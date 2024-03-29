@@ -125,8 +125,8 @@ class ConfigControl(ConfigStore):
     def __update_value_find_key(self, source, overrides):
         # https://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth
         for key, val in overrides.items():
-            if isinstance(source, collections.Mapping):
-                if isinstance(val, collections.Mapping):
+            if isinstance(source, collections.abc.Mapping):
+                if isinstance(val, collections.abc.Mapping):
                     source[key] = self.__update_value_find_key(source.get(key, {}), val)
                 else:
                     source[key] = val
