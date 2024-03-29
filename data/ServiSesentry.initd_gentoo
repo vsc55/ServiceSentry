@@ -3,8 +3,8 @@
 # Distributed under the terms of the GNU General Public License v2
 
 command="/usr/bin/python3"
-command_args="/opt/watchful/main.py -d -c"
-pidfile="/var/run/watchful.pid"
+command_args="/opt/ServiSesentry/main.py -d -c"
+pidfile="/var/run/ServiSesentry.pid"
 
 depend() {
 	use net

@@ -152,7 +152,7 @@ class Main(ObjectBase):
         elif self._is_mode_dev:
             return os.path.normpath(os.path.join(self._dir, '../data/'))
         else:
-            return '/etc/watchful/'
+            return '/etc/ServiSesentry/'
 
     @property
     def _var_dir(self):
@@ -163,9 +163,9 @@ class Main(ObjectBase):
 
         """
         if self._is_mode_dev:
-            return '/var/lib/watchful/dev/'
+            return '/var/lib/ServiSesentry/dev/'
         else:
-            return '/var/lib/watchful/'
+            return '/var/lib/ServiSesentry/'
 
     @property
     def _config_file(self):
