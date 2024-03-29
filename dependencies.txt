@@ -1,0 +1,6 @@
+wget
+curl
+python3
+python3-requests
+python3-pymysql
+python3-paramiko;http://ftp.es.debian.org/debian/pool/main/p/paramiko/python3-paramiko_2.4.2-0.1_all.deb

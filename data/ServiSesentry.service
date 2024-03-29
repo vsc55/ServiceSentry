@@ -1,0 +1,6 @@
+[Unit]
+Description=Run ServiSesentry service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py

@@ -1,0 +1,10 @@
+{
+    "global": {
+        "debug": false
+    },
+    "telegram": {
+        "chat_id": "",
+        "group_messages": true,
+        "token": ""
+    }
+}

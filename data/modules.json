@@ -1,0 +1,144 @@
+{
+    "filesystemusage": {
+        "alert": 85,
+        "enabled": true,
+        "list": {
+            "/": 80,
+            "/boot": 80
+        }
+    },
+    "hddtemp": {
+        "alert": 50,
+        "enabled": true,
+        "list": {
+            "Server01": {
+                "enabled": false,
+                "exclude": [
+                    "/dev/sdy",
+                    "/dev/sdz"
+                ],
+                "host": "127.0.0.1",
+                "port": 7634
+            }
+        },
+        "threads": 5,
+        "timeout": 5
+    },
+    "mysql": {
+        "enabled": true,
+        "list": {
+            "MariaDB01": {
+                "db": "test",
+                "enabled": false,
+                "host": "db01.dominio.lan",
+                "password": "",
+                "port": 3307,
+                "socket": "",
+                "user": "test"
+            }
+        }
+    },
+    "ping": {
+        "attempt": 3,
+        "enabled": true,
+        "list": {
+            "192.168.1.1": {
+                "attempt": 3,
+                "enabled": true,
+                "label": "Router",
+                "timeout": 5
+            },
+            "192.168.1.200": false,
+            "192.168.86.4": false
+        },
+        "threads": 5,
+        "timeout": 5
+    },
+    "raid": {
+        "enabled": true,
+        "local": true,
+        "remote": {
+            "1": {
+                "host": "192.168.1.10",
+                "label": "Servidor1",
+                "password": "pi",
+                "port": 22,
+                "user": "pi"
+            },
+            "2": {
+                "host": "192.168.1.11",
+                "label": "Servidor2",
+                "password": "",
+                "port": 122,
+                "user": "pi"
+            }
+        },
+        "threads": 5,
+        "timeout": 5
+    },
+    "ram_swap": {
+        "alert_ram": 60,
+        "alert_swap": 60,
+        "enabled": true
+    },
+    "service_status": {
+        "enabled": true,
+        "list": {
+            "bind9": {
+                "enabled": false,
+                "remediation": false
+            },
+            "mariabd": {
+                "enabled": false,
+                "remediation": false
+            },
+            "nginx": {
+                "enabled": false,
+                "remediation": false
+            },
+            "slapd": {
+                "enabled": false,
+                "remediation": false
+            },
+            "snmpd": {
+                "enabled": false,
+                "remediation": false
+            },
+            "webmin": {
+                "enabled": false,
+                "remediation": false
+            }
+        },
+        "threads": 5
+    },
+    "temperature": {
+        "alert": 80,
+        "enabled": true,
+        "list": {
+            "thermal_zone0": {
+                "alert": 70,
+                "enabled": true,
+                "label": "CPU"
+            }
+        }
+    },
+    "web": {
+        "enabled": true,
+        "list": {
+            "test.domain.unknown:1234": {
+                "code": 400,
+                "enabled": false
+            },
+            "www.atareao.es": true,
+            "www.cerebelum.net": true,
+            "www.domain.com": false,
+            "www.domain.net": false,
+            "www.domain.unknown": false,
+            "www.domain.unknown/forbidden": {
+                "code": 403,
+                "enabled": false
+            }
+        },
+        "threads": 5
+    }
+}
