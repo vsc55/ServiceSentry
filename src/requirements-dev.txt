@@ -1,0 +1,6 @@
+# ServiSesentry - Dependencias de desarrollo y testing
+-r requirements.txt
+pytest>=7.0
+pytest-mock
+pytest-env
+flake8

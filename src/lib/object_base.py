@@ -18,14 +18,15 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+""" Base class for all objects. """
 
-from lib.debug import Debug
-from lib.debug import DebugLevel
+from lib.debug import Debug, DebugLevel
 
 __all__ = ['ObjectBase']
 
 
 class ObjectBase:
+    """ Base class for all objects. """
 
-    # Creamos el objeto aquí, de esta forma sera el mismo objeto para todos los objetos que lo hereden.
+    # Create the object here, this way it will be the same object for all objects that inherit it.
     debug = Debug(True, DebugLevel.info)

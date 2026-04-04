@@ -161,67 +161,10 @@ class Watchful(ModuleBase):
     class Hddtemp_Info:
 
         def __init__(self, label):
-            self.__label = ""
-            self.__host = ""
-            self.__port = 0
-            self.__alert = 0
-            self.__exclude = []
-            self.__list_hdd = {}
-            self.__error = ""
             self.label = label
-
-        @property
-        def label(self) -> str:
-            return self.__label
-
-        @label.setter
-        def label(self, val: str):
-            self.__label = val
-
-        @property
-        def host(self) -> str:
-            return self.__host
-
-        @host.setter
-        def host(self, val: str):
-            self.__host = val
-
-        @property
-        def port(self) -> int:
-            return self.__port
-
-        @port.setter
-        def port(self, val: int):
-            self.__port = val
-
-        @property
-        def alert(self) -> int:
-            return self.__alert
-
-        @alert.setter
-        def alert(self, val: int):
-            self.__alert = val
-
-        @property
-        def exclude(self) -> list:
-            return self.__exclude
-
-        @exclude.setter
-        def exclude(self, val: list):
-            self.__exclude = val
-
-        @property
-        def list_hdd(self) -> dict:
-            return self.__list_hdd
-
-        @list_hdd.setter
-        def list_hdd(self, val: dict):
-            self.__list_hdd = val
-
-        @property
-        def error(self) -> str:
-            return self.__error
-
-        @error.setter
-        def error(self, val: str):
-            self.__error = val
+            self.host = ""
+            self.port = 0
+            self.alert = 0
+            self.exclude = []
+            self.list_hdd = {}
+            self.error = ""

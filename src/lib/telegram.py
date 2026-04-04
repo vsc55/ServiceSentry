@@ -91,7 +91,7 @@ class Telegram(ObjectBase):
 
     @property
     def is_entry_list(self) -> bool:
-        return not self.list_msg or len(self.list_msg) == 0
+        return not self.list_msg
 
     def add_list(self, message):
         # Efectuamos insert para mantener el orden.

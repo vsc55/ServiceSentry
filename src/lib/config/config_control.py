@@ -21,10 +21,11 @@
 
 """Configuration module"""
 
-import datetime
 import collections
-from lib.config import ConfigTypeReturn
-from lib.config import ConfigStore
+import datetime
+
+from lib.config.config_store import ConfigStore
+from lib.config.config_type_return import ConfigTypeReturn
 
 __all__ = ['ConfigControl']
 
@@ -35,104 +36,136 @@ class ConfigControl(ConfigStore):
 
     def __init__(self, file, init_data: dict = None):
         """ Init object. """
-        self.__load = None
-        self.__update = None
+        self._load = None
+        self._update = None
         super().__init__(file)
         self.data = init_data
 
     @property
-    def data(self):
-        """Return Obtenemos los datos almacendados."""
-        if self.__data is None:
+    def data(self) -> dict:
+        """
+        Return the configuration data.
+        If the data is None, it will return an empty dictionary.
+        """
+        if self._data is None:
             return {}
-        return self.__data
+        return self._data
 
     @data.setter
-    def data(self, val):
-        self.__update = datetime.datetime.now()
-        self.__data = val
+    def data(self, val: dict | None = None):
+        """ Set the configuration data. """
+        self._update = datetime.datetime.now()
+        self._data = val
+
+    @property
+    def is_data(self) -> bool:
+        """ Return True if the configuration data is not None, False otherwise. """
+        return self._data is not None
 
     @property
     def is_changed(self) -> bool:
-        if self.__update and not self.__load:
-            # Se han insertado datos manulamente, no se ha leido ningun
-            # archivo.
-            return True
-        if not self.__update or not self.__load:
-            # No se ha cargado ningun archivo ni se han insertado datos.
+        """
+        Return True if the configuration data has been changed since the last load,
+        False otherwise.
+        """
+        if not self._update:
             return False
-        if self.__update > self.__load:
-            # La fecha de actualizacione es superior a la de carga
-            # por lo que se ha modificado.
+
+        if not self._load:
+            # Data inserted manually, no file has been read.
             return True
-        return False
+
+        return self._update > self._load
 
     @property
     def is_load(self) -> bool:
-        return self.__load is not None
+        """
+        Return True if the configuration data has been loaded from the file,
+        False otherwise.
+        """
+        return self._load is not None
 
-    def read(self, return_data=True, def_return=None):
+    def read(self, return_data=True, def_return=None) -> dict | None: # pylint: disable=arguments-renamed
+        """ Read the configuration from the file. """
         self.data = super().read(def_return)
-        if self.__data is not None:
-            self.__load = datetime.datetime.now()
-            self.__update = self.__load
-        else:
-            self.__load = None
-            self.__update = None
+
+        time_read = datetime.datetime.now() if self.is_data else None
+
+        self._load = time_read
+        self._update = time_read
 
         if return_data:
             return self.data
 
     def save(self, data=None) -> bool:
+        """ Save the configuration to the file. """
         if data is None:
             data = self.data
+
         if super().save(data):
-            self.__load = datetime.datetime.now()
-            self.__update = self.__load
+            time_save = datetime.datetime.now()
+            self._load = time_save
+            self._update = time_save
             return True
         return False
 
     @staticmethod
     def convert_find_key_to_list(find_key, str_split: str = None) -> list:
+        """ Convert the find_key to a list. """
         list_return = []
         if isinstance(find_key, str):
             if str_split is None:
                 list_return = find_key.split()
             else:
                 list_return = find_key.split(str_split)
+
         elif isinstance(find_key, list):
             list_return = find_key.copy()
+
         elif isinstance(find_key, tuple):
             list_return = list(find_key)
+
         else:
-            raise TypeError(f'Invalid type: find_key must be a string, list or tuple, not {type(find_key)}.')
+            raise TypeError(
+                f'Invalid type: find_key must be a string, list or tuple, not {type(find_key)}.'
+            )
+
         return list_return
 
-    def __convert_list_to_dict(self, list_items, val):
-        dict_return = {}
+    def _convert_list_to_dict(self, list_items, val) -> dict:
+        """ Convert a list to a dictionary with the last element as the value. """
+        dict_return: dict = {}
         if isinstance(list_items, list):
             target = list_items.pop(0)
             if list_items:
-                dict_return[target] = self.__convert_list_to_dict(list_items, val)
+                dict_return[target] = self._convert_list_to_dict(list_items, val)
             else:
                 dict_return[target] = val
         else:
             dict_return[list_items] = val
         return dict_return
 
-    def __update_value_find_key(self, source, overrides):
+    def _update_value_find_key(self, source, overrides) -> dict:
+        """ Update the value of a nested dictionary of varying depth. """
         # https://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth
         for key, val in overrides.items():
             if isinstance(source, collections.abc.Mapping):
                 if isinstance(val, collections.abc.Mapping):
-                    source[key] = self.__update_value_find_key(source.get(key, {}), val)
+                    source[key] = self._update_value_find_key(source.get(key, {}), val)
                 else:
                     source[key] = val
             else:
-                source = {key: overrides[key]}
+                source: dict = {key: overrides[key]}
         return source
 
-    def get_conf(self, find_key, def_val=None, str_split: str = None, data_dict: dict = None, r_type: ConfigTypeReturn = ConfigTypeReturn.STR):
+    def get_conf(
+            self,
+            find_key,
+            def_val=None,
+            str_split: str = None,
+            data_dict: dict = None,
+            r_type: ConfigTypeReturn = ConfigTypeReturn.STR
+        ) -> dict | list | tuple | int | bool | str:
         """ Return value of the key that we are looking for and if this key does not exist, it
         will return def_val. If def_val is None it will return an object (empty) of the type
         that is defined in r_type.
@@ -166,7 +199,6 @@ class ConfigControl(ConfigStore):
             {'level2': 'OK'}
             >>> x.get_conf('level2', r_type=ConfigTypeReturn.LIST)
             []
-
         """
 
         if data_dict is None:
@@ -180,12 +212,14 @@ class ConfigControl(ConfigStore):
             while keys:
                 target = keys.pop(0)
                 if isinstance(work_dict, dict):
-                    if target in work_dict.keys():
-                        if not keys:    # this is the last element in the find_key, and it is in the data_dict
+                    if target in work_dict:
+                        if not keys:
+                            # this is the last element in the find_key, and it is in the data_dict
                             data_return = work_dict[target]
                             break
-                        else:   # not the last element of find_key, change the temp var
-                            work_dict = work_dict[target]
+
+                        # not the last element of find_key, change the temp var
+                        work_dict = work_dict[target]
                     else:
                         continue
                 else:
@@ -195,23 +229,24 @@ class ConfigControl(ConfigStore):
             return data_return
 
         if def_val is None:
-            if r_type == ConfigTypeReturn.LIST:
-                return []
-            elif r_type == ConfigTypeReturn.DICT:
-                return {}
-            elif r_type == ConfigTypeReturn.TUPLE:
-                return ()
-            elif r_type == ConfigTypeReturn.INT:
-                return 0
-            elif r_type == ConfigTypeReturn.BOOL:
-                return False
-            elif r_type == ConfigTypeReturn.STR:
-                return ''
-            else:
-                raise TypeError(f'Invalid type: r_type must be a string, list, dict, tuple, int or bool, not {type(r_type)}.')
+            match r_type:
+                case ConfigTypeReturn.LIST:
+                    return []
+                case ConfigTypeReturn.DICT:
+                    return {}
+                case ConfigTypeReturn.TUPLE:
+                    return ()
+                case ConfigTypeReturn.INT:
+                    return 0
+                case ConfigTypeReturn.BOOL:
+                    return False
+                case ConfigTypeReturn.STR:
+                    return ''
+                case _:
+                    raise TypeError(f'Invalid type: r_type must be a string, list, dict, tuple, int or bool, not supported type ({type(r_type)}).')
         return def_val
 
-    def is_exist_conf(self, find_key, str_split: str = None, data_dict: dict = None):
+    def is_exist_conf(self, find_key, str_split: str = None, data_dict: dict = None) -> bool:
         """ Return True if the given find_key is present within the structure of the source dictionary, False otherwise.
 
         The find_key format is list, tuple, or string in which the str_split parameter is used as the deleting character.
@@ -260,11 +295,13 @@ class ConfigControl(ConfigStore):
             while keys:
                 target = keys.pop(0)
                 if isinstance(work_dict, dict):
-                    if target in work_dict.keys():
-                        if not keys:    # this is the last element in the find_key, and it is in the data_dict
+                    if target in work_dict:
+                        if not keys:
+                            # this is the last element in the find_key, and it is in the data_dict
                             return True
-                        else:   # not the last element of find_key, change the temp var
-                            work_dict = work_dict[target]
+
+                        # not the last element of find_key, change the temp var
+                        work_dict = work_dict[target]
                     else:
                         return False
                 else:
@@ -321,8 +358,8 @@ class ConfigControl(ConfigStore):
             else:
                 work_dict = {}
 
-            key_update = self.__convert_list_to_dict(keys, val)
-            work_dict = self.__update_value_find_key(work_dict, key_update)
+            key_update = self._convert_list_to_dict(keys, val)
+            work_dict = self._update_value_find_key(work_dict, key_update)
 
             if data_dict is not None:
                 return work_dict

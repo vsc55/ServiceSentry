@@ -34,9 +34,7 @@ class ReturnModuleCheck:
 
     @property
     def list(self) -> dict:
-        if self.__dict_return:
-            return self.__dict_return
-        return {}
+        return self.__dict_return or {}
 
     @property
     def count(self) -> int:

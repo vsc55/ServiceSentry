@@ -69,7 +69,7 @@ class Watchful(ModuleBase):
     def __web_check(self, url):
         code = int(self.__web_return(url))
         code_true = self.get_conf_in_list("code", url, self.__default_http_code)
-        status = True if code == code_true else False
+        status = (code == code_true)
 
         s_message = f'Web: {url} - *({code})*'
         if status:

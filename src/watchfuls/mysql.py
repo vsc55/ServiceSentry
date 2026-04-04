@@ -134,7 +134,7 @@ class Watchful(ModuleBase):
     def __db_return(self, db_name, socket, host, port, user, password, db):
         return_status = 0
         return_msg = ""
-        connect_socket = True if len(str(socket).strip()) > 0 else False
+        connect_socket = bool(str(socket).strip())
         try:
             if connect_socket:
                 if not os.path.exists(socket):

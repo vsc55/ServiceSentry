@@ -25,7 +25,6 @@ import subprocess
 import paramiko
 
 from enum import Enum
-from lib.switch import Switch
 
 __author__ = "Javier Pastor"
 __copyright__ = "Copyright © 2019, Javier Pastor"
@@ -123,40 +122,24 @@ class Exec:
     def __is_command_exist(self) -> bool:
         return bool(self.command and self.command.strip())
 
+    @staticmethod
+    def _empty_result(exception=None):
+        """ Retorna un dict de resultado vacío. """
+        return {'out': None, 'err': None, 'code': None, 'exception': exception}
+
     def __execute_local(self):
         """ Ejecuta el comando en el equipo local.
 
         :return: Retorna stdout, stderr y exit_code
 
         """
-        data_return = {
-            'out': None,
-            'err': None,
-            'code': None,
-            'exception': None
-        }
-
-        if self.__is_command_exist():
-            try:
-                result = subprocess.run(
-                    shlex.split(self.command),
-                    capture_output=True,
-                    text=True
-                )
-
-                data_return['out'] = result.stdout
-                data_return['err'] = result.stderr
-                data_return['code'] = result.returncode
-
-            except Exception as ex:
-                data_return = {
-                    'out': None,
-                    'err': None,
-                    'code': None,
-                    'exception': ex
-                }
-
-        return data_return
+        if not self.__is_command_exist():
+            return self._empty_result()
+        try:
+            result = subprocess.run(shlex.split(self.command), capture_output=True, text=True)
+            return {'out': result.stdout, 'err': result.stderr, 'code': result.returncode, 'exception': None}
+        except Exception as ex:
+            return self._empty_result(ex)
 
     def __execute_remote(self):
         """ Ejecuta el comando en el host remoto que se ha configurado.
@@ -164,62 +147,36 @@ class Exec:
         :return: Retorna stdout, stderr y exit_code
 
         """
-        # http://docs.paramiko.org/en/2.6/api/client.html
-        # https://stackoverflow.com/questions/7002878/basic-paramiko-exec-command-help
-        # https://www.programcreek.com/python/example/4561/paramiko.SSHClient
+        if not self.__is_command_exist():
+            return self._empty_result()
+        client = None
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(hostname=self.host, port=self.port, username=self.user,
+                           password=self.password, timeout=self.timeout)
 
-        data_return = {'out': None, 'err': None, 'code': None, 'exception': None}
-
-        if self.__is_command_exist():
-            client = None
-            try:
-                client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                client.connect(hostname=self.host,
-                               port=self.port,
-                               username=self.user,
-                               password=self.password,
-                               timeout=self.timeout)
-
-                # TODO: Pendiente añadir soporte para multiples commands.
-                _, stdout, stderr = client.exec_command(self.command)
-
-                # Espera a que termine de ejecutarse el comando y obtenemos el exit code.
-                exit_code = stdout.channel.recv_exit_status()
-
-                # read_out = stdout if stdout else ""
-                # read_err = stderr if stdout else ""
-
-                read_out = stdout.read().decode() if stdout else ""
-                read_err = stderr.read().decode() if stdout else ""
-
-                data_return = {'out': read_out, 'err': read_err, 'code': exit_code, 'exception': None}
-
-            except Exception as ex:
-                # http://docs.paramiko.org/en/2.6/api/ssh_exception.html
-                # print("Exception:", ex)
-                # Authentication failed.
-                data_return = {'out': None, 'err': None, 'code': None, 'exception': ex}
-
-            finally:
-                if client:
-                    client.close()
-
-        return data_return
+            # TODO: Pendiente añadir soporte para multiples commands.
+            _, stdout, stderr = client.exec_command(self.command)
+            exit_code = stdout.channel.recv_exit_status()
+            read_out = stdout.read().decode() if stdout else ""
+            read_err = stderr.read().decode() if stdout else ""
+            return {'out': read_out, 'err': read_err, 'code': exit_code, 'exception': None}
+        except Exception as ex:
+            return self._empty_result(ex)
+        finally:
+            if client:
+                client.close()
 
     def start(self):
         """ Ejecuta el comando y mira si tiene que ejecutarlo localmente o se tiene que ejecutar en otro host. """
-
-        tmp_exec = {'out': None, 'err': None, 'code': None, 'exception': None}
-        if self.__is_command_exist():
-            with Switch(self.location) as case:
-                if case(EnumLocationExec.local):
-                    tmp_exec = self.__execute_local()
-
-                elif case(EnumLocationExec.remote):
-                    tmp_exec = self.__execute_remote()
-
-        return tmp_exec['out'], tmp_exec['err'], tmp_exec['code'], tmp_exec['exception']
+        if self.location == EnumLocationExec.local:
+            result = self.__execute_local()
+        elif self.location == EnumLocationExec.remote:
+            result = self.__execute_remote()
+        else:
+            result = self._empty_result()
+        return result['out'], result['err'], result['code'], result['exception']
 
     def set_remote(self, host: str = "", port: int = 22, user: str = "root", password: str = None,
                    timeout: float = None):

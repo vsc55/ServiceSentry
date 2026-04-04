@@ -18,13 +18,14 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+""" Enum for the type of return value in the get_conf method. """
 
 from enum import Enum
 
 __all__ = ['ConfigTypeReturn']
 
-
 class ConfigTypeReturn(Enum):
+    """ Enum for the type of return value in the get_conf method. """
     STR = 1
     INT = 2
     BOOL = 3
