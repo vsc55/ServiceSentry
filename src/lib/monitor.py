@@ -274,7 +274,10 @@ class Monitor(ObjectBase):
         changed = False
         max_threads = self.get_conf('threads', self._DEFAULT_THREADS)
 
-        self.debug.print(f"> Monitor > check >> Monitor Max Threads: {max_threads}", DebugLevel.info)
+        self.debug.print(
+            f"> Monitor > check >> Monitor Max Threads: {max_threads}",
+            DebugLevel.info
+        )
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
             future_to_module = {

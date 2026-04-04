@@ -21,55 +21,64 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+""" Watchful to check filesystem usage (cross-platform via psutil). """
 
-import re
+import psutil
 
 from lib.modules import ModuleBase
 
 
 class Watchful(ModuleBase):
+    """ Watchful to check filesystem usage (cross-platform via psutil). """
 
-    # porcentaje que se usara si no se ha configurado el modulo, o se ha definido un valor que no esté entre 0 y 100.
-    _default_alert = 85
+    # Default alert percentage for filesystem usage if not configured or invalid.
+    _DEFAULT_ALERT = 85
+
+    # Filesystem types to ignore (virtual / pseudo filesystems).
+    _IGNORED_FSTYPES = frozenset({
+        'squashfs', 'tmpfs', 'devtmpfs', 'overlay', 'proc', 'sysfs',
+        'devfs', 'cgroup', 'cgroup2', 'autofs', 'binfmt_misc',
+    })
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
-        self.paths.set('df', '/bin/df')
 
     def check(self):
         list_partition = self.get_conf('list', {})
 
-        usage_alert = self.get_conf("alert", self._default_alert)
+        usage_alert = self.get_conf("alert", self._DEFAULT_ALERT)
         if isinstance(usage_alert, str):
             usage_alert = usage_alert.strip()
+
         if not usage_alert or usage_alert < 0 or usage_alert > 100:
-            usage_alert = self._default_alert
+            usage_alert = self._DEFAULT_ALERT
 
-        cmd = f'{self.paths.find("df")} -x squashfs -x tmpfs  -x devtmpfs'
-        stdout = self._run_cmd(cmd)
-        if not stdout:
-            super().check()
-            return self.dict_return
+        for part in psutil.disk_partitions():
+            if part.fstype in self._IGNORED_FSTYPES:
+                continue
 
-        reg = r'\/dev\/([^\s]*)\s+\d+\s+\d+\s+\d+\s+(\d+)\%\s+([^\n]*)'
+            try:
+                usage = psutil.disk_usage(part.mountpoint)
+            except (PermissionError, OSError):
+                continue
 
-        for fs in re.findall(reg, stdout):
-            # fs = ('mmcblk0p6', '32', '/boot')
-            mount_point = fs[2]
-            if mount_point in list_partition.keys():
+            mount_point = part.mountpoint
+            used_percent = usage.percent
+
+            if mount_point in list_partition:
                 for_usage_alert = list_partition[mount_point]
             else:
                 for_usage_alert = usage_alert
 
-            if float(fs[1]) > float(for_usage_alert):
+            if used_percent > float(for_usage_alert):
                 tmp_status = False
-                tmp_message = f'Warning partition {fs[0]} ({fs[2]}) used {fs[1]}% {u"\U000026A0"}'
+                tmp_message = f'Warning partition {part.device} ({mount_point}) used {used_percent}% ⚠️'
             else:
                 tmp_status = True
-                tmp_message = f'Filesystem partition {fs[0]} ({fs[2]}) used {fs[1]}% {u"\U00002705"}'
+                tmp_message = f'Normal partition {part.device} ({mount_point}) used {used_percent}% ✅'
 
-            other_data = {'used': fs[1], 'mount': fs[2], 'alert': for_usage_alert}
-            self.dict_return.set(fs[0], tmp_status, tmp_message, other_data=other_data)
+            other_data = {'used': used_percent, 'mount': mount_point, 'alert': for_usage_alert}
+            self.dict_return.set(mount_point, tmp_status, tmp_message, other_data=other_data)
 
         super().check()
         return self.dict_return
