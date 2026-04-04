@@ -1,10 +1,11 @@
 # ServiceSentry (ServiSesentry)
 
-> Sistema de monitorización de servicios e infraestructura Linux con notificaciones por Telegram.
+> Sistema de monitorización de servicios e infraestructura con notificaciones por Telegram.
+> Compatible con Linux y parcialmente multiplataforma (Windows/macOS) gracias a psutil.
 
-**Autor:** Javier Pastor (VSC55)  
-**Licencia:** GPL v3  
-**Python:** 3.6+  
+**Autor:** Javier Pastor (VSC55)
+**Licencia:** GPL v3
+**Python:** 3.10+
 
 ---
 
@@ -21,13 +22,14 @@
 9. [Sistema de Debug](#sistema-de-debug)
 10. [Uso por Línea de Comandos](#uso-por-línea-de-comandos)
 11. [Dependencias](#dependencias)
-12. [Notas de Diseño](#notas-de-diseño)
+12. [Tests](#tests)
+13. [Notas de Diseño](#notas-de-diseño)
 
 ---
 
 ## Descripción General
 
-ServiceSentry es una herramienta de monitorización para sistemas Linux que:
+ServiceSentry es una herramienta de monitorización para sistemas que:
 
 - Ejecuta comprobaciones periódicas sobre servicios, discos, RAID, RAM, temperaturas, webs, MySQL, ping, etc.
 - Detecta **cambios de estado** (no envía notificación si el estado no ha cambiado).
@@ -35,6 +37,8 @@ ServiceSentry es una herramienta de monitorización para sistemas Linux que:
 - Soporta ejecución **local** y **remota** (SSH vía paramiko).
 - Ejecuta los módulos en **paralelo** usando `ThreadPoolExecutor`.
 - Arquitectura de **plugins**: cada módulo de monitorización es un archivo Python independiente en `watchfuls/`.
+- Usa `match/case` nativo de Python 3.10+ para la lógica de despacho.
+- Módulos `filesystemusage`, `ram_swap` y `mem` son **multiplataforma** (Linux/Windows/macOS) gracias a `psutil`.
 
 ---
 
@@ -62,7 +66,7 @@ ServiceSentry es una herramienta de monitorización para sistemas Linux que:
                     ┌────────────┼────────────┐
                     ▼            ▼            ▼
               ModuleBase    lib/exe.py   lib/linux/
-              (herencia)    (local/SSH)  (sensores, RAID, mem)
+              (herencia)    (local/SSH)  (RAID, sensores térmicos)
 ```
 
 ### Jerarquía de Clases
@@ -77,12 +81,12 @@ ObjectBase (lib/object_base.py)
 ├── ConfigStore (lib/config/config_store.py)
 │   └── ConfigControl (lib/config/config_control.py)
 └── ModuleBase (lib/modules/module_base.py)
-    ├── watchfuls/filesystemusage.py::Watchful
+    ├── watchfuls/filesystemusage.py::Watchful  🌐 (multiplataforma)
     ├── watchfuls/hddtemp.py::Watchful
     ├── watchfuls/mysql.py::Watchful
     ├── watchfuls/ping.py::Watchful
     ├── watchfuls/raid.py::Watchful
-    ├── watchfuls/ram_swap.py::Watchful
+    ├── watchfuls/ram_swap.py::Watchful          🌐 (multiplataforma)
     ├── watchfuls/service_status.py::Watchful
     ├── watchfuls/temperature.py::Watchful
     └── watchfuls/web.py::Watchful
@@ -96,13 +100,16 @@ ObjectBase (lib/object_base.py)
 ServiceSentry/
 ├── src/
 │   ├── main.py                          # Punto de entrada
+│   ├── requirements.txt                 # Dependencias de producción
+│   ├── requirements-dev.txt             # Dependencias de desarrollo (pytest)
 │   ├── lib/
-│   │   ├── __init__.py                  # Exports: ObjectBase, Switch, DictFilesPath, Monitor, Telegram, Exec
+│   │   ├── __init__.py                  # Exports: ObjectBase, DictFilesPath, Monitor, Telegram, Exec, ExecResult, Mem, MemInfo
 │   │   ├── object_base.py              # Clase base con Debug compartido
 │   │   ├── monitor.py                  # Motor de monitorización
 │   │   ├── telegram.py                 # Envío de mensajes Telegram
 │   │   ├── exe.py                      # Ejecución de comandos local/remoto
-│   │   ├── switch.py                   # Implementación Switch/Case
+│   │   ├── mem.py                      # Lectura de RAM/SWAP (multiplataforma vía psutil)
+│   │   ├── mem_info.py                 # Dataclass MemInfo (total, free, used, percent)
 │   │   ├── dict_files_path.py          # Diccionario de rutas de archivos
 │   │   ├── tools.py                    # Utilidades (bytes2human)
 │   │   ├── config/
@@ -116,7 +123,8 @@ ServiceSentry/
 │   │   │   └── debug_level.py          # Enum: null, debug, info, warning, error, emergency
 │   │   ├── linux/
 │   │   │   ├── __init__.py
-│   │   │   ├── mem.py                  # Lectura /proc/meminfo (RAM/SWAP)
+│   │   │   ├── thermal_base.py         # Clase base para datos térmicos
+│   │   │   ├── thermal_node.py         # Nodo individual de sensor térmico
 │   │   │   ├── thermal_info_collection.py  # Sensores térmicos /sys/class/thermal
 │   │   │   └── raid_mdstat.py          # Parser /proc/mdstat (RAID)
 │   │   └── modules/
@@ -124,16 +132,38 @@ ServiceSentry/
 │   │       ├── module_base.py          # Clase base para todos los watchfuls
 │   │       ├── dict_return_check.py    # Estructura ReturnModuleCheck
 │   │       └── enum_config_options.py  # Enum opciones de config comunes
-│   └── watchfuls/                      # Plugins de monitorización
-│       ├── filesystemusage.py
-│       ├── hddtemp.py
-│       ├── mysql.py
-│       ├── ping.py
-│       ├── raid.py
-│       ├── ram_swap.py
-│       ├── service_status.py
-│       ├── temperature.py
-│       └── web.py
+│   ├── watchfuls/                      # Plugins de monitorización
+│   │   ├── filesystemusage.py          # 🌐 Multiplataforma (psutil)
+│   │   ├── hddtemp.py
+│   │   ├── mysql.py
+│   │   ├── ping.py
+│   │   ├── raid.py
+│   │   ├── ram_swap.py                 # 🌐 Multiplataforma (psutil)
+│   │   ├── service_status.py
+│   │   ├── temperature.py
+│   │   └── web.py
+│   └── tests/                          # 405 tests (pytest)
+│       ├── conftest.py
+│       ├── test_config.py
+│       ├── test_debug.py
+│       ├── test_dict_files_path.py
+│       ├── test_dict_return_check.py
+│       ├── test_exe.py
+│       ├── test_filesystemusage.py
+│       ├── test_get_conf_in_list.py
+│       ├── test_hddtemp.py
+│       ├── test_mem.py
+│       ├── test_mysql.py
+│       ├── test_parse_helpers.py
+│       ├── test_ping.py
+│       ├── test_raid.py
+│       ├── test_raid_mdstat.py
+│       ├── test_ram_swap.py
+│       ├── test_service_status.py
+│       ├── test_temperature.py
+│       ├── test_thermal.py
+│       ├── test_tools.py
+│       └── test_web.py
 ├── data/                               # Config en modo desarrollo
 │   ├── config.json
 │   ├── monitor.json
@@ -153,14 +183,14 @@ ServiceSentry/
 2. Main.__init__():
    ├── Inicializa atributos defensivamente
    ├── Añade watchfuls/ al sys.path
-   ├── __args_set() → aplica argumentos (path, verbose, timer, daemon)
-   ├── __init_config() → lee config.json, aplica defaults, lee valores
-   ├── __init_monitor() → crea Monitor(dir_base, dir_config, dir_modules, dir_var)
+   ├── _args_set() → aplica argumentos (path, verbose, timer, daemon)
+   ├── _init_config() → lee config.json, aplica defaults, lee valores
+   ├── _init_monitor() → crea Monitor(dir_base, dir_config, dir_modules, dir_var)
    │   └── Monitor.__init__():
    │       ├── Lee config.json, monitor.json, modules.json
    │       ├── Lee/crea status.json en /var/lib/ServiSesentry/
    │       └── Inicializa Telegram (token + chat_id)
-   └── __args_cmd() → ejecuta comandos (ej: clear_status)
+   └── _args_cmd() → ejecuta comandos (ej: clear_status)
 3. Main.start():
    ├── Modo single: monitor.check() una vez
    └── Modo daemon: loop infinito con sleep(timer_check)
@@ -296,6 +326,7 @@ Cada módulo es un archivo Python en `watchfuls/` que:
 1. Define una clase `Watchful` que hereda de `ModuleBase`
 2. Implementa `check()` que retorna `ReturnModuleCheck`
 3. Usa `self.get_conf()` para leer su configuración de `modules.json`
+4. Usa `match/case` nativo para la lógica de despacho de opciones
 
 ### ReturnModuleCheck
 
@@ -314,9 +345,11 @@ Estructura de datos que cada módulo devuelve:
 
 ---
 
-### 📁 filesystemusage — Uso de Disco
+### 📁 filesystemusage — Uso de Disco (🌐 Multiplataforma)
 
-Monitoriza el porcentaje de uso de particiones con `df`.
+Monitoriza el porcentaje de uso de particiones usando `psutil`.
+
+**Compatibilidad:** Linux, Windows, macOS.
 
 **Config** (`modules.json`):
 ```json
@@ -335,9 +368,9 @@ Monitoriza el porcentaje de uso de particiones con `df`.
 | Clave | Tipo | Default | Descripción |
 |-------|------|---------|-------------|
 | `alert` | int | 85 | % de uso global para alerta |
-| `list` | dict | {} | Particiones con % de alerta personalizado |
+| `list` | dict | {} | Particiones/volúmenes con % de alerta personalizado |
 
-**Flujo:** `df -x squashfs -x tmpfs -x devtmpfs` → regex → compara % con umbral.
+**Flujo:** `psutil.disk_partitions()` → `psutil.disk_usage(mountpoint)` → compara % con umbral. Filtra automáticamente tipos de filesystem no relevantes (squashfs, tmpfs, devtmpfs, etc.).
 
 ---
 
@@ -412,7 +445,7 @@ Verifica que se puede conectar y ejecutar consultas en servidores MySQL.
 | `list.*.db` | string | "" | Base de datos |
 | `list.*.socket` | string | "" | Socket Unix (si se usa, ignora host/port) |
 
-**Flujo:** `pymysql.connect()` → `SHOW GLOBAL STATUS` → clasifica errores (1045=acceso denegado, 2003=sin conexión, etc.).
+**Flujo:** `pymysql.connect()` → `SHOW GLOBAL STATUS` → clasifica errores con `match/case` (1045=acceso denegado, 2003=sin conexión con sub-clasificación por mensaje, etc.).
 
 ---
 
@@ -484,13 +517,15 @@ Monitoriza arrays RAID Linux (local y remoto vía SSH).
 
 **Estados detectados:** `ok`, `error` (degraded), `recovery` (reconstruyendo con %, tiempo estimado, velocidad).
 
-**Flujo:** Lee `/proc/mdstat` (local con `open()`, remoto con `cat` vía SSH/paramiko) → parsea líneas.
+**Flujo:** Lee `/proc/mdstat` (local con `open()`, remoto con `cat` vía SSH/paramiko) → parsea líneas con `match/case` sobre `UpdateStatus`.
 
 ---
 
-### 🐏 ram_swap — Uso de RAM y SWAP
+### 🐏 ram_swap — Uso de RAM y SWAP (🌐 Multiplataforma)
 
-Monitoriza el porcentaje de uso de memoria RAM y SWAP.
+Monitoriza el porcentaje de uso de memoria RAM y SWAP usando `psutil`.
+
+**Compatibilidad:** Linux, Windows, macOS.
 
 **Config:**
 ```json
@@ -508,7 +543,7 @@ Monitoriza el porcentaje de uso de memoria RAM y SWAP.
 | `alert_ram` | int | 60 | % de RAM usada para alertar |
 | `alert_swap` | int | 60 | % de SWAP usada para alertar |
 
-**Flujo:** Lee `/proc/meminfo` → calcula `used = total - free - buffers - cached` (RAM) o `total - free` (SWAP).
+**Flujo:** `psutil.virtual_memory()` y `psutil.swap_memory()` → calcula porcentaje de uso → compara con umbral.
 
 ---
 
@@ -659,11 +694,16 @@ La clase `Exec` en `lib/exe.py` abstrae la ejecución de comandos:
 | **Local** | `subprocess.Popen(shlex.split(cmd))` → stdout, stderr, exit_code |
 | **Remoto** | `paramiko.SSHClient()` → `client.exec_command(cmd)` → stdout, stderr, exit_code |
 
-### Retorno
+### Retorno (ExecResult)
 
-Siempre retorna una tupla de 4 elementos:
+Retorna un objeto `ExecResult` con los siguientes atributos:
 ```python
-(stdout: str, stderr: str, exit_code: int, exception: Exception)
+ExecResult(
+    stdout: str,       # Salida estándar
+    stderr: str,       # Salida de error
+    exit_code: int,    # Código de salida
+    exception: Exception  # Excepción si hubo error
+)
 ```
 
 ### Uso directo (estático)
@@ -672,10 +712,10 @@ Siempre retorna una tupla de 4 elementos:
 from lib.exe import Exec
 
 # Local
-stdout, stderr, code, exc = Exec.execute("ls -la")
+result = Exec.execute("ls -la")
 
 # Remoto
-stdout, stderr, code, exc = Exec.execute(
+result = Exec.execute(
     command="cat /proc/mdstat",
     host="192.168.1.10",
     port=22,
@@ -748,31 +788,86 @@ python3 main.py -c -d -t 60
 
 ## Dependencias
 
-| Paquete | Usado por | Propósito |
-|---------|-----------|-----------|
-| `paramiko` | lib/exe.py | Ejecución remota de comandos vía SSH |
-| `requests` | lib/telegram.py | Envío de mensajes por API de Telegram |
-| `pymysql` | watchfuls/mysql.py | Verificación de conectividad MySQL |
+### Paquetes Python
+
+| Paquete | Versión | Usado por | Propósito |
+|---------|---------|-----------|-----------|
+| `requests` | >=2.28 | lib/telegram.py | Envío de mensajes por API de Telegram |
+| `paramiko` | >=3.0 | lib/exe.py | Ejecución remota de comandos vía SSH |
+| `PyMySQL` | >=1.0 | watchfuls/mysql.py | Verificación de conectividad MySQL |
+| `psutil` | >=5.9 | lib/mem.py, watchfuls/filesystemusage.py, watchfuls/ram_swap.py | Información de sistema multiplataforma (RAM, SWAP, disco) |
 
 ### Instalación
 
 ```bash
-pip install paramiko requests pymysql
+pip install -r requirements.txt
 ```
 
-### Dependencias del Sistema
+### Dependencias del Sistema (solo Linux)
 
-| Comando | Módulo | Ruta esperada |
-|---------|--------|---------------|
-| `df` | filesystemusage | `/bin/df` |
-| `ping` | ping | `/bin/ping` |
-| `systemctl` | service_status | `/bin/systemctl` |
-| `curl` | web | `/usr/bin/curl` |
-| hddtemp daemon | hddtemp | TCP puerto 7634 |
+| Comando | Módulo | Ruta esperada | Nota |
+|---------|--------|---------------|------|
+| `ping` | ping | `/bin/ping` | Solo Linux |
+| `systemctl` | service_status | `/bin/systemctl` | Solo Linux (systemd) |
+| `curl` | web | `/usr/bin/curl` | Solo Linux |
+| hddtemp daemon | hddtemp | TCP puerto 7634 | Demonio externo |
+
+> **Nota:** `filesystemusage` y `ram_swap` ya **no** dependen de comandos del sistema. Usan `psutil` y funcionan en cualquier plataforma.
+
+---
+
+## Tests
+
+El proyecto incluye una suite de **405 tests** usando `pytest`:
+
+```bash
+# Ejecutar todos los tests
+python -m pytest tests/ -q
+
+# Ejecutar tests de un módulo específico
+python -m pytest tests/test_mysql.py -v
+
+# Ejecutar con cobertura (requiere pytest-cov)
+python -m pytest tests/ --cov=lib --cov=watchfuls
+```
+
+### Archivos de Test
+
+| Archivo | Cobertura |
+|---------|-----------|
+| `test_config.py` | ConfigStore, ConfigControl |
+| `test_debug.py` | Debug, DebugLevel |
+| `test_dict_files_path.py` | DictFilesPath |
+| `test_dict_return_check.py` | ReturnModuleCheck |
+| `test_exe.py` | Exec, ExecResult |
+| `test_filesystemusage.py` | Watchful (filesystemusage) |
+| `test_get_conf_in_list.py` | ModuleBase.get_conf_in_list (match/case por tipo) |
+| `test_hddtemp.py` | Watchful (hddtemp) |
+| `test_mem.py` | Mem, MemInfo |
+| `test_mysql.py` | Watchful (mysql) |
+| `test_parse_helpers.py` | Funciones de parseo auxiliares |
+| `test_ping.py` | Watchful (ping) |
+| `test_raid.py` | Watchful (raid) |
+| `test_raid_mdstat.py` | RaidMdstat parser |
+| `test_ram_swap.py` | Watchful (ram_swap) |
+| `test_service_status.py` | Watchful (service_status) |
+| `test_temperature.py` | Watchful (temperature) |
+| `test_thermal.py` | ThermalInfoCollection, ThermalNode |
+| `test_tools.py` | bytes2human y utilidades |
+| `test_web.py` | Watchful (web) |
 
 ---
 
 ## Notas de Diseño
+
+### Convenciones de Código
+
+- **Prefijo `_`** (un solo guión bajo) para métodos y atributos privados (no `__`).
+- **Type hints** en firmas de métodos y atributos.
+- **Docstrings** en todas las clases y métodos públicos.
+- **`IntEnum`/`StrEnum`** para enumeraciones (no `Enum` base).
+- **`match/case`** nativo de Python 3.10+ para toda la lógica de despacho (sin clases Switch custom).
+- **`encoding='utf-8'`** explícito en todas las operaciones de I/O.
 
 ### Plugins
 
@@ -799,6 +894,19 @@ class Watchful(ModuleBase):
         super().check()  # debug logging
         return self.dict_return
 ```
+
+### Multiplataforma
+
+Algunos módulos son multiplataforma gracias a `psutil`:
+- **`filesystemusage`**: Usa `psutil.disk_partitions()` y `psutil.disk_usage()` en vez del comando `df`.
+- **`ram_swap` / `mem`**: Usa `psutil.virtual_memory()` y `psutil.swap_memory()` en vez de leer `/proc/meminfo`.
+
+Otros módulos siguen siendo **solo Linux**:
+- **`ping`**: Usa `/bin/ping`.
+- **`service_status`**: Usa `systemctl`.
+- **`temperature`**: Lee `/sys/class/thermal/`.
+- **`raid`**: Lee `/proc/mdstat`.
+- **`web`**: Usa `curl`.
 
 ### Concurrencia
 
