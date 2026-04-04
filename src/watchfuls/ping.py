@@ -19,12 +19,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import time
 import concurrent.futures
-from lib import Switch
+import time
+from enum import IntEnum
+
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
-from enum import IntEnum
 
 
 class ConfigOptions(IntEnum):
@@ -114,21 +114,20 @@ class Watchful(ModuleBase):
     def _get_conf(self, opt_find: IntEnum, dev_name: str, default_val=None):
         # Sec - Get Default Val
         if default_val is None:
-            with Switch(opt_find) as case:
-                if case(ConfigOptions.attempt):
+            match opt_find:
+                case ConfigOptions.attempt:
                     val_def = self.get_conf(opt_find.name, self._default_attempt)
 
-                elif case(ConfigOptions.timeout):
+                case ConfigOptions.timeout:
                     val_def = self.get_conf(opt_find.name, self._default_timeout)
 
-                elif case(ConfigOptions.enabled):
+                case ConfigOptions.enabled:
                     val_def = self.get_conf(opt_find.name, self._default_enabled)
 
-                else:
-                    if opt_find is None:
-                        raise ValueError("opt_find it can not be None!")
-                    else:
-                        raise TypeError(f"{opt_find.name} is not valid option!")
+                case None:
+                    raise ValueError("opt_find it can not be None!")
+                case _:
+                    raise TypeError(f"{opt_find.name} is not valid option!")
         else:
             val_def = default_val
 
@@ -136,12 +135,12 @@ class Watchful(ModuleBase):
         value = self.get_conf_in_list(opt_find, dev_name, val_def)
 
         # Sec - Format Return Data
-        with Switch(opt_find) as case:
-            if case(ConfigOptions.attempt, ConfigOptions.timeout):
+        match opt_find:
+            case ConfigOptions.attempt | ConfigOptions.timeout:
                 return self._parse_conf_int(value, val_def)
-            elif case(ConfigOptions.enabled):
+            case ConfigOptions.enabled:
                 return bool(value)
-            elif case(ConfigOptions.label):
+            case ConfigOptions.label:
                 return self._parse_conf_str(value, val_def)
-            else:
+            case _:
                 return value

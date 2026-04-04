@@ -19,14 +19,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import os.path
 import concurrent.futures
+import os.path
+from enum import IntEnum
+
 import pymysql
 import pymysql.cursors
-from lib import Switch
+
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
-from enum import IntEnum
 
 
 class ConfigOptions(IntEnum):
@@ -100,28 +101,26 @@ class Watchful(ModuleBase):
             status = True
         else:
             s_message += f'{db} - *Error:* '
-            with Switch(status) as case:
-                if case("1045"):
+            match status:
+                case "1045":
                     # OperationalError(1045, "Access denied for user 'user'@'server' (using password: NO)")
                     # OperationalError(1045, "Access denied for user 'user'@'server' (using password: YES)")
                     s_message += f"*Access denied* {'\U0001F510'}"
-                elif case("2003"):
+                case "2003":
                     # OperationalError(2003, "Can't connect to MySQL server on 'host1' (timed out)")
                     # OperationalError(2003, "Can't connect to MySQL server on 'host1' ([Errno 113] No route to host)")
                     # OperationalError(2003, "Can't connect to MySQL server on 'host1' ([Errno 111] Connection refused)"
                     s_message += "*Can't connect to MySQL server*"
-                    with Switch(message, check_contain=True) as sub_case:
-                        if sub_case('(timed out)'):
-                            s_message += ' *(timed out)*'
-                        elif sub_case('[Errno 111]'):
-                            s_message += ' *(connection refused)*'
-                        elif sub_case('[Errno 113]'):
-                            s_message += ' *(no route to host)*'
-                        else:
-                            s_message += ' *(?????)*'
+                    if '(timed out)' in message:
+                        s_message += ' *(timed out)*'
+                    elif '[Errno 111]' in message:
+                        s_message += ' *(connection refused)*'
+                    elif '[Errno 113]' in message:
+                        s_message += ' *(no route to host)*'
+                    else:
+                        s_message += ' *(?????)*'
                     s_message += '\U000026A0'
-                    # s_message += "*Can't connect to MySQL server (time out)* {0}".format('\U000026A0')
-                else:
+                case _:
                     s_message += f'*{message}* {"\U000026A0"}'
             status = False
 
@@ -161,12 +160,12 @@ class Watchful(ModuleBase):
 
             err_array = str(e).split(",")
             err_code = err_array[0][1:]
-            with Switch(err_code) as case:
-                if case("2003") and connect_socket:
+            match err_code:
+                case "2003" if connect_socket:
                     return "SOCKET_ERROR", "Socket file is not work!"
-                elif case("1045", "2003"):
+                case "1045" | "2003":
                     return_status = err_code
-                else:
+                case _:
                     return_status = "-9999"
 
         if connection is not None:
@@ -193,25 +192,22 @@ class Watchful(ModuleBase):
     def _get_conf(self, opt_find: IntEnum, dev_name: str, default_val=None):
         # Sec - Get Default Val
         if default_val is None:
-            with Switch(opt_find) as case:
-                if case(ConfigOptions.port):
+            match opt_find:
+                case ConfigOptions.port:
                     val_def = self.get_conf(opt_find.name, self._default_port)
 
-                elif case(ConfigOptions.socket,
-                          ConfigOptions.host,
-                          ConfigOptions.user,
-                          ConfigOptions.password,
-                          ConfigOptions.db):
+                case (ConfigOptions.socket | ConfigOptions.host
+                      | ConfigOptions.user | ConfigOptions.password
+                      | ConfigOptions.db):
                     val_def = self.get_conf(opt_find.name, "")
 
-                elif case(ConfigOptions.enabled):
+                case ConfigOptions.enabled:
                     val_def = self.get_conf(opt_find.name, self._default_enabled)
 
-                else:
-                    if opt_find is None:
-                        raise ValueError("opt_find it can not be None!")
-                    else:
-                        raise TypeError(f"{opt_find.name} is not valid option!")
+                case None:
+                    raise ValueError("opt_find it can not be None!")
+                case _:
+                    raise TypeError(f"{opt_find.name} is not valid option!")
         else:
             val_def = default_val
 
@@ -219,17 +215,15 @@ class Watchful(ModuleBase):
         value = self.get_conf_in_list(opt_find, dev_name, val_def)
 
         # Sec - Format Return Data
-        with Switch(opt_find) as case:
-            if case(ConfigOptions.port):
+        match opt_find:
+            case ConfigOptions.port:
                 return self._parse_conf_int(value, val_def)
-            elif case(ConfigOptions.enabled):
+            case ConfigOptions.enabled:
                 return bool(value)
-            elif case(ConfigOptions.socket,
-                      ConfigOptions.host,
-                      ConfigOptions.user,
-                      ConfigOptions.password,
-                      ConfigOptions.db):
+            case (ConfigOptions.socket | ConfigOptions.host
+                  | ConfigOptions.user | ConfigOptions.password
+                  | ConfigOptions.db):
                 return self._parse_conf_str(value, val_def)
-            else:
+            case _:
                 return value
 

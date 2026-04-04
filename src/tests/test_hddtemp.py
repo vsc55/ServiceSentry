@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 """Tests para watchfuls/hddtemp.py."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-from tests.conftest import create_mock_monitor
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from tests.conftest import create_mock_monitor
 
 # Datos simulados del daemon hddtemp
 HDDTEMP_RESPONSE_OK = b"|/dev/sda|ST2000VN004-2E4164|29|C||/dev/sdb|ST3000VN007-2E4166|31|C|"
@@ -253,3 +254,19 @@ class TestHddtempCheck:
             if not val['status']:
                 found_fail = True
         assert found_fail
+
+    def test_check_host_string_value_crashes_on_get(self):
+        """Valor string en config no hace match con bool() ni dict(),
+        is_enabled queda True (default) y luego value.get() falla
+        porque str no tiene .get()."""
+        config = {
+            'watchfuls.hddtemp': {
+                'list': {
+                    'server1': 'some_string'
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+        w = self.Watchful(mock_monitor)
+        with pytest.raises(AttributeError):
+            w.check()

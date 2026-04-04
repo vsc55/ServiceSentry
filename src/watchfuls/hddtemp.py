@@ -22,7 +22,6 @@
 import concurrent.futures
 import socket
 
-from lib import Switch
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
@@ -47,10 +46,10 @@ class Watchful(ModuleBase):
         return_list = []
         for (key, value) in self.get_conf('list', {}).items():
             is_enabled = self._default_enabled
-            with Switch(value, check_isinstance=True) as case:
-                if case(bool):
+            match value:
+                case bool():
                     is_enabled = value
-                elif case(dict):
+                case dict():
                     is_enabled = value.get("enabled", is_enabled)
 
             self._debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)

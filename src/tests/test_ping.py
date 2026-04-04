@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """Tests para watchfuls/ping.py."""
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from tests.conftest import create_mock_monitor
 
 
@@ -138,3 +140,30 @@ class TestPingConfigOptions:
         assert hasattr(ConfigOptions, 'label')
         assert hasattr(ConfigOptions, 'timeout')
         assert hasattr(ConfigOptions, 'attempt')
+
+
+class TestPingGetConf:
+
+    def setup_method(self):
+        from watchfuls.ping import ConfigOptions, Watchful
+        self.Watchful = Watchful
+        self.ConfigOptions = ConfigOptions
+
+    def test_get_conf_none_raises_value_error(self):
+        """opt_find=None lanza ValueError."""
+        config = {'watchfuls.ping': {'list': {}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with pytest.raises(ValueError, match="can not be None"):
+            w._get_conf(None, '192.168.1.1')
+
+    def test_get_conf_invalid_option_raises_type_error(self):
+        """opt_find inválido lanza TypeError."""
+        from enum import IntEnum
+
+        class FakeOption(IntEnum):
+            invalid = 999
+
+        config = {'watchfuls.ping': {'list': {}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with pytest.raises(TypeError, match="is not valid option"):
+            w._get_conf(FakeOption.invalid, '192.168.1.1')

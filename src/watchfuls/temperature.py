@@ -22,10 +22,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from lib import Switch
 from lib.linux import ThermalInfoCollection
-from lib.modules import ModuleBase
 from lib.modules import EnumConfigOptions as ConfigOptions
+from lib.modules import ModuleBase
 
 
 class Watchful(ModuleBase):
@@ -70,18 +69,17 @@ class Watchful(ModuleBase):
     def _get_conf(self, opt_find, dev_name: str, default_val=None):
         # Sec - Get Default Val
         if default_val is None:
-            with Switch(opt_find) as case:
-                if case(ConfigOptions.alert):
+            match opt_find:
+                case ConfigOptions.alert:
                     val_def = self.get_conf(opt_find.name, self._default_alert)
 
-                elif case(ConfigOptions.enabled):
+                case ConfigOptions.enabled:
                     val_def = self.get_conf(opt_find.name, self._default_enabled)
 
-                else:
-                    if opt_find is None:
-                        raise ValueError("opt_find it can not be None!")
-                    else:
-                        raise TypeError(f"{opt_find.name} is not valid option!")
+                case None:
+                    raise ValueError("opt_find it can not be None!")
+                case _:
+                    raise TypeError(f"{opt_find.name} is not valid option!")
         else:
             val_def = default_val
 
@@ -89,12 +87,12 @@ class Watchful(ModuleBase):
         value = self.get_conf_in_list(opt_find, dev_name, val_def)
 
         # Sec - Format Return Data
-        with Switch(opt_find) as case:
-            if case(ConfigOptions.alert):
+        match opt_find:
+            case ConfigOptions.alert:
                 return self._parse_conf_float(value, val_def)
-            elif case(ConfigOptions.enabled):
+            case ConfigOptions.enabled:
                 return bool(value)
-            elif case(ConfigOptions.label):
+            case ConfigOptions.label:
                 return self._parse_conf_str(value, val_def)
-            else:
+            case _:
                 return value

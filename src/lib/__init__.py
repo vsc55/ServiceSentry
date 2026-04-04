@@ -8,12 +8,10 @@ from lib.mem import Mem
 from lib.mem_info import MemInfo
 from lib.monitor import Monitor
 from lib.object_base import ObjectBase
-from lib.switch import Switch
 from lib.telegram import Telegram
 
 __all__ = [
     'ObjectBase',
-    'Switch',
     'DictFilesPath',
     'Monitor',
     'Telegram',

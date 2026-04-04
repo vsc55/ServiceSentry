@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """Tests para watchfuls/mysql.py."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from tests.conftest import create_mock_monitor
 
 
@@ -196,3 +198,117 @@ class TestMysqlCheck:
             assert 'db1' in items
             assert 'db2' not in items
             assert 'db3' in items
+
+    @patch('watchfuls.mysql.pymysql.connect')
+    def test_check_db_2003_connection_refused(self, mock_connect):
+        """Error 2003 con [Errno 111] muestra 'connection refused'."""
+        config = {
+            'watchfuls.mysql': {
+                'host': 'localhost',
+                'socket': '',
+                'list': {'db1': {'enabled': True, 'host': 'localhost'}},
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+        w = self.Watchful(mock_monitor)
+
+        import pymysql
+        mock_connect.side_effect = pymysql.OperationalError(
+            2003, "Can't connect to MySQL server on 'localhost' ([Errno 111] Connection refused)")
+
+        result = w.check()
+        items = result.list
+        assert items['db1']['status'] is False
+        assert 'connection refused' in items['db1']['message']
+
+    @patch('watchfuls.mysql.pymysql.connect')
+    def test_check_db_2003_no_route(self, mock_connect):
+        """Error 2003 con [Errno 113] muestra 'no route to host'."""
+        config = {
+            'watchfuls.mysql': {
+                'host': 'localhost',
+                'socket': '',
+                'list': {'db1': {'enabled': True, 'host': 'remote'}},
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+        w = self.Watchful(mock_monitor)
+
+        import pymysql
+        mock_connect.side_effect = pymysql.OperationalError(
+            2003, "Can't connect to MySQL server on 'remote' ([Errno 113] No route to host)")
+
+        result = w.check()
+        items = result.list
+        assert items['db1']['status'] is False
+        assert 'no route to host' in items['db1']['message']
+
+    @patch('watchfuls.mysql.pymysql.connect')
+    def test_check_db_2003_unknown_sub_error(self, mock_connect):
+        """Error 2003 con sub-error desconocido muestra '?????'."""
+        config = {
+            'watchfuls.mysql': {
+                'host': 'localhost',
+                'socket': '',
+                'list': {'db1': {'enabled': True, 'host': 'localhost'}},
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+        w = self.Watchful(mock_monitor)
+
+        import pymysql
+        mock_connect.side_effect = pymysql.OperationalError(
+            2003, "Can't connect to MySQL server on 'localhost' (Unknown error)")
+
+        result = w.check()
+        items = result.list
+        assert items['db1']['status'] is False
+        assert '?????' in items['db1']['message']
+
+    @patch('watchfuls.mysql.pymysql.connect')
+    def test_check_db_unknown_error_code(self, mock_connect):
+        """Error con código desconocido usa rama default."""
+        config = {
+            'watchfuls.mysql': {
+                'host': 'localhost',
+                'socket': '',
+                'list': {'db1': {'enabled': True, 'host': 'localhost'}},
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+        w = self.Watchful(mock_monitor)
+
+        import pymysql
+        mock_connect.side_effect = pymysql.OperationalError(
+            9999, "Some completely unknown error")
+
+        result = w.check()
+        items = result.list
+        assert items['db1']['status'] is False
+
+
+class TestMysqlGetConf:
+
+    def setup_method(self):
+        from watchfuls.mysql import ConfigOptions, Watchful
+        self.Watchful = Watchful
+        self.ConfigOptions = ConfigOptions
+
+    def test_get_conf_none_raises_value_error(self):
+        """opt_find=None lanza ValueError."""
+        config = {'watchfuls.mysql': {'list': {}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with pytest.raises(ValueError, match="can not be None"):
+            w._get_conf(None, 'db1')
+
+    def test_get_conf_invalid_option_raises_type_error(self):
+        """opt_find inválido lanza TypeError."""
+        from enum import IntEnum
+
+        class FakeOption(IntEnum):
+            invalid = 999
+
+        config = {'watchfuls.mysql': {'list': {}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with pytest.raises(TypeError, match="is not valid option"):
+            w._get_conf(FakeOption.invalid, 'db1')

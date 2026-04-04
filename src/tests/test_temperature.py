@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """Tests para watchfuls/temperature.py."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from tests.conftest import create_mock_monitor
 
 
@@ -197,3 +199,59 @@ class TestTemperatureCheck:
         assert other['type'] == 'cpu-thermal'
         assert other['temp'] == 45.0
         assert 'alert' in other
+
+
+class TestTemperatureGetConf:
+
+    def setup_method(self):
+        from watchfuls.temperature import Watchful
+        self.Watchful = Watchful
+
+    @patch('watchfuls.temperature.ThermalInfoCollection')
+    def test_get_conf_custom_label(self, mock_thermal_cls):
+        """Sensor con label personalizado en config."""
+        config = {
+            'watchfuls.temperature': {
+                'alert': 80,
+                'list': {
+                    'thermal_zone0': {
+                        'enabled': True,
+                        'label': 'CPU Core',
+                    }
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+
+        mock_node = MagicMock()
+        mock_node.dev = 'thermal_zone0'
+        mock_node.type = 'cpu-thermal'
+        mock_node.temp = 45.0
+
+        mock_thermal = MagicMock()
+        mock_thermal.nodes = [mock_node]
+        mock_thermal_cls.return_value = mock_thermal
+
+        w = self.Watchful(mock_monitor)
+        result = w.check()
+        items = result.list
+        assert 'CPU Core' in items['thermal_zone0']['message']
+
+    def test_get_conf_none_raises_value_error(self):
+        """opt_find=None lanza ValueError."""
+        config = {'watchfuls.temperature': {}}
+        w = self.Watchful(create_mock_monitor(config))
+        with pytest.raises(ValueError, match="can not be None"):
+            w._get_conf(None, 'thermal_zone0')
+
+    def test_get_conf_invalid_option_raises_type_error(self):
+        """opt_find inválido lanza TypeError."""
+        from enum import IntEnum
+
+        class FakeOption(IntEnum):
+            invalid = 999
+
+        config = {'watchfuls.temperature': {}}
+        w = self.Watchful(create_mock_monitor(config))
+        with pytest.raises(TypeError, match="is not valid option"):
+            w._get_conf(FakeOption.invalid, 'thermal_zone0')

@@ -56,7 +56,7 @@ class TestFilesystemUsageCheck:
 
         for val in items.values():
             assert val['status'] is True
-            assert 'Filesystem' in val['message']
+            assert 'partition' in val['message']
 
     @patch('watchfuls.filesystemusage.psutil')
     def test_check_high_usage(self, mock_psutil):

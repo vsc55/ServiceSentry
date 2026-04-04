@@ -22,7 +22,6 @@
 import concurrent.futures
 from enum import IntEnum
 
-from lib import Switch
 from lib.debug import DebugLevel
 from lib.linux import RaidMdstat
 from lib.modules import ModuleBase
@@ -107,22 +106,22 @@ class Watchful(ModuleBase):
 
                 other_data = {}
                 is_warning = True
-                with Switch(value.get("update", '')) as case:
-                    if case(RaidMdstat.UpdateStatus.ok):
+                match value.get("update", ''):
+                    case RaidMdstat.UpdateStatus.ok:
                         is_warning = False
                         message = f"RAID *{label}/{key}* in good status. {u'\U00002705'}"
 
-                    elif case(RaidMdstat.UpdateStatus.error):
+                    case RaidMdstat.UpdateStatus.error:
                         message = f"*RAID {label}/{key} is degraded.* {u'\U000026A0'}"
 
-                    elif case(RaidMdstat.UpdateStatus.recovery):
+                    case RaidMdstat.UpdateStatus.recovery:
                         other_data['percent'] = value.get("recovery", {}).get('percent', -1)
                         other_data['finish'] = value.get("recovery", {}).get('finish', -1)
                         other_data['speed'] = value.get("recovery", {}).get('speed', -1)
 
                         message = f"*RAID {label}/{key} is degraded, recovery status {other_data['percent']}%, estimate time to finish {other_data['finish']}.* {u'\U000026A0'}"
 
-                    else:
+                    case _:
                         message = f"*RAID {label}/{key} Unknown Error*. {u'\U000026A0'}"
 
                 if remote_id:
@@ -151,25 +150,22 @@ class Watchful(ModuleBase):
     def get_conf_item(self, opt_find: IntEnum, dev_name: str, default_val=None):
         # Sec - Set Default Val
         if default_val is None:
-            with Switch(opt_find) as case:
-                if case(ConfigOptions.port):
+            match opt_find:
+                case ConfigOptions.port:
                     val_def = self.get_conf(opt_find.name, self._default_port)
 
-                elif case(ConfigOptions.label,
-                          ConfigOptions.host,
-                          ConfigOptions.user,
-                          ConfigOptions.password,
-                          ConfigOptions.key_file):
+                case (ConfigOptions.label | ConfigOptions.host
+                      | ConfigOptions.user | ConfigOptions.password
+                      | ConfigOptions.key_file):
                     val_def = self.get_conf(opt_find.name, "")
 
-                elif case(ConfigOptions.enabled):
+                case ConfigOptions.enabled:
                     val_def = self.get_conf(opt_find.name, self._default_enabled)
 
-                else:
-                    if opt_find is None:
-                        raise ValueError("opt_find it can not be None!")
-                    else:
-                        raise TypeError(f"{opt_find.name} is not valid option!")
+                case None:
+                    raise ValueError("opt_find it can not be None!")
+                case _:
+                    raise TypeError(f"{opt_find.name} is not valid option!")
         else:
             val_def = default_val
 
@@ -177,18 +173,16 @@ class Watchful(ModuleBase):
         value = self.get_conf_in_list(opt_find, dev_name, val_def, key_name_list="remote")
 
         # Sec - Format Return Data
-        with Switch(opt_find) as case:
-            if case(ConfigOptions.port):
+        match opt_find:
+            case ConfigOptions.port:
                 return self._parse_conf_int(value, val_def)
-            elif case(ConfigOptions.enabled):
+            case ConfigOptions.enabled:
                 return bool(value)
-            elif case(ConfigOptions.label,
-                      ConfigOptions.host,
-                      ConfigOptions.user,
-                      ConfigOptions.password,
-                      ConfigOptions.key_file):
+            case (ConfigOptions.label | ConfigOptions.host
+                  | ConfigOptions.user | ConfigOptions.password
+                  | ConfigOptions.key_file):
                 return self._parse_conf_str(value, val_def)
-            else:
+            case _:
                 return value
 
     def get_label_by_id(self, remote_id) -> str:

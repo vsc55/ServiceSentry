@@ -28,7 +28,6 @@ from lib.debug import DebugLevel
 from lib.dict_files_path import DictFilesPath
 from lib.modules import ReturnModuleCheck
 from lib.object_base import ObjectBase
-from lib.switch import Switch
 
 __all__ = ['ModuleBase']
 
@@ -157,18 +156,18 @@ class ModuleBase(ObjectBase):
                               search.
         :return: Value obtained from the configuration.
         """
-        with Switch(opt_find, check_isinstance=True) as case:
-            if case(Enum):
+        match opt_find:
+            case Enum():
                 find_key = [opt_find.name]
-            elif case(str):
+            case str():
                 find_key = [opt_find]
-            elif case(list):
+            case list():
                 find_key = opt_find.copy()
-            elif case(int, float):
+            case int() | float():
                 find_key = [str(opt_find)]
-            elif case(tuple):
+            case tuple():
                 find_key = list(opt_find)
-            else:
+            case _:
                 raise TypeError(f"opt_find is not valid type ({type(opt_find)})!")
 
         if key_name_module:

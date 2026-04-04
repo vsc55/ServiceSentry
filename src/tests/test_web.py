@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """Tests para watchfuls/web.py."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from tests.conftest import create_mock_monitor
 
 
@@ -157,5 +159,24 @@ class TestWebCheck:
         with patch.object(w, '_run_cmd', return_value="200"):
             result = w.check()
             items = result.list
+            assert 'example.com' in items
+            assert items['example.com']['status'] is True
+
+    def test_check_url_string_value_uses_default_enabled(self):
+        """Valor string en config no hace match con bool() ni dict(), usa default_enabled=True."""
+        config = {
+            'watchfuls.web': {
+                'list': {
+                    'example.com': 'some_string'
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+        w = self.Watchful(mock_monitor)
+
+        with patch.object(w, '_run_cmd', return_value="200"):
+            result = w.check()
+            items = result.list
+            # default_enabled=True, así que se procesa
             assert 'example.com' in items
             assert items['example.com']['status'] is True

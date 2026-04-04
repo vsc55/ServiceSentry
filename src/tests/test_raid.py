@@ -381,3 +381,59 @@ class TestRaidCheckRemoteKeyFile:
         call_kwargs = mock_mdstat_cls.call_args
         # key_file should be empty string (default from get_conf_item)
         assert call_kwargs.kwargs.get('key_file') == ''
+
+
+class TestRaidGetConfItem:
+
+    def setup_method(self):
+        from watchfuls.raid import ConfigOptions, Watchful
+        self.Watchful = Watchful
+        self.ConfigOptions = ConfigOptions
+
+    def test_get_conf_item_none_raises_value_error(self):
+        """opt_find=None lanza ValueError."""
+        config = {'watchfuls.raid': {'remote': {}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with pytest.raises(ValueError, match="can not be None"):
+            w.get_conf_item(None, '1')
+
+    def test_get_conf_item_invalid_option_raises_type_error(self):
+        """opt_find inválido lanza TypeError."""
+        from enum import IntEnum
+
+        class FakeOption(IntEnum):
+            invalid = 999
+
+        config = {'watchfuls.raid': {'remote': {}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with pytest.raises(TypeError, match="is not valid option"):
+            w.get_conf_item(FakeOption.invalid, '1')
+
+    @patch('watchfuls.raid.RaidMdstat')
+    def test_md_analyze_unknown_status(self, mock_mdstat_cls):
+        """UpdateStatus desconocido produce 'Unknown Error'."""
+        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
+        config = {
+            'watchfuls.raid': {
+                'local': True,
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+
+        mock_mdstat = MagicMock()
+        mock_mdstat.read_status.return_value = {
+            'md0': {
+                'status': 'active',
+                'type': 'raid1',
+                'disk': ['sda1[0]'],
+                'update': 'unexpected_value',
+            }
+        }
+        mock_mdstat_cls.return_value = mock_mdstat
+
+        w = self.Watchful(mock_monitor)
+        result = w.check()
+        items = result.list
+        assert 'L_md0' in items
+        assert items['L_md0']['status'] is False
+        assert 'Unknown Error' in items['L_md0']['message']
