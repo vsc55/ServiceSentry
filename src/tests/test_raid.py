@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 """Tests para watchfuls/raid.py."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from tests.conftest import create_mock_monitor
+
 from lib.linux.raid_mdstat import RaidMdstat
+from tests.conftest import create_mock_monitor
 
 
 class TestRaidInit:
@@ -28,6 +30,7 @@ class TestRaidConfigOptions:
         assert hasattr(ConfigOptions, 'port')
         assert hasattr(ConfigOptions, 'user')
         assert hasattr(ConfigOptions, 'password')
+        assert hasattr(ConfigOptions, 'key_file')
 
 
 class TestRaidCheckLocal:
@@ -299,3 +302,82 @@ class TestRaidGetLabelById:
         w = self.Watchful(mock_monitor)
         label = w.get_label_by_id('1')
         assert 'Remote' in label
+
+
+class TestRaidCheckRemoteKeyFile:
+
+    def setup_method(self):
+        from watchfuls.raid import Watchful
+        self.Watchful = Watchful
+
+    @patch('watchfuls.raid.RaidMdstat')
+    def test_check_remote_with_key_file(self, mock_mdstat_cls):
+        """Remote with key_file passes it to RaidMdstat."""
+        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
+        config = {
+            'watchfuls.raid': {
+                'local': False,
+                'remote': {
+                    '1': {
+                        'enabled': True,
+                        'label': 'NAS',
+                        'host': '192.168.1.10',
+                        'port': 22,
+                        'user': 'root',
+                        'key_file': '/home/user/.ssh/id_rsa',
+                    }
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+
+        mock_mdstat = MagicMock()
+        mock_mdstat.read_status.return_value = {
+            'md0': {
+                'status': 'active',
+                'type': 'raid1',
+                'disk': ['sda1[0]', 'sdb1[1]'],
+                'update': RaidMdstat.UpdateStatus.ok,
+            }
+        }
+        mock_mdstat_cls.return_value = mock_mdstat
+
+        w = self.Watchful(mock_monitor)
+        result = w.check()
+        items = result.list
+        assert 'R_1_md0' in items
+        assert items['R_1_md0']['status'] is True
+
+        # Verify key_file was passed to RaidMdstat constructor
+        call_kwargs = mock_mdstat_cls.call_args
+        assert call_kwargs.kwargs.get('key_file') == '/home/user/.ssh/id_rsa'
+
+    @patch('watchfuls.raid.RaidMdstat')
+    def test_check_remote_without_key_file(self, mock_mdstat_cls):
+        """Remote without key_file passes empty string."""
+        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
+        config = {
+            'watchfuls.raid': {
+                'local': False,
+                'remote': {
+                    '1': {
+                        'enabled': True,
+                        'host': '192.168.1.10',
+                        'user': 'root',
+                        'password': 'pass',
+                    }
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+
+        mock_mdstat = MagicMock()
+        mock_mdstat.read_status.return_value = {}
+        mock_mdstat_cls.return_value = mock_mdstat
+
+        w = self.Watchful(mock_monitor)
+        w.check()
+
+        call_kwargs = mock_mdstat_cls.call_args
+        # key_file should be empty string (default from get_conf_item)
+        assert call_kwargs.kwargs.get('key_file') == ''

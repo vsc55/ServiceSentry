@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 """Tests para lib/linux/raid_mdstat.py — RaidMdstat."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-from lib.linux.raid_mdstat import RaidMdstat
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from lib.linux.raid_mdstat import RaidMdstat
 
 # Contenido típico de /proc/mdstat con un RAID saludable
 MDSTAT_OK = """\
@@ -72,6 +73,15 @@ class TestRaidMdstatInit:
     def test_not_remote_without_host(self):
         r = RaidMdstat(host=None)
         assert r.is_remote is False
+
+    def test_remote_with_key_file(self):
+        r = RaidMdstat(host='server1', port=22, user='root', key_file='/home/user/.ssh/id_rsa')
+        assert r.is_remote is True
+        assert r._key_file == '/home/user/.ssh/id_rsa'
+
+    def test_key_file_default_none(self):
+        r = RaidMdstat(host='server1', port=22, user='root')
+        assert r._key_file is None
 
 
 class TestRaidMdstatValidateRemote:
@@ -231,3 +241,106 @@ class TestUpdateStatusEnum:
         assert RaidMdstat.UpdateStatus.ok.value == 1
         assert RaidMdstat.UpdateStatus.error.value == 2
         assert RaidMdstat.UpdateStatus.recovery.value == 3
+
+    def test_is_intenum(self):
+        """UpdateStatus is IntEnum, supports direct comparison."""
+        assert RaidMdstat.UpdateStatus.ok > RaidMdstat.UpdateStatus.unknown
+        assert RaidMdstat.UpdateStatus.recovery > RaidMdstat.UpdateStatus.error
+        assert RaidMdstat.UpdateStatus.ok < RaidMdstat.UpdateStatus.error
+
+
+class TestRaidMdstatReadLines:
+
+    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('builtins.open')
+    def test_read_lines_local(self, mock_open, mock_isfile):
+        mock_open.return_value.__enter__ = lambda s: s
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_open.return_value.read.return_value = MDSTAT_OK
+        r = RaidMdstat(mdstat='/proc/mdstat')
+        lines = r._read_lines()
+        assert any('md0' in line for line in lines)
+
+    @patch.object(RaidMdstat, '_exec_remote')
+    def test_read_lines_remote_ok(self, mock_exec):
+        mock_exec.return_value = (MDSTAT_OK, "", None)
+        r = RaidMdstat(host='server1', port=22, user='root', password='pass')
+        lines = r._read_lines()
+        assert any('md0' in line for line in lines)
+
+    @patch.object(RaidMdstat, '_exec_remote')
+    def test_read_lines_remote_stderr_raises_oserror(self, mock_exec):
+        mock_exec.return_value = ("", "permission denied", None)
+        r = RaidMdstat(host='server1', port=22, user='root', password='pass')
+        with pytest.raises(OSError, match="REMOTE ERROR"):
+            r._read_lines()
+
+    @patch.object(RaidMdstat, '_exec_remote')
+    def test_read_lines_remote_stdexcept_raises_runtime(self, mock_exec):
+        mock_exec.return_value = ("", "", "connection timeout")
+        r = RaidMdstat(host='server1', port=22, user='root', password='pass')
+        with pytest.raises(RuntimeError, match="REMOTE EXCEPTION"):
+            r._read_lines()
+
+    def test_read_lines_remote_invalid_config_raises_valueerror(self):
+        r = RaidMdstat(host='server1', port=0, user='')
+        with pytest.raises(ValueError, match="Remote config not valid"):
+            r._read_lines()
+
+
+class TestRaidMdstatIsExistRemoteStdexcept:
+
+    @patch.object(RaidMdstat, '_exec_remote')
+    def test_remote_stdexcept_returns_false(self, mock_exec):
+        mock_exec.return_value = ("", "", "timeout exception")
+        r = RaidMdstat(host='server1', port=22, user='root', password='pass')
+        assert r.is_exist is False
+
+
+class TestRaidMdstatRemoteStderrRaises:
+
+    @patch.object(RaidMdstat, '_exec_remote')
+    def test_read_remote_stdexcept_raises(self, mock_exec):
+        mock_exec.side_effect = [
+            ("exists\n", "", None),
+            ("", "", "SSH connection lost"),
+        ]
+        r = RaidMdstat(host='server1', port=22, user='root', password='pass')
+        with pytest.raises(RuntimeError, match="REMOTE EXCEPTION"):
+            r.read_status()
+
+
+class TestRaidMdstatRecoveryParsing:
+
+    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('builtins.open')
+    def test_recovery_details(self, mock_open, mock_isfile):
+        mock_open.return_value.__enter__ = lambda s: s
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_open.return_value.read.return_value = MDSTAT_RECOVERY
+        r = RaidMdstat(mdstat='/proc/mdstat')
+        result = r.read_status()
+        recovery = result['md0']['recovery']
+        assert recovery['percent'] == 5.2
+        assert recovery['finish'] == '200.5min'
+        assert recovery['speed'] == '150000K/sec'
+        assert isinstance(recovery['blocks'], list)
+
+    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('builtins.open')
+    def test_recovery_malformed_falls_back_empty(self, mock_open, mock_isfile):
+        """Malformed recovery line returns empty recovery dict."""
+        mdstat_bad_recovery = """Personalities : [raid1]
+md0 : active raid1 sda1[0] sdb1[2]
+      1953513472 blocks [2/1] [U_]
+      [>.......] recovery = BADDATA
+
+unused devices: <none>
+"""
+        mock_open.return_value.__enter__ = lambda s: s
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_open.return_value.read.return_value = mdstat_bad_recovery
+        r = RaidMdstat(mdstat='/proc/mdstat')
+        result = r.read_status()
+        assert result['md0']['update'] == RaidMdstat.UpdateStatus.recovery
+        assert result['md0']['recovery'] == {}

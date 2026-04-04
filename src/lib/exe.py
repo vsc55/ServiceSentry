@@ -22,9 +22,9 @@
 
 import shlex
 import subprocess
-import paramiko
-
 from enum import Enum
+
+import paramiko
 
 __author__ = "Javier Pastor"
 __copyright__ = "Copyright © 2019, Javier Pastor"
@@ -60,6 +60,7 @@ class Exec:
         self.__port = 0
         self.__user = ""
         self.__password = ""
+        self.__key_file = None
         self.__timeout = 30
         self.set_remote()
 
@@ -112,6 +113,14 @@ class Exec:
         self.__password = val
 
     @property
+    def key_file(self) -> str:
+        return self.__key_file
+
+    @key_file.setter
+    def key_file(self, val: str):
+        self.__key_file = val
+
+    @property
     def timeout(self) -> float:
         return self.__timeout
 
@@ -153,8 +162,19 @@ class Exec:
         try:
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(hostname=self.host, port=self.port, username=self.user,
-                           password=self.password, timeout=self.timeout)
+
+            connect_kwargs = {
+                'hostname': self.host,
+                'port': self.port,
+                'username': self.user,
+                'timeout': self.timeout,
+            }
+            if self.key_file:
+                connect_kwargs['key_filename'] = self.key_file
+            else:
+                connect_kwargs['password'] = self.password
+
+            client.connect(**connect_kwargs)
 
             # TODO: Pendiente añadir soporte para multiples commands.
             _, stdout, stderr = client.exec_command(self.command)
@@ -179,30 +199,29 @@ class Exec:
         return result['out'], result['err'], result['code'], result['exception']
 
     def set_remote(self, host: str = "", port: int = 22, user: str = "root", password: str = None,
-                   timeout: float = None):
+                   key_file: str = None, timeout: float = None):
         """ Configuramos los datos de conexión al host remoto.
 
         :param host: Nombre del host o IP
         :param port: Puerto que usa SSH
         :param user: Nombre de usuario con el que nos logeamos en el sistema.
         :param password: Password del usuario.
+        :param key_file: Ruta al archivo de clave privada SSH.
         :param timeout: Timeout al intentar conectar.
         :return:
 
         """
-
-        # TODO: Pendiente añadir soporte key public/private
-
         self.host = host
         self.port = port
         self.user = user
         self.password = password
+        self.key_file = key_file
         if timeout is not None:
             self.timeout = timeout
 
     @staticmethod
     def execute(command: str = "", host: str = "", port: int = 22, user: str = "", password: str = "",
-                timeout: float = None):
+                key_file: str = None, timeout: float = None):
         """ Ejecuta el comando que le pasamos sin tener que crear el objeto Exec.
 
         :param command: Comando ha ejecutar.
@@ -210,6 +229,7 @@ class Exec:
         :param port: Puerto SSH
         :param user: Usuario login
         :param password: Password Login
+        :param key_file: Ruta al archivo de clave privada SSH.
         :param timeout: Tiempo en segundos hasta que falla el intento de conexión.
         :return: Retorna stdout y stderr
 
@@ -218,5 +238,6 @@ class Exec:
         tmp_exec = Exec(command=command)
         if len(host.strip()) > 0:
             tmp_exec.location = EnumLocationExec.remote
-            tmp_exec.set_remote(host=host, port=port, user=user, password=password, timeout=timeout)
+            tmp_exec.set_remote(host=host, port=port, user=user, password=password,
+                               key_file=key_file, timeout=timeout)
         return tmp_exec.start()

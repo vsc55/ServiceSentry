@@ -18,81 +18,91 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+""" Memory information collection for Linux. """
+
+from dataclasses import dataclass
 
 __all__ = ['Mem']
 
 
+@dataclass
+class MemInfo:
+    """ Memory information structure. """
+    total: int = 0
+    free: int = 0
+
+    @property
+    def used(self) -> int:
+        """ Return the used memory. """
+        return self.total - self.free
+
+    @property
+    def used_percent(self) -> float:
+        """ Return the used memory percentage. """
+        if self.total <= 0:
+            return 0.0
+        return (self.used / self.total) * 100.0
+
+
 class Mem:
-
-    class MemInfo:
-        def __init__(self, total: int = 0, free: int = 0):
-            self.total = total
-            self.free = free
-
-        @property
-        def used(self) -> int:
-            r_used = int(self.total) - int(self.free)
-            return r_used
-
-        @property
-        def used_percent(self) -> float:
-            r_per = float(self.used) / float(self.total) * 100.0
-            return r_per
-
-        @property
-        def total(self) -> int:
-            return self.__total
-
-        @total.setter
-        def total(self, val: int):
-            self.__total = val
-
-        @property
-        def free(self) -> int:
-            return self.__free
-
-        @free.setter
-        def free(self, val: int):
-            self.__free = val
-
-    def __init__(self):
-        pass
+    """ Memory information collection for Linux. """
 
     @staticmethod
-    def __read_meminfo():
-        with open('/proc/meminfo', 'r') as mem:
-            ret = {'ram': {}, 'swap': {}}
-            for i in mem:
-                s_line = i.split()
-                if str(s_line[0]) == 'MemTotal:':
-                    ret['ram']['total'] = int(s_line[1])
-                elif str(s_line[0]) == 'MemFree:':
-                    ret['ram']['free'] = int(s_line[1])
-                elif str(s_line[0]) == 'Buffers:':
-                    ret['ram']['buffers'] = int(s_line[1])
-                elif str(s_line[0]) == 'Cached:':
-                    ret['ram']['cached'] = int(s_line[1])
-                elif str(s_line[0]) == 'SwapTotal:':
-                    ret['swap']['total'] = int(s_line[1])
-                elif str(s_line[0]) == 'SwapFree:':
-                    ret['swap']['free'] = int(s_line[1])
-        return ret
+    def _read_meminfo() -> dict:
+        """ Read the memory information from /proc/meminfo. """
+        data = {}
+        with open('/proc/meminfo', 'r', encoding='utf-8') as mem:
+            for line in mem:
+                parts = line.split()
+                if len(parts) >= 2:
+                    key = parts[0].rstrip(':')
+                    data[key] = int(parts[1])
+        return data
+
+        # with open('/proc/meminfo', 'r') as mem:
+        #     ret = {'ram': {}, 'swap': {}}
+        #     for i in mem:
+        #         s_line = i.split()
+        #         if str(s_line[0]) == 'MemTotal:':
+        #             ret['ram']['total'] = int(s_line[1])
+        #         elif str(s_line[0]) == 'MemFree:':
+        #             ret['ram']['free'] = int(s_line[1])
+        #         elif str(s_line[0]) == 'Buffers:':
+        #             ret['ram']['buffers'] = int(s_line[1])
+        #         elif str(s_line[0]) == 'Cached:':
+        #             ret['ram']['cached'] = int(s_line[1])
+        #         elif str(s_line[0]) == 'SwapTotal:':
+        #             ret['swap']['total'] = int(s_line[1])
+        #         elif str(s_line[0]) == 'SwapFree:':
+        #             ret['swap']['free'] = int(s_line[1])
+        # return ret
 
     @property
     def ram(self) -> MemInfo:
-        mem_info = self.__read_meminfo()
-        r_info = self.MemInfo()
-        r_info.total = int(mem_info['ram']['total'])
-        r_info.free = int(mem_info['ram']['free']) + int(mem_info['ram']['buffers']) + int(mem_info['ram']['cached'])
-        return r_info
+        """ Return the RAM memory information. """
+        mem_info = self._read_meminfo()
+
+        total = mem_info.get('MemTotal', 0)
+
+        if 'MemAvailable' in mem_info:
+            free = mem_info['MemAvailable']
+        else:
+            free = (
+                mem_info.get('MemFree', 0) +
+                mem_info.get('Buffers', 0) +
+                mem_info.get('Cached', 0)
+            )
+        return MemInfo(total=total, free=free)
 
     @property
     def swap(self) -> MemInfo:
-        mem_info = self.__read_meminfo()
-        r_info = self.MemInfo()
-        r_info.total = int(mem_info['swap']['total'])
-        r_info.free = int(mem_info['swap']['free'])
-        return r_info
+        """Return the SWAP memory information."""
+        mem_info = self._read_meminfo()
+
+        return MemInfo(
+            total=mem_info.get('SwapTotal', 0),
+            free=mem_info.get('SwapFree', 0),
+        )
 
 
 if __name__ == "__main__":

@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 """Tests para la clase Exec."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from lib.exe import Exec, EnumLocationExec
+
+from lib.exe import EnumLocationExec, Exec
 
 
 class TestExecInit:
@@ -48,6 +50,15 @@ class TestExecProperties:
         e.password = "secret"
         assert e.password == "secret"
 
+    def test_set_key_file(self):
+        e = Exec()
+        e.key_file = "/home/user/.ssh/id_rsa"
+        assert e.key_file == "/home/user/.ssh/id_rsa"
+
+    def test_default_key_file_none(self):
+        e = Exec()
+        assert e.key_file is None
+
     def test_set_timeout(self):
         e = Exec()
         e.timeout = 60.0
@@ -76,6 +87,17 @@ class TestExecSetRemote:
         assert e.user == "admin"
         assert e.password == "pass"
         assert e.timeout == 10
+
+    def test_set_remote_with_key_file(self):
+        e = Exec()
+        e.set_remote(host="server1", user="admin", key_file="/home/user/.ssh/id_rsa")
+        assert e.key_file == "/home/user/.ssh/id_rsa"
+        assert e.password is None
+
+    def test_set_remote_key_file_default_none(self):
+        e = Exec()
+        e.set_remote(host="server1")
+        assert e.key_file is None
 
     def test_set_remote_timeout_none_keeps_default(self):
         e = Exec()
@@ -154,6 +176,14 @@ class TestExecStaticMethod:
         """execute() con host configura modo remoto."""
         mock_start.return_value = ("out", "err", 0, None)
         Exec.execute(command="ls", host="server1", port=22, user="root", password="pass")
+        mock_start.assert_called_once()
+
+    @patch('lib.exe.Exec.start')
+    def test_static_execute_with_key_file(self, mock_start):
+        """execute() with key_file sets it in remote config."""
+        mock_start.return_value = ("out", "err", 0, None)
+        Exec.execute(command="ls", host="server1", user="root",
+                     key_file="/home/user/.ssh/id_rsa")
         mock_start.assert_called_once()
 
 

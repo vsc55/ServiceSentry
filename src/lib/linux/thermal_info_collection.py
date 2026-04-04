@@ -18,105 +18,111 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+""" Thermal information collection for Linux. """
 
 __all__ = ['ThermalInfoCollection']
 
-import os
 import glob
+import os
 
 
-class ThermalInfoCollection:
+class _ThermalBase:
+    PATH_THERMAL = '/sys/class/thermal'
 
-    __path_thermal = '/sys/class/thermal'
+class ThermalNode(_ThermalBase):
+    """ Thermal node information. """
 
-    class ThermalNode:
+    def __init__(self, dev: str):
+        if not dev or not dev.strip():
+            raise ValueError("dev cannot be empty")
+        self._dev = dev.strip()
 
-        __path_thermal = '/sys/class/thermal'
+    @property
+    def dev(self) -> str:
+        """ Return the device name. """
+        return self._dev
 
-        def __init__(self, dev):
-            self.dev = dev
+    @property
+    def type(self) -> str:
+        """ Return the type of the thermal node. """
+        value = self._read_file(self._path_type)
+        return value.strip() if value is not None else "Unknown"
 
-        @property
-        def dev(self) -> str:
-            return self.__dev
+    @property
+    def temp(self) -> float:
+        """ Return the temperature of the thermal node in Celsius. """
+        value = self._read_file(self._path_temp)
+        if value is None:
+            return 0.0
 
-        @dev.setter
-        def dev(self, val: str):
-            if val.strip():
-                self.__dev = val
-            else:
-                pass
-                # TODO: Pendiente Controlar si no se define dev.
+        try:
+            return float(value.strip()) / 1000.0
+        except ValueError:
+            return 0.0
 
-        @property
-        def type(self) -> str:
-            type_return = self.__read_file(self.__path_type)
-            if type_return is not None:
-                type_return = str(type_return).strip()
-            else:
-                type_return = "Unknown"
-            return type_return
+    def _read_file(self, path_file: str, default=None):
+        """
+        Read the content of a file. Returns the content as a string, 
+        or default if the file does not exist.
+        """
+        try:
+            with open(path_file, 'r', encoding='utf-8') as f:
+                return f.read()
+        except OSError:
+            return default
 
-        @property
-        def temp(self) -> float:
-            temp_return = self.__read_file(self.__path_temp)
-            if temp_return is not None:
-                temp_return = float(temp_return.split('\n')[0]) / 1000.0
-            else:
-                temp_return = float(0)
-            return temp_return
+    @property
+    def _path_dev(self) -> str:
+        """ Return the path of the thermal node device. """
+        return os.path.join(self.PATH_THERMAL, self.dev)
 
-        def __read_file(self, path_file, default_none=None):
-            if self.__is_exist_file(path_file):
-                output = default_none
-                with open(path_file, 'r') as f_buffer:
-                    output = f_buffer.read()
-                return output
-            else:
-                return default_none
+    @property
+    def _path_temp(self) -> str:
+        """ Return the path of the temperature file of the thermal node. """
+        return os.path.join(self._path_dev, 'temp')
 
-        def __is_exist_file(self, path_check):
-            return bool(str(path_check).strip() and os.path.isfile(path_check))
+    @property
+    def _path_type(self) -> str:
+        """ Return the path of the type file of the thermal node. """
+        return os.path.join(self._path_dev, 'type')
 
-        @property
-        def __path_dev(self):
-            return os.path.join(self.__path_thermal, self.dev)
+    def _is_exist_file(self, path_check) -> bool:
+        """ Check if the file exist. """
+        return bool(str(path_check).strip() and os.path.isfile(path_check))
 
-        @property
-        def __path_temp(self):
-            return os.path.join(self.__path_dev, 'temp')
 
-        @property
-        def __path_type(self):
-            return os.path.join(self.__path_dev, 'type')
+class ThermalInfoCollection (_ThermalBase):
+    """ Thermal information collection for Linux. """
 
-    def __init__(self, autodetect=False):
-        self.nodes = []
+    def __init__(self, autodetect: bool = False):
+        self.nodes: list[ThermalNode] = []
         if autodetect:
             self.detect()
 
     def clear(self):
+        """ Clear the thermal nodes list. """
         self.nodes.clear()
 
     @property
     def count(self) -> int:
-        if self.nodes is None:
-            return 0
+        """ Return the number of thermal nodes. """
         return len(self.nodes)
 
     def detect(self):
+        """ Detect the thermal nodes and populate the nodes list. """
         self.clear()
-        for dev_lnk in glob.glob(os.path.join(self.__path_thermal, '*')):
-            dev_name = os.path.splitext(os.path.basename(dev_lnk))[0]
-            self.__add_sensor(dev_name)
 
-    def __add_sensor(self, dev: str):
-        if dev.strip():
-            node = self.ThermalNode(dev)
-            self.nodes.append(node)
-            return True
-        else:
+        pattern = os.path.join(self.PATH_THERMAL, 'thermal_zone*')
+        for dev_path in glob.glob(pattern):
+            dev_name = os.path.basename(dev_path)
+            self._add_sensor(dev_name)
+
+    def _add_sensor(self, dev: str):
+        if not dev or not dev.strip():
             return False
+
+        self.nodes.append(ThermalNode(dev))
+        return True
 
 
 if __name__ == "__main__":

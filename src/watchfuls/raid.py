@@ -20,11 +20,12 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import concurrent.futures
+from enum import Enum
+
 from lib import Switch
 from lib.debug import DebugLevel
-from lib.modules import ModuleBase
 from lib.linux import RaidMdstat
-from enum import Enum
+from lib.modules import ModuleBase
 
 
 class ConfigOptions(Enum):
@@ -35,6 +36,7 @@ class ConfigOptions(Enum):
     port = 101
     user = 102
     password = 103
+    key_file = 104
 
 
 class Watchful(ModuleBase):
@@ -84,9 +86,10 @@ class Watchful(ModuleBase):
         tmp_port = self.get_conf_item(ConfigOptions.port, remote_id)
         tmp_user = self.get_conf_item(ConfigOptions.user, remote_id)
         tmp_pass = self.get_conf_item(ConfigOptions.password, remote_id)
+        tmp_key = self.get_conf_item(ConfigOptions.key_file, remote_id)
 
         list_md = RaidMdstat(host=tmp_host, port=tmp_port, user=tmp_user, password=tmp_pass,
-                             timeout=self.conf_timeout).read_status()
+                             key_file=tmp_key, timeout=self.conf_timeout).read_status()
         self.__md_analyze(list_md, remote_id)
 
     def __md_analyze(self, list_md, remote_id=None):
@@ -155,7 +158,8 @@ class Watchful(ModuleBase):
                 elif case(ConfigOptions.label,
                           ConfigOptions.host,
                           ConfigOptions.user,
-                          ConfigOptions.password):
+                          ConfigOptions.password,
+                          ConfigOptions.key_file):
                     val_def = self.get_conf(opt_find.name, "")
 
                 elif case(ConfigOptions.enabled):
@@ -181,7 +185,8 @@ class Watchful(ModuleBase):
             elif case(ConfigOptions.label,
                       ConfigOptions.host,
                       ConfigOptions.user,
-                      ConfigOptions.password):
+                      ConfigOptions.password,
+                      ConfigOptions.key_file):
                 return self._parse_conf_str(value, val_def)
             else:
                 return value

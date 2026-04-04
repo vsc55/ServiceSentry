@@ -23,7 +23,7 @@
 import pprint
 import traceback
 
-from lib.debug import DebugLevel
+from lib.debug.debug_level import DebugLevel
 
 __all__ = ['Debug']
 

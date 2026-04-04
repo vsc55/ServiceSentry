@@ -18,131 +18,165 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+""" RAID mdstat information collection for Linux. """
 
 import os.path
-from enum import Enum
-from lib.exe import Exec
+import shlex
+from enum import IntEnum
+
 from lib import DictFilesPath
+from lib.exe import Exec
 
 __all__ = ['RaidMdstat']
 
 
 class RaidMdstat:
+    """ RAID mdstat information collection for Linux. """
 
-    class UpdateStatus(Enum):
+    class UpdateStatus(IntEnum):
+        """ Status of the RAID update. """
         unknown = 0
         ok = 1
         error = 2
         recovery = 3
 
-    def __init__(self, mdstat=None, host=None, port=22, user=None, password=None, timeout=None):
+    def __init__(self, mdstat=None, host=None, port=22, user=None, password=None, key_file=None, timeout=None):
+        """ Initialize the RaidMdstat object. """
         self.paths = DictFilesPath()
         self.paths.set('mdstat', '/proc/mdstat')
         if mdstat is not None:
             self.paths.set('mdstat', mdstat)
-        self.__host = host
-        self.__port = port
-        self.__user = user
-        self.__pass = password
-        self.__timeout = timeout
+        self._host = host
+        self._port = port
+        self._user = user
+        self._pass = password
+        self._key_file = key_file
+        self._timeout = timeout
 
     @property
     def is_remote(self) -> bool:
-        return bool(self.__host)
+        """ Return if the mdstat information is collected from a remote host. """
+        return bool(self._host)
 
     @property
     def validate_remote(self) -> bool:
+        """ Validate if the remote configuration is valid. """
         return (self.is_remote
-                and bool(str(self.__host).strip())
-                and int(self.__port) > 0
-                and bool(str(self.__user).strip()))
+                and bool(str(self._host).strip())
+                and int(self._port) > 0
+                and bool(str(self._user).strip()))
 
     def _exec_remote(self, cmd):
-        """ Ejecuta un comando en el host remoto. Retorna (stdout, stderr, stdexcept). """
+        """ Execute a command on the remote host. Returns (stdout, stderr, stdexcept). """
         stdout, stderr, _, stdexcept = Exec.execute(
-            cmd, self.__host, self.__port, self.__user, self.__pass, self.__timeout)
+            cmd, self._host, self._port, self._user, self._pass,
+            self._key_file, self._timeout)
         return stdout, stderr, stdexcept
+
+    def _read_lines(self):
+        """ Read the mdstat information and return a list of lines. """
+        path_mdstat = self.paths.find('mdstat')
+
+        if self.is_remote:
+            if not self.validate_remote:
+                raise ValueError(
+                    f"Remote config not valid ({self._user}:{self._pass}@{self._host})"
+                )
+
+            remote_cmd = f"cat {shlex.quote(path_mdstat)}"
+            stdout, stderr, stdexcept = self._exec_remote(remote_cmd)
+
+            if stderr:
+                raise OSError(f"REMOTE ERROR ({remote_cmd}): {stderr}")
+            if stdexcept:
+                raise RuntimeError(f"REMOTE EXCEPTION ({remote_cmd}): {stdexcept}")
+
+            return stdout.splitlines()
+
+        with open(path_mdstat, 'r', encoding='utf-8') as f:
+            return f.read().splitlines()
 
     @property
     def is_exist(self) -> bool:
-        path_md_stat = self.paths.find('mdstat')
+        """ Check if the mdstat file exist. """
+        path_mdstat  = self.paths.find('mdstat')
+
         if self.is_remote:
             if not self.validate_remote:
-                print(f"** RAID_Mdstat ** >> WARNING!! >> REMOTE >> CONFIG NOT VALID ({self.__user}:{self.__pass}@{self.__host}) NOT VALID!")
                 return False
 
             str_check = "exists"
-            stdout, stderr, stdexcept = self._exec_remote(f"test -e {path_md_stat} && echo {str_check}")
+            cmd = f"test -e {shlex.quote(path_mdstat)} && echo {str_check}"
+            stdout, stderr, stdexcept = self._exec_remote(cmd)
 
-            if stderr:
-                print(f"** RAID_Mdstat ** >> ERROR!! >> REMOTE >> Failed to check existence of {path_md_stat}: {stderr}!")
+            if stderr or stdexcept:
                 return False
-            if stdexcept:
-                print(f"** RAID_Mdstat ** >> EXCEPTION!! >> REMOTE >> Failed to check existence of {path_md_stat}: {stdexcept}!")
-                raise Exception(stdexcept)
 
             return stdout.strip() == str_check
-        else:
-            return os.path.isfile(path_md_stat)
+
+        return os.path.isfile(path_mdstat)
 
     def read_status(self):
+        """ Read the mdstat information and return a dictionary with the status of each RAID. """
         md_list = {}
         md_actual = None
 
         if not self.is_exist:
             return md_list
 
-        f_buffer = None
-        if self.is_remote:
-            remote_cmd = f"cat {self.paths.find('mdstat')}"
-            stdout, stderr, stdexcept = self._exec_remote(remote_cmd)
+        f_buffer = self._read_lines()
 
-            if stderr:
-                raise Exception(f"** RAID_Mdstat ** >> ERROR!! >> REMOTE >> ({remote_cmd}): {stderr}!")
-            if stdexcept:
-                raise Exception(f"** RAID_Mdstat ** >> EXCEPTION!! >> REMOTE >> ({remote_cmd}): {stdexcept}!")
+        for line in f_buffer:
+            line = line.strip()
 
-            f_buffer = stdout.splitlines()
-        else:
-            with open(self.paths.find('mdstat'), 'r') as f:
-                f_buffer = f.read().splitlines()
+            if not line:
+                md_actual = None
+                continue
 
-        if f_buffer:
-            for l_buffer in f_buffer:
-                l_buffer = str(l_buffer).strip()
+            if line.startswith("Personalities :") or line.startswith("unused devices:"):
+                md_actual = None
+                continue
 
-                if "Personalities :" in l_buffer:
-                    md_actual = None
-                elif "unused devices:" in l_buffer:
-                    md_actual = None
-                elif l_buffer:
-                    if md_actual is None and len(l_buffer) > 2 and l_buffer[:2] == "md":
-                        md_actual = l_buffer.split(":")[0].strip()
-                        tmp_split = l_buffer.split(":")[1].strip().split(" ")
-                        md_list[md_actual] = {
-                            'status': tmp_split.pop(0),
-                            'type': tmp_split.pop(0),
-                            'disk': tmp_split
-                        }
-                    elif "recovery" in l_buffer:
-                        md_list[md_actual]['update'] = self.UpdateStatus.recovery
-                        tmp_split = l_buffer.split("]")[1].strip().split(" ")
-                        md_list[md_actual]['recovery'] = {
-                            'percent': float(tmp_split[2][:-1]),
-                            'blocks': tmp_split[3][1:-1].split("/"),
-                            'finish': tmp_split[4].split("=")[1].strip(),
-                            'speed': tmp_split[5].split("=")[1].strip()
-                        }
-                    elif "blocks" in l_buffer:
-                        tmp_split = l_buffer.split(" ")
-                        md_list[md_actual]['blocks'] = tmp_split[0]
-                        tmp_disks = tmp_split[2][1:-1].split("/")
+            if md_actual is None and line.startswith("md") and ":" in line:
+                name, info = line.split(":", 1)
+                parts = info.strip().split()
+
+                if len(parts) >= 2:
+                    md_actual = name.strip()
+                    md_list[md_actual] = {
+                        'status': parts[0],
+                        'type': parts[1],
+                        'disk': parts[2:]
+                    }
+                continue
+
+            if md_actual is None:
+                continue
+
+            if "recovery" in line:
+                md_list[md_actual]['update'] = self.UpdateStatus.recovery
+                try:
+                    parts = line.split("]")[-1].strip().split()
+                    md_list[md_actual]['recovery'] = {
+                        'percent': float(parts[2].rstrip('%')),
+                        'blocks': parts[3][1:-1].split("/"),
+                        'finish': parts[4].split("=", 1)[1].strip(),
+                        'speed': parts[5].split("=", 1)[1].strip()
+                    }
+                except (IndexError, ValueError):
+                    md_list[md_actual]['recovery'] = {}
+                continue
+
+            if "blocks" in line:
+                parts = line.split()
+                if len(parts) >= 3:
+                    md_list[md_actual]['blocks'] = parts[0]
+                    disks = parts[2][1:-1].split("/")
+                    if len(disks) == 2:
                         md_list[md_actual]['update'] = (
-                            self.UpdateStatus.ok if tmp_disks[0] == tmp_disks[1] else self.UpdateStatus.error
+                            self.UpdateStatus.ok if disks[0] == disks[1]
+                            else self.UpdateStatus.error
                         )
-                    else:
-                        print(f"** RAID_Mdstat ** >> WARNING!! >> {md_actual} >> NOT CONTROL TEXT: {l_buffer}")
-                else:
-                    md_actual = None
+                continue
 
         return md_list
