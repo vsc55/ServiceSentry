@@ -1,7 +1,6 @@
-import sys
 import os
-import pytest
-from unittest.mock import MagicMock, PropertyMock
+import sys
+from unittest.mock import MagicMock
 
 # Añadir el directorio src al path para poder importar los módulos del proyecto
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -9,7 +8,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib import Monitor
 from lib.config import ConfigControl
 from lib.debug import Debug, DebugLevel
-from lib.modules import ReturnModuleCheck
 
 
 def create_mock_monitor(module_config=None):

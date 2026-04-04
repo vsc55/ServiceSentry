@@ -21,9 +21,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
+""" Tools for the project. """
 
 def bytes2human(n):
+    """ Convert bytes to human readable format. """
     # http://code.activestate.com/recipes/577972-disk-usage/
     # print("Total:", bytes2human(total))
     # print("Used:", bytes2human(used))

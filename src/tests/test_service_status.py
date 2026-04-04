@@ -49,21 +49,21 @@ class TestServiceStatusClearStr:
         mock_monitor = create_mock_monitor({'watchfuls.service_status': {}})
         w = Watchful(mock_monitor)
         # __clear_str es estático privado, lo accedemos así
-        result = w._Watchful__clear_str("(running)")
+        result = w._clear_str("(running)")
         assert result == "running"
 
     def test_clear_str_empty(self):
         from watchfuls.service_status import Watchful
         mock_monitor = create_mock_monitor({'watchfuls.service_status': {}})
         w = Watchful(mock_monitor)
-        result = w._Watchful__clear_str("")
+        result = w._clear_str("")
         assert result == ""
 
     def test_clear_str_none(self):
         from watchfuls.service_status import Watchful
         mock_monitor = create_mock_monitor({'watchfuls.service_status': {}})
         w = Watchful(mock_monitor)
-        result = w._Watchful__clear_str(None)
+        result = w._clear_str(None)
         assert result == ""
 
 
@@ -80,7 +80,7 @@ class TestServiceStatusReturn:
         w = self.Watchful(mock_monitor)
 
         with patch.object(w, '_run_cmd', return_value=(SYSTEMCTL_ACTIVE, "")):
-            status, error, message = w._Watchful__service_return("nginx")
+            status, error, message = w._service_return("nginx")
             assert status is True
             assert error is False
             assert message == "running"
@@ -92,7 +92,7 @@ class TestServiceStatusReturn:
         w = self.Watchful(mock_monitor)
 
         with patch.object(w, '_run_cmd', return_value=(SYSTEMCTL_INACTIVE, "")):
-            status, error, message = w._Watchful__service_return("nginx")
+            status, error, message = w._service_return("nginx")
             assert status is False
             assert error is False
             assert message == ""
@@ -104,7 +104,7 @@ class TestServiceStatusReturn:
         w = self.Watchful(mock_monitor)
 
         with patch.object(w, '_run_cmd', return_value=(SYSTEMCTL_FAILED, "")):
-            status, error, message = w._Watchful__service_return("nginx")
+            status, error, message = w._service_return("nginx")
             assert status is False
 
     def test_service_active_exited(self):
@@ -114,7 +114,7 @@ class TestServiceStatusReturn:
         w = self.Watchful(mock_monitor)
 
         with patch.object(w, '_run_cmd', return_value=(SYSTEMCTL_ACTIVE_EXITED, "")):
-            status, error, message = w._Watchful__service_return("cron")
+            status, error, message = w._service_return("cron")
             assert status is False
             assert message == "exited"
 
@@ -125,7 +125,7 @@ class TestServiceStatusReturn:
         w = self.Watchful(mock_monitor)
 
         with patch.object(w, '_run_cmd', return_value=("", "Unit not found")):
-            status, error, message = w._Watchful__service_return("fake")
+            status, error, message = w._service_return("fake")
             assert status is False
             assert error is True
 

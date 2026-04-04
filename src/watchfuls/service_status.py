@@ -41,7 +41,7 @@ class Watchful(ModuleBase):
 
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            future_to_service = {executor.submit(self.__service_check, service): service for service in list_service}
+            future_to_service = {executor.submit(self._service_check, service): service for service in list_service}
             for future in concurrent.futures.as_completed(future_to_service):
                 service = future_to_service[future]
                 try:
@@ -53,10 +53,10 @@ class Watchful(ModuleBase):
         super().check()
         return self.dict_return
 
-    def __service_check(self, service):
+    def _service_check(self, service):
         remediation_use = None
         service_name = service['service']
-        status, error, message = self.__service_return(service_name)
+        status, error, message = self._service_return(service_name)
 
         s_message = f'Service: {service_name} '
         if status:
@@ -72,8 +72,8 @@ class Watchful(ModuleBase):
         if self.check_status(status, self.name_module, service_name):
             self.send_message(s_message, status)
             if not status and service['remediation']:
-                self.__service_remediation(service_name)
-                status, error, message = self.__service_return(service_name)
+                self._service_remediation(service_name)
+                status, error, message = self._service_return(service_name)
 
                 s_message = f'*Recovery* Service: {service_name} '
                 if status:
@@ -92,11 +92,11 @@ class Watchful(ModuleBase):
         other_data = {'error': error, 'status_detail': message, 'remediation': remediation_use}
         self.dict_return.set(service_name, status, s_message, False, other_data)
 
-    def __service_remediation(self, service_name):
+    def _service_remediation(self, service_name):
         cmd = f'{self.paths.find("systemctl")} start {service_name}'
         self._run_cmd(cmd)
 
-    def __service_return(self, service_name):
+    def _service_return(self, service_name):
         cmd = f'{self.paths.find("systemctl")} status {service_name}'
         stdout, stderr = self._run_cmd(cmd, True)
         if not stdout:
@@ -110,22 +110,22 @@ class Watchful(ModuleBase):
                 if str(s_line[1]) == "active":
                     #    Active: active (running) since Mon 2019-05-27 11:28:46 CEST; 1min 48s ago
                     if str(s_line[2]) == "(running)":
-                        return True, False, self.__clear_str(s_line[2])
+                        return True, False, self._clear_str(s_line[2])
                     else:
-                        return False, False, self.__clear_str(s_line[2])
+                        return False, False, self._clear_str(s_line[2])
                 elif str(s_line[1]) == "inactive":
                     #    Active: inactive (dead) since Mon 2019-05-27 11:30:51 CEST; 1s ago
                     if str(s_line[2]) == "(dead)":
                         return False, False, ''
                     else:
-                        return False, False, self.__clear_str(s_line[2])
+                        return False, False, self._clear_str(s_line[2])
                 else:
                     return False, True, line
 
         return False, False, 'Not detect status in the data!!!'
 
     @staticmethod
-    def __clear_str(text: str) -> str:
+    def _clear_str(text: str) -> str:
         if text:
             return str(text).strip().replace("(", "").replace(")", "")
         return ''

@@ -22,48 +22,57 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from lib.linux import Mem
 from lib.debug import DebugLevel
+from lib.mem import Mem
+from lib.mem_info import MemInfo
 from lib.modules import ModuleBase
 
 
 class Watchful(ModuleBase):
+    """ Watchful to check RAM and SWAP usage. """
 
     # porcentaje de RAM/SWAP que se usara si no se ha configurado el modulo, o se ha definido un
     # valor que no esté entre 0 y 100.
-    __default_alert_ram = 60
-    __default_alert_swap = 60
+    _default_alert_ram = 60
+    _default_alert_swap = 60
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 
-    def __check_config(self, key_conf, default_val):
+    def _check_config(self, key_conf, default_val):
         val_conf = self.get_conf(key_conf, default_val)
 
         if isinstance(val_conf, str):
             val_conf = val_conf.strip()
             if not val_conf.isnumeric():
-                self._debug(f"Warning, config {key_conf} type incorrect!", DebugLevel.warning)
+                self._debug(
+                    f"Warning, config {key_conf} type incorrect!",
+                    DebugLevel.warning
+                )
                 return default_val
             val_conf = int(val_conf)
 
         if not val_conf or not (0 <= val_conf <= 100):
-            self._debug(f"Warning, config {key_conf} value not valid!", DebugLevel.warning)
+            self._debug(
+                f"Warning, config {key_conf} value not valid!",
+                DebugLevel.warning
+            )
             return default_val
 
         return val_conf
 
     def check(self):
+        m = Mem()
         x = {
             'ram': {
                 'caption': 'RAM',
-                'alarm': self.__check_config("alert_ram", self.__default_alert_ram),
-                'used': Mem().ram.used_percent
+                'alarm': self._check_config("alert_ram", self._default_alert_ram),
+                'used': m.ram.used_percent
             },
             'swap': {
                 'caption': 'SWAP',
-                'alarm': self.__check_config("alert_swap", self.__default_alert_swap),
-                'used': Mem().swap.used_percent
+                'alarm': self._check_config("alert_swap", self._default_alert_swap),
+                'used': m.swap.used_percent
             }
         }
 
@@ -77,11 +86,14 @@ class Watchful(ModuleBase):
 
             message = f'{value["caption"]} used {per:.1f}%'
             if is_warning:
-                message = f'Excessive {message} {u"\U000026A0"}'
+                message = f'Excessive {message} ⚠️'
             else:
-                message = f'Normal {message} {u"\U00002705"}'
+                message = f'Normal {message} ✅'
 
-            other_data = {'used': per, 'alert': alert}
+            other_data = {
+                'used': per,
+                'alert': alert
+            }
             self.dict_return.set(key, not is_warning, message, other_data=other_data)
 
         super().check()

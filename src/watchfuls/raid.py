@@ -20,7 +20,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import concurrent.futures
-from enum import Enum
+from enum import IntEnum
 
 from lib import Switch
 from lib.debug import DebugLevel
@@ -28,7 +28,7 @@ from lib.linux import RaidMdstat
 from lib.modules import ModuleBase
 
 
-class ConfigOptions(Enum):
+class ConfigOptions(IntEnum):
     enabled = 1
     # alert = 2
     label = 3
@@ -41,35 +41,35 @@ class ConfigOptions(Enum):
 
 class Watchful(ModuleBase):
 
-    __default_enabled = True
-    __default_port = 22
-    __default_timeout = 30
+    _default_enabled = True
+    _default_port = 22
+    _default_timeout = 30
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
         self.paths.set('mdstat', '/proc/mdstat')
 
     def check(self):
-        self.__check_local()
-        self.__check_remote()
+        self._check_local()
+        self._check_remote()
         super().check()
         return self.dict_return
 
-    def __check_local(self):
-        is_enable = self.get_conf("local", self.__default_enabled)
+    def _check_local(self):
+        is_enable = self.get_conf("local", self._default_enabled)
         self._debug(f"Local - Enabled: {is_enable}", DebugLevel.info)
         if is_enable:
             list_md = RaidMdstat(self.paths.find('mdstat')).read_status()
-            self.__md_analyze(list_md)
+            self._md_analyze(list_md)
 
-    def __check_remote(self):
-        list_remote = self.__get_list_remote_enable()
+    def _check_remote(self):
+        list_remote = self._get_list_remote_enable()
         if len(list_remote) > 0:
-            self.__check_remotes_run(list_remote)
+            self._check_remotes_run(list_remote)
 
-    def __check_remotes_run(self, list_remote):
+    def _check_remotes_run(self, list_remote):
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.conf_threads) as executor:
-            future_to_remote_id = {executor.submit(self.__check_remotes_process, remote_id): remote_id for remote_id in list_remote}
+            future_to_remote_id = {executor.submit(self._check_remotes_process, remote_id): remote_id for remote_id in list_remote}
             for future in concurrent.futures.as_completed(future_to_remote_id):
                 remote_id = future_to_remote_id[future]
                 try:
@@ -81,7 +81,7 @@ class Watchful(ModuleBase):
                     self._debug(f"{remote_id}/{tmp_label} - Exception: {exc}", DebugLevel.error)
                     # self.debug.exception(exc)
 
-    def __check_remotes_process(self, remote_id):
+    def _check_remotes_process(self, remote_id):
         tmp_host = self.get_conf_item(ConfigOptions.host, remote_id)
         tmp_port = self.get_conf_item(ConfigOptions.port, remote_id)
         tmp_user = self.get_conf_item(ConfigOptions.user, remote_id)
@@ -90,9 +90,9 @@ class Watchful(ModuleBase):
 
         list_md = RaidMdstat(host=tmp_host, port=tmp_port, user=tmp_user, password=tmp_pass,
                              key_file=tmp_key, timeout=self.conf_timeout).read_status()
-        self.__md_analyze(list_md, remote_id)
+        self._md_analyze(list_md, remote_id)
 
-    def __md_analyze(self, list_md, remote_id=None):
+    def _md_analyze(self, list_md, remote_id=None):
 
         label = self.get_label_by_id(remote_id)
 
@@ -131,7 +131,7 @@ class Watchful(ModuleBase):
                     key_id = f"L_{key}"
                 self.dict_return.set(key_id, not is_warning, message, other_data=other_data)
 
-    def __get_list_remote_enable(self):
+    def _get_list_remote_enable(self):
         return_list = []
         for (key, value) in self.get_conf('remote', {}).items():
             if not str(key).isnumeric():
@@ -140,7 +140,7 @@ class Watchful(ModuleBase):
             if isinstance(value, dict):
                 is_enabled = self.get_conf_item(ConfigOptions.enabled, key)
             else:
-                is_enabled = self.__default_enabled
+                is_enabled = self._default_enabled
 
             self._debug(f"Remote/{key} - Enabled: {is_enabled}", DebugLevel.info)
             if is_enabled:
@@ -148,12 +148,12 @@ class Watchful(ModuleBase):
 
         return return_list
 
-    def get_conf_item(self, opt_find: Enum, dev_name: str, default_val=None):
+    def get_conf_item(self, opt_find: IntEnum, dev_name: str, default_val=None):
         # Sec - Set Default Val
         if default_val is None:
             with Switch(opt_find) as case:
                 if case(ConfigOptions.port):
-                    val_def = self.get_conf(opt_find.name, self.__default_port)
+                    val_def = self.get_conf(opt_find.name, self._default_port)
 
                 elif case(ConfigOptions.label,
                           ConfigOptions.host,
@@ -163,7 +163,7 @@ class Watchful(ModuleBase):
                     val_def = self.get_conf(opt_find.name, "")
 
                 elif case(ConfigOptions.enabled):
-                    val_def = self.get_conf(opt_find.name, self.__default_enabled)
+                    val_def = self.get_conf(opt_find.name, self._default_enabled)
 
                 else:
                     if opt_find is None:
@@ -203,7 +203,7 @@ class Watchful(ModuleBase):
 
     @property
     def conf_timeout(self) -> float:
-        return self.get_conf('timeout', self.__default_timeout)
+        return self.get_conf('timeout', self._default_timeout)
 
     @property
     def conf_threads(self) -> int:

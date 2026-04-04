@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from lib.exe import ExecResult
 from lib.linux.raid_mdstat import RaidMdstat
 
 # Contenido típico de /proc/mdstat con un RAID saludable
@@ -121,19 +122,19 @@ class TestRaidMdstatIsExistRemote:
 
     @patch.object(RaidMdstat, '_exec_remote')
     def test_exist_remote(self, mock_exec):
-        mock_exec.return_value = ("exists\n", "", None)
+        mock_exec.return_value = ExecResult(out="exists\n", err="", exception=None)
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         assert r.is_exist is True
 
     @patch.object(RaidMdstat, '_exec_remote')
     def test_not_exist_remote(self, mock_exec):
-        mock_exec.return_value = ("", "", None)
+        mock_exec.return_value = ExecResult(out="", err="", exception=None)
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         assert r.is_exist is False
 
     @patch.object(RaidMdstat, '_exec_remote')
     def test_remote_stderr_returns_false(self, mock_exec):
-        mock_exec.return_value = ("", "error occurred", None)
+        mock_exec.return_value = ExecResult(out="", err="error occurred", exception=None)
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         assert r.is_exist is False
 
@@ -215,8 +216,8 @@ class TestRaidMdstatReadStatusRemote:
         # Primer llamada: is_exist -> "exists"
         # Segunda llamada: cat -> contenido mdstat
         mock_exec.side_effect = [
-            ("exists\n", "", None),
-            (MDSTAT_OK, "", None),
+            ExecResult(out="exists\n", err="", exception=None),
+            ExecResult(out=MDSTAT_OK, err="", exception=None),
         ]
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         result = r.read_status()
@@ -226,8 +227,8 @@ class TestRaidMdstatReadStatusRemote:
     @patch.object(RaidMdstat, '_exec_remote')
     def test_read_remote_stderr_raises(self, mock_exec):
         mock_exec.side_effect = [
-            ("exists\n", "", None),
-            ("", "permission denied", None),
+            ExecResult(out="exists\n", err="", exception=None),
+            ExecResult(out="", err="permission denied", exception=None),
         ]
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         with pytest.raises(Exception, match="ERROR"):
@@ -263,21 +264,21 @@ class TestRaidMdstatReadLines:
 
     @patch.object(RaidMdstat, '_exec_remote')
     def test_read_lines_remote_ok(self, mock_exec):
-        mock_exec.return_value = (MDSTAT_OK, "", None)
+        mock_exec.return_value = ExecResult(out=MDSTAT_OK, err="", exception=None)
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         lines = r._read_lines()
         assert any('md0' in line for line in lines)
 
     @patch.object(RaidMdstat, '_exec_remote')
     def test_read_lines_remote_stderr_raises_oserror(self, mock_exec):
-        mock_exec.return_value = ("", "permission denied", None)
+        mock_exec.return_value = ExecResult(out="", err="permission denied", exception=None)
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         with pytest.raises(OSError, match="REMOTE ERROR"):
             r._read_lines()
 
     @patch.object(RaidMdstat, '_exec_remote')
     def test_read_lines_remote_stdexcept_raises_runtime(self, mock_exec):
-        mock_exec.return_value = ("", "", "connection timeout")
+        mock_exec.return_value = ExecResult(out="", err="", exception="connection timeout")
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         with pytest.raises(RuntimeError, match="REMOTE EXCEPTION"):
             r._read_lines()
@@ -292,7 +293,7 @@ class TestRaidMdstatIsExistRemoteStdexcept:
 
     @patch.object(RaidMdstat, '_exec_remote')
     def test_remote_stdexcept_returns_false(self, mock_exec):
-        mock_exec.return_value = ("", "", "timeout exception")
+        mock_exec.return_value = ExecResult(out="", err="", exception="timeout exception")
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         assert r.is_exist is False
 
@@ -302,8 +303,8 @@ class TestRaidMdstatRemoteStderrRaises:
     @patch.object(RaidMdstat, '_exec_remote')
     def test_read_remote_stdexcept_raises(self, mock_exec):
         mock_exec.side_effect = [
-            ("exists\n", "", None),
-            ("", "", "SSH connection lost"),
+            ExecResult(out="exists\n", err="", exception=None),
+            ExecResult(out="", err="", exception="SSH connection lost"),
         ]
         r = RaidMdstat(host='server1', port=22, user='root', password='pass')
         with pytest.raises(RuntimeError, match="REMOTE EXCEPTION"):

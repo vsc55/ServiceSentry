@@ -1,8 +1,24 @@
-from .switch import Switch
-from .dict_files_path import DictFilesPath
-from .object_base import ObjectBase
-from .telegram import Telegram
-from .monitor import Monitor
-from .exe import Exec
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+""" Lib package. """
 
-__all__ = ['ObjectBase', 'Switch', 'DictFilesPath', 'Monitor', 'Telegram', 'Exec']
+from lib.dict_files_path import DictFilesPath
+from lib.exe import Exec, ExecResult
+from lib.mem import Mem
+from lib.mem_info import MemInfo
+from lib.monitor import Monitor
+from lib.object_base import ObjectBase
+from lib.switch import Switch
+from lib.telegram import Telegram
+
+__all__ = [
+    'ObjectBase',
+    'Switch',
+    'DictFilesPath',
+    'Monitor',
+    'Telegram',
+    'Exec',
+    'ExecResult',
+    'Mem',
+    'MemInfo'
+]

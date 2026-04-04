@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """ Debug module. """
 
-from .debug import Debug
-from .debug_level import DebugLevel
+from lib.debug.debug import Debug
+from lib.debug.debug_level import DebugLevel
 
 __all__ = ['Debug', 'DebugLevel']

@@ -18,8 +18,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-from lib.switch import Switch
+""" Class to check the return of the modules. """
 
 __all__ = ['ReturnModuleCheck']
 
@@ -30,125 +29,131 @@ class ReturnModuleCheck:
 
     def __init__(self):
         """ Inicializa Objeto. """
-        self.__dict_return = {}
+        self._dict_return = {}
 
     @property
     def list(self) -> dict:
-        return self.__dict_return or {}
+        """ Return the list of returns. """
+        return self._dict_return or {}
 
     @property
     def count(self) -> int:
         """
-        Obtenemos el numero de returns que contiene el objeto.
+        Return the number of returns that contains the object.
 
-        :return: Numero de returns.
-
+        :return: Number of returns.
         """
         return len(self.list)
 
     def items(self):
         """
-        Lista de items del diccionario return.
+        Return the list of items in the return dictionary.
 
-        :return: Lista de items.
-
+        :return: List of items.
         """
         return self.list.items()
 
     def keys(self):
         """
-        Lista de keys del diccionario return.
+        Return the list of keys in the return dictionary.
 
-        :return: Lista de keys.
-
+        :return: List of keys.
         """
         return self.list.keys()
 
     def is_exist(self, key: str) -> bool:
+        """ Check if the key exist in the return list."""
         return key in self.list
 
-    def set(self, key: str, status: bool = True, message='', send_msg: bool = True, other_data: dict = None) -> bool:
+    def set(
+            self, key: str,
+            status: bool = True,
+            message='',
+            send_msg: bool = True,
+            other_data: dict = None
+        ) -> bool:
         """
-        Crea un nuevo return y si ya existe lo actualiza.
+        Create a new return and update it if it already exists.
 
-        :param key: Key del return
-        :param status: True si el Status es OK, False si el status es Error/Warning/Etc.. todo lo que no es OK.
-        :param message: Mensaje que se enviara pro telegram.
-        :param send_msg: True el mensaje hay que enviarlo, False el mensaje no hay que enviarlo.
-        :param other_data: Diccionario con otros datos.
-        :return: True se ha guardado ok, False algo ha fallado.
-
+        :param key: Key of the return
+        :param status: True if the status is OK, False if the status is Error/Warning/Etc.. 
+                       anything that is not OK.
+        :param message: Message to be sent via telegram.
+        :param send_msg: True if the message should be sent, False if the message should not
+                         be sent.
+        :param other_data: Dictionary with other data.
+        :return: True if saved successfully, False if something went wrong.
         """
         if key:
             if other_data is None:
                 other_data = {}
-            self.__dict_return[key] = {}
-            self.__dict_return[key]['status'] = status
-            self.__dict_return[key]['message'] = message
-            self.__dict_return[key]['send'] = send_msg
-            self.__dict_return[key]['other_data'] = other_data
+            self._dict_return[key] = {}
+            self._dict_return[key]['status'] = status
+            self._dict_return[key]['message'] = message
+            self._dict_return[key]['send'] = send_msg
+            self._dict_return[key]['other_data'] = other_data
             return self.is_exist(key)
         return False
 
     def update(self, key: str, option: str, value) -> bool:
         """
-        Actualiza alguna de las propiedades de un return que ya existe.
+        Update one of the properties of an existing return.
 
-        :param key: Key del return
-        :param option: Nombre de la opción.
-        :param value: Nuevo valor.
-        :return: True si todo ha ido bien y False si algo ha fallado.
-
+        :param key: Key of the return
+        :param option: Name of the option.
+        :param value: New value.
+        :return: True if everything went well, False if something went wrong.
         """
 
         if key:
-            with Switch(option, invariant_culture_ignore_case=True) as case:
-                if case("status", "message", "send", "other_data"):
-                    if self.is_exist(key):
-                        self.__dict_return[key][option] = value
-                        return True
-                else:
-                    # Opción no valida!!
-                    pass
+            if isinstance(option, str) and option.lower() in {
+                "status",
+                "message",
+                "send",
+                "other_data"
+                }:
+                if self.is_exist(key):
+                    self._dict_return[key][option] = value
+                    return True
+
         return False
 
     def remove(self, key: str) -> bool:
         """
-        Eliminamos el key que le especificamos de la lista de returns.
+        Remove the specified key from the return list.
 
-        :param key: Key a eliminar.
-        :return: True se ha eliminado, False algo ha fallado.
-
+        :param key: Key to remove.
+        :return: True if removed successfully, False if something went wrong.
         """
         if self.is_exist(key):
-            del self.__dict_return[key]
+            del self._dict_return[key]
             return True
         return False
 
     def get(self, key: str) -> dict:
         """
-        Obtenemos el diccionario de la key que buscamos.
+        Get the dictionary of the key we are looking for.
 
-        :param key: Key que buscamos.
-        :return: Diccionario con los datos de la key que buscamos y si no existe esa key retorna diccionario vacio.
-
+        :param key: Key we are looking for.
+        :return: Dictionary with the data of the key we are looking for, and if the 
+                 key does not exist, returns an empty dictionary.
         """
         if self.is_exist(key):
             return self.list[key]
         return {}
 
     def get_status(self, key: str) -> bool:
-        """ Obtenemos el Status del key que especificamos. """
+        """ Get the status of the specified key. """
         return self.get(key).get('status', False)
 
     def get_message(self, key: str) -> str:
-        """ Obtenemos el mensaje del key que especificamos. """
+        """ Get the message of the specified key. """
         return self.get(key).get('message', '')
 
     def get_send(self, key: str) -> bool:
-        """ Obtenemos el Send del key que especificamos. """
+        """ Get the send status of the specified key. """
         return self.get(key).get('send', True)
 
     def get_other_data(self, key: str) -> dict:
-        """ Obtenemos other_data del key que especificamos. """
+        """ Get the other_data of the specified key. """
         return self.get(key).get('other_data', {})

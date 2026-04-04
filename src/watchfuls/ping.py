@@ -24,10 +24,10 @@ import concurrent.futures
 from lib import Switch
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
-from enum import Enum
+from enum import IntEnum
 
 
-class ConfigOptions(Enum):
+class ConfigOptions(IntEnum):
     enabled = 1
     # alert = 2
     label = 3
@@ -37,29 +37,29 @@ class ConfigOptions(Enum):
 
 class Watchful(ModuleBase):
 
-    __default_attempt = 3
-    __default_timeout = 5
-    __default_enabled = True
+    _default_attempt = 3
+    _default_timeout = 5
+    _default_enabled = True
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
         self.paths.set('ping', '/bin/ping')
 
     def check(self):
-        list_host = self.__check_get_list_hosts()
-        self.__check_run(list_host)
+        list_host = self._check_get_list_hosts()
+        self._check_run(list_host)
         super().check()
         return self.dict_return
 
-    def __check_get_list_hosts(self):
+    def _check_get_list_hosts(self):
         return_list = []
         for (key, value) in self.get_conf('list', {}).items():
             if isinstance(value, bool):
                 is_enabled = value
             elif isinstance(value, dict):
-                is_enabled = self.__get_conf(ConfigOptions.enabled, key)
+                is_enabled = self._get_conf(ConfigOptions.enabled, key)
             else:
-                is_enabled = self.__default_enabled
+                is_enabled = self._default_enabled
 
             self._debug(f"Ping: {key} - Enabled: {is_enabled}", DebugLevel.info)
 
@@ -68,10 +68,10 @@ class Watchful(ModuleBase):
 
         return return_list
 
-    def __check_run(self, list_host):
+    def _check_run(self, list_host):
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            future_to_ping = {executor.submit(self.__ping_check, host): host for host in list_host}
+            future_to_ping = {executor.submit(self._ping_check, host): host for host in list_host}
             for future in concurrent.futures.as_completed(future_to_ping):
                 host = future_to_ping[future]
                 try:
@@ -80,14 +80,14 @@ class Watchful(ModuleBase):
                     message = f'Ping: {host} - *Error: {exc}* {u"\U0001F4A5"}'
                     self.dict_return.set(host, False, message)
 
-    def __ping_check(self, host):
+    def _ping_check(self, host):
         # TODO: Pendiente poder configurar número de intentos y timeout para cada IP
 
-        tmp_host_name = self.__get_conf(ConfigOptions.label, host, host)
-        tmp_timeout = self.__get_conf(ConfigOptions.timeout, host)
-        tmp_attempt = self.__get_conf(ConfigOptions.attempt, host)
+        tmp_host_name = self._get_conf(ConfigOptions.label, host, host)
+        tmp_timeout = self._get_conf(ConfigOptions.timeout, host)
+        tmp_attempt = self._get_conf(ConfigOptions.attempt, host)
 
-        status = self.__ping_return(host, tmp_timeout, tmp_attempt)
+        status = self._ping_return(host, tmp_timeout, tmp_attempt)
 
         s_message = f'Ping: *{tmp_host_name}* '
         if status:
@@ -100,7 +100,7 @@ class Watchful(ModuleBase):
         if self.check_status(status, self.name_module, host):
             self.send_message(s_message, status)
 
-    def __ping_return(self, host, timeout, attempt):
+    def _ping_return(self, host, timeout, attempt):
         counter = 0
         while counter < attempt:
             cmd = f'{self.paths.find("ping")} -c 1 -W {timeout} {host}'
@@ -111,18 +111,18 @@ class Watchful(ModuleBase):
             counter += 1
         return False
 
-    def __get_conf(self, opt_find: Enum, dev_name: str, default_val=None):
+    def _get_conf(self, opt_find: IntEnum, dev_name: str, default_val=None):
         # Sec - Get Default Val
         if default_val is None:
             with Switch(opt_find) as case:
                 if case(ConfigOptions.attempt):
-                    val_def = self.get_conf(opt_find.name, self.__default_attempt)
+                    val_def = self.get_conf(opt_find.name, self._default_attempt)
 
                 elif case(ConfigOptions.timeout):
-                    val_def = self.get_conf(opt_find.name, self.__default_timeout)
+                    val_def = self.get_conf(opt_find.name, self._default_timeout)
 
                 elif case(ConfigOptions.enabled):
-                    val_def = self.get_conf(opt_find.name, self.__default_enabled)
+                    val_def = self.get_conf(opt_find.name, self._default_enabled)
 
                 else:
                     if opt_find is None:

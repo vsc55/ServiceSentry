@@ -30,8 +30,8 @@ from lib.modules import ModuleBase
 
 class Watchful(ModuleBase):
 
-    __default_enabled = True
-    __default_http_code = 200
+    _default_enabled = True
+    _default_http_code = 200
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
@@ -41,7 +41,7 @@ class Watchful(ModuleBase):
         list_url = []
         for (key, value) in self.get_conf('list', {}).items():
 
-            is_enabled = self.__default_enabled
+            is_enabled = self._default_enabled
             with Switch(value, check_isinstance=True) as case:
                 if case(bool):
                     is_enabled = value
@@ -54,7 +54,7 @@ class Watchful(ModuleBase):
 
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            future_to_url = {executor.submit(self.__web_check, url): url for url in list_url}
+            future_to_url = {executor.submit(self._web_check, url): url for url in list_url}
             for future in concurrent.futures.as_completed(future_to_url):
                 url = future_to_url[future]
                 try:
@@ -66,9 +66,9 @@ class Watchful(ModuleBase):
         super().check()
         return self.dict_return
 
-    def __web_check(self, url):
-        code = int(self.__web_return(url))
-        code_true = self.get_conf_in_list("code", url, self.__default_http_code)
+    def _web_check(self, url):
+        code = int(self._web_return(url))
+        code_true = self.get_conf_in_list("code", url, self._default_http_code)
         status = (code == code_true)
 
         s_message = f'Web: {url} - *({code})*'
@@ -83,7 +83,7 @@ class Watchful(ModuleBase):
         if self.check_status(status, self.name_module, url):
             self.send_message(s_message, status)
 
-    def __web_return(self, url):
+    def _web_return(self, url):
         # TODO: Pendiente añadir soporte https.
         cmd = self.paths.find('curl')
         cmd += ' -sL -w "%{http_code}" http://' + url + ' -o /dev/null'

@@ -26,10 +26,10 @@ import pymysql.cursors
 from lib import Switch
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
-from enum import Enum
+from enum import IntEnum
 
 
-class ConfigOptions(Enum):
+class ConfigOptions(IntEnum):
     enabled = 1
     # alert = 2
     # label = 3
@@ -43,27 +43,27 @@ class ConfigOptions(Enum):
 
 class Watchful(ModuleBase):
 
-    __default_enabled = True
-    __default_port = 3306
+    _default_enabled = True
+    _default_port = 3306
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 
     def check(self):
-        list_db = self.__check_get_list_db()
-        self.__check_run(list_db)
+        list_db = self._check_get_list_db()
+        self._check_run(list_db)
         super().check()
         return self.dict_return
 
-    def __check_get_list_db(self):
+    def _check_get_list_db(self):
         return_list = []
         for (key, value) in self.get_conf('list', {}).items():
             if isinstance(value, bool):
                 is_enabled = value
             elif isinstance(value, dict):
-                is_enabled = self.__get_conf(ConfigOptions.enabled, key)
+                is_enabled = self._get_conf(ConfigOptions.enabled, key)
             else:
-                is_enabled = self.__default_enabled
+                is_enabled = self._default_enabled
 
             self._debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
 
@@ -72,10 +72,10 @@ class Watchful(ModuleBase):
 
         return return_list
 
-    def __check_run(self, list_db):
+    def _check_run(self, list_db):
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            future_to_db = {executor.submit(self.__db_check, db): db for db in list_db}
+            future_to_db = {executor.submit(self._db_check, db): db for db in list_db}
             for future in concurrent.futures.as_completed(future_to_db):
                 db = future_to_db[future]
                 try:
@@ -84,15 +84,15 @@ class Watchful(ModuleBase):
                     message = f'MySQL: {db} - *Error: {exc}* {u"\U0001F4A5"}'
                     self.dict_return.set(db, False, message)
 
-    def __db_check(self, db):
-        tmp_socket = self.__get_conf(ConfigOptions.socket, db)
-        tmp_host = self.__get_conf(ConfigOptions.host, db)
-        tmp_port = self.__get_conf(ConfigOptions.port, db)
-        tmp_user = self.__get_conf(ConfigOptions.user, db)
-        tmp_pass = self.__get_conf(ConfigOptions.password, db)
-        tmp_db = self.__get_conf(ConfigOptions.db, db)
+    def _db_check(self, db):
+        tmp_socket = self._get_conf(ConfigOptions.socket, db)
+        tmp_host = self._get_conf(ConfigOptions.host, db)
+        tmp_port = self._get_conf(ConfigOptions.port, db)
+        tmp_user = self._get_conf(ConfigOptions.user, db)
+        tmp_pass = self._get_conf(ConfigOptions.password, db)
+        tmp_db = self._get_conf(ConfigOptions.db, db)
 
-        status, message = self.__db_return(db, tmp_socket, tmp_host, tmp_port, tmp_user, tmp_pass, tmp_db)
+        status, message = self._db_return(db, tmp_socket, tmp_host, tmp_port, tmp_user, tmp_pass, tmp_db)
 
         s_message = 'MySQL: '
         if status == "OK":
@@ -131,7 +131,7 @@ class Watchful(ModuleBase):
         if self.check_status_custom(status, db, message):
             self.send_message(s_message, status)
 
-    def __db_return(self, db_name, socket, host, port, user, password, db):
+    def _db_return(self, db_name, socket, host, port, user, password, db):
         return_status = 0
         return_msg = ""
         connect_socket = bool(str(socket).strip())
@@ -190,12 +190,12 @@ class Watchful(ModuleBase):
 
         return return_status, return_msg
 
-    def __get_conf(self, opt_find: Enum, dev_name: str, default_val=None):
+    def _get_conf(self, opt_find: IntEnum, dev_name: str, default_val=None):
         # Sec - Get Default Val
         if default_val is None:
             with Switch(opt_find) as case:
                 if case(ConfigOptions.port):
-                    val_def = self.get_conf(opt_find.name, self.__default_port)
+                    val_def = self.get_conf(opt_find.name, self._default_port)
 
                 elif case(ConfigOptions.socket,
                           ConfigOptions.host,
@@ -205,7 +205,7 @@ class Watchful(ModuleBase):
                     val_def = self.get_conf(opt_find.name, "")
 
                 elif case(ConfigOptions.enabled):
-                    val_def = self.get_conf(opt_find.name, self.__default_enabled)
+                    val_def = self.get_conf(opt_find.name, self._default_enabled)
 
                 else:
                     if opt_find is None:

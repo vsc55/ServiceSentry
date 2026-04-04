@@ -24,8 +24,8 @@ import os.path
 import shlex
 from enum import IntEnum
 
-from lib import DictFilesPath
-from lib.exe import Exec
+from lib.dict_files_path import DictFilesPath
+from lib.exe import Exec, ExecResult
 
 __all__ = ['RaidMdstat']
 
@@ -40,7 +40,16 @@ class RaidMdstat:
         error = 2
         recovery = 3
 
-    def __init__(self, mdstat=None, host=None, port=22, user=None, password=None, key_file=None, timeout=None):
+    def __init__(
+            self,
+            mdstat=None,
+            host=None,
+            port=22,
+            user=None,
+            password=None,
+            key_file=None,
+            timeout=None
+        ):
         """ Initialize the RaidMdstat object. """
         self.paths = DictFilesPath()
         self.paths.set('mdstat', '/proc/mdstat')
@@ -66,12 +75,18 @@ class RaidMdstat:
                 and int(self._port) > 0
                 and bool(str(self._user).strip()))
 
-    def _exec_remote(self, cmd):
+    def _exec_remote(self, cmd) -> ExecResult:
         """ Execute a command on the remote host. Returns (stdout, stderr, stdexcept). """
-        stdout, stderr, _, stdexcept = Exec.execute(
-            cmd, self._host, self._port, self._user, self._pass,
-            self._key_file, self._timeout)
-        return stdout, stderr, stdexcept
+        result = Exec.execute(
+            cmd,
+            self._host,
+            self._port,
+            self._user,
+            self._pass,
+            self._key_file,
+            self._timeout
+        )
+        return result
 
     def _read_lines(self):
         """ Read the mdstat information and return a list of lines. """
@@ -84,7 +99,10 @@ class RaidMdstat:
                 )
 
             remote_cmd = f"cat {shlex.quote(path_mdstat)}"
-            stdout, stderr, stdexcept = self._exec_remote(remote_cmd)
+            result = self._exec_remote(remote_cmd)
+            stdout = result.out
+            stderr = result.err
+            stdexcept = result.exception
 
             if stderr:
                 raise OSError(f"REMOTE ERROR ({remote_cmd}): {stderr}")
@@ -107,7 +125,10 @@ class RaidMdstat:
 
             str_check = "exists"
             cmd = f"test -e {shlex.quote(path_mdstat)} && echo {str_check}"
-            stdout, stderr, stdexcept = self._exec_remote(cmd)
+            result = self._exec_remote(cmd)
+            stdout = result.out
+            stderr = result.err
+            stdexcept = result.exception
 
             if stderr or stdexcept:
                 return False

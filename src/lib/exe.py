@@ -19,10 +19,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+""" Class to execute commands locally or remotely via SSH. """
 
 import shlex
 import subprocess
-from enum import Enum
+from dataclasses import dataclass, field
+from enum import StrEnum
 
 import paramiko
 
@@ -30,214 +32,208 @@ __author__ = "Javier Pastor"
 __copyright__ = "Copyright © 2019, Javier Pastor"
 __credits__ = "Javier Pastor"
 __license__ = "GPL"
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 __maintainer__ = 'Javier Pastor'
-__email__ = "python@cerebelum.net"
+__email__ = "python[at]cerebelum[dot]net"
 __status__ = "Development"
 
-__all__ = ['EnumLocationExec', 'Exec']
+__all__ = ['EnumLocationExec', 'Exec', 'ExecConfig', 'ExecResult']
 
 
-class EnumLocationExec(Enum):
-    local = 1
-    remote = 2
+class EnumLocationExec(StrEnum):
+    """ Enum to specify the location where the command will be executed. """
+    local = "local"
+    remote = "remote"
+
+
+@dataclass
+class ExecConfig:
+    """ Class to hold the configuration for executing a command. """
+    command: str = ""
+    location: EnumLocationExec = EnumLocationExec.local
+    host: str = ""
+    port: int = 22
+    user: str = "root"
+    password: str | None = None
+    key_file: str | None = None
+    timeout: float = 30
+    host_key_policy: paramiko.MissingHostKeyPolicy | None = field(
+        default_factory=paramiko.AutoAddPolicy
+    )
+
+
+@dataclass
+class ExecResult:
+    """ Class to hold the result of an executed command. """
+    out: str | None = None
+    err: str | None = None
+    code: int | None = None
+    exception: Exception | None = None
 
 
 class Exec:
-
-    """ Main Class. """
+    """ Class to execute commands locally or remotely via SSH. """
 
     def __init__(self, command: str = ""):
-        """ Inicializa el objeto y lo configura con los valores por defecto.
-
-        :param command: Comando a ejecutar.
-
-        """
-
-        self.__location = EnumLocationExec.local
-        self.__command = command
-        self.__host = ""
-        self.__port = 0
-        self.__user = ""
-        self.__password = ""
-        self.__key_file = None
-        self.__timeout = 30
-        self.set_remote()
+        self.config = ExecConfig(command=command)
 
     @property
     def location(self) -> EnumLocationExec:
-        return self.__location
+        """ Return the location where the command will be executed. """
+        return self.config.location
 
     @location.setter
     def location(self, val: EnumLocationExec):
-        self.__location = val
+        """ Set the location where the command will be executed. """
+        self.config.location = val
 
     @property
     def command(self) -> str:
-        return self.__command
+        """ Return the command to execute. """
+        return self.config.command
 
     @command.setter
     def command(self, val: str):
-        self.__command = val
+        """ Set the command to execute. """
+        self.config.command = val
 
-    @property
-    def host(self) -> str:
-        return self.__host
-
-    @host.setter
-    def host(self, val: str):
-        self.__host = val
-
-    @property
-    def port(self) -> int:
-        return self.__port
-
-    @port.setter
-    def port(self, val: int):
-        self.__port = val
-
-    @property
-    def user(self) -> str:
-        return self.__user
-
-    @user.setter
-    def user(self, val: str):
-        self.__user = val
-
-    @property
-    def password(self) -> str:
-        return self.__password
-
-    @password.setter
-    def password(self, val: str):
-        self.__password = val
-
-    @property
-    def key_file(self) -> str:
-        return self.__key_file
-
-    @key_file.setter
-    def key_file(self, val: str):
-        self.__key_file = val
-
-    @property
-    def timeout(self) -> float:
-        return self.__timeout
-
-    @timeout.setter
-    def timeout(self, val: float):
-        self.__timeout = val
-
-    def __is_command_exist(self) -> bool:
-        return bool(self.command and self.command.strip())
+    def _has_command(self) -> bool:
+        """ Check if the command is not empty. """
+        return bool(self.config.command and self.config.command.strip())
 
     @staticmethod
-    def _empty_result(exception=None):
-        """ Retorna un dict de resultado vacío. """
-        return {'out': None, 'err': None, 'code': None, 'exception': exception}
+    def _empty_result(exception: Exception | None = None) -> ExecResult:
+        """ Return an empty result. """
+        return ExecResult(exception=exception)
 
-    def __execute_local(self):
-        """ Ejecuta el comando en el equipo local.
-
-        :return: Retorna stdout, stderr y exit_code
-
-        """
-        if not self.__is_command_exist():
+    def _execute_local(self) -> ExecResult:
+        """ Execute the command on the local machine. """
+        if not self._has_command():
             return self._empty_result()
+
         try:
-            result = subprocess.run(shlex.split(self.command), capture_output=True, text=True)
-            return {'out': result.stdout, 'err': result.stderr, 'code': result.returncode, 'exception': None}
+            result = subprocess.run(
+                shlex.split(self.config.command),
+                capture_output=True,
+                text=True,
+                timeout=self.config.timeout,
+                check=False
+            )
+            return ExecResult(
+                out=result.stdout,
+                err=result.stderr,
+                code=result.returncode,
+            )
+        except subprocess.TimeoutExpired as ex:
+            return self._empty_result(ex)
+        except OSError as ex:
+            return self._empty_result(ex)
+
         except Exception as ex:
             return self._empty_result(ex)
 
-    def __execute_remote(self):
-        """ Ejecuta el comando en el host remoto que se ha configurado.
-
-        :return: Retorna stdout, stderr y exit_code
-
-        """
-        if not self.__is_command_exist():
+    def _execute_remote(self) -> ExecResult:
+        """ Execute the command on the remote host that has been configured. """
+        if not self._has_command():
             return self._empty_result()
+
         client = None
         try:
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.load_system_host_keys()
+            if self.config.host_key_policy:
+                client.set_missing_host_key_policy(self.config.host_key_policy)
 
             connect_kwargs = {
-                'hostname': self.host,
-                'port': self.port,
-                'username': self.user,
-                'timeout': self.timeout,
+                'hostname': self.config.host,
+                'port': self.config.port,
+                'username': self.config.user,
+                'timeout': self.config.timeout,
             }
-            if self.key_file:
-                connect_kwargs['key_filename'] = self.key_file
+
+            if self.config.key_file:
+                connect_kwargs['key_filename'] = self.config.key_file
             else:
-                connect_kwargs['password'] = self.password
+                connect_kwargs['password'] = self.config.password
 
             client.connect(**connect_kwargs)
 
-            # TODO: Pendiente añadir soporte para multiples commands.
-            _, stdout, stderr = client.exec_command(self.command)
+            _, stdout, stderr = client.exec_command(
+                self.config.command,
+                timeout=self.config.timeout
+            )
             exit_code = stdout.channel.recv_exit_status()
+
             read_out = stdout.read().decode() if stdout else ""
-            read_err = stderr.read().decode() if stdout else ""
-            return {'out': read_out, 'err': read_err, 'code': exit_code, 'exception': None}
+            read_err = stderr.read().decode() if stderr else ""
+
+            return ExecResult(
+                out=read_out,
+                err=read_err,
+                code=exit_code,
+            )
+
+        except paramiko.AuthenticationException as ex:
+            return self._empty_result(ex)
+        except paramiko.SSHException as ex:
+            return self._empty_result(ex)
+        except OSError as ex:
+            return self._empty_result(ex)
+
         except Exception as ex:
             return self._empty_result(ex)
+
         finally:
             if client:
                 client.close()
 
-    def start(self):
-        """ Ejecuta el comando y mira si tiene que ejecutarlo localmente o se tiene que ejecutar en otro host. """
-        if self.location == EnumLocationExec.local:
-            result = self.__execute_local()
-        elif self.location == EnumLocationExec.remote:
-            result = self.__execute_remote()
-        else:
-            result = self._empty_result()
-        return result['out'], result['err'], result['code'], result['exception']
+    def start(self) -> ExecResult:
+        """ Execute the command and determine if it should be run locally or on a remote host. """
+        if self.config.location == EnumLocationExec.remote:
+            return self._execute_remote()
+        return self._execute_local()
 
-    def set_remote(self, host: str = "", port: int = 22, user: str = "root", password: str = None,
-                   key_file: str = None, timeout: float = None):
-        """ Configuramos los datos de conexión al host remoto.
-
-        :param host: Nombre del host o IP
-        :param port: Puerto que usa SSH
-        :param user: Nombre de usuario con el que nos logeamos en el sistema.
-        :param password: Password del usuario.
-        :param key_file: Ruta al archivo de clave privada SSH.
-        :param timeout: Timeout al intentar conectar.
-        :return:
-
-        """
-        self.host = host
-        self.port = port
-        self.user = user
-        self.password = password
-        self.key_file = key_file
+    def set_remote(
+        self,
+        host: str = "",
+        port: int = 22,
+        user: str = "root",
+        password: str | None = None,
+        key_file: str | None = None,
+        timeout: float | None = None
+    ) -> None:
+        """ Set the configuration for remote execution. """
+        self.config.location = EnumLocationExec.remote
+        self.config.host = host
+        self.config.port = port
+        self.config.user = user
+        self.config.password = password
+        self.config.key_file = key_file
         if timeout is not None:
-            self.timeout = timeout
+            self.config.timeout = timeout
 
     @staticmethod
-    def execute(command: str = "", host: str = "", port: int = 22, user: str = "", password: str = "",
-                key_file: str = None, timeout: float = None):
-        """ Ejecuta el comando que le pasamos sin tener que crear el objeto Exec.
+    def execute(
+        command: str = "",
+        host: str = "",
+        port: int = 22,
+        user: str = "root",
+        password: str | None = None,
+        key_file: str | None = None,
+        timeout: float | None = None
+    ) -> ExecResult:
+        """ Static method to execute a command with the specified configuration. """
+        runner = Exec(command=command)
+        if host and host.strip():
+            runner.set_remote(
+                host=host,
+                port=port,
+                user=user,
+                password=password,
+                key_file=key_file,
+                timeout=timeout
+            )
+        elif timeout is not None:
+            runner.config.timeout = timeout
 
-        :param command: Comando ha ejecutar.
-        :param host: Host o IP
-        :param port: Puerto SSH
-        :param user: Usuario login
-        :param password: Password Login
-        :param key_file: Ruta al archivo de clave privada SSH.
-        :param timeout: Tiempo en segundos hasta que falla el intento de conexión.
-        :return: Retorna stdout y stderr
-
-        """
-
-        tmp_exec = Exec(command=command)
-        if len(host.strip()) > 0:
-            tmp_exec.location = EnumLocationExec.remote
-            tmp_exec.set_remote(host=host, port=port, user=user, password=password,
-                               key_file=key_file, timeout=timeout)
-        return tmp_exec.start()
+        return runner.start()

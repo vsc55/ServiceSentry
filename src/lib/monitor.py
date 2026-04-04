@@ -21,53 +21,65 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+""" Monitor class to check the status of the system. """
 
+import concurrent.futures
 import glob
-import os
 import importlib
+import os
+import pprint
 import socket
 import time
-import pprint
-import concurrent.futures
 
-from lib.modules import ReturnModuleCheck
-from lib.debug import DebugLevel
 from lib.config import ConfigControl
-from lib import ObjectBase
-from lib import Telegram
+from lib.debug import DebugLevel
+from lib.modules import ReturnModuleCheck
+from lib.object_base import ObjectBase
+from lib.telegram import Telegram
 
 __all__ = ['Monitor']
 
+__author__ = "Javier Pastor"
+__copyright__ = "Copyright © 2019, Javier Pastor"
+__credits__ = "Javier Pastor"
+__license__ = "GPL"
+__version__ = "0.1.0"
+__maintainer__ = 'Javier Pastor'
+__email__ = "python[at]cerebelum[dot]net"
+__status__ = "Development"
+
 
 class Monitor(ObjectBase):
+    """ Monitor class to check the status of the system. """
 
-    # Nº de hilos que se usaran para procesamiento en paralelo como valor por defecto.
-    __default_threads = 5
-    __default_enabled = True
+    _DEFAULT_THREADS = 5     # Number of threads to use for parallel processing as default value.
+    _DEFAULT_ENABLED = True
 
-    def __init__(self, dir_base, dir_config, dir_modules, dir_var):
+    def __init__(self, dir_base: str, dir_config: str, dir_modules: str, dir_var: str):
         self.dir_base = dir_base
         self.dir_config = dir_config
         self.dir_modules = dir_modules
         self.dir_var = dir_var
 
-        self.__read_config()
-        self.__read_status()
-        self.__init_telegram()
+        self._read_config()
+        self._read_status()
+        self._init_telegram()
         self.debug.print("> Monitor >> Monitor Init OK")
 
     @staticmethod
-    def __check_dir(path_dir):
+    def _check_dir(path_dir):
         if path_dir:
-            if not os.path.isdir(path_dir):
-                os.makedirs(path_dir, exist_ok=True)
+            os.makedirs(path_dir, exist_ok=True)
 
-    def __read_config(self):
+    def _read_config(self):
+        """ Read the configuration files. """
         if self.dir_config:
             self.config = ConfigControl(os.path.join(self.dir_config, 'config.json'))
             self.config.read()
+
             self.config_monitor = ConfigControl(os.path.join(self.dir_config, 'monitor.json'))
             self.config_monitor.read()
+
             self.config_modules = ConfigControl(os.path.join(self.dir_config, 'modules.json'))
             self.config_modules.read()
         else:
@@ -75,9 +87,10 @@ class Monitor(ObjectBase):
             self.config_monitor = ConfigControl(None, {})
             self.config_modules = ConfigControl(None, {})
 
-    def __read_status(self):
+    def _read_status(self):
+        """ Read the status file. If the file does not exist, it will be created. """
         if self.dir_var:
-            self.__check_dir(self.dir_var)
+            self._check_dir(self.dir_var)
             self.status = ConfigControl(os.path.join(self.dir_var, 'status.json'), {})
             if not self.status.is_exist_file:
                 self.status.save()
@@ -85,161 +98,208 @@ class Monitor(ObjectBase):
             self.status = ConfigControl(None, {})
 
     def clear_status(self):
+        """ Clear the status file. """
         # TODO: Pendiente crear funcion clear en el objeto config
         self.debug.print("> Monitor >> Clear Status", DebugLevel.info)
-        self.__read_status()
         self.status.data = {}
         self.status.save()
 
-    def __init_telegram(self):
+    def _init_telegram(self):
+        """ Initialize the Telegram object if the configuration is available. """
         if self.config:
-            self.tg = Telegram(self.config.get_conf(['telegram', 'token'], ''),
-                               self.config.get_conf(['telegram', 'chat_id'], '')
-                               )
+            self.tg = Telegram(
+                self.config.get_conf(['telegram', 'token'], ''),
+                self.config.get_conf(['telegram', 'chat_id'], '')
+            )
             self.tg.group_messages = self.config.get_conf(['telegram', 'group_messages'], False)
         else:
             self.tg = None
 
     @property
     def dir_base(self):
-        return self.__dir_base
+        """ Get the base directory. """
+        return self._dir_base
 
     @dir_base.setter
     def dir_base(self, val):
-        self.__dir_base = val
+        """ Set the base directory. """
+        self._dir_base = val
 
     @property
     def dir_config(self):
-        return self.__dir_config
+        """ Get the configuration directory. """
+        return self._dir_config
 
     @dir_config.setter
     def dir_config(self, val):
-        self.__dir_config = val
+        """ Set the configuration directory. """
+        self._dir_config = val
 
     @property
     def dir_modules(self):
-        return self.__dir_modules
+        """ Get the modules directory. """
+        return self._dir_modules
 
     @dir_modules.setter
     def dir_modules(self, val):
-        self.__dir_modules = val
+        """ Set the modules directory. """
+        self._dir_modules = val
 
     @property
     def dir_var(self):
-        return self.__dir_var
+        """ Get the variable directory. """
+        return self._dir_var
 
     @dir_var.setter
     def dir_var(self, val):
-        self.__dir_var = val
+        """ Set the variable directory. """
+        self._dir_var = val
 
     def get_conf(self, find_key=None, default_val=None):
+        """ Get a configuration value from the monitor configuration. """
         if self.config_monitor:
             return self.config_monitor.get_conf(find_key, default_val)
         return default_val
 
-    def send_message(self, message, status=None):
+    def send_message(self, message, status=None) -> None:
+        """ Send a message to Telegram if the Telegram object is initialized. """
         if message and self.tg:
             hostname = socket.gethostname()
             # Hay que enviar "\[" ya que solo "[" se lo come Telegram en modo "Markdown".
-            message = f"{u'\U0001F4BB'} \[{hostname}]: {message}"
+            message = f"💻 \\[{hostname}]: {message}"
             if status is True:
-                message = f"{u'\U00002705'} {message}"
+                message = f"✅ {message}"
             elif status is False:
-                message = f"{u'\U0000274E'} {message}"
+                message = f"❎ {message}"
             self.tg.send_message(message)
 
-    def send_message_end(self):
+    def send_message_end(self) -> None:
+        """ Send a summary message to Telegram at the end of the check. """
         if self.tg is not None:
             hostname = socket.gethostname()
             self.tg.send_message_end(hostname)
 
-    def check_status(self, status, module, module_sub_key=''):
-        l_find = [module]
+    def check_status(self, status, module, module_sub_key='') -> bool:
+        """ Check if the status has changed for a given module and sub-key. """
+        find_key = [module]
         if module_sub_key:
-            l_find.append(module_sub_key)
-        l_find.append('status')
+            find_key.append(module_sub_key)
+        find_key.append('status')
 
-        return self.status.get_conf(l_find, not status) != status
+        current_status = self.status.get_conf(find_key, None)
+        return current_status != status
 
-    def check_module(self, module_name):
+    def _process_module_result(self, module_name: str, result_data: ReturnModuleCheck) -> bool:
+        """Apply module result to status and notifications."""
+        changed = False
+
+        for key, value in result_data.items():
+            self.debug.print(
+                f"> Monitor > check_module >> Module: {module_name} - Key: {key} - Val: {value}"
+            )
+
+            tmp_status = result_data.get_status(key)
+            tmp_message = result_data.get_message(key)
+            tmp_send = result_data.get_send(key)
+            tmp_other_data = result_data.get_other_data(key)
+
+            self.status.set_conf([module_name, key, 'other_data'], tmp_other_data)
+
+            if self.check_status(tmp_status, module_name, key):
+                self.status.set_conf([module_name, key, 'status'], tmp_status)
+                changed = True
+
+                if tmp_send:
+                    self.send_message(tmp_message, tmp_status)
+
+                self.debug.print(
+                    f"> Monitor > check_module >> Module: {module_name}/{key} - New Status: {tmp_status}"
+                )
+
+        return changed
+
+    def check_module(self, module_name: str) -> tuple[bool, str, ReturnModuleCheck | None]:
+        """
+        Execute module check and return raw result.
+
+        Returns:
+            tuple[bool, str, ReturnModuleCheck | None]
+            (success, module_name, result_data)
+        """
         try:
             self.debug.print(f"> Monitor > check_module >> Module: {module_name}", DebugLevel.info)
             module_import = importlib.import_module(module_name)
             module = module_import.Watchful(self)
-            r_mod_check = module.check()
+            result_data = module.check()
 
-            if isinstance(r_mod_check, ReturnModuleCheck):
-                for (key, value) in r_mod_check.items():
-                    self.debug.print(
-                        f"> Monitor > check_module >> Module: {module_name} - Key: {key} - Val: {value}"
-                    )
-                    tmp_status = r_mod_check.get_status(key)
-                    tmp_message = r_mod_check.get_message(key)
-                    tmp_send = r_mod_check.get_send(key)
-                    tmp_other_data = r_mod_check.get_other_data(key)
+            if isinstance(result_data, ReturnModuleCheck):
+                return True, module_name, result_data
 
-                    self.status.set_conf([module_name, key, 'other_data'], tmp_other_data)
-                    if self.check_status(tmp_status, module_name, key):
-                        self.status.set_conf([module_name, key, 'status'], tmp_status)
-                        if tmp_send:
-                            self.send_message(tmp_message, tmp_status)
-                        self.debug.print(
-                            f'> Monitor > check_module >> Module: {module_name}/{key} - New Status: {tmp_status}'
-                        )
-                return True
-
-            else:
-                msg_debug = '\n\n'+'*'*60 + '\n'
-                msg_debug += f"WARNING: check_module({module_name}) - Format not implement: {type(r_mod_check)}\n"
-                msg_debug += f'Data Return: {pprint.pformat(r_mod_check)}\n'
-                msg_debug += '*'*60 + '\n'
-                msg_debug += '*'*60 + '\n\n'
-                self.debug.print(msg_debug, DebugLevel.warning)
+            msg_debug = '\n\n' + '*' * 60 + '\n'
+            msg_debug += f"WARNING: check_module({module_name}) - Format not implement: {type(result_data)}\n"
+            msg_debug += f'Data Return: {pprint.pformat(result_data)}\n'
+            msg_debug += '*' * 60 + '\n'
+            msg_debug += '*' * 60 + '\n\n'
+            self.debug.print(msg_debug, DebugLevel.warning)
 
         except Exception as e:
             self.debug.exception(e)
-        return False
 
-    def check(self):
-        # cont_break = 0  # Debug - Count
+        return False, module_name, None
 
+    def _get_enabled_modules(self) -> list[str]:
+        """Return enabled module names."""
+        if not self.dir_modules:
+            return []
+
+        modules = []
+        for module_path in glob.glob(os.path.join(self.dir_modules, '*.py')):
+            module_name = os.path.splitext(os.path.basename(module_path))[0]
+
+            if module_name.startswith('__'):
+                continue
+
+            if self.config_modules.get_conf([module_name, "enabled"], self._DEFAULT_ENABLED):
+                modules.append(module_name)
+
+        return modules
+
+    def check(self) -> None:
+        """Run all enabled checks."""
         self.debug.print(f"> Monitor > check >> Check Init: {time.strftime('%c')}", DebugLevel.info)
-        list_modules = []
-        for module_def in glob.glob(os.path.join(self.dir_modules, '*.py')):
-            module_def = os.path.splitext(os.path.basename(module_def))[0]
-            if module_def.find('__') == -1:
-                # Debug Control Run Modules
-                # --- MODE NAME -------------------
-                # if module_def != "mysql":
-                #     continue
-                # --- MODE COUNT ------------------
-                # if cont_break < 1:
-                #     list_modules.append(module_def)
-                # cont_break = cont_break + 1
-                # continue
-                # Debug - End
-
-                if self.config_modules.get_conf([module_def, "enabled"], self.__default_enabled):
-                    list_modules.append(module_def)
-
-        changed = False
 
         self.status.read()
+        list_modules = self._get_enabled_modules()
 
-        max_threads = self.get_conf('threads', self.__default_threads)
-        self.debug.print(f"> Monitor > check >> Monitor Max Threads: {max_threads}")
+        changed = False
+        max_threads = self.get_conf('threads', self._DEFAULT_THREADS)
+
+        self.debug.print(f"> Monitor > check >> Monitor Max Threads: {max_threads}", DebugLevel.info)
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
-            future_to_run_module = {executor.submit(self.check_module, module): module for module in list_modules}
-            for future in concurrent.futures.as_completed(future_to_run_module):
-                module = future_to_run_module[future]
+            future_to_module = {
+                executor.submit(self.check_module, module): module
+                for module in list_modules
+            }
+
+            for future in concurrent.futures.as_completed(future_to_module):
+                module_name = future_to_module[future]
                 try:
-                    if future.result():
-                        changed = True
+                    success, result_module_name, result_data = future.result()
+                    if success and result_data is not None:
+                        if self._process_module_result(result_module_name, result_data):
+                            changed = True
+                    else:
+                        self.debug.print(
+                            f"> Monitor > check >> Module failed: {module_name}",
+                            DebugLevel.warning
+                        )
                 except Exception as exc:
                     self.debug.exception(exc)
 
         self.debug.debug_obj(__name__, self.status.data, "Debug Status Save")
-        if changed is True:
+
+        if changed:
             self.status.save()
 
         self.send_message_end()

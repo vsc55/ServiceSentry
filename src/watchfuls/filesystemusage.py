@@ -23,13 +23,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import re
+
 from lib.modules import ModuleBase
 
 
 class Watchful(ModuleBase):
 
     # porcentaje que se usara si no se ha configurado el modulo, o se ha definido un valor que no esté entre 0 y 100.
-    __default_alert = 85
+    _default_alert = 85
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
@@ -38,14 +39,18 @@ class Watchful(ModuleBase):
     def check(self):
         list_partition = self.get_conf('list', {})
 
-        usage_alert = self.get_conf("alert", self.__default_alert)
+        usage_alert = self.get_conf("alert", self._default_alert)
         if isinstance(usage_alert, str):
             usage_alert = usage_alert.strip()
         if not usage_alert or usage_alert < 0 or usage_alert > 100:
-            usage_alert = self.__default_alert
+            usage_alert = self._default_alert
 
         cmd = f'{self.paths.find("df")} -x squashfs -x tmpfs  -x devtmpfs'
         stdout = self._run_cmd(cmd)
+        if not stdout:
+            super().check()
+            return self.dict_return
+
         reg = r'\/dev\/([^\s]*)\s+\d+\s+\d+\s+\d+\s+(\d+)\%\s+([^\n]*)'
 
         for fs in re.findall(reg, stdout):

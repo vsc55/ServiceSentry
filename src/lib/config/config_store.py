@@ -26,8 +26,8 @@
 import json
 import os
 
-from lib import ObjectBase
 from lib.debug import DebugLevel
+from lib.object_base import ObjectBase
 
 __all__ = ['ConfigStore']
 

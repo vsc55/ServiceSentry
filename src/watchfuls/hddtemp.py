@@ -21,6 +21,7 @@
 
 import concurrent.futures
 import socket
+
 from lib import Switch
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
@@ -28,25 +29,24 @@ from lib.modules import ModuleBase
 
 class Watchful(ModuleBase):
 
-    __default_enabled = True
-    __default_port = 7634
-    __default_alert = 50
-    __default_threads = 5
-    __default_timeout = 5
+    _default_enabled = True
+    _default_port = 7634
+    _default_alert = 50
+    _default_timeout = 5
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 
     def check(self):
-        list_hosts = self.__check_get_list_hosts()
-        self.__check_run(list_hosts)
+        list_hosts = self._check_get_list_hosts()
+        self._check_run(list_hosts)
         super().check()
         return self.dict_return
 
-    def __check_get_list_hosts(self):
+    def _check_get_list_hosts(self):
         return_list = []
         for (key, value) in self.get_conf('list', {}).items():
-            is_enabled = self.__default_enabled
+            is_enabled = self._default_enabled
             with Switch(value, check_isinstance=True) as case:
                 if case(bool):
                     is_enabled = value
@@ -60,17 +60,17 @@ class Watchful(ModuleBase):
                 else:
                     new_hddtemp = self.Hddtemp_Info(key)
                     new_hddtemp.host = value.get("host")
-                    new_hddtemp.port = value.get("port", self.__default_port)
-                    new_hddtemp.alert = self.get_conf('alert', self.__default_alert)
+                    new_hddtemp.port = value.get("port", self._default_port)
+                    new_hddtemp.alert = self.get_conf('alert', self._default_alert)
                     new_hddtemp.exclude = value.get("exclude", [])
                     return_list.append(new_hddtemp)
 
         return return_list
 
-    def __check_run(self, list_hosts):
+    def _check_run(self, list_hosts):
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            future_to_hddtemp = {executor.submit(self.__hddtemp_check, hddtemp): hddtemp for hddtemp in list_hosts}
+            future_to_hddtemp = {executor.submit(self._hddtemp_check, hddtemp): hddtemp for hddtemp in list_hosts}
             for future in concurrent.futures.as_completed(future_to_hddtemp):
                 hddtemp = future_to_hddtemp[future]
                 try:
@@ -79,8 +79,8 @@ class Watchful(ModuleBase):
                     message = f'HDD: {hddtemp.label} - *Error: {exc}* {u"\U0001F4A5"}'
                     self.dict_return.set(hddtemp.label, False, message)
 
-    def __hddtemp_check(self, hddtemp):
-        if self.__hddtemp_return(hddtemp):
+    def _hddtemp_check(self, hddtemp):
+        if self._hddtemp_return(hddtemp):
             for (key, value) in hddtemp.list_hdd.items():
                 if key not in hddtemp.exclude:
                     # print("dev:", key)
@@ -119,8 +119,8 @@ class Watchful(ModuleBase):
             if self.check_status_custom(False, hddtemp.label, hddtemp.error):
                 self.send_message(s_message, False)
 
-    def __hddtemp_return(self, hddtemp):
-        timeout = self.get_conf('timeout', self.__default_timeout)
+    def _hddtemp_return(self, hddtemp):
+        timeout = self.get_conf('timeout', self._default_timeout)
         try:
             with socket.create_connection(
                 (hddtemp.host, hddtemp.port),

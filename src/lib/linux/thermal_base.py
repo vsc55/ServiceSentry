@@ -3,7 +3,7 @@
 #
 # ServiSesentry
 #
-# Copyright © 2019  Javier Pastor (aka VSC55)
+# Copyright © 2019  Javier Pastor (aka vsc55)
 # <jpastor at cerebelum dot net>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -18,17 +18,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-""" Enum for configuration options. """
-
-from enum import IntEnum
-
-__all__ = ['EnumConfigOptions']
+""" Thermal Base class """
 
 
-class EnumConfigOptions(IntEnum):
-    """ Enum for configuration options. """
-    enabled = 1
-    alert = 2
-    label = 3
-    # Plugins a partir del numero 100 en adelante.
-    # Plugins from number 100 onwards.
+class ThermalBase:
+    """ Thermal information collection for Linux. """
+
+    PATH_THERMAL = '/sys/class/thermal'

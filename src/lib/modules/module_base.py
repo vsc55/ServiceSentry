@@ -18,90 +18,101 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+""" Base class for modules. """
+
+from enum import Enum
 
 import lib.tools
-from lib import Switch
-from lib import ObjectBase
-from lib import DictFilesPath
-from lib.debug import DebugLevel
 from lib.config import ConfigTypeReturn
+from lib.debug import DebugLevel
+from lib.dict_files_path import DictFilesPath
 from lib.modules import ReturnModuleCheck
-from enum import Enum
+from lib.object_base import ObjectBase
+from lib.switch import Switch
 
 __all__ = ['ModuleBase']
 
 
 class ModuleBase(ObjectBase):
+    """ Base class for modules. """
 
-    # Nº de hilos que se usaran en los módulos para procesamiento en paralelo como valor por defecto.
-    _default_threads = 5
+    _DEFAULT_THREADS = 5 # Number of threads that will be used in the modules for parallel processing as default value.
 
     def __init__(self, obj_monitor, name=None):
+        if not isinstance(obj_monitor, lib.Monitor):
+            raise ValueError('Type not valid, only Monitor valid type.')
+
         self._monitor = obj_monitor
         if name:
-            self.__name_module = name
+            self._name_module = name
         else:
-            self.__name_module = __name__
+            self._name_module = __name__
 
         # Set var's
         self.paths = None
         self.dict_return = None
 
         # Init Var's
-        self.__init_var()
+        self._init_var()
 
-    def __init_var(self):
+    def _init_var(self):
+        """ Initialize the variables of the module. """
         self.paths = DictFilesPath()
         self.dict_return = ReturnModuleCheck()
 
     def check(self):
+        """ Check the module and return the result. """
         self.debug.debug_obj(self.name_module, self.dict_return.list, "Data Return")
 
     @property
     def name_module(self) -> str:
-        """ Nombre del modulo. """
-        return self.__name_module
+        """ Name of the module. """
+        return self._name_module
+
+    @property
+    def _default_threads(self) -> int:
+        """ Default number of threads for parallel processing. """
+        return self._DEFAULT_THREADS
 
     @property
     def is_monitor_exist(self) -> bool:
+        """ Check if the Monitor object exists and is valid. """
         return bool(self._monitor and isinstance(self._monitor, lib.Monitor))
-
-    @property
-    def _monitor(self):
-        """ Leemos el objeto Monitor. """
-        return self.__monitor
-
-    @_monitor.setter
-    def _monitor(self, val):
-        """ Definimos el objeto Monitor. """
-        if isinstance(val, lib.Monitor):
-            self.__monitor = val
-        else:
-            raise ValueError('Type not valid, only Monitor valid type.')
 
     def send_message(self, message, status=None):
         """
-        Funciona puente con la función send_message del objeto Monitor, efectuando comprobación de si se ha definido
-        Monitor antes de enviar los datos.
+        Bridge function to the send_message function of the Monitor object, checking if the
+        Monitor is defined and valid before sending the data.
         """
         if self.is_monitor_exist:
             self._monitor.send_message(message, status)
         else:
-            self.debug.print(f">> {self.name_module} > send_message: Error, Monitor is not defined!!",
-                             DebugLevel.error)
+            self.debug.print(
+                f">> {self.name_module} > send_message: Error, Monitor is not defined!!",
+                DebugLevel.error
+            )
 
-    def get_conf(self, find_key=None, default_val=None, select_module: str = None, str_split: str = None,
-                 r_type: ConfigTypeReturn = ConfigTypeReturn.STR):
+    def get_conf(
+            self,
+            find_key=None,
+            default_val=None,
+            select_module: str = None,
+            str_split: str = None,
+            r_type: ConfigTypeReturn = ConfigTypeReturn.STR
+        ):
         """
-        Función puente con la función get_conf del objeto Monitor efectuando un comprobación de si el objeto Monitor se
-        ha definido antes de solicitar los datos.
+        Function bridge with the get_conf function of the Monitor object, checking
+        if the Monitor object is defined before requesting the data.
 
-        :param find_key: Key de configuración que buscamos.
-        :param default_val: Valor por defecto que retornara si la configuración no existe o es incorrecta.
-        :param select_module: Nombre del modulo en el que vamos a buscar el parámetro find_key. Si no se define ninguno
-                              buscaremos en la configuración del modulo actual.
-        :param str_split: Carácter que se usara para separar find_key si se pasa en modo String.
-        :param r_type: Tipo de return.
+        :param find_key: Key or list of keys to find in the configuration. If it is a string
+                         and str_split is defined, it will be split using str_split as separator.
+        :param default_val: Default value to return if the configuration does not exist or
+                            is incorrect.
+        :param select_module: Name of the module in which to search for the find_key parameter. 
+                              If none is defined, we will search in the configuration of the 
+                              current module.
+        :param str_split: Character to use to split find_key if passed as a string.
+        :param r_type: Return type.
         :return:
         """
         if default_val is None:
@@ -114,26 +125,37 @@ class ModuleBase(ObjectBase):
             if select_module:
                 if find_key is None:
                     return self._monitor.config_modules.get_conf(select_module, default_val)
-                else:
-                    keys_list = self._monitor.config_modules.convert_find_key_to_list(find_key, str_split)
-                    keys_list.insert(0, select_module)
-                    return self._monitor.config_modules.get_conf(keys_list, default_val, str_split=str_split,
-                                                                 r_type=r_type)
+
+                keys_list = self._monitor.config_modules.convert_find_key_to_list(
+                    find_key,
+                    str_split
+                )
+                keys_list.insert(0, select_module)
+                return self._monitor.config_modules.get_conf(
+                    keys_list, default_val, str_split=str_split,
+                    r_type=r_type
+                )
 
         if find_key or default_val:
             return default_val
         return []
 
-    def get_conf_in_list(self, opt_find, key_name_module: str, def_val=None, key_name_list: str = "list"):
+    def get_conf_in_list(
+            self,
+            opt_find,
+            key_name_module: str,
+            def_val=None,
+            key_name_list: str = "list"
+        ):
         """
-        Obtenemos los datos que deseamos buscar de la sección 'list' de la configuración del modulo.
+        Get the data we want to search for from the 'list' section of the module configuration.
 
-        :param opt_find: Opción a buscar.
-        :param key_name_module: Nombre del modulo del que deseamos obtener la sección 'list'.
-        :param def_val: Valor por defecto si no existe la opción que buscamos.
-        :param key_name_list: Key de la configuración donde se almacena el listado donde vamos a buscar.
-        :return: Valor obtenido de la configuración.
-
+        :param opt_find: Option to search for.
+        :param key_name_module: Name of the module from which we want to obtain the 'list' section.
+        :param def_val: Default value if the option we are looking for does not exist.
+        :param key_name_list: Key of the configuration where the list is stored where we will 
+                              search.
+        :return: Value obtained from the configuration.
         """
         with Switch(opt_find, check_isinstance=True) as case:
             if case(Enum):
@@ -156,6 +178,13 @@ class ModuleBase(ObjectBase):
         return value
 
     def get_status(self, key_name_module: str, def_val=None):
+        """
+        Get the status of a module.
+
+        :param key_name_module: Name of the module for which to get the status.
+        :param def_val: Default value if the status does not exist.
+        :return: Status of the module.
+        """
         if def_val is None:
             def_val = {}
         if not self.is_monitor_exist:
@@ -163,6 +192,7 @@ class ModuleBase(ObjectBase):
         return self._monitor.status.get_conf(key_name_module, def_val)
 
     def get_status_find(self, opt_find: str, key_name_module: str, def_val=None):
+        """ Get the status of a module for a specific option."""
         if def_val is None:
             def_val = {}
         if not self.is_monitor_exist:
@@ -217,20 +247,26 @@ class ModuleBase(ObjectBase):
     @staticmethod
     def _run_cmd(cmd, return_str_err: bool = False, return_exit_code: bool = False):
         """
-        Ejecutamos el programa que le pasamos y leemos lo que retorna.
+        Run the command we pass and read what it returns.
 
-        :param cmd: Comando a ejecutar.
-        :param return_str_err: True retornamos stdout y stderr, False retornamos solo stdout.
-        :return: Retornamos el resultado de la ejecución del comando que hemos pasado.
-
+        :param cmd: Command to execute.
+        :param return_str_err: True to return stdout and stderr, False to return only stdout.
+        :param return_exit_code: True to return the exit code, False to not return it.
+        :return: The result of the command execution.
         """
 
-        stdout, stderr, exit_code, _ = lib.Exec.execute(command=cmd)
+        result = lib.Exec.execute(command=cmd)
+        stdout = result.out or ''
+        stderr = result.err or ''
+        exit_code = result.code
+
         if return_str_err and return_exit_code:
             return stdout, stderr, exit_code
-        elif return_str_err and not return_exit_code:
+
+        if return_str_err and not return_exit_code:
             return stdout, stderr
-        elif not return_str_err and return_exit_code:
+
+        if not return_str_err and return_exit_code:
             return stdout, exit_code
-        else:
-            return stdout
+
+        return stdout

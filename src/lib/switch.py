@@ -22,9 +22,11 @@
 # Fuente:
 # https://stackoverflow.com/questions/60208/replacements-for-switch-statement-in-python
 
-""" The switch statement is similar to a series of IF statements on the same expression. In many occasions, you may
-want to compare the same variable (or expression) with many different values, and execute a different piece of code
-depending on which value it equals to. This is exactly what the switch statement is for.
+"""
+The switch statement is similar to a series of IF statements on the same expression.
+In many occasions, you may want to compare the same variable (or expression) with many 
+different values, and execute a different piece of code depending on which value it 
+equals to. This is exactly what the switch statement is for.
 
 Example 1:
     with Switch(5) as case:
@@ -74,28 +76,35 @@ __author__ = "Javier Pastor, Ian Bell"
 __copyright__ = "Copyright © 2019, Javier Pastor"
 __credits__ = "Javier Pastor"
 __license__ = "GPL"
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 __maintainer__ = 'Javier Pastor'
-__email__ = "python@cerebelum.net"
+__email__ = "python[at]cerebelum[dot]net"
 __status__ = "Development"
 
 __all__ = ['Switch']
 
 
 class Switch:
+    """ Class to simulate the behavior of a switch statement. """
 
-    """ Main Class. """
-
-    def __init__(self, value, invariant_culture_ignore_case=False, check_isinstance=False, check_contain=False):
+    def __init__(
+            self,
+            value,
+            invariant_culture_ignore_case=False,
+            check_isinstance=False,
+            check_contain=False
+        ):
         """ The switch is initialized and configured as it will act.
 
         :param value: Value against which comparisons will be made.
-        :param invariant_culture_ignore_case: If it is set to True and the type of value to be compared is a String,
-        the difference between uppercase and lowercase will be ignored when doing the verification.
-        :param check_isinstance: If set to True, the check will not be content value but the type of object it is.
-        :param check_contain: If it is true, it will check if the value that is specified is part of the text that
-        we check.
-
+        :param invariant_culture_ignore_case:   If it is set to True and the type of value to be
+                                                compared is a String, the difference between 
+                                                uppercase and lowercase will be ignored when doing
+                                                the verification.
+        :param check_isinstance: If set to True, the check will not be content value but the type 
+                                 of object it is.
+        :param check_contain:   If it is true, it will check if the value that is specified is part
+                                of the text that we check.
         """
         self.value = value
         self.invariant_culture_ignore_case = invariant_culture_ignore_case
@@ -110,24 +119,26 @@ class Switch:
         return False
 
     def __call__(self, *values):
-        """ Check if any of the values passed to you match the value that was defined when the object was created.
+        """
+        Check if any of the values passed to you match the value that was defined when the
+        object was created.
 
-        :param values: List of values that are compared to the value specified when creating the switch.
+        :param values: List of values that are compared to the value specified when creating
+                       the switch.
         :return: True if any of the values that have been passed match, False if none matches.
-
         """
         if self.check_isinstance:
-            # Efectúa check isinstance
+            # Perform isinstance check
             for item in values:
                 if isinstance(self.value, item):
                     return True
             return False
 
-        elif isinstance(self.value, str):
+        if isinstance(self.value, str):
             for item in values:
                 if isinstance(item, str):
                     if self.invariant_culture_ignore_case:
-                        # Comparativa ignorando Mayúsculas y Minúsculas.
+                        # Check if the item is equal to the value, ignoring case.
                         tmp_item = item.lower()
                         tmp_value = self.value.lower()
                     else:
@@ -135,11 +146,11 @@ class Switch:
                         tmp_value = self.value
 
                     if self.check_contain:
-                        # Comprueba si el item esta dentro del valor.
+                        # Check if the item is within the value.
                         if tmp_item in tmp_value:
                             return True
                     else:
-                        # Comprueba si el item es igual valor.
+                        # Check if the item is equal to the value.
                         if tmp_item == tmp_value:
                             return True
 

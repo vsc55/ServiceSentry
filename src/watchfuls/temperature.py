@@ -26,14 +26,13 @@ from lib import Switch
 from lib.linux import ThermalInfoCollection
 from lib.modules import ModuleBase
 from lib.modules import EnumConfigOptions as ConfigOptions
-from enum import Enum
 
 
 class Watchful(ModuleBase):
 
     # temperatura en ºC que se usara si no se ha configurado el modulo, o se ha definido un valor igual o menor que 0.
-    __default_alert = 80
-    __default_enabled = True
+    _default_alert = 80
+    _default_enabled = True
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
@@ -42,14 +41,14 @@ class Watchful(ModuleBase):
         termal_info = ThermalInfoCollection(True)
 
         for item in termal_info.nodes:
-            if not self.__get_conf(ConfigOptions.enabled, item.dev):
+            if not self._get_conf(ConfigOptions.enabled, item.dev):
                 continue
 
             dev_name = item.dev
             type_name = item.type
-            type_label = self.__get_conf(ConfigOptions.label, dev_name, type_name)
+            type_label = self._get_conf(ConfigOptions.label, dev_name, type_name)
             temp = item.temp
-            temp_alert = self.__get_conf(ConfigOptions.alert, dev_name)
+            temp_alert = self._get_conf(ConfigOptions.alert, dev_name)
 
             if temp <= temp_alert:  # Función OK :)
                 is_warning = False
@@ -68,15 +67,15 @@ class Watchful(ModuleBase):
         super().check()
         return self.dict_return
 
-    def __get_conf(self, opt_find: Enum, dev_name: str, default_val=None):
+    def _get_conf(self, opt_find, dev_name: str, default_val=None):
         # Sec - Get Default Val
         if default_val is None:
             with Switch(opt_find) as case:
                 if case(ConfigOptions.alert):
-                    val_def = self.get_conf(opt_find.name, self.__default_alert)
+                    val_def = self.get_conf(opt_find.name, self._default_alert)
 
                 elif case(ConfigOptions.enabled):
-                    val_def = self.get_conf(opt_find.name, self.__default_enabled)
+                    val_def = self.get_conf(opt_find.name, self._default_enabled)
 
                 else:
                     if opt_find is None:

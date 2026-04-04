@@ -22,85 +22,44 @@
 """Module Main."""
 
 
+import argparse
 import os
 import sys
 import time
-import argparse
 
-from lib import Monitor
-from lib import ObjectBase
-from lib.debug import DebugLevel
+from lib import Monitor, ObjectBase
 from lib.config import ConfigControl
+from lib.debug import DebugLevel
 
 
 class Main(ObjectBase):
-    """
-    Main class for the ServiceSentry application.
-
-    Attributes:
-        monitor (Monitor): Instance of the Monitor class.
-        cfg_general (ConfigControl): General configuration control.
-        cfg_monitor (ConfigControl): Monitor configuration control.
-        cfg_modules (ConfigControl): Modules configuration control.
-        __cfg_file_config (str): Path to the general configuration file.
-        __cfg_file_monitor (str): Path to the monitor configuration file.
-        __cfg_file_modules (str): Path to the modules configuration file.
-
-    Methods:
-        __init__(args_get): Initializes the Main class with given arguments.
-        __init_config(): Initializes the configuration.
-        __check_config(): Checks if the configuration is valid.
-        __default_conf(): Sets default configuration values.
-        __read_config(): Reads the configuration values.
-        __sys_path_append(list_dir): Appends directories to the system path.
-        __init_monitor(): Initializes the monitor.
-        _is_mode_dev(): Checks if the application is in development mode.
-        _dir(): Returns the path where the program is running.
-        _modules_dir(): Returns the path to the modules directory.
-        _lib_dir(): Returns the path to the libraries directory.
-        _config_dir(): Returns the path to the configuration files directory.
-        _var_dir(): Returns the path to the /var/lib directory.
-        _config_file(): Returns the path to the configuration file.
-        __args_set(args_get): Sets the arguments.
-        __args_cmd(args_get): Executes commands based on arguments.
-        _daemon_mode(): Gets the daemon mode status.
-        _daemon_mode(val): Sets the daemon mode status.
-        _timer_check(): Gets the timer check value.
-        _timer_check(val): Sets the timer check value.
-        start(): Starts the main process.
-    """
+    """ Main class for the ServiceSentry application. """
 
     monitor = None
     cfg_general = None
     cfg_monitor = None
     cfg_modules = None
-    __cfg_file_config = 'config.json'
-    __cfg_file_monitor = 'monitor.json'
-    __cfg_file_modules = 'modules.json'
+    _cfg_file_config = 'config.json'
+    _cfg_file_monitor = 'monitor.json'
+    _cfg_file_modules = 'modules.json'
 
-    def __init__(self, args_get):
-        """
-        Initializes the main class with the provided arguments.
+    def __init__(self, args: argparse.Namespace):
+        """ Initializes the Main class with the provided command-line arguments. """
 
-        Args:
-            args_get (list): List of arguments passed to the program.
-
-        Attributes:
-            _daemon_mode (bool): Indicates if the program is running in daemon mode.
-            _timer_check (int): Timer check interval.
-        """
-        self.__path_config = None
-        self.__verbose = False
-        self.__timer_check_force = None
-        self._daemon_mode = False
+        self._path_config = getattr(args, 'path', None)
+        self._verbose = getattr(args, 'verbose', False)
+        self._timer_check_force = getattr(args, 'timer_check', None)
+        self._daemon_mode = getattr(args, 'daemon_mode', False)
         self._timer_check = 0
-        self.__sys_path_append([self._modules_dir])
-        self.__args_set(args_get)
-        self.__init_config()
-        self.__init_monitor()
-        self.__args_cmd(args_get)
 
-    def __init_config(self):
+        self._sys_path_append([self._modules_dir])
+        self._init_config()
+        self._init_monitor()
+
+        if getattr(args, 'clear_status', False) and self.monitor:
+            self.monitor.clear_status()
+
+    def _init_config(self):
         """
         Initializes the configuration for the service.
 
@@ -114,13 +73,13 @@ class Main(ObjectBase):
         """
         self.cfg_general = ConfigControl(self._config_file)
         self.cfg_general.read()
-        if self.__check_config():
-            self.__default_conf()
-            self.__read_config()
+        if self._check_config():
+            self._default_conf()
+            self._read_config()
         else:
             raise ValueError("Error load config.")
 
-    def __check_config(self):
+    def _check_config(self):
         """
         Checks if the general configuration is set.
 
@@ -129,7 +88,7 @@ class Main(ObjectBase):
         """
         return bool(self.cfg_general)
 
-    def __default_conf(self):
+    def _default_conf(self):
         """
         Ensures that the default configuration settings are present.
 
@@ -140,7 +99,7 @@ class Main(ObjectBase):
             bool: True if the configuration check is enabled and the default 
                   settings are ensured, False otherwise.
         """
-        if self.__check_config():
+        if self._check_config():
             if not self.cfg_general.is_exist_conf(['daemon', 'timer_check']):
                 self.cfg_general.set_conf(['daemon', 'timer_check'], 300)
 
@@ -150,16 +109,17 @@ class Main(ObjectBase):
             return True
         return False
 
-    def __read_config(self):
+    def _read_config(self):
         """
         Reads and applies the configuration settings.
 
-        This method sets the debug level and enables or disables debugging based on the verbose flag.
+        This method sets the debug level and enables or disables debugging based
+        on the verbose flag.
         It also updates the timer check interval based on the configuration settings.
 
         Attributes:
-            __verbose (bool): Determines if verbose mode is enabled.
-            __timer_check_force (int): Overrides the timer check interval if set.
+            _verbose (bool): Determines if verbose mode is enabled.
+            _timer_check_force (int): Overrides the timer check interval if set.
             debug (object): Debugging configuration object.
             cfg_general (object): Configuration object for general settings.
             _timer_check (int): Timer check interval.
@@ -169,7 +129,7 @@ class Main(ObjectBase):
             DebugLevel.info: Informational debugging level.
         """
 
-        if self.__verbose:
+        if self._verbose:
             self.debug.enabled = True
             self.debug.level = DebugLevel.null
         else:
@@ -178,13 +138,16 @@ class Main(ObjectBase):
             self.debug.enabled = True
             # self.debug.enabled = self.cfg_general.get_conf(['global', 'debug'], self.debug.enabled)
 
-        if self.__timer_check_force:
-            self._timer_check = self.__timer_check_force
+        if self._timer_check_force:
+            self._timer_check = self._timer_check_force
         else:
-            self._timer_check = self.cfg_general.get_conf(['daemon', 'timer_check'], self._timer_check)
+            self._timer_check = self.cfg_general.get_conf(
+                ['daemon', 'timer_check'],
+                self._timer_check
+            )
 
     @staticmethod
-    def __sys_path_append(list_dir):
+    def _sys_path_append(list_dir):
         """
         Appends directories to the system path if they are not already present.
 
@@ -199,7 +162,7 @@ class Main(ObjectBase):
                 if f not in sys.path:
                     sys.path.append(f)
 
-    def __init_monitor(self):
+    def _init_monitor(self):
         """
         Initializes the monitor instance with the specified directories.
 
@@ -251,8 +214,8 @@ class Main(ObjectBase):
         str: Returning value
 
         """
-        if self.__path_config:
-            return self.__path_config
+        if self._path_config:
+            return self._path_config
         elif self._is_mode_dev:
             return os.path.normpath(os.path.join(self._dir, '../data/'))
         else:
@@ -280,122 +243,41 @@ class Main(ObjectBase):
             str: The full path to the configuration file, constructed by joining
                  the configuration directory and the configuration file name.
         """
-        return os.path.join(self._config_dir, self.__cfg_file_config)
-
-    def __args_set(self, args_get):
-        """
-        Sets the configuration parameters based on the provided arguments.
-
-        Args:
-            args_get (dict): A dictionary containing configuration parameters.
-
-        The dictionary can have the following keys:
-            - 'path': Sets the configuration path.
-            - 'verbose': Sets the verbosity level.
-            - 'timer_check': Sets the timer check force.
-            - 'daemon_mode': Sets the daemon mode.
-        """
-        if args_get:
-            for key, value in args_get.items():
-                if key == 'path':
-                    self.__path_config = value
-
-                elif key == 'verbose':
-                    self.__verbose = value
-
-                elif key == 'timer_check':
-                    self.__timer_check_force = value
-
-                elif key == 'daemon_mode':
-                    self.__daemon_mode = value
-
-    def __args_cmd(self, args_get):
-        """
-        Processes command-line arguments and performs actions based on them.
-
-        Args:
-            args_get (dict): A dictionary of command-line arguments and their values.
-
-        Actions:
-            - If 'clear_status' key is present and its value is True, it calls the clear_status method on the monitor object.
-        """
-        if args_get:
-            for key, value in args_get.items():
-                if key == 'clear_status':
-                    if value:
-                        if self.monitor:
-                            self.monitor.clear_status()
+        return os.path.join(self._config_dir, self._cfg_file_config)
 
     @property
-    def _daemon_mode(self):
-        """
-        Returns the current daemon mode status.
-
-        Returns:
-            bool: True if the service is running in daemon mode, False otherwise.
-        """
-        return self.__daemon_mode
-
-    @_daemon_mode.setter
-    def _daemon_mode(self, val):
-        """
-        Sets the daemon mode for the service.
-
-        Args:
-            val (bool): If True, the service will run in daemon mode.
-        """
-        self.__daemon_mode = val
-
-    @property
-    def _timer_check(self):
-        """
-        Checks the status of the timer.
-
-        Returns:
-            int: The current timer value if it exists, otherwise 0.
-        """
-        if self.__timer_check:
-            return self.__timer_check
-        return 0
+    def _timer_check(self) -> int:
+        """ Timer check interval in seconds. """
+        return self._timer_check_value
 
     @_timer_check.setter
     def _timer_check(self, val):
         """
         Validates and sets the timer check value.
 
-        This method ensures that the input value is converted to an integer and is non-negative.
-        If the input value is None, a non-numeric string, or any other type that cannot be 
-        converted to an integer, it defaults to 0.
+        Ensures the value is converted to a non-negative integer.
 
         Args:
-            val (Any): The value to be validated and set. It can be of type int, float, str, or None.
-
-        Sets:
-            self.__timer_check (int): The validated and converted timer check value.
+            val: The value to set. Accepts int, float, str, or None.
         """
         if not val:
             val = 0
         elif isinstance(val, str):
-            if not val.isnumeric():
-                val = 0
-            else:
-                val = int(val)
+            val = int(val) if val.isnumeric() else 0
         elif isinstance(val, float):
             val = int(val)
         elif not isinstance(val, int):
             val = 0
 
-        if int(val) < 0:
-            val = 0
+        self._timer_check_value = max(0, int(val))
 
-        self.__timer_check = int(val)
-
-    def start(self):
+    def start(self) -> int:
         """
         Starts the service in either single process mode or daemon mode.
 
         In single process mode, it runs the monitor check once.
-        In daemon mode, it continuously runs the monitor check at intervals specified by `_timer_check`.
+        In daemon mode, it continuously runs the monitor check at intervals 
+        specified by `_timer_check`.
 
         Raises:
             KeyboardInterrupt: If the process is interrupted by the user.
@@ -408,23 +290,29 @@ class Main(ObjectBase):
         if not self._daemon_mode:
             self.debug.print("* Main >> Run Mode Single Process")
             self.monitor.check()
-        else:
-            self.debug.print("* Main >> Run Mode Daemon")
-            while True:
-                self.monitor.check()
-                if self._timer_check == 0:
-                    break
-                self.debug.print(f"* Main >> Waiting {self._timer_check} seconds...")
+            return 0
+
+        self.debug.print("* Main >> Run Mode Daemon")
+        while True:
+            self.monitor.check()
+            if self._timer_check == 0:
+                break
+
+            self.debug.print(f"* Main >> Waiting {self._timer_check} seconds...")
+            try:
+                time.sleep(self._timer_check)
+            except KeyboardInterrupt:
+                self.debug.print("* Main >> Process cancelled by the user!!", DebugLevel.info)
                 try:
-                    time.sleep(self._timer_check)
-                except KeyboardInterrupt:
-                    self.debug.print("* Main >> Process cancel  by the user!!", DebugLevel.info)
-                    try:
-                        sys.exit(0)
-                    except SystemExit:
-                        os._exit(0)
-                except Exception as e:
-                    self.debug.exception(e)
+                    sys.exit(0)
+                except SystemExit:
+                    os._exit(0)
+
+            except Exception as e:
+                self.debug.exception(e)
+                return 1
+
+        return 2
 
 
 def arg_check_dir_path(path):
@@ -448,64 +336,78 @@ def arg_check_dir_path(path):
         raise argparse.ArgumentTypeError(f"{path} is not a valid path")
 
 
-def arg_check_timer(timer_check):
+def arg_check_timer(timer_check: str) -> int:
     """
     Validates that the provided timer_check argument is a positive integer.
 
     Args:
-        timer_check (str): The timer value to be checked.
+        timer_check: The timer value string to validate.
 
     Returns:
-        str: The validated timer value if it is a positive integer.
+        The validated timer value as integer.
 
     Raises:
         argparse.ArgumentTypeError: If the timer_check is not a positive integer.
     """
     if timer_check.isnumeric() and int(timer_check) > 0:
-        return timer_check
-    else:
-        raise argparse.ArgumentTypeError(f"{timer_check} is not a valid timer")
+        return int(timer_check)
+    raise argparse.ArgumentTypeError(f"{timer_check} is not a valid timer")
 
 
-if __name__ == "__main__":
-    # Allow_abbrev modo estricto en la detección de argumento, de lo contrario --pat lo reconocería como --path
-    ap = argparse.ArgumentParser(allow_abbrev=False)
+def args_init() -> argparse.Namespace:
+    """
+    Initializes and parses command-line arguments.
+
+    Returns:
+        argparse.Namespace: The parsed command-line arguments.
+    """
+    ap = argparse.ArgumentParser(
+        prog='ServiceSentry',
+        description='ServiceSentry - Service monitoring and alerting tool.',
+        epilog='Example: %(prog)s -d -t 60 -v',
+        allow_abbrev=False,
+    )
+
     ap.add_argument(
         '-c', '--clear',
         default=False,
         action="store_true",
         dest="clear_status",
-        help="clear status.json"
+        help="clear the status file (status.json) before starting",
     )
     ap.add_argument(
         '-d', '--daemon',
         default=False,
         action="store_true",
         dest="daemon_mode",
-        help="start mode daemon"
+        help="run in daemon mode (continuous monitoring loop)",
     )
     ap.add_argument(
         '-t', '--timer',
         default=None,
         type=arg_check_timer,
+        metavar='SECONDS',
         dest="timer_check",
-        help="timer interval of the check in daemon mode"
+        help="check interval in seconds for daemon mode (default: config file value)",
     )
     ap.add_argument(
         '-v', '--verbose',
         default=False,
         action="store_true",
         dest="verbose",
-        help="verbose mode true"
+        help="enable verbose/debug output",
     )
     ap.add_argument(
         '-p', '--path',
         default=None,
         type=arg_check_dir_path,
+        metavar='DIR',
         dest="path",
-        help="path config files"
+        help="path to the configuration files directory",
     )
-    args = vars(ap.parse_args())
+    return ap.parse_args()
 
-    main = Main(args)
-    main.start()
+if __name__ == "__main__":
+    main = Main(args_init())
+    start_code = main.start()
+    sys.exit(start_code)
