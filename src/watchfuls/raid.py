@@ -48,7 +48,7 @@ class Watchful(ModuleBase):
         self.paths.set('mdstat', '/proc/mdstat')
 
     def __debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
-        super().debug.print(">> PlugIn >> {0} >> {1}".format(self.name_module, msg), level)
+        super().debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)
 
     def check(self):
         self.__check_local()
@@ -58,7 +58,7 @@ class Watchful(ModuleBase):
 
     def __check_local(self):
         is_enable = self.get_conf("local", self.__default_enabled)
-        self.__debug("{0} - Enabled: {1}".format("Local", is_enable), DebugLevel.info)
+        self.__debug(f"Local - Enabled: {is_enable}", DebugLevel.info)
         if is_enable:
             list_md = RaidMdstat(self.paths.find('mdstat')).read_status()
             self.__md_analyze(list_md)
@@ -77,9 +77,9 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:
                     tmp_label = self.get_label_by_id(remote_id)
-                    message = 'RAID: {0} - *Error: {1}* {2}'.format(tmp_label, exc, u'\U0001F4A5')
+                    message = f'RAID: {tmp_label} - *Error: {exc}* {u"\U0001F4A5"}'
                     self.dict_return.set(remote_id, False, message)
-                    self.__debug("{0}/{1} - Exception: {2}".format(remote_id, tmp_label, exc), DebugLevel.error)
+                    self.__debug(f"{remote_id}/{tmp_label} - Exception: {exc}", DebugLevel.error)
                     # self.debug.exception(exc)
 
     def __check_remotes_process(self, remote_id):
@@ -97,8 +97,8 @@ class Watchful(ModuleBase):
         label = self.get_label_by_id(remote_id)
 
         if len(list_md) == 0:
-            message = "[{0}] *No RAID's* in the system. {1}".format(label, u'\U00002705')
-            key_id = "R_{0}".format(remote_id) if remote_id else "L"
+            message = f"[{label}] *No RAID's* in the system. {u'\U00002705'}"
+            key_id = f"R_{remote_id}" if remote_id else "L"
             self.dict_return.set(key_id, True, message)
 
         else:
@@ -110,26 +110,25 @@ class Watchful(ModuleBase):
                 with Switch(value.get("update", '')) as case:
                     if case(RaidMdstat.UpdateStatus.ok):
                         is_warning = False
-                        message = "RAID *{0}/{1}* in good status. {2}".format(label, key, u'\U00002705')
+                        message = f"RAID *{label}/{key}* in good status. {u'\U00002705'}"
 
                     elif case(RaidMdstat.UpdateStatus.error):
-                        message = "*RAID {0}/{1} is degraded.* {2}".format(label, key, u'\U000026A0')
+                        message = f"*RAID {label}/{key} is degraded.* {u'\U000026A0'}"
 
                     elif case(RaidMdstat.UpdateStatus.recovery):
                         other_data['percent'] = value.get("recovery", {}).get('percent', -1)
                         other_data['finish'] = value.get("recovery", {}).get('finish', -1)
                         other_data['speed'] = value.get("recovery", {}).get('speed', -1)
 
-                        message = "*RAID {0}/{1} is degraded, recovery status {2}%, estimate time to finish {3}.* {4}". \
-                            format(label, key, other_data['percent'], other_data['finish'], u'\U000026A0')
+                        message = f"*RAID {label}/{key} is degraded, recovery status {other_data['percent']}%, estimate time to finish {other_data['finish']}.* {u'\U000026A0'}"
 
                     else:
-                        message = "*RAID {0}/{1} Unknown Error*. {2}".format(label, key, u'\U000026A0')
+                        message = f"*RAID {label}/{key} Unknown Error*. {u'\U000026A0'}"
 
                 if remote_id:
-                    key_id = "R_{0}_{1}".format(remote_id, key)
+                    key_id = f"R_{remote_id}_{key}"
                 else:
-                    key_id = "L_{0}".format(key)
+                    key_id = f"L_{key}"
                 self.dict_return.set(key_id, not is_warning, message, other_data=other_data)
 
     def __get_list_remote_enable(self):
@@ -143,7 +142,7 @@ class Watchful(ModuleBase):
             else:
                 is_enabled = self.__default_enabled
 
-            self.__debug("Remote/{0} - Enabled: {1}".format(key, is_enabled), DebugLevel.info)
+            self.__debug(f"Remote/{key} - Enabled: {is_enabled}", DebugLevel.info)
             if is_enabled:
                 return_list.append(key)
 
@@ -169,7 +168,7 @@ class Watchful(ModuleBase):
                     if opt_find is None:
                         raise ValueError("opt_find it can not be None!")
                     else:
-                        raise TypeError("{0} is not valid option!".format(opt_find.name))
+                        raise TypeError(f"{opt_find.name} is not valid option!")
         else:
             val_def = default_val
 
@@ -204,7 +203,7 @@ class Watchful(ModuleBase):
         if remote_id:
             label = self.get_conf_item(ConfigOptions.label, remote_id)
             if not label:
-                label = "Remote{0}".format(remote_id)
+                label = f"Remote{remote_id}"
         else:
             label = "Local"
         return label

@@ -50,7 +50,7 @@ class Watchful(ModuleBase):
         super().__init__(monitor, __name__)
 
     def __debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
-        super().debug.print(">> PlugIn >> {0} >> {1}".format(self.name_module, msg), level)
+        super().debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)
 
     def check(self):
         list_db = self.__check_get_list_db()
@@ -68,7 +68,7 @@ class Watchful(ModuleBase):
             else:
                 is_enabled = self.__default_enabled
 
-            self.__debug("{0} - Enabled: {1}".format(key, is_enabled), DebugLevel.info)
+            self.__debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
 
             if is_enabled:
                 return_list.append(key)
@@ -84,7 +84,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = 'MySQL: {0} - *Error: {1}* {2}'.format(db, exc, u'\U0001F4A5')
+                    message = f'MySQL: {db} - *Error: {exc}* {u"\U0001F4A5"}'
                     self.dict_return.set(db, False, message)
 
     def __db_check(self, db):
@@ -99,15 +99,15 @@ class Watchful(ModuleBase):
 
         s_message = 'MySQL: '
         if status == "OK":
-            s_message += '*{0}* {1}'.format(db, u'\U00002705')
+            s_message += f'*{db}* {u"\U00002705"}'
             status = True
         else:
-            s_message += '{0} - *Error:* '.format(db)
+            s_message += f'{db} - *Error:* '
             with Switch(status) as case:
                 if case("1045"):
                     # OperationalError(1045, "Access denied for user 'user'@'server' (using password: NO)")
                     # OperationalError(1045, "Access denied for user 'user'@'server' (using password: YES)")
-                    s_message += "*Access denied* {0}".format('\U0001F510')
+                    s_message += f"*Access denied* {'\U0001F510'}"
                 elif case("2003"):
                     # OperationalError(2003, "Can't connect to MySQL server on 'host1' (timed out)")
                     # OperationalError(2003, "Can't connect to MySQL server on 'host1' ([Errno 113] No route to host)")
@@ -125,7 +125,7 @@ class Watchful(ModuleBase):
                     s_message += '\U000026A0'
                     # s_message += "*Can't connect to MySQL server (time out)* {0}".format('\U000026A0')
                 else:
-                    s_message += '*{0}* {1}'.format(message, '\U000026A0')
+                    s_message += f'*{message}* {"\U000026A0"}'
             status = False
 
         other_data = {'message': message}
@@ -159,7 +159,7 @@ class Watchful(ModuleBase):
 
         except Exception as e:
             connection = None
-            self.__debug("{0} >> Exception: {1}".format(db_name, repr(e)), DebugLevel.error)
+            self.__debug(f"{db_name} >> Exception: {repr(e)}", DebugLevel.error)
             return_msg = repr(e)
 
             err_array = str(e).split(",")
@@ -184,7 +184,7 @@ class Watchful(ModuleBase):
                     return_status = "OK"
 
             except Exception as e:
-                self.__debug("{0} >> Exception: {1}".format(db_name, repr(e)), DebugLevel.error)
+                self.__debug(f"{db_name} >> Exception: {repr(e)}", DebugLevel.error)
                 return_msg = repr(e)
                 return_status = "-9999"
 
@@ -214,7 +214,7 @@ class Watchful(ModuleBase):
                     if opt_find is None:
                         raise ValueError("opt_find it can not be None!")
                     else:
-                        raise TypeError("{0} is not valid option!".format(opt_find.name))
+                        raise TypeError(f"{opt_find.name} is not valid option!")
         else:
             val_def = default_val
 

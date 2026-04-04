@@ -64,15 +64,7 @@ class ModuleBase(ObjectBase):
 
     @property
     def is_monitor_exist(self) -> bool:
-        """
-        Nos dice si el objeto Monitor esta creado o no.
-
-        :return: True esta creado, False es None o no es tipo Monitor.
-
-        """
-        if self._monitor and isinstance(self._monitor, lib.Monitor):
-            return True
-        return False
+        return bool(self._monitor and isinstance(self._monitor, lib.Monitor))
 
     @property
     def _monitor(self):
@@ -95,7 +87,7 @@ class ModuleBase(ObjectBase):
         if self.is_monitor_exist:
             self._monitor.send_message(message, status)
         else:
-            self.debug.print(">> {0} > send_message: Error, Monitor is not defined!!".format(self.name_module),
+            self.debug.print(f">> {self.name_module} > send_message: Error, Monitor is not defined!!",
                              DebugLevel.error)
 
     def get_conf(self, find_key=None, default_val=None, select_module: str = None, str_split: str = None,
@@ -155,7 +147,7 @@ class ModuleBase(ObjectBase):
             elif case(tuple):
                 find_key = list(opt_find)
             else:
-                raise TypeError("opt_find is not valid type ({0})!".format(type(opt_find)))
+                raise TypeError(f"opt_find is not valid type ({type(opt_find)})!")
 
         if key_name_module:
             find_key.insert(0, key_name_module)

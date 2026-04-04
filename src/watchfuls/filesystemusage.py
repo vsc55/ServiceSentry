@@ -44,7 +44,7 @@ class Watchful(ModuleBase):
         if not usage_alert or usage_alert < 0 or usage_alert > 100:
             usage_alert = self.__default_alert
 
-        cmd = '{0} -x squashfs -x tmpfs  -x devtmpfs'.format(self.paths.find('df'))
+        cmd = f'{self.paths.find("df")} -x squashfs -x tmpfs  -x devtmpfs'
         stdout = self._run_cmd(cmd)
         reg = r'\/dev\/([^\s]*)\s+\d+\s+\d+\s+\d+\s+(\d+)\%\s+([^\n]*)'
 
@@ -58,10 +58,10 @@ class Watchful(ModuleBase):
 
             if float(fs[1]) > float(for_usage_alert):
                 tmp_status = False
-                tmp_message = 'Warning partition {0} ({1}) used {2}% {3}'.format(fs[0], fs[2], fs[1], u'\U000026A0')
+                tmp_message = f'Warning partition {fs[0]} ({fs[2]}) used {fs[1]}% {u"\U000026A0"}'
             else:
                 tmp_status = True
-                tmp_message = 'Filesystem partition {0} ({1}) used {2}% {3}'.format(fs[0], fs[2], fs[1], u'\U00002705')
+                tmp_message = f'Filesystem partition {fs[0]} ({fs[2]}) used {fs[1]}% {u"\U00002705"}'
 
             other_data = {'used': fs[1], 'mount': fs[2], 'alert': for_usage_alert}
             self.dict_return.set(fs[0], tmp_status, tmp_message, other_data=other_data)

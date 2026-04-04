@@ -59,7 +59,7 @@ __status__ = "Development"
 __all__ = ['DictFilesPath']
 
 
-class DictFilesPath(object):
+class DictFilesPath:
 
     """ Main Class. """
 

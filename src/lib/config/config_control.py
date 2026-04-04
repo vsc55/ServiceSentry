@@ -69,9 +69,7 @@ class ConfigControl(ConfigStore):
 
     @property
     def is_load(self) -> bool:
-        if self.__load is not None:
-            return True
-        return False
+        return self.__load is not None
 
     def read(self, return_data=True, def_return=None):
         self.data = super().read(def_return)
@@ -107,7 +105,7 @@ class ConfigControl(ConfigStore):
         elif isinstance(find_key, tuple):
             list_return = list(find_key)
         else:
-            raise TypeError('Invalid type: find_key must be a string, list or tuple, not {0}.'.format(type(find_key)))
+            raise TypeError(f'Invalid type: find_key must be a string, list or tuple, not {type(find_key)}.')
         return list_return
 
     def __convert_list_to_dict(self, list_items, val):
@@ -210,7 +208,7 @@ class ConfigControl(ConfigStore):
             elif r_type == ConfigTypeReturn.STR:
                 return ''
             else:
-                raise TypeError('Invalid type: r_type must be a string, list, dict, tuple, int or bool, not {0}.'.format(type(r_type)))
+                raise TypeError(f'Invalid type: r_type must be a string, list, dict, tuple, int or bool, not {type(r_type)}.')
         return def_val
 
     def is_exist_conf(self, find_key, str_split: str = None, data_dict: dict = None):

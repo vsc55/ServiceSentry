@@ -25,11 +25,11 @@ import os
 import glob
 
 
-class ThermalInfoCollection(object):
+class ThermalInfoCollection:
 
     __path_thermal = '/sys/class/thermal'
 
-    class ThermalNode(object):
+    class ThermalNode:
 
         __path_thermal = '/sys/class/thermal'
 
@@ -76,10 +76,7 @@ class ThermalInfoCollection(object):
                 return default_none
 
         def __is_exist_file(self, path_check):
-            if str(path_check).strip():
-                if os.path.isfile(path_check):
-                    return True
-            return False
+            return bool(str(path_check).strip() and os.path.isfile(path_check))
 
         @property
         def __path_dev(self):

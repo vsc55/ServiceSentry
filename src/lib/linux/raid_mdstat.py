@@ -27,7 +27,7 @@ from lib import DictFilesPath
 __all__ = ['RaidMdstat']
 
 
-class RaidMdstat(object):
+class RaidMdstat:
 
     class UpdateStatus(Enum):
         unknown = 0
@@ -48,16 +48,14 @@ class RaidMdstat(object):
 
     @property
     def is_remote(self) -> bool:
-        if self.__host:
-            return True
-        return False
+        return bool(self.__host)
 
     @property
     def validate_remote(self) -> bool:
-        if self.is_remote:
-            if str(self.__host).strip() and int(self.__port) > 0 and str(self.__user).strip():
-                return True
-        return False
+        return (self.is_remote
+                and bool(str(self.__host).strip())
+                and int(self.__port) > 0
+                and bool(str(self.__user).strip()))
 
     @property
     def is_exist(self) -> bool:
@@ -65,7 +63,7 @@ class RaidMdstat(object):
         if self.is_remote:
             if self.validate_remote:
                 str_check = "exists"
-                remote_cmd = "test -e {0} && echo {1}".format(path_md_stat, str_check)
+                remote_cmd = f"test -e {path_md_stat} && echo {str_check}"
                 stdout, stderr, _, stdexcept = Exec.execute(remote_cmd,
                                                             self.__host,
                                                             self.__port,
@@ -73,21 +71,19 @@ class RaidMdstat(object):
                                                             self.__pass,
                                                             self.__timeout)
 
-                str_err = "** RAID_Mdstat ** >> {0}!! >> REMOTE >> Failed to check existence of {1}: {2}!"
                 if stderr:
-                    print(str_err.format("ERROR", path_md_stat, stderr))
+                    print(f"** RAID_Mdstat ** >> ERROR!! >> REMOTE >> Failed to check existence of {path_md_stat}: {stderr}!")
                     return False
 
                 if stdexcept:
-                    print(str_err.format("EXCEPTION", path_md_stat, stdexcept))
+                    print(f"** RAID_Mdstat ** >> EXCEPTION!! >> REMOTE >> Failed to check existence of {path_md_stat}: {stdexcept}!")
                     raise Exception(stdexcept)
 
                 return True if stdout.strip() == str_check else False
 
             else:
                 print(
-                    "** RAID_Mdstat ** >> WARNING!! >> REMOTE >> CONFIG NOT VALID ({2}:{1}@{0}) NOT VALID!".format(
-                        self.__host, self.__pass, self.__user))
+                    f"** RAID_Mdstat ** >> WARNING!! >> REMOTE >> CONFIG NOT VALID ({self.__user}:{self.__pass}@{self.__host}) NOT VALID!")
                 return False
 
         else:
@@ -108,7 +104,7 @@ class RaidMdstat(object):
         if is_exist:
             f_buffer = None
             if self.is_remote:
-                remote_cmd = "cat {0}".format(self.paths.find('mdstat'))
+                remote_cmd = f"cat {self.paths.find('mdstat')}"
                 stdout, stderr, _, stdexcept = Exec.execute(remote_cmd,
                                                             self.__host,
                                                             self.__port,
@@ -116,12 +112,11 @@ class RaidMdstat(object):
                                                             self.__pass,
                                                             self.__timeout)
 
-                str_err = "** RAID_Mdstat ** >> {0}!! >> REMOTE >> ({1}): {2}!"
                 if stderr:
-                    raise Exception(str_err.format("ERROR", remote_cmd, stderr))
+                    raise Exception(f"** RAID_Mdstat ** >> ERROR!! >> REMOTE >> ({remote_cmd}): {stderr}!")
 
                 if stdexcept:
-                    raise Exception(str_err.format("EXCEPTION", remote_cmd, stdexcept))
+                    raise Exception(f"** RAID_Mdstat ** >> EXCEPTION!! >> REMOTE >> ({remote_cmd}): {stdexcept}!")
 
                 f_buffer = stdout.splitlines()
             else:
@@ -178,8 +173,7 @@ class RaidMdstat(object):
                             continue
 
                         else:
-                            print("** RAID_Mdstat ** >> WARNING!! >> {0} >> NOT CONTROL TEXT: {1}".format(md_actual,
-                                                                                                          l_buffer))
+                            print(f"** RAID_Mdstat ** >> WARNING!! >> {md_actual} >> NOT CONTROL TEXT: {l_buffer}")
                             continue
 
                     else:

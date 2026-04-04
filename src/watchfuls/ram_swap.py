@@ -45,7 +45,7 @@ class Watchful(ModuleBase):
             if not val_conf.isnumeric():
                 val_conf = default_val
                 self.debug.print(
-                    "PlugIn > {0} > Warning, config {1} type incorrect!".format(self.name_module, key_conf),
+                    f"PlugIn > {self.name_module} > Warning, config {key_conf} type incorrect!",
                     DebugLevel.warning
                 )
             else:
@@ -54,7 +54,7 @@ class Watchful(ModuleBase):
         if not val_conf or val_conf < 0 or val_conf > 100:
             val_conf = default_val
             self.debug.print(
-                "PlugIn > {0} > Warning, config {1} value not valid!".format(self.name_module, key_conf),
+                f"PlugIn > {self.name_module} > Warning, config {key_conf} value not valid!",
                 DebugLevel.warning
             )
 
@@ -82,11 +82,11 @@ class Watchful(ModuleBase):
             else:
                 is_warning = True
 
-            message = '{0} used {1:.1f}%'.format(value['caption'], per)
+            message = f'{value["caption"]} used {per:.1f}%'
             if is_warning:
-                message = 'Excessive {0} {1}'.format(message, u'\U000026A0')
+                message = f'Excessive {message} {u"\U000026A0"}'
             else:
-                message = 'Normal {0} {1}'.format(message, u'\U00002705')
+                message = f'Normal {message} {u"\U00002705"}'
 
             other_data = {'used': per, 'alert': alert}
             self.dict_return.set(key, not is_warning, message, other_data=other_data)

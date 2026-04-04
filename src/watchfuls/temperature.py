@@ -56,11 +56,11 @@ class Watchful(ModuleBase):
             else:  # Esta echando fuego!!!
                 is_warning = True
 
-            message = "Sensor *{0}*, ".format(type_label)
+            message = f"Sensor *{type_label}*, "
             if is_warning:
-                message += '*over temperature Warning {0:.1f} ºC* {1}'.format(temp, u'\U0001F525')
+                message += f'*over temperature Warning {temp:.1f} ºC* {u"\U0001F525"}'
             else:
-                message += 'temperature Ok *{0:.1f} ºC* {1}'.format(temp, u'\U00002705')
+                message += f'temperature Ok *{temp:.1f} ºC* {u"\U00002705"}'
 
             other_data = {'type': type_name, 'temp': temp, 'alert': temp_alert}
             self.dict_return.set(dev_name, not is_warning, message, other_data=other_data)
@@ -82,7 +82,7 @@ class Watchful(ModuleBase):
                     if opt_find is None:
                         raise ValueError("opt_find it can not be None!")
                     else:
-                        raise TypeError("{0} is not valid option!".format(opt_find.name))
+                        raise TypeError(f"{opt_find.name} is not valid option!")
         else:
             val_def = default_val
 

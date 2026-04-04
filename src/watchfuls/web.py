@@ -48,7 +48,7 @@ class Watchful(ModuleBase):
                 elif case(dict):
                     is_enabled = value.get("enabled", is_enabled)
 
-            self.debug.print(">> PlugIn >> {0} >> Web: {1} - Enabled: {2}".format(self.name_module, key, is_enabled),
+            self.debug.print(f">> PlugIn >> {self.name_module} >> Web: {key} - Enabled: {is_enabled}",
                              DebugLevel.info)
             if is_enabled:
                 list_url.append(key)
@@ -61,7 +61,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = 'Web: {0} - Error: {1}'.format(url, exc)
+                    message = f'Web: {url} - Error: {exc}'
                     self.dict_return.set(url, False, message)
 
         super().check()
@@ -72,7 +72,7 @@ class Watchful(ModuleBase):
         code_true = self.get_conf_in_list("code", url, self.__default_http_code)
         status = True if code == code_true else False
 
-        s_message = 'Web: {0} - *({1})*'.format(url, code)
+        s_message = f'Web: {url} - *({code})*'
         if status:
             s_message += u'\U0001F53C'
         else:

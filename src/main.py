@@ -127,9 +127,7 @@ class Main(ObjectBase):
         Returns:
             bool: True if the general configuration is set, False otherwise.
         """
-        if self.cfg_general:
-            return True
-        return False
+        return bool(self.cfg_general)
 
     def __default_conf(self):
         """
@@ -213,19 +211,7 @@ class Main(ObjectBase):
 
     @property
     def _is_mode_dev(self):
-        """
-        Checks if the current directory indicates a development mode.
-
-        This method determines if the application is running in development mode
-        by checking if the string 'src' is present in the directory path.
-
-        Returns:
-            bool: True if 'src' is found in the directory path, indicating development mode.
-                  False otherwise.
-        """
-        if self._dir.find('src') != -1:
-            return True
-        return False
+        return 'src' in self._dir
 
     @property
     def _dir(self):
@@ -428,7 +414,7 @@ class Main(ObjectBase):
                 self.monitor.check()
                 if self._timer_check == 0:
                     break
-                self.debug.print("* Main >> Waiting {0} seconds...".format(self._timer_check))
+                self.debug.print(f"* Main >> Waiting {self._timer_check} seconds...")
                 try:
                     time.sleep(self._timer_check)
                 except KeyboardInterrupt:
@@ -459,7 +445,7 @@ def arg_check_dir_path(path):
     elif os.path.isdir(path):
         return path
     else:
-        raise argparse.ArgumentTypeError("{0} is not a valid path".format(path))
+        raise argparse.ArgumentTypeError(f"{path} is not a valid path")
 
 
 def arg_check_timer(timer_check):
@@ -478,7 +464,7 @@ def arg_check_timer(timer_check):
     if timer_check.isnumeric() and int(timer_check) > 0:
         return timer_check
     else:
-        raise argparse.ArgumentTypeError("{0} is not a valid timer".format(timer_check))
+        raise argparse.ArgumentTypeError(f"{timer_check} is not a valid timer")
 
 
 if __name__ == "__main__":

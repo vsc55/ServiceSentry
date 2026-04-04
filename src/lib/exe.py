@@ -44,7 +44,7 @@ class EnumLocationExec(Enum):
     remote = 2
 
 
-class Exec(object):
+class Exec:
 
     """ Main Class. """
 
@@ -121,10 +121,7 @@ class Exec(object):
         self.__timeout = val
 
     def __is_command_exist(self) -> bool:
-        if self.command and len(self.command.strip()) > 0:
-            return True
-        else:
-            return False
+        return bool(self.command and self.command.strip())
 
     def __execute_local(self):
         """ Ejecuta el comando en el equipo local.
@@ -141,17 +138,15 @@ class Exec(object):
 
         if self.__is_command_exist():
             try:
-                command_with_args = shlex.split(self.command)
-                execution = subprocess.Popen(
-                    command_with_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
+                result = subprocess.run(
+                    shlex.split(self.command),
+                    capture_output=True,
+                    text=True
                 )
-                stdout, stderr = execution.communicate()
 
-                data_return['out'] = stdout.decode()
-                data_return['err'] = stderr.decode()
-                data_return['code'] = execution.returncode
+                data_return['out'] = result.stdout
+                data_return['err'] = result.stderr
+                data_return['code'] = result.returncode
 
             except Exception as ex:
                 data_return = {

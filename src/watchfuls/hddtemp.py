@@ -38,7 +38,7 @@ class Watchful(ModuleBase):
         super().__init__(monitor, __name__)
 
     def __debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
-        super().debug.print(">> PlugIn >> {0} >> {1}".format(self.name_module, msg), level)
+        super().debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)
 
     def check(self):
         list_hosts = self.__check_get_list_hosts()
@@ -56,10 +56,10 @@ class Watchful(ModuleBase):
                 elif case(dict):
                     is_enabled = value.get("enabled", is_enabled)
 
-            self.__debug("{0} - Enabled: {1}".format(key, is_enabled), DebugLevel.info)
+            self.__debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
             if is_enabled:
                 if not value.get("host", None):
-                    self.__debug("{0} - Host is not defined!".format(key), DebugLevel.warning)
+                    self.__debug(f"{key} - Host is not defined!", DebugLevel.warning)
                 else:
                     new_hddtemp = self.Hddtemp_Info(key)
                     new_hddtemp.host = value.get("host")
@@ -79,7 +79,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = 'HDD: {0} - *Error: {1}* {2}'.format(hddtemp.label, exc, u'\U0001F4A5')
+                    message = f'HDD: {hddtemp.label} - *Error: {exc}* {u"\U0001F4A5"}'
                     self.dict_return.set(hddtemp.label, False, message)
 
     def __hddtemp_check(self, hddtemp):
@@ -95,15 +95,15 @@ class Watchful(ModuleBase):
                     hdd_unit = value['TEMP_UNIT']
 
                     if isinstance(hdd_temp, int):
-                        status = True if hdd_alert >= hdd_temp else False
-                        s_message = '({}): *{}* *({}º{})*'.format(hddtemp.label, hdd_dev, hdd_temp, hdd_unit)
+                        status = hdd_alert >= hdd_temp
+                        s_message = f'({hddtemp.label}): *{hdd_dev}* *({hdd_temp}º{hdd_unit})*'
                         if status:
                             s_message += u'\U0001F53C'
                         else:
                             s_message += u'\U0001F53D'
                     else:
                         status = False
-                        s_message = '({}): *{}* *({})*'.format(hddtemp.label, hdd_dev, hdd_temp) + u'\U0001F525' + u'\U0001F525'
+                        s_message = f'({hddtemp.label}): *{hdd_dev}* *({hdd_temp})*' + u'\U0001F525' + u'\U0001F525'
 
                     other_data = value
                     self.dict_return.set(hdd_name, status, s_message, False, other_data)
@@ -112,8 +112,8 @@ class Watchful(ModuleBase):
                         self.send_message(s_message, status)
 
         else:
-            self.__debug("{0} >> Exception: {1}".format(hddtemp.label, hddtemp.error), DebugLevel.warning)
-            s_message = 'HddTemp: {} - *Error:* *{}*'.format(hddtemp.label, hddtemp.error)
+            self.__debug(f"{hddtemp.label} >> Exception: {hddtemp.error}", DebugLevel.warning)
+            s_message = f'HddTemp: {hddtemp.label} - *Error:* *{hddtemp.error}*'
             s_message += u'\U0001F53D'
 
             other_data = {'message': str(hddtemp.error)}
@@ -174,7 +174,7 @@ class Watchful(ModuleBase):
                 b_return = return_status
         return b_return
 
-    class Hddtemp_Info(object):
+    class Hddtemp_Info:
 
         def __init__(self, label):
             self.__label = ""

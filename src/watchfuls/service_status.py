@@ -36,7 +36,7 @@ class Watchful(ModuleBase):
             enabled = str(value.get('enabled', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
             remediation = str(value.get('remediation', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
             self.debug.print(
-                ">> PlugIn >> {0} >> Service: {1} - Enabled: {2} - Remediation: {3}".format(self.name_module, key, enabled, remediation),
+                f">> PlugIn >> {self.name_module} >> Service: {key} - Enabled: {enabled} - Remediation: {remediation}",
                 DebugLevel.info
             )
             if enabled:
@@ -50,7 +50,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = 'Service: {0} - *Error: {1}* {2}'.format(service, exc, u'\U0001F4A5')
+                    message = f'Service: {service} - *Error: {exc}* {u"\U0001F4A5"}'
                     self.dict_return.set(service, False, message)
 
         super().check()
@@ -61,12 +61,12 @@ class Watchful(ModuleBase):
         service_name = service['service']
         status, error, message = self.__service_return(service_name)
 
-        s_message = 'Service: {0} '.format(service_name)
+        s_message = f'Service: {service_name} '
         if status:
             s_message += ' - *Running* ' + u'\U00002705'
         else:
             if message:
-                s_message += '- *Error: {0}* '.format(message)
+                s_message += f'- *Error: {message}* '
             else:
                 s_message += '- *Stop* '
             s_message += u'\U000026A0'
@@ -78,14 +78,14 @@ class Watchful(ModuleBase):
                 self.__service_remediation(service_name)
                 status, error, message = self.__service_return(service_name)
 
-                s_message = '*Recovery* Service: {0} '.format(service_name)
+                s_message = f'*Recovery* Service: {service_name} '
                 if status:
                     remediation_use = True
                     s_message += ' - *OK* ' + u'\U00002705'
                 else:
                     remediation_use = False
                     if message:
-                        s_message += '- *Error: {0}* '.format(message)
+                        s_message += f'- *Error: {message}* '
                     else:
                         s_message += '- *UNSUCCESSFUL* '
                     s_message += u'\U000026A0'
@@ -96,11 +96,11 @@ class Watchful(ModuleBase):
         self.dict_return.set(service_name, status, s_message, False, other_data)
 
     def __service_remediation(self, service_name):
-        cmd = '{0} start {1}'.format(self.paths.find('systemctl'), service_name)
+        cmd = f'{self.paths.find("systemctl")} start {service_name}'
         self._run_cmd(cmd)
 
     def __service_return(self, service_name):
-        cmd = '{0} status {1}'.format(self.paths.find('systemctl'), service_name)
+        cmd = f'{self.paths.find("systemctl")} status {service_name}'
         stdout, stderr = self._run_cmd(cmd, True)
         if not stdout:
             return False, True, (stderr[:-1] if stderr else '')

@@ -46,7 +46,7 @@ class Watchful(ModuleBase):
         self.paths.set('ping', '/bin/ping')
 
     def __debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
-        super().debug.print(">> PlugIn >> {0} >> {1}".format(self.name_module, msg), level)
+        super().debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)
 
     def check(self):
         list_host = self.__check_get_list_hosts()
@@ -64,7 +64,7 @@ class Watchful(ModuleBase):
             else:
                 is_enabled = self.__default_enabled
 
-            self.__debug("Ping: {0} - Enabled: {1}".format(key, is_enabled), DebugLevel.info)
+            self.__debug(f"Ping: {key} - Enabled: {is_enabled}", DebugLevel.info)
 
             if is_enabled:
                 return_list.append(key)
@@ -80,7 +80,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = 'Ping: {0} - *Error: {1}* {2}'.format(host, exc, u'\U0001F4A5')
+                    message = f'Ping: {host} - *Error: {exc}* {u"\U0001F4A5"}'
                     self.dict_return.set(host, False, message)
 
     def __ping_check(self, host):
@@ -92,7 +92,7 @@ class Watchful(ModuleBase):
 
         status = self.__ping_return(host, tmp_timeout, tmp_attempt)
 
-        s_message = 'Ping: *{0}* '.format(tmp_host_name)
+        s_message = f'Ping: *{tmp_host_name}* '
         if status:
             s_message += u'\U0001F53C'
         else:
@@ -106,7 +106,7 @@ class Watchful(ModuleBase):
     def __ping_return(self, host, timeout, attempt):
         counter = 0
         while counter < attempt:
-            cmd = '{0} -c 1 -W {1} {2}'.format(self.paths.find('ping'), timeout, host)
+            cmd = f'{self.paths.find("ping")} -c 1 -W {timeout} {host}'
             _, r_code = self._run_cmd(cmd, return_exit_code=True)
             if r_code == 0:
                 return True
@@ -131,7 +131,7 @@ class Watchful(ModuleBase):
                     if opt_find is None:
                         raise ValueError("opt_find it can not be None!")
                     else:
-                        raise TypeError("{0} is not valid option!".format(opt_find.name))
+                        raise TypeError(f"{opt_find.name} is not valid option!")
         else:
             val_def = default_val
 

@@ -24,7 +24,7 @@ from lib.switch import Switch
 __all__ = ['ReturnModuleCheck']
 
 
-class ReturnModuleCheck(object):
+class ReturnModuleCheck:
 
     """ Main Class. """
 
@@ -67,16 +67,7 @@ class ReturnModuleCheck(object):
         return self.list.keys()
 
     def is_exist(self, key: str) -> bool:
-        """
-        Comprueba si la key que le especificamos existe en la lista de returns.
-
-        :param key: Key que buscamos.
-        :return:  True si existe, False si no existe.
-
-        """
-        if key in self.list.keys():
-            return True
-        return False
+        return key in self.list
 
     def set(self, key: str, status: bool = True, message='', send_msg: bool = True, other_data: dict = None) -> bool:
         """

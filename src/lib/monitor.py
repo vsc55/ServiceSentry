@@ -141,11 +141,11 @@ class Monitor(ObjectBase):
         if message and self.tg:
             hostname = socket.gethostname()
             # Hay que enviar "\[" ya que solo "[" se lo come Telegram en modo "Markdown".
-            message = "{0} \[{1}]: {2}".format(u'\U0001F4BB', hostname, message)
+            message = f"{u'\U0001F4BB'} \[{hostname}]: {message}"
             if status is True:
-                message = "{0} {1}".format(u'\U00002705', message)
+                message = f"{u'\U00002705'} {message}"
             elif status is False:
-                message = "{0} {1}".format(u'\U0000274E', message)
+                message = f"{u'\U0000274E'} {message}"
             self.tg.send_message(message)
 
     def send_message_end(self):
@@ -159,13 +159,11 @@ class Monitor(ObjectBase):
             l_find.append(module_sub_key)
         l_find.append('status')
 
-        if self.status.get_conf(l_find, not status) != status:
-            return True
-        return False
+        return self.status.get_conf(l_find, not status) != status
 
     def check_module(self, module_name):
         try:
-            self.debug.print("> Monitor > check_module >> Module: {0}".format(module_name), DebugLevel.info)
+            self.debug.print(f"> Monitor > check_module >> Module: {module_name}", DebugLevel.info)
             module_import = importlib.import_module(module_name)
             module = module_import.Watchful(self)
             r_mod_check = module.check()
@@ -173,9 +171,7 @@ class Monitor(ObjectBase):
             if isinstance(r_mod_check, ReturnModuleCheck):
                 for (key, value) in r_mod_check.items():
                     self.debug.print(
-                        "> Monitor > check_module >> Module: {0} - Key: {1} - Val: {2}".format(
-                            module_name, key, value
-                        )
+                        f"> Monitor > check_module >> Module: {module_name} - Key: {key} - Val: {value}"
                     )
                     tmp_status = r_mod_check.get_status(key)
                     tmp_message = r_mod_check.get_message(key)
@@ -188,17 +184,14 @@ class Monitor(ObjectBase):
                         if tmp_send:
                             self.send_message(tmp_message, tmp_status)
                         self.debug.print(
-                            '> Monitor > check_module >> Module: {0}/{1} - New Status: {2}'.format(
-                                module_name, key, tmp_status
-                            )
+                            f'> Monitor > check_module >> Module: {module_name}/{key} - New Status: {tmp_status}'
                         )
                 return True
 
             else:
                 msg_debug = '\n\n'+'*'*60 + '\n'
-                msg_debug += "WARNING: check_module({0}) - Format not implement: {1}\n".format(module_name,
-                                                                                               type(r_mod_check))
-                msg_debug += 'Data Return: {0}\n'.format(pprint.pformat(r_mod_check))
+                msg_debug += f"WARNING: check_module({module_name}) - Format not implement: {type(r_mod_check)}\n"
+                msg_debug += f'Data Return: {pprint.pformat(r_mod_check)}\n'
                 msg_debug += '*'*60 + '\n'
                 msg_debug += '*'*60 + '\n\n'
                 self.debug.print(msg_debug, DebugLevel.warning)
@@ -210,7 +203,7 @@ class Monitor(ObjectBase):
     def check(self):
         # cont_break = 0  # Debug - Count
 
-        self.debug.print("> Monitor > check >> Check Init: {0}".format(time.strftime("%c")), DebugLevel.info)
+        self.debug.print(f"> Monitor > check >> Check Init: {time.strftime('%c')}", DebugLevel.info)
         list_modules = []
         for module_def in glob.glob(os.path.join(self.dir_modules, '*.py')):
             module_def = os.path.splitext(os.path.basename(module_def))[0]
@@ -234,7 +227,7 @@ class Monitor(ObjectBase):
         self.status.read()
 
         max_threads = self.get_conf('threads', self.__default_threads)
-        self.debug.print("> Monitor > check >> Monitor Max Threads: {0}".format(max_threads))
+        self.debug.print(f"> Monitor > check >> Monitor Max Threads: {max_threads}")
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
             future_to_run_module = {executor.submit(self.check_module, module): module for module in list_modules}
             for future in concurrent.futures.as_completed(future_to_run_module):
@@ -250,4 +243,4 @@ class Monitor(ObjectBase):
             self.status.save()
 
         self.send_message_end()
-        self.debug.print("> Monitor > check >> Check End: {0}".format(time.strftime("%c")), DebugLevel.info)
+        self.debug.print(f"> Monitor > check >> Check End: {time.strftime('%c')}", DebugLevel.info)

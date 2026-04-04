@@ -22,9 +22,9 @@
 __all__ = ['Mem']
 
 
-class Mem(object):
+class Mem:
 
-    class MemInfo(object):
+    class MemInfo:
         def __init__(self, total: int = 0, free: int = 0):
             self.total = total
             self.free = free

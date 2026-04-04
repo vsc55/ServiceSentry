@@ -22,7 +22,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import codecs
 import json
 import os
 from lib import ObjectBase
@@ -39,10 +38,7 @@ class ConfigStore(ObjectBase):
 
     @property
     def is_exist_file(self):
-        if self.file:
-            if os.path.isfile(self.file):
-                return True
-        return False
+        return bool(self.file and os.path.isfile(self.file))
 
     @property
     def file(self):
@@ -56,18 +52,18 @@ class ConfigStore(ObjectBase):
         return_date = def_return
         if self.is_exist_file:
             try:
-                with codecs.open(self.file, 'r', 'utf-8') as f:
-                    return_date = json.loads(f.read())
+                with open(self.file, 'r', encoding='utf-8') as f:
+                    return_date = json.load(f)
             except Exception as e:
                 self.debug.exception(e)
         else:
-            self.debug.print("Config >> Warning: File ({0}) not exist!!!".format(self.file),  DebugLevel.warning)
+            self.debug.print(f"Config >> Warning: File ({self.file}) not exist!!!",  DebugLevel.warning)
         return return_date
 
     def save(self, data) -> bool:
         try:
-            with codecs.open(self.file, 'w', 'utf-8') as f:
-                f.write(json.dumps(data))
+            with open(self.file, 'w', encoding='utf-8') as f:
+                json.dump(data, f)
         except Exception as e:
             self.debug.exception(e)
             return False

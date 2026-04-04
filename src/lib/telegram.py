@@ -75,8 +75,8 @@ class Telegram(ObjectBase):
 
     def send_message_end(self, hostname):
         if self.count_msg > 0:
-            s_message = "Summary *{0}*, get *{1}* new Message.".format(hostname, self.count_msg)
-            s_message = "{0} {1} {2}{2}{2}".format(u'\U00002139', s_message, u'\U0000261D')
+            s_message = f"Summary *{hostname}*, get *{self.count_msg}* new Message."
+            s_message = f"{u'\U00002139'} {s_message} {u'\U0000261D'}{u'\U0000261D'}{u'\U0000261D'}"
             self.add_list(s_message)
             # Sleep para asegurarnos de que el mensaje anterior esta en la lista antes de iniciar el siguiente While.
             sleep(1)
@@ -91,9 +91,7 @@ class Telegram(ObjectBase):
 
     @property
     def is_entry_list(self) -> bool:
-        if self.list_msg and len(self.list_msg) > 0:
-            return False
-        return True
+        return not self.list_msg or len(self.list_msg) == 0
 
     def add_list(self, message):
         # Efectuamos insert para mantener el orden.
@@ -109,7 +107,7 @@ class Telegram(ObjectBase):
         while while_run:
             if not self.is_entry_list:
                 msg = self.list_msg.pop(0)
-                self.debug.print("Telegram > Send >> Msg: {0}".format(msg))
+                self.debug.print(f"Telegram > Send >> Msg: {msg}")
                 if self.group_messages:
                     msg_group += msg + "\n"
                 else:
@@ -130,7 +128,7 @@ class Telegram(ObjectBase):
     def api_send_message(self, message):
         code_return = 0
         if message and self.token and self.chat_id:
-            result = requests.post('https://api.telegram.org/bot{0}/sendMessage'.format(self.token),
+            result = requests.post(f'https://api.telegram.org/bot{self.token}/sendMessage',
                                    data={'chat_id': self.chat_id, 'text': message, 'parse_mode': 'Markdown'})
             code_return = result.status_code
         else:
