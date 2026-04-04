@@ -85,6 +85,7 @@ class Telegram(ObjectBase):
         while True:
             if self.is_entry_list:
                 break
+            sleep(0.1)
 
         self.reset_count()
 
@@ -120,9 +121,10 @@ class Telegram(ObjectBase):
                     if msg_group:
                         self.api_send_message(msg_group)
                         msg_group = ''
+                if self.stop:
+                    while_run = False
                 else:
-                    if self.stop:
-                        while_run = False
+                    sleep(0.05)
         return
 
     def api_send_message(self, message):

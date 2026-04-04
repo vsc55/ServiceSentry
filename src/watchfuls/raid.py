@@ -53,7 +53,6 @@ class Watchful(ModuleBase):
     def check(self):
         self.__check_local()
         self.__check_remote()
-        print("DATOS*******:", self.dict_return.list)
         super().check()
         return self.dict_return
 

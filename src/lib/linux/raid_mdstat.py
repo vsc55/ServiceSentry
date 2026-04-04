@@ -86,7 +86,7 @@ class RaidMdstat(object):
 
             else:
                 print(
-                    "** RAID_Mdstat ** >> WARNING!! >> REMOTE >> CONFIG NOT VALID ({0}:{1}@{1}) NOT VALID!".format(
+                    "** RAID_Mdstat ** >> WARNING!! >> REMOTE >> CONFIG NOT VALID ({2}:{1}@{0}) NOT VALID!".format(
                         self.__host, self.__pass, self.__user))
                 return False
 
@@ -125,7 +125,8 @@ class RaidMdstat(object):
 
                 f_buffer = stdout.splitlines()
             else:
-                f_buffer = open(self.paths.find('mdstat'), 'r')
+                with open(self.paths.find('mdstat'), 'r') as f:
+                    f_buffer = f.read().splitlines()
 
             if f_buffer:
                 for l_buffer in f_buffer:

@@ -132,17 +132,34 @@ class Exec(object):
         :return: Retorna stdout, stderr y exit_code
 
         """
-        data_return = {'out': None, 'err': None, 'code': None}
+        data_return = {
+            'out': None,
+            'err': None,
+            'code': None,
+            'exception': None
+        }
 
         if self.__is_command_exist():
-            command_with_args = shlex.split(self.command)
-            execution = subprocess.Popen(command_with_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = execution.communicate()
+            try:
+                command_with_args = shlex.split(self.command)
+                execution = subprocess.Popen(
+                    command_with_args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                stdout, stderr = execution.communicate()
 
-            data_return['out'] = stdout.decode()
-            data_return['err'] = stderr.decode()
-            data_return['code'] = execution.returncode
-            data_return['exception'] = None
+                data_return['out'] = stdout.decode()
+                data_return['err'] = stderr.decode()
+                data_return['code'] = execution.returncode
+
+            except Exception as ex:
+                data_return = {
+                    'out': None,
+                    'err': None,
+                    'code': None,
+                    'exception': ex
+                }
 
         return data_return
 
@@ -159,7 +176,6 @@ class Exec(object):
         data_return = {'out': None, 'err': None, 'code': None, 'exception': None}
 
         if self.__is_command_exist():
-            shell = None
             client = None
             try:
                 client = paramiko.SSHClient()
@@ -169,7 +185,6 @@ class Exec(object):
                                username=self.user,
                                password=self.password,
                                timeout=self.timeout)
-                shell = client.invoke_shell()
 
                 # TODO: Pendiente añadir soporte para multiples commands.
                 _, stdout, stderr = client.exec_command(self.command)
@@ -192,8 +207,6 @@ class Exec(object):
                 data_return = {'out': None, 'err': None, 'code': None, 'exception': ex}
 
             finally:
-                if shell:
-                    shell.close()
                 if client:
                     client.close()
 
@@ -202,7 +215,7 @@ class Exec(object):
     def start(self):
         """ Ejecuta el comando y mira si tiene que ejecutarlo localmente o se tiene que ejecutar en otro host. """
 
-        tmp_exec = {'out': None, 'err': None}
+        tmp_exec = {'out': None, 'err': None, 'code': None, 'exception': None}
         if self.__is_command_exist():
             with Switch(self.location) as case:
                 if case(EnumLocationExec.local):

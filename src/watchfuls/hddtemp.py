@@ -20,11 +20,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import concurrent.futures
-import telnetlib
+import socket
 from lib import Switch
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
-from pprint import pprint
 
 
 class Watchful(ModuleBase):
@@ -126,12 +125,17 @@ class Watchful(ModuleBase):
     def __hddtemp_return(self, hddtemp):
         timeout = self.get_conf('timeout', self.__default_timeout)
         try:
-            if timeout > 0:
-                tn = telnetlib.Telnet(hddtemp.host, hddtemp.port, timeout)
-            else:
-                tn = telnetlib.Telnet(hddtemp.host, hddtemp.port)
-            # decode('ascii') removes the B char that appears at the beginning of the string
-            read_all = str(tn.read_all().decode('ascii'))
+            with socket.create_connection(
+                (hddtemp.host, hddtemp.port),
+                timeout=timeout if timeout > 0 else None
+            ) as sock:
+                data = b''
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+            read_all = data.decode('ascii')
 
         except Exception as exc:
             hddtemp.error = exc
@@ -142,6 +146,8 @@ class Watchful(ModuleBase):
             item_hdd = str(value).split("|")
             # Remove items None.
             item_hdd = list(filter(None, item_hdd))
+            if len(item_hdd) < 4:
+                continue
 
             # /dev/sda|ST2000VN004-2E4164|29|C
             # |/dev/sda|ST2000VN004-2E4164|31|C||/dev/sdb|ST3000VN007-2E4166|31|C||/dev/sdc|ST3000VN007-2E4166|ERR|*|
@@ -170,15 +176,14 @@ class Watchful(ModuleBase):
 
     class Hddtemp_Info(object):
 
-        __label = ""
-        __host = ""
-        __port = 0
-        __alert = 0
-        __exclude = []
-        __list_hdd = {}
-        __error = ""
-
         def __init__(self, label):
+            self.__label = ""
+            self.__host = ""
+            self.__port = 0
+            self.__alert = 0
+            self.__exclude = []
+            self.__list_hdd = {}
+            self.__error = ""
             self.label = label
 
         @property

@@ -198,7 +198,7 @@ class Monitor(ObjectBase):
                 msg_debug = '\n\n'+'*'*60 + '\n'
                 msg_debug += "WARNING: check_module({0}) - Format not implement: {1}\n".format(module_name,
                                                                                                type(r_mod_check))
-                msg_debug += 'Data Return: {0}\n'.format(pprint.pprint(r_mod_check))
+                msg_debug += 'Data Return: {0}\n'.format(pprint.pformat(r_mod_check))
                 msg_debug += '*'*60 + '\n'
                 msg_debug += '*'*60 + '\n\n'
                 self.debug.print(msg_debug, DebugLevel.warning)

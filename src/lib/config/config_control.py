@@ -41,11 +41,11 @@ class ConfigControl(ConfigStore):
         self.data = init_data
 
     @property
-    def data(self) -> dict:
+    def data(self):
         """Return Obtenemos los datos almacendados."""
-        if self.__data:
-            return self.__data
-        return {}
+        if self.__data is None:
+            return {}
+        return self.__data
 
     @data.setter
     def data(self, val):
@@ -75,7 +75,7 @@ class ConfigControl(ConfigStore):
 
     def read(self, return_data=True, def_return=None):
         self.data = super().read(def_return)
-        if self.data is not None:
+        if self.__data is not None:
             self.__load = datetime.datetime.now()
             self.__update = self.__load
         else:

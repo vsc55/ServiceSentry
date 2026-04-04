@@ -33,10 +33,12 @@ class Watchful(ModuleBase):
     def check(self):
         list_service = []
         for (key, value) in self.get_conf('list', {}).items():
-            enabled = value['enabled']
-            remediation = value['remediation']
-            self.debug.print(">> PlugIn >> {0} >> Service: {1} - Enabled: {2} - Remediation: {3}".format(self.name_module, key, enabled, remediation),
-                             DebugLevel.info)
+            enabled = str(value.get('enabled', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
+            remediation = str(value.get('remediation', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
+            self.debug.print(
+                ">> PlugIn >> {0} >> Service: {1} - Enabled: {2} - Remediation: {3}".format(self.name_module, key, enabled, remediation),
+                DebugLevel.info
+            )
             if enabled:
                 list_service.append({"service": key, "remediation": remediation})
 
@@ -100,11 +102,13 @@ class Watchful(ModuleBase):
     def __service_return(self, service_name):
         cmd = '{0} status {1}'.format(self.paths.find('systemctl'), service_name)
         stdout, stderr = self._run_cmd(cmd, True)
-        if stdout == '':
-            return False, True, stderr[:-1]
+        if not stdout:
+            return False, True, (stderr[:-1] if stderr else '')
 
         for line in stdout.split('\n'):
             s_line = line.split()
+            if not s_line:
+                continue
             if str(s_line[0]) == 'Active:':
                 if str(s_line[1]) == "active":
                     #    Active: active (running) since Mon 2019-05-27 11:28:46 CEST; 1min 48s ago
@@ -121,9 +125,10 @@ class Watchful(ModuleBase):
                 else:
                     return False, True, line
 
-        return False, 'Not detect status in the data!!!'
+        return False, False, 'Not detect status in the data!!!'
 
     @staticmethod
     def __clear_str(text: str) -> str:
         if text:
             return str(text).strip().replace("(", "").replace(")", "")
+        return ''

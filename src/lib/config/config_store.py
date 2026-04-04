@@ -56,9 +56,8 @@ class ConfigStore(ObjectBase):
         return_date = def_return
         if self.is_exist_file:
             try:
-                f = codecs.open(self.file, 'r', 'utf-8')
-                return_date = json.loads(f.read())
-                f.close()
+                with codecs.open(self.file, 'r', 'utf-8') as f:
+                    return_date = json.loads(f.read())
             except Exception as e:
                 self.debug.exception(e)
         else:
@@ -67,9 +66,8 @@ class ConfigStore(ObjectBase):
 
     def save(self, data) -> bool:
         try:
-            f = codecs.open(self.file, 'w', 'utf-8')
-            f.write(json.dumps(data))
-            f.close()
+            with codecs.open(self.file, 'w', 'utf-8') as f:
+                f.write(json.dumps(data))
         except Exception as e:
             self.debug.exception(e)
             return False
