@@ -18,15 +18,18 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+""" Debug class for debugging purposes. """
 
 import pprint
 import traceback
+
 from lib.debug import DebugLevel
 
 __all__ = ['Debug']
 
 
 class Debug:
+    """ Debug class. """
 
     def __init__(self, enable: bool = True, level: DebugLevel = DebugLevel.info):
         self.enabled = enable
@@ -34,36 +37,45 @@ class Debug:
 
     @property
     def enabled(self) -> bool:
-        return self.__enabled
+        """ Return if the debug is enabled. """
+        return self._enabled
 
     @enabled.setter
     def enabled(self, value: bool):
-        self.__enabled = value
+        """ Set the debug enabled or disabled. """
+        self._enabled = value
 
     @property
     def level(self) -> DebugLevel:
-        return self.__level
+        """ Return the debug level. """
+        return self._level
 
     @level.setter
     def level(self, value: DebugLevel = DebugLevel.null):
-        self.__level = value
+        """ Set the debug level. """
+        self._level = value
 
-    def print(self, message, msg_level: DebugLevel = DebugLevel.debug, force: bool = False):
-        show_msg = True
-        if self.enabled is False:
-            show_msg = False
-        elif force is False:
-            if self.level.value > msg_level.value:
-                show_msg = False
+    def print(
+            self,
+            message,
+            msg_level: DebugLevel = DebugLevel.debug,
+            force: bool = False
+        ):
+        """
+        Print the message if debug is enabled and the message level is
+        greater than or equal to the configured debug level, or if force is True.
+        """
+        if not force and (not self.enabled or self.level > msg_level):
+            return
 
-        if show_msg:
-            if isinstance(message, str):
-                print(message)
-            else:
-                pprint.pprint(message)
+        if isinstance(message, str):
+            print(message)
+        else:
+            pprint.pprint(message)
 
     @staticmethod
     def exception(ex=None):
+        """ Print the exception with traceback. """
         msg_print = 'Exception in user code:\n'
         msg_print += f"{'-'*60}\n"
         if ex:
@@ -74,6 +86,7 @@ class Debug:
         print(msg_print)
 
     def debug_obj(self, name_module, obj_debug, obj_info="Data Object"):
+        """ Print the debug information of an object. """
         str_obj = pprint.pformat(obj_debug)
         msg_debug = f"{'*' * 60}\n"
         msg_debug += f"Debug [{name_module}] - {obj_info}:\n"
@@ -93,5 +106,6 @@ if __name__ == '__main__':
         x.level = DebugLevel.debug
         x.print("Msg Test 4 - Level = debug - Yes Show")
         val = 10 * (1/0)
+
     except Exception as e:
         x.exception(e)

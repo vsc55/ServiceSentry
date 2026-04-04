@@ -3,6 +3,7 @@
 """Tests para la clase Debug."""
 
 import pytest
+
 from lib.debug.debug import Debug
 from lib.debug.debug_level import DebugLevel
 
@@ -55,15 +56,15 @@ class TestDebug:
         captured = capsys.readouterr()
         assert "error message" in captured.out
 
-    def test_print_force_does_not_bypass_disabled(self, capsys):
-        """force=True solo ignora el nivel, NO el enabled=False."""
+    def test_print_force_bypasses_disabled(self, capsys):
+        """force=True bypasses enabled=False and shows the message."""
         d = Debug(False, DebugLevel.error)
         d.print("forced message", DebugLevel.debug, force=True)
         captured = capsys.readouterr()
-        assert "forced message" not in captured.out
+        assert "forced message" in captured.out
 
     def test_print_force_bypasses_level(self, capsys):
-        """force=True ignora la restricción de nivel cuando enabled=True."""
+        """force=True bypasses level restriction when enabled=True."""
         d = Debug(True, DebugLevel.error)
         d.print("forced message", DebugLevel.debug, force=True)
         captured = capsys.readouterr()

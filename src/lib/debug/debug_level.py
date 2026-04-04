@@ -18,13 +18,14 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-from enum import Enum
+""" Debug level enumeration. """
+from enum import IntEnum
 
 __all__ = ['DebugLevel']
 
 
-class DebugLevel(Enum):
+class DebugLevel(IntEnum):
+    """ Debug level enumeration. """
     null = 0
     debug = 1
     info = 2
