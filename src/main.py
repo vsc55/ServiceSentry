@@ -315,6 +315,60 @@ class Main(ObjectBase):
         return 2
 
 
+def start_web(args):
+    """Start the web administration server.
+
+    Reads web_admin settings from ``config.json`` and launches a Flask
+    server for browser-based configuration editing.
+    """
+    try:
+        from lib.web_admin import WebAdmin  # noqa: WPS433 – conditional import
+    except ImportError:
+        print("Error: Flask es necesario para el panel web.")
+        print("       Instálalo con:  pip install flask")
+        sys.exit(1)
+
+    from lib.config import ConfigControl as _CC
+
+    dir_base = os.path.dirname(os.path.abspath(__file__))
+    is_dev = 'src' in dir_base
+
+    path_config = getattr(args, 'path', None)
+    if path_config:
+        config_dir = path_config
+    elif is_dev:
+        config_dir = os.path.normpath(os.path.join(dir_base, '../data/'))
+    else:
+        config_dir = '/etc/ServiSesentry/'
+
+    var_dir = '/var/lib/ServiSesentry/dev/' if is_dev else '/var/lib/ServiSesentry/'
+
+    cfg = _CC(os.path.join(config_dir, 'config.json'))
+    cfg.read()
+
+    username = cfg.get_conf(['web_admin', 'username'], 'admin')
+    password = cfg.get_conf(['web_admin', 'password'], 'admin')
+    host = getattr(args, 'web_host', None) or cfg.get_conf(
+        ['web_admin', 'host'], WebAdmin.DEFAULT_HOST
+    )
+    port = getattr(args, 'web_port', None) or cfg.get_conf(
+        ['web_admin', 'port'], WebAdmin.DEFAULT_PORT
+    )
+
+    admin = WebAdmin(config_dir, str(username), str(password), var_dir)
+
+    print("ServiceSentry Web Admin")
+    print(f"  URL:    http://{host}:{port}")
+    print(f"  Config: {config_dir}")
+    if username == 'admin' and password == 'admin':
+        print("  ⚠  Credenciales por defecto (admin/admin).")
+        print("     Configúralas en config.json → web_admin")
+    print("  Pulsa Ctrl+C para detener")
+    print()
+
+    admin.run(host=str(host), port=int(port), debug=getattr(args, 'verbose', False))
+
+
 def arg_check_dir_path(path):
     """
     Check if the provided path is a valid directory path.
@@ -405,9 +459,38 @@ def args_init() -> argparse.Namespace:
         dest="path",
         help="path to the configuration files directory",
     )
+
+    # Web admin arguments
+    web_group = ap.add_argument_group('web admin')
+    web_group.add_argument(
+        '--web',
+        default=False,
+        action="store_true",
+        dest="web_mode",
+        help="start the web administration panel instead of monitoring",
+    )
+    web_group.add_argument(
+        '--web-port',
+        default=None,
+        type=int,
+        metavar='PORT',
+        dest="web_port",
+        help="port for the web admin panel (default: 8080 or config.json)",
+    )
+    web_group.add_argument(
+        '--web-host',
+        default=None,
+        metavar='HOST',
+        dest="web_host",
+        help="host/IP to bind the web admin panel (default: 0.0.0.0)",
+    )
     return ap.parse_args()
 
 if __name__ == "__main__":
-    main = Main(args_init())
-    start_code = main.start()
-    sys.exit(start_code)
+    _args = args_init()
+    if getattr(_args, 'web_mode', False):
+        start_web(_args)
+    else:
+        main = Main(_args)
+        start_code = main.start()
+        sys.exit(start_code)

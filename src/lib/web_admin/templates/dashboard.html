@@ -1,0 +1,877 @@
+{% extends "base.html" %}
+
+{% block title %}ServiceSentry — Admin{% endblock %}
+
+{% block extra_head %}
+<style>
+    .card-header[role="button"] {
+        cursor: pointer;
+        transition: background .15s
+    }
+
+    .card-header[role="button"]:hover {
+        background: rgba(0, 0, 0, .03) !important
+    }
+
+    .module-card {
+        border-left: 4px solid #6c757d;
+        transition: border-color .2s
+    }
+
+    .module-card.enabled {
+        border-left-color: #198754
+    }
+
+    .toast-container {
+        z-index: 9999
+    }
+
+    #loading {
+        position: fixed;
+        inset: 0;
+        background: rgba(255, 255, 255, .85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<!-- Loading overlay -->
+<div id="loading">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Cargando…</span>
+    </div>
+</div>
+
+<!-- Navbar -->
+<nav class="navbar navbar-dark bg-dark sticky-top">
+    <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">
+            <i class="bi bi-shield-check me-1"></i> ServiceSentry
+        </span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="text-light small">
+                <i class="bi bi-person-circle me-1"></i>{{ display_name }}
+                <span class="badge bg-secondary ms-1">{{ role }}</span>
+            </span>
+            <a href="/logout" class="btn btn-outline-light btn-sm">
+                <i class="bi bi-box-arrow-right me-1"></i>Salir
+            </a>
+        </div>
+    </div>
+</nav>
+
+<!-- Main content -->
+<div class="container-fluid py-3">
+    <!-- Tabs -->
+    <ul class="nav nav-tabs" id="mainTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-modules" type="button">
+                <i class="bi bi-puzzle me-1"></i>Módulos
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-config" type="button">
+                <i class="bi bi-gear me-1"></i>Configuración
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-status" type="button"
+                id="btn-tab-status">
+                <i class="bi bi-activity me-1"></i>Estado
+            </button>
+        </li>
+        <li class="nav-item" role="presentation" id="tab-users-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-users" type="button" id="btn-tab-users">
+                <i class="bi bi-people me-1"></i>Usuarios
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content pt-3">
+        <!-- ==================== Modules Tab ==================== -->
+        <div class="tab-pane fade show active" id="tab-modules">
+            <div id="modules-container"></div>
+            <button class="btn btn-primary mt-3" onclick="saveModules()">
+                <i class="bi bi-save me-1"></i>Guardar módulos
+            </button>
+        </div>
+
+        <!-- ==================== Config Tab ===================== -->
+        <div class="tab-pane fade" id="tab-config">
+            <div id="config-container"></div>
+            <button class="btn btn-primary mt-3" onclick="saveConfig()">
+                <i class="bi bi-save me-1"></i>Guardar configuración
+            </button>
+        </div>
+
+        <!-- ==================== Status Tab ===================== -->
+        <div class="tab-pane fade" id="tab-status">
+            <div id="status-container">
+                <p class="text-muted">Selecciona esta pestaña para cargar el estado.</p>
+            </div>
+        </div>
+
+        <!-- ==================== Users Tab ====================== -->
+        <div class="tab-pane fade" id="tab-users">
+            <div class="d-flex align-items-center mb-3">
+                <h5 class="mb-0"><i class="bi bi-people me-2"></i>Gestión de usuarios</h5>
+                <button class="btn btn-sm btn-success ms-auto" onclick="openNewUserModal()">
+                    <i class="bi bi-person-plus me-1"></i>Nuevo usuario
+                </button>
+            </div>
+            <div id="users-container"></div>
+            <hr>
+            <h6 class="text-muted"><i class="bi bi-key me-1"></i>Cambiar mi contraseña</h6>
+            <div class="card" style="max-width:500px">
+                <div class="card-body py-2">
+                    <div class="row mb-2">
+                        <label class="col-sm-5 col-form-label col-form-label-sm">Contraseña actual</label>
+                        <div class="col-sm-7"><input type="password" class="form-control form-control-sm"
+                                id="pwCurrent"></div>
+                    </div>
+                    <div class="row mb-2">
+                        <label class="col-sm-5 col-form-label col-form-label-sm">Nueva contraseña</label>
+                        <div class="col-sm-7"><input type="password" class="form-control form-control-sm" id="pwNew">
+                        </div>
+                    </div>
+                    <div class="row mb-2">
+                        <label class="col-sm-5 col-form-label col-form-label-sm">Confirmar</label>
+                        <div class="col-sm-7"><input type="password" class="form-control form-control-sm"
+                                id="pwConfirm"></div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="changeOwnPassword()">
+                        <i class="bi bi-check-lg me-1"></i>Cambiar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New/Edit user modal -->
+<div class="modal fade" id="userModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="userModalTitle">Nuevo usuario</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Usuario</label>
+                    <input type="text" class="form-control form-control-sm" id="umUsername" autocomplete="off">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Nombre para mostrar</label>
+                    <input type="text" class="form-control form-control-sm" id="umDisplayName">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Rol</label>
+                    <select class="form-select form-select-sm" id="umRole">
+                        <option value="admin">Admin — Control total</option>
+                        <option value="editor">Editor — Editar configuración</option>
+                        <option value="viewer" selected>Viewer — Solo lectura</option>
+                    </select>
+                </div>
+                <div class="mb-3" id="umPasswordGroup">
+                    <label class="form-label small fw-semibold" id="umPasswordLabel">Contraseña</label>
+                    <input type="password" class="form-control form-control-sm" id="umPassword"
+                        autocomplete="new-password">
+                    <div class="form-text" id="umPasswordHint" style="display:none">Dejar vacío para no cambiar</div>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button class="btn btn-sm btn-primary" id="btnUserModalOk">
+                    <i class="bi bi-check-lg me-1"></i>Guardar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add-item modal -->
+<div class="modal fade" id="addItemModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title">Nuevo elemento</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small">Nombre / clave</label>
+                <input type="text" class="form-control form-control-sm" id="newItemName" placeholder="Ej: 192.168.1.1">
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button class="btn btn-sm btn-primary" id="btnAddItemOk">
+                    <i class="bi bi-plus-lg me-1"></i>Añadir
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast" class="toast align-items-center border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body" id="toast-body"></div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    /* ================================================================
+       ServiceSentry — Dashboard JavaScript
+       ================================================================ */
+
+    // ──────────────────────────── Constants ────────────────────────────
+    const ICONS = {
+        filesystemusage: '📁', hddtemp: '💿', mysql: '🗄️', ping: '🏓',
+        raid: '💽', ram_swap: '🐏', service_status: '⚙️',
+        temperature: '🌡️', web: '🌐'
+    };
+    const PRETTY_NAMES = {
+        filesystemusage: 'Uso de disco',
+        hddtemp: 'Temperatura HDD',
+        mysql: 'MySQL / MariaDB',
+        ping: 'Ping',
+        raid: 'RAID',
+        ram_swap: 'RAM y Swap',
+        ram: 'RAM',
+        swap: 'Swap',
+        service_status: 'Servicios',
+        temperature: 'Temperatura CPU',
+        web: 'Sitios Web'
+    };
+    const LABELS = {
+        enabled: 'Habilitado', alert: 'Alerta (%)', alert_ram: 'Alerta RAM (%)',
+        alert_swap: 'Alerta SWAP (%)', threads: 'Hilos', timeout: 'Timeout (s)',
+        attempt: 'Intentos', host: 'Host', port: 'Puerto', user: 'Usuario',
+        password: 'Contraseña', db: 'Base de datos', socket: 'Socket',
+        label: 'Etiqueta', code: 'Código HTTP', local: 'Monitor local',
+        exclude: 'Excluidos', remediation: 'Auto-remediación',
+        token: 'Token Bot', chat_id: 'Chat ID', group_messages: 'Agrupar mensajes',
+        timer_check: 'Intervalo (s)', debug: 'Debug',
+        list: 'Elementos', remote: 'Remotos',
+        username: 'Usuario web', key_file: 'Clave SSH',
+        pretty_name: 'Nombre para mostrar'
+    };
+    const SECTION_LABELS = {
+        daemon: 'Daemon', global: 'General', telegram: 'Telegram', web_admin: 'Panel Web'
+    };
+    const SENSITIVE = new Set(['password', 'token']);
+
+    // ──────────────────────────── State ───────────────────────────────
+    let modulesData = {};
+    let configData = {};
+    let usersData = {};
+    let currentUser = {};
+    let _uid = 0;
+    let _addItemCtx = null;   // {target, pathStr}
+    let _editingUser = null;  // null = new, string = editing username
+
+    // ──────────────────────────── Utilities ───────────────────────────
+    function uid() { return 'u' + (++_uid); }
+
+    function esc(s) {
+        const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML;
+    }
+    function escAttr(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function setPath(obj, parts, val) {
+        let cur = obj;
+        for (let i = 0; i < parts.length - 1; i++) {
+            if (!(parts[i] in cur) || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
+            cur = cur[parts[i]];
+        }
+        cur[parts[parts.length - 1]] = val;
+    }
+    function getPath(obj, parts) {
+        let cur = obj;
+        for (const p of parts) {
+            if (cur == null || typeof cur !== 'object' || !(p in cur)) return undefined;
+            cur = cur[p];
+        }
+        return cur;
+    }
+
+    function fieldLabel(k) { return LABELS[k] || k; }
+
+    /** Return pretty name for a module: custom > default > raw key */
+    function modulePrettyName(name, cfg) {
+        if (cfg && cfg.pretty_name) return cfg.pretty_name;
+        return PRETTY_NAMES[name] || name;
+    }
+
+    // ──────────────────────────── Toast ───────────────────────────────
+    function showToast(msg, type = 'success') {
+        const t = document.getElementById('toast');
+        const b = document.getElementById('toast-body');
+        t.className = 'toast align-items-center border-0 text-bg-' + type;
+        b.textContent = msg;
+        bootstrap.Toast.getOrCreateInstance(t, { delay: 3000 }).show();
+    }
+
+    // ──────────────────────────── API ─────────────────────────────────
+    async function apiGet(url) {
+        try {
+            const r = await fetch(url);
+            if (r.status === 401) { location.href = '/login'; return null; }
+            return await r.json();
+        } catch (e) { showToast('Error de conexión', 'danger'); return null; }
+    }
+    async function apiPut(url, data) {
+        try {
+            const r = await fetch(url, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            if (r.status === 401) { location.href = '/login'; return null; }
+            return await r.json();
+        } catch (e) { showToast('Error de conexión', 'danger'); return null; }
+    }
+    async function apiPost(url, data) {
+        try {
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            if (r.status === 401) { location.href = '/login'; return null; }
+            return { status: r.status, data: await r.json() };
+        } catch (e) { showToast('Error de conexión', 'danger'); return null; }
+    }
+    async function apiDelete(url) {
+        try {
+            const r = await fetch(url, { method: 'DELETE' });
+            if (r.status === 401) { location.href = '/login'; return null; }
+            return { status: r.status, data: await r.json() };
+        } catch (e) { showToast('Error de conexión', 'danger'); return null; }
+    }
+
+    // ──────────────────────────── Field render ─────────────────────────
+    function renderField(key, value, pathStr, target = 'modules') {
+        const lbl = esc(fieldLabel(key));
+        const sp = escAttr(pathStr), tg = escAttr(target);
+
+        if (typeof value === 'boolean') {
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+            <div class="col-sm-8"><div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch"
+                    ${value ? 'checked' : ''}
+                    onchange="updateField('${tg}','${sp}',this.checked)">
+            </div></div></div>`;
+        }
+        if (typeof value === 'number') {
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+            <div class="col-sm-8">
+                <input type="number" class="form-control form-control-sm"
+                    value="${value}"
+                    onchange="updateField('${tg}','${sp}',Number(this.value))">
+            </div></div>`;
+        }
+        if (typeof value === 'string') {
+            const tp = SENSITIVE.has(key) ? 'password' : 'text';
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+            <div class="col-sm-8">
+                <input type="${tp}" class="form-control form-control-sm"
+                    value="${escAttr(value)}"
+                    onchange="updateField('${tg}','${sp}',this.value)">
+            </div></div>`;
+        }
+        if (Array.isArray(value)) {
+            const csv = value.map(v => String(v)).join(', ');
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+            <div class="col-sm-8">
+                <input type="text" class="form-control form-control-sm"
+                    value="${escAttr(csv)}" placeholder="Separar con comas"
+                    onchange="updateArray('${tg}','${sp}',this.value)">
+            </div></div>`;
+        }
+        return '';
+    }
+
+    /** Render all scalar (non-object) fields of *obj*. */
+    function renderScalarFields(obj, pathPrefix, target, exclude = []) {
+        let h = '';
+        const keys = Object.keys(obj).sort((a, b) => {
+            if (a === 'enabled') return -1; if (b === 'enabled') return 1;
+            return a.localeCompare(b);
+        });
+        for (const k of keys) {
+            if (exclude.includes(k)) continue;
+            const v = obj[k];
+            if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
+            h += renderField(k, v, pathPrefix + '|' + k, target);
+        }
+        return h;
+    }
+
+    // ──────────────────────────── Collection render ───────────────────
+    function renderCollection(title, data, pathStr, target) {
+        const lbl = esc(fieldLabel(title));
+        let h = `<div class="mt-3">
+        <div class="d-flex align-items-center mb-2">
+            <h6 class="text-muted mb-0"><i class="bi bi-list-ul me-1"></i>${lbl}</h6>
+            <button class="btn btn-sm btn-outline-success ms-2 py-0 px-1"
+                onclick="openAddModal('${escAttr(target)}','${escAttr(pathStr)}')">
+                <i class="bi bi-plus-lg"></i>
+            </button>
+        </div><div class="ps-1">`;
+
+        for (const [name, val] of Object.entries(data)) {
+            h += renderCollectionItem(name, val, pathStr + '|' + name, pathStr, target);
+        }
+        h += '</div></div>';
+        return h;
+    }
+
+    function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, target) {
+        const sp = escAttr(pathStr), pp = escAttr(parentPathStr), tg = escAttr(target);
+        const nameEsc = escAttr(itemName);
+        const delBtn = `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1"
+        onclick="event.stopPropagation();removeItem('${tg}','${pp}','${nameEsc}')">
+        <i class="bi bi-trash3"></i></button>`;
+
+        // --- boolean item ---
+        if (typeof itemValue === 'boolean') {
+            return `<div class="d-flex align-items-center mb-1 p-2 rounded border bg-white">
+            <code class="me-auto small">${esc(itemName)}</code>
+            <div class="form-check form-switch me-1">
+                <input class="form-check-input" type="checkbox" ${itemValue ? 'checked' : ''}
+                    onchange="updateField('${tg}','${sp}',this.checked)">
+            </div>${delBtn}</div>`;
+        }
+
+        // --- number item ---
+        if (typeof itemValue === 'number') {
+            return `<div class="d-flex align-items-center mb-1 p-2 rounded border bg-white">
+            <code class="me-2 small">${esc(itemName)}</code>
+            <input type="number" class="form-control form-control-sm ms-auto"
+                style="max-width:100px" value="${itemValue}"
+                onchange="updateField('${tg}','${sp}',Number(this.value))">
+            ${delBtn}</div>`;
+        }
+
+        // --- dict item ---
+        if (typeof itemValue === 'object' && itemValue !== null && !Array.isArray(itemValue)) {
+            const id = uid();
+            const hasEnabled = 'enabled' in itemValue;
+            let sw = '';
+            if (hasEnabled) {
+                sw = `<div class="form-check form-switch me-1" onclick="event.stopPropagation()">
+                <input class="form-check-input" type="checkbox"
+                    ${itemValue.enabled ? 'checked' : ''}
+                    onchange="updateField('${tg}','${sp}|enabled',this.checked)">
+            </div>`;
+            }
+            const body = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : []);
+            return `<div class="card mb-2">
+            <div class="card-header d-flex align-items-center py-1 px-2 bg-white"
+                 role="button" data-bs-toggle="collapse" data-bs-target="#${id}">
+                <code class="me-auto small">${esc(itemName)}</code>
+                ${sw}${delBtn}
+                <i class="bi bi-chevron-down text-muted ms-1 small"></i>
+            </div>
+            <div class="collapse" id="${id}">
+                <div class="card-body py-2 px-3">${body}</div>
+            </div></div>`;
+        }
+        return '';
+    }
+
+    // ──────────────────────────── Modules tab ─────────────────────────
+    function renderModules() {
+        const c = document.getElementById('modules-container');
+        let h = '';
+        for (const name of Object.keys(modulesData).sort()) {
+            const cfg = modulesData[name];
+            const on = cfg.enabled !== false;
+            const icon = ICONS[name] || '📦';
+            const id = uid();
+
+            const pname = modulePrettyName(name, cfg);
+            h += `<div class="card mb-2 module-card${on ? ' enabled' : ''}" id="card-${esc(name)}">
+            <div class="card-header d-flex align-items-center py-2"
+                 role="button" data-bs-toggle="collapse" data-bs-target="#${id}">
+                <span class="me-2 fs-5">${icon}</span>
+                <div class="me-auto">
+                    <span class="fw-semibold">${esc(pname)}</span>
+                    <small class="text-muted ms-2"><code>${esc(name)}</code></small>
+                </div>
+                <div class="form-check form-switch me-2" onclick="event.stopPropagation()">
+                    <input class="form-check-input" type="checkbox" role="switch"
+                        ${on ? 'checked' : ''}
+                        onchange="toggleModule('${escAttr(name)}',this.checked)">
+                </div>
+                <i class="bi bi-chevron-down text-muted"></i>
+            </div>
+            <div class="collapse" id="${id}">
+                <div class="card-body py-2">
+                    ${renderModuleBody(name, cfg)}
+                </div>
+            </div></div>`;
+        }
+        c.innerHTML = h;
+    }
+
+    function renderModuleBody(name, cfg) {
+        // pretty_name field (always first, with placeholder)
+        const pn = cfg.pretty_name || '';
+        let h = `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${esc(fieldLabel('pretty_name'))}</label>
+            <div class="col-sm-8">
+                <input type="text" class="form-control form-control-sm"
+                    value="${escAttr(pn)}"
+                    placeholder="${escAttr(PRETTY_NAMES[name] || name)}"
+                    onchange="updatePrettyName('${escAttr(name)}',this.value)">
+            </div></div>`;
+
+        // Identify collection keys (dicts that aren't list items)
+        const colKeys = [];
+        for (const [k, v] of Object.entries(cfg)) {
+            if (typeof v === 'object' && v !== null && !Array.isArray(v)) colKeys.push(k);
+        }
+        h += renderScalarFields(cfg, name, 'modules', ['enabled', 'pretty_name', ...colKeys]);
+        for (const k of colKeys) h += renderCollection(k, cfg[k], name + '|' + k, 'modules');
+        return h;
+    }
+
+    // ──────────────────────────── Config tab ──────────────────────────
+    function renderConfig() {
+        const c = document.getElementById('config-container');
+        const order = ['daemon', 'global', 'telegram', 'web_admin'];
+        const sections = Object.keys(configData).sort((a, b) => {
+            const ai = order.indexOf(a), bi = order.indexOf(b);
+            return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+        });
+        let h = '';
+        for (const sec of sections) {
+            const data = configData[sec];
+            if (typeof data !== 'object' || data === null) continue;
+            const lbl = SECTION_LABELS[sec] || sec;
+            h += `<div class="card mb-3">
+            <div class="card-header fw-semibold py-2">
+                <i class="bi bi-gear me-1"></i>${esc(lbl)}
+            </div>
+            <div class="card-body py-2">
+                ${renderScalarFields(data, sec, 'config', [])}
+            </div></div>`;
+        }
+        c.innerHTML = h;
+    }
+
+    // ──────────────────────────── Status tab ──────────────────────────
+    async function renderStatus() {
+        const c = document.getElementById('status-container');
+        c.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+        const data = await apiGet('/api/status');
+        if (!data) { c.innerHTML = '<div class="alert alert-warning">No se pudo cargar.</div>'; return; }
+        if (!Object.keys(data).length) {
+            c.innerHTML = '<div class="alert alert-info">No hay datos de estado disponibles.</div>'; return;
+        }
+        let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
+        h += '<thead class="table-light"><tr><th>Módulo</th><th>Check</th><th>Estado</th></tr></thead><tbody>';
+        for (const [mod, checks] of Object.entries(data)) {
+            if (typeof checks !== 'object' || checks === null) continue;
+            const pname = modulePrettyName(mod, modulesData[mod]);
+            for (const [ck, info] of Object.entries(checks)) {
+                const st = info.status;
+                const icon = st === true ? '✅' : st === false ? '❌' : '❓';
+                const cls = st === true ? 'bg-success' : st === false ? 'bg-danger' : 'bg-secondary';
+                const txt = st === true ? 'OK' : st === false ? 'Error' : '—';
+                h += `<tr><td><strong>${esc(pname)}</strong></td><td>${esc(ck)}</td>
+                <td><span class="badge ${cls}">${icon} ${txt}</span></td></tr>`;
+            }
+        }
+        h += '</tbody></table></div>';
+        c.innerHTML = h;
+    }
+
+    // ──────────────────────────── Actions ─────────────────────────────
+    function updateField(target, pathStr, value) {
+        const parts = pathStr.split('|');
+        setPath(target === 'config' ? configData : modulesData, parts, value);
+    }
+
+    function updateArray(target, pathStr, csv) {
+        const arr = csv.split(',').map(s => s.trim()).filter(Boolean);
+        updateField(target, pathStr, arr);
+    }
+
+    function toggleModule(name, on) {
+        modulesData[name].enabled = on;
+        const card = document.getElementById('card-' + name);
+        if (card) card.classList.toggle('enabled', on);
+    }
+
+    function updatePrettyName(name, value) {
+        if (value.trim()) {
+            modulesData[name].pretty_name = value.trim();
+        } else {
+            delete modulesData[name].pretty_name;
+        }
+        // Update header text live
+        const card = document.getElementById('card-' + name);
+        if (card) {
+            const label = card.querySelector('.card-header .fw-semibold');
+            if (label) label.textContent = modulePrettyName(name, modulesData[name]);
+        }
+    }
+
+    function removeItem(target, parentPathStr, key) {
+        if (!confirm('¿Eliminar "' + key + '"?')) return;
+        const parts = parentPathStr.split('|');
+        const parent = getPath(target === 'config' ? configData : modulesData, parts);
+        if (parent && key in parent) {
+            delete parent[key];
+            target === 'modules' ? renderModules() : renderConfig();
+        }
+    }
+
+    // --- Add-item modal ---
+    function openAddModal(target, pathStr) {
+        _addItemCtx = { target, pathStr };
+        document.getElementById('newItemName').value = '';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('addItemModal')).show();
+        setTimeout(() => document.getElementById('newItemName').focus(), 400);
+    }
+
+    function confirmAddItem() {
+        if (!_addItemCtx) return;
+        const name = document.getElementById('newItemName').value.trim();
+        if (!name) return;
+        const { target, pathStr } = _addItemCtx;
+        const parts = pathStr.split('|');
+        const data = target === 'modules' ? modulesData : configData;
+        const parent = getPath(data, parts);
+        if (!parent || typeof parent !== 'object') return;
+        if (name in parent) { showToast('"' + name + '" ya existe', 'warning'); return; }
+
+        // Smart default: copy structure from first dict item, else true
+        let def = true;
+        for (const v of Object.values(parent)) {
+            if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+                def = {};
+                for (const [k, val] of Object.entries(v)) {
+                    if (typeof val === 'boolean') def[k] = (k === 'enabled');
+                    else if (typeof val === 'number') def[k] = 0;
+                    else if (typeof val === 'string') def[k] = '';
+                    else if (Array.isArray(val)) def[k] = [];
+                    else def[k] = {};
+                }
+                break;
+            }
+        }
+        parent[name] = def;
+        bootstrap.Modal.getInstance(document.getElementById('addItemModal')).hide();
+        target === 'modules' ? renderModules() : renderConfig();
+        _addItemCtx = null;
+    }
+
+    // --- Save ---
+    async function saveModules() {
+        const r = await apiPut('/api/modules', modulesData);
+        if (r && r.ok) showToast('Módulos guardados correctamente');
+        else showToast(r?.error || 'Error al guardar', 'danger');
+    }
+    async function saveConfig() {
+        const r = await apiPut('/api/config', configData);
+        if (r && r.ok) showToast('Configuración guardada correctamente');
+        else showToast(r?.error || 'Error al guardar', 'danger');
+    }
+
+    // ──────────────────────────── Users tab ───────────────────────────
+    const ROLE_BADGES = {
+        admin: 'bg-danger',
+        editor: 'bg-primary',
+        viewer: 'bg-secondary'
+    };
+    const ROLE_LABELS = {
+        admin: 'Admin',
+        editor: 'Editor',
+        viewer: 'Viewer'
+    };
+
+    function renderUsers() {
+        const c = document.getElementById('users-container');
+        if (!c) return;
+        const names = Object.keys(usersData).sort();
+        if (!names.length) { c.innerHTML = '<p class="text-muted">No hay usuarios.</p>'; return; }
+        let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
+        h += '<thead class="table-light"><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th style="width:120px">Acciones</th></tr></thead><tbody>';
+        for (const uname of names) {
+            const u = usersData[uname];
+            const role = u.role || 'viewer';
+            const badge = ROLE_BADGES[role] || 'bg-secondary';
+            const isSelf = (uname === currentUser.username);
+            h += `<tr>
+                <td><code>${esc(uname)}</code>${isSelf ? ' <span class="badge bg-info">Tú</span>' : ''}</td>
+                <td>${esc(u.display_name || uname)}</td>
+                <td><span class="badge ${badge}">${esc(ROLE_LABELS[role] || role)}</span></td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
+                        onclick="openEditUserModal('${escAttr(uname)}')" title="Editar">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                        onclick="deleteUser('${escAttr(uname)}')" title="Eliminar"
+                        ${isSelf ? 'disabled' : ''}>
+                        <i class="bi bi-trash3"></i>
+                    </button>
+                </td>
+            </tr>`;
+        }
+        h += '</tbody></table></div>';
+        c.innerHTML = h;
+    }
+
+    function openNewUserModal() {
+        _editingUser = null;
+        document.getElementById('userModalTitle').textContent = 'Nuevo usuario';
+        document.getElementById('umUsername').value = '';
+        document.getElementById('umUsername').disabled = false;
+        document.getElementById('umDisplayName').value = '';
+        document.getElementById('umRole').value = 'viewer';
+        document.getElementById('umPassword').value = '';
+        document.getElementById('umPasswordLabel').textContent = 'Contraseña';
+        document.getElementById('umPasswordHint').style.display = 'none';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
+    }
+
+    function openEditUserModal(username) {
+        _editingUser = username;
+        const u = usersData[username] || {};
+        document.getElementById('userModalTitle').textContent = 'Editar usuario: ' + username;
+        document.getElementById('umUsername').value = username;
+        document.getElementById('umUsername').disabled = true;
+        document.getElementById('umDisplayName').value = u.display_name || '';
+        document.getElementById('umRole').value = u.role || 'viewer';
+        document.getElementById('umPassword').value = '';
+        document.getElementById('umPasswordLabel').textContent = 'Nueva contraseña';
+        document.getElementById('umPasswordHint').style.display = '';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
+    }
+
+    async function saveUserModal() {
+        const username = document.getElementById('umUsername').value.trim();
+        const display_name = document.getElementById('umDisplayName').value.trim();
+        const role = document.getElementById('umRole').value;
+        const password = document.getElementById('umPassword').value;
+
+        if (!username) { showToast('El nombre de usuario es obligatorio', 'warning'); return; }
+
+        if (_editingUser) {
+            // Update
+            const body = { role, display_name };
+            if (password) body.password = password;
+            const r = await apiPut('/api/users/' + encodeURIComponent(_editingUser), body);
+            if (r && r.ok) {
+                showToast('Usuario actualizado');
+                usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser };
+                if (_editingUser === currentUser.username) {
+                    currentUser.role = role;
+                    currentUser.display_name = display_name || _editingUser;
+                }
+            } else {
+                showToast(r?.error || 'Error al actualizar', 'danger'); return;
+            }
+        } else {
+            // Create
+            if (!password) { showToast('La contraseña es obligatoria', 'warning'); return; }
+            const r = await apiPost('/api/users', { username, password, role, display_name });
+            if (r && r.status === 201) {
+                showToast('Usuario creado');
+                usersData[username] = { role, display_name: display_name || username };
+            } else {
+                showToast(r?.data?.error || 'Error al crear', 'danger'); return;
+            }
+        }
+        bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
+        renderUsers();
+    }
+
+    async function deleteUser(username) {
+        if (!confirm('¿Eliminar el usuario "' + username + '"?')) return;
+        const r = await apiDelete('/api/users/' + encodeURIComponent(username));
+        if (r && r.status === 200 && r.data.ok) {
+            showToast('Usuario eliminado');
+            delete usersData[username];
+            renderUsers();
+        } else {
+            showToast(r?.data?.error || 'Error al eliminar', 'danger');
+        }
+    }
+
+    async function changeOwnPassword() {
+        const cur = document.getElementById('pwCurrent').value;
+        const nw = document.getElementById('pwNew').value;
+        const conf = document.getElementById('pwConfirm').value;
+        if (!cur) { showToast('Introduce tu contraseña actual', 'warning'); return; }
+        if (!nw) { showToast('Introduce la nueva contraseña', 'warning'); return; }
+        if (nw !== conf) { showToast('Las contraseñas no coinciden', 'warning'); return; }
+        const r = await apiPut('/api/users/me/password', { current_password: cur, new_password: nw });
+        if (r && r.ok) {
+            showToast('Contraseña cambiada correctamente');
+            document.getElementById('pwCurrent').value = '';
+            document.getElementById('pwNew').value = '';
+            document.getElementById('pwConfirm').value = '';
+        } else {
+            showToast(r?.error || 'Error al cambiar contraseña', 'danger');
+        }
+    }
+
+    // ──────────────────────────── Role-based UI ──────────────────────
+    function applyRoleRestrictions() {
+        const role = currentUser.role;
+        // Show users tab only for admins
+        const usersLi = document.getElementById('tab-users-li');
+        if (usersLi) usersLi.style.display = (role === 'admin') ? '' : 'none';
+
+        // Hide save buttons for viewers
+        if (role === 'viewer') {
+            document.querySelectorAll('button[onclick="saveModules()"], button[onclick="saveConfig()"]')
+                .forEach(b => b.style.display = 'none');
+        }
+    }
+
+    // ──────────────────────────── Init ────────────────────────────────
+    document.getElementById('btnAddItemOk').addEventListener('click', confirmAddItem);
+    document.getElementById('newItemName').addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); confirmAddItem(); }
+    });
+    document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', renderStatus);
+    document.getElementById('btn-tab-users')?.addEventListener('shown.bs.tab', async () => {
+        usersData = await apiGet('/api/users') || {};
+        renderUsers();
+    });
+    document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
+
+    (async function init() {
+        currentUser = await apiGet('/api/me') || {};
+        modulesData = await apiGet('/api/modules') || {};
+        configData = await apiGet('/api/config') || {};
+        renderModules();
+        renderConfig();
+        applyRoleRestrictions();
+        document.getElementById('loading').remove();
+    })();
+</script>
+{% endblock %}

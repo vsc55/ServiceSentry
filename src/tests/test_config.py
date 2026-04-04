@@ -4,7 +4,6 @@
 
 import json
 import os
-import stat
 import tempfile
 
 import pytest
@@ -105,7 +104,12 @@ class TestConfigStore:
 
     def test_read_invalid_json(self):
         """read() con JSON inválido retorna el valor por defecto."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            suffix='.json',
+            delete=False,
+            encoding='utf-8'
+        ) as f:
             f.write("{invalid json content!!!")
             tmp_path = f.name
         try:

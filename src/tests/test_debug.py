@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests para la clase Debug."""
 
-import pytest
-
 from lib.debug.debug import Debug
 from lib.debug.debug_level import DebugLevel
 
