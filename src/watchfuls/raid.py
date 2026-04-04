@@ -47,9 +47,6 @@ class Watchful(ModuleBase):
         super().__init__(monitor, __name__)
         self.paths.set('mdstat', '/proc/mdstat')
 
-    def __debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
-        super().debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)
-
     def check(self):
         self.__check_local()
         self.__check_remote()
@@ -58,7 +55,7 @@ class Watchful(ModuleBase):
 
     def __check_local(self):
         is_enable = self.get_conf("local", self.__default_enabled)
-        self.__debug(f"Local - Enabled: {is_enable}", DebugLevel.info)
+        self._debug(f"Local - Enabled: {is_enable}", DebugLevel.info)
         if is_enable:
             list_md = RaidMdstat(self.paths.find('mdstat')).read_status()
             self.__md_analyze(list_md)
@@ -79,7 +76,7 @@ class Watchful(ModuleBase):
                     tmp_label = self.get_label_by_id(remote_id)
                     message = f'RAID: {tmp_label} - *Error: {exc}* {u"\U0001F4A5"}'
                     self.dict_return.set(remote_id, False, message)
-                    self.__debug(f"{remote_id}/{tmp_label} - Exception: {exc}", DebugLevel.error)
+                    self._debug(f"{remote_id}/{tmp_label} - Exception: {exc}", DebugLevel.error)
                     # self.debug.exception(exc)
 
     def __check_remotes_process(self, remote_id):
@@ -142,7 +139,7 @@ class Watchful(ModuleBase):
             else:
                 is_enabled = self.__default_enabled
 
-            self.__debug(f"Remote/{key} - Enabled: {is_enabled}", DebugLevel.info)
+            self._debug(f"Remote/{key} - Enabled: {is_enabled}", DebugLevel.info)
             if is_enabled:
                 return_list.append(key)
 
@@ -178,23 +175,14 @@ class Watchful(ModuleBase):
         # Sec - Format Return Data
         with Switch(opt_find) as case:
             if case(ConfigOptions.port):
-                value = str(value).strip()
-                if not value or not value.isnumeric() or int(value) <= 0:
-                    value = val_def
-                return int(value)
-
+                return self._parse_conf_int(value, val_def)
             elif case(ConfigOptions.enabled):
                 return bool(value)
-
             elif case(ConfigOptions.label,
                       ConfigOptions.host,
                       ConfigOptions.user,
                       ConfigOptions.password):
-                value = str(value).strip()
-                if not value:
-                    value = val_def
-                return str(value)
-
+                return self._parse_conf_str(value, val_def)
             else:
                 return value
 

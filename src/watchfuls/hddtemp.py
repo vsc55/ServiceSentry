@@ -37,9 +37,6 @@ class Watchful(ModuleBase):
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 
-    def __debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
-        super().debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)
-
     def check(self):
         list_hosts = self.__check_get_list_hosts()
         self.__check_run(list_hosts)
@@ -56,10 +53,10 @@ class Watchful(ModuleBase):
                 elif case(dict):
                     is_enabled = value.get("enabled", is_enabled)
 
-            self.__debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
+            self._debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
             if is_enabled:
                 if not value.get("host", None):
-                    self.__debug(f"{key} - Host is not defined!", DebugLevel.warning)
+                    self._debug(f"{key} - Host is not defined!", DebugLevel.warning)
                 else:
                     new_hddtemp = self.Hddtemp_Info(key)
                     new_hddtemp.host = value.get("host")
@@ -112,7 +109,7 @@ class Watchful(ModuleBase):
                         self.send_message(s_message, status)
 
         else:
-            self.__debug(f"{hddtemp.label} >> Exception: {hddtemp.error}", DebugLevel.warning)
+            self._debug(f"{hddtemp.label} >> Exception: {hddtemp.error}", DebugLevel.warning)
             s_message = f'HddTemp: {hddtemp.label} - *Error:* *{hddtemp.error}*'
             s_message += u'\U0001F53D'
 
@@ -160,19 +157,6 @@ class Watchful(ModuleBase):
             }
             hddtemp.list_hdd[new_hdd['DEV']] = new_hdd
         return True
-
-    def check_status_custom(self, status, hddtemp, status_msg):
-        return_status = super().check_status(status, self.name_module, hddtemp)
-
-        if status or return_status:
-            b_return = return_status
-        else:
-            msg_status_old = super().get_status_find(hddtemp, self.name_module).get("other_data", {}).get("message", '')
-            if str(status_msg) != str(msg_status_old):
-                b_return = True
-            else:
-                b_return = return_status
-        return b_return
 
     class Hddtemp_Info:
 

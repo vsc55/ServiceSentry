@@ -92,19 +92,10 @@ class Watchful(ModuleBase):
         # Sec - Format Return Data
         with Switch(opt_find) as case:
             if case(ConfigOptions.alert):
-                value = str(value).strip()
-                if not value or not value.isnumeric() or float(value) <= 0:
-                    value = val_def
-                return float(value)
-
+                return self._parse_conf_float(value, val_def)
             elif case(ConfigOptions.enabled):
                 return bool(value)
-
             elif case(ConfigOptions.label):
-                value = str(value).strip()
-                if not value:
-                    value = val_def
-                return str(value)
-
+                return self._parse_conf_str(value, val_def)
             else:
                 return value

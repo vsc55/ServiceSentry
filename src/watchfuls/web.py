@@ -48,8 +48,7 @@ class Watchful(ModuleBase):
                 elif case(dict):
                     is_enabled = value.get("enabled", is_enabled)
 
-            self.debug.print(f">> PlugIn >> {self.name_module} >> Web: {key} - Enabled: {is_enabled}",
-                             DebugLevel.info)
+            self._debug(f"Web: {key} - Enabled: {is_enabled}", DebugLevel.info)
             if is_enabled:
                 list_url.append(key)
 

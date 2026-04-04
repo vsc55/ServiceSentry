@@ -49,9 +49,6 @@ class Watchful(ModuleBase):
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 
-    def __debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
-        super().debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)
-
     def check(self):
         list_db = self.__check_get_list_db()
         self.__check_run(list_db)
@@ -68,7 +65,7 @@ class Watchful(ModuleBase):
             else:
                 is_enabled = self.__default_enabled
 
-            self.__debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
+            self._debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
 
             if is_enabled:
                 return_list.append(key)
@@ -159,7 +156,7 @@ class Watchful(ModuleBase):
 
         except Exception as e:
             connection = None
-            self.__debug(f"{db_name} >> Exception: {repr(e)}", DebugLevel.error)
+            self._debug(f"{db_name} >> Exception: {repr(e)}", DebugLevel.error)
             return_msg = repr(e)
 
             err_array = str(e).split(",")
@@ -184,7 +181,7 @@ class Watchful(ModuleBase):
                     return_status = "OK"
 
             except Exception as e:
-                self.__debug(f"{db_name} >> Exception: {repr(e)}", DebugLevel.error)
+                self._debug(f"{db_name} >> Exception: {repr(e)}", DebugLevel.error)
                 return_msg = repr(e)
                 return_status = "-9999"
 
@@ -224,36 +221,15 @@ class Watchful(ModuleBase):
         # Sec - Format Return Data
         with Switch(opt_find) as case:
             if case(ConfigOptions.port):
-                value = str(value).strip()
-                if not value or not value.isnumeric() or int(value) <= 0:
-                    value = val_def
-                return int(value)
-
+                return self._parse_conf_int(value, val_def)
             elif case(ConfigOptions.enabled):
                 return bool(value)
-
             elif case(ConfigOptions.socket,
                       ConfigOptions.host,
                       ConfigOptions.user,
                       ConfigOptions.password,
                       ConfigOptions.db):
-                value = str(value).strip()
-                if not value:
-                    value = val_def
-                return str(value)
-
+                return self._parse_conf_str(value, val_def)
             else:
                 return value
 
-    def check_status_custom(self, status, db, status_msg):
-        return_status = super().check_status(status, self.name_module, db)
-
-        if status or return_status:
-            b_return = return_status
-        else:
-            msg_status_old = super().get_status_find(db, self.name_module).get("other_data", {}).get("message", '')
-            if status_msg != msg_status_old:
-                b_return = True
-            else:
-                b_return = return_status
-        return b_return

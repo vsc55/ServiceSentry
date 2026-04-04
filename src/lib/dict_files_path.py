@@ -85,9 +85,7 @@ class DictFilesPath:
         :return: True si existe, False no existe.
 
         """
-        if file_find and file_find in self.files.keys():
-            return True
-        return False
+        return bool(file_find and file_find in self.files)
 
     def find(self, file_find: str, default_value: str = '') -> str:
         """

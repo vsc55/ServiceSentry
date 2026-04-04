@@ -174,6 +174,46 @@ class ModuleBase(ObjectBase):
         if self.is_monitor_exist:
             return self._monitor.check_status(status, module, module_sub_key)
 
+    def check_status_custom(self, status, key, status_msg):
+        """
+        Comprueba cambio de estado incluyendo cambio de mensaje de error.
+        Se usa cuando además de comprobar el cambio de estado, necesitamos detectar
+        si el mensaje de error ha cambiado.
+        """
+        return_status = self.check_status(status, self.name_module, key)
+        if status or return_status:
+            return return_status
+        msg_old = self.get_status_find(key, self.name_module).get("other_data", {}).get("message", '')
+        return True if str(status_msg) != str(msg_old) else return_status
+
+    def _debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
+        """ Helper de debug para plugins. """
+        self.debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)
+
+    @staticmethod
+    def _parse_conf_int(value, default, min_val=1):
+        """ Parsea un valor de configuración como entero con validación. """
+        value = str(value).strip()
+        if not value or not value.isnumeric() or int(value) < min_val:
+            return int(default)
+        return int(value)
+
+    @staticmethod
+    def _parse_conf_float(value, default, min_val=0):
+        """ Parsea un valor de configuración como float con validación. """
+        value = str(value).strip()
+        try:
+            fval = float(value)
+        except (ValueError, TypeError):
+            return float(default)
+        return fval if fval > min_val else float(default)
+
+    @staticmethod
+    def _parse_conf_str(value, default=''):
+        """ Parsea un valor de configuración como string. """
+        value = str(value).strip()
+        return value if value else str(default)
+
     @staticmethod
     def _run_cmd(cmd, return_str_err: bool = False, return_exit_code: bool = False):
         """

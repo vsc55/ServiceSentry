@@ -35,10 +35,7 @@ class Watchful(ModuleBase):
         for (key, value) in self.get_conf('list', {}).items():
             enabled = str(value.get('enabled', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
             remediation = str(value.get('remediation', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
-            self.debug.print(
-                f">> PlugIn >> {self.name_module} >> Service: {key} - Enabled: {enabled} - Remediation: {remediation}",
-                DebugLevel.info
-            )
+            self._debug(f"Service: {key} - Enabled: {enabled} - Remediation: {remediation}", DebugLevel.info)
             if enabled:
                 list_service.append({"service": key, "remediation": remediation})
 

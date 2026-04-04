@@ -45,9 +45,6 @@ class Watchful(ModuleBase):
         super().__init__(monitor, __name__)
         self.paths.set('ping', '/bin/ping')
 
-    def __debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
-        super().debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)
-
     def check(self):
         list_host = self.__check_get_list_hosts()
         self.__check_run(list_host)
@@ -64,7 +61,7 @@ class Watchful(ModuleBase):
             else:
                 is_enabled = self.__default_enabled
 
-            self.__debug(f"Ping: {key} - Enabled: {is_enabled}", DebugLevel.info)
+            self._debug(f"Ping: {key} - Enabled: {is_enabled}", DebugLevel.info)
 
             if is_enabled:
                 return_list.append(key)
@@ -141,19 +138,10 @@ class Watchful(ModuleBase):
         # Sec - Format Return Data
         with Switch(opt_find) as case:
             if case(ConfigOptions.attempt, ConfigOptions.timeout):
-                value = str(value).strip()
-                if not value or not value.isnumeric() or int(value) <= 0:
-                    value = val_def
-                return int(value)
-
+                return self._parse_conf_int(value, val_def)
             elif case(ConfigOptions.enabled):
                 return bool(value)
-
             elif case(ConfigOptions.label):
-                value = str(value).strip()
-                if not value:
-                    value = val_def
-                return str(value)
-
+                return self._parse_conf_str(value, val_def)
             else:
                 return value
