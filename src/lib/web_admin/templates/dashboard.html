@@ -42,7 +42,7 @@
 <!-- Loading overlay -->
 <div id="loading">
     <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Cargando…</span>
+        <span class="visually-hidden">{{ i18n.loading }}</span>
     </div>
 </div>
 
@@ -57,8 +57,19 @@
                 <i class="bi bi-person-circle me-1"></i>{{ display_name }}
                 <span class="badge bg-secondary ms-1">{{ role }}</span>
             </span>
+            <div class="dropdown">
+                <button class="btn btn-outline-light btn-sm dropdown-toggle py-0" data-bs-toggle="dropdown">
+                    <i class="bi bi-translate me-1"></i>{{ lang|upper }}
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    {% for l in supported_langs %}
+                    <li><a class="dropdown-item{% if l == lang %} active{% endif %}" href="/lang/{{ l }}">{{
+                            i18n['lang_' + l] }}</a></li>
+                    {% endfor %}
+                </ul>
+            </div>
             <a href="/logout" class="btn btn-outline-light btn-sm">
-                <i class="bi bi-box-arrow-right me-1"></i>Salir
+                <i class="bi bi-box-arrow-right me-1"></i>{{ i18n.logout }}
             </a>
         </div>
     </div>
@@ -70,23 +81,23 @@
     <ul class="nav nav-tabs" id="mainTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-modules" type="button">
-                <i class="bi bi-puzzle me-1"></i>Módulos
+                <i class="bi bi-puzzle me-1"></i>{{ i18n.tab_modules }}
             </button>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-config" type="button">
-                <i class="bi bi-gear me-1"></i>Configuración
+                <i class="bi bi-gear me-1"></i>{{ i18n.tab_config }}
             </button>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-status" type="button"
                 id="btn-tab-status">
-                <i class="bi bi-activity me-1"></i>Estado
+                <i class="bi bi-activity me-1"></i>{{ i18n.tab_status }}
             </button>
         </li>
         <li class="nav-item" role="presentation" id="tab-users-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-users" type="button" id="btn-tab-users">
-                <i class="bi bi-people me-1"></i>Usuarios
+                <i class="bi bi-people me-1"></i>{{ i18n.tab_users }}
             </button>
         </li>
     </ul>
@@ -96,7 +107,7 @@
         <div class="tab-pane fade show active" id="tab-modules">
             <div id="modules-container"></div>
             <button class="btn btn-primary mt-3" onclick="saveModules()">
-                <i class="bi bi-save me-1"></i>Guardar módulos
+                <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
             </button>
         </div>
 
@@ -104,47 +115,47 @@
         <div class="tab-pane fade" id="tab-config">
             <div id="config-container"></div>
             <button class="btn btn-primary mt-3" onclick="saveConfig()">
-                <i class="bi bi-save me-1"></i>Guardar configuración
+                <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
             </button>
         </div>
 
         <!-- ==================== Status Tab ===================== -->
         <div class="tab-pane fade" id="tab-status">
             <div id="status-container">
-                <p class="text-muted">Selecciona esta pestaña para cargar el estado.</p>
+                <p class="text-muted">{{ i18n.status_placeholder }}</p>
             </div>
         </div>
 
         <!-- ==================== Users Tab ====================== -->
         <div class="tab-pane fade" id="tab-users">
             <div class="d-flex align-items-center mb-3">
-                <h5 class="mb-0"><i class="bi bi-people me-2"></i>Gestión de usuarios</h5>
+                <h5 class="mb-0"><i class="bi bi-people me-2"></i>{{ i18n.user_management }}</h5>
                 <button class="btn btn-sm btn-success ms-auto" onclick="openNewUserModal()">
-                    <i class="bi bi-person-plus me-1"></i>Nuevo usuario
+                    <i class="bi bi-person-plus me-1"></i>{{ i18n.new_user }}
                 </button>
             </div>
             <div id="users-container"></div>
             <hr>
-            <h6 class="text-muted"><i class="bi bi-key me-1"></i>Cambiar mi contraseña</h6>
+            <h6 class="text-muted"><i class="bi bi-key me-1"></i>{{ i18n.change_my_password }}</h6>
             <div class="card" style="max-width:500px">
                 <div class="card-body py-2">
                     <div class="row mb-2">
-                        <label class="col-sm-5 col-form-label col-form-label-sm">Contraseña actual</label>
+                        <label class="col-sm-5 col-form-label col-form-label-sm">{{ i18n.current_password }}</label>
                         <div class="col-sm-7"><input type="password" class="form-control form-control-sm"
                                 id="pwCurrent"></div>
                     </div>
                     <div class="row mb-2">
-                        <label class="col-sm-5 col-form-label col-form-label-sm">Nueva contraseña</label>
+                        <label class="col-sm-5 col-form-label col-form-label-sm">{{ i18n.new_password }}</label>
                         <div class="col-sm-7"><input type="password" class="form-control form-control-sm" id="pwNew">
                         </div>
                     </div>
                     <div class="row mb-2">
-                        <label class="col-sm-5 col-form-label col-form-label-sm">Confirmar</label>
+                        <label class="col-sm-5 col-form-label col-form-label-sm">{{ i18n.confirm_password }}</label>
                         <div class="col-sm-7"><input type="password" class="form-control form-control-sm"
                                 id="pwConfirm"></div>
                     </div>
                     <button class="btn btn-sm btn-primary" onclick="changeOwnPassword()">
-                        <i class="bi bi-check-lg me-1"></i>Cambiar
+                        <i class="bi bi-check-lg me-1"></i>{{ i18n.change }}
                     </button>
                 </div>
             </div>
@@ -157,37 +168,47 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title" id="userModalTitle">Nuevo usuario</h6>
+                <h6 class="modal-title" id="userModalTitle">{{ i18n.new_user }}</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label class="form-label small fw-semibold">Usuario</label>
+                    <label class="form-label small fw-semibold">{{ i18n.username }}</label>
                     <input type="text" class="form-control form-control-sm" id="umUsername" autocomplete="off">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label small fw-semibold">Nombre para mostrar</label>
+                    <label class="form-label small fw-semibold">{{ i18n.display_name }}</label>
                     <input type="text" class="form-control form-control-sm" id="umDisplayName">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label small fw-semibold">Rol</label>
+                    <label class="form-label small fw-semibold">{{ i18n.role }}</label>
                     <select class="form-select form-select-sm" id="umRole">
-                        <option value="admin">Admin — Control total</option>
-                        <option value="editor">Editor — Editar configuración</option>
-                        <option value="viewer" selected>Viewer — Solo lectura</option>
+                        <option value="admin">{{ i18n.role_admin_desc }}</option>
+                        <option value="editor">{{ i18n.role_editor_desc }}</option>
+                        <option value="viewer" selected>{{ i18n.role_viewer_desc }}</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.language }}</label>
+                    <select class="form-select form-select-sm" id="umLang">
+                        <option value="">{{ i18n.system_default }}</option>
+                        {% for l in supported_langs %}
+                        <option value="{{ l }}">{{ i18n['lang_' + l] }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 <div class="mb-3" id="umPasswordGroup">
-                    <label class="form-label small fw-semibold" id="umPasswordLabel">Contraseña</label>
+                    <label class="form-label small fw-semibold" id="umPasswordLabel">{{ i18n.password }}</label>
                     <input type="password" class="form-control form-control-sm" id="umPassword"
                         autocomplete="new-password">
-                    <div class="form-text" id="umPasswordHint" style="display:none">Dejar vacío para no cambiar</div>
+                    <div class="form-text" id="umPasswordHint" style="display:none">{{ i18n.leave_empty_no_change }}
+                    </div>
                 </div>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
                 <button class="btn btn-sm btn-primary" id="btnUserModalOk">
-                    <i class="bi bi-check-lg me-1"></i>Guardar
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
                 </button>
             </div>
         </div>
@@ -199,17 +220,18 @@
     <div class="modal-dialog modal-sm">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title">Nuevo elemento</h6>
+                <h6 class="modal-title">{{ i18n.new_item }}</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <label class="form-label small">Nombre / clave</label>
-                <input type="text" class="form-control form-control-sm" id="newItemName" placeholder="Ej: 192.168.1.1">
+                <label class="form-label small">{{ i18n.item_name }}</label>
+                <input type="text" class="form-control form-control-sm" id="newItemName"
+                    placeholder="{{ i18n.item_placeholder }}">
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
                 <button class="btn btn-sm btn-primary" id="btnAddItemOk">
-                    <i class="bi bi-plus-lg me-1"></i>Añadir
+                    <i class="bi bi-plus-lg me-1"></i>{{ i18n.add }}
                 </button>
             </div>
         </div>
@@ -233,42 +255,23 @@
        ServiceSentry — Dashboard JavaScript
        ================================================================ */
 
+    // ──────────────────────────── i18n ─────────────────────────────────
+    const I18N = {{ i18n| tojson }};
+    function t(k) { return I18N[k] || k; }
+    function tf(k, ...a) { let s = t(k); a.forEach(v => { s = s.replace('{}', v); }); return s; }
+
     // ──────────────────────────── Constants ────────────────────────────
     const ICONS = {
         filesystemusage: '📁', hddtemp: '💿', mysql: '🗄️', ping: '🏓',
         raid: '💽', ram_swap: '🐏', service_status: '⚙️',
         temperature: '🌡️', web: '🌐'
     };
-    const PRETTY_NAMES = {
-        filesystemusage: 'Uso de disco',
-        hddtemp: 'Temperatura HDD',
-        mysql: 'MySQL / MariaDB',
-        ping: 'Ping',
-        raid: 'RAID',
-        ram_swap: 'RAM y Swap',
-        ram: 'RAM',
-        swap: 'Swap',
-        service_status: 'Servicios',
-        temperature: 'Temperatura CPU',
-        web: 'Sitios Web'
-    };
-    const LABELS = {
-        enabled: 'Habilitado', alert: 'Alerta (%)', alert_ram: 'Alerta RAM (%)',
-        alert_swap: 'Alerta SWAP (%)', threads: 'Hilos', timeout: 'Timeout (s)',
-        attempt: 'Intentos', host: 'Host', port: 'Puerto', user: 'Usuario',
-        password: 'Contraseña', db: 'Base de datos', socket: 'Socket',
-        label: 'Etiqueta', code: 'Código HTTP', local: 'Monitor local',
-        exclude: 'Excluidos', remediation: 'Auto-remediación',
-        token: 'Token Bot', chat_id: 'Chat ID', group_messages: 'Agrupar mensajes',
-        timer_check: 'Intervalo (s)', debug: 'Debug',
-        list: 'Elementos', remote: 'Remotos',
-        username: 'Usuario web', key_file: 'Clave SSH',
-        pretty_name: 'Nombre para mostrar'
-    };
-    const SECTION_LABELS = {
-        daemon: 'Daemon', global: 'General', telegram: 'Telegram', web_admin: 'Panel Web'
-    };
+    const PRETTY_NAMES = I18N.pretty_names || {};
+    const LABELS = I18N.labels || {};
+    const SECTION_LABELS = I18N.sections || {};
     const SENSITIVE = new Set(['password', 'token']);
+    const SUPPORTED_LANGS = {{ supported_langs| tojson }};
+    const SYSTEM_DEFAULT_LANG = '{{ default_lang }}';
 
     // ──────────────────────────── State ───────────────────────────────
     let modulesData = {};
@@ -330,7 +333,7 @@
             const r = await fetch(url);
             if (r.status === 401) { location.href = '/login'; return null; }
             return await r.json();
-        } catch (e) { showToast('Error de conexión', 'danger'); return null; }
+        } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
     }
     async function apiPut(url, data) {
         try {
@@ -341,7 +344,7 @@
             });
             if (r.status === 401) { location.href = '/login'; return null; }
             return await r.json();
-        } catch (e) { showToast('Error de conexión', 'danger'); return null; }
+        } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
     }
     async function apiPost(url, data) {
         try {
@@ -352,14 +355,14 @@
             });
             if (r.status === 401) { location.href = '/login'; return null; }
             return { status: r.status, data: await r.json() };
-        } catch (e) { showToast('Error de conexión', 'danger'); return null; }
+        } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
     }
     async function apiDelete(url) {
         try {
             const r = await fetch(url, { method: 'DELETE' });
             if (r.status === 401) { location.href = '/login'; return null; }
             return { status: r.status, data: await r.json() };
-        } catch (e) { showToast('Error de conexión', 'danger'); return null; }
+        } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
     }
 
     // ──────────────────────────── Field render ─────────────────────────
@@ -386,6 +389,22 @@
             </div></div>`;
         }
         if (typeof value === 'string') {
+            // Language selector
+            if (key === 'lang') {
+                let opts = '';
+                for (const code of SUPPORTED_LANGS) {
+                    const sel = value === code ? ' selected' : '';
+                    opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
+                }
+                return `<div class="row mb-2 align-items-center">
+                <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+                <div class="col-sm-8">
+                    <select class="form-select form-select-sm"
+                        onchange="updateField('${tg}','${sp}',this.value)">
+                        ${opts}
+                    </select>
+                </div></div>`;
+            }
             const tp = SENSITIVE.has(key) ? 'password' : 'text';
             return `<div class="row mb-2 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
@@ -401,7 +420,7 @@
             <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
             <div class="col-sm-8">
                 <input type="text" class="form-control form-control-sm"
-                    value="${escAttr(csv)}" placeholder="Separar con comas"
+                    value="${escAttr(csv)}" placeholder="${t('comma_separated')}"
                     onchange="updateArray('${tg}','${sp}',this.value)">
             </div></div>`;
         }
@@ -557,6 +576,9 @@
     // ──────────────────────────── Config tab ──────────────────────────
     function renderConfig() {
         const c = document.getElementById('config-container');
+        // Ensure web_admin.lang is visible in config editor
+        if (!configData.web_admin) configData.web_admin = {};
+        if (!('lang' in configData.web_admin)) configData.web_admin.lang = SYSTEM_DEFAULT_LANG;
         const order = ['daemon', 'global', 'telegram', 'web_admin'];
         const sections = Object.keys(configData).sort((a, b) => {
             const ai = order.indexOf(a), bi = order.indexOf(b);
@@ -583,12 +605,12 @@
         const c = document.getElementById('status-container');
         c.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
         const data = await apiGet('/api/status');
-        if (!data) { c.innerHTML = '<div class="alert alert-warning">No se pudo cargar.</div>'; return; }
+        if (!data) { c.innerHTML = '<div class="alert alert-warning">' + t('status_load_error') + '</div>'; return; }
         if (!Object.keys(data).length) {
-            c.innerHTML = '<div class="alert alert-info">No hay datos de estado disponibles.</div>'; return;
+            c.innerHTML = '<div class="alert alert-info">' + t('status_empty') + '</div>'; return;
         }
         let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
-        h += '<thead class="table-light"><tr><th>Módulo</th><th>Check</th><th>Estado</th></tr></thead><tbody>';
+        h += '<thead class="table-light"><tr><th>' + t('col_module') + '</th><th>' + t('col_check') + '</th><th>' + t('col_status') + '</th></tr></thead><tbody>';
         for (const [mod, checks] of Object.entries(data)) {
             if (typeof checks !== 'object' || checks === null) continue;
             const pname = modulePrettyName(mod, modulesData[mod]);
@@ -596,7 +618,7 @@
                 const st = info.status;
                 const icon = st === true ? '✅' : st === false ? '❌' : '❓';
                 const cls = st === true ? 'bg-success' : st === false ? 'bg-danger' : 'bg-secondary';
-                const txt = st === true ? 'OK' : st === false ? 'Error' : '—';
+                const txt = st === true ? t('status_ok') : st === false ? t('status_error') : '—';
                 h += `<tr><td><strong>${esc(pname)}</strong></td><td>${esc(ck)}</td>
                 <td><span class="badge ${cls}">${icon} ${txt}</span></td></tr>`;
             }
@@ -637,7 +659,7 @@
     }
 
     function removeItem(target, parentPathStr, key) {
-        if (!confirm('¿Eliminar "' + key + '"?')) return;
+        if (!confirm(tf('confirm_delete_item', key))) return;
         const parts = parentPathStr.split('|');
         const parent = getPath(target === 'config' ? configData : modulesData, parts);
         if (parent && key in parent) {
@@ -663,7 +685,7 @@
         const data = target === 'modules' ? modulesData : configData;
         const parent = getPath(data, parts);
         if (!parent || typeof parent !== 'object') return;
-        if (name in parent) { showToast('"' + name + '" ya existe', 'warning'); return; }
+        if (name in parent) { showToast(tf('already_exists', name), 'warning'); return; }
 
         // Smart default: copy structure from first dict item, else true
         let def = true;
@@ -689,13 +711,13 @@
     // --- Save ---
     async function saveModules() {
         const r = await apiPut('/api/modules', modulesData);
-        if (r && r.ok) showToast('Módulos guardados correctamente');
-        else showToast(r?.error || 'Error al guardar', 'danger');
+        if (r && r.ok) showToast(t('modules_saved'));
+        else showToast(r?.error || t('save_error'), 'danger');
     }
     async function saveConfig() {
         const r = await apiPut('/api/config', configData);
-        if (r && r.ok) showToast('Configuración guardada correctamente');
-        else showToast(r?.error || 'Error al guardar', 'danger');
+        if (r && r.ok) showToast(t('config_saved'));
+        else showToast(r?.error || t('save_error'), 'danger');
     }
 
     // ──────────────────────────── Users tab ───────────────────────────
@@ -704,35 +726,31 @@
         editor: 'bg-primary',
         viewer: 'bg-secondary'
     };
-    const ROLE_LABELS = {
-        admin: 'Admin',
-        editor: 'Editor',
-        viewer: 'Viewer'
-    };
+    const ROLE_LABELS = I18N.role_labels || {};
 
     function renderUsers() {
         const c = document.getElementById('users-container');
         if (!c) return;
         const names = Object.keys(usersData).sort();
-        if (!names.length) { c.innerHTML = '<p class="text-muted">No hay usuarios.</p>'; return; }
+        if (!names.length) { c.innerHTML = '<p class="text-muted">' + t('no_users') + '</p>'; return; }
         let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
-        h += '<thead class="table-light"><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th style="width:120px">Acciones</th></tr></thead><tbody>';
+        h += '<thead class="table-light"><tr><th>' + t('col_user') + '</th><th>' + t('col_name') + '</th><th>' + t('col_role') + '</th><th style="width:120px">' + t('col_actions') + '</th></tr></thead><tbody>';
         for (const uname of names) {
             const u = usersData[uname];
             const role = u.role || 'viewer';
             const badge = ROLE_BADGES[role] || 'bg-secondary';
             const isSelf = (uname === currentUser.username);
             h += `<tr>
-                <td><code>${esc(uname)}</code>${isSelf ? ' <span class="badge bg-info">Tú</span>' : ''}</td>
+                <td><code>${esc(uname)}</code>${isSelf ? ' <span class="badge bg-info">' + t('you_badge') + '</span>' : ''}</td>
                 <td>${esc(u.display_name || uname)}</td>
                 <td><span class="badge ${badge}">${esc(ROLE_LABELS[role] || role)}</span></td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
-                        onclick="openEditUserModal('${escAttr(uname)}')" title="Editar">
+                        onclick="openEditUserModal('${escAttr(uname)}')" title="${t('edit')}">
                         <i class="bi bi-pencil"></i>
                     </button>
                     <button class="btn btn-sm btn-outline-danger py-0 px-1"
-                        onclick="deleteUser('${escAttr(uname)}')" title="Eliminar"
+                        onclick="deleteUser('${escAttr(uname)}')" title="${t('delete')}"
                         ${isSelf ? 'disabled' : ''}>
                         <i class="bi bi-trash3"></i>
                     </button>
@@ -745,13 +763,14 @@
 
     function openNewUserModal() {
         _editingUser = null;
-        document.getElementById('userModalTitle').textContent = 'Nuevo usuario';
+        document.getElementById('userModalTitle').textContent = t('new_user');
         document.getElementById('umUsername').value = '';
         document.getElementById('umUsername').disabled = false;
         document.getElementById('umDisplayName').value = '';
         document.getElementById('umRole').value = 'viewer';
+        document.getElementById('umLang').value = '';
         document.getElementById('umPassword').value = '';
-        document.getElementById('umPasswordLabel').textContent = 'Contraseña';
+        document.getElementById('umPasswordLabel').textContent = t('password');
         document.getElementById('umPasswordHint').style.display = 'none';
         bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
     }
@@ -759,13 +778,14 @@
     function openEditUserModal(username) {
         _editingUser = username;
         const u = usersData[username] || {};
-        document.getElementById('userModalTitle').textContent = 'Editar usuario: ' + username;
+        document.getElementById('userModalTitle').textContent = t('edit_user_title') + ': ' + username;
         document.getElementById('umUsername').value = username;
         document.getElementById('umUsername').disabled = true;
         document.getElementById('umDisplayName').value = u.display_name || '';
         document.getElementById('umRole').value = u.role || 'viewer';
+        document.getElementById('umLang').value = u.lang || '';
         document.getElementById('umPassword').value = '';
-        document.getElementById('umPasswordLabel').textContent = 'Nueva contraseña';
+        document.getElementById('umPasswordLabel').textContent = t('new_password');
         document.getElementById('umPasswordHint').style.display = '';
         bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
     }
@@ -774,34 +794,36 @@
         const username = document.getElementById('umUsername').value.trim();
         const display_name = document.getElementById('umDisplayName').value.trim();
         const role = document.getElementById('umRole').value;
+        const lang = document.getElementById('umLang').value;
         const password = document.getElementById('umPassword').value;
 
-        if (!username) { showToast('El nombre de usuario es obligatorio', 'warning'); return; }
+        if (!username) { showToast(t('username_required'), 'warning'); return; }
 
         if (_editingUser) {
             // Update
-            const body = { role, display_name };
+            const body = { role, display_name, lang };
             if (password) body.password = password;
             const r = await apiPut('/api/users/' + encodeURIComponent(_editingUser), body);
             if (r && r.ok) {
-                showToast('Usuario actualizado');
-                usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser };
+                showToast(t('user_updated'));
+                usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang };
                 if (_editingUser === currentUser.username) {
                     currentUser.role = role;
                     currentUser.display_name = display_name || _editingUser;
+                    if (lang && lang !== currentUser.lang) { location.reload(); return; }
                 }
             } else {
-                showToast(r?.error || 'Error al actualizar', 'danger'); return;
+                showToast(r?.error || t('update_error'), 'danger'); return;
             }
         } else {
             // Create
-            if (!password) { showToast('La contraseña es obligatoria', 'warning'); return; }
-            const r = await apiPost('/api/users', { username, password, role, display_name });
+            if (!password) { showToast(t('password_required'), 'warning'); return; }
+            const r = await apiPost('/api/users', { username, password, role, display_name, lang });
             if (r && r.status === 201) {
-                showToast('Usuario creado');
-                usersData[username] = { role, display_name: display_name || username };
+                showToast(t('user_created'));
+                usersData[username] = { role, display_name: display_name || username, lang };
             } else {
-                showToast(r?.data?.error || 'Error al crear', 'danger'); return;
+                showToast(r?.data?.error || t('create_error'), 'danger'); return;
             }
         }
         bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
@@ -809,14 +831,14 @@
     }
 
     async function deleteUser(username) {
-        if (!confirm('¿Eliminar el usuario "' + username + '"?')) return;
+        if (!confirm(tf('confirm_delete_user', username))) return;
         const r = await apiDelete('/api/users/' + encodeURIComponent(username));
         if (r && r.status === 200 && r.data.ok) {
-            showToast('Usuario eliminado');
+            showToast(t('user_deleted'));
             delete usersData[username];
             renderUsers();
         } else {
-            showToast(r?.data?.error || 'Error al eliminar', 'danger');
+            showToast(r?.data?.error || t('delete_error'), 'danger');
         }
     }
 
@@ -824,17 +846,17 @@
         const cur = document.getElementById('pwCurrent').value;
         const nw = document.getElementById('pwNew').value;
         const conf = document.getElementById('pwConfirm').value;
-        if (!cur) { showToast('Introduce tu contraseña actual', 'warning'); return; }
-        if (!nw) { showToast('Introduce la nueva contraseña', 'warning'); return; }
-        if (nw !== conf) { showToast('Las contraseñas no coinciden', 'warning'); return; }
+        if (!cur) { showToast(t('enter_current_password'), 'warning'); return; }
+        if (!nw) { showToast(t('enter_new_password'), 'warning'); return; }
+        if (nw !== conf) { showToast(t('passwords_dont_match'), 'warning'); return; }
         const r = await apiPut('/api/users/me/password', { current_password: cur, new_password: nw });
         if (r && r.ok) {
-            showToast('Contraseña cambiada correctamente');
+            showToast(t('password_changed'));
             document.getElementById('pwCurrent').value = '';
             document.getElementById('pwNew').value = '';
             document.getElementById('pwConfirm').value = '';
         } else {
-            showToast(r?.error || 'Error al cambiar contraseña', 'danger');
+            showToast(r?.error || t('password_change_error'), 'danger');
         }
     }
 

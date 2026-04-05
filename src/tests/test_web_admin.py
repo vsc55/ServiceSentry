@@ -175,17 +175,17 @@ class TestAuthentication:
     def test_login_wrong_password(self, client):
         resp = _login(client, password="wrong")
         assert resp.status_code == 200
-        assert "incorrectas" in resp.data.decode()
+        assert "Invalid credentials" in resp.data.decode()
 
     def test_login_wrong_username(self, client):
         resp = _login(client, username="hacker")
         assert resp.status_code == 200
-        assert "incorrectas" in resp.data.decode()
+        assert "Invalid credentials" in resp.data.decode()
 
     def test_login_empty_fields(self, client):
         resp = _login(client, username="", password="")
         assert resp.status_code == 200
-        assert "incorrectas" in resp.data.decode()
+        assert "Invalid credentials" in resp.data.decode()
 
     def test_logout(self, client):
         _login(client)
@@ -474,14 +474,14 @@ class TestApiUsers:
         _login(client)
         resp = client.delete("/api/users/admin")
         assert resp.status_code == 400
-        assert "propia" in resp.get_json()["error"]
+        assert "own account" in resp.get_json()["error"]
 
     def test_cannot_remove_last_admin(self, client):
         """Demoting the only admin to editor must fail."""
         _login(client)
         resp = client.put("/api/users/admin", json={"role": "viewer"})
         assert resp.status_code == 400
-        assert "administrador" in resp.get_json()["error"]
+        assert "admin must exist" in resp.get_json()["error"]
 
     def test_users_persisted_to_file(self, admin, config_dir):
         """users.json on disk reflects API changes."""
@@ -655,3 +655,169 @@ class TestConfigEdgeCases:
         resp = c.put("/api/modules", json={"test": {"enabled": True}})
         assert resp.status_code == 200
         assert (tmp_path / "modules.json").exists()
+
+
+# ──────────────────────────── Internationalisation ─────────────────
+
+class TestI18n:
+    """Multi-language support tests."""
+
+    def test_default_language_is_english(self, client):
+        _login(client)
+        resp = client.get("/api/me")
+        assert resp.get_json()["lang"] == "en"
+
+    def test_switch_to_spanish(self, client):
+        _login(client)
+        client.get("/lang/es")
+        resp = client.get("/api/me")
+        assert resp.get_json()["lang"] == "es"
+
+    def test_switch_back_to_english(self, client):
+        _login(client)
+        client.get("/lang/es")
+        client.get("/lang/en")
+        resp = client.get("/api/me")
+        assert resp.get_json()["lang"] == "en"
+
+    def test_invalid_language_ignored(self, client):
+        _login(client)
+        client.get("/lang/fr")
+        resp = client.get("/api/me")
+        assert resp.get_json()["lang"] == "en"
+
+    def test_spanish_error_messages(self, client):
+        """Backend errors are returned in the selected language."""
+        client.get("/lang/es")
+        resp = _login(client, password="wrong")
+        assert "Credenciales incorrectas" in resp.data.decode()
+
+    def test_login_page_renders_in_english(self, client):
+        resp = client.get("/login")
+        assert b"Sign In" in resp.data
+
+    def test_login_page_renders_in_spanish(self, client):
+        client.get("/lang/es")
+        resp = client.get("/login")
+        assert "Entrar".encode() in resp.data
+
+    def test_lang_switch_without_auth(self, client):
+        """Language can be switched on the login page without auth."""
+        resp = client.get("/lang/es", follow_redirects=True)
+        assert resp.status_code == 200
+        assert "Entrar".encode() in resp.data
+
+    def test_api_errors_in_spanish(self, client):
+        """API validation errors respect the session language."""
+        _login(client)
+        client.get("/lang/es")
+        resp = client.put("/api/modules", content_type="application/json")
+        assert resp.status_code == 400
+        assert "JSON" in resp.get_json()["error"]
+
+    def test_lang_persisted_to_user_record(self, admin, client):
+        """Switching language saves preference to user profile."""
+        _login(client)
+        client.get("/lang/es")
+        assert admin._users["admin"].get("lang") == "es"
+
+    def test_lang_loaded_on_login(self, admin, client):
+        """User's saved language is loaded on login."""
+        admin._users["admin"]["lang"] = "es"
+        _login(client)
+        resp = client.get("/api/me")
+        assert resp.get_json()["lang"] == "es"
+
+    def test_global_default_lang(self, config_dir, var_dir):
+        """WebAdmin respects the global default_lang parameter."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir, default_lang="es")
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        _login(c)
+        resp = c.get("/api/me")
+        assert resp.get_json()["lang"] == "es"
+
+    def test_global_default_invalid_falls_back(self, config_dir, var_dir):
+        """Invalid default_lang falls back to DEFAULT_LANG ('en')."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir, default_lang="xx")
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        _login(c)
+        resp = c.get("/api/me")
+        assert resp.get_json()["lang"] == "en"
+
+    def test_user_lang_in_users_list(self, client):
+        """Language preference appears in the users API."""
+        _login(client)
+        client.get("/lang/es")
+        users = client.get("/api/users").get_json()
+        assert users["admin"]["lang"] == "es"
+
+    def test_admin_can_set_user_lang(self, client):
+        """Admin can update another user's language via PUT."""
+        _login(client)
+        client.post("/api/users", json={
+            "username": "languser", "password": "x", "role": "viewer",
+        })
+        resp = client.put("/api/users/languser", json={"lang": "es"})
+        assert resp.status_code == 200
+        users = client.get("/api/users").get_json()
+        assert users["languser"]["lang"] == "es"
+
+    def test_create_user_with_lang(self, client):
+        """Creating a user with a specific language saves it."""
+        _login(client)
+        resp = client.post("/api/users", json={
+            "username": "langcreate", "password": "x",
+            "role": "viewer", "lang": "es",
+        })
+        assert resp.status_code == 201
+        users = client.get("/api/users").get_json()
+        assert users["langcreate"]["lang"] == "es"
+
+    def test_create_user_without_lang(self, client):
+        """Creating a user without lang defaults to empty (system default)."""
+        _login(client)
+        resp = client.post("/api/users", json={
+            "username": "nolang", "password": "x", "role": "viewer",
+        })
+        assert resp.status_code == 201
+        users = client.get("/api/users").get_json()
+        assert users["nolang"]["lang"] == ""
+
+    def test_update_own_lang_updates_session(self, client):
+        """Editing own user's language updates the active session."""
+        _login(client)
+        resp = client.put("/api/users/admin", json={"lang": "es"})
+        assert resp.status_code == 200
+        me = client.get("/api/me").get_json()
+        assert me["lang"] == "es"
+
+    def test_save_config_updates_default_lang(self, admin, client):
+        """Saving config.json with web_admin.lang updates runtime default."""
+        _login(client)
+        resp = client.put("/api/config", json={
+            "web_admin": {"lang": "es"},
+        })
+        assert resp.status_code == 200
+        assert admin._default_lang == "es"
+
+    def test_save_config_invalid_lang_ignored(self, admin, client):
+        """Saving config.json with invalid lang keeps current default."""
+        _login(client)
+        client.put("/api/config", json={
+            "web_admin": {"lang": "xx"},
+        })
+        assert admin._default_lang == "en"
+
+    def test_dashboard_exposes_default_lang(self, client):
+        """Dashboard HTML includes the system default language."""
+        _login(client)
+        resp = client.get("/")
+        assert b"SYSTEM_DEFAULT_LANG" in resp.data
+
+    def test_dashboard_exposes_supported_langs(self, client):
+        """Dashboard JS has the list of supported languages."""
+        _login(client)
+        resp = client.get("/")
+        assert b"SUPPORTED_LANGS" in resp.data

@@ -25,24 +25,29 @@
             <div class="text-center mb-4">
                 <i class="bi bi-shield-check display-4 text-primary"></i>
                 <h4 class="mt-2 mb-0">ServiceSentry</h4>
-                <p class="text-muted small">Panel de Administración</p>
+                <p class="text-muted small">{{ i18n.admin_panel }}</p>
             </div>
             {% if error %}
             <div class="alert alert-danger py-2 small">{{ error }}</div>
             {% endif %}
             <form method="post" action="/login">
                 <div class="mb-3">
-                    <label class="form-label small fw-semibold">Usuario</label>
+                    <label class="form-label small fw-semibold">{{ i18n.username }}</label>
                     <input type="text" name="username" class="form-control" required autofocus>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label small fw-semibold">Contraseña</label>
+                    <label class="form-label small fw-semibold">{{ i18n.password }}</label>
                     <input type="password" name="password" class="form-control" required>
                 </div>
                 <button type="submit" class="btn btn-primary w-100">
-                    <i class="bi bi-box-arrow-in-right me-1"></i> Entrar
+                    <i class="bi bi-box-arrow-in-right me-1"></i> {{ i18n.login_btn }}
                 </button>
             </form>
+            <div class="text-center mt-3">
+                <small class="text-muted">{% for l in supported_langs %}{% if l == lang %}<strong>{{ i18n['lang_' + l]
+                        }}</strong>{% else %}<a href="/lang/{{ l }}">{{ i18n['lang_' + l] }}</a>{% endif %}{% if not
+                    loop.last %} · {% endif %}{% endfor %}</small>
+            </div>
         </div>
     </div>
 </div>

@@ -348,6 +348,7 @@ def start_web(args):
 
     username = cfg.get_conf(['web_admin', 'username'], 'admin')
     password = cfg.get_conf(['web_admin', 'password'], 'admin')
+    lang = cfg.get_conf(['web_admin', 'lang'], 'en')
     host = getattr(args, 'web_host', None) or cfg.get_conf(
         ['web_admin', 'host'], WebAdmin.DEFAULT_HOST
     )
@@ -355,7 +356,8 @@ def start_web(args):
         ['web_admin', 'port'], WebAdmin.DEFAULT_PORT
     )
 
-    admin = WebAdmin(config_dir, str(username), str(password), var_dir)
+    admin = WebAdmin(config_dir, str(username), str(password), var_dir,
+                     default_lang=str(lang))
 
     print("ServiceSentry Web Admin")
     print(f"  URL:    http://{host}:{port}")
