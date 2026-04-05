@@ -29,17 +29,16 @@ from lib.modules import ModuleBase
 
 class Watchful(ModuleBase):
 
-    # temperatura en ºC que se usara si no se ha configurado el modulo, o se ha definido un valor igual o menor que 0.
-    _default_alert = 80
-    _default_enabled = True
-
     ITEM_SCHEMA = {
         'list': {
-            'enabled': True,
-            'label': '',
-            'alert': 80,
+            'enabled': {'default': True, 'type': 'bool'},
+            'label': {'default': '', 'type': 'str'},
+            'alert': {'default': 80, 'type': 'float', 'min': 0, 'max': 150},
         },
     }
+
+    # Default values derived from ITEM_SCHEMA (single source of truth).
+    _DEFAULTS = {k: v['default'] for k, v in ITEM_SCHEMA['list'].items()}
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
@@ -64,9 +63,9 @@ class Watchful(ModuleBase):
 
             message = f"Sensor *{type_label}*, "
             if is_warning:
-                message += f'*over temperature Warning {temp:.1f} ºC* {u"\U0001F525"}'
+                message += f'*over temperature Warning {temp:.1f} ºC* 🔥'
             else:
-                message += f'temperature Ok *{temp:.1f} ºC* {u"\U00002705"}'
+                message += f'temperature Ok *{temp:.1f} ºC* ✅'
 
             other_data = {'type': type_name, 'temp': temp, 'alert': temp_alert}
             self.dict_return.set(dev_name, not is_warning, message, other_data=other_data)
@@ -79,10 +78,10 @@ class Watchful(ModuleBase):
         if default_val is None:
             match opt_find:
                 case ConfigOptions.alert:
-                    val_def = self.get_conf(opt_find.name, self._default_alert)
+                    val_def = self.get_conf(opt_find.name, self._DEFAULTS['alert'])
 
                 case ConfigOptions.enabled:
-                    val_def = self.get_conf(opt_find.name, self._default_enabled)
+                    val_def = self.get_conf(opt_find.name, self._DEFAULTS['enabled'])
 
                 case None:
                     raise ValueError("opt_find it can not be None!")

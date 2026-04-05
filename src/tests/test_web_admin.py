@@ -471,49 +471,73 @@ class TestModuleItemSchemas:
 
     # ---- per-module checks ----
     def test_web_list_schema_has_code(self):
-        """web|list schema includes the 'code' field (original bug)."""
+        """web|list schema includes the 'code' and 'url' fields with rich metadata."""
         schema = self.schemas.get('web|list')
         assert schema is not None
         assert 'code' in schema
-        assert schema['code'] == 200
+        assert schema['code']['default'] == 200
+        assert schema['code']['type'] == 'int'
         assert 'enabled' in schema
+        assert 'url' in schema
+        assert schema['url']['type'] == 'str'
 
     def test_ping_list_schema_fields(self):
-        """ping|list schema has enabled, label, timeout, attempt."""
+        """ping|list schema has enabled, host, timeout, attempt, alert."""
         schema = self.schemas['ping|list']
-        assert set(schema.keys()) == {'enabled', 'label', 'timeout', 'attempt'}
+        assert set(schema.keys()) == {'enabled', 'host', 'timeout', 'attempt', 'alert'}
+        assert schema['port']['min'] == 1 if 'port' in schema else True
+        # Verify rich format
+        assert schema['timeout']['default'] == 5
+        assert schema['timeout']['type'] == 'int'
+        assert schema['timeout']['min'] == 1
 
     def test_mysql_list_schema_fields(self):
-        """mysql|list schema has all connection fields."""
+        """mysql|list schema has all connection fields with metadata."""
         schema = self.schemas['mysql|list']
         for field in ('enabled', 'host', 'port', 'user', 'password', 'db', 'socket'):
             assert field in schema
+        # Port has range constraints
+        assert schema['port']['default'] == 3306
+        assert schema['port']['min'] == 1
+        assert schema['port']['max'] == 65535
+        # Password is marked sensitive
+        assert schema['password'].get('sensitive') is True
 
     def test_service_status_schema_fields(self):
-        """service_status|list schema has enabled and remediation."""
+        """service_status|list schema has enabled, service and remediation."""
         schema = self.schemas['service_status|list']
-        assert set(schema.keys()) == {'enabled', 'remediation'}
+        assert set(schema.keys()) == {'enabled', 'service', 'remediation'}
+        assert schema['enabled']['type'] == 'bool'
+        assert schema['service']['type'] == 'str'
 
     def test_temperature_list_schema_fields(self):
         """temperature|list schema has enabled, label, alert."""
         schema = self.schemas['temperature|list']
         assert set(schema.keys()) == {'enabled', 'label', 'alert'}
+        assert schema['alert']['type'] == 'float'
 
     def test_hddtemp_list_schema_fields(self):
         """hddtemp|list schema has enabled, host, port, exclude."""
         schema = self.schemas['hddtemp|list']
         assert set(schema.keys()) == {'enabled', 'host', 'port', 'exclude'}
+        assert schema['exclude']['type'] == 'list'
 
     def test_raid_remote_schema_fields(self):
         """raid|remote schema has SSH connection fields."""
         schema = self.schemas['raid|remote']
         for field in ('enabled', 'label', 'host', 'port', 'user', 'password', 'key_file'):
             assert field in schema
+        assert schema['port']['default'] == 22
 
-    # ---- modules without collections have no schema ----
-    def test_ram_swap_has_no_item_schema(self):
-        """ram_swap has no per-item collection → no schema entry."""
-        assert 'ram_swap|list' not in self.schemas
+    # ---- modules with config-level schema ----
+    def test_ram_swap_config_schema(self):
+        """ram_swap|config schema has alert_ram and alert_swap."""
+        schema = self.schemas.get('ram_swap|config')
+        assert schema is not None
+        assert set(schema.keys()) == {'alert_ram', 'alert_swap'}
+        assert schema['alert_ram']['default'] == 60
+        assert schema['alert_ram']['min'] == 0
+        assert schema['alert_ram']['max'] == 100
 
     def test_filesystemusage_list_schema_fields(self):
         """filesystemusage|list schema has alert field."""
@@ -526,6 +550,7 @@ class TestModuleItemSchemas:
         assert isinstance(WebWatchful.ITEM_SCHEMA, dict)
         assert 'list' in WebWatchful.ITEM_SCHEMA
         assert 'code' in WebWatchful.ITEM_SCHEMA['list']
+        assert WebWatchful.ITEM_SCHEMA['list']['code']['default'] == 200
 
     # ---- discover_schemas with invalid dir ----
     def test_discover_with_bad_dir_returns_empty(self):
@@ -543,7 +568,8 @@ class TestModuleItemSchemas:
         """item_schemas variable is present in the rendered dashboard."""
         _login(client)
         html = client.get("/").data.decode()
-        assert '"code": 200' in html or '"code":200' in html
+        # Rich schema: code has a 'default' key
+        assert '"default": 200' in html or '"default":200' in html
 
 
 # ──────────────────────────── API: user management ─────────────────
@@ -1691,6 +1717,52 @@ class TestAuditLog:
         bc = [c for c in changes if c['field'] == 'b.c'][0]
         assert bc['old'] == 2
         assert bc['new'] == 9
+
+
+# ──────────────────────── Run checks API tests ─────────────────────
+
+class TestApiRunChecks:
+    """Tests for the /api/checks/run endpoint."""
+
+    def test_run_checks_requires_auth(self, client):
+        resp = client.post("/api/checks/run",
+                           json={"modules": "all"})
+        assert resp.status_code == 302
+
+    def test_run_checks_viewer_denied(self, admin, client):
+        _login(client)
+        # Patch *both* the user record and the active session so the
+        # write_required decorator sees the 'viewer' role.
+        admin._users['admin']['role'] = 'viewer'
+        with client.session_transaction() as sess:
+            sess['role'] = 'viewer'
+        resp = client.post("/api/checks/run",
+                           json={"modules": "all"})
+        assert resp.status_code in (302, 403)
+        admin._users['admin']['role'] = 'admin'
+
+    def test_run_checks_no_modules_dir(self, admin, client):
+        _login(client)
+        orig = admin._modules_dir
+        admin._modules_dir = None
+        resp = client.post("/api/checks/run",
+                           json={"modules": "all"})
+        assert resp.status_code == 500
+        admin._modules_dir = orig
+
+    def test_run_checks_audit_entry(self, admin, client):
+        """Running checks creates an audit log entry."""
+        _login(client)
+        # Even if it fails to actually run modules, audit should fire
+        orig = admin._modules_dir
+        admin._modules_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', 'watchfuls'
+        )
+        client.post("/api/checks/run",
+                     json={"modules": []})
+        admin._modules_dir = orig
+        events = [e['event'] for e in admin._audit_log]
+        assert 'checks_run' in events
 
 
 # ────────────────────── Security & injection tests ─────────────────

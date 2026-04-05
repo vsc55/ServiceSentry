@@ -25,14 +25,12 @@
 
 import psutil
 
+from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
 
 class Watchful(ModuleBase):
     """ Watchful to check filesystem usage (cross-platform via psutil). """
-
-    # Default alert percentage for filesystem usage if not configured or invalid.
-    _DEFAULT_ALERT = 85
 
     # Filesystem types to ignore (virtual / pseudo filesystems).
     _IGNORED_FSTYPES = frozenset({
@@ -42,49 +40,110 @@ class Watchful(ModuleBase):
 
     ITEM_SCHEMA = {
         'list': {
-            'alert': 85,
+            'enabled': {
+                'default': True,
+                'type': 'bool'
+            },
+            'alert': {
+                'default': 85,
+                'type': 'int',
+                'min': 0,
+                'max': 100
+            },
+            'partition': {
+                'default': '',
+                'type': 'str'
+            },
+            'label': {
+                'default': '',
+                'type': 'str'
+            },
         },
     }
+
+    # Default values are derived from ITEM_SCHEMA so there is a single
+    # source of truth that the web UI can also consume.
+    _DEFAULTS = {k: v['default'] for k, v in ITEM_SCHEMA['list'].items()}
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 
     def check(self):
-        list_partition = self.get_conf('list', {})
+        if not self.is_enabled:
+            self._debug("FilesystemUsage: Module disabled, skipping check.", DebugLevel.info)
+            return self.dict_return
 
-        usage_alert = self.get_conf("alert", self._DEFAULT_ALERT)
-        if isinstance(usage_alert, str):
-            usage_alert = usage_alert.strip()
+        list_partition: list = []
 
-        if not usage_alert or usage_alert < 0 or usage_alert > 100:
-            usage_alert = self._DEFAULT_ALERT
+        for (key, value) in self.get_conf('list', {}).items():
+            is_enabled = self._DEFAULTS['enabled']
+            match value:
+                case int():
+                    # Legacy support: if the value is an int, treat it as the alert threshold for
+                    # the partition identified by the key.
+                    is_enabled = True
+                    part = key
+                    self._debug(
+                        f"[Deprecate] Check: {part} - Alert: {value}. Please update format.",
+                        DebugLevel.warning
+                    )
+
+                case dict():
+                    # New format: value is a dict with possible 'enabled' and 'partition' keys.
+                    # If 'enabled' is not specified, default to the module's default enabled state.
+                    # If 'partition' is not specified, default to the key.
+                    is_enabled = value.get("enabled", is_enabled)
+                    part = (value.get('partition', '') or '').strip() or key
+                    self._debug(f"Check: {part} - Enabled: {is_enabled}", DebugLevel.info)
+
+                case _:
+                    is_enabled = False
+                    self._debug(
+                        f"Check: {key} - Invalid configuration format. Treating as disabled.",
+                        DebugLevel.warning
+                    )
+
+            if is_enabled:
+                list_partition.append(part)
 
         for part in psutil.disk_partitions():
             if part.fstype in self._IGNORED_FSTYPES:
                 continue
 
-            try:
-                usage = psutil.disk_usage(part.mountpoint)
-            except (PermissionError, OSError):
+            mount_point = part.mountpoint
+            if not mount_point in list_partition:
                 continue
 
-            mount_point = part.mountpoint
-            used_percent = usage.percent
+            try:
+                usage = psutil.disk_usage(mount_point)
+            except (PermissionError, OSError):
+                self._debug(
+                    f"FilesystemUsage: Permission denied for {mount_point}, skipping.",
+                    DebugLevel.warning
+                )
+                continue
 
-            if mount_point in list_partition:
-                for_usage_alert = list_partition[mount_point]
-            else:
-                for_usage_alert = usage_alert
+            used_percent = usage.percent
+            for_usage_alert = self.get_conf_in_list("alert", mount_point, self._DEFAULTS['alert'])
 
             if used_percent > float(for_usage_alert):
-                tmp_status = False
-                tmp_message = f'Warning partition {part.device} ({mount_point}) used {used_percent}% ⚠️'
+                status = False
+                s_msg = "Warning"
+                icon = '⚠️'
             else:
-                tmp_status = True
-                tmp_message = f'Normal partition {part.device} ({mount_point}) used {used_percent}% ✅'
+                status = True
+                s_msg = "Normal"
+                icon = '✅'
 
-            other_data = {'used': used_percent, 'mount': mount_point, 'alert': for_usage_alert}
-            self.dict_return.set(mount_point, tmp_status, tmp_message, other_data=other_data)
+            # s_msg = f'{s_msg} partition {part.device} ({mount_point}) used {used_percent}% {icon}'
+            s_msg = f'{s_msg} partition {part.device} used {used_percent}% {icon}'
+
+            other_data = {
+                'used': used_percent,
+                'mount': mount_point,
+                'alert': for_usage_alert
+            }
+            self.dict_return.set(mount_point, status, s_msg, other_data=other_data)
 
         super().check()
         return self.dict_return

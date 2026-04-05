@@ -31,10 +31,14 @@ from lib.modules import ModuleBase
 class Watchful(ModuleBase):
     """ Watchful to check RAM and SWAP usage. """
 
-    # porcentaje de RAM/SWAP que se usara si no se ha configurado el modulo, o se ha definido un
-    # valor que no esté entre 0 y 100.
-    _default_alert_ram = 60
-    _default_alert_swap = 60
+    ITEM_SCHEMA = {
+        'config': {
+            'alert_ram': {'default': 60, 'type': 'int', 'min': 0, 'max': 100},
+            'alert_swap': {'default': 60, 'type': 'int', 'min': 0, 'max': 100},
+        },
+    }
+
+    _DEFAULTS = {k: v['default'] for k, v in ITEM_SCHEMA['config'].items()}
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
@@ -66,12 +70,12 @@ class Watchful(ModuleBase):
         x = {
             'ram': {
                 'caption': 'RAM',
-                'alarm': self._check_config("alert_ram", self._default_alert_ram),
+                'alarm': self._check_config("alert_ram", self._DEFAULTS['alert_ram']),
                 'used': m.ram.used_percent
             },
             'swap': {
                 'caption': 'SWAP',
-                'alarm': self._check_config("alert_swap", self._default_alert_swap),
+                'alarm': self._check_config("alert_swap", self._DEFAULTS['alert_swap']),
                 'used': m.swap.used_percent
             }
         }

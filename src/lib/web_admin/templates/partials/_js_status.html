@@ -1,16 +1,91 @@
 {# ================================================================
-   Status tab — rendering logic.
+   Status tab — rendering logic + run checks.
    ================================================================ #}
 
 // ──────────────────────────── Status tab ──────────────────────────
+let _checkSelection = new Set();
+let _statusTimer = null;
+
+function setStatusAutoRefresh(seconds) {
+    if (_statusTimer) { clearInterval(_statusTimer._id); _statusTimer = null; }
+    if (seconds > 0) {
+        const id = setInterval(() => {
+            const pane = document.getElementById('tab-status');
+            if (pane && pane.classList.contains('active')) renderStatus();
+        }, seconds * 1000);
+        _statusTimer = { _id: id, _interval: seconds };
+    }
+    renderStatus();
+}
+
 async function renderStatus() {
     const c = document.getElementById('status-container');
     c.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
     const data = await apiGet('/api/status');
     if (!data) { c.innerHTML = '<div class="alert alert-warning">' + t('status_load_error') + '</div>'; return; }
-    if (!Object.keys(data).length) {
-        c.innerHTML = '<div class="alert alert-info">' + t('status_empty') + '</div>'; return;
+
+    const role = currentUser.role;
+    const canRun = role === 'admin' || role === 'editor';
+
+    // ── Refresh bar ───────────────────────────────────────────
+    let h = _renderRefreshBar('status-container', 'renderStatus',
+        () => _statusTimer, 'setStatusAutoRefresh');
+    if (canRun) {
+        h += `<div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+          <button class="btn btn-sm btn-primary" id="btnRunAll" onclick="runAllChecks()">
+            <i class="bi bi-play-fill me-1"></i>${t('run_all_checks')}
+          </button>
+          <button class="btn btn-sm btn-outline-primary" id="btnRunSelected" onclick="runSelectedChecks()">
+            <i class="bi bi-check2-square me-1"></i>${t('run_selected_checks')}
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="toggleCheckSelection(true)">
+            ${t('checks_select_all')}
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="toggleCheckSelection(false)">
+            ${t('checks_select_none')}
+          </button>
+          <span id="checksSpinner" class="d-none">
+            <span class="spinner-border spinner-border-sm me-1"></span>${t('checks_running')}
+          </span>
+        </div>`;
     }
+
+    // ── Modules selector ──────────────────────────────────────
+    if (canRun) {
+        // Build list of known modules from modulesData
+        const mods = Object.keys(modulesData).filter(k => typeof modulesData[k] === 'object');
+        if (mods.length) {
+            h += '<div class="mb-3 d-flex flex-wrap gap-2">';
+            _checkSelection.clear();
+            for (const m of mods) {
+                const enabled = modulesData[m].enabled;
+                if (enabled) _checkSelection.add(m);
+                const icon = ICONS[m] || '📦';
+                const pname = modulePrettyName(m, modulesData[m]);
+                h += `<div class="form-check form-check-inline">
+                  <input class="form-check-input check-module-cb" type="checkbox" value="${escAttr(m)}"
+                    id="chk-${escAttr(m)}" ${enabled ? 'checked' : ''}
+                    onchange="onCheckModuleToggle(this)">
+                  <label class="form-check-label small" for="chk-${escAttr(m)}">${icon} ${esc(pname)}</label>
+                </div>`;
+            }
+            h += '</div>';
+        }
+    }
+
+    // ── Results table ─────────────────────────────────────────
+    h += '<div id="checksResultArea">';
+    if (!Object.keys(data).length) {
+        h += '<div class="alert alert-info">' + t('status_empty') + '</div>';
+    } else {
+        h += _renderStatusTable(data);
+    }
+    h += '</div>';
+
+    c.innerHTML = h;
+}
+
+function _renderStatusTable(data) {
     let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
     h += '<thead class="table-light"><tr><th>' + t('col_module') + '</th><th>' + t('col_check') + '</th><th>' + t('col_status') + '</th></tr></thead><tbody>';
     for (const [mod, checks] of Object.entries(data)) {
@@ -26,5 +101,62 @@ async function renderStatus() {
         }
     }
     h += '</tbody></table></div>';
-    c.innerHTML = h;
+    return h;
+}
+
+function onCheckModuleToggle(el) {
+    if (el.checked) _checkSelection.add(el.value);
+    else _checkSelection.delete(el.value);
+}
+
+function toggleCheckSelection(selectAll) {
+    document.querySelectorAll('.check-module-cb').forEach(cb => {
+        cb.checked = selectAll;
+        if (selectAll) _checkSelection.add(cb.value);
+        else _checkSelection.delete(cb.value);
+    });
+}
+
+async function runAllChecks() {
+    await _doRunChecks('all');
+}
+
+async function runSelectedChecks() {
+    const mods = [..._checkSelection];
+    if (!mods.length) { showToast(t('checks_no_selection'), 'warning'); return; }
+    await _doRunChecks(mods);
+}
+
+async function _doRunChecks(modules) {
+    const spinner = document.getElementById('checksSpinner');
+    const btnAll = document.getElementById('btnRunAll');
+    const btnSel = document.getElementById('btnRunSelected');
+    if (spinner) spinner.classList.remove('d-none');
+    if (btnAll) btnAll.disabled = true;
+    if (btnSel) btnSel.disabled = true;
+
+    try {
+        const res = await apiPost('/api/checks/run', { modules });
+        if (!res || res.status !== 200) {
+            showToast(res?.data?.error || t('checks_error'), 'danger');
+            return;
+        }
+        const { results, errors } = res.data;
+
+        // Show inline results
+        const area = document.getElementById('checksResultArea');
+        if (area && results) {
+            area.innerHTML = _renderStatusTable(results);
+        }
+
+        if (errors && errors.length) {
+            showToast(t('checks_error') + ': ' + errors.join(', '), 'warning');
+        } else {
+            showToast(t('checks_done'));
+        }
+    } finally {
+        if (spinner) spinner.classList.add('d-none');
+        if (btnAll) btnAll.disabled = false;
+        if (btnSel) btnSel.disabled = false;
+    }
 }

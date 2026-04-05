@@ -38,13 +38,31 @@ __all__ = ['ModuleBase']
 class ModuleBase(ObjectBase):
     """ Base class for modules. """
 
-    _DEFAULT_THREADS = 5 # Number of threads that will be used in the modules for parallel processing as default value.
+    # Number of threads that will be used in the modules for parallel processing as default value.
+    _DEFAULT_THREADS = 5
+    _DEFAULT_ENABLED = True
 
     # Per-item field schema for the module's collections.
     # Override in subclasses to declare which fields each item supports.
     # Format: { 'collection_key': { field: default_value, … } }
     # Example: { 'list': { 'enabled': True, 'code': 200 } }
     ITEM_SCHEMA: dict[str, dict] = {}
+
+    @staticmethod
+    def _schema_defaults(collection: dict) -> dict:
+        """Extract default values from an enriched ``ITEM_SCHEMA`` collection.
+
+        Supports both the simple format (``{field: value}``) and the rich
+        format (``{field: {default: value, type: ..., ...}}``).
+        """
+        defaults: dict = {}
+        for k, v in collection.items():
+            if isinstance(v, dict) and 'default' in v:
+                val = v['default']
+                defaults[k] = list(val) if isinstance(val, list) else val
+            else:
+                defaults[k] = list(v) if isinstance(v, list) else v
+        return defaults
 
     @classmethod
     def discover_schemas(cls, watchfuls_dir: str | None = None) -> dict[str, dict]:
@@ -132,6 +150,11 @@ class ModuleBase(ObjectBase):
     def is_monitor_exist(self) -> bool:
         """ Check if the Monitor object exists and is valid. """
         return bool(self._monitor and isinstance(self._monitor, lib.Monitor))
+
+    @property
+    def is_enabled(self) -> bool:
+        """ Check if the module is enabled in the configuration. """
+        return self.get_conf('enabled', self._DEFAULT_ENABLED)
 
     def send_message(self, message, status=None):
         """

@@ -44,20 +44,19 @@ class ConfigOptions(IntEnum):
 
 class Watchful(ModuleBase):
 
-    _default_enabled = True
-    _default_port = 3306
-
     ITEM_SCHEMA = {
         'list': {
-            'enabled': True,
-            'host': '',
-            'port': 3306,
-            'user': '',
-            'password': '',
-            'db': '',
-            'socket': '',
+            'enabled': {'default': True, 'type': 'bool'},
+            'host': {'default': '', 'type': 'str'},
+            'port': {'default': 3306, 'type': 'int', 'min': 1, 'max': 65535},
+            'user': {'default': '', 'type': 'str'},
+            'password': {'default': '', 'type': 'str', 'sensitive': True},
+            'db': {'default': '', 'type': 'str'},
+            'socket': {'default': '', 'type': 'str'},
         },
     }
+
+    _DEFAULTS = {k: v['default'] for k, v in ITEM_SCHEMA['list'].items()}
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
@@ -76,7 +75,7 @@ class Watchful(ModuleBase):
             elif isinstance(value, dict):
                 is_enabled = self._get_conf(ConfigOptions.enabled, key)
             else:
-                is_enabled = self._default_enabled
+                is_enabled = self._DEFAULTS['enabled']
 
             self._debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
 
@@ -94,7 +93,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = f'MySQL: {db} - *Error: {exc}* {u"\U0001F4A5"}'
+                    message = f'MySQL: {db} - *Error: {exc}* 💥'
                     self.dict_return.set(db, False, message)
 
     def _db_check(self, db):
@@ -109,7 +108,7 @@ class Watchful(ModuleBase):
 
         s_message = 'MySQL: '
         if status == "OK":
-            s_message += f'*{db}* {u"\U00002705"}'
+            s_message += f'*{db}* ✅'
             status = True
         else:
             s_message += f'{db} - *Error:* '
@@ -117,7 +116,7 @@ class Watchful(ModuleBase):
                 case "1045":
                     # OperationalError(1045, "Access denied for user 'user'@'server' (using password: NO)")
                     # OperationalError(1045, "Access denied for user 'user'@'server' (using password: YES)")
-                    s_message += f"*Access denied* {'\U0001F510'}"
+                    s_message += "*Access denied* 🔐"
                 case "2003":
                     # OperationalError(2003, "Can't connect to MySQL server on 'host1' (timed out)")
                     # OperationalError(2003, "Can't connect to MySQL server on 'host1' ([Errno 113] No route to host)")
@@ -131,9 +130,9 @@ class Watchful(ModuleBase):
                         s_message += ' *(no route to host)*'
                     else:
                         s_message += ' *(?????)*'
-                    s_message += '\U000026A0'
+                    s_message += '⚠️'
                 case _:
-                    s_message += f'*{message}* {"\U000026A0"}'
+                    s_message += f'*{message}* ⚠️'
             status = False
 
         other_data = {'message': message}
@@ -206,15 +205,15 @@ class Watchful(ModuleBase):
         if default_val is None:
             match opt_find:
                 case ConfigOptions.port:
-                    val_def = self.get_conf(opt_find.name, self._default_port)
+                    val_def = self.get_conf(opt_find.name, self._DEFAULTS['port'])
 
                 case (ConfigOptions.socket | ConfigOptions.host
                       | ConfigOptions.user | ConfigOptions.password
                       | ConfigOptions.db):
-                    val_def = self.get_conf(opt_find.name, "")
+                    val_def = self.get_conf(opt_find.name, self._DEFAULTS.get(opt_find.name, ''))
 
                 case ConfigOptions.enabled:
-                    val_def = self.get_conf(opt_find.name, self._default_enabled)
+                    val_def = self.get_conf(opt_find.name, self._DEFAULTS['enabled'])
 
                 case None:
                     raise ValueError("opt_find it can not be None!")

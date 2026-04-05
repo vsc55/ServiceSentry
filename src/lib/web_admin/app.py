@@ -6,6 +6,7 @@ import functools
 import json
 import os
 import secrets
+import threading
 from datetime import datetime, timedelta, timezone
 
 import requests as req
@@ -48,6 +49,7 @@ class WebAdmin:
         var_dir: str | None = None,
         default_lang: str = DEFAULT_LANG,
         default_dark_mode: bool = False,
+        modules_dir: str | None = None,
     ):
         """Initialise the web administration server.
 
@@ -64,6 +66,8 @@ class WebAdmin:
         """
         self._config_dir = config_dir
         self._var_dir = var_dir
+        self._modules_dir = modules_dir
+        self._check_lock = threading.Lock()
         self._default_lang = (
             default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
         )
@@ -909,6 +913,94 @@ class WebAdmin:
         def api_get_audit():
             """Return the audit log (most recent first)."""
             return jsonify(list(reversed(self._audit_log)))
+
+        # --- API: run checks (editor+) ---------------------------------
+
+        @app.route('/api/checks/run', methods=['POST'])
+        @write_required
+        def api_run_checks():
+            """Run module checks on demand.
+
+            Accepts a JSON body with ``{"modules": [...]}`` to run
+            specific modules, or ``{"modules": "all"}`` to run every
+            enabled module.  Returns the result dict keyed by module.
+            """
+            if not self._modules_dir:
+                return jsonify({'error': self._t('checks_no_modules_dir')}), 500
+            if not self._check_lock.acquire(blocking=False):
+                return jsonify({'error': self._t('checks_already_running')}), 409
+            try:
+                data = request.get_json(silent=True) or {}
+                requested = data.get('modules', 'all')
+                results, errors = self._run_checks(requested)
+                self._audit('checks_run', detail={
+                    'requested': requested,
+                    'ok': list(results.keys()),
+                    'errors': errors,
+                })
+                return jsonify({'ok': True, 'results': results,
+                                'errors': errors})
+            finally:
+                self._check_lock.release()
+
+    # ------------------------------------------------------------------
+    # Check execution helper
+    # ------------------------------------------------------------------
+
+    def _run_checks(self, requested) -> tuple[dict, list[str]]:
+        """Execute module checks and return serialisable results.
+
+        *requested* is either the string ``"all"`` or a list of module
+        names.  Returns ``(results_dict, error_list)``.
+        """
+        import glob
+        import importlib
+        import sys
+
+        from lib import Monitor
+
+        # Ensure watchfuls dir is importable
+        if self._modules_dir and self._modules_dir not in sys.path:
+            sys.path.insert(0, self._modules_dir)
+        parent = os.path.dirname(self._modules_dir)
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+
+        # Build a Monitor for running checks
+        dir_base = os.path.dirname(self._modules_dir)
+        monitor = Monitor(dir_base, self._config_dir,
+                          self._modules_dir, self._var_dir)
+
+        # Resolve module list
+        if requested == 'all':
+            module_names = monitor._get_enabled_modules()
+        else:
+            module_names = [m for m in requested if isinstance(m, str)]
+
+        results: dict = {}
+        errors: list[str] = []
+
+        for mod_name in module_names:
+            try:
+                success, result_name, result_data = monitor.check_module(
+                    mod_name)
+                if success and result_data is not None:
+                    monitor._process_module_result(result_name, result_data)
+                    items: dict = {}
+                    for key in result_data.list:
+                        items[key] = {
+                            'status': result_data.get_status(key),
+                            'message': result_data.get_message(key),
+                        }
+                    results[mod_name] = items
+                else:
+                    errors.append(mod_name)
+            except Exception as exc:
+                errors.append(f'{mod_name}: {exc}')
+
+        # Persist updated status
+        monitor.status.save()
+        return results, errors
 
     # ------------------------------------------------------------------
     # Server entry-point

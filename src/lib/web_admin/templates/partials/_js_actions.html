@@ -43,6 +43,29 @@ function removeItem(target, parentPathStr, key) {
     }
 }
 
+function renameItem(target, parentPathStr, oldKey) {
+    const newKey = prompt(t('rename_item_prompt'), oldKey);
+    if (!newKey || newKey === oldKey) return;
+    const nk = newKey.trim();
+    if (!nk) return;
+    const parts = parentPathStr.split('|');
+    const data = target === 'modules' ? modulesData : configData;
+    const parent = getPath(data, parts);
+    if (!parent || typeof parent !== 'object') return;
+    if (nk in parent) { showToast(tf('already_exists', nk), 'warning'); return; }
+    // Copy value to new key, preserving insertion order
+    const entries = Object.entries(parent);
+    const idx = entries.findIndex(([k]) => k === oldKey);
+    if (idx < 0) return;
+    // Clear parent and re-insert in same order with new key
+    for (const k of Object.keys(parent)) delete parent[k];
+    for (let i = 0; i < entries.length; i++) {
+        const [k, v] = entries[i];
+        parent[i === idx ? nk : k] = v;
+    }
+    target === 'modules' ? renderModules() : renderConfig();
+}
+
 // --- Add-item modal ---
 function openAddModal(target, pathStr) {
     _addItemCtx = { target, pathStr };
@@ -64,10 +87,11 @@ function confirmAddItem() {
 
     // Smart default: schema > copy from first dict sibling > true
     const schema = schemaFor(pathStr);
+    const defaults = schemaDefaults(schema);
     let def = true;
-    if (schema) {
+    if (defaults) {
         def = {};
-        for (const [k, sv] of Object.entries(schema)) {
+        for (const [k, sv] of Object.entries(defaults)) {
             def[k] = Array.isArray(sv) ? [...sv] : sv;
         }
     } else {

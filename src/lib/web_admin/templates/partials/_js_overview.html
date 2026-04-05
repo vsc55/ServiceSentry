@@ -3,6 +3,41 @@
    ================================================================ #}
 
 // ──────────────────────────── Overview ────────────────────────────
+let _overviewTimer = null;
+
+function _renderRefreshBar(containerId, renderFn, timerGet, timerSet) {
+    const intervals = [0, 10, 30, 60];
+    const current = timerGet() ? 1 : 0; // just need the active interval
+    let h = `<div class="d-flex flex-wrap align-items-center gap-2 mb-3">`;
+    h += `<button class="btn btn-sm btn-outline-secondary" onclick="${renderFn}()">`;
+    h += `<i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`;
+    h += `<div class="btn-group btn-group-sm" role="group">`;
+    h += `<span class="btn btn-sm btn-outline-secondary disabled">`;
+    h += `<i class="bi bi-clock me-1"></i>${t('auto_refresh')}</span>`;
+    for (const s of intervals) {
+        const label = s === 0 ? 'OFF' : tf('auto_refresh_seconds', s);
+        const activeInterval = timerGet()?._interval || 0;
+        const active = (s === 0 && !timerGet()) || (s > 0 && activeInterval === s);
+        h += `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-outline-primary'}" `;
+        h += `onclick="${timerSet}(${s})">${label}</button>`;
+    }
+    h += `</div></div>`;
+    return h;
+}
+
+function setOverviewAutoRefresh(seconds) {
+    if (_overviewTimer) { clearInterval(_overviewTimer._id); _overviewTimer = null; }
+    if (seconds > 0) {
+        const id = setInterval(() => {
+            // Only refresh if the overview tab is visible
+            const pane = document.getElementById('tab-overview');
+            if (pane && pane.classList.contains('active')) renderOverview();
+        }, seconds * 1000);
+        _overviewTimer = { _id: id, _interval: seconds };
+    }
+    renderOverview();
+}
+
 async function renderOverview() {
     const c = document.getElementById('overview-container');
     if (!c) return;
@@ -22,7 +57,9 @@ async function renderOverview() {
     const enabledCount = modules.filter(m => m.enabled).length;
     const disabledCount = modules.length - enabledCount;
 
-    let h = '<div class="row g-3 mb-4">';
+    let h = _renderRefreshBar('overview-container', 'renderOverview',
+        () => _overviewTimer, 'setOverviewAutoRefresh');
+    h += '<div class="row g-3 mb-4">';
 
     // ── Card: Modules ─────────────────────────────────────────────
     h += `<div class="col-sm-6 col-xl-3">

@@ -11,7 +11,7 @@ from tests.conftest import create_mock_monitor
 
 class FakeConfigOptions(IntEnum):
     enabled = 1
-    host = 100
+    nonexistent = 100
 
 
 class TestGetConfInListTypes:
@@ -28,7 +28,7 @@ class TestGetConfInListTypes:
                     'list': {
                         'dev1': {
                             'enabled': True,
-                            'label': 'MyDevice',
+                            'host': 'MyDevice',
                             'timeout': 10,
                             'attempt': 3,
                         }
@@ -41,19 +41,19 @@ class TestGetConfInListTypes:
         """IntEnum opt_find usa .name como clave de búsqueda."""
         w = self._make_watchful()
         from watchfuls.ping import ConfigOptions
-        result = w.get_conf_in_list(ConfigOptions.label, 'dev1', 'default')
+        result = w.get_conf_in_list(ConfigOptions.host, 'dev1', 'default')
         assert result == 'MyDevice'
 
     def test_opt_find_str(self):
         """str opt_find se usa directamente como clave."""
         w = self._make_watchful()
-        result = w.get_conf_in_list('label', 'dev1', 'default')
+        result = w.get_conf_in_list('host', 'dev1', 'default')
         assert result == 'MyDevice'
 
     def test_opt_find_list(self):
         """list opt_find se usa como ruta de claves."""
         w = self._make_watchful()
-        result = w.get_conf_in_list(['label'], 'dev1', 'default')
+        result = w.get_conf_in_list(['host'], 'dev1', 'default')
         assert result == 'MyDevice'
 
     def test_opt_find_int(self):
@@ -89,7 +89,7 @@ class TestGetConfInListTypes:
     def test_opt_find_tuple(self):
         """tuple opt_find se convierte a list."""
         w = self._make_watchful()
-        result = w.get_conf_in_list(('label',), 'dev1', 'default')
+        result = w.get_conf_in_list(('host',), 'dev1', 'default')
         assert result == 'MyDevice'
 
     def test_opt_find_invalid_type_raises_type_error(self):
@@ -113,7 +113,7 @@ class TestGetConfInListTypes:
     def test_opt_find_enum_not_found_returns_default(self):
         """Enum que no existe en config retorna default."""
         w = self._make_watchful()
-        result = w.get_conf_in_list(FakeConfigOptions.host, 'dev1', 'fallback')
+        result = w.get_conf_in_list(FakeConfigOptions.nonexistent, 'dev1', 'fallback')
         assert result == 'fallback'
 
     def test_opt_find_str_not_found_returns_default(self):

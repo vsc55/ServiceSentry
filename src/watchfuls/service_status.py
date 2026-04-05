@@ -29,8 +29,9 @@ class Watchful(ModuleBase):
 
     ITEM_SCHEMA = {
         'list': {
-            'enabled': True,
-            'remediation': False,
+            'enabled': {'default': True, 'type': 'bool'},
+            'service': {'default': '', 'type': 'str'},
+            'remediation': {'default': False, 'type': 'bool'},
         },
     }
 
@@ -43,9 +44,10 @@ class Watchful(ModuleBase):
         for (key, value) in self.get_conf('list', {}).items():
             enabled = str(value.get('enabled', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
             remediation = str(value.get('remediation', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
+            service_name = (value.get('service', '') or '').strip() or key
             self._debug(f"Service: {key} - Enabled: {enabled} - Remediation: {remediation}", DebugLevel.info)
             if enabled:
-                list_service.append({"service": key, "remediation": remediation})
+                list_service.append({"key": key, "service": service_name, "remediation": remediation})
 
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)) as executor:
@@ -55,50 +57,51 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = f'Service: {service} - *Error: {exc}* {u"\U0001F4A5"}'
-                    self.dict_return.set(service, False, message)
+                    message = f'Service: {service["key"]} - *Error: {exc}* 💥'
+                    self.dict_return.set(service['key'], False, message)
 
         super().check()
         return self.dict_return
 
     def _service_check(self, service):
         remediation_use = None
+        display_name = service['key']
         service_name = service['service']
         status, error, message = self._service_return(service_name)
 
-        s_message = f'Service: {service_name} '
+        s_message = f'Service: {display_name} '
         if status:
-            s_message += ' - *Running* ' + u'\U00002705'
+            s_message += ' - *Running* ✅'
         else:
             if message:
                 s_message += f'- *Error: {message}* '
             else:
                 s_message += '- *Stop* '
-            s_message += u'\U000026A0'
+            s_message += '⚠️'
 
         # Solo se ejecuta la primera vez, cuando cambia de estado.
-        if self.check_status(status, self.name_module, service_name):
+        if self.check_status(status, self.name_module, display_name):
             self.send_message(s_message, status)
             if not status and service['remediation']:
                 self._service_remediation(service_name)
                 status, error, message = self._service_return(service_name)
 
-                s_message = f'*Recovery* Service: {service_name} '
+                s_message = f'*Recovery* Service: {display_name} '
                 if status:
                     remediation_use = True
-                    s_message += ' - *OK* ' + u'\U00002705'
+                    s_message += ' - *OK* ✅'
                 else:
                     remediation_use = False
                     if message:
                         s_message += f'- *Error: {message}* '
                     else:
                         s_message += '- *UNSUCCESSFUL* '
-                    s_message += u'\U000026A0'
+                    s_message += '⚠️'
 
                 self.send_message(s_message, status)
 
         other_data = {'error': error, 'status_detail': message, 'remediation': remediation_use}
-        self.dict_return.set(service_name, status, s_message, False, other_data)
+        self.dict_return.set(display_name, status, s_message, False, other_data)
 
     def _service_remediation(self, service_name):
         cmd = f'{self.paths.find("systemctl")} start {service_name}'

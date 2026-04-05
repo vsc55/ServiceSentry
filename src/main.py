@@ -359,7 +359,8 @@ def start_web(args):
 
     admin = WebAdmin(config_dir, str(username), str(password), var_dir,
                      default_lang=str(lang),
-                     default_dark_mode=bool(dark_mode))
+                     default_dark_mode=bool(dark_mode),
+                     modules_dir=os.path.join(dir_base, 'watchfuls'))
 
     print("ServiceSentry Web Admin")
     print(f"  URL:    http://{host}:{port}")

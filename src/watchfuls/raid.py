@@ -40,21 +40,21 @@ class ConfigOptions(IntEnum):
 
 class Watchful(ModuleBase):
 
-    _default_enabled = True
-    _default_port = 22
-    _default_timeout = 30
+    _DEFAULT_TIMEOUT = 30
 
     ITEM_SCHEMA = {
         'remote': {
-            'enabled': True,
-            'label': '',
-            'host': '',
-            'port': 22,
-            'user': '',
-            'password': '',
-            'key_file': '',
+            'enabled': {'default': True, 'type': 'bool'},
+            'label': {'default': '', 'type': 'str'},
+            'host': {'default': '', 'type': 'str'},
+            'port': {'default': 22, 'type': 'int', 'min': 1, 'max': 65535},
+            'user': {'default': '', 'type': 'str'},
+            'password': {'default': '', 'type': 'str', 'sensitive': True},
+            'key_file': {'default': '', 'type': 'str'},
         },
     }
+
+    _DEFAULTS = {k: v['default'] for k, v in ITEM_SCHEMA['remote'].items()}
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
@@ -67,7 +67,7 @@ class Watchful(ModuleBase):
         return self.dict_return
 
     def _check_local(self):
-        is_enable = self.get_conf("local", self._default_enabled)
+        is_enable = self.get_conf("local", self._DEFAULTS['enabled'])
         self._debug(f"Local - Enabled: {is_enable}", DebugLevel.info)
         if is_enable:
             list_md = RaidMdstat(self.paths.find('mdstat')).read_status()
@@ -87,7 +87,7 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:
                     tmp_label = self.get_label_by_id(remote_id)
-                    message = f'RAID: {tmp_label} - *Error: {exc}* {u"\U0001F4A5"}'
+                    message = f'RAID: {tmp_label} - *Error: {exc}* 💥'
                     self.dict_return.set(remote_id, False, message)
                     self._debug(f"{remote_id}/{tmp_label} - Exception: {exc}", DebugLevel.error)
                     # self.debug.exception(exc)
@@ -108,7 +108,7 @@ class Watchful(ModuleBase):
         label = self.get_label_by_id(remote_id)
 
         if len(list_md) == 0:
-            message = f"[{label}] *No RAID's* in the system. {u'\U00002705'}"
+            message = f"[{label}] *No RAID's* in the system. ✅"
             key_id = f"R_{remote_id}" if remote_id else "L"
             self.dict_return.set(key_id, True, message)
 
@@ -121,20 +121,20 @@ class Watchful(ModuleBase):
                 match value.get("update", ''):
                     case RaidMdstat.UpdateStatus.ok:
                         is_warning = False
-                        message = f"RAID *{label}/{key}* in good status. {u'\U00002705'}"
+                        message = f"RAID *{label}/{key}* in good status. ✅"
 
                     case RaidMdstat.UpdateStatus.error:
-                        message = f"*RAID {label}/{key} is degraded.* {u'\U000026A0'}"
+                        message = f"*RAID {label}/{key} is degraded.* ⚠️"
 
                     case RaidMdstat.UpdateStatus.recovery:
                         other_data['percent'] = value.get("recovery", {}).get('percent', -1)
                         other_data['finish'] = value.get("recovery", {}).get('finish', -1)
                         other_data['speed'] = value.get("recovery", {}).get('speed', -1)
 
-                        message = f"*RAID {label}/{key} is degraded, recovery status {other_data['percent']}%, estimate time to finish {other_data['finish']}.* {u'\U000026A0'}"
+                        message = f"*RAID {label}/{key} is degraded, recovery status {other_data['percent']}%, estimate time to finish {other_data['finish']}.* ⚠️"
 
                     case _:
-                        message = f"*RAID {label}/{key} Unknown Error*. {u'\U000026A0'}"
+                        message = f"*RAID {label}/{key} Unknown Error*. ⚠️"
 
                 if remote_id:
                     key_id = f"R_{remote_id}_{key}"
@@ -151,8 +151,7 @@ class Watchful(ModuleBase):
             if isinstance(value, dict):
                 is_enabled = self.get_conf_item(ConfigOptions.enabled, key)
             else:
-                is_enabled = self._default_enabled
-
+                is_enabled = self._DEFAULTS['enabled']
             self._debug(f"Remote/{key} - Enabled: {is_enabled}", DebugLevel.info)
             if is_enabled:
                 return_list.append(key)
@@ -164,15 +163,15 @@ class Watchful(ModuleBase):
         if default_val is None:
             match opt_find:
                 case ConfigOptions.port:
-                    val_def = self.get_conf(opt_find.name, self._default_port)
+                    val_def = self.get_conf(opt_find.name, self._DEFAULTS['port'])
 
                 case (ConfigOptions.label | ConfigOptions.host
                       | ConfigOptions.user | ConfigOptions.password
                       | ConfigOptions.key_file):
-                    val_def = self.get_conf(opt_find.name, "")
+                    val_def = self.get_conf(opt_find.name, self._DEFAULTS.get(opt_find.name, ''))
 
                 case ConfigOptions.enabled:
-                    val_def = self.get_conf(opt_find.name, self._default_enabled)
+                    val_def = self.get_conf(opt_find.name, self._DEFAULTS['enabled'])
 
                 case None:
                     raise ValueError("opt_find it can not be None!")
@@ -209,7 +208,7 @@ class Watchful(ModuleBase):
 
     @property
     def conf_timeout(self) -> float:
-        return self.get_conf('timeout', self._default_timeout)
+        return self.get_conf('timeout', self._DEFAULT_TIMEOUT)
 
     @property
     def conf_threads(self) -> int:

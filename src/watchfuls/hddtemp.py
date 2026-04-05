@@ -28,19 +28,20 @@ from lib.modules import ModuleBase
 
 class Watchful(ModuleBase):
 
-    _default_enabled = True
-    _default_port = 7634
-    _default_alert = 50
-    _default_timeout = 5
+    _DEFAULT_ALERT = 50
+    _DEFAULT_TIMEOUT = 5
 
     ITEM_SCHEMA = {
         'list': {
-            'enabled': True,
-            'host': '',
-            'port': 7634,
-            'exclude': [],
+            'enabled': {'default': True, 'type': 'bool'},
+            'host': {'default': '', 'type': 'str'},
+            'port': {'default': 7634, 'type': 'int', 'min': 1, 'max': 65535},
+            'exclude': {'default': [], 'type': 'list'},
         },
     }
+
+    _DEFAULTS = {k: (list(v['default']) if isinstance(v['default'], list) else v['default'])
+                 for k, v in ITEM_SCHEMA['list'].items()}
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
@@ -54,7 +55,7 @@ class Watchful(ModuleBase):
     def _check_get_list_hosts(self):
         return_list = []
         for (key, value) in self.get_conf('list', {}).items():
-            is_enabled = self._default_enabled
+            is_enabled = self._DEFAULTS['enabled']
             match value:
                 case bool():
                     is_enabled = value
@@ -68,8 +69,8 @@ class Watchful(ModuleBase):
                 else:
                     new_hddtemp = self.Hddtemp_Info(key)
                     new_hddtemp.host = value.get("host")
-                    new_hddtemp.port = value.get("port", self._default_port)
-                    new_hddtemp.alert = self.get_conf('alert', self._default_alert)
+                    new_hddtemp.port = value.get("port", self._DEFAULTS['port'])
+                    new_hddtemp.alert = self.get_conf('alert', self._DEFAULT_ALERT)
                     new_hddtemp.exclude = value.get("exclude", [])
                     return_list.append(new_hddtemp)
 
@@ -84,7 +85,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = f'HDD: {hddtemp.label} - *Error: {exc}* {u"\U0001F4A5"}'
+                    message = f'HDD: {hddtemp.label} - *Error: {exc}* 💥'
                     self.dict_return.set(hddtemp.label, False, message)
 
     def _hddtemp_check(self, hddtemp):
@@ -103,12 +104,12 @@ class Watchful(ModuleBase):
                         status = hdd_alert >= hdd_temp
                         s_message = f'({hddtemp.label}): *{hdd_dev}* *({hdd_temp}º{hdd_unit})*'
                         if status:
-                            s_message += u'\U0001F53C'
+                            s_message += '🔼'
                         else:
-                            s_message += u'\U0001F53D'
+                            s_message += '🔽'
                     else:
                         status = False
-                        s_message = f'({hddtemp.label}): *{hdd_dev}* *({hdd_temp})*' + u'\U0001F525' + u'\U0001F525'
+                        s_message = f'({hddtemp.label}): *{hdd_dev}* *({hdd_temp})* 🔥🔥'
 
                     other_data = value
                     self.dict_return.set(hdd_name, status, s_message, False, other_data)
@@ -119,7 +120,7 @@ class Watchful(ModuleBase):
         else:
             self._debug(f"{hddtemp.label} >> Exception: {hddtemp.error}", DebugLevel.warning)
             s_message = f'HddTemp: {hddtemp.label} - *Error:* *{hddtemp.error}*'
-            s_message += u'\U0001F53D'
+            s_message += '🔽'
 
             other_data = {'message': str(hddtemp.error)}
             self.dict_return.set(hddtemp.label, False, s_message, False, other_data)
@@ -128,7 +129,7 @@ class Watchful(ModuleBase):
                 self.send_message(s_message, False)
 
     def _hddtemp_return(self, hddtemp):
-        timeout = self.get_conf('timeout', self._default_timeout)
+        timeout = self.get_conf('timeout', self._DEFAULT_TIMEOUT)
         try:
             with socket.create_connection(
                 (hddtemp.host, hddtemp.port),

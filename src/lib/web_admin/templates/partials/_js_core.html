@@ -47,6 +47,28 @@ function schemaFor(pathStr) {
 }
 
 /**
+ * Extract plain default values from a rich schema.
+ * Handles both simple ({field: value}) and rich ({field: {default, type, ...}}) formats.
+ */
+function schemaDefaults(schema) {
+    if (!schema) return null;
+    const d = {};
+    for (const [k, v] of Object.entries(schema)) {
+        d[k] = (v && typeof v === 'object' && !Array.isArray(v) && 'default' in v) ? v['default'] : v;
+    }
+    return d;
+}
+
+/**
+ * Return metadata for a single field from the schema, or null.
+ */
+function fieldMeta(schema, key) {
+    if (!schema) return null;
+    const v = schema[key];
+    return (v && typeof v === 'object' && !Array.isArray(v) && 'type' in v) ? v : null;
+}
+
+/**
  * Ensure an item matches its schema.  If the current value is a bare
  * boolean but the schema says it should be a dict, promote it in-place
  * and return the dict.  Missing schema fields are also added.
@@ -59,11 +81,12 @@ function promoteItem(data, parts, schema) {
     }
     const itemKey = parts[parts.length - 1];
     let val = cur[itemKey];
-    if (typeof val === 'boolean' && schema) {
-        val = Object.assign({}, schema, { enabled: val });
+    const defaults = schemaDefaults(schema);
+    if (typeof val === 'boolean' && defaults) {
+        val = Object.assign({}, defaults, { enabled: val });
         cur[itemKey] = val;
-    } else if (typeof val === 'object' && val !== null && !Array.isArray(val) && schema) {
-        for (const [sk, sv] of Object.entries(schema)) {
+    } else if (typeof val === 'object' && val !== null && !Array.isArray(val) && defaults) {
+        for (const [sk, sv] of Object.entries(defaults)) {
             if (!(sk in val)) val[sk] = (Array.isArray(sv) ? [...sv] : sv);
         }
     }
@@ -158,6 +181,13 @@ function renderField(key, value, pathStr, target = 'modules') {
     const lbl = esc(fieldLabel(key));
     const sp = escAttr(pathStr), tg = escAttr(target);
 
+    // Get field metadata from schema
+    const schema = schemaFor(pathStr.split('|').slice(0, 2).join('|') + '|_');
+    // schemaFor needs "module|collection|..." — but we can also look it up directly
+    const parentKey = pathStr.split('|').slice(0, 2).join('|');
+    const sch = ITEM_SCHEMAS[parentKey] || null;
+    const meta = fieldMeta(sch, key);
+
     if (typeof value === 'boolean') {
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
@@ -168,11 +198,14 @@ function renderField(key, value, pathStr, target = 'modules') {
         </div></div></div>`;
     }
     if (typeof value === 'number') {
+        const minA = meta && meta.min != null ? ` min="${meta.min}"` : '';
+        const maxA = meta && meta.max != null ? ` max="${meta.max}"` : '';
+        const stepA = meta && meta.type === 'float' ? ' step="0.1"' : ' step="1"';
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
         <div class="col-sm-8">
             <input type="number" class="form-control form-control-sm"
-                value="${value}"
+                value="${value}"${minA}${maxA}${stepA}
                 onchange="updateField('${tg}','${sp}',Number(this.value))">
         </div></div>`;
     }
@@ -193,7 +226,8 @@ function renderField(key, value, pathStr, target = 'modules') {
                 </select>
             </div></div>`;
         }
-        const tp = SENSITIVE.has(key) ? 'password' : 'text';
+        const isSensitive = (meta && meta.sensitive) || SENSITIVE.has(key);
+        const tp = isSensitive ? 'password' : 'text';
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
         <div class="col-sm-8">
@@ -257,6 +291,12 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     onclick="event.stopPropagation();removeItem('${tg}','${pp}','${nameEsc}')">
     <i class="bi bi-trash3"></i></button>`;
 
+    // Rename (key edit) button
+    const renameBtn = `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
+    onclick="event.stopPropagation();renameItem('${tg}','${pp}','${nameEsc}')"
+    title="${esc(t('rename_item'))}">
+    <i class="bi bi-pencil-square"></i></button>`;
+
     // --- promote boolean → dict when a schema exists ---
     const schema = schemaFor(parentPathStr);
     if (schema && typeof itemValue === 'boolean') {
@@ -272,10 +312,18 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         promoteItem(target === 'modules' ? modulesData : configData, parts, schema);
     }
 
+    // Determine display name: use 'label' field if present and non-empty,
+    // otherwise fall back to the item key.
+    let displayName = itemName;
+    if (typeof itemValue === 'object' && itemValue !== null && !Array.isArray(itemValue)) {
+        const lbl = (itemValue.label || '').trim();
+        if (lbl) displayName = lbl;
+    }
+
     // --- boolean item (no schema) ---
     if (typeof itemValue === 'boolean') {
         return `<div class="d-flex align-items-center mb-1 p-2 rounded border bg-body">
-        <code class="me-auto small">${esc(itemName)}</code>
+        <code class="me-auto small">${esc(displayName)}</code>
         <div class="form-check form-switch me-1">
             <input class="form-check-input" type="checkbox" ${itemValue ? 'checked' : ''}
                 onchange="updateField('${tg}','${sp}',this.checked)">
@@ -285,7 +333,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     // --- number item ---
     if (typeof itemValue === 'number') {
         return `<div class="d-flex align-items-center mb-1 p-2 rounded border bg-body">
-        <code class="me-2 small">${esc(itemName)}</code>
+        <code class="me-2 small">${esc(displayName)}</code>
         <input type="number" class="form-control form-control-sm ms-auto"
             style="max-width:100px" value="${itemValue}"
             onchange="updateField('${tg}','${sp}',Number(this.value))">
@@ -304,12 +352,16 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                 onchange="updateField('${tg}','${sp}|enabled',this.checked)">
         </div>`;
         }
+        // Show key as a small muted badge when displayName differs from itemName
+        const keyBadge = (displayName !== itemName)
+            ? `<span class="badge bg-secondary bg-opacity-25 text-body-secondary ms-2 small fw-normal">${esc(itemName)}</span>`
+            : '';
         const body = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : []);
         return `<div class="card mb-2">
         <div class="card-header d-flex align-items-center py-1 px-2 bg-body"
              role="button" data-bs-toggle="collapse" data-bs-target="#${id}">
-            <code class="me-auto small">${esc(itemName)}</code>
-            ${sw}${delBtn}
+            <code class="me-auto small">${esc(displayName)}${keyBadge}</code>
+            ${sw}${renameBtn}${delBtn}
             <i class="bi bi-chevron-down text-muted ms-1 small"></i>
         </div>
         <div class="collapse" id="${id}">
