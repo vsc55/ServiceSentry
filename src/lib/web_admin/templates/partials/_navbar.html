@@ -1,0 +1,53 @@
+{# Navigation bar — top of every dashboard page #}
+<nav class="navbar navbar-dark bg-dark sticky-top">
+    <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">
+            <i class="bi bi-shield-check me-1"></i> ServiceSentry
+        </span>
+        <div class="d-flex align-items-center">
+            <div class="dropdown">
+                <button class="btn btn-outline-light btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                    <i class="bi bi-person-circle me-1"></i>{{ display_name }}
+                    <span class="badge bg-secondary ms-1">{{ role }}</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                        <a class="dropdown-item" href="#" onclick="openChangePasswordModal(); return false;">
+                            <i class="bi bi-key me-2"></i>{{ i18n.change_my_password }}
+                        </a>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <a class="dropdown-item" href="#"
+                            onclick="event.stopPropagation(); this.nextElementSibling.classList.toggle('d-none'); return false;">
+                            <i class="bi bi-translate me-2"></i>{{ i18n.language }}
+                            <i class="bi bi-chevron-down float-end"></i>
+                        </a>
+                        <div class="d-none">
+                            {% for l in supported_langs %}
+                            <a class="dropdown-item ps-5{% if l == lang %} active{% endif %}"
+                                href="/lang/{{ l }}">{{ i18n['lang_' + l] }}</a>
+                            {% endfor %}
+                        </div>
+                    </li>
+                    <li>
+                        <a class="dropdown-item d-flex align-items-center" href="#"
+                            onclick="toggleDarkMode(); return false;">
+                            <i class="bi bi-moon-stars me-2"></i>{{ i18n.dark_mode }}
+                            <div class="form-check form-switch ms-auto mb-0 pe-none">
+                                <input class="form-check-input" type="checkbox" id="darkModeSwitch"
+                                    {% if dark_mode %}checked{% endif %}>
+                            </div>
+                        </a>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <a class="dropdown-item" href="/logout">
+                            <i class="bi bi-box-arrow-right me-2"></i>{{ i18n.logout }}
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</nav>

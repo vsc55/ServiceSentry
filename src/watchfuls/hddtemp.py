@@ -33,6 +33,15 @@ class Watchful(ModuleBase):
     _default_alert = 50
     _default_timeout = 5
 
+    ITEM_SCHEMA = {
+        'list': {
+            'enabled': True,
+            'host': '',
+            'port': 7634,
+            'exclude': [],
+        },
+    }
+
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 

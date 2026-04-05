@@ -44,6 +44,18 @@ class Watchful(ModuleBase):
     _default_port = 22
     _default_timeout = 30
 
+    ITEM_SCHEMA = {
+        'remote': {
+            'enabled': True,
+            'label': '',
+            'host': '',
+            'port': 22,
+            'user': '',
+            'password': '',
+            'key_file': '',
+        },
+    }
+
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
         self.paths.set('mdstat', '/proc/mdstat')

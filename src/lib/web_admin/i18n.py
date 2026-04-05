@@ -17,7 +17,7 @@ from lib.web_admin import lang as _lang_pkg
 
 __all__ = ['SUPPORTED_LANGS', 'DEFAULT_LANG', 'TRANSLATIONS']
 
-DEFAULT_LANG = 'en'
+DEFAULT_LANG = 'en_EN'
 
 # Auto-discover every module inside the ``lang`` package.
 TRANSLATIONS: dict[str, dict] = {}

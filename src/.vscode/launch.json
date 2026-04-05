@@ -11,6 +11,18 @@
             "envFile": "${workspaceFolder}/.env.dev"
         },
         {
+            "name": "🖥 Python: Main.py Web",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "envFile": "${workspaceFolder}/.env.dev",
+            "args": [
+                "--web"
+            ],
+        },
+        {
             "name": "🩺 Python: pytest (usa pytest.ini)",
             "type": "debugpy",
             "request": "launch",

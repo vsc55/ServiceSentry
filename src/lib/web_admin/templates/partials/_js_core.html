@@ -1,0 +1,320 @@
+{# ================================================================
+   Core JS: i18n, constants, state, utilities, toast, API helpers,
+   field rendering and collection rendering.
+   ================================================================ #}
+
+// ──────────────────────────── i18n ─────────────────────────────────
+const I18N = {{ i18n| tojson }};
+function t(k) { return I18N[k] || k; }
+function tf(k, ...a) { let s = t(k); a.forEach(v => { s = s.replace('{}', v); }); return s; }
+
+// ──────────────────────────── Constants ────────────────────────────
+const ICONS = {
+    filesystemusage: '📁', hddtemp: '💿', mysql: '🗄️', ping: '🏓',
+    raid: '💽', ram_swap: '🐏', service_status: '⚙️',
+    temperature: '🌡️', web: '🌐'
+};
+const PRETTY_NAMES = I18N.pretty_names || {};
+const LABELS = I18N.labels || {};
+const SECTION_LABELS = I18N.sections || {};
+const SENSITIVE = new Set(['password', 'token']);
+const SUPPORTED_LANGS = {{ supported_langs| tojson }};
+const SYSTEM_DEFAULT_LANG = '{{ default_lang }}';
+
+// ──────────────────────────── State ───────────────────────────────
+let modulesData = {};
+let configData = {};
+let usersData = {};
+let sessionsData = {};
+let currentUser = {};
+let _uid = 0;
+let _addItemCtx = null;   // {target, pathStr}
+let _editingUser = null;  // null = new, string = editing username
+const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
+const ITEM_SCHEMAS = {{ item_schemas | default({}) | tojson }};
+
+/**
+ * Return the schema key for a path like "web|list|www.example.com".
+ * Checks "module|collection" (first two segments).
+ */
+function schemaFor(pathStr) {
+    const parts = pathStr.split('|');
+    if (parts.length >= 2) {
+        const key = parts[0] + '|' + parts[1];
+        if (ITEM_SCHEMAS[key]) return ITEM_SCHEMAS[key];
+    }
+    return null;
+}
+
+/**
+ * Ensure an item matches its schema.  If the current value is a bare
+ * boolean but the schema says it should be a dict, promote it in-place
+ * and return the dict.  Missing schema fields are also added.
+ */
+function promoteItem(data, parts, schema) {
+    let cur = data;
+    for (let i = 0; i < parts.length - 1; i++) {
+        cur = cur[parts[i]];
+        if (!cur) return null;
+    }
+    const itemKey = parts[parts.length - 1];
+    let val = cur[itemKey];
+    if (typeof val === 'boolean' && schema) {
+        val = Object.assign({}, schema, { enabled: val });
+        cur[itemKey] = val;
+    } else if (typeof val === 'object' && val !== null && !Array.isArray(val) && schema) {
+        for (const [sk, sv] of Object.entries(schema)) {
+            if (!(sk in val)) val[sk] = (Array.isArray(sv) ? [...sv] : sv);
+        }
+    }
+    return val;
+}
+
+// ──────────────────────────── Utilities ───────────────────────────
+function uid() { return 'u' + (++_uid); }
+
+function esc(s) {
+    const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML;
+}
+function escAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function setPath(obj, parts, val) {
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+        if (!(parts[i] in cur) || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
+        cur = cur[parts[i]];
+    }
+    cur[parts[parts.length - 1]] = val;
+}
+function getPath(obj, parts) {
+    let cur = obj;
+    for (const p of parts) {
+        if (cur == null || typeof cur !== 'object' || !(p in cur)) return undefined;
+        cur = cur[p];
+    }
+    return cur;
+}
+
+function fieldLabel(k) { return LABELS[k] || k; }
+
+/** Return pretty name for a module: custom > default > raw key */
+function modulePrettyName(name, cfg) {
+    if (cfg && cfg.pretty_name) return cfg.pretty_name;
+    return PRETTY_NAMES[name] || name;
+}
+
+// ──────────────────────────── Toast ───────────────────────────────
+function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    const b = document.getElementById('toast-body');
+    t.className = 'toast align-items-center border-0 text-bg-' + type;
+    b.textContent = msg;
+    bootstrap.Toast.getOrCreateInstance(t, { delay: 3000 }).show();
+}
+
+// ──────────────────────────── API ─────────────────────────────────
+async function apiGet(url) {
+    try {
+        const r = await fetch(url);
+        if (r.status === 401) { location.href = '/login'; return null; }
+        return await r.json();
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}
+async function apiPut(url, data) {
+    try {
+        const r = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (r.status === 401) { location.href = '/login'; return null; }
+        return await r.json();
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}
+async function apiPost(url, data) {
+    try {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (r.status === 401) { location.href = '/login'; return null; }
+        return { status: r.status, data: await r.json() };
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}
+async function apiDelete(url) {
+    try {
+        const r = await fetch(url, { method: 'DELETE' });
+        if (r.status === 401) { location.href = '/login'; return null; }
+        return { status: r.status, data: await r.json() };
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}
+
+// ──────────────────────────── Field render ─────────────────────────
+function renderField(key, value, pathStr, target = 'modules') {
+    const lbl = esc(fieldLabel(key));
+    const sp = escAttr(pathStr), tg = escAttr(target);
+
+    if (typeof value === 'boolean') {
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+        <div class="col-sm-8"><div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch"
+                ${value ? 'checked' : ''}
+                onchange="updateField('${tg}','${sp}',this.checked)">
+        </div></div></div>`;
+    }
+    if (typeof value === 'number') {
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+        <div class="col-sm-8">
+            <input type="number" class="form-control form-control-sm"
+                value="${value}"
+                onchange="updateField('${tg}','${sp}',Number(this.value))">
+        </div></div>`;
+    }
+    if (typeof value === 'string') {
+        // Language selector
+        if (key === 'lang') {
+            let opts = '';
+            for (const code of SUPPORTED_LANGS) {
+                const sel = value === code ? ' selected' : '';
+                opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
+            }
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+            <div class="col-sm-8">
+                <select class="form-select form-select-sm"
+                    onchange="updateField('${tg}','${sp}',this.value)">
+                    ${opts}
+                </select>
+            </div></div>`;
+        }
+        const tp = SENSITIVE.has(key) ? 'password' : 'text';
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+        <div class="col-sm-8">
+            <input type="${tp}" class="form-control form-control-sm"
+                value="${escAttr(value)}"
+                onchange="updateField('${tg}','${sp}',this.value)">
+        </div></div>`;
+    }
+    if (Array.isArray(value)) {
+        const csv = value.map(v => String(v)).join(', ');
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
+        <div class="col-sm-8">
+            <input type="text" class="form-control form-control-sm"
+                value="${escAttr(csv)}" placeholder="${t('comma_separated')}"
+                onchange="updateArray('${tg}','${sp}',this.value)">
+        </div></div>`;
+    }
+    return '';
+}
+
+/** Render all scalar (non-object) fields of *obj*. */
+function renderScalarFields(obj, pathPrefix, target, exclude = []) {
+    let h = '';
+    const keys = Object.keys(obj).sort((a, b) => {
+        if (a === 'enabled') return -1; if (b === 'enabled') return 1;
+        return a.localeCompare(b);
+    });
+    for (const k of keys) {
+        if (exclude.includes(k)) continue;
+        const v = obj[k];
+        if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
+        h += renderField(k, v, pathPrefix + '|' + k, target);
+    }
+    return h;
+}
+
+// ──────────────────────────── Collection render ───────────────────
+function renderCollection(title, data, pathStr, target) {
+    const lbl = esc(fieldLabel(title));
+    let h = `<div class="mt-3">
+    <div class="d-flex align-items-center mb-2">
+        <h6 class="text-muted mb-0"><i class="bi bi-list-ul me-1"></i>${lbl}</h6>
+        <button class="btn btn-sm btn-outline-success ms-2 py-0 px-1"
+            onclick="openAddModal('${escAttr(target)}','${escAttr(pathStr)}')">
+            <i class="bi bi-plus-lg"></i>
+        </button>
+    </div><div class="ps-1">`;
+
+    for (const [name, val] of Object.entries(data)) {
+        h += renderCollectionItem(name, val, pathStr + '|' + name, pathStr, target);
+    }
+    h += '</div></div>';
+    return h;
+}
+
+function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, target) {
+    const sp = escAttr(pathStr), pp = escAttr(parentPathStr), tg = escAttr(target);
+    const nameEsc = escAttr(itemName);
+    const delBtn = `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1"
+    onclick="event.stopPropagation();removeItem('${tg}','${pp}','${nameEsc}')">
+    <i class="bi bi-trash3"></i></button>`;
+
+    // --- promote boolean → dict when a schema exists ---
+    const schema = schemaFor(parentPathStr);
+    if (schema && typeof itemValue === 'boolean') {
+        const parts = pathStr.split('|');
+        const promoted = promoteItem(
+            target === 'modules' ? modulesData : configData, parts, schema);
+        if (promoted && typeof promoted === 'object') {
+            itemValue = promoted;
+        }
+    } else if (schema && typeof itemValue === 'object' && itemValue !== null && !Array.isArray(itemValue)) {
+        // Ensure existing dicts also get missing schema fields
+        const parts = pathStr.split('|');
+        promoteItem(target === 'modules' ? modulesData : configData, parts, schema);
+    }
+
+    // --- boolean item (no schema) ---
+    if (typeof itemValue === 'boolean') {
+        return `<div class="d-flex align-items-center mb-1 p-2 rounded border bg-body">
+        <code class="me-auto small">${esc(itemName)}</code>
+        <div class="form-check form-switch me-1">
+            <input class="form-check-input" type="checkbox" ${itemValue ? 'checked' : ''}
+                onchange="updateField('${tg}','${sp}',this.checked)">
+        </div>${delBtn}</div>`;
+    }
+
+    // --- number item ---
+    if (typeof itemValue === 'number') {
+        return `<div class="d-flex align-items-center mb-1 p-2 rounded border bg-body">
+        <code class="me-2 small">${esc(itemName)}</code>
+        <input type="number" class="form-control form-control-sm ms-auto"
+            style="max-width:100px" value="${itemValue}"
+            onchange="updateField('${tg}','${sp}',Number(this.value))">
+        ${delBtn}</div>`;
+    }
+
+    // --- dict item ---
+    if (typeof itemValue === 'object' && itemValue !== null && !Array.isArray(itemValue)) {
+        const id = uid();
+        const hasEnabled = 'enabled' in itemValue;
+        let sw = '';
+        if (hasEnabled) {
+            sw = `<div class="form-check form-switch me-1" onclick="event.stopPropagation()">
+            <input class="form-check-input" type="checkbox"
+                ${itemValue.enabled ? 'checked' : ''}
+                onchange="updateField('${tg}','${sp}|enabled',this.checked)">
+        </div>`;
+        }
+        const body = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : []);
+        return `<div class="card mb-2">
+        <div class="card-header d-flex align-items-center py-1 px-2 bg-body"
+             role="button" data-bs-toggle="collapse" data-bs-target="#${id}">
+            <code class="me-auto small">${esc(itemName)}</code>
+            ${sw}${delBtn}
+            <i class="bi bi-chevron-down text-muted ms-1 small"></i>
+        </div>
+        <div class="collapse" id="${id}">
+            <div class="card-body py-2 px-3">${body}</div>
+        </div></div>`;
+    }
+    return '';
+}

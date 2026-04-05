@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ lang }}" data-bs-theme="light">
+<html lang="{{ lang }}" data-bs-theme="{{ 'dark' if dark_mode else 'light' }}">
 
 <head>
     <meta charset="utf-8">
@@ -8,7 +8,7 @@
     <link href="/static/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/bootstrap-icons.min.css" rel="stylesheet">
     <style>
-        body {
+        [data-bs-theme="light"] body {
             background-color: #f5f6fa
         }
     </style>

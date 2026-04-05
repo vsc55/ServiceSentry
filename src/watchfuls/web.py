@@ -33,6 +33,13 @@ class Watchful(ModuleBase):
     _default_enabled = True
     _default_http_code = 200
 
+    ITEM_SCHEMA = {
+        'list': {
+            'enabled': True,
+            'code': 200,
+        },
+    }
+
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
         self.paths.set('curl', '/usr/bin/curl')

@@ -41,6 +41,15 @@ class Watchful(ModuleBase):
     _default_timeout = 5
     _default_enabled = True
 
+    ITEM_SCHEMA = {
+        'list': {
+            'enabled': True,
+            'label': '',
+            'timeout': 5,
+            'attempt': 3,
+        },
+    }
+
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
         self.paths.set('ping', '/bin/ping')

@@ -33,6 +33,14 @@ class Watchful(ModuleBase):
     _default_alert = 80
     _default_enabled = True
 
+    ITEM_SCHEMA = {
+        'list': {
+            'enabled': True,
+            'label': '',
+            'alert': 80,
+        },
+    }
+
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 

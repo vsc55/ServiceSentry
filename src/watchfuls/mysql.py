@@ -47,6 +47,18 @@ class Watchful(ModuleBase):
     _default_enabled = True
     _default_port = 3306
 
+    ITEM_SCHEMA = {
+        'list': {
+            'enabled': True,
+            'host': '',
+            'port': 3306,
+            'user': '',
+            'password': '',
+            'db': '',
+            'socket': '',
+        },
+    }
+
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 

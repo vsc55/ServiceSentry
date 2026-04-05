@@ -1,0 +1,104 @@
+{# ================================================================
+   Actions — field updates, item add/remove, save operations.
+   ================================================================ #}
+
+// ──────────────────────────── Actions ─────────────────────────────
+function updateField(target, pathStr, value) {
+    const parts = pathStr.split('|');
+    setPath(target === 'config' ? configData : modulesData, parts, value);
+}
+
+function updateArray(target, pathStr, csv) {
+    const arr = csv.split(',').map(s => s.trim()).filter(Boolean);
+    updateField(target, pathStr, arr);
+}
+
+function toggleModule(name, on) {
+    modulesData[name].enabled = on;
+    const card = document.getElementById('card-' + name);
+    if (card) card.classList.toggle('enabled', on);
+}
+
+function updatePrettyName(name, value) {
+    if (value.trim()) {
+        modulesData[name].pretty_name = value.trim();
+    } else {
+        delete modulesData[name].pretty_name;
+    }
+    // Update header text live
+    const card = document.getElementById('card-' + name);
+    if (card) {
+        const label = card.querySelector('.card-header .fw-semibold');
+        if (label) label.textContent = modulePrettyName(name, modulesData[name]);
+    }
+}
+
+function removeItem(target, parentPathStr, key) {
+    if (!confirm(tf('confirm_delete_item', key))) return;
+    const parts = parentPathStr.split('|');
+    const parent = getPath(target === 'config' ? configData : modulesData, parts);
+    if (parent && key in parent) {
+        delete parent[key];
+        target === 'modules' ? renderModules() : renderConfig();
+    }
+}
+
+// --- Add-item modal ---
+function openAddModal(target, pathStr) {
+    _addItemCtx = { target, pathStr };
+    document.getElementById('newItemName').value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('addItemModal')).show();
+    setTimeout(() => document.getElementById('newItemName').focus(), 400);
+}
+
+function confirmAddItem() {
+    if (!_addItemCtx) return;
+    const name = document.getElementById('newItemName').value.trim();
+    if (!name) return;
+    const { target, pathStr } = _addItemCtx;
+    const parts = pathStr.split('|');
+    const data = target === 'modules' ? modulesData : configData;
+    const parent = getPath(data, parts);
+    if (!parent || typeof parent !== 'object') return;
+    if (name in parent) { showToast(tf('already_exists', name), 'warning'); return; }
+
+    // Smart default: schema > copy from first dict sibling > true
+    const schema = schemaFor(pathStr);
+    let def = true;
+    if (schema) {
+        def = {};
+        for (const [k, sv] of Object.entries(schema)) {
+            def[k] = Array.isArray(sv) ? [...sv] : sv;
+        }
+    } else {
+        for (const v of Object.values(parent)) {
+            if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+                def = {};
+                for (const [k, val] of Object.entries(v)) {
+                    if (typeof val === 'boolean') def[k] = (k === 'enabled');
+                    else if (typeof val === 'number') def[k] = 0;
+                    else if (typeof val === 'string') def[k] = '';
+                    else if (Array.isArray(val)) def[k] = [];
+                    else def[k] = {};
+                }
+                break;
+            }
+        }
+    }
+    parent[name] = def;
+    bootstrap.Modal.getInstance(document.getElementById('addItemModal')).hide();
+    target === 'modules' ? renderModules() : renderConfig();
+    _addItemCtx = null;
+}
+
+// --- Save ---
+async function saveModules() {
+    const r = await apiPut('/api/modules', modulesData);
+    if (r && r.ok) showToast(t('modules_saved'));
+    else showToast(r?.error || t('save_error'), 'danger');
+}
+async function saveConfig() {
+    const r = await apiPut('/api/config', configData);
+    if (r && r.ok) showToast(t('config_saved'));
+    else showToast(r?.error || t('save_error'), 'danger');
+}

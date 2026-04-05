@@ -20,6 +20,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """ Base class for modules. """
 
+import importlib
+import os
+import sys
 from enum import Enum
 
 import lib.tools
@@ -36,6 +39,58 @@ class ModuleBase(ObjectBase):
     """ Base class for modules. """
 
     _DEFAULT_THREADS = 5 # Number of threads that will be used in the modules for parallel processing as default value.
+
+    # Per-item field schema for the module's collections.
+    # Override in subclasses to declare which fields each item supports.
+    # Format: { 'collection_key': { field: default_value, … } }
+    # Example: { 'list': { 'enabled': True, 'code': 200 } }
+    ITEM_SCHEMA: dict[str, dict] = {}
+
+    @classmethod
+    def discover_schemas(cls, watchfuls_dir: str | None = None) -> dict[str, dict]:
+        """Scan the *watchfuls* package and return the aggregated schemas.
+
+        Returns a flat dict keyed ``"module_name|collection"`` whose values
+        are the per-item field defaults declared by each module's
+        ``ITEM_SCHEMA``.
+
+        When *watchfuls_dir* is ``None`` the directory is resolved
+        relative to this file (``../../watchfuls``).
+        """
+        if watchfuls_dir is None:
+            watchfuls_dir = os.path.normpath(
+                os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, 'watchfuls')
+            )
+
+        schemas: dict[str, dict] = {}
+        if not os.path.isdir(watchfuls_dir):
+            return schemas
+
+        # Ensure the parent of watchfuls is on sys.path so
+        # ``import watchfuls.<name>`` works.
+        parent = os.path.dirname(watchfuls_dir)
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+
+        for fname in sorted(os.listdir(watchfuls_dir)):
+            if not fname.endswith('.py') or fname.startswith('_'):
+                continue
+            mod_name = fname[:-3]                       # e.g. "web"
+            fq = f'watchfuls.{mod_name}'                # e.g. "watchfuls.web"
+            try:
+                mod = importlib.import_module(fq)
+            except Exception:                           # pragma: no cover
+                continue
+            watchful_cls = getattr(mod, 'Watchful', None)
+            if watchful_cls is None:
+                continue
+            item_schema = getattr(watchful_cls, 'ITEM_SCHEMA', None)
+            if not item_schema or not isinstance(item_schema, dict):
+                continue
+            for collection, fields in item_schema.items():
+                schemas[f'{mod_name}|{collection}'] = dict(fields)
+
+        return schemas
 
     def __init__(self, obj_monitor, name=None):
         if not isinstance(obj_monitor, lib.Monitor):

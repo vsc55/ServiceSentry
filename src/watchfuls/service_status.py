@@ -20,11 +20,19 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import concurrent.futures
+
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
 
 class Watchful(ModuleBase):
+
+    ITEM_SCHEMA = {
+        'list': {
+            'enabled': True,
+            'remediation': False,
+        },
+    }
 
     def __init__(self, monitor):
         super().__init__(monitor, __name__)

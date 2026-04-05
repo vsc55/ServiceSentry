@@ -6,6 +6,7 @@ import functools
 import json
 import os
 import secrets
+from datetime import datetime, timedelta, timezone
 
 import requests as req
 from flask import (Flask, jsonify, redirect, render_template, request, session,
@@ -13,6 +14,7 @@ from flask import (Flask, jsonify, redirect, render_template, request, session,
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib.config import ConfigControl
+from lib.modules import ModuleBase
 from lib.web_admin.i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS
 
 __all__ = ['WebAdmin']
@@ -32,6 +34,11 @@ class WebAdmin:
     DEFAULT_PORT = 8080
     DEFAULT_HOST = '0.0.0.0'
     _USERS_FILE = 'users.json'
+    _SECRET_KEY_FILE = '.flask_secret'
+    _SESSIONS_FILE = 'sessions.json'
+    _AUDIT_FILE = 'audit.json'
+    _AUDIT_MAX_ENTRIES = 500
+    REMEMBER_ME_DAYS = 30
 
     def __init__(
         self,
@@ -40,6 +47,7 @@ class WebAdmin:
         password: str = 'admin',
         var_dir: str | None = None,
         default_lang: str = DEFAULT_LANG,
+        default_dark_mode: bool = False,
     ):
         """Initialise the web administration server.
 
@@ -59,8 +67,13 @@ class WebAdmin:
         self._default_lang = (
             default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
         )
+        self._default_dark_mode = bool(default_dark_mode)
         self._users: dict[str, dict] = {}
+        self._sessions: dict[str, dict] = {}
+        self._audit_log: list[dict] = []
         self._load_or_create_users(username, password)
+        self._load_sessions()
+        self._load_audit()
         self._app = self._create_app()
 
     # ------------------------------------------------------------------
@@ -110,6 +123,214 @@ class WebAdmin:
         except OSError:
             return False
 
+    @property
+    def _secret_key_path(self) -> str:
+        """Full path to the Flask secret-key file."""
+        return os.path.join(self._config_dir, self._SECRET_KEY_FILE)
+
+    def _load_or_create_secret_key(self) -> str:
+        """Load the Flask secret key from disk, or generate a new one.
+
+        Persisting the key allows sessions (including *remember me*
+        cookies) to survive server restarts.
+        """
+        path = self._secret_key_path
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding='utf-8') as fh:
+                    key = fh.read().strip()
+                if key:
+                    return key
+            except OSError:
+                pass
+        key = secrets.token_hex(32)
+        self._save_secret_key(key)
+        return key
+
+    def _save_secret_key(self, key: str) -> None:
+        """Write the secret key to disk."""
+        try:
+            os.makedirs(self._config_dir, exist_ok=True)
+            with open(self._secret_key_path, 'w', encoding='utf-8') as fh:
+                fh.write(key)
+        except OSError:
+            pass
+
+    # ------------------------------------------------------------------
+    # Session registry
+    # ------------------------------------------------------------------
+
+    @property
+    def _sessions_path(self) -> str:
+        """Full path to the sessions registry file."""
+        return os.path.join(self._config_dir, self._SESSIONS_FILE)
+
+    def _load_sessions(self) -> None:
+        """Load active sessions from disk and discard expired ones."""
+        path = self._sessions_path
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding='utf-8') as fh:
+                    self._sessions = json.load(fh)
+            except (json.JSONDecodeError, OSError):
+                self._sessions = {}
+        cutoff = (
+            datetime.now(timezone.utc)
+            - timedelta(days=self.REMEMBER_ME_DAYS)
+        ).isoformat()
+        stale = [
+            t for t, s in self._sessions.items()
+            if s.get('last_seen', '') < cutoff
+        ]
+        for t in stale:
+            del self._sessions[t]
+        if stale:
+            self._persist_sessions()
+
+    def _persist_sessions(self) -> bool:
+        """Write sessions registry to disk."""
+        try:
+            os.makedirs(self._config_dir, exist_ok=True)
+            with open(self._sessions_path, 'w', encoding='utf-8') as fh:
+                json.dump(self._sessions, fh, indent=4, ensure_ascii=False)
+            return True
+        except OSError:
+            return False
+
+    def _create_session(
+        self, username: str, ip: str, user_agent: str,
+    ) -> str:
+        """Register a new session and return its token."""
+        token = secrets.token_hex(32)
+        now = datetime.now(timezone.utc).isoformat()
+        self._sessions[token] = {
+            'username': username,
+            'created': now,
+            'last_seen': now,
+            'ip': ip,
+            'user_agent': user_agent,
+        }
+        self._persist_sessions()
+        return token
+
+    def _check_session(self) -> bool:
+        """Validate the current request's session against the registry."""
+        if not session.get('logged_in'):
+            return False
+        token = session.get('session_token')
+        if not token or token not in self._sessions:
+            session.clear()
+            return False
+        self._sessions[token]['last_seen'] = (
+            datetime.now(timezone.utc).isoformat()
+        )
+        return True
+
+    def _revoke_session(self, token: str) -> bool:
+        """Remove a single session from the registry."""
+        if token in self._sessions:
+            del self._sessions[token]
+            self._persist_sessions()
+            return True
+        return False
+
+    def _revoke_user_sessions(self, username: str) -> int:
+        """Remove all sessions belonging to *username*.  Returns count."""
+        tokens = [
+            t for t, s in self._sessions.items()
+            if s.get('username') == username
+        ]
+        for t in tokens:
+            del self._sessions[t]
+        if tokens:
+            self._persist_sessions()
+        return len(tokens)
+
+    def _revoke_all_sessions(self) -> int:
+        """Remove every session from the registry.  Returns count."""
+        count = len(self._sessions)
+        self._sessions.clear()
+        self._persist_sessions()
+        return count
+
+    # ------------------------------------------------------------------
+    # Audit log
+    # ------------------------------------------------------------------
+
+    @property
+    def _audit_path(self) -> str:
+        """Full path to the audit-log file."""
+        return os.path.join(self._config_dir, self._AUDIT_FILE)
+
+    def _load_audit(self) -> None:
+        """Load the audit log from disk."""
+        path = self._audit_path
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding='utf-8') as fh:
+                    self._audit_log = json.load(fh)
+            except (json.JSONDecodeError, OSError):
+                self._audit_log = []
+
+    def _persist_audit(self) -> bool:
+        """Write the audit log to disk (capped to last N entries)."""
+        self._audit_log = self._audit_log[-self._AUDIT_MAX_ENTRIES:]
+        try:
+            os.makedirs(self._config_dir, exist_ok=True)
+            with open(self._audit_path, 'w', encoding='utf-8') as fh:
+                json.dump(self._audit_log, fh, indent=2, ensure_ascii=False)
+            return True
+        except OSError:
+            return False
+
+    def _audit(self, event: str, username: str = '', ip: str = '',
+               detail: str | list | dict = '') -> None:
+        """Append an entry to the audit log and persist."""
+        self._audit_log.append({
+            'ts': datetime.now(timezone.utc).isoformat(),
+            'event': event,
+            'user': username or session.get('username', ''),
+            'ip': ip or request.remote_addr,
+            'detail': detail,
+        })
+        self._persist_audit()
+
+    # Fields whose values must never appear in audit detail.
+    _SENSITIVE_FIELDS = frozenset({
+        'password', 'password_hash', 'token', 'secret', 'key_file',
+    })
+
+    @staticmethod
+    def _diff_dicts(
+        old: dict, new: dict, prefix: str = '', *,
+        sensitive: frozenset[str] = frozenset(),
+    ) -> list[dict]:
+        """Return a list of ``{field, old, new}`` for every value that
+        differs between *old* and *new*.  Nested dicts are compared
+        recursively.  Values of keys in *sensitive* are replaced with
+        ``'***'``.
+        """
+        changes: list[dict] = []
+        all_keys = sorted(set(list(old.keys()) + list(new.keys())))
+        for key in all_keys:
+            path = f'{prefix}.{key}' if prefix else key
+            ov = old.get(key)
+            nv = new.get(key)
+            if ov == nv:
+                continue
+            if isinstance(ov, dict) and isinstance(nv, dict):
+                changes.extend(
+                    WebAdmin._diff_dicts(ov, nv, path, sensitive=sensitive)
+                )
+            else:
+                hide = key in sensitive
+                changes.append({
+                    'field': path,
+                    'old': '***' if hide else ov,
+                    'new': '***' if hide else nv,
+                })
+        return changes
+
     def _authenticate(self, username: str, password: str) -> dict | None:
         """Return user record if credentials are valid, else ``None``."""
         user = self._users.get(username)
@@ -141,17 +362,23 @@ class WebAdmin:
             static_folder=static_dir,
             static_url_path='/static',
         )
-        app.secret_key = secrets.token_hex(32)
+        app.secret_key = self._load_or_create_secret_key()
+        app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(
+            days=self.REMEMBER_ME_DAYS,
+        )
 
         @app.context_processor
         def _inject_i18n():
             lang = session.get('lang', self._default_lang)
+            dark_mode = session.get('dark_mode', self._default_dark_mode)
             trans = TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG])
             return {
                 'lang': lang,
                 'default_lang': self._default_lang,
+                'dark_mode': dark_mode,
                 'i18n': trans,
                 'supported_langs': SUPPORTED_LANGS,
+                'current_session_token': session.get('session_token', ''),
             }
 
         self._register_routes(app)
@@ -161,7 +388,7 @@ class WebAdmin:
         """Decorator that redirects unauthenticated requests to ``/login``."""
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
-            if not session.get('logged_in'):
+            if not self._check_session():
                 return redirect(url_for('login'))
             return f(*args, **kwargs)
         return wrapper
@@ -170,7 +397,7 @@ class WebAdmin:
         """Decorator that restricts access to *admin* users only."""
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
-            if not session.get('logged_in'):
+            if not self._check_session():
                 return redirect(url_for('login'))
             if session.get('role') != 'admin':
                 return jsonify({'error': self._t('access_denied')}), 403
@@ -181,7 +408,7 @@ class WebAdmin:
         """Decorator that restricts write access to *admin* and *editor*."""
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
-            if not session.get('logged_in'):
+            if not self._check_session():
                 return redirect(url_for('login'))
             if session.get('role') not in ('admin', 'editor'):
                 return jsonify({'error': self._t('read_only_access')}), 403
@@ -222,6 +449,18 @@ class WebAdmin:
                     self._persist_users()
             return redirect(request.referrer or url_for('login'))
 
+        @app.route('/theme/<mode>')
+        def set_theme(mode):
+            """Switch dark/light theme and persist to user profile."""
+            if mode in ('dark', 'light'):
+                dark_mode = mode == 'dark'
+                session['dark_mode'] = dark_mode
+                uname = session.get('username')
+                if uname and uname in self._users:
+                    self._users[uname]['dark_mode'] = dark_mode
+                    self._persist_users()
+            return redirect(request.referrer or url_for('login'))
+
         @app.route('/login', methods=['GET', 'POST'])
         def login():
             """Login page."""
@@ -232,6 +471,13 @@ class WebAdmin:
                 password = request.form.get('password', '')
                 user = self._authenticate(username, password)
                 if user:
+                    remember = request.form.get('remember_me') == 'on'
+                    session.permanent = remember
+                    token = self._create_session(
+                        username, request.remote_addr,
+                        request.user_agent.string,
+                    )
+                    session['session_token'] = token
                     session['logged_in'] = True
                     session['username'] = username
                     session['role'] = user.get('role', 'viewer')
@@ -239,7 +485,14 @@ class WebAdmin:
                     user_lang = user.get('lang')
                     if user_lang and user_lang in SUPPORTED_LANGS:
                         session['lang'] = user_lang
+                    user_dm = user.get('dark_mode')
+                    if user_dm is not None:
+                        session['dark_mode'] = user_dm
+                    self._audit('login_ok', username, request.remote_addr)
                     return redirect(url_for('dashboard'))
+                self._audit(
+                    'login_failed', username, request.remote_addr,
+                )
                 return render_template(
                     'login.html', error=self._t('invalid_credentials'))
             return render_template('login.html')
@@ -247,6 +500,11 @@ class WebAdmin:
         @app.route('/logout')
         def logout():
             """Log out and redirect to login page."""
+            token = session.get('session_token')
+            uname = session.get('username', '')
+            if token:
+                self._revoke_session(token)
+            self._audit('logout', uname, request.remote_addr)
             session.clear()
             return redirect(url_for('login'))
 
@@ -261,6 +519,7 @@ class WebAdmin:
                 username=session.get('username', ''),
                 display_name=session.get('display_name', ''),
                 role=session.get('role', 'viewer'),
+                item_schemas=ModuleBase.discover_schemas(),
             )
 
         # --- API: current user info -----------------------------------
@@ -274,6 +533,7 @@ class WebAdmin:
                 'display_name': session.get('display_name', ''),
                 'role': session.get('role', 'viewer'),
                 'lang': session.get('lang', self._default_lang),
+                'dark_mode': session.get('dark_mode', self._default_dark_mode),
             })
 
         # --- API: modules.json ----------------------------------------
@@ -291,7 +551,12 @@ class WebAdmin:
             data = request.get_json(silent=True)
             if data is None:
                 return jsonify({'error': self._t('invalid_json')}), 400
+            old_data = self._read_config_file('modules.json')
             if self._save_config_file('modules.json', data):
+                changes = self._diff_dicts(
+                    old_data, data, sensitive=self._SENSITIVE_FIELDS,
+                )
+                self._audit('modules_saved', detail=changes or '')
                 return jsonify({'ok': True})
             return jsonify({'error': self._t('save_file_error')}), 500
 
@@ -310,11 +575,19 @@ class WebAdmin:
             data = request.get_json(silent=True)
             if data is None:
                 return jsonify({'error': self._t('invalid_json')}), 400
+            old_data = self._read_config_file('config.json')
             if self._save_config_file('config.json', data):
                 # Apply web_admin.lang at runtime if changed
                 new_lang = (data.get('web_admin') or {}).get('lang', '')
                 if new_lang and new_lang in SUPPORTED_LANGS:
                     self._default_lang = new_lang
+                new_dm = (data.get('web_admin') or {}).get('dark_mode')
+                if isinstance(new_dm, bool):
+                    self._default_dark_mode = new_dm
+                changes = self._diff_dicts(
+                    old_data, data, sensitive=self._SENSITIVE_FIELDS,
+                )
+                self._audit('config_saved', detail=changes or '')
                 return jsonify({'ok': True})
             return jsonify({'error': self._t('save_file_error')}), 500
 
@@ -361,6 +634,84 @@ class WebAdmin:
             data = cfg.read()
             return jsonify(data if data else {})
 
+        # --- API: overview (dashboard summary) -----------------------
+
+        @app.route('/api/overview', methods=['GET'])
+        @login_required
+        def api_get_overview():
+            """Return a summary snapshot for the overview dashboard."""
+            # Modules summary
+            modules_raw = self._read_config_file('modules.json')
+            modules_list = []
+            for name, cfg in modules_raw.items():
+                if not isinstance(cfg, dict):
+                    continue
+                enabled = cfg.get('enabled', False)
+                items_count = 0
+                items_obj = cfg.get('list')
+                if isinstance(items_obj, dict):
+                    items_count = len(items_obj)
+                modules_list.append({
+                    'name': name,
+                    'enabled': bool(enabled),
+                    'items': items_count,
+                })
+
+            # Status summary
+            status_raw: dict = {}
+            if self._var_dir:
+                path = os.path.join(self._var_dir, 'status.json')
+                cfg_ctrl = ConfigControl(path)
+                status_raw = cfg_ctrl.read() or {}
+            total_checks = 0
+            checks_ok = 0
+            checks_err = 0
+            for mod_checks in status_raw.values():
+                if not isinstance(mod_checks, dict):
+                    continue
+                for info in mod_checks.values():
+                    total_checks += 1
+                    st = info.get('status') if isinstance(info, dict) else None
+                    if st is True:
+                        checks_ok += 1
+                    elif st is False:
+                        checks_err += 1
+
+            # Sessions summary
+            active_sessions = len(self._sessions)
+            session_users = list({
+                s.get('username', '')
+                for s in self._sessions.values()
+            })
+
+            # Users summary
+            total_users = len(self._users)
+            users_by_role: dict[str, int] = {}
+            for u in self._users.values():
+                r = u.get('role', 'viewer')
+                users_by_role[r] = users_by_role.get(r, 0) + 1
+
+            # Last audit events
+            last_events = list(reversed(self._audit_log))[:10]
+
+            return jsonify({
+                'modules': modules_list,
+                'status': {
+                    'total': total_checks,
+                    'ok': checks_ok,
+                    'error': checks_err,
+                },
+                'sessions': {
+                    'active': active_sessions,
+                    'users': session_users,
+                },
+                'users': {
+                    'total': total_users,
+                    'by_role': users_by_role,
+                },
+                'last_events': last_events,
+            })
+
         # --- API: user management (admin only) ------------------------
 
         @app.route('/api/users', methods=['GET'])
@@ -373,6 +724,7 @@ class WebAdmin:
                     'role': udata.get('role', 'viewer'),
                     'display_name': udata.get('display_name', uname),
                     'lang': udata.get('lang', ''),
+                    'dark_mode': udata.get('dark_mode'),
                 }
             return jsonify(safe)
 
@@ -404,6 +756,10 @@ class WebAdmin:
             if user_lang and user_lang in SUPPORTED_LANGS:
                 self._users[uname]['lang'] = user_lang
             self._persist_users()
+            self._audit('user_created', detail={
+                'username': uname, 'role': role,
+                'display_name': dname,
+            })
             return jsonify({'ok': True}), 201
 
         @app.route('/api/users/<username>', methods=['PUT'])
@@ -416,6 +772,7 @@ class WebAdmin:
             if not data:
                 return jsonify({'error': self._t('invalid_json')}), 400
             user = self._users[username]
+            changes: list[dict] = []
             if 'role' in data:
                 if data['role'] not in ROLES:
                     return jsonify({'error': self._t('invalid_role')}), 400
@@ -426,15 +783,38 @@ class WebAdmin:
                     )
                     if admin_count <= 1:
                         return jsonify({'error': self._t('must_have_admin')}), 400
+                if user['role'] != data['role']:
+                    changes.append({'field': 'role', 'old': user['role'], 'new': data['role']})
                 user['role'] = data['role']
             if 'display_name' in data:
-                user['display_name'] = data['display_name'].strip() or username
+                new_dn = data['display_name'].strip() or username
+                old_dn = user.get('display_name', username)
+                if old_dn != new_dn:
+                    changes.append({'field': 'display_name', 'old': old_dn, 'new': new_dn})
+                user['display_name'] = new_dn
+            has_password_reset = False
             if 'password' in data and data['password']:
                 user['password_hash'] = generate_password_hash(data['password'])
+                has_password_reset = True
             if 'lang' in data:
                 if data['lang'] in SUPPORTED_LANGS or data['lang'] == '':
+                    old_lang = user.get('lang', '')
+                    if old_lang != data['lang']:
+                        changes.append({'field': 'lang', 'old': old_lang, 'new': data['lang']})
                     user['lang'] = data['lang']
+            if 'dark_mode' in data:
+                if isinstance(data['dark_mode'], bool):
+                    old_dm = user.get('dark_mode')
+                    if old_dm != data['dark_mode']:
+                        changes.append({'field': 'dark_mode', 'old': old_dm, 'new': data['dark_mode']})
+                    user['dark_mode'] = data['dark_mode']
             self._persist_users()
+            if changes:
+                self._audit('user_updated', detail={
+                    'username': username, 'changes': changes,
+                })
+            if has_password_reset:
+                self._audit('password_reset', detail=username)
             # Update session if the user edited themselves
             if username == session.get('username'):
                 session['role'] = user['role']
@@ -442,6 +822,8 @@ class WebAdmin:
                 user_lang = user.get('lang')
                 if user_lang and user_lang in SUPPORTED_LANGS:
                     session['lang'] = user_lang
+                if 'dark_mode' in user:
+                    session['dark_mode'] = user['dark_mode']
             return jsonify({'ok': True})
 
         @app.route('/api/users/<username>', methods=['DELETE'])
@@ -460,6 +842,7 @@ class WebAdmin:
                     return jsonify({'error': self._t('must_have_admin')}), 400
             del self._users[username]
             self._persist_users()
+            self._audit('user_deleted', detail={'username': username})
             return jsonify({'ok': True})
 
         @app.route('/api/users/me/password', methods=['PUT'])
@@ -479,7 +862,53 @@ class WebAdmin:
                 return jsonify({'error': self._t('wrong_current_password')}), 403
             user['password_hash'] = generate_password_hash(new_pw)
             self._persist_users()
+            self._audit('password_changed')
             return jsonify({'ok': True})
+
+        # --- API: sessions (admin only) --------------------------------
+
+        @app.route('/api/sessions', methods=['GET'])
+        @admin_required
+        def api_get_sessions():
+            """Return all active sessions."""
+            return jsonify(self._sessions)
+
+        @app.route('/api/sessions/invalidate', methods=['POST'])
+        @admin_required
+        def api_invalidate_sessions():
+            """Revoke ALL active sessions."""
+            count = self._revoke_all_sessions()
+            self._audit('all_sessions_revoked', detail=str(count))
+            session.clear()
+            return jsonify({'ok': True, 'count': count})
+
+        @app.route('/api/sessions/revoke/<sid>', methods=['POST'])
+        @admin_required
+        def api_revoke_session_route(sid):
+            """Revoke a specific session by its token."""
+            if self._revoke_session(sid):
+                self._audit('session_revoked', detail=sid[:8])
+                return jsonify({'ok': True})
+            return jsonify({'error': self._t('session_not_found')}), 404
+
+        @app.route('/api/sessions/revoke-user/<username>', methods=['POST'])
+        @admin_required
+        def api_revoke_user_sessions_route(username):
+            """Revoke all sessions for a specific user."""
+            count = self._revoke_user_sessions(username)
+            self._audit('user_sessions_revoked',
+                        detail=f'{username} ({count})')
+            if username == session.get('username'):
+                session.clear()
+            return jsonify({'ok': True, 'count': count})
+
+        # --- API: audit log (admin only) -------------------------------
+
+        @app.route('/api/audit', methods=['GET'])
+        @admin_required
+        def api_get_audit():
+            """Return the audit log (most recent first)."""
+            return jsonify(list(reversed(self._audit_log)))
 
     # ------------------------------------------------------------------
     # Server entry-point

@@ -1,0 +1,145 @@
+{# New/Edit user modal #}
+<div class="modal fade" id="userModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="userModalTitle">{{ i18n.new_user }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.username }}</label>
+                    <input type="text" class="form-control form-control-sm" id="umUsername" autocomplete="off">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.display_name }}</label>
+                    <input type="text" class="form-control form-control-sm" id="umDisplayName">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.role }}</label>
+                    <select class="form-select form-select-sm" id="umRole">
+                        <option value="admin">{{ i18n.role_admin_desc }}</option>
+                        <option value="editor">{{ i18n.role_editor_desc }}</option>
+                        <option value="viewer" selected>{{ i18n.role_viewer_desc }}</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.language }}</label>
+                    <select class="form-select form-select-sm" id="umLang">
+                        <option value="">{{ i18n.system_default }}</option>
+                        {% for l in supported_langs %}
+                        <option value="{{ l }}">{{ i18n['lang_' + l] }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3" id="umPasswordGroup">
+                    <label class="form-label small fw-semibold" id="umPasswordLabel">{{ i18n.password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="umPassword"
+                        autocomplete="new-password">
+                    <div class="form-text" id="umPasswordHint" style="display:none">{{ i18n.leave_empty_no_change }}
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnUserModalOk">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Add-item modal #}
+<div class="modal fade" id="addItemModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title">{{ i18n.new_item }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small">{{ i18n.item_name }}</label>
+                <input type="text" class="form-control form-control-sm" id="newItemName"
+                    placeholder="{{ i18n.item_placeholder }}">
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnAddItemOk">
+                    <i class="bi bi-plus-lg me-1"></i>{{ i18n.add }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Toast notifications #}
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast" class="toast align-items-center border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body" id="toast-body"></div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+
+{# Change own password modal #}
+<div class="modal fade" id="changePasswordModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-key me-1"></i>{{ i18n.change_my_password }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.current_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="pwCurrent">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="pwNew">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="pwConfirm">
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnChangePasswordOk">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.change }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Reset user password modal (admin) #}
+<div class="modal fade" id="resetPasswordModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="resetPasswordTitle"><i class="bi bi-key me-1"></i>{{ i18n.reset_password }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="rpNewPassword"
+                        autocomplete="new-password">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="rpConfirmPassword">
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-warning" id="btnResetPasswordOk">
+                    <i class="bi bi-key me-1"></i>{{ i18n.reset_password }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

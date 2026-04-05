@@ -1,0 +1,30 @@
+{# ================================================================
+   Status tab — rendering logic.
+   ================================================================ #}
+
+// ──────────────────────────── Status tab ──────────────────────────
+async function renderStatus() {
+    const c = document.getElementById('status-container');
+    c.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+    const data = await apiGet('/api/status');
+    if (!data) { c.innerHTML = '<div class="alert alert-warning">' + t('status_load_error') + '</div>'; return; }
+    if (!Object.keys(data).length) {
+        c.innerHTML = '<div class="alert alert-info">' + t('status_empty') + '</div>'; return;
+    }
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
+    h += '<thead class="table-light"><tr><th>' + t('col_module') + '</th><th>' + t('col_check') + '</th><th>' + t('col_status') + '</th></tr></thead><tbody>';
+    for (const [mod, checks] of Object.entries(data)) {
+        if (typeof checks !== 'object' || checks === null) continue;
+        const pname = modulePrettyName(mod, modulesData[mod]);
+        for (const [ck, info] of Object.entries(checks)) {
+            const st = info.status;
+            const icon = st === true ? '✅' : st === false ? '❌' : '❓';
+            const cls = st === true ? 'bg-success' : st === false ? 'bg-danger' : 'bg-secondary';
+            const txt = st === true ? t('status_ok') : st === false ? t('status_error') : '—';
+            h += `<tr><td><strong>${esc(pname)}</strong></td><td>${esc(ck)}</td>
+            <td><span class="badge ${cls}">${icon} ${txt}</span></td></tr>`;
+        }
+    }
+    h += '</tbody></table></div>';
+    c.innerHTML = h;
+}

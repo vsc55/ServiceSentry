@@ -1,0 +1,154 @@
+{# ================================================================
+   Overview tab — at-a-glance system dashboard.
+   ================================================================ #}
+
+// ──────────────────────────── Overview ────────────────────────────
+async function renderOverview() {
+    const c = document.getElementById('overview-container');
+    if (!c) return;
+    c.innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>';
+    const data = await apiGet('/api/overview');
+    if (!data) {
+        c.innerHTML = '<div class="alert alert-warning">' + t('connection_error') + '</div>';
+        return;
+    }
+
+    const isAdmin = currentUser.role === 'admin';
+    const modules = data.modules || [];
+    const status = data.status || {};
+    const sessions = data.sessions || {};
+    const users = data.users || {};
+    const events = data.last_events || [];
+    const enabledCount = modules.filter(m => m.enabled).length;
+    const disabledCount = modules.length - enabledCount;
+
+    let h = '<div class="row g-3 mb-4">';
+
+    // ── Card: Modules ─────────────────────────────────────────────
+    h += `<div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-start border-4 border-primary">
+        <div class="card-body">
+          <div class="d-flex align-items-center mb-2">
+            <i class="bi bi-puzzle fs-4 text-primary me-2"></i>
+            <h6 class="card-title mb-0">${t('overview_modules')}</h6>
+          </div>
+          <div class="fs-2 fw-bold">${modules.length}</div>
+          <small class="text-success">${enabledCount} ${t('overview_enabled')}</small>
+          ${disabledCount ? ' · <small class="text-secondary">' + disabledCount + ' ' + t('overview_disabled') + '</small>' : ''}
+        </div>
+      </div>
+    </div>`;
+
+    // ── Card: Checks ──────────────────────────────────────────────
+    const hasErrors = status.error > 0;
+    const statusBorder = status.total === 0 ? 'secondary' : hasErrors ? 'danger' : 'success';
+    const statusIcon = status.total === 0 ? 'bi-dash-circle' : hasErrors ? 'bi-exclamation-triangle' : 'bi-check-circle';
+    const statusLabel = status.total === 0
+        ? t('overview_no_status')
+        : hasErrors ? tf('overview_has_errors', status.error) : t('overview_all_ok');
+    h += `<div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-start border-4 border-${statusBorder}">
+        <div class="card-body">
+          <div class="d-flex align-items-center mb-2">
+            <i class="bi ${statusIcon} fs-4 text-${statusBorder} me-2"></i>
+            <h6 class="card-title mb-0">${t('overview_status')}</h6>
+          </div>
+          <div class="fs-2 fw-bold">${status.total}</div>
+          <small class="text-${statusBorder}">${statusLabel}</small>
+        </div>
+      </div>
+    </div>`;
+
+    // ── Card: Sessions ────────────────────────────────────────────
+    h += `<div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-start border-4 border-info">
+        <div class="card-body">
+          <div class="d-flex align-items-center mb-2">
+            <i class="bi bi-plug fs-4 text-info me-2"></i>
+            <h6 class="card-title mb-0">${t('overview_sessions')}</h6>
+          </div>
+          <div class="fs-2 fw-bold">${sessions.active || 0}</div>
+          <small class="text-muted">${t('overview_connected_users')}: ${(sessions.users || []).map(u => esc(u)).join(', ') || '—'}</small>
+        </div>
+      </div>
+    </div>`;
+
+    // ── Card: Users ───────────────────────────────────────────────
+    const byRole = users.by_role || {};
+    const roleParts = Object.entries(byRole).map(
+        ([r, n]) => `<span class="badge ${ROLE_BADGES[r] || 'bg-secondary'} me-1">${n} ${esc(ROLE_LABELS[r] || r)}</span>`
+    ).join(' ');
+    h += `<div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-start border-4 border-warning">
+        <div class="card-body">
+          <div class="d-flex align-items-center mb-2">
+            <i class="bi bi-people fs-4 text-warning me-2"></i>
+            <h6 class="card-title mb-0">${t('overview_users')}</h6>
+          </div>
+          <div class="fs-2 fw-bold">${users.total || 0}</div>
+          <small>${roleParts || '—'}</small>
+        </div>
+      </div>
+    </div>`;
+
+    h += '</div>'; // end row cards
+
+    // ── Module list ───────────────────────────────────────────────
+    h += '<div class="row g-3">';
+    h += '<div class="col-lg-6">';
+    h += `<div class="card">
+      <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>${t('overview_modules')}</h6></div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light"><tr>
+              <th>${t('col_module')}</th><th>${t('col_status')}</th><th>${t('overview_items')}</th>
+            </tr></thead><tbody>`;
+    for (const m of modules) {
+        const pname = PRETTY_NAMES[m.name] || m.name;
+        const icon = ICONS[m.name] || '📦';
+        const stBadge = m.enabled
+            ? '<span class="badge bg-success">ON</span>'
+            : '<span class="badge bg-secondary">OFF</span>';
+        h += `<tr>
+          <td>${icon} ${esc(pname)}</td>
+          <td>${stBadge}</td>
+          <td>${m.items}</td>
+        </tr>`;
+    }
+    h += '</tbody></table></div></div></div></div>';
+
+    // ── Recent activity (admin only) ──────────────────────────────
+    if (isAdmin && events.length) {
+        const AE = I18N.audit_events || {};
+        h += '<div class="col-lg-6">';
+        h += `<div class="card">
+          <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-clock-history me-2"></i>${t('overview_recent_activity')}</h6></div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light"><tr>
+                  <th>${t('col_time')}</th><th>${t('col_event')}</th><th>${t('col_user')}</th>
+                </tr></thead><tbody>`;
+        for (const e of events) {
+            const date = new Date(e.ts).toLocaleString();
+            const label = AE[e.event] || e.event;
+            let badge = 'bg-secondary';
+            if (e.event === 'login_failed') badge = 'bg-danger';
+            else if (e.event === 'login_ok') badge = 'bg-success';
+            else if (e.event === 'logout') badge = 'bg-warning text-dark';
+            else if (e.event.includes('error') || e.event.includes('revoked') || e.event.includes('deleted')) badge = 'bg-danger';
+            else if (e.event.includes('created') || e.event.includes('saved')) badge = 'bg-success';
+            else if (e.event.includes('updated') || e.event.includes('changed') || e.event === 'password_reset') badge = 'bg-info text-dark';
+            h += `<tr>
+              <td class="small text-nowrap">${esc(date)}</td>
+              <td><span class="badge ${badge}">${esc(label)}</span></td>
+              <td><code>${esc(e.user)}</code></td>
+            </tr>`;
+        }
+        h += '</tbody></table></div></div></div></div>';
+    }
+
+    h += '</div>'; // end row
+    c.innerHTML = h;
+}

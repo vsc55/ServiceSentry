@@ -348,7 +348,8 @@ def start_web(args):
 
     username = cfg.get_conf(['web_admin', 'username'], 'admin')
     password = cfg.get_conf(['web_admin', 'password'], 'admin')
-    lang = cfg.get_conf(['web_admin', 'lang'], 'en')
+    lang = cfg.get_conf(['web_admin', 'lang'], 'en_EN')
+    dark_mode = cfg.get_conf(['web_admin', 'dark_mode'], False)
     host = getattr(args, 'web_host', None) or cfg.get_conf(
         ['web_admin', 'host'], WebAdmin.DEFAULT_HOST
     )
@@ -357,7 +358,8 @@ def start_web(args):
     )
 
     admin = WebAdmin(config_dir, str(username), str(password), var_dir,
-                     default_lang=str(lang))
+                     default_lang=str(lang),
+                     default_dark_mode=bool(dark_mode))
 
     print("ServiceSentry Web Admin")
     print(f"  URL:    http://{host}:{port}")

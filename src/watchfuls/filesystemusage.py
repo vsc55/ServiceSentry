@@ -40,6 +40,12 @@ class Watchful(ModuleBase):
         'devfs', 'cgroup', 'cgroup2', 'autofs', 'binfmt_misc',
     })
 
+    ITEM_SCHEMA = {
+        'list': {
+            'alert': 85,
+        },
+    }
+
     def __init__(self, monitor):
         super().__init__(monitor, __name__)
 

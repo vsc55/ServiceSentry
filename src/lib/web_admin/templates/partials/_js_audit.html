@@ -1,0 +1,75 @@
+{# ================================================================
+   Audit log tab — event history table (admin only).
+   ================================================================ #}
+
+// ──────────────────────────── Audit log ──────────────────────────
+const AUDIT_EVENTS = I18N.audit_events || {};
+
+function formatAuditDetail(detail) {
+    if (!detail) return '';
+    if (typeof detail === 'string') return esc(detail);
+
+    // List of {field, old, new} changes
+    if (Array.isArray(detail)) {
+        if (!detail.length) return '';
+        return detail.map(c => {
+            const f = esc(c.field || '');
+            const o = c.old === null || c.old === undefined ? '∅' : esc(String(c.old));
+            const n = c.new === null || c.new === undefined ? '∅' : esc(String(c.new));
+            return `<span class="text-nowrap"><strong>${f}</strong>: ${o} → ${n}</span>`;
+        }).join('<br>');
+    }
+
+    // Object — e.g. {username, role, ...} or {username, changes: [...]}
+    if (typeof detail === 'object') {
+        let parts = [];
+        if (detail.username) parts.push(esc(detail.username));
+        if (detail.role) parts.push('role=' + esc(detail.role));
+        if (detail.display_name && !detail.changes) parts.push(esc(detail.display_name));
+        if (Array.isArray(detail.changes) && detail.changes.length) {
+            parts.push(formatAuditDetail(detail.changes));
+        }
+        return parts.join(parts.some(p => p.includes('<br>')) ? '<br>' : ', ');
+    }
+    return esc(String(detail));
+}
+
+async function renderAudit() {
+    const c = document.getElementById('audit-container');
+    if (!c) return;
+    c.innerHTML = '<p class="text-muted">…</p>';
+    const entries = await apiGet('/api/audit');
+    if (!entries || !entries.length) {
+        c.innerHTML = '<p class="text-muted">' + t('no_audit_entries') + '</p>';
+        return;
+    }
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
+    h += '<thead class="table-light"><tr>'
+       + '<th>' + t('col_time') + '</th>'
+       + '<th>' + t('col_event') + '</th>'
+       + '<th>' + t('col_user') + '</th>'
+       + '<th>' + t('col_ip') + '</th>'
+       + '<th>' + t('col_detail') + '</th>'
+       + '</tr></thead><tbody>';
+    for (const e of entries) {
+        const date = new Date(e.ts).toLocaleString();
+        const eventLabel = AUDIT_EVENTS[e.event] || e.event;
+        let badgeClass = 'bg-secondary';
+        if (e.event === 'login_failed') badgeClass = 'bg-danger';
+        else if (e.event === 'login_ok') badgeClass = 'bg-success';
+        else if (e.event === 'logout') badgeClass = 'bg-warning text-dark';
+        else if (e.event.includes('deleted') || e.event.includes('revoked')) badgeClass = 'bg-danger';
+        else if (e.event.includes('created')) badgeClass = 'bg-success';
+        else if (e.event === 'password_reset') badgeClass = 'bg-warning text-dark';
+        else if (e.event.includes('saved') || e.event.includes('updated') || e.event.includes('changed')) badgeClass = 'bg-info text-dark';
+        h += `<tr>
+            <td class="small text-nowrap">${esc(date)}</td>
+            <td><span class="badge ${badgeClass}">${esc(eventLabel)}</span></td>
+            <td><code>${esc(e.user)}</code></td>
+            <td class="small">${esc(e.ip)}</td>
+            <td class="small">${formatAuditDetail(e.detail)}</td>
+        </tr>`;
+    }
+    h += '</tbody></table></div>';
+    c.innerHTML = h;
+}
