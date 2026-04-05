@@ -129,7 +129,7 @@ class Exec:
         except OSError as ex:
             return self._empty_result(ex)
 
-        except Exception as ex:
+        except Exception as ex: # pylint: disable=broad-except
             return self._empty_result(ex)
 
     def _execute_remote(self) -> ExecResult:
@@ -180,7 +180,7 @@ class Exec:
         except OSError as ex:
             return self._empty_result(ex)
 
-        except Exception as ex:
+        except Exception as ex: # pylint: disable=broad-except
             return self._empty_result(ex)
 
         finally:

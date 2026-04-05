@@ -99,7 +99,7 @@ class Monitor(ObjectBase):
 
     def clear_status(self):
         """ Clear the status file. """
-        # TODO: Pendiente crear funcion clear en el objeto config
+        # TODO: Pendiente crear funcion clear en el objeto config # pylint: disable=fixme
         self.debug.print("> Monitor >> Clear Status", DebugLevel.info)
         self.status.data = {}
         self.status.save()
@@ -236,13 +236,13 @@ class Monitor(ObjectBase):
                 return True, module_name, result_data
 
             msg_debug = '\n\n' + '*' * 60 + '\n'
-            msg_debug += f"WARNING: check_module({module_name}) - Format not implement: {type(result_data)}\n"
+            msg_debug += f"WARNING: check_module({module_name}) - Format not implement: {type(result_data)}\n" # pylint: disable=line-too-long
             msg_debug += f'Data Return: {pprint.pformat(result_data)}\n'
             msg_debug += '*' * 60 + '\n'
             msg_debug += '*' * 60 + '\n\n'
             self.debug.print(msg_debug, DebugLevel.warning)
 
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-except
             self.debug.exception(e)
 
         return False, module_name, None
@@ -297,7 +297,8 @@ class Monitor(ObjectBase):
                             f"> Monitor > check >> Module failed: {module_name}",
                             DebugLevel.warning
                         )
-                except Exception as exc:
+
+                except Exception as exc: # pylint: disable=broad-except
                     self.debug.exception(exc)
 
         self.debug.debug_obj(__name__, self.status.data, "Debug Status Save")
