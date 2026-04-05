@@ -589,12 +589,19 @@
             const data = configData[sec];
             if (typeof data !== 'object' || data === null) continue;
             const lbl = SECTION_LABELS[sec] || sec;
+            let extra = '';
+            if (sec === 'telegram') {
+                extra = `<hr class="my-2"><button class="btn btn-outline-info btn-sm" onclick="testTelegram()" id="btnTestTelegram">
+                    <i class="bi bi-telegram me-1"></i>${t('telegram_test')}
+                </button>`;
+            }
             h += `<div class="card mb-3">
             <div class="card-header fw-semibold py-2">
                 <i class="bi bi-gear me-1"></i>${esc(lbl)}
             </div>
             <div class="card-body py-2">
                 ${renderScalarFields(data, sec, 'config', [])}
+                ${extra}
             </div></div>`;
         }
         c.innerHTML = h;
@@ -718,6 +725,25 @@
         const r = await apiPut('/api/config', configData);
         if (r && r.ok) showToast(t('config_saved'));
         else showToast(r?.error || t('save_error'), 'danger');
+    }
+
+    async function testTelegram() {
+        const tg = configData.telegram || {};
+        const token = tg.token || '';
+        const chat_id = tg.chat_id || '';
+        if (!token || !chat_id) {
+            showToast(t('telegram_test_missing'), 'warning');
+            return;
+        }
+        const btn = document.getElementById('btnTestTelegram');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('telegram_test'); }
+        const r = await apiPost('/api/telegram/test', { token, chat_id });
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-telegram me-1"></i>' + t('telegram_test'); }
+        if (r && r.status === 200 && r.data?.ok) {
+            showToast(t('telegram_test_ok'));
+        } else {
+            showToast(r?.data?.error || t('telegram_test_error'), 'danger');
+        }
     }
 
     // ──────────────────────────── Users tab ───────────────────────────

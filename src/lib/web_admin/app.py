@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 
+import requests as req
 from flask import (Flask, jsonify, redirect, render_template, request, session,
                    url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -316,6 +317,36 @@ class WebAdmin:
                     self._default_lang = new_lang
                 return jsonify({'ok': True})
             return jsonify({'error': self._t('save_file_error')}), 500
+
+        # --- API: Telegram test ------------------------------------------
+
+        @app.route('/api/telegram/test', methods=['POST'])
+        @write_required
+        def api_test_telegram():
+            """Send a test message via Telegram to verify settings."""
+            data = request.get_json(silent=True) or {}
+            token = data.get('token', '').strip()
+            chat_id = data.get('chat_id', '').strip()
+            if not token or not chat_id:
+                return jsonify({'error': self._t('telegram_test_missing')}), 400
+            try:
+                result = req.post(
+                    f'https://api.telegram.org/bot{token}/sendMessage',
+                    data={
+                        'chat_id': chat_id,
+                        'text': self._t('telegram_test_message'),
+                        'parse_mode': 'Markdown',
+                    },
+                    timeout=10,
+                )
+                if result.status_code == 200:
+                    return jsonify({'ok': True})
+                ct = result.headers.get('content-type', '')
+                body = result.json() if 'json' in ct else {}
+                desc = body.get('description', f'HTTP {result.status_code}')
+                return jsonify({'error': desc}), 502
+            except Exception as exc:
+                return jsonify({'error': str(exc)}), 502
 
         # --- API: status.json (read-only) -----------------------------
 

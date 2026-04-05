@@ -94,6 +94,12 @@ LANG = {
     'cannot_delete_self': 'No puedes eliminar tu propia cuenta',
     'new_password_required': 'La nueva contraseña es obligatoria',
     'wrong_current_password': 'Contraseña actual incorrecta',
+    # Telegram test
+    'telegram_test': 'Probar Telegram',
+    'telegram_test_ok': 'Mensaje de Telegram enviado correctamente',
+    'telegram_test_message': '✅ ServiceSentry — Mensaje de prueba OK',
+    'telegram_test_missing': 'Token y Chat ID son obligatorios',
+    'telegram_test_error': 'Error en la prueba de Telegram',
     # Language
     'language': 'Idioma',
     'system_default': 'Predeterminado del sistema',
