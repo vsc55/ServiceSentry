@@ -4,4 +4,5 @@ paramiko>=3.0
 PyMySQL>=1.0
 psutil>=5.9
 flask>=3.0
+werkzeug>=3.0
 pythonping>=1.1.4
