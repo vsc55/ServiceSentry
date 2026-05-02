@@ -1,0 +1,7 @@
+{
+    "name": "raid",
+    "version": "1.0.0",
+    "description": "RAID health monitoring (local mdstat and remote via SSH).",
+    "icon": "\ud83d\uddc4\ufe0f",
+    "dependencies": ["paramiko"]
+}

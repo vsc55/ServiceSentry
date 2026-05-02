@@ -1,0 +1,10 @@
+{
+    "pretty_name": "Uso de disco",
+    "labels": {
+        "enabled":   "Habilitado",
+        "threads":   "Hilos",
+        "alert":     "Alerta (%)",
+        "partition": "Partici\u00f3n",
+        "label":     "Etiqueta"
+    }
+}

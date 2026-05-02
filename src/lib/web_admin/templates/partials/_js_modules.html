@@ -1,60 +1,66 @@
 {# ================================================================
-   Modules tab — rendering logic.
-   ================================================================ #}
+Modules tab — rendering logic.
+================================================================ #}
 
 // ──────────────────────────── Modules tab ─────────────────────────
 function renderModules() {
-    const c = document.getElementById('modules-container');
-    let h = '';
-    for (const name of Object.keys(modulesData).sort()) {
-        const cfg = modulesData[name];
-        const on = cfg.enabled !== false;
-        const icon = ICONS[name] || '📦';
-        const id = uid();
+const c = document.getElementById('modules-container');
+let h = '';
+for (const name of Object.keys(modulesData).sort()) {
+const cfg = modulesData[name];
+const on = cfg.enabled !== false;
+const icon = moduleIcon(name, cfg);
+const id = uid();
 
-        const pname = modulePrettyName(name, cfg);
-        h += `<div class="card mb-2 module-card${on ? ' enabled' : ''}" id="card-${esc(name)}">
-        <div class="card-header d-flex align-items-center py-2"
-             role="button" data-bs-toggle="collapse" data-bs-target="#${id}">
-            <span class="me-2 fs-5">${icon}</span>
-            <div class="me-auto">
-                <span class="fw-semibold">${esc(pname)}</span>
-                <small class="text-muted ms-2"><code>${esc(name)}</code></small>
-            </div>
-            <div class="form-check form-switch me-2" onclick="event.stopPropagation()">
-                <input class="form-check-input" type="checkbox" role="switch"
-                    ${on ? 'checked' : ''}
-                    onchange="toggleModule('${escAttr(name)}',this.checked)">
-            </div>
-            <i class="bi bi-chevron-down text-muted"></i>
+const pname = modulePrettyName(name, cfg);
+h += `<div class="card mb-2 module-card${on ? ' enabled' : ''}" id="card-${esc(name)}">
+    <div class="card-header d-flex align-items-center py-2" role="button"
+        onclick="toggleCollapseFromHeader(event,'${id}')">
+        <span class="me-2 fs-5">${icon}</span>
+        <div class="me-auto">
+            <span class="fw-semibold">${esc(pname)}</span>
+            <small class="text-muted ms-2"><code>${esc(name)}</code></small>
         </div>
-        <div class="collapse" id="${id}">
-            <div class="card-body py-2">
-                ${renderModuleBody(name, cfg)}
-            </div>
-        </div></div>`;
-    }
-    c.innerHTML = h;
+        <div class="form-check form-switch me-2" data-no-collapse="1" onclick="event.stopPropagation()">
+            <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1" ${on ? 'checked' : '' }
+                onclick="event.stopPropagation()"
+                onchange="event.stopPropagation();toggleModule('${escAttr(name)}',this.checked)">
+        </div>
+        <button class="btn btn-sm btn-outline-secondary py-0 px-1" type="button" data-no-collapse="1"
+            data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
+            aria-label="Toggle details" onclick="event.stopPropagation()">
+            <i class="bi bi-chevron-down text-muted"></i>
+        </button>
+    </div>
+    <div class="collapse" id="${id}">
+        <div class="card-body py-2">
+            ${renderModuleBody(name, cfg)}
+        </div>
+    </div>
+</div>`;
+}
+c.innerHTML = h;
 }
 
 function renderModuleBody(name, cfg) {
-    // pretty_name field (always first, with placeholder)
-    const pn = cfg.pretty_name || '';
-    let h = `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(fieldLabel('pretty_name'))}</label>
-        <div class="col-sm-8">
-            <input type="text" class="form-control form-control-sm"
-                value="${escAttr(pn)}"
-                placeholder="${escAttr(PRETTY_NAMES[name] || name)}"
-                onchange="updatePrettyName('${escAttr(name)}',this.value)">
-        </div></div>`;
+// pretty_name field (always first, with placeholder)
+const pn = cfg.pretty_name || '';
+const placeholder = modulePrettyName(name, cfg);
+let h = `<div class="row mb-2 align-items-center">
+    <label class="col-sm-4 col-form-label col-form-label-sm">${esc(fieldLabel('pretty_name'))}</label>
+    <div class="col-sm-8">
+        <input type="text" class="form-control form-control-sm" value="${escAttr(pn)}"
+            placeholder="${escAttr(placeholder)}"
+            onchange="updatePrettyName('${escAttr(name)}',this.value)">
+    </div>
+</div>`;
 
-    // Identify collection keys (dicts that aren't list items)
-    const colKeys = [];
-    for (const [k, v] of Object.entries(cfg)) {
-        if (typeof v === 'object' && v !== null && !Array.isArray(v)) colKeys.push(k);
-    }
-    h += renderScalarFields(cfg, name, 'modules', ['enabled', 'pretty_name', ...colKeys]);
-    for (const k of colKeys) h += renderCollection(k, cfg[k], name + '|' + k, 'modules');
-    return h;
+// Identify collection keys (dicts that aren't list items)
+const colKeys = [];
+for (const [k, v] of Object.entries(cfg)) {
+if (typeof v === 'object' && v !== null && !Array.isArray(v)) colKeys.push(k);
+}
+h += renderScalarFields(cfg, name, 'modules', ['enabled', 'pretty_name', ...colKeys]);
+for (const k of colKeys) h += renderCollection(k, cfg[k], name + '|' + k, 'modules');
+return h;
 }

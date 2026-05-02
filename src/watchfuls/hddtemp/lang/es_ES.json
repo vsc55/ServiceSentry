@@ -1,0 +1,12 @@
+{
+    "pretty_name": "Temperatura HDD",
+    "labels": {
+        "enabled": "Habilitado",
+        "threads": "Hilos",
+        "alert":   "Alerta (\u00b0C)",
+        "timeout": "Timeout (s)",
+        "host":    "Host",
+        "port":    "Puerto",
+        "exclude": "Dispositivos excluidos"
+    }
+}

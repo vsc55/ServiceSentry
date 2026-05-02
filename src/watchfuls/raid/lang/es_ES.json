@@ -1,0 +1,15 @@
+{
+    "pretty_name": "RAID",
+    "labels": {
+        "enabled":  "Habilitado",
+        "local":    "Monitor local",
+        "threads":  "Hilos",
+        "timeout":  "Timeout (s)",
+        "label":    "Etiqueta",
+        "host":     "Host",
+        "port":     "Puerto",
+        "user":     "Usuario",
+        "password": "Contrase\u00f1a",
+        "key_file": "Archivo clave SSH"
+    }
+}

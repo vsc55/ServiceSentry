@@ -1,0 +1,7 @@
+{
+    "name": "temperature",
+    "version": "1.0.0",
+    "description": "CPU temperature monitoring via Linux thermal sensor nodes.",
+    "icon": "\ud83c\udf21\ufe0f",
+    "dependencies": []
+}

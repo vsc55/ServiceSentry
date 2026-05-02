@@ -1,0 +1,7 @@
+{
+    "name": "ping",
+    "version": "1.0.0",
+    "description": "ICMP ping monitoring — checks if hosts are reachable.",
+    "icon": "\ud83c\udfd3",
+    "dependencies": ["pythonping"]
+}

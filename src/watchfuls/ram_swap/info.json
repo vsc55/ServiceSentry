@@ -1,0 +1,7 @@
+{
+    "name": "ram_swap",
+    "version": "1.0.0",
+    "description": "RAM and SWAP usage monitoring.",
+    "icon": "\ud83e\udde0",
+    "dependencies": []
+}

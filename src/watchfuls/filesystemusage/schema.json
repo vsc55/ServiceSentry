@@ -1,0 +1,13 @@
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int", "default": 5,  "min": 1, "max": 100},
+        "alert":   {"type": "int", "default": 85, "min": 0, "max": 100}
+    },
+    "list": {
+        "enabled":   {"type": "bool", "default": true},
+        "alert":     {"type": "int",  "default": 85, "min": 0, "max": 100},
+        "partition": {"type": "str",  "default": ""},
+        "label":     {"type": "str",  "default": ""}
+    }
+}

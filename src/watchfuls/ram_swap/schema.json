@@ -1,0 +1,9 @@
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true}
+    },
+    "config": {
+        "alert_ram":  {"type": "int", "default": 60, "min": 0, "max": 100},
+        "alert_swap": {"type": "int", "default": 60, "min": 0, "max": 100}
+    }
+}

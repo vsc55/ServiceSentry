@@ -1,0 +1,8 @@
+{
+    "pretty_name": "RAM y Swap",
+    "labels": {
+        "enabled":    "Habilitado",
+        "alert_ram":  "Alerta RAM (%)",
+        "alert_swap": "Alerta SWAP (%)"
+    }
+}

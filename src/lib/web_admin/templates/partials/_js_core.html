@@ -9,17 +9,12 @@ function t(k) { return I18N[k] || k; }
 function tf(k, ...a) { let s = t(k); a.forEach(v => { s = s.replace('{}', v); }); return s; }
 
 // ──────────────────────────── Constants ────────────────────────────
-const ICONS = {
-    filesystemusage: '📁', hddtemp: '💿', mysql: '🗄️', ping: '🏓',
-    raid: '💽', ram_swap: '🐏', service_status: '⚙️',
-    temperature: '🌡️', web: '🌐'
-};
-const PRETTY_NAMES = I18N.pretty_names || {};
 const LABELS = I18N.labels || {};
 const SECTION_LABELS = I18N.sections || {};
 const SENSITIVE = new Set(['password', 'token']);
 const SUPPORTED_LANGS = {{ supported_langs| tojson }};
 const SYSTEM_DEFAULT_LANG = '{{ default_lang }}';
+const CURRENT_LANG = '{{ lang }}';
 
 // ──────────────────────────── State ───────────────────────────────
 let modulesData = {};
@@ -32,6 +27,27 @@ let _addItemCtx = null;   // {target, pathStr}
 let _editingUser = null;  // null = new, string = editing username
 const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
 const ITEM_SCHEMAS = {{ item_schemas | default({}) | tojson }};
+
+/**
+ * Return the per-module schema (top-level module keys).
+ */
+function moduleSchema(moduleName) {
+    return ITEM_SCHEMAS[moduleName + '|__module__'] || null;
+}
+
+/**
+ * Apply module-level defaults from schema for missing keys.
+ */
+function applyModuleDefaults() {
+    for (const [name, cfg] of Object.entries(modulesData)) {
+        if (typeof cfg !== 'object' || cfg === null || Array.isArray(cfg)) continue;
+        const defaults = schemaDefaults(moduleSchema(name));
+        if (!defaults) continue;
+        for (const [k, v] of Object.entries(defaults)) {
+            if (!(k in cfg)) cfg[k] = Array.isArray(v) ? [...v] : v;
+        }
+    }
+}
 
 /**
  * Return the schema key for a path like "web|list|www.example.com".
@@ -121,12 +137,54 @@ function getPath(obj, parts) {
     return cur;
 }
 
-function fieldLabel(k) { return LABELS[k] || k; }
+function toggleCollapseFromHeader(event, collapseId) {
+    // Ignore clicks from controls that must not toggle collapse.
+    if (event.target.closest('[data-no-collapse="1"]')) return;
+    const el = document.getElementById(collapseId);
+    if (!el) return;
+    bootstrap.Collapse.getOrCreateInstance(el).toggle();
+}
 
-/** Return pretty name for a module: custom > default > raw key */
+function humanizeKey(k) {
+    return String(k).replace(/[_\-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function fieldLabel(k, meta = null) {
+    // Priority: schema metadata -> i18n labels -> generated human label.
+    if (meta && typeof meta.label === 'string' && meta.label.trim()) {
+        return meta.label.trim();
+    }
+    if (meta && meta.label_i18n && typeof meta.label_i18n === 'object') {
+        const v = meta.label_i18n[CURRENT_LANG] || meta.label_i18n[SYSTEM_DEFAULT_LANG];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return LABELS[k] || humanizeKey(k);
+}
+
+/** Return pretty name for a module.
+ * Priority: user config pretty_name > schema __i18n__ > humanized key.
+ */
 function modulePrettyName(name, cfg) {
     if (cfg && cfg.pretty_name) return cfg.pretty_name;
-    return PRETTY_NAMES[name] || name;
+    const i18n = ITEM_SCHEMAS[name + '|__i18n__'];
+    if (i18n) {
+        const d = i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG];
+        if (d && d.pretty_name) return d.pretty_name;
+    }
+    return String(name).replace(/[_\-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/** Return icon for a module.
+ * Priority: user config icon > schema __i18n__ > generic fallback.
+ */
+function moduleIcon(name, cfg) {
+    if (cfg && typeof cfg.icon === 'string' && cfg.icon.trim()) return cfg.icon.trim();
+    const i18n = ITEM_SCHEMAS[name + '|__i18n__'];
+    if (i18n) {
+        const d = i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG];
+        if (d && typeof d.icon === 'string' && d.icon.trim()) return d.icon.trim();
+    }
+    return '\u{1F4E6}';
 }
 
 // ──────────────────────────── Toast ───────────────────────────────
@@ -287,12 +345,12 @@ function renderCollection(title, data, pathStr, target) {
 function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, target) {
     const sp = escAttr(pathStr), pp = escAttr(parentPathStr), tg = escAttr(target);
     const nameEsc = escAttr(itemName);
-    const delBtn = `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1"
+    const delBtn = `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1" data-no-collapse="1"
     onclick="event.stopPropagation();removeItem('${tg}','${pp}','${nameEsc}')">
     <i class="bi bi-trash3"></i></button>`;
 
     // Rename (key edit) button
-    const renameBtn = `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
+    const renameBtn = `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" data-no-collapse="1"
     onclick="event.stopPropagation();renameItem('${tg}','${pp}','${nameEsc}')"
     title="${esc(t('rename_item'))}">
     <i class="bi bi-pencil-square"></i></button>`;
@@ -346,10 +404,11 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         const hasEnabled = 'enabled' in itemValue;
         let sw = '';
         if (hasEnabled) {
-            sw = `<div class="form-check form-switch me-1" onclick="event.stopPropagation()">
-            <input class="form-check-input" type="checkbox"
+            sw = `<div class="form-check form-switch me-1" data-no-collapse="1" onclick="event.stopPropagation()">
+            <input class="form-check-input" type="checkbox" data-no-collapse="1"
                 ${itemValue.enabled ? 'checked' : ''}
-                onchange="updateField('${tg}','${sp}|enabled',this.checked)">
+                onclick="event.stopPropagation()"
+                onchange="event.stopPropagation();updateField('${tg}','${sp}|enabled',this.checked)">
         </div>`;
         }
         // Show key as a small muted badge when displayName differs from itemName
@@ -359,10 +418,14 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         const body = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : []);
         return `<div class="card mb-2">
         <div class="card-header d-flex align-items-center py-1 px-2 bg-body"
-             role="button" data-bs-toggle="collapse" data-bs-target="#${id}">
+             role="button" onclick="toggleCollapseFromHeader(event,'${id}')">
             <code class="me-auto small">${esc(displayName)}${keyBadge}</code>
             ${sw}${renameBtn}${delBtn}
-            <i class="bi bi-chevron-down text-muted ms-1 small"></i>
+            <button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" type="button" data-no-collapse="1"
+                data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
+                aria-label="Toggle details" onclick="event.stopPropagation()">
+                <i class="bi bi-chevron-down text-muted small"></i>
+            </button>
         </div>
         <div class="collapse" id="${id}">
             <div class="card-body py-2 px-3">${body}</div>

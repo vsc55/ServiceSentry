@@ -1,0 +1,7 @@
+{
+    "name": "service_status",
+    "version": "1.0.0",
+    "description": "systemd service status monitoring with optional auto-remediation.",
+    "icon": "\u2699\ufe0f",
+    "dependencies": []
+}

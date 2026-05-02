@@ -1,0 +1,7 @@
+{
+    "name": "mysql",
+    "version": "1.0.0",
+    "description": "MySQL / MariaDB connection monitoring.",
+    "icon": "\ud83d\udc2c",
+    "dependencies": ["pymysql"]
+}

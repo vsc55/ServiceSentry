@@ -540,9 +540,9 @@ class TestModuleItemSchemas:
         assert schema['alert_ram']['max'] == 100
 
     def test_filesystemusage_list_schema_fields(self):
-        """filesystemusage|list schema has alert field."""
+        """filesystemusage|list schema has the expected fields."""
         schema = self.schemas['filesystemusage|list']
-        assert set(schema.keys()) == {'alert'}
+        assert set(schema.keys()) == {'enabled', 'alert', 'label', 'partition'}
 
     # ---- ITEM_SCHEMA on the Watchful class directly ----
     def test_watchful_class_declares_schema(self):

@@ -21,6 +21,7 @@
 """ Base class for modules. """
 
 import importlib
+import json
 import os
 import sys
 from enum import Enum
@@ -69,8 +70,11 @@ class ModuleBase(ObjectBase):
         """Scan the *watchfuls* package and return the aggregated schemas.
 
         Returns a flat dict keyed ``"module_name|collection"`` whose values
-        are the per-item field defaults declared by each module's
-        ``ITEM_SCHEMA``.
+        are the per-item field metadata declared by each module's
+        ``ITEM_SCHEMA``.  For folder-based modules (new style) the per-field
+        ``label_i18n`` and the top-level ``__i18n__`` entry are built by
+        merging ``schema.json``, ``info.json`` and ``lang/*.json`` so that
+        the Python class stays clean.
 
         When *watchfuls_dir* is ``None`` the directory is resolved
         relative to this file (``../../watchfuls``).
@@ -90,11 +94,24 @@ class ModuleBase(ObjectBase):
         if parent not in sys.path:
             sys.path.insert(0, parent)
 
-        for fname in sorted(os.listdir(watchfuls_dir)):
-            if not fname.endswith('.py') or fname.startswith('_'):
+        # Collect module names, preferring folder-based packages over legacy .py files.
+        seen: set[str] = set()
+        entries: list[tuple[str, bool]] = []  # (mod_name, is_folder)
+        for entry in sorted(os.listdir(watchfuls_dir)):
+            if entry.startswith('_'):
                 continue
-            mod_name = fname[:-3]                       # e.g. "web"
-            fq = f'watchfuls.{mod_name}'                # e.g. "watchfuls.web"
+            entry_path = os.path.join(watchfuls_dir, entry)
+            if (os.path.isdir(entry_path) and
+                    os.path.isfile(os.path.join(entry_path, '__init__.py'))):
+                entries.append((entry, True))
+                seen.add(entry)
+            elif entry.endswith('.py') and os.path.isfile(entry_path):
+                mod_name = entry[:-3]
+                if mod_name not in seen:
+                    entries.append((mod_name, False))
+
+        for mod_name, is_folder in entries:
+            fq = f'watchfuls.{mod_name}'
             try:
                 mod = importlib.import_module(fq)
             except Exception:                           # pragma: no cover
@@ -105,10 +122,69 @@ class ModuleBase(ObjectBase):
             item_schema = getattr(watchful_cls, 'ITEM_SCHEMA', None)
             if not item_schema or not isinstance(item_schema, dict):
                 continue
+
+            if is_folder:
+                mod_dir = os.path.join(watchfuls_dir, mod_name)
+                info = cls._load_module_info(mod_dir)
+                lang_data = cls._load_module_langs(mod_dir)
+            else:
+                info = {}
+                lang_data = {}
+
             for collection, fields in item_schema.items():
-                schemas[f'{mod_name}|{collection}'] = dict(fields)
+                if collection == '__i18n__':
+                    continue  # handled separately below
+                col_fields = dict(fields)
+                # Merge label_i18n from lang files for folder-based modules.
+                if lang_data:
+                    for field_key, field_meta in list(col_fields.items()):
+                        if isinstance(field_meta, dict) and 'type' in field_meta:
+                            label_i18n = {
+                                lc: ld['labels'][field_key]
+                                for lc, ld in lang_data.items()
+                                if field_key in ld.get('labels', {})
+                            }
+                            if label_i18n:
+                                col_fields[field_key] = {**field_meta, 'label_i18n': label_i18n}
+                schemas[f'{mod_name}|{collection}'] = col_fields
+
+            # Build __i18n__ entry.
+            if is_folder and (info or lang_data):
+                icon = info.get('icon', '\U0001f4e6')
+                i18n = {
+                    lc: {'pretty_name': ld.get('pretty_name', mod_name), 'icon': icon}
+                    for lc, ld in lang_data.items()
+                }
+                if i18n:
+                    schemas[f'{mod_name}|__i18n__'] = i18n
+            elif '__i18n__' in item_schema:
+                # Legacy: __i18n__ embedded directly in ITEM_SCHEMA
+                schemas[f'{mod_name}|__i18n__'] = dict(item_schema['__i18n__'])
 
         return schemas
+
+    @staticmethod
+    def _load_module_info(module_dir: str) -> dict:
+        """Load ``info.json`` from a folder-based module directory."""
+        path = os.path.join(module_dir, 'info.json')
+        if os.path.isfile(path):
+            with open(path, encoding='utf-8') as fh:
+                return json.load(fh)
+        return {}
+
+    @staticmethod
+    def _load_module_langs(module_dir: str) -> dict[str, dict]:
+        """Load all ``lang/*.json`` files from a folder-based module directory."""
+        lang_dir = os.path.join(module_dir, 'lang')
+        result: dict[str, dict] = {}
+        if not os.path.isdir(lang_dir):
+            return result
+        for fname in sorted(os.listdir(lang_dir)):
+            if fname.endswith('.json') and not fname.startswith('_'):
+                lang_code = fname[:-5]
+                with open(os.path.join(lang_dir, fname), encoding='utf-8') as fh:
+                    result[lang_code] = json.load(fh)
+        return result
 
     def __init__(self, obj_monitor, name=None):
         if not isinstance(obj_monitor, lib.Monitor):

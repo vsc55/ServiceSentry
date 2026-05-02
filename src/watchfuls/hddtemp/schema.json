@@ -1,0 +1,14 @@
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int", "default": 5,    "min": 1, "max": 100},
+        "alert":   {"type": "int", "default": 50,   "min": 1, "max": 200},
+        "timeout": {"type": "int", "default": 5,    "min": 1, "max": 300}
+    },
+    "list": {
+        "enabled": {"type": "bool", "default": true},
+        "host":    {"type": "str",  "default": ""},
+        "port":    {"type": "int",  "default": 7634, "min": 1, "max": 65535},
+        "exclude": {"type": "list", "default": []}
+    }
+}

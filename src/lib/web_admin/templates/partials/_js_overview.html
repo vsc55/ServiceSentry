@@ -142,8 +142,8 @@ async function renderOverview() {
               <th>${t('col_module')}</th><th>${t('col_status')}</th><th>${t('overview_items')}</th>
             </tr></thead><tbody>`;
     for (const m of modules) {
-        const pname = PRETTY_NAMES[m.name] || m.name;
-        const icon = ICONS[m.name] || '📦';
+        const pname = modulePrettyName(m.name, modulesData[m.name]);
+        const icon = moduleIcon(m.name, modulesData[m.name]);
         const stBadge = m.enabled
             ? '<span class="badge bg-success">ON</span>'
             : '<span class="badge bg-secondary">OFF</span>';

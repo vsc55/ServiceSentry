@@ -26,14 +26,16 @@
             "name": "🩺 Python: pytest (usa pytest.ini)",
             "type": "debugpy",
             "request": "launch",
-            "module": "pytest",
+            "program": "${workspaceFolder}/.venv/Scripts/pytest.exe",
             "args": [
-                "."
+                "-c",
+                "${workspaceFolder}/pytest.ini",
+                "tests",
+                "watchfuls"
             ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "justMyCode": false,
-            "envFile": "${workspaceFolder}/.env.test",
+            "justMyCode": false
         },
         {
             "name": "🐍 Python: Archivo actual",

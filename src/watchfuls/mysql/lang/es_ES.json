@@ -1,0 +1,13 @@
+{
+    "pretty_name": "MySQL / MariaDB",
+    "labels": {
+        "enabled":  "Habilitado",
+        "threads":  "Hilos",
+        "host":     "Host",
+        "port":     "Puerto",
+        "user":     "Usuario",
+        "password": "Contrase\u00f1a",
+        "db":       "Base de datos",
+        "socket":   "Socket"
+    }
+}

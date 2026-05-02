@@ -8,6 +8,7 @@ import os
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 import requests as req
 from flask import (Flask, jsonify, redirect, render_template, request, session,
@@ -342,6 +343,21 @@ class WebAdmin:
             return user
         return None
 
+    @staticmethod
+    def _safe_referrer(fallback: str = 'login') -> str:
+        """Return the Referer URL only when it belongs to the same origin.
+
+        Prevents open-redirect attacks where an attacker-controlled
+        ``Referer`` header could redirect users to an external site.
+        """
+        ref = request.referrer
+        if ref:
+            parsed = urlparse(ref)
+            own = urlparse(request.host_url)
+            if parsed.scheme == own.scheme and parsed.netloc == own.netloc:
+                return ref
+        return url_for(fallback)
+
     def _t(self, key: str, *args: str) -> str:
         """Return the translated string for *key* in the session language."""
         lang = session.get('lang', self._default_lang)
@@ -451,7 +467,7 @@ class WebAdmin:
                 if uname and uname in self._users:
                     self._users[uname]['lang'] = code
                     self._persist_users()
-            return redirect(request.referrer or url_for('login'))
+            return redirect(self._safe_referrer('login'))
 
         @app.route('/theme/<mode>')
         def set_theme(mode):
@@ -463,7 +479,7 @@ class WebAdmin:
                 if uname and uname in self._users:
                     self._users[uname]['dark_mode'] = dark_mode
                     self._persist_users()
-            return redirect(request.referrer or url_for('login'))
+            return redirect(self._safe_referrer('login'))
 
         @app.route('/login', methods=['GET', 'POST'])
         def login():
@@ -523,7 +539,7 @@ class WebAdmin:
                 username=session.get('username', ''),
                 display_name=session.get('display_name', ''),
                 role=session.get('role', 'viewer'),
-                item_schemas=ModuleBase.discover_schemas(),
+                item_schemas=ModuleBase.discover_schemas(self._modules_dir),
             )
 
         # --- API: current user info -----------------------------------

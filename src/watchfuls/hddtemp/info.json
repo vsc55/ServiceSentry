@@ -1,0 +1,7 @@
+{
+    "name": "hddtemp",
+    "version": "1.0.0",
+    "description": "HDD temperature monitoring via hddtemp daemon.",
+    "icon": "\ud83d\udcbd",
+    "dependencies": []
+}

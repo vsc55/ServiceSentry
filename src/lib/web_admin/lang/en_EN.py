@@ -182,36 +182,19 @@ LANG = {
     'lang_en_EN': 'English',
     # Theme
     'dark_mode': 'Dark mode',
-    # Field labels
+    # Field labels (generic UI and config fields — module-specific labels live in each module's ITEM_SCHEMA)
     'labels': {
-        'enabled': 'Enabled', 'alert': 'Alert (%)',
-        'alert_ram': 'RAM Alert (%)', 'alert_swap': 'SWAP Alert (%)',
-        'threads': 'Threads', 'timeout': 'Timeout (s)',
-        'attempt': 'Attempts', 'host': 'Host', 'port': 'Port',
-        'user': 'User', 'password': 'Password',
-        'db': 'Database', 'socket': 'Socket', 'service': 'Service name',
-        'label': 'Label', 'url': 'URL', 'code': 'HTTP Code',
-        'local': 'Local monitor', 'exclude': 'Excluded',
-        'remediation': 'Auto-remediation', 'token': 'Bot Token',
-        'chat_id': 'Chat ID', 'group_messages': 'Group messages',
+        'enabled': 'Enabled', 'threads': 'Threads', 'timeout': 'Timeout (s)',
+        'token': 'Bot Token', 'chat_id': 'Chat ID', 'group_messages': 'Group messages',
         'timer_check': 'Interval (s)', 'debug': 'Debug',
-        'list': 'Items', 'remote': 'Remote',
-        'username': 'Web user', 'key_file': 'SSH Key',
-        'pretty_name': 'Display name', 'lang': 'Language',
-        'dark_mode': 'Dark mode',
+        'list': 'Items', 'remote': 'Remote', 'config': 'Configuration',
+        'username': 'Web user', 'password': 'Password',
+        'pretty_name': 'Display name', 'lang': 'Language', 'dark_mode': 'Dark mode',
     },
     # Section labels
     'sections': {
         'daemon': 'Daemon', 'global': 'General',
         'telegram': 'Telegram', 'web_admin': 'Web Panel',
-    },
-    # Pretty names
-    'pretty_names': {
-        'filesystemusage': 'Disk Usage', 'hddtemp': 'HDD Temperature',
-        'mysql': 'MySQL / MariaDB', 'ping': 'Ping', 'raid': 'RAID',
-        'ram_swap': 'RAM & Swap', 'ram': 'RAM', 'swap': 'Swap',
-        'service_status': 'Services', 'temperature': 'CPU Temperature',
-        'web': 'Websites',
     },
     # Role labels
     'role_labels': {

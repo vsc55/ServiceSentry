@@ -169,7 +169,7 @@ let _resetPasswordUser = null;
 function openResetPasswordModal(username) {
     _resetPasswordUser = username;
     document.getElementById('resetPasswordTitle').innerHTML =
-        '<i class="bi bi-key me-1"></i>' + tf('reset_password_for', username);
+        '<i class="bi bi-key me-1"></i>' + tf('reset_password_for', esc(username));
     document.getElementById('rpNewPassword').value = '';
     document.getElementById('rpConfirmPassword').value = '';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('resetPasswordModal')).show();

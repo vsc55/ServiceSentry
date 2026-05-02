@@ -1,0 +1,16 @@
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int", "default": 5, "min": 1, "max": 100},
+        "timeout": {"type": "int", "default": 5, "min": 1, "max": 300},
+        "attempt": {"type": "int", "default": 3, "min": 1, "max": 50},
+        "alert":   {"type": "int", "default": 1, "min": 1, "max": 100}
+    },
+    "list": {
+        "enabled": {"type": "bool", "default": true},
+        "host":    {"type": "str",  "default": ""},
+        "timeout": {"type": "int",  "default": 5, "min": 1, "max": 300},
+        "attempt": {"type": "int",  "default": 3, "min": 1, "max": 50},
+        "alert":   {"type": "int",  "default": 1, "min": 1, "max": 100}
+    }
+}

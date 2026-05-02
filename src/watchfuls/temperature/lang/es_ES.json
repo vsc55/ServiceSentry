@@ -1,0 +1,8 @@
+{
+    "pretty_name": "Temperatura CPU",
+    "labels": {
+        "enabled": "Habilitado",
+        "label":   "Etiqueta",
+        "alert":   "Alerta (\u00b0C)"
+    }
+}

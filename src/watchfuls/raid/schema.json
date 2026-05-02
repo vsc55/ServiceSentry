@@ -1,0 +1,17 @@
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "local":   {"type": "bool", "default": true},
+        "threads": {"type": "int",  "default": 5,  "min": 1, "max": 100},
+        "timeout": {"type": "int",  "default": 30, "min": 1, "max": 600}
+    },
+    "remote": {
+        "enabled":  {"type": "bool", "default": true},
+        "label":    {"type": "str",  "default": ""},
+        "host":     {"type": "str",  "default": ""},
+        "port":     {"type": "int",  "default": 22,  "min": 1, "max": 65535},
+        "user":     {"type": "str",  "default": ""},
+        "password": {"type": "str",  "default": "", "sensitive": true},
+        "key_file": {"type": "str",  "default": ""}
+    }
+}

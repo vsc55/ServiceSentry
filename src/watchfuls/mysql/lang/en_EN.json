@@ -1,0 +1,13 @@
+{
+    "pretty_name": "MySQL / MariaDB",
+    "labels": {
+        "enabled":  "Enabled",
+        "threads":  "Threads",
+        "host":     "Host",
+        "port":     "Port",
+        "user":     "User",
+        "password": "Password",
+        "db":       "Database",
+        "socket":   "Socket"
+    }
+}

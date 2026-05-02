@@ -1,0 +1,11 @@
+{
+    "pretty_name": "Ping",
+    "labels": {
+        "enabled": "Habilitado",
+        "host":    "Host",
+        "timeout": "Timeout (s)",
+        "attempt": "Intentos",
+        "alert":   "Umbral de alerta",
+        "threads": "Hilos"
+    }
+}

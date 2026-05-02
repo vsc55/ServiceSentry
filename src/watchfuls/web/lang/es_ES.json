@@ -1,0 +1,10 @@
+{
+    "pretty_name": "Sitios Web",
+    "labels": {
+        "enabled": "Habilitado",
+        "threads": "Hilos",
+        "url":     "URL",
+        "code":    "C\u00f3digo HTTP",
+        "timeout": "Timeout (s)"
+    }
+}

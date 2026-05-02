@@ -1,0 +1,9 @@
+{
+    "pretty_name": "Services",
+    "labels": {
+        "enabled":     "Enabled",
+        "threads":     "Threads",
+        "service":     "Service name",
+        "remediation": "Auto-remediation"
+    }
+}

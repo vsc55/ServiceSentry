@@ -1,0 +1,15 @@
+{
+    "pretty_name": "RAID",
+    "labels": {
+        "enabled":  "Enabled",
+        "local":    "Local monitor",
+        "threads":  "Threads",
+        "timeout":  "Timeout (s)",
+        "label":    "Label",
+        "host":     "Host",
+        "port":     "Port",
+        "user":     "User",
+        "password": "Password",
+        "key_file": "SSH Key file"
+    }
+}

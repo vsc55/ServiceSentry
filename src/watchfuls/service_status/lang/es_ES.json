@@ -1,0 +1,9 @@
+{
+    "pretty_name": "Servicios",
+    "labels": {
+        "enabled":     "Habilitado",
+        "threads":     "Hilos",
+        "service":     "Nombre del servicio",
+        "remediation": "Auto-remediaci\u00f3n"
+    }
+}

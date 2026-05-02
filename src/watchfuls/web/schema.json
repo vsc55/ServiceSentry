@@ -1,0 +1,12 @@
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int", "default": 5,  "min": 1, "max": 100}
+    },
+    "list": {
+        "enabled": {"type": "bool", "default": true},
+        "url":     {"type": "str",  "default": ""},
+        "code":    {"type": "int",  "default": 200, "min": 1,  "max": 9999},
+        "timeout": {"type": "int",  "default": 15,  "min": 1,  "max": 300}
+    }
+}

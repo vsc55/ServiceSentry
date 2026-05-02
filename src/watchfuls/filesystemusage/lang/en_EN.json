@@ -1,0 +1,10 @@
+{
+    "pretty_name": "Disk Usage",
+    "labels": {
+        "enabled":   "Enabled",
+        "threads":   "Threads",
+        "alert":     "Alert (%)",
+        "partition": "Partition",
+        "label":     "Label"
+    }
+}

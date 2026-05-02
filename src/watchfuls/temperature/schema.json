@@ -1,0 +1,10 @@
+{
+    "__module__": {
+        "enabled": {"type": "bool",  "default": true}
+    },
+    "list": {
+        "enabled": {"type": "bool",  "default": true},
+        "label":   {"type": "str",   "default": ""},
+        "alert":   {"type": "float", "default": 80, "min": 0, "max": 150}
+    }
+}

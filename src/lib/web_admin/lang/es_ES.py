@@ -182,38 +182,21 @@ LANG = {
     'lang_en_EN': 'English',
     # Theme
     'dark_mode': 'Modo oscuro',
-    # Field labels
+    # Etiquetas de campos (genéricas para UI y config — las etiquetas de módulo viven en el ITEM_SCHEMA de cada módulo)
     'labels': {
-        'enabled': 'Habilitado', 'alert': 'Alerta (%)',
-        'alert_ram': 'Alerta RAM (%)', 'alert_swap': 'Alerta SWAP (%)',
-        'threads': 'Hilos', 'timeout': 'Timeout (s)',
-        'attempt': 'Intentos', 'host': 'Host', 'port': 'Puerto',
-        'user': 'Usuario', 'password': 'Contraseña',
-        'db': 'Base de datos', 'socket': 'Socket', 'service': 'Nombre del servicio',
-        'label': 'Etiqueta', 'url': 'URL', 'code': 'Código HTTP',
-        'local': 'Monitor local', 'exclude': 'Excluidos',
-        'remediation': 'Auto-remediación', 'token': 'Token Bot',
-        'chat_id': 'Chat ID', 'group_messages': 'Agrupar mensajes',
+        'enabled': 'Habilitado', 'threads': 'Hilos', 'timeout': 'Timeout (s)',
+        'token': 'Token Bot', 'chat_id': 'Chat ID', 'group_messages': 'Agrupar mensajes',
         'timer_check': 'Intervalo (s)', 'debug': 'Debug',
-        'list': 'Elementos', 'remote': 'Remotos',
-        'username': 'Usuario web', 'key_file': 'Clave SSH',
-        'pretty_name': 'Nombre para mostrar', 'lang': 'Idioma',
-        'dark_mode': 'Modo oscuro',
+        'list': 'Elementos', 'remote': 'Remotos', 'config': 'Configuración',
+        'username': 'Usuario web', 'password': 'Contraseña',
+        'pretty_name': 'Nombre para mostrar', 'lang': 'Idioma', 'dark_mode': 'Modo oscuro',
     },
-    # Section labels
+    # Etiquetas de secciones
     'sections': {
         'daemon': 'Daemon', 'global': 'General',
         'telegram': 'Telegram', 'web_admin': 'Panel Web',
     },
-    # Pretty names
-    'pretty_names': {
-        'filesystemusage': 'Uso de disco', 'hddtemp': 'Temperatura HDD',
-        'mysql': 'MySQL / MariaDB', 'ping': 'Ping', 'raid': 'RAID',
-        'ram_swap': 'RAM y Swap', 'ram': 'RAM', 'swap': 'Swap',
-        'service_status': 'Servicios', 'temperature': 'Temperatura CPU',
-        'web': 'Sitios Web',
-    },
-    # Role labels
+    # Etiquetas de roles
     'role_labels': {
         'admin': 'Admin', 'editor': 'Editor', 'viewer': 'Viewer',
     },

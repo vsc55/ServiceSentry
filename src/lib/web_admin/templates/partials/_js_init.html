@@ -1,36 +1,36 @@
 {# ================================================================
-   Initialisation — role restrictions, event listeners, data load.
-   ================================================================ #}
+Initialisation — role restrictions, event listeners, data load.
+================================================================ #}
 
 // ──────────────────────────── Role-based UI ──────────────────────
 function applyRoleRestrictions() {
-    const role = currentUser.role;
-    // Show users tab only for admins
-    const usersLi = document.getElementById('tab-users-li');
-    if (usersLi) usersLi.style.display = (role === 'admin') ? '' : 'none';
-    // Show audit tab only for admins
-    const auditLi = document.getElementById('tab-audit-li');
-    if (auditLi) auditLi.style.display = (role === 'admin') ? '' : 'none';
+const role = currentUser.role;
+// Show users tab only for admins
+const usersLi = document.getElementById('tab-users-li');
+if (usersLi) usersLi.style.display = (role === 'admin') ? '' : 'none';
+// Show audit tab only for admins
+const auditLi = document.getElementById('tab-audit-li');
+if (auditLi) auditLi.style.display = (role === 'admin') ? '' : 'none';
 
-    // Hide save buttons for viewers
-    if (role === 'viewer') {
-        document.querySelectorAll('button[onclick="saveModules()"], button[onclick="saveConfig()"]')
-            .forEach(b => b.style.display = 'none');
-    }
+// Hide save buttons for viewers
+if (role === 'viewer') {
+document.querySelectorAll('button[onclick="saveModules()"], button[onclick="saveConfig()"]')
+.forEach(b => b.style.display = 'none');
+}
 }
 
 // ──────────────────────────── Init ────────────────────────────────
 document.getElementById('btnAddItemOk').addEventListener('click', confirmAddItem);
 document.getElementById('newItemName').addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); confirmAddItem(); }
+if (e.key === 'Enter') { e.preventDefault(); confirmAddItem(); }
 });
 document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', renderStatus);
 document.getElementById('btn-tab-users')?.addEventListener('shown.bs.tab', async () => {
-    const [u, s] = await Promise.all([apiGet('/api/users'), apiGet('/api/sessions')]);
-    usersData = u || {};
-    sessionsData = s || {};
-    renderSessions();
-    renderUsers();
+const [u, s] = await Promise.all([apiGet('/api/users'), apiGet('/api/sessions')]);
+usersData = u || {};
+sessionsData = s || {};
+renderSessions();
+renderUsers();
 });
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
 document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
@@ -40,12 +40,13 @@ document.getElementById('btnResetPasswordOk').addEventListener('click', resetUse
 document.getElementById('btn-tab-overview')?.addEventListener('shown.bs.tab', renderOverview);
 
 (async function init() {
-    currentUser = await apiGet('/api/me') || {};
-    modulesData = await apiGet('/api/modules') || {};
-    configData = await apiGet('/api/config') || {};
-    renderModules();
-    renderConfig();
-    applyRoleRestrictions();
-    renderOverview();
-    document.getElementById('loading').remove();
+currentUser = await apiGet('/api/me') || {};
+modulesData = await apiGet('/api/modules') || {};
+applyModuleDefaults();
+configData = await apiGet('/api/config') || {};
+renderModules();
+renderConfig();
+applyRoleRestrictions();
+renderOverview();
+document.getElementById('loading').remove();
 })();

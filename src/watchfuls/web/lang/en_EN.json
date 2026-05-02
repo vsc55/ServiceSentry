@@ -1,0 +1,10 @@
+{
+    "pretty_name": "Websites",
+    "labels": {
+        "enabled": "Enabled",
+        "threads": "Threads",
+        "url":     "URL",
+        "code":    "HTTP Code",
+        "timeout": "Timeout (s)"
+    }
+}

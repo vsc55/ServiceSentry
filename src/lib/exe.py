@@ -58,7 +58,7 @@ class ExecConfig:
     key_file: str | None = None
     timeout: float = 30
     host_key_policy: paramiko.MissingHostKeyPolicy | None = field(
-        default_factory=paramiko.AutoAddPolicy
+        default_factory=paramiko.RejectPolicy
     )
 
 
