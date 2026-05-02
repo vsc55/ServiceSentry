@@ -72,6 +72,7 @@ Edit `data/config.json` to add your Telegram bot token and chat ID before runnin
 | [docs/security.md](docs/security.md) | Authentication, RBAC, sessions, XSS, path traversal, audit log and security tests |
 | [docs/development.md](docs/development.md) | Setup, tests, VS Code debug, conventions, dependencies |
 | [docs/watchful_guide.md](docs/watchful_guide.md) | Step-by-step guide to create a new watchful module |
+| [docs/i18n.md](docs/i18n.md) | Internationalisation system: two-tier architecture, `discover_schemas` pipeline, adding languages |
 
 ---
 

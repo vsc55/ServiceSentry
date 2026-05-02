@@ -17,6 +17,7 @@
 | [security.md](security.md) | Autenticación, RBAC, sesiones, XSS, path traversal, auditoría y tests de seguridad del panel web |
 | [development.md](development.md) | Setup local, tests (672), pytest, depuración en VS Code, convenciones de código, dependencias |
 | [watchful_guide.md](watchful_guide.md) | Guía paso a paso para crear un nuevo módulo de monitorización |
+| [i18n.md](i18n.md) | Sistema de internacionalización: arquitectura de dos niveles, pipeline de `discover_schemas`, añadir idiomas |
 
 ---
 

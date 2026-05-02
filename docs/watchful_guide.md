@@ -1,66 +1,66 @@
-# Creating a new monitoring module (Watchful)
+# Creación de un módulo de monitorización (Watchful)
 
-Step-by-step guide to creating a monitoring module from scratch in ServiceSentry.
+Guía paso a paso para crear un módulo de monitorización desde cero en ServiceSentry.
 
 ---
 
-## 1. General architecture
+## 1. Arquitectura general
 
 ```text
 main.py -> Monitor
-              |-- Discovers modules in watchfuls/ (packages or *.py files)
-              |-- Reads modules.json to check if enabled
-              |-- Instantiates Watchful(monitor) for each module
-              +-- Runs module.check() in parallel
+              |-- Descubre módulos en watchfuls/ (packages o archivos *.py)
+              |-- Lee modules.json para comprobar si están habilitados
+              |-- Instancia Watchful(monitor) por cada módulo
+              +-- Ejecuta module.check() en paralelo
                        |
                        v
               Watchful(ModuleBase)
-                  |-- Reads its configuration from modules.json
-                  |-- Executes the monitoring logic
-                  |-- Stores results in dict_return
-                  |-- Detects state changes (check_status)
-                  +-- Sends notifications via Telegram (send_message)
+                  |-- Lee su configuración desde modules.json
+                  |-- Ejecuta la lógica de monitorización
+                  |-- Almacena resultados en dict_return
+                  |-- Detecta cambios de estado (check_status)
+                  +-- Envía notificaciones por Telegram (send_message)
 ```
 
-### Class hierarchy
+### Jerarquía de clases
 
 ```text
-ObjectBase          <- shared debug instance
-  +-- ModuleBase    <- configuration, paths, dict_return, messaging
-        +-- Watchful  <- your concrete module
+ObjectBase          <- instancia de debug compartida
+  +-- ModuleBase    <- configuración, rutas, dict_return, mensajería
+        +-- Watchful  <- tu módulo concreto
 ```
 
 ---
 
-## 2. File structure
+## 2. Estructura de archivos
 
-For a module called `my_module`, create a package folder:
+Para un módulo llamado `mi_modulo`, crea una carpeta package:
 
 ```text
 watchfuls/
-  +-- my_module/
-        +-- __init__.py       <- Module implementation (required)
-        +-- watchful.py       <- Thin alias: `from . import Watchful` (required)
-        +-- schema.json       <- Field schema (replaces inline ITEM_SCHEMA)
-        +-- info.json         <- Module metadata: icon and description
+  +-- mi_modulo/
+        +-- __init__.py       <- Implementación del módulo (obligatorio)
+        +-- watchful.py       <- Alias: `from . import Watchful` (obligatorio)
+        +-- schema.json       <- Schema de campos
+        +-- info.json         <- Metadatos del módulo: icono y descripción
         +-- lang/
-              +-- en_EN.json  <- English field labels and pretty name
-              +-- es_ES.json  <- Spanish field labels (or other languages)
+              +-- en_EN.json  <- Etiquetas de campos en inglés y nombre visible
+              +-- es_ES.json  <- Etiquetas en español (u otros idiomas)
         +-- tests/
-              +-- test_my_module.py  <- Unit tests (recommended)
+              +-- test_mi_modulo.py  <- Tests unitarios (recomendado)
 ```
 
-There is no need to register the module anywhere. The `Monitor` automatically
-discovers every package folder (directory with `__init__.py`) under `watchfuls/`.
+No es necesario registrar el módulo en ningún sitio. El `Monitor` descubre
+automáticamente cualquier carpeta con `__init__.py` dentro de `watchfuls/`.
 
 ---
 
-## 3. Minimal module template
+## 3. Plantilla mínima de módulo
 
 ```python
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Monitoring module: my_module."""
+"""Módulo de monitorización: mi_modulo."""
 
 import concurrent.futures
 import json
@@ -69,74 +69,74 @@ import os
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
-# Load field schema from the package folder's schema.json
+# Carga el schema de campos desde schema.json en la carpeta del package
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
 
 class Watchful(ModuleBase):
-    """Monitors <description of what it does>."""
+    """Monitoriza <descripción de lo que hace>."""
 
-    # Schema loaded from schema.json — defines fields, types, defaults and ranges.
-    # Used by the web UI to render forms and apply defaults automatically.
+    # Schema cargado desde schema.json — define campos, tipos, valores por defecto y rangos.
+    # La UI web lo usa para generar formularios y aplicar valores por defecto automáticamente.
     ITEM_SCHEMA = _SCHEMA
 
-    # Shortcut for quick access to default values
+    # Atajo para acceder rápidamente a los valores por defecto
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()}
 
-    # Module constants (optional)
-    _MY_DEFAULT_VALUE = 42
+    # Constantes del módulo (opcional)
+    _MI_VALOR_DEFAULT = 42
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
-        # __name__ will be 'watchfuls.my_module' -> used as name_module
+        # __package__ será 'watchfuls.mi_modulo' -> usado como name_module
 
-        # Register system tools if needed
-        # self.paths.set('mytool', '/usr/bin/mytool')
+        # Registrar herramientas del sistema si se necesitan
+        # self.paths.set('miherramienta', '/usr/bin/miherramienta')
 
-        # Internal state (not persisted between monitoring cycles)
+        # Estado interno (no persiste entre ciclos de monitorización)
         # self._fail_count: dict[str, int] = {}
 
     def check(self):
-        """Main entry point. Executes the monitoring logic."""
+        """Punto de entrada principal. Ejecuta la lógica de monitorización."""
 
-        # 1. Read the configured item list
+        # 1. Leer la lista de ítems configurados
         items = self._get_items()
 
-        # 2. Run checks in parallel
+        # 2. Ejecutar comprobaciones en paralelo
         self._run_checks(items)
 
-        # 3. REQUIRED: call super().check() (runs debug log)
+        # 3. OBLIGATORIO: llamar a super().check() (registra el log de debug)
         super().check()
 
-        # 4. REQUIRED: return dict_return
+        # 4. OBLIGATORIO: devolver dict_return
         return self.dict_return
 
-    # -- Private methods -------------------------------------------------
+    # -- Métodos privados -------------------------------------------------
 
     def _get_items(self):
-        """Parse configuration and return enabled items."""
+        """Parsea la configuración y devuelve los ítems habilitados."""
         result = []
         for key, value in self.get_conf('list', {}).items():
             if isinstance(value, bool):
                 is_enabled = value
-                target = key  # backward compat: key is the operational data
+                target = key  # compatibilidad hacia atrás: la clave es el dato operativo
             elif isinstance(value, dict):
                 is_enabled = value.get('enabled', self._DEFAULTS['enabled'])
-                # The 'target' field holds the real data; if empty,
-                # the key is used as fallback (backward compatibility)
+                # El campo 'target' contiene el dato real; si está vacío,
+                # se usa la clave como fallback (compatibilidad hacia atrás)
                 target = (value.get('target', '') or '').strip() or key
             else:
                 is_enabled = self._DEFAULTS['enabled']
                 target = key
 
-            self._debug(f"Item: {key} - Enabled: {is_enabled}", DebugLevel.info)
+            self._debug(f"Ítem: {key} - Habilitado: {is_enabled}", DebugLevel.info)
             if is_enabled:
                 result.append((key, target))
 
         return result
 
     def _run_checks(self, items):
-        """Run checks in parallel using ThreadPoolExecutor."""
+        """Ejecuta las comprobaciones en paralelo usando ThreadPoolExecutor."""
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)
         ) as executor:
@@ -149,46 +149,46 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = f'MyModule: {name} - *Error: {exc}* '
+                    message = f'MiModulo: {name} - *Error: {exc}* '
                     self.dict_return.set(name, False, message)
 
     def _item_check(self, name, target):
-        """Execute the individual check for one item."""
+        """Ejecuta la comprobación individual para un ítem."""
         timeout = self.get_conf_in_list('timeout', name, self._DEFAULTS['timeout'])
 
-        # === Your monitoring logic goes here ===
+        # === Aquí va tu lógica de monitorización ===
         status, detail = self._do_check(target, timeout)
 
-        # Build message
-        s_message = f'MyModule: *{name}* '
+        # Construir mensaje
+        s_message = f'MiModulo: *{name}* '
         if status:
             s_message += 'OK'
         else:
-            s_message += f'FAIL {detail}'
+            s_message += f'FALLO {detail}'
 
-        # Store result
+        # Almacenar resultado
         other_data = {'detail': detail}
         self.dict_return.set(name, status, s_message, False, other_data)
 
-        # Notify if state changed
+        # Notificar si el estado cambió
         if self.check_status(status, self.name_module, name):
             self.send_message(s_message, status)
 
     def _do_check(self, target, timeout):
-        """Perform the actual verification. Returns (status: bool, detail: str)."""
-        # Implement your specific logic here
-        # Examples:
-        #   - Make an HTTP request
-        #   - Run a command: stdout, stderr = self._run_cmd(cmd)
-        #   - Connect to a socket
-        #   - Read a file
-        raise NotImplementedError("Implement _do_check")
+        """Realiza la verificación real. Devuelve (status: bool, detail: str)."""
+        # Implementa aquí tu lógica específica
+        # Ejemplos:
+        #   - Hacer una petición HTTP
+        #   - Ejecutar un comando: stdout, stderr = self._run_cmd(cmd)
+        #   - Conectar a un socket
+        #   - Leer un archivo
+        raise NotImplementedError("Implementa _do_check")
 ```
 
 ### schema.json
 
-Create `schema.json` at the root of your package folder. It defines module-level
-and per-item fields:
+Crea `schema.json` en la raíz de la carpeta del package. Define los campos a
+nivel de módulo y por ítem:
 
 ```json
 {
@@ -206,107 +206,124 @@ and per-item fields:
 
 ---
 
-## 4. ITEM_SCHEMA fields
+## 4. Referencia de campos (`schema.json`)
 
-Each field is defined as a dict with these properties:
+Los campos se declaran en `schema.json` en la raíz del package — no como dicts
+Python inline. El archivo tiene una clave de primer nivel por **colección**:
+`__module__` para ajustes a nivel de módulo y una clave por colección nombrada
+(habitualmente `list`, a veces `remote` o `config`).
 
-| Property   | Type     | Required | Description |
-|------------|----------|----------|-------------|
-| `default`  | any      | Yes | Default value |
-| `type`     | str      | Yes | Type: `'bool'`, `'int'`, `'float'`, `'str'`, `'list'` |
-| `min`      | number   | No  | Minimum value (for `int`/`float`) |
-| `max`      | number   | No  | Maximum value (for `int`/`float`) |
-| `sensitive`| bool     | No  | If `True`, displayed as a password field in the UI |
-
-### Full example
-
-```python
-ITEM_SCHEMA = {
-    'list': {
-        'enabled':    {'default': True,   'type': 'bool'},
-        'host':       {'default': '',     'type': 'str'},
-        'port':       {'default': 3306,   'type': 'int', 'min': 1, 'max': 65535},
-        'password':   {'default': '',     'type': 'str', 'sensitive': True},
-        'threshold':  {'default': 80.0,   'type': 'float', 'min': 0.0, 'max': 100.0},
-        'alert':      {'default': 1,      'type': 'int', 'min': 1, 'max': 100},
-        'exclude':    {'default': [],     'type': 'list'},
+```json
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
     },
+    "list": {
+        "enabled":   {"type": "bool",  "default": true},
+        "host":      {"type": "str",   "default": ""},
+        "port":      {"type": "int",   "default": 3306, "min": 1, "max": 65535},
+        "password":  {"type": "str",   "default": "", "sensitive": true},
+        "threshold": {"type": "float", "default": 80.0, "min": 0.0, "max": 100.0},
+        "alert":     {"type": "int",   "default": 1, "min": 1, "max": 100},
+        "exclude":   {"type": "list",  "default": []}
+    }
 }
 ```
 
+La clase Python carga el archivo una vez al importar y lo expone como `ITEM_SCHEMA`:
+
+```python
+_SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
+
+class Watchful(ModuleBase):
+    ITEM_SCHEMA = _SCHEMA
+    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()}
+```
+
+### Propiedades de campo
+
+| Propiedad   | Tipo   | Obligatorio | Descripción |
+|-------------|--------|-------------|-------------|
+| `type`      | str    | Sí | `"bool"`, `"int"`, `"float"`, `"str"`, `"list"` |
+| `default`   | any    | Sí | Valor por defecto aplicado cuando el campo falta en `modules.json` |
+| `min`       | number | No | Valor mínimo (para `int` / `float`) |
+| `max`       | number | No | Valor máximo (para `int` / `float`) |
+| `sensitive` | bool   | No | Si es `true`, se renderiza como campo de contraseña en la UI web |
+
 ---
 
-## 5. ModuleBase API reference
+## 5. Referencia de la API de ModuleBase
 
-### Configuration
+### Configuración
 
-| Method | Purpose | Example |
-|--------|---------|---------|
-| `get_conf(key, default)` | Read module-level config | `self.get_conf('timeout', 10)` |
-| `get_conf_in_list(field, item_key, default)` | Read a field from an item | `self.get_conf_in_list('port', 'mydb', 3306)` |
-| `_parse_int(value, default)` | Parse to int | `self._parse_int('5', 0)` |
-| `_parse_float(value, default)` | Parse to float | `self._parse_float('3.14', 0.0)` |
+| Método | Propósito | Ejemplo |
+|--------|-----------|---------|
+| `get_conf(key, default)` | Leer configuración a nivel de módulo | `self.get_conf('timeout', 10)` |
+| `get_conf_in_list(field, item_key, default)` | Leer un campo de un ítem | `self.get_conf_in_list('port', 'mibd', 3306)` |
+| `_parse_int(value, default)` | Parsear a entero | `self._parse_int('5', 0)` |
+| `_parse_float(value, default)` | Parsear a flotante | `self._parse_float('3.14', 0.0)` |
 
-### Results
+### Resultados
 
-| Method | Description |
+| Método | Descripción |
 |--------|-------------|
-| `self.dict_return.set(key, status, message, send_msg, other_data)` | Store a check result |
+| `self.dict_return.set(key, status, message, send_msg, other_data)` | Almacena un resultado de comprobación |
 
-Parameters of `dict_return.set()`:
+Parámetros de `dict_return.set()`:
 
-| Parameter | Type | Description |
+| Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
-| `key` | str | Item name/ID (the dict key) |
+| `key` | str | Nombre/ID del ítem (clave del dict) |
 | `status` | bool | `True` = OK, `False` = Error |
-| `message` | str | Telegram message (supports `*bold*`) |
-| `send_msg` | bool | `False` = do not send automatically |
-| `other_data` | dict | Extra data visible in the status API |
+| `message` | str | Mensaje de Telegram (soporta `*negrita*`) |
+| `send_msg` | bool | `False` = no enviar automáticamente |
+| `other_data` | dict | Datos extra visibles en la API de estado |
 
-### State and notifications
+### Estado y notificaciones
 
-| Method | Description |
+| Método | Descripción |
 |--------|-------------|
-| `self.check_status(status, module_name, key)` | Returns `True` if the state **changed** |
-| `self.check_status_custom(status, key, message)` | Like `check_status` but also detects message changes |
-| `self.send_message(message, status)` | Send message to Telegram |
+| `self.check_status(status, module_name, key)` | Devuelve `True` si el estado **cambió** |
+| `self.check_status_custom(status, key, message)` | Como `check_status` pero también detecta cambios de mensaje |
+| `self.send_message(message, status)` | Envía mensaje a Telegram |
 
-### System tools
+### Herramientas del sistema
 
-| Method | Description |
+| Método | Descripción |
 |--------|-------------|
-| `self.paths.set(name, path)` | Register a tool path |
-| `self.paths.find(name, default='')` | Get a registered path |
-| `self._run_cmd(cmd, ignore_error=False)` | Run a system command -> `(stdout, stderr)` |
+| `self.paths.set(name, path)` | Registra una ruta de herramienta |
+| `self.paths.find(name, default='')` | Obtiene una ruta registrada |
+| `self._run_cmd(cmd, ignore_error=False)` | Ejecuta un comando del sistema → `(stdout, stderr)` |
 
 ### Debug
 
 ```python
-self._debug("My message", DebugLevel.info)
-self._debug("Critical error", DebugLevel.error)
-self._debug("Extra data", DebugLevel.debug)
+self._debug("Mi mensaje", DebugLevel.info)
+self._debug("Error crítico", DebugLevel.error)
+self._debug("Datos extra", DebugLevel.debug)
 ```
 
 ---
 
-## 6. Configuration in modules.json
+## 6. Configuración en modules.json
 
-The `Monitor` reads `modules.json` to decide which modules are enabled and
-with what configuration. The structure for your module:
+El `Monitor` lee `modules.json` para decidir qué módulos están habilitados y
+con qué configuración. La estructura para tu módulo:
 
 ```json
 {
-    "my_module": {
+    "mi_modulo": {
         "enabled": true,
         "threads": 5,
         "timeout": 10,
         "list": {
-            "Main Server": {
+            "Servidor Principal": {
                 "enabled": true,
                 "target": "192.168.1.100",
                 "timeout": 5
             },
-            "Backup Server": {
+            "Servidor de Backup": {
                 "enabled": true,
                 "target": "192.168.1.200"
             },
@@ -316,87 +333,72 @@ with what configuration. The structure for your module:
 }
 ```
 
-### Item data model
+### Modelo de datos de un ítem
 
-The **dictionary key** is the **descriptive name** of the item (shown as
-the title in the UI and in Telegram messages).
+La **clave del diccionario** es el **nombre descriptivo** del ítem (mostrado
+como título en la UI y en los mensajes de Telegram).
 
-The **operational data** (IP, URL, service name...) goes in a **field inside
-the item dict** (e.g. `target`, `host`, `url`, `service`).
+El **dato operativo** (IP, URL, nombre del servicio…) va en un **campo dentro
+del dict del ítem** (p. ej. `target`, `host`, `url`, `service`).
 
-For **backward compatibility**, if the operational field is empty or missing,
-the key is used as the operational value.
+Por **compatibilidad hacia atrás**, si el campo operativo está vacío o ausente,
+se usa la clave como valor operativo.
 
 ```python
-# New format (recommended)
-"My Router": {"enabled": true, "host": "192.168.1.1", "timeout": 2}
+# Formato nuevo (recomendado)
+"Mi Router": {"enabled": true, "host": "192.168.1.1", "timeout": 2}
 
-# Simple format (backward compat)
+# Formato simple (compat. hacia atrás)
 "192.168.1.1": true
 
-# Simple format with dict (backward compat)
+# Formato simple con dict (compat. hacia atrás)
 "192.168.1.1": {"enabled": true, "timeout": 2}
 ```
 
 ---
 
-## 7. How modules are discovered
+## 7. Cómo se descubren los módulos
 
 ```text
 watchfuls/
-  |-- ping/             <- package discovered -> importlib.import_module('watchfuls.ping')
-  |    |-- __init__.py  <- implementation
+  |-- ping/             <- package descubierto -> importlib.import_module('watchfuls.ping')
+  |    |-- __init__.py  <- implementación
   |    +-- watchful.py  <- alias
-  |-- web/              <- package discovered
-  |-- service_status/   <- package discovered
-  +-- my_module/        <- automatically discovered!
+  |-- web/              <- package descubierto
+  |-- service_status/   <- package descubierto
+  +-- mi_modulo/        <- ¡descubierto automáticamente!
        +-- __init__.py
 ```
 
-The `Monitor`:
-1. Scans `watchfuls/` for subdirectories containing `__init__.py` (packages)
-2. Also discovers legacy `watchfuls/*.py` single-file modules
-3. Checks `modules.json[my_module].enabled` (default: `True`)
-4. Uses `importlib.import_module('watchfuls.my_module')`
-5. Instantiates `Watchful(monitor)`
-6. Calls `check()`
+El `Monitor`:
+1. Escanea `watchfuls/` en busca de subdirectorios con `__init__.py` (packages)
+2. También descubre módulos legacy `watchfuls/*.py` de archivo único
+3. Comprueba `modules.json[mi_modulo].enabled` (por defecto: `True`)
+4. Usa `importlib.import_module('watchfuls.mi_modulo')`
+5. Instancia `Watchful(monitor)`
+6. Llama a `check()`
 
 ---
 
-## 8. Web UI customization
+## 8. Personalización en la UI web
 
-### Module icon and description
+### Icono y descripción del módulo
 
-Set them in `info.json` at the root of your module package:
+Se definen en `info.json` en la raíz del package del módulo:
 
 ```json
 {
-    "name": "my_module",
+    "name": "mi_modulo",
     "version": "1.0.0",
-    "description": "Short description of what the module does.",
+    "description": "Descripción breve de lo que hace el módulo.",
     "icon": "🔍"
 }
 ```
 
-### Field labels and display name (i18n)
+### Etiquetas de campos e i18n
 
-Create language files inside your module's `lang/` folder.
-
-**`lang/en_EN.json`:**
-
-```json
-{
-    "pretty_name": "My Module",
-    "labels": {
-        "enabled": "Enabled",
-        "target":  "Target address",
-        "timeout": "Timeout (s)",
-        "my_field": "My custom field"
-    }
-}
-```
-
-**`lang/es_ES.json`:**
+Crea archivos `lang/en_EN.json` y `lang/es_ES.json` con el nombre visible
+del módulo y las etiquetas de cada campo:
 
 ```json
 {
@@ -404,58 +406,62 @@ Create language files inside your module's `lang/` folder.
     "labels": {
         "enabled": "Habilitado",
         "target":  "Dirección destino",
-        "timeout": "Tiempo máximo (s)",
-        "my_field": "Mi campo personalizado"
+        "timeout": "Tiempo máximo (s)"
     }
 }
 ```
 
-The web admin reads these files automatically via `ModuleBase.discover_schemas()` —
-no changes needed in global JS files or Python lang files.
+El sistema multilanguage es automático: `ModuleBase.discover_schemas()` fusiona
+estos archivos con `schema.json` e `info.json` al arrancar, y la UI los usa
+sin ninguna configuración adicional.
+
+> **Documentación completa del sistema i18n** → [i18n.md](i18n.md)
+> (arquitectura de dos niveles, pipeline de `discover_schemas`, resolución de
+> etiquetas en el navegador, constantes JS, cómo añadir un idioma nuevo)
 
 ---
 
 ## 9. Tests
 
-### Basic test structure
+### Estructura básica de tests
 
 ```python
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls.my_module."""
+"""Tests para watchfuls.mi_modulo."""
 
 from unittest.mock import patch
 import pytest
 from conftest import create_mock_monitor
 
 
-class TestMyModuleInit:
+class TestMiModuloInit:
 
     def test_init(self):
-        from watchfuls.my_module import Watchful
-        mock_monitor = create_mock_monitor({'watchfuls.my_module': {}})
+        from watchfuls.mi_modulo import Watchful
+        mock_monitor = create_mock_monitor({'watchfuls.mi_modulo': {}})
         w = Watchful(mock_monitor)
-        assert w.name_module == 'watchfuls.my_module'
+        assert w.name_module == 'watchfuls.mi_modulo'
 
 
-class TestMyModuleCheck:
+class TestMiModuloCheck:
 
     def setup_method(self):
-        from watchfuls.my_module import Watchful
+        from watchfuls.mi_modulo import Watchful
         self.Watchful = Watchful
 
     def test_check_empty_list(self):
-        """No configured items means no results."""
-        config = {'watchfuls.my_module': {'list': {}}}
+        """Sin ítems configurados no hay resultados."""
+        config = {'watchfuls.mi_modulo': {'list': {}}}
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
         result = w.check()
         assert len(result.items()) == 0
 
     def test_check_disabled_item(self):
-        """Disabled item is not processed."""
+        """Un ítem deshabilitado no se procesa."""
         config = {
-            'watchfuls.my_module': {
+            'watchfuls.mi_modulo': {
                 'list': {'test': False}
             }
         }
@@ -465,27 +471,26 @@ class TestMyModuleCheck:
         assert len(result.items()) == 0
 
     def test_check_item_ok(self):
-        """Item that passes the check -> status True."""
+        """Ítem que supera la comprobación → status True."""
         config = {
-            'watchfuls.my_module': {
-                'list': {'My Server': {'enabled': True, 'target': '1.2.3.4'}}
+            'watchfuls.mi_modulo': {
+                'list': {'Mi Servidor': {'enabled': True, 'target': '1.2.3.4'}}
             }
         }
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
 
-        # Mock the actual check method
         with patch.object(w, '_do_check', return_value=(True, 'OK')):
             result = w.check()
             items = result.list
-            assert 'My Server' in items
-            assert items['My Server']['status'] is True
+            assert 'Mi Servidor' in items
+            assert items['Mi Servidor']['status'] is True
 
     def test_check_item_fail(self):
-        """Item that fails the check -> status False."""
+        """Ítem que falla la comprobación → status False."""
         config = {
-            'watchfuls.my_module': {
-                'list': {'My Server': {'enabled': True, 'target': '1.2.3.4'}}
+            'watchfuls.mi_modulo': {
+                'list': {'Mi Servidor': {'enabled': True, 'target': '1.2.3.4'}}
             }
         }
         mock_monitor = create_mock_monitor(config)
@@ -494,12 +499,12 @@ class TestMyModuleCheck:
         with patch.object(w, '_do_check', return_value=(False, 'timeout')):
             result = w.check()
             items = result.list
-            assert items['My Server']['status'] is False
+            assert items['Mi Servidor']['status'] is False
 
     def test_backward_compat_key_as_target(self):
-        """Without a target field, the key is used as fallback."""
+        """Sin campo target, se usa la clave como fallback."""
         config = {
-            'watchfuls.my_module': {
+            'watchfuls.mi_modulo': {
                 'list': {'1.2.3.4': True}
             }
         }
@@ -511,57 +516,55 @@ class TestMyModuleCheck:
             assert '1.2.3.4' in result.list
 
 
-class TestMyModuleDefaults:
+class TestMiModuloDefaults:
 
     def test_defaults_from_schema(self):
-        from watchfuls.my_module import Watchful
+        from watchfuls.mi_modulo import Watchful
         for key, meta in Watchful.ITEM_SCHEMA['list'].items():
             assert key in Watchful._DEFAULTS
             assert Watchful._DEFAULTS[key] == meta['default']
 
     def test_schema_types(self):
-        from watchfuls.my_module import Watchful
+        from watchfuls.mi_modulo import Watchful
         for key, meta in Watchful.ITEM_SCHEMA['list'].items():
             assert 'type' in meta
             assert 'default' in meta
 ```
 
-### How `create_mock_monitor` works
+### Cómo funciona `create_mock_monitor`
 
-This function creates a `MagicMock` that simulates the real `Monitor`:
-- The config key in the mock is the full `name_module`:
-  `'watchfuls.my_module'` (not `'my_module'`)
-- `check_status` returns `False` by default (does not trigger notifications)
-- `send_message` is a silent mock
+Esta función crea un `MagicMock` que simula el `Monitor` real:
+- La clave de configuración en el mock es el `name_module` completo:
+  `'watchfuls.mi_modulo'` (no `'mi_modulo'`)
+- `check_status` devuelve `False` por defecto (no dispara notificaciones)
+- `send_message` es un mock silencioso
 
 ---
 
-## 10. Full example: TCP port checker module
+## 10. Ejemplo completo: módulo verificador de puertos TCP
 
 ```python
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Monitoring module: tcp_check -- checks that TCP ports are open."""
+"""Módulo de monitorización: tcp_check — comprueba que los puertos TCP están abiertos."""
 
 import concurrent.futures
+import json
+import os
 import socket
 
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
+_SCHEMA = json.load(
+    open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8')
+)
+
 
 class Watchful(ModuleBase):
 
-    ITEM_SCHEMA = {
-        'list': {
-            'enabled': {'default': True, 'type': 'bool'},
-            'host':    {'default': '', 'type': 'str'},
-            'port':    {'default': 80, 'type': 'int', 'min': 1, 'max': 65535},
-            'timeout': {'default': 5, 'type': 'int', 'min': 1, 'max': 60},
-        },
-    }
-
-    _DEFAULTS = {k: v['default'] for k, v in ITEM_SCHEMA['list'].items()}
+    ITEM_SCHEMA = _SCHEMA
+    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()}
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -579,7 +582,7 @@ class Watchful(ModuleBase):
                 is_enabled = self._DEFAULTS['enabled']
                 host = key
 
-            self._debug(f"TCP: {key} - Enabled: {is_enabled}", DebugLevel.info)
+            self._debug(f"TCP: {key} - Habilitado: {is_enabled}", DebugLevel.info)
             if is_enabled:
                 items.append((key, host))
 
@@ -611,7 +614,7 @@ class Watchful(ModuleBase):
         if status:
             s_message += 'OK'
         else:
-            s_message += 'FAIL'
+            s_message += 'FALLO'
 
         other_data = {'host': host, 'port': port}
         self.dict_return.set(name, status, s_message, False, other_data)
@@ -621,7 +624,7 @@ class Watchful(ModuleBase):
 
     @staticmethod
     def _tcp_connect(host, port, timeout):
-        """Try to connect to host:port. Returns True if the port responds."""
+        """Intenta conectar a host:port. Devuelve True si el puerto responde."""
         try:
             with socket.create_connection((host, port), timeout=timeout):
                 return True
@@ -629,20 +632,51 @@ class Watchful(ModuleBase):
             return False
 ```
 
-### Configuration for this example (`modules.json`)
+### `schema.json` para este ejemplo
+
+```json
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
+    },
+    "list": {
+        "enabled": {"type": "bool", "default": true},
+        "host":    {"type": "str",  "default": ""},
+        "port":    {"type": "int",  "default": 80,  "min": 1, "max": 65535},
+        "timeout": {"type": "int",  "default": 5,   "min": 1, "max": 60}
+    }
+}
+```
+
+### `lang/es_ES.json` para este ejemplo
+
+```json
+{
+    "pretty_name": "Verificador TCP",
+    "labels": {
+        "enabled": "Habilitado",
+        "host":    "Host",
+        "port":    "Puerto",
+        "timeout": "Timeout (s)"
+    }
+}
+```
+
+### Configuración (`modules.json`)
 
 ```json
 {
     "tcp_check": {
         "enabled": true,
         "list": {
-            "Web Server": {
+            "Servidor Web": {
                 "enabled": true,
                 "host": "192.168.1.10",
                 "port": 443,
                 "timeout": 3
             },
-            "SSH Gateway": {
+            "Gateway SSH": {
                 "enabled": true,
                 "host": "10.0.0.1",
                 "port": 22
@@ -655,22 +689,22 @@ class Watchful(ModuleBase):
 
 ---
 
-## 11. Creation checklist
+## 11. Lista de comprobación para la creación
 
-- [ ] Create folder `watchfuls/my_module/`
-- [ ] Create `__init__.py` with a `Watchful(ModuleBase)` class
-- [ ] Create `watchful.py` with `from . import Watchful`
-- [ ] Create `schema.json` with `__module__` and `list` field definitions
-- [ ] Create `info.json` with `name`, `description` and `icon`
-- [ ] Create `lang/en_EN.json` with `pretty_name` and `labels`
-- [ ] Create `lang/es_ES.json` with translated `pretty_name` and `labels`
-- [ ] Load `_SCHEMA` from `schema.json` and set `ITEM_SCHEMA = _SCHEMA`
-- [ ] Define `_DEFAULTS` derived from `_SCHEMA['list']`
-- [ ] Implement `__init__` calling `super().__init__(monitor, __package__)`
-- [ ] Implement `check()` returning `self.dict_return`
-- [ ] Call `super().check()` before returning
-- [ ] Use `dict_return.set()` to store each result
-- [ ] Use `check_status()` + `send_message()` for notifications
-- [ ] Add a section in `modules.json` with `enabled: true`
-- [ ] Create `tests/test_my_module.py` with unit tests
-- [ ] Run `pytest tests/ watchfuls/ -q` and verify everything passes
+- [ ] Crear carpeta `watchfuls/mi_modulo/`
+- [ ] Crear `__init__.py` con una clase `Watchful(ModuleBase)`
+- [ ] Crear `watchful.py` con `from . import Watchful`
+- [ ] Crear `schema.json` con las definiciones de campos `__module__` y `list`
+- [ ] Crear `info.json` con `name`, `description` e `icon`
+- [ ] Crear `lang/en_EN.json` con `pretty_name` y `labels`
+- [ ] Crear `lang/es_ES.json` con `pretty_name` y `labels` traducidos
+- [ ] Cargar `_SCHEMA` desde `schema.json` y asignar `ITEM_SCHEMA = _SCHEMA`
+- [ ] Definir `_DEFAULTS` a partir de `_SCHEMA['list']`
+- [ ] Implementar `__init__` llamando a `super().__init__(monitor, __package__)`
+- [ ] Implementar `check()` devolviendo `self.dict_return`
+- [ ] Llamar a `super().check()` antes de devolver
+- [ ] Usar `dict_return.set()` para almacenar cada resultado
+- [ ] Usar `check_status()` + `send_message()` para las notificaciones
+- [ ] Añadir una sección en `modules.json` con `enabled: true`
+- [ ] Crear `tests/test_mi_modulo.py` con tests unitarios
+- [ ] Ejecutar `pytest tests/ watchfuls/ -q` y verificar que todo pasa
