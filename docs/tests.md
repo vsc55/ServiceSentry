@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: 870 tests** | Todos deben pasar con `pytest` para que el build sea válido.
+**Total: 952 tests** | Todos deben pasar con `pytest` para que el build sea válido.
 
 ---
 
@@ -21,15 +21,16 @@
 13. [Panel Web — API estado y ejecución de checks](#13-panel-web--api-estado-y-ejecución-de-checks)
 14. [Panel Web — Usuarios, roles y sesiones](#14-panel-web--usuarios-roles-y-sesiones)
 15. [Panel Web — i18n, UI y seguridad](#15-panel-web--i18n-ui-y-seguridad)
-16. [Watchful: filesystemusage](#16-watchful-filesystemusage)
-17. [Watchful: hddtemp](#17-watchful-hddtemp)
-18. [Watchful: mysql](#18-watchful-mysql)
-19. [Watchful: ping](#19-watchful-ping)
-20. [Watchful: raid](#20-watchful-raid)
-21. [Watchful: ram\_swap](#21-watchful-ram_swap)
-22. [Watchful: service\_status](#22-watchful-service_status)
-23. [Watchful: temperature](#23-watchful-temperature)
-24. [Watchful: web](#24-watchful-web)
+16. [Panel Web — Permisos granulares y roles personalizados](#16-panel-web--permisos-granulares-y-roles-personalizados)
+17. [Watchful: filesystemusage](#17-watchful-filesystemusage)
+18. [Watchful: hddtemp](#18-watchful-hddtemp)
+19. [Watchful: mysql](#19-watchful-mysql)
+20. [Watchful: ping](#20-watchful-ping)
+21. [Watchful: raid](#21-watchful-raid)
+22. [Watchful: ram\_swap](#22-watchful-ram_swap)
+23. [Watchful: service\_status](#23-watchful-service_status)
+24. [Watchful: temperature](#24-watchful-temperature)
+25. [Watchful: web](#25-watchful-web)
 
 ---
 
@@ -585,7 +586,110 @@
 
 ---
 
-## 16. Watchful: filesystemusage
+## 16. Panel Web — Permisos granulares y roles personalizados
+
+**Archivo:** `tests/test_web_admin.py` — `TestPermissionsConstants`, `TestCustomRoles`, `TestGranularPermissions`
+
+### `TestPermissionsConstants`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_permissions_tuple_has_15_flags` | `len(PERMISSIONS) == 15` | 15 elementos | Otro número |
+| `test_permissions_are_unique` | Sin duplicados en `PERMISSIONS` | `set` sin colisiones | Si hay repetidos |
+| `test_permissions_expected_flags` | El conjunto exacto de 15 flags | Coincide con el set esperado | Si falta o sobra alguno |
+| `test_permission_groups_structure` | `PERMISSION_GROUPS` es lista de 2-tuplas | Lista con pares `(key, [perms])` | Si la estructura difiere |
+| `test_permission_groups_cover_all_permissions` | Todos los 15 flags están en algún grupo | Unión de grupos == PERMISSIONS | Si alguno no está cubierto |
+| `test_permission_groups_no_duplicates` | Ningún flag aparece en más de un grupo | Sin duplicados entre grupos | Si hay solapamiento |
+| `test_permission_groups_keys` | Los 7 group keys están presentes | `perm_group_users` … `perm_group_checks` | Si falta alguna clave |
+| `test_admin_has_all_permissions` | Role `admin` tiene los 15 permisos | `frozenset == set(PERMISSIONS)` | Si falta alguno |
+| `test_editor_permissions` | Role `editor` tiene solo sus 4 permisos | `modules_edit`, `config_edit`, `checks_run`, `audit_view` | Si tiene de más o de menos |
+| `test_viewer_has_no_permissions` | Role `viewer` sin permisos | `frozenset()` vacío | Si tiene alguno |
+| `test_builtin_roles_are_frozensets` | Los 3 roles integrados son `frozenset` | Tipo correcto | Si son otro tipo |
+| `test_get_role_permissions_admin` | `_get_role_permissions('admin')` | Devuelve todos los permisos | Si falta alguno |
+| `test_get_role_permissions_viewer` | `_get_role_permissions('viewer')` | Devuelve `frozenset()` | Si devuelve algo |
+| `test_get_role_permissions_unknown_role` | Rol inexistente | `frozenset()` vacío | Si lanza o devuelve algo |
+| `test_get_role_permissions_custom_role` | Rol personalizado con permisos válidos | Devuelve los permisos asignados | Si difieren |
+| `test_get_role_permissions_custom_role_filters_invalid` | Rol personalizado con flags inválidos | Los inválidos son ignorados | Si los incluye |
+| `test_api_me_includes_permissions_list` | `GET /api/me` devuelve clave `permissions` | Lista presente en JSON | Si no está |
+| `test_api_me_admin_has_all_permissions` | `/api/me` con sesión admin | Lista contiene los 15 flags | Si falta alguno |
+| `test_api_me_viewer_has_no_permissions` | `/api/me` con sesión viewer | Lista vacía | Si contiene algo |
+| `test_api_me_editor_permissions` | `/api/me` con sesión editor | Lista con 4 permisos de editor | Si difieren |
+| `test_dashboard_exposes_permissions_list_js` | Dashboard renderiza `PERMISSIONS` como JS | Variable JS presente en HTML | Si no aparece |
+| `test_dashboard_exposes_permission_groups` | Dashboard renderiza `PERMISSION_GROUPS` | Groups JS presente en HTML | Si no aparece |
+
+### `TestCustomRoles`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_get_roles_requires_auth` | `GET /api/roles` sin autenticar | `302` | Si devuelve datos |
+| `test_get_roles_returns_builtin_roles` | `GET /api/roles` devuelve `admin`, `editor`, `viewer` | Los 3 en la lista | Si falta alguno |
+| `test_builtin_roles_are_marked` | Los roles integrados tienen `builtin: true` | Flag presente | Si no está marcado |
+| `test_builtin_roles_have_permissions` | Los roles integrados tienen su `permissions` en la respuesta | Lista no vacía para admin/editor | Si falta |
+| `test_create_custom_role` | `POST /api/roles` crea un rol | `201`, role en respuesta | Si es otro código |
+| `test_create_role_appears_in_list` | Rol recién creado aparece en `GET /api/roles` | Presente en lista | Si no aparece |
+| `test_create_role_invalid_permissions_filtered` | Permisos inválidos ignorados al crear | Solo flags válidos guardados | Si guarda inválidos |
+| `test_create_role_missing_name` | `POST /api/roles` sin campo `name` | `400` | Si crea o devuelve 201 |
+| `test_create_role_duplicate_name` | Crear rol con nombre ya existente | `409` | Si lo sobreescribe |
+| `test_create_role_name_clashes_with_builtin` | Nombre coincide con `admin`/`editor`/`viewer` | `409` | Si lo crea |
+| `test_create_role_name_normalised` | Nombre con mayúsculas y espacios | Se normaliza a lowercase + guiones | Si lo guarda tal cual |
+| `test_update_custom_role_label` | `PUT /api/roles/<name>` cambia la etiqueta | `200`, etiqueta actualizada | Si es otro código |
+| `test_update_custom_role_permissions` | `PUT /api/roles/<name>` cambia permisos | `200`, permisos actualizados | Si no cambian |
+| `test_cannot_update_builtin_role` | Intentar editar rol integrado | `403` | Si lo modifica |
+| `test_update_nonexistent_role` | `PUT /api/roles/fantasma` | `404` | Si devuelve otro código |
+| `test_delete_custom_role` | `DELETE /api/roles/<name>` elimina el rol | `200`, no aparece en lista | Si persiste |
+| `test_cannot_delete_builtin_role` | Eliminar rol integrado | `403` | Si lo elimina |
+| `test_cannot_delete_role_in_use` | Eliminar rol asignado a un usuario | `409` | Si lo elimina |
+| `test_delete_nonexistent_role` | `DELETE /api/roles/fantasma` | `404` | Si devuelve otro código |
+| `test_roles_persisted_to_file` | Rol creado se guarda en `roles.json` | Archivo contiene el nuevo rol | Si no persiste |
+| `test_custom_role_accepted_for_user_creation` | Crear usuario con rol personalizado | `201`, rol asignado | Si rechaza el rol |
+| `test_custom_role_audited_on_create` | Crear rol genera evento de auditoría | Evento `role_created` en log | Si no se audita |
+| `test_custom_role_audited_on_update` | Editar rol genera evento de auditoría | Evento `role_updated` en log | Si no se audita |
+| `test_custom_role_audited_on_delete` | Eliminar rol genera evento de auditoría | Evento `role_deleted` en log | Si no se audita |
+
+### `TestGranularPermissions`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_users_view_allows_get_users` | `users_view` → `GET /api/users` | `200` | Si es `403` |
+| `test_without_users_view_get_users_403` | Sin `users_view` → `GET /api/users` | `403` | Si devuelve datos |
+| `test_users_add_allows_create_user` | `users_add` → `POST /api/users` | `201` | Si es `403` |
+| `test_without_users_add_create_user_403` | Sin `users_add` → `POST /api/users` | `403` | Si crea usuario |
+| `test_users_edit_allows_update_user` | `users_edit` → `PUT /api/users/<n>` | `200` | Si es `403` |
+| `test_without_users_edit_update_user_403` | Sin `users_edit` → `PUT /api/users/<n>` | `403` | Si actualiza |
+| `test_users_delete_allows_delete_user` | `users_delete` → `DELETE /api/users/<n>` | `200` | Si es `403` |
+| `test_without_users_delete_delete_user_403` | Sin `users_delete` → `DELETE /api/users/<n>` | `403` | Si elimina |
+| `test_roles_add_allows_create_role` | `roles_add` → `POST /api/roles` | `201` | Si es `403` |
+| `test_without_roles_add_create_role_403` | Sin `roles_add` → `POST /api/roles` | `403` | Si crea rol |
+| `test_roles_edit_allows_update_role` | `roles_edit` → `PUT /api/roles/<n>` | `200` | Si es `403` |
+| `test_without_roles_edit_update_role_403` | Sin `roles_edit` → `PUT /api/roles/<n>` | `403` | Si actualiza |
+| `test_roles_delete_allows_delete_role` | `roles_delete` → `DELETE /api/roles/<n>` | `200` | Si es `403` |
+| `test_without_roles_delete_delete_role_403` | Sin `roles_delete` → `DELETE /api/roles/<n>` | `403` | Si elimina |
+| `test_audit_view_allows_get_audit` | `audit_view` → `GET /api/audit` | `200` | Si es `403` |
+| `test_without_audit_view_get_audit_403` | Sin `audit_view` → `GET /api/audit` | `403` | Si devuelve datos |
+| `test_audit_delete_allows_clear` | `audit_delete` → `DELETE /api/audit` | `200` | Si es `403` |
+| `test_without_audit_delete_clear_403` | Sin `audit_delete` → `DELETE /api/audit` | `403` | Si borra |
+| `test_audit_delete_allows_delete_entry` | `audit_delete` → `DELETE /api/audit/<idx>` | `200/404` | Si es `403` |
+| `test_without_audit_delete_delete_entry_403` | Sin `audit_delete` → `DELETE /api/audit/<idx>` | `403` | Si borra |
+| `test_sessions_view_allows_get_sessions` | `sessions_view` → `GET /api/sessions` | `200` | Si es `403` |
+| `test_without_sessions_view_get_sessions_403` | Sin `sessions_view` → `GET /api/sessions` | `403` | Si devuelve datos |
+| `test_sessions_revoke_allows_invalidate` | `sessions_revoke` → `POST /api/sessions/invalidate` | `200` | Si es `403` |
+| `test_without_sessions_revoke_invalidate_403` | Sin `sessions_revoke` → `POST /api/sessions/invalidate` | `403` | Si revoca |
+| `test_sessions_revoke_allows_revoke_user` | `sessions_revoke` → `POST /api/sessions/revoke-user/<u>` | `200` | Si es `403` |
+| `test_modules_edit_allows_put` | `modules_edit` → `PUT /api/modules` | `200` | Si es `403` |
+| `test_without_modules_edit_put_403` | Sin `modules_edit` → `PUT /api/modules` | `403` | Si guarda |
+| `test_config_edit_allows_put` | `config_edit` → `PUT /api/config` | `200` | Si es `403` |
+| `test_without_config_edit_put_403` | Sin `config_edit` → `PUT /api/config` | `403` | Si guarda |
+| `test_config_edit_allows_telegram_test` | `config_edit` → `POST /api/telegram/test` | `200/5xx` (no `403`) | Si devuelve `403` |
+| `test_without_config_edit_telegram_test_403` | Sin `config_edit` → `POST /api/telegram/test` | `403` | Si ejecuta |
+| `test_checks_run_allows_post` | `checks_run` → `POST /api/checks/run` | `200` | Si es `403` |
+| `test_without_checks_run_post_403` | Sin `checks_run` → `POST /api/checks/run` | `403` | Si ejecuta |
+| `test_custom_role_user_gets_correct_perms` | Usuario con rol personalizado recibe sus permisos en `/api/me` | Lista correcta | Si difiere |
+| `test_custom_role_user_respects_allowed_endpoint` | Usuario con `modules_edit` puede hacer `PUT /api/modules` | `200` | Si es `403` |
+| `test_custom_role_user_respects_denied_endpoint` | Usuario con `modules_edit` no puede `GET /api/users` (falta `users_view`) | `403` | Si devuelve `200` |
+
+---
+
+## 17. Watchful: filesystemusage
 
 **Archivo:** `watchfuls/filesystemusage/tests/test_filesystemusage.py`
 
@@ -608,7 +712,7 @@
 
 ---
 
-## 17. Watchful: hddtemp
+## 18. Watchful: hddtemp
 
 **Archivo:** `watchfuls/hddtemp/tests/test_hddtemp.py`
 
@@ -626,7 +730,7 @@
 
 ---
 
-## 18. Watchful: mysql
+## 19. Watchful: mysql
 
 **Archivo:** `watchfuls/mysql/tests/test_mysql.py`
 
@@ -645,7 +749,7 @@
 
 ---
 
-## 19. Watchful: ping
+## 20. Watchful: ping
 
 **Archivo:** `watchfuls/ping/tests/test_ping.py`
 
@@ -674,7 +778,7 @@
 
 ---
 
-## 20. Watchful: raid
+## 21. Watchful: raid
 
 **Archivo:** `watchfuls/raid/tests/test_raid.py` y `test_raid_mdstat.py`
 
@@ -701,7 +805,7 @@
 
 ---
 
-## 21. Watchful: ram\_swap
+## 22. Watchful: ram\_swap
 
 **Archivo:** `watchfuls/ram_swap/tests/test_ram_swap.py`
 
@@ -720,7 +824,7 @@
 
 ---
 
-## 22. Watchful: service\_status
+## 23. Watchful: service\_status
 
 **Archivo:** `watchfuls/service_status/tests/test_service_status.py`
 
@@ -744,7 +848,7 @@
 
 ---
 
-## 23. Watchful: temperature
+## 24. Watchful: temperature
 
 **Archivo:** `watchfuls/temperature/tests/test_temperature.py`
 
@@ -766,7 +870,7 @@
 
 ---
 
-## 24. Watchful: web
+## 25. Watchful: web
 
 **Archivo:** `watchfuls/web/tests/test_web.py`
 

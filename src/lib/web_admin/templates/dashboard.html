@@ -104,16 +104,20 @@
         <!-- ==================== Modules Tab ==================== -->
         <div class="tab-pane fade" id="tab-modules">
             <div id="modules-container"></div>
-            <button class="btn btn-primary mt-3" onclick="saveModules()">
+            <button class="btn btn-primary mt-3" id="btnSaveModules" onclick="saveModules()">
                 <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
+                <span class="badge bg-warning text-dark ms-1 d-none" id="badgeModulesDirty"
+                    title="{{ i18n.unsaved_changes }}">●</span>
             </button>
         </div>
 
         <!-- ==================== Config Tab ===================== -->
         <div class="tab-pane fade" id="tab-config">
             <div id="config-container"></div>
-            <button class="btn btn-primary mt-3" onclick="saveConfig()">
+            <button class="btn btn-primary mt-3" id="btnSaveConfig" onclick="saveConfig()">
                 <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
+                <span class="badge bg-warning text-dark ms-1 d-none" id="badgeConfigDirty"
+                    title="{{ i18n.unsaved_changes }}">●</span>
             </button>
         </div>
 
@@ -139,21 +143,116 @@
             <!-- Users -->
             <div class="d-flex align-items-center mb-3">
                 <h5 class="mb-0"><i class="bi bi-people me-2"></i>{{ i18n.user_management }}</h5>
-                <button class="btn btn-sm btn-success ms-auto" onclick="openNewUserModal()">
+                <button class="btn btn-sm btn-success ms-auto" id="btnNewUser" onclick="openNewUserModal()">
                     <i class="bi bi-person-plus me-1"></i>{{ i18n.new_user }}
                 </button>
             </div>
             <div id="users-container"></div>
+
+            <!-- Roles -->
+            <div id="roles-section">
+            <hr>
+            <div class="d-flex align-items-center mb-3">
+                <h5 class="mb-0"><i class="bi bi-shield-lock me-2"></i>{{ i18n.role_management }}</h5>
+                <button class="btn btn-sm btn-success ms-auto" onclick="openNewRoleModal()"
+                    id="btnNewRole" style="display:none">
+                    <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_role }}
+                </button>
+            </div>
+            <div id="roles-container"></div>
+            </div>
         </div>
 
         <!-- ==================== Audit Tab ====================== -->
         <div class="tab-pane fade" id="tab-audit">
-            <div class="d-flex align-items-center mb-3">
+            <div class="d-flex align-items-center mb-2 gap-2">
                 <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>{{ i18n.audit_log }}</h5>
-                <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="renderAudit()">
-                    <i class="bi bi-arrow-clockwise me-1"></i>
-                </button>
+                <div class="ms-auto d-flex gap-1">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="renderAudit()" title="{{ i18n.refresh }}">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-outline-primary" onclick="exportAudit('csv')">
+                            <i class="bi bi-filetype-csv me-1"></i>{{ i18n.export_csv }}
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="exportAudit('json')">
+                            <i class="bi bi-filetype-json me-1"></i>{{ i18n.export_json }}
+                        </button>
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger" id="btnClearAudit" onclick="confirmClearAudit()" title="{{ i18n.audit_clear_all }}">
+                        <i class="bi bi-trash3"></i>
+                    </button>
+                </div>
             </div>
+
+            <!-- Controls bar -->
+            <div class="card card-body py-2 mb-3 bg-light">
+                <div class="row g-2 align-items-center">
+                    <div class="col-auto">
+                        <div class="input-group input-group-sm">
+                            <label class="input-group-text">{{ i18n.sort }}</label>
+                            <select class="form-select form-select-sm" id="auditSortField" onchange="applyAuditControls()">
+                                <option value="time">{{ i18n.col_time }}</option>
+                                <option value="event">{{ i18n.col_event }}</option>
+                                <option value="user">{{ i18n.col_user }}</option>
+                                <option value="ip">IP</option>
+                            </select>
+                            <button class="btn btn-outline-secondary" id="btnAuditSortDir" onclick="toggleAuditSortDir()" title="{{ i18n.sort_dir }}">
+                                <i class="bi bi-sort-down" id="iconAuditSortDir"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <div class="input-group input-group-sm">
+                            <label class="input-group-text">{{ i18n.group_by }}</label>
+                            <select class="form-select form-select-sm" id="auditGroupBy" onchange="applyAuditControls()">
+                                <option value="none">{{ i18n.none }}</option>
+                                <option value="date">{{ i18n.col_time }}</option>
+                                <option value="event">{{ i18n.col_event }}</option>
+                                <option value="user">{{ i18n.col_user }}</option>
+                                <option value="ip">IP</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-auto ms-auto">
+                        <button class="btn btn-sm btn-outline-danger d-none" id="btnClearAuditFilters" onclick="clearAuditFilters()">
+                            <i class="bi bi-x-circle me-1"></i>{{ i18n.clear_filters }}
+                        </button>
+                    </div>
+                </div>
+                <div class="row g-2 align-items-center mt-1">
+                    <div class="col-auto">
+                        <select class="form-select form-select-sm" id="auditFilterEvent" onchange="applyAuditControls()" style="max-width:180px">
+                            <option value="">{{ i18n.all_events }}</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <input class="form-control form-control-sm" id="auditFilterUser"
+                            placeholder="{{ i18n.col_user }}" oninput="applyAuditControls()"
+                            list="auditUserList" autocomplete="off" style="width:140px">
+                        <datalist id="auditUserList"></datalist>
+                    </div>
+                    <div class="col-auto">
+                        <input class="form-control form-control-sm" id="auditFilterIp"
+                            placeholder="IP" oninput="applyAuditControls()"
+                            list="auditIpList" autocomplete="off" style="width:130px">
+                        <datalist id="auditIpList"></datalist>
+                    </div>
+                    <div class="col-auto">
+                        <div class="input-group input-group-sm">
+                            <label class="input-group-text">{{ i18n.date_from }}</label>
+                            <input type="date" class="form-control form-control-sm" id="auditFilterFrom" onchange="applyAuditControls()">
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <div class="input-group input-group-sm">
+                            <label class="input-group-text">{{ i18n.date_to }}</label>
+                            <input type="date" class="form-control form-control-sm" id="auditFilterTo" onchange="applyAuditControls()">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div id="audit-container"></div>
         </div>
     </div>

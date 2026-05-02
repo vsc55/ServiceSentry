@@ -21,11 +21,15 @@ let modulesData = {};
 let configData = {};
 let usersData = {};
 let sessionsData = {};
+let rolesData = {};
 let currentUser = {};
 let _uid = 0;
-let _addItemCtx = null;   // {target, pathStr}
-let _editingUser = null;  // null = new, string = editing username
+let _addItemCtx = null;     // {target, pathStr}
+let _deleteItemCtx = null;  // {target, parentPathStr, key}
+let _renameItemCtx = null;  // {target, parentPathStr, oldKey}
+let _editingUser = null;    // null = new, string = editing username
 const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
+const ALL_PERMISSIONS = {{ permissions_list | tojson }};
 const ITEM_SCHEMAS = {{ item_schemas | default({}) | tojson }};
 
 /**

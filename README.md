@@ -13,12 +13,12 @@
 
 - **9 built-in modules:** disk usage, disk temperature, MySQL, ping (cross-platform via `pythonping`), RAID, RAM/SWAP, systemd services, temperature sensors, web availability.
 - **Telegram notifications** — alerts only when state *changes* (no spam on repeated failures).
-- **Web admin panel** — browser UI to manage modules, config and users; role-based (admin / editor / viewer); dark mode; i18n (EN / ES).
+- **Web admin panel** — browser UI to manage modules, config and users; granular per-action roles (15 permission flags); custom roles; dark mode; i18n (EN / ES).
 - **Plugin architecture** — each module is an independent Python package in `watchfuls/`.
 - **Parallel execution** — modules and per-module items run in `ThreadPoolExecutor`.
 - **Cross-platform modules** — `filesystemusage` and `ram_swap` work on Linux, Windows and macOS via `psutil`.
 - **Remote execution** — SSH command execution via paramiko for RAID and other remote checks.
-- **870 tests** with pytest.
+- **952 tests** with pytest.
 
 ---
 
@@ -73,7 +73,7 @@ Edit `data/config.json` to add your Telegram bot token and chat ID before runnin
 | [docs/development.md](docs/development.md) | Setup, tests, VS Code debug, conventions, dependencies |
 | [docs/watchful_guide.md](docs/watchful_guide.md) | Step-by-step guide to create a new watchful module |
 | [docs/i18n.md](docs/i18n.md) | Internationalisation system: two-tier architecture, `discover_schemas` pipeline, adding languages |
-| [docs/tests.md](docs/tests.md) | Full test inventory (870 tests): what each test checks, pass and fail conditions, organized by group |
+| [docs/tests.md](docs/tests.md) | Full test inventory (952 tests): what each test checks, pass and fail conditions, organized by group |
 
 ---
 

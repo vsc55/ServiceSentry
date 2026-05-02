@@ -4,34 +4,332 @@
 
 // ──────────────────────────── Audit log ──────────────────────────
 const AUDIT_EVENTS = I18N.audit_events || {};
+let _auditEntries = [];
 
-function formatAuditDetail(detail) {
+// Full detail renderer — used in the modal
+function formatAuditDetailFull(detail) {
     if (!detail) return '';
-    if (typeof detail === 'string') return esc(detail);
+    if (typeof detail === 'string') return '<p class="mb-0">' + esc(detail) + '</p>';
 
-    // List of {field, old, new} changes
     if (Array.isArray(detail)) {
         if (!detail.length) return '';
-        return detail.map(c => {
+        let rows = detail.map(c => {
             const f = esc(c.field || '');
-            const o = c.old === null || c.old === undefined ? '∅' : esc(String(c.old));
-            const n = c.new === null || c.new === undefined ? '∅' : esc(String(c.new));
-            return `<span class="text-nowrap"><strong>${f}</strong>: ${o} → ${n}</span>`;
-        }).join('<br>');
+            const o = auditVal(c.old);
+            const n = auditVal(c.new);
+            return `<tr><td class="text-nowrap pe-3"><strong>${f}</strong></td><td>${o}</td><td class="px-2 text-muted">→</td><td>${n}</td></tr>`;
+        }).join('');
+        return `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
     }
 
-    // Object — e.g. {username, role, ...} or {username, changes: [...]}
     if (typeof detail === 'object') {
-        let parts = [];
-        if (detail.username) parts.push(esc(detail.username));
-        if (detail.role) parts.push('role=' + esc(detail.role));
-        if (detail.display_name && !detail.changes) parts.push(esc(detail.display_name));
+        let html = '';
+        if (detail.username) html += `<p class="mb-1"><strong>${t('col_user')}:</strong> ${esc(detail.username)}</p>`;
+        if (detail.role)     html += `<p class="mb-1"><strong>Role:</strong> ${esc(detail.role)}</p>`;
+        if (detail.display_name && !detail.changes) html += `<p class="mb-1">${esc(detail.display_name)}</p>`;
         if (Array.isArray(detail.changes) && detail.changes.length) {
-            parts.push(formatAuditDetail(detail.changes));
+            html += formatAuditDetailFull(detail.changes);
         }
-        return parts.join(parts.some(p => p.includes('<br>')) ? '<br>' : ', ');
+        return html || renderReadable(detail);
     }
-    return esc(String(detail));
+    return '<p class="mb-0">' + esc(String(detail)) + '</p>';
+}
+
+// Recursive pretty renderer for any value
+function renderReadable(v) {
+    if (v === null || v === undefined) return '<span class="text-muted">∅</span>';
+    if (typeof v === 'boolean') {
+        return v ? '<span class="badge bg-success">true</span>'
+                 : '<span class="badge bg-secondary">false</span>';
+    }
+    if (typeof v === 'number') return `<span>${esc(String(v))}</span>`;
+    if (typeof v === 'string') {
+        if (v === '') return '<span class="text-muted">—</span>';
+        return esc(v);
+    }
+    if (Array.isArray(v)) {
+        if (!v.length) return '<span class="text-muted">∅</span>';
+        // Array of primitives → inline badges
+        if (v.every(x => x === null || typeof x !== 'object')) {
+            return v.map(x => `<span class="badge bg-light text-dark border me-1">${esc(String(x))}</span>`).join('');
+        }
+        // Array of objects → stacked
+        return v.map(x => renderReadable(x)).join('<hr class="my-1">');
+    }
+    if (typeof v === 'object') {
+        const rows = Object.entries(v).map(([k, val]) =>
+            `<tr><td class="pe-3 text-muted small text-nowrap">${esc(k)}</td><td>${renderReadable(val)}</td></tr>`
+        ).join('');
+        return `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
+    }
+    return esc(String(v));
+}
+
+function auditVal(v) {
+    return renderReadable(v);
+}
+
+// Compact summary for the table cell
+function auditSummaryHtml(idx, detail) {
+    if (!detail || (Array.isArray(detail) && !detail.length)) return '';
+    let label;
+    if (typeof detail === 'string') {
+        if (detail.length <= 28) return `<span class="text-muted small">${esc(detail)}</span>`;
+        label = esc(detail.slice(0, 28)) + '…';
+    } else if (Array.isArray(detail)) {
+        label = tf('audit_n_changes', detail.length);
+    } else if (typeof detail === 'object') {
+        if (detail.username) {
+            const n = Array.isArray(detail.changes) ? detail.changes.length : 0;
+            label = n
+                ? esc(detail.username) + ' · ' + tf('audit_n_changes', n)
+                : esc(detail.username);
+            if (!n) return `<span class="text-muted small">${label}</span>`;
+        } else {
+            label = '···';
+        }
+    } else {
+        return `<span class="text-muted small">${esc(String(detail))}</span>`;
+    }
+    return `<a href="#" class="badge bg-light text-dark border text-decoration-none" onclick="showAuditDetail(${idx});return false;">${label}</a>`;
+}
+
+function showAuditDetail(idx) {
+    const e = _auditEntries[idx];
+    if (!e) return;
+    const eventLabel = AUDIT_EVENTS[e.event] || e.event;
+    const date = new Date(e.ts).toLocaleString();
+    document.getElementById('auditDetailModalTitle').innerHTML =
+        `<i class="bi bi-journal-text me-1"></i>${esc(eventLabel)} <small class="text-muted fw-normal ms-2">${esc(date)}</small>`;
+    document.getElementById('auditDetailModalBody').innerHTML =
+        formatAuditDetailFull(e.detail) || `<p class="text-muted mb-0">${t('no_audit_entries')}</p>`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('auditDetailModal')).show();
+}
+
+// ─────────────────────── Export ──────────────────────────────────
+function auditDetailText(detail) {
+    if (!detail) return '';
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        return detail.map(c => {
+            const o = c.old === null || c.old === undefined ? '∅' :
+                      typeof c.old === 'object' ? JSON.stringify(c.old) : String(c.old);
+            const n = c.new === null || c.new === undefined ? '∅' :
+                      typeof c.new === 'object' ? JSON.stringify(c.new) : String(c.new);
+            return `${c.field || ''}: ${o} → ${n}`;
+        }).join('; ');
+    }
+    if (typeof detail === 'object') {
+        const parts = [];
+        if (detail.username) parts.push(detail.username);
+        if (detail.role) parts.push('role=' + detail.role);
+        if (Array.isArray(detail.changes) && detail.changes.length)
+            parts.push(auditDetailText(detail.changes));
+        return parts.join(' | ') || JSON.stringify(detail);
+    }
+    return String(detail);
+}
+
+function exportAudit(format) {
+    if (!_auditEntries.length) return;
+    let content, mime, ext;
+    const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+    if (format === 'json') {
+        content = JSON.stringify(_auditEntries, null, 2);
+        mime = 'application/json';
+        ext = 'json';
+    } else {
+        const escape = v => '"' + String(v).replace(/"/g, '""') + '"';
+        const headers = ['time', 'event', 'user', 'ip', 'detail'];
+        const rows = _auditEntries.map(e => [
+            escape(new Date(e.ts).toLocaleString()),
+            escape(AUDIT_EVENTS[e.event] || e.event),
+            escape(e.user),
+            escape(e.ip),
+            escape(auditDetailText(e.detail)),
+        ].join(','));
+        content = [headers.join(','), ...rows].join('\r\n');
+        mime = 'text/csv;charset=utf-8;';
+        ext = 'csv';
+    }
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit_${ts}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// ──────────────────── Sort / Group / Filter ────────────────────────
+let _auditSort    = 'time';   // time | event | user | ip
+let _auditSortDir = 'desc';   // asc | desc
+let _auditGroup   = 'none';   // none | date | event | user | ip
+let _auditFilters = { event: '', user: '', ip: '', dateFrom: '', dateTo: '' };
+
+function initAuditControls() {
+    // Apply default sort from config
+    const defaultSort = configData?.web_admin?.audit_sort || 'time';
+    _auditSort = defaultSort;
+    const sf = document.getElementById('auditSortField');
+    if (sf) sf.value = _auditSort;
+    // Populate event filter dropdown with distinct events in this dataset
+    const ef = document.getElementById('auditFilterEvent');
+    if (ef) {
+        const events = [...new Set(_auditEntries.map(e => e.event))].sort();
+        ef.innerHTML = `<option value="">${t('all_events')}</option>` +
+            events.map(ev => `<option value="${esc(ev)}">${esc(AUDIT_EVENTS[ev] || ev)}</option>`).join('');
+    }
+    // Populate user datalist
+    const ul = document.getElementById('auditUserList');
+    if (ul) {
+        const users = [...new Set(_auditEntries.map(e => e.user).filter(Boolean))].sort();
+        ul.innerHTML = users.map(u => `<option value="${esc(u)}"></option>`).join('');
+    }
+    // Populate ip datalist
+    const il = document.getElementById('auditIpList');
+    if (il) {
+        const ips = [...new Set(_auditEntries.map(e => e.ip).filter(Boolean))].sort();
+        il.innerHTML = ips.map(ip => `<option value="${esc(ip)}"></option>`).join('');
+    }
+}
+
+function toggleAuditSortDir() {
+    _auditSortDir = _auditSortDir === 'asc' ? 'desc' : 'asc';
+    const icon = document.getElementById('iconAuditSortDir');
+    if (icon) icon.className = _auditSortDir === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
+    applyAuditControls();
+}
+
+function applyAuditControls() {
+    const sf = document.getElementById('auditSortField');
+    const gb = document.getElementById('auditGroupBy');
+    if (sf) _auditSort = sf.value;
+    if (gb) _auditGroup = gb.value;
+    _auditFilters.event    = document.getElementById('auditFilterEvent')?.value || '';
+    _auditFilters.user     = document.getElementById('auditFilterUser')?.value  || '';
+    _auditFilters.ip       = document.getElementById('auditFilterIp')?.value    || '';
+    _auditFilters.dateFrom = document.getElementById('auditFilterFrom')?.value  || '';
+    _auditFilters.dateTo   = document.getElementById('auditFilterTo')?.value    || '';
+    const hasFilters = _auditFilters.event || _auditFilters.user || _auditFilters.ip ||
+                       _auditFilters.dateFrom || _auditFilters.dateTo;
+    document.getElementById('btnClearAuditFilters')?.classList.toggle('d-none', !hasFilters);
+    renderAuditTable();
+}
+
+function clearAuditFilters() {
+    _auditFilters = { event: '', user: '', ip: '', dateFrom: '', dateTo: '' };
+    ['auditFilterEvent','auditFilterUser','auditFilterIp','auditFilterFrom','auditFilterTo']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    document.getElementById('btnClearAuditFilters')?.classList.add('d-none');
+    renderAuditTable();
+}
+
+function _auditEventBadge(event) {
+    let cls = 'bg-secondary';
+    if (event === 'login_failed') cls = 'bg-danger';
+    else if (event === 'login_ok') cls = 'bg-success';
+    else if (event === 'logout') cls = 'bg-warning text-dark';
+    else if (event.includes('deleted') || event.includes('revoked')) cls = 'bg-danger';
+    else if (event.includes('created')) cls = 'bg-success';
+    else if (event === 'password_reset') cls = 'bg-warning text-dark';
+    else if (event.includes('saved') || event.includes('updated') || event.includes('changed')) cls = 'bg-info text-dark';
+    return `<span class="badge ${cls}">${esc(AUDIT_EVENTS[event] || event)}</span>`;
+}
+
+function renderFlatAudit(entries) {
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
+    h += '<thead class="table-light"><tr>'
+       + `<th>${t('col_time')}</th>`
+       + `<th>${t('col_event')}</th>`
+       + `<th>${t('col_user')}</th>`
+       + `<th>${t('col_ip')}</th>`
+       + `<th>${t('col_detail')}</th>`
+       + '<th></th>'
+       + '</tr></thead><tbody>';
+    for (const e of entries) {
+        h += `<tr>
+            <td class="small text-nowrap">${esc(new Date(e.ts).toLocaleString())}</td>
+            <td>${_auditEventBadge(e.event)}</td>
+            <td><code>${esc(e.user)}</code></td>
+            <td class="small">${esc(e.ip)}</td>
+            <td class="small">${auditSummaryHtml(e._idx, e.detail)}</td>
+            <td>${new Set(currentUser.permissions||[]).has('audit_delete') ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteAuditEntry(${e._origIdx})" title="${t('delete')}"><i class="bi bi-trash3"></i></button>` : ''}</td>
+        </tr>`;
+    }
+    h += '</tbody></table></div>';
+    return h;
+}
+
+function renderGroupedAudit(entries) {
+    const groups = new Map();
+    for (const e of entries) {
+        let k;
+        switch (_auditGroup) {
+            case 'date':  k = new Date(e.ts).toLocaleDateString(); break;
+            case 'event': k = AUDIT_EVENTS[e.event] || e.event; break;
+            case 'user':  k = e.user || '—'; break;
+            case 'ip':    k = e.ip   || '—'; break;
+            default:      k = '';
+        }
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(e);
+    }
+    let h = '';
+    for (const [key, items] of groups) {
+        h += `<div class="mb-3">
+            <h6 class="border-bottom pb-1 text-muted">
+                <i class="bi bi-collection me-1"></i>${esc(key)}
+                <span class="badge bg-secondary ms-1">${items.length}</span>
+            </h6>
+            ${renderFlatAudit(items)}
+        </div>`;
+    }
+    return h;
+}
+
+// Convert a filter string (may contain * wildcard) to a RegExp
+function _auditFilterRegex(pattern) {
+    if (!pattern) return null;
+    // Escape regex special chars except *, then convert * to .*
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    return new RegExp(escaped, 'i');
+}
+
+function renderAuditTable() {
+    const c = document.getElementById('audit-container');
+    if (!c) return;
+
+    // Filter
+    const userRx  = _auditFilterRegex(_auditFilters.user);
+    const ipRx    = _auditFilterRegex(_auditFilters.ip);
+    const filtered = _auditEntries.filter(e => {
+        if (_auditFilters.event && e.event !== _auditFilters.event) return false;
+        if (userRx && !userRx.test(e.user || '')) return false;
+        if (ipRx   && !ipRx.test(e.ip   || '')) return false;
+        if (_auditFilters.dateFrom && new Date(e.ts) < new Date(_auditFilters.dateFrom + 'T00:00:00')) return false;
+        if (_auditFilters.dateTo   && new Date(e.ts) > new Date(_auditFilters.dateTo   + 'T23:59:59')) return false;
+        return true;
+    });
+
+    // Sort
+    filtered.sort((a, b) => {
+        let av, bv;
+        switch (_auditSort) {
+            case 'event': av = a.event; bv = b.event; break;
+            case 'user':  av = a.user;  bv = b.user;  break;
+            case 'ip':    av = a.ip;    bv = b.ip;    break;
+            default:      av = a.ts;    bv = b.ts;    break;
+        }
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        return _auditSortDir === 'asc' ? cmp : -cmp;
+    });
+
+    if (!filtered.length) {
+        c.innerHTML = `<p class="text-muted">${t('no_audit_entries')}</p>`;
+        return;
+    }
+    c.innerHTML = _auditGroup !== 'none' ? renderGroupedAudit(filtered) : renderFlatAudit(filtered);
 }
 
 async function renderAudit() {
@@ -39,37 +337,37 @@ async function renderAudit() {
     if (!c) return;
     c.innerHTML = '<p class="text-muted">…</p>';
     const entries = await apiGet('/api/audit');
-    if (!entries || !entries.length) {
+    // _origIdx = real index in the backend array (0=oldest, reversed from API)
+    const raw = entries || [];
+    _auditEntries = raw.map((e, i) => ({ ...e, _idx: i, _origIdx: raw.length - 1 - i }));
+    if (!_auditEntries.length) {
         c.innerHTML = '<p class="text-muted">' + t('no_audit_entries') + '</p>';
         return;
     }
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
-    h += '<thead class="table-light"><tr>'
-       + '<th>' + t('col_time') + '</th>'
-       + '<th>' + t('col_event') + '</th>'
-       + '<th>' + t('col_user') + '</th>'
-       + '<th>' + t('col_ip') + '</th>'
-       + '<th>' + t('col_detail') + '</th>'
-       + '</tr></thead><tbody>';
-    for (const e of entries) {
-        const date = new Date(e.ts).toLocaleString();
-        const eventLabel = AUDIT_EVENTS[e.event] || e.event;
-        let badgeClass = 'bg-secondary';
-        if (e.event === 'login_failed') badgeClass = 'bg-danger';
-        else if (e.event === 'login_ok') badgeClass = 'bg-success';
-        else if (e.event === 'logout') badgeClass = 'bg-warning text-dark';
-        else if (e.event.includes('deleted') || e.event.includes('revoked')) badgeClass = 'bg-danger';
-        else if (e.event.includes('created')) badgeClass = 'bg-success';
-        else if (e.event === 'password_reset') badgeClass = 'bg-warning text-dark';
-        else if (e.event.includes('saved') || e.event.includes('updated') || e.event.includes('changed')) badgeClass = 'bg-info text-dark';
-        h += `<tr>
-            <td class="small text-nowrap">${esc(date)}</td>
-            <td><span class="badge ${badgeClass}">${esc(eventLabel)}</span></td>
-            <td><code>${esc(e.user)}</code></td>
-            <td class="small">${esc(e.ip)}</td>
-            <td class="small">${formatAuditDetail(e.detail)}</td>
-        </tr>`;
-    }
-    h += '</tbody></table></div>';
-    c.innerHTML = h;
+    initAuditControls();
+    renderAuditTable();
+}
+
+let _auditConfirmCallback = null;
+
+function _showAuditConfirm(msg, callback) {
+    _auditConfirmCallback = callback;
+    document.getElementById('auditConfirmModalMsg').textContent = msg;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('auditConfirmModal')).show();
+}
+
+async function deleteAuditEntry(origIdx) {
+    _showAuditConfirm(t('audit_confirm_delete'), async () => {
+        const r = await apiDelete(`/api/audit/${origIdx}`);
+        if (r && r.status === 200) renderAudit();
+        else showToast(r?.data?.error || t('save_error'), 'danger');
+    });
+}
+
+async function confirmClearAudit() {
+    _showAuditConfirm(t('audit_confirm_clear_all'), async () => {
+        const r = await apiDelete('/api/audit');
+        if (r && r.status === 200) { _auditEntries = []; renderAuditTable(); }
+        else showToast(r?.data?.error || t('save_error'), 'danger');
+    });
 }

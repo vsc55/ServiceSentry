@@ -56,12 +56,12 @@ Las sesiones se persisten en `sessions.json` y se cargan al iniciar.
 
 ### Revocación
 
-| Endpoint | Rol | Acción |
-|----------|-----|--------|
-| `GET /api/sessions` | admin | Lista sesiones activas |
-| `POST /api/sessions/revoke/<sid>` | admin | Revoca una sesión concreta |
-| `POST /api/sessions/revoke-user/<user>` | admin | Revoca todas las sesiones de un usuario |
-| `POST /api/sessions/invalidate` | admin | Revoca **todas** las sesiones |
+| Endpoint | Permiso | Acción |
+|----------|---------|--------|
+| `GET /api/sessions` | `sessions_view` | Lista sesiones activas |
+| `POST /api/sessions/revoke/<sid>` | `sessions_revoke` | Revoca una sesión concreta |
+| `POST /api/sessions/revoke-user/<user>` | `sessions_revoke` | Revoca todas las sesiones de un usuario |
+| `POST /api/sessions/invalidate` | `sessions_revoke` | Revoca **todas** las sesiones |
 
 Una petición con un token revocado (incluso si la cookie Flask sigue siendo válida) es redirigida a `/login`.
 
@@ -83,11 +83,61 @@ Una petición con un token revocado (incluso si la cookie Flask sigue siendo vá
 
 ---
 
-## Control de Acceso por Roles (RBAC)
+## Control de Acceso Basado en Roles (RBAC)
 
-Tres roles con permisos acumulativos:
+### Sistema de permisos granulares
 
-| Rol | Puede leer | Puede guardar config/módulos | Gestiona usuarios | Gestiona sesiones | Accede al log de auditoría |
+El sistema usa **15 flags de permiso por acción** en lugar de roles monolíticos.
+Cada endpoint está protegido por el permiso exacto que necesita:
+
+| Recurso | Permiso |
+|---------|--------|
+| Listar usuarios | `users_view` |
+| Crear usuarios | `users_add` |
+| Editar usuarios | `users_edit` |
+| Eliminar usuarios | `users_delete` |
+| Ver roles | `roles_view` |
+| Crear roles | `roles_add` |
+| Editar roles | `roles_edit` |
+| Eliminar roles | `roles_delete` |
+| Ver auditoría | `audit_view` |
+| Borrar auditoría | `audit_delete` |
+| Editar módulos | `modules_edit` |
+| Editar configuración | `config_edit` |
+| Ver sesiones | `sessions_view` |
+| Revocar sesiones | `sessions_revoke` |
+| Lanzar checks | `checks_run` |
+
+### Roles integrados (inmutables)
+
+| Rol | Permisos |
+|-----|----------|
+| `admin` | Todos |
+| `editor` | `modules_edit`, `config_edit`, `checks_run`, `audit_view` |
+| `viewer` | Ninguno |
+
+### Roles personalizados
+
+- Se crean desde la UI o la API (`POST /api/roles`) con cualquier combinación de permisos.
+- Se persisten en `roles.json`.
+- Los roles integrados no pueden modificarse ni eliminarse.
+- No se puede eliminar un rol que tenga usuarios asignados (409).
+
+### Implementación
+
+- `_perm_required(*perms)` — factoría de decoradores: la petición pasa si el
+  usuario tiene **al menos uno** de los permisos indicados.
+- `_get_session_permissions()` — devuelve el `frozenset` de permisos del usuario
+  activo, consultando `BUILTIN_ROLE_PERMISSIONS` o `_custom_roles`.
+- Los permisos desconocidos en un rol personalizado son ignorados silenciosamente.
+
+### Tests de permisos
+
+| Clase | Qué cubre |
+|-------|----------|
+| `TestPermissionsConstants` | Estructura de `PERMISSIONS`, `PERMISSION_GROUPS` y `BUILTIN_ROLE_PERMISSIONS`; `_get_role_permissions()`; `/api/me` devuelve `permissions` |
+| `TestCustomRoles` | CRUD completo de `/api/roles`: crear, editar, borrar, casos de error (duplicado, builtin, en uso), persistencia, auditoría |
+| `TestGranularPermissions` | Cada uno de los 15 endpoints acepta/rechaza según su permiso específico; resolución end-to-end de roles personalizados |
 |-----|-----------|-----------------------------|--------------------|-------------------|-----------------------------|
 | `viewer` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | `editor` | ✅ | ✅ | ❌ | ❌ | ❌ |

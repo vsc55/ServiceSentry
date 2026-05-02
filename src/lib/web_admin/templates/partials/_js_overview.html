@@ -113,7 +113,7 @@ async function renderOverview() {
     // ── Card: Users ───────────────────────────────────────────────
     const byRole = users.by_role || {};
     const roleParts = Object.entries(byRole).map(
-        ([r, n]) => `<span class="badge ${ROLE_BADGES[r] || 'bg-secondary'} me-1">${n} ${esc(ROLE_LABELS[r] || r)}</span>`
+        ([r, n]) => `<span class="badge ${roleBadgeClass(r)} me-1">${n} ${esc((rolesData[r] && rolesData[r].label) || ROLE_LABELS[r] || r)}</span>`
     ).join(' ');
     h += `<div class="col-sm-6 col-xl-3">
       <div class="card h-100 border-start border-4 border-warning">

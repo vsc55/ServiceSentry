@@ -2,21 +2,36 @@
 Initialisation — role restrictions, event listeners, data load.
 ================================================================ #}
 
-// ──────────────────────────── Role-based UI ──────────────────────
-function applyRoleRestrictions() {
-const role = currentUser.role;
-// Show users tab only for admins
+// ────────────────────────────── Permission-based UI ──────────────────
+ function applyRoleRestrictions() {
+const perms = new Set(currentUser.permissions || []);
+const hasAnyUser = ['users_view','users_add','users_edit','users_delete'].some(p => perms.has(p));
+const hasAnyRole = ['roles_view','roles_add','roles_edit','roles_delete'].some(p => perms.has(p));
+// Users tab: visible if user has any user permission
 const usersLi = document.getElementById('tab-users-li');
-if (usersLi) usersLi.style.display = (role === 'admin') ? '' : 'none';
-// Show audit tab only for admins
+if (usersLi) usersLi.style.display = hasAnyUser ? '' : 'none';
+// Audit tab: visible if user can view audit
 const auditLi = document.getElementById('tab-audit-li');
-if (auditLi) auditLi.style.display = (role === 'admin') ? '' : 'none';
-
-// Hide save buttons for viewers
-if (role === 'viewer') {
-document.querySelectorAll('button[onclick="saveModules()"], button[onclick="saveConfig()"]')
-.forEach(b => b.style.display = 'none');
+if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
+// Save buttons
+if (!perms.has('modules_edit')) {
+document.querySelectorAll('button[onclick="saveModules()"]').forEach(b => b.style.display = 'none');
 }
+if (!perms.has('config_edit')) {
+document.querySelectorAll('button[onclick="saveConfig()"]').forEach(b => b.style.display = 'none');
+}
+// "New role" button
+const btnNewRole = document.getElementById('btnNewRole');
+if (btnNewRole) btnNewRole.style.display = perms.has('roles_add') ? '' : 'none';
+// Roles section visibility
+const rolesSection = document.getElementById('roles-section');
+if (rolesSection) rolesSection.style.display = hasAnyRole ? '' : 'none';
+// "New user" button
+const btnNewUser = document.getElementById('btnNewUser');
+if (btnNewUser) btnNewUser.style.display = perms.has('users_add') ? '' : 'none';
+// Audit clear button
+const btnClearAudit = document.getElementById('btnClearAudit');
+if (btnClearAudit) btnClearAudit.style.display = perms.has('audit_delete') ? '' : 'none';
 }
 
 // ──────────────────────────── Init ────────────────────────────────
@@ -24,23 +39,36 @@ document.getElementById('btnAddItemOk').addEventListener('click', confirmAddItem
 document.getElementById('newItemName').addEventListener('keydown', e => {
 if (e.key === 'Enter') { e.preventDefault(); confirmAddItem(); }
 });
+document.getElementById('btnConfirmDeleteItemOk').addEventListener('click', _doDeleteItem);
+document.getElementById('btnAuditConfirmOk').addEventListener('click', () => {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('auditConfirmModal')).hide();
+    if (_auditConfirmCallback) { _auditConfirmCallback(); _auditConfirmCallback = null; }
+});
+document.getElementById('btnRenameItemOk').addEventListener('click', _doRenameItem);
+document.getElementById('renameItemInput').addEventListener('keydown', e => {
+if (e.key === 'Enter') { e.preventDefault(); _doRenameItem(); }
+});
 document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', renderStatus);
 document.getElementById('btn-tab-users')?.addEventListener('shown.bs.tab', async () => {
-const [u, s] = await Promise.all([apiGet('/api/users'), apiGet('/api/sessions')]);
+const [u, s, ro] = await Promise.all([apiGet('/api/users'), apiGet('/api/sessions'), apiGet('/api/roles')]);
 usersData = u || {};
 sessionsData = s || {};
+rolesData = ro || {};
 renderSessions();
 renderUsers();
+renderRoles();
 });
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
 document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
 document.getElementById('btnChangePasswordOk').addEventListener('click', changeOwnPassword);
 document.getElementById('btnResetPasswordOk').addEventListener('click', resetUserPassword);
+document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
 
 document.getElementById('btn-tab-overview')?.addEventListener('shown.bs.tab', renderOverview);
 
 (async function init() {
 currentUser = await apiGet('/api/me') || {};
+rolesData = await apiGet('/api/roles') || {};
 modulesData = await apiGet('/api/modules') || {};
 applyModuleDefaults();
 configData = await apiGet('/api/config') || {};

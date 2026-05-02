@@ -3,9 +3,19 @@
    ================================================================ #}
 
 // ──────────────────────────── Actions ─────────────────────────────
+function markDirty(target) {
+    const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
+    document.getElementById(id)?.classList.remove('d-none');
+}
+function clearDirty(target) {
+    const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
+    document.getElementById(id)?.classList.add('d-none');
+}
+
 function updateField(target, pathStr, value) {
     const parts = pathStr.split('|');
     setPath(target === 'config' ? configData : modulesData, parts, value);
+    markDirty(target);
 }
 
 function updateArray(target, pathStr, csv) {
@@ -17,6 +27,7 @@ function toggleModule(name, on) {
     modulesData[name].enabled = on;
     const card = document.getElementById('card-' + name);
     if (card) card.classList.toggle('enabled', on);
+    markDirty('modules');
 }
 
 function updatePrettyName(name, value) {
@@ -25,6 +36,7 @@ function updatePrettyName(name, value) {
     } else {
         delete modulesData[name].pretty_name;
     }
+    markDirty('modules');
     // Update header text live
     const card = document.getElementById('card-' + name);
     if (card) {
@@ -34,20 +46,46 @@ function updatePrettyName(name, value) {
 }
 
 function removeItem(target, parentPathStr, key) {
-    if (!confirm(tf('confirm_delete_item', key))) return;
+    _deleteItemCtx = { target, parentPathStr, key };
+    document.getElementById('confirmDeleteItemMsg').textContent = tf('confirm_delete_item', key);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmDeleteItemModal')).show();
+}
+
+function _doDeleteItem() {
+    if (!_deleteItemCtx) return;
+    const { target, parentPathStr, key } = _deleteItemCtx;
     const parts = parentPathStr.split('|');
     const parent = getPath(target === 'config' ? configData : modulesData, parts);
     if (parent && key in parent) {
         delete parent[key];
+        markDirty(target);
         target === 'modules' ? renderModules() : renderConfig();
     }
+    bootstrap.Modal.getInstance(document.getElementById('confirmDeleteItemModal')).hide();
+    _deleteItemCtx = null;
 }
 
 function renameItem(target, parentPathStr, oldKey) {
-    const newKey = prompt(t('rename_item_prompt'), oldKey);
-    if (!newKey || newKey === oldKey) return;
-    const nk = newKey.trim();
-    if (!nk) return;
+    _renameItemCtx = { target, parentPathStr, oldKey };
+    const input = document.getElementById('renameItemInput');
+    input.value = oldKey;
+    const modalEl = document.getElementById('renameItemModal');
+    modalEl.addEventListener('shown.bs.modal', () => {
+        input.focus();
+        input.select();
+    }, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function _doRenameItem() {
+    if (!_renameItemCtx) return;
+    const { target, parentPathStr, oldKey } = _renameItemCtx;
+    const nk = document.getElementById('renameItemInput').value.trim();
+    if (!nk || nk === oldKey) {
+        bootstrap.Modal.getInstance(document.getElementById('renameItemModal')).hide();
+        _renameItemCtx = null;
+        return;
+    }
     const parts = parentPathStr.split('|');
     const data = target === 'modules' ? modulesData : configData;
     const parent = getPath(data, parts);
@@ -63,6 +101,9 @@ function renameItem(target, parentPathStr, oldKey) {
         const [k, v] = entries[i];
         parent[i === idx ? nk : k] = v;
     }
+    bootstrap.Modal.getInstance(document.getElementById('renameItemModal')).hide();
+    _renameItemCtx = null;
+    markDirty(target);
     target === 'modules' ? renderModules() : renderConfig();
 }
 
@@ -111,6 +152,7 @@ function confirmAddItem() {
     }
     parent[name] = def;
     bootstrap.Modal.getInstance(document.getElementById('addItemModal')).hide();
+    markDirty(target);
     target === 'modules' ? renderModules() : renderConfig();
     _addItemCtx = null;
 }
@@ -118,11 +160,11 @@ function confirmAddItem() {
 // --- Save ---
 async function saveModules() {
     const r = await apiPut('/api/modules', modulesData);
-    if (r && r.ok) showToast(t('modules_saved'));
+    if (r && r.ok) { showToast(t('modules_saved')); clearDirty('modules'); }
     else showToast(r?.error || t('save_error'), 'danger');
 }
 async function saveConfig() {
     const r = await apiPut('/api/config', configData);
-    if (r && r.ok) showToast(t('config_saved'));
+    if (r && r.ok) { showToast(t('config_saved')); clearDirty('config'); }
     else showToast(r?.error || t('save_error'), 'danger');
 }

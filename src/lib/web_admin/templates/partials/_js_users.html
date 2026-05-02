@@ -3,12 +3,48 @@
    ================================================================ #}
 
 // ──────────────────────────── Users tab ───────────────────────────
-const ROLE_BADGES = {
+const BUILTIN_ROLE_BADGES = {
     admin: 'bg-danger',
     editor: 'bg-primary',
     viewer: 'bg-secondary'
 };
 const ROLE_LABELS = I18N.role_labels || {};
+const PERM_LABELS = I18N.permission_labels || {};
+
+function roleBadgeClass(role) {
+    return BUILTIN_ROLE_BADGES[role] || 'bg-info text-dark';
+}
+
+// Populate the role <select> from rolesData
+function populateRoleDropdown(selectId, selected) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    sel.innerHTML = '';
+    // Built-in roles first
+    const builtins = ['admin', 'editor', 'viewer'];
+    for (const r of builtins) {
+        const rd = rolesData[r] || {};
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = rd.label || r;
+        if (r === selected) opt.selected = true;
+        sel.appendChild(opt);
+    }
+    // Custom roles
+    const customs = Object.entries(rolesData).filter(([n]) => !builtins.includes(n)).sort((a, b) => a[0].localeCompare(b[0]));
+    if (customs.length) {
+        const grp = document.createElement('optgroup');
+        grp.label = t('role_management');
+        for (const [n, rd] of customs) {
+            const opt = document.createElement('option');
+            opt.value = n;
+            opt.textContent = rd.label || n;
+            if (n === selected) opt.selected = true;
+            grp.appendChild(opt);
+        }
+        sel.appendChild(grp);
+    }
+}
 
 function renderUsers() {
     const c = document.getElementById('users-container');
@@ -20,37 +56,34 @@ function renderUsers() {
     }
     const names = Object.keys(usersData).sort();
     if (!names.length) { c.innerHTML = '<p class="text-muted">' + t('no_users') + '</p>'; return; }
+    const userPerms = new Set(currentUser.permissions || []);
+    const canEdit   = userPerms.has('users_edit');
+    const canDelete = userPerms.has('users_delete');
+    const canRevoke = userPerms.has('sessions_revoke');
+    const showActions = canEdit || canDelete;
     let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
-    h += '<thead class="table-light"><tr><th>' + t('col_user') + '</th><th>' + t('col_name') + '</th><th>' + t('col_role') + '</th><th>' + t('col_sessions') + '</th><th style="width:160px">' + t('col_actions') + '</th></tr></thead><tbody>';
+    h += '<thead class="table-light"><tr><th>' + t('col_user') + '</th><th>' + t('col_name') + '</th><th>' + t('col_role') + '</th><th>' + t('col_sessions') + '</th>' + (showActions ? '<th style="width:160px">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
     for (const uname of names) {
         const u = usersData[uname];
         const role = u.role || 'viewer';
-        const badge = ROLE_BADGES[role] || 'bg-secondary';
+        const badge = roleBadgeClass(role);
+        const roleLabel = (rolesData[role] && rolesData[role].label) || ROLE_LABELS[role] || role;
         const isSelf = (uname === currentUser.username);
         const sc = sessionCounts[uname] || 0;
         const scHtml = sc > 0
-            ? `<span class="badge bg-info">${sc}</span> <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="revokeUserSessions('${escAttr(uname)}')" title="${t('revoke_user_sessions')}"><i class="bi bi-x-circle"></i></button>`
+            ? `<span class="badge bg-info">${sc}</span>${canRevoke ? ` <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="revokeUserSessions('${escAttr(uname)}')" title="${t('revoke_user_sessions')}"><i class="bi bi-x-circle"></i></button>` : ''}`
             : '<span class="text-muted small">0</span>';
+        const actionBtns = [
+            canEdit   ? `<button class="btn btn-sm btn-outline-primary py-0 px-1 me-1" onclick="openEditUserModal('${escAttr(uname)}')" title="${t('edit')}"><i class="bi bi-pencil"></i></button>` : '',
+            canEdit   ? `<button class="btn btn-sm btn-outline-warning py-0 px-1 me-1" onclick="openResetPasswordModal('${escAttr(uname)}')" title="${t('reset_password')}"><i class="bi bi-key"></i></button>` : '',
+            canDelete ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteUser('${escAttr(uname)}')" title="${t('delete')}" ${isSelf ? 'disabled' : ''}><i class="bi bi-trash3"></i></button>` : '',
+        ].join('');
         h += `<tr>
             <td><code>${esc(uname)}</code>${isSelf ? ' <span class="badge bg-info">' + t('you_badge') + '</span>' : ''}</td>
             <td>${esc(u.display_name || uname)}</td>
-            <td><span class="badge ${badge}">${esc(ROLE_LABELS[role] || role)}</span></td>
+            <td><span class="badge ${badge}">${esc(roleLabel)}</span></td>
             <td>${scHtml}</td>
-            <td>
-                <button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
-                    onclick="openEditUserModal('${escAttr(uname)}')" title="${t('edit')}">
-                    <i class="bi bi-pencil"></i>
-                </button>
-                <button class="btn btn-sm btn-outline-warning py-0 px-1 me-1"
-                    onclick="openResetPasswordModal('${escAttr(uname)}')" title="${t('reset_password')}">
-                    <i class="bi bi-key"></i>
-                </button>
-                <button class="btn btn-sm btn-outline-danger py-0 px-1"
-                    onclick="deleteUser('${escAttr(uname)}')" title="${t('delete')}"
-                    ${isSelf ? 'disabled' : ''}>
-                    <i class="bi bi-trash3"></i>
-                </button>
-            </td>
+            ${showActions ? `<td>${actionBtns}</td>` : ''}
         </tr>`;
     }
     h += '</tbody></table></div>';
@@ -63,7 +96,7 @@ function openNewUserModal() {
     document.getElementById('umUsername').value = '';
     document.getElementById('umUsername').disabled = false;
     document.getElementById('umDisplayName').value = '';
-    document.getElementById('umRole').value = 'viewer';
+    populateRoleDropdown('umRole', 'viewer');
     document.getElementById('umLang').value = '';
     document.getElementById('umPassword').value = '';
     document.getElementById('umPasswordLabel').textContent = t('password');
@@ -78,7 +111,7 @@ function openEditUserModal(username) {
     document.getElementById('umUsername').value = username;
     document.getElementById('umUsername').disabled = true;
     document.getElementById('umDisplayName').value = u.display_name || '';
-    document.getElementById('umRole').value = u.role || 'viewer';
+    populateRoleDropdown('umRole', u.role || 'viewer');
     document.getElementById('umLang').value = u.lang || '';
     document.getElementById('umPassword').value = '';
     document.getElementById('umPasswordLabel').textContent = t('new_password');
@@ -277,3 +310,110 @@ async function invalidateAllSessions() {
         showToast(r?.data?.error || t('connection_error'), 'danger');
     }
 }
+
+// ──────────────────────────── Role management ─────────────────────
+
+function renderRoles() {
+    const c = document.getElementById('roles-container');
+    if (!c) return;
+    const rolePerms = new Set(currentUser.permissions || []);
+    const canEditRole   = rolePerms.has('roles_edit');
+    const canDeleteRole = rolePerms.has('roles_delete');
+    const entries = Object.entries(rolesData);
+    if (!entries.length) { c.innerHTML = '<p class="text-muted">' + t('no_roles') + '</p>'; return; }
+    const PERM_L = PERM_LABELS;
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
+    h += '<thead class="table-light"><tr><th>' + t('col_role_name') + '</th><th>' + t('col_role_label') + '</th><th>' + t('col_role_permissions') + '</th><th style="width:80px">' + t('col_actions') + '</th></tr></thead><tbody>';
+    for (const [name, rd] of entries.sort((a, b) => {
+        if (a[1].builtin && !b[1].builtin) return -1;
+        if (!a[1].builtin && b[1].builtin) return 1;
+        return a[0].localeCompare(b[0]);
+    })) {
+        const builtinBadge = rd.builtin ? ' <span class="badge bg-secondary ms-1">' + t('role_builtin_badge') + '</span>' : '';
+        const permBadges = (rd.permissions || []).map(p => `<span class="badge bg-light text-dark border me-1">${esc(PERM_L[p] || p)}</span>`).join('');
+        h += `<tr>
+            <td><code>${esc(name)}</code>${builtinBadge}</td>
+            <td>${esc(rd.label || name)}</td>
+            <td class="small">${permBadges || '<span class="text-muted">—</span>'}</td>
+            <td>
+                ${canEditRole && !rd.builtin ? `
+                <button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
+                    onclick="openEditRoleModal('${escAttr(name)}')" title="${t('edit')}">
+                    <i class="bi bi-pencil"></i>
+                </button>` : ''}
+                ${canDeleteRole && !rd.builtin ? `
+                <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                    onclick="deleteRole('${escAttr(name)}')" title="${t('delete')}">
+                    <i class="bi bi-trash3"></i>
+                </button>` : ''}
+            </td>
+        </tr>`;
+    }
+    h += '</tbody></table></div>';
+    c.innerHTML = h;
+}
+
+let _editingRole = null;
+
+function openNewRoleModal() {
+    _editingRole = null;
+    document.getElementById('roleModalTitle').textContent = t('new_role');
+    document.getElementById('rmName').value = '';
+    document.getElementById('rmName').disabled = false;
+    document.getElementById('rmLabel').value = '';
+    document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]').forEach(cb => cb.checked = false);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
+}
+
+function openEditRoleModal(name) {
+    _editingRole = name;
+    const rd = rolesData[name] || {};
+    document.getElementById('roleModalTitle').textContent = t('edit_role_title') + ': ' + name;
+    document.getElementById('rmName').value = name;
+    document.getElementById('rmName').disabled = true;
+    document.getElementById('rmLabel').value = rd.label || '';
+    const activePerms = new Set(rd.permissions || []);
+    document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]').forEach(cb => {
+        cb.checked = activePerms.has(cb.value);
+    });
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
+}
+
+async function saveRoleModal() {
+    const name = document.getElementById('rmName').value.trim();
+    const label = document.getElementById('rmLabel').value.trim();
+    const permissions = Array.from(document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]:checked')).map(cb => cb.value);
+    if (!name) { showToast(t('role_name_required'), 'warning'); return; }
+    if (_editingRole) {
+        const r = await apiPut('/api/roles/' + encodeURIComponent(_editingRole), { label, permissions });
+        if (r && r.ok) {
+            showToast(t('role_updated'));
+            rolesData[_editingRole] = { ...rolesData[_editingRole], label: label || _editingRole, permissions };
+        } else {
+            showToast(r?.error || t('update_error'), 'danger'); return;
+        }
+    } else {
+        const r = await apiPost('/api/roles', { name, label, permissions });
+        if (r && r.status === 201) {
+            showToast(t('role_created'));
+            rolesData[name] = { builtin: false, label: label || name, permissions };
+        } else {
+            showToast(r?.data?.error || t('create_error'), 'danger'); return;
+        }
+    }
+    bootstrap.Modal.getInstance(document.getElementById('roleModal')).hide();
+    renderRoles();
+}
+
+async function deleteRole(name) {
+    if (!confirm(t('role_confirm_delete') + ' [' + name + ']')) return;
+    const r = await apiDelete('/api/roles/' + encodeURIComponent(name));
+    if (r && r.status === 200 && r.data?.ok) {
+        showToast(t('role_deleted'));
+        delete rolesData[name];
+        renderRoles();
+    } else {
+        showToast(r?.data?.error || t('delete_error'), 'danger');
+    }
+}
+

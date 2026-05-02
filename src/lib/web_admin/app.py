@@ -24,6 +24,43 @@ __all__ = ['WebAdmin']
 # Valid user roles ordered by privilege (highest first).
 ROLES = ('admin', 'editor', 'viewer')
 
+# All available permission flags (granular, per-action).
+PERMISSIONS = (
+    'users_view',      # see the users list
+    'users_add',       # create users
+    'users_edit',      # edit user properties / role
+    'users_delete',    # delete users
+    'roles_view',      # see the roles list
+    'roles_add',       # create custom roles
+    'roles_edit',      # edit custom roles
+    'roles_delete',    # delete custom roles
+    'audit_view',      # read audit log
+    'audit_delete',    # delete audit entries
+    'modules_edit',    # write modules.json
+    'config_edit',     # write config.json
+    'sessions_view',   # view active sessions
+    'sessions_revoke', # revoke sessions
+    'checks_run',      # trigger module checks
+)
+
+# Permissions grouped for the role editor UI.
+PERMISSION_GROUPS = [
+    ('perm_group_users',    ['users_view', 'users_add', 'users_edit', 'users_delete']),
+    ('perm_group_roles',    ['roles_view', 'roles_add', 'roles_edit', 'roles_delete']),
+    ('perm_group_audit',    ['audit_view', 'audit_delete']),
+    ('perm_group_modules',  ['modules_edit']),
+    ('perm_group_config',   ['config_edit']),
+    ('perm_group_sessions', ['sessions_view', 'sessions_revoke']),
+    ('perm_group_checks',   ['checks_run']),
+]
+
+# Built-in role → permission mapping (immutable).
+BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
+    'admin':  frozenset(PERMISSIONS),
+    'editor': frozenset({'modules_edit', 'config_edit', 'checks_run', 'audit_view'}),
+    'viewer': frozenset(),
+}
+
 
 class WebAdmin:
     """Web administration server for ServiceSentry configuration.
@@ -36,6 +73,7 @@ class WebAdmin:
     DEFAULT_PORT = 8080
     DEFAULT_HOST = '0.0.0.0'
     _USERS_FILE = 'users.json'
+    _ROLES_FILE = 'roles.json'
     _SECRET_KEY_FILE = '.flask_secret'
     _SESSIONS_FILE = 'sessions.json'
     _AUDIT_FILE = 'audit.json'
@@ -76,9 +114,11 @@ class WebAdmin:
         self._users: dict[str, dict] = {}
         self._sessions: dict[str, dict] = {}
         self._audit_log: list[dict] = []
+        self._custom_roles: dict[str, dict] = {}
         self._load_or_create_users(username, password)
         self._load_sessions()
         self._load_audit()
+        self._load_roles()
         self._app = self._create_app()
 
     # ------------------------------------------------------------------
@@ -127,6 +167,63 @@ class WebAdmin:
             return True
         except OSError:
             return False
+
+    # ------------------------------------------------------------------
+    # Custom roles management
+    # ------------------------------------------------------------------
+
+    @property
+    def _roles_path(self) -> str:
+        """Full path to ``roles.json``."""
+        return os.path.join(self._config_dir, self._ROLES_FILE)
+
+    def _load_roles(self) -> None:
+        """Load custom roles from ``roles.json``."""
+        path = self._roles_path
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding='utf-8') as fh:
+                    self._custom_roles = json.load(fh)
+            except (json.JSONDecodeError, OSError):
+                self._custom_roles = {}
+        else:
+            self._custom_roles = {}
+
+    def _persist_roles(self) -> bool:
+        """Write custom roles to ``roles.json``."""
+        try:
+            os.makedirs(self._config_dir, exist_ok=True)
+            with open(self._roles_path, 'w', encoding='utf-8') as fh:
+                json.dump(self._custom_roles, fh, indent=4, ensure_ascii=False)
+            return True
+        except OSError:
+            return False
+
+    def _get_role_permissions(self, role_name: str) -> frozenset:
+        """Return the set of permissions for the given role name."""
+        if role_name in BUILTIN_ROLE_PERMISSIONS:
+            return BUILTIN_ROLE_PERMISSIONS[role_name]
+        custom = self._custom_roles.get(role_name)
+        if custom:
+            return frozenset(p for p in custom.get('permissions', []) if p in PERMISSIONS)
+        return frozenset()
+
+    def _get_session_permissions(self) -> frozenset:
+        """Return the set of permissions for the currently logged-in user."""
+        return self._get_role_permissions(session.get('role', 'viewer'))
+
+    def _perm_required(self, *perms):
+        """Return a decorator that requires ANY of the listed permissions."""
+        def decorator(f):
+            @functools.wraps(f)
+            def wrapper(*args, **kwargs):
+                if not self._check_session():
+                    return redirect(url_for('login'))
+                if not any(p in self._get_session_permissions() for p in perms):
+                    return jsonify({'error': self._t('access_denied')}), 403
+                return f(*args, **kwargs)
+            return wrapper
+        return decorator
 
     @property
     def _secret_key_path(self) -> str:
@@ -399,6 +496,8 @@ class WebAdmin:
                 'i18n': trans,
                 'supported_langs': SUPPORTED_LANGS,
                 'current_session_token': session.get('session_token', ''),
+                'permissions_list': list(PERMISSIONS),
+                'permissions_groups': PERMISSION_GROUPS,
             }
 
         self._register_routes(app)
@@ -414,23 +513,24 @@ class WebAdmin:
         return wrapper
 
     def _admin_required(self, f):
-        """Decorator that restricts access to *admin* users only."""
+        """Deprecated shim — prefer _perm_required(). Checks users_view."""
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             if not self._check_session():
                 return redirect(url_for('login'))
-            if session.get('role') != 'admin':
+            if 'users_view' not in self._get_session_permissions():
                 return jsonify({'error': self._t('access_denied')}), 403
             return f(*args, **kwargs)
         return wrapper
 
     def _write_required(self, f):
-        """Decorator that restricts write access to *admin* and *editor*."""
+        """Deprecated shim — prefer _perm_required(). Checks modules_edit or config_edit."""
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             if not self._check_session():
                 return redirect(url_for('login'))
-            if session.get('role') not in ('admin', 'editor'):
+            perms = self._get_session_permissions()
+            if not ('modules_edit' in perms or 'config_edit' in perms):
                 return jsonify({'error': self._t('read_only_access')}), 403
             return f(*args, **kwargs)
         return wrapper
@@ -455,6 +555,25 @@ class WebAdmin:
         login_required = self._login_required
         admin_required = self._admin_required
         write_required = self._write_required
+        # granular user-management decorators
+        users_view_req    = self._perm_required('users_view')
+        users_add_req     = self._perm_required('users_add')
+        users_edit_req    = self._perm_required('users_edit')
+        users_delete_req  = self._perm_required('users_delete')
+        # granular roles decorators
+        roles_add_req     = self._perm_required('roles_add')
+        roles_edit_req    = self._perm_required('roles_edit')
+        roles_delete_req  = self._perm_required('roles_delete')
+        # audit decorators
+        audit_view_req    = self._perm_required('audit_view')
+        audit_delete_req  = self._perm_required('audit_delete')
+        # sessions decorators
+        sessions_view_req   = self._perm_required('sessions_view')
+        sessions_revoke_req = self._perm_required('sessions_revoke')
+        # single-permission write decorators
+        modules_edit_req  = self._perm_required('modules_edit')
+        config_edit_req   = self._perm_required('config_edit')
+        checks_run_req    = self._perm_required('checks_run')
 
         # --- Authentication -------------------------------------------
 
@@ -554,6 +673,7 @@ class WebAdmin:
                 'role': session.get('role', 'viewer'),
                 'lang': session.get('lang', self._default_lang),
                 'dark_mode': session.get('dark_mode', self._default_dark_mode),
+                'permissions': list(self._get_session_permissions()),
             })
 
         # --- API: modules.json ----------------------------------------
@@ -565,7 +685,7 @@ class WebAdmin:
             return jsonify(self._read_config_file('modules.json'))
 
         @app.route('/api/modules', methods=['PUT'])
-        @write_required
+        @modules_edit_req
         def api_save_modules():
             """Overwrite ``modules.json`` with the request body."""
             data = request.get_json(silent=True)
@@ -589,7 +709,7 @@ class WebAdmin:
             return jsonify(self._read_config_file('config.json'))
 
         @app.route('/api/config', methods=['PUT'])
-        @write_required
+        @config_edit_req
         def api_save_config():
             """Overwrite ``config.json`` with the request body."""
             data = request.get_json(silent=True)
@@ -614,7 +734,7 @@ class WebAdmin:
         # --- API: Telegram test ------------------------------------------
 
         @app.route('/api/telegram/test', methods=['POST'])
-        @write_required
+        @config_edit_req
         def api_test_telegram():
             """Send a test message via Telegram to verify settings."""
             data = request.get_json(silent=True) or {}
@@ -735,7 +855,7 @@ class WebAdmin:
         # --- API: user management (admin only) ------------------------
 
         @app.route('/api/users', methods=['GET'])
-        @admin_required
+        @users_view_req
         def api_get_users():
             """Return all users (without password hashes)."""
             safe = {}
@@ -749,7 +869,7 @@ class WebAdmin:
             return jsonify(safe)
 
         @app.route('/api/users', methods=['POST'])
-        @admin_required
+        @users_add_req
         def api_create_user():
             """Create a new user."""
             data = request.get_json(silent=True)
@@ -763,8 +883,9 @@ class WebAdmin:
                 return jsonify({'error': self._t('username_required')}), 400
             if not pw:
                 return jsonify({'error': self._t('password_required')}), 400
-            if role not in ROLES:
-                return jsonify({'error': self._t('invalid_role_options', ', '.join(ROLES))}), 400
+            valid_roles = set(ROLES) | set(self._custom_roles.keys())
+            if role not in valid_roles:
+                return jsonify({'error': self._t('invalid_role')}), 400
             if uname in self._users:
                 return jsonify({'error': self._t('user_already_exists', uname)}), 409
             self._users[uname] = {
@@ -783,7 +904,7 @@ class WebAdmin:
             return jsonify({'ok': True}), 201
 
         @app.route('/api/users/<username>', methods=['PUT'])
-        @admin_required
+        @users_edit_req
         def api_update_user(username: str):
             """Update an existing user (role, display_name, password)."""
             if username not in self._users:
@@ -794,7 +915,8 @@ class WebAdmin:
             user = self._users[username]
             changes: list[dict] = []
             if 'role' in data:
-                if data['role'] not in ROLES:
+                valid_roles = set(ROLES) | set(self._custom_roles.keys())
+                if data['role'] not in valid_roles:
                     return jsonify({'error': self._t('invalid_role')}), 400
                 # Prevent removing the last admin
                 if user['role'] == 'admin' and data['role'] != 'admin':
@@ -847,7 +969,7 @@ class WebAdmin:
             return jsonify({'ok': True})
 
         @app.route('/api/users/<username>', methods=['DELETE'])
-        @admin_required
+        @users_delete_req
         def api_delete_user(username: str):
             """Delete a user account."""
             if username not in self._users:
@@ -888,13 +1010,13 @@ class WebAdmin:
         # --- API: sessions (admin only) --------------------------------
 
         @app.route('/api/sessions', methods=['GET'])
-        @admin_required
+        @sessions_view_req
         def api_get_sessions():
             """Return all active sessions."""
             return jsonify(self._sessions)
 
         @app.route('/api/sessions/invalidate', methods=['POST'])
-        @admin_required
+        @sessions_revoke_req
         def api_invalidate_sessions():
             """Revoke ALL active sessions."""
             count = self._revoke_all_sessions()
@@ -903,7 +1025,7 @@ class WebAdmin:
             return jsonify({'ok': True, 'count': count})
 
         @app.route('/api/sessions/revoke/<sid>', methods=['POST'])
-        @admin_required
+        @sessions_revoke_req
         def api_revoke_session_route(sid):
             """Revoke a specific session by its token."""
             if self._revoke_session(sid):
@@ -912,7 +1034,7 @@ class WebAdmin:
             return jsonify({'error': self._t('session_not_found')}), 404
 
         @app.route('/api/sessions/revoke-user/<username>', methods=['POST'])
-        @admin_required
+        @sessions_revoke_req
         def api_revoke_user_sessions_route(username):
             """Revoke all sessions for a specific user."""
             count = self._revoke_user_sessions(username)
@@ -925,15 +1047,119 @@ class WebAdmin:
         # --- API: audit log (admin only) -------------------------------
 
         @app.route('/api/audit', methods=['GET'])
-        @admin_required
+        @audit_view_req
         def api_get_audit():
             """Return the audit log (most recent first)."""
             return jsonify(list(reversed(self._audit_log)))
 
+        @app.route('/api/audit', methods=['DELETE'])
+        @audit_delete_req
+        def api_clear_audit():
+            """Delete all audit log entries."""
+            self._audit_log = []
+            self._persist_audit()
+            return jsonify({'ok': True})
+
+        @app.route('/api/audit/<int:idx>', methods=['DELETE'])
+        @audit_delete_req
+        def api_delete_audit_entry(idx: int):
+            """Delete a single audit entry by its index (0 = oldest)."""
+            if idx < 0 or idx >= len(self._audit_log):
+                return jsonify({'error': 'not found'}), 404
+            self._audit_log.pop(idx)
+            self._persist_audit()
+            return jsonify({'ok': True})
+
+        # --- API: custom roles management -----------------------------
+
+        @app.route('/api/roles', methods=['GET'])
+        @login_required
+        def api_get_roles():
+            """Return all roles (builtin + custom) with their permissions."""
+            all_roles: dict[str, dict] = {}
+            for r in ROLES:
+                all_roles[r] = {
+                    'builtin': True,
+                    'label': r.title(),
+                    'permissions': list(BUILTIN_ROLE_PERMISSIONS[r]),
+                }
+            for name, rdata in self._custom_roles.items():
+                all_roles[name] = {
+                    'builtin': False,
+                    'label': rdata.get('label', name),
+                    'permissions': rdata.get('permissions', []),
+                }
+            return jsonify(all_roles)
+
+        @app.route('/api/roles', methods=['POST'])
+        @roles_add_req
+        def api_create_role():
+            """Create a new custom role."""
+            data = request.get_json(silent=True)
+            if not data:
+                return jsonify({'error': self._t('invalid_json')}), 400
+            name = data.get('name', '').strip().lower().replace(' ', '_')
+            label = data.get('label', '').strip() or name
+            perms = [p for p in data.get('permissions', []) if p in PERMISSIONS]
+            if not name:
+                return jsonify({'error': self._t('role_name_required')}), 400
+            if name in ROLES or name in self._custom_roles:
+                return jsonify({'error': self._t('role_already_exists', name)}), 409
+            self._custom_roles[name] = {'label': label, 'permissions': perms}
+            self._persist_roles()
+            self._audit('role_created', detail={'name': name, 'label': label, 'permissions': perms})
+            return jsonify({'ok': True}), 201
+
+        @app.route('/api/roles/<name>', methods=['PUT'])
+        @roles_edit_req
+        def api_update_role(name: str):
+            """Update a custom role's label or permissions."""
+            if name in ROLES:
+                return jsonify({'error': self._t('role_builtin')}), 400
+            if name not in self._custom_roles:
+                return jsonify({'error': self._t('role_not_found')}), 404
+            data = request.get_json(silent=True)
+            if not data:
+                return jsonify({'error': self._t('invalid_json')}), 400
+            role = self._custom_roles[name]
+            changes: list[dict] = []
+            if 'label' in data:
+                new_label = data['label'].strip() or name
+                old_label = role.get('label', name)
+                if old_label != new_label:
+                    changes.append({'field': 'label', 'old': old_label, 'new': new_label})
+                role['label'] = new_label
+            if 'permissions' in data:
+                new_perms = sorted(p for p in data['permissions'] if p in PERMISSIONS)
+                old_perms = sorted(role.get('permissions', []))
+                if old_perms != new_perms:
+                    changes.append({'field': 'permissions', 'old': old_perms, 'new': new_perms})
+                role['permissions'] = new_perms
+            self._persist_roles()
+            if changes:
+                self._audit('role_updated', detail={'name': name, 'changes': changes})
+            return jsonify({'ok': True})
+
+        @app.route('/api/roles/<name>', methods=['DELETE'])
+        @roles_delete_req
+        def api_delete_role(name: str):
+            """Delete a custom role (fails if any user is assigned to it)."""
+            if name in ROLES:
+                return jsonify({'error': self._t('role_builtin')}), 400
+            if name not in self._custom_roles:
+                return jsonify({'error': self._t('role_not_found')}), 404
+            users_with_role = [u for u, d in self._users.items() if d.get('role') == name]
+            if users_with_role:
+                return jsonify({'error': self._t('role_in_use', ', '.join(users_with_role))}), 409
+            del self._custom_roles[name]
+            self._persist_roles()
+            self._audit('role_deleted', detail={'name': name})
+            return jsonify({'ok': True})
+
         # --- API: run checks (editor+) ---------------------------------
 
         @app.route('/api/checks/run', methods=['POST'])
-        @write_required
+        @checks_run_req
         def api_run_checks():
             """Run module checks on demand.
 
