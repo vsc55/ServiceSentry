@@ -60,7 +60,7 @@ async function renderStatus() {
             for (const m of mods) {
                 const enabled = modulesData[m].enabled;
                 if (enabled) _checkSelection.add(m);
-                const icon = ICONS[m] || '📦';
+                const icon = moduleIcon(m, modulesData[m]);
                 const pname = modulePrettyName(m, modulesData[m]);
                 h += `<div class="form-check form-check-inline">
                   <input class="form-check-input check-module-cb" type="checkbox" value="${escAttr(m)}"

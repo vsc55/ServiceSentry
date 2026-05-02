@@ -230,7 +230,11 @@ class Main(ObjectBase):
 
         """
         if self._is_mode_dev:
-            return '/var/lib/ServiSesentry/dev/'
+            return self._config_dir
+        elif sys.platform == 'win32':
+            return os.path.join(
+                os.environ.get('PROGRAMDATA', 'C:\\ProgramData'), 'ServiSesentry'
+            )
         else:
             return '/var/lib/ServiSesentry/'
 
@@ -341,7 +345,14 @@ def start_web(args):
     else:
         config_dir = '/etc/ServiSesentry/'
 
-    var_dir = '/var/lib/ServiSesentry/dev/' if is_dev else '/var/lib/ServiSesentry/'
+    if is_dev:
+        var_dir = config_dir
+    elif sys.platform == 'win32':
+        var_dir = os.path.join(
+            os.environ.get('PROGRAMDATA', 'C:\\ProgramData'), 'ServiSesentry'
+        )
+    else:
+        var_dir = '/var/lib/ServiSesentry/'
 
     cfg = _CC(os.path.join(config_dir, 'config.json'))
     cfg.read()

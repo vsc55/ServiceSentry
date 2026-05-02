@@ -8,8 +8,9 @@ Referencia completa de todos los archivos de configuración y opciones CLI de Se
 
 | Modo | Directorio config | Directorio var |
 |------|------------------|----------------|
-| **Desarrollo** (detecta `src` en la ruta) | `../data/` (relativo) | `/var/lib/ServiSesentry/dev/` |
-| **Producción** | `/etc/ServiSesentry/` | `/var/lib/ServiSesentry/` |
+| **Desarrollo** (detecta `src` en la ruta) | `../data/` (relativo) | igual que directorio config (`../data/`) |
+| **Producción Linux / macOS** | `/etc/ServiSesentry/` | `/var/lib/ServiSesentry/` |
+| **Producción Windows** | `/etc/ServiSesentry/` | `%PROGRAMDATA%\ServiSesentry` |
 | **Personalizado** (`-p path`) | ruta especificada | según modo dev/prod |
 
 ---

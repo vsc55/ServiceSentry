@@ -253,8 +253,10 @@ class Monitor(ObjectBase):
             return []
 
         modules = []
-        for module_path in glob.glob(os.path.join(self.dir_modules, '*.py')):
-            module_name = os.path.splitext(os.path.basename(module_path))[0]
+
+        # Package-based modules (folder with __init__.py)
+        for module_path in glob.glob(os.path.join(self.dir_modules, '*', '__init__.py')):
+            module_name = os.path.basename(os.path.dirname(module_path))
 
             if module_name.startswith('__'):
                 continue

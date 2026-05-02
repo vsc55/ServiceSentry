@@ -94,23 +94,17 @@ class ModuleBase(ObjectBase):
         if parent not in sys.path:
             sys.path.insert(0, parent)
 
-        # Collect module names, preferring folder-based packages over legacy .py files.
-        seen: set[str] = set()
-        entries: list[tuple[str, bool]] = []  # (mod_name, is_folder)
+        # Collect package-based module names (folder with __init__.py).
+        entries: list[str] = []
         for entry in sorted(os.listdir(watchfuls_dir)):
             if entry.startswith('_'):
                 continue
             entry_path = os.path.join(watchfuls_dir, entry)
             if (os.path.isdir(entry_path) and
                     os.path.isfile(os.path.join(entry_path, '__init__.py'))):
-                entries.append((entry, True))
-                seen.add(entry)
-            elif entry.endswith('.py') and os.path.isfile(entry_path):
-                mod_name = entry[:-3]
-                if mod_name not in seen:
-                    entries.append((mod_name, False))
+                entries.append(entry)
 
-        for mod_name, is_folder in entries:
+        for mod_name in entries:
             fq = f'watchfuls.{mod_name}'
             try:
                 mod = importlib.import_module(fq)
@@ -123,19 +117,15 @@ class ModuleBase(ObjectBase):
             if not item_schema or not isinstance(item_schema, dict):
                 continue
 
-            if is_folder:
-                mod_dir = os.path.join(watchfuls_dir, mod_name)
-                info = cls._load_module_info(mod_dir)
-                lang_data = cls._load_module_langs(mod_dir)
-            else:
-                info = {}
-                lang_data = {}
+            mod_dir = os.path.join(watchfuls_dir, mod_name)
+            info = cls._load_module_info(mod_dir)
+            lang_data = cls._load_module_langs(mod_dir)
 
             for collection, fields in item_schema.items():
                 if collection == '__i18n__':
                     continue  # handled separately below
                 col_fields = dict(fields)
-                # Merge label_i18n from lang files for folder-based modules.
+                # Merge label_i18n from lang files.
                 if lang_data:
                     for field_key, field_meta in list(col_fields.items()):
                         if isinstance(field_meta, dict) and 'type' in field_meta:
@@ -149,7 +139,7 @@ class ModuleBase(ObjectBase):
                 schemas[f'{mod_name}|{collection}'] = col_fields
 
             # Build __i18n__ entry.
-            if is_folder and (info or lang_data):
+            if info or lang_data:
                 icon = info.get('icon', '\U0001f4e6')
                 i18n = {
                     lc: {'pretty_name': ld.get('pretty_name', mod_name), 'icon': icon}
@@ -157,9 +147,6 @@ class ModuleBase(ObjectBase):
                 }
                 if i18n:
                     schemas[f'{mod_name}|__i18n__'] = i18n
-            elif '__i18n__' in item_schema:
-                # Legacy: __i18n__ embedded directly in ITEM_SCHEMA
-                schemas[f'{mod_name}|__i18n__'] = dict(item_schema['__i18n__'])
 
         return schemas
 
