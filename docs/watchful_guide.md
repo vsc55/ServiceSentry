@@ -8,7 +8,7 @@ Step-by-step guide to creating a monitoring module from scratch in ServiceSentry
 
 ```text
 main.py -> Monitor
-              |-- Discovers modules in watchfuls/*.py
+              |-- Discovers modules in watchfuls/ (packages or *.py files)
               |-- Reads modules.json to check if enabled
               |-- Instantiates Watchful(monitor) for each module
               +-- Runs module.check() in parallel
@@ -34,18 +34,24 @@ ObjectBase          <- shared debug instance
 
 ## 2. File structure
 
-For a module called `my_module`, you need to create:
+For a module called `my_module`, create a package folder:
 
 ```text
 watchfuls/
-  +-- my_module.py       <- Module code (required)
-
-tests/
-  +-- test_my_module.py  <- Unit tests (recommended)
+  +-- my_module/
+        +-- __init__.py       <- Module implementation (required)
+        +-- watchful.py       <- Thin alias: `from . import Watchful` (required)
+        +-- schema.json       <- Field schema (replaces inline ITEM_SCHEMA)
+        +-- info.json         <- Module metadata: icon and description
+        +-- lang/
+              +-- en_EN.json  <- English field labels and pretty name
+              +-- es_ES.json  <- Spanish field labels (or other languages)
+        +-- tests/
+              +-- test_my_module.py  <- Unit tests (recommended)
 ```
 
 There is no need to register the module anywhere. The `Monitor` automatically
-discovers every `*.py` in `watchfuls/` (except `__*.py`).
+discovers every package folder (directory with `__init__.py`) under `watchfuls/`.
 
 ---
 
@@ -57,38 +63,31 @@ discovers every `*.py` in `watchfuls/` (except `__*.py`).
 """Monitoring module: my_module."""
 
 import concurrent.futures
+import json
+import os
 
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
+
+# Load field schema from the package folder's schema.json
+_SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
 
 class Watchful(ModuleBase):
     """Monitors <description of what it does>."""
 
-    # -- Schema ----------------------------------------------------------
-    # Defines the fields for each item in the 'list' collection.
-    # This is used for:
-    #   - Default values when creating items in the web UI
-    #   - Type and range validation in the web UI
-    #   - Documenting available fields
-
-    ITEM_SCHEMA = {
-        'list': {
-            'enabled':  {'default': True,  'type': 'bool'},
-            'target':   {'default': '',    'type': 'str'},
-            'timeout':  {'default': 10,    'type': 'int', 'min': 1, 'max': 300},
-            # Add more fields as needed...
-        },
-    }
+    # Schema loaded from schema.json — defines fields, types, defaults and ranges.
+    # Used by the web UI to render forms and apply defaults automatically.
+    ITEM_SCHEMA = _SCHEMA
 
     # Shortcut for quick access to default values
-    _DEFAULTS = {k: v['default'] for k, v in ITEM_SCHEMA['list'].items()}
+    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()}
 
     # Module constants (optional)
     _MY_DEFAULT_VALUE = 42
 
     def __init__(self, monitor):
-        super().__init__(monitor, __name__)
+        super().__init__(monitor, __package__)
         # __name__ will be 'watchfuls.my_module' -> used as name_module
 
         # Register system tools if needed
@@ -184,6 +183,25 @@ class Watchful(ModuleBase):
         #   - Connect to a socket
         #   - Read a file
         raise NotImplementedError("Implement _do_check")
+```
+
+### schema.json
+
+Create `schema.json` at the root of your package folder. It defines module-level
+and per-item fields:
+
+```json
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
+    },
+    "list": {
+        "enabled": {"type": "bool", "default": true},
+        "target":  {"type": "str",  "default": ""},
+        "timeout": {"type": "int",  "default": 10, "min": 1, "max": 300}
+    }
+}
 ```
 
 ---
@@ -326,16 +344,18 @@ the key is used as the operational value.
 
 ```text
 watchfuls/
-  |-- __init__.py       <- ignored (starts with __)
-  |-- ping.py           <- discovered -> importlib.import_module('watchfuls.ping')
-  |-- web.py            <- discovered
-  |-- service_status.py <- discovered
-  +-- my_module.py      <- automatically discovered!
+  |-- ping/             <- package discovered -> importlib.import_module('watchfuls.ping')
+  |    |-- __init__.py  <- implementation
+  |    +-- watchful.py  <- alias
+  |-- web/              <- package discovered
+  |-- service_status/   <- package discovered
+  +-- my_module/        <- automatically discovered!
+       +-- __init__.py
 ```
 
 The `Monitor`:
-1. Scans `watchfuls/*.py` using `glob`
-2. Ignores `__*.py`
+1. Scans `watchfuls/` for subdirectories containing `__init__.py` (packages)
+2. Also discovers legacy `watchfuls/*.py` single-file modules
 3. Checks `modules.json[my_module].enabled` (default: `True`)
 4. Uses `importlib.import_module('watchfuls.my_module')`
 5. Instantiates `Watchful(monitor)`
@@ -345,39 +365,53 @@ The `Monitor`:
 
 ## 8. Web UI customization
 
-### Icons and names
+### Module icon and description
 
-In `lib/web_admin/templates/partials/_js_core.html` the icons are defined:
+Set them in `info.json` at the root of your module package:
 
-```javascript
-const ICONS = {
-    // ... existing modules ...
-    my_module: 'magnifier-emoji',  // <- add your icon here
-};
+```json
+{
+    "name": "my_module",
+    "version": "1.0.0",
+    "description": "Short description of what the module does.",
+    "icon": "🔍"
+}
 ```
 
-### Field labels
+### Field labels and display name (i18n)
 
-In `lib/web_admin/lang/en_EN.py` and `es_ES.py`, inside `'labels'`:
+Create language files inside your module's `lang/` folder.
 
-```python
-'labels': {
-    # ... existing fields ...
-    'target': 'Target address',
-    'my_field': 'My custom field',
-},
+**`lang/en_EN.json`:**
+
+```json
+{
+    "pretty_name": "My Module",
+    "labels": {
+        "enabled": "Enabled",
+        "target":  "Target address",
+        "timeout": "Timeout (s)",
+        "my_field": "My custom field"
+    }
+}
 ```
 
-### Readable module name
+**`lang/es_ES.json`:**
 
-In `lib/web_admin/lang/en_EN.py` and `es_ES.py`, inside `'pretty_names'`:
-
-```python
-'pretty_names': {
-    # ... existing modules ...
-    'my_module': 'My Module',
-},
+```json
+{
+    "pretty_name": "Mi Módulo",
+    "labels": {
+        "enabled": "Habilitado",
+        "target":  "Dirección destino",
+        "timeout": "Tiempo máximo (s)",
+        "my_field": "Mi campo personalizado"
+    }
+}
 ```
+
+The web admin reads these files automatically via `ModuleBase.discover_schemas()` —
+no changes needed in global JS files or Python lang files.
 
 ---
 
@@ -388,11 +422,11 @@ In `lib/web_admin/lang/en_EN.py` and `es_ES.py`, inside `'pretty_names'`:
 ```python
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/my_module.py."""
+"""Tests for watchfuls.my_module."""
 
 from unittest.mock import patch
 import pytest
-from tests.conftest import create_mock_monitor
+from conftest import create_mock_monitor
 
 
 class TestMyModuleInit:
@@ -530,7 +564,7 @@ class Watchful(ModuleBase):
     _DEFAULTS = {k: v['default'] for k, v in ITEM_SCHEMA['list'].items()}
 
     def __init__(self, monitor):
-        super().__init__(monitor, __name__)
+        super().__init__(monitor, __package__)
 
     def check(self):
         items = []
@@ -623,17 +657,20 @@ class Watchful(ModuleBase):
 
 ## 11. Creation checklist
 
-- [ ] Create `watchfuls/my_module.py` with a `Watchful(ModuleBase)` class
-- [ ] Define `ITEM_SCHEMA` with all item fields
-- [ ] Define `_DEFAULTS` derived from the schema
-- [ ] Implement `__init__` calling `super().__init__(monitor, __name__)`
+- [ ] Create folder `watchfuls/my_module/`
+- [ ] Create `__init__.py` with a `Watchful(ModuleBase)` class
+- [ ] Create `watchful.py` with `from . import Watchful`
+- [ ] Create `schema.json` with `__module__` and `list` field definitions
+- [ ] Create `info.json` with `name`, `description` and `icon`
+- [ ] Create `lang/en_EN.json` with `pretty_name` and `labels`
+- [ ] Create `lang/es_ES.json` with translated `pretty_name` and `labels`
+- [ ] Load `_SCHEMA` from `schema.json` and set `ITEM_SCHEMA = _SCHEMA`
+- [ ] Define `_DEFAULTS` derived from `_SCHEMA['list']`
+- [ ] Implement `__init__` calling `super().__init__(monitor, __package__)`
 - [ ] Implement `check()` returning `self.dict_return`
 - [ ] Call `super().check()` before returning
 - [ ] Use `dict_return.set()` to store each result
 - [ ] Use `check_status()` + `send_message()` for notifications
 - [ ] Add a section in `modules.json` with `enabled: true`
-- [ ] Add an icon in `_js_core.html` -> `ICONS`
-- [ ] Add a readable name in lang -> `pretty_names`
-- [ ] Add field labels in lang -> `labels`
 - [ ] Create `tests/test_my_module.py` with unit tests
-- [ ] Run `pytest tests/ -q` and verify everything passes
+- [ ] Run `pytest tests/ watchfuls/ -q` and verify everything passes
