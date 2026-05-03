@@ -87,7 +87,7 @@ Una petición con un token revocado (incluso si la cookie Flask sigue siendo vá
 
 ### Sistema de permisos granulares
 
-El sistema usa **15 flags de permiso por acción** en lugar de roles monolíticos.
+El sistema usa **19 flags de permiso por acción** en lugar de roles monolíticos.
 Cada endpoint está protegido por el permiso exacto que necesita:
 
 | Recurso | Permiso |
@@ -100,6 +100,10 @@ Cada endpoint está protegido por el permiso exacto que necesita:
 | Crear roles | `roles_add` |
 | Editar roles | `roles_edit` |
 | Eliminar roles | `roles_delete` |
+| Ver grupos | `groups_view` |
+| Crear grupos | `groups_add` |
+| Editar grupos | `groups_edit` |
+| Eliminar grupos | `groups_delete` |
 | Ver auditoría | `audit_view` |
 | Borrar auditoría | `audit_delete` |
 | Editar módulos | `modules_edit` |
@@ -108,27 +112,39 @@ Cada endpoint está protegido por el permiso exacto que necesita:
 | Revocar sesiones | `sessions_revoke` |
 | Lanzar checks | `checks_run` |
 
-### Roles integrados (inmutables)
+### Roles integrados
 
 | Rol | Permisos |
 |-----|----------|
 | `admin` | Todos |
-| `editor` | `modules_edit`, `config_edit`, `checks_run`, `audit_view` |
-| `viewer` | Ninguno |
+| `editor` | `modules_edit`, `config_edit`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
+| `viewer` | `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view` |
+
+Los roles integrados **no pueden eliminarse** ni cambiar sus permisos. Sí se puede actualizar su **etiqueta** (`label`) vía `PUT /api/roles/<name>`. Cualquier campo `permissions` en el cuerpo de la petición es ignorado silenciosamente. La etiqueta personalizada se persiste bajo la clave `__builtin_labels__` en `roles.json`.
 
 ### Roles personalizados
 
 - Se crean desde la UI o la API (`POST /api/roles`) con cualquier combinación de permisos.
 - Se persisten en `roles.json`.
-- Los roles integrados no pueden modificarse ni eliminarse.
+- Los roles integrados no pueden eliminar ni cambiar permisos; solo permiten actualizar la etiqueta.
 - No se puede eliminar un rol que tenga usuarios asignados (409).
+
+### Sistema de Grupos
+
+Los grupos permiten asignar uno o varios roles a un conjunto de usuarios.
+Los permisos son **aditivos**: el usuario obtiene sus permisos de rol propios más la unión de los permisos de todos los roles de todos sus grupos.
+
+- `administrators` es el único grupo integrado; no puede borrarse ni renombrarse.
+- El grupo integrado **sí permite** actualizar sus `roles` y `members` vía `PUT /api/groups/administrators`; los campos `label` y `description` son ignorados en la petición.
+- Un usuario puede pertenecer a cero o más grupos.
+- El cálculo de permisos efectivos se realiza en cada petición mediante `_get_effective_permissions(username, role)`.
 
 ### Implementación
 
 - `_perm_required(*perms)` — factoría de decoradores: la petición pasa si el
   usuario tiene **al menos uno** de los permisos indicados.
-- `_get_session_permissions()` — devuelve el `frozenset` de permisos del usuario
-  activo, consultando `BUILTIN_ROLE_PERMISSIONS` o `_custom_roles`.
+- `_get_effective_permissions(username, role)` — devuelve la unión del `frozenset`
+  de permisos del rol del usuario más los permisos de todos los roles de todos sus grupos.
 - Los permisos desconocidos en un rol personalizado son ignorados silenciosamente.
 
 ### Tests de permisos
@@ -136,12 +152,16 @@ Cada endpoint está protegido por el permiso exacto que necesita:
 | Clase | Qué cubre |
 |-------|----------|
 | `TestPermissionsConstants` | Estructura de `PERMISSIONS`, `PERMISSION_GROUPS` y `BUILTIN_ROLE_PERMISSIONS`; `_get_role_permissions()`; `/api/me` devuelve `permissions` |
-| `TestCustomRoles` | CRUD completo de `/api/roles`: crear, editar, borrar, casos de error (duplicado, builtin, en uso), persistencia, auditoría |
-| `TestGranularPermissions` | Cada uno de los 15 endpoints acepta/rechaza según su permiso específico; resolución end-to-end de roles personalizados |
-|-----|-----------|-----------------------------|--------------------|-------------------|-----------------------------|
-| `viewer` | ✅ | ❌ | ❌ | ❌ | ❌ |
-| `editor` | ✅ | ✅ | ❌ | ❌ | ❌ |
-| `admin` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `TestCustomRoles` | CRUD completo de `/api/roles`: crear, editar, borrar, casos de error (duplicado, en uso); actualizar etiqueta de rol builtin (200, permisos sin cambiar); persistencia, auditoría |
+| `TestGranularPermissions` | Cada uno de los 19 endpoints acepta/rechaza según su permiso específico; resolución end-to-end de roles personalizados |
+
+### Matriz de acceso por rol (resumen)
+
+| Rol | Ver dashboard | Módulos/Config | Usuarios/Roles/Grupos | Auditoría | Sesiones |
+|-----|:---:|:---:|:---:|:---:|:---:|
+| `viewer` | ✅ | ❌ | solo ver | ✅ | ✅ ver |
+| `editor` | ✅ | ✅ | ✅ ver+editar | ✅ | ❌ |
+| `admin` | ✅ | ✅ | ✅ completo | ✅ | ✅ |
 
 ### Decoradores
 
@@ -164,7 +184,7 @@ Cada endpoint está protegido por el permiso exacto que necesita:
 | `test_viewer_cannot_manage_users` | Viewer → 403 en `POST /api/users` |
 | `test_editor_can_write_modules` | Editor → 200 en `PUT /api/modules` |
 | `test_editor_can_write_config` | Editor → 200 en `PUT /api/config` |
-| `test_editor_cannot_manage_users` | Editor → 403 en todos los endpoints de usuarios |
+| `test_editor_cannot_create_or_delete_users` | Editor → 403 en `POST`/`DELETE /api/users`, 200 en `GET /api/users` |
 | `test_editor_cannot_access_sessions` | Editor → 403 en `GET /api/sessions` |
 | `test_viewer_cannot_access_audit` | Viewer → 403 en `GET /api/audit` |
 | `test_self_promotion_via_update` | Viewer intentando `PUT /api/users/viewer` con `role: admin` → 403 |
@@ -313,6 +333,12 @@ Todos los eventos relevantes para la seguridad quedan registrados en `audit.json
 | `password_changed` | Usuario cambia su propia contraseña |
 | `password_reset` | Admin resetea la contraseña de otro usuario |
 | `all_sessions_revoked` | Invalidación global de sesiones |
+| `group_created` | Creación de grupo |
+| `group_updated` | Modificación de grupo (roles, miembros, label o descripción) |
+| `group_deleted` | Eliminación de grupo |
+| `role_created` | Creación de rol personalizado |
+| `role_updated` | Modificación de rol (etiqueta o permisos) |
+| `role_deleted` | Eliminación de rol personalizado |
 | `checks_run` | Ejecución manual de comprobaciones desde la UI |
 
 ### Enmascarado de datos sensibles

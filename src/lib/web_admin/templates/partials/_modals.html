@@ -38,6 +38,13 @@
                     <div class="form-text" id="umPasswordHint" style="display:none">{{ i18n.leave_empty_no_change }}
                     </div>
                 </div>
+                <div class="mb-2" id="umGroupsGroup">
+                    <label class="form-label small fw-semibold">{{ i18n.col_groups }}</label>
+                    <div id="umGroupsContainer" class="border rounded p-2" style="max-height:120px;overflow-y:auto;">
+                        {# Populated dynamically by populateGroupCheckboxes() #}
+                        <p class="text-muted small mb-0">{{ i18n.no_groups }}</p>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
@@ -205,6 +212,27 @@
     </div>
 </div>
 
+{# Generic confirm modal #}
+<div class="modal fade" id="confirmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="confirmModalTitle">
+                    <i class="bi bi-exclamation-triangle me-1 text-warning"></i>{{ i18n.confirm }}
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0" id="confirmModalMsg"></p>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-danger" id="btnConfirmModalOk">{{ i18n.confirm }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# Audit confirm delete modal #}
 <div class="modal fade" id="auditConfirmModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
@@ -226,9 +254,60 @@
     </div>
 </div>
 
+{# New/Edit group modal #}
+<div class="modal fade" id="groupModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="groupModalTitle">{{ i18n.new_group }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-5">
+                        <label class="form-label small fw-semibold">{{ i18n.group_name }}</label>
+                        <input type="text" class="form-control form-control-sm" id="gmName" autocomplete="off"
+                            placeholder="e.g. ops_team">
+                    </div>
+                    <div class="col-sm-7">
+                        <label class="form-label small fw-semibold">{{ i18n.group_label }}</label>
+                        <input type="text" class="form-control form-control-sm" id="gmLabel" autocomplete="off"
+                            placeholder="e.g. Operations Team">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.group_description }}</label>
+                    <input type="text" class="form-control form-control-sm" id="gmDescription" autocomplete="off"
+                        placeholder="{{ i18n.group_description }}">
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-5">
+                        <label class="form-label small fw-semibold">{{ i18n.group_roles }}</label>
+                        <div id="groupRolesGrid" class="mt-1"></div>
+                    </div>
+                    <div class="col-md-7">
+                        <label class="form-label small fw-semibold">{{ i18n.col_group_members }}</label>
+                        <input type="search" class="form-control form-control-sm mt-1 mb-2"
+                            id="gmMemberSearch" placeholder="{{ i18n.group_members_search }}">
+                        <div id="groupMembersGrid"
+                            style="max-height:180px;overflow-y:auto;border:1px solid #dee2e6;border-radius:4px;padding:6px 10px">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnGroupModalOk">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# New/Edit role modal #}
 <div class="modal fade" id="roleModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="roleModalTitle">{{ i18n.new_role }}</h6>
@@ -247,25 +326,61 @@
                             placeholder="e.g. Operations Viewer">
                     </div>
                 </div>
-                <div class="mb-1">
-                    <label class="form-label small fw-semibold">{{ i18n.role_permissions }}</label>
-                </div>
-                <div id="rolePermissionsGrid">
-                    {% for group_key, perms in permissions_groups %}
-                    <p class="small fw-semibold text-muted mb-1 mt-2">{{ i18n.get(group_key, group_key) }}</p>
-                    <div class="row g-1 mb-1">
-                        {% for perm in perms %}
-                        <div class="col-sm-6">
-                            <div class="form-check form-switch mb-0">
-                                <input class="form-check-input" type="checkbox" id="rm_{{ perm }}" value="{{ perm }}">
-                                <label class="form-check-label small" for="rm_{{ perm }}">
-                                    {{ i18n.get('permission_labels', {}).get(perm, perm) }}
-                                </label>
+                {# Sub-tabs #}
+                <ul class="nav nav-tabs mb-3" id="roleModalTabs">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#rmTabPerms" type="button">
+                            <i class="bi bi-shield-check me-1"></i>{{ i18n.role_tab_permissions }}
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#rmTabAssign" type="button">
+                            <i class="bi bi-people me-1"></i>{{ i18n.role_tab_assignments }}
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content">
+                    {# Permissions tab #}
+                    <div class="tab-pane fade show active" id="rmTabPerms">
+                        <div id="rolePermissionsGrid">
+                            {% for group_key, perms in permissions_groups %}
+                            <p class="small fw-semibold text-muted mb-1 mt-2">{{ i18n.get(group_key, group_key) }}</p>
+                            <div class="row g-1 mb-1">
+                                {% for perm in perms %}
+                                <div class="col-sm-6">
+                                    <div class="form-check form-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" id="rm_{{ perm }}" value="{{ perm }}">
+                                        <label class="form-check-label small" for="rm_{{ perm }}">
+                                            {{ i18n.get('permission_labels', {}).get(perm, perm) }}
+                                        </label>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {# Assignments tab #}
+                    <div class="tab-pane fade" id="rmTabAssign">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">{{ i18n.role_assign_users }}</label>
+                                <input type="search" class="form-control form-control-sm mt-1 mb-2"
+                                    id="rmUserSearch" placeholder="{{ i18n.group_members_search }}">
+                                <div id="rmUsersGrid"
+                                    style="max-height:220px;overflow-y:auto;border:1px solid #dee2e6;border-radius:4px;padding:6px 10px">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">{{ i18n.role_assign_groups }}</label>
+                                <input type="search" class="form-control form-control-sm mt-1 mb-2"
+                                    id="rmGroupSearch" placeholder="{{ i18n.group_members_search }}">
+                                <div id="rmGroupsGrid"
+                                    style="max-height:220px;overflow-y:auto;border:1px solid #dee2e6;border-radius:4px;padding:6px 10px">
+                                </div>
                             </div>
                         </div>
-                        {% endfor %}
                     </div>
-                    {% endfor %}
                 </div>
             </div>
             <div class="modal-footer py-1">

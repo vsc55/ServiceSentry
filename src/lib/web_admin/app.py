@@ -34,6 +34,10 @@ PERMISSIONS = (
     'roles_add',       # create custom roles
     'roles_edit',      # edit custom roles
     'roles_delete',    # delete custom roles
+    'groups_view',     # see the groups list
+    'groups_add',      # create groups
+    'groups_edit',     # edit groups
+    'groups_delete',   # delete groups
     'audit_view',      # read audit log
     'audit_delete',    # delete audit entries
     'modules_edit',    # write modules.json
@@ -47,6 +51,7 @@ PERMISSIONS = (
 PERMISSION_GROUPS = [
     ('perm_group_users',    ['users_view', 'users_add', 'users_edit', 'users_delete']),
     ('perm_group_roles',    ['roles_view', 'roles_add', 'roles_edit', 'roles_delete']),
+    ('perm_group_groups',   ['groups_view', 'groups_add', 'groups_edit', 'groups_delete']),
     ('perm_group_audit',    ['audit_view', 'audit_delete']),
     ('perm_group_modules',  ['modules_edit']),
     ('perm_group_config',   ['config_edit']),
@@ -54,11 +59,22 @@ PERMISSION_GROUPS = [
     ('perm_group_checks',   ['checks_run']),
 ]
 
+# Built-in groups (cannot be deleted or modified via API).
+_BUILTIN_GROUPS: frozenset[str] = frozenset({'administrators'})
+
 # Built-in role → permission mapping (immutable).
 BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
     'admin':  frozenset(PERMISSIONS),
-    'editor': frozenset({'modules_edit', 'config_edit', 'checks_run', 'audit_view'}),
-    'viewer': frozenset(),
+    'editor': frozenset({
+        'modules_edit', 'config_edit', 'checks_run', 'audit_view',
+        'users_view', 'users_edit',
+        'roles_view', 'roles_edit',
+        'groups_view', 'groups_edit',
+    }),
+    'viewer': frozenset({
+        'users_view', 'roles_view', 'groups_view',
+        'audit_view', 'sessions_view',
+    }),
 }
 
 
@@ -74,6 +90,7 @@ class WebAdmin:
     DEFAULT_HOST = '0.0.0.0'
     _USERS_FILE = 'users.json'
     _ROLES_FILE = 'roles.json'
+    _GROUPS_FILE = 'groups.json'
     _SECRET_KEY_FILE = '.flask_secret'
     _SESSIONS_FILE = 'sessions.json'
     _AUDIT_FILE = 'audit.json'
@@ -89,6 +106,7 @@ class WebAdmin:
         default_lang: str = DEFAULT_LANG,
         default_dark_mode: bool = False,
         modules_dir: str | None = None,
+        secure_cookies: bool = False,
     ):
         """Initialise the web administration server.
 
@@ -106,6 +124,7 @@ class WebAdmin:
         self._config_dir = config_dir
         self._var_dir = var_dir
         self._modules_dir = modules_dir
+        self._secure_cookies = bool(secure_cookies)
         self._check_lock = threading.Lock()
         self._default_lang = (
             default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
@@ -115,10 +134,13 @@ class WebAdmin:
         self._sessions: dict[str, dict] = {}
         self._audit_log: list[dict] = []
         self._custom_roles: dict[str, dict] = {}
+        self._builtin_role_labels: dict[str, str] = {}
+        self._groups: dict[str, dict] = {}
         self._load_or_create_users(username, password)
         self._load_sessions()
         self._load_audit()
         self._load_roles()
+        self._load_groups()
         self._app = self._create_app()
 
     # ------------------------------------------------------------------
@@ -183,18 +205,64 @@ class WebAdmin:
         if os.path.isfile(path):
             try:
                 with open(path, encoding='utf-8') as fh:
-                    self._custom_roles = json.load(fh)
+                    data = json.load(fh)
+                self._builtin_role_labels = data.pop('__builtin_labels__', {})
+                self._custom_roles = data
             except (json.JSONDecodeError, OSError):
                 self._custom_roles = {}
+                self._builtin_role_labels = {}
         else:
             self._custom_roles = {}
+            self._builtin_role_labels = {}
 
     def _persist_roles(self) -> bool:
         """Write custom roles to ``roles.json``."""
         try:
             os.makedirs(self._config_dir, exist_ok=True)
+            data = dict(self._custom_roles)
+            if self._builtin_role_labels:
+                data['__builtin_labels__'] = self._builtin_role_labels
             with open(self._roles_path, 'w', encoding='utf-8') as fh:
-                json.dump(self._custom_roles, fh, indent=4, ensure_ascii=False)
+                json.dump(data, fh, indent=4, ensure_ascii=False)
+            return True
+        except OSError:
+            return False
+
+    # ------------------------------------------------------------------
+    # Groups management
+    # ------------------------------------------------------------------
+
+    @property
+    def _groups_path(self) -> str:
+        """Full path to ``groups.json``."""
+        return os.path.join(self._config_dir, self._GROUPS_FILE)
+
+    def _load_groups(self) -> None:
+        """Load groups from ``groups.json``. Creates default group on first run."""
+        path = self._groups_path
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding='utf-8') as fh:
+                    self._groups = json.load(fh)
+            except (json.JSONDecodeError, OSError):
+                self._groups = {}
+        else:
+            # First run: seed a default administrators group
+            self._groups = {
+                'administrators': {
+                    'label': 'Administrators',
+                    'description': 'Default administrators group',
+                    'roles': ['admin'],
+                },
+            }
+            self._persist_groups()
+
+    def _persist_groups(self) -> bool:
+        """Write groups to ``groups.json``."""
+        try:
+            os.makedirs(self._config_dir, exist_ok=True)
+            with open(self._groups_path, 'w', encoding='utf-8') as fh:
+                json.dump(self._groups, fh, indent=4, ensure_ascii=False)
             return True
         except OSError:
             return False
@@ -208,9 +276,22 @@ class WebAdmin:
             return frozenset(p for p in custom.get('permissions', []) if p in PERMISSIONS)
         return frozenset()
 
+    def _get_effective_permissions(self, username: str, role_name: str) -> frozenset:
+        """Return merged permissions: user role perms ∪ perms from all roles in user's groups."""
+        perms = self._get_role_permissions(role_name)
+        user = self._users.get(username, {})
+        for gname in user.get('groups', []):
+            g = self._groups.get(gname)
+            if g:
+                for rname in g.get('roles', []):
+                    perms = perms | self._get_role_permissions(rname)
+        return perms
+
     def _get_session_permissions(self) -> frozenset:
         """Return the set of permissions for the currently logged-in user."""
-        return self._get_role_permissions(session.get('role', 'viewer'))
+        return self._get_effective_permissions(
+            session.get('username', ''), session.get('role', 'viewer')
+        )
 
     def _perm_required(self, *perms):
         """Return a decorator that requires ANY of the listed permissions."""
@@ -288,6 +369,14 @@ class WebAdmin:
             del self._sessions[t]
         if stale:
             self._persist_sessions()
+        # Migrate sessions created before sid was introduced
+        migrated = False
+        for entry in self._sessions.values():
+            if 'sid' not in entry:
+                entry['sid'] = secrets.token_hex(8)
+                migrated = True
+        if migrated:
+            self._persist_sessions()
 
     def _persist_sessions(self) -> bool:
         """Write sessions registry to disk."""
@@ -301,11 +390,17 @@ class WebAdmin:
 
     def _create_session(
         self, username: str, ip: str, user_agent: str,
-    ) -> str:
-        """Register a new session and return its token."""
+    ) -> tuple[str, str]:
+        """Register a new session and return (token, sid).
+
+        *token* is the secret auth token stored only in the signed cookie.
+        *sid* is a short opaque identifier safe to expose in the API.
+        """
         token = secrets.token_hex(32)
+        sid = secrets.token_hex(8)
         now = datetime.now(timezone.utc).isoformat()
         self._sessions[token] = {
+            'sid': sid,
             'username': username,
             'created': now,
             'last_seen': now,
@@ -313,7 +408,7 @@ class WebAdmin:
             'user_agent': user_agent,
         }
         self._persist_sessions()
-        return token
+        return token, sid
 
     def _check_session(self) -> bool:
         """Validate the current request's session against the registry."""
@@ -323,9 +418,24 @@ class WebAdmin:
         if not token or token not in self._sessions:
             session.clear()
             return False
-        self._sessions[token]['last_seen'] = (
-            datetime.now(timezone.utc).isoformat()
-        )
+        entry = self._sessions[token]
+        # Sync session_id into the cookie if it was created before this field existed
+        if 'session_id' not in session:
+            session['session_id'] = entry.get('sid', token[:16])
+        current_ip = request.remote_addr
+        if entry.get('ip') and entry['ip'] != current_ip:
+            self._audit(
+                'session_ip_changed',
+                username=entry.get('username', ''),
+                ip=current_ip,
+                detail={
+                    'sid': entry.get('sid', token[:8]),
+                    'previous_ip': entry['ip'],
+                    'current_ip': current_ip,
+                },
+            )
+            entry['ip'] = current_ip
+        entry['last_seen'] = datetime.now(timezone.utc).isoformat()
         return True
 
     def _revoke_session(self, token: str) -> bool:
@@ -483,6 +593,9 @@ class WebAdmin:
         app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(
             days=self.REMEMBER_ME_DAYS,
         )
+        app.config['SESSION_COOKIE_HTTPONLY'] = True
+        app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+        app.config['SESSION_COOKIE_SECURE'] = self._secure_cookies
 
         @app.context_processor
         def _inject_i18n():
@@ -495,7 +608,7 @@ class WebAdmin:
                 'dark_mode': dark_mode,
                 'i18n': trans,
                 'supported_langs': SUPPORTED_LANGS,
-                'current_session_token': session.get('session_token', ''),
+                'current_session_token': session.get('session_id', ''),
                 'permissions_list': list(PERMISSIONS),
                 'permissions_groups': PERMISSION_GROUPS,
             }
@@ -570,6 +683,11 @@ class WebAdmin:
         # sessions decorators
         sessions_view_req   = self._perm_required('sessions_view')
         sessions_revoke_req = self._perm_required('sessions_revoke')
+        # granular groups decorators
+        groups_view_req   = self._perm_required('groups_view')
+        groups_add_req    = self._perm_required('groups_add')
+        groups_edit_req   = self._perm_required('groups_edit')
+        groups_delete_req = self._perm_required('groups_delete')
         # single-permission write decorators
         modules_edit_req  = self._perm_required('modules_edit')
         config_edit_req   = self._perm_required('config_edit')
@@ -612,11 +730,12 @@ class WebAdmin:
                 if user:
                     remember = request.form.get('remember_me') == 'on'
                     session.permanent = remember
-                    token = self._create_session(
+                    token, sid = self._create_session(
                         username, request.remote_addr,
                         request.user_agent.string,
                     )
                     session['session_token'] = token
+                    session['session_id'] = sid
                     session['logged_in'] = True
                     session['username'] = username
                     session['role'] = user.get('role', 'viewer')
@@ -667,13 +786,15 @@ class WebAdmin:
         @login_required
         def api_me():
             """Return current logged-in user info."""
+            uname_me = session.get('username', '')
             return jsonify({
-                'username': session.get('username', ''),
+                'username': uname_me,
                 'display_name': session.get('display_name', ''),
                 'role': session.get('role', 'viewer'),
                 'lang': session.get('lang', self._default_lang),
                 'dark_mode': session.get('dark_mode', self._default_dark_mode),
                 'permissions': list(self._get_session_permissions()),
+                'groups': self._users.get(uname_me, {}).get('groups', []),
             })
 
         # --- API: modules.json ----------------------------------------
@@ -865,6 +986,7 @@ class WebAdmin:
                     'display_name': udata.get('display_name', uname),
                     'lang': udata.get('lang', ''),
                     'dark_mode': udata.get('dark_mode'),
+                    'groups': udata.get('groups', []),
                 }
             return jsonify(safe)
 
@@ -896,10 +1018,14 @@ class WebAdmin:
             user_lang = data.get('lang', '')
             if user_lang and user_lang in SUPPORTED_LANGS:
                 self._users[uname]['lang'] = user_lang
+            user_groups = [g for g in data.get('groups', []) if g in self._groups]
+            if user_groups:
+                self._users[uname]['groups'] = user_groups
             self._persist_users()
             self._audit('user_created', detail={
                 'username': uname, 'role': role,
                 'display_name': dname,
+                'groups': user_groups,
             })
             return jsonify({'ok': True}), 201
 
@@ -950,6 +1076,12 @@ class WebAdmin:
                     if old_dm != data['dark_mode']:
                         changes.append({'field': 'dark_mode', 'old': old_dm, 'new': data['dark_mode']})
                     user['dark_mode'] = data['dark_mode']
+            if 'groups' in data:
+                new_groups = [g for g in data['groups'] if g in self._groups]
+                old_groups = sorted(user.get('groups', []))
+                if old_groups != sorted(new_groups):
+                    changes.append({'field': 'groups', 'old': old_groups, 'new': sorted(new_groups)})
+                user['groups'] = new_groups
             self._persist_users()
             if changes:
                 self._audit('user_updated', detail={
@@ -1012,8 +1144,20 @@ class WebAdmin:
         @app.route('/api/sessions', methods=['GET'])
         @sessions_view_req
         def api_get_sessions():
-            """Return all active sessions."""
-            return jsonify(self._sessions)
+            """Return all active sessions (keyed by sid, token never exposed)."""
+            current_token = session.get('session_token')
+            result = {}
+            for token, entry in self._sessions.items():
+                sid = entry.get('sid') or token[:16]
+                result[sid] = {
+                    'username': entry.get('username', ''),
+                    'ip': entry.get('ip', ''),
+                    'user_agent': entry.get('user_agent', ''),
+                    'created': entry.get('created', ''),
+                    'last_seen': entry.get('last_seen', ''),
+                    'is_current': token == current_token,
+                }
+            return jsonify(result)
 
         @app.route('/api/sessions/invalidate', methods=['POST'])
         @sessions_revoke_req
@@ -1027,9 +1171,13 @@ class WebAdmin:
         @app.route('/api/sessions/revoke/<sid>', methods=['POST'])
         @sessions_revoke_req
         def api_revoke_session_route(sid):
-            """Revoke a specific session by its token."""
-            if self._revoke_session(sid):
-                self._audit('session_revoked', detail=sid[:8])
+            """Revoke a specific session by its sid."""
+            token = next(
+                (t for t, e in self._sessions.items() if e.get('sid') == sid),
+                None,
+            )
+            if token and self._revoke_session(token):
+                self._audit('session_revoked', detail=sid)
                 return jsonify({'ok': True})
             return jsonify({'error': self._t('session_not_found')}), 404
 
@@ -1080,7 +1228,7 @@ class WebAdmin:
             for r in ROLES:
                 all_roles[r] = {
                     'builtin': True,
-                    'label': r.title(),
+                    'label': self._builtin_role_labels.get(r, r.title()),
                     'permissions': list(BUILTIN_ROLE_PERMISSIONS[r]),
                 }
             for name, rdata in self._custom_roles.items():
@@ -1113,29 +1261,38 @@ class WebAdmin:
         @app.route('/api/roles/<name>', methods=['PUT'])
         @roles_edit_req
         def api_update_role(name: str):
-            """Update a custom role's label or permissions."""
-            if name in ROLES:
-                return jsonify({'error': self._t('role_builtin')}), 400
-            if name not in self._custom_roles:
+            """Update a role's label or permissions. Built-in roles: label only."""
+            is_builtin = name in ROLES
+            if not is_builtin and name not in self._custom_roles:
                 return jsonify({'error': self._t('role_not_found')}), 404
             data = request.get_json(silent=True)
             if not data:
                 return jsonify({'error': self._t('invalid_json')}), 400
-            role = self._custom_roles[name]
             changes: list[dict] = []
-            if 'label' in data:
-                new_label = data['label'].strip() or name
-                old_label = role.get('label', name)
-                if old_label != new_label:
-                    changes.append({'field': 'label', 'old': old_label, 'new': new_label})
-                role['label'] = new_label
-            if 'permissions' in data:
-                new_perms = sorted(p for p in data['permissions'] if p in PERMISSIONS)
-                old_perms = sorted(role.get('permissions', []))
-                if old_perms != new_perms:
-                    changes.append({'field': 'permissions', 'old': old_perms, 'new': new_perms})
-                role['permissions'] = new_perms
-            self._persist_roles()
+            if is_builtin:
+                # Built-in roles: store custom label in a side dict
+                if 'label' in data:
+                    new_label = data['label'].strip() or name
+                    old_label = self._builtin_role_labels.get(name, name.title())
+                    if old_label != new_label:
+                        changes.append({'field': 'label', 'old': old_label, 'new': new_label})
+                        self._builtin_role_labels[name] = new_label
+                        self._persist_roles()
+            else:
+                role = self._custom_roles[name]
+                if 'label' in data:
+                    new_label = data['label'].strip() or name
+                    old_label = role.get('label', name)
+                    if old_label != new_label:
+                        changes.append({'field': 'label', 'old': old_label, 'new': new_label})
+                    role['label'] = new_label
+                if 'permissions' in data:
+                    new_perms = sorted(p for p in data['permissions'] if p in PERMISSIONS)
+                    old_perms = sorted(role.get('permissions', []))
+                    if old_perms != new_perms:
+                        changes.append({'field': 'permissions', 'old': old_perms, 'new': new_perms})
+                    role['permissions'] = new_perms
+                self._persist_roles()
             if changes:
                 self._audit('role_updated', detail={'name': name, 'changes': changes})
             return jsonify({'ok': True})
@@ -1154,6 +1311,133 @@ class WebAdmin:
             del self._custom_roles[name]
             self._persist_roles()
             self._audit('role_deleted', detail={'name': name})
+            return jsonify({'ok': True})
+
+        # --- API: groups management -----------------------------------
+
+        @app.route('/api/groups', methods=['GET'])
+        @login_required
+        def api_get_groups():
+            """Return all groups with their roles and member count."""
+            all_role_names = set(BUILTIN_ROLE_PERMISSIONS.keys()) | set(self._custom_roles.keys())
+            result: dict[str, dict] = {}
+            for name, gdata in self._groups.items():
+                members = [
+                    u for u, d in self._users.items()
+                    if name in d.get('groups', [])
+                ]
+                result[name] = {
+                    'label': gdata.get('label', name),
+                    'description': gdata.get('description', ''),
+                    'roles': [r for r in gdata.get('roles', []) if r in all_role_names],
+                    'members': members,
+                    'builtin': name in _BUILTIN_GROUPS,
+                }
+            return jsonify(result)
+
+        @app.route('/api/groups', methods=['POST'])
+        @groups_add_req
+        def api_create_group():
+            """Create a new group."""
+            data = request.get_json(silent=True)
+            if not data:
+                return jsonify({'error': self._t('invalid_json')}), 400
+            name = data.get('name', '').strip().lower().replace(' ', '_')
+            label = data.get('label', '').strip() or name
+            description = data.get('description', '').strip()
+            all_role_names = set(BUILTIN_ROLE_PERMISSIONS.keys()) | set(self._custom_roles.keys())
+            roles = [r for r in data.get('roles', []) if r in all_role_names]
+            if not name:
+                return jsonify({'error': self._t('group_name_required')}), 400
+            if name in self._groups:
+                return jsonify({'error': self._t('group_already_exists', name)}), 409
+            self._groups[name] = {
+                'label': label,
+                'description': description,
+                'roles': roles,
+            }
+            self._persist_groups()
+            self._audit('group_created', detail={
+                'name': name, 'label': label, 'roles': roles,
+            })
+            return jsonify({'ok': True}), 201
+
+        @app.route('/api/groups/<name>', methods=['PUT'])
+        @groups_edit_req
+        def api_update_group(name: str):
+            """Update a group's label, description, roles and members."""
+            if name not in self._groups:
+                return jsonify({'error': self._t('group_not_found')}), 404
+            is_builtin = name in _BUILTIN_GROUPS
+            data = request.get_json(silent=True)
+            if not data:
+                return jsonify({'error': self._t('invalid_json')}), 400
+            group = self._groups[name]
+            changes: list[dict] = []
+            # Built-in groups: allow roles and members changes, but not label/description
+            if not is_builtin:
+                if 'label' in data:
+                    new_label = data['label'].strip() or name
+                    old_label = group.get('label', name)
+                    if old_label != new_label:
+                        changes.append({'field': 'label', 'old': old_label, 'new': new_label})
+                    group['label'] = new_label
+                if 'description' in data:
+                    new_desc = data['description'].strip()
+                    old_desc = group.get('description', '')
+                    if old_desc != new_desc:
+                        changes.append({'field': 'description', 'old': old_desc, 'new': new_desc})
+                    group['description'] = new_desc
+            if 'roles' in data:
+                all_role_names = set(BUILTIN_ROLE_PERMISSIONS.keys()) | set(self._custom_roles.keys())
+                new_roles = sorted(r for r in data['roles'] if r in all_role_names)
+                old_roles = sorted(group.get('roles', []))
+                if old_roles != new_roles:
+                    changes.append({'field': 'roles', 'old': old_roles, 'new': new_roles})
+                group['roles'] = new_roles
+            if 'members' in data:
+                all_usernames = set(self._users.keys())
+                new_members = set(data['members']) & all_usernames
+                old_members = {u for u, d in self._users.items() if name in d.get('groups', [])}
+                users_changed = False
+                for uname in old_members - new_members:
+                    self._users[uname]['groups'] = [g for g in self._users[uname].get('groups', []) if g != name]
+                    users_changed = True
+                for uname in new_members - old_members:
+                    if 'groups' not in self._users[uname]:
+                        self._users[uname]['groups'] = []
+                    self._users[uname]['groups'].append(name)
+                    users_changed = True
+                if users_changed:
+                    self._persist_users()
+                new_members_sorted = sorted(new_members)
+                old_members_sorted = sorted(old_members)
+                if old_members_sorted != new_members_sorted:
+                    changes.append({'field': 'members', 'old': old_members_sorted, 'new': new_members_sorted})
+            self._persist_groups()
+            if changes:
+                self._audit('group_updated', detail={'name': name, 'changes': changes})
+            return jsonify({'ok': True})
+
+        @app.route('/api/groups/<name>', methods=['DELETE'])
+        @groups_delete_req
+        def api_delete_group(name: str):
+            """Delete a group and remove it from all users."""
+            if name not in self._groups:
+                return jsonify({'error': self._t('group_not_found')}), 404
+            if name in _BUILTIN_GROUPS:
+                return jsonify({'error': self._t('group_builtin')}), 403
+            # Remove group from every user that belongs to it
+            affected = []
+            for uname, udata in self._users.items():
+                if name in udata.get('groups', []):
+                    udata['groups'] = [g for g in udata['groups'] if g != name]
+                    affected.append(uname)
+            if affected:
+                self._persist_users()
+            del self._groups[name]
+            self._persist_groups()
+            self._audit('group_deleted', detail={'name': name, 'removed_from': affected})
             return jsonify({'ok': True})
 
         # --- API: run checks (editor+) ---------------------------------

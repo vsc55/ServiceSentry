@@ -23,7 +23,8 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Vista general (Overview)** | Estado en tiempo real de todos los módulos con auto-refresco configurable (OFF / 10 s / 30 s / 60 s) |
 | **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles; cambiar contraseña propia |
-| **Roles personalizados** | Crear roles con permisos granulares por acción (ver/añadir/editar/eliminar) |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + roles personalizados con 19 flags granulares; los roles integrados permiten editar la etiqueta y gestionar qué usuarios/grupos tienen asignado ese rol; sus permisos se muestran en solo lectura |
+| **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado (permite editar roles y miembros, pero no nombre ni etiqueta) |
 | **Prueba de Telegram** | Enviar un mensaje de prueba para verificar la conectividad del bot |
 | **Modo oscuro** | Preferencia por usuario, persistida entre sesiones |
 | **i18n** | Inglés y español; seleccionable por usuario y configurable globalmente con `web_admin.lang` |
@@ -39,26 +40,55 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | Rol | Permisos |
 |-----|----------|
 | `admin` | Todos los permisos |
-| `editor` | `modules_edit`, `config_edit`, `checks_run`, `audit_view` |
-| `viewer` | Sin permisos (solo puede ver el dashboard y cambiar su contraseña) |
+| `editor` | `modules_edit`, `config_edit`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
+| `viewer` | `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view` |
+
+> Los roles integrados **no pueden eliminarse** ni cambiar sus permisos via API. Sí permiten actualizar la **etiqueta** (`label`) y gestionar qué usuarios y grupos tienen ese rol asignado. La etiqueta personalizada se persiste en `roles.json` bajo la clave `__builtin_labels__`.
 
 ### Roles personalizados
 
-Se pueden crear roles adicionales desde la pestaña **Usuarios → Roles** asignando
-cualquier combinación de los 15 permisos disponibles. Los roles personalizados se
+Se pueden crear roles adicionales desde la pestaña **Acceso → Roles** asignando
+cualquier combinación de los 19 permisos disponibles. Los roles personalizados se
 persisten en `roles.json`.
 
 ```
 /api/roles             POST   → crear rol
-/api/roles/<name>  PUT    → editar rol
-/api/roles/<name>  DELETE → eliminar rol (falla si hay usuarios asignados)
+/api/roles/<name>      PUT    → editar rol
+/api/roles/<name>      DELETE → eliminar rol (falla si hay usuarios asignados)
 ```
+
+---
+
+## Grupos de Usuarios
+
+Los grupos permiten asignar uno o varios **roles** a un conjunto de usuarios.
+Los permisos son **aditivos**: el usuario obtiene sus permisos de rol propios más
+la unión de los permisos de todos los roles de todos sus grupos.
+
+### Grupo integrado
+
+| Grupo | Roles | Notas |
+|-------|-------|-------|
+| `administrators` | `admin` | No puede borrarse; permite editar roles asignados y miembros; `label`/`description` son inmutables |
+
+### API de grupos
+
+```
+/api/groups             GET    → listar grupos con miembros y roles
+/api/groups             POST   → crear grupo
+/api/groups/<name>      PUT    → editar roles y miembros (label/description ignorados en builtin)
+/api/groups/<name>      DELETE → eliminar grupo (403 si es builtin)
+```
+
+Cada grupo tiene:
+- `roles: []` — lista de nombres de rol cuyos permisos se añaden a los miembros
+- `members` — calculado dinámicamente a partir de `users.json` (campo `groups` de cada usuario)
 
 ---
 
 ## Sistema de Permisos
 
-El sistema de control de acceso usa **15 flags granulares** por acción y recurso.
+El sistema de control de acceso usa **19 flags granulares** por acción y recurso.
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -70,6 +100,10 @@ El sistema de control de acceso usa **15 flags granulares** por acción y recurs
 | | `roles_add` | Crear roles personalizados |
 | | `roles_edit` | Editar roles personalizados |
 | | `roles_delete` | Eliminar roles personalizados |
+| **Grupos** | `groups_view` | Ver la lista de grupos |
+| | `groups_add` | Crear grupos |
+| | `groups_edit` | Editar grupos |
+| | `groups_delete` | Eliminar grupos |
 | **Auditoría** | `audit_view` | Leer el registro de auditoría |
 | | `audit_delete` | Borrar entradas del registro |
 | **Módulos** | `modules_edit` | Guardar cambios en módulos |
@@ -80,12 +114,12 @@ El sistema de control de acceso usa **15 flags granulares** por acción y recurs
 
 ### Implementación interna
 
-- `PERMISSIONS` — tupla con los 15 flags.
+- `PERMISSIONS` — tupla con los 19 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` para los roles integrados.
 - `_perm_required(*perms)` — factoría de decoradores: acepta si el usuario tiene **alguno** de los permisos indicados.
-- `_get_role_permissions(role)` — devuelve el `frozenset` de permisos para un rol (integrado o personalizado).
-- `GET /api/me` — incluye el campo `permissions: list[str]` con los permisos de la sesión activa.
+- `_get_effective_permissions(username, role)` — devuelve la unión del frozenset del rol del usuario más los permisos de todos los roles de todos sus grupos.
+- `GET /api/me` — incluye el campo `permissions: list[str]` con los permisos efectivos de la sesión activa.
 
 ### Restricción de roles en la UI
 
@@ -156,13 +190,22 @@ El permiso requerido se indica entre paréntesis.
 | `GET` | `/api/me` | auth | Obtener información del usuario actual |
 | `PUT` | `/api/users/me/password` | auth | Cambiar la contraseña propia |
 
+### Grupos
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/groups` | auth | Listar todos los grupos con miembros y roles |
+| `POST` | `/api/groups` | `groups_add` | Crear un grupo |
+| `PUT` | `/api/groups/<name>` | `groups_edit` | Editar roles y miembros de un grupo (label/description ignorados en builtin) |
+| `DELETE` | `/api/groups/<name>` | `groups_delete` | Eliminar un grupo (403 si es builtin) |
+
 ### Roles
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
 | `GET` | `/api/roles` | auth | Listar todos los roles (integrados + personalizados) |
 | `POST` | `/api/roles` | `roles_add` | Crear un rol personalizado |
-| `PUT` | `/api/roles/<name>` | `roles_edit` | Editar etiqueta o permisos de un rol personalizado |
+| `PUT` | `/api/roles/<name>` | `roles_edit` | Editar rol; en integrados solo se acepta `label`; en personalizados acepta `label` y `permissions` |
 | `DELETE` | `/api/roles/<name>` | `roles_delete` | Eliminar un rol personalizado |
 
 ### Sesiones
@@ -210,8 +253,14 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 15 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 19 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
+| `group_roles` | Etiqueta del selector de roles en el modal de grupo |
+| `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |
+| `role_tab_permissions` | Pestaña "Permisos" del modal de rol |
+| `role_tab_assignments` | Pestaña "Asignación" del modal de rol |
+| `role_assign_users` | Título de la columna de usuarios en la pestaña Asignación |
+| `role_assign_groups` | Título de la columna de grupos en la pestaña Asignación |
 
 Para añadir un nuevo idioma, basta con crear un nuevo fichero `.py` en `lib/web_admin/lang/`. Se auto-descubre vía `pkgutil`.
 

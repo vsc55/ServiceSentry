@@ -5,12 +5,29 @@ Initialisation — role restrictions, event listeners, data load.
 // ────────────────────────────── Permission-based UI ──────────────────
  function applyRoleRestrictions() {
 const perms = new Set(currentUser.permissions || []);
-const hasAnyUser = ['users_view','users_add','users_edit','users_delete'].some(p => perms.has(p));
-const hasAnyRole = ['roles_view','roles_add','roles_edit','roles_delete'].some(p => perms.has(p));
-// Users tab: visible if user has any user permission
-const usersLi = document.getElementById('tab-users-li');
-if (usersLi) usersLi.style.display = hasAnyUser ? '' : 'none';
-// Audit tab: visible if user can view audit
+const hasAnyUser    = ['users_view','users_add','users_edit','users_delete'].some(p => perms.has(p));
+const hasAnyRole    = ['roles_view','roles_add','roles_edit','roles_delete'].some(p => perms.has(p));
+const hasAnyGroup   = ['groups_view','groups_add','groups_edit','groups_delete'].some(p => perms.has(p));
+const hasAnySessions = ['sessions_view','sessions_revoke'].some(p => perms.has(p));
+const hasAnyAccess  = hasAnyUser || hasAnyRole || hasAnyGroup || hasAnySessions;
+// Main access tab
+const accessLi = document.getElementById('tab-access-li');
+if (accessLi) accessLi.style.display = hasAnyAccess ? '' : 'none';
+// Sub-tabs
+const stSessions = document.getElementById('subtab-sessions-li');
+if (stSessions) stSessions.style.display = hasAnySessions ? '' : 'none';
+const stUsers = document.getElementById('subtab-users-li');
+if (stUsers) stUsers.style.display = hasAnyUser ? '' : 'none';
+const stGroups = document.getElementById('subtab-groups-li');
+if (stGroups) stGroups.style.display = hasAnyGroup ? '' : 'none';
+const stRoles = document.getElementById('subtab-roles-li');
+if (stRoles) stRoles.style.display = hasAnyRole ? '' : 'none';
+// Activate the first visible sub-tab
+const firstSubtab = ['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles']
+    .map(id => document.getElementById(id))
+    .find(btn => btn && btn.closest('li')?.style.display !== 'none');
+if (firstSubtab) bootstrap.Tab.getOrCreateInstance(firstSubtab).show();
+// Audit tab
 const auditLi = document.getElementById('tab-audit-li');
 if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
 // Save buttons
@@ -23,9 +40,9 @@ document.querySelectorAll('button[onclick="saveConfig()"]').forEach(b => b.style
 // "New role" button
 const btnNewRole = document.getElementById('btnNewRole');
 if (btnNewRole) btnNewRole.style.display = perms.has('roles_add') ? '' : 'none';
-// Roles section visibility
-const rolesSection = document.getElementById('roles-section');
-if (rolesSection) rolesSection.style.display = hasAnyRole ? '' : 'none';
+// "New group" button
+const btnNewGroup = document.getElementById('btnNewGroup');
+if (btnNewGroup) btnNewGroup.style.display = perms.has('groups_add') ? '' : 'none';
 // "New user" button
 const btnNewUser = document.getElementById('btnNewUser');
 if (btnNewUser) btnNewUser.style.display = perms.has('users_add') ? '' : 'none';
@@ -49,32 +66,42 @@ document.getElementById('renameItemInput').addEventListener('keydown', e => {
 if (e.key === 'Enter') { e.preventDefault(); _doRenameItem(); }
 });
 document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', renderStatus);
-document.getElementById('btn-tab-users')?.addEventListener('shown.bs.tab', async () => {
-const [u, s, ro] = await Promise.all([apiGet('/api/users'), apiGet('/api/sessions'), apiGet('/api/roles')]);
+document.getElementById('btn-tab-access')?.addEventListener('shown.bs.tab', async () => {
+const [u, s, ro, gr] = await Promise.all([apiGet('/api/users'), apiGet('/api/sessions'), apiGet('/api/roles'), apiGet('/api/groups')]);
 usersData = u || {};
 sessionsData = s || {};
 rolesData = ro || {};
+groupsData = gr || {};
 renderSessions();
 renderUsers();
 renderRoles();
+renderGroups();
 });
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
 document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
 document.getElementById('btnChangePasswordOk').addEventListener('click', changeOwnPassword);
 document.getElementById('btnResetPasswordOk').addEventListener('click', resetUserPassword);
 document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
+document.getElementById('btnGroupModalOk').addEventListener('click', saveGroupModal);
 
 document.getElementById('btn-tab-overview')?.addEventListener('shown.bs.tab', renderOverview);
 
 (async function init() {
-currentUser = await apiGet('/api/me') || {};
-rolesData = await apiGet('/api/roles') || {};
-modulesData = await apiGet('/api/modules') || {};
-applyModuleDefaults();
-configData = await apiGet('/api/config') || {};
-renderModules();
-renderConfig();
-applyRoleRestrictions();
-renderOverview();
-document.getElementById('loading').remove();
+try {
+    currentUser = await apiGet('/api/me') || {};
+    rolesData = await apiGet('/api/roles') || {};
+    groupsData = await apiGet('/api/groups') || {};
+    modulesData = await apiGet('/api/modules') || {};
+    applyModuleDefaults();
+    configData = await apiGet('/api/config') || {};
+    renderModules();
+    renderConfig();
+    applyRoleRestrictions();
+    renderOverview();
+} catch (e) {
+    console.error('Init error:', e);
+} finally {
+    const loading = document.getElementById('loading');
+    if (loading) loading.remove();
+}
 })();

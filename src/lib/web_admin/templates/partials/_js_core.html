@@ -22,6 +22,7 @@ let configData = {};
 let usersData = {};
 let sessionsData = {};
 let rolesData = {};
+let groupsData = {};
 let currentUser = {};
 let _uid = 0;
 let _addItemCtx = null;     // {target, pathStr}
@@ -204,7 +205,10 @@ function showToast(msg, type = 'success') {
 async function apiGet(url) {
     try {
         const r = await fetch(url);
-        if (r.status === 401) { location.href = '/login'; return null; }
+        if (r.status === 401 || r.status === 302) { location.href = '/login'; return null; }
+        if (!r.ok && r.status !== 403) return null;
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) { location.href = '/login'; return null; }
         return await r.json();
     } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
 }

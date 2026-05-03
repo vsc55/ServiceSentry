@@ -79,8 +79,8 @@
                 <i class="bi bi-activity me-1"></i>{{ i18n.tab_status }}
             </button>
         </li>
-        <li class="nav-item" role="presentation" id="tab-users-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-users" type="button" id="btn-tab-users">
+        <li class="nav-item" role="presentation" id="tab-access-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-access" type="button" id="btn-tab-access">
                 <i class="bi bi-people me-1"></i>{{ i18n.tab_users }}
             </button>
         </li>
@@ -129,37 +129,79 @@
         </div>
 
         <!-- ==================== Users Tab ====================== -->
-        <div class="tab-pane fade" id="tab-users">
-            <!-- Sessions panel -->
-            <div class="card mb-3" id="sessions-panel">
-                <div class="card-header d-flex align-items-center py-2">
-                    <h6 class="mb-0"><i class="bi bi-plug me-2"></i><span id="sessions-title">{{ i18n.active_sessions }}</span></h6>
-                    <button class="btn btn-sm btn-outline-danger ms-auto" onclick="invalidateAllSessions()">
-                        <i class="bi bi-x-circle me-1"></i>{{ i18n.close_all_sessions }}
+        <div class="tab-pane fade" id="tab-access">
+            <!-- Sub-tab nav -->
+            <ul class="nav nav-pills mb-3 gap-1 pt-1" id="accessSubTabs" role="tablist">
+                <li class="nav-item" role="presentation" id="subtab-sessions-li" style="display:none">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-sessions" type="button" id="btn-subtab-sessions">
+                        <i class="bi bi-plug me-1"></i>{{ i18n.subtab_sessions }}
                     </button>
+                </li>
+                <li class="nav-item" role="presentation" id="subtab-users-li" style="display:none">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-users" type="button" id="btn-subtab-users">
+                        <i class="bi bi-people me-1"></i>{{ i18n.subtab_users }}
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation" id="subtab-groups-li" style="display:none">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-groups" type="button" id="btn-subtab-groups">
+                        <i class="bi bi-collection me-1"></i>{{ i18n.subtab_groups }}
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation" id="subtab-roles-li" style="display:none">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-roles" type="button" id="btn-subtab-roles">
+                        <i class="bi bi-shield-lock me-1"></i>{{ i18n.subtab_roles }}
+                    </button>
+                </li>
+            </ul>
+            <div class="tab-content">
+                <!-- Sessions sub-tab -->
+                <div class="tab-pane fade" id="subtab-sessions">
+                    <div class="card mb-3" id="sessions-panel">
+                        <div class="card-header d-flex align-items-center py-2">
+                            <h6 class="mb-0"><i class="bi bi-plug me-2"></i><span id="sessions-title">{{ i18n.active_sessions }}</span></h6>
+                            <button class="btn btn-sm btn-outline-danger ms-auto" onclick="invalidateAllSessions()">
+                                <i class="bi bi-x-circle me-1"></i>{{ i18n.close_all_sessions }}
+                            </button>
+                        </div>
+                        <div class="card-body py-2" id="sessions-container"></div>
+                    </div>
                 </div>
-                <div class="card-body py-2" id="sessions-container"></div>
-            </div>
-            <!-- Users -->
-            <div class="d-flex align-items-center mb-3">
-                <h5 class="mb-0"><i class="bi bi-people me-2"></i>{{ i18n.user_management }}</h5>
-                <button class="btn btn-sm btn-success ms-auto" id="btnNewUser" onclick="openNewUserModal()">
-                    <i class="bi bi-person-plus me-1"></i>{{ i18n.new_user }}
-                </button>
-            </div>
-            <div id="users-container"></div>
-
-            <!-- Roles -->
-            <div id="roles-section">
-            <hr>
-            <div class="d-flex align-items-center mb-3">
-                <h5 class="mb-0"><i class="bi bi-shield-lock me-2"></i>{{ i18n.role_management }}</h5>
-                <button class="btn btn-sm btn-success ms-auto" onclick="openNewRoleModal()"
-                    id="btnNewRole" style="display:none">
-                    <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_role }}
-                </button>
-            </div>
-            <div id="roles-container"></div>
+                <!-- Users sub-tab -->
+                <div class="tab-pane fade" id="subtab-users">
+                    <div class="d-flex align-items-center mb-3">
+                        <h5 class="mb-0"><i class="bi bi-people me-2"></i>{{ i18n.user_management }}</h5>
+                        <button class="btn btn-sm btn-success ms-auto" id="btnNewUser" onclick="openNewUserModal()">
+                            <i class="bi bi-person-plus me-1"></i>{{ i18n.new_user }}
+                        </button>
+                    </div>
+                    <div id="users-container"></div>
+                </div>
+                <!-- Groups sub-tab -->
+                <div class="tab-pane fade" id="subtab-groups">
+                    <div id="groups-section">
+                        <div class="d-flex align-items-center mb-3">
+                            <h5 class="mb-0"><i class="bi bi-collection me-2"></i>{{ i18n.group_management }}</h5>
+                            <button class="btn btn-sm btn-success ms-auto" onclick="openNewGroupModal()"
+                                id="btnNewGroup" style="display:none">
+                                <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_group }}
+                            </button>
+                        </div>
+                        <div id="groups-container"></div>
+                    </div>
+                </div>
+                <!-- Roles sub-tab -->
+                <div class="tab-pane fade" id="subtab-roles">
+                    <div id="roles-section">
+                        <div class="d-flex align-items-center mb-3">
+                            <h5 class="mb-0"><i class="bi bi-shield-lock me-2"></i>{{ i18n.role_management }}</h5>
+                            <button class="btn btn-sm btn-success ms-auto" onclick="openNewRoleModal()"
+                                id="btnNewRole" style="display:none">
+                                <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_role }}
+                            </button>
+                        </div>
+                        <div id="roles-container"></div>
+                    </div>
+                </div>
             </div>
         </div>
 
