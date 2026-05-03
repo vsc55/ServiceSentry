@@ -1,0 +1,188 @@
+{# ================================================================
+   Groups tab — list, create, edit (incl. built-in), delete groups
+   and manage role/member assignments.
+   ================================================================ #}
+
+// ──────────────────────────── Group management ────────────────────
+
+function renderGroups() {
+    const c = document.getElementById('groups-container');
+    if (!c) return;
+    const grpPerms = new Set(currentUser.permissions || []);
+    const canEditGroup   = grpPerms.has('groups_edit');
+    const canDeleteGroup = grpPerms.has('groups_delete');
+    const entries = Object.entries(groupsData);
+    if (!entries.length) { c.innerHTML = '<p class="text-muted">' + t('no_groups') + '</p>'; return; }
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
+    h += '<thead class="table-light"><tr><th>' + t('col_group_name') + '</th><th>' + t('col_group_label') + '</th><th>' + t('col_group_roles') + '</th><th>' + t('col_group_members') + '</th><th style="width:80px">' + t('col_actions') + '</th></tr></thead><tbody>';
+    for (const [name, gd] of entries.sort((a, b) => {
+        if (a[1].builtin && !b[1].builtin) return -1;
+        if (!a[1].builtin && b[1].builtin) return 1;
+        return a[0].localeCompare(b[0]);
+    })) {
+        const builtinBadge = gd.builtin ? ' <span class="badge bg-secondary ms-1 fw-normal" style="font-size:0.65em">' + t('group_builtin_badge') + '</span>' : '';
+        const roleBadges = (gd.roles || []).map(r => {
+            const rd = rolesData[r] || {};
+            return `<span class="badge ${roleBadgeClass(r)} me-1">${esc(rd.label || r)}</span>`;
+        }).join('');
+        const memberCount = (gd.members || []).length;
+        h += `<tr>
+            <td><code>${esc(name)}</code>${builtinBadge}</td>
+            <td>${esc(gd.label || name)}</td>
+            <td class="small">${roleBadges || '<span class="text-muted">\u2014</span>'}</td>
+            <td class="small">${memberCount}</td>
+            <td>
+                ${canEditGroup ? `
+                <button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
+                    onclick="openEditGroupModal('${escAttr(name)}')" title="${t('edit')}">
+                    <i class="bi bi-pencil"></i>
+                </button>` : ''}
+                ${canDeleteGroup && !gd.builtin ? `
+                <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                    onclick="deleteGroup('${escAttr(name)}')" title="${t('delete')}">
+                    <i class="bi bi-trash3"></i>
+                </button>` : ''}
+            </td>
+        </tr>`;
+    }
+    h += '</tbody></table></div>';
+    c.innerHTML = h;
+    const btnNewGroup = document.getElementById('btnNewGroup');
+    if (btnNewGroup) btnNewGroup.style.display = grpPerms.has('groups_add') ? '' : 'none';
+}
+
+let _editingGroup = null;
+
+function _populateGroupRolesGrid(activeRoles, disabled) {
+    const grid = document.getElementById('groupRolesGrid');
+    if (!grid) return;
+    const active = new Set(activeRoles || []);
+    const dis = disabled ? 'disabled' : '';
+    let h = '';
+    for (const [rname, rd] of Object.entries(rolesData).sort((a, b) => a[0].localeCompare(b[0]))) {
+        const id = 'grole_' + rname;
+        h += `<div class="form-check form-check-inline me-2 mb-1">
+            <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(rname)}" ${active.has(rname) ? 'checked' : ''} ${dis}>
+            <label class="form-check-label small" for="${id}">${esc(rd.label || rname)}</label>
+        </div>`;
+    }
+    grid.innerHTML = h || '<span class="text-muted small">' + t('no_roles') + '</span>';
+}
+
+function _populateGroupMembersGrid(activeMembers, searchVal) {
+    const grid = document.getElementById('groupMembersGrid');
+    if (!grid) return;
+    const active = new Set(activeMembers || []);
+    const q = (searchVal || '').toLowerCase();
+    let h = '';
+    for (const uname of Object.keys(usersData).sort()) {
+        if (q && !uname.toLowerCase().includes(q)) continue;
+        const id = 'gmember_' + uname;
+        h += `<div class="form-check">
+            <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(uname)}" ${active.has(uname) ? 'checked' : ''}>
+            <label class="form-check-label small" for="${id}">${esc(uname)}</label>
+        </div>`;
+    }
+    grid.innerHTML = h || '<span class="text-muted small">' + t('no_users') + '</span>';
+    const srch = document.getElementById('gmMemberSearch');
+    if (srch && !srch.dataset.bound) {
+        srch.dataset.bound = '1';
+        srch.addEventListener('input', () => {
+            const members = Array.from(document.querySelectorAll('#groupMembersGrid input:checked')).map(x => x.value);
+            _populateGroupMembersGrid(members, srch.value);
+        });
+    }
+}
+
+function openNewGroupModal() {
+    _editingGroup = null;
+    document.getElementById('groupModalTitle').textContent = t('new_group');
+    document.getElementById('gmName').value = '';
+    document.getElementById('gmName').disabled = false;
+    document.getElementById('gmLabel').value = '';
+    document.getElementById('gmLabel').disabled = false;
+    document.getElementById('gmDescription').value = '';
+    document.getElementById('gmDescription').disabled = false;
+    _populateGroupRolesGrid([]);
+    _populateGroupMembersGrid([], '');
+    document.getElementById('gmMemberSearch').value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('groupModal')).show();
+}
+
+function openEditGroupModal(name) {
+    _editingGroup = name;
+    const gd = groupsData[name] || {};
+    const isBuiltin = !!gd.builtin;
+    document.getElementById('groupModalTitle').textContent = t('edit_group_title') + ': ' + name;
+    document.getElementById('gmName').value = name;
+    document.getElementById('gmName').disabled = true;
+    document.getElementById('gmLabel').value = gd.label || '';
+    document.getElementById('gmLabel').disabled = isBuiltin;
+    document.getElementById('gmDescription').value = gd.description || '';
+    document.getElementById('gmDescription').disabled = isBuiltin;
+    _populateGroupRolesGrid(gd.roles || [], isBuiltin);
+    _populateGroupMembersGrid(gd.members || [], '');
+    document.getElementById('gmMemberSearch').value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('groupModal')).show();
+}
+
+async function saveGroupModal() {
+    const name = document.getElementById('gmName').value.trim();
+    const label = document.getElementById('gmLabel').value.trim();
+    const description = document.getElementById('gmDescription').value.trim();
+    const roles = Array.from(document.querySelectorAll('#groupRolesGrid input[type=checkbox]:checked')).map(cb => cb.value);
+    const members = Array.from(document.querySelectorAll('#groupMembersGrid input[type=checkbox]:checked')).map(cb => cb.value);
+    if (!name) { showToast(t('group_name_required'), 'warning'); return; }
+    const isBuiltin = !!(groupsData[name] || {}).builtin;
+    if (_editingGroup) {
+        const payload = { roles, members };
+        if (!isBuiltin) { payload.label = label; payload.description = description; }
+        const r = await apiPut('/api/groups/' + encodeURIComponent(_editingGroup), payload);
+        if (r && r.ok) {
+            showToast(t('group_updated'));
+            groupsData[_editingGroup] = { ...groupsData[_editingGroup], roles, members };
+            if (!isBuiltin) { groupsData[_editingGroup].label = label || _editingGroup; groupsData[_editingGroup].description = description; }
+        } else {
+            showToast(r?.error || t('update_error'), 'danger'); return;
+        }
+    } else {
+        const r = await apiPost('/api/groups', { name, label, description, roles, members });
+        if (r && r.status === 201) {
+            showToast(t('group_created'));
+            groupsData[name] = { builtin: false, label: label || name, description, roles, members };
+        } else {
+            showToast(r?.data?.error || t('create_error'), 'danger'); return;
+        }
+    }
+    bootstrap.Modal.getInstance(document.getElementById('groupModal')).hide();
+    renderGroups();
+    renderUsers();
+}
+
+async function deleteGroup(name) {
+    if (!confirm(t('group_confirm_delete') + ' [' + name + ']')) return;
+    const r = await apiDelete('/api/groups/' + encodeURIComponent(name));
+    if (r && r.status === 200 && r.data?.ok) {
+        showToast(t('group_deleted'));
+        delete groupsData[name];
+        renderGroups();
+        renderUsers();
+    } else {
+        showToast(r?.data?.error || t('delete_error'), 'danger');
+    }
+}
+
+function populateGroupCheckboxes(activeGroups) {
+    const container = document.getElementById('umGroupsContainer');
+    if (!container) return;
+    const active = new Set(activeGroups || []);
+    let h = '';
+    for (const [gname, gd] of Object.entries(groupsData).sort((a, b) => a[0].localeCompare(b[0]))) {
+        const id = 'umgrp_' + gname;
+        h += `<div class="form-check form-check-inline me-2 mb-1">
+            <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(gname)}" ${active.has(gname) ? 'checked' : ''}>
+            <label class="form-check-label small" for="${id}">${esc(gd.label || gname)}</label>
+        </div>`;
+    }
+    container.innerHTML = h || '<span class="text-muted small">' + t('no_groups') + '</span>';
+}

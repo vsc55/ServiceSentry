@@ -1,0 +1,86 @@
+{# ================================================================
+   Account — shared role constants, shared utilities, and own
+   account actions (change password, dark mode toggle).
+   Must be included before _js_users, _js_roles and _js_groups.
+   ================================================================ #}
+
+// ──────────────────────── Shared role constants ────────────────────
+const BUILTIN_ROLE_BADGES = {
+    admin: 'bg-danger',
+    editor: 'bg-primary',
+    viewer: 'bg-secondary'
+};
+const ROLE_LABELS = I18N.role_labels || {};
+const PERM_LABELS = I18N.permission_labels || {};
+
+function roleBadgeClass(role) {
+    return BUILTIN_ROLE_BADGES[role] || 'bg-info text-dark';
+}
+
+// Populate a role <select> from rolesData
+function populateRoleDropdown(selectId, selected) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    sel.innerHTML = '';
+    const builtins = ['admin', 'editor', 'viewer'];
+    for (const r of builtins) {
+        const rd = rolesData[r] || {};
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = rd.label || r;
+        if (r === selected) opt.selected = true;
+        sel.appendChild(opt);
+    }
+    const customs = Object.entries(rolesData)
+        .filter(([n]) => !builtins.includes(n))
+        .sort((a, b) => a[0].localeCompare(b[0]));
+    if (customs.length) {
+        const grp = document.createElement('optgroup');
+        grp.label = t('role_management');
+        for (const [n, rd] of customs) {
+            const opt = document.createElement('option');
+            opt.value = n;
+            opt.textContent = rd.label || n;
+            if (n === selected) opt.selected = true;
+            grp.appendChild(opt);
+        }
+        sel.appendChild(grp);
+    }
+}
+
+// ──────────────────────────── Account tab ─────────────────────────
+async function changeOwnPassword() {
+    const cur = document.getElementById('pwCurrent').value;
+    const nw  = document.getElementById('pwNew').value;
+    const conf = document.getElementById('pwConfirm').value;
+    if (!cur)        { showToast(t('enter_current_password'), 'warning'); return; }
+    if (!nw)         { showToast(t('enter_new_password'),     'warning'); return; }
+    if (nw !== conf) { showToast(t('passwords_dont_match'),   'warning'); return; }
+    const r = await apiPut('/api/users/me/password', { current_password: cur, new_password: nw });
+    if (r && r.ok) {
+        showToast(t('password_changed'));
+        document.getElementById('pwCurrent').value = '';
+        document.getElementById('pwNew').value     = '';
+        document.getElementById('pwConfirm').value = '';
+        bootstrap.Modal.getInstance(document.getElementById('changePasswordModal'))?.hide();
+    } else {
+        showToast(r?.error || t('password_change_error'), 'danger');
+    }
+}
+
+function openChangePasswordModal() {
+    document.getElementById('pwCurrent').value = '';
+    document.getElementById('pwNew').value     = '';
+    document.getElementById('pwConfirm').value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('changePasswordModal')).show();
+}
+
+function toggleDarkMode() {
+    const html = document.documentElement;
+    const isDark = html.getAttribute('data-bs-theme') === 'dark';
+    const newMode = isDark ? 'light' : 'dark';
+    html.setAttribute('data-bs-theme', newMode);
+    const sw = document.getElementById('darkModeSwitch');
+    if (sw) sw.checked = !isDark;
+    fetch('/theme/' + newMode);
+}

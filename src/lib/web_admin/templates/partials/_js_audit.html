@@ -24,6 +24,7 @@ function formatAuditDetailFull(detail) {
 
     if (typeof detail === 'object') {
         let html = '';
+        if (detail.name)     html += `<p class="mb-1"><strong>${t('col_group_name') || 'Group'}:</strong> <code>${esc(detail.name)}</code></p>`;
         if (detail.username) html += `<p class="mb-1"><strong>${t('col_user')}:</strong> ${esc(detail.username)}</p>`;
         if (detail.role)     html += `<p class="mb-1"><strong>Role:</strong> ${esc(detail.role)}</p>`;
         if (detail.display_name && !detail.changes) html += `<p class="mb-1">${esc(detail.display_name)}</p>`;
@@ -84,6 +85,12 @@ function auditSummaryHtml(idx, detail) {
             label = n
                 ? esc(detail.username) + ' · ' + tf('audit_n_changes', n)
                 : esc(detail.username);
+            if (!n) return `<span class="text-muted small">${label}</span>`;
+        } else if (detail.name) {
+            const n = Array.isArray(detail.changes) ? detail.changes.length : 0;
+            label = n
+                ? esc(detail.name) + ' · ' + tf('audit_n_changes', n)
+                : esc(detail.name);
             if (!n) return `<span class="text-muted small">${label}</span>`;
         } else {
             label = '···';

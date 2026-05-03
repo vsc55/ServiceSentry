@@ -1,0 +1,82 @@
+{# ================================================================
+   Sessions tab — list active sessions, revoke, invalidate all.
+   ================================================================ #}
+
+// ──────────────────────────── Session management ─────────────────
+
+function renderSessions() {
+    const c = document.getElementById('sessions-container');
+    if (!c) return;
+    const entries = Object.entries(sessionsData);
+    const title = document.getElementById('sessions-title');
+    if (title) title.textContent = t('active_sessions') + ' (' + entries.length + ')';
+    if (!entries.length) {
+        c.innerHTML = '<p class="text-muted small mb-0">' + t('no_active_sessions') + '</p>';
+        return;
+    }
+    entries.sort((a, b) => (b[1].last_seen || '').localeCompare(a[1].last_seen || ''));
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">';
+    h += '<thead class="table-light"><tr><th>' + t('col_user') + '</th><th>' + t('col_ip') + '</th><th>' + t('col_created') + '</th><th>' + t('col_last_seen') + '</th><th style="width:70px"></th></tr></thead><tbody>';
+    for (const [sid, s] of entries) {
+        const isCurrent = !!s.is_current;
+        const badge = isCurrent ? ' <span class="badge bg-success">' + t('current_session') + '</span>' : '';
+        h += `<tr${isCurrent ? ' class="table-success"' : ''}>
+            <td><code>${esc(s.username)}</code>${badge}</td>
+            <td class="small">${esc(s.ip)}</td>
+            <td class="small">${new Date(s.created).toLocaleString()}</td>
+            <td class="small">${new Date(s.last_seen).toLocaleString()}</td>
+            <td><button class="btn btn-sm btn-outline-danger py-0 px-1"
+                onclick="revokeSession('${escAttr(sid)}')" title="${t('revoke_session')}">
+                <i class="bi bi-x-lg"></i></button></td>
+        </tr>`;
+    }
+    h += '</tbody></table></div>';
+    c.innerHTML = h;
+}
+
+async function revokeSession(sid) {
+    const isCurrent = !!sessionsData[sid]?.is_current;
+    const r = await apiPost('/api/sessions/revoke/' + encodeURIComponent(sid), {});
+    if (r && r.status === 200 && r.data?.ok) {
+        showToast(t('session_revoked'));
+        delete sessionsData[sid];
+        if (isCurrent) {
+            setTimeout(() => { location.href = '/login'; }, 800);
+            return;
+        }
+        renderSessions();
+        renderUsers();
+    } else {
+        showToast(r?.data?.error || t('connection_error'), 'danger');
+    }
+}
+
+async function revokeUserSessions(username) {
+    if (!confirm(tf('confirm_revoke_user_sessions', username))) return;
+    const r = await apiPost('/api/sessions/revoke-user/' + encodeURIComponent(username), {});
+    if (r && r.status === 200 && r.data?.ok) {
+        showToast(t('user_sessions_revoked'));
+        if (username === currentUser.username) {
+            setTimeout(() => { location.href = '/login'; }, 800);
+            return;
+        }
+        for (const [sid, s] of Object.entries(sessionsData)) {
+            if (s.username === username) delete sessionsData[sid];
+        }
+        renderSessions();
+        renderUsers();
+    } else {
+        showToast(r?.data?.error || t('connection_error'), 'danger');
+    }
+}
+
+async function invalidateAllSessions() {
+    if (!confirm(t('confirm_close_all_sessions'))) return;
+    const r = await apiPost('/api/sessions/invalidate', {});
+    if (r && r.status === 200 && r.data?.ok) {
+        showToast(t('sessions_closed'));
+        setTimeout(() => { location.href = '/login'; }, 1000);
+    } else {
+        showToast(r?.data?.error || t('connection_error'), 'danger');
+    }
+}

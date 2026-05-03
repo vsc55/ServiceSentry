@@ -181,6 +181,12 @@ LANG = {
         'user_sessions_revoked': 'User sessions closed',
         'all_sessions_revoked': 'All sessions closed',
         'checks_run': 'Checks executed',
+        'role_created': 'Role created',
+        'role_updated': 'Role updated',
+        'role_deleted': 'Role deleted',
+        'group_created': 'Group created',
+        'group_updated': 'Group updated',
+        'group_deleted': 'Group deleted',
     },
     # Telegram test
     'telegram_test': 'Test Telegram',
