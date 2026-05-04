@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for Telegram test endpoint, internationalisation and UI reorganisation."""
-
-import unittest.mock
+"""Tests for UI routes: /, /api/me, /lang/<code>, /theme/<mode>."""
 
 import pytest
 
@@ -19,103 +17,108 @@ from tests.conftest import _login
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 
-# ──────────────────────────── Telegram Test ────────────────────────
+# ──────────────────────────── Dark mode ────────────────────────────
 
-class TestTelegramTest:
-    """Telegram test-message endpoint tests."""
+class TestDarkMode:
+    """Dark mode toggle, persistence and default handling."""
 
-    def test_requires_auth(self, client):
-        """Unauthenticated request redirects to login."""
-        resp = client.post("/api/telegram/test", json={
-            "token": "x", "chat_id": "y",
+    def test_default_theme_is_light(self, client):
+        """Without any config, theme defaults to light."""
+        _login(client)
+        html = client.get("/").data
+        assert b'data-bs-theme="light"' in html
+
+    def test_toggle_to_dark(self, client):
+        """Hitting /theme/dark switches the session to dark mode."""
+        _login(client)
+        client.get("/theme/dark")
+        html = client.get("/").data
+        assert b'data-bs-theme="dark"' in html
+
+    def test_toggle_back_to_light(self, client):
+        """Hitting /theme/light switches back to light mode."""
+        _login(client)
+        client.get("/theme/dark")
+        client.get("/theme/light")
+        html = client.get("/").data
+        assert b'data-bs-theme="light"' in html
+
+    def test_theme_persisted_to_user(self, admin, client):
+        """Theme preference is saved in the user record."""
+        _login(client)
+        client.get("/theme/dark")
+        assert admin._users["admin"]["dark_mode"] is True
+        client.get("/theme/light")
+        assert admin._users["admin"]["dark_mode"] is False
+
+    def test_theme_loaded_on_login(self, admin, client):
+        """User's saved dark_mode preference is restored on login."""
+        admin._users["admin"]["dark_mode"] = True
+        _login(client)
+        html = client.get("/").data
+        assert b'data-bs-theme="dark"' in html
+
+    def test_api_me_includes_dark_mode(self, client):
+        """GET /api/me includes the dark_mode field."""
+        _login(client)
+        data = client.get("/api/me").get_json()
+        assert "dark_mode" in data
+        assert data["dark_mode"] is False
+
+    def test_invalid_theme_ignored(self, client):
+        """Invalid theme mode is silently ignored."""
+        _login(client)
+        client.get("/theme/purple")
+        html = client.get("/").data
+        assert b'data-bs-theme="light"' in html
+
+    def test_global_default_dark_mode(self, config_dir, var_dir):
+        """WebAdmin can be initialised with dark mode as default."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      default_dark_mode=True)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        _login(c)
+        html = c.get("/").data
+        assert b'data-bs-theme="dark"' in html
+
+    def test_save_config_updates_default_dark_mode(self, admin, client):
+        """Saving config.json web_admin.dark_mode updates the runtime default."""
+        _login(client)
+        assert admin._default_dark_mode is False
+        client.put("/api/config", json={
+            "web_admin": {"dark_mode": True},
         })
-        assert resp.status_code == 302
+        assert admin._default_dark_mode is True
 
-    def test_viewer_denied(self, client):
-        """Viewer role cannot send test messages."""
+    def test_user_dark_mode_in_users_list(self, admin, client):
+        """GET /api/users includes dark_mode for each user."""
+        _login(client)
+        client.get("/theme/dark")
+        users = client.get("/api/users").get_json()
+        assert users["admin"]["dark_mode"] is True
+
+    def test_admin_can_set_user_dark_mode(self, admin, client):
+        """Admin can set dark_mode for another user via PUT."""
         _login(client)
         client.post("/api/users", json={
-            "username": "v1", "password": "v", "role": "viewer",
+            "username": "dmuser", "password": "x", "role": "viewer",
         })
-        client.get("/logout")
-        _login(client, "v1", "v")
-        resp = client.post("/api/telegram/test", json={
-            "token": "x", "chat_id": "y",
-        })
-        assert resp.status_code == 403
-
-    def test_missing_fields(self, client):
-        """Returns 400 when body is empty."""
-        _login(client)
-        resp = client.post("/api/telegram/test", json={})
-        assert resp.status_code == 400
-
-    def test_missing_token(self, client):
-        """Returns 400 when token is empty."""
-        _login(client)
-        resp = client.post("/api/telegram/test", json={"chat_id": "123"})
-        assert resp.status_code == 400
-
-    def test_missing_chat_id(self, client):
-        """Returns 400 when chat_id is empty."""
-        _login(client)
-        resp = client.post("/api/telegram/test", json={"token": "abc"})
-        assert resp.status_code == 400
-
-    def test_success(self, client):
-        """Returns ok when the Telegram API returns 200."""
-        _login(client)
-        with unittest.mock.patch("requests.post") as mock_post:
-            mock_post.return_value = unittest.mock.Mock(status_code=200)
-            resp = client.post("/api/telegram/test", json={
-                "token": "123:ABC", "chat_id": "456",
-            })
+        resp = client.put("/api/users/dmuser", json={"dark_mode": True})
         assert resp.status_code == 200
-        assert resp.get_json()["ok"] is True
+        assert admin._users["dmuser"]["dark_mode"] is True
 
-    def test_api_error(self, client):
-        """Returns 502 when the Telegram API rejects the request."""
-        _login(client)
-        mock_resp = unittest.mock.Mock()
-        mock_resp.status_code = 401
-        mock_resp.headers = {"content-type": "application/json"}
-        mock_resp.json.return_value = {"description": "Unauthorized"}
-        with unittest.mock.patch("requests.post", return_value=mock_resp):
-            resp = client.post("/api/telegram/test", json={
-                "token": "bad", "chat_id": "456",
-            })
-        assert resp.status_code == 502
-        assert "Unauthorized" in resp.get_json()["error"]
 
-    def test_network_error(self, client):
-        """Returns 502 on network exceptions."""
-        _login(client)
-        with unittest.mock.patch("requests.post", side_effect=Exception("timeout")):
-            resp = client.post("/api/telegram/test", json={
-                "token": "123:ABC", "chat_id": "456",
-            })
-        assert resp.status_code == 502
-        assert "timeout" in resp.get_json()["error"]
+# ──────────────────────────── Config dark mode ─────────────────────
 
-    def test_non_json_error_response(self, client):
-        """Returns 502 with generic message for non-JSON error body."""
-        _login(client)
-        mock_resp = unittest.mock.Mock()
-        mock_resp.status_code = 500
-        mock_resp.headers = {"content-type": "text/html"}
-        with unittest.mock.patch("requests.post", return_value=mock_resp):
-            resp = client.post("/api/telegram/test", json={
-                "token": "123:ABC", "chat_id": "456",
-            })
-        assert resp.status_code == 502
-        assert "500" in resp.get_json()["error"]
+class TestConfigDarkMode:
+    """Dark mode field appears in the Configuration tab."""
 
-    def test_dashboard_has_test_button(self, client):
-        """Dashboard HTML includes the Telegram test button."""
+    def test_config_tab_renders_dark_mode_field(self, client):
+        """The config tab JS ensures web_admin.dark_mode is rendered."""
         _login(client)
-        resp = client.get("/")
-        assert b"btnTestTelegram" in resp.data
-        assert b"testTelegram()" in resp.data
+        html = client.get("/").data
+        assert b"configData.web_admin.dark_mode" in html
 
 
 # ──────────────────────────── Internationalisation ─────────────────

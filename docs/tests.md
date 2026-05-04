@@ -410,7 +410,7 @@
 
 ## 11. Panel Web — Inicialización y autenticación
 
-**Archivo:** `tests/test_web_admin.py` — `TestWebAdminInit`, `TestAuthentication`
+**Archivos:** `tests/test_wa_init.py` — `TestWebAdminInit` · `tests/test_wa_auth.py` — `TestAuthentication`, `TestRememberMe`
 
 ### `TestWebAdminInit`
 
@@ -434,7 +434,7 @@
 
 ## 12. Panel Web — API módulos y configuración
 
-**Archivo:** `tests/test_web_admin.py` — `TestApiModules`, `TestApiConfig`, `TestModuleItemSchemas`
+**Archivos:** `tests/test_wa_modules.py` — `TestApiModules`, `TestApiStatus`, `TestApiOverview`, `TestModuleItemSchemas`, `TestConfigEdgeCases` · `tests/test_wa_config.py` — `TestApiConfig`
 
 ### `TestApiModules`
 
@@ -476,7 +476,7 @@
 
 ## 13. Panel Web — API estado y ejecución de checks
 
-**Archivo:** `tests/test_web_admin.py` — `TestApiStatus`, `TestApiOverview`, `TestApiRunChecks`
+**Archivos:** `tests/test_wa_modules.py` — `TestApiStatus`, `TestApiOverview` · `tests/test_wa_checks.py` — `TestApiRunChecks`
 
 ### `TestApiStatus`
 
@@ -512,7 +512,7 @@
 
 ## 14. Panel Web — Usuarios, roles y sesiones
 
-**Archivo:** `tests/test_web_admin.py` — `TestApiUsers`, `TestRolePermissions`, `TestChangeOwnPassword`, `TestSessionRegistry`, `TestRememberMe`
+**Archivos:** `tests/test_wa_users.py` — `TestApiUsers`, `TestChangeOwnPassword` · `tests/test_wa_sessions.py` — `TestSessionRegistry` · `tests/test_wa_auth.py` — `TestRememberMe`
 
 ### `TestApiUsers`
 
@@ -547,48 +547,164 @@
 
 ## 15. Panel Web — i18n, UI y seguridad
 
-**Archivo:** `tests/test_web_admin.py` — `TestI18n`, `TestDarkMode`, `TestAuditLog`, `TestTelegramTest`, `TestSecurityInjection`
+**Archivos:** `tests/test_wa_ui.py` — `TestI18n`, `TestDarkMode`, `TestConfigDarkMode`, `TestUIReorganisation` · `tests/test_wa_telegram.py` — `TestTelegramTest` · `tests/test_wa_audit.py` — `TestAuditLog` · `tests/test_wa_security.py` — `TestSecurityInjection`
 
 ### `TestI18n`
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_supported_languages` | Lista de idiomas disponibles en `/api/i18n/langs` | `en_EN`, `es_ES` presentes | Si faltan |
-| `test_set_language` | `PUT /api/i18n/lang` cambia el idioma | `200`, idioma activo actualizado | Si no cambia |
-| `test_translations_loaded` | Traducciones disponibles en el HTML | Claves i18n en el template | Si no aparecen |
+| `test_default_language_is_english` | Idioma por defecto en sesión nueva | `lang == "en_EN"` | Si es otro |
+| `test_switch_to_spanish` | `GET /lang/es_ES` cambia la sesión | `lang == "es_ES"` | Si no cambia |
+| `test_switch_back_to_english` | Volver a inglés tras cambiar | `lang == "en_EN"` | Si no cambia |
+| `test_invalid_language_ignored` | Código inválido (`fr`) silenciado | Idioma anterior conservado | Si lanza o acepta |
+| `test_spanish_error_messages` | Errores de login en español | Mensaje en castellano | Si sigue en inglés |
+| `test_login_page_renders_in_english` | Formulario de login en inglés | `"Sign In"` en HTML | Si no aparece |
+| `test_login_page_renders_in_spanish` | Formulario de login en español | `"Entrar"` en HTML | Si no aparece |
+| `test_lang_switch_without_auth` | Cambio de idioma sin login | `200`, idioma activo | Si redirige a login |
+| `test_api_errors_in_spanish` | Errores de API en el idioma activo | Mensaje en castellano | Si devuelve otro idioma |
+| `test_lang_persisted_to_user_record` | Preferencia guardada en el usuario | Campo `lang` en `_users` | Si no se persiste |
+| `test_lang_loaded_on_login` | Idioma del usuario restaurado al login | Sesión con idioma guardado | Si usa defecto |
+| `test_global_default_lang` | `WebAdmin(..., default_lang="es_ES")` | Sesión nueva en español | Si usa inglés |
+| `test_global_default_invalid_falls_back` | `default_lang` inválido cae a `"en_EN"` | `lang == "en_EN"` | Si lanza o usa el inválido |
+| `test_user_lang_in_users_list` | `GET /api/users` incluye `lang` por usuario | Campo `lang` presente | Si no está |
+| `test_admin_can_set_user_lang` | Admin cambia idioma de otro usuario via PUT | `200`, campo actualizado | Si es `403` |
+| `test_create_user_with_lang` | `POST /api/users` con `lang` | Usuario creado con idioma | Si se descarta |
+| `test_create_user_without_lang` | `POST /api/users` sin `lang` | `lang == ""` (usa defecto del sistema) | Si pone otra cosa |
+| `test_update_own_lang_updates_session` | Editar propio usuario actualiza la sesión activa | Sesión refleja el nuevo idioma | Si no se propaga |
+| `test_save_config_updates_default_lang` | `PUT /api/config` con `web_admin.lang` | `_default_lang` actualizado | Si no cambia |
+| `test_save_config_invalid_lang_ignored` | Guardar idioma inválido | `_default_lang` sin cambio | Si lo acepta |
+| `test_dashboard_exposes_default_lang` | Dashboard incluye `SYSTEM_DEFAULT_LANG` | Cadena presente en HTML | Si no aparece |
+| `test_dashboard_exposes_supported_langs` | Dashboard incluye `SUPPORTED_LANGS` | Cadena presente en HTML | Si no aparece |
 
-### `TestDarkMode`, `TestConfigDarkMode`
+### `TestDarkMode`
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| Activar dark mode | `PUT /api/config/ui` con `dark_mode: true` | `200`, preferencia guardada | Si no se guarda |
-| Persistencia del dark mode | Recargar la página tras activar | HTML con clase de dark mode | Si no aparece |
+| `test_default_theme_is_light` | Sin config, tema es claro | `data-bs-theme="light"` en HTML | Si es dark |
+| `test_toggle_to_dark` | `GET /theme/dark` activa modo oscuro | `data-bs-theme="dark"` en HTML | Si no cambia |
+| `test_toggle_back_to_light` | `GET /theme/light` vuelve al modo claro | `data-bs-theme="light"` en HTML | Si no cambia |
+| `test_theme_persisted_to_user` | Preferencia guardada en el usuario | `_users["admin"]["dark_mode"]` correcto | Si no se persiste |
+| `test_theme_loaded_on_login` | Preferencia del usuario restaurada al login | HTML refleja el dark_mode guardado | Si usa defecto |
+| `test_api_me_includes_dark_mode` | `GET /api/me` incluye `dark_mode` | Campo presente y correcto | Si no está |
+| `test_invalid_theme_ignored` | Tema inválido (`/theme/purple`) silenciado | Tema anterior conservado | Si lanza o acepta |
+| `test_global_default_dark_mode` | `WebAdmin(..., default_dark_mode=True)` | Sesión nueva en modo oscuro | Si usa claro |
+| `test_save_config_updates_default_dark_mode` | `PUT /api/config` con `web_admin.dark_mode` | `_default_dark_mode` actualizado | Si no cambia |
+| `test_user_dark_mode_in_users_list` | `GET /api/users` incluye `dark_mode` por usuario | Campo presente | Si no está |
+| `test_admin_can_set_user_dark_mode` | Admin cambia dark_mode de otro usuario via PUT | `200`, campo actualizado | Si es `403` |
+
+### `TestConfigDarkMode`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_config_tab_renders_dark_mode_field` | La pestaña Config renderiza el campo dark_mode | `configData.web_admin.dark_mode` en HTML | Si no aparece |
+
+### `TestUIReorganisation`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_navbar_has_user_dropdown` | Navbar contiene el menú de usuario | Icono y función presentes en HTML | Si no aparecen |
+| `test_change_password_modal_exists` | Modal de cambio de contraseña propia | `id="changePasswordModal"` en HTML | Si no está |
+| `test_reset_password_modal_exists` | Modal de reset de contraseña por admin | `id="resetPasswordModal"` en HTML | Si no está |
+| `test_no_inline_password_form_in_users_tab` | Formulario inline antiguo eliminado | No aparece `onclick="changeOwnPassword()"` | Si sigue presente |
+| `test_users_table_has_reset_icon` | Tabla de usuarios tiene botón de reset | `openResetPasswordModal(` en HTML | Si no aparece |
+| `test_reset_password_via_admin_api` | Admin reseta contraseña de otro usuario via PUT | `200`, hash actualizado | Si no cambia |
+| `test_language_selector_in_user_menu` | Selector de idioma está en el menú de usuario | Icono `bi-translate` y `/lang/` en HTML | Si no aparecen |
+| `test_dark_mode_toggle_in_user_menu` | Toggle de dark mode está en el menú de usuario | `id="darkModeSwitch"` y `toggleDarkMode()` | Si no aparecen |
+
+### `TestTelegramTest`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_requires_auth` | Sin login redirige a `/login` | `302` | Si devuelve `200` |
+| `test_viewer_denied` | Rol `viewer` no puede enviar mensajes | `403` | Si envía |
+| `test_missing_fields` | Body vacío | `400` | Si acepta |
+| `test_missing_token` | Sin campo `token` | `400` | Si acepta |
+| `test_missing_chat_id` | Sin campo `chat_id` | `400` | Si acepta |
+| `test_success` | API Telegram devuelve `200` (mock) | `{"ok": true}` | Si falla |
+| `test_api_error` | API Telegram devuelve `401` (mock) | `502`, mensaje de error | Si devuelve `200` |
+| `test_network_error` | Excepción de red (mock) | `502`, mensaje de excepción | Si no maneja |
+| `test_non_json_error_response` | Respuesta `500` no-JSON (mock) | `502`, código en mensaje | Si lanza |
+| `test_dashboard_has_test_button` | Dashboard incluye el botón de prueba | `btnTestTelegram` en HTML | Si no aparece |
 
 ### `TestAuditLog`
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_audit_requires_auth` | Sin login | `302` | Si devuelve datos |
-| `test_audit_returns_list` | `GET /api/audit` | Lista de eventos | Si es otro tipo |
-| `test_modules_save_audited` | Guardar módulos crea entrada | `"modules_updated"` en el log | Si no aparece |
-| `test_login_audited` | Login exitoso crea entrada | `"login"` en el log | Si no aparece |
+| `test_login_audited` | Login exitoso genera evento | `"login"` en audit | Si no aparece |
+| `test_failed_login_audited` | Login fallido genera evento | `"login_failed"` en audit | Si no aparece |
+| `test_logout_audited` | Logout genera evento | `"logout"` en audit | Si no aparece |
+| `test_modules_save_audited` | Guardar módulos genera evento | `"modules_updated"` en audit | Si no aparece |
+| `test_config_save_audited` | Guardar config genera evento | `"config_updated"` en audit | Si no aparece |
+| `test_user_create_audited` | Crear usuario genera evento | `"user_created"` en audit | Si no aparece |
+| `test_user_update_audited` | Editar usuario genera evento | `"user_updated"` en audit | Si no aparece |
+| `test_user_delete_audited` | Eliminar usuario genera evento | `"user_deleted"` en audit | Si no aparece |
+| `test_password_change_audited` | Cambio de contraseña propia genera evento | `"password_changed"` en audit | Si no aparece |
+| `test_all_sessions_revoked_audited` | Revocar todas las sesiones genera evento | `"sessions_revoked"` en audit | Si no aparece |
+| `test_audit_api_returns_entries` | `GET /api/audit` devuelve la lista | Lista con entradas | Si está vacía |
+| `test_audit_api_viewer_can_read_but_not_delete` | Viewer puede leer pero no borrar | `200` GET / `403` DELETE | Si puede borrar |
+| `test_audit_persisted_to_file` | Entradas se guardan en disco | Archivo actualizado tras evento | Si solo en memoria |
+| `test_audit_max_entries` | Límite máximo de entradas | No supera el máximo configurado | Si crece sin límite |
+| `test_audit_tab_in_ui` | Pestaña de audit visible en el dashboard | `id="tab-audit"` en HTML | Si no aparece |
+| `test_audit_entry_has_required_fields` | Estructura de cada entrada | Campos `event`, `user`, `ts` presentes | Si falta alguno |
+| `test_admin_password_reset_audited` | Reset de contraseña por admin genera evento | `"password_reset"` en audit | Si no aparece |
+| `test_password_reset_separate_from_update` | Reset genera evento distinto al de edición | No aparece `"user_updated"` | Si los mezcla |
+| `test_config_save_records_old_and_new` | El evento de config incluye diff old/new | Campos `old` y `new` en el evento | Si no hay diff |
+| `test_sensitive_fields_masked_in_audit` | Campos sensibles enmascarados en el diff | `"***"` en lugar del valor real | Si aparece en claro |
+| `test_no_update_audit_when_no_changes` | Guardar sin cambios no genera evento | Lista de audit sin `"user_updated"` | Si genera evento vacío |
+| `test_diff_dicts_helper` | Helper `_diff_dicts` calcula el diff correcto | Sólo claves modificadas en el resultado | Si incluye todas |
+| `test_clear_all_entries` | `DELETE /api/audit` vacía la lista | `200`, lista vacía tras la petición | Si quedan entradas |
+| `test_clear_all_persisted_to_disk` | Vaciar audit persiste en disco | Archivo en disco vacío tras borrar | Si sólo en memoria |
+| `test_delete_single_entry` | `DELETE /api/audit/<idx>` elimina entrada puntual | `200`, entrada ya no en lista | Si permanece |
+| `test_delete_single_entry_oob` | Índice fuera de rango | `404` | Si borra o lanza |
+| `test_delete_single_entry_negative` | Índice negativo | `404` | Si borra o lanza |
+| `test_delete_single_entry_viewer_forbidden` | Viewer no puede borrar entradas | `403` | Si borra |
+| `test_delete_single_entry_persisted` | Borrado puntual persiste en disco | Archivo actualizado sin la entrada | Si sólo en memoria |
 
 ### `TestSecurityInjection`
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_xss_in_module_name` | Payload XSS como nombre de módulo | Almacenado literal, no ejecutado | Si se interpreta como HTML |
-| `test_sql_injection_in_user` | Payload SQL como nombre de usuario | Almacenado literal | Si causa error DB |
-| `test_ssti_in_config` | Payload `{{7*7}}` en configuración | Almacenado como `"{{7*7}}"` (no `49`) | Si se evalúa |
-| `test_viewer_cannot_write_modules` | Escalada de privilegios | `403` | Si permite escritura |
-| `test_special_chars_in_module_keys` | Caracteres especiales en claves de módulo | Claves guardadas literal | Si causan error |
+| `test_xss_in_username_create` | XSS en nombre de usuario al crear | Almacenado literal, `200`/`201` | Si se evalúa como HTML |
+| `test_xss_in_display_name` | XSS en display name | Almacenado literal | Si se ejecuta |
+| `test_xss_in_login_form_username` | XSS en campo username del login | No redirige al dashboard | Si lo ejecuta |
+| `test_sql_injection_in_username` | Payload SQL como nombre de usuario | Almacenado literal | Si causa error DB |
+| `test_sql_injection_in_user_lookup` | Payload SQL en operación de lectura | Almacenado literal | Si causa error DB |
+| `test_path_traversal_lang_endpoint` | Path traversal en `/lang/` | `200` o ignorado, sin acceso a ficheros | Si devuelve ficheros |
+| `test_path_traversal_theme_endpoint` | Path traversal en `/theme/` | `200` o ignorado | Si devuelve ficheros |
+| `test_path_traversal_session_revoke` | Path traversal en revocación de sesión | `404` o `400` | Si accede a rutas internas |
+| `test_non_json_content_type` | Content-Type incorrecto en endpoints JSON | `400` o `415` | Si acepta datos malformados |
+| `test_empty_body_json_endpoints` | Body vacío en endpoints que requieren JSON | `400` | Si lanza excepción no controlada |
+| `test_deeply_nested_json` | JSON muy anidado | No lanza excepción, respuesta controlada | Si causa stack overflow |
+| `test_very_large_json_payload` | JSON de gran tamaño | No lanza excepción | Si cuelga el servidor |
+| `test_null_bytes_in_json_fields` | Bytes nulos en campos de texto | Almacenados literal o rechazados | Si causan error |
+| `test_unicode_abuse_in_fields` | Caracteres Unicode extremos en campos | Almacenados literal | Si causan error |
+| `test_viewer_cannot_create_user` | Escalada de privilegios (crear usuario) | `403` | Si crea el usuario |
+| `test_viewer_cannot_delete_user` | Escalada de privilegios (eliminar usuario) | `403` | Si elimina |
+| `test_editor_cannot_create_or_delete_user` | Editor no puede gestionar usuarios | `403` | Si lo permite |
+| `test_editor_cannot_access_sessions` | Editor no puede ver sesiones | `403` | Si las muestra |
+| `test_viewer_cannot_write_modules` | Viewer no puede editar módulos | `403` | Si guarda datos |
+| `test_viewer_cannot_write_config` | Viewer no puede editar config | `403` | Si guarda datos |
+| `test_viewer_can_access_audit` | Viewer sí puede leer audit | `200` | Si es `403` |
+| `test_self_promotion_via_update` | Usuario se intenta promover a admin | `403` | Si lo permite |
+| `test_unauthenticated_api_access` | Acceso sin autenticar a múltiples endpoints | `302` en todos | Si alguno devuelve `200` |
+| `test_login_wrong_password` | Credenciales incorrectas | `401` o redirección al login | Si entra |
+| `test_login_nonexistent_user` | Usuario inexistente | `401` o redirección al login | Si entra |
+| `test_login_empty_credentials` | Credenciales vacías | `401` o redirección al login | Si entra |
+| `test_forged_session_token_rejected` | Token de sesión falsificado | Redirección a login | Si acepta la sesión |
+| `test_reused_session_token_after_logout` | Token de sesión reutilizado tras logout | Redirección a login | Si reutiliza la sesión |
+| `test_wrong_http_methods_rejected` | Métodos HTTP incorrectos en endpoints | `405` o `302` | Si devuelve `200` |
+| `test_ssti_in_display_name` | SSTI `{{7*7}}` en display name | Almacenado como literal `"{{7*7}}"` | Si se evalúa como `49` |
+| `test_invalid_role_rejected` | Rol inexistente al crear usuario | `400` | Si acepta el rol |
+| `test_update_to_invalid_role_rejected` | Cambiar usuario a rol inexistente | `400` | Si acepta el rol |
+| `test_special_chars_in_module_keys` | Caracteres especiales en claves de módulo | Guardados literal | Si causan error |
 | `test_audit_log_not_injectable` | Payloads XSS en entradas de audit | Almacenados literales | Si se ejecutan |
 
 ---
 
 ## 16. Panel Web — Permisos granulares y roles personalizados
 
-**Archivo:** `tests/test_web_admin.py` — `TestPermissionsConstants`, `TestCustomRoles`, `TestGranularPermissions`
+
+**Archivos:** `tests/test_wa_roles.py` — `TestPermissionsConstants`, `TestCustomRoles`, `TestGranularPermissions` · `tests/test_wa_groups.py` — grupos de usuarios
 
 ### `TestPermissionsConstants`
 

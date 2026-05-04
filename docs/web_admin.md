@@ -164,6 +164,7 @@ El permiso requerido se indica entre paréntesis.
 |--------|------|---------|-------------|
 | `GET` | `/api/modules` | auth | Obtener todas las configuraciones de módulos |
 | `PUT` | `/api/modules` | `modules_edit` | Guardar todas las configuraciones de módulos |
+| `GET` | `/api/status` | auth | Obtener el contenido de `status.json` (solo lectura) |
 | `GET` | `/api/overview` | auth | Obtener resumen de estado de módulos |
 
 ### Configuración

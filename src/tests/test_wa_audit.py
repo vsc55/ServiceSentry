@@ -244,3 +244,87 @@ class TestAuditLog:
         bc = [c for c in changes if c['field'] == 'b.c'][0]
         assert bc['old'] == 2
         assert bc['new'] == 9
+
+    # ── DELETE /api/audit (clear all) ─────────────────────────────
+
+    def test_clear_all_entries(self, admin, client):
+        """DELETE /api/audit removes all entries and returns ok."""
+        _login(client)
+        assert len(admin._audit_log) >= 1
+        resp = client.delete("/api/audit")
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+        assert admin._audit_log == []
+
+    def test_clear_all_persisted_to_disk(self, admin, client, config_dir):
+        """After DELETE /api/audit the on-disk file reflects the empty log."""
+        _login(client)
+        client.delete("/api/audit")
+        path = os.path.join(config_dir, "audit.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        assert data == []
+
+    # ── DELETE /api/audit/<idx> (single entry) ────────────────────
+
+    def test_delete_single_entry(self, admin, client):
+        """DELETE /api/audit/<idx> removes the entry at that position."""
+        admin._audit_log = [
+            {'ts': 'a', 'event': 'evt_0', 'user': '', 'ip': '', 'detail': ''},
+            {'ts': 'b', 'event': 'evt_1', 'user': '', 'ip': '', 'detail': ''},
+            {'ts': 'c', 'event': 'evt_2', 'user': '', 'ip': '', 'detail': ''},
+        ]
+        _login(client)
+        # Delete oldest entry (index 0)
+        resp = client.delete("/api/audit/0")
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+        events = [e['event'] for e in admin._audit_log
+                  if e['event'].startswith('evt_')]
+        assert 'evt_0' not in events
+        assert 'evt_1' in events
+        assert 'evt_2' in events
+
+    def test_delete_single_entry_oob(self, admin, client):
+        """DELETE /api/audit/<idx> returns 404 for an out-of-range index."""
+        _login(client)
+        resp = client.delete("/api/audit/9999")
+        assert resp.status_code == 404
+
+    def test_delete_single_entry_negative(self, admin, client):
+        """Negative index is out-of-range → 404."""
+        _login(client)
+        # Flask converts /<int:idx> so -1 does not match the route; expect 404
+        resp = client.delete("/api/audit/-1")
+        assert resp.status_code == 404
+
+    def test_delete_single_entry_viewer_forbidden(self, admin, client):
+        """Viewer cannot delete a single audit entry."""
+        admin._users["viewer2"] = {
+            "password_hash": generate_password_hash("v"),
+            "role": "viewer", "display_name": "V2",
+        }
+        admin._audit_log.append(
+            {'ts': 'x', 'event': 'sentinel', 'user': '', 'ip': '', 'detail': ''}
+        )
+        _login(client, "viewer2", "v")
+        resp = client.delete(f"/api/audit/{len(admin._audit_log) - 1}")
+        assert resp.status_code == 403
+
+    def test_delete_single_entry_persisted(self, admin, client, config_dir):
+        """After DELETE /api/audit/<idx> the on-disk file reflects the change."""
+        admin._audit_log = [
+            {'ts': 't1', 'event': 'keep', 'user': '', 'ip': '', 'detail': ''},
+            {'ts': 't2', 'event': 'remove', 'user': '', 'ip': '', 'detail': ''},
+        ]
+        _login(client)
+        # Remove the first entry (index 0)
+        resp = client.delete("/api/audit/0")
+        assert resp.status_code == 200
+        path = os.path.join(config_dir, "audit.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        events_on_disk = [e['event'] for e in data]
+        assert 'remove' in events_on_disk
+        assert 'keep' not in events_on_disk
+
