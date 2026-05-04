@@ -325,7 +325,7 @@ LANG = {
     'role_tab_assignments':   'Asignación',
     'role_assign_users':      'Usuarios con este rol',
     'role_assign_groups':     'Grupos con este rol',
-    'group_confirm_delete':   '¿Eliminar este grupo? Se eliminará de todos los usuarios.',
+    'group_confirm_delete':   '¿Eliminar este grupo? Se desasignará de todos los usuarios.',
     'col_group_name':         'Nombre',
     'col_group_label':        'Etiqueta',
     'col_group_roles':        'Roles',
