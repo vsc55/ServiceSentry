@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Checks route: /api/checks/run."""
 
-from flask import jsonify, request
+from flask import jsonify
 
 
 def register(app, wa):
@@ -24,7 +24,7 @@ def register(app, wa):
         if not wa._check_lock.acquire(blocking=False):
             return jsonify({'error': wa._t('checks_already_running')}), 409
         try:
-            data = request.get_json(silent=True) or {}
+            data = wa._optional_json()
             requested = data.get('modules', 'all')
             results, errors = wa._run_checks(requested)
             wa._audit('checks_run', detail={

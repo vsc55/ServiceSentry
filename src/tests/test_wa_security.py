@@ -84,7 +84,7 @@ class TestSecurityInjection:
         self._login(c)
         for payload in self._XSS_PAYLOADS:
             resp = c.post("/api/users", json={
-                "username": payload, "password": "x", "role": "viewer",
+                "username": payload, "password": "testpass", "role": "viewer",
             })
             # Server must not crash; response is 201 or 400/409
             assert resp.status_code in (201, 400, 409)
@@ -96,7 +96,7 @@ class TestSecurityInjection:
         self._login(c)
         payload = '<script>alert("xss")</script>'
         c.post("/api/users", json={
-            "username": "xssuser", "password": "x", "role": "viewer",
+            "username": "xssuser", "password": "testpass", "role": "viewer",
             "display_name": payload,
         })
         html = c.get("/").data.decode()
@@ -129,7 +129,7 @@ class TestSecurityInjection:
         ]
         for payload in payloads:
             resp = c.post("/api/users", json={
-                "username": payload, "password": "x", "role": "viewer",
+                "username": payload, "password": "testpass", "role": "viewer",
             })
             assert resp.status_code in (201, 400, 409)
 
@@ -280,7 +280,7 @@ class TestSecurityInjection:
         ]
         for p in payloads:
             resp = c.post("/api/users", json={
-                "username": p, "password": "x", "role": "viewer",
+                "username": p, "password": "testpass", "role": "viewer",
             })
             assert resp.status_code in (201, 400, 409)
 
@@ -292,7 +292,7 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c, "viewer", "vpass")
         resp = c.post("/api/users", json={
-            "username": "hacker", "password": "x", "role": "admin",
+            "username": "hacker", "password": "testpass", "role": "admin",
         })
         assert resp.status_code == 403
 
@@ -311,7 +311,7 @@ class TestSecurityInjection:
         self._login(c, "editor", "epass")
         assert c.get("/api/users").status_code == 200
         assert c.post("/api/users", json={
-            "username": "h", "password": "x", "role": "viewer",
+            "username": "h", "password": "testpass", "role": "viewer",
         }).status_code == 403
         assert c.delete("/api/users/viewer").status_code == 403
 
@@ -397,7 +397,7 @@ class TestSecurityInjection:
         wa = self._make_admin(config_dir, var_dir)
         c = wa.app.test_client()
         resp = c.post("/login", data={
-            "username": "nobody_exists_here", "password": "x",
+            "username": "nobody_exists_here", "password": "testpass",
         })
         assert resp.status_code == 200
         with c.session_transaction() as s:
@@ -472,7 +472,7 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c)
         c.post("/api/users", json={
-            "username": "sstiuser", "password": "x", "role": "viewer",
+            "username": "sstiuser", "password": "testpass", "role": "viewer",
             "display_name": "{{ config.items() }}",
         })
         html = c.get("/").data.decode()
@@ -487,7 +487,7 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c)
         resp = c.post("/api/users", json={
-            "username": "badrole", "password": "x", "role": "superadmin",
+            "username": "badrole", "password": "testpass", "role": "superadmin",
         })
         assert resp.status_code == 400
 
@@ -527,7 +527,7 @@ class TestSecurityInjection:
         self._login(c)
         payload = '<script>alert("audit")</script>'
         c.post("/api/users", json={
-            "username": payload, "password": "x", "role": "viewer",
+            "username": payload, "password": "testpass", "role": "viewer",
         })
         entries = c.get("/api/audit").get_json()
         # If there's a user_created entry, the username should be literal

@@ -57,9 +57,11 @@ document.getElementById('newItemName').addEventListener('keydown', e => {
 if (e.key === 'Enter') { e.preventDefault(); confirmAddItem(); }
 });
 document.getElementById('btnConfirmDeleteItemOk').addEventListener('click', _doDeleteItem);
-document.getElementById('btnAuditConfirmOk').addEventListener('click', () => {
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('auditConfirmModal')).hide();
-    if (_auditConfirmCallback) { _auditConfirmCallback(); _auditConfirmCallback = null; }
+document.getElementById('btnConfirmModalOk').addEventListener('click', () => {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).hide();
+    const cb = _confirmModalCallback;
+    _confirmModalCallback = null;
+    if (cb) cb();
 });
 document.getElementById('btnRenameItemOk').addEventListener('click', _doRenameItem);
 document.getElementById('renameItemInput').addEventListener('keydown', e => {
@@ -94,6 +96,14 @@ try {
     modulesData = await apiGet('/api/modules') || {};
     applyModuleDefaults();
     configData = await apiGet('/api/config') || {};
+    configSchema = await apiGet('/api/config/schema') || {};
+    // Backfill CONFIG_FIELD_DEFAULTS with server defaults from schema
+    for (const [k, v] of Object.entries(configSchema)) {
+        if (!(k in CONFIG_FIELD_DEFAULTS) && v.default !== undefined) {
+            CONFIG_FIELD_DEFAULTS[k] = v.default;
+        }
+    }
+    _serverConfigData = deepClone(configData);
     renderModules();
     renderConfig();
     applyRoleRestrictions();

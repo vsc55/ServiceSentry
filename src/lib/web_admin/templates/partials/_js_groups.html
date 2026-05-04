@@ -160,16 +160,17 @@ async function saveGroupModal() {
 }
 
 async function deleteGroup(name) {
-    if (!confirm(t('group_confirm_delete') + ' [' + name + ']')) return;
-    const r = await apiDelete('/api/groups/' + encodeURIComponent(name));
-    if (r && r.status === 200 && r.data?.ok) {
-        showToast(t('group_deleted'));
-        delete groupsData[name];
-        renderGroups();
-        renderUsers();
-    } else {
-        showToast(r?.data?.error || t('delete_error'), 'danger');
-    }
+    showConfirmModal(t('group_confirm_delete'), async () => {
+        const r = await apiDelete('/api/groups/' + encodeURIComponent(name));
+        if (r && r.status === 200 && r.data?.ok) {
+            showToast(t('group_deleted'));
+            delete groupsData[name];
+            renderGroups();
+            renderUsers();
+        } else {
+            showToast(r?.data?.error || t('delete_error'), 'danger');
+        }
+    });
 }
 
 function populateGroupCheckboxes(activeGroups) {

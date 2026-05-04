@@ -102,7 +102,7 @@ class TestDarkMode:
         """Admin can set dark_mode for another user via PUT."""
         _login(client)
         client.post("/api/users", json={
-            "username": "dmuser", "password": "x", "role": "viewer",
+            "username": "dmuser", "password": "testpass", "role": "viewer",
         })
         resp = client.put("/api/users/dmuser", json={"dark_mode": True})
         assert resp.status_code == 200
@@ -221,7 +221,7 @@ class TestI18n:
         """Admin can update another user's language via PUT."""
         _login(client)
         client.post("/api/users", json={
-            "username": "languser", "password": "x", "role": "viewer",
+            "username": "languser", "password": "testpass", "role": "viewer",
         })
         resp = client.put("/api/users/languser", json={"lang": "es_ES"})
         assert resp.status_code == 200
@@ -232,7 +232,7 @@ class TestI18n:
         """Creating a user with a specific language saves it."""
         _login(client)
         resp = client.post("/api/users", json={
-            "username": "langcreate", "password": "x",
+            "username": "langcreate", "password": "testpass",
             "role": "viewer", "lang": "es_ES",
         })
         assert resp.status_code == 201
@@ -243,7 +243,7 @@ class TestI18n:
         """Creating a user without lang defaults to empty (system default)."""
         _login(client)
         resp = client.post("/api/users", json={
-            "username": "nolang", "password": "x", "role": "viewer",
+            "username": "nolang", "password": "testpass", "role": "viewer",
         })
         assert resp.status_code == 201
         users = client.get("/api/users").get_json()
@@ -331,7 +331,7 @@ class TestUIReorganisation:
         """Admin can reset another user's password via PUT /api/users/<u>."""
         _login(client)
         client.post("/api/users", json={
-            "username": "resetme", "password": "old", "role": "viewer",
+            "username": "resetme", "password": "testpass", "role": "viewer",
         })
         resp = client.put("/api/users/resetme", json={"password": "brandnew"})
         assert resp.status_code == 200

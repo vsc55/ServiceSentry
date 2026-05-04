@@ -11,10 +11,16 @@ function tf(k, ...a) { let s = t(k); a.forEach(v => { s = s.replace('{}', v); })
 // ──────────────────────────── Constants ────────────────────────────
 const LABELS = I18N.labels || {};
 const SECTION_LABELS = I18N.sections || {};
-const SENSITIVE = new Set(['password', 'token']);
+const SENSITIVE = new Set({{ wa_sensitive_fields | tojson }});
 const SUPPORTED_LANGS = {{ supported_langs| tojson }};
-const SYSTEM_DEFAULT_LANG = '{{ default_lang }}';
-const CURRENT_LANG = '{{ lang }}';
+const SYSTEM_DEFAULT_LANG      = '{{ default_lang }}';
+const CURRENT_LANG             = '{{ lang }}';
+const WA_REMEMBER_ME_DAYS      = {{ wa_remember_me_days }};
+const WA_AUDIT_MAX_ENTRIES     = {{ wa_audit_max_entries }};
+const WA_SECURE_COOKIES        = {{ wa_secure_cookies | tojson }};
+const WA_DEFAULT_SECURE_COOKIES    = {{ wa_default_secure_cookies | tojson }};
+const WA_DEFAULT_REMEMBER_ME_DAYS  = {{ wa_default_remember_me_days }};
+const WA_DEFAULT_AUDIT_MAX_ENTRIES = {{ wa_default_audit_max_entries }};
 
 // ──────────────────────────── State ───────────────────────────────
 let modulesData = {};
@@ -29,9 +35,49 @@ let _addItemCtx = null;     // {target, pathStr}
 let _deleteItemCtx = null;  // {target, parentPathStr, key}
 let _renameItemCtx = null;  // {target, parentPathStr, oldKey}
 let _editingUser = null;    // null = new, string = editing username
+let _serverConfigData = null; // snapshot from last server load/save
 const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
 const ALL_PERMISSIONS = {{ permissions_list | tojson }};
 const ITEM_SCHEMAS = {{ item_schemas | default({}) | tojson }};
+const HINTS = I18N.hints || {};
+
+/**
+ * Default values for config fields, keyed by 'section|field'.
+ * Only fields listed here will show the "Restore default" button.
+ */
+const CONFIG_FIELD_DEFAULTS = {
+    'web_admin|lang':              SYSTEM_DEFAULT_LANG,
+    'web_admin|dark_mode':         false,
+    'web_admin|secure_cookies':    WA_DEFAULT_SECURE_COOKIES,
+    'web_admin|remember_me_days':  WA_DEFAULT_REMEMBER_ME_DAYS,
+    'web_admin|audit_max_entries': WA_DEFAULT_AUDIT_MAX_ENTRIES,
+    'web_admin|audit_sort':        'time',
+};
+
+// Field schema loaded from /api/config/schema — min, max, default per field.
+let configSchema = {};
+
+/**
+ * Return the hint text for a field identified by its pathStr, or null.
+ * Looks up 'section|field' first, then falls back to just 'field'.
+ */
+function fieldHint(pathStr) {
+    const parts = pathStr.split('|');
+    const field = parts[parts.length - 1];
+    const scoped = parts.length >= 2 ? parts[0] + '|' + field : field;
+    return HINTS[scoped] || HINTS[field] || null;
+}
+
+/**
+ * Initialise (or re-initialise) Bootstrap tooltips inside *container*.
+ * Safe to call multiple times — uses getOrCreateInstance.
+ */
+function initTooltips(container) {
+    const root = container || document;
+    root.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+        bootstrap.Tooltip.getOrCreateInstance(el, { trigger: 'hover focus' });
+    });
+}
 
 /**
  * Return the per-module schema (top-level module keys).
@@ -116,6 +162,7 @@ function promoteItem(data, parts, schema) {
 
 // ──────────────────────────── Utilities ───────────────────────────
 function uid() { return 'u' + (++_uid); }
+function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
 function esc(s) {
     const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML;
@@ -193,6 +240,15 @@ function moduleIcon(name, cfg) {
 }
 
 // ──────────────────────────── Toast ───────────────────────────────
+// ──────────────────────────── Generic confirm modal ───────────────
+let _confirmModalCallback = null;
+
+function showConfirmModal(msg, callback) {
+    _confirmModalCallback = callback;
+    document.getElementById('confirmModalMsg').textContent = msg;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).show();
+}
+
 function showToast(msg, type = 'success') {
     const t = document.getElementById('toast');
     const b = document.getElementById('toast-body');
@@ -245,6 +301,13 @@ async function apiDelete(url) {
 // ──────────────────────────── Field render ─────────────────────────
 function renderField(key, value, pathStr, target = 'modules') {
     const lbl = esc(fieldLabel(key));
+    const _hint = fieldHint(pathStr);
+    const _infoIcon = _hint
+        ? ` <i class="bi bi-info-circle text-muted" style="cursor:help;font-size:.85em"
+            data-bs-toggle="tooltip" data-bs-placement="top"
+            title="${escAttr(_hint)}"></i>`
+        : '';
+    const lblHtml = lbl + _infoIcon;
     const sp = escAttr(pathStr), tg = escAttr(target);
 
     // Get field metadata from schema
@@ -252,27 +315,43 @@ function renderField(key, value, pathStr, target = 'modules') {
     // schemaFor needs "module|collection|..." — but we can also look it up directly
     const parentKey = pathStr.split('|').slice(0, 2).join('|');
     const sch = ITEM_SCHEMAS[parentKey] || null;
-    const meta = fieldMeta(sch, key);
+    const meta = fieldMeta(sch, key) || (configSchema[pathStr] || null);
+
+    // Per-field reset button — only in config tab and only when a default is defined
+    const _resetBtn = target === 'config' && (pathStr in CONFIG_FIELD_DEFAULTS)
+        ? `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0"
+            onclick="resetConfigField('${sp}')"
+            data-bs-toggle="tooltip" data-bs-placement="top"
+            title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`
+        : '';
 
     if (typeof value === 'boolean') {
         return `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
-        <div class="col-sm-8"><div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" role="switch"
-                ${value ? 'checked' : ''}
-                onchange="updateField('${tg}','${sp}',this.checked)">
-        </div></div></div>`;
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8 d-flex align-items-center gap-2">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch"
+                    ${value ? 'checked' : ''}
+                    onchange="updateField('${tg}','${sp}',this.checked)">
+            </div>${_resetBtn}</div></div>`;
     }
     if (typeof value === 'number') {
         const minA = meta && meta.min != null ? ` min="${meta.min}"` : '';
         const maxA = meta && meta.max != null ? ` max="${meta.max}"` : '';
-        const stepA = meta && meta.type === 'float' ? ' step="0.1"' : ' step="1"';
+        const isFloat = meta && meta.type === 'float';
+        const stepA = isFloat ? ' step="0.1"' : ' step="1"';
+        const _minV = meta && meta.min != null ? meta.min : 'null';
+        const _maxV = meta && meta.max != null ? meta.max : 'null';
+        const _onkeydown = isFloat
+            ? `onkeydown="blockNonNumericKey(event,true)"`
+            : `onkeydown="blockNonNumericKey(event,false)"`;
         return `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
-        <div class="col-sm-8">
-            <input type="number" class="form-control form-control-sm"
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8 d-flex gap-1 align-items-center">
+            <input type="number" class="form-control form-control-sm flex-grow-1"
                 value="${value}"${minA}${maxA}${stepA}
-                onchange="updateField('${tg}','${sp}',Number(this.value))">
+                ${_onkeydown}
+                onchange="validateAndUpdateNumber(this,'${tg}','${sp}',${_minV},${_maxV})">${_resetBtn}
         </div></div>`;
     }
     if (typeof value === 'string') {
@@ -284,35 +363,97 @@ function renderField(key, value, pathStr, target = 'modules') {
                 opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
             }
             return `<div class="row mb-2 align-items-center">
-            <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
-            <div class="col-sm-8">
-                <select class="form-select form-select-sm"
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8 d-flex gap-1 align-items-center">
+                <select class="form-select form-select-sm flex-grow-1"
                     onchange="updateField('${tg}','${sp}',this.value)">
                     ${opts}
-                </select>
+                </select>${_resetBtn}
             </div></div>`;
         }
         const isSensitive = (meta && meta.sensitive) || SENSITIVE.has(key);
         const tp = isSensitive ? 'password' : 'text';
+        const _numKbd = (meta && meta.numericString)
+            ? ` onkeydown="blockNonNumericKey(event,false)"`
+            : '';
         return `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
-        <div class="col-sm-8">
-            <input type="${tp}" class="form-control form-control-sm"
-                value="${escAttr(value)}"
-                onchange="updateField('${tg}','${sp}',this.value)">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8 d-flex gap-1 align-items-center">
+            <input type="${tp}" class="form-control form-control-sm flex-grow-1"
+                value="${escAttr(value)}"${_numKbd}
+                onchange="updateField('${tg}','${sp}',this.value)">${_resetBtn}
         </div></div>`;
     }
     if (Array.isArray(value)) {
         const csv = value.map(v => String(v)).join(', ');
         return `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${lbl}</label>
-        <div class="col-sm-8">
-            <input type="text" class="form-control form-control-sm"
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8 d-flex gap-1 align-items-center">
+            <input type="text" class="form-control form-control-sm flex-grow-1"
                 value="${escAttr(csv)}" placeholder="${t('comma_separated')}"
-                onchange="updateArray('${tg}','${sp}',this.value)">
+                onchange="updateArray('${tg}','${sp}',this.value)">${_resetBtn}
         </div></div>`;
     }
     return '';
+}
+
+/**
+ * Block non-numeric keypresses before they reach the input.
+ * Allows: digits, one leading minus, one decimal point (floats only),
+ * and all control/navigation keys (Backspace, Delete, arrows, Tab, etc.)
+ * and clipboard shortcuts (Ctrl/Cmd + A/C/V/X).
+ */
+function blockNonNumericKey(event, allowFloat) {
+    const k = event.key;
+    // Always pass through: control keys (length > 1 = named key like 'Backspace'),
+    // and keyboard shortcuts with Ctrl/Meta
+    if (k.length > 1 || event.ctrlKey || event.metaKey) return;
+    // Digits: always ok
+    if (k >= '0' && k <= '9') return;
+    // Minus: only if cursor is at position 0 and no minus already present
+    if (k === '-') {
+        const el = event.target;
+        if (el.selectionStart === 0 && !el.value.includes('-')) return;
+        event.preventDefault(); return;
+    }
+    // Decimal point: only for floats and only once
+    if (k === '.') {
+        if (allowFloat && !event.target.value.includes('.')) return;
+        event.preventDefault(); return;
+    }
+    // Block everything else
+    event.preventDefault();
+}
+
+/**
+ * Validate and apply a numeric input change:
+ *  - empty / non-numeric  → revert el.value to the current state value (no updateField call)
+ *  - out of [min, max]    → clamp to boundary, then call updateField
+ *  - valid integer        → call updateField
+ */
+function validateAndUpdateNumber(el, target, pathStr, min, max) {
+    const raw = el.value;
+    const v = parseInt(raw, 10);
+    if (raw === '' || isNaN(v)) {
+        const parts = pathStr.split('|');
+        let cur = target === 'config' ? configData : modulesData;
+        for (const p of parts) cur = (cur != null) ? cur[p] : null;
+        el.value = (typeof cur === 'number') ? cur : (min ?? 0);
+        return;
+    }
+    const clamped = (min != null && v < min) ? min : (max != null && v > max) ? max : v;
+    el.value = clamped;
+    updateField(target, pathStr, clamped);
+}
+
+/**
+ * Restore a config field to its built-in default value.
+ */
+function resetConfigField(pathStr) {
+    if (!(pathStr in CONFIG_FIELD_DEFAULTS)) return;
+    const dflt = CONFIG_FIELD_DEFAULTS[pathStr];
+    updateField('config', pathStr, typeof dflt === 'object' && dflt !== null ? deepClone(dflt) : dflt);
+    renderConfig();
 }
 
 /** Render all scalar (non-object) fields of *obj*. */
@@ -402,7 +543,8 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         <code class="me-2 small">${esc(displayName)}</code>
         <input type="number" class="form-control form-control-sm ms-auto"
             style="max-width:100px" value="${itemValue}"
-            onchange="updateField('${tg}','${sp}',Number(this.value))">
+            onkeydown="blockNonNumericKey(event,false)"
+            onchange="validateAndUpdateNumber(this,'${tg}','${sp}',null,null)">
         ${delBtn}</div>`;
     }
 

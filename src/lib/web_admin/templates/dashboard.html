@@ -114,11 +114,17 @@
         <!-- ==================== Config Tab ===================== -->
         <div class="tab-pane fade" id="tab-config">
             <div id="config-container"></div>
-            <button class="btn btn-primary mt-3" id="btnSaveConfig" onclick="saveConfig()">
-                <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
-                <span class="badge bg-warning text-dark ms-1 d-none" id="badgeConfigDirty"
-                    title="{{ i18n.unsaved_changes }}">●</span>
-            </button>
+            <div class="d-flex gap-2 mt-3 flex-wrap">
+                <button class="btn btn-primary" id="btnSaveConfig" onclick="saveConfig()">
+                    <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
+                    <span class="badge bg-warning text-dark ms-1 d-none" id="badgeConfigDirty"
+                        title="{{ i18n.unsaved_changes }}">●</span>
+                </button>
+                <button class="btn btn-outline-secondary" id="btnReloadConfig" onclick="reloadConfig()"
+                    title="{{ i18n.reload_config_title }}">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.reload_config }}
+                </button>
+            </div>
         </div>
 
         <!-- ==================== Status Tab ===================== -->
@@ -237,7 +243,7 @@
                                 <option value="time">{{ i18n.col_time }}</option>
                                 <option value="event">{{ i18n.col_event }}</option>
                                 <option value="user">{{ i18n.col_user }}</option>
-                                <option value="ip">IP</option>
+                                <option value="ip">{{ i18n.col_ip }}</option>
                             </select>
                             <button class="btn btn-outline-secondary" id="btnAuditSortDir" onclick="toggleAuditSortDir()" title="{{ i18n.sort_dir }}">
                                 <i class="bi bi-sort-down" id="iconAuditSortDir"></i>
@@ -252,7 +258,7 @@
                                 <option value="date">{{ i18n.col_time }}</option>
                                 <option value="event">{{ i18n.col_event }}</option>
                                 <option value="user">{{ i18n.col_user }}</option>
-                                <option value="ip">IP</option>
+                                <option value="ip">{{ i18n.col_ip }}</option>
                             </select>
                         </div>
                     </div>

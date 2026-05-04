@@ -59,6 +59,10 @@ LANG = {
     # Config
     'save_config': 'Save configuration',
     'config_saved': 'Configuration saved successfully',
+    'reset_field': 'Restore default',
+    'reload_config': 'Reload',
+    'reload_config_title': 'Discard unsaved changes and reload from server',
+    'config_reloaded': 'Configuration reloaded from server',
     # Status
     'status_placeholder': 'Select this tab to load status.',
     'status_empty': 'No status data available.',
@@ -222,6 +226,20 @@ LANG = {
         'username': 'Web user', 'password': 'Password',
         'pretty_name': 'Display name', 'lang': 'Language', 'dark_mode': 'Dark mode',
     },
+    # Field hints — shown as ⓘ tooltip next to each config option
+    'hints': {
+        'web_admin|lang':               'Display language for the web panel.',
+        'web_admin|dark_mode':          'Use the dark theme for the interface.',
+        'web_admin|secure_cookies':     'Mark session cookies as Secure (HTTPS only). Enable only when the panel is served over HTTPS.',
+        'web_admin|remember_me_days':   'Number of days a "Remember me" session remains active (1–365).',
+        'web_admin|audit_max_entries':  'Maximum number of entries kept in the audit log (10–10\u202f000). Older entries are trimmed when the limit is reached.',
+        'daemon|timer_check':           'Interval in seconds between consecutive checks across all modules.',
+        'global|debug':                 'Enable verbose debug logging. Not recommended in production.',
+        'telegram|token':               'Telegram Bot API token. Create a bot with @BotFather to obtain one.',
+        'telegram|chat_id':             'Numeric Telegram Chat ID where alerts will be sent.',
+        'telegram|group_messages':      'Bundle multiple consecutive alerts into a single Telegram message.',
+        'web_admin|audit_sort':         'Default column used to sort the audit log table.',
+    },
     # Section labels
     'sections': {
         'daemon': 'Daemon', 'global': 'General',
@@ -314,4 +332,13 @@ LANG = {
     'col_group_permissions':  'Permissions',
     'col_group_members':      'Members',
     'col_groups':             'Groups',
+    # Input validation
+    'password_too_short':     'Password must be at least 8 characters',
+    'telegram_invalid_token': 'Invalid Telegram bot token format',
+    'telegram_invalid_chat_id': 'Chat ID must be a valid number',
+    'invalid_modules_data':   'Invalid modules data: all values must be objects',
+    'name_too_long':          'Name too long (max {} characters)',
+    'label_too_long':         'Label too long (max {} characters)',
+    'description_too_long':   'Description too long (max {} characters)',
+    'display_name_too_long':  'Display name too long (max {} characters)',
 }

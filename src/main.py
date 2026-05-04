@@ -361,6 +361,9 @@ def start_web(args):
     password = cfg.get_conf(['web_admin', 'password'], 'admin')
     lang = cfg.get_conf(['web_admin', 'lang'], 'en_EN')
     dark_mode = cfg.get_conf(['web_admin', 'dark_mode'], False)
+    secure_cookies = cfg.get_conf(['web_admin', 'secure_cookies'], False)
+    remember_me_days = cfg.get_conf(['web_admin', 'remember_me_days'], 30)
+    audit_max_entries = cfg.get_conf(['web_admin', 'audit_max_entries'], 500)
     host = getattr(args, 'web_host', None) or cfg.get_conf(
         ['web_admin', 'host'], WebAdmin.DEFAULT_HOST
     )
@@ -371,7 +374,10 @@ def start_web(args):
     admin = WebAdmin(config_dir, str(username), str(password), var_dir,
                      default_lang=str(lang),
                      default_dark_mode=bool(dark_mode),
-                     modules_dir=os.path.join(dir_base, 'watchfuls'))
+                     modules_dir=os.path.join(dir_base, 'watchfuls'),
+                     secure_cookies=bool(secure_cookies),
+                     remember_me_days=int(remember_me_days),
+                     audit_max_entries=int(audit_max_entries))
 
     print("ServiceSentry Web Admin")
     print(f"  URL:    http://{host}:{port}")

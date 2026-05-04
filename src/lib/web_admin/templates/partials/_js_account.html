@@ -22,7 +22,7 @@ function populateRoleDropdown(selectId, selected) {
     const sel = document.getElementById(selectId);
     if (!sel) return;
     sel.innerHTML = '';
-    const builtins = ['admin', 'editor', 'viewer'];
+    const builtins = {{ wa_builtin_roles | tojson }};
     for (const r of builtins) {
         const rd = rolesData[r] || {};
         const opt = document.createElement('option');

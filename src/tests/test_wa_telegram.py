@@ -33,10 +33,10 @@ class TestTelegramTest:
         """Viewer role cannot send test messages."""
         _login(client)
         client.post("/api/users", json={
-            "username": "v1", "password": "v", "role": "viewer",
+            "username": "v1", "password": "testpass", "role": "viewer",
         })
         client.get("/logout")
-        _login(client, "v1", "v")
+        _login(client, "v1", "testpass")
         resp = client.post("/api/telegram/test", json={
             "token": "x", "chat_id": "y",
         })
@@ -66,7 +66,7 @@ class TestTelegramTest:
         with unittest.mock.patch("requests.post") as mock_post:
             mock_post.return_value = unittest.mock.Mock(status_code=200)
             resp = client.post("/api/telegram/test", json={
-                "token": "123:ABC", "chat_id": "456",
+                "token": "123456789:ABCDefGHiJklMNoPqrSTuV", "chat_id": "456",
             })
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
@@ -80,7 +80,7 @@ class TestTelegramTest:
         mock_resp.json.return_value = {"description": "Unauthorized"}
         with unittest.mock.patch("requests.post", return_value=mock_resp):
             resp = client.post("/api/telegram/test", json={
-                "token": "bad", "chat_id": "456",
+                "token": "123456789:ABCDefGHiJklMNoPqrSTuV", "chat_id": "456",
             })
         assert resp.status_code == 502
         assert "Unauthorized" in resp.get_json()["error"]
@@ -90,7 +90,7 @@ class TestTelegramTest:
         _login(client)
         with unittest.mock.patch("requests.post", side_effect=Exception("timeout")):
             resp = client.post("/api/telegram/test", json={
-                "token": "123:ABC", "chat_id": "456",
+                "token": "123456789:ABCDefGHiJklMNoPqrSTuV", "chat_id": "456",
             })
         assert resp.status_code == 502
         assert "timeout" in resp.get_json()["error"]
@@ -103,7 +103,7 @@ class TestTelegramTest:
         mock_resp.headers = {"content-type": "text/html"}
         with unittest.mock.patch("requests.post", return_value=mock_resp):
             resp = client.post("/api/telegram/test", json={
-                "token": "123:ABC", "chat_id": "456",
+                "token": "123456789:ABCDefGHiJklMNoPqrSTuV", "chat_id": "456",
             })
         assert resp.status_code == 502
         assert "500" in resp.get_json()["error"]

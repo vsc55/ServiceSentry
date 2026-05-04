@@ -43,7 +43,7 @@ class TestApiUsers:
         _login(client)
         resp = client.post("/api/users", json={
             "username": "newuser",
-            "password": "pass123",
+            "password": "pass1234",
             "role": "editor",
             "display_name": "New User",
         })
@@ -58,7 +58,7 @@ class TestApiUsers:
         _login(client)
         resp = client.post("/api/users", json={
             "username": "",
-            "password": "x",
+            "password": "testpass",
         })
         assert resp.status_code == 400
 
@@ -74,7 +74,7 @@ class TestApiUsers:
         _login(client)
         resp = client.post("/api/users", json={
             "username": "admin",
-            "password": "x",
+            "password": "testpass",
         })
         assert resp.status_code == 409
 
@@ -82,7 +82,7 @@ class TestApiUsers:
         _login(client)
         resp = client.post("/api/users", json={
             "username": "badrole",
-            "password": "x",
+            "password": "testpass",
             "role": "superadmin",
         })
         assert resp.status_code == 400
@@ -92,7 +92,7 @@ class TestApiUsers:
         # Create a user first
         client.post("/api/users", json={
             "username": "testuser",
-            "password": "pass",
+            "password": "testpass",
             "role": "viewer",
         })
         # Update role and display_name
@@ -109,13 +109,13 @@ class TestApiUsers:
         """Changing a user's password via admin API works."""
         _login(client)
         client.post("/api/users", json={
-            "username": "pwuser", "password": "oldpass", "role": "viewer",
+            "username": "pwuser", "password": "oldpass1", "role": "viewer",
         })
         # Change the password
-        resp = client.put("/api/users/pwuser", json={"password": "newpass"})
+        resp = client.put("/api/users/pwuser", json={"password": "newpass1"})
         assert resp.status_code == 200
         # Verify new password works
-        assert check_password_hash(admin._users["pwuser"]["password_hash"], "newpass")
+        assert check_password_hash(admin._users["pwuser"]["password_hash"], "newpass1")
 
     def test_update_nonexistent_user(self, client):
         _login(client)
@@ -125,7 +125,7 @@ class TestApiUsers:
     def test_delete_user(self, client):
         _login(client)
         client.post("/api/users", json={
-            "username": "todelete", "password": "x", "role": "viewer",
+            "username": "todelete", "password": "testpass", "role": "viewer",
         })
         resp = client.delete("/api/users/todelete")
         assert resp.status_code == 200
@@ -156,7 +156,7 @@ class TestApiUsers:
         c = admin.app.test_client()
         c.post("/login", data={"username": "admin", "password": "secret"})
         c.post("/api/users", json={
-            "username": "persisted", "password": "x", "role": "viewer",
+            "username": "persisted", "password": "testpass", "role": "viewer",
         })
         path = os.path.join(config_dir, "users.json")
         with open(path, encoding="utf-8") as f:
@@ -237,14 +237,14 @@ class TestRolePermissions:
         # editor has users_view so GET is allowed
         assert c.get("/api/users").status_code == 200
         # but cannot create or delete users
-        assert c.post("/api/users", json={"username": "x", "password": "x", "role": "viewer"}).status_code == 403
+        assert c.post("/api/users", json={"username": "x", "password": "testpass", "role": "viewer"}).status_code == 403
         assert c.delete("/api/users/guest").status_code == 403
 
     def test_viewer_cannot_manage_users(self, config_dir, var_dir):
         wa = self._make_multiuser_admin(config_dir, var_dir)
         c = wa.app.test_client()
         c.post("/login", data={"username": "guest", "password": "guestpass"})
-        resp = c.post("/api/users", json={"username": "x", "password": "x"})
+        resp = c.post("/api/users", json={"username": "x", "password": "testpass"})
         assert resp.status_code == 403
 
     def test_admin_can_manage_users(self, config_dir, var_dir):

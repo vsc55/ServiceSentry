@@ -173,7 +173,7 @@ class TestGroups:
         _login(client)
         client.post("/api/groups", json={"name": "cleanup_grp", "label": "C", "roles": []})
         client.post("/api/users", json={
-            "username": "grp_user", "password": "x", "role": "viewer",
+            "username": "grp_user", "password": "testpass", "role": "viewer",
             "groups": ["cleanup_grp"],
         })
         assert "cleanup_grp" in admin._users["grp_user"].get("groups", [])
@@ -184,11 +184,11 @@ class TestGroups:
         _login(client)
         client.post("/api/groups", json={"name": "member_grp", "label": "M", "roles": []})
         client.post("/api/users", json={
-            "username": "member1", "password": "x", "role": "viewer",
+            "username": "member1", "password": "testpass", "role": "viewer",
             "groups": ["member_grp"],
         })
         client.post("/api/users", json={
-            "username": "member2", "password": "x", "role": "viewer",
+            "username": "member2", "password": "testpass", "role": "viewer",
             "groups": ["member_grp"],
         })
         groups = client.get("/api/groups").get_json()
@@ -201,10 +201,10 @@ class TestGroups:
             "permissions": ["users_view"],
         })
         client.post("/api/users", json={
-            "username": "no_grp_user", "password": "x", "role": "no_grp_add",
+            "username": "no_grp_user", "password": "testpass", "role": "no_grp_add",
         })
         client.get("/logout")
-        _login(client, "no_grp_user", "x")
+        _login(client, "no_grp_user", "testpass")
         resp = client.post("/api/groups", json={"name": "forbidden", "label": "F", "roles": []})
         assert resp.status_code == 403
 
@@ -216,10 +216,10 @@ class TestGroups:
             "permissions": ["groups_view"],
         })
         client.post("/api/users", json={
-            "username": "no_del_user", "password": "x", "role": "no_grp_del",
+            "username": "no_del_user", "password": "testpass", "role": "no_grp_del",
         })
         client.get("/logout")
-        _login(client, "no_del_user", "x")
+        _login(client, "no_del_user", "testpass")
         resp = client.delete("/api/groups/protected")
         assert resp.status_code == 403
 
@@ -251,7 +251,7 @@ class TestGroups:
         _login(client)
         client.post("/api/groups", json={"name": "usr_grp", "label": "U", "roles": []})
         client.post("/api/users", json={
-            "username": "grp_check_user", "password": "x", "role": "viewer",
+            "username": "grp_check_user", "password": "testpass", "role": "viewer",
             "groups": ["usr_grp"],
         })
         users = client.get("/api/users").get_json()
@@ -261,7 +261,7 @@ class TestGroups:
     def test_update_user_groups(self, client):
         _login(client)
         client.post("/api/groups", json={"name": "upd_grp", "label": "U", "roles": []})
-        client.post("/api/users", json={"username": "upd_user", "password": "x", "role": "viewer"})
+        client.post("/api/users", json={"username": "upd_user", "password": "testpass", "role": "viewer"})
         client.put("/api/users/upd_user", json={"groups": ["upd_grp"]})
         users = client.get("/api/users").get_json()
         assert "upd_grp" in users["upd_user"]["groups"]
@@ -269,7 +269,7 @@ class TestGroups:
     def test_create_user_invalid_groups_ignored(self, client):
         _login(client)
         resp = client.post("/api/users", json={
-            "username": "badgrp_user", "password": "x", "role": "viewer",
+            "username": "badgrp_user", "password": "testpass", "role": "viewer",
             "groups": ["nonexistent_group"],
         })
         assert resp.status_code == 201
@@ -278,7 +278,7 @@ class TestGroups:
 
     def test_update_user_invalid_groups_filtered(self, client):
         _login(client)
-        client.post("/api/users", json={"username": "flt_user", "password": "x", "role": "viewer"})
+        client.post("/api/users", json={"username": "flt_user", "password": "testpass", "role": "viewer"})
         client.put("/api/users/flt_user", json={"groups": ["ghost_group"]})
         users = client.get("/api/users").get_json()
         assert users["flt_user"].get("groups", []) == []
@@ -307,11 +307,11 @@ class TestGroupPermissions:
             "name": "editor_grp", "label": "Editors", "roles": ["editor"],
         })
         client.post("/api/users", json={
-            "username": "viewer_in_grp", "password": "x", "role": "viewer",
+            "username": "viewer_in_grp", "password": "testpass", "role": "viewer",
             "groups": ["editor_grp"],
         })
         client.get("/logout")
-        _login(client, "viewer_in_grp", "x")
+        _login(client, "viewer_in_grp", "testpass")
         me = client.get("/api/me").get_json()
         # viewer perms + editor perms
         assert "modules_edit" in me["permissions"]
@@ -340,11 +340,11 @@ class TestGroupPermissions:
             "permissions": ["audit_view"],
         })
         client.post("/api/users", json={
-            "username": "multi_grp_user", "password": "x", "role": "minimal_role",
+            "username": "multi_grp_user", "password": "testpass", "role": "minimal_role",
             "groups": ["grp_a", "grp_b"],
         })
         client.get("/logout")
-        _login(client, "multi_grp_user", "x")
+        _login(client, "multi_grp_user", "testpass")
         me = client.get("/api/me").get_json()
         perms = set(me["permissions"])
         # from editor group
@@ -361,11 +361,11 @@ class TestGroupPermissions:
             "name": "viewer_grp", "label": "Viewers", "roles": ["viewer"],
         })
         client.post("/api/users", json={
-            "username": "editor_in_grp", "password": "x", "role": "editor",
+            "username": "editor_in_grp", "password": "testpass", "role": "editor",
             "groups": ["viewer_grp"],
         })
         client.get("/logout")
-        _login(client, "editor_in_grp", "x")
+        _login(client, "editor_in_grp", "testpass")
         me = client.get("/api/me").get_json()
         perms = set(me["permissions"])
         # editor perms
@@ -382,7 +382,7 @@ class TestGroupPermissions:
             "name": "revoke_grp", "label": "Revoke", "roles": ["editor"],
         })
         client.post("/api/users", json={
-            "username": "revoke_user", "password": "x", "role": "viewer",
+            "username": "revoke_user", "password": "testpass", "role": "viewer",
             "groups": ["revoke_grp"],
         })
         effective_with = admin._get_effective_permissions("revoke_user", "viewer")
@@ -413,10 +413,10 @@ class TestGroupPermissions:
             "permissions": ["groups_view"],
         })
         client.post("/api/users", json={
-            "username": "grp_viewer", "password": "x", "role": "grp_viewer_role",
+            "username": "grp_viewer", "password": "testpass", "role": "grp_viewer_role",
         })
         client.get("/logout")
-        _login(client, "grp_viewer", "x")
+        _login(client, "grp_viewer", "testpass")
         resp = client.get("/api/groups")
         assert resp.status_code == 200
 
@@ -428,9 +428,9 @@ class TestGroupPermissions:
             "permissions": ["groups_edit"],
         })
         client.post("/api/users", json={
-            "username": "grp_editor", "password": "x", "role": "grp_editor_role",
+            "username": "grp_editor", "password": "testpass", "role": "grp_editor_role",
         })
         client.get("/logout")
-        _login(client, "grp_editor", "x")
+        _login(client, "grp_editor", "testpass")
         resp = client.put("/api/groups/edit_target", json={"label": "Updated"})
         assert resp.status_code == 200

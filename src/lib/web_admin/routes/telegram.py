@@ -2,8 +2,13 @@
 # -*- coding: utf-8 -*-
 """Telegram routes: /api/telegram/test."""
 
+import re
+
 import requests as req
-from flask import jsonify, request
+from flask import jsonify
+
+_TOKEN_RE = re.compile(r'^[0-9]+:[A-Za-z0-9_-]{20,}$')
+_CHAT_ID_RE = re.compile(r'^-?[0-9]{1,20}$')
 
 
 def register(app, wa):
@@ -13,11 +18,15 @@ def register(app, wa):
     @config_edit_req
     def api_test_telegram():
         """Send a test message via Telegram to verify settings."""
-        data = request.get_json(silent=True) or {}
+        data = wa._optional_json()
         token = data.get('token', '').strip()
         chat_id = data.get('chat_id', '').strip()
         if not token or not chat_id:
             return jsonify({'error': wa._t('telegram_test_missing')}), 400
+        if not _TOKEN_RE.match(token):
+            return jsonify({'error': wa._t('telegram_invalid_token')}), 400
+        if not _CHAT_ID_RE.match(chat_id):
+            return jsonify({'error': wa._t('telegram_invalid_chat_id')}), 400
         try:
             result = req.post(
                 f'https://api.telegram.org/bot{token}/sendMessage',

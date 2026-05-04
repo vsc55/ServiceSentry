@@ -355,12 +355,8 @@ async function renderAudit() {
     renderAuditTable();
 }
 
-let _auditConfirmCallback = null;
-
 function _showAuditConfirm(msg, callback) {
-    _auditConfirmCallback = callback;
-    document.getElementById('auditConfirmModalMsg').textContent = msg;
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('auditConfirmModal')).show();
+    showConfirmModal(msg, callback);
 }
 
 async function deleteAuditEntry(origIdx) {

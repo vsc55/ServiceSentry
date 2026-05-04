@@ -165,6 +165,18 @@ async function saveModules() {
 }
 async function saveConfig() {
     const r = await apiPut('/api/config', configData);
-    if (r && r.ok) { showToast(t('config_saved')); clearDirty('config'); }
-    else showToast(r?.error || t('save_error'), 'danger');
+    if (r && r.ok) {
+        showToast(t('config_saved'));
+        clearDirty('config');
+        _serverConfigData = deepClone(configData); // update snapshot after successful save
+    } else showToast(r?.error || t('save_error'), 'danger');
+}
+async function reloadConfig() {
+    const data = await apiGet('/api/config');
+    if (!data) return;
+    configData = data;
+    _serverConfigData = deepClone(configData);
+    clearDirty('config');
+    renderConfig();
+    showToast(t('config_reloaded'));
 }

@@ -116,15 +116,16 @@ async function saveUserModal() {
 }
 
 async function deleteUser(username) {
-    if (!confirm(tf('confirm_delete_user', username))) return;
-    const r = await apiDelete('/api/users/' + encodeURIComponent(username));
-    if (r && r.status === 200 && r.data.ok) {
-        showToast(t('user_deleted'));
-        delete usersData[username];
-        renderUsers();
-    } else {
-        showToast(r?.data?.error || t('delete_error'), 'danger');
-    }
+    showConfirmModal(tf('confirm_delete_user', username), async () => {
+        const r = await apiDelete('/api/users/' + encodeURIComponent(username));
+        if (r && r.status === 200 && r.data.ok) {
+            showToast(t('user_deleted'));
+            delete usersData[username];
+            renderUsers();
+        } else {
+            showToast(r?.data?.error || t('delete_error'), 'danger');
+        }
+    });
 }
 
 let _resetPasswordUser = null;

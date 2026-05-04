@@ -2,9 +2,13 @@
 # -*- coding: utf-8 -*-
 """Groups management routes: /api/groups, /api/groups/<name>."""
 
-from flask import jsonify, request
+from flask import jsonify
 
 from ..constants import BUILTIN_ROLE_PERMISSIONS, _BUILTIN_GROUPS
+
+_MAX_NAME_LEN = 64
+_MAX_LABEL_LEN = 128
+_MAX_DESC_LEN = 512
 
 
 def register(app, wa):
@@ -39,9 +43,9 @@ def register(app, wa):
     @groups_add_req
     def api_create_group():
         """Create a new group."""
-        data = request.get_json(silent=True)
-        if not data:
-            return jsonify({'error': wa._t('invalid_json')}), 400
+        data, err = wa._require_json()
+        if err:
+            return err
         name = data.get('name', '').strip().lower().replace(' ', '_')
         label = data.get('label', '').strip() or name
         description = data.get('description', '').strip()
@@ -49,6 +53,12 @@ def register(app, wa):
         roles = [r for r in data.get('roles', []) if r in all_role_names]
         if not name:
             return jsonify({'error': wa._t('group_name_required')}), 400
+        if len(name) > _MAX_NAME_LEN:
+            return jsonify({'error': wa._t('name_too_long', _MAX_NAME_LEN)}), 400
+        if len(label) > _MAX_LABEL_LEN:
+            return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
+        if len(description) > _MAX_DESC_LEN:
+            return jsonify({'error': wa._t('description_too_long', _MAX_DESC_LEN)}), 400
         if name in wa._groups:
             return jsonify({'error': wa._t('group_already_exists', name)}), 409
         wa._groups[name] = {
@@ -69,21 +79,25 @@ def register(app, wa):
         if name not in wa._groups:
             return jsonify({'error': wa._t('group_not_found')}), 404
         is_builtin = name in _BUILTIN_GROUPS
-        data = request.get_json(silent=True)
-        if not data:
-            return jsonify({'error': wa._t('invalid_json')}), 400
+        data, err = wa._require_json()
+        if err:
+            return err
         group = wa._groups[name]
         changes: list[dict] = []
         # Built-in groups: allow roles and members changes, but not label/description
         if not is_builtin:
             if 'label' in data:
                 new_label = data['label'].strip() or name
+                if len(new_label) > _MAX_LABEL_LEN:
+                    return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
                 old_label = group.get('label', name)
                 if old_label != new_label:
                     changes.append({'field': 'label', 'old': old_label, 'new': new_label})
                 group['label'] = new_label
             if 'description' in data:
                 new_desc = data['description'].strip()
+                if len(new_desc) > _MAX_DESC_LEN:
+                    return jsonify({'error': wa._t('description_too_long', _MAX_DESC_LEN)}), 400
                 old_desc = group.get('description', '')
                 if old_desc != new_desc:
                     changes.append({'field': 'description', 'old': old_desc, 'new': new_desc})

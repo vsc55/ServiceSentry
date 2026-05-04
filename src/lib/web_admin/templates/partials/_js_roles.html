@@ -191,13 +191,14 @@ async function saveRoleModal() {
 }
 
 async function deleteRole(name) {
-    if (!confirm(t('role_confirm_delete') + ' [' + name + ']')) return;
-    const r = await apiDelete('/api/roles/' + encodeURIComponent(name));
-    if (r && r.status === 200 && r.data?.ok) {
-        showToast(t('role_deleted'));
-        delete rolesData[name];
-        renderRoles();
-    } else {
-        showToast(r?.data?.error || t('delete_error'), 'danger');
-    }
+    showConfirmModal(t('role_confirm_delete'), async () => {
+        const r = await apiDelete('/api/roles/' + encodeURIComponent(name));
+        if (r && r.status === 200 && r.data?.ok) {
+            showToast(t('role_deleted'));
+            delete rolesData[name];
+            renderRoles();
+        } else {
+            showToast(r?.data?.error || t('delete_error'), 'danger');
+        }
+    });
 }

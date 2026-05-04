@@ -4,7 +4,7 @@
 
 import os
 
-from flask import jsonify, request
+from flask import jsonify
 
 from lib.config import ConfigControl
 
@@ -25,9 +25,11 @@ def register(app, wa):
     @modules_edit_req
     def api_save_modules():
         """Overwrite ``modules.json`` with the request body."""
-        data = request.get_json(silent=True)
-        if data is None:
-            return jsonify({'error': wa._t('invalid_json')}), 400
+        data, err = wa._require_json()
+        if err:
+            return err
+        if not all(isinstance(v, dict) for v in data.values()):
+            return jsonify({'error': wa._t('invalid_modules_data')}), 400
         old_data = wa._read_config_file('modules.json')
         if wa._save_config_file('modules.json', data):
             changes = wa._diff_dicts(

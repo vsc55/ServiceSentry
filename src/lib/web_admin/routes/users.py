@@ -3,10 +3,14 @@
 """User management routes: /api/users, /api/users/<username>,
 /api/users/me/password."""
 
-from flask import jsonify, request, session
+from flask import jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..constants import ROLES, SUPPORTED_LANGS
+
+_MAX_USERNAME_LEN = 64
+_MAX_DISPLAY_NAME_LEN = 128
+_MIN_PASSWORD_LEN = 8
 
 
 def register(app, wa):
@@ -37,17 +41,23 @@ def register(app, wa):
     @users_add_req
     def api_create_user():
         """Create a new user."""
-        data = request.get_json(silent=True)
-        if not data:
-            return jsonify({'error': wa._t('invalid_json')}), 400
+        data, err = wa._require_json()
+        if err:
+            return err
         uname = data.get('username', '').strip()
         pw = data.get('password', '')
         role = data.get('role', 'viewer')
         dname = data.get('display_name', '').strip() or uname
         if not uname:
             return jsonify({'error': wa._t('username_required')}), 400
+        if len(uname) > _MAX_USERNAME_LEN:
+            return jsonify({'error': wa._t('name_too_long', _MAX_USERNAME_LEN)}), 400
         if not pw:
             return jsonify({'error': wa._t('password_required')}), 400
+        if len(pw) < _MIN_PASSWORD_LEN:
+            return jsonify({'error': wa._t('password_too_short')}), 400
+        if len(dname) > _MAX_DISPLAY_NAME_LEN:
+            return jsonify({'error': wa._t('display_name_too_long', _MAX_DISPLAY_NAME_LEN)}), 400
         valid_roles = set(ROLES) | set(wa._custom_roles.keys())
         if role not in valid_roles:
             return jsonify({'error': wa._t('invalid_role')}), 400
@@ -78,9 +88,9 @@ def register(app, wa):
         """Update an existing user (role, display_name, password)."""
         if username not in wa._users:
             return jsonify({'error': wa._t('user_not_found')}), 404
-        data = request.get_json(silent=True)
-        if not data:
-            return jsonify({'error': wa._t('invalid_json')}), 400
+        data, err = wa._require_json()
+        if err:
+            return err
         user = wa._users[username]
         changes: list[dict] = []
         if 'role' in data:
@@ -99,12 +109,16 @@ def register(app, wa):
             user['role'] = data['role']
         if 'display_name' in data:
             new_dn = data['display_name'].strip() or username
+            if len(new_dn) > _MAX_DISPLAY_NAME_LEN:
+                return jsonify({'error': wa._t('display_name_too_long', _MAX_DISPLAY_NAME_LEN)}), 400
             old_dn = user.get('display_name', username)
             if old_dn != new_dn:
                 changes.append({'field': 'display_name', 'old': old_dn, 'new': new_dn})
             user['display_name'] = new_dn
         has_password_reset = False
         if 'password' in data and data['password']:
+            if len(data['password']) < _MIN_PASSWORD_LEN:
+                return jsonify({'error': wa._t('password_too_short')}), 400
             user['password_hash'] = generate_password_hash(data['password'])
             has_password_reset = True
         if 'lang' in data:
@@ -166,9 +180,9 @@ def register(app, wa):
     @login_required
     def api_change_own_password():
         """Allow any logged-in user to change their own password."""
-        data = request.get_json(silent=True)
-        if not data:
-            return jsonify({'error': wa._t('invalid_json')}), 400
+        data, err = wa._require_json()
+        if err:
+            return err
         current_pw = data.get('current_password', '')
         new_pw = data.get('new_password', '')
         if not new_pw:
@@ -177,6 +191,8 @@ def register(app, wa):
         user = wa._users.get(uname)
         if not user or not check_password_hash(user['password_hash'], current_pw):
             return jsonify({'error': wa._t('wrong_current_password')}), 403
+        if len(new_pw) < _MIN_PASSWORD_LEN:
+            return jsonify({'error': wa._t('password_too_short')}), 400
         user['password_hash'] = generate_password_hash(new_pw)
         wa._persist_users()
         wa._audit('password_changed')

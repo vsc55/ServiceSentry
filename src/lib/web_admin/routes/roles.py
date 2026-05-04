@@ -2,9 +2,12 @@
 # -*- coding: utf-8 -*-
 """Custom roles management routes: /api/roles, /api/roles/<name>."""
 
-from flask import jsonify, request
+from flask import jsonify
 
 from ..constants import BUILTIN_ROLE_PERMISSIONS, PERMISSIONS, ROLES
+
+_MAX_NAME_LEN = 64
+_MAX_LABEL_LEN = 128
 
 
 def register(app, wa):
@@ -38,14 +41,18 @@ def register(app, wa):
     @roles_add_req
     def api_create_role():
         """Create a new custom role."""
-        data = request.get_json(silent=True)
-        if not data:
-            return jsonify({'error': wa._t('invalid_json')}), 400
+        data, err = wa._require_json()
+        if err:
+            return err
         name = data.get('name', '').strip().lower().replace(' ', '_')
         label = data.get('label', '').strip() or name
         perms = [p for p in data.get('permissions', []) if p in PERMISSIONS]
         if not name:
             return jsonify({'error': wa._t('role_name_required')}), 400
+        if len(name) > _MAX_NAME_LEN:
+            return jsonify({'error': wa._t('name_too_long', _MAX_NAME_LEN)}), 400
+        if len(label) > _MAX_LABEL_LEN:
+            return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
         if name in ROLES or name in wa._custom_roles:
             return jsonify({'error': wa._t('role_already_exists', name)}), 409
         wa._custom_roles[name] = {'label': label, 'permissions': perms}
@@ -60,14 +67,16 @@ def register(app, wa):
         is_builtin = name in ROLES
         if not is_builtin and name not in wa._custom_roles:
             return jsonify({'error': wa._t('role_not_found')}), 404
-        data = request.get_json(silent=True)
-        if not data:
-            return jsonify({'error': wa._t('invalid_json')}), 400
+        data, err = wa._require_json()
+        if err:
+            return err
         changes: list[dict] = []
         if is_builtin:
             # Built-in roles: store custom label in a side dict
             if 'label' in data:
                 new_label = data['label'].strip() or name
+                if len(new_label) > _MAX_LABEL_LEN:
+                    return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
                 old_label = wa._builtin_role_labels.get(name, name.title())
                 if old_label != new_label:
                     changes.append({'field': 'label', 'old': old_label, 'new': new_label})
@@ -77,6 +86,8 @@ def register(app, wa):
             role = wa._custom_roles[name]
             if 'label' in data:
                 new_label = data['label'].strip() or name
+                if len(new_label) > _MAX_LABEL_LEN:
+                    return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
                 old_label = role.get('label', name)
                 if old_label != new_label:
                     changes.append({'field': 'label', 'old': old_label, 'new': new_label})

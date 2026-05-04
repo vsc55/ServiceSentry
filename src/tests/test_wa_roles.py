@@ -364,7 +364,7 @@ class TestCustomRoles:
         _login(client)
         client.post("/api/roles", json={"name": "inuse", "label": "I", "permissions": []})
         client.post("/api/users", json={
-            "username": "roleuser", "password": "x", "role": "inuse",
+            "username": "roleuser", "password": "testpass", "role": "inuse",
         })
         resp = client.delete("/api/roles/inuse")
         assert resp.status_code == 409
@@ -392,7 +392,7 @@ class TestCustomRoles:
             "name": "customrole", "label": "C", "permissions": ["modules_edit"],
         })
         resp = client.post("/api/users", json={
-            "username": "customuser", "password": "x", "role": "customrole",
+            "username": "customuser", "password": "testpass", "role": "customrole",
         })
         assert resp.status_code == 201
         users = client.get("/api/users").get_json()
@@ -463,13 +463,13 @@ class TestGranularPermissions:
     def test_users_add_allows_create_user(self, admin):
         self._make_user_with_perms(admin, "u_add", ["users_add"])
         c = self._client_as(admin, "u_add")
-        resp = c.post("/api/users", json={"username": "newu", "password": "x", "role": "viewer"})
+        resp = c.post("/api/users", json={"username": "newu", "password": "testpass", "role": "viewer"})
         assert resp.status_code == 201
 
     def test_without_users_add_create_user_403(self, admin):
         self._make_user_with_perms(admin, "no_add", [])
         c = self._client_as(admin, "no_add")
-        resp = c.post("/api/users", json={"username": "x", "password": "x", "role": "viewer"})
+        resp = c.post("/api/users", json={"username": "x", "password": "testpass", "role": "viewer"})
         assert resp.status_code == 403
 
     # ── users_edit ────────────────────────────────────────────────
@@ -660,7 +660,7 @@ class TestGranularPermissions:
         with unittest.mock.patch("requests.post") as mock_post:
             mock_post.return_value = unittest.mock.Mock(status_code=200)
             resp = c.post("/api/telegram/test", json={
-                "token": "123:ABC", "chat_id": "456",
+                "token": "123456789:ABCDefGHiJklMNoPqrSTuV", "chat_id": "456",
             })
         assert resp.status_code == 200
 
@@ -700,11 +700,11 @@ class TestGranularPermissions:
             "permissions": ["audit_view", "sessions_view"],
         })
         client.post("/api/users", json={
-            "username": "auditor_user", "password": "x", "role": "auditor_role",
+            "username": "auditor_user", "password": "testpass", "role": "auditor_role",
         })
         client.get("/logout")
 
-        _login(client, "auditor_user", "x")
+        _login(client, "auditor_user", "testpass")
         me = client.get("/api/me").get_json()
         assert set(me["permissions"]) == {"audit_view", "sessions_view"}
 
@@ -717,11 +717,11 @@ class TestGranularPermissions:
             "permissions": ["modules_edit"],
         })
         client.post("/api/users", json={
-            "username": "writer_user", "password": "x", "role": "mod_writer",
+            "username": "writer_user", "password": "testpass", "role": "mod_writer",
         })
         client.get("/logout")
 
-        _login(client, "writer_user", "x")
+        _login(client, "writer_user", "testpass")
         resp = client.put("/api/modules", json={"test": {"enabled": True}})
         assert resp.status_code == 200
 
@@ -734,10 +734,10 @@ class TestGranularPermissions:
             "permissions": ["modules_edit"],
         })
         client.post("/api/users", json={
-            "username": "modonly_user", "password": "x", "role": "mod_only",
+            "username": "modonly_user", "password": "testpass", "role": "mod_only",
         })
         client.get("/logout")
 
-        _login(client, "modonly_user", "x")
+        _login(client, "modonly_user", "testpass")
         resp = client.put("/api/config", json={"daemon": {"timer_check": 60}})
         assert resp.status_code == 403

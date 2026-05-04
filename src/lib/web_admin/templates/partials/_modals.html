@@ -212,13 +212,13 @@
     </div>
 </div>
 
-{# Generic confirm modal #}
+{# Generic confirm modal — used by delete user/group/role, revoke session, audit #}
 <div class="modal fade" id="confirmModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title" id="confirmModalTitle">
-                    <i class="bi bi-exclamation-triangle me-1 text-warning"></i>{{ i18n.confirm }}
+                <h6 class="modal-title">
+                    <i class="bi bi-exclamation-triangle me-1 text-danger"></i>{{ i18n.confirm }}
                 </h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
@@ -228,27 +228,6 @@
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
                 <button class="btn btn-sm btn-danger" id="btnConfirmModalOk">{{ i18n.confirm }}</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-{# Audit confirm delete modal #}
-<div class="modal fade" id="auditConfirmModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header py-2">
-                <h6 class="modal-title" id="auditConfirmModalTitle">
-                    <i class="bi bi-exclamation-triangle me-1 text-danger"></i>{{ i18n.confirm }}
-                </h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p class="mb-0" id="auditConfirmModalMsg"></p>
-            </div>
-            <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-danger" id="btnAuditConfirmOk">{{ i18n.delete }}</button>
             </div>
         </div>
     </div>

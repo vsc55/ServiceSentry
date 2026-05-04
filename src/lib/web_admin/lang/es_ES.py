@@ -59,6 +59,10 @@ LANG = {
     # Config
     'save_config': 'Guardar configuración',
     'config_saved': 'Configuración guardada correctamente',
+    'reset_field': 'Restaurar predeterminado',
+    'reload_config': 'Recargar',
+    'reload_config_title': 'Descartar cambios y recargar desde el servidor',
+    'config_reloaded': 'Configuración recargada desde el servidor',
     # Status
     'status_placeholder': 'Selecciona esta pestaña para cargar el estado.',
     'status_empty': 'No hay datos de estado disponibles.',
@@ -222,6 +226,20 @@ LANG = {
         'username': 'Usuario web', 'password': 'Contraseña',
         'pretty_name': 'Nombre para mostrar', 'lang': 'Idioma', 'dark_mode': 'Modo oscuro',
     },
+    # Hints de campo — se muestran como tooltip ⓘ junto a cada opción de configuración
+    'hints': {
+        'web_admin|lang':               'Idioma de visualización del panel web.',
+        'web_admin|dark_mode':          'Usar el tema oscuro en la interfaz.',
+        'web_admin|secure_cookies':     'Marcar las cookies de sesión como Secure (solo HTTPS). Activar únicamente si el panel se sirve por HTTPS.',
+        'web_admin|remember_me_days':   'Número de días que permanece activa una sesión «Recuérdame» (1–365).',
+        'web_admin|audit_max_entries':  'Número máximo de entradas conservadas en el registro de auditoría (10–10\u202f000). Las más antiguas se eliminan al alcanzar el límite.',
+        'daemon|timer_check':           'Intervalo en segundos entre comprobaciones consecutivas de todos los módulos.',
+        'global|debug':                 'Activar el registro de depuración detallado. No recomendado en producción.',
+        'telegram|token':               'Token de la API del Bot de Telegram. Crea un bot con @BotFather para obtenerlo.',
+        'telegram|chat_id':             'ID numérico del chat de Telegram donde se enviarán las alertas.',
+        'telegram|group_messages':      'Agrupar varias alertas consecutivas en un único mensaje de Telegram.',
+        'web_admin|audit_sort':         'Columna predeterminada para ordenar la tabla del registro de auditoría.',
+    },
     # Etiquetas de secciones
     'sections': {
         'daemon': 'Daemon', 'global': 'General',
@@ -314,4 +332,13 @@ LANG = {
     'col_group_permissions':  'Permisos',
     'col_group_members':      'Miembros',
     'col_groups':             'Grupos',
+    # Validación de entrada
+    'password_too_short':     'La contraseña debe tener al menos 8 caracteres',
+    'telegram_invalid_token': 'Formato de token del bot de Telegram no válido',
+    'telegram_invalid_chat_id': 'El Chat ID debe ser un número válido',
+    'invalid_modules_data':   'Datos de módulos no válidos: todos los valores deben ser objetos',
+    'name_too_long':          'Nombre demasiado largo (máx {} caracteres)',
+    'label_too_long':         'Etiqueta demasiado larga (máx {} caracteres)',
+    'description_too_long':   'Descripción demasiado larga (máx {} caracteres)',
+    'display_name_too_long':  'Nombre a mostrar demasiado largo (máx {} caracteres)',
 }

@@ -65,7 +65,7 @@ class TestAuditLog:
         """Creating a user logs username, role and display_name."""
         _login(client)
         client.post("/api/users", json={
-            "username": "auduser", "password": "p", "role": "viewer",
+            "username": "auduser", "password": "testpass", "role": "viewer",
         })
         entry = [e for e in admin._audit_log if e['event'] == 'user_created'][-1]
         assert entry['detail']['username'] == 'auduser'
@@ -167,7 +167,7 @@ class TestAuditLog:
             "role": "viewer", "display_name": "PW",
         }
         _login(client)
-        client.put("/api/users/pwuser", json={"password": "newpass"})
+        client.put("/api/users/pwuser", json={"password": "newpass1"})
         events = [e['event'] for e in admin._audit_log]
         assert 'password_reset' in events
         entry = [e for e in admin._audit_log if e['event'] == 'password_reset'][-1]
@@ -181,7 +181,7 @@ class TestAuditLog:
         }
         _login(client)
         client.put("/api/users/both", json={
-            "role": "editor", "password": "newpw",
+            "role": "editor", "password": "newpass1",
         })
         events = [e['event'] for e in admin._audit_log]
         assert 'user_updated' in events
