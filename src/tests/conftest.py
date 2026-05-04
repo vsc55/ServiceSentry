@@ -19,6 +19,11 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from lib.modules import ModuleBase
 from watchfuls.web import Watchful as WebWatchful
 
+# Pre-computed hash for password "secret" using pbkdf2:sha256 (fast algorithm).
+# Avoids calling generate_password_hash (bcrypt ~300 ms) on every test fixture.
+_ADMIN_PASS = "secret"
+_ADMIN_HASH = generate_password_hash(_ADMIN_PASS, method="pbkdf2:sha256")
+
 
 # ──────────────────────────── Fixtures ─────────────────────────────
 
@@ -84,7 +89,22 @@ def var_dir(tmp_path):
 
 @pytest.fixture()
 def admin(config_dir, var_dir):
-    """WebAdmin instance with testing config."""
+    """WebAdmin instance with testing config.
+
+    Pre-writes users.json with a pbkdf2:sha256 hash to avoid the slow
+    scrypt/bcrypt generate_password_hash call on every fixture setup.
+    """
+    import pathlib
+    users = {
+        "admin": {
+            "password_hash": _ADMIN_HASH,
+            "role": "admin",
+            "display_name": "Administrator",
+        }
+    }
+    (pathlib.Path(config_dir) / "users.json").write_text(
+        json.dumps(users, indent=4), encoding="utf-8"
+    )
     return WebAdmin(config_dir, "admin", "secret", var_dir)
 
 

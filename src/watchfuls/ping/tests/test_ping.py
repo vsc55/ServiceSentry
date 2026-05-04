@@ -87,8 +87,9 @@ class TestPingCheck:
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
 
-        # Mock _icmp_ping para simular ping fallido
-        with patch.object(w, '_icmp_ping', return_value=False):
+        # Mock _icmp_ping para simular ping fallido; mock sleep para no esperar
+        with patch.object(w, '_icmp_ping', return_value=False), \
+             patch('watchfuls.ping.time.sleep'):
             result = w.check()
             items = result.list
             assert '192.168.1.99' in items
