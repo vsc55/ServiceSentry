@@ -78,7 +78,7 @@ LANG = {
     'edit_user_title': 'Edit user',
     'current_password': 'Current password',
     'new_password': 'New password',
-    'confirm_password': 'Confirm',
+    'confirm_password': 'Confirm password',
     'change': 'Change',
     'change_my_password': 'Change my password',
     'no_users': 'No users.',

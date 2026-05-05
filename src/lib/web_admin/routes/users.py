@@ -8,9 +8,6 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..constants import ROLES, SUPPORTED_LANGS
 
-_MAX_USERNAME_LEN = 64
-_MAX_DISPLAY_NAME_LEN = 128
-
 
 def register(app, wa):
     login_required = wa._login_required
@@ -49,15 +46,15 @@ def register(app, wa):
         dname = data.get('display_name', '').strip() or uname
         if not uname:
             return jsonify({'error': wa._t('username_required')}), 400
-        if len(uname) > _MAX_USERNAME_LEN:
-            return jsonify({'error': wa._t('name_too_long', _MAX_USERNAME_LEN)}), 400
+        if len(uname) > wa._MAX_USERNAME_LEN:
+            return jsonify({'error': wa._t('name_too_long', wa._MAX_USERNAME_LEN)}), 400
         if not pw:
             return jsonify({'error': wa._t('password_required')}), 400
         pw_err = wa._validate_password(pw)
         if pw_err:
             return jsonify({'error': wa._t(*pw_err)}), 400
-        if len(dname) > _MAX_DISPLAY_NAME_LEN:
-            return jsonify({'error': wa._t('display_name_too_long', _MAX_DISPLAY_NAME_LEN)}), 400
+        if len(dname) > wa._MAX_DISPLAY_NAME_LEN:
+            return jsonify({'error': wa._t('display_name_too_long', wa._MAX_DISPLAY_NAME_LEN)}), 400
         valid_roles = set(ROLES) | set(wa._custom_roles.keys())
         if role not in valid_roles:
             return jsonify({'error': wa._t('invalid_role')}), 400
@@ -109,8 +106,8 @@ def register(app, wa):
             user['role'] = data['role']
         if 'display_name' in data:
             new_dn = data['display_name'].strip() or username
-            if len(new_dn) > _MAX_DISPLAY_NAME_LEN:
-                return jsonify({'error': wa._t('display_name_too_long', _MAX_DISPLAY_NAME_LEN)}), 400
+            if len(new_dn) > wa._MAX_DISPLAY_NAME_LEN:
+                return jsonify({'error': wa._t('display_name_too_long', wa._MAX_DISPLAY_NAME_LEN)}), 400
             old_dn = user.get('display_name', username)
             if old_dn != new_dn:
                 changes.append({'field': 'display_name', 'old': old_dn, 'new': new_dn})

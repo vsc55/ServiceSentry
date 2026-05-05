@@ -19,7 +19,7 @@ def register(app, wa):
     @login_required
     def api_get_modules():
         """Return the contents of ``modules.json``."""
-        return jsonify(wa._read_config_file('modules.json'))
+        return jsonify(wa._read_config_file(wa._MODULES_FILE))
 
     @app.route('/api/modules', methods=['PUT'])
     @modules_edit_req
@@ -30,8 +30,8 @@ def register(app, wa):
             return err
         if not all(isinstance(v, dict) for v in data.values()):
             return jsonify({'error': wa._t('invalid_modules_data')}), 400
-        old_data = wa._read_config_file('modules.json')
-        if wa._save_config_file('modules.json', data):
+        old_data = wa._read_config_file(wa._MODULES_FILE)
+        if wa._save_config_file(wa._MODULES_FILE, data):
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._SENSITIVE_FIELDS,
             )
@@ -47,7 +47,7 @@ def register(app, wa):
         """Return the contents of ``status.json`` (read-only)."""
         if not wa._var_dir:
             return jsonify({})
-        path = os.path.join(wa._var_dir, 'status.json')
+        path = os.path.join(wa._var_dir, wa._STATUS_FILE)
         cfg = ConfigControl(path)
         data = cfg.read()
         return jsonify(data if data else {})
@@ -59,7 +59,7 @@ def register(app, wa):
     def api_get_overview():
         """Return a summary snapshot for the overview dashboard."""
         # Modules summary
-        modules_raw = wa._read_config_file('modules.json')
+        modules_raw = wa._read_config_file(wa._MODULES_FILE)
         modules_list = []
         for name, cfg in modules_raw.items():
             if not isinstance(cfg, dict):
@@ -78,7 +78,7 @@ def register(app, wa):
         # Status summary
         status_raw: dict = {}
         if wa._var_dir:
-            path = os.path.join(wa._var_dir, 'status.json')
+            path = os.path.join(wa._var_dir, wa._STATUS_FILE)
             cfg_ctrl = ConfigControl(path)
             status_raw = cfg_ctrl.read() or {}
         total_checks = 0

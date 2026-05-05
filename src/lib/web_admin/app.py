@@ -42,6 +42,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _SECRET_KEY_FILE = '.flask_secret'
     _SESSIONS_FILE = 'sessions.json'
     _AUDIT_FILE = 'audit.json'
+    _CONFIG_FILE = 'config.json'
+    _MODULES_FILE = 'modules.json'
+    _STATUS_FILE = 'status.json'
     _AUDIT_MAX_ENTRIES = 500
     _REMEMBER_ME_DAYS = 30
     _SECURE_COOKIES_DEFAULT = False
@@ -51,6 +54,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _PW_REQUIRE_UPPER = True
     _PW_REQUIRE_DIGIT = True
     _PW_REQUIRE_SYMBOL = False
+    # Validation length limits
+    _MAX_USERNAME_LEN = 64
+    _MAX_DISPLAY_NAME_LEN = 128
+    _MAX_ROLE_NAME_LEN = 64
+    _MAX_ROLE_LABEL_LEN = 128
+    _MAX_GROUP_NAME_LEN = 64
+    _MAX_GROUP_LABEL_LEN = 128
+    _MAX_GROUP_DESC_LEN = 512
 
     def __init__(
         self,

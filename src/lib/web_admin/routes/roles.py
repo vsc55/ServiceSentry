@@ -6,9 +6,6 @@ from flask import jsonify
 
 from ..constants import BUILTIN_ROLE_PERMISSIONS, PERMISSIONS, ROLES
 
-_MAX_NAME_LEN = 64
-_MAX_LABEL_LEN = 128
-
 
 def register(app, wa):
     login_required = wa._login_required
@@ -49,10 +46,10 @@ def register(app, wa):
         perms = [p for p in data.get('permissions', []) if p in PERMISSIONS]
         if not name:
             return jsonify({'error': wa._t('role_name_required')}), 400
-        if len(name) > _MAX_NAME_LEN:
-            return jsonify({'error': wa._t('name_too_long', _MAX_NAME_LEN)}), 400
-        if len(label) > _MAX_LABEL_LEN:
-            return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
+        if len(name) > wa._MAX_ROLE_NAME_LEN:
+            return jsonify({'error': wa._t('name_too_long', wa._MAX_ROLE_NAME_LEN)}), 400
+        if len(label) > wa._MAX_ROLE_LABEL_LEN:
+            return jsonify({'error': wa._t('label_too_long', wa._MAX_ROLE_LABEL_LEN)}), 400
         if name in ROLES or name in wa._custom_roles:
             return jsonify({'error': wa._t('role_already_exists', name)}), 409
         wa._custom_roles[name] = {'label': label, 'permissions': perms}
@@ -75,8 +72,8 @@ def register(app, wa):
             # Built-in roles: store custom label in a side dict
             if 'label' in data:
                 new_label = data['label'].strip() or name
-                if len(new_label) > _MAX_LABEL_LEN:
-                    return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
+                if len(new_label) > wa._MAX_ROLE_LABEL_LEN:
+                    return jsonify({'error': wa._t('label_too_long', wa._MAX_ROLE_LABEL_LEN)}), 400
                 old_label = wa._builtin_role_labels.get(name, name.title())
                 if old_label != new_label:
                     changes.append({'field': 'label', 'old': old_label, 'new': new_label})
@@ -86,8 +83,8 @@ def register(app, wa):
             role = wa._custom_roles[name]
             if 'label' in data:
                 new_label = data['label'].strip() or name
-                if len(new_label) > _MAX_LABEL_LEN:
-                    return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
+                if len(new_label) > wa._MAX_ROLE_LABEL_LEN:
+                    return jsonify({'error': wa._t('label_too_long', wa._MAX_ROLE_LABEL_LEN)}), 400
                 old_label = role.get('label', name)
                 if old_label != new_label:
                     changes.append({'field': 'label', 'old': old_label, 'new': new_label})

@@ -40,7 +40,7 @@ def register(app, wa):
     @login_required
     def api_get_config():
         """Return the contents of ``config.json``."""
-        return jsonify(wa._read_config_file('config.json'))
+        return jsonify(wa._read_config_file(wa._CONFIG_FILE))
 
     @app.route('/api/config/schema', methods=['GET'])
     @login_required
@@ -69,7 +69,7 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
-        old_data = wa._read_config_file('config.json')
+        old_data = wa._read_config_file(wa._CONFIG_FILE)
         # Sanitize: ensure integer fields written to disk are always valid.
         # If an invalid value arrives (string, null, bool, out-of-range), replace
         # it with the current runtime value so the file is never corrupted.
@@ -82,7 +82,7 @@ def register(app, wa):
             if not (isinstance(v, int) and not isinstance(v, bool)
                     and rule['min'] <= v <= rule['max']):
                 sec_data[field] = getattr(wa, rule['attr'])
-        if wa._save_config_file('config.json', data):
+        if wa._save_config_file(wa._CONFIG_FILE, data):
             # Apply web_admin.lang at runtime if changed
             new_lang = (data.get('web_admin') or {}).get('lang', '')
             if new_lang and new_lang in SUPPORTED_LANGS:

@@ -6,10 +6,6 @@ from flask import jsonify
 
 from ..constants import BUILTIN_ROLE_PERMISSIONS, _BUILTIN_GROUPS
 
-_MAX_NAME_LEN = 64
-_MAX_LABEL_LEN = 128
-_MAX_DESC_LEN = 512
-
 
 def register(app, wa):
     login_required  = wa._login_required
@@ -53,12 +49,12 @@ def register(app, wa):
         roles = [r for r in data.get('roles', []) if r in all_role_names]
         if not name:
             return jsonify({'error': wa._t('group_name_required')}), 400
-        if len(name) > _MAX_NAME_LEN:
-            return jsonify({'error': wa._t('name_too_long', _MAX_NAME_LEN)}), 400
-        if len(label) > _MAX_LABEL_LEN:
-            return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
-        if len(description) > _MAX_DESC_LEN:
-            return jsonify({'error': wa._t('description_too_long', _MAX_DESC_LEN)}), 400
+        if len(name) > wa._MAX_GROUP_NAME_LEN:
+            return jsonify({'error': wa._t('name_too_long', wa._MAX_GROUP_NAME_LEN)}), 400
+        if len(label) > wa._MAX_GROUP_LABEL_LEN:
+            return jsonify({'error': wa._t('label_too_long', wa._MAX_GROUP_LABEL_LEN)}), 400
+        if len(description) > wa._MAX_GROUP_DESC_LEN:
+            return jsonify({'error': wa._t('description_too_long', wa._MAX_GROUP_DESC_LEN)}), 400
         if name in wa._groups:
             return jsonify({'error': wa._t('group_already_exists', name)}), 409
         wa._groups[name] = {
@@ -88,16 +84,16 @@ def register(app, wa):
         if not is_builtin:
             if 'label' in data:
                 new_label = data['label'].strip() or name
-                if len(new_label) > _MAX_LABEL_LEN:
-                    return jsonify({'error': wa._t('label_too_long', _MAX_LABEL_LEN)}), 400
+                if len(new_label) > wa._MAX_GROUP_LABEL_LEN:
+                    return jsonify({'error': wa._t('label_too_long', wa._MAX_GROUP_LABEL_LEN)}), 400
                 old_label = group.get('label', name)
                 if old_label != new_label:
                     changes.append({'field': 'label', 'old': old_label, 'new': new_label})
                 group['label'] = new_label
             if 'description' in data:
                 new_desc = data['description'].strip()
-                if len(new_desc) > _MAX_DESC_LEN:
-                    return jsonify({'error': wa._t('description_too_long', _MAX_DESC_LEN)}), 400
+                if len(new_desc) > wa._MAX_GROUP_DESC_LEN:
+                    return jsonify({'error': wa._t('description_too_long', wa._MAX_GROUP_DESC_LEN)}), 400
                 old_desc = group.get('description', '')
                 if old_desc != new_desc:
                     changes.append({'field': 'description', 'old': old_desc, 'new': new_desc})
