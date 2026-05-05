@@ -56,18 +56,21 @@ En modo desarrollo (cuando `src` está en la ruta), los archivos de configuraci�
 
 ## Tests
 
-El proyecto tiene **672 tests** usando `pytest`.
+El proyecto tiene **1110 tests** usando `pytest`, con ejecución paralela automática via `pytest-xdist`.
 
 ### Ejecutar todos los tests
 
 ```bash
 cd src
 
-# Ejecución rápida
+# Ejecución rápida (paralelo automático, usa todos los cores)
 python -m pytest tests/ watchfuls/ -q
 
 # Verbose con traza corta
 python -m pytest tests/ watchfuls/ -v --tb=short
+
+# Sin paralelismo (secuencial)
+python -m pytest tests/ watchfuls/ -n 0
 
 # Módulo específico
 python -m pytest watchfuls/ping/tests/ -v
@@ -82,10 +85,21 @@ Los tests están junto a cada módulo:
 
 ```
 src/
-├── conftest.py                          # Helper compartido: create_mock_monitor()
+├── conftest.py                          # Fixtures compartidos: admin, client, _login()
 ├── tests/                               # Tests de core y web admin
-│   ├── test_config.py
-│   ├── test_web_admin.py
+│   ├── conftest.py                      # Fixtures de web_admin (config_dir, var_dir, admin, client)
+│   ├── test_wa_init.py
+│   ├── test_wa_users.py
+│   ├── test_wa_roles.py
+│   ├── test_wa_groups.py
+│   ├── test_wa_config.py
+│   ├── test_wa_modules.py
+│   ├── test_wa_sessions.py
+│   ├── test_wa_audit.py
+│   ├── test_wa_security.py
+│   ├── test_wa_telegram.py
+│   ├── test_wa_ui.py
+│   ├── test_wa_json_helpers.py
 │   └── ...
 └── watchfuls/
     ├── ping/tests/test_ping.py
@@ -119,8 +133,12 @@ La clave del mock es el `name_module` completo (ej: `'watchfuls.ping'`), no el n
 ```ini
 [pytest]
 testpaths = tests watchfuls
-addopts = -ra -s -v --tb=short
+addopts = -ra -v --tb=short -n auto
 ```
+
+La opción `-n auto` usa `pytest-xdist` para distribuir los tests entre todos los cores disponibles automáticamente. El tiempo de ejecución pasa de ~4 min (secuencial) a ~2 min (paralelo en 8 cores).
+
+> **Nota:** `-s` (no capture stdout) es incompatible con `-n auto`. Si necesitas ver `print()` durante el desarrollo, pasa `-n 0` para ejecutar en serie.
 
 ---
 

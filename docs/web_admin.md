@@ -5,6 +5,38 @@ Permite gestionar módulos, configuración y usuarios sin tocar archivos directa
 
 ---
 
+## Organización del Código
+
+La lógica de `WebAdmin` está dividida en **mixins** (lógica de negocio) y **routes** (registro de rutas Flask):
+
+```
+lib/web_admin/
+├── app.py            # class WebAdmin(hereda todos los mixins)
+├── mixins/
+│   ├── users.py      # _UsersMixin
+│   ├── roles.py      # _RolesMixin
+│   ├── groups.py     # _GroupsMixin
+│   ├── permissions.py# _PermissionsMixin
+│   ├── sessions.py   # _SessionsMixin
+│   ├── audit.py      # _AuditMixin
+│   └── checks.py     # _ChecksMixin
+└── routes/
+    ├── __init__.py   # register_all(app, wa)
+    ├── auth.py       # /login, /logout
+    ├── users.py      # /api/users, /api/me
+    ├── roles.py      # /api/roles
+    ├── groups.py     # /api/groups
+    ├── modules.py    # /api/modules, /api/status, /api/overview
+    ├── config.py     # /api/config, /api/config/schema
+    ├── sessions.py   # /api/sessions
+    ├── telegram.py   # /api/telegram/test
+    ├── audit.py      # /api/audit
+    ├── checks.py     # /api/checks/run
+    └── ui.py         # /, /lang, /theme
+```
+
+---
+
 ## Iniciar la Interfaz Web
 
 ```bash
@@ -137,10 +169,13 @@ botones y pestañas según los permisos del usuario actual obtenidos de `/api/me
 
 ## Seguridad
 
-- Contraseñas hasheadas con `werkzeug.security` (PBKDF2).
+- Contraseñas hasheadas con `werkzeug.security` (scrypt por defecto en Werkzeug 3.x; los tests usan `pbkdf2:sha256` para acelerar la ejecución paralela).
+- Contraseña nueva mínimo 8 caracteres; validada en el servidor.
+- Límites de longitud aplicados en el servidor: username ≤ 64 chars, display_name ≤ 128, group name ≤ 64, label ≤ 128, description ≤ 512.
 - Redireccionamientos validados contra el mismo origen (evita open redirect).
 - Nombres de usuario escapados en mensajes de la UI (evita XSS en títulos de modales).
 - Sesiones revocables desde el panel de administración.
+- Las acciones destructivas (eliminar usuario/rol/grupo, revocar sesión) se confirman con un modal Bootstrap centrado antes de ejecutarse — nunca con `confirm()` nativo del navegador.
 - Política de host SSH por defecto cambiada a `RejectPolicy` (hosts desconocidos rechazados).
 - Campos sensibles (contraseñas, tokens) enmascarados en el diff del registro de auditoría.
 
@@ -173,6 +208,14 @@ El permiso requerido se indica entre paréntesis.
 |--------|------|---------|-------------|
 | `GET` | `/api/config` | auth | Obtener el `config.json` actual |
 | `PUT` | `/api/config` | `config_edit` | Guardar `config.json` |
+| `GET` | `/api/config/schema` | auth | Obtener el schema de validación de los campos de configuración del web admin |
+
+Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `routes/config.py`):
+
+| Clave (`config.json`) | Atributo | Mín | Máx |
+|----------------------|----------|-----|-----|
+| `web_admin\|remember_me_days` | `_REMEMBER_ME_DAYS` | 1 | 365 |
+| `web_admin\|audit_max_entries` | `_AUDIT_MAX_ENTRIES` | 10 | 10000 |
 
 ### Telegram
 

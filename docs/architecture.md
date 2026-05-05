@@ -45,6 +45,14 @@ ObjectBase (lib/object_base.py)
 ├── Telegram (lib/telegram.py)
 ├── ConfigStore (lib/config/config_store.py)
 │   └── ConfigControl (lib/config/config_control.py)
+├── WebAdmin (lib/web_admin/app.py)
+│   ├── _UsersMixin      (lib/web_admin/mixins/users.py)
+│   ├── _RolesMixin      (lib/web_admin/mixins/roles.py)
+│   ├── _GroupsMixin     (lib/web_admin/mixins/groups.py)
+│   ├── _PermissionsMixin(lib/web_admin/mixins/permissions.py)
+│   ├── _SessionsMixin   (lib/web_admin/mixins/sessions.py)
+│   ├── _AuditMixin      (lib/web_admin/mixins/audit.py)
+│   └── _ChecksMixin     (lib/web_admin/mixins/checks.py)
 └── ModuleBase (lib/modules/module_base.py)
     ├── watchfuls.filesystemusage::Watchful  🌐 (multiplataforma)
     ├── watchfuls.hddtemp::Watchful
@@ -97,10 +105,31 @@ ServiceSentry/
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck
 │   │   │   └── enum_config_options.py   # Enum opciones de config comunes
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
-│   │       ├── app.py                   # Rutas y lógica principal
+│   │       ├── app.py                   # Clase WebAdmin (hereda de los 7 mixins)
 │   │       ├── i18n.py                  # Cargador de traducciones
 │   │       ├── lang/                    # Ficheros de idioma globales (en_EN.py, es_ES.py)
-│   │       └── templates/              # Plantillas Jinja2
+│   │       ├── templates/               # Plantillas Jinja2
+│   │       ├── mixins/                  # Lógica de negocio por dominio
+│   │       │   ├── users.py             # _UsersMixin: CRUD usuarios
+│   │       │   ├── roles.py             # _RolesMixin: CRUD roles
+│   │       │   ├── groups.py            # _GroupsMixin: CRUD grupos
+│   │       │   ├── permissions.py       # _PermissionsMixin: permisos efectivos
+│   │       │   ├── sessions.py          # _SessionsMixin: gestión de sesiones
+│   │       │   ├── audit.py             # _AuditMixin: registro de auditoría
+│   │       │   └── checks.py            # _ChecksMixin: ejecución de checks
+│   │       └── routes/                  # Blueprints / registradores de rutas Flask
+│   │           ├── __init__.py          # register_all(app, wa)
+│   │           ├── auth.py              # /login, /logout
+│   │           ├── users.py             # /api/users, /api/me
+│   │           ├── roles.py             # /api/roles
+│   │           ├── groups.py            # /api/groups
+│   │           ├── modules.py           # /api/modules, /api/status, /api/overview
+│   │           ├── config.py            # /api/config, /api/config/schema
+│   │           ├── sessions.py          # /api/sessions
+│   │           ├── telegram.py          # /api/telegram/test
+│   │           ├── audit.py             # /api/audit
+│   │           ├── checks.py            # /api/checks/run
+│   │           └── ui.py                # /, /lang, /theme
 │   ├── watchfuls/                       # Módulos de monitorización (packages)
 │   │   ├── filesystemusage/             # 🌐 Multiplataforma (psutil)
 │   │   │   ├── __init__.py              # Implementación del módulo
@@ -119,6 +148,7 @@ ServiceSentry/
 │   │   ├── temperature/
 │   │   └── web/
 │   └── tests/                           # Tests de core y web admin
+│       ├── conftest.py                  # Fixtures: config_dir, var_dir, admin, client
 │       ├── test_config.py
 │       ├── test_debug.py
 │       ├── test_dict_files_path.py
@@ -128,7 +158,18 @@ ServiceSentry/
 │       ├── test_parse_helpers.py
 │       ├── test_thermal.py
 │       ├── test_tools.py
-│       └── test_web_admin.py
+│       ├── test_wa_init.py
+│       ├── test_wa_users.py
+│       ├── test_wa_roles.py
+│       ├── test_wa_groups.py
+│       ├── test_wa_config.py
+│       ├── test_wa_modules.py
+│       ├── test_wa_sessions.py
+│       ├── test_wa_audit.py
+│       ├── test_wa_security.py
+│       ├── test_wa_telegram.py
+│       ├── test_wa_ui.py
+│       └── test_wa_json_helpers.py
 ├── data/                                # Config en modo desarrollo
 │   ├── config.json
 │   ├── monitor.json

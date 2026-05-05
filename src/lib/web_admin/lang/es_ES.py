@@ -127,6 +127,13 @@ LANG = {
     'cannot_delete_self': 'No puedes eliminar tu propia cuenta',
     'new_password_required': 'La nueva contraseña es obligatoria',
     'wrong_current_password': 'Contraseña actual incorrecta',
+    'password_too_short':     'La contraseña debe tener al menos {} caracteres',
+    'password_too_long':      'La contraseña no puede superar {} caracteres',
+    'password_need_upper':    'La contraseña debe contener al menos una mayúscula y una minúscula',
+    'password_need_digit':    'La contraseña debe contener al menos un dígito (0–9)',
+    'password_need_symbol':   'La contraseña debe contener al menos un símbolo (ej: @, #, !)',
+    'name_too_long':          'El nombre no puede superar {} caracteres',
+    'display_name_too_long':  'El nombre para mostrar no puede superar {} caracteres',
     # Sessions
     'close_all_sessions': 'Cerrar todas las sesiones',
     'confirm_close_all_sessions': '¿Cerrar todas las sesiones activas? Todos (incluido tú) serán desconectados.',
@@ -225,6 +232,11 @@ LANG = {
         'list': 'Elementos', 'remote': 'Remotos', 'config': 'Configuración',
         'username': 'Usuario web', 'password': 'Contraseña',
         'pretty_name': 'Nombre para mostrar', 'lang': 'Idioma', 'dark_mode': 'Modo oscuro',
+        'pw_min_len':        'Long. mínima contraseña',
+        'pw_max_len':        'Long. máxima contraseña',
+        'pw_require_upper':  'Exigir mayúscula y minúscula',
+        'pw_require_digit':  'Exigir dígito',
+        'pw_require_symbol': 'Exigir símbolo',
     },
     # Hints de campo — se muestran como tooltip ⓘ junto a cada opción de configuración
     'hints': {
@@ -232,8 +244,11 @@ LANG = {
         'web_admin|dark_mode':          'Usar el tema oscuro en la interfaz.',
         'web_admin|secure_cookies':     'Marcar las cookies de sesión como Secure (solo HTTPS). Activar únicamente si el panel se sirve por HTTPS.',
         'web_admin|remember_me_days':   'Número de días que permanece activa una sesión «Recuérdame» (1–365).',
-        'web_admin|audit_max_entries':  'Número máximo de entradas conservadas en el registro de auditoría (10–10\u202f000). Las más antiguas se eliminan al alcanzar el límite.',
-        'daemon|timer_check':           'Intervalo en segundos entre comprobaciones consecutivas de todos los módulos.',
+        'web_admin|audit_max_entries':  'Número máximo de entradas conservadas en el registro de auditoría (10–10\u202f000). Las más antiguas se eliminan al alcanzar el límite.',        'web_admin|pw_min_len':         'Longitud mínima de contraseña (1–128 caracteres).',
+        'web_admin|pw_max_len':         'Longitud máxima de contraseña (8–256 caracteres).',
+        'web_admin|pw_require_upper':   'Exigir al menos una mayúscula y una minúscula en las contraseñas.',
+        'web_admin|pw_require_digit':   'Exigir al menos un dígito (0–9) en las contraseñas.',
+        'web_admin|pw_require_symbol':  'Exigir al menos un símbolo (ej: @, #, !) en las contraseñas.',        'daemon|timer_check':           'Intervalo en segundos entre comprobaciones consecutivas de todos los módulos.',
         'global|debug':                 'Activar el registro de depuración detallado. No recomendado en producción.',
         'telegram|token':               'Token de la API del Bot de Telegram. Crea un bot con @BotFather para obtenerlo.',
         'telegram|chat_id':             'ID numérico del chat de Telegram donde se enviarán las alertas.',
@@ -245,6 +260,8 @@ LANG = {
         'daemon': 'Daemon', 'global': 'General',
         'telegram': 'Telegram', 'web_admin': 'Panel Web',
     },
+    # Etiqueta de subsección política de contraseñas
+    'pw_policy_section': 'Política de contraseñas',
     # Etiquetas de roles
     'role_labels': {
         'admin': 'Admin', 'editor': 'Editor', 'viewer': 'Viewer',
@@ -333,12 +350,9 @@ LANG = {
     'col_group_members':      'Miembros',
     'col_groups':             'Grupos',
     # Validación de entrada
-    'password_too_short':     'La contraseña debe tener al menos 8 caracteres',
     'telegram_invalid_token': 'Formato de token del bot de Telegram no válido',
     'telegram_invalid_chat_id': 'El Chat ID debe ser un número válido',
     'invalid_modules_data':   'Datos de módulos no válidos: todos los valores deben ser objetos',
-    'name_too_long':          'Nombre demasiado largo (máx {} caracteres)',
     'label_too_long':         'Etiqueta demasiado larga (máx {} caracteres)',
     'description_too_long':   'Descripción demasiado larga (máx {} caracteres)',
-    'display_name_too_long':  'Nombre a mostrar demasiado largo (máx {} caracteres)',
 }

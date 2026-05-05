@@ -1,6 +1,6 @@
 # Seguridad del Panel Web
 
-Referencia completa de los mecanismos de seguridad implementados en la interfaz web de administración (`lib/web_admin`) y los tests que los verifican (`tests/test_web_admin.py`).
+Referencia completa de los mecanismos de seguridad implementados en la interfaz web de administración (`lib/web_admin`) y los tests que los verifican.
 
 ---
 
@@ -198,9 +198,12 @@ Los permisos son **aditivos**: el usuario obtiene sus permisos de rol propios m�
 
 ## Hashing de Contraseñas
 
-- `werkzeug.security.generate_password_hash` (PBKDF2-SHA256) al crear o cambiar contraseñas.
-- `werkzeug.security.check_password_hash` al verificar.
+- `werkzeug.security.generate_password_hash` al crear o cambiar contraseñas. Werkzeug 3.x usa **scrypt** por defecto (más seguro que PBKDF2).
+- `werkzeug.security.check_password_hash` al verificar — compatible con cualquier algoritmo soportado por Werkzeug.
 - El campo `password_hash` **nunca se expone** en `GET /api/users` ni en ninguna respuesta JSON.
+- Nueva contraseña mínimo **8 caracteres**; el servidor la valida y devuelve 400 si no cumple.
+
+> **Tests:** Los fixtures de pytest usan `pbkdf2:sha256` (más rápido que scrypt) pre-computado una sola vez a nivel de módulo en `conftest.py`. Esto evita recalcular el hash en cada test y permite la ejecución paralela con `pytest-xdist` sin degradación de rendimiento.
 
 ### Gestión de contraseñas
 
@@ -228,6 +231,7 @@ El cambio de contraseña propia requiere enviar la contraseña actual (`current_
 
 - Jinja2 tiene **auto-escape activado** para todas las plantillas HTML.
 - Los payloads XSS en campos de usuario (`username`, `display_name`) se almacenan literalmente pero se renderizan escapados en el HTML.
+- Las acciones destructivas (eliminar usuario/rol/grupo, revocar sesión) se confirman con un **modal Bootstrap centrado** antes de ejecutarse. Los nombres de usuario se insertan vía `textContent` (no `innerHTML`), por lo que cualquier payload XSS en el nombre no se evalúa como HTML.
 - Los mensajes de error del backend (p.ej. en el formulario de login) pasan por el motor de plantillas — nunca se concatenan directamente en HTML.
 
 ### Tests de XSS

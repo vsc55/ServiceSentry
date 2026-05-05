@@ -1,6 +1,8 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: 952 tests** | Todos deben pasar con `pytest` para que el build sea válido.
+**Total: 1110 tests** | Todos deben pasar con `pytest` para que el build sea válido.
+
+> Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
 ---
 
@@ -22,6 +24,7 @@
 14. [Panel Web — Usuarios, roles y sesiones](#14-panel-web--usuarios-roles-y-sesiones)
 15. [Panel Web — i18n, UI y seguridad](#15-panel-web--i18n-ui-y-seguridad)
 16. [Panel Web — Permisos granulares y roles personalizados](#16-panel-web--permisos-granulares-y-roles-personalizados)
+16b. [Panel Web — Helpers JSON y validación de payloads](#16b-panel-web--helpers-json-y-validación-de-payloads)
 17. [Watchful: filesystemusage](#17-watchful-filesystemusage)
 18. [Watchful: hddtemp](#18-watchful-hddtemp)
 19. [Watchful: mysql](#19-watchful-mysql)
@@ -802,6 +805,25 @@
 | `test_custom_role_user_gets_correct_perms` | Usuario con rol personalizado recibe sus permisos en `/api/me` | Lista correcta | Si difiere |
 | `test_custom_role_user_respects_allowed_endpoint` | Usuario con `modules_edit` puede hacer `PUT /api/modules` | `200` | Si es `403` |
 | `test_custom_role_user_respects_denied_endpoint` | Usuario con `modules_edit` no puede `GET /api/users` (falta `users_view`) | `403` | Si devuelve `200` |
+
+---
+
+## 16b. Panel Web — Helpers JSON y validación de payloads
+
+**Archivo:** `tests/test_wa_json_helpers.py`
+
+Verifica que todos los endpoints JSON del web admin se comportan correctamente ante payloads malformados o extremos. Complementa las pruebas de seguridad de `test_wa_security.py`.
+
+| Test | Qué verifica |
+|------|-------------|
+| `test_non_json_content_type` | 5 endpoints rechazan `text/plain` con 400 |
+| `test_empty_body_json_endpoints` | 4 endpoints rechazan cuerpo vacío con 400 |
+| `test_deeply_nested_json` | JSON 50 niveles → no crash (200 o 400) |
+| `test_very_large_json_payload` | ~500 KB de JSON → no crash (200, 400 o 413) |
+| `test_null_bytes_in_values` | Bytes nulos (`\x00`) en valores → 201 o 400 |
+| `test_unicode_abuse` | RTL override, emoji, cadenas largas → 201, 400 o 409 |
+
+> **`conftest.py` (tests/):** El hash de la contraseña de admin se pre-computa una sola vez a nivel de módulo usando `pbkdf2:sha256` en lugar de scrypt. Esto evita recalcular el hash en cada fixture de test y reduce el tiempo de suite de ~4 min a ~2 min con xdist.
 
 ---
 

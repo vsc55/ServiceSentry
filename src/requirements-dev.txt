@@ -3,4 +3,5 @@
 pytest>=7.0
 pytest-mock
 pytest-env
+pytest-xdist>=3.5.0
 flake8

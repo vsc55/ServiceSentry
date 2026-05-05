@@ -127,7 +127,13 @@ LANG = {
     'cannot_delete_self': 'You cannot delete your own account',
     'new_password_required': 'New password is required',
     'wrong_current_password': 'Current password is incorrect',
-    # Sessions
+    'password_too_short':     'Password must be at least {} characters',
+    'password_too_long':      'Password must be at most {} characters',
+    'password_need_upper':    'Password must contain at least one uppercase and one lowercase letter',
+    'password_need_digit':    'Password must contain at least one digit',
+    'password_need_symbol':   'Password must contain at least one symbol',
+    'name_too_long':          'Name must be at most {} characters',
+    'display_name_too_long':  'Display name must be at most {} characters',
     'close_all_sessions': 'Close all sessions',
     'confirm_close_all_sessions': 'Close all active sessions? Everyone (including you) will be logged out.',
     'sessions_closed': 'All sessions have been closed',
@@ -224,8 +230,11 @@ LANG = {
         'timer_check': 'Interval (s)', 'debug': 'Debug',
         'list': 'Items', 'remote': 'Remote', 'config': 'Configuration',
         'username': 'Web user', 'password': 'Password',
-        'pretty_name': 'Display name', 'lang': 'Language', 'dark_mode': 'Dark mode',
-    },
+        'pretty_name': 'Display name', 'lang': 'Language', 'dark_mode': 'Dark mode',        'pw_min_len':        'Min. password length',
+        'pw_max_len':        'Max. password length',
+        'pw_require_upper':  'Require uppercase & lowercase',
+        'pw_require_digit':  'Require digit',
+        'pw_require_symbol': 'Require symbol',    },
     # Field hints — shown as ⓘ tooltip next to each config option
     'hints': {
         'web_admin|lang':               'Display language for the web panel.',
@@ -233,6 +242,11 @@ LANG = {
         'web_admin|secure_cookies':     'Mark session cookies as Secure (HTTPS only). Enable only when the panel is served over HTTPS.',
         'web_admin|remember_me_days':   'Number of days a "Remember me" session remains active (1–365).',
         'web_admin|audit_max_entries':  'Maximum number of entries kept in the audit log (10–10\u202f000). Older entries are trimmed when the limit is reached.',
+        'web_admin|pw_min_len':         'Minimum password length (1–128 characters).',
+        'web_admin|pw_max_len':         'Maximum password length (8–256 characters).',
+        'web_admin|pw_require_upper':   'Require at least one uppercase and one lowercase letter in passwords.',
+        'web_admin|pw_require_digit':   'Require at least one digit (0–9) in passwords.',
+        'web_admin|pw_require_symbol':  'Require at least one symbol (e.g. @, #, !) in passwords.',
         'daemon|timer_check':           'Interval in seconds between consecutive checks across all modules.',
         'global|debug':                 'Enable verbose debug logging. Not recommended in production.',
         'telegram|token':               'Telegram Bot API token. Create a bot with @BotFather to obtain one.',
@@ -245,6 +259,8 @@ LANG = {
         'daemon': 'Daemon', 'global': 'General',
         'telegram': 'Telegram', 'web_admin': 'Web Panel',
     },
+    # Password policy section label (shown as subsection in config UI)
+    'pw_policy_section': 'Password policy',
     # Role labels
     'role_labels': {
         'admin': 'Admin', 'editor': 'Editor', 'viewer': 'Viewer',
@@ -333,12 +349,9 @@ LANG = {
     'col_group_members':      'Members',
     'col_groups':             'Groups',
     # Input validation
-    'password_too_short':     'Password must be at least 8 characters',
     'telegram_invalid_token': 'Invalid Telegram bot token format',
     'telegram_invalid_chat_id': 'Chat ID must be a valid number',
     'invalid_modules_data':   'Invalid modules data: all values must be objects',
-    'name_too_long':          'Name too long (max {} characters)',
     'label_too_long':         'Label too long (max {} characters)',
     'description_too_long':   'Description too long (max {} characters)',
-    'display_name_too_long':  'Display name too long (max {} characters)',
 }

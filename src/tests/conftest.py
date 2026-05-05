@@ -105,7 +105,8 @@ def admin(config_dir, var_dir):
     (pathlib.Path(config_dir) / "users.json").write_text(
         json.dumps(users, indent=4), encoding="utf-8"
     )
-    return WebAdmin(config_dir, "admin", "secret", var_dir)
+    return WebAdmin(config_dir, "admin", "secret", var_dir,
+                    pw_require_upper=False, pw_require_digit=False)
 
 
 @pytest.fixture()

@@ -12,6 +12,11 @@ function renderConfig() {
     if (!('secure_cookies' in configData.web_admin)) configData.web_admin.secure_cookies = WA_SECURE_COOKIES;
     if (!('remember_me_days' in configData.web_admin)) configData.web_admin.remember_me_days = WA_REMEMBER_ME_DAYS;
     if (!('audit_max_entries' in configData.web_admin)) configData.web_admin.audit_max_entries = WA_AUDIT_MAX_ENTRIES;
+    if (!('pw_min_len' in configData.web_admin)) configData.web_admin.pw_min_len = WA_PW_MIN_LEN;
+    if (!('pw_max_len' in configData.web_admin)) configData.web_admin.pw_max_len = WA_PW_MAX_LEN;
+    if (!('pw_require_upper' in configData.web_admin)) configData.web_admin.pw_require_upper = WA_PW_REQUIRE_UPPER;
+    if (!('pw_require_digit' in configData.web_admin)) configData.web_admin.pw_require_digit = WA_PW_REQUIRE_DIGIT;
+    if (!('pw_require_symbol' in configData.web_admin)) configData.web_admin.pw_require_symbol = WA_PW_REQUIRE_SYMBOL;
     const order = ['daemon', 'global', 'telegram', 'web_admin'];
     const sections = Object.keys(configData).sort((a, b) => {
         const ai = order.indexOf(a), bi = order.indexOf(b);
@@ -33,10 +38,19 @@ function renderConfig() {
             <i class="bi bi-gear me-1"></i>${esc(lbl)}
         </div>
         <div class="card-body py-2">
-            ${renderScalarFields(data, sec, 'config', [])}
+            ${renderScalarFields(data, sec, 'config', sec === 'web_admin' ? ['pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol'] : [])}
             ${extra}
         </div></div>`;
     }
+    // Password policy card
+    const pwFields = ['pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol'];
+    h += `<div class="card mb-3">
+        <div class="card-header fw-semibold py-2">
+            <i class="bi bi-shield-lock me-1"></i>${esc(t('pw_policy_section'))}
+        </div>
+        <div class="card-body py-2">
+            ${renderScalarFields(Object.fromEntries(pwFields.map(f => [f, configData.web_admin[f]])), 'web_admin', 'config', [])}
+        </div></div>`;
     // Audit preferences card — audit_sort rendered with the same 2-col layout
     const _auditSortPath = 'web_admin|audit_sort';
     const auditSort = configData?.web_admin?.audit_sort || 'time';

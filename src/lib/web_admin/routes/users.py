@@ -10,7 +10,6 @@ from ..constants import ROLES, SUPPORTED_LANGS
 
 _MAX_USERNAME_LEN = 64
 _MAX_DISPLAY_NAME_LEN = 128
-_MIN_PASSWORD_LEN = 8
 
 
 def register(app, wa):
@@ -54,8 +53,9 @@ def register(app, wa):
             return jsonify({'error': wa._t('name_too_long', _MAX_USERNAME_LEN)}), 400
         if not pw:
             return jsonify({'error': wa._t('password_required')}), 400
-        if len(pw) < _MIN_PASSWORD_LEN:
-            return jsonify({'error': wa._t('password_too_short')}), 400
+        pw_err = wa._validate_password(pw)
+        if pw_err:
+            return jsonify({'error': wa._t(*pw_err)}), 400
         if len(dname) > _MAX_DISPLAY_NAME_LEN:
             return jsonify({'error': wa._t('display_name_too_long', _MAX_DISPLAY_NAME_LEN)}), 400
         valid_roles = set(ROLES) | set(wa._custom_roles.keys())
@@ -117,8 +117,9 @@ def register(app, wa):
             user['display_name'] = new_dn
         has_password_reset = False
         if 'password' in data and data['password']:
-            if len(data['password']) < _MIN_PASSWORD_LEN:
-                return jsonify({'error': wa._t('password_too_short')}), 400
+            pw_err = wa._validate_password(data['password'])
+            if pw_err:
+                return jsonify({'error': wa._t(*pw_err)}), 400
             user['password_hash'] = generate_password_hash(data['password'])
             has_password_reset = True
         if 'lang' in data:
@@ -191,8 +192,9 @@ def register(app, wa):
         user = wa._users.get(uname)
         if not user or not check_password_hash(user['password_hash'], current_pw):
             return jsonify({'error': wa._t('wrong_current_password')}), 403
-        if len(new_pw) < _MIN_PASSWORD_LEN:
-            return jsonify({'error': wa._t('password_too_short')}), 400
+        pw_err = wa._validate_password(new_pw)
+        if pw_err:
+            return jsonify({'error': wa._t(*pw_err)}), 400
         user['password_hash'] = generate_password_hash(new_pw)
         wa._persist_users()
         wa._audit('password_changed')

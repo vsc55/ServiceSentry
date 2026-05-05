@@ -45,6 +45,12 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _AUDIT_MAX_ENTRIES = 500
     _REMEMBER_ME_DAYS = 30
     _SECURE_COOKIES_DEFAULT = False
+    # Password-strength policy (can be overridden via config.json web_admin section)
+    _PW_MIN_LEN = 8
+    _PW_MAX_LEN = 128
+    _PW_REQUIRE_UPPER = True
+    _PW_REQUIRE_DIGIT = True
+    _PW_REQUIRE_SYMBOL = False
 
     def __init__(
         self,
@@ -58,6 +64,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         secure_cookies: bool = False,
         remember_me_days: int = 30,
         audit_max_entries: int = 500,
+        pw_min_len: int = 8,
+        pw_max_len: int = 128,
+        pw_require_upper: bool = True,
+        pw_require_digit: bool = True,
+        pw_require_symbol: bool = False,
     ):
         """Initialise the web administration server.
 
@@ -78,6 +89,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._secure_cookies = bool(secure_cookies)
         self._REMEMBER_ME_DAYS = int(remember_me_days)
         self._AUDIT_MAX_ENTRIES = int(audit_max_entries)
+        self._PW_MIN_LEN = max(1, int(pw_min_len))
+        self._PW_MAX_LEN = max(self._PW_MIN_LEN, int(pw_max_len))
+        self._PW_REQUIRE_UPPER = bool(pw_require_upper)
+        self._PW_REQUIRE_DIGIT = bool(pw_require_digit)
+        self._PW_REQUIRE_SYMBOL = bool(pw_require_symbol)
         self._check_lock = threading.Lock()
         self._default_lang = (
             default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
@@ -185,6 +201,32 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             text = text.replace('{}', str(arg), 1)
         return text
 
+    def _validate_password(self, pw: str) -> tuple | None:
+        """Return an i18n error key (with args) if *pw* violates the policy,
+        or ``None`` if the password is acceptable.
+
+        Returns a tuple ``(key, *args)`` so callers can do::
+
+            result = self._validate_password(pw)
+            if result:
+                return jsonify({'error': self._t(*result)}), 400
+        """
+        if len(pw) < self._PW_MIN_LEN:
+            return ('password_too_short', str(self._PW_MIN_LEN))
+        if len(pw) > self._PW_MAX_LEN:
+            return ('password_too_long', str(self._PW_MAX_LEN))
+        if self._PW_REQUIRE_UPPER and not (
+            any(c.isupper() for c in pw) and any(c.islower() for c in pw)
+        ):
+            return ('password_need_upper',)
+        if self._PW_REQUIRE_DIGIT and not any(c.isdigit() for c in pw):
+            return ('password_need_digit',)
+        if self._PW_REQUIRE_SYMBOL and not any(
+            c in '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~' for c in pw
+        ):
+            return ('password_need_symbol',)
+        return None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -230,6 +272,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_default_secure_cookies': type(self)._SECURE_COOKIES_DEFAULT,
                 'wa_default_remember_me_days': type(self)._REMEMBER_ME_DAYS,
                 'wa_default_audit_max_entries': type(self)._AUDIT_MAX_ENTRIES,
+                'wa_pw_min_len': self._PW_MIN_LEN,
+                'wa_pw_max_len': self._PW_MAX_LEN,
+                'wa_pw_require_upper': self._PW_REQUIRE_UPPER,
+                'wa_pw_require_digit': self._PW_REQUIRE_DIGIT,
+                'wa_pw_require_symbol': self._PW_REQUIRE_SYMBOL,
             }
 
         self._register_routes(app)

@@ -21,6 +21,11 @@ const WA_SECURE_COOKIES        = {{ wa_secure_cookies | tojson }};
 const WA_DEFAULT_SECURE_COOKIES    = {{ wa_default_secure_cookies | tojson }};
 const WA_DEFAULT_REMEMBER_ME_DAYS  = {{ wa_default_remember_me_days }};
 const WA_DEFAULT_AUDIT_MAX_ENTRIES = {{ wa_default_audit_max_entries }};
+const WA_PW_MIN_LEN            = {{ wa_pw_min_len }};
+const WA_PW_MAX_LEN            = {{ wa_pw_max_len }};
+const WA_PW_REQUIRE_UPPER      = {{ wa_pw_require_upper | tojson }};
+const WA_PW_REQUIRE_DIGIT      = {{ wa_pw_require_digit | tojson }};
+const WA_PW_REQUIRE_SYMBOL     = {{ wa_pw_require_symbol | tojson }};
 
 // ──────────────────────────── State ───────────────────────────────
 let modulesData = {};
@@ -52,6 +57,11 @@ const CONFIG_FIELD_DEFAULTS = {
     'web_admin|remember_me_days':  WA_DEFAULT_REMEMBER_ME_DAYS,
     'web_admin|audit_max_entries': WA_DEFAULT_AUDIT_MAX_ENTRIES,
     'web_admin|audit_sort':        'time',
+    'web_admin|pw_min_len':        8,
+    'web_admin|pw_max_len':        128,
+    'web_admin|pw_require_upper':  true,
+    'web_admin|pw_require_digit':  true,
+    'web_admin|pw_require_symbol': false,
 };
 
 // Field schema loaded from /api/config/schema — min, max, default per field.

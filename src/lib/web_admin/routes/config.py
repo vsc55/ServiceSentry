@@ -18,6 +18,15 @@ INT_RULES = {
         'flask_cfg': ('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v)),
     },
     'web_admin|audit_max_entries': {'min': 10, 'max': 10000, 'attr': '_AUDIT_MAX_ENTRIES'},
+    'web_admin|pw_min_len':        {'min': 1,  'max': 128,   'attr': '_PW_MIN_LEN'},
+    'web_admin|pw_max_len':        {'min': 8,  'max': 256,   'attr': '_PW_MAX_LEN'},
+}
+
+# Boolean config fields in web_admin that are synced to wa instance attributes.
+BOOL_RULES = {
+    'web_admin|pw_require_upper':  '_PW_REQUIRE_UPPER',
+    'web_admin|pw_require_digit':  '_PW_REQUIRE_DIGIT',
+    'web_admin|pw_require_symbol': '_PW_REQUIRE_SYMBOL',
 }
 
 
@@ -44,6 +53,8 @@ def register(app, wa):
                 'max': rule['max'],
                 'default': getattr(type(wa), rule['attr']),
             }
+        for path, attr in BOOL_RULES.items():
+            schema[path] = {'type': 'bool', 'default': getattr(type(wa), attr)}
         schema['web_admin|audit_sort'] = {
             'options': ['time', 'event', 'user', 'ip'],
             'default': 'time',
@@ -93,6 +104,15 @@ def register(app, wa):
                 if 'flask_cfg' in rule:
                     cfg_key, transform = rule['flask_cfg']
                     wa._app.config[cfg_key] = transform(v)
+            # Apply boolean policy rules at runtime
+            for path, attr in BOOL_RULES.items():
+                section, field = path.split('|')
+                v = (data.get(section) or {}).get(field)
+                if isinstance(v, bool):
+                    setattr(wa, attr, v)
+            # Ensure pw_max_len >= pw_min_len after applying both
+            if wa._PW_MAX_LEN < wa._PW_MIN_LEN:
+                wa._PW_MAX_LEN = wa._PW_MIN_LEN
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._SENSITIVE_FIELDS,
             )
