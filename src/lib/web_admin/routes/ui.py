@@ -61,3 +61,5 @@ def register(app, wa):
             'permissions': list(wa._get_session_permissions()),
             'groups': wa._users.get(uname_me, {}).get('groups', []),
         })
+
+

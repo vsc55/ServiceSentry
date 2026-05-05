@@ -364,6 +364,8 @@ def start_web(args):
     secure_cookies = cfg.get_conf(['web_admin', 'secure_cookies'], False)
     remember_me_days = cfg.get_conf(['web_admin', 'remember_me_days'], 30)
     audit_max_entries = cfg.get_conf(['web_admin', 'audit_max_entries'], 500)
+    public_status = cfg.get_conf(['web_admin', 'public_status'], False)
+    status_refresh_secs = cfg.get_conf(['web_admin', 'status_refresh_secs'], 60)
     host = getattr(args, 'web_host', None) or cfg.get_conf(
         ['web_admin', 'host'], WebAdmin.DEFAULT_HOST
     )
@@ -377,7 +379,9 @@ def start_web(args):
                      modules_dir=os.path.join(dir_base, 'watchfuls'),
                      secure_cookies=bool(secure_cookies),
                      remember_me_days=int(remember_me_days),
-                     audit_max_entries=int(audit_max_entries))
+                     audit_max_entries=int(audit_max_entries),
+                     public_status=bool(public_status),
+                     status_refresh_secs=int(status_refresh_secs))
 
     print("ServiceSentry Web Admin")
     print(f"  URL:    http://{host}:{port}")

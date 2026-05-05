@@ -48,6 +48,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _AUDIT_MAX_ENTRIES = 500
     _REMEMBER_ME_DAYS = 30
     _SECURE_COOKIES_DEFAULT = False
+    _PUBLIC_STATUS = False
+    _STATUS_REFRESH_SECS = 60
     # Password-strength policy (can be overridden via config.json web_admin section)
     _PW_MIN_LEN = 8
     _PW_MAX_LEN = 128
@@ -80,6 +82,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         pw_require_upper: bool = True,
         pw_require_digit: bool = True,
         pw_require_symbol: bool = False,
+        public_status: bool = False,
+        status_refresh_secs: int = 60,
     ):
         """Initialise the web administration server.
 
@@ -105,6 +109,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._PW_REQUIRE_UPPER = bool(pw_require_upper)
         self._PW_REQUIRE_DIGIT = bool(pw_require_digit)
         self._PW_REQUIRE_SYMBOL = bool(pw_require_symbol)
+        self._public_status = bool(public_status)
+        self._STATUS_REFRESH_SECS = max(10, int(status_refresh_secs))
         self._check_lock = threading.Lock()
         self._default_lang = (
             default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
@@ -288,6 +294,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_pw_require_upper': self._PW_REQUIRE_UPPER,
                 'wa_pw_require_digit': self._PW_REQUIRE_DIGIT,
                 'wa_pw_require_symbol': self._PW_REQUIRE_SYMBOL,
+                'wa_public_status': self._public_status,
+                'wa_status_refresh_secs': self._STATUS_REFRESH_SECS,
             }
 
         self._register_routes(app)

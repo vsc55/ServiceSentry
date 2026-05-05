@@ -353,3 +353,165 @@ class TestUIReorganisation:
         html = client.get("/").data
         assert b'id="darkModeSwitch"' in html
         assert b'toggleDarkMode()' in html
+
+
+# ──────────────────────────── Public status page ───────────────────
+
+class TestPublicStatusPage:
+    """Tests for the /status public page."""
+
+    def test_status_hidden_by_default(self, client):
+        """/status returns 404 when public_status is not enabled."""
+        resp = client.get("/status")
+        assert resp.status_code == 404
+
+    def test_status_accessible_when_enabled(self, config_dir, var_dir):
+        """When public_status=True, /status returns 200."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        resp = c.get("/status")
+        assert resp.status_code == 200
+
+    def test_status_no_login_required(self, config_dir, var_dir):
+        """The status page is accessible without authentication."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        # No _login() call — should still work
+        resp = c.get("/status")
+        assert resp.status_code == 200
+
+    def test_status_shows_module_name(self, config_dir, var_dir):
+        """The status page renders the module name from status.json."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        html = c.get("/status").data
+        assert b"Ping" in html or b"ping" in html
+
+    def test_status_shows_check_name(self, config_dir, var_dir):
+        """The status page renders individual check names."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        html = c.get("/status").data
+        assert b"192.168.1.1" in html
+
+    def test_status_overall_pct_100_when_all_ok(self, config_dir, var_dir):
+        """Overall percentage is 100% when all checks pass."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        html = c.get("/status").data.decode()
+        assert "100" in html
+
+    def test_status_shows_all_systems_ok_banner(self, config_dir, var_dir):
+        """Banner says 'operational' when all checks pass."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        html = c.get("/status").data
+        assert b"operational" in html
+
+    def test_status_shows_degraded_banner_on_failure(self, config_dir, tmp_path):
+        """Banner shows degraded message when a check fails."""
+        import json as _json
+        import os
+        d = tmp_path / "var"
+        d.mkdir()
+        status = {"api": {"endpoint": {"status": False, "other_data": {}}}}
+        (d / "status.json").write_text(_json.dumps(status), encoding="utf-8")
+        wa = WebAdmin(config_dir, "admin", "secret", str(d),
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        html = c.get("/status").data
+        assert b"Degraded" in html or b"degraded" in html
+
+    def test_status_has_auto_refresh_meta(self, config_dir, var_dir):
+        """Page includes JS auto-refresh countdown."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        html = c.get("/status").data
+        assert b"REFRESH_SECS" in html or b"location.reload" in html
+
+    def test_status_has_login_link(self, config_dir, var_dir):
+        """Page contains a link to /login for admins."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        html = c.get("/status").data
+        assert b"/login" in html
+
+    def test_status_empty_when_no_status_file(self, config_dir, tmp_path):
+        """Page renders without error when no status.json exists."""
+        d = tmp_path / "emptyvar"
+        d.mkdir()
+        wa = WebAdmin(config_dir, "admin", "secret", str(d),
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        resp = c.get("/status")
+        assert resp.status_code == 200
+
+    def test_status_custom_refresh_secs(self, config_dir, var_dir):
+        """Custom refresh interval is embedded in the page."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True, status_refresh_secs=120,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        html = c.get("/status").data
+        assert b"120" in html
+
+    def test_status_config_updates_refresh_secs(self, config_dir, var_dir):
+        """Saving config.json updates status_refresh_secs at runtime."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        _login(c)
+        c.put("/api/config", json={"web_admin": {"status_refresh_secs": 300}})
+        assert wa._STATUS_REFRESH_SECS == 300
+
+    def test_status_hidden_from_anonymous_when_disabled(self, config_dir, var_dir):
+        """When public_status=False, anonymous requests get 404."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=False,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        resp = c.get("/status")
+        assert resp.status_code == 404
+
+    def test_status_visible_to_logged_in_when_disabled(self, config_dir, var_dir):
+        """When public_status=False, logged-in users can still access /status."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=False,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        _login(c)
+        resp = c.get("/status")
+        assert resp.status_code == 200

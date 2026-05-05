@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}{{ code }} — ServiceSentry{% endblock %}
+
+{% block extra_head %}
+<style>
+    .error-wrap {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+    }
+    .error-card {
+        max-width: 480px;
+        width: 100%;
+        text-align: center;
+    }
+    .error-code {
+        font-size: 5rem;
+        font-weight: 800;
+        line-height: 1;
+        letter-spacing: -.04em;
+        color: var(--bs-secondary-color, #6c757d);
+    }
+    .error-icon {
+        font-size: 3rem;
+        margin-bottom: .5rem;
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="error-wrap">
+    <div class="error-card">
+        <div class="error-code mb-2">{{ code }}</div>
+        <div class="error-icon text-secondary">
+            <i class="bi {{ icon }}"></i>
+        </div>
+        <h1 class="h4 fw-semibold mb-2">{{ title }}</h1>
+        <p class="text-secondary mb-0">{{ description }}</p>
+    </div>
+</div>
+{% endblock %}

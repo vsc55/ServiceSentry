@@ -17,6 +17,8 @@ function renderConfig() {
     if (!('pw_require_upper' in configData.web_admin)) configData.web_admin.pw_require_upper = WA_PW_REQUIRE_UPPER;
     if (!('pw_require_digit' in configData.web_admin)) configData.web_admin.pw_require_digit = WA_PW_REQUIRE_DIGIT;
     if (!('pw_require_symbol' in configData.web_admin)) configData.web_admin.pw_require_symbol = WA_PW_REQUIRE_SYMBOL;
+    if (!('public_status' in configData.web_admin)) configData.web_admin.public_status = WA_PUBLIC_STATUS;
+    if (!('status_refresh_secs' in configData.web_admin)) configData.web_admin.status_refresh_secs = WA_STATUS_REFRESH_SECS;
     const order = ['daemon', 'global', 'telegram', 'web_admin'];
     const sections = Object.keys(configData).sort((a, b) => {
         const ai = order.indexOf(a), bi = order.indexOf(b);
@@ -38,7 +40,7 @@ function renderConfig() {
             <i class="bi bi-gear me-1"></i>${esc(lbl)}
         </div>
         <div class="card-body py-2">
-            ${renderScalarFields(data, sec, 'config', sec === 'web_admin' ? ['pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol'] : [])}
+            ${renderScalarFields(data, sec, 'config', sec === 'web_admin' ? ['pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol', 'public_status', 'status_refresh_secs'] : [])}
             ${extra}
         </div></div>`;
     }
@@ -50,6 +52,15 @@ function renderConfig() {
         </div>
         <div class="card-body py-2">
             ${renderScalarFields(Object.fromEntries(pwFields.map(f => [f, configData.web_admin[f]])), 'web_admin', 'config', [])}
+        </div></div>`;
+    // Public Status page card
+    const psFields = ['public_status', 'status_refresh_secs'];
+    h += `<div class="card mb-3">
+        <div class="card-header fw-semibold py-2">
+            <i class="bi bi-globe me-1"></i>${esc(t('public_status_section'))}
+        </div>
+        <div class="card-body py-2">
+            ${renderScalarFields(Object.fromEntries(psFields.map(f => [f, configData.web_admin[f]])), 'web_admin', 'config', [])}
         </div></div>`;
     // Audit preferences card — audit_sort rendered with the same 2-col layout
     const _auditSortPath = 'web_admin|audit_sort';

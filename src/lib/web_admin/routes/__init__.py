@@ -4,6 +4,8 @@
 
 from .auth import register as _auth
 from .ui import register as _ui
+from .status import register as _status
+from .errors import register as _errors
 from .modules import register as _modules
 from .config import register as _config
 from .telegram import register as _telegram
@@ -18,6 +20,8 @@ from .checks import register as _checks
 def register_all(app, wa):
     _auth(app, wa)
     _ui(app, wa)
+    _status(app, wa)
+    _errors(app, wa)
     _modules(app, wa)
     _config(app, wa)
     _telegram(app, wa)

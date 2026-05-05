@@ -20,6 +20,7 @@ INT_RULES = {
     'web_admin|audit_max_entries': {'min': 10, 'max': 10000, 'attr': '_AUDIT_MAX_ENTRIES'},
     'web_admin|pw_min_len':        {'min': 1,  'max': 128,   'attr': '_PW_MIN_LEN'},
     'web_admin|pw_max_len':        {'min': 8,  'max': 256,   'attr': '_PW_MAX_LEN'},
+    'web_admin|status_refresh_secs': {'min': 10, 'max': 3600, 'attr': '_STATUS_REFRESH_SECS'},
 }
 
 # Boolean config fields in web_admin that are synced to wa instance attributes.
@@ -27,6 +28,7 @@ BOOL_RULES = {
     'web_admin|pw_require_upper':  '_PW_REQUIRE_UPPER',
     'web_admin|pw_require_digit':  '_PW_REQUIRE_DIGIT',
     'web_admin|pw_require_symbol': '_PW_REQUIRE_SYMBOL',
+    'web_admin|public_status':     '_public_status',
 }
 
 
@@ -94,6 +96,10 @@ def register(app, wa):
             if isinstance(new_sec, bool):
                 wa._secure_cookies = new_sec
                 wa._app.config['SESSION_COOKIE_SECURE'] = new_sec
+            new_ps = (data.get('web_admin') or {}).get('public_status')
+            if isinstance(new_ps, bool):
+                wa._public_status = new_ps
+            # (public_status is now handled via BOOL_RULES loop below)
             # Apply integer rules at runtime (values already sanitized above)
             for path, rule in INT_RULES.items():
                 section, field = path.split('|')

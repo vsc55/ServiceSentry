@@ -3,6 +3,21 @@
 """English translations for the web administration panel."""
 
 LANG = {
+    # HTTP error pages
+    'err_400_title': 'Bad Request',
+    'err_400_desc': 'The server could not understand the request.',
+    'err_403_title': 'Forbidden',
+    'err_403_desc': 'You do not have permission to access this page.',
+    'err_404_title': 'Page Not Found',
+    'err_404_desc': 'The page you are looking for does not exist or has been moved.',
+    'err_405_title': 'Method Not Allowed',
+    'err_405_desc': 'The HTTP method used is not allowed for this resource.',
+    'err_500_title': 'Internal Server Error',
+    'err_500_desc': 'An unexpected error occurred. Please try again later.',
+    'err_generic_title': 'Something went wrong',
+    'err_generic_desc': 'An error occurred while processing your request.',
+    'err_go_back': 'Go back',
+    'err_go_home': 'Admin panel',
     # General
     'admin_panel': 'Administration Panel',
     'loading': 'Loading…',
@@ -234,7 +249,10 @@ LANG = {
         'pw_max_len':        'Max. password length',
         'pw_require_upper':  'Require uppercase & lowercase',
         'pw_require_digit':  'Require digit',
-        'pw_require_symbol': 'Require symbol',    },
+        'pw_require_symbol': 'Require symbol',
+        'public_status':     'Public status page',
+        'status_refresh_secs': 'Status refresh interval (s)',
+    },
     # Field hints — shown as ⓘ tooltip next to each config option
     'hints': {
         'web_admin|lang':               'Display language for the web panel.',
@@ -247,6 +265,8 @@ LANG = {
         'web_admin|pw_require_upper':   'Require at least one uppercase and one lowercase letter in passwords.',
         'web_admin|pw_require_digit':   'Require at least one digit (0–9) in passwords.',
         'web_admin|pw_require_symbol':  'Require at least one symbol (e.g. @, #, !) in passwords.',
+        'web_admin|public_status':       'Expose a public /status page showing service health. No login required.',
+        'web_admin|status_refresh_secs': 'How often the public status page auto-refreshes (10–3600 seconds).',
         'daemon|timer_check':           'Interval in seconds between consecutive checks across all modules.',
         'global|debug':                 'Enable verbose debug logging. Not recommended in production.',
         'telegram|token':               'Telegram Bot API token. Create a bot with @BotFather to obtain one.',
@@ -261,6 +281,7 @@ LANG = {
     },
     # Password policy section label (shown as subsection in config UI)
     'pw_policy_section': 'Password policy',
+    'public_status_section': 'Public Status Page',
     # Role labels
     'role_labels': {
         'admin': 'Admin', 'editor': 'Editor', 'viewer': 'Viewer',
