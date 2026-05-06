@@ -18,7 +18,9 @@
 - **Parallel execution** — modules and per-module items run in `ThreadPoolExecutor`.
 - **Cross-platform modules** — `filesystemusage` and `ram_swap` work on Linux, Windows and macOS via `psutil`.
 - **Remote execution** — SSH command execution via paramiko for RAID and other remote checks.
-- **952 tests** with pytest.
+- **1164 tests** with pytest.
+- **Public status page** — optional `/status` endpoint (no login required) showing real-time health of all modules with collapsible cards and configurable auto-refresh.
+- **Custom error pages** — branded 400/403/404/405/500 pages that inherit dark/light theme; API routes return JSON errors.
 
 ---
 
@@ -56,7 +58,8 @@ Edit `data/config.json` to add your Telegram bot token and chat ID before runnin
 | `-v`, `--verbose` | Verbose / debug output |
 | `-p PATH`, `--path PATH` | Custom config directory |
 | `-c`, `--clear` | Clear saved state before running |
-| `--web-admin` | Start the web admin interface |
+| `--web` | Start the web admin interface |
+| `--web-port N` | Port to listen on (default: 8080) |
 
 ---
 
@@ -73,7 +76,7 @@ Edit `data/config.json` to add your Telegram bot token and chat ID before runnin
 | [docs/development.md](docs/development.md) | Setup, tests, VS Code debug, conventions, dependencies |
 | [docs/watchful_guide.md](docs/watchful_guide.md) | Step-by-step guide to create a new watchful module |
 | [docs/i18n.md](docs/i18n.md) | Internationalisation system: two-tier architecture, `discover_schemas` pipeline, adding languages |
-| [docs/tests.md](docs/tests.md) | Full test inventory (952 tests): what each test checks, pass and fail conditions, organized by group |
+| [docs/tests.md](docs/tests.md) | Full test inventory (1164 tests): what each test checks, pass and fail conditions, organized by group |
 
 ---
 

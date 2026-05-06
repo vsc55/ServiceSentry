@@ -28,6 +28,7 @@ const WA_PW_REQUIRE_DIGIT      = {{ wa_pw_require_digit | tojson }};
 const WA_PW_REQUIRE_SYMBOL     = {{ wa_pw_require_symbol | tojson }};
 const WA_PUBLIC_STATUS         = {{ wa_public_status | tojson }};
 const WA_STATUS_REFRESH_SECS   = {{ wa_status_refresh_secs }};
+const WA_STATUS_LANG           = {{ wa_status_lang | tojson }};
 
 // ──────────────────────────── State ───────────────────────────────
 let modulesData = {};
@@ -64,6 +65,9 @@ const CONFIG_FIELD_DEFAULTS = {
     'web_admin|pw_require_upper':  true,
     'web_admin|pw_require_digit':  true,
     'web_admin|pw_require_symbol': false,
+    'web_admin|public_status':     false,
+    'web_admin|status_refresh_secs': 60,
+    'web_admin|status_lang':       '',
 };
 
 // Field schema loaded from /api/config/schema — min, max, default per field.
@@ -370,6 +374,23 @@ function renderField(key, value, pathStr, target = 'modules') {
         // Language selector
         if (key === 'lang') {
             let opts = '';
+            for (const code of SUPPORTED_LANGS) {
+                const sel = value === code ? ' selected' : '';
+                opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
+            }
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8 d-flex gap-1 align-items-center">
+                <select class="form-select form-select-sm flex-grow-1"
+                    onchange="updateField('${tg}','${sp}',this.value)">
+                    ${opts}
+                </select>${_resetBtn}
+            </div></div>`;
+        }
+        // Status-page language selector (with empty = use default option)
+        if (key === 'status_lang') {
+            const defLabel = esc(I18N['status_lang_default'] || '\u2014 ' + (I18N['use_default'] || 'Use default') + ' \u2014');
+            let opts = `<option value=""${value === '' ? ' selected' : ''}>${defLabel}</option>`;
             for (const code of SUPPORTED_LANGS) {
                 const sel = value === code ? ' selected' : '';
                 opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;

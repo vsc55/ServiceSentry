@@ -61,6 +61,10 @@ def register(app, wa):
             'options': ['time', 'event', 'user', 'ip'],
             'default': 'time',
         }
+        schema['web_admin|status_lang'] = {
+            'options': [''] + list(SUPPORTED_LANGS),
+            'default': '',
+        }
         schema['telegram|chat_id'] = {'numericString': True}
         return jsonify(schema)
 
@@ -89,6 +93,10 @@ def register(app, wa):
             new_lang = (data.get('web_admin') or {}).get('lang', '')
             if new_lang and new_lang in SUPPORTED_LANGS:
                 wa._default_lang = new_lang
+            # Apply web_admin.status_lang at runtime if changed
+            new_status_lang = (data.get('web_admin') or {}).get('status_lang', '')
+            if isinstance(new_status_lang, str):
+                wa._STATUS_LANG = new_status_lang if new_status_lang in SUPPORTED_LANGS else ''
             new_dm = (data.get('web_admin') or {}).get('dark_mode')
             if isinstance(new_dm, bool):
                 wa._default_dark_mode = new_dm

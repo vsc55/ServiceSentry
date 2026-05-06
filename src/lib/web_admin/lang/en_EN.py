@@ -252,6 +252,7 @@ LANG = {
         'pw_require_symbol': 'Require symbol',
         'public_status':     'Public status page',
         'status_refresh_secs': 'Status refresh interval (s)',
+        'status_lang':       'Status page language',
     },
     # Field hints — shown as ⓘ tooltip next to each config option
     'hints': {
@@ -267,6 +268,7 @@ LANG = {
         'web_admin|pw_require_symbol':  'Require at least one symbol (e.g. @, #, !) in passwords.',
         'web_admin|public_status':       'Expose a public /status page showing service health. No login required.',
         'web_admin|status_refresh_secs': 'How often the public status page auto-refreshes (10–3600 seconds).',
+        'web_admin|status_lang':         'Language for the public /status page. Priority: user session → this setting → default web panel language. Leave blank to use the web panel default.',
         'daemon|timer_check':           'Interval in seconds between consecutive checks across all modules.',
         'global|debug':                 'Enable verbose debug logging. Not recommended in production.',
         'telegram|token':               'Telegram Bot API token. Create a bot with @BotFather to obtain one.',
@@ -282,6 +284,7 @@ LANG = {
     # Password policy section label (shown as subsection in config UI)
     'pw_policy_section': 'Password policy',
     'public_status_section': 'Public Status Page',
+    'status_lang_default': '— Use web panel default —',
     # Role labels
     'role_labels': {
         'admin': 'Admin', 'editor': 'Editor', 'viewer': 'Viewer',

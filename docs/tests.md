@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: 1110 tests** | Todos deben pasar con `pytest` para que el build sea válido.
+**Total: 1164 tests** | Todos deben pasar con `pytest` para que el build sea válido.
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -23,6 +23,9 @@
 13. [Panel Web — API estado y ejecución de checks](#13-panel-web--api-estado-y-ejecución-de-checks)
 14. [Panel Web — Usuarios, roles y sesiones](#14-panel-web--usuarios-roles-y-sesiones)
 15. [Panel Web — i18n, UI y seguridad](#15-panel-web--i18n-ui-y-seguridad)
+15b. [Panel Web — Política de contraseñas](#15b-panel-web--política-de-contraseñas)
+15c. [Panel Web — Página de estado pública](#15c-panel-web--página-de-estado-pública)
+15d. [Panel Web — Páginas de error HTTP](#15d-panel-web--páginas-de-error-http)
 16. [Panel Web — Permisos granulares y roles personalizados](#16-panel-web--permisos-granulares-y-roles-personalizados)
 16b. [Panel Web — Helpers JSON y validación de payloads](#16b-panel-web--helpers-json-y-validación-de-payloads)
 17. [Watchful: filesystemusage](#17-watchful-filesystemusage)
@@ -704,10 +707,105 @@
 
 ---
 
+## 15b. Panel Web — Política de contraseñas
+
+**Archivo:** `tests/test_wa_password_policy.py`
+
+Cubre la función `_validate_password` (unidad) y la aplicación de la política vía la API HTTP.
+
+### `TestValidatePasswordUnit`
+
+| Test | Qué comprueba | OK | Error |
+|------|-------------|-----|------|
+| `test_accepts_valid_password_no_policy` | Contraseña válida sin política estricta | `None` (sin error) | Si devuelve error |
+| `test_too_short` | Contraseña más corta que `pw_min_len` | Código `password_too_short` con el límite | Si acepta o devuelve otro código |
+| `test_too_long` | Contraseña más larga que `pw_max_len` | Código `password_too_long` | Si acepta |
+| `test_exactly_min_len_accepted` | Longitud exactamente igual a `pw_min_len` | `None` | Si rechaza |
+| `test_exactly_max_len_accepted` | Longitud exactamente igual a `pw_max_len` | `None` | Si rechaza |
+| `test_require_upper_rejects_all_lower` | `pw_require_upper=True` con solo minúsculas | `password_need_upper` | Si acepta |
+| `test_require_upper_rejects_all_upper` | `pw_require_upper=True` con solo mayúsculas (sin minúscula) | `password_need_upper` | Si acepta |
+| `test_require_upper_accepts_mixed_case` | `pw_require_upper=True` con mayúsculas y minúsculas | `None` | Si rechaza |
+| `test_no_require_upper_accepts_all_lower` | `pw_require_upper=False` | `None` | Si rechaza |
+| `test_require_digit_rejects_no_digit` | `pw_require_digit=True` sin dígitos | `password_need_digit` | Si acepta |
+| `test_require_digit_accepts_with_digit` | `pw_require_digit=True` con dígito | `None` | Si rechaza |
+| `test_no_require_digit_accepts_no_digit` | `pw_require_digit=False` | `None` | Si rechaza |
+| `test_require_symbol_rejects_no_symbol` | `pw_require_symbol=True` sin símbolos | `password_need_symbol` | Si acepta |
+| `test_require_symbol_accepts_with_symbol` | `pw_require_symbol=True` con símbolo | `None` | Si rechaza |
+| `test_no_require_symbol_accepts_no_symbol` | `pw_require_symbol=False` | `None` | Si rechaza |
+| `test_all_rules_enabled_accepts_strong_password` | Todas las reglas activas + contraseña fuerte | `None` | Si rechaza |
+| `test_all_rules_enabled_rejects_missing_digit` | Todas las reglas activas, falta dígito | `password_need_digit` | Si acepta |
+| `test_all_rules_enabled_rejects_missing_symbol` | Todas las reglas activas, falta símbolo | `password_need_symbol` | Si acepta |
+| `test_priority_length_before_complexity` | Longitud se valida antes que complejidad | `password_too_short` | Si devuelve otro error |
+| `test_returns_none_means_no_error` | Sin política → `None` | `None` | Si devuelve error |
+
+### `TestPasswordPolicyApi`
+
+| Test | Qué comprueba | OK | Error |
+|------|-------------|-----|------|
+| `test_create_user_rejects_short_password` | `POST /api/users` contraseña corta | `400` con "password" en error | Si crea el usuario |
+| `test_create_user_rejects_no_digit` | `POST /api/users` sin dígito | `400` | Si acepta |
+| `test_create_user_rejects_no_upper` | `POST /api/users` sin mayúscula | `400` | Si acepta |
+| `test_create_user_rejects_no_symbol` | `POST /api/users` sin símbolo | `400` | Si acepta |
+| `test_create_user_accepts_compliant_password` | `POST /api/users` contraseña fuerte | `201` | Si rechaza |
+| `test_update_password_rejects_policy_violation` | `PUT /api/users/<u>` contraseña inválida | `400` | Si actualiza |
+| `test_update_password_accepts_compliant_password` | `PUT /api/users/<u>` contraseña válida | `200` | Si rechaza |
+| `test_change_own_password_rejects_policy_violation` | `PUT /api/users/me/password` inválida | `400` | Si cambia |
+| `test_change_own_password_accepts_compliant_password` | `PUT /api/users/me/password` válida | `200` | Si rechaza |
+
+---
+
+## 15c. Panel Web — Página de estado pública
+
+**Archivo:** `tests/test_wa_ui.py` — clase `TestPublicStatusPage`
+
+Verifica el comportamiento de la ruta `/status` (acceso público vs. autenticado, contenido de la página, configuración).
+
+| Test | Qué comprueba | OK | Error |
+|------|-------------|-----|------|
+| `test_status_page_returns_200` | `/status` con `public_status=True` | `200` | Si es `404` o `500` |
+| `test_status_page_shows_ok_banner` | Banner verde cuando todo está OK | "All systems operational" en HTML | Si no aparece |
+| `test_status_page_shows_degraded_banner` | Banner rojo con algún check fallido | "Degraded" / "Degraded service" en HTML | Si no cambia |
+| `test_status_page_shows_module_names` | Nombres de módulos visibles | Aparece el nombre del módulo | Si no aparece |
+| `test_status_page_shows_check_names` | Nombres de checks visibles | Aparece el nombre del check | Si no aparece |
+| `test_status_page_not_available_when_disabled` | `/status` con `public_status=False` anónimo | `404` | Si devuelve `200` |
+| `test_status_page_has_refresh_countdown` | Contador de refresco visible | Elemento de countdown en HTML | Si no aparece |
+| `test_status_page_custom_refresh` | `status_refresh_secs=30` | El valor 30 aparece en el HTML | Si usa otro valor |
+| `test_status_page_no_nav_links` | Sin enlaces del panel de admin | No hay "/users" ni "/api" en la página | Si aparecen |
+| `test_status_page_is_standalone` | No extiende base.html con nav/sidebar | No hay `id="sidebar"` ni `class="navbar"` en HTML | Si lo hereda |
+| `test_status_page_empty_status` | Sin módulos activos | Sin tarjetas de módulo | Si muestra algo |
+| `test_status_page_all_systems_no_data` | Sin datos de status (archivo vacío) | Banner OK y sin tarjetas | Si falla |
+| `test_status_page_multiple_modules` | Varios módulos y checks | Cada módulo tiene su tarjeta | Si falta alguno |
+| `test_status_hidden_from_anonymous_when_disabled` | `public_status=False` + usuario anónimo | `404` | Si devuelve `200` |
+| `test_status_visible_to_logged_in_when_disabled` | `public_status=False` + usuario logueado | `200` | Si devuelve `404` |
+
+---
+
+## 15d. Panel Web — Páginas de error HTTP
+
+**Archivo:** `tests/test_wa_errors.py` — clase `TestErrorPages`
+
+Verifica que los errores HTTP devuelven la plantilla `error.html` (o JSON para `/api/*`) con el código, título y descripción correctos.
+
+| Test | Qué comprueba | OK | Error |
+|------|-------------|-----|------|
+| `test_404_returns_html` | Ruta inexistente → 404 HTML | `404`, `text/html` en Content-Type | Si devuelve JSON o 200 |
+| `test_404_contains_title` | Página 404 contiene el título traducido | "Page Not Found" en HTML | Si no aparece |
+| `test_404_has_error_code_displayed` | Página 404 muestra el código "404" | "404" en el cuerpo HTML | Si no aparece |
+| `test_404_api_returns_json` | `Accept: application/json` → JSON | `{"error": ..., "code": 404}` | Si devuelve HTML |
+| `test_404_api_path_returns_json` | `/api/ruta-inexistente` → JSON | `{"error": ..., "code": 404}` | Si devuelve HTML |
+| `test_500_returns_html` | Ruta que lanza excepción → 500 HTML | `500`, `text/html` | Si propaga la excepción sin capturar |
+| `test_405_on_wrong_method` | Método no permitido → 405 HTML | `405` | Si devuelve 404 o 200 |
+| `test_error_page_respects_dark_mode` | Página de error hereda tema dark | Atributo `data-bs-theme="dark"` | Si usa tema light siempre |
+| `test_error_page_has_description` | Página de error muestra descripción | Texto de descripción en HTML | Si no aparece |
+| `test_error_page_404_no_session` | 404 sin sesión activa | `404` y HTML válido | Si falla o redirige |
+
+---
+
 ## 16. Panel Web — Permisos granulares y roles personalizados
 
 
 **Archivos:** `tests/test_wa_roles.py` — `TestPermissionsConstants`, `TestCustomRoles`, `TestGranularPermissions` · `tests/test_wa_groups.py` — grupos de usuarios
+
 
 ### `TestPermissionsConstants`
 

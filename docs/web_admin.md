@@ -32,6 +32,8 @@ lib/web_admin/
     ├── telegram.py   # /api/telegram/test
     ├── audit.py      # /api/audit
     ├── checks.py     # /api/checks/run
+    ├── status.py     # /status (página pública de estado, sin autenticación)
+    ├── errors.py     # handlers 400, 403, 404, 405, 500
     └── ui.py         # /, /lang, /theme
 ```
 
@@ -54,6 +56,8 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas |
 | **Vista general (Overview)** | Estado en tiempo real de todos los módulos con auto-refresco configurable (OFF / 10 s / 30 s / 60 s) |
 | **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador |
+| **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
+| **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles; cambiar contraseña propia |
 | **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + roles personalizados con 19 flags granulares; los roles integrados permiten editar la etiqueta y gestionar qué usuarios/grupos tienen asignado ese rol; sus permisos se muestran en solo lectura |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado (permite editar roles y miembros, pero no nombre ni etiqueta) |
@@ -183,8 +187,14 @@ botones y pestañas según los permisos del usuario actual obtenidos de `/api/me
 
 ## Endpoints REST
 
-Todos los endpoints requieren autenticación (cookie de sesión).
+Todos los endpoints requieren autenticación (cookie de sesión) salvo los indicados como *público*.
 El permiso requerido se indica entre paréntesis.
+
+### Estado público
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/status` | público* | Página de estado de los servicios. *Requiere `public_status=true` para acceso anónimo; los usuarios autenticados siempre pueden acceder. |
 
 ### Autenticación
 
@@ -216,6 +226,13 @@ Los campos numéricos del bloque `web_admin` se validan contra reglas definidas 
 |----------------------|----------|-----|-----|
 | `web_admin\|remember_me_days` | `_REMEMBER_ME_DAYS` | 1 | 365 |
 | `web_admin\|audit_max_entries` | `_AUDIT_MAX_ENTRIES` | 10 | 10000 |
+| `web_admin\|status_refresh_secs` | `_STATUS_REFRESH_SECS` | 10 | 3600 |
+
+Los campos booleanos se validan vía `BOOL_RULES`:
+
+| Clave (`config.json`) | Atributo |
+|----------------------|----------|
+| `web_admin\|public_status` | `_public_status` |
 
 ### Telegram
 
@@ -284,6 +301,54 @@ Los campos numéricos del bloque `web_admin` se validan contra reglas definidas 
 
 ---
 
+## Página de Estado Pública (`/status`)
+
+La ruta `/status` muestra el estado actual de todos los módulos en una página pública, sin panel de navegación ni menú de administración.
+
+![Estado de servicios](images/status_page.png)
+
+### Comportamiento de acceso
+
+| Situación | Resultado |
+|-----------|-----------|
+| `public_status = false` + usuario anónimo | `404 Not Found` |
+| `public_status = false` + usuario logueado | `200 OK` |
+| `public_status = true` + cualquier visitante | `200 OK` |
+
+### Características
+
+- **Banner superior** verde (todos OK) o rojo (algún fallo) con el nombre de la aplicación.
+- **Tarjetas colapsables por módulo** — colapsadas por defecto; se expanden automáticamente si alguna comprobación falla.
+- **Contador de refresco** — cuenta regresiva en pantalla y recarga automática de la página; configurable con `status_refresh_secs` (10–3600 s).
+- No extiende `base.html`; es una página standalone completamente independiente del panel de administración.
+
+### Configuración
+
+| Parámetro `config.json` | Tipo | Por defecto | Descripción |
+|------------------------|------|-------------|-------------|
+| `web_admin.public_status` | bool | `false` | Permite el acceso anónimo a `/status` |
+| `web_admin.status_refresh_secs` | int | `60` | Intervalo de refresco automático (10–3600 s) |
+
+---
+
+## Páginas de Error Personalizadas
+
+Los errores HTTP 400, 403, 404, 405 y 500 muestran páginas con el código de error, un icono Bootstrap, título y descripción traducidos al idioma de la sesión activa.
+
+Las páginas heredan `base.html`, por lo que el tema dark/light se aplica automáticamente.
+
+### Comportamiento JSON vs HTML
+
+Si la ruta que genera el error empieza por `/api/` o el cliente envía `Accept: application/json`, la respuesta es JSON:
+
+```json
+{"error": "Page Not Found", "code": 404}
+```
+
+En cualquier otro caso se devuelve la plantilla `error.html`.
+
+---
+
 ## i18n
 
 Los ficheros de idioma están en dos lugares:
@@ -305,6 +370,17 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 | `role_tab_assignments` | Pestaña "Asignación" del modal de rol |
 | `role_assign_users` | Título de la columna de usuarios en la pestaña Asignación |
 | `role_assign_groups` | Título de la columna de grupos en la pestaña Asignación |
+
+Las claves de i18n para páginas de error son:
+
+| Clave | Descripción |
+|-------|-------------|
+| `err_400_title` / `err_400_desc` | Título y descripción del error 400 |
+| `err_403_title` / `err_403_desc` | Título y descripción del error 403 |
+| `err_404_title` / `err_404_desc` | Título y descripción del error 404 |
+| `err_405_title` / `err_405_desc` | Título y descripción del error 405 |
+| `err_500_title` / `err_500_desc` | Título y descripción del error 500 |
+| `err_generic_title` / `err_generic_desc` | Fallback para errores sin clave específica |
 
 Para añadir un nuevo idioma, basta con crear un nuevo fichero `.py` en `lib/web_admin/lang/`. Se auto-descubre vía `pkgutil`.
 

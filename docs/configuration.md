@@ -46,6 +46,8 @@ Configuración global de la aplicación.
 | `telegram.chat_id` | string | `""` | ID del chat o grupo de Telegram |
 | `telegram.group_messages` | bool | false | Si `true`, agrupa todos los mensajes en un bloque por ciclo |
 | `web_admin.lang` | string | `"en_EN"` | Idioma por defecto de la interfaz web (`en_EN` o `es_ES`) |
+| `web_admin.public_status` | bool | `false` | Exponer `/status` públicamente sin autenticación. Los usuarios logueados siempre pueden acceder. |
+| `web_admin.status_refresh_secs` | int | `60` | Intervalo de refresco automático de la página `/status` (10–3600 segundos) |
 
 ---
 
