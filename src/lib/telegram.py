@@ -118,6 +118,15 @@ class Telegram(ObjectBase):
                 self.count_msg_send += 1
                 self.queue_msg.task_done()
 
+        # Flush de mensajes agrupados pendientes al cerrar
+        if self.group_messages and msg_group:
+            full_msg = "\n".join(msg_group)
+            self.api_send_message(full_msg)
+            for _ in msg_group:
+                self.queue_msg.task_done()
+                self.count_msg_send += 1
+            msg_group.clear()
+
     def api_send_message(self, message):
         """
         Send a message to Telegram using the API.

@@ -25,6 +25,7 @@
 
 import json
 import os
+import tempfile
 
 from lib.debug import DebugLevel
 from lib.object_base import ObjectBase
@@ -109,9 +110,16 @@ class ConfigStore(ObjectBase):
             )
             return False
 
+        dir_path = os.path.dirname(self.file) or '.'
+        tmp_path = None
         try:
-            with open(self.file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
+            with tempfile.NamedTemporaryFile(
+                'w', dir=dir_path, suffix='.tmp', delete=False, encoding='utf-8'
+            ) as tmp:
+                json.dump(data, tmp, ensure_ascii=False, indent=4)
+                tmp_path = tmp.name
+            os.replace(tmp_path, self.file)
+            tmp_path = None
 
         except TypeError as e:
             self.debug.print(
@@ -130,5 +138,9 @@ class ConfigStore(ObjectBase):
         except Exception as e:
             self.debug.exception(e)
             return False
+
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
         return True

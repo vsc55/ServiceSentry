@@ -95,7 +95,7 @@ class RaidMdstat:
         if self.is_remote:
             if not self.validate_remote:
                 raise ValueError(
-                    f"Remote config not valid ({self._user}:{self._pass}@{self._host})"
+                    f"Remote config not valid ({self._user}:***@{self._host})"
                 )
 
             remote_cmd = f"cat {shlex.quote(path_mdstat)}"
