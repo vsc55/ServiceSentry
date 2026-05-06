@@ -6,6 +6,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-GPL%20v3-green)
 ![Author](https://img.shields.io/badge/author-VSC55-lightgrey)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vsc55/ServiceSentry)
 
 ---
 
