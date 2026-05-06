@@ -584,3 +584,54 @@ class TestApiConfigPutInjection:
         assert resp.status_code == 200
         with open(f"{config_dir}/config.json", encoding="utf-8") as f:
             assert json.load(f).get("custom_key") == payload
+
+
+# ──────────────────────────── Schema ───────────────────────────────
+
+class TestApiConfigSchema:
+    """GET /api/config/schema."""
+
+    def test_schema_returns_200(self, client):
+        _login(client)
+        assert client.get("/api/config/schema").status_code == 200
+
+    def test_schema_returns_dict(self, client):
+        _login(client)
+        data = client.get("/api/config/schema").get_json()
+        assert isinstance(data, dict)
+
+    def test_schema_requires_auth(self, client):
+        assert client.get("/api/config/schema").status_code == 302
+
+    def test_schema_bool_fields_present(self, client):
+        _login(client)
+        data = client.get("/api/config/schema").get_json()
+        for field in ('web_admin|public_status', 'web_admin|pw_require_upper',
+                      'web_admin|pw_require_digit', 'web_admin|pw_require_symbol'):
+            assert field in data, f"Missing schema field: {field}"
+            assert data[field].get('type') == 'bool'
+            assert isinstance(data[field].get('default'), bool)
+
+    def test_schema_int_fields_present(self, client):
+        _login(client)
+        data = client.get("/api/config/schema").get_json()
+        for field in ('web_admin|remember_me_days', 'web_admin|audit_max_entries',
+                      'web_admin|status_refresh_secs'):
+            assert field in data, f"Missing schema field: {field}"
+            assert 'min' in data[field] and 'max' in data[field]
+
+    def test_schema_status_lang_options(self, client):
+        _login(client)
+        data = client.get("/api/config/schema").get_json()
+        assert 'web_admin|status_lang' in data
+        opts = data['web_admin|status_lang'].get('options', [])
+        assert '' in opts
+        for lang in SUPPORTED_LANGS:
+            assert lang in opts
+
+    def test_schema_no_crash_on_instance_attrs(self, client):
+        """Regression: getattr(type(wa), attr) crashed for instance-only attrs."""
+        _login(client)
+        resp = client.get("/api/config/schema")
+        assert resp.status_code == 200
+        assert resp.get_json() is not None

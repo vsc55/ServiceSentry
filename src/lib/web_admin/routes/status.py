@@ -8,6 +8,7 @@ import os
 from flask import abort, render_template, session
 
 from lib.config import ConfigControl
+from lib.web_admin.constants import DEFAULT_LANG, TRANSLATIONS
 
 # Fallback language for watchful pretty-name lookup.
 _LANG_FALLBACK = 'en_EN'
@@ -48,6 +49,7 @@ def register(app, wa):
         # 2. Status-page-specific language (wa._STATUS_LANG)
         # 3. Default web-admin language (wa._default_lang)
         lang = session.get('lang') or wa._STATUS_LANG or wa._default_lang
+        i18n = TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG])
 
         status_raw: dict = {}
         if wa._var_dir:
@@ -106,5 +108,6 @@ def register(app, wa):
             total_all=total_all,
             refresh_secs=wa._STATUS_REFRESH_SECS,
             lang=lang,
+            i18n=i18n,
         )
 

@@ -61,13 +61,13 @@
         <h1 class="mt-2 mb-0">ServiceSentry</h1>
         <div class="badge-status mt-2">
             {% if overall_ok %}
-            <i class="bi bi-check-circle-fill"></i> All systems operational
+            <i class="bi bi-check-circle-fill"></i> {{ i18n.status_all_ok }}
             {% else %}
-            <i class="bi bi-exclamation-triangle-fill"></i> Degraded performance
+            <i class="bi bi-exclamation-triangle-fill"></i> {{ i18n.status_degraded }}
             {% endif %}
         </div>
         <div class="mt-2" style="font-size:.88rem;opacity:.8">
-            {{ total_ok }} / {{ total_all }} checks passing &nbsp;·&nbsp; {{ overall_pct }}% uptime
+            {{ i18n.status_checks_passing.format(ok=total_ok, total=total_all) }} &nbsp;&middot;&nbsp; {{ i18n.status_uptime.format(pct=overall_pct) }}
         </div>
     </div>
 </div>
@@ -77,7 +77,7 @@
     {% if not modules %}
     <div class="card p-4 text-center text-muted">
         <i class="bi bi-inbox" style="font-size:2rem"></i>
-        <p class="mt-2 mb-0">No status data available yet.</p>
+        <p class="mt-2 mb-0">{{ i18n.status_no_data }}</p>
     </div>
     {% endif %}
 
@@ -102,13 +102,13 @@
                 <span class="check-name">{{ item.name }}</span>
                 {% if item.extra.get('used') is not none %}
                 <span class="extra-val">{{ "%.1f"|format(item.extra.used) }}%
-                    {% if item.extra.get('alert') %}<span class="text-muted">/ {{ item.extra.alert }}% alert</span>{% endif %}
+                    {% if item.extra.get('alert') %}<span class="text-muted">/ {{ item.extra.alert }}% {{ i18n.status_alert_threshold }}</span>{% endif %}
                 </span>
                 {% elif item.extra.get('code') %}
                 <span class="extra-val">HTTP {{ item.extra.code }}</span>
                 {% endif %}
                 <span class="badge rounded-pill {% if item.ok %}badge-ok{% else %}badge-err{% endif %}">
-                    {% if item.ok %}OK{% else %}ERROR{% endif %}
+                    {% if item.ok %}{{ i18n.status_ok }}{% else %}{{ i18n.status_error }}{% endif %}
                 </span>
             </div>
             {% endfor %}
@@ -119,9 +119,9 @@
 
     <p class="footer-note">
         <i class="bi bi-arrow-clockwise"></i>
-        Refreshing in <span id="countdown">{{ refresh_secs }}</span>s
-        &nbsp;·&nbsp;
-        <a href="/login" class="text-muted text-decoration-none">Admin</a>
+        {{ i18n.status_refreshing_in }} <span id="countdown">{{ refresh_secs }}</span>{{ i18n.status_seconds_abbr }}
+        &nbsp;&middot;&nbsp;
+        <a href="/login" class="text-muted text-decoration-none">{{ i18n.status_admin_link }}</a>
     </p>
 </div>
 

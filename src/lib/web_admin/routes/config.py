@@ -56,7 +56,7 @@ def register(app, wa):
                 'default': getattr(type(wa), rule['attr']),
             }
         for path, attr in BOOL_RULES.items():
-            schema[path] = {'type': 'bool', 'default': getattr(type(wa), attr)}
+            schema[path] = {'type': 'bool', 'default': getattr(wa, attr)}
         schema['web_admin|audit_sort'] = {
             'options': ['time', 'event', 'user', 'ip'],
             'default': 'time',
