@@ -46,6 +46,8 @@ def register(app, wa):
         perms = [p for p in data.get('permissions', []) if p in PERMISSIONS]
         if not name:
             return jsonify({'error': wa._t('role_name_required')}), 400
+        if name == '__builtin_labels__':
+            return jsonify({'error': wa._t('role_already_exists', name)}), 409
         if len(name) > wa._MAX_ROLE_NAME_LEN:
             return jsonify({'error': wa._t('name_too_long', wa._MAX_ROLE_NAME_LEN)}), 400
         if len(label) > wa._MAX_ROLE_LABEL_LEN:

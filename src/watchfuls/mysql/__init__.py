@@ -142,6 +142,7 @@ class Watchful(ModuleBase):
                 connection = pymysql.connect(unix_socket=socket,
                                              db=db,
                                              charset='utf8mb4',
+                                             connect_timeout=10,
                                              cursorclass=pymysql.cursors.DictCursor)
             else:
                 connection = pymysql.connect(host=host,
@@ -171,7 +172,7 @@ class Watchful(ModuleBase):
         if connection is not None:
             try:
                 with connection.cursor() as cursor:
-                    cursor.execute("SHOW GLOBAL STATUS")
+                    cursor.execute("SELECT 1")
                     return_status = "OK"
 
             except Exception as e:

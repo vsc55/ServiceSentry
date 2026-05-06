@@ -15,7 +15,7 @@
 | [modules.md](modules.md) | Los 9 módulos integrados: referencia de configuración, campos y flujo de cada uno |
 | [web_admin.md](web_admin.md) | Interfaz web Flask: características, roles, seguridad, endpoints REST, i18n, formularios por schema |
 | [security.md](security.md) | Autenticación, RBAC, sesiones, XSS, path traversal, auditoría y tests de seguridad del panel web |
-| [development.md](development.md) | Setup local, tests (1110), pytest, depuración en VS Code, convenciones de código, dependencias |
+| [development.md](development.md) | Setup local, tests (1176), pytest, depuración en VS Code, convenciones de código, dependencias |
 | [watchful_guide.md](watchful_guide.md) | Guía paso a paso para crear un nuevo módulo de monitorización |
 | [i18n.md](i18n.md) | Sistema de internacionalización: arquitectura de dos niveles, pipeline de `discover_schemas`, añadir idiomas |
 | [tests.md](tests.md) | Inventario completo de tests (870): qué comprueba cada test, condiciones de OK y error, organizado por grupos |

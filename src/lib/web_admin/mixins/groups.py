@@ -4,6 +4,7 @@
 
 import json
 import os
+import tempfile
 
 
 class _GroupsMixin:
@@ -33,11 +34,22 @@ class _GroupsMixin:
             self._persist_groups()
 
     def _persist_groups(self) -> bool:
-        """Write groups to ``groups.json``."""
+        """Write groups to ``groups.json`` atomically."""
+        tmp_path = None
         try:
             os.makedirs(self._config_dir, exist_ok=True)
-            with open(self._groups_path, 'w', encoding='utf-8') as fh:
-                json.dump(self._groups, fh, indent=4, ensure_ascii=False)
+            with tempfile.NamedTemporaryFile(
+                'w', encoding='utf-8', dir=self._config_dir,
+                suffix='.tmp', delete=False,
+            ) as tmp:
+                json.dump(self._groups, tmp, indent=4, ensure_ascii=False)
+                tmp_path = tmp.name
+            os.replace(tmp_path, self._groups_path)
             return True
         except OSError:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             return False

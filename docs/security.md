@@ -201,7 +201,20 @@ Los permisos son **aditivos**: el usuario obtiene sus permisos de rol propios m�
 - `werkzeug.security.generate_password_hash` al crear o cambiar contraseñas. Werkzeug 3.x usa **scrypt** por defecto (más seguro que PBKDF2).
 - `werkzeug.security.check_password_hash` al verificar — compatible con cualquier algoritmo soportado por Werkzeug.
 - El campo `password_hash` **nunca se expone** en `GET /api/users` ni en ninguna respuesta JSON.
-- Nueva contraseña mínimo **8 caracteres**; el servidor la valida y devuelve 400 si no cumple.
+
+### Política de contraseñas configurable
+
+La validación de contraseñas se controla mediante campos en `config.json → web_admin`:
+
+| Campo | Por defecto | Descripción |
+|-------|-------------|-------------|
+| `pw_min_len` | `8` | Longitud mínima (1–128). El servidor devuelve 400 si no se cumple. |
+| `pw_max_len` | `128` | Longitud máxima (8–256). |
+| `pw_require_upper` | `true` | Exige al menos una mayúscula y una minúscula. |
+| `pw_require_digit` | `true` | Exige al menos un dígito. |
+| `pw_require_symbol` | `false` | Exige al menos un símbolo (`!`, `@`, `#`…). |
+
+Los cambios en estos campos se aplican **en caliente** al guardar `config.json` desde el panel web (sin reiniciar el servidor).
 
 > **Tests:** Los fixtures de pytest usan `pbkdf2:sha256` (más rápido que scrypt) pre-computado una sola vez a nivel de módulo en `conftest.py`. Esto evita recalcular el hash en cada test y permite la ejecución paralela con `pytest-xdist` sin degradación de rendimiento.
 

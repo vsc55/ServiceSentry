@@ -44,6 +44,7 @@ class Telegram(ObjectBase):
         self.group_messages = False
         self.count_msg = 0
         self.count_msg_send = 0
+        self._count_lock = threading.Lock()
         self.stop = False
         self.queue_msg = queue.Queue()
         self.pool_send_msg = None
@@ -67,16 +68,20 @@ class Telegram(ObjectBase):
     def send_message(self, message):
         """ Add a message to the list. """
         self.queue_msg.put(message)
-        self.count_msg += 1
+        with self._count_lock:
+            self.count_msg += 1
 
-    def send_message_end(self, hostname):
-        """ Add a message to the list and wait for the list to be empty. """
+    def send_message_end(self, hostname, timeout=30):
+        """ Add a summary message and wait up to *timeout* seconds for the queue to drain. """
         if self.count_msg > 0:
             s_message = f"ℹ️ Summary *{hostname}*, get *{self.count_msg}* new Message. ☝️☝️☝️"
             self.queue_msg.put(s_message)
-            self.count_msg += 1
+            with self._count_lock:
+                self.count_msg += 1
 
-        self.queue_msg.join()
+        join_thread = threading.Thread(target=self.queue_msg.join, daemon=True)
+        join_thread.start()
+        join_thread.join(timeout=timeout)
         self.reset_count()
 
     @property
@@ -106,7 +111,8 @@ class Telegram(ObjectBase):
                     # marcar todos como procesados
                     for _ in msg_group:
                         self.queue_msg.task_done()
-                        self.count_msg_send += 1
+                        with self._count_lock:
+                            self.count_msg_send += 1
 
                     msg_group.clear()
                 continue
@@ -115,7 +121,8 @@ class Telegram(ObjectBase):
             if not self.group_messages:
                 self.debug.print(f"Telegram > Send >> Msg: {msg}")
                 self.api_send_message(msg)
-                self.count_msg_send += 1
+                with self._count_lock:
+                    self.count_msg_send += 1
                 self.queue_msg.task_done()
 
         # Flush de mensajes agrupados pendientes al cerrar
@@ -124,7 +131,8 @@ class Telegram(ObjectBase):
             self.api_send_message(full_msg)
             for _ in msg_group:
                 self.queue_msg.task_done()
-                self.count_msg_send += 1
+                with self._count_lock:
+                    self.count_msg_send += 1
             msg_group.clear()
 
     def api_send_message(self, message):

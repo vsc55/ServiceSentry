@@ -42,7 +42,7 @@ lib/web_admin/
 ## Iniciar la Interfaz Web
 
 ```bash
-python3 main.py --web-admin
+python3 main.py --web
 ```
 
 Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
@@ -66,6 +66,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **i18n** | Inglés y español; seleccionable por usuario y configurable globalmente con `web_admin.lang` |
 | **Registro de auditoría** | Seguimiento de cambios a nivel de campo con enmascarado de datos sensibles |
 | **Gestión de sesiones** | Ver sesiones activas; los usuarios con permiso `sessions_revoke` pueden revocar cualquier sesión |
+| **Soporte proxy inverso** | `proxy_count` activa `ProxyFix` de Werkzeug para leer la IP real del cliente cuando Flask está detrás de uno o más proxies (nginx, Traefik…) |
 
 ---
 
@@ -227,12 +228,26 @@ Los campos numéricos del bloque `web_admin` se validan contra reglas definidas 
 | `web_admin\|remember_me_days` | `_REMEMBER_ME_DAYS` | 1 | 365 |
 | `web_admin\|audit_max_entries` | `_AUDIT_MAX_ENTRIES` | 10 | 10000 |
 | `web_admin\|status_refresh_secs` | `_STATUS_REFRESH_SECS` | 10 | 3600 |
+| `web_admin\|pw_min_len` | `_PW_MIN_LEN` | 1 | 128 |
+| `web_admin\|pw_max_len` | `_PW_MAX_LEN` | 8 | 256 |
+| `web_admin\|proxy_count` | `_proxy_count` | 0 | 10 |
 
 Los campos booleanos se validan vía `BOOL_RULES`:
 
 | Clave (`config.json`) | Atributo |
 |----------------------|----------|
 | `web_admin\|public_status` | `_public_status` |
+| `web_admin\|pw_require_upper` | `_PW_REQUIRE_UPPER` |
+| `web_admin\|pw_require_digit` | `_PW_REQUIRE_DIGIT` |
+| `web_admin\|pw_require_symbol` | `_PW_REQUIRE_SYMBOL` |
+
+El endpoint `/api/config/schema` también expone metadatos para:
+
+| Clave | Tipo especial | Descripción |
+|-------|---------------|-------------|
+| `web_admin\|status_lang` | `options` | Lista de idiomas disponibles + `""` (vacío = usar idioma por defecto) |
+| `web_admin\|audit_sort` | `options` | `time`, `event`, `user`, `ip` — campo por el que ordenar el log |
+| `telegram\|chat_id` | `numericString` | Indica al cliente que el valor debe ser una cadena de solo dígitos |
 
 ### Telegram
 

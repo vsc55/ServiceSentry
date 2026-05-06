@@ -23,6 +23,7 @@
 import concurrent.futures
 import json
 import os
+import secrets
 import socket
 import struct
 import time
@@ -201,7 +202,7 @@ class Watchful(ModuleBase):
 
             try:
                 sock.settimeout(timeout)
-                packet_id = os.getpid() & 0xFFFF
+                packet_id = secrets.randbits(16)
                 seq = 1
                 packet = self._build_icmp_packet(packet_id, seq)
                 sock.sendto(packet, (dest, 0))

@@ -5,6 +5,7 @@
 from datetime import timedelta
 
 from flask import jsonify
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from ..constants import SUPPORTED_LANGS
 
@@ -89,6 +90,15 @@ def register(app, wa):
             if not (isinstance(v, int) and not isinstance(v, bool)
                     and rule['min'] <= v <= rule['max']):
                 sec_data[field] = getattr(wa, rule['attr'])
+        # Enforce pw_max_len >= pw_min_len in data before writing to disk
+        web_data = data.get('web_admin')
+        if isinstance(web_data, dict):
+            pm = web_data.get('pw_min_len')
+            px = web_data.get('pw_max_len')
+            if (isinstance(pm, int) and not isinstance(pm, bool) and
+                    isinstance(px, int) and not isinstance(px, bool) and
+                    px < pm):
+                web_data['pw_max_len'] = pm
         if wa._save_config_file(wa._CONFIG_FILE, data):
             # Apply web_admin.lang at runtime if changed
             new_lang = (data.get('web_admin') or {}).get('lang', '')
@@ -105,28 +115,6 @@ def register(app, wa):
             if isinstance(new_sec, bool):
                 wa._secure_cookies = new_sec
                 wa._app.config['SESSION_COOKIE_SECURE'] = new_sec
-            new_ps = (data.get('web_admin') or {}).get('public_status')
-            if isinstance(new_ps, bool):
-                wa._public_status = new_ps
-            # Apply proxy_count at runtime
-            new_proxy = (data.get('web_admin') or {}).get('proxy_count')
-            if isinstance(new_proxy, int) and not isinstance(new_proxy, bool):
-                count = max(0, min(10, new_proxy))
-                wa._proxy_count = count
-                from werkzeug.middleware.proxy_fix import ProxyFix
-                if count > 0:
-                    wa._app.wsgi_app = ProxyFix(
-                        wa._app.wsgi_app,
-                        x_for=count,
-                        x_proto=count,
-                        x_host=count,
-                        x_prefix=count,
-                    )
-                else:
-                    # Quitar ProxyFix si count vuelve a 0
-                    if isinstance(wa._app.wsgi_app, ProxyFix):
-                        wa._app.wsgi_app = wa._app.wsgi_app.app
-            # (public_status is now handled via BOOL_RULES loop below)
             # Apply integer rules at runtime (values already sanitized above)
             for path, rule in INT_RULES.items():
                 section, field = path.split('|')
@@ -146,6 +134,17 @@ def register(app, wa):
             # Ensure pw_max_len >= pw_min_len after applying both
             if wa._PW_MAX_LEN < wa._PW_MIN_LEN:
                 wa._PW_MAX_LEN = wa._PW_MIN_LEN
+            # Update ProxyFix middleware to reflect current proxy_count
+            if isinstance(wa._app.wsgi_app, ProxyFix):
+                wa._app.wsgi_app = wa._app.wsgi_app.app
+            if wa._proxy_count > 0:
+                wa._app.wsgi_app = ProxyFix(
+                    wa._app.wsgi_app,
+                    x_for=wa._proxy_count,
+                    x_proto=wa._proxy_count,
+                    x_host=wa._proxy_count,
+                    x_prefix=wa._proxy_count,
+                )
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._SENSITIVE_FIELDS,
             )

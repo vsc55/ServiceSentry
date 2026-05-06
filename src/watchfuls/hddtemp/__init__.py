@@ -61,7 +61,7 @@ class Watchful(ModuleBase):
 
             self._debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
             if is_enabled:
-                if not value.get("host", None):
+                if not isinstance(value, dict) or not value.get("host", None):
                     self._debug(f"{key} - Host is not defined!", DebugLevel.warning)
                 else:
                     new_hddtemp = self.Hddtemp_Info(key)
@@ -153,7 +153,7 @@ class Watchful(ModuleBase):
             new_hdd = {
                 'DEV': str(item_hdd[0]).strip(),
                 'MODEL': str(item_hdd[1]).strip(),
-                'TEMP': int(item_hdd[2]) if item_hdd[2].isnumeric() else str(item_hdd[2]).strip(),
+                'TEMP': int(item_hdd[2]) if item_hdd[2].lstrip('-').isnumeric() else str(item_hdd[2]).strip(),
                 'TEMP_UNIT': str(item_hdd[3]).strip(),
                 'ALERT': int(hddtemp.alert)
             }

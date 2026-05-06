@@ -162,10 +162,9 @@ class Exec:
                 self.config.command,
                 timeout=self.config.timeout
             )
-            exit_code = stdout.channel.recv_exit_status()
-
             read_out = stdout.read().decode() if stdout else ""
             read_err = stderr.read().decode() if stderr else ""
+            exit_code = stdout.channel.recv_exit_status()
 
             return ExecResult(
                 out=read_out,

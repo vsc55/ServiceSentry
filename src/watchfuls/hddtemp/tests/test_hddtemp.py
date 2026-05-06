@@ -4,8 +4,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from conftest import create_mock_monitor
 
 # Datos simulados del daemon hddtemp
@@ -255,10 +253,10 @@ class TestHddtempCheck:
                 found_fail = True
         assert found_fail
 
-    def test_check_host_string_value_crashes_on_get(self):
+    def test_check_host_string_value_skipped_gracefully(self):
         """Valor string en config no hace match con bool() ni dict(),
-        is_enabled queda True (default) y luego value.get() falla
-        porque str no tiene .get()."""
+        is_enabled queda True (default) pero la entry se omite porque
+        no es un dict con host válido — no debe lanzar excepción."""
         config = {
             'watchfuls.hddtemp': {
                 'list': {
@@ -268,5 +266,5 @@ class TestHddtempCheck:
         }
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
-        with pytest.raises(AttributeError):
-            w.check()
+        result = w.check()
+        assert 'server1' not in result.list

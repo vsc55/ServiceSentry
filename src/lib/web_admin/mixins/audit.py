@@ -4,6 +4,7 @@
 
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 
 from flask import request, session
@@ -31,14 +32,26 @@ class _AuditMixin:
                 self._audit_log = []
 
     def _persist_audit(self) -> bool:
-        """Write the audit log to disk (capped to last N entries)."""
-        self._audit_log = self._audit_log[-self._AUDIT_MAX_ENTRIES:]
+        """Write the audit log to disk atomically (capped to last N entries)."""
+        to_write = self._audit_log[-self._AUDIT_MAX_ENTRIES:]
+        tmp_path = None
         try:
             os.makedirs(self._config_dir, exist_ok=True)
-            with open(self._audit_path, 'w', encoding='utf-8') as fh:
-                json.dump(self._audit_log, fh, indent=2, ensure_ascii=False)
+            with tempfile.NamedTemporaryFile(
+                'w', encoding='utf-8', dir=self._config_dir,
+                suffix='.tmp', delete=False,
+            ) as tmp:
+                json.dump(to_write, tmp, indent=2, ensure_ascii=False)
+                tmp_path = tmp.name
+            os.replace(tmp_path, self._audit_path)
+            self._audit_log = to_write
             return True
         except OSError:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             return False
 
     def _audit(self, event: str, username: str = '', ip: str = '',

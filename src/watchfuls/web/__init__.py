@@ -116,7 +116,7 @@ class Watchful(ModuleBase):
         code_true = self.get_conf_in_list("code", name, self._DEFAULTS['code'])
         timeout = self.get_conf_in_list("timeout", name, self._DEFAULTS['timeout'])
 
-        status_code: int = self._web_return(url)
+        status_code: int = self._web_return(url, timeout)
         status: bool = status_code == code_true
 
         icon = '🔼' if status else '🔽'

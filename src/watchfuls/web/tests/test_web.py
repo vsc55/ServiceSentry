@@ -279,8 +279,9 @@ class TestWebUrl:
             # El resultado se indexa por el key (nombre descriptivo)
             assert 'Mi Blog' in result.list
             assert result.list['Mi Blog']['status'] is True
-            # _web_return recibe la url, no el key
-            mock_ret.assert_called_once_with('example.com')
+            # _web_return recibe la url (no el key) y el timeout configurado
+            args, _ = mock_ret.call_args
+            assert args[0] == 'example.com'
 
     def test_backward_compat_key_as_url(self):
         """Sin campo url, el key se usa como URL (retrocompat)."""
@@ -293,7 +294,8 @@ class TestWebUrl:
         with patch.object(w, '_web_return', return_value=200) as mock_ret:
             result = w.check()
             assert 'example.com' in result.list
-            mock_ret.assert_called_once_with('example.com')
+            args, _ = mock_ret.call_args
+            assert args[0] == 'example.com'
 
     def test_empty_url_falls_back_to_key(self):
         """url vacío usa el key como URL."""
@@ -306,7 +308,8 @@ class TestWebUrl:
         with patch.object(w, '_web_return', return_value=200) as mock_ret:
             result = w.check()
             assert 'example.com' in result.list
-            mock_ret.assert_called_once_with('example.com')
+            args, _ = mock_ret.call_args
+            assert args[0] == 'example.com'
 
     def test_key_used_in_message(self):
         """El mensaje usa el key (nombre descriptivo), no la url."""

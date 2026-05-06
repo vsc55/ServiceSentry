@@ -66,6 +66,8 @@ class Watchful(ModuleBase):
         return val_conf
 
     def check(self):
+        if not self.is_enabled:
+            return self.dict_return
         m = Mem()
         x = {
             'ram': {

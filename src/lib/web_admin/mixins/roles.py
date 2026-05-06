@@ -4,6 +4,7 @@
 
 import json
 import os
+import tempfile
 
 
 class _RolesMixin:
@@ -30,14 +31,25 @@ class _RolesMixin:
             self._builtin_role_labels = {}
 
     def _persist_roles(self) -> bool:
-        """Write custom roles to ``roles.json``."""
+        """Write custom roles to ``roles.json`` atomically."""
+        tmp_path = None
         try:
             os.makedirs(self._config_dir, exist_ok=True)
             data = dict(self._custom_roles)
             if self._builtin_role_labels:
                 data['__builtin_labels__'] = self._builtin_role_labels
-            with open(self._roles_path, 'w', encoding='utf-8') as fh:
-                json.dump(data, fh, indent=4, ensure_ascii=False)
+            with tempfile.NamedTemporaryFile(
+                'w', encoding='utf-8', dir=self._config_dir,
+                suffix='.tmp', delete=False,
+            ) as tmp:
+                json.dump(data, tmp, indent=4, ensure_ascii=False)
+                tmp_path = tmp.name
+            os.replace(tmp_path, self._roles_path)
             return True
         except OSError:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             return False

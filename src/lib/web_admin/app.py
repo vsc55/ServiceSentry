@@ -118,6 +118,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._STATUS_LANG = status_lang if status_lang in SUPPORTED_LANGS else ''
         self._proxy_count = max(0, int(proxy_count))
         self._check_lock = threading.Lock()
+        self._data_lock = threading.RLock()
         self._default_lang = (
             default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
         )

@@ -5,6 +5,7 @@
 import json
 import os
 import secrets
+import tempfile
 from datetime import datetime, timedelta, timezone
 
 from flask import request, session
@@ -83,13 +84,24 @@ class _SessionsMixin:
             self._persist_sessions()
 
     def _persist_sessions(self) -> bool:
-        """Write sessions registry to disk."""
+        """Write sessions registry to disk atomically."""
+        tmp_path = None
         try:
             os.makedirs(self._config_dir, exist_ok=True)
-            with open(self._sessions_path, 'w', encoding='utf-8') as fh:
-                json.dump(self._sessions, fh, indent=4, ensure_ascii=False)
+            with tempfile.NamedTemporaryFile(
+                'w', encoding='utf-8', dir=self._config_dir,
+                suffix='.tmp', delete=False,
+            ) as tmp:
+                json.dump(self._sessions, tmp, indent=4, ensure_ascii=False)
+                tmp_path = tmp.name
+            os.replace(tmp_path, self._sessions_path)
             return True
         except OSError:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             return False
 
     def _create_session(
