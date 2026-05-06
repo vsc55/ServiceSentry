@@ -21,6 +21,7 @@ INT_RULES = {
     'web_admin|pw_min_len':        {'min': 1,  'max': 128,   'attr': '_PW_MIN_LEN'},
     'web_admin|pw_max_len':        {'min': 8,  'max': 256,   'attr': '_PW_MAX_LEN'},
     'web_admin|status_refresh_secs': {'min': 10, 'max': 3600, 'attr': '_STATUS_REFRESH_SECS'},
+    'web_admin|proxy_count':          {'min': 0,  'max': 10,   'attr': '_proxy_count'},
 }
 
 # Boolean config fields in web_admin that are synced to wa instance attributes.
@@ -53,7 +54,7 @@ def register(app, wa):
             schema[path] = {
                 'min': rule['min'],
                 'max': rule['max'],
-                'default': getattr(type(wa), rule['attr']),
+                'default': getattr(wa, rule['attr']),
             }
         for path, attr in BOOL_RULES.items():
             schema[path] = {'type': 'bool', 'default': getattr(wa, attr)}
@@ -107,6 +108,24 @@ def register(app, wa):
             new_ps = (data.get('web_admin') or {}).get('public_status')
             if isinstance(new_ps, bool):
                 wa._public_status = new_ps
+            # Apply proxy_count at runtime
+            new_proxy = (data.get('web_admin') or {}).get('proxy_count')
+            if isinstance(new_proxy, int) and not isinstance(new_proxy, bool):
+                count = max(0, min(10, new_proxy))
+                wa._proxy_count = count
+                from werkzeug.middleware.proxy_fix import ProxyFix
+                if count > 0:
+                    wa._app.wsgi_app = ProxyFix(
+                        wa._app.wsgi_app,
+                        x_for=count,
+                        x_proto=count,
+                        x_host=count,
+                        x_prefix=count,
+                    )
+                else:
+                    # Quitar ProxyFix si count vuelve a 0
+                    if isinstance(wa._app.wsgi_app, ProxyFix):
+                        wa._app.wsgi_app = wa._app.wsgi_app.app
             # (public_status is now handled via BOOL_RULES loop below)
             # Apply integer rules at runtime (values already sanitized above)
             for path, rule in INT_RULES.items():

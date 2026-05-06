@@ -9,6 +9,7 @@ from datetime import timedelta
 from urllib.parse import urlparse
 
 from flask import Flask, jsonify, redirect, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
 from lib.config import ConfigControl
@@ -86,6 +87,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         public_status: bool = False,
         status_refresh_secs: int = 60,
         status_lang: str = '',
+        proxy_count: int = 0,
     ):
         """Initialise the web administration server.
 
@@ -114,6 +116,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._public_status = bool(public_status)
         self._STATUS_REFRESH_SECS = max(10, int(status_refresh_secs))
         self._STATUS_LANG = status_lang if status_lang in SUPPORTED_LANGS else ''
+        self._proxy_count = max(0, int(proxy_count))
         self._check_lock = threading.Lock()
         self._default_lang = (
             default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
@@ -270,6 +273,15 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
         app.config['SESSION_COOKIE_SECURE'] = self._secure_cookies
 
+        if self._proxy_count > 0:
+            app.wsgi_app = ProxyFix(
+                app.wsgi_app,
+                x_for=self._proxy_count,
+                x_proto=self._proxy_count,
+                x_host=self._proxy_count,
+                x_prefix=self._proxy_count,
+            )
+
         @app.context_processor
         def _inject_i18n():
             lang = session.get('lang', self._default_lang)
@@ -300,6 +312,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_public_status': self._public_status,
                 'wa_status_refresh_secs': self._STATUS_REFRESH_SECS,
                 'wa_status_lang': self._STATUS_LANG,
+                'wa_proxy_count': self._proxy_count,
             }
 
         self._register_routes(app)

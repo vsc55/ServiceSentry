@@ -29,6 +29,7 @@ const WA_PW_REQUIRE_SYMBOL     = {{ wa_pw_require_symbol | tojson }};
 const WA_PUBLIC_STATUS         = {{ wa_public_status | tojson }};
 const WA_STATUS_REFRESH_SECS   = {{ wa_status_refresh_secs }};
 const WA_STATUS_LANG           = {{ wa_status_lang | tojson }};
+const WA_PROXY_COUNT           = {{ wa_proxy_count }};
 
 // ──────────────────────────── State ───────────────────────────────
 let modulesData = {};
@@ -68,6 +69,7 @@ const CONFIG_FIELD_DEFAULTS = {
     'web_admin|public_status':     false,
     'web_admin|status_refresh_secs': 60,
     'web_admin|status_lang':       '',
+    'web_admin|proxy_count':       0,
 };
 
 // Field schema loaded from /api/config/schema — min, max, default per field.

@@ -367,6 +367,7 @@ def start_web(args):
     public_status = cfg.get_conf(['web_admin', 'public_status'], False)
     status_refresh_secs = cfg.get_conf(['web_admin', 'status_refresh_secs'], 60)
     status_lang = cfg.get_conf(['web_admin', 'status_lang'], '')
+    proxy_count = cfg.get_conf(['web_admin', 'proxy_count'], 0)
     host = getattr(args, 'web_host', None) or cfg.get_conf(
         ['web_admin', 'host'], WebAdmin.DEFAULT_HOST
     )
@@ -383,7 +384,8 @@ def start_web(args):
                      audit_max_entries=int(audit_max_entries),
                      public_status=bool(public_status),
                      status_refresh_secs=int(status_refresh_secs),
-                     status_lang=str(status_lang))
+                     status_lang=str(status_lang),
+                     proxy_count=int(proxy_count))
 
     print("ServiceSentry Web Admin")
     print(f"  URL:    http://{host}:{port}")

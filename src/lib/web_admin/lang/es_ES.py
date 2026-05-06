@@ -265,6 +265,7 @@ LANG = {
         'public_status':     'Página de estado pública',
         'status_refresh_secs': 'Intervalo de refresco del estado (s)',
         'status_lang':       'Idioma de la página de estado',
+        'proxy_count':       'Número de proxies inversos',
     },
     # Hints de campo — se muestran como tooltip ⓘ junto a cada opción de configuración
     'hints': {
@@ -280,6 +281,7 @@ LANG = {
         'web_admin|public_status':       'Exponer una página /status pública con el estado de los servicios. No requiere inicio de sesión.',
         'web_admin|status_refresh_secs': 'Cada cuántos segundos se recarga automáticamente la página de estado pública (10–3600).',
         'web_admin|status_lang':         'Idioma de la página /status pública. Prioridad: idioma del usuario → este ajuste → idioma por defecto del panel. Dejar en blanco para usar el idioma por defecto.',
+        'web_admin|proxy_count':         'Número de proxies inversos delante del panel (0 = acceso directo). Si es > 0, se confía en las cabeceras X-Forwarded-For/Proto/Host para obtener la IP real del cliente y el esquema de URL.',
         'daemon|timer_check':           'Intervalo en segundos entre comprobaciones consecutivas de todos los módulos.',
         'global|debug':                 'Activar el registro de depuración detallado. No recomendado en producción.',
         'telegram|token':               'Token de la API del Bot de Telegram. Crea un bot con @BotFather para obtenerlo.',
@@ -295,6 +297,7 @@ LANG = {
     # Etiqueta de subsección política de contraseñas
     'pw_policy_section': 'Política de contraseñas',
     'public_status_section': 'Página de Estado Pública',
+    'proxy_section': 'Proxy Inverso',
     'status_lang_default': '— Usar idioma por defecto —',
     # Etiquetas de roles
     'role_labels': {

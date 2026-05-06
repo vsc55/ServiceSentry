@@ -20,6 +20,7 @@ function renderConfig() {
     if (!('public_status' in configData.web_admin)) configData.web_admin.public_status = WA_PUBLIC_STATUS;
     if (!('status_refresh_secs' in configData.web_admin)) configData.web_admin.status_refresh_secs = WA_STATUS_REFRESH_SECS;
     if (!('status_lang' in configData.web_admin)) configData.web_admin.status_lang = WA_STATUS_LANG;
+    if (!('proxy_count' in configData.web_admin)) configData.web_admin.proxy_count = WA_PROXY_COUNT;
     const order = ['daemon', 'global', 'telegram', 'web_admin'];
     const sections = Object.keys(configData).sort((a, b) => {
         const ai = order.indexOf(a), bi = order.indexOf(b);
@@ -62,6 +63,15 @@ function renderConfig() {
         </div>
         <div class="card-body py-2">
             ${renderScalarFields(Object.fromEntries(psFields.map(f => [f, configData.web_admin[f]])), 'web_admin', 'config', [])}
+        </div></div>`;
+    // Reverse proxy card
+    const rpFields = ['proxy_count'];
+    h += `<div class="card mb-3">
+        <div class="card-header fw-semibold py-2">
+            <i class="bi bi-diagram-3 me-1"></i>${esc(t('proxy_section'))}
+        </div>
+        <div class="card-body py-2">
+            ${renderScalarFields(Object.fromEntries(rpFields.map(f => [f, configData.web_admin[f]])), 'web_admin', 'config', [])}
         </div></div>`;
     // Audit preferences card — audit_sort rendered with the same 2-col layout
     const _auditSortPath = 'web_admin|audit_sort';
