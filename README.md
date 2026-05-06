@@ -19,7 +19,7 @@
 - **Parallel execution** — modules and per-module items run in `ThreadPoolExecutor`.
 - **Cross-platform modules** — `filesystemusage` and `ram_swap` work on Linux, Windows and macOS via `psutil`.
 - **Remote execution** — SSH command execution via paramiko for RAID and other remote checks.
-- **1164 tests** with pytest.
+- **1176 tests** with pytest.
 - **Public status page** — optional `/status` endpoint (no login required) showing real-time health of all modules with collapsible cards and configurable auto-refresh.
 - **Custom error pages** — branded 400/403/404/405/500 pages that inherit dark/light theme; API routes return JSON errors.
 

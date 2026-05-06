@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: 1164 tests** | Todos deben pasar con `pytest` para que el build sea válido.
+**Total: 1176 tests** | Todos deben pasar con `pytest` para que el build sea válido.
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -440,7 +440,7 @@
 
 ## 12. Panel Web — API módulos y configuración
 
-**Archivos:** `tests/test_wa_modules.py` — `TestApiModules`, `TestApiStatus`, `TestApiOverview`, `TestModuleItemSchemas`, `TestConfigEdgeCases` · `tests/test_wa_config.py` — `TestApiConfig`
+**Archivos:** `tests/test_wa_modules.py` — `TestApiModules`, `TestApiStatus`, `TestApiOverview`, `TestModuleItemSchemas`, `TestConfigEdgeCases` · `tests/test_wa_config.py` — `TestApiConfigAuth`, `TestApiConfigGet`, `TestApiConfigPutBasic`, `TestApiConfigPutSecureCookies`, `TestApiConfigPutRememberMeDays`, `TestApiConfigPutAuditMaxEntries`, `TestApiConfigPutLang`, `TestApiConfigPutDarkMode`, `TestApiConfigPutWebAdminKey`, `TestApiConfigPutInjection`, **`TestApiConfigSchema`**
 
 ### `TestApiModules`
 
@@ -458,6 +458,18 @@
 | `test_get_config_requires_auth` | Sin login | `302` | Si devuelve datos |
 | `test_get_config_returns_dict` | `GET /api/config` con login | Dict JSON | Si es otro tipo |
 | `test_put_config_saves` | `PUT /api/config` | `200` | Si devuelve error |
+
+### `TestApiConfigSchema`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_schema_returns_200` | `GET /api/config/schema` con login | `200` | Si devuelve otro código |
+| `test_schema_returns_dict` | Respuesta es un dict JSON | Dict no vacío | Si es otro tipo |
+| `test_schema_requires_auth` | Sin login | `302` | Si devuelve datos |
+| `test_schema_bool_fields_present` | `public_status`, `pw_require_*` tienen `type: bool` y `default` bool | Todos presentes con tipo correcto | Si falta alguno o el tipo es incorrecto |
+| `test_schema_int_fields_present` | `remember_me_days`, `audit_max_entries`, `status_refresh_secs` tienen `min`/`max` | Todas las claves presentes | Si falta alguna |
+| `test_schema_status_lang_options` | `status_lang` incluye `""` y todos los `SUPPORTED_LANGS` | Lista correcta | Si falta algún idioma |
+| `test_schema_no_crash_on_instance_attrs` | Regresión: `getattr(type(wa), attr)` fallaba para atributos de instancia | `200` sin traza | Si devuelve 500 |
 
 ### `TestModuleItemSchemas`
 
@@ -756,27 +768,48 @@ Cubre la función `_validate_password` (unidad) y la aplicación de la política
 
 ## 15c. Panel Web — Página de estado pública
 
-**Archivo:** `tests/test_wa_ui.py` — clase `TestPublicStatusPage`
+**Archivo:** `tests/test_wa_status.py` — clases `TestPublicStatusPage` y `TestStatusPageLanguage`
 
-Verifica el comportamiento de la ruta `/status` (acceso público vs. autenticado, contenido de la página, configuración).
+Verifica el comportamiento de la ruta `/status` (acceso público vs. autenticado, contenido de la página, configuración e idioma).
+
+### `TestPublicStatusPage`
 
 | Test | Qué comprueba | OK | Error |
 |------|-------------|-----|------|
-| `test_status_page_returns_200` | `/status` con `public_status=True` | `200` | Si es `404` o `500` |
-| `test_status_page_shows_ok_banner` | Banner verde cuando todo está OK | "All systems operational" en HTML | Si no aparece |
-| `test_status_page_shows_degraded_banner` | Banner rojo con algún check fallido | "Degraded" / "Degraded service" en HTML | Si no cambia |
-| `test_status_page_shows_module_names` | Nombres de módulos visibles | Aparece el nombre del módulo | Si no aparece |
-| `test_status_page_shows_check_names` | Nombres de checks visibles | Aparece el nombre del check | Si no aparece |
-| `test_status_page_not_available_when_disabled` | `/status` con `public_status=False` anónimo | `404` | Si devuelve `200` |
-| `test_status_page_has_refresh_countdown` | Contador de refresco visible | Elemento de countdown en HTML | Si no aparece |
-| `test_status_page_custom_refresh` | `status_refresh_secs=30` | El valor 30 aparece en el HTML | Si usa otro valor |
-| `test_status_page_no_nav_links` | Sin enlaces del panel de admin | No hay "/users" ni "/api" en la página | Si aparecen |
-| `test_status_page_is_standalone` | No extiende base.html con nav/sidebar | No hay `id="sidebar"` ni `class="navbar"` en HTML | Si lo hereda |
-| `test_status_page_empty_status` | Sin módulos activos | Sin tarjetas de módulo | Si muestra algo |
-| `test_status_page_all_systems_no_data` | Sin datos de status (archivo vacío) | Banner OK y sin tarjetas | Si falla |
-| `test_status_page_multiple_modules` | Varios módulos y checks | Cada módulo tiene su tarjeta | Si falta alguno |
+| `test_status_no_login_required` | `/status` accesible sin login | `200` | Si es `302` o `404` |
+| `test_status_accessible_when_enabled` | `/status` con `public_status=True` | `200` | Si es `404` o `500` |
+| `test_status_shows_all_systems_ok_banner` | Banner verde cuando todo está OK | Texto "All systems operational" en HTML | Si no aparece |
+| `test_status_shows_degraded_banner_on_failure` | Banner rojo con algún check fallido | Texto de degradación en HTML | Si no cambia |
+| `test_status_shows_module_name` | Nombre de módulo visible | Aparece el label del módulo | Si no aparece |
+| `test_status_has_login_link` | Enlace al login en el footer | `/login` en el HTML | Si no aparece |
+| `test_status_has_auto_refresh_meta` | Contador de refresco visible | Elemento `countdown` en HTML | Si no aparece |
+| `test_status_custom_refresh_secs` | `status_refresh_secs=30` | El valor `30` aparece en el HTML | Si usa otro valor |
+| `test_status_config_updates_refresh_secs` | Cambio en runtime de `status_refresh_secs` | Nuevo valor reflejado en el HTML | Si sigue el anterior |
+| `test_status_empty_when_no_status_file` | Sin archivo `status.json` | `200` sin tarjetas de módulo | Si falla o muestra módulos |
 | `test_status_hidden_from_anonymous_when_disabled` | `public_status=False` + usuario anónimo | `404` | Si devuelve `200` |
 | `test_status_visible_to_logged_in_when_disabled` | `public_status=False` + usuario logueado | `200` | Si devuelve `404` |
+| `test_status_shows_check_names` | Nombres de checks visibles | Nombre del check en HTML | Si no aparece |
+| `test_status_shows_check_status_ok` | Check OK muestra badge correcto | Badge OK en HTML | Si muestra error |
+| `test_status_overall_pct_100_when_all_ok` | Porcentaje global 100% cuando todo OK | `100%` en HTML | Si muestra otro valor |
+
+### `TestStatusPageLanguage`
+
+Valida la prioridad de 3 niveles para el idioma de `/status`: sesión de usuario > `status_lang` > `default_lang`.
+
+| Test | Qué comprueba | OK | Error |
+|------|-------------|-----|------|
+| `test_lang_falls_back_to_default_lang` | Sin `status_lang` ni sesión → usa `default_lang` | `lang=` igual a `default_lang` | Si usa otro idioma |
+| `test_lang_default_lang_en_when_all_empty` | Todo vacío → idioma por defecto es `en_EN` | `lang="en_EN"` en `<html>` | Si es otro valor |
+| `test_lang_status_lang_overrides_default` | `status_lang=es_ES` > `default_lang=en_EN` | `lang="es_ES"` en `<html>` | Si usa en_EN |
+| `test_lang_status_lang_set_en` | `status_lang=en_EN` explícito | `lang="en_EN"` en `<html>` | Si difiere |
+| `test_lang_runtime_config_update_applies_to_status` | Cambio de `_STATUS_LANG` en runtime | Nuevo idioma aplicado | Si sigue el anterior |
+| `test_lang_user_session_overrides_status_lang` | Sesión de usuario (es_ES) > `status_lang` (en_EN) | `lang="es_ES"` en `<html>` | Si usa status_lang |
+| `test_lang_user_session_es_overrides_status_lang_en` | Sesión es_ES con status_lang en_EN | `lang="es_ES"` en `<html>` | Si no es es_ES |
+| `test_lang_user_session_overrides_default_lang` | Sesión de usuario > `default_lang` | Idioma de sesión aplicado | Si usa default_lang |
+| `test_lang_anonymous_uses_status_lang_not_session` | Usuario anónimo → usa `status_lang`, no sesión de otro usuario | `lang` igual a `status_lang` | Si mezcla sesiones |
+| `test_pretty_name_from_lang_file` | Lee `pretty_name` del archivo `lang/{lang}.json` del watchful | Label legible en HTML | Si muestra nombre raw |
+| `test_pretty_name_no_modules_dir_falls_back_to_title` | Sin `modules_dir` → title-case del nombre raw | Nombre en title-case | Si muestra nombre raw sin formato |
+| `test_pretty_name_unknown_module_title_case_fallback` | Módulo sin archivo lang → title-case del nombre | Nombre en title-case | Si falla o muestra nombre sin formato |
 
 ---
 

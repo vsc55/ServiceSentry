@@ -320,6 +320,7 @@ La ruta `/status` muestra el estado actual de todos los módulos en una página 
 - **Banner superior** verde (todos OK) o rojo (algún fallo) con el nombre de la aplicación.
 - **Tarjetas colapsables por módulo** — colapsadas por defecto; se expanden automáticamente si alguna comprobación falla.
 - **Contador de refresco** — cuenta regresiva en pantalla y recarga automática de la página; configurable con `status_refresh_secs` (10–3600 s).
+- **Idioma configurable** — prioridad de 3 niveles: idioma de sesión del usuario → `status_lang` → `default_lang`. El `<html lang="...">` y todos los textos de la página se renderizan en el idioma resultante.
 - No extiende `base.html`; es una página standalone completamente independiente del panel de administración.
 
 ### Configuración
@@ -328,6 +329,7 @@ La ruta `/status` muestra el estado actual de todos los módulos en una página 
 |------------------------|------|-------------|-------------|
 | `web_admin.public_status` | bool | `false` | Permite el acceso anónimo a `/status` |
 | `web_admin.status_refresh_secs` | int | `60` | Intervalo de refresco automático (10–3600 s) |
+| `web_admin.status_lang` | string | `""` | Idioma fijo para la página `/status`. Prioridad: idioma de sesión del usuario > este ajuste > `web_admin.lang`. Vacío = usa el idioma por defecto del panel. |
 
 ---
 
