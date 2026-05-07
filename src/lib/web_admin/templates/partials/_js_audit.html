@@ -4,7 +4,10 @@
 
 // ──────────────────────────── Audit log ──────────────────────────
 const AUDIT_EVENTS = I18N.audit_events || {};
-let _auditEntries = [];
+let _auditEntries  = [];
+let _auditPage     = 1;
+let _auditPageSize = 25;
+const _AUDIT_PAGE_SIZES = [25, 50, 100, 200, 0]; // 0 = All
 
 // Full detail renderer — used in the modal
 function formatAuditDetailFull(detail) {
@@ -221,6 +224,7 @@ function applyAuditControls() {
     const hasFilters = _auditFilters.event || _auditFilters.user || _auditFilters.ip ||
                        _auditFilters.dateFrom || _auditFilters.dateTo;
     document.getElementById('btnClearAuditFilters')?.classList.toggle('d-none', !hasFilters);
+    _auditPage = 1;
     renderAuditTable();
 }
 
@@ -303,6 +307,58 @@ function _auditFilterRegex(pattern) {
     return new RegExp(escaped, 'i');
 }
 
+function _goAuditPage(p) {
+    _auditPage = p;
+    renderAuditTable();
+}
+
+function _changeAuditPageSize(val) {
+    _auditPageSize = parseInt(val, 10);
+    _auditPage = 1;
+    renderAuditTable();
+}
+
+function _renderAuditPagination(total) {
+    const pageSize   = _auditPageSize || total;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page       = Math.min(_auditPage, totalPages);
+    const start      = (page - 1) * pageSize + 1;
+    const end        = Math.min(page * pageSize, total);
+
+    const sizeOpts = _AUDIT_PAGE_SIZES.map(s => {
+        const label = s === 0 ? t('all') : s;
+        return `<option value="${s}"${_auditPageSize === s ? ' selected' : ''}>${label}</option>`;
+    }).join('');
+
+    // Page number buttons — up to 5 around current
+    let pageNums = '';
+    const w = 2;
+    let lo = Math.max(1, page - w);
+    let hi = Math.min(totalPages, lo + 2 * w);
+    if (hi - lo < 2 * w) lo = Math.max(1, hi - 2 * w);
+    if (lo > 1)           pageNums += `<li class="page-item"><a class="page-link" href="#" onclick="_goAuditPage(1);return false;">1</a></li>`;
+    if (lo > 2)           pageNums += `<li class="page-item disabled"><span class="page-link">&hellip;</span></li>`;
+    for (let i = lo; i <= hi; i++)
+        pageNums += `<li class="page-item${i === page ? ' active' : ''}"><a class="page-link" href="#" onclick="_goAuditPage(${i});return false;">${i}</a></li>`;
+    if (hi < totalPages - 1) pageNums += `<li class="page-item disabled"><span class="page-link">&hellip;</span></li>`;
+    if (hi < totalPages)     pageNums += `<li class="page-item"><a class="page-link" href="#" onclick="_goAuditPage(${totalPages});return false;">${totalPages}</a></li>`;
+
+    return `<div class="d-flex align-items-center justify-content-between mt-2 flex-wrap gap-2">
+        <span class="text-muted small">${tf('audit_showing', start, end, total)}</span>
+        <div class="d-flex align-items-center gap-2">
+            <div class="input-group input-group-sm">
+                <label class="input-group-text">${t('per_page')}</label>
+                <select class="form-select form-select-sm" style="width:auto" onchange="_changeAuditPageSize(this.value)">${sizeOpts}</select>
+            </div>
+            <nav><ul class="pagination pagination-sm mb-0">
+                <li class="page-item${page <= 1 ? ' disabled' : ''}"><a class="page-link" href="#" onclick="_goAuditPage(${page - 1});return false;">&laquo;</a></li>
+                ${pageNums}
+                <li class="page-item${page >= totalPages ? ' disabled' : ''}"><a class="page-link" href="#" onclick="_goAuditPage(${page + 1});return false;">&raquo;</a></li>
+            </ul></nav>
+        </div>
+    </div>`;
+}
+
 function renderAuditTable() {
     const c = document.getElementById('audit-container');
     if (!c) return;
@@ -336,7 +392,17 @@ function renderAuditTable() {
         c.innerHTML = `<p class="text-muted">${t('no_audit_entries')}</p>`;
         return;
     }
-    c.innerHTML = _auditGroup !== 'none' ? renderGroupedAudit(filtered) : renderFlatAudit(filtered);
+
+    // Paginate
+    const total    = filtered.length;
+    const pageSize = _auditPageSize || total;
+    _auditPage     = Math.max(1, Math.min(_auditPage, Math.ceil(total / pageSize)));
+    const sliceStart = (_auditPage - 1) * pageSize;
+    const pageEntries = filtered.slice(sliceStart, sliceStart + pageSize);
+
+    const pagination = _renderAuditPagination(total);
+    const tableHtml  = _auditGroup !== 'none' ? renderGroupedAudit(pageEntries) : renderFlatAudit(pageEntries);
+    c.innerHTML = pagination + tableHtml + pagination;
 }
 
 async function renderAudit() {

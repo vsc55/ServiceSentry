@@ -1,6 +1,6 @@
 {# New/Edit user modal #}
 <div class="modal fade" id="userModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="userModalTitle">{{ i18n.new_user }}</h6>
@@ -56,9 +56,66 @@
     </div>
 </div>
 
+{# Account settings modal #}
+<div class="modal fade" id="accountSettingsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-person-gear me-1"></i>{{ i18n.account_settings }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small fw-semibold text-muted mb-2 mt-1">
+                    <i class="bi bi-palette me-1"></i>{{ i18n.settings_appearance }}
+                </p>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.language }}</label>
+                    <select class="form-select form-select-sm" id="settingsLang">
+                        <option value="">{{ i18n.system_default }}</option>
+                        {% for l in supported_langs %}
+                        <option value="{{ l }}">{{ i18n['lang_' + l] }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label small fw-semibold">{{ i18n.dark_mode }}</label>
+                    <select class="form-select form-select-sm" id="settingsDarkMode">
+                        <option value="auto">{{ i18n.settings_theme_auto }}</option>
+                        <option value="light">{{ i18n.settings_theme_light }}</option>
+                        <option value="dark">{{ i18n.settings_theme_dark }}</option>
+                    </select>
+                </div>
+                <hr class="my-3">
+                <p class="small fw-semibold text-muted mb-2">
+                    <i class="bi bi-shield-lock me-1"></i>{{ i18n.settings_security }}
+                </p>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.current_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="settingsPwCurrent" autocomplete="current-password">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="settingsPwNew" autocomplete="new-password">
+                </div>
+                <div class="mb-1">
+                    <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="settingsPwConfirm" autocomplete="new-password">
+                </div>
+                <div class="form-text mb-1">{{ i18n.leave_empty_no_change }}</div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" onclick="saveAccountPreferences()">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# Add-item modal #}
 <div class="modal fade" id="addItemModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title">{{ i18n.new_item }}</h6>
@@ -89,41 +146,10 @@
     </div>
 </div>
 
-{# Change own password modal #}
-<div class="modal fade" id="changePasswordModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
-        <div class="modal-content">
-            <div class="modal-header py-2">
-                <h6 class="modal-title"><i class="bi bi-key me-1"></i>{{ i18n.change_my_password }}</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">{{ i18n.current_password }}</label>
-                    <input type="password" class="form-control form-control-sm" id="pwCurrent">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
-                    <input type="password" class="form-control form-control-sm" id="pwNew">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
-                    <input type="password" class="form-control form-control-sm" id="pwConfirm">
-                </div>
-            </div>
-            <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-primary" id="btnChangePasswordOk">
-                    <i class="bi bi-check-lg me-1"></i>{{ i18n.change }}
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
 
 {# Reset user password modal (admin) #}
 <div class="modal fade" id="resetPasswordModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="resetPasswordTitle"><i class="bi bi-key me-1"></i>{{ i18n.reset_password }}</h6>
@@ -235,7 +261,7 @@
 
 {# New/Edit group modal #}
 <div class="modal fade" id="groupModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="groupModalTitle">{{ i18n.new_group }}</h6>
@@ -286,7 +312,7 @@
 
 {# New/Edit role modal #}
 <div class="modal fade" id="roleModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="roleModalTitle">{{ i18n.new_role }}</h6>

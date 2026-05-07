@@ -193,6 +193,36 @@ def register(app, wa):
         wa._audit('user_deleted', detail={'username': username})
         return jsonify({'ok': True})
 
+    @app.route('/api/users/me/preferences', methods=['PUT'])
+    @login_required
+    def api_save_my_preferences():
+        """Save the current user's own appearance preferences (lang, dark_mode)."""
+        data, err = wa._require_json()
+        if err:
+            return err
+        uname = session.get('username', '')
+        user = wa._users.get(uname)
+        if not user:
+            return jsonify({'error': wa._t('user_not_found')}), 404
+        if 'lang' in data:
+            lang = data['lang']
+            if not lang:
+                user.pop('lang', None)
+                session['lang'] = wa._default_lang
+            elif lang in SUPPORTED_LANGS:
+                user['lang'] = lang
+                session['lang'] = lang
+        if 'dark_mode' in data:
+            dm = data['dark_mode']
+            if dm is None:
+                user.pop('dark_mode', None)
+                session['dark_mode'] = wa._default_dark_mode
+            elif isinstance(dm, bool):
+                user['dark_mode'] = dm
+                session['dark_mode'] = dm
+        wa._persist_users()
+        return jsonify({'ok': True})
+
     @app.route('/api/users/me/password', methods=['PUT'])
     @login_required
     def api_change_own_password():

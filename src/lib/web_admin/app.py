@@ -314,6 +314,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_status_refresh_secs': self._STATUS_REFRESH_SECS,
                 'wa_status_lang': self._STATUS_LANG,
                 'wa_proxy_count': self._proxy_count,
+                'wa_default_dark_mode': self._default_dark_mode,
             }
 
         self._register_routes(app)

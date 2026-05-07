@@ -49,38 +49,44 @@ function populateRoleDropdown(selectId, selected) {
 }
 
 // ──────────────────────────── Account tab ─────────────────────────
-async function changeOwnPassword() {
-    const cur = document.getElementById('pwCurrent').value;
-    const nw  = document.getElementById('pwNew').value;
-    const conf = document.getElementById('pwConfirm').value;
-    if (!cur)        { showToast(t('enter_current_password'), 'warning'); return; }
-    if (!nw)         { showToast(t('enter_new_password'),     'warning'); return; }
-    if (nw !== conf) { showToast(t('passwords_dont_match'),   'warning'); return; }
-    const r = await apiPut('/api/users/me/password', { current_password: cur, new_password: nw });
-    if (r && r.ok) {
-        showToast(t('password_changed'));
-        document.getElementById('pwCurrent').value = '';
-        document.getElementById('pwNew').value     = '';
-        document.getElementById('pwConfirm').value = '';
-        bootstrap.Modal.getInstance(document.getElementById('changePasswordModal'))?.hide();
-    } else {
-        showToast(r?.error || t('password_change_error'), 'danger');
+function openAccountSettingsModal() {
+    const dm = currentUser.pref_dark_mode;
+    document.getElementById('settingsDarkMode').value =
+        dm === null || dm === undefined ? 'auto' : (dm ? 'dark' : 'light');
+    document.getElementById('settingsLang').value = currentUser.pref_lang || '';
+    document.getElementById('settingsPwCurrent').value = '';
+    document.getElementById('settingsPwNew').value     = '';
+    document.getElementById('settingsPwConfirm').value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('accountSettingsModal')).show();
+}
+
+async function saveAccountPreferences() {
+    const dmVal    = document.getElementById('settingsDarkMode').value;
+    const langVal  = document.getElementById('settingsLang').value;
+    const darkMode = dmVal === 'auto' ? null : dmVal === 'dark';
+    const prevLang = currentUser.pref_lang;
+    const pwCur    = document.getElementById('settingsPwCurrent').value;
+    const pwNew    = document.getElementById('settingsPwNew').value;
+    const pwConf   = document.getElementById('settingsPwConfirm').value;
+
+    if (pwCur || pwNew || pwConf) {
+        if (!pwCur)           { showToast(t('enter_current_password'), 'warning'); return; }
+        if (!pwNew)           { showToast(t('enter_new_password'),     'warning'); return; }
+        if (pwNew !== pwConf) { showToast(t('passwords_dont_match'),   'warning'); return; }
+        const rp = await apiPut('/api/users/me/password', { current_password: pwCur, new_password: pwNew });
+        if (!rp || !rp.ok) { showToast(rp?.error || t('password_change_error'), 'danger'); return; }
     }
-}
 
-function openChangePasswordModal() {
-    document.getElementById('pwCurrent').value = '';
-    document.getElementById('pwNew').value     = '';
-    document.getElementById('pwConfirm').value = '';
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('changePasswordModal')).show();
-}
-
-function toggleDarkMode() {
-    const html = document.documentElement;
-    const isDark = html.getAttribute('data-bs-theme') === 'dark';
-    const newMode = isDark ? 'light' : 'dark';
-    html.setAttribute('data-bs-theme', newMode);
-    const sw = document.getElementById('darkModeSwitch');
-    if (sw) sw.checked = !isDark;
-    fetch('/theme/' + newMode);
+    const r = await apiPut('/api/users/me/preferences', { lang: langVal, dark_mode: darkMode });
+    if (r && r.ok) {
+        const resolved = darkMode === null ? WA_DEFAULT_DARK_MODE : darkMode;
+        document.documentElement.setAttribute('data-bs-theme', resolved ? 'dark' : 'light');
+        currentUser.pref_dark_mode = darkMode;
+        currentUser.pref_lang = langVal;
+        bootstrap.Modal.getInstance(document.getElementById('accountSettingsModal'))?.hide();
+        showToast(t('preferences_saved'));
+        if (langVal !== prevLang) setTimeout(() => location.reload(), 800);
+    } else {
+        showToast(r?.error || t('save_error'), 'danger');
+    }
 }

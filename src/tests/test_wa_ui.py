@@ -293,19 +293,19 @@ class TestUIReorganisation:
     """Verify the user-menu dropdown, password modals and users tab."""
 
     def test_navbar_has_user_dropdown(self, client):
-        """Navbar contains a user dropdown menu."""
+        """Navbar contains a user dropdown menu with account settings."""
         _login(client)
         html = client.get("/").data
-        assert b"openChangePasswordModal()" in html
+        assert b"openAccountSettingsModal()" in html
         assert b"bi-person-circle" in html
 
-    def test_change_password_modal_exists(self, client):
-        """Dashboard contains the change-own-password modal."""
+    def test_account_settings_modal_has_password_fields(self, client):
+        """Account settings modal contains password change fields."""
         _login(client)
         html = client.get("/").data
-        assert b'id="changePasswordModal"' in html
-        assert b'id="btnChangePasswordOk"' in html
-        assert b'id="pwCurrent"' in html
+        assert b'id="accountSettingsModal"' in html
+        assert b'id="settingsPwCurrent"' in html
+        assert b'id="settingsPwNew"' in html
 
     def test_reset_password_modal_exists(self, client):
         """Dashboard contains the admin reset-password modal."""
@@ -339,18 +339,17 @@ class TestUIReorganisation:
             admin._users["resetme"]["password_hash"], "brandnew"
         )
 
-    def test_language_selector_in_user_menu(self, client):
-        """Language options are inside the user dropdown as a submenu."""
+    def test_language_selector_in_account_settings(self, client):
+        """Language selector is inside the account settings modal."""
         _login(client)
         html = client.get("/").data
-        assert b'bi-translate' in html
-        assert b'bi-chevron-down' in html
-        assert b'/lang/' in html
+        assert b'accountSettingsModal' in html
+        assert b'id="settingsLang"' in html
 
-    def test_dark_mode_toggle_in_user_menu(self, client):
-        """Dark mode toggle is present in the user dropdown menu."""
+    def test_dark_mode_selector_in_account_settings(self, client):
+        """Dark mode selector (3 options) is present in the account settings modal."""
         _login(client)
         html = client.get("/").data
-        assert b'id="darkModeSwitch"' in html
-        assert b'toggleDarkMode()' in html
+        assert b'id="settingsDarkMode"' in html
+        assert b'saveAccountPreferences' in html
 
