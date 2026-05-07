@@ -16,10 +16,9 @@ function renderUsers() {
     const userPerms = new Set(currentUser.permissions || []);
     const canEdit   = userPerms.has('users_edit');
     const canDelete = userPerms.has('users_delete');
-    const canRevoke = userPerms.has('sessions_revoke');
     const showActions = canEdit || canDelete;
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
-    h += '<thead class="table-light"><tr><th>' + t('col_user') + '</th><th>' + t('col_name') + '</th><th>' + t('col_role') + '</th><th>' + t('col_sessions') + '</th>' + (showActions ? '<th style="width:160px">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle" style="--bs-table-cell-padding-x:0.6rem">';
+    h += '<thead class="table-light"><tr><th>' + t('col_user') + '</th><th>' + t('col_name') + '</th><th class="text-center">' + t('col_role') + '</th><th class="text-center" style="width:1%;white-space:nowrap">' + t('col_sessions') + '</th>' + (showActions ? '<th class="text-center" style="width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
     for (const uname of names) {
         const u = usersData[uname];
         const role = u.role || 'viewer';
@@ -27,20 +26,23 @@ function renderUsers() {
         const roleLabel = (rolesData[role] && rolesData[role].label) || ROLE_LABELS[role] || role;
         const isSelf = (uname === currentUser.username);
         const sc = sessionCounts[uname] || 0;
-        const scHtml = sc > 0
-            ? `<span class="badge bg-info">${sc}</span>${canRevoke ? ` <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="revokeUserSessions('${escAttr(uname)}')" title="${t('revoke_user_sessions')}"><i class="bi bi-x-circle"></i></button>` : ''}`
-            : '<span class="text-muted small">0</span>';
+        const scHtml = sc > 0 ? `<span class="badge bg-info">${sc}</span>` : '<span class="text-muted small">0</span>';
+        const isEnabled = u.enabled !== false;
+        const disabledRowStyle = isEnabled ? '' : ' class="table-secondary"';
+        const disabledBadge = isEnabled ? '' : ` <span class="badge bg-secondary ms-1 fw-normal">${t('status_disabled')}</span>`;
+        const toggleBtn = canEdit ? `<button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-outline-secondary' : 'btn-outline-success'}" ${isSelf ? 'disabled' : `onclick="toggleUser('${escAttr(uname)}',${isEnabled})"`} title="${isEnabled ? t('disable') : t('enable')}"><i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i></button>` : '';
         const actionBtns = [
+            toggleBtn,
             canEdit   ? `<button class="btn btn-sm btn-outline-primary py-0 px-1 me-1" onclick="openEditUserModal('${escAttr(uname)}')" title="${t('edit')}"><i class="bi bi-pencil"></i></button>` : '',
             canEdit   ? `<button class="btn btn-sm btn-outline-warning py-0 px-1 me-1" onclick="openResetPasswordModal('${escAttr(uname)}')" title="${t('reset_password')}"><i class="bi bi-key"></i></button>` : '',
             canDelete ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteUser('${escAttr(uname)}')" title="${t('delete')}" ${isSelf ? 'disabled' : ''}><i class="bi bi-trash3"></i></button>` : '',
         ].join('');
-        h += `<tr>
-            <td><code>${esc(uname)}</code>${isSelf ? ' <span class="badge bg-info">' + t('you_badge') + '</span>' : ''}</td>
+        h += `<tr${disabledRowStyle}>
+            <td><code>${esc(uname)}</code>${isSelf ? ' <span class="badge bg-info">' + t('you_badge') + '</span>' : ''}${disabledBadge}</td>
             <td>${esc(u.display_name || uname)}</td>
-            <td><span class="badge ${badge}">${esc(roleLabel)}</span></td>
-            <td>${scHtml}</td>
-            ${showActions ? `<td>${actionBtns}</td>` : ''}
+            <td class="text-center"><span class="badge ${badge}">${esc(roleLabel)}</span></td>
+            <td class="text-center" style="white-space:nowrap">${scHtml}</td>
+            ${showActions ? `<td class="text-center" style="white-space:nowrap;border-left:1px solid var(--bs-border-color)">${actionBtns}</td>` : ''}
         </tr>`;
     }
     h += '</tbody></table></div>';
@@ -150,6 +152,18 @@ async function resetUserPassword() {
         bootstrap.Modal.getInstance(document.getElementById('resetPasswordModal'))?.hide();
     } else {
         showToast(r?.error || t('password_change_error'), 'danger');
+    }
+}
+
+async function toggleUser(username, currentEnabled) {
+    const newEnabled = !currentEnabled;
+    const r = await apiPut('/api/users/' + encodeURIComponent(username), { enabled: newEnabled });
+    if (r && r.ok) {
+        showToast(newEnabled ? t('user_enabled') : t('user_disabled'));
+        usersData[username] = { ...usersData[username], enabled: newEnabled };
+        renderUsers();
+    } else {
+        showToast(r?.error || t('update_error'), 'danger');
     }
 }
 

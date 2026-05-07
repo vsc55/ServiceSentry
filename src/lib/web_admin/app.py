@@ -195,9 +195,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         return wrapper
 
     def _authenticate(self, username: str, password: str) -> dict | None:
-        """Return user record if credentials are valid, else ``None``."""
+        """Return user record if credentials are valid and account is enabled, else ``None``."""
         user = self._users.get(username)
-        if user and check_password_hash(user['password_hash'], password):
+        if user and user.get('enabled', True) and check_password_hash(user['password_hash'], password):
             return user
         return None
 

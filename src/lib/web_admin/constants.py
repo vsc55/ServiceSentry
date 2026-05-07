@@ -29,6 +29,8 @@ PERMISSIONS = (
     'groups_delete',   # delete groups
     'audit_view',      # read audit log
     'audit_delete',    # delete audit entries
+    'modules_view',    # view modules list
+    'modules_add',     # create new module entries
     'modules_edit',    # write modules.json
     'config_edit',     # write config.json
     'sessions_view',   # view active sessions
@@ -42,7 +44,7 @@ PERMISSION_GROUPS = [
     ('perm_group_roles',    ['roles_view', 'roles_add', 'roles_edit', 'roles_delete']),
     ('perm_group_groups',   ['groups_view', 'groups_add', 'groups_edit', 'groups_delete']),
     ('perm_group_audit',    ['audit_view', 'audit_delete']),
-    ('perm_group_modules',  ['modules_edit']),
+    ('perm_group_modules',  ['modules_view', 'modules_add', 'modules_edit']),
     ('perm_group_config',   ['config_edit']),
     ('perm_group_sessions', ['sessions_view', 'sessions_revoke']),
     ('perm_group_checks',   ['checks_run']),
@@ -55,13 +57,14 @@ _BUILTIN_GROUPS: frozenset[str] = frozenset({'administrators'})
 BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
     'admin':  frozenset(PERMISSIONS),
     'editor': frozenset({
-        'modules_edit', 'config_edit', 'checks_run', 'audit_view',
+        'modules_view', 'modules_add', 'modules_edit',
+        'config_edit', 'checks_run', 'audit_view',
         'users_view', 'users_edit',
         'roles_view', 'roles_edit',
         'groups_view', 'groups_edit',
     }),
     'viewer': frozenset({
         'users_view', 'roles_view', 'groups_view',
-        'audit_view', 'sessions_view',
+        'audit_view', 'sessions_view', 'modules_view',
     }),
 }

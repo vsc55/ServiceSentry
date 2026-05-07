@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_19_flags(self):
+    def test_permissions_tuple_has_21_flags(self):
         from lib.web_admin.app import PERMISSIONS
-        assert len(PERMISSIONS) == 19
+        assert len(PERMISSIONS) == 21
 
     def test_permissions_are_unique(self):
         from lib.web_admin.app import PERMISSIONS
@@ -41,7 +41,7 @@ class TestPermissionsConstants:
             'roles_view', 'roles_add', 'roles_edit', 'roles_delete',
             'groups_view', 'groups_add', 'groups_edit', 'groups_delete',
             'audit_view', 'audit_delete',
-            'modules_edit', 'config_edit',
+            'modules_view', 'modules_add', 'modules_edit', 'config_edit',
             'sessions_view', 'sessions_revoke',
             'checks_run',
         }
@@ -85,6 +85,8 @@ class TestPermissionsConstants:
     def test_editor_permissions(self):
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
         ep = BUILTIN_ROLE_PERMISSIONS['editor']
+        assert 'modules_view' in ep
+        assert 'modules_add' in ep
         assert 'modules_edit' in ep
         assert 'config_edit' in ep
         assert 'checks_run' in ep
@@ -113,9 +115,11 @@ class TestPermissionsConstants:
         assert 'groups_view' in vp
         assert 'audit_view' in vp
         assert 'sessions_view' in vp
+        assert 'modules_view' in vp
         # no write permissions
         assert 'users_add' not in vp
         assert 'users_delete' not in vp
+        assert 'modules_add' not in vp
         assert 'modules_edit' not in vp
         assert 'config_edit' not in vp
 
@@ -627,6 +631,18 @@ class TestGranularPermissions:
         assert resp.status_code == 200
 
     # ── modules_edit ──────────────────────────────────────────────
+
+    def test_modules_view_allows_get(self, admin):
+        self._make_user_with_perms(admin, "m_view", ["modules_view"])
+        c = self._client_as(admin, "m_view")
+        resp = c.get("/api/modules")
+        assert resp.status_code == 200
+
+    def test_without_modules_view_get_403(self, admin):
+        self._make_user_with_perms(admin, "no_mview", [])
+        c = self._client_as(admin, "no_mview")
+        resp = c.get("/api/modules")
+        assert resp.status_code == 403
 
     def test_modules_edit_allows_put(self, admin):
         self._make_user_with_perms(admin, "m_edit", ["modules_edit"])

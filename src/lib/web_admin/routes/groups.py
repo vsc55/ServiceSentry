@@ -8,7 +8,7 @@ from ..constants import BUILTIN_ROLE_PERMISSIONS, _BUILTIN_GROUPS
 
 
 def register(app, wa):
-    login_required  = wa._login_required
+    groups_view_req   = wa._perm_required('groups_view')
     groups_add_req    = wa._perm_required('groups_add')
     groups_edit_req   = wa._perm_required('groups_edit')
     groups_delete_req = wa._perm_required('groups_delete')
@@ -16,7 +16,7 @@ def register(app, wa):
     # --- API: groups management -----------------------------------
 
     @app.route('/api/groups', methods=['GET'])
-    @login_required
+    @groups_view_req
     def api_get_groups():
         """Return all groups with their roles and member count."""
         all_role_names = set(BUILTIN_ROLE_PERMISSIONS.keys()) | set(wa._custom_roles.keys())
@@ -32,6 +32,7 @@ def register(app, wa):
                 'roles': [r for r in gdata.get('roles', []) if r in all_role_names],
                 'members': members,
                 'builtin': name in _BUILTIN_GROUPS,
+                'enabled': gdata.get('enabled', True),
             }
         return jsonify(result)
 
@@ -124,6 +125,12 @@ def register(app, wa):
             old_members_sorted = sorted(old_members)
             if old_members_sorted != new_members_sorted:
                 changes.append({'field': 'members', 'old': old_members_sorted, 'new': new_members_sorted})
+        if 'enabled' in data:
+            new_enabled = bool(data['enabled'])
+            old_enabled = group.get('enabled', True)
+            if old_enabled != new_enabled:
+                changes.append({'field': 'enabled', 'old': old_enabled, 'new': new_enabled})
+                group['enabled'] = new_enabled
         wa._persist_groups()
         if changes:
             wa._audit('group_updated', detail={'name': name, 'changes': changes})

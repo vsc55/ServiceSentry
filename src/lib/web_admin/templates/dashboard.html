@@ -63,12 +63,13 @@
                 <i class="bi bi-speedometer2 me-1"></i>{{ i18n.tab_overview }}
             </button>
         </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-modules" type="button">
+        <li class="nav-item" role="presentation" id="tab-modules-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-modules" type="button"
+                id="btn-tab-modules">
                 <i class="bi bi-puzzle me-1"></i>{{ i18n.tab_modules }}
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" id="tab-config-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-config" type="button">
                 <i class="bi bi-gear me-1"></i>{{ i18n.tab_config }}
             </button>
@@ -104,11 +105,16 @@
         <!-- ==================== Modules Tab ==================== -->
         <div class="tab-pane fade" id="tab-modules">
             <div id="modules-container"></div>
-            <button class="btn btn-primary mt-3" id="btnSaveModules" onclick="saveModules()">
-                <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
-                <span class="badge bg-warning text-dark ms-1 d-none" id="badgeModulesDirty"
-                    title="{{ i18n.unsaved_changes }}">●</span>
-            </button>
+            <div class="d-flex gap-2 mt-3 flex-wrap">
+                <button class="btn btn-outline-secondary" id="btnNewModule" onclick="openNewModuleModal()">
+                    <i class="bi bi-plus-lg me-1"></i>{{ i18n.add_module }}
+                </button>
+                <button class="btn btn-primary" id="btnSaveModules" onclick="saveModules()">
+                    <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
+                    <span class="badge bg-warning text-dark ms-1 d-none" id="badgeModulesDirty"
+                        title="{{ i18n.unsaved_changes }}">●</span>
+                </button>
+            </div>
         </div>
 
         <!-- ==================== Config Tab ===================== -->

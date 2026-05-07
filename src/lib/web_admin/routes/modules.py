@@ -11,12 +11,13 @@ from lib.config import ConfigControl
 
 def register(app, wa):
     login_required = wa._login_required
+    modules_view_req = wa._perm_required('modules_view')
     modules_edit_req = wa._perm_required('modules_edit')
 
     # --- API: modules.json ----------------------------------------
 
     @app.route('/api/modules', methods=['GET'])
-    @login_required
+    @modules_view_req
     def api_get_modules():
         """Return the contents of ``modules.json``."""
         return jsonify(wa._read_config_file(wa._MODULES_FILE))

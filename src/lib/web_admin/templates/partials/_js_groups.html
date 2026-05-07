@@ -11,38 +11,46 @@ function renderGroups() {
     const grpPerms = new Set(currentUser.permissions || []);
     const canEditGroup   = grpPerms.has('groups_edit');
     const canDeleteGroup = grpPerms.has('groups_delete');
+    const showActions    = canEditGroup || canDeleteGroup;
     const entries = Object.entries(groupsData);
     if (!entries.length) { c.innerHTML = '<p class="text-muted">' + t('no_groups') + '</p>'; return; }
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
-    h += '<thead class="table-light"><tr><th>' + t('col_group_name') + '</th><th>' + t('col_group_label') + '</th><th>' + t('col_group_roles') + '</th><th>' + t('col_group_members') + '</th><th style="width:80px">' + t('col_actions') + '</th></tr></thead><tbody>';
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle" style="--bs-table-cell-padding-x:0.6rem">';
+    h += '<thead class="table-light"><tr><th>' + t('col_group_name') + '</th><th>' + t('col_group_label') + '</th><th>' + t('col_group_roles') + '</th><th class="text-center" style="width:1%;white-space:nowrap">' + t('col_group_members') + '</th>' + (showActions ? '<th class="text-center" style="width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
     for (const [name, gd] of entries.sort((a, b) => {
         if (a[1].builtin && !b[1].builtin) return -1;
         if (!a[1].builtin && b[1].builtin) return 1;
         return a[0].localeCompare(b[0]);
     })) {
-        const builtinBadge = gd.builtin ? ' <span class="badge bg-secondary ms-1 fw-normal" style="font-size:0.65em">' + t('group_builtin_badge') + '</span>' : '';
+        const isEnabled = gd.enabled !== false;
+        const disabledRowStyle = isEnabled ? '' : ' class="table-secondary"';
+        const builtinBadge = gd.builtin ? ' <span class="badge bg-secondary ms-1 fw-normal" style="font-size:0.6em;padding:0.15em 0.35em">' + t('group_builtin_badge') + '</span>' : '';
+        const disabledBadge = isEnabled ? '' : ` <span class="badge bg-secondary ms-1 fw-normal">${t('status_disabled')}</span>`;
         const roleBadges = (gd.roles || []).map(r => {
             const rd = rolesData[r] || {};
             return `<span class="badge ${roleBadgeClass(r)} me-1">${esc(rd.label || r)}</span>`;
         }).join('');
         const memberCount = (gd.members || []).length;
-        h += `<tr>
-            <td><code>${esc(name)}</code>${builtinBadge}</td>
+        h += `<tr${disabledRowStyle}>
+            <td><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
             <td>${esc(gd.label || name)}</td>
             <td class="small">${roleBadges || '<span class="text-muted">\u2014</span>'}</td>
-            <td class="small">${memberCount}</td>
-            <td>
+            <td class="small text-center" style="white-space:nowrap">${memberCount}</td>
+            ${showActions ? `<td class="text-center" style="white-space:nowrap;border-left:1px solid var(--bs-border-color)">
                 ${canEditGroup ? `
+                <button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-outline-secondary' : 'btn-outline-success'}"
+                    onclick="toggleGroup('${escAttr(name)}',${isEnabled})" title="${isEnabled ? t('disable') : t('enable')}">
+                    <i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i>
+                </button>
                 <button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
                     onclick="openEditGroupModal('${escAttr(name)}')" title="${t('edit')}">
                     <i class="bi bi-pencil"></i>
                 </button>` : ''}
-                ${canDeleteGroup && !gd.builtin ? `
+                ${canDeleteGroup ? `
                 <button class="btn btn-sm btn-outline-danger py-0 px-1"
-                    onclick="deleteGroup('${escAttr(name)}')" title="${t('delete')}">
+                    ${gd.builtin ? 'disabled' : `onclick="deleteGroup('${escAttr(name)}')"`} title="${t('delete')}">
                     <i class="bi bi-trash3"></i>
                 </button>` : ''}
-            </td>
+            </td>` : ''}
         </tr>`;
     }
     h += '</tbody></table></div>';
@@ -171,6 +179,18 @@ async function deleteGroup(name) {
             showToast(r?.data?.error || t('delete_error'), 'danger');
         }
     });
+}
+
+async function toggleGroup(name, currentEnabled) {
+    const newEnabled = !currentEnabled;
+    const r = await apiPut('/api/groups/' + encodeURIComponent(name), { enabled: newEnabled });
+    if (r && r.ok) {
+        showToast(newEnabled ? t('group_enabled') : t('group_disabled'));
+        groupsData[name] = { ...groupsData[name], enabled: newEnabled };
+        renderGroups();
+    } else {
+        showToast(r?.error || t('update_error'), 'danger');
+    }
 }
 
 function populateGroupCheckboxes(activeGroups) {

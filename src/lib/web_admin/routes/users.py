@@ -30,6 +30,7 @@ def register(app, wa):
                 'lang': udata.get('lang', ''),
                 'dark_mode': udata.get('dark_mode'),
                 'groups': udata.get('groups', []),
+                'enabled': udata.get('enabled', True),
             }
         return jsonify(safe)
 
@@ -137,6 +138,24 @@ def register(app, wa):
             if old_groups != sorted(new_groups):
                 changes.append({'field': 'groups', 'old': old_groups, 'new': sorted(new_groups)})
             user['groups'] = new_groups
+        if 'enabled' in data:
+            new_enabled = bool(data['enabled'])
+            old_enabled = user.get('enabled', True)
+            if old_enabled != new_enabled:
+                if not new_enabled:
+                    if username == session.get('username'):
+                        return jsonify({'error': wa._t('cannot_disable_self')}), 400
+                    if user.get('role') == 'admin':
+                        active_admin_count = sum(
+                            1 for _, d in wa._users.items()
+                            if d.get('role') == 'admin' and d.get('enabled', True)
+                        )
+                        if active_admin_count <= 1:
+                            return jsonify({'error': wa._t('cannot_disable_last_admin')}), 400
+                changes.append({'field': 'enabled', 'old': old_enabled, 'new': new_enabled})
+                user['enabled'] = new_enabled
+                if not new_enabled:
+                    wa._revoke_user_sessions(username)
         wa._persist_users()
         if changes:
             wa._audit('user_updated', detail={

@@ -11,34 +11,43 @@ function renderRoles() {
     const rolePerms = new Set(currentUser.permissions || []);
     const canEditRole   = rolePerms.has('roles_edit');
     const canDeleteRole = rolePerms.has('roles_delete');
+    const showActions   = canEditRole || canDeleteRole;
     const entries = Object.entries(rolesData);
     if (!entries.length) { c.innerHTML = '<p class="text-muted">' + t('no_roles') + '</p>'; return; }
     const PERM_L = PERM_LABELS;
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
-    h += '<thead class="table-light"><tr><th style="width:1%;white-space:nowrap">' + t('col_role_name') + '</th><th style="width:1%;white-space:nowrap">' + t('col_role_label') + '</th><th>' + t('col_role_permissions') + '</th><th style="width:80px">' + t('col_actions') + '</th></tr></thead><tbody>';
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle" style="--bs-table-cell-padding-x:0.6rem">';
+    h += '<thead class="table-light"><tr><th style="white-space:nowrap">' + t('col_role_name') + '</th><th style="white-space:nowrap">' + t('col_role_label') + '</th><th>' + t('col_role_permissions') + '</th>' + (showActions ? '<th class="text-center" style="width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
     for (const [name, rd] of entries.sort((a, b) => {
         if (a[1].builtin && !b[1].builtin) return -1;
         if (!a[1].builtin && b[1].builtin) return 1;
         return a[0].localeCompare(b[0]);
     })) {
-        const builtinBadge = rd.builtin ? ' <span class="badge bg-secondary ms-1 fw-normal" style="font-size:0.65em">' + t('role_builtin_badge') + '</span>' : '';
+        const isEnabled = rd.builtin || rd.enabled !== false;
+        const disabledRowStyle = isEnabled ? '' : ' class="table-secondary"';
+        const builtinBadge = rd.builtin ? ' <span class="badge bg-secondary ms-1 fw-normal" style="font-size:0.6em;padding:0.15em 0.35em">' + t('role_builtin_badge') + '</span>' : '';
+        const disabledBadge = (!rd.builtin && !isEnabled) ? ` <span class="badge bg-secondary ms-1 fw-normal">${t('status_disabled')}</span>` : '';
         const permBadges = (rd.permissions || []).map(p => `<span class="badge bg-light text-dark border me-1">${esc(PERM_L[p] || p)}</span>`).join('');
-        h += `<tr>
-            <td style="white-space:nowrap"><code>${esc(name)}</code>${builtinBadge}</td>
+        h += `<tr${disabledRowStyle}>
+            <td style="white-space:nowrap"><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
             <td style="white-space:nowrap">${esc(rd.label || name)}</td>
             <td class="small">${permBadges || '<span class="text-muted">\u2014</span>'}</td>
-            <td>
+            ${showActions ? `<td class="text-center" style="white-space:nowrap;border-left:1px solid var(--bs-border-color)">
+                ${canEditRole ? `
+                <button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-outline-secondary' : 'btn-outline-success'}"
+                    ${rd.builtin ? 'disabled' : `onclick="toggleRole('${escAttr(name)}',${isEnabled})"`} title="${isEnabled ? t('disable') : t('enable')}">
+                    <i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i>
+                </button>` : ''}
                 ${canEditRole ? `
                 <button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
                     onclick="openEditRoleModal('${escAttr(name)}')" title="${t('edit')}">
                     <i class="bi bi-pencil"></i>
                 </button>` : ''}
-                ${canDeleteRole && !rd.builtin ? `
+                ${canDeleteRole ? `
                 <button class="btn btn-sm btn-outline-danger py-0 px-1"
-                    onclick="deleteRole('${escAttr(name)}')" title="${t('delete')}">
+                    ${rd.builtin ? 'disabled' : `onclick="deleteRole('${escAttr(name)}')"`} title="${t('delete')}">
                     <i class="bi bi-trash3"></i>
                 </button>` : ''}
-            </td>
+            </td>` : ''}
         </tr>`;
     }
     h += '</tbody></table></div>';
@@ -188,6 +197,18 @@ async function saveRoleModal() {
     renderRoles();
     renderGroups();
     renderUsers();
+}
+
+async function toggleRole(name, currentEnabled) {
+    const newEnabled = !currentEnabled;
+    const r = await apiPut('/api/roles/' + encodeURIComponent(name), { enabled: newEnabled });
+    if (r && r.ok) {
+        showToast(newEnabled ? t('role_enabled') : t('role_disabled'));
+        rolesData[name] = { ...rolesData[name], enabled: newEnabled };
+        renderRoles();
+    } else {
+        showToast(r?.error || t('update_error'), 'danger');
+    }
 }
 
 async function deleteRole(name) {

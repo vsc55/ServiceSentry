@@ -9,6 +9,7 @@ const hasAnyUser    = ['users_view','users_add','users_edit','users_delete'].som
 const hasAnyRole    = ['roles_view','roles_add','roles_edit','roles_delete'].some(p => perms.has(p));
 const hasAnyGroup   = ['groups_view','groups_add','groups_edit','groups_delete'].some(p => perms.has(p));
 const hasAnySessions = ['sessions_view','sessions_revoke'].some(p => perms.has(p));
+const hasAnyModule  = ['modules_view','modules_add','modules_edit'].some(p => perms.has(p));
 const hasAnyAccess  = hasAnyUser || hasAnyRole || hasAnyGroup || hasAnySessions;
 // Main access tab
 const accessLi = document.getElementById('tab-access-li');
@@ -27,10 +28,18 @@ const firstSubtab = ['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups
     .map(id => document.getElementById(id))
     .find(btn => btn && btn.closest('li')?.style.display !== 'none');
 if (firstSubtab) bootstrap.Tab.getOrCreateInstance(firstSubtab).show();
+// Modules tab
+const modulesLi = document.getElementById('tab-modules-li');
+if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
+// Config tab
+const configLi = document.getElementById('tab-config-li');
+if (configLi) configLi.style.display = perms.has('config_edit') ? '' : 'none';
 // Audit tab
 const auditLi = document.getElementById('tab-audit-li');
 if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
-// Save buttons
+// Modules buttons
+const btnNewModule = document.getElementById('btnNewModule');
+if (btnNewModule) btnNewModule.style.display = perms.has('modules_add') ? '' : 'none';
 if (!perms.has('modules_edit')) {
 document.querySelectorAll('button[onclick="saveModules()"]').forEach(b => b.style.display = 'none');
 }

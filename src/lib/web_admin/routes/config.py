@@ -35,19 +35,18 @@ BOOL_RULES = {
 
 
 def register(app, wa):
-    login_required = wa._login_required
     config_edit_req = wa._perm_required('config_edit')
 
     # --- API: config.json -----------------------------------------
 
     @app.route('/api/config', methods=['GET'])
-    @login_required
+    @config_edit_req
     def api_get_config():
         """Return the contents of ``config.json``."""
         return jsonify(wa._read_config_file(wa._CONFIG_FILE))
 
     @app.route('/api/config/schema', methods=['GET'])
-    @login_required
+    @config_edit_req
     def api_get_config_schema():
         """Return field-level metadata (min, max, default) for config fields."""
         schema = {}

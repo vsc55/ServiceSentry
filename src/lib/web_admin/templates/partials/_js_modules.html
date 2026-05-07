@@ -42,6 +42,13 @@ h += `<div class="card mb-2 module-card${on ? ' enabled' : ''}" id="card-${esc(n
 c.innerHTML = h;
 }
 
+function openNewModuleModal() {
+    _addItemCtx = { target: 'modules', pathStr: null };
+    document.getElementById('newItemName').value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('addItemModal')).show();
+    setTimeout(() => document.getElementById('newItemName').focus(), 400);
+}
+
 function renderModuleBody(name, cfg) {
 // pretty_name field (always first, with placeholder)
 const pn = cfg.pretty_name || '';

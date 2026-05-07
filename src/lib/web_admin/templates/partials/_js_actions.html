@@ -120,14 +120,13 @@ function confirmAddItem() {
     const name = document.getElementById('newItemName').value.trim();
     if (!name) return;
     const { target, pathStr } = _addItemCtx;
-    const parts = pathStr.split('|');
     const data = target === 'modules' ? modulesData : configData;
-    const parent = getPath(data, parts);
+    const parent = pathStr === null ? data : getPath(data, pathStr.split('|'));
     if (!parent || typeof parent !== 'object') return;
     if (name in parent) { showToast(tf('already_exists', name), 'warning'); return; }
 
     // Smart default: schema > copy from first dict sibling > true
-    const schema = schemaFor(pathStr);
+    const schema = pathStr !== null ? schemaFor(pathStr) : null;
     const defaults = schemaDefaults(schema);
     let def = true;
     if (defaults) {

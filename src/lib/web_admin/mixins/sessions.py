@@ -131,6 +131,13 @@ class _SessionsMixin:
             session.clear()
             return False
         entry = self._sessions[token]
+        # Kick disabled users immediately
+        uname = entry.get('username', session.get('username', ''))
+        if not self._users.get(uname, {}).get('enabled', True):
+            del self._sessions[token]
+            self._persist_sessions()
+            session.clear()
+            return False
         if 'session_id' not in session:
             session['session_id'] = entry.get('sid', token[:16])
         current_ip = request.remote_addr

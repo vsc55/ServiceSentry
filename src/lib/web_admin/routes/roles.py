@@ -8,7 +8,7 @@ from ..constants import BUILTIN_ROLE_PERMISSIONS, PERMISSIONS, ROLES
 
 
 def register(app, wa):
-    login_required = wa._login_required
+    roles_view_req   = wa._perm_required('roles_view')
     roles_add_req    = wa._perm_required('roles_add')
     roles_edit_req   = wa._perm_required('roles_edit')
     roles_delete_req = wa._perm_required('roles_delete')
@@ -16,7 +16,7 @@ def register(app, wa):
     # --- API: custom roles management -----------------------------
 
     @app.route('/api/roles', methods=['GET'])
-    @login_required
+    @roles_view_req
     def api_get_roles():
         """Return all roles (builtin + custom) with their permissions."""
         all_roles: dict[str, dict] = {}
@@ -31,6 +31,7 @@ def register(app, wa):
                 'builtin': False,
                 'label': rdata.get('label', name),
                 'permissions': rdata.get('permissions', []),
+                'enabled': rdata.get('enabled', True),
             }
         return jsonify(all_roles)
 
@@ -97,6 +98,12 @@ def register(app, wa):
                 if old_perms != new_perms:
                     changes.append({'field': 'permissions', 'old': old_perms, 'new': new_perms})
                 role['permissions'] = new_perms
+            if 'enabled' in data:
+                new_enabled = bool(data['enabled'])
+                old_enabled = role.get('enabled', True)
+                if old_enabled != new_enabled:
+                    changes.append({'field': 'enabled', 'old': old_enabled, 'new': new_enabled})
+                    role['enabled'] = new_enabled
             wa._persist_roles()
         if changes:
             wa._audit('role_updated', detail={'name': name, 'changes': changes})
