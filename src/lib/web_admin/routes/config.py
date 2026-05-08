@@ -23,6 +23,7 @@ INT_RULES = {
     'web_admin|pw_max_len':        {'min': 8,  'max': 256,   'attr': '_PW_MAX_LEN'},
     'web_admin|status_refresh_secs': {'min': 10, 'max': 3600, 'attr': '_STATUS_REFRESH_SECS'},
     'web_admin|proxy_count':          {'min': 0,  'max': 10,   'attr': '_proxy_count'},
+    'web_admin|default_page_size':    {'min': 0,  'max': 200,  'attr': '_DEFAULT_PAGE_SIZE'},
 }
 
 # Boolean config fields in web_admin that are synced to wa instance attributes.
@@ -35,18 +36,19 @@ BOOL_RULES = {
 
 
 def register(app, wa):
+    config_view_req = wa._perm_required('config_view', 'config_edit')
     config_edit_req = wa._perm_required('config_edit')
 
     # --- API: config.json -----------------------------------------
 
     @app.route('/api/config', methods=['GET'])
-    @config_edit_req
+    @config_view_req
     def api_get_config():
         """Return the contents of ``config.json``."""
         return jsonify(wa._read_config_file(wa._CONFIG_FILE))
 
     @app.route('/api/config/schema', methods=['GET'])
-    @config_edit_req
+    @config_view_req
     def api_get_config_schema():
         """Return field-level metadata (min, max, default) for config fields."""
         schema = {}
@@ -58,6 +60,10 @@ def register(app, wa):
             }
         for path, attr in BOOL_RULES.items():
             schema[path] = {'type': 'bool', 'default': getattr(wa, attr)}
+        schema['web_admin|default_page_size'] = {
+            'options_int': [25, 50, 100, 200, 0],
+            'default': getattr(wa, '_DEFAULT_PAGE_SIZE'),
+        }
         schema['web_admin|audit_sort'] = {
             'options': ['time', 'event', 'user', 'ip'],
             'default': 'time',
@@ -77,9 +83,7 @@ def register(app, wa):
         if err:
             return err
         old_data = wa._read_config_file(wa._CONFIG_FILE)
-        # Sanitize: ensure integer fields written to disk are always valid.
-        # If an invalid value arrives (string, null, bool, out-of-range), replace
-        # it with the current runtime value so the file is never corrupted.
+        # Validate integer fields: reject with 400 if type or range is wrong.
         for path, rule in INT_RULES.items():
             section, field = path.split('|')
             sec_data = data.get(section)
@@ -88,8 +92,19 @@ def register(app, wa):
             v = sec_data[field]
             if not (isinstance(v, int) and not isinstance(v, bool)
                     and rule['min'] <= v <= rule['max']):
-                sec_data[field] = getattr(wa, rule['attr'])
-        # Enforce pw_max_len >= pw_min_len in data before writing to disk
+                return jsonify({'error': wa._t(
+                    'invalid_config_int', field, rule['min'], rule['max'],
+                )}), 400
+        # Validate page_sizes: must be a list of non-negative integers.
+        web_data = data.get('web_admin')
+        if isinstance(web_data, dict) and 'page_sizes' in web_data:
+            raw_ps = web_data['page_sizes']
+            if not isinstance(raw_ps, list) or len(raw_ps) == 0:
+                return jsonify({'error': wa._t('invalid_page_sizes')}), 400
+            for v in raw_ps:
+                if not (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
+                    return jsonify({'error': wa._t('invalid_page_sizes')}), 400
+        # Reject pw_max_len < pw_min_len explicitly.
         web_data = data.get('web_admin')
         if isinstance(web_data, dict):
             pm = web_data.get('pw_min_len')
@@ -97,7 +112,7 @@ def register(app, wa):
             if (isinstance(pm, int) and not isinstance(pm, bool) and
                     isinstance(px, int) and not isinstance(px, bool) and
                     px < pm):
-                web_data['pw_max_len'] = pm
+                return jsonify({'error': wa._t('pw_max_less_than_min')}), 400
         if wa._save_config_file(wa._CONFIG_FILE, data):
             # Apply web_admin.lang at runtime if changed
             new_lang = (data.get('web_admin') or {}).get('lang', '')

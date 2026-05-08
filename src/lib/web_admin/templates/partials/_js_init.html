@@ -33,7 +33,16 @@ const modulesLi = document.getElementById('tab-modules-li');
 if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
 // Config tab
 const configLi = document.getElementById('tab-config-li');
-if (configLi) configLi.style.display = perms.has('config_edit') ? '' : 'none';
+const hasConfigEdit = perms.has('config_edit');
+const hasConfigView = perms.has('config_view');
+if (configLi) configLi.style.display = (hasConfigEdit || hasConfigView) ? '' : 'none';
+if (hasConfigView && !hasConfigEdit) {
+    document.getElementById('config-container')?.classList.add('config-readonly');
+}
+// Status tab
+const statusLi = document.getElementById('tab-status-li');
+const hasChecks = perms.has('checks_view') || perms.has('checks_run');
+if (statusLi) statusLi.style.display = hasChecks ? '' : 'none';
 // Audit tab
 const auditLi = document.getElementById('tab-audit-li');
 if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
@@ -77,7 +86,9 @@ document.getElementById('renameItemInput').addEventListener('keydown', e => {
 if (e.key === 'Enter') { e.preventDefault(); _doRenameItem(); }
 });
 document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', renderStatus);
-document.getElementById('btn-tab-access')?.addEventListener('shown.bs.tab', async () => {
+document.getElementById('btn-tab-access')?.addEventListener('shown.bs.tab', refreshAccessData);
+
+async function refreshAccessData() {
 const [u, s, ro, gr] = await Promise.all([apiGet('/api/users'), apiGet('/api/sessions'), apiGet('/api/roles'), apiGet('/api/groups')]);
 usersData = u || {};
 sessionsData = s || {};
@@ -87,7 +98,7 @@ renderSessions();
 renderUsers();
 renderRoles();
 renderGroups();
-});
+}
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
 document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
 document.getElementById('btnResetPasswordOk').addEventListener('click', resetUserPassword);
@@ -104,12 +115,22 @@ try {
     modulesData = await apiGet('/api/modules') || {};
     applyModuleDefaults();
     configData = await apiGet('/api/config') || {};
+    _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
+    const _rawPS = configData?.web_admin?.page_sizes;
+    if (Array.isArray(_rawPS) && _rawPS.length > 0) {
+        const _parsedPS = _rawPS.map(s => parseInt(s, 10)).filter(s => !isNaN(s) && s >= 0);
+        if (_parsedPS.length > 0) _PAGE_SIZES = _parsedPS;
+    }
     configSchema = await apiGet('/api/config/schema') || {};
     // Backfill CONFIG_FIELD_DEFAULTS with server defaults from schema
     for (const [k, v] of Object.entries(configSchema)) {
         if (!(k in CONFIG_FIELD_DEFAULTS) && v.default !== undefined) {
             CONFIG_FIELD_DEFAULTS[k] = v.default;
         }
+    }
+    // Sync default_page_size options to reflect current page_sizes config
+    if (configSchema['web_admin|default_page_size']) {
+        configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
     }
     _serverConfigData = deepClone(configData);
     renderModules();

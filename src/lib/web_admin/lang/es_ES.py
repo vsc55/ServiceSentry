@@ -65,7 +65,14 @@ LANG = {
     'overview_has_errors': '{} error(es)',
     'overview_no_status': 'Sin datos de estado',
     'overview_connected_users': 'Usuarios conectados',
+    'overview_groups': 'Grupos',
+    'overview_roles': 'Roles',
+    'overview_custom_roles': '{} personalizados',
+    'overview_members': '{} miembros',
     'overview_recent_activity': 'Actividad reciente',
+    'widget_configure': 'Personalizar',
+    'widget_config_title': 'Personalizar dashboard',
+    'widget_reset': 'Restablecer',
     'auto_refresh': 'Auto-refresco',
     'auto_refresh_seconds': 'cada {} s',
     # Modules
@@ -174,6 +181,14 @@ LANG = {
     'password_need_symbol':   'La contraseña debe contener al menos un símbolo (ej: @, #, !)',
     'name_too_long':          'El nombre no puede superar {} caracteres',
     'display_name_too_long':  'El nombre para mostrar no puede superar {} caracteres',
+    'invalid_page_sizes':     'page_sizes debe ser una lista de enteros no negativos',
+    'invalid_config_int':     "Valor inválido para '{}': debe ser un entero entre {} y {}",
+    'pw_max_less_than_min':   'pw_max_len no puede ser menor que pw_min_len',
+    'invalid_lang':           "Idioma inválido: '{}'",
+    'invalid_dark_mode':      'dark_mode debe ser true o false',
+    'invalid_groups':         'Grupo(s) desconocido(s): {}',
+    'invalid_roles':          'Rol(es) desconocido(s): {}',
+    'invalid_members':        'Usuario(s) desconocido(s): {}',
     # Sessions
     'close_all_sessions': 'Cerrar todas las sesiones',
     'confirm_close_all_sessions': '¿Cerrar todas las sesiones activas? Todos (incluido tú) serán desconectados.',
@@ -283,6 +298,8 @@ LANG = {
         'status_refresh_secs': 'Intervalo de refresco del estado (s)',
         'status_lang':       'Idioma de la página de estado',
         'proxy_count':       'Número de proxies inversos',
+        'default_page_size': 'Tamaño de página predeterminado',
+        'page_sizes':        'Opciones de tamaño de página',
     },
     # Hints de campo — se muestran como tooltip ⓘ junto a cada opción de configuración
     'hints': {
@@ -305,6 +322,8 @@ LANG = {
         'telegram|chat_id':             'ID numérico del chat de Telegram donde se enviarán las alertas.',
         'telegram|group_messages':      'Agrupar varias alertas consecutivas en un único mensaje de Telegram.',
         'web_admin|audit_sort':         'Columna predeterminada para ordenar la tabla del registro de auditoría.',
+        'web_admin|default_page_size':  'Número de filas mostradas por página en todas las tablas de listado. 0 = mostrar todas.',
+        'web_admin|page_sizes':         'Lista de opciones de tamaño de página separadas por comas. Usa 0 para incluir la opción "Todos".',
     },
     # Etiquetas de secciones
     'sections': {
@@ -315,6 +334,7 @@ LANG = {
     'pw_policy_section': 'Política de contraseñas',
     'public_status_section': 'Página de Estado Pública',
     'proxy_section': 'Proxy Inverso',
+    'tables_section': 'Tablas',
     'status_lang_default': '— Usar idioma por defecto —',
     # Etiquetas de roles
     'role_labels': {
@@ -363,9 +383,11 @@ LANG = {
         'modules_view':    'Ver módulos',
         'modules_add':     'Añadir módulos',
         'modules_edit':    'Editar módulos',
+        'config_view':     'Ver configuración',
         'config_edit':     'Editar configuración',
         'sessions_view':   'Ver sesiones',
         'sessions_revoke': 'Revocar sesiones',
+        'checks_view':     'Ver resultados de checks',
         'checks_run':      'Ejecutar checks',
     },
     # Etiquetas de grupos de permisos

@@ -47,7 +47,13 @@ def register(app, wa):
         label = data.get('label', '').strip() or name
         description = data.get('description', '').strip()
         all_role_names = set(BUILTIN_ROLE_PERMISSIONS.keys()) | set(wa._custom_roles.keys())
-        roles = [r for r in data.get('roles', []) if r in all_role_names]
+        roles_raw = data.get('roles', [])
+        if not isinstance(roles_raw, list):
+            return jsonify({'error': wa._t('invalid_roles', '')}), 400
+        unknown_roles = [r for r in roles_raw if r not in all_role_names]
+        if unknown_roles:
+            return jsonify({'error': wa._t('invalid_roles', ', '.join(unknown_roles))}), 400
+        roles = list(roles_raw)
         if not name:
             return jsonify({'error': wa._t('group_name_required')}), 400
         if len(name) > wa._MAX_GROUP_NAME_LEN:
@@ -100,15 +106,25 @@ def register(app, wa):
                     changes.append({'field': 'description', 'old': old_desc, 'new': new_desc})
                 group['description'] = new_desc
         if 'roles' in data:
+            if not isinstance(data['roles'], list):
+                return jsonify({'error': wa._t('invalid_roles', '')}), 400
             all_role_names = set(BUILTIN_ROLE_PERMISSIONS.keys()) | set(wa._custom_roles.keys())
-            new_roles = sorted(r for r in data['roles'] if r in all_role_names)
+            unknown_roles = [r for r in data['roles'] if r not in all_role_names]
+            if unknown_roles:
+                return jsonify({'error': wa._t('invalid_roles', ', '.join(unknown_roles))}), 400
+            new_roles = sorted(data['roles'])
             old_roles = sorted(group.get('roles', []))
             if old_roles != new_roles:
                 changes.append({'field': 'roles', 'old': old_roles, 'new': new_roles})
             group['roles'] = new_roles
         if 'members' in data:
+            if not isinstance(data['members'], list):
+                return jsonify({'error': wa._t('invalid_members', '')}), 400
             all_usernames = set(wa._users.keys())
-            new_members = set(data['members']) & all_usernames
+            unknown_members = [m for m in data['members'] if m not in all_usernames]
+            if unknown_members:
+                return jsonify({'error': wa._t('invalid_members', ', '.join(unknown_members))}), 400
+            new_members = set(data['members'])
             old_members = {u for u, d in wa._users.items() if name in d.get('groups', [])}
             users_changed = False
             for uname in old_members - new_members:

@@ -65,7 +65,14 @@ LANG = {
     'overview_has_errors': '{} error(s)',
     'overview_no_status': 'No status data',
     'overview_connected_users': 'Connected users',
+    'overview_groups': 'Groups',
+    'overview_roles': 'Roles',
+    'overview_custom_roles': '{} custom',
+    'overview_members': '{} memberships',
     'overview_recent_activity': 'Recent activity',
+    'widget_configure': 'Customize',
+    'widget_config_title': 'Customize dashboard',
+    'widget_reset': 'Reset to defaults',
     'auto_refresh': 'Auto-refresh',
     'auto_refresh_seconds': 'every {} s',
     'refresh': 'Refresh',
@@ -175,6 +182,14 @@ LANG = {
     'password_need_symbol':   'Password must contain at least one symbol',
     'name_too_long':          'Name must be at most {} characters',
     'display_name_too_long':  'Display name must be at most {} characters',
+    'invalid_page_sizes':     'page_sizes must be a list of non-negative integers',
+    'invalid_config_int':     "Invalid value for '{}': must be an integer between {} and {}",
+    'pw_max_less_than_min':   'pw_max_len must be greater than or equal to pw_min_len',
+    'invalid_lang':           "Invalid language: '{}'",
+    'invalid_dark_mode':      'dark_mode must be true or false',
+    'invalid_groups':         'Unknown group(s): {}',
+    'invalid_roles':          'Unknown role(s): {}',
+    'invalid_members':        'Unknown user(s): {}',
     'close_all_sessions': 'Close all sessions',
     'confirm_close_all_sessions': 'Close all active sessions? Everyone (including you) will be logged out.',
     'sessions_closed': 'All sessions have been closed',
@@ -281,6 +296,8 @@ LANG = {
         'status_refresh_secs': 'Status refresh interval (s)',
         'status_lang':       'Status page language',
         'proxy_count':       'Reverse proxy count',
+        'default_page_size': 'Default page size',
+        'page_sizes':        'Page size options',
     },
     # Field hints — shown as ⓘ tooltip next to each config option
     'hints': {
@@ -304,6 +321,8 @@ LANG = {
         'telegram|chat_id':             'Numeric Telegram Chat ID where alerts will be sent.',
         'telegram|group_messages':      'Bundle multiple consecutive alerts into a single Telegram message.',
         'web_admin|audit_sort':         'Default column used to sort the audit log table.',
+        'web_admin|default_page_size':  'Default number of rows shown per page in all listing tables. 0 = show all rows.',
+        'web_admin|page_sizes':         'Comma-separated list of page size options shown in the per-page selector. Use 0 to include an "All" option.',
     },
     # Section labels
     'sections': {
@@ -314,6 +333,7 @@ LANG = {
     'pw_policy_section': 'Password policy',
     'public_status_section': 'Public Status Page',
     'proxy_section': 'Reverse Proxy',
+    'tables_section': 'Tables',
     'status_lang_default': '— Use web panel default —',
     # Role labels
     'role_labels': {
@@ -362,9 +382,11 @@ LANG = {
         'modules_view':    'View modules',
         'modules_add':     'Add modules',
         'modules_edit':    'Edit modules',
+        'config_view':     'View configuration',
         'config_edit':     'Edit configuration',
         'sessions_view':   'View sessions',
         'sessions_revoke': 'Revoke sessions',
+        'checks_view':     'View check results',
         'checks_run':      'Run checks',
     },
     # Permission group labels

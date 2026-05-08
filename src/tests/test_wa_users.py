@@ -164,6 +164,185 @@ class TestApiUsers:
         assert "persisted" in on_disk
 
 
+# ──────────────────────────── Input validation ─────────────────────
+
+class TestUserInputValidation:
+    """Strict validation of lang, dark_mode and groups fields."""
+
+    # --- create user: lang ---
+
+    def test_create_user_invalid_lang_rejected(self, client):
+        _login(client)
+        resp = client.post("/api/users", json={
+            "username": "u1", "password": "testpass", "role": "viewer",
+            "lang": "xx_INVALID",
+        })
+        assert resp.status_code == 400
+        assert "error" in resp.get_json()
+
+    def test_create_user_valid_lang_accepted(self, admin, client):
+        _login(client)
+        from lib.web_admin.constants import SUPPORTED_LANGS
+        lang = SUPPORTED_LANGS[0]
+        resp = client.post("/api/users", json={
+            "username": "u2", "password": "testpass", "role": "viewer",
+            "lang": lang,
+        })
+        assert resp.status_code == 201
+        assert admin._users["u2"].get("lang") == lang
+
+    def test_create_user_empty_lang_ignored(self, admin, client):
+        """Lang vacío es válido: no se guarda en el usuario (usa el default del sistema)."""
+        _login(client)
+        resp = client.post("/api/users", json={
+            "username": "u3", "password": "testpass", "role": "viewer",
+            "lang": "",
+        })
+        assert resp.status_code == 201
+        assert admin._users["u3"].get("lang") is None
+
+    # --- create user: groups ---
+
+    def test_create_user_unknown_group_rejected(self, client):
+        _login(client)
+        resp = client.post("/api/users", json={
+            "username": "u4", "password": "testpass", "role": "viewer",
+            "groups": ["nonexistent_group"],
+        })
+        assert resp.status_code == 400
+        assert "error" in resp.get_json()
+
+    def test_create_user_non_list_groups_rejected(self, client):
+        _login(client)
+        resp = client.post("/api/users", json={
+            "username": "u5", "password": "testpass", "role": "viewer",
+            "groups": "administrators",
+        })
+        assert resp.status_code == 400
+
+    def test_create_user_known_group_accepted(self, admin, client):
+        _login(client)
+        resp = client.post("/api/users", json={
+            "username": "u6", "password": "testpass", "role": "viewer",
+            "groups": ["administrators"],
+        })
+        assert resp.status_code == 201
+        assert "administrators" in admin._users["u6"].get("groups", [])
+
+    # --- update user: lang ---
+
+    def test_update_user_invalid_lang_rejected(self, admin, client):
+        _login(client)
+        client.post("/api/users", json={
+            "username": "upd1", "password": "testpass", "role": "viewer",
+        })
+        resp = client.put("/api/users/upd1", json={"lang": "xx_INVALID"})
+        assert resp.status_code == 400
+        assert admin._users["upd1"].get("lang", "") == ""
+
+    def test_update_user_valid_lang_accepted(self, admin, client):
+        _login(client)
+        from lib.web_admin.constants import SUPPORTED_LANGS
+        lang = SUPPORTED_LANGS[0]
+        client.post("/api/users", json={
+            "username": "upd2", "password": "testpass", "role": "viewer",
+        })
+        resp = client.put("/api/users/upd2", json={"lang": lang})
+        assert resp.status_code == 200
+        assert admin._users["upd2"].get("lang") == lang
+
+    def test_update_user_empty_lang_accepted(self, admin, client):
+        _login(client)
+        client.post("/api/users", json={
+            "username": "upd3", "password": "testpass", "role": "viewer",
+        })
+        resp = client.put("/api/users/upd3", json={"lang": ""})
+        assert resp.status_code == 200
+
+    # --- update user: dark_mode ---
+
+    def test_update_user_non_bool_dark_mode_rejected(self, client):
+        _login(client)
+        client.post("/api/users", json={
+            "username": "dm1", "password": "testpass", "role": "viewer",
+        })
+        resp = client.put("/api/users/dm1", json={"dark_mode": "yes"})
+        assert resp.status_code == 400
+
+    def test_update_user_int_dark_mode_rejected(self, client):
+        _login(client)
+        client.post("/api/users", json={
+            "username": "dm2", "password": "testpass", "role": "viewer",
+        })
+        resp = client.put("/api/users/dm2", json={"dark_mode": 1})
+        assert resp.status_code == 400
+
+    def test_update_user_bool_dark_mode_accepted(self, admin, client):
+        _login(client)
+        client.post("/api/users", json={
+            "username": "dm3", "password": "testpass", "role": "viewer",
+        })
+        resp = client.put("/api/users/dm3", json={"dark_mode": True})
+        assert resp.status_code == 200
+        assert admin._users["dm3"]["dark_mode"] is True
+
+    # --- update user: groups ---
+
+    def test_update_user_unknown_group_rejected(self, admin, client):
+        _login(client)
+        client.post("/api/users", json={
+            "username": "grp1", "password": "testpass", "role": "viewer",
+        })
+        resp = client.put("/api/users/grp1", json={"groups": ["ghost_group"]})
+        assert resp.status_code == 400
+        assert admin._users["grp1"].get("groups", []) == []
+
+    def test_update_user_non_list_groups_rejected(self, client):
+        _login(client)
+        client.post("/api/users", json={
+            "username": "grp2", "password": "testpass", "role": "viewer",
+        })
+        resp = client.put("/api/users/grp2", json={"groups": "administrators"})
+        assert resp.status_code == 400
+
+    def test_update_user_known_group_accepted(self, admin, client):
+        _login(client)
+        client.post("/api/users", json={
+            "username": "grp3", "password": "testpass", "role": "viewer",
+        })
+        resp = client.put("/api/users/grp3", json={"groups": ["administrators"]})
+        assert resp.status_code == 200
+        assert "administrators" in admin._users["grp3"]["groups"]
+
+    # --- preferences endpoint ---
+
+    def test_preferences_invalid_lang_rejected(self, client):
+        _login(client)
+        resp = client.put("/api/users/me/preferences", json={"lang": "zz_INVALID"})
+        assert resp.status_code == 400
+
+    def test_preferences_non_string_lang_rejected(self, client):
+        _login(client)
+        resp = client.put("/api/users/me/preferences", json={"lang": 42})
+        assert resp.status_code == 400
+
+    def test_preferences_valid_lang_accepted(self, client):
+        _login(client)
+        from lib.web_admin.constants import SUPPORTED_LANGS
+        resp = client.put("/api/users/me/preferences", json={"lang": SUPPORTED_LANGS[0]})
+        assert resp.status_code == 200
+
+    def test_preferences_non_bool_dark_mode_rejected(self, client):
+        _login(client)
+        resp = client.put("/api/users/me/preferences", json={"dark_mode": "yes"})
+        assert resp.status_code == 400
+
+    def test_preferences_null_dark_mode_resets_to_default(self, admin, client):
+        _login(client)
+        resp = client.put("/api/users/me/preferences", json={"dark_mode": None})
+        assert resp.status_code == 200
+
+
 # ──────────────────────────── Roles & permissions ──────────────────
 
 class TestRolePermissions:

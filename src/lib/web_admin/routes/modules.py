@@ -7,6 +7,7 @@ import os
 from flask import jsonify
 
 from lib.config import ConfigControl
+from ..constants import BUILTIN_ROLE_PERMISSIONS
 
 
 def register(app, wa):
@@ -42,8 +43,10 @@ def register(app, wa):
 
     # --- API: status.json (read-only) -----------------------------
 
+    checks_view_req = wa._perm_required('checks_view', 'checks_run')
+
     @app.route('/api/status', methods=['GET'])
-    @login_required
+    @checks_view_req
     def api_get_status():
         """Return the contents of ``status.json`` (read-only)."""
         if not wa._var_dir:
@@ -110,6 +113,16 @@ def register(app, wa):
             r = u.get('role', 'viewer')
             users_by_role[r] = users_by_role.get(r, 0) + 1
 
+        # Groups summary
+        total_groups = len(wa._groups)
+        total_group_members = sum(
+            len(g.get('members', [])) for g in wa._groups.values() if isinstance(g, dict)
+        )
+
+        # Roles summary
+        builtin_roles = len(BUILTIN_ROLE_PERMISSIONS)
+        custom_roles = len(wa._custom_roles)
+
         # Last audit events
         last_events = list(reversed(wa._audit_log))[:10]
 
@@ -127,6 +140,15 @@ def register(app, wa):
             'users': {
                 'total': total_users,
                 'by_role': users_by_role,
+            },
+            'groups': {
+                'total': total_groups,
+                'members': total_group_members,
+            },
+            'roles': {
+                'total': builtin_roles + custom_roles,
+                'builtin': builtin_roles,
+                'custom': custom_roles,
             },
             'last_events': last_events,
         })

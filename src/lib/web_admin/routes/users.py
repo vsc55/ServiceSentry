@@ -59,6 +59,16 @@ def register(app, wa):
         valid_roles = set(ROLES) | set(wa._custom_roles.keys())
         if role not in valid_roles:
             return jsonify({'error': wa._t('invalid_role')}), 400
+        user_lang = data.get('lang', '')
+        if user_lang and user_lang not in SUPPORTED_LANGS:
+            return jsonify({'error': wa._t('invalid_lang', user_lang)}), 400
+        user_groups_raw = data.get('groups', [])
+        if not isinstance(user_groups_raw, list):
+            return jsonify({'error': wa._t('invalid_groups', '')}), 400
+        unknown_groups = [g for g in user_groups_raw if g not in wa._groups]
+        if unknown_groups:
+            return jsonify({'error': wa._t('invalid_groups', ', '.join(unknown_groups))}), 400
+        user_groups = list(user_groups_raw)
         if uname in wa._users:
             return jsonify({'error': wa._t('user_already_exists', uname)}), 409
         wa._users[uname] = {
@@ -66,10 +76,8 @@ def register(app, wa):
             'role': role,
             'display_name': dname,
         }
-        user_lang = data.get('lang', '')
-        if user_lang and user_lang in SUPPORTED_LANGS:
+        if user_lang:
             wa._users[uname]['lang'] = user_lang
-        user_groups = [g for g in data.get('groups', []) if g in wa._groups]
         if user_groups:
             wa._users[uname]['groups'] = user_groups
         wa._persist_users()
@@ -121,19 +129,27 @@ def register(app, wa):
             user['password_hash'] = generate_password_hash(data['password'])
             has_password_reset = True
         if 'lang' in data:
-            if data['lang'] in SUPPORTED_LANGS or data['lang'] == '':
-                old_lang = user.get('lang', '')
-                if old_lang != data['lang']:
-                    changes.append({'field': 'lang', 'old': old_lang, 'new': data['lang']})
-                user['lang'] = data['lang']
+            lang = data['lang']
+            if lang != '' and lang not in SUPPORTED_LANGS:
+                return jsonify({'error': wa._t('invalid_lang', lang)}), 400
+            old_lang = user.get('lang', '')
+            if old_lang != lang:
+                changes.append({'field': 'lang', 'old': old_lang, 'new': lang})
+            user['lang'] = lang
         if 'dark_mode' in data:
-            if isinstance(data['dark_mode'], bool):
-                old_dm = user.get('dark_mode')
-                if old_dm != data['dark_mode']:
-                    changes.append({'field': 'dark_mode', 'old': old_dm, 'new': data['dark_mode']})
-                user['dark_mode'] = data['dark_mode']
+            if not isinstance(data['dark_mode'], bool):
+                return jsonify({'error': wa._t('invalid_dark_mode')}), 400
+            old_dm = user.get('dark_mode')
+            if old_dm != data['dark_mode']:
+                changes.append({'field': 'dark_mode', 'old': old_dm, 'new': data['dark_mode']})
+            user['dark_mode'] = data['dark_mode']
         if 'groups' in data:
-            new_groups = [g for g in data['groups'] if g in wa._groups]
+            if not isinstance(data['groups'], list):
+                return jsonify({'error': wa._t('invalid_groups', '')}), 400
+            unknown_groups = [g for g in data['groups'] if g not in wa._groups]
+            if unknown_groups:
+                return jsonify({'error': wa._t('invalid_groups', ', '.join(unknown_groups))}), 400
+            new_groups = list(data['groups'])
             old_groups = sorted(user.get('groups', []))
             if old_groups != sorted(new_groups):
                 changes.append({'field': 'groups', 'old': old_groups, 'new': sorted(new_groups)})
@@ -206,18 +222,24 @@ def register(app, wa):
             return jsonify({'error': wa._t('user_not_found')}), 404
         if 'lang' in data:
             lang = data['lang']
+            if not isinstance(lang, str):
+                return jsonify({'error': wa._t('invalid_lang', '')}), 400
+            if lang and lang not in SUPPORTED_LANGS:
+                return jsonify({'error': wa._t('invalid_lang', lang)}), 400
             if not lang:
                 user.pop('lang', None)
                 session['lang'] = wa._default_lang
-            elif lang in SUPPORTED_LANGS:
+            else:
                 user['lang'] = lang
                 session['lang'] = lang
         if 'dark_mode' in data:
             dm = data['dark_mode']
+            if dm is not None and not isinstance(dm, bool):
+                return jsonify({'error': wa._t('invalid_dark_mode')}), 400
             if dm is None:
                 user.pop('dark_mode', None)
                 session['dark_mode'] = wa._default_dark_mode
-            elif isinstance(dm, bool):
+            else:
                 user['dark_mode'] = dm
                 session['dark_mode'] = dm
         wa._persist_users()

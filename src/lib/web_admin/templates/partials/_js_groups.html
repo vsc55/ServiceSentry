@@ -4,6 +4,10 @@
    ================================================================ #}
 
 // ──────────────────────────── Group management ────────────────────
+let _groupsPage = 1;
+let _groupsPageSize = null;
+function _goGroupsPage(p) { _groupsPage = p; renderGroups(); }
+function _changeGroupsPageSize(v) { _groupsPageSize = parseInt(v, 10); _groupsPage = 1; renderGroups(); }
 
 function renderGroups() {
     const c = document.getElementById('groups-container');
@@ -12,15 +16,20 @@ function renderGroups() {
     const canEditGroup   = grpPerms.has('groups_edit');
     const canDeleteGroup = grpPerms.has('groups_delete');
     const showActions    = canEditGroup || canDeleteGroup;
-    const entries = Object.entries(groupsData);
-    if (!entries.length) { c.innerHTML = '<p class="text-muted">' + t('no_groups') + '</p>'; return; }
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle" style="--bs-table-cell-padding-x:0.6rem">';
-    h += '<thead class="table-light"><tr><th>' + t('col_group_name') + '</th><th>' + t('col_group_label') + '</th><th>' + t('col_group_roles') + '</th><th class="text-center" style="width:1%;white-space:nowrap">' + t('col_group_members') + '</th>' + (showActions ? '<th class="text-center" style="width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
-    for (const [name, gd] of entries.sort((a, b) => {
+    if (_groupsPageSize === null) _groupsPageSize = _defaultPageSize;
+    const allEntries = Object.entries(groupsData).sort((a, b) => {
         if (a[1].builtin && !b[1].builtin) return -1;
         if (!a[1].builtin && b[1].builtin) return 1;
         return a[0].localeCompare(b[0]);
-    })) {
+    });
+    if (!allEntries.length) { c.innerHTML = '<p class="text-muted">' + t('no_groups') + '</p>'; return; }
+    const total = allEntries.length;
+    const ps = _groupsPageSize || total;
+    _groupsPage = Math.max(1, Math.min(_groupsPage, Math.ceil(total / ps)));
+    const entries = allEntries.slice((_groupsPage - 1) * ps, _groupsPage * ps);
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover table-striped align-middle" style="--bs-table-cell-padding-x:0.6rem">';
+    h += '<thead class="table-light"><tr><th>' + t('col_group_name') + '</th><th>' + t('col_group_label') + '</th><th>' + t('col_group_roles') + '</th><th class="text-center" style="width:1%;white-space:nowrap">' + t('col_group_members') + '</th>' + (showActions ? '<th class="text-center" style="width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
+    for (const [name, gd] of entries) {
         const isEnabled = gd.enabled !== false;
         const disabledRowStyle = isEnabled ? '' : ' class="table-secondary"';
         const builtinBadge = gd.builtin ? ' <span class="badge bg-secondary ms-1 fw-normal" style="font-size:0.6em;padding:0.15em 0.35em">' + t('group_builtin_badge') + '</span>' : '';
@@ -54,7 +63,8 @@ function renderGroups() {
         </tr>`;
     }
     h += '</tbody></table></div>';
-    c.innerHTML = h;
+    const pagination = _renderPagination(total, _groupsPage, _groupsPageSize, '_goGroupsPage', '_changeGroupsPageSize');
+    c.innerHTML = pagination + h + pagination;
     const btnNewGroup = document.getElementById('btnNewGroup');
     if (btnNewGroup) btnNewGroup.style.display = grpPerms.has('groups_add') ? '' : 'none';
 }
@@ -148,6 +158,18 @@ async function saveGroupModal() {
         const r = await apiPut('/api/groups/' + encodeURIComponent(_editingGroup), payload);
         if (r && r.ok) {
             showToast(t('group_updated'));
+            const oldMembers = new Set(groupsData[_editingGroup]?.members || []);
+            const newMembers = new Set(members);
+            for (const u of oldMembers) {
+                if (!newMembers.has(u) && usersData[u])
+                    usersData[u].groups = (usersData[u].groups || []).filter(g => g !== _editingGroup);
+            }
+            for (const u of newMembers) {
+                if (!oldMembers.has(u) && usersData[u]) {
+                    if (!usersData[u].groups) usersData[u].groups = [];
+                    if (!usersData[u].groups.includes(_editingGroup)) usersData[u].groups.push(_editingGroup);
+                }
+            }
             groupsData[_editingGroup] = { ...groupsData[_editingGroup], roles, members };
             if (!isBuiltin) { groupsData[_editingGroup].label = label || _editingGroup; groupsData[_editingGroup].description = description; }
         } else {
@@ -158,6 +180,12 @@ async function saveGroupModal() {
         if (r && r.status === 201) {
             showToast(t('group_created'));
             groupsData[name] = { builtin: false, label: label || name, description, roles, members };
+            for (const u of members) {
+                if (usersData[u]) {
+                    if (!usersData[u].groups) usersData[u].groups = [];
+                    if (!usersData[u].groups.includes(name)) usersData[u].groups.push(name);
+                }
+            }
         } else {
             showToast(r?.data?.error || t('create_error'), 'danger'); return;
         }
@@ -172,6 +200,9 @@ async function deleteGroup(name) {
         const r = await apiDelete('/api/groups/' + encodeURIComponent(name));
         if (r && r.status === 200 && r.data?.ok) {
             showToast(t('group_deleted'));
+            for (const ud of Object.values(usersData)) {
+                if (ud.groups) ud.groups = ud.groups.filter(g => g !== name);
+            }
             delete groupsData[name];
             renderGroups();
             renderUsers();

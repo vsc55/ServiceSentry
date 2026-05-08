@@ -24,8 +24,7 @@ async function renderStatus() {
     const data = await apiGet('/api/status');
     if (!data) { c.innerHTML = '<div class="alert alert-warning">' + t('status_load_error') + '</div>'; return; }
 
-    const role = currentUser.role;
-    const canRun = role === 'admin' || role === 'editor';
+    const canRun = new Set(currentUser.permissions || []).has('checks_run');
 
     // ── Refresh bar ───────────────────────────────────────────
     let h = _renderRefreshBar('status-container', 'renderStatus',
@@ -86,7 +85,7 @@ async function renderStatus() {
 }
 
 function _renderStatusTable(data) {
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover table-striped align-middle">';
     h += '<thead class="table-light"><tr><th>' + t('col_module') + '</th><th>' + t('col_check') + '</th><th>' + t('col_status') + '</th></tr></thead><tbody>';
     for (const [mod, checks] of Object.entries(data)) {
         if (typeof checks !== 'object' || checks === null) continue;

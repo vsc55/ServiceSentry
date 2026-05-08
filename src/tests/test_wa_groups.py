@@ -94,15 +94,16 @@ class TestGroups:
         assert "viewer" in groups["devs"]["roles"]
         assert "members" in groups["devs"]
 
-    def test_create_group_invalid_roles_filtered(self, client):
+    def test_create_group_invalid_roles_rejected(self, client):
         _login(client)
-        client.post("/api/groups", json={
+        resp = client.post("/api/groups", json={
             "name": "filtered",
             "label": "Filtered",
             "roles": ["editor", "FAKE_ROLE", "not_real"],
         })
+        assert resp.status_code == 400
         groups = client.get("/api/groups").get_json()
-        assert groups["filtered"]["roles"] == ["editor"]
+        assert "filtered" not in groups
 
     def test_create_group_missing_name(self, client):
         _login(client)
@@ -266,20 +267,21 @@ class TestGroups:
         users = client.get("/api/users").get_json()
         assert "upd_grp" in users["upd_user"]["groups"]
 
-    def test_create_user_invalid_groups_ignored(self, client):
+    def test_create_user_invalid_groups_rejected(self, client):
         _login(client)
         resp = client.post("/api/users", json={
             "username": "badgrp_user", "password": "testpass", "role": "viewer",
             "groups": ["nonexistent_group"],
         })
-        assert resp.status_code == 201
+        assert resp.status_code == 400
         users = client.get("/api/users").get_json()
-        assert users["badgrp_user"].get("groups", []) == []
+        assert "badgrp_user" not in users
 
-    def test_update_user_invalid_groups_filtered(self, client):
+    def test_update_user_invalid_groups_rejected(self, client):
         _login(client)
         client.post("/api/users", json={"username": "flt_user", "password": "testpass", "role": "viewer"})
-        client.put("/api/users/flt_user", json={"groups": ["ghost_group"]})
+        resp = client.put("/api/users/flt_user", json={"groups": ["ghost_group"]})
+        assert resp.status_code == 400
         users = client.get("/api/users").get_json()
         assert users["flt_user"].get("groups", []) == []
 
@@ -324,8 +326,9 @@ class TestGroupPermissions:
             "label": "Bad", "description": "", "roles": ["fake_role"],
         }
         admin._users["admin"]["groups"] = ["bad_role_grp"]
-        me = client.get("/api/me").get_json()
+        perms = client.get("/api/me").get_json()["permissions"]
         # admin still has all perms from their admin role, but fake_role adds nothing
+        assert "fake_role" not in perms
         admin._users["admin"].pop("groups", None)
         del admin._groups["bad_role_grp"]
 
@@ -434,3 +437,146 @@ class TestGroupPermissions:
         _login(client, "grp_editor", "testpass")
         resp = client.put("/api/groups/edit_target", json={"label": "Updated"})
         assert resp.status_code == 200
+
+
+# ──────────────────────────────────────────────────────────────────
+# TestGroupInputValidation — strict validation of roles / members
+# ──────────────────────────────────────────────────────────────────
+
+class TestGroupInputValidation:
+    """Verify that unknown roles and members are rejected with 400."""
+
+    # --- Create group: roles -----------------------------------------------
+
+    def test_create_group_unknown_role_rejected(self, client):
+        _login(client)
+        resp = client.post("/api/groups", json={
+            "name": "bad_role_grp", "label": "Bad", "roles": ["FAKE_ROLE"],
+        })
+        assert resp.status_code == 400
+        assert "error" in resp.get_json()
+
+    def test_create_group_unknown_role_group_not_created(self, admin, client):
+        _login(client)
+        client.post("/api/groups", json={
+            "name": "ghost_role_grp", "label": "G", "roles": ["nonexistent"],
+        })
+        assert "ghost_role_grp" not in admin._groups
+
+    def test_create_group_non_list_roles_rejected(self, client):
+        _login(client)
+        resp = client.post("/api/groups", json={
+            "name": "str_role_grp", "label": "S", "roles": "viewer",
+        })
+        assert resp.status_code == 400
+
+    def test_create_group_mixed_valid_and_invalid_roles_rejected(self, client):
+        _login(client)
+        resp = client.post("/api/groups", json={
+            "name": "mix_grp", "label": "M", "roles": ["viewer", "FAKE"],
+        })
+        assert resp.status_code == 400
+        groups = client.get("/api/groups").get_json()
+        assert "mix_grp" not in groups
+
+    def test_create_group_valid_roles_accepted(self, client):
+        _login(client)
+        resp = client.post("/api/groups", json={
+            "name": "valid_role_grp", "label": "V", "roles": ["viewer", "editor"],
+        })
+        assert resp.status_code == 201
+        groups = client.get("/api/groups").get_json()
+        assert set(groups["valid_role_grp"]["roles"]) == {"viewer", "editor"}
+
+    def test_create_group_empty_roles_accepted(self, client):
+        _login(client)
+        resp = client.post("/api/groups", json={
+            "name": "no_role_grp", "label": "N", "roles": [],
+        })
+        assert resp.status_code == 201
+
+    def test_create_group_custom_role_accepted(self, client):
+        _login(client)
+        client.post("/api/roles", json={
+            "name": "custom_r", "label": "Custom",
+            "permissions": ["users_view"],
+        })
+        resp = client.post("/api/groups", json={
+            "name": "custom_role_grp", "label": "C", "roles": ["custom_r"],
+        })
+        assert resp.status_code == 201
+
+    # --- Update group: roles -----------------------------------------------
+
+    def test_update_group_unknown_role_rejected(self, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "upd_role_grp", "label": "U", "roles": []})
+        resp = client.put("/api/groups/upd_role_grp", json={"roles": ["FAKE_ROLE"]})
+        assert resp.status_code == 400
+        assert "error" in resp.get_json()
+
+    def test_update_group_unknown_role_not_persisted(self, admin, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "persist_role_grp", "label": "P", "roles": ["viewer"]})
+        client.put("/api/groups/persist_role_grp", json={"roles": ["viewer", "FAKE"]})
+        assert admin._groups["persist_role_grp"]["roles"] == ["viewer"]
+
+    def test_update_group_non_list_roles_rejected(self, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "nl_role_grp", "label": "NL", "roles": []})
+        resp = client.put("/api/groups/nl_role_grp", json={"roles": "viewer"})
+        assert resp.status_code == 400
+
+    def test_update_group_valid_roles_accepted(self, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "vr_grp", "label": "VR", "roles": ["viewer"]})
+        resp = client.put("/api/groups/vr_grp", json={"roles": ["viewer", "editor"]})
+        assert resp.status_code == 200
+        groups = client.get("/api/groups").get_json()
+        assert set(groups["vr_grp"]["roles"]) == {"viewer", "editor"}
+
+    # --- Update group: members ---------------------------------------------
+
+    def test_update_group_unknown_member_rejected(self, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "mem_grp", "label": "M", "roles": []})
+        resp = client.put("/api/groups/mem_grp", json={"members": ["ghost_user"]})
+        assert resp.status_code == 400
+        assert "error" in resp.get_json()
+
+    def test_update_group_unknown_member_not_persisted(self, admin, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "safe_mem_grp", "label": "S", "roles": []})
+        client.put("/api/groups/safe_mem_grp", json={"members": ["nobody"]})
+        members = [
+            u for u, d in admin._users.items()
+            if "safe_mem_grp" in d.get("groups", [])
+        ]
+        assert members == []
+
+    def test_update_group_non_list_members_rejected(self, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "nl_mem_grp", "label": "NL", "roles": []})
+        resp = client.put("/api/groups/nl_mem_grp", json={"members": "admin"})
+        assert resp.status_code == 400
+
+    def test_update_group_valid_member_accepted(self, admin, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "real_mem_grp", "label": "R", "roles": []})
+        resp = client.put("/api/groups/real_mem_grp", json={"members": ["admin"]})
+        assert resp.status_code == 200
+        assert "real_mem_grp" in admin._users["admin"].get("groups", [])
+
+    def test_update_group_mixed_valid_and_invalid_members_rejected(self, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "mix_mem_grp", "label": "MM", "roles": []})
+        resp = client.put("/api/groups/mix_mem_grp", json={"members": ["admin", "ghost_user"]})
+        assert resp.status_code == 400
+
+    def test_update_group_empty_members_accepted(self, admin, client):
+        _login(client)
+        client.post("/api/groups", json={"name": "empty_mem_grp", "label": "E", "roles": []})
+        client.put("/api/groups/empty_mem_grp", json={"members": ["admin"]})
+        resp = client.put("/api/groups/empty_mem_grp", json={"members": []})
+        assert resp.status_code == 200
+        assert "empty_mem_grp" not in admin._users["admin"].get("groups", [])

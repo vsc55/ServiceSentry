@@ -4,6 +4,10 @@
    ================================================================ #}
 
 // ──────────────────────────── Role management ─────────────────────
+let _rolesPage = 1;
+let _rolesPageSize = null;
+function _goRolesPage(p) { _rolesPage = p; renderRoles(); }
+function _changeRolesPageSize(v) { _rolesPageSize = parseInt(v, 10); _rolesPage = 1; renderRoles(); }
 
 function renderRoles() {
     const c = document.getElementById('roles-container');
@@ -12,16 +16,21 @@ function renderRoles() {
     const canEditRole   = rolePerms.has('roles_edit');
     const canDeleteRole = rolePerms.has('roles_delete');
     const showActions   = canEditRole || canDeleteRole;
-    const entries = Object.entries(rolesData);
-    if (!entries.length) { c.innerHTML = '<p class="text-muted">' + t('no_roles') + '</p>'; return; }
-    const PERM_L = PERM_LABELS;
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle" style="--bs-table-cell-padding-x:0.6rem">';
-    h += '<thead class="table-light"><tr><th style="white-space:nowrap">' + t('col_role_name') + '</th><th style="white-space:nowrap">' + t('col_role_label') + '</th><th>' + t('col_role_permissions') + '</th>' + (showActions ? '<th class="text-center" style="width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
-    for (const [name, rd] of entries.sort((a, b) => {
+    if (_rolesPageSize === null) _rolesPageSize = _defaultPageSize;
+    const allEntries = Object.entries(rolesData).sort((a, b) => {
         if (a[1].builtin && !b[1].builtin) return -1;
         if (!a[1].builtin && b[1].builtin) return 1;
         return a[0].localeCompare(b[0]);
-    })) {
+    });
+    if (!allEntries.length) { c.innerHTML = '<p class="text-muted">' + t('no_roles') + '</p>'; return; }
+    const total = allEntries.length;
+    const ps = _rolesPageSize || total;
+    _rolesPage = Math.max(1, Math.min(_rolesPage, Math.ceil(total / ps)));
+    const entries = allEntries.slice((_rolesPage - 1) * ps, _rolesPage * ps);
+    const PERM_L = PERM_LABELS;
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover table-striped align-middle" style="--bs-table-cell-padding-x:0.6rem">';
+    h += '<thead class="table-light"><tr><th style="white-space:nowrap">' + t('col_role_name') + '</th><th style="white-space:nowrap">' + t('col_role_label') + '</th><th>' + t('col_role_permissions') + '</th>' + (showActions ? '<th class="text-center" style="width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
+    for (const [name, rd] of entries) {
         const isEnabled = rd.builtin || rd.enabled !== false;
         const disabledRowStyle = isEnabled ? '' : ' class="table-secondary"';
         const builtinBadge = rd.builtin ? ' <span class="badge bg-secondary ms-1 fw-normal" style="font-size:0.6em;padding:0.15em 0.35em">' + t('role_builtin_badge') + '</span>' : '';
@@ -51,7 +60,8 @@ function renderRoles() {
         </tr>`;
     }
     h += '</tbody></table></div>';
-    c.innerHTML = h;
+    const pagination = _renderPagination(total, _rolesPage, _rolesPageSize, '_goRolesPage', '_changeRolesPageSize');
+    c.innerHTML = pagination + h + pagination;
 }
 
 let _editingRole = null;

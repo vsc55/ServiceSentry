@@ -4,6 +4,11 @@
    ================================================================ #}
 
 // ──────────────────────────── Users tab ───────────────────────────
+let _usersPage = 1;
+let _usersPageSize = null;
+function _goUsersPage(p) { _usersPage = p; renderUsers(); }
+function _changeUsersPageSize(v) { _usersPageSize = parseInt(v, 10); _usersPage = 1; renderUsers(); }
+
 function renderUsers() {
     const c = document.getElementById('users-container');
     if (!c) return;
@@ -11,15 +16,20 @@ function renderUsers() {
     for (const s of Object.values(sessionsData)) {
         sessionCounts[s.username] = (sessionCounts[s.username] || 0) + 1;
     }
+    if (_usersPageSize === null) _usersPageSize = _defaultPageSize;
     const names = Object.keys(usersData).sort();
     if (!names.length) { c.innerHTML = '<p class="text-muted">' + t('no_users') + '</p>'; return; }
     const userPerms = new Set(currentUser.permissions || []);
     const canEdit   = userPerms.has('users_edit');
     const canDelete = userPerms.has('users_delete');
     const showActions = canEdit || canDelete;
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle" style="--bs-table-cell-padding-x:0.6rem">';
+    const total = names.length;
+    const ps = _usersPageSize || total;
+    _usersPage = Math.max(1, Math.min(_usersPage, Math.ceil(total / ps)));
+    const pageNames = names.slice((_usersPage - 1) * ps, _usersPage * ps);
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover table-striped align-middle" style="--bs-table-cell-padding-x:0.6rem">';
     h += '<thead class="table-light"><tr><th>' + t('col_user') + '</th><th>' + t('col_name') + '</th><th class="text-center">' + t('col_role') + '</th><th class="text-center" style="width:1%;white-space:nowrap">' + t('col_sessions') + '</th>' + (showActions ? '<th class="text-center" style="width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
-    for (const uname of names) {
+    for (const uname of pageNames) {
         const u = usersData[uname];
         const role = u.role || 'viewer';
         const badge = roleBadgeClass(role);
@@ -46,7 +56,8 @@ function renderUsers() {
         </tr>`;
     }
     h += '</tbody></table></div>';
-    c.innerHTML = h;
+    const pagination = _renderPagination(total, _usersPage, _usersPageSize, '_goUsersPage', '_changeUsersPageSize');
+    c.innerHTML = pagination + h + pagination;
 }
 
 function openNewUserModal() {
@@ -94,6 +105,18 @@ async function saveUserModal() {
         const r = await apiPut('/api/users/' + encodeURIComponent(_editingUser), body);
         if (r && r.ok) {
             showToast(t('user_updated'));
+            const oldGroups = new Set(usersData[_editingUser]?.groups || []);
+            const newGroups = new Set(groups);
+            for (const g of oldGroups) {
+                if (!newGroups.has(g) && groupsData[g])
+                    groupsData[g].members = (groupsData[g].members || []).filter(m => m !== _editingUser);
+            }
+            for (const g of newGroups) {
+                if (!oldGroups.has(g) && groupsData[g]) {
+                    if (!groupsData[g].members) groupsData[g].members = [];
+                    if (!groupsData[g].members.includes(_editingUser)) groupsData[g].members.push(_editingUser);
+                }
+            }
             usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups };
             if (_editingUser === currentUser.username) {
                 currentUser.role = role;
@@ -109,12 +132,19 @@ async function saveUserModal() {
         if (r && r.status === 201) {
             showToast(t('user_created'));
             usersData[username] = { role, display_name: display_name || username, lang, groups };
+            for (const g of groups) {
+                if (groupsData[g]) {
+                    if (!groupsData[g].members) groupsData[g].members = [];
+                    if (!groupsData[g].members.includes(username)) groupsData[g].members.push(username);
+                }
+            }
         } else {
             showToast(r?.data?.error || t('create_error'), 'danger'); return;
         }
     }
     bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
     renderUsers();
+    renderGroups();
 }
 
 async function deleteUser(username) {
@@ -122,8 +152,12 @@ async function deleteUser(username) {
         const r = await apiDelete('/api/users/' + encodeURIComponent(username));
         if (r && r.status === 200 && r.data.ok) {
             showToast(t('user_deleted'));
+            for (const gd of Object.values(groupsData)) {
+                if (gd.members) gd.members = gd.members.filter(m => m !== username);
+            }
             delete usersData[username];
             renderUsers();
+            renderGroups();
         } else {
             showToast(r?.data?.error || t('delete_error'), 'danger');
         }

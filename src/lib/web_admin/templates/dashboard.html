@@ -26,6 +26,9 @@
         z-index: 9999
     }
 
+    .cfg-chevron { transition: transform .2s; }
+    .cfg-card-header[aria-expanded="false"] .cfg-chevron { transform: rotate(-90deg); }
+
     #loading {
         position: fixed;
         inset: 0;
@@ -38,6 +41,13 @@
 
     [data-bs-theme="dark"] #loading {
         background: rgba(33, 37, 41, .85)
+    }
+
+    #config-container.config-readonly input,
+    #config-container.config-readonly select,
+    #config-container.config-readonly button {
+        pointer-events: none;
+        opacity: 0.6;
     }
 </style>
 {% endblock %}
@@ -74,7 +84,7 @@
                 <i class="bi bi-gear me-1"></i>{{ i18n.tab_config }}
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" id="tab-status-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-status" type="button"
                 id="btn-tab-status">
                 <i class="bi bi-activity me-1"></i>{{ i18n.tab_status }}
@@ -171,7 +181,10 @@
                     <div class="card mb-3" id="sessions-panel">
                         <div class="card-header d-flex align-items-center py-2">
                             <h6 class="mb-0"><i class="bi bi-plug me-2"></i><span id="sessions-title">{{ i18n.active_sessions }}</span></h6>
-                            <button class="btn btn-sm btn-outline-danger ms-auto" onclick="invalidateAllSessions()">
+                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh }}">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger ms-1" onclick="invalidateAllSessions()">
                                 <i class="bi bi-x-circle me-1"></i>{{ i18n.close_all_sessions }}
                             </button>
                         </div>
@@ -180,38 +193,49 @@
                 </div>
                 <!-- Users sub-tab -->
                 <div class="tab-pane fade" id="subtab-users">
-                    <div class="d-flex align-items-center mb-3">
-                        <h5 class="mb-0"><i class="bi bi-people me-2"></i>{{ i18n.user_management }}</h5>
-                        <button class="btn btn-sm btn-success ms-auto" id="btnNewUser" onclick="openNewUserModal()">
-                            <i class="bi bi-person-plus me-1"></i>{{ i18n.new_user }}
-                        </button>
+                    <div class="card mb-3">
+                        <div class="card-header d-flex align-items-center py-2">
+                            <h6 class="mb-0"><i class="bi bi-people me-2"></i>{{ i18n.user_management }}</h6>
+                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh }}">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <button class="btn btn-sm btn-success ms-1" id="btnNewUser" onclick="openNewUserModal()">
+                                <i class="bi bi-person-plus me-1"></i>{{ i18n.new_user }}
+                            </button>
+                        </div>
+                        <div class="card-body py-2" id="users-container"></div>
                     </div>
-                    <div id="users-container"></div>
                 </div>
                 <!-- Groups sub-tab -->
                 <div class="tab-pane fade" id="subtab-groups">
-                    <div id="groups-section">
-                        <div class="d-flex align-items-center mb-3">
-                            <h5 class="mb-0"><i class="bi bi-collection me-2"></i>{{ i18n.group_management }}</h5>
-                            <button class="btn btn-sm btn-success ms-auto" onclick="openNewGroupModal()"
+                    <div class="card mb-3">
+                        <div class="card-header d-flex align-items-center py-2">
+                            <h6 class="mb-0"><i class="bi bi-collection me-2"></i>{{ i18n.group_management }}</h6>
+                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh }}">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <button class="btn btn-sm btn-success ms-1" onclick="openNewGroupModal()"
                                 id="btnNewGroup" style="display:none">
                                 <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_group }}
                             </button>
                         </div>
-                        <div id="groups-container"></div>
+                        <div class="card-body py-2" id="groups-container"></div>
                     </div>
                 </div>
                 <!-- Roles sub-tab -->
                 <div class="tab-pane fade" id="subtab-roles">
-                    <div id="roles-section">
-                        <div class="d-flex align-items-center mb-3">
-                            <h5 class="mb-0"><i class="bi bi-shield-lock me-2"></i>{{ i18n.role_management }}</h5>
-                            <button class="btn btn-sm btn-success ms-auto" onclick="openNewRoleModal()"
+                    <div class="card mb-3">
+                        <div class="card-header d-flex align-items-center py-2">
+                            <h6 class="mb-0"><i class="bi bi-shield-lock me-2"></i>{{ i18n.role_management }}</h6>
+                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh }}">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <button class="btn btn-sm btn-success ms-1" onclick="openNewRoleModal()"
                                 id="btnNewRole" style="display:none">
                                 <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_role }}
                             </button>
                         </div>
-                        <div id="roles-container"></div>
+                        <div class="card-body py-2" id="roles-container"></div>
                     </div>
                 </div>
             </div>
@@ -314,6 +338,25 @@
 
 <!-- Modals & Toast -->
 {% include "partials/_modals.html" %}
+
+<!-- Widget config modal -->
+<div class="modal fade" id="widgetConfigModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">{{ i18n.widget_config_title }}</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <ul class="list-group list-group-flush" id="widgetList"></ul>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" onclick="_widgetReset()">{{ i18n.widget_reset }}</button>
+        <button class="btn btn-sm btn-primary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

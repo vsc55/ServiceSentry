@@ -5,9 +5,8 @@
 // ──────────────────────────── Overview ────────────────────────────
 let _overviewTimer = null;
 
-function _renderRefreshBar(containerId, renderFn, timerGet, timerSet) {
+function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '') {
     const intervals = [0, 10, 30, 60];
-    const current = timerGet() ? 1 : 0; // just need the active interval
     let h = `<div class="d-flex flex-wrap align-items-center gap-2 mb-3">`;
     h += `<button class="btn btn-sm btn-outline-secondary" onclick="${renderFn}()">`;
     h += `<i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`;
@@ -21,7 +20,9 @@ function _renderRefreshBar(containerId, renderFn, timerGet, timerSet) {
         h += `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-outline-primary'}" `;
         h += `onclick="${timerSet}(${s})">${label}</button>`;
     }
-    h += `</div></div>`;
+    h += `</div>`;
+    if (extraBtns) h += extraBtns;
+    h += `</div>`;
     return h;
 }
 
@@ -29,7 +30,6 @@ function setOverviewAutoRefresh(seconds) {
     if (_overviewTimer) { clearInterval(_overviewTimer._id); _overviewTimer = null; }
     if (seconds > 0) {
         const id = setInterval(() => {
-            // Only refresh if the overview tab is visible
             const pane = document.getElementById('tab-overview');
             if (pane && pane.classList.contains('active')) renderOverview();
         }, seconds * 1000);
@@ -38,6 +38,89 @@ function setOverviewAutoRefresh(seconds) {
     renderOverview();
 }
 
+// ──────────────────────────── Widget config ────────────────────────
+const _WIDGET_IDS = ['modules', 'checks', 'sessions', 'users', 'groups', 'roles'];
+
+function _widgetKey() { return 'ss_widgets_' + (currentUser.username || '_'); }
+
+function _loadWidgetCfg() {
+    try {
+        const raw = localStorage.getItem(_widgetKey());
+        if (raw) {
+            const p = JSON.parse(raw);
+            const known = new Set(_WIDGET_IDS);
+            const order = (Array.isArray(p.order) ? p.order : []).filter(id => known.has(id));
+            for (const id of _WIDGET_IDS) if (!order.includes(id)) order.push(id);
+            return { order, hidden: new Set(Array.isArray(p.hidden) ? p.hidden : []) };
+        }
+    } catch (_) {}
+    return { order: [..._WIDGET_IDS], hidden: new Set() };
+}
+
+function _saveWidgetCfg(cfg) {
+    localStorage.setItem(_widgetKey(), JSON.stringify({ order: cfg.order, hidden: [...cfg.hidden] }));
+}
+
+function openWidgetConfig() {
+    const cfg = _loadWidgetCfg();
+    const labels = {
+        modules:  t('overview_modules'),
+        checks:   t('overview_status'),
+        sessions: t('overview_sessions'),
+        users:    t('overview_users'),
+        groups:   t('overview_groups'),
+        roles:    t('overview_roles'),
+    };
+    let rows = '';
+    cfg.order.forEach((id, i) => {
+        const checked = !cfg.hidden.has(id) ? 'checked' : '';
+        const isFirst = i === 0, isLast = i === cfg.order.length - 1;
+        rows += `<li class="list-group-item d-flex align-items-center gap-2" data-wid="${escAttr(id)}">
+          <input class="form-check-input flex-shrink-0" type="checkbox" ${checked}
+            onchange="_widgetToggle(this,'${escAttr(id)}')">
+          <span class="flex-grow-1 ms-1">${esc(labels[id] || id)}</span>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary py-0" onclick="_widgetMove('${escAttr(id)}',-1)"
+              ${isFirst ? 'disabled' : ''}><i class="bi bi-chevron-up"></i></button>
+            <button class="btn btn-outline-secondary py-0" onclick="_widgetMove('${escAttr(id)}',1)"
+              ${isLast ? 'disabled' : ''}><i class="bi bi-chevron-down"></i></button>
+          </div>
+        </li>`;
+    });
+    document.getElementById('widgetList').innerHTML = rows;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('widgetConfigModal')).show();
+}
+
+function _widgetCurrentOrder() {
+    return [...document.querySelectorAll('#widgetList [data-wid]')].map(el => el.dataset.wid);
+}
+
+function _widgetToggle(cb, id) {
+    const cfg = _loadWidgetCfg();
+    cfg.order = _widgetCurrentOrder();
+    if (cb.checked) cfg.hidden.delete(id); else cfg.hidden.add(id);
+    _saveWidgetCfg(cfg);
+}
+
+function _widgetMove(id, dir) {
+    const cfg = _loadWidgetCfg();
+    cfg.order = _widgetCurrentOrder();
+    const i = cfg.order.indexOf(id);
+    if (i < 0) return;
+    const j = i + dir;
+    if (j < 0 || j >= cfg.order.length) return;
+    [cfg.order[i], cfg.order[j]] = [cfg.order[j], cfg.order[i]];
+    _saveWidgetCfg(cfg);
+    openWidgetConfig();
+}
+
+function _widgetReset() {
+    localStorage.removeItem(_widgetKey());
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('widgetConfigModal')).hide();
+    renderOverview();
+}
+
+// ──────────────────────────── Render overview ─────────────────────
 async function renderOverview() {
     const c = document.getElementById('overview-container');
     if (!c) return;
@@ -49,89 +132,130 @@ async function renderOverview() {
     }
 
     const isAdmin = currentUser.role === 'admin';
+    const perms = new Set(currentUser.permissions || []);
+    const canViewModules = perms.has('modules_view');
     const modules = data.modules || [];
     const status = data.status || {};
     const sessions = data.sessions || {};
     const users = data.users || {};
+    const groups = data.groups || {};
+    const roles = data.roles || {};
     const events = data.last_events || [];
     const enabledCount = modules.filter(m => m.enabled).length;
     const disabledCount = modules.length - enabledCount;
 
+    // ── Card builders ─────────────────────────────────────────────
+    const cardOf = {
+        modules: () => `<div class="col-sm-6 col-xl-3">
+          <div class="card h-100 border-start border-4 border-primary">
+            <div class="card-body">
+              <div class="d-flex align-items-center mb-2">
+                <i class="bi bi-puzzle fs-4 text-primary me-2"></i>
+                <h6 class="card-title mb-0">${t('overview_modules')}</h6>
+              </div>
+              <div class="fs-2 fw-bold">${modules.length}</div>
+              <small class="text-success">${enabledCount} ${t('overview_enabled')}</small>
+              ${disabledCount ? ' · <small class="text-secondary">' + disabledCount + ' ' + t('overview_disabled') + '</small>' : ''}
+            </div>
+          </div>
+        </div>`,
+
+        checks: () => {
+            const hasErrors = status.error > 0;
+            const border = status.total === 0 ? 'secondary' : hasErrors ? 'danger' : 'success';
+            const icon = status.total === 0 ? 'bi-dash-circle' : hasErrors ? 'bi-exclamation-triangle' : 'bi-check-circle';
+            const label = status.total === 0
+                ? t('overview_no_status')
+                : hasErrors ? tf('overview_has_errors', status.error) : t('overview_all_ok');
+            return `<div class="col-sm-6 col-xl-3">
+              <div class="card h-100 border-start border-4 border-${border}">
+                <div class="card-body">
+                  <div class="d-flex align-items-center mb-2">
+                    <i class="bi ${icon} fs-4 text-${border} me-2"></i>
+                    <h6 class="card-title mb-0">${t('overview_status')}</h6>
+                  </div>
+                  <div class="fs-2 fw-bold">${status.total}</div>
+                  <small class="text-${border}">${label}</small>
+                </div>
+              </div>
+            </div>`;
+        },
+
+        sessions: () => `<div class="col-sm-6 col-xl-3">
+          <div class="card h-100 border-start border-4 border-info">
+            <div class="card-body">
+              <div class="d-flex align-items-center mb-2">
+                <i class="bi bi-plug fs-4 text-info me-2"></i>
+                <h6 class="card-title mb-0">${t('overview_sessions')}</h6>
+              </div>
+              <div class="fs-2 fw-bold">${sessions.active || 0}</div>
+            </div>
+          </div>
+        </div>`,
+
+        users: () => {
+            const byRole = users.by_role || {};
+            const parts = Object.entries(byRole).map(
+                ([r, n]) => `<span class="badge ${roleBadgeClass(r)} me-1">${n} ${esc((rolesData[r] && rolesData[r].label) || ROLE_LABELS[r] || r)}</span>`
+            ).join(' ');
+            return `<div class="col-sm-6 col-xl-3">
+              <div class="card h-100 border-start border-4 border-warning">
+                <div class="card-body">
+                  <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-people fs-4 text-warning me-2"></i>
+                    <h6 class="card-title mb-0">${t('overview_users')}</h6>
+                  </div>
+                  <div class="fs-2 fw-bold">${users.total || 0}</div>
+                  <small>${parts || '—'}</small>
+                </div>
+              </div>
+            </div>`;
+        },
+
+        groups: () => `<div class="col-sm-6 col-xl-3">
+          <div class="card h-100 border-start border-4 border-secondary">
+            <div class="card-body">
+              <div class="d-flex align-items-center mb-2">
+                <i class="bi bi-diagram-3 fs-4 text-secondary me-2"></i>
+                <h6 class="card-title mb-0">${t('overview_groups')}</h6>
+              </div>
+              <div class="fs-2 fw-bold">${groups.total || 0}</div>
+              ${groups.members ? `<small class="text-muted">${tf('overview_members', groups.members)}</small>` : ''}
+            </div>
+          </div>
+        </div>`,
+
+        roles: () => `<div class="col-sm-6 col-xl-3">
+          <div class="card h-100 border-start border-4 border-dark">
+            <div class="card-body">
+              <div class="d-flex align-items-center mb-2">
+                <i class="bi bi-shield-half fs-4 text-dark me-2"></i>
+                <h6 class="card-title mb-0">${t('overview_roles')}</h6>
+              </div>
+              <div class="fs-2 fw-bold">${roles.total || 0}</div>
+              ${roles.custom ? `<small class="text-muted">${tf('overview_custom_roles', roles.custom)}</small>` : ''}
+            </div>
+          </div>
+        </div>`,
+    };
+
+    const configureBtnHtml = `<button class="btn btn-sm btn-outline-secondary ms-auto" onclick="openWidgetConfig()">
+        <i class="bi bi-grid me-1"></i>${t('widget_configure')}</button>`;
+
     let h = _renderRefreshBar('overview-container', 'renderOverview',
-        () => _overviewTimer, 'setOverviewAutoRefresh');
+        () => _overviewTimer, 'setOverviewAutoRefresh', configureBtnHtml);
+
+    // ── Render cards in configured order ──────────────────────────
+    const wCfg = _loadWidgetCfg();
     h += '<div class="row g-3 mb-4">';
-
-    // ── Card: Modules ─────────────────────────────────────────────
-    h += `<div class="col-sm-6 col-xl-3">
-      <div class="card h-100 border-start border-4 border-primary">
-        <div class="card-body">
-          <div class="d-flex align-items-center mb-2">
-            <i class="bi bi-puzzle fs-4 text-primary me-2"></i>
-            <h6 class="card-title mb-0">${t('overview_modules')}</h6>
-          </div>
-          <div class="fs-2 fw-bold">${modules.length}</div>
-          <small class="text-success">${enabledCount} ${t('overview_enabled')}</small>
-          ${disabledCount ? ' · <small class="text-secondary">' + disabledCount + ' ' + t('overview_disabled') + '</small>' : ''}
-        </div>
-      </div>
-    </div>`;
-
-    // ── Card: Checks ──────────────────────────────────────────────
-    const hasErrors = status.error > 0;
-    const statusBorder = status.total === 0 ? 'secondary' : hasErrors ? 'danger' : 'success';
-    const statusIcon = status.total === 0 ? 'bi-dash-circle' : hasErrors ? 'bi-exclamation-triangle' : 'bi-check-circle';
-    const statusLabel = status.total === 0
-        ? t('overview_no_status')
-        : hasErrors ? tf('overview_has_errors', status.error) : t('overview_all_ok');
-    h += `<div class="col-sm-6 col-xl-3">
-      <div class="card h-100 border-start border-4 border-${statusBorder}">
-        <div class="card-body">
-          <div class="d-flex align-items-center mb-2">
-            <i class="bi ${statusIcon} fs-4 text-${statusBorder} me-2"></i>
-            <h6 class="card-title mb-0">${t('overview_status')}</h6>
-          </div>
-          <div class="fs-2 fw-bold">${status.total}</div>
-          <small class="text-${statusBorder}">${statusLabel}</small>
-        </div>
-      </div>
-    </div>`;
-
-    // ── Card: Sessions ────────────────────────────────────────────
-    h += `<div class="col-sm-6 col-xl-3">
-      <div class="card h-100 border-start border-4 border-info">
-        <div class="card-body">
-          <div class="d-flex align-items-center mb-2">
-            <i class="bi bi-plug fs-4 text-info me-2"></i>
-            <h6 class="card-title mb-0">${t('overview_sessions')}</h6>
-          </div>
-          <div class="fs-2 fw-bold">${sessions.active || 0}</div>
-          <small class="text-muted">${t('overview_connected_users')}: ${(sessions.users || []).map(u => esc(u)).join(', ') || '—'}</small>
-        </div>
-      </div>
-    </div>`;
-
-    // ── Card: Users ───────────────────────────────────────────────
-    const byRole = users.by_role || {};
-    const roleParts = Object.entries(byRole).map(
-        ([r, n]) => `<span class="badge ${roleBadgeClass(r)} me-1">${n} ${esc((rolesData[r] && rolesData[r].label) || ROLE_LABELS[r] || r)}</span>`
-    ).join(' ');
-    h += `<div class="col-sm-6 col-xl-3">
-      <div class="card h-100 border-start border-4 border-warning">
-        <div class="card-body">
-          <div class="d-flex align-items-center mb-2">
-            <i class="bi bi-people fs-4 text-warning me-2"></i>
-            <h6 class="card-title mb-0">${t('overview_users')}</h6>
-          </div>
-          <div class="fs-2 fw-bold">${users.total || 0}</div>
-          <small>${roleParts || '—'}</small>
-        </div>
-      </div>
-    </div>`;
-
-    h += '</div>'; // end row cards
+    for (const id of wCfg.order) {
+        if (!wCfg.hidden.has(id) && cardOf[id]) h += cardOf[id]();
+    }
+    h += '</div>';
 
     // ── Module list ───────────────────────────────────────────────
     h += '<div class="row g-3">';
+    if (canViewModules) {
     h += '<div class="col-lg-6">';
     h += `<div class="card">
       <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>${t('overview_modules')}</h6></div>
@@ -154,6 +278,7 @@ async function renderOverview() {
         </tr>`;
     }
     h += '</tbody></table></div></div></div></div>';
+    }
 
     // ── Recent activity (admin only) ──────────────────────────────
     if (isAdmin && events.length) {

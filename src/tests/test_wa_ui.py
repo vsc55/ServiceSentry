@@ -118,7 +118,9 @@ class TestConfigDarkMode:
         """The config tab JS ensures web_admin.dark_mode is rendered."""
         _login(client)
         html = client.get("/").data
-        assert b"configData.web_admin.dark_mode" in html
+        # _js_config.html pre-populates web_admin fields via the 'wa' alias:
+        # const wa = configData.web_admin; ... if (!('dark_mode' in wa)) wa.dark_mode = ...
+        assert b"wa.dark_mode" in html
 
 
 # ──────────────────────────── Internationalisation ─────────────────

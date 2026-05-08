@@ -22,6 +22,10 @@ function updateArray(target, pathStr, csv) {
     const arr = csv.split(',').map(s => s.trim()).filter(Boolean);
     updateField(target, pathStr, arr);
 }
+function updateIntArray(target, pathStr, csv) {
+    const arr = csv.split(',').map(s => parseInt(s.trim(), 10)).filter(s => !isNaN(s) && s >= 0);
+    updateField(target, pathStr, arr);
+}
 
 function toggleModule(name, on) {
     modulesData[name].enabled = on;
@@ -167,7 +171,16 @@ async function saveConfig() {
     if (r && r.ok) {
         showToast(t('config_saved'));
         clearDirty('config');
-        _serverConfigData = deepClone(configData); // update snapshot after successful save
+        _serverConfigData = deepClone(configData);
+        const rawPS = configData?.web_admin?.page_sizes;
+        if (Array.isArray(rawPS) && rawPS.length > 0) {
+            const parsed = rawPS.map(s => parseInt(s, 10)).filter(s => !isNaN(s) && s >= 0);
+            if (parsed.length > 0) _PAGE_SIZES = parsed;
+        }
+        _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
+        if (configSchema['web_admin|default_page_size']) {
+            configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
+        }
     } else showToast(r?.error || t('save_error'), 'danger');
 }
 async function reloadConfig() {
@@ -175,6 +188,15 @@ async function reloadConfig() {
     if (!data) return;
     configData = data;
     _serverConfigData = deepClone(configData);
+    _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
+    const _rawPS = configData?.web_admin?.page_sizes;
+    if (Array.isArray(_rawPS) && _rawPS.length > 0) {
+        const _parsedPS = _rawPS.map(s => parseInt(s, 10)).filter(s => !isNaN(s) && s >= 0);
+        if (_parsedPS.length > 0) _PAGE_SIZES = _parsedPS;
+    }
+    if (configSchema['web_admin|default_page_size']) {
+        configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
+    }
     clearDirty('config');
     renderConfig();
     showToast(t('config_reloaded'));

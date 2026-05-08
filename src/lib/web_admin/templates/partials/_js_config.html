@@ -5,22 +5,50 @@
 // ──────────────────────────── Config tab ──────────────────────────
 function renderConfig() {
     const c = document.getElementById('config-container');
-    // Ensure web_admin.lang is visible in config editor
+    // Save collapse state so re-renders preserve open/closed panels
+    const prevState = {};
+    c.querySelectorAll('[id^="cfgcol_"]').forEach(el => {
+        prevState[el.id] = el.classList.contains('show');
+    });
+    // Pre-populate all web_admin fields
     if (!configData.web_admin) configData.web_admin = {};
-    if (!('lang' in configData.web_admin)) configData.web_admin.lang = SYSTEM_DEFAULT_LANG;
-    if (!('dark_mode' in configData.web_admin)) configData.web_admin.dark_mode = false;
-    if (!('secure_cookies' in configData.web_admin)) configData.web_admin.secure_cookies = WA_SECURE_COOKIES;
-    if (!('remember_me_days' in configData.web_admin)) configData.web_admin.remember_me_days = WA_REMEMBER_ME_DAYS;
-    if (!('audit_max_entries' in configData.web_admin)) configData.web_admin.audit_max_entries = WA_AUDIT_MAX_ENTRIES;
-    if (!('pw_min_len' in configData.web_admin)) configData.web_admin.pw_min_len = WA_PW_MIN_LEN;
-    if (!('pw_max_len' in configData.web_admin)) configData.web_admin.pw_max_len = WA_PW_MAX_LEN;
-    if (!('pw_require_upper' in configData.web_admin)) configData.web_admin.pw_require_upper = WA_PW_REQUIRE_UPPER;
-    if (!('pw_require_digit' in configData.web_admin)) configData.web_admin.pw_require_digit = WA_PW_REQUIRE_DIGIT;
-    if (!('pw_require_symbol' in configData.web_admin)) configData.web_admin.pw_require_symbol = WA_PW_REQUIRE_SYMBOL;
-    if (!('public_status' in configData.web_admin)) configData.web_admin.public_status = WA_PUBLIC_STATUS;
-    if (!('status_refresh_secs' in configData.web_admin)) configData.web_admin.status_refresh_secs = WA_STATUS_REFRESH_SECS;
-    if (!('status_lang' in configData.web_admin)) configData.web_admin.status_lang = WA_STATUS_LANG;
-    if (!('proxy_count' in configData.web_admin)) configData.web_admin.proxy_count = WA_PROXY_COUNT;
+    const wa = configData.web_admin;
+    if (!('lang'              in wa)) wa.lang              = SYSTEM_DEFAULT_LANG;
+    if (!('dark_mode'         in wa)) wa.dark_mode         = false;
+    if (!('secure_cookies'    in wa)) wa.secure_cookies    = WA_SECURE_COOKIES;
+    if (!('remember_me_days'  in wa)) wa.remember_me_days  = WA_REMEMBER_ME_DAYS;
+    if (!('audit_max_entries' in wa)) wa.audit_max_entries = WA_AUDIT_MAX_ENTRIES;
+    if (!('pw_min_len'        in wa)) wa.pw_min_len        = WA_PW_MIN_LEN;
+    if (!('pw_max_len'        in wa)) wa.pw_max_len        = WA_PW_MAX_LEN;
+    if (!('pw_require_upper'  in wa)) wa.pw_require_upper  = WA_PW_REQUIRE_UPPER;
+    if (!('pw_require_digit'  in wa)) wa.pw_require_digit  = WA_PW_REQUIRE_DIGIT;
+    if (!('pw_require_symbol' in wa)) wa.pw_require_symbol = WA_PW_REQUIRE_SYMBOL;
+    if (!('public_status'     in wa)) wa.public_status     = WA_PUBLIC_STATUS;
+    if (!('status_refresh_secs' in wa)) wa.status_refresh_secs = WA_STATUS_REFRESH_SECS;
+    if (!('status_lang'       in wa)) wa.status_lang       = WA_STATUS_LANG;
+    if (!('proxy_count'       in wa)) wa.proxy_count       = WA_PROXY_COUNT;
+    if (!('default_page_size' in wa)) wa.default_page_size = _defaultPageSize;
+    if (!('page_sizes'        in wa)) wa.page_sizes        = [..._PAGE_SIZES];
+
+    function cfgCardOpen(id, icon, title) {
+        const isShow = prevState[id] !== false;
+        return `<div class="card mb-3">
+            <div class="card-header d-flex align-items-center fw-semibold py-2 cfg-card-header"
+                 style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#${id}"
+                 aria-expanded="${isShow}" aria-controls="${id}">
+                <span class="me-auto">${icon}${esc(title)}</span>
+                <i class="bi bi-chevron-down cfg-chevron text-muted small"></i>
+            </div>
+            <div class="collapse${isShow ? ' show' : ''}" id="${id}">
+                <div class="card-body py-2">`;
+    }
+    const cfgCardClose = `</div></div></div>`;
+
+    const WA_EXCLUDE = [
+        'pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol',
+        'public_status', 'status_refresh_secs', 'status_lang',
+        'proxy_count', 'audit_sort', 'default_page_size', 'page_sizes',
+    ];
     const order = ['daemon', 'global', 'telegram', 'web_admin'];
     const sections = Object.keys(configData).sort((a, b) => {
         const ai = order.indexOf(a), bi = order.indexOf(b);
@@ -31,51 +59,39 @@ function renderConfig() {
         const data = configData[sec];
         if (typeof data !== 'object' || data === null) continue;
         const lbl = SECTION_LABELS[sec] || sec;
+        const cfgId = 'cfgcol_' + sec;
         let extra = '';
         if (sec === 'telegram') {
             extra = `<hr class="my-2"><button class="btn btn-outline-info btn-sm" onclick="testTelegram()" id="btnTestTelegram">
                 <i class="bi bi-telegram me-1"></i>${t('telegram_test')}
             </button>`;
         }
-        h += `<div class="card mb-3">
-        <div class="card-header fw-semibold py-2">
-            <i class="bi bi-gear me-1"></i>${esc(lbl)}
-        </div>
-        <div class="card-body py-2">
-            ${renderScalarFields(data, sec, 'config', sec === 'web_admin' ? ['pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol', 'public_status', 'status_refresh_secs', 'status_lang'] : [])}
-            ${extra}
-        </div></div>`;
+        h += cfgCardOpen(cfgId, '<i class="bi bi-gear me-1"></i>', lbl);
+        h += renderScalarFields(data, sec, 'config', sec === 'web_admin' ? WA_EXCLUDE : []);
+        h += extra;
+        h += cfgCardClose;
     }
+
     // Password policy card
     const pwFields = ['pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol'];
-    h += `<div class="card mb-3">
-        <div class="card-header fw-semibold py-2">
-            <i class="bi bi-shield-lock me-1"></i>${esc(t('pw_policy_section'))}
-        </div>
-        <div class="card-body py-2">
-            ${renderScalarFields(Object.fromEntries(pwFields.map(f => [f, configData.web_admin[f]])), 'web_admin', 'config', [])}
-        </div></div>`;
-    // Public Status page card
+    h += cfgCardOpen('cfgcol_pw_policy', '<i class="bi bi-shield-lock me-1"></i>', t('pw_policy_section'));
+    h += renderScalarFields(Object.fromEntries(pwFields.map(f => [f, wa[f]])), 'web_admin', 'config', []);
+    h += cfgCardClose;
+
+    // Public status card
     const psFields = ['public_status', 'status_refresh_secs', 'status_lang'];
-    h += `<div class="card mb-3">
-        <div class="card-header fw-semibold py-2">
-            <i class="bi bi-globe me-1"></i>${esc(t('public_status_section'))}
-        </div>
-        <div class="card-body py-2">
-            ${renderScalarFields(Object.fromEntries(psFields.map(f => [f, configData.web_admin[f]])), 'web_admin', 'config', [])}
-        </div></div>`;
+    h += cfgCardOpen('cfgcol_pub_status', '<i class="bi bi-globe me-1"></i>', t('public_status_section'));
+    h += renderScalarFields(Object.fromEntries(psFields.map(f => [f, wa[f]])), 'web_admin', 'config', []);
+    h += cfgCardClose;
+
     // Reverse proxy card
-    const rpFields = ['proxy_count'];
-    h += `<div class="card mb-3">
-        <div class="card-header fw-semibold py-2">
-            <i class="bi bi-diagram-3 me-1"></i>${esc(t('proxy_section'))}
-        </div>
-        <div class="card-body py-2">
-            ${renderScalarFields(Object.fromEntries(rpFields.map(f => [f, configData.web_admin[f]])), 'web_admin', 'config', [])}
-        </div></div>`;
-    // Audit preferences card — audit_sort rendered with the same 2-col layout
+    h += cfgCardOpen('cfgcol_proxy', '<i class="bi bi-diagram-3 me-1"></i>', t('proxy_section'));
+    h += renderScalarFields({ proxy_count: wa.proxy_count }, 'web_admin', 'config', []);
+    h += cfgCardClose;
+
+    // Audit preferences card — audit_sort rendered with a custom select
     const _auditSortPath = 'web_admin|audit_sort';
-    const auditSort = configData?.web_admin?.audit_sort || 'time';
+    const auditSort = wa.audit_sort || 'time';
     const _auditHint = fieldHint(_auditSortPath);
     const _auditInfoIcon = _auditHint
         ? ` <i class="bi bi-info-circle text-muted" style="cursor:help;font-size:.85em"
@@ -88,22 +104,44 @@ function renderConfig() {
         title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
     const auditSortOpts = [['time', t('col_time')], ['event', t('col_event')], ['user', t('col_user')], ['ip', t('col_ip')]]
         .map(([v, lbl]) => `<option value="${v}" ${auditSort === v ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
-    h += `<div class="card mb-3">
-        <div class="card-header fw-semibold py-2">
-            <i class="bi bi-journal-text me-1"></i>${t('tab_audit')}
-        </div>
-        <div class="card-body py-2">
-            <div class="row mb-2 align-items-center">
-                <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort'))}${_auditInfoIcon}</label>
-                <div class="col-sm-8 d-flex gap-1 align-items-center">
-                    <select class="form-select form-select-sm flex-grow-1"
-                        onchange="configData.web_admin = configData.web_admin || {}; configData.web_admin.audit_sort = this.value; markDirty('config')">
-                        ${auditSortOpts}
-                    </select>${_auditResetBtn}
-                </div>
-            </div>
+    h += cfgCardOpen('cfgcol_audit', '<i class="bi bi-journal-text me-1"></i>', t('tab_audit'));
+    h += `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort'))}${_auditInfoIcon}</label>
+        <div class="col-sm-8 d-flex gap-1 align-items-center">
+            <select class="form-select form-select-sm flex-grow-1"
+                onchange="configData.web_admin = configData.web_admin || {}; configData.web_admin.audit_sort = this.value; markDirty('config')">
+                ${auditSortOpts}
+            </select>${_auditResetBtn}
         </div>
     </div>`;
+    h += cfgCardClose;
+
+    // Tables card — default_page_size select + page_sizes text input
+    const _psPath = 'web_admin|page_sizes';
+    const _psHint = fieldHint(_psPath);
+    const _psInfoIcon = _psHint
+        ? ` <i class="bi bi-info-circle text-muted" style="cursor:help;font-size:.85em"
+            data-bs-toggle="tooltip" data-bs-placement="top"
+            title="${escAttr(_psHint)}"></i>`
+        : '';
+    const _psResetBtn = `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0"
+        onclick="resetConfigField('${escAttr(_psPath)}')"
+        data-bs-toggle="tooltip" data-bs-placement="top"
+        title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
+    const psLabel = esc(LABELS['page_sizes'] || t('page_sizes'));
+    const psValue = escAttr((wa.page_sizes || _PAGE_SIZES).join(', '));
+    h += cfgCardOpen('cfgcol_tables', '<i class="bi bi-table me-1"></i>', t('tables_section'));
+    h += renderField('default_page_size', wa.default_page_size, 'web_admin|default_page_size', 'config');
+    h += `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${psLabel}${_psInfoIcon}</label>
+        <div class="col-sm-8 d-flex gap-1 align-items-center">
+            <input type="text" class="form-control form-control-sm flex-grow-1"
+                value="${psValue}" placeholder="25, 50, 100, 200, 0"
+                onchange="updateIntArray('config','${_psPath}',this.value)">${_psResetBtn}
+        </div>
+    </div>`;
+    h += cfgCardClose;
+
     c.innerHTML = h;
     initTooltips(c);
 }

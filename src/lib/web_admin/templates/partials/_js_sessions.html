@@ -3,19 +3,28 @@
    ================================================================ #}
 
 // ──────────────────────────── Session management ─────────────────
+let _sessionsPage = 1;
+let _sessionsPageSize = null;
+function _goSessionsPage(p) { _sessionsPage = p; renderSessions(); }
+function _changeSessionsPageSize(v) { _sessionsPageSize = parseInt(v, 10); _sessionsPage = 1; renderSessions(); }
 
 function renderSessions() {
     const c = document.getElementById('sessions-container');
     if (!c) return;
-    const entries = Object.entries(sessionsData);
+    if (_sessionsPageSize === null) _sessionsPageSize = _defaultPageSize;
+    const allEntries = Object.entries(sessionsData);
     const title = document.getElementById('sessions-title');
-    if (title) title.textContent = t('active_sessions') + ' (' + entries.length + ')';
-    if (!entries.length) {
+    if (title) title.textContent = t('active_sessions') + ' (' + allEntries.length + ')';
+    if (!allEntries.length) {
         c.innerHTML = '<p class="text-muted small mb-0">' + t('no_active_sessions') + '</p>';
         return;
     }
-    entries.sort((a, b) => (b[1].last_seen || '').localeCompare(a[1].last_seen || ''));
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">';
+    allEntries.sort((a, b) => (b[1].last_seen || '').localeCompare(a[1].last_seen || ''));
+    const total = allEntries.length;
+    const ps = _sessionsPageSize || total;
+    _sessionsPage = Math.max(1, Math.min(_sessionsPage, Math.ceil(total / ps)));
+    const entries = allEntries.slice((_sessionsPage - 1) * ps, _sessionsPage * ps);
+    let h = '<div class="table-responsive"><table class="table table-sm table-hover table-striped align-middle mb-0">';
     h += '<thead class="table-light"><tr><th>' + t('col_user') + '</th><th>' + t('col_ip') + '</th><th>' + t('col_created') + '</th><th>' + t('col_last_seen') + '</th><th style="width:70px"></th></tr></thead><tbody>';
     for (const [sid, s] of entries) {
         const isCurrent = !!s.is_current;
@@ -31,7 +40,8 @@ function renderSessions() {
         </tr>`;
     }
     h += '</tbody></table></div>';
-    c.innerHTML = h;
+    const pagination = _renderPagination(total, _sessionsPage, _sessionsPageSize, '_goSessionsPage', '_changeSessionsPageSize');
+    c.innerHTML = pagination + h + pagination;
 }
 
 async function revokeSession(sid) {

@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_21_flags(self):
+    def test_permissions_tuple_has_23_flags(self):
         from lib.web_admin.app import PERMISSIONS
-        assert len(PERMISSIONS) == 21
+        assert len(PERMISSIONS) == 23
 
     def test_permissions_are_unique(self):
         from lib.web_admin.app import PERMISSIONS
@@ -41,9 +41,10 @@ class TestPermissionsConstants:
             'roles_view', 'roles_add', 'roles_edit', 'roles_delete',
             'groups_view', 'groups_add', 'groups_edit', 'groups_delete',
             'audit_view', 'audit_delete',
-            'modules_view', 'modules_add', 'modules_edit', 'config_edit',
+            'modules_view', 'modules_add', 'modules_edit',
+            'config_view', 'config_edit',
             'sessions_view', 'sessions_revoke',
-            'checks_run',
+            'checks_view', 'checks_run',
         }
         assert set(PERMISSIONS) == expected
 
@@ -89,6 +90,7 @@ class TestPermissionsConstants:
         assert 'modules_add' in ep
         assert 'modules_edit' in ep
         assert 'config_edit' in ep
+        assert 'checks_view' in ep
         assert 'checks_run' in ep
         assert 'audit_view' in ep
         # Editor has view+edit for users/roles/groups
@@ -685,6 +687,27 @@ class TestGranularPermissions:
         c = self._client_as(admin, "no_ctel")
         resp = c.post("/api/telegram/test", json={"token": "x", "chat_id": "y"})
         assert resp.status_code == 403
+
+    # ── checks_view ───────────────────────────────────────────────
+
+    def test_checks_view_allows_get_status(self, admin):
+        self._make_user_with_perms(admin, "ch_view", ["checks_view"])
+        c = self._client_as(admin, "ch_view")
+        resp = c.get("/api/status")
+        assert resp.status_code == 200
+
+    def test_without_checks_view_get_status_403(self, admin):
+        self._make_user_with_perms(admin, "no_chview", [])
+        c = self._client_as(admin, "no_chview")
+        resp = c.get("/api/status")
+        assert resp.status_code == 403
+
+    def test_checks_run_also_allows_get_status(self, admin):
+        """checks_run implies ability to view status (OR guard)."""
+        self._make_user_with_perms(admin, "chrun_status", ["checks_run"])
+        c = self._client_as(admin, "chrun_status")
+        resp = c.get("/api/status")
+        assert resp.status_code in (200, 500)
 
     # ── checks_run ────────────────────────────────────────────────
 

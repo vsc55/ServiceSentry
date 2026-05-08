@@ -55,11 +55,12 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 |---------------|-------------|
 | **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas |
 | **Vista general (Overview)** | Estado en tiempo real de todos los módulos con auto-refresco configurable (OFF / 10 s / 30 s / 60 s) |
-| **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador |
+| **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador; paneles colapsables por sección |
+| **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles; cambiar contraseña propia |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + roles personalizados con 19 flags granulares; los roles integrados permiten editar la etiqueta y gestionar qué usuarios/grupos tienen asignado ese rol; sus permisos se muestran en solo lectura |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + roles personalizados con 21 flags granulares; los roles integrados permiten editar la etiqueta y gestionar qué usuarios/grupos tienen asignado ese rol; sus permisos se muestran en solo lectura |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado (permite editar roles y miembros, pero no nombre ni etiqueta) |
 | **Prueba de Telegram** | Enviar un mensaje de prueba para verificar la conectividad del bot |
 | **Modo oscuro** | Preferencia por usuario, persistida entre sesiones |
@@ -77,15 +78,15 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | Rol | Permisos |
 |-----|----------|
 | `admin` | Todos los permisos |
-| `editor` | `modules_edit`, `config_edit`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
-| `viewer` | `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view` |
+| `editor` | `modules_view`, `modules_add`, `modules_edit`, `config_edit`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
+| `viewer` | `modules_view`, `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view` |
 
 > Los roles integrados **no pueden eliminarse** ni cambiar sus permisos via API. Sí permiten actualizar la **etiqueta** (`label`) y gestionar qué usuarios y grupos tienen ese rol asignado. La etiqueta personalizada se persiste en `roles.json` bajo la clave `__builtin_labels__`.
 
 ### Roles personalizados
 
 Se pueden crear roles adicionales desde la pestaña **Acceso → Roles** asignando
-cualquier combinación de los 19 permisos disponibles. Los roles personalizados se
+cualquier combinación de los 21 permisos disponibles. Los roles personalizados se
 persisten en `roles.json`.
 
 ```
@@ -125,7 +126,7 @@ Cada grupo tiene:
 
 ## Sistema de Permisos
 
-El sistema de control de acceso usa **19 flags granulares** por acción y recurso.
+El sistema de control de acceso usa **21 flags granulares** por acción y recurso.
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -143,7 +144,9 @@ El sistema de control de acceso usa **19 flags granulares** por acción y recurs
 | | `groups_delete` | Eliminar grupos |
 | **Auditoría** | `audit_view` | Leer el registro de auditoría |
 | | `audit_delete` | Borrar entradas del registro |
-| **Módulos** | `modules_edit` | Guardar cambios en módulos |
+| **Módulos** | `modules_view` | Ver la lista de módulos |
+| | `modules_add` | Crear nuevas entradas de módulo |
+| | `modules_edit` | Guardar cambios en módulos |
 | **Config** | `config_edit` | Guardar cambios en configuración |
 | **Sesiones** | `sessions_view` | Ver sesiones activas |
 | | `sessions_revoke` | Revocar sesiones |
@@ -151,7 +154,7 @@ El sistema de control de acceso usa **19 flags granulares** por acción y recurs
 
 ### Implementación interna
 
-- `PERMISSIONS` — tupla con los 19 flags.
+- `PERMISSIONS` — tupla con los 21 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` para los roles integrados.
 - `_perm_required(*perms)` — factoría de decoradores: acepta si el usuario tiene **alguno** de los permisos indicados.
@@ -231,6 +234,7 @@ Los campos numéricos del bloque `web_admin` se validan contra reglas definidas 
 | `web_admin\|pw_min_len` | `_PW_MIN_LEN` | 1 | 128 |
 | `web_admin\|pw_max_len` | `_PW_MAX_LEN` | 8 | 256 |
 | `web_admin\|proxy_count` | `_proxy_count` | 0 | 10 |
+| `web_admin\|default_page_size` | `_DEFAULT_PAGE_SIZE` | 0 | 200 |
 
 Los campos booleanos se validan vía `BOOL_RULES`:
 
@@ -247,7 +251,10 @@ El endpoint `/api/config/schema` también expone metadatos para:
 |-------|---------------|-------------|
 | `web_admin\|status_lang` | `options` | Lista de idiomas disponibles + `""` (vacío = usar idioma por defecto) |
 | `web_admin\|audit_sort` | `options` | `time`, `event`, `user`, `ip` — campo por el que ordenar el log |
+| `web_admin\|default_page_size` | `options_int` | Lista de enteros tomada de `page_sizes`; el select de la UI se regenera al guardar cambios en `page_sizes` |
 | `telegram\|chat_id` | `numericString` | Indica al cliente que el valor debe ser una cadena de solo dígitos |
+
+El campo `web_admin.page_sizes` es un array de enteros no negativos que define las opciones de tamaño de página disponibles en todos los listados del panel. Se sanitiza al guardar: se descartan valores no enteros, booleanos y negativos; si el resultado queda vacío, se restaura el valor por defecto `[25, 50, 100, 200, 0]` (donde `0` significa "Todos"). No forma parte de `INT_RULES` ya que su validación es especial (array, no escalar).
 
 ### Telegram
 
@@ -379,7 +386,7 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 19 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 21 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |
@@ -424,10 +431,27 @@ Cada cambio de configuración se registra en `audit.json` con:
 
 Los últimos N eventos de auditoría se muestran en la pestaña Overview.
 
-Eventos auditados relacionados con roles:
+Todos los eventos auditados:
 
 | Evento | Cuándo se registra |
 |--------|--------------------|
+| `login_ok` | Login exitoso |
+| `login_failed` | Contraseña incorrecta o usuario inexistente |
+| `logout` | Cierre de sesión |
+| `modules_saved` | Guardado de `modules.json` |
+| `config_saved` | Guardado de `config.json` |
+| `user_created` | Creación de usuario |
+| `user_updated` | Modificación de usuario |
+| `user_deleted` | Eliminación de usuario |
+| `password_changed` | Usuario cambia su propia contraseña |
+| `password_reset` | Admin resetea la contraseña de otro usuario |
+| `all_sessions_revoked` | Invalidación global de sesiones |
+| `session_revoked` | Revocación de una sesión concreta |
+| `user_sessions_revoked` | Revocación de todas las sesiones de un usuario |
+| `group_created` | Creación de grupo |
+| `group_updated` | Modificación de grupo (roles, miembros, label o descripción) |
+| `group_deleted` | Eliminación de grupo |
 | `role_created` | Se crea un rol personalizado |
 | `role_updated` | Se cambia etiqueta o permisos de un rol |
 | `role_deleted` | Se elimina un rol personalizado |
+| `checks_run` | Ejecución manual de comprobaciones desde la UI |

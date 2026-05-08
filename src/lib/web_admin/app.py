@@ -48,6 +48,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _STATUS_FILE = 'status.json'
     _AUDIT_MAX_ENTRIES = 500
     _REMEMBER_ME_DAYS = 30
+    _DEFAULT_PAGE_SIZE = 25
     _SECURE_COOKIES_DEFAULT = False
     _PUBLIC_STATUS = False
     _STATUS_REFRESH_SECS = 60

@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: 1176 tests** | Todos deben pasar con `pytest` para que el build sea válido.
+**Total: 1258 tests** | Todos deben pasar con `pytest` para que el build sea válido.
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -440,7 +440,7 @@
 
 ## 12. Panel Web — API módulos y configuración
 
-**Archivos:** `tests/test_wa_modules.py` — `TestApiModules`, `TestApiStatus`, `TestApiOverview`, `TestModuleItemSchemas`, `TestConfigEdgeCases` · `tests/test_wa_config.py` — `TestApiConfigAuth`, `TestApiConfigGet`, `TestApiConfigPutBasic`, `TestApiConfigPutSecureCookies`, `TestApiConfigPutRememberMeDays`, `TestApiConfigPutAuditMaxEntries`, `TestApiConfigPutLang`, `TestApiConfigPutDarkMode`, `TestApiConfigPutWebAdminKey`, `TestApiConfigPutInjection`, **`TestApiConfigSchema`**
+**Archivos:** `tests/test_wa_modules.py` — `TestApiModules`, `TestApiStatus`, `TestApiOverview`, `TestModuleItemSchemas`, `TestConfigEdgeCases` · `tests/test_wa_config.py` — `TestApiConfigAuth`, `TestApiConfigGet`, `TestApiConfigPutBasic`, `TestApiConfigPutSecureCookies`, `TestApiConfigPutRememberMeDays`, `TestApiConfigPutAuditMaxEntries`, `TestApiConfigPutLang`, `TestApiConfigPutDarkMode`, `TestApiConfigPutWebAdminKey`, `TestApiConfigPutInjection`, **`TestApiConfigSchema`**, **`TestApiConfigPutDefaultPageSize`**, **`TestApiConfigPutPageSizes`**, **`TestApiConfigPutProxyCount`**
 
 ### `TestApiModules`
 
@@ -470,6 +470,81 @@
 | `test_schema_int_fields_present` | `remember_me_days`, `audit_max_entries`, `status_refresh_secs` tienen `min`/`max` | Todas las claves presentes | Si falta alguna |
 | `test_schema_status_lang_options` | `status_lang` incluye `""` y todos los `SUPPORTED_LANGS` | Lista correcta | Si falta algún idioma |
 | `test_schema_no_crash_on_instance_attrs` | Regresión: `getattr(type(wa), attr)` fallaba para atributos de instancia | `200` sin traza | Si devuelve 500 |
+| `test_schema_default_page_size_has_options_int` | `default_page_size` tiene `options_int` con `0` y al menos un tamaño estándar | Lista presente | Si falta o no incluye `0` |
+| `test_schema_default_page_size_default_in_options` | El `default` de `default_page_size` está en `options_int` | Coincide con instancia | Si difiere |
+| `test_schema_audit_sort_options` | `audit_sort` expone las 4 opciones de ordenación | `time`, `event`, `user`, `ip` presentes | Si falta alguna |
+| `test_schema_pw_min_len_bounds` | `pw_min_len` tiene `min: 1`, `max: 128` | Rangos correctos | Si difieren |
+| `test_schema_pw_max_len_bounds` | `pw_max_len` tiene `min: 8`, `max: 256` | Rangos correctos | Si difieren |
+| `test_schema_proxy_count_bounds` | `proxy_count` tiene `min: 0`, `max: 10` | Rangos correctos | Si difieren |
+
+### `TestApiConfigPutDefaultPageSize`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_default_page_size_zero_means_all` | `default_page_size: 0` (Todos) se guarda y relée | `200`, valor `0` en disco | Si falla |
+| `test_default_page_size_standard_values` | Valores 25, 50, 100, 200 | `200`, persistido | Si rechaza |
+| `test_default_page_size_max_boundary` | Valor `200` (límite superior) | `200` | Si rechaza |
+| `test_default_page_size_above_max_clamped` | Valor `201` supera el máximo | Rechazado o ajustado a 200 | Si acepta `201` |
+| `test_default_page_size_negative_rejected` | Valor `-1` | `400` | Si acepta |
+| `test_default_page_size_string_rejected` | Valor `"25"` (string) | `400` | Si acepta |
+| `test_default_page_size_float_rejected` | Valor `25.5` | `400` | Si acepta |
+| `test_default_page_size_null_rejected` | Valor `null` | `400` | Si acepta |
+| `test_default_page_size_bool_rejected` | Valor `true` | `400` | Si acepta |
+| `test_default_page_size_list_rejected` | Valor `[25]` | `400` | Si acepta |
+| `test_default_page_size_dict_rejected` | Valor `{"a": 1}` | `400` | Si acepta |
+| `test_default_page_size_updates_instance` | Guardar `100` actualiza `wa._DEFAULT_PAGE_SIZE` en caliente | `100` en atributo | Si no se aplica |
+| `test_default_page_size_persisted_to_disk` | Valor guardado se lee del disco tras recargar | Valor correcto | Si se pierde |
+| `test_default_page_size_not_in_body_unchanged` | No enviar `default_page_size` no lo modifica | Valor anterior sin cambios | Si se resetea |
+| `test_default_page_size_injection_string` | Strings tipo `"1; DROP TABLE"` | `400` | Si acepta |
+| `test_default_page_size_nosql_operator_rejected` | `{"$gt": 0}` como valor | `400` | Si acepta |
+| `test_default_page_size_xss_rejected` | `"<script>alert(1)</script>"` | `400` | Si acepta |
+| `test_default_page_size_combined_with_page_sizes` | Enviar `page_sizes` y `default_page_size` juntos | Ambos guardados | Si solo uno persiste |
+
+### `TestApiConfigPutPageSizes`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_page_sizes_happy_path` | `[25, 50, 100, 200, 0]` — array estándar | `200`, array guardado | Si falla |
+| `test_page_sizes_single_element` | `[10]` — array de un elemento | `200`, guardado | Si rechaza |
+| `test_page_sizes_includes_zero` | `0` (Todos) puede estar en el array | `200` | Si filtra el `0` |
+| `test_page_sizes_large_valid_value` | `[1000]` — valor grande pero entero no negativo | `200` | Si rechaza |
+| `test_page_sizes_non_array_fallback` | Enviar un string en lugar de array | Fallback a `[25,50,100,200,0]` | Si falla con error |
+| `test_page_sizes_null_fallback` | Enviar `null` | Fallback a defecto | Si falla con error |
+| `test_page_sizes_number_fallback` | Enviar un entero `50` | Fallback a defecto | Si falla con error |
+| `test_page_sizes_all_strings_filtered` | `["25", "50"]` — todos strings | Fallback a defecto | Si los acepta |
+| `test_page_sizes_strings_and_ints_mixed` | `[25, "50", 100]` — mix strings/ints | Solo enteros sobreviven | Si incluye strings |
+| `test_page_sizes_negatives_filtered` | `[-1, 25]` — negativos descartados | Solo `[25]` | Si incluye negativos |
+| `test_page_sizes_all_negative_fallback` | `[-1, -5]` — todos negativos | Fallback a defecto | Si falla |
+| `test_page_sizes_booleans_filtered` | `[true, false, 25]` — booleanos descartados | Solo `[25]` | Si incluye booleanos |
+| `test_page_sizes_floats_filtered` | `[25.5, 50.0, 100]` — floats descartados | Solo `[100]` | Si acepta floats |
+| `test_page_sizes_null_elements_filtered` | `[null, 25]` — nulos descartados | Solo `[25]` | Si incluye nulos |
+| `test_page_sizes_nested_arrays_filtered` | `[[25], 50]` — arrays anidados descartados | Solo `[50]` | Si incluye arrays |
+| `test_page_sizes_nested_dicts_filtered` | `[{"a": 1}, 50]` — dicts descartados | Solo `[50]` | Si incluye dicts |
+| `test_page_sizes_xss_elements_filtered` | `["<script>alert(1)</script>", 50]` | Solo `[50]` | Si acepta strings |
+| `test_page_sizes_sql_injection_filtered` | `["1; DROP TABLE users;--", 50]` | Solo `[50]` | Si acepta strings |
+| `test_page_sizes_nosql_operator_filtered` | `[{"$gt": 0}, 50]` | Solo `[50]` | Si acepta dicts |
+| `test_page_sizes_path_traversal_filtered` | `["../../../etc/passwd", 50]` | Solo `[50]` | Si acepta strings |
+| `test_page_sizes_large_array_accepted` | Array con 1000 enteros válidos | `200`, guardado | Si rechaza por tamaño |
+| `test_page_sizes_large_values_accepted` | `[9999999]` — entero grande no negativo | `200` | Si rechaza |
+| `test_page_sizes_combined_with_default` | `page_sizes` y `default_page_size` en el mismo PUT | Ambos guardados correctamente | Si se pisan |
+
+### `TestApiConfigPutProxyCount`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_proxy_count_zero` | `proxy_count: 0` (sin proxy) | `200`, valor persistido | Si falla |
+| `test_proxy_count_one` | `proxy_count: 1` | `200` | Si rechaza |
+| `test_proxy_count_ten` | `proxy_count: 10` (límite superior) | `200` | Si rechaza |
+| `test_proxy_count_above_max_clamped` | `proxy_count: 11` | Rechazado o ajustado a 10 | Si acepta 11 |
+| `test_proxy_count_negative_rejected` | `proxy_count: -1` | `400` | Si acepta |
+| `test_proxy_count_string_rejected` | `proxy_count: "1"` | `400` | Si acepta |
+| `test_proxy_count_float_rejected` | `proxy_count: 1.5` | `400` | Si acepta |
+| `test_proxy_count_null_rejected` | `proxy_count: null` | `400` | Si acepta |
+| `test_proxy_count_bool_coercion` | `proxy_count: true` → rechazado como bool | `400` | Si acepta como 1 |
+| `test_proxy_count_list_rejected` | `proxy_count: [1]` | `400` | Si acepta |
+| `test_proxy_count_updates_instance` | Guardar `3` actualiza `wa._proxy_count` | `3` en atributo | Si no se aplica |
+| `test_proxy_count_nosql_operator_rejected` | `proxy_count: {"$gt": 0}` | `400` | Si acepta |
+| `test_proxy_count_not_in_body_unchanged` | No enviar `proxy_count` no lo modifica | Valor anterior sin cambios | Si se resetea |
 
 ### `TestModuleItemSchemas`
 
