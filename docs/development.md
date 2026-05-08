@@ -56,7 +56,7 @@ En modo desarrollo (cuando `src` está en la ruta), los archivos de configuraci�
 
 ## Tests
 
-El proyecto tiene **1258 tests** usando `pytest`, con ejecución paralela automática via `pytest-xdist`.
+El proyecto tiene **1309 tests** usando `pytest`, con ejecución paralela automática via `pytest-xdist`.
 
 ### Ejecutar todos los tests
 

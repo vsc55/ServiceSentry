@@ -1,0 +1,112 @@
+<!-- ServiceSentry UI Mockup — Config Tab -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+
+  <!-- Body background -->
+  <rect width="1200" height="800" fill="#f8f9fa"/>
+
+  <!-- ===== TOP NAVBAR ===== -->
+  <rect width="1200" height="52" fill="#212529"/>
+  <text x="16" y="33" fill="#ffffff" font-size="16" font-weight="700">⚡ ServiceSentry</text>
+
+  <!-- Inactive tabs -->
+  <text x="180" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Overview</text>
+  <text x="265" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Modules</text>
+
+  <!-- Active tab: Config -->
+  <rect x="300" y="0" width="80" height="52" fill="#ffffff" opacity="0.12" rx="0"/>
+  <text x="340" y="31" fill="#ffffff" font-size="13" font-weight="600" text-anchor="middle">Config</text>
+
+  <!-- Inactive tabs -->
+  <text x="410" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Status</text>
+  <text x="478" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Audit</text>
+  <text x="548" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Access</text>
+  <text x="628" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Sessions</text>
+
+  <!-- Right side -->
+  <text x="1140" y="31" fill="#adb5bd" font-size="15" text-anchor="middle">🌙</text>
+  <text x="1175" y="31" fill="#adb5bd" font-size="12" text-anchor="middle">admin ▾</text>
+
+  <!-- ===== TOOLBAR ===== -->
+  <rect x="0" y="52" width="1200" height="40" fill="#ffffff"/>
+  <line x1="0" y1="92" x2="1200" y2="92" stroke="#dee2e6" stroke-width="1"/>
+
+  <!-- Save Configuration button (right, green) -->
+  <rect x="950" y="63" width="148" height="26" fill="#198754" rx="4"/>
+  <text x="1024" y="80" fill="#ffffff" font-size="12" text-anchor="middle">💾 Save Configuration</text>
+
+  <!-- Send test button -->
+  <rect x="1106" y="63" width="88" height="26" fill="#6c757d" rx="4"/>
+  <text x="1150" y="80" fill="#ffffff" font-size="12" text-anchor="middle">Send test 📨</text>
+
+  <!-- ===== CONFIG PANELS ===== -->
+
+  <!-- Panel 1: General (collapsed) -->
+  <rect x="16" y="108" width="1168" height="52" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="6"/>
+  <text x="32" y="138" fill="#212529" font-size="13">▼</text>
+  <text x="52" y="138" fill="#212529" font-size="14" font-weight="600">General</text>
+  <text x="130" y="138" fill="#6c757d" font-size="12">debug, timer_check...</text>
+
+  <!-- Panel 2: Web Admin (EXPANDED) -->
+  <rect x="16" y="172" width="1168" height="290" fill="#ffffff" stroke="#0d6efd" stroke-width="1.5" rx="6"/>
+  <!-- Header -->
+  <rect x="16" y="172" width="1168" height="44" fill="#f8f9fa" rx="6"/>
+  <rect x="16" y="194" width="1168" height="22" fill="#f8f9fa"/>
+  <line x1="16" y1="216" x2="1184" y2="216" stroke="#dee2e6" stroke-width="1"/>
+  <text x="32" y="200" fill="#0d6efd" font-size="13">▲</text>
+  <text x="52" y="200" fill="#212529" font-size="14" font-weight="600">Web Admin</text>
+
+  <!-- Grid of fields inside panel 2 -->
+  <!-- Row 1: lang + public_status -->
+  <text x="36" y="242" fill="#6c757d" font-size="12">lang</text>
+  <rect x="160" y="228" width="120" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="172" y="245" fill="#212529" font-size="12">en_EN</text>
+  <text x="268" y="245" fill="#6c757d" font-size="11">▾</text>
+
+  <text x="320" y="242" fill="#6c757d" font-size="12">public_status</text>
+  <!-- Toggle OFF -->
+  <rect x="460" y="229" width="36" height="18" fill="#dee2e6" rx="9"/>
+  <circle cx="469" cy="238" r="7" fill="#ffffff"/>
+
+  <!-- Row 2: status_refresh_secs + pw_min_len -->
+  <text x="36" y="282" fill="#6c757d" font-size="12">status_refresh_secs</text>
+  <rect x="160" y="268" width="80" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="172" y="285" fill="#212529" font-size="12">60</text>
+
+  <text x="320" y="282" fill="#6c757d" font-size="12">pw_min_len</text>
+  <rect x="460" y="268" width="80" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="472" y="285" fill="#212529" font-size="12">8</text>
+
+  <!-- Row 3: pw_require_upper + pw_require_digit -->
+  <text x="36" y="322" fill="#6c757d" font-size="12">pw_require_upper</text>
+  <!-- Toggle ON -->
+  <rect x="160" y="309" width="36" height="18" fill="#198754" rx="9"/>
+  <circle cx="186" cy="318" r="7" fill="#ffffff"/>
+
+  <text x="320" y="322" fill="#6c757d" font-size="12">pw_require_digit</text>
+  <!-- Toggle ON -->
+  <rect x="460" y="309" width="36" height="18" fill="#198754" rx="9"/>
+  <circle cx="486" cy="318" r="7" fill="#ffffff"/>
+
+  <!-- Row 4: proxy_count + default_page_size -->
+  <text x="36" y="362" fill="#6c757d" font-size="12">proxy_count</text>
+  <rect x="160" y="348" width="80" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="172" y="365" fill="#212529" font-size="12">0</text>
+
+  <text x="320" y="362" fill="#6c757d" font-size="12">default_page_size</text>
+  <rect x="460" y="348" width="80" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="472" y="365" fill="#212529" font-size="12">25</text>
+  <text x="528" y="365" fill="#6c757d" font-size="11">▾</text>
+
+  <!-- Panel 3: Telegram (collapsed) -->
+  <rect x="16" y="474" width="1168" height="52" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="6"/>
+  <text x="32" y="504" fill="#212529" font-size="13">▼</text>
+  <text x="52" y="504" fill="#212529" font-size="14" font-weight="600">Telegram</text>
+  <text x="140" y="504" fill="#6c757d" font-size="12">token, chat_id...</text>
+
+  <!-- Panel 4: Tables (collapsed) -->
+  <rect x="16" y="538" width="1168" height="52" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="6"/>
+  <text x="32" y="568" fill="#212529" font-size="13">▼</text>
+  <text x="52" y="568" fill="#212529" font-size="14" font-weight="600">Tables</text>
+  <text x="120" y="568" fill="#6c757d" font-size="12">page_sizes, default...</text>
+
+</svg>

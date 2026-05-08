@@ -1,0 +1,151 @@
+<!-- ServiceSentry UI Mockup — Modules Tab -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+
+  <!-- Body background -->
+  <rect width="1200" height="800" fill="#f8f9fa"/>
+
+  <!-- ===== TOP NAVBAR ===== -->
+  <rect width="1200" height="52" fill="#212529"/>
+  <text x="16" y="33" fill="#ffffff" font-size="16" font-weight="700">⚡ ServiceSentry</text>
+
+  <!-- Inactive: Overview -->
+  <text x="180" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Overview</text>
+
+  <!-- Active tab: Modules -->
+  <rect x="222" y="0" width="80" height="52" fill="#ffffff" opacity="0.12" rx="0"/>
+  <text x="265" y="31" fill="#ffffff" font-size="13" font-weight="600" text-anchor="middle">Modules</text>
+
+  <!-- Inactive tabs -->
+  <text x="340" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Config</text>
+  <text x="410" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Status</text>
+  <text x="478" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Audit</text>
+  <text x="548" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Access</text>
+  <text x="628" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Sessions</text>
+
+  <!-- Right side -->
+  <text x="1140" y="31" fill="#adb5bd" font-size="15" text-anchor="middle">🌙</text>
+  <text x="1175" y="31" fill="#adb5bd" font-size="12" text-anchor="middle">admin ▾</text>
+
+  <!-- ===== TOOLBAR ===== -->
+  <rect x="0" y="52" width="1200" height="40" fill="#ffffff"/>
+  <line x1="0" y1="92" x2="1200" y2="92" stroke="#dee2e6" stroke-width="1"/>
+
+  <!-- Search input -->
+  <rect x="16" y="62" width="200" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="28" y="79" fill="#adb5bd" font-size="12">🔍 Buscar módulo...</text>
+
+  <!-- New module button (right) -->
+  <rect x="1083" y="62" width="110" height="26" fill="#0d6efd" rx="4"/>
+  <text x="1138" y="79" fill="#ffffff" font-size="12" text-anchor="middle">+ Nuevo módulo</text>
+
+  <!-- ===== MODULE CARDS ===== -->
+
+  <!-- Card 1: ping -->
+  <rect x="16" y="108" width="380" height="130" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="6"/>
+  <!-- Icon circle -->
+  <circle cx="56" cy="145" r="20" fill="#198754"/>
+  <text x="56" y="152" fill="#ffffff" font-size="16" font-weight="700" text-anchor="middle">P</text>
+  <!-- Module name + description -->
+  <text x="88" y="136" fill="#212529" font-size="15" font-weight="600">ping</text>
+  <text x="88" y="154" fill="#6c757d" font-size="12">ICMP Ping Monitor</text>
+  <!-- Bottom bar -->
+  <line x1="16" y1="180" x2="396" y2="180" stroke="#dee2e6" stroke-width="1"/>
+  <!-- ON badge -->
+  <rect x="28" y="191" width="32" height="18" fill="#198754" rx="4"/>
+  <text x="44" y="204" fill="#ffffff" font-size="11" text-anchor="middle">ON</text>
+  <!-- Items count -->
+  <text x="74" y="204" fill="#6c757d" font-size="12">2 items</text>
+  <!-- Settings button -->
+  <rect x="330" y="188" width="56" height="22" fill="#6c757d" rx="4"/>
+  <text x="358" y="203" fill="#ffffff" font-size="12" text-anchor="middle">⚙ Conf.</text>
+
+  <!-- Card 2: web -->
+  <rect x="412" y="108" width="380" height="130" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="6"/>
+  <!-- Icon circle -->
+  <circle cx="452" cy="145" r="20" fill="#0d6efd"/>
+  <text x="452" y="152" fill="#ffffff" font-size="16" font-weight="700" text-anchor="middle">W</text>
+  <!-- Module name + description -->
+  <text x="484" y="136" fill="#212529" font-size="15" font-weight="600">web</text>
+  <text x="484" y="154" fill="#6c757d" font-size="12">HTTP Web Checker</text>
+  <!-- Bottom bar -->
+  <line x1="412" y1="180" x2="792" y2="180" stroke="#dee2e6" stroke-width="1"/>
+  <!-- ON badge -->
+  <rect x="424" y="191" width="32" height="18" fill="#198754" rx="4"/>
+  <text x="440" y="204" fill="#ffffff" font-size="11" text-anchor="middle">ON</text>
+  <!-- Items count -->
+  <text x="470" y="204" fill="#6c757d" font-size="12">1 item</text>
+  <!-- Settings button -->
+  <rect x="726" y="188" width="56" height="22" fill="#6c757d" rx="4"/>
+  <text x="754" y="203" fill="#ffffff" font-size="12" text-anchor="middle">⚙ Conf.</text>
+
+  <!-- Card 3: mysql -->
+  <rect x="808" y="108" width="376" height="130" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="6"/>
+  <!-- Icon circle -->
+  <circle cx="848" cy="145" r="20" fill="#fd7e14"/>
+  <text x="848" y="152" fill="#ffffff" font-size="16" font-weight="700" text-anchor="middle">M</text>
+  <!-- Module name + description -->
+  <text x="880" y="136" fill="#212529" font-size="15" font-weight="600">mysql</text>
+  <text x="880" y="154" fill="#6c757d" font-size="12">MySQL Connectivity</text>
+  <!-- Bottom bar -->
+  <line x1="808" y1="180" x2="1184" y2="180" stroke="#dee2e6" stroke-width="1"/>
+  <!-- OFF badge -->
+  <rect x="820" y="191" width="34" height="18" fill="#6c757d" rx="4"/>
+  <text x="837" y="204" fill="#ffffff" font-size="11" text-anchor="middle">OFF</text>
+  <!-- Items count -->
+  <text x="868" y="204" fill="#6c757d" font-size="12">0 items</text>
+  <!-- Settings button -->
+  <rect x="1118" y="188" width="56" height="22" fill="#6c757d" rx="4"/>
+  <text x="1146" y="203" fill="#ffffff" font-size="12" text-anchor="middle">⚙ Conf.</text>
+
+  <!-- ===== MODAL OVERLAY ===== -->
+  <rect x="0" y="0" width="1200" height="800" fill="#000000" opacity="0.35"/>
+
+  <!-- Modal card -->
+  <rect x="650" y="150" width="500" height="440" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="6"/>
+
+  <!-- Modal header -->
+  <rect x="650" y="150" width="500" height="48" fill="#f8f9fa" rx="6"/>
+  <rect x="650" y="174" width="500" height="24" fill="#f8f9fa"/>
+  <line x1="650" y1="198" x2="1150" y2="198" stroke="#dee2e6" stroke-width="1"/>
+  <text x="666" y="179" fill="#212529" font-size="14" font-weight="600">✏ Edit — ping &gt; 192.168.1.1</text>
+  <!-- Close button -->
+  <text x="1134" y="179" fill="#6c757d" font-size="16" text-anchor="middle">×</text>
+
+  <!-- Modal body -->
+  <!-- Field: Enabled -->
+  <text x="670" y="228" fill="#6c757d" font-size="12">Enabled</text>
+  <!-- Toggle switch ON -->
+  <rect x="820" y="216" width="40" height="20" fill="#198754" rx="10"/>
+  <circle cx="850" cy="226" r="8" fill="#ffffff"/>
+  <text x="870" y="230" fill="#198754" font-size="12">On</text>
+
+  <!-- Field: Host -->
+  <text x="670" y="268" fill="#6c757d" font-size="12">Host</text>
+  <rect x="820" y="256" width="220" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="832" y="273" fill="#212529" font-size="13">192.168.1.1</text>
+
+  <!-- Field: Timeout -->
+  <text x="670" y="308" fill="#6c757d" font-size="12">Timeout</text>
+  <rect x="820" y="296" width="80" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="832" y="313" fill="#212529" font-size="13">5</text>
+
+  <!-- Field: Attempts -->
+  <text x="670" y="348" fill="#6c757d" font-size="12">Attempts</text>
+  <rect x="820" y="336" width="80" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="832" y="353" fill="#212529" font-size="13">3</text>
+
+  <!-- Field: Label -->
+  <text x="670" y="388" fill="#6c757d" font-size="12">Label</text>
+  <rect x="820" y="376" width="220" height="26" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="832" y="393" fill="#212529" font-size="13">Router</text>
+
+  <!-- Modal footer -->
+  <line x1="650" y1="540" x2="1150" y2="540" stroke="#dee2e6" stroke-width="1"/>
+  <!-- Cancel button -->
+  <rect x="878" y="552" width="72" height="28" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="914" y="570" fill="#6c757d" font-size="13" text-anchor="middle">Cancel</text>
+  <!-- Save button -->
+  <rect x="960" y="552" width="124" height="28" fill="#0d6efd" rx="4"/>
+  <text x="1022" y="570" fill="#ffffff" font-size="13" text-anchor="middle">Save changes</text>
+
+</svg>

@@ -1,0 +1,160 @@
+<!-- ServiceSentry UI Mockup — Dashboard Edit Mode -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+
+  <!-- Body background -->
+  <rect width="1200" height="800" fill="#f8f9fa"/>
+
+  <!-- ===== TOP NAVBAR ===== -->
+  <rect width="1200" height="52" fill="#212529"/>
+  <!-- Logo -->
+  <text x="16" y="33" fill="#ffffff" font-size="16" font-weight="700">⚡ ServiceSentry</text>
+
+  <!-- Active tab: Overview -->
+  <rect x="140" y="0" width="80" height="52" fill="#ffffff" opacity="0.12" rx="0"/>
+  <text x="180" y="31" fill="#ffffff" font-size="13" font-weight="600" text-anchor="middle">Overview</text>
+
+  <!-- Inactive tabs -->
+  <text x="265" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Modules</text>
+  <text x="340" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Config</text>
+  <text x="410" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Status</text>
+  <text x="478" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Audit</text>
+  <text x="548" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Access</text>
+  <text x="628" y="31" fill="#adb5bd" font-size="13" text-anchor="middle">Sessions</text>
+
+  <!-- Right side -->
+  <text x="1140" y="31" fill="#adb5bd" font-size="15" text-anchor="middle">🌙</text>
+  <text x="1175" y="31" fill="#adb5bd" font-size="12" text-anchor="middle">admin ▾</text>
+
+  <!-- ===== TOOLBAR ===== -->
+  <rect x="0" y="52" width="1200" height="40" fill="#ffffff"/>
+  <line x1="0" y1="92" x2="1200" y2="92" stroke="#dee2e6" stroke-width="1"/>
+
+  <!-- Auto-refresh label -->
+  <text x="16" y="76" fill="#6c757d" font-size="12">Auto-refresh:</text>
+
+  <!-- OFF button (active/blue) -->
+  <rect x="106" y="61" width="36" height="22" fill="#0d6efd" rx="4"/>
+  <text x="124" y="76" fill="#ffffff" font-size="11" font-weight="600" text-anchor="middle">OFF</text>
+
+  <!-- 10s button -->
+  <rect x="146" y="61" width="36" height="22" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="164" y="76" fill="#6c757d" font-size="11" text-anchor="middle">10s</text>
+
+  <!-- 30s button -->
+  <rect x="186" y="61" width="36" height="22" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="204" y="76" fill="#6c757d" font-size="11" text-anchor="middle">30s</text>
+
+  <!-- 60s button -->
+  <rect x="226" y="61" width="36" height="22" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="244" y="76" fill="#6c757d" font-size="11" text-anchor="middle">60s</text>
+
+  <!-- Refresh icon button -->
+  <rect x="270" y="61" width="30" height="22" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="285" y="76" fill="#6c757d" font-size="13" text-anchor="middle">↻</text>
+
+  <!-- Save Layout button (right, green) -->
+  <rect x="1004" y="61" width="110" height="26" fill="#198754" rx="4"/>
+  <text x="1059" y="78" fill="#ffffff" font-size="12" text-anchor="middle">💾 Save Layout</text>
+
+  <!-- Reset button -->
+  <rect x="1122" y="61" width="72" height="26" fill="#6c757d" rx="4"/>
+  <text x="1158" y="78" fill="#ffffff" font-size="12" text-anchor="middle">↺ Reset</text>
+
+  <!-- ===== ADD WIDGET BAR ===== -->
+  <rect x="0" y="92" width="1200" height="44" fill="#e8f4fd" stroke="#0d6efd" stroke-width="1"/>
+  <text x="16" y="118" fill="#212529" font-size="13" font-weight="600">Add widget:</text>
+
+  <!-- + Groups button -->
+  <rect x="102" y="104" width="76" height="22" fill="#ffffff" stroke="#0d6efd" stroke-width="1" rx="4"/>
+  <text x="140" y="119" fill="#0d6efd" font-size="12" text-anchor="middle">+ Groups</text>
+
+  <!-- + Roles button -->
+  <rect x="184" y="104" width="66" height="22" fill="#ffffff" stroke="#0d6efd" stroke-width="1" rx="4"/>
+  <text x="217" y="119" fill="#0d6efd" font-size="12" text-anchor="middle">+ Roles</text>
+
+  <!-- + Custom Widget... button -->
+  <rect x="256" y="104" width="120" height="22" fill="#ffffff" stroke="#0d6efd" stroke-width="1" rx="4"/>
+  <text x="316" y="119" fill="#0d6efd" font-size="12" text-anchor="middle">+ Custom Widget...</text>
+
+  <!-- ===== WIDGET 1: Modules stat card in EDIT MODE ===== -->
+  <rect x="16" y="152" width="378" height="148" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="6"/>
+
+  <!-- Edit toolbar strip -->
+  <rect x="16" y="152" width="378" height="28" fill="#e9ecef" rx="6"/>
+  <rect x="16" y="162" width="378" height="18" fill="#e9ecef"/>
+  <line x1="16" y1="180" x2="394" y2="180" stroke="#dee2e6" stroke-width="1"/>
+  <!-- Drag handle -->
+  <text x="28" y="170" fill="#adb5bd" font-size="14">⠿</text>
+  <!-- Width control -->
+  <text x="56" y="170" fill="#6c757d" font-size="12">← 6 →</text>
+  <!-- Height control -->
+  <text x="120" y="170" fill="#6c757d" font-size="12">↑ md ↓</text>
+  <!-- Hide button -->
+  <rect x="348" y="157" width="40" height="18" fill="#dc3545" rx="4"/>
+  <text x="368" y="169" fill="#ffffff" font-size="11" text-anchor="middle">✕ hide</text>
+
+  <!-- Card content: Modules stat -->
+  <text x="28" y="200" fill="#6c757d" font-size="12">Modules</text>
+  <text x="28" y="242" fill="#212529" font-size="30" font-weight="700">2</text>
+  <text x="28" y="264" fill="#6c757d" font-size="12">2 of 6 enabled</text>
+  <text x="378" y="204" fill="#fd7e14" font-size="22" text-anchor="end">📦</text>
+
+  <!-- ===== WIDGET 2: Module List table in EDIT MODE ===== -->
+  <rect x="406" y="152" width="578" height="270" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="6"/>
+
+  <!-- Edit toolbar strip -->
+  <rect x="406" y="152" width="578" height="28" fill="#e9ecef" rx="6"/>
+  <rect x="406" y="162" width="578" height="18" fill="#e9ecef"/>
+  <line x1="406" y1="180" x2="984" y2="180" stroke="#dee2e6" stroke-width="1"/>
+  <!-- Drag handle -->
+  <text x="418" y="170" fill="#adb5bd" font-size="14">⠿</text>
+  <!-- Width control -->
+  <text x="446" y="170" fill="#6c757d" font-size="12">← 6 →</text>
+  <!-- Height control -->
+  <text x="510" y="170" fill="#6c757d" font-size="12">↑ md ↓</text>
+  <!-- Hide button -->
+  <rect x="938" y="157" width="40" height="18" fill="#dc3545" rx="4"/>
+  <text x="958" y="169" fill="#ffffff" font-size="11" text-anchor="middle">✕ hide</text>
+
+  <!-- Card sub-header -->
+  <rect x="406" y="180" width="578" height="36" fill="#f8f9fa"/>
+  <line x1="406" y1="216" x2="984" y2="216" stroke="#dee2e6" stroke-width="1"/>
+  <text x="418" y="203" fill="#212529" font-size="13" font-weight="600">📦 Modules</text>
+  <rect x="947" y="188" width="26" height="20" fill="#ffffff" stroke="#dee2e6" stroke-width="1" rx="4"/>
+  <text x="960" y="202" fill="#6c757d" font-size="13" text-anchor="middle">↻</text>
+
+  <!-- Table header -->
+  <rect x="406" y="216" width="578" height="30" fill="#f8f9fa"/>
+  <line x1="406" y1="246" x2="984" y2="246" stroke="#dee2e6" stroke-width="1"/>
+  <text x="422" y="235" fill="#6c757d" font-size="12" font-weight="600">Module ↕</text>
+  <text x="600" y="235" fill="#6c757d" font-size="12" font-weight="600">Active ↕</text>
+  <text x="730" y="235" fill="#6c757d" font-size="12" font-weight="600">Checks ↕</text>
+  <text x="860" y="235" fill="#6c757d" font-size="12" font-weight="600">Items ↕</text>
+
+  <!-- Row 1 -->
+  <rect x="406" y="246" width="578" height="36" fill="#ffffff"/>
+  <line x1="406" y1="282" x2="984" y2="282" stroke="#dee2e6" stroke-width="1"/>
+  <text x="422" y="268" fill="#212529" font-size="13">ping</text>
+  <rect x="590" y="256" width="32" height="18" fill="#198754" rx="4"/>
+  <text x="606" y="269" fill="#ffffff" font-size="11" text-anchor="middle">ON</text>
+  <rect x="718" y="256" width="38" height="18" fill="#198754" rx="4"/>
+  <text x="737" y="269" fill="#ffffff" font-size="11" text-anchor="middle">✅ OK</text>
+  <text x="860" y="268" fill="#212529" font-size="13">2</text>
+
+  <!-- Row 2 -->
+  <rect x="406" y="282" width="578" height="36" fill="#f8f9fa"/>
+  <line x1="406" y1="318" x2="984" y2="318" stroke="#dee2e6" stroke-width="1"/>
+  <text x="422" y="304" fill="#212529" font-size="13">web</text>
+  <rect x="590" y="292" width="32" height="18" fill="#198754" rx="4"/>
+  <text x="606" y="305" fill="#ffffff" font-size="11" text-anchor="middle">ON</text>
+  <text x="737" y="304" fill="#6c757d" font-size="13" text-anchor="middle">—</text>
+  <text x="860" y="304" fill="#212529" font-size="13">1</text>
+
+  <!-- ===== GHOST PLACEHOLDER WIDGET ===== -->
+  <rect x="16" y="316" width="378" height="100" fill="none" stroke="#0d6efd" stroke-width="2" stroke-dasharray="8,4" rx="6" opacity="0.4"/>
+  <text x="205" y="368" fill="#0d6efd" font-size="14" text-anchor="middle" opacity="0.6">+ Drop widget here</text>
+
+  <!-- ===== CAPTION / INSTRUCTIONS ===== -->
+  <text x="600" y="580" fill="#6c757d" font-size="12" font-style="italic" text-anchor="middle">Arrastra los widgets para reordenarlos · Usa ← → para cambiar el ancho · ↑ ↓ para la altura</text>
+
+</svg>

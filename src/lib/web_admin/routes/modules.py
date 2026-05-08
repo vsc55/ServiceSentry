@@ -62,6 +62,22 @@ def register(app, wa):
     @login_required
     def api_get_overview():
         """Return a summary snapshot for the overview dashboard."""
+        # Status file (read first so modules can reference per-module check counts)
+        status_raw: dict = {}
+        if wa._var_dir:
+            path = os.path.join(wa._var_dir, wa._STATUS_FILE)
+            cfg_ctrl = ConfigControl(path)
+            status_raw = cfg_ctrl.read() or {}
+
+        def _mod_checks(name: str) -> dict:
+            mc = status_raw.get(name, {})
+            if not isinstance(mc, dict):
+                return {'total': 0, 'ok': 0, 'error': 0}
+            tot = len(mc)
+            ok  = sum(1 for v in mc.values() if isinstance(v, dict) and v.get('status') is True)
+            err = sum(1 for v in mc.values() if isinstance(v, dict) and v.get('status') is False)
+            return {'total': tot, 'ok': ok, 'error': err}
+
         # Modules summary
         modules_raw = wa._read_config_file(wa._MODULES_FILE)
         modules_list = []
@@ -69,35 +85,19 @@ def register(app, wa):
             if not isinstance(cfg, dict):
                 continue
             enabled = cfg.get('enabled', False)
-            items_count = 0
             items_obj = cfg.get('list')
-            if isinstance(items_obj, dict):
-                items_count = len(items_obj)
+            items_count = len(items_obj) if isinstance(items_obj, dict) else 0
             modules_list.append({
-                'name': name,
+                'name':    name,
                 'enabled': bool(enabled),
-                'items': items_count,
+                'items':   items_count,
+                'checks':  _mod_checks(name),
             })
 
-        # Status summary
-        status_raw: dict = {}
-        if wa._var_dir:
-            path = os.path.join(wa._var_dir, wa._STATUS_FILE)
-            cfg_ctrl = ConfigControl(path)
-            status_raw = cfg_ctrl.read() or {}
-        total_checks = 0
-        checks_ok = 0
-        checks_err = 0
-        for mod_checks in status_raw.values():
-            if not isinstance(mod_checks, dict):
-                continue
-            for info in mod_checks.values():
-                total_checks += 1
-                st = info.get('status') if isinstance(info, dict) else None
-                if st is True:
-                    checks_ok += 1
-                elif st is False:
-                    checks_err += 1
+        # Aggregate status counts
+        total_checks = sum(m['checks']['total'] for m in modules_list)
+        checks_ok    = sum(m['checks']['ok']    for m in modules_list)
+        checks_err   = sum(m['checks']['error'] for m in modules_list)
 
         # Sessions summary
         active_sessions = len(wa._sessions)

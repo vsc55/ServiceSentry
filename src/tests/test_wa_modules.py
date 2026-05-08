@@ -134,7 +134,7 @@ class TestApiOverview:
     def test_response_keys(self, client):
         _login(client)
         data = client.get("/api/overview").get_json()
-        for key in ("modules", "status", "sessions", "users", "last_events"):
+        for key in ("modules", "status", "sessions", "users", "groups", "roles", "last_events"):
             assert key in data
 
     def test_modules_list(self, client):
@@ -216,6 +216,122 @@ class TestApiOverview:
         html = resp.data.decode()
         assert 'id="tab-overview"' in html
         assert 'btn-tab-overview' in html
+
+    # ---- groups summary ----
+
+    def test_groups_summary_keys(self, client):
+        """groups key has total and members sub-keys."""
+        _login(client)
+        groups = client.get("/api/overview").get_json()["groups"]
+        assert "total" in groups
+        assert "members" in groups
+
+    def test_groups_default_administrators(self, client):
+        """No groups.json → WebAdmin auto-creates 'administrators' group with no members."""
+        _login(client)
+        groups = client.get("/api/overview").get_json()["groups"]
+        assert groups["total"] == 1
+        assert groups["members"] == 0
+
+    # ---- roles summary ----
+
+    def test_roles_summary_keys(self, client):
+        """roles key has total, builtin and custom sub-keys."""
+        _login(client)
+        roles = client.get("/api/overview").get_json()["roles"]
+        assert "total" in roles
+        assert "builtin" in roles
+        assert "custom" in roles
+
+    def test_roles_builtin_count(self, client):
+        """Builtin roles match BUILTIN_ROLE_PERMISSIONS length (admin, editor, viewer = 3)."""
+        from lib.web_admin.constants import BUILTIN_ROLE_PERMISSIONS
+        _login(client)
+        roles = client.get("/api/overview").get_json()["roles"]
+        assert roles["builtin"] == len(BUILTIN_ROLE_PERMISSIONS)
+        assert roles["custom"] == 0
+        assert roles["total"] == roles["builtin"] + roles["custom"]
+
+    def test_roles_custom_count(self, admin, client):
+        """Adding a custom role increments the custom and total counts."""
+        from lib.web_admin.constants import BUILTIN_ROLE_PERMISSIONS
+        _login(client)
+        admin._custom_roles["superuser"] = {"permissions": ["modules_view"]}
+        roles = client.get("/api/overview").get_json()["roles"]
+        assert roles["custom"] == 1
+        assert roles["total"] == len(BUILTIN_ROLE_PERMISSIONS) + 1
+
+    # ---- per-module checks ----
+
+    def test_modules_have_checks_key(self, client):
+        """Every module entry in overview has a checks dict."""
+        _login(client)
+        modules = client.get("/api/overview").get_json()["modules"]
+        for m in modules:
+            assert "checks" in m
+            assert isinstance(m["checks"], dict)
+
+    def test_module_checks_structure(self, client):
+        """checks dict has total, ok and error keys."""
+        _login(client)
+        modules = client.get("/api/overview").get_json()["modules"]
+        for m in modules:
+            for key in ("total", "ok", "error"):
+                assert key in m["checks"], f"{m['name']}.checks missing '{key}'"
+
+    def test_module_checks_counts(self, client):
+        """ping: 1 check OK; web: no checks in status fixture."""
+        _login(client)
+        modules = {
+            m["name"]: m["checks"]
+            for m in client.get("/api/overview").get_json()["modules"]
+        }
+        assert modules["ping"] == {"total": 1, "ok": 1, "error": 0}
+        assert modules["web"] == {"total": 0, "ok": 0, "error": 0}
+
+    def test_module_checks_with_error(self, config_dir, tmp_path):
+        """A failing check increments the error counter."""
+        status = {
+            "ping": {
+                "192.168.1.1": {"status": False},
+                "192.168.1.2": {"status": True},
+            }
+        }
+        var = tmp_path / "var2"
+        var.mkdir()
+        (var / "status.json").write_text(json.dumps(status), encoding="utf-8")
+        wa = WebAdmin(config_dir, "admin", "pass", var_dir=str(var))
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        c.post("/login", data={"username": "admin", "password": "pass"})
+        modules = {
+            m["name"]: m["checks"]
+            for m in c.get("/api/overview").get_json()["modules"]
+        }
+        assert modules["ping"]["total"] == 2
+        assert modules["ping"]["ok"] == 1
+        assert modules["ping"]["error"] == 1
+
+    def test_module_checks_without_var_dir(self, config_dir):
+        """No var_dir → all module checks are zero."""
+        wa = WebAdmin(config_dir, "admin", "pass", var_dir=None)
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        c.post("/login", data={"username": "admin", "password": "pass"})
+        modules = c.get("/api/overview").get_json()["modules"]
+        for m in modules:
+            assert m["checks"] == {"total": 0, "ok": 0, "error": 0}
+
+    def test_status_aggregated_from_module_checks(self, client):
+        """Top-level status counts equal the sum of per-module check counts."""
+        _login(client)
+        data = client.get("/api/overview").get_json()
+        total = sum(m["checks"]["total"] for m in data["modules"])
+        ok    = sum(m["checks"]["ok"]    for m in data["modules"])
+        error = sum(m["checks"]["error"] for m in data["modules"])
+        assert data["status"]["total"] == total
+        assert data["status"]["ok"]    == ok
+        assert data["status"]["error"] == error
 
 
 # ──────────────────────────── Module item schemas ──────────────────

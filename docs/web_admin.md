@@ -54,13 +54,14 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | Característica | Descripción |
 |---------------|-------------|
 | **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas |
-| **Vista general (Overview)** | Estado en tiempo real de todos los módulos con auto-refresco configurable (OFF / 10 s / 30 s / 60 s) |
+| **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en `localStorage`; modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
+| **Vista general (Overview)** | 6 tarjetas de resumen (Modules, Checks, Sessions, Users, Groups, Roles) + 2 widgets de tabla (lista de módulos con estado por check, actividad reciente); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables |
 | **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador; paneles colapsables por sección |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles; cambiar contraseña propia |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + roles personalizados con 21 flags granulares; los roles integrados permiten editar la etiqueta y gestionar qué usuarios/grupos tienen asignado ese rol; sus permisos se muestran en solo lectura |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + roles personalizados con 23 flags granulares; los roles integrados permiten editar la etiqueta y gestionar qué usuarios/grupos tienen asignado ese rol; sus permisos se muestran en solo lectura |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado (permite editar roles y miembros, pero no nombre ni etiqueta) |
 | **Prueba de Telegram** | Enviar un mensaje de prueba para verificar la conectividad del bot |
 | **Modo oscuro** | Preferencia por usuario, persistida entre sesiones |
@@ -73,13 +74,15 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 
 ## Roles de Usuario
 
+![Gestión de acceso](images/access_tab.svg)
+
 ### Roles integrados
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos |
-| `editor` | `modules_view`, `modules_add`, `modules_edit`, `config_edit`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
-| `viewer` | `modules_view`, `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view` |
+| `admin` | Todos los permisos (23 flags) |
+| `editor` | `modules_view`, `modules_add`, `modules_edit`, `config_edit`, `checks_view`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
+| `viewer` | `modules_view`, `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view`, `checks_view` |
 
 > Los roles integrados **no pueden eliminarse** ni cambiar sus permisos via API. Sí permiten actualizar la **etiqueta** (`label`) y gestionar qué usuarios y grupos tienen ese rol asignado. La etiqueta personalizada se persiste en `roles.json` bajo la clave `__builtin_labels__`.
 
@@ -126,7 +129,7 @@ Cada grupo tiene:
 
 ## Sistema de Permisos
 
-El sistema de control de acceso usa **21 flags granulares** por acción y recurso.
+El sistema de control de acceso usa **23 flags granulares** por acción y recurso.
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -147,14 +150,16 @@ El sistema de control de acceso usa **21 flags granulares** por acción y recurs
 | **Módulos** | `modules_view` | Ver la lista de módulos |
 | | `modules_add` | Crear nuevas entradas de módulo |
 | | `modules_edit` | Guardar cambios en módulos |
-| **Config** | `config_edit` | Guardar cambios en configuración |
+| **Config** | `config_view` | Leer `config.json` sin poder editarlo |
+| | `config_edit` | Guardar cambios en configuración |
 | **Sesiones** | `sessions_view` | Ver sesiones activas |
 | | `sessions_revoke` | Revocar sesiones |
-| **Checks** | `checks_run` | Lanzar comprobaciones bajo demanda |
+| **Checks** | `checks_view` | Ver resultados de checks y la pestaña Status |
+| | `checks_run` | Lanzar comprobaciones bajo demanda |
 
 ### Implementación interna
 
-- `PERMISSIONS` — tupla con los 21 flags.
+- `PERMISSIONS` — tupla con los 23 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` para los roles integrados.
 - `_perm_required(*perms)` — factoría de decoradores: acepta si el usuario tiene **alguno** de los permisos indicados.
@@ -168,10 +173,12 @@ botones y pestañas según los permisos del usuario actual obtenidos de `/api/me
 
 - Pestaña Usuarios: visible si tiene cualquier permiso `users_*`.
 - Pestaña Auditoría: visible si tiene `audit_view`.
+- Pestaña Status: visible si tiene `checks_view` o `checks_run`; oculta cuando ninguno de los dos está activo.
 - Botón "Nuevo usuario": solo si `users_add`.
 - Botones editar/borrar de cada usuario: solo si `users_edit` / `users_delete`.
 - Botón limpiar audit / borrar entrada: solo si `audit_delete`.
 - Botón "Nuevo rol" y sección de roles: solo si tiene cualquier permiso `roles_*`.
+- Widget "Lista de módulos" del dashboard: oculto cuando falta `modules_view` (las tarjetas de resumen sí son siempre visibles).
 
 ---
 
@@ -190,6 +197,8 @@ botones y pestañas según los permisos del usuario actual obtenidos de `/api/me
 ---
 
 ## Endpoints REST
+
+![Pestaña configuración](images/config_tab.svg)
 
 Todos los endpoints requieren autenticación (cookie de sesión) salvo los indicados como *público*.
 El permiso requerido se indica entre paréntesis.
@@ -211,18 +220,18 @@ El permiso requerido se indica entre paréntesis.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/modules` | auth | Obtener todas las configuraciones de módulos |
+| `GET` | `/api/modules` | `modules_view` | Obtener todas las configuraciones de módulos |
 | `PUT` | `/api/modules` | `modules_edit` | Guardar todas las configuraciones de módulos |
-| `GET` | `/api/status` | auth | Obtener el contenido de `status.json` (solo lectura) |
-| `GET` | `/api/overview` | auth | Obtener resumen de estado de módulos |
+| `GET` | `/api/status` | `checks_view` o `checks_run` | Obtener el contenido de `status.json` (solo lectura) |
+| `GET` | `/api/overview` | auth | Obtener resumen del dashboard (módulos, checks, sesiones, usuarios, grupos, roles, últimos eventos) |
 
 ### Configuración
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/config` | auth | Obtener el `config.json` actual |
+| `GET` | `/api/config` | `config_view` o `config_edit` | Obtener el `config.json` actual |
 | `PUT` | `/api/config` | `config_edit` | Guardar `config.json` |
-| `GET` | `/api/config/schema` | auth | Obtener el schema de validación de los campos de configuración del web admin |
+| `GET` | `/api/config/schema` | `config_view` o `config_edit` | Obtener el schema de validación de los campos de configuración del web admin |
 
 Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `routes/config.py`):
 
@@ -323,11 +332,68 @@ El campo `web_admin.page_sizes` es un array de enteros no negativos que define l
 
 ---
 
+## Dashboard Personalizable
+
+La pestaña **Overview** del panel de administración incluye un dashboard totalmente personalizable por usuario. Los cambios se persisten en `localStorage` con la clave `ss_layout2_<username>`.
+
+![Dashboard Overview](images/dashboard_overview.svg)
+
+### Widgets disponibles
+
+| Widget | ID | Descripción |
+| ------ | -- | ----------- |
+| Modules | `modules` | Tarjeta: total de módulos y cuántos están habilitados |
+| Checks | `checks` | Tarjeta: total de checks y resultado (OK / errores) |
+| Sessions | `sessions` | Tarjeta: sesiones activas y usuarios conectados |
+| Users | `users` | Tarjeta: total de usuarios por rol |
+| Groups | `groups` | Tarjeta: total de grupos y membresías |
+| Roles | `roles` | Tarjeta: roles integrados + personalizados |
+| Module List | `modules_list` | Tabla: módulo, estado activo, resultado de checks, nº de ítems; columnas ordenables |
+| Recent Activity | `activity` | Tabla: últimos 10 eventos de auditoría; columnas ordenables |
+
+### Modo edición
+
+Para activar el modo edición, pulsa **✏ Edit Dashboard** en la barra de herramientas. Esto habilita:
+
+- **Drag-and-drop** para reordenar widgets — arrastra desde el icono `⠿` de la barra del widget.
+- **Control de ancho** `← N →` para cambiar entre columnas del grid (ciclo: 2 → 3 → 4 → 6 → 8 → 9 → 12).
+- **Control de altura** `↑ H ↓` para los widgets de tabla (ciclo: auto → sm → md → lg → xl).
+- **Ocultar** `✕` para retirar un widget del dashboard (vuelve a aparecer en "Añadir widget").
+- **Barra "Añadir widget"** que lista los widgets ocultos para restaurarlos.
+- **Restablecer** para volver al layout por defecto.
+
+![Dashboard en modo edición](images/dashboard_edit.svg)
+
+### Respuesta de `/api/overview`
+
+```json
+{
+  "modules": [
+    {
+      "name": "ping",
+      "enabled": true,
+      "items": 2,
+      "checks": { "total": 1, "ok": 1, "error": 0 }
+    }
+  ],
+  "status":   { "total": 1, "ok": 1, "error": 0 },
+  "sessions": { "active": 1, "users": ["admin"] },
+  "users":    { "total": 1, "by_role": { "admin": 1 } },
+  "groups":   { "total": 1, "members": 0 },
+  "roles":    { "total": 3, "builtin": 3, "custom": 0 },
+  "last_events": [{ "ts": "...", "event": "login_ok", "user": "admin", "ip": "..." }]
+}
+```
+
+Los contadores de `status` se calculan como la suma de `checks.total/ok/error` de todos los módulos.
+
+---
+
 ## Página de Estado Pública (`/status`)
 
 La ruta `/status` muestra el estado actual de todos los módulos en una página pública, sin panel de navegación ni menú de administración.
 
-![Estado de servicios](images/status_page.png)
+![Estado de servicios](images/status_public.svg)
 
 ### Comportamiento de acceso
 
@@ -412,6 +478,8 @@ Para añadir un nuevo idioma, basta con crear un nuevo fichero `.py` en `lib/web
 
 ## Formularios por Schema
 
+![Pestaña Módulos](images/modules_tab.svg)
+
 La interfaz web genera automáticamente los formularios de configuración de módulos a partir del `schema.json` de cada package. Los campos se renderizan con el tipo de input correcto, rangos de validación y etiquetas del fichero `lang/*.json` del módulo.
 
 Esto implica:
@@ -429,7 +497,7 @@ Cada cambio de configuración se registra en `audit.json` con:
 - Diff a nivel de campo (`valor_anterior` → `valor_nuevo`)
 - Campos sensibles (contraseñas, tokens) mostrados solo como `***`
 
-Los últimos N eventos de auditoría se muestran en la pestaña Overview.
+Los últimos N eventos de auditoría se muestran en el widget **Recent Activity** del dashboard Overview.
 
 Todos los eventos auditados:
 

@@ -49,6 +49,55 @@
         pointer-events: none;
         opacity: 0.6;
     }
+
+    /* ── Dashboard grid ──────────────────────────────────────────── */
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: .75rem;
+    }
+    @media (max-width: 767px) {
+        .dashboard-grid .dw { grid-column: span 12 !important; }
+    }
+    .dw { display: flex; flex-direction: column; }
+    .dw-content { flex: 1; min-height: 0; overflow: hidden; }
+    .dw-c1  { grid-column: span 1; }
+    .dw-c2  { grid-column: span 2; }
+    .dw-c3  { grid-column: span 3; }
+    .dw-c4  { grid-column: span 4; }
+    .dw-c6  { grid-column: span 6; }
+    .dw-c8  { grid-column: span 8; }
+    .dw-c9  { grid-column: span 9; }
+    .dw-c12 { grid-column: span 12; }
+
+    /* Height variants — applied to .dw, clips .dw-content */
+    .dw-h-sm .dw-content { height: 150px; overflow-y: auto; }
+    .dw-h-md .dw-content { height: 280px; overflow-y: auto; }
+    .dw-h-lg .dw-content { height: 420px; overflow-y: auto; }
+    .dw-h-xl .dw-content { height: 560px; overflow-y: auto; }
+
+    /* Edit-mode toolbar */
+    .dw-toolbar {
+        display: none;
+        align-items: center;
+        gap: 3px;
+        padding: 3px 6px;
+        margin-bottom: 4px;
+        background: var(--bs-secondary-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: var(--bs-border-radius-sm);
+        font-size: .75rem;
+    }
+    .dashboard-edit .dw-toolbar { display: flex; }
+    .dw-drag-handle {
+        cursor: grab;
+        padding: 0 6px;
+        color: var(--bs-secondary-color);
+    }
+    .dw-drag-handle:active { cursor: grabbing; }
+    .dw.dw-dragging { opacity: .4; }
+    .dw.dw-over { outline: 2px dashed var(--bs-primary); border-radius: var(--bs-border-radius); }
+    .btn-dw { padding: .1rem .35rem; font-size: .7rem; line-height: 1.4; }
 </style>
 {% endblock %}
 
@@ -339,24 +388,6 @@
 <!-- Modals & Toast -->
 {% include "partials/_modals.html" %}
 
-<!-- Widget config modal -->
-<div class="modal fade" id="widgetConfigModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-content">
-      <div class="modal-header py-2">
-        <h6 class="modal-title">{{ i18n.widget_config_title }}</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body p-0">
-        <ul class="list-group list-group-flush" id="widgetList"></ul>
-      </div>
-      <div class="modal-footer py-2">
-        <button class="btn btn-sm btn-outline-secondary" onclick="_widgetReset()">{{ i18n.widget_reset }}</button>
-        <button class="btn btn-sm btn-primary" data-bs-dismiss="modal">{{ i18n.close }}</button>
-      </div>
-    </div>
-  </div>
-</div>
 {% endblock %}
 
 {% block scripts %}

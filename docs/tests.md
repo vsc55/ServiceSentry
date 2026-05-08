@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: 1258 tests** | Todos deben pasar con `pytest` para que el build sea válido.
+**Total: 1309 tests** | Todos deben pasar con `pytest` para que el build sea válido.
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -585,8 +585,30 @@
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_overview_requires_auth` | Sin login | `302` | Si devuelve datos |
-| `test_overview_returns_data` | `GET /api/overview` | Dict con resumen global | Si está vacío |
+| `test_requires_auth` | Sin login | `302` | Si devuelve datos |
+| `test_returns_200` | `GET /api/overview` autenticado | `200` | Si no accesible |
+| `test_response_keys` | Claves del JSON: `modules`, `status`, `sessions`, `users`, `groups`, `roles`, `last_events` | Todas presentes | Si falta alguna |
+| `test_modules_list` | Lista de módulos contiene `ping` y `web` | Nombres exactos | Si difiere |
+| `test_modules_enabled_flag` | Flag `enabled` por módulo | Ambos `true` en fixture | Si difiere |
+| `test_modules_items_count` | Número de ítems por módulo | `ping=2`, `web=1` | Si difiere |
+| `test_status_counts` | Contadores globales de checks | `total=1`, `ok=1`, `error=0` | Si difiere |
+| `test_status_without_var_dir` | Sin `var_dir` → ceros | `{total:0, ok:0, error:0}` | Si no es cero |
+| `test_sessions_contains_current` | Sesión activa tras login | `active≥1`, `admin` en `users` | Si no aparece |
+| `test_users_total` | Total de usuarios | `total=1`, `by_role.admin=1` | Si difiere |
+| `test_last_events_list` | `last_events` es lista con campo `event` | Lista válida | Si no es lista |
+| `test_last_events_max_10` | Con >10 eventos en audit | Máximo 10 devueltos | Si devuelve más |
+| `test_dashboard_has_overview_tab` | HTML del dashboard contiene `tab-overview` | Elemento presente | Si no aparece |
+| `test_groups_summary_keys` | `groups` tiene `total` y `members` | Ambas claves presentes | Si falta alguna |
+| `test_groups_default_administrators` | Sin `groups.json` → grupo `administrators` creado | `total=1`, `members=0` | Si difiere |
+| `test_roles_summary_keys` | `roles` tiene `total`, `builtin`, `custom` | Todas presentes | Si falta alguna |
+| `test_roles_builtin_count` | Roles integrados = 3 (admin/editor/viewer) | `builtin=3`, `custom=0` | Si difiere |
+| `test_roles_custom_count` | Añadir rol personalizado en runtime | `custom=1`, `total=4` | Si no incrementa |
+| `test_modules_have_checks_key` | Cada módulo tiene clave `checks` | Dict presente en todos | Si falta |
+| `test_module_checks_structure` | `checks` tiene `total`, `ok`, `error` | Tres claves presentes | Si falta alguna |
+| `test_module_checks_counts` | Counts reales: `ping` 1 OK, `web` 0 | Valores exactos del fixture | Si difiere |
+| `test_module_checks_with_error` | Check fallido contabilizado | `ping.error=1` | Si no se refleja |
+| `test_module_checks_without_var_dir` | Sin `var_dir` → checks a cero | Todos `{0,0,0}` | Si no es cero |
+| `test_status_aggregated_from_module_checks` | `status` = suma de checks por módulo | Invariante aritmética | Si no cuadra |
 
 ### `TestApiRunChecks`
 

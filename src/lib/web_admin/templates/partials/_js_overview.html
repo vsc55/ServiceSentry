@@ -1,8 +1,8 @@
 {# ================================================================
-   Overview tab — at-a-glance system dashboard.
+   Overview tab — fully customisable drag/resize dashboard.
    ================================================================ #}
 
-// ──────────────────────────── Overview ────────────────────────────
+// ──────────────────────── Auto-refresh bar ────────────────────────
 let _overviewTimer = null;
 
 function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '') {
@@ -38,89 +38,465 @@ function setOverviewAutoRefresh(seconds) {
     renderOverview();
 }
 
-// ──────────────────────────── Widget config ────────────────────────
-const _WIDGET_IDS = ['modules', 'checks', 'sessions', 'users', 'groups', 'roles'];
+// ──────────────────────── Widget definitions ──────────────────────
+// cols: default column span (out of 12); hasH: allow height control
+const _DW_COLS_CYCLE  = [2, 3, 4, 6, 8, 9, 12];
+const _DW_H_CYCLE     = ['auto', 'sm', 'md', 'lg', 'xl'];
+const _DW_H_LABELS    = { auto: 'Auto', sm: 'S', md: 'M', lg: 'L', xl: 'XL' };
 
-function _widgetKey() { return 'ss_widgets_' + (currentUser.username || '_'); }
+const _DW_DEFS = {
+    modules:      { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    checks:       { icon: 'bi-activity',      lkey: 'overview_status',           dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    sessions:     { icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    users:        { icon: 'bi-people',        lkey: 'overview_users',            dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    groups:       { icon: 'bi-diagram-3',     lkey: 'overview_groups',           dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    roles:        { icon: 'bi-shield-shaded',   lkey: 'overview_roles',            dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    modules_list: { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 6,  dH: 'md',   hasH: true,
+                    canShow: (p)         => p.has('modules_view') },
+    activity:     { icon: 'bi-clock-history', lkey: 'overview_recent_activity',  dCols: 6,  dH: 'md',   hasH: true,
+                    canShow: (p, admin)  => admin },
+};
 
-function _loadWidgetCfg() {
+// ──────────────────────── Layout persistence ──────────────────────
+function _dwKey() { return 'ss_layout2_' + (currentUser.username || '_'); }
+
+function _dwLoad() {
     try {
-        const raw = localStorage.getItem(_widgetKey());
+        const raw = localStorage.getItem(_dwKey());
         if (raw) {
-            const p = JSON.parse(raw);
-            const known = new Set(_WIDGET_IDS);
-            const order = (Array.isArray(p.order) ? p.order : []).filter(id => known.has(id));
-            for (const id of _WIDGET_IDS) if (!order.includes(id)) order.push(id);
-            return { order, hidden: new Set(Array.isArray(p.hidden) ? p.hidden : []) };
+            const saved = JSON.parse(raw);
+            const known = new Set(Object.keys(_DW_DEFS));
+            const layout = (Array.isArray(saved) ? saved : []).filter(w => known.has(w.id));
+            for (const [id, d] of Object.entries(_DW_DEFS)) {
+                if (!layout.find(w => w.id === id))
+                    layout.push({ id, cols: d.dCols, h: d.dH, hidden: false });
+            }
+            return layout;
         }
     } catch (_) {}
-    return { order: [..._WIDGET_IDS], hidden: new Set() };
+    return Object.entries(_DW_DEFS).map(([id, d]) => ({ id, cols: d.dCols, h: d.dH, hidden: false }));
 }
 
-function _saveWidgetCfg(cfg) {
-    localStorage.setItem(_widgetKey(), JSON.stringify({ order: cfg.order, hidden: [...cfg.hidden] }));
+function _dwSave() {
+    const grid = document.getElementById('dashboardGrid');
+    if (!grid) return;
+    const layout = [...grid.querySelectorAll('.dw[data-wid]')].map(el => ({
+        id:     el.dataset.wid,
+        cols:   parseInt(el.dataset.cols) || 3,
+        h:      el.dataset.h  || 'auto',
+        hidden: el.style.display === 'none',
+    }));
+    localStorage.setItem(_dwKey(), JSON.stringify(layout));
 }
 
-function openWidgetConfig() {
-    const cfg = _loadWidgetCfg();
-    const labels = {
-        modules:  t('overview_modules'),
-        checks:   t('overview_status'),
-        sessions: t('overview_sessions'),
-        users:    t('overview_users'),
-        groups:   t('overview_groups'),
-        roles:    t('overview_roles'),
-    };
-    let rows = '';
-    cfg.order.forEach((id, i) => {
-        const checked = !cfg.hidden.has(id) ? 'checked' : '';
-        const isFirst = i === 0, isLast = i === cfg.order.length - 1;
-        rows += `<li class="list-group-item d-flex align-items-center gap-2" data-wid="${escAttr(id)}">
-          <input class="form-check-input flex-shrink-0" type="checkbox" ${checked}
-            onchange="_widgetToggle(this,'${escAttr(id)}')">
-          <span class="flex-grow-1 ms-1">${esc(labels[id] || id)}</span>
-          <div class="btn-group btn-group-sm">
-            <button class="btn btn-outline-secondary py-0" onclick="_widgetMove('${escAttr(id)}',-1)"
-              ${isFirst ? 'disabled' : ''}><i class="bi bi-chevron-up"></i></button>
-            <button class="btn btn-outline-secondary py-0" onclick="_widgetMove('${escAttr(id)}',1)"
-              ${isLast ? 'disabled' : ''}><i class="bi bi-chevron-down"></i></button>
-          </div>
-        </li>`;
+// ──────────────────────── Sort state ─────────────────────────────
+let _lastOverviewData = null;
+let _dwSort = {};   // { widgetId: { col, dir } }
+
+function _dwSortIcon(wid, col) {
+    const s = _dwSort[wid];
+    if (!s || s.col !== col)
+        return `<i class="bi bi-sort-down ms-1 small text-muted opacity-25 dw-si" data-c="${escAttr(col)}"></i>`;
+    const ic = s.dir > 0 ? 'bi-sort-up' : 'bi-sort-down';
+    return `<i class="bi ${ic} ms-1 small text-primary dw-si" data-c="${escAttr(col)}"></i>`;
+}
+
+function _dwTh(wid, col, label) {
+    return `<th style="cursor:pointer;user-select:none;white-space:nowrap"
+        onclick="_dwSortTable('${escAttr(wid)}','${escAttr(col)}')">${esc(label)}${_dwSortIcon(wid, col)}</th>`;
+}
+
+function _dwChecksBadge(checks) {
+    if (!checks || checks.total === 0) return '<span class="text-muted">—</span>';
+    if (checks.error > 0)
+        return `<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>${checks.error} err</span>`;
+    return '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>OK</span>';
+}
+
+function _dwBuildModuleRows(modules) {
+    const s = _dwSort['modules_list'];
+    let rows = [...modules];
+    if (s?.col) {
+        rows.sort((a, b) => {
+            let va, vb;
+            if (s.col === 'name') {
+                va = modulePrettyName(a.name, modulesData[a.name]).toLowerCase();
+                vb = modulePrettyName(b.name, modulesData[b.name]).toLowerCase();
+            } else if (s.col === 'enabled') {
+                va = a.enabled ? 1 : 0; vb = b.enabled ? 1 : 0;
+            } else if (s.col === 'checks') {
+                va = (a.checks?.error ?? 0); vb = (b.checks?.error ?? 0);
+            } else {
+                va = a.items; vb = b.items;
+            }
+            return va < vb ? -s.dir : va > vb ? s.dir : 0;
+        });
+    }
+    if (!rows.length)
+        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('status_empty')}</td></tr>`;
+    return rows.map(m => {
+        const pname = modulePrettyName(m.name, modulesData[m.name]);
+        const icon  = moduleIcon(m.name, modulesData[m.name]);
+        const active = m.enabled ? '<span class="badge bg-success">ON</span>' : '<span class="badge bg-secondary">OFF</span>';
+        return `<tr><td>${icon} ${esc(pname)}</td><td>${active}</td><td>${_dwChecksBadge(m.checks)}</td><td>${m.items}</td></tr>`;
+    }).join('');
+}
+
+function _dwBuildActivityRows(events) {
+    const AE = I18N.audit_events || {};
+    const s  = _dwSort['activity'];
+    let rows = [...events];
+    if (s?.col) {
+        rows.sort((a, b) => {
+            let va, vb;
+            if (s.col === 'ts')    { va = a.ts;    vb = b.ts; }
+            else if (s.col === 'event') { va = (AE[a.event] || a.event).toLowerCase(); vb = (AE[b.event] || b.event).toLowerCase(); }
+            else                   { va = a.user.toLowerCase(); vb = b.user.toLowerCase(); }
+            return va < vb ? -s.dir : va > vb ? s.dir : 0;
+        });
+    }
+    return rows.map(e => {
+        const date  = new Date(e.ts).toLocaleString();
+        const label = AE[e.event] || e.event;
+        let badge = 'bg-secondary';
+        if (e.event === 'login_failed') badge = 'bg-danger';
+        else if (e.event === 'login_ok') badge = 'bg-success';
+        else if (e.event === 'logout') badge = 'bg-warning text-dark';
+        else if (e.event.includes('error') || e.event.includes('revoked') || e.event.includes('deleted')) badge = 'bg-danger';
+        else if (e.event.includes('created') || e.event.includes('saved')) badge = 'bg-success';
+        else if (e.event.includes('updated') || e.event.includes('changed') || e.event === 'password_reset') badge = 'bg-info text-dark';
+        return `<tr>
+          <td class="small text-nowrap">${esc(date)}</td>
+          <td><span class="badge ${badge}">${esc(label)}</span></td>
+          <td><code>${esc(e.user)}</code></td></tr>`;
+    }).join('');
+}
+
+function _dwSortTable(wid, col) {
+    const cur = _dwSort[wid];
+    _dwSort[wid] = (cur?.col === col) ? { col, dir: -cur.dir } : { col, dir: 1 };
+    const container = document.querySelector(`.dw[data-wid="${wid}"]`);
+    if (!container) return;
+    // Update header icons
+    container.querySelectorAll('.dw-si').forEach(ic => {
+        const c = ic.dataset.c;
+        const active = c === _dwSort[wid].col;
+        ic.className = active
+            ? `bi ${_dwSort[wid].dir > 0 ? 'bi-sort-up' : 'bi-sort-down'} ms-1 small text-primary dw-si`
+            : 'bi bi-sort-down ms-1 small text-muted opacity-25 dw-si';
     });
-    document.getElementById('widgetList').innerHTML = rows;
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('widgetConfigModal')).show();
+    // Rebuild tbody
+    const tbody = container.querySelector('tbody');
+    if (!tbody || !_lastOverviewData) return;
+    if (wid === 'modules_list')
+        tbody.innerHTML = _dwBuildModuleRows(_lastOverviewData.modules || []);
+    else if (wid === 'activity')
+        tbody.innerHTML = _dwBuildActivityRows(_lastOverviewData.last_events || []);
 }
 
-function _widgetCurrentOrder() {
-    return [...document.querySelectorAll('#widgetList [data-wid]')].map(el => el.dataset.wid);
+// ──────────────────────── Edit mode ───────────────────────────────
+let _dwEditing = false;
+let _dwDragSrc = null;
+
+function _dwToggleEdit() {
+    _dwEditing = !_dwEditing;
+    const grid   = document.getElementById('dashboardGrid');
+    const addBar = document.getElementById('dwAddBar');
+    const btn    = document.getElementById('dwEditBtn');
+    if (!grid) return;
+    if (_dwEditing) {
+        grid.classList.add('dashboard-edit');
+        addBar?.classList.remove('d-none');
+        if (btn) {
+            btn.className = 'btn btn-sm btn-warning ms-auto';
+            btn.innerHTML = `<i class="bi bi-check-lg me-1"></i>${t('dashboard_save')}`;
+        }
+        _dwInitDnd(grid);
+        _dwRefreshAddBar();
+    } else {
+        grid.classList.remove('dashboard-edit');
+        addBar?.classList.add('d-none');
+        if (btn) {
+            btn.className = 'btn btn-sm btn-outline-secondary ms-auto';
+            btn.innerHTML = `<i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}`;
+        }
+        _dwSave();
+    }
 }
 
-function _widgetToggle(cb, id) {
-    const cfg = _loadWidgetCfg();
-    cfg.order = _widgetCurrentOrder();
-    if (cb.checked) cfg.hidden.delete(id); else cfg.hidden.add(id);
-    _saveWidgetCfg(cfg);
+// ──────────────────────── Drag & drop ─────────────────────────────
+function _dwInitDnd(grid) {
+    grid.querySelectorAll('.dw[data-wid]').forEach(el => {
+        el.setAttribute('draggable', 'true');
+        el.ondragstart = e => {
+            if (!e.target.closest('.dw-toolbar')) { e.preventDefault(); return; }
+            _dwDragSrc = el;
+            e.dataTransfer.effectAllowed = 'move';
+            setTimeout(() => el.classList.add('dw-dragging'), 0);
+        };
+        el.ondragend = () => {
+            el.classList.remove('dw-dragging');
+            grid.querySelectorAll('.dw').forEach(w => w.classList.remove('dw-over'));
+            _dwDragSrc = null;
+        };
+        el.ondragover = e => {
+            e.preventDefault();
+            if (_dwDragSrc && el !== _dwDragSrc) {
+                grid.querySelectorAll('.dw').forEach(w => w.classList.remove('dw-over'));
+                el.classList.add('dw-over');
+            }
+        };
+        el.ondragleave = () => el.classList.remove('dw-over');
+        el.ondrop = e => {
+            e.preventDefault();
+            el.classList.remove('dw-over');
+            if (!_dwDragSrc || _dwDragSrc === el) return;
+            const mid = el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2;
+            if (e.clientX < mid) grid.insertBefore(_dwDragSrc, el);
+            else el.after(_dwDragSrc);
+            _dwSave();
+        };
+    });
 }
 
-function _widgetMove(id, dir) {
-    const cfg = _loadWidgetCfg();
-    cfg.order = _widgetCurrentOrder();
-    const i = cfg.order.indexOf(id);
-    if (i < 0) return;
-    const j = i + dir;
-    if (j < 0 || j >= cfg.order.length) return;
-    [cfg.order[i], cfg.order[j]] = [cfg.order[j], cfg.order[i]];
-    _saveWidgetCfg(cfg);
-    openWidgetConfig();
+// ──────────────────────── Toolbar actions ─────────────────────────
+function _dwCycleW(btn, dir) {
+    const dw   = btn.closest('.dw');
+    const cur  = parseInt(dw.dataset.cols) || 3;
+    const idx  = _DW_COLS_CYCLE.indexOf(cur);
+    const next = _DW_COLS_CYCLE[(idx + dir + _DW_COLS_CYCLE.length) % _DW_COLS_CYCLE.length];
+    dw.dataset.cols = next;
+    _DW_COLS_CYCLE.forEach(c => dw.classList.remove('dw-c' + c));
+    dw.classList.add('dw-c' + next);
+    dw.querySelector('.dw-w-lbl').textContent = next;
+    _dwSave();
 }
 
-function _widgetReset() {
-    localStorage.removeItem(_widgetKey());
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('widgetConfigModal')).hide();
+function _dwCycleH(btn, dir) {
+    const dw   = btn.closest('.dw');
+    const cur  = dw.dataset.h || 'auto';
+    const idx  = _DW_H_CYCLE.indexOf(cur);
+    const next = _DW_H_CYCLE[(idx + dir + _DW_H_CYCLE.length) % _DW_H_CYCLE.length];
+    dw.dataset.h = next;
+    _DW_H_CYCLE.forEach(h => dw.classList.remove('dw-h-' + h));
+    if (next !== 'auto') dw.classList.add('dw-h-' + next);
+    dw.querySelector('.dw-h-lbl').textContent = _DW_H_LABELS[next] || next;
+    _dwSave();
+}
+
+function _dwRemove(btn) {
+    btn.closest('.dw').style.display = 'none';
+    _dwSave();
+    _dwRefreshAddBar();
+}
+
+function _dwAdd(id) {
+    const grid = document.getElementById('dashboardGrid');
+    const el   = grid?.querySelector(`.dw[data-wid="${id}"]`);
+    if (!el) return;
+    el.style.display = '';
+    _dwSave();
+    _dwRefreshAddBar();
+    _dwInitDnd(grid);
+}
+
+function _dwRefreshAddBar() {
+    const bar  = document.getElementById('dwAddBar');
+    const grid = document.getElementById('dashboardGrid');
+    if (!bar || !grid) return;
+    const hidden = [...grid.querySelectorAll('.dw[data-wid]')]
+        .filter(el => el.style.display === 'none');
+    if (!hidden.length) {
+        bar.innerHTML = `<span class="text-muted small">${t('dashboard_all_visible')}</span>`;
+        return;
+    }
+    let h = `<span class="text-muted small me-2">${t('dashboard_add_widget')}:</span>`;
+    for (const el of hidden) {
+        const def = _DW_DEFS[el.dataset.wid];
+        if (!def) continue;
+        h += `<button class="btn btn-sm btn-outline-primary" onclick="_dwAdd('${escAttr(el.dataset.wid)}')">
+            <i class="bi ${def.icon} me-1"></i>${esc(t(def.lkey))}</button>`;
+    }
+    bar.innerHTML = h;
+}
+
+function _dwReset() {
+    localStorage.removeItem(_dwKey());
+    _dwEditing = false;
     renderOverview();
 }
 
-// ──────────────────────────── Render overview ─────────────────────
+// ──────────────────────── Widget toolbar HTML ─────────────────────
+function _dwToolbar(id, cols, h) {
+    const def  = _DW_DEFS[id];
+    const hasH = def?.hasH;
+    let tb = `<div class="dw-toolbar" title="${t('dashboard_drag')}">`;
+    tb += `<span class="dw-drag-handle"><i class="bi bi-grip-horizontal"></i></span>`;
+    tb += `<span class="small text-muted text-truncate" style="max-width:8em">${esc(t(def?.lkey || id))}</span>`;
+    tb += `<span class="d-flex align-items-center gap-1 ms-auto">`;
+    // Width
+    tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleW(this,-1)" title="${t('widget_width')}"><i class="bi bi-chevron-left"></i></button>`;
+    tb += `<span class="dw-w-lbl small fw-semibold" style="min-width:1.4em;text-align:center">${cols}</span>`;
+    tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleW(this,1)"><i class="bi bi-chevron-right"></i></button>`;
+    // Height (tables only)
+    if (hasH) {
+        tb += `<span class="vr mx-1"></span>`;
+        tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleH(this,-1)" title="${t('widget_height')}"><i class="bi bi-chevron-up"></i></button>`;
+        tb += `<span class="dw-h-lbl small fw-semibold" style="min-width:2em;text-align:center">${_DW_H_LABELS[h] || h}</span>`;
+        tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleH(this,1)"><i class="bi bi-chevron-down"></i></button>`;
+    }
+    tb += `<span class="vr mx-1"></span>`;
+    tb += `<button class="btn btn-dw btn-outline-danger" onclick="_dwRemove(this)" title="${t('widget_hide')}"><i class="bi bi-eye-slash"></i></button>`;
+    tb += `</span></div>`;
+    return tb;
+}
+
+// ──────────────────────── Widget content ──────────────────────────
+function _dwContent(id, data) {
+    const perms   = new Set(currentUser.permissions || []);
+    const isAdmin = currentUser.role === 'admin';
+
+    const modules  = data.modules  || [];
+    const status   = data.status   || {};
+    const sessions = data.sessions || {};
+    const users    = data.users    || {};
+    const groups   = data.groups   || {};
+    const roles    = data.roles    || {};
+    const events   = data.last_events || [];
+
+    const enabled  = modules.filter(m => m.enabled).length;
+    const disabled = modules.length - enabled;
+
+    switch (id) {
+
+        case 'modules':
+            return `<div class="card h-100 border-start border-4 border-primary">
+              <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                  <i class="bi bi-puzzle fs-4 text-primary me-2"></i>
+                  <h6 class="card-title mb-0">${t('overview_modules')}</h6>
+                </div>
+                <div class="fs-2 fw-bold">${modules.length}</div>
+                <small class="text-success">${enabled} ${t('overview_enabled')}</small>
+                ${disabled ? ' · <small class="text-secondary">' + disabled + ' ' + t('overview_disabled') + '</small>' : ''}
+              </div></div>`;
+
+        case 'checks': {
+            const err  = status.error > 0;
+            const b    = status.total === 0 ? 'secondary' : err ? 'danger' : 'success';
+            const ic   = status.total === 0 ? 'bi-dash-circle' : err ? 'bi-exclamation-triangle' : 'bi-check-circle';
+            const lbl  = status.total === 0 ? t('overview_no_status') : err ? tf('overview_has_errors', status.error) : t('overview_all_ok');
+            return `<div class="card h-100 border-start border-4 border-${b}">
+              <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                  <i class="bi ${ic} fs-4 text-${b} me-2"></i>
+                  <h6 class="card-title mb-0">${t('overview_status')}</h6>
+                </div>
+                <div class="fs-2 fw-bold">${status.total}</div>
+                <small class="text-${b}">${lbl}</small>
+              </div></div>`;
+        }
+
+        case 'sessions':
+            return `<div class="card h-100 border-start border-4 border-info">
+              <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                  <i class="bi bi-plug fs-4 text-info me-2"></i>
+                  <h6 class="card-title mb-0">${t('overview_sessions')}</h6>
+                </div>
+                <div class="fs-2 fw-bold">${sessions.active || 0}</div>
+              </div></div>`;
+
+        case 'users': {
+            const byRole = users.by_role || {};
+            const parts  = Object.entries(byRole)
+                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)} me-1">${n} ${esc((rolesData[r]?.label) || ROLE_LABELS[r] || r)}</span>`)
+                .join('');
+            return `<div class="card h-100 border-start border-4 border-warning">
+              <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                  <i class="bi bi-people fs-4 text-warning me-2"></i>
+                  <h6 class="card-title mb-0">${t('overview_users')}</h6>
+                </div>
+                <div class="fs-2 fw-bold">${users.total || 0}</div>
+                <small>${parts || '—'}</small>
+              </div></div>`;
+        }
+
+        case 'groups':
+            return `<div class="card h-100 border-start border-4 border-secondary">
+              <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                  <i class="bi bi-diagram-3 fs-4 text-secondary me-2"></i>
+                  <h6 class="card-title mb-0">${t('overview_groups')}</h6>
+                </div>
+                <div class="fs-2 fw-bold">${groups.total || 0}</div>
+                ${groups.members ? `<small class="text-muted">${tf('overview_members', groups.members)}</small>` : ''}
+              </div></div>`;
+
+        case 'roles':
+            return `<div class="card h-100 border-start border-4 border-dark">
+              <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                  <i class="bi bi-shield-shaded fs-4 text-dark me-2"></i>
+                  <h6 class="card-title mb-0">${t('overview_roles')}</h6>
+                </div>
+                <div class="fs-2 fw-bold">${roles.total || 0}</div>
+                ${roles.custom ? `<small class="text-muted">${tf('overview_custom_roles', roles.custom)}</small>` : ''}
+              </div></div>`;
+
+        case 'modules_list': {
+            if (!perms.has('modules_view'))
+                return `<div class="card h-100"><div class="card-body text-muted small">${t('no_permission')}</div></div>`;
+            return `<div class="card h-100">
+              <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>${t('overview_modules')}</h6></div>
+              <div class="card-body p-0">
+                <div class="table-responsive">
+                  <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light"><tr>
+                      ${_dwTh('modules_list','name',t('col_module'))}
+                      ${_dwTh('modules_list','enabled',t('col_enabled'))}
+                      ${_dwTh('modules_list','checks',t('col_checks'))}
+                      ${_dwTh('modules_list','items',t('overview_items'))}
+                    </tr></thead>
+                    <tbody>${_dwBuildModuleRows(modules)}</tbody>
+                  </table>
+                </div>
+              </div></div>`;
+        }
+
+        case 'activity': {
+            if (!isAdmin)
+                return `<div class="card h-100"><div class="card-body text-muted small">${t('no_permission')}</div></div>`;
+            if (!events.length)
+                return `<div class="card h-100"><div class="card-body text-muted small">${t('status_empty')}</div></div>`;
+            return `<div class="card h-100">
+              <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-clock-history me-2"></i>${t('overview_recent_activity')}</h6></div>
+              <div class="card-body p-0">
+                <div class="table-responsive">
+                  <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light"><tr>
+                      ${_dwTh('activity','ts',t('col_time'))}
+                      ${_dwTh('activity','event',t('col_event'))}
+                      ${_dwTh('activity','user',t('col_user'))}
+                    </tr></thead>
+                    <tbody>${_dwBuildActivityRows(events)}</tbody>
+                  </table>
+                </div>
+              </div></div>`;
+        }
+
+        default: return '';
+    }
+}
+
+// ──────────────────────── Main render ─────────────────────────────
 async function renderOverview() {
     const c = document.getElementById('overview-container');
     if (!c) return;
@@ -130,187 +506,53 @@ async function renderOverview() {
         c.innerHTML = '<div class="alert alert-warning">' + t('connection_error') + '</div>';
         return;
     }
+    _lastOverviewData = data;
 
+    const perms   = new Set(currentUser.permissions || []);
     const isAdmin = currentUser.role === 'admin';
-    const perms = new Set(currentUser.permissions || []);
-    const canViewModules = perms.has('modules_view');
-    const modules = data.modules || [];
-    const status = data.status || {};
-    const sessions = data.sessions || {};
-    const users = data.users || {};
-    const groups = data.groups || {};
-    const roles = data.roles || {};
-    const events = data.last_events || [];
-    const enabledCount = modules.filter(m => m.enabled).length;
-    const disabledCount = modules.length - enabledCount;
+    const layout  = _dwLoad();
 
-    // ── Card builders ─────────────────────────────────────────────
-    const cardOf = {
-        modules: () => `<div class="col-sm-6 col-xl-3">
-          <div class="card h-100 border-start border-4 border-primary">
-            <div class="card-body">
-              <div class="d-flex align-items-center mb-2">
-                <i class="bi bi-puzzle fs-4 text-primary me-2"></i>
-                <h6 class="card-title mb-0">${t('overview_modules')}</h6>
-              </div>
-              <div class="fs-2 fw-bold">${modules.length}</div>
-              <small class="text-success">${enabledCount} ${t('overview_enabled')}</small>
-              ${disabledCount ? ' · <small class="text-secondary">' + disabledCount + ' ' + t('overview_disabled') + '</small>' : ''}
-            </div>
-          </div>
-        </div>`,
-
-        checks: () => {
-            const hasErrors = status.error > 0;
-            const border = status.total === 0 ? 'secondary' : hasErrors ? 'danger' : 'success';
-            const icon = status.total === 0 ? 'bi-dash-circle' : hasErrors ? 'bi-exclamation-triangle' : 'bi-check-circle';
-            const label = status.total === 0
-                ? t('overview_no_status')
-                : hasErrors ? tf('overview_has_errors', status.error) : t('overview_all_ok');
-            return `<div class="col-sm-6 col-xl-3">
-              <div class="card h-100 border-start border-4 border-${border}">
-                <div class="card-body">
-                  <div class="d-flex align-items-center mb-2">
-                    <i class="bi ${icon} fs-4 text-${border} me-2"></i>
-                    <h6 class="card-title mb-0">${t('overview_status')}</h6>
-                  </div>
-                  <div class="fs-2 fw-bold">${status.total}</div>
-                  <small class="text-${border}">${label}</small>
-                </div>
-              </div>
-            </div>`;
-        },
-
-        sessions: () => `<div class="col-sm-6 col-xl-3">
-          <div class="card h-100 border-start border-4 border-info">
-            <div class="card-body">
-              <div class="d-flex align-items-center mb-2">
-                <i class="bi bi-plug fs-4 text-info me-2"></i>
-                <h6 class="card-title mb-0">${t('overview_sessions')}</h6>
-              </div>
-              <div class="fs-2 fw-bold">${sessions.active || 0}</div>
-            </div>
-          </div>
-        </div>`,
-
-        users: () => {
-            const byRole = users.by_role || {};
-            const parts = Object.entries(byRole).map(
-                ([r, n]) => `<span class="badge ${roleBadgeClass(r)} me-1">${n} ${esc((rolesData[r] && rolesData[r].label) || ROLE_LABELS[r] || r)}</span>`
-            ).join(' ');
-            return `<div class="col-sm-6 col-xl-3">
-              <div class="card h-100 border-start border-4 border-warning">
-                <div class="card-body">
-                  <div class="d-flex align-items-center mb-2">
-                    <i class="bi bi-people fs-4 text-warning me-2"></i>
-                    <h6 class="card-title mb-0">${t('overview_users')}</h6>
-                  </div>
-                  <div class="fs-2 fw-bold">${users.total || 0}</div>
-                  <small>${parts || '—'}</small>
-                </div>
-              </div>
-            </div>`;
-        },
-
-        groups: () => `<div class="col-sm-6 col-xl-3">
-          <div class="card h-100 border-start border-4 border-secondary">
-            <div class="card-body">
-              <div class="d-flex align-items-center mb-2">
-                <i class="bi bi-diagram-3 fs-4 text-secondary me-2"></i>
-                <h6 class="card-title mb-0">${t('overview_groups')}</h6>
-              </div>
-              <div class="fs-2 fw-bold">${groups.total || 0}</div>
-              ${groups.members ? `<small class="text-muted">${tf('overview_members', groups.members)}</small>` : ''}
-            </div>
-          </div>
-        </div>`,
-
-        roles: () => `<div class="col-sm-6 col-xl-3">
-          <div class="card h-100 border-start border-4 border-dark">
-            <div class="card-body">
-              <div class="d-flex align-items-center mb-2">
-                <i class="bi bi-shield-half fs-4 text-dark me-2"></i>
-                <h6 class="card-title mb-0">${t('overview_roles')}</h6>
-              </div>
-              <div class="fs-2 fw-bold">${roles.total || 0}</div>
-              ${roles.custom ? `<small class="text-muted">${tf('overview_custom_roles', roles.custom)}</small>` : ''}
-            </div>
-          </div>
-        </div>`,
-    };
-
-    const configureBtnHtml = `<button class="btn btn-sm btn-outline-secondary ms-auto" onclick="openWidgetConfig()">
-        <i class="bi bi-grid me-1"></i>${t('widget_configure')}</button>`;
+    const ctrlBtns = `
+        <button class="btn btn-sm btn-outline-secondary ms-auto" id="dwEditBtn" onclick="_dwToggleEdit()">
+            <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="_dwReset()" title="${t('dashboard_reset')}">
+            <i class="bi bi-arrow-counterclockwise"></i></button>`;
 
     let h = _renderRefreshBar('overview-container', 'renderOverview',
-        () => _overviewTimer, 'setOverviewAutoRefresh', configureBtnHtml);
+        () => _overviewTimer, 'setOverviewAutoRefresh', ctrlBtns);
 
-    // ── Render cards in configured order ──────────────────────────
-    const wCfg = _loadWidgetCfg();
-    h += '<div class="row g-3 mb-4">';
-    for (const id of wCfg.order) {
-        if (!wCfg.hidden.has(id) && cardOf[id]) h += cardOf[id]();
-    }
-    h += '</div>';
+    // Add-widget bar (shown only in edit mode)
+    h += `<div id="dwAddBar" class="d-none d-flex flex-wrap align-items-center gap-2 mb-3 p-2 rounded border"></div>`;
 
-    // ── Module list ───────────────────────────────────────────────
-    h += '<div class="row g-3">';
-    if (canViewModules) {
-    h += '<div class="col-lg-6">';
-    h += `<div class="card">
-      <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>${t('overview_modules')}</h6></div>
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
-            <thead class="table-light"><tr>
-              <th>${t('col_module')}</th><th>${t('col_status')}</th><th>${t('overview_items')}</th>
-            </tr></thead><tbody>`;
-    for (const m of modules) {
-        const pname = modulePrettyName(m.name, modulesData[m.name]);
-        const icon = moduleIcon(m.name, modulesData[m.name]);
-        const stBadge = m.enabled
-            ? '<span class="badge bg-success">ON</span>'
-            : '<span class="badge bg-secondary">OFF</span>';
-        h += `<tr>
-          <td>${icon} ${esc(pname)}</td>
-          <td>${stBadge}</td>
-          <td>${m.items}</td>
-        </tr>`;
+    // Dashboard grid
+    const gridEdit = _dwEditing ? ' dashboard-edit' : '';
+    h += `<div class="dashboard-grid${gridEdit}" id="dashboardGrid">`;
+    for (const item of layout) {
+        const def = _DW_DEFS[item.id];
+        if (!def || !def.canShow(perms, isAdmin)) continue;
+        const hClass  = item.h && item.h !== 'auto' ? ` dw-h-${item.h}` : '';
+        const display = item.hidden ? ' style="display:none"' : '';
+        h += `<div class="dw dw-c${item.cols}${hClass}" data-wid="${escAttr(item.id)}"
+               data-cols="${item.cols}" data-h="${item.h || 'auto'}"${display}>`;
+        h += _dwToolbar(item.id, item.cols, item.h || 'auto');
+        h += `<div class="dw-content">${_dwContent(item.id, data)}</div>`;
+        h += `</div>`;
     }
-    h += '</tbody></table></div></div></div></div>';
-    }
+    h += `</div>`;
 
-    // ── Recent activity (admin only) ──────────────────────────────
-    if (isAdmin && events.length) {
-        const AE = I18N.audit_events || {};
-        h += '<div class="col-lg-6">';
-        h += `<div class="card">
-          <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-clock-history me-2"></i>${t('overview_recent_activity')}</h6></div>
-          <div class="card-body p-0">
-            <div class="table-responsive">
-              <table class="table table-sm table-hover align-middle mb-0">
-                <thead class="table-light"><tr>
-                  <th>${t('col_time')}</th><th>${t('col_event')}</th><th>${t('col_user')}</th>
-                </tr></thead><tbody>`;
-        for (const e of events) {
-            const date = new Date(e.ts).toLocaleString();
-            const label = AE[e.event] || e.event;
-            let badge = 'bg-secondary';
-            if (e.event === 'login_failed') badge = 'bg-danger';
-            else if (e.event === 'login_ok') badge = 'bg-success';
-            else if (e.event === 'logout') badge = 'bg-warning text-dark';
-            else if (e.event.includes('error') || e.event.includes('revoked') || e.event.includes('deleted')) badge = 'bg-danger';
-            else if (e.event.includes('created') || e.event.includes('saved')) badge = 'bg-success';
-            else if (e.event.includes('updated') || e.event.includes('changed') || e.event === 'password_reset') badge = 'bg-info text-dark';
-            h += `<tr>
-              <td class="small text-nowrap">${esc(date)}</td>
-              <td><span class="badge ${badge}">${esc(label)}</span></td>
-              <td><code>${esc(e.user)}</code></td>
-            </tr>`;
-        }
-        h += '</tbody></table></div></div></div></div>';
-    }
-
-    h += '</div>'; // end row
     c.innerHTML = h;
+
+    // Re-apply edit mode after DOM rebuild
+    if (_dwEditing) {
+        const grid = document.getElementById('dashboardGrid');
+        const btn  = document.getElementById('dwEditBtn');
+        const bar  = document.getElementById('dwAddBar');
+        grid?.classList.add('dashboard-edit');
+        if (btn) {
+            btn.className = 'btn btn-sm btn-warning ms-auto';
+            btn.innerHTML = `<i class="bi bi-check-lg me-1"></i>${t('dashboard_save')}`;
+        }
+        bar?.classList.remove('d-none');
+        if (grid) { _dwInitDnd(grid); _dwRefreshAddBar(); }
+    }
 }
