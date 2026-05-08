@@ -7,140 +7,496 @@
     <link href="/static/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/bootstrap-icons.min.css" rel="stylesheet">
     <style>
-        body { background: #f5f6fa; }
-        .status-header {
-            background: {% if overall_ok %}#198754{% else %}#dc3545{% endif %};
+        /* ── Design tokens ──────────────────────────────────────────────── */
+        :root {
+            --bg:         #f0f4f8;
+            --card-bg:    #ffffff;
+            --border:     rgba(0,0,0,.06);
+            --txt:        #0f172a;
+            --muted:      #64748b;
+            --divider:    #e2e8f0;
+            --row-hover:  #f8fafc;
+            --shadow:     0 2px 12px rgba(0,0,0,.07), 0 1px 3px rgba(0,0,0,.04);
+            --shadow-lg:  0 6px 28px rgba(0,0,0,.11);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg:        #0c0e14;
+                --card-bg:   #161920;
+                --border:    rgba(255,255,255,.06);
+                --txt:       #e2e8f0;
+                --muted:     #94a3b8;
+                --divider:   #1e2230;
+                --row-hover: #1a1d26;
+                --shadow:    0 2px 16px rgba(0,0,0,.55);
+                --shadow-lg: 0 6px 32px rgba(0,0,0,.6);
+            }
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            color: var(--txt);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0; padding: 0; min-height: 100vh;
+        }
+
+        /* ── Animated live bar ──────────────────────────────────────────── */
+        .live-bar {
+            height: 3px;
+            background: linear-gradient(90deg,
+                {% if overall_ok %}#22c55e 0%, #0ea5e9 40%, #6366f1 70%, #22c55e 100%
+                {% else %}#ef4444 0%, #f97316 40%, #fbbf24 70%, #ef4444 100%{% endif %});
+            background-size: 200% 100%;
+            animation: sweep 2s linear infinite;
+        }
+        @keyframes sweep { to { background-position: -200% 0; } }
+
+        /* ── Hero ───────────────────────────────────────────────────────── */
+        .hero {
+            {% if overall_ok %}
+            background: linear-gradient(150deg, #064e3b 0%, #065f46 35%, #059669 75%, #0d9488 100%);
+            {% else %}
+            background: linear-gradient(150deg, #7f1d1d 0%, #991b1b 35%, #dc2626 75%, #c2410c 100%);
+            {% endif %}
             color: #fff;
-            padding: 2.5rem 1rem 2rem;
+            padding: 3.5rem 1.5rem 5rem;
             text-align: center;
+            position: relative;
+            overflow: hidden;
         }
-        .status-header h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: .01em; }
-        .status-header .badge-status {
-            display: inline-flex; align-items: center; gap: .4rem;
-            background: rgba(255,255,255,.18); border-radius: 2rem;
-            padding: .35rem 1rem; font-size: 1.05rem; margin-top: .6rem;
+        .hero::before, .hero::after {
+            content: ''; position: absolute; border-radius: 50%;
+            background: rgba(255,255,255,.04); pointer-events: none;
         }
-        .card { border: none; border-radius: .75rem; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
-        .module-header {
-            display: flex; align-items: center; gap: .5rem;
-            padding: .55rem .75rem;
-            cursor: pointer;
-            border-radius: .75rem;
+        .hero::before { width: 560px; height: 560px; top: -200px; right: -130px; }
+        .hero::after  { width: 380px; height: 380px; bottom: -160px; left: -90px; }
+
+        .hero-inner { position: relative; z-index: 1; }
+
+        .hero-icon {
+            font-size: 3.8rem; display: block; margin-bottom: .5rem;
+            filter: drop-shadow(0 4px 16px rgba(0,0,0,.25));
+            animation: breathe 4s ease-in-out infinite;
+        }
+        @keyframes breathe {
+            0%,100% { transform: scale(1);    opacity: .95; }
+            50%      { transform: scale(1.06); opacity: 1; }
+        }
+
+        .hero-title {
+            font-size: 2.2rem; font-weight: 800; letter-spacing: -.025em;
+            margin: 0; text-shadow: 0 2px 10px rgba(0,0,0,.2);
+        }
+
+        .hero-pill {
+            display: inline-flex; align-items: center; gap: .5rem;
+            background: rgba(255,255,255,.15);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,.22);
+            border-radius: 2rem;
+            padding: .5rem 1.5rem;
+            font-size: 1.05rem; font-weight: 600;
+            margin: .9rem 0;
+        }
+
+        .hero-meta {
+            display: flex; justify-content: center;
+            gap: 2.5rem; flex-wrap: wrap;
+            font-size: .875rem; opacity: .82; margin-top: .25rem;
+        }
+        .hero-meta-item { display: flex; align-items: center; gap: .4rem; }
+
+        /* ── Summary ribbon ─────────────────────────────────────────────── */
+        .ribbon {
+            display: flex; justify-content: center; flex-wrap: wrap; gap: .6rem;
+            padding: 1.1rem 1.25rem;
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--divider);
+        }
+        .ribbon-chip {
+            display: inline-flex; align-items: center; gap: .45rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 2rem;
+            padding: .35rem 1rem;
+            font-size: .8rem; font-weight: 600;
+            box-shadow: var(--shadow);
+        }
+        .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+        /* ── Content ────────────────────────────────────────────────────── */
+        .content { max-width: 1080px; margin: 0 auto; padding: 2rem 1.25rem; }
+
+        /* ── Module grid ────────────────────────────────────────────────── */
+        .mod-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+            gap: 1rem;
+        }
+        @media (max-width: 520px) { .mod-grid { grid-template-columns: 1fr; } }
+
+        /* ── Module card ────────────────────────────────────────────────── */
+        .mod-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: .9rem;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            opacity: 0;
+            animation: fadeUp .38s ease forwards;
+            transition: box-shadow .18s;
+        }
+        .mod-card:hover { box-shadow: var(--shadow-lg); }
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Top accent strip */
+        .mod-accent { height: 3px; }
+        .accent-ok  { background: linear-gradient(90deg, #22c55e, #4ade80, #0ea5e9); }
+        .accent-err { background: linear-gradient(90deg, #ef4444, #f97316); }
+
+        /* Card header */
+        .mod-header {
+            display: flex; align-items: center; gap: .9rem;
+            padding: 1rem 1.1rem .85rem;
+            cursor: pointer; user-select: none;
             transition: background .12s;
-            user-select: none;
         }
-        .module-header:hover { background: #f0f0f0; }
-        .module-header.has-body { border-radius: .75rem .75rem 0 0; }
-        .module-label { font-weight: 600; font-size: .95rem; }
-        .module-pct { font-size: .82rem; color: #6c757d; margin-left: auto; }
-        .chevron { font-size: .75rem; color: #aaa; transition: transform .2s; }
-        .module-header.collapsed .chevron { transform: rotate(-90deg); }
+        .mod-header:hover { background: var(--row-hover); }
+
+        /* Avatar */
+        .mod-avatar {
+            width: 46px; height: 46px; border-radius: .625rem;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.35rem; flex-shrink: 0;
+        }
+        .av-ok  { background: #dcfce7; color: #16a34a; }
+        .av-err { background: #fee2e2; color: #dc2626; }
+        @media (prefers-color-scheme: dark) {
+            .av-ok  { background: #14532d; color: #4ade80; }
+            .av-err { background: #450a0a; color: #f87171; }
+        }
+
+        .mod-info { flex: 1; min-width: 0; }
+        .mod-name {
+            font-weight: 700; font-size: .98rem;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .mod-sub { font-size: .77rem; color: var(--muted); margin-top: .18rem; }
+
+        /* Status badge */
+        .mod-badge {
+            display: inline-flex; align-items: center; gap: .35rem;
+            font-size: .77rem; font-weight: 700; flex-shrink: 0;
+            padding: .3rem .85rem; border-radius: 2rem;
+            letter-spacing: .01em;
+        }
+        .mbadge-ok  { background: #dcfce7; color: #15803d; }
+        .mbadge-err { background: #fee2e2; color: #b91c1c; }
+        @media (prefers-color-scheme: dark) {
+            .mbadge-ok  { background: #14532d; color: #4ade80; }
+            .mbadge-err { background: #450a0a; color: #f87171; }
+        }
+
+        /* Chevron */
+        .mod-chevron {
+            font-size: .76rem; color: var(--muted);
+            transition: transform .22s; flex-shrink: 0;
+        }
+        .mod-header.collapsed .mod-chevron { transform: rotate(-90deg); }
+
+        /* Progress bar strip */
+        .mod-progress { height: 4px; background: var(--divider); }
+        .mod-pbar {
+            height: 100%;
+            transition: width .55s cubic-bezier(.4,0,.2,1);
+        }
+        .pbar-ok  { background: linear-gradient(90deg, #22c55e, #4ade80); }
+        .pbar-err { background: linear-gradient(90deg, #ef4444, #f97316); }
+
+        /* ── Check rows ─────────────────────────────────────────────────── */
+        .mod-body { padding: 0 1rem; }
+
         .check-row {
-            display: flex; align-items: center; gap: .6rem;
-            padding: .45rem .1rem; border-bottom: 1px solid #f0f0f0;
-            font-size: .88rem;
+            display: flex; align-items: center; gap: .65rem;
+            padding: .6rem .1rem;
+            border-top: 1px solid var(--divider);
+            font-size: .865rem;
+            transition: background .1s;
         }
-        .check-row:last-child { border-bottom: none; }
-        .check-name { flex: 1; color: #333; }
-        .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-        .dot-ok  { background: #198754; }
-        .dot-err { background: #dc3545; }
-        .badge-ok  { background: #d1f0de; color: #176b43; font-size: .75rem; }
-        .badge-err { background: #fde8e8; color: #b02a37; font-size: .75rem; }
-        .progress { height: 6px; border-radius: 3px; }
-        .extra-val { color: #888; font-size: .78rem; }
-        .footer-note { text-align: center; color: #aaa; font-size: .78rem; margin: 2rem 0 1.5rem; }
-        #countdown { font-variant-numeric: tabular-nums; }
+        .check-row:hover {
+            background: var(--row-hover);
+            margin-left: -1rem; margin-right: -1rem;
+            padding-left: 1.1rem; padding-right: 1.1rem;
+            border-radius: .3rem;
+        }
+
+        .check-icon { font-size: .92rem; flex-shrink: 0; }
+        .check-name {
+            flex: 1; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+
+        .check-extra {
+            display: flex; align-items: center; gap: .45rem;
+            font-size: .74rem; color: var(--muted); flex-shrink: 0;
+        }
+        .mini-bar {
+            width: 52px; height: 5px; border-radius: 3px;
+            background: var(--divider); overflow: hidden; display: inline-block;
+        }
+        .mini-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+        .mf-safe   { background: #22c55e; }
+        .mf-warn   { background: #f59e0b; }
+        .mf-crit   { background: #ef4444; }
+        .http-badge {
+            font-family: ui-monospace, "Cascadia Code", monospace;
+            font-size: .72rem; opacity: .75;
+        }
+
+        .check-badge {
+            font-size: .7rem; font-weight: 700;
+            padding: .2rem .6rem; border-radius: 1rem; flex-shrink: 0;
+        }
+        .cbadge-ok  { background: #dcfce7; color: #15803d; }
+        .cbadge-err { background: #fee2e2; color: #b91c1c; }
+        @media (prefers-color-scheme: dark) {
+            .cbadge-ok  { background: #14532d; color: #4ade80; }
+            .cbadge-err { background: #450a0a; color: #f87171; }
+        }
+
+        .body-pad { height: .75rem; }
+
+        /* ── Empty state ────────────────────────────────────────────────── */
+        .empty-state {
+            text-align: center; padding: 5rem 2rem; color: var(--muted);
+        }
+        .empty-state i {
+            font-size: 4rem; display: block;
+            margin-bottom: 1.2rem; opacity: .3;
+        }
+        .empty-state p { font-size: 1rem; margin: 0; }
+
+        /* ── Footer ─────────────────────────────────────────────────────── */
+        .status-footer {
+            text-align: center;
+            padding: 2.5rem 1rem 2.2rem;
+            color: var(--muted); font-size: .82rem;
+        }
+        .refresh-track {
+            max-width: 200px; height: 4px; border-radius: 2px;
+            background: var(--divider);
+            margin: 0 auto .8rem; overflow: hidden;
+        }
+        .refresh-fill {
+            height: 100%; border-radius: 2px;
+            background: {% if overall_ok %}#22c55e{% else %}#ef4444{% endif %};
+            transition: width 1s linear;
+        }
+        .footer-sep { margin: 0 .6rem; opacity: .4; }
+        .footer-link { color: var(--muted); text-decoration: none; }
+        .footer-link:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
 
-<div class="status-header">
-    <div class="container">
-        <div><i class="bi bi-shield-check" style="font-size:2.2rem;opacity:.9"></i></div>
-        <h1 class="mt-2 mb-0">ServiceSentry</h1>
-        <div class="badge-status mt-2">
-            {% if overall_ok %}
-            <i class="bi bi-check-circle-fill"></i> {{ i18n.status_all_ok }}
-            {% else %}
-            <i class="bi bi-exclamation-triangle-fill"></i> {{ i18n.status_degraded }}
+{% set mod_icons = {
+    'ping':           'bi-broadcast',
+    'web':            'bi-globe',
+    'mysql':          'bi-database',
+    'service_status': 'bi-gear-fill',
+    'filesystemusage':'bi-hdd-fill',
+    'ram_swap':       'bi-memory',
+    'temperature':    'bi-thermometer-half',
+    'hddtemp':        'bi-thermometer',
+    'raid':           'bi-shield-shaded',
+} %}
+
+{% set ns = namespace(ok_mods=0, err_mods=0) %}
+{% for mod in modules %}
+  {% if mod.all_ok %}{% set ns.ok_mods = ns.ok_mods + 1 %}
+  {% else %}{% set ns.err_mods = ns.err_mods + 1 %}{% endif %}
+{% endfor %}
+
+<!-- Live bar -->
+<div class="live-bar"></div>
+
+<!-- ── Hero ──────────────────────────────────────────────────────────── -->
+<div class="hero">
+  <div class="hero-inner">
+    <i class="bi {% if overall_ok %}bi-shield-check{% else %}bi-shield-exclamation{% endif %} hero-icon"></i>
+    <h1 class="hero-title">ServiceSentry</h1>
+    <div class="hero-pill">
+      {% if overall_ok %}<i class="bi bi-check-circle-fill"></i> {{ i18n.status_all_ok }}
+      {% else %}<i class="bi bi-exclamation-triangle-fill"></i> {{ i18n.status_degraded }}{% endif %}
+    </div>
+    <div class="hero-meta">
+      <span class="hero-meta-item">
+        <i class="bi bi-activity"></i>
+        {{ i18n.status_checks_passing.format(ok=total_ok, total=total_all) }}
+      </span>
+      <span class="hero-meta-item">
+        <i class="bi bi-speedometer2"></i>
+        {{ i18n.status_uptime.format(pct=overall_pct) }}
+      </span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Summary ribbon ────────────────────────────────────────────────── -->
+{% if modules %}
+<div class="ribbon">
+  {% if ns.ok_mods %}
+  <span class="ribbon-chip">
+    <span class="dot" style="background:#22c55e"></span>
+    {{ ns.ok_mods }} {{ i18n.status_ok }}
+  </span>
+  {% endif %}
+  {% if ns.err_mods %}
+  <span class="ribbon-chip">
+    <span class="dot" style="background:#ef4444"></span>
+    {{ ns.err_mods }} {{ i18n.status_error }}
+  </span>
+  {% endif %}
+  <span class="ribbon-chip">
+    <i class="bi bi-activity" style="color:var(--muted);font-size:.8rem"></i>
+    {{ total_ok }}/{{ total_all }} checks
+  </span>
+  <span class="ribbon-chip">
+    <i class="bi bi-puzzle" style="color:var(--muted);font-size:.8rem"></i>
+    {{ modules|length }} modules
+  </span>
+</div>
+{% endif %}
+
+<!-- ── Content ────────────────────────────────────────────────────────── -->
+<div class="content">
+
+  {% if not modules %}
+  <div class="empty-state">
+    <i class="bi bi-inbox"></i>
+    <p>{{ i18n.status_no_data }}</p>
+  </div>
+  {% endif %}
+
+  <div class="mod-grid">
+  {% for mod in modules %}
+  <div class="mod-card" id="mod-{{ mod.name }}" style="animation-delay:{{ loop.index0 * 0.06 }}s">
+
+    <div class="mod-accent {% if mod.all_ok %}accent-ok{% else %}accent-err{% endif %}"></div>
+
+    <!-- Header -->
+    <div class="mod-header {% if mod.all_ok %}collapsed{% endif %}"
+         onclick="toggleMod('{{ mod.name }}')">
+
+      <div class="mod-avatar {% if mod.all_ok %}av-ok{% else %}av-err{% endif %}">
+        <i class="bi {{ mod_icons.get(mod.name, 'bi-puzzle-fill') }}"></i>
+      </div>
+
+      <div class="mod-info">
+        <div class="mod-name">{{ mod.label }}</div>
+        <div class="mod-sub">
+          {{ mod.total }} checks
+          &nbsp;·&nbsp;
+          {% if mod.all_ok %}
+            <span style="color:#16a34a">{{ i18n.status_ok }}</span>
+          {% else %}
+            <span style="color:#dc2626">{{ mod.total - mod.ok }} {{ i18n.status_error }}</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <span class="mod-badge {% if mod.all_ok %}mbadge-ok{% else %}mbadge-err{% endif %}">
+        {% if mod.all_ok %}
+          <i class="bi bi-check-lg"></i> {{ i18n.status_ok }}
+        {% else %}
+          <i class="bi bi-x-lg"></i> {{ mod.total - mod.ok }} {{ i18n.status_error }}
+        {% endif %}
+      </span>
+
+      <i class="bi bi-chevron-down mod-chevron"></i>
+    </div>
+
+    <!-- Progress strip -->
+    <div class="mod-progress">
+      <div class="mod-pbar {% if mod.all_ok %}pbar-ok{% else %}pbar-err{% endif %}"
+           style="width:{{ mod.pct }}%"></div>
+    </div>
+
+    <!-- Check list -->
+    <div class="mod-body" id="body-{{ mod.name }}"
+         style="{% if mod.all_ok %}display:none{% endif %}">
+      {% for item in mod.checks %}
+      <div class="check-row">
+        <i class="bi {% if item.ok %}bi-check-circle-fill text-success{% else %}bi-x-circle-fill text-danger{% endif %} check-icon"></i>
+        <span class="check-name" title="{{ item.name }}">{{ item.name }}</span>
+        <span class="check-extra">
+          {% if item.extra.get('used') is not none %}
+            {% set used = item.extra.used | float %}
+            {% set alert = (item.extra.get('alert') or 80) | float %}
+            <span class="mini-bar">
+              <span class="mini-fill
+                {%- if used >= alert %}mf-crit
+                {%- elif used >= alert * 0.75 %}mf-warn
+                {%- else %}mf-safe{% endif %}"
+                style="width:{{ [used, 100] | min }}%"></span>
+            </span>
+            {{ "%.1f" | format(used) }}%
+            {% if item.extra.get('alert') %}
+              <span style="opacity:.55">/ {{ item.extra.alert }}% {{ i18n.status_alert_threshold }}</span>
             {% endif %}
-        </div>
-        <div class="mt-2" style="font-size:.88rem;opacity:.8">
-            {{ i18n.status_checks_passing.format(ok=total_ok, total=total_all) }} &nbsp;&middot;&nbsp; {{ i18n.status_uptime.format(pct=overall_pct) }}
-        </div>
+          {% elif item.extra.get('code') %}
+            <span class="http-badge">HTTP {{ item.extra.code }}</span>
+          {% endif %}
+        </span>
+        <span class="check-badge {% if item.ok %}cbadge-ok{% else %}cbadge-err{% endif %}">
+          {% if item.ok %}{{ i18n.status_ok }}{% else %}{{ i18n.status_error }}{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+      <div class="body-pad"></div>
     </div>
-</div>
 
-<div class="container" style="max-width:720px; margin-top:2rem;">
+  </div>
+  {% endfor %}
+  </div>
 
-    {% if not modules %}
-    <div class="card p-4 text-center text-muted">
-        <i class="bi bi-inbox" style="font-size:2rem"></i>
-        <p class="mt-2 mb-0">{{ i18n.status_no_data }}</p>
+  <!-- Footer -->
+  <div class="status-footer">
+    <div class="refresh-track">
+      <div class="refresh-fill" id="refresh-fill" style="width:100%"></div>
     </div>
-    {% endif %}
-
-    {% for mod in modules %}
-    <div class="card mb-3" id="mod-{{ mod.name }}">
-        <div class="module-header has-body {% if mod.all_ok %}collapsed{% endif %}"
-             onclick="toggleMod('{{ mod.name }}')">
-            <i class="bi {% if mod.all_ok %}bi-check-circle-fill text-success{% else %}bi-exclamation-circle-fill text-danger{% endif %}"></i>
-            <span class="module-label">{{ mod.label }}</span>
-            <span class="module-pct">{{ mod.ok }}/{{ mod.total }} &nbsp; {{ mod.pct }}%</span>
-            <i class="bi bi-chevron-down chevron"></i>
-        </div>
-        <div class="module-body px-3 py-0" id="body-{{ mod.name }}"
-             style="{% if mod.all_ok %}display:none{% endif %}">
-            <div class="progress my-2">
-                <div class="progress-bar {% if mod.all_ok %}bg-success{% else %}bg-danger{% endif %}"
-                     style="width:{{ mod.pct }}%"></div>
-            </div>
-            {% for item in mod.checks %}
-            <div class="check-row">
-                <span class="dot {% if item.ok %}dot-ok{% else %}dot-err{% endif %}"></span>
-                <span class="check-name">{{ item.name }}</span>
-                {% if item.extra.get('used') is not none %}
-                <span class="extra-val">{{ "%.1f"|format(item.extra.used) }}%
-                    {% if item.extra.get('alert') %}<span class="text-muted">/ {{ item.extra.alert }}% {{ i18n.status_alert_threshold }}</span>{% endif %}
-                </span>
-                {% elif item.extra.get('code') %}
-                <span class="extra-val">HTTP {{ item.extra.code }}</span>
-                {% endif %}
-                <span class="badge rounded-pill {% if item.ok %}badge-ok{% else %}badge-err{% endif %}">
-                    {% if item.ok %}{{ i18n.status_ok }}{% else %}{{ i18n.status_error }}{% endif %}
-                </span>
-            </div>
-            {% endfor %}
-            <div style="height:.4rem"></div>
-        </div>
+    <div>
+      <i class="bi bi-arrow-clockwise"></i>
+      {{ i18n.status_refreshing_in }} <span id="countdown">{{ refresh_secs }}</span>{{ i18n.status_seconds_abbr }}
+      <span class="footer-sep">·</span>
+      <a href="/login" class="footer-link">{{ i18n.status_admin_link }}</a>
     </div>
-    {% endfor %}
+  </div>
 
-    <p class="footer-note">
-        <i class="bi bi-arrow-clockwise"></i>
-        {{ i18n.status_refreshing_in }} <span id="countdown">{{ refresh_secs }}</span>{{ i18n.status_seconds_abbr }}
-        &nbsp;&middot;&nbsp;
-        <a href="/login" class="text-muted text-decoration-none">{{ i18n.status_admin_link }}</a>
-    </p>
-</div>
+</div><!-- /content -->
 
 <script>
 const REFRESH_SECS = {{ refresh_secs }};
 let remaining = REFRESH_SECS;
 const countEl = document.getElementById('countdown');
-const timer = setInterval(() => {
+const fillEl  = document.getElementById('refresh-fill');
+
+const tick = setInterval(() => {
     remaining--;
     if (countEl) countEl.textContent = remaining;
-    if (remaining <= 0) { clearInterval(timer); location.reload(); }
+    if (fillEl)  fillEl.style.width = (remaining / REFRESH_SECS * 100) + '%';
+    if (remaining <= 0) { clearInterval(tick); location.reload(); }
 }, 1000);
 
 function toggleMod(name) {
-    const hdr  = document.querySelector('#mod-' + name + ' .module-header');
+    const hdr  = document.querySelector('#mod-' + name + ' .mod-header');
     const body = document.getElementById('body-' + name);
     if (!hdr || !body) return;
-    const collapsed = hdr.classList.contains('collapsed');
-    if (collapsed) {
+    if (hdr.classList.contains('collapsed')) {
         body.style.display = '';
         hdr.classList.remove('collapsed');
     } else {

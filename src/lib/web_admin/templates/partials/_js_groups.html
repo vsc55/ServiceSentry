@@ -22,47 +22,62 @@ function renderGroups() {
         if (!a[1].builtin && b[1].builtin) return 1;
         return a[0].localeCompare(b[0]);
     });
-    if (!allEntries.length) { c.innerHTML = '<p class="text-muted">' + t('no_groups') + '</p>'; return; }
+    if (!allEntries.length) {
+        c.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-diagram-3" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <span>${t('no_groups')}</span>
+        </div>`;
+        return;
+    }
     const total = allEntries.length;
     const ps = _groupsPageSize || total;
     _groupsPage = Math.max(1, Math.min(_groupsPage, Math.ceil(total / ps)));
     const entries = allEntries.slice((_groupsPage - 1) * ps, _groupsPage * ps);
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover table-striped align-middle" style="--bs-table-cell-padding-x:0.6rem">';
-    h += '<thead class="table-light"><tr><th>' + t('col_group_name') + '</th><th>' + t('col_group_label') + '</th><th>' + t('col_group_roles') + '</th><th class="text-center" style="width:1%;white-space:nowrap">' + t('col_group_members') + '</th>' + (showActions ? '<th class="text-center" style="width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">' + t('col_actions') + '</th>' : '') + '</tr></thead><tbody>';
+
+    let h = `<div class="rounded-3 border overflow-hidden">
+    <table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
+    <thead style="background:var(--bs-secondary-bg)"><tr>
+        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_group_name')}</th>
+        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_group_label')}</th>
+        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_group_roles')}</th>
+        <th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;width:1%;white-space:nowrap">${t('col_group_members')}</th>
+        ${showActions ? `<th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">${t('col_actions')}</th>` : ''}
+    </tr></thead><tbody>`;
+
     for (const [name, gd] of entries) {
         const isEnabled = gd.enabled !== false;
-        const disabledRowStyle = isEnabled ? '' : ' class="table-secondary"';
-        const builtinBadge = gd.builtin ? ' <span class="badge bg-secondary ms-1 fw-normal" style="font-size:0.6em;padding:0.15em 0.35em">' + t('group_builtin_badge') + '</span>' : '';
-        const disabledBadge = isEnabled ? '' : ` <span class="badge bg-secondary ms-1 fw-normal">${t('status_disabled')}</span>`;
+        const rowStyle = isEnabled ? '' : ' style="opacity:.55"';
+        const builtinBadge = gd.builtin
+            ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.6em;padding:.15em .35em">${t('group_builtin_badge')}</span>` : '';
+        const disabledBadge = isEnabled ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
         const roleBadges = (gd.roles || []).map(r => {
             const rd = rolesData[r] || {};
             return `<span class="badge ${roleBadgeClass(r)} me-1">${esc(rd.label || r)}</span>`;
         }).join('');
         const memberCount = (gd.members || []).length;
-        h += `<tr${disabledRowStyle}>
-            <td><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
-            <td>${esc(gd.label || name)}</td>
-            <td class="small">${roleBadges || '<span class="text-muted">\u2014</span>'}</td>
-            <td class="small text-center" style="white-space:nowrap">${memberCount}</td>
+        const memberHtml = memberCount > 0
+            ? `<span class="badge bg-secondary bg-opacity-50 rounded-pill">${memberCount}</span>`
+            : `<span class="text-muted small">\u2014</span>`;
+
+        h += `<tr${rowStyle}>
+            <td style="white-space:nowrap"><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
+            <td class="text-muted small">${esc(gd.label || name)}</td>
+            <td style="line-height:1.9">${roleBadges || `<span class="text-muted">\u2014</span>`}</td>
+            <td class="text-center" style="white-space:nowrap">${memberHtml}</td>
             ${showActions ? `<td class="text-center" style="white-space:nowrap;border-left:1px solid var(--bs-border-color)">
-                ${canEditGroup ? `
-                <button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-outline-secondary' : 'btn-outline-success'}"
+                ${canEditGroup ? `<button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-outline-secondary' : 'btn-outline-success'}"
                     onclick="toggleGroup('${escAttr(name)}',${isEnabled})" title="${isEnabled ? t('disable') : t('enable')}">
-                    <i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i>
-                </button>
+                    <i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i></button>
                 <button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
                     onclick="openEditGroupModal('${escAttr(name)}')" title="${t('edit')}">
-                    <i class="bi bi-pencil"></i>
-                </button>` : ''}
-                ${canDeleteGroup ? `
-                <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                    <i class="bi bi-pencil"></i></button>` : ''}
+                ${canDeleteGroup ? `<button class="btn btn-sm btn-outline-danger py-0 px-1"
                     ${gd.builtin ? 'disabled' : `onclick="deleteGroup('${escAttr(name)}')"`} title="${t('delete')}">
-                    <i class="bi bi-trash3"></i>
-                </button>` : ''}
+                    <i class="bi bi-trash3"></i></button>` : ''}
             </td>` : ''}
         </tr>`;
     }
-    h += '</tbody></table></div>';
+    h += `</tbody></table></div>`;
     const pagination = _renderPagination(total, _groupsPage, _groupsPageSize, '_goGroupsPage', '_changeGroupsPageSize');
     c.innerHTML = pagination + h + pagination;
     const btnNewGroup = document.getElementById('btnNewGroup');

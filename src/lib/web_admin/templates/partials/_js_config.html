@@ -30,17 +30,32 @@ function renderConfig() {
     if (!('default_page_size' in wa)) wa.default_page_size = _defaultPageSize;
     if (!('page_sizes'        in wa)) wa.page_sizes        = [..._PAGE_SIZES];
 
+    const _cfgSectionAccent = {
+        cfgcol_daemon:     'linear-gradient(90deg,#6366f1,#8b5cf6)',
+        cfgcol_global:     'linear-gradient(90deg,#0ea5e9,#38bdf8)',
+        cfgcol_telegram:   'linear-gradient(90deg,#0ea5e9,#22d3ee)',
+        cfgcol_web_admin:  'linear-gradient(90deg,#f59e0b,#fbbf24)',
+        cfgcol_pw_policy:  'linear-gradient(90deg,#ef4444,#f97316)',
+        cfgcol_pub_status: 'linear-gradient(90deg,#22c55e,#4ade80)',
+        cfgcol_proxy:      'linear-gradient(90deg,#8b5cf6,#a78bfa)',
+        cfgcol_audit:      'linear-gradient(90deg,#64748b,#94a3b8)',
+        cfgcol_tables:     'linear-gradient(90deg,#14b8a6,#2dd4bf)',
+    };
+
     function cfgCardOpen(id, icon, title) {
         const isShow = prevState[id] !== false;
-        return `<div class="card mb-3">
-            <div class="card-header d-flex align-items-center fw-semibold py-2 cfg-card-header"
-                 style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#${id}"
+        const accent = _cfgSectionAccent[id] || 'linear-gradient(90deg,var(--bs-primary),#60a5fa)';
+        return `<div class="rounded-3 border overflow-hidden mb-3" style="background:var(--bs-body-bg);box-shadow:0 1px 4px rgba(0,0,0,.05)">
+            <div style="height:3px;background:${accent}"></div>
+            <div class="d-flex align-items-center gap-2 px-3 py-2 fw-semibold cfg-card-header"
+                 style="cursor:pointer;background:var(--bs-secondary-bg);border-bottom:1px solid var(--bs-border-color)"
+                 data-bs-toggle="collapse" data-bs-target="#${id}"
                  aria-expanded="${isShow}" aria-controls="${id}">
-                <span class="me-auto">${icon}${esc(title)}</span>
-                <i class="bi bi-chevron-down cfg-chevron text-muted small"></i>
+                <span class="me-auto d-flex align-items-center gap-1" style="font-size:.92rem">${icon}${esc(title)}</span>
+                <i class="bi bi-chevron-down cfg-chevron text-muted" style="font-size:.8rem;transition:transform .2s"></i>
             </div>
             <div class="collapse${isShow ? ' show' : ''}" id="${id}">
-                <div class="card-body py-2">`;
+                <div class="px-3 py-2">`;
     }
     const cfgCardClose = `</div></div></div>`;
 

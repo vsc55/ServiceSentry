@@ -248,26 +248,28 @@ function _auditEventBadge(event) {
 }
 
 function renderFlatAudit(entries) {
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover table-striped align-middle">';
-    h += '<thead class="table-light"><tr>'
-       + `<th>${t('col_time')}</th>`
-       + `<th>${t('col_event')}</th>`
-       + `<th>${t('col_user')}</th>`
-       + `<th>${t('col_ip')}</th>`
-       + `<th>${t('col_detail')}</th>`
-       + '<th></th>'
-       + '</tr></thead><tbody>';
+    const canDelete = new Set(currentUser.permissions || []).has('audit_delete');
+    let h = `<div class="rounded-3 border overflow-hidden">
+    <table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
+    <thead style="background:var(--bs-secondary-bg)"><tr>
+        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_time')}</th>
+        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_event')}</th>
+        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_user')}</th>
+        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_ip')}</th>
+        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_detail')}</th>
+        ${canDelete ? '<th style="width:1%"></th>' : ''}
+    </tr></thead><tbody>`;
     for (const e of entries) {
         h += `<tr>
-            <td class="small text-nowrap">${esc(new Date(e.ts).toLocaleString())}</td>
+            <td class="text-nowrap text-muted" style="font-size:.8rem">${esc(new Date(e.ts).toLocaleString())}</td>
             <td>${_auditEventBadge(e.event)}</td>
-            <td><code>${esc(e.user)}</code></td>
-            <td class="small">${esc(e.ip)}</td>
-            <td class="small">${auditSummaryHtml(e._idx, e.detail)}</td>
-            <td>${new Set(currentUser.permissions||[]).has('audit_delete') ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteAuditEntry(${e._origIdx})" title="${t('delete')}"><i class="bi bi-trash3"></i></button>` : ''}</td>
+            <td><code style="font-size:.82rem">${esc(e.user)}</code></td>
+            <td class="text-muted" style="font-size:.8rem">${esc(e.ip)}</td>
+            <td style="font-size:.82rem">${auditSummaryHtml(e._idx, e.detail)}</td>
+            ${canDelete ? `<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteAuditEntry(${e._origIdx})" title="${t('delete')}"><i class="bi bi-trash3"></i></button></td>` : ''}
         </tr>`;
     }
-    h += '</tbody></table></div>';
+    h += `</tbody></table></div>`;
     return h;
 }
 
@@ -287,11 +289,12 @@ function renderGroupedAudit(entries) {
     }
     let h = '';
     for (const [key, items] of groups) {
-        h += `<div class="mb-3">
-            <h6 class="border-bottom pb-1 text-muted">
-                <i class="bi bi-collection me-1"></i>${esc(key)}
-                <span class="badge bg-secondary ms-1">${items.length}</span>
-            </h6>
+        h += `<div class="mb-4">
+            <div class="d-flex align-items-center gap-2 mb-2 pb-1" style="border-bottom:2px solid var(--bs-border-color)">
+                <i class="bi bi-collection text-muted" style="font-size:.9rem"></i>
+                <span class="fw-semibold" style="font-size:.9rem">${esc(key)}</span>
+                <span class="badge bg-secondary bg-opacity-50 rounded-pill ms-1" style="font-size:.7rem">${items.length}</span>
+            </div>
             ${renderFlatAudit(items)}
         </div>`;
     }
@@ -356,7 +359,10 @@ function renderAuditTable() {
     });
 
     if (!filtered.length) {
-        c.innerHTML = `<p class="text-muted">${t('no_audit_entries')}</p>`;
+        c.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-funnel" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <span>${t('no_audit_entries')}</span>
+        </div>`;
         return;
     }
 
@@ -375,13 +381,19 @@ function renderAuditTable() {
 async function renderAudit() {
     const c = document.getElementById('audit-container');
     if (!c) return;
-    c.innerHTML = '<p class="text-muted">…</p>';
+    c.innerHTML = `<div class="text-center py-5 text-muted">
+        <div class="spinner-border spinner-border-sm me-2"></div>
+        <span>${t('loading')}</span>
+    </div>`;
     const entries = await apiGet('/api/audit');
     // _origIdx = real index in the backend array (0=oldest, reversed from API)
     const raw = entries || [];
     _auditEntries = raw.map((e, i) => ({ ...e, _idx: i, _origIdx: raw.length - 1 - i }));
     if (!_auditEntries.length) {
-        c.innerHTML = '<p class="text-muted">' + t('no_audit_entries') + '</p>';
+        c.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-journal-x" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <span>${t('no_audit_entries')}</span>
+        </div>`;
         return;
     }
     initAuditControls();

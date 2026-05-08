@@ -3,50 +3,224 @@ Modules tab — rendering logic.
 ================================================================ #}
 
 // ──────────────────────────── Modules tab ─────────────────────────
-function renderModules() {
-const c = document.getElementById('modules-container');
-let h = '';
-for (const name of Object.keys(modulesData).sort()) {
-const cfg = modulesData[name];
-const on = cfg.enabled !== false;
-const icon = moduleIcon(name, cfg);
-const id = uid();
-
-const pname = modulePrettyName(name, cfg);
-h += `<div class="card mb-2 module-card${on ? ' enabled' : ''}" id="card-${esc(name)}">
-    <div class="card-header d-flex align-items-center py-2" role="button"
-        onclick="toggleCollapseFromHeader(event,'${id}')">
-        <span class="me-2 fs-5">${icon}</span>
-        <div class="me-auto">
-            <span class="fw-semibold">${esc(pname)}</span>
-            <small class="text-muted ms-2"><code>${esc(name)}</code></small>
-        </div>
-        <div class="form-check form-switch me-2" data-no-collapse="1" onclick="event.stopPropagation()">
-            <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1" ${on ? 'checked' : '' }
-                onclick="event.stopPropagation()"
-                onchange="event.stopPropagation();toggleModule('${escAttr(name)}',this.checked)">
-        </div>
-        <button class="btn btn-sm btn-outline-secondary py-0 px-1" type="button" data-no-collapse="1"
-            data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
-            aria-label="Toggle details" onclick="event.stopPropagation()">
-            <i class="bi bi-chevron-down text-muted"></i>
-        </button>
-    </div>
-    <div class="collapse" id="${id}">
-        <div class="card-body py-2">
-            ${renderModuleBody(name, cfg)}
-        </div>
-    </div>
-</div>`;
+function _moduleHue(name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
+    return h % 360;
 }
-c.innerHTML = h;
+
+function renderModules() {
+    const c = document.getElementById('modules-container');
+    const moduleKeys = Object.keys(modulesData).sort();
+    if (!moduleKeys.length) {
+        c.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-puzzle" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <span>${t('no_modules') || 'No modules configured'}</span>
+        </div>`;
+        return;
+    }
+
+    // Save expanded state before re-render
+    const expandedMods  = new Set();
+    const expandedItems = new Set();
+    c.querySelectorAll('[data-module].show').forEach(el => expandedMods.add(el.dataset.module));
+    c.querySelectorAll('[data-item-path]').forEach(el => {
+        const col = el.querySelector(':scope > .collapse');
+        if (col && col.classList.contains('show')) expandedItems.add(el.dataset.itemPath);
+    });
+    for (const m of _pendingExpandMods) expandedMods.add(m);
+    _pendingExpandMods.clear();
+
+    const canEdit = new Set(currentUser.permissions || []).has('modules_edit');
+    let h = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:.75rem;align-items:start">';
+    for (const name of moduleKeys) {
+        const cfg = modulesData[name];
+        const on = cfg.enabled !== false;
+        const icon = moduleIcon(name, cfg);
+        const id = uid();
+        const pname = modulePrettyName(name, cfg);
+
+        // Count items across all collections
+        const colKeys = Object.keys(cfg).filter(k => typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
+        const totalItems  = colKeys.reduce((s, k) => s + Object.keys(cfg[k]).length, 0);
+        const activeItems = colKeys.reduce((s, k) =>
+            s + Object.values(cfg[k]).filter(v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
+
+        // Per-module accent derived from name hash
+        const hue = _moduleHue(name);
+        const accentGrad = on
+            ? `linear-gradient(90deg,hsl(${hue},65%,50%),hsl(${(hue + 45) % 360},65%,55%))`
+            : 'linear-gradient(90deg,#94a3b8,#cbd5e1)';
+        const avBg    = on ? `hsla(${hue},65%,55%,.14)` : 'var(--bs-secondary-bg)';
+        const avColor = on ? `hsl(${hue},60%,42%)` : 'var(--bs-secondary-color)';
+
+        h += `<div class="rounded-3 overflow-hidden border module-card${on ? ' enabled' : ''}"
+               id="card-${esc(name)}"
+               style="background:var(--bs-body-bg);box-shadow:0 2px 8px rgba(0,0,0,.06)${on ? '' : ';opacity:.65'}">
+
+            <div style="height:3px;background:${accentGrad}"></div>
+
+            <div class="module-header d-flex align-items-center gap-2 px-3 py-2"
+                 role="button" onclick="toggleCollapseFromHeader(event,'${id}')"
+                 style="cursor:pointer">
+                <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                      style="width:40px;height:40px;background:${avBg};color:${avColor};font-size:1.15rem">${icon}</span>
+                <div class="flex-grow-1 min-w-0">
+                    <div class="fw-semibold" style="font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(pname)}</div>
+                    <code class="text-muted" style="font-size:.73rem">${esc(name)}</code>
+                </div>
+                ${totalItems > 0 ? `
+                <span class="badge rounded-pill flex-shrink-0"
+                      style="font-size:.7rem;background:var(--bs-secondary-bg);color:${activeItems < totalItems ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)'};border:1px solid var(--bs-border-color)">
+                    <i class="bi bi-list-ul me-1" style="opacity:.6"></i>${activeItems}/${totalItems}
+                </span>` : ''}
+                <div class="form-check form-switch mb-0 flex-shrink-0" data-no-collapse="1" onclick="event.stopPropagation()">
+                    <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1"
+                           ${on ? 'checked' : ''}
+                           onclick="event.stopPropagation()"
+                           onchange="event.stopPropagation();toggleModule('${escAttr(name)}',this.checked)">
+                </div>
+                ${canEdit ? `<button class="btn btn-sm btn-outline-danger py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                    onclick="event.stopPropagation();deleteModule('${escAttr(name)}')" title="${t('delete')}">
+                    <i class="bi bi-trash3"></i>
+                </button>` : ''}
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                    data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
+                    aria-label="Toggle details" onclick="event.stopPropagation()">
+                    <i class="bi bi-chevron-down text-muted small"></i>
+                </button>
+            </div>
+
+            <div class="collapse" id="${id}" data-module="${esc(name)}">
+                <div class="px-3 py-3" style="border-top:1px solid var(--bs-border-color)">
+                    ${renderModuleBody(name, cfg)}
+                </div>
+            </div>
+        </div>`;
+    }
+    h += '</div>';
+    c.innerHTML = h;
+
+    // Restore expanded state after re-render
+    c.querySelectorAll('[data-module]').forEach(el => {
+        if (expandedMods.has(el.dataset.module)) el.classList.add('show');
+    });
+    c.querySelectorAll('[data-item-path]').forEach(el => {
+        if (expandedItems.has(el.dataset.itemPath)) {
+            const col = el.querySelector(':scope > .collapse');
+            if (col) col.classList.add('show');
+        }
+    });
+}
+
+function _discoveredModuleNames() {
+    const names = new Set();
+    for (const key of Object.keys(ITEM_SCHEMAS)) {
+        const sep = key.indexOf('|');
+        if (sep < 0) continue;
+        const col = key.slice(sep + 1);
+        if (col !== '__i18n__' && col !== '__module__') names.add(key.slice(0, sep));
+    }
+    return [...names].sort();
 }
 
 function openNewModuleModal() {
-    _addItemCtx = { target: 'modules', pathStr: null };
-    document.getElementById('newItemName').value = '';
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('addItemModal')).show();
-    setTimeout(() => document.getElementById('newItemName').focus(), 400);
+    const allModules  = _discoveredModuleNames();
+    const available   = allModules.filter(n => !(n in modulesData));
+    const configured  = allModules.filter(n =>   n in modulesData);
+
+    const titleEl = document.getElementById('addModuleModalTitle');
+    if (titleEl) titleEl.textContent = t('add_module') + (available.length ? ` (${available.length})` : '');
+
+    const body = document.getElementById('addModuleModalBody');
+    if (!body) return;
+
+    if (!allModules.length) {
+        body.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-puzzle" style="font-size:2rem;opacity:.3;display:block;margin-bottom:.5rem"></i>
+            <span>${t('checks_no_modules_dir')}</span>
+        </div>`;
+    } else if (!available.length) {
+        body.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-check-circle" style="font-size:2rem;opacity:.5;color:#22c55e;display:block;margin-bottom:.5rem"></i>
+            <span>${t('add_module_all_configured')}</span>
+        </div>`;
+    } else {
+        let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.65rem">`;
+        for (const name of available) {
+            const icon  = moduleIcon(name, {});
+            const pname = modulePrettyName(name, {});
+            const hue   = _moduleHue(name);
+            const avBg    = `hsla(${hue},65%,55%,.14)`;
+            const avColor = `hsl(${hue},60%,42%)`;
+            const accentColor = `hsl(${hue},65%,55%)`;
+            h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
+                       style="cursor:pointer;background:var(--bs-body-bg);transition:box-shadow .15s,border-color .15s"
+                       onclick="addModuleFromPicker('${escAttr(name)}')"
+                       onmouseover="this.style.boxShadow='0 4px 14px rgba(0,0,0,.13)';this.style.borderColor='${accentColor}'"
+                       onmouseout="this.style.boxShadow='';this.style.borderColor=''">
+                <span class="rounded-2 d-flex align-items-center justify-content-center"
+                      style="width:46px;height:46px;background:${avBg};color:${avColor};font-size:1.35rem">${icon}</span>
+                <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${esc(pname)}</div>
+                <code class="text-muted" style="font-size:.7rem">${esc(name)}</code>
+            </div>`;
+        }
+        h += `</div>`;
+
+        if (configured.length) {
+            h += `<div class="text-muted mt-4 mb-2 pb-1 fw-semibold"
+                       style="font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--bs-border-color)">
+                <i class="bi bi-check-lg me-1"></i>${t('add_module_already_configured')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.4rem;opacity:.45">`;
+            for (const name of configured) {
+                const icon  = moduleIcon(name, modulesData[name] || {});
+                const pname = modulePrettyName(name, modulesData[name] || {});
+                h += `<div class="rounded-3 border d-flex align-items-center gap-2 px-2 py-1" style="background:var(--bs-secondary-bg)">
+                    <span style="font-size:1.05rem">${icon}</span>
+                    <span class="text-muted text-truncate" style="font-size:.8rem">${esc(pname)}</span>
+                </div>`;
+            }
+            h += `</div>`;
+        }
+        body.innerHTML = h;
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('addModuleModal')).show();
+}
+
+function addModuleFromPicker(name) {
+    if (name in modulesData) { showToast(tf('already_exists', name), 'warning'); return; }
+    const cfg = { enabled: true };
+    for (const key of Object.keys(ITEM_SCHEMAS)) {
+        if (!key.startsWith(name + '|')) continue;
+        const col = key.slice(name.length + 1);
+        if (col === '__i18n__' || col === '__module__') continue;
+        cfg[col] = {};
+    }
+    const modDefaults = schemaDefaults(moduleSchema(name));
+    if (modDefaults) {
+        for (const [k, v] of Object.entries(modDefaults)) {
+            if (!(k in cfg)) cfg[k] = Array.isArray(v) ? [...v] : v;
+        }
+    }
+    modulesData[name] = cfg;
+    markDirty('modules');
+    bootstrap.Modal.getInstance(document.getElementById('addModuleModal'))?.hide();
+    renderModules();
+    showToast(tf('module_added', modulePrettyName(name, cfg)));
+    setTimeout(() => {
+        document.getElementById('card-' + name)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 150);
+}
+
+function deleteModule(name) {
+    const pname = modulePrettyName(name, modulesData[name] || {});
+    showConfirmModal(tf('confirm_delete_module', pname), () => {
+        delete modulesData[name];
+        markDirty('modules');
+        renderModules();
+        showToast(tf('module_removed', pname));
+    });
 }
 
 function renderModuleBody(name, cfg) {

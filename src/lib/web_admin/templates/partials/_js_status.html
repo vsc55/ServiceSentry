@@ -20,86 +20,184 @@ function setStatusAutoRefresh(seconds) {
 
 async function renderStatus() {
     const c = document.getElementById('status-container');
-    c.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+    c.innerHTML = `<div class="text-center py-5 text-muted">
+        <div class="spinner-border spinner-border-sm me-2"></div>
+        <span>${t('loading')}</span>
+    </div>`;
     const data = await apiGet('/api/status');
-    if (!data) { c.innerHTML = '<div class="alert alert-warning">' + t('status_load_error') + '</div>'; return; }
+    if (!data) {
+        c.innerHTML = `<div class="alert alert-warning d-flex align-items-center gap-2">
+            <i class="bi bi-exclamation-triangle-fill"></i>${t('status_load_error')}
+        </div>`;
+        return;
+    }
 
     const canRun = new Set(currentUser.permissions || []).has('checks_run');
+    let h = '';
 
     // ── Refresh bar ───────────────────────────────────────────
-    let h = _renderRefreshBar('status-container', 'renderStatus',
+    h += _renderRefreshBar('status-container', 'renderStatus',
         () => _statusTimer, 'setStatusAutoRefresh');
+
     if (canRun) {
-        h += `<div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+        // ── Action toolbar ────────────────────────────────────
+        h += `<div class="d-flex flex-wrap align-items-center gap-2 mb-3 px-3 py-2 rounded-3 border" style="background:var(--bs-secondary-bg)">
           <button class="btn btn-sm btn-primary" id="btnRunAll" onclick="runAllChecks()">
             <i class="bi bi-play-fill me-1"></i>${t('run_all_checks')}
           </button>
           <button class="btn btn-sm btn-outline-primary" id="btnRunSelected" onclick="runSelectedChecks()">
             <i class="bi bi-check2-square me-1"></i>${t('run_selected_checks')}
           </button>
+          <div class="vr mx-1 d-none d-sm-block"></div>
           <button class="btn btn-sm btn-outline-secondary" onclick="toggleCheckSelection(true)">
             ${t('checks_select_all')}
           </button>
           <button class="btn btn-sm btn-outline-secondary" onclick="toggleCheckSelection(false)">
             ${t('checks_select_none')}
           </button>
-          <span id="checksSpinner" class="d-none">
+          <span id="checksSpinner" class="d-none ms-auto text-muted small">
             <span class="spinner-border spinner-border-sm me-1"></span>${t('checks_running')}
           </span>
         </div>`;
-    }
 
-    // ── Modules selector ──────────────────────────────────────
-    if (canRun) {
-        // Build list of known modules from modulesData
+        // ── Module chip selector ──────────────────────────────
         const mods = Object.keys(modulesData).filter(k => typeof modulesData[k] === 'object');
         if (mods.length) {
-            h += '<div class="mb-3 d-flex flex-wrap gap-2">';
+            h += `<div class="d-flex flex-wrap gap-2 mb-3">`;
             _checkSelection.clear();
             for (const m of mods) {
                 const enabled = modulesData[m].enabled;
                 if (enabled) _checkSelection.add(m);
-                const icon = moduleIcon(m, modulesData[m]);
+                const icon  = moduleIcon(m, modulesData[m]);
                 const pname = modulePrettyName(m, modulesData[m]);
-                h += `<div class="form-check form-check-inline">
-                  <input class="form-check-input check-module-cb" type="checkbox" value="${escAttr(m)}"
-                    id="chk-${escAttr(m)}" ${enabled ? 'checked' : ''}
-                    onchange="onCheckModuleToggle(this)">
-                  <label class="form-check-label small" for="chk-${escAttr(m)}">${icon} ${esc(pname)}</label>
-                </div>`;
+                h += `<input class="btn-check check-module-cb" type="checkbox" value="${escAttr(m)}"
+                         id="chk-${escAttr(m)}" autocomplete="off" ${enabled ? 'checked' : ''}
+                         onchange="onCheckModuleToggle(this)">
+                      <label class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                             for="chk-${escAttr(m)}" style="font-size:.8rem">
+                        ${icon} ${esc(pname)}
+                      </label>`;
             }
-            h += '</div>';
+            h += `</div>`;
         }
     }
 
-    // ── Results table ─────────────────────────────────────────
-    h += '<div id="checksResultArea">';
+    // ── Results area ──────────────────────────────────────────
+    h += `<div id="checksResultArea">`;
     if (!Object.keys(data).length) {
-        h += '<div class="alert alert-info">' + t('status_empty') + '</div>';
+        h += `<div class="text-center py-5 text-muted">
+            <i class="bi bi-inbox" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <span>${t('status_empty')}</span>
+        </div>`;
     } else {
-        h += _renderStatusTable(data);
+        h += _renderStatusCards(data);
     }
-    h += '</div>';
+    h += `</div>`;
 
     c.innerHTML = h;
 }
 
-function _renderStatusTable(data) {
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover table-striped align-middle">';
-    h += '<thead class="table-light"><tr><th>' + t('col_module') + '</th><th>' + t('col_check') + '</th><th>' + t('col_status') + '</th></tr></thead><tbody>';
-    for (const [mod, checks] of Object.entries(data)) {
-        if (typeof checks !== 'object' || checks === null) continue;
+function _renderStatusCards(data) {
+    const entries = Object.entries(data).filter(([, v]) => v && typeof v === 'object');
+    if (!entries.length) return `<div class="alert alert-info">${t('status_empty')}</div>`;
+
+    // Two-column grid on wide screens
+    let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:.85rem">`;
+
+    for (const [mod, checks] of entries) {
         const pname = modulePrettyName(mod, modulesData[mod]);
-        for (const [ck, info] of Object.entries(checks)) {
-            const st = info.status;
-            const icon = st === true ? '✅' : st === false ? '❌' : '❓';
-            const cls = st === true ? 'bg-success' : st === false ? 'bg-danger' : 'bg-secondary';
-            const txt = st === true ? t('status_ok') : st === false ? t('status_error') : '—';
-            h += `<tr><td><strong>${esc(pname)}</strong></td><td>${esc(ck)}</td>
-            <td><span class="badge ${cls}">${icon} ${txt}</span></td></tr>`;
+        const icon  = moduleIcon(mod, modulesData[mod]);
+        const rows  = Object.entries(checks);
+        const okCnt = rows.filter(([, v]) => v?.status === true).length;
+        const total = rows.length;
+        const allOk = okCnt === total && total > 0;
+        const errCnt = total - okCnt;
+        const pct   = total ? Math.round(100 * okCnt / total) : 100;
+
+        const accentGrad = allOk
+            ? 'linear-gradient(90deg,#22c55e,#4ade80,#0ea5e9)'
+            : 'linear-gradient(90deg,#ef4444,#f97316)';
+        const avBg    = allOk ? '#dcfce7' : '#fee2e2';
+        const avColor = allOk ? '#15803d' : '#b91c1c';
+        const badgeBg    = allOk ? '#dcfce7' : '#fee2e2';
+        const badgeColor = allOk ? '#15803d' : '#b91c1c';
+        const pbarBg = allOk
+            ? 'linear-gradient(90deg,#22c55e,#4ade80)'
+            : 'linear-gradient(90deg,#ef4444,#f97316)';
+
+        h += `<div class="rounded-3 overflow-hidden border" style="background:var(--bs-body-bg);box-shadow:0 2px 8px rgba(0,0,0,.06)">`;
+
+        // Accent strip
+        h += `<div style="height:3px;background:${accentGrad}"></div>`;
+
+        // Card header
+        h += `<div class="d-flex align-items-center gap-2 px-3 py-2" style="border-bottom:1px solid var(--bs-border-color)">
+            <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                  style="width:38px;height:38px;background:${avBg};color:${avColor};font-size:1.1rem">${icon}</span>
+            <div class="flex-grow-1 min-w-0">
+                <div class="fw-semibold" style="font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(pname)}</div>
+                <div class="text-muted" style="font-size:.75rem">${total} checks &nbsp;·&nbsp; ${okCnt}/${total} OK</div>
+            </div>
+            <span class="rounded-pill px-2 py-1 fw-bold flex-shrink-0"
+                  style="font-size:.72rem;background:${badgeBg};color:${badgeColor}">
+                ${allOk
+                    ? `<i class="bi bi-check-lg"></i> ${t('status_ok')}`
+                    : `<i class="bi bi-x-lg"></i> ${errCnt} ${t('status_error')}`}
+            </span>
+        </div>`;
+
+        // Progress bar
+        h += `<div style="height:4px;background:var(--bs-border-color)">
+            <div style="height:100%;width:${pct}%;background:${pbarBg};transition:width .5s ease"></div>
+        </div>`;
+
+        // Check rows
+        for (const [ck, info] of rows) {
+            const st = info?.status;
+            const ok = st === true;
+            const unknown = st !== true && st !== false;
+            const extra = (typeof info === 'object' && info?.other_data) || {};
+
+            const rowIcon = ok
+                ? '<i class="bi bi-check-circle-fill text-success" style="font-size:.9rem;flex-shrink:0"></i>'
+                : !unknown
+                    ? '<i class="bi bi-x-circle-fill text-danger" style="font-size:.9rem;flex-shrink:0"></i>'
+                    : '<i class="bi bi-question-circle text-secondary" style="font-size:.9rem;flex-shrink:0"></i>';
+
+            const cbBg    = ok ? '#dcfce7' : !unknown ? '#fee2e2' : 'var(--bs-secondary-bg)';
+            const cbColor = ok ? '#15803d' : !unknown ? '#b91c1c' : 'var(--bs-secondary-color)';
+            const cbTxt   = ok ? t('status_ok') : !unknown ? t('status_error') : '—';
+
+            // Extra info: usage bar or HTTP code
+            let extraHtml = '';
+            if (extra.used !== undefined && extra.used !== null) {
+                const usedPct = Math.min(parseFloat(extra.used) || 0, 100);
+                const alert   = parseFloat(extra.alert) || 80;
+                const barColor = usedPct >= alert ? '#ef4444' : usedPct >= alert * 0.75 ? '#f59e0b' : '#22c55e';
+                extraHtml = `<span class="d-flex align-items-center gap-1 text-muted" style="font-size:.74rem;flex-shrink:0">
+                    <span style="width:48px;height:5px;background:var(--bs-border-color);border-radius:3px;display:inline-block;overflow:hidden;vertical-align:middle">
+                        <span style="display:block;height:100%;width:${usedPct}%;background:${barColor}"></span>
+                    </span>
+                    ${parseFloat(extra.used).toFixed(1)}%
+                    ${extra.alert ? `<span style="opacity:.55">/ ${extra.alert}%</span>` : ''}
+                </span>`;
+            } else if (extra.code) {
+                extraHtml = `<code style="font-size:.72rem;flex-shrink:0;opacity:.75">HTTP ${esc(String(extra.code))}</code>`;
+            }
+
+            h += `<div class="d-flex align-items-center gap-2 px-3 py-2" style="border-top:1px solid var(--bs-border-color);font-size:.865rem">
+                ${rowIcon}
+                <span class="flex-grow-1 text-truncate" style="min-width:0" title="${escAttr(ck)}">${esc(ck)}</span>
+                ${extraHtml}
+                <span class="rounded-pill px-2 py-0 fw-bold flex-shrink-0"
+                      style="font-size:.68rem;background:${cbBg};color:${cbColor}">${cbTxt}</span>
+            </div>`;
         }
+
+        h += `</div>`; // card
     }
-    h += '</tbody></table></div>';
+
+    h += `</div>`; // grid
     return h;
 }
 
@@ -128,11 +226,11 @@ async function runSelectedChecks() {
 
 async function _doRunChecks(modules) {
     const spinner = document.getElementById('checksSpinner');
-    const btnAll = document.getElementById('btnRunAll');
-    const btnSel = document.getElementById('btnRunSelected');
+    const btnAll  = document.getElementById('btnRunAll');
+    const btnSel  = document.getElementById('btnRunSelected');
     if (spinner) spinner.classList.remove('d-none');
-    if (btnAll) btnAll.disabled = true;
-    if (btnSel) btnSel.disabled = true;
+    if (btnAll)  btnAll.disabled  = true;
+    if (btnSel)  btnSel.disabled  = true;
 
     try {
         const res = await apiPost('/api/checks/run', { modules });
@@ -142,10 +240,9 @@ async function _doRunChecks(modules) {
         }
         const { results, errors } = res.data;
 
-        // Show inline results
         const area = document.getElementById('checksResultArea');
         if (area && results) {
-            area.innerHTML = _renderStatusTable(results);
+            area.innerHTML = _renderStatusCards(results);
         }
 
         if (errors && errors.length) {
@@ -155,7 +252,7 @@ async function _doRunChecks(modules) {
         }
     } finally {
         if (spinner) spinner.classList.add('d-none');
-        if (btnAll) btnAll.disabled = false;
-        if (btnSel) btnSel.disabled = false;
+        if (btnAll)  btnAll.disabled  = false;
+        if (btnSel)  btnSel.disabled  = false;
     }
 }

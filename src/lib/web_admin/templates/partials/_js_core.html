@@ -43,9 +43,11 @@ let currentUser = {};
 let _uid = 0;
 let _defaultPageSize = 25;
 let _PAGE_SIZES = [25, 50, 100, 200, 0];
-let _addItemCtx = null;     // {target, pathStr}
-let _deleteItemCtx = null;  // {target, parentPathStr, key}
-let _renameItemCtx = null;  // {target, parentPathStr, oldKey}
+let _addItemCtx = null;          // {target, pathStr}
+let _deleteItemCtx = null;       // {target, parentPathStr, key}
+let _renameItemCtx = null;       // {target, parentPathStr, oldKey}
+let _autoExpandItemPath = null;  // full pathStr of item to auto-expand after next render
+let _pendingExpandMods  = new Set(); // module names to force-expand on next renderModules()
 let _editingUser = null;    // null = new, string = editing username
 let _serverConfigData = null; // snapshot from last server load/save
 const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
@@ -529,19 +531,27 @@ function renderScalarFields(obj, pathPrefix, target, exclude = []) {
 // ──────────────────────────── Collection render ───────────────────
 function renderCollection(title, data, pathStr, target) {
     const lbl = esc(fieldLabel(title));
-    let h = `<div class="mt-3">
-    <div class="d-flex align-items-center mb-2">
-        <h6 class="text-muted mb-0"><i class="bi bi-list-ul me-1"></i>${lbl}</h6>
-        <button class="btn btn-sm btn-outline-success ms-2 py-0 px-1"
+    const itemCount = Object.keys(data).length;
+    let h = `<div class="mt-3 mb-1">
+    <div class="d-flex align-items-center gap-2 mb-2 pb-1" style="border-bottom:1px solid var(--bs-border-color)">
+        <span class="fw-semibold text-muted" style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em">
+            <i class="bi bi-list-ul me-1"></i>${lbl}
+        </span>
+        ${itemCount > 0 ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.68rem">${itemCount}</span>` : ''}
+        <button class="btn btn-sm btn-outline-success ms-auto py-0 px-2"
             onclick="openAddModal('${escAttr(target)}','${escAttr(pathStr)}')">
-            <i class="bi bi-plus-lg"></i>
+            <i class="bi bi-plus-lg me-1"></i>${t('add') || 'Add'}
         </button>
-    </div><div class="ps-1">`;
+    </div>
+    <div class="d-flex flex-column gap-1">`;
 
     for (const [name, val] of Object.entries(data)) {
         h += renderCollectionItem(name, val, pathStr + '|' + name, pathStr, target);
     }
-    h += '</div></div>';
+    h += `${!itemCount ? `<div class="text-center py-3 text-muted" style="font-size:.82rem">
+        <i class="bi bi-inbox" style="opacity:.35;display:block;font-size:1.4rem;margin-bottom:.4rem"></i>
+        ${t('no_items') || 'No items'}
+    </div>` : ''}</div></div>`;
     return h;
 }
 
@@ -583,57 +593,70 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
 
     // --- boolean item (no schema) ---
     if (typeof itemValue === 'boolean') {
-        return `<div class="d-flex align-items-center mb-1 p-2 rounded border bg-body">
-        <code class="me-auto small">${esc(displayName)}</code>
-        <div class="form-check form-switch me-1">
-            <input class="form-check-input" type="checkbox" ${itemValue ? 'checked' : ''}
-                onchange="updateField('${tg}','${sp}',this.checked)">
-        </div>${delBtn}</div>`;
+        const boolBg = itemValue ? 'rgba(34,197,94,.09)' : 'var(--bs-secondary-bg)';
+        const boolIcon = itemValue
+            ? '<i class="bi bi-check-circle-fill text-success flex-shrink-0" style="font-size:.88rem"></i>'
+            : '<i class="bi bi-circle text-secondary flex-shrink-0" style="font-size:.88rem"></i>';
+        return `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border" style="background:${boolBg}">
+            ${boolIcon}
+            <code class="me-auto" style="font-size:.82rem">${esc(displayName)}</code>
+            <div class="form-check form-switch mb-0 me-1">
+                <input class="form-check-input" type="checkbox" ${itemValue ? 'checked' : ''}
+                    onchange="updateField('${tg}','${sp}',this.checked)">
+            </div>${delBtn}
+        </div>`;
     }
 
     // --- number item ---
     if (typeof itemValue === 'number') {
-        return `<div class="d-flex align-items-center mb-1 p-2 rounded border bg-body">
-        <code class="me-2 small">${esc(displayName)}</code>
-        <input type="number" class="form-control form-control-sm ms-auto"
-            style="max-width:100px" value="${itemValue}"
-            onkeydown="blockNonNumericKey(event,false)"
-            onchange="validateAndUpdateNumber(this,'${tg}','${sp}',null,null)">
-        ${delBtn}</div>`;
+        return `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border" style="background:var(--bs-body-bg)">
+            <i class="bi bi-hash text-muted flex-shrink-0" style="font-size:.88rem"></i>
+            <code class="me-auto" style="font-size:.82rem">${esc(displayName)}</code>
+            <input type="number" class="form-control form-control-sm"
+                style="max-width:90px" value="${itemValue}"
+                onkeydown="blockNonNumericKey(event,false)"
+                onchange="validateAndUpdateNumber(this,'${tg}','${sp}',null,null)">
+            ${delBtn}
+        </div>`;
     }
 
     // --- dict item ---
     if (typeof itemValue === 'object' && itemValue !== null && !Array.isArray(itemValue)) {
         const id = uid();
         const hasEnabled = 'enabled' in itemValue;
+        const itemOn = !hasEnabled || itemValue.enabled !== false;
         let sw = '';
         if (hasEnabled) {
-            sw = `<div class="form-check form-switch me-1" data-no-collapse="1" onclick="event.stopPropagation()">
-            <input class="form-check-input" type="checkbox" data-no-collapse="1"
-                ${itemValue.enabled ? 'checked' : ''}
-                onclick="event.stopPropagation()"
-                onchange="event.stopPropagation();updateField('${tg}','${sp}|enabled',this.checked)">
-        </div>`;
+            sw = `<div class="form-check form-switch mb-0 me-1" data-no-collapse="1" onclick="event.stopPropagation()">
+                <input class="form-check-input" type="checkbox" data-no-collapse="1"
+                    ${itemValue.enabled ? 'checked' : ''}
+                    onclick="event.stopPropagation()"
+                    onchange="event.stopPropagation();updateField('${tg}','${sp}|enabled',this.checked)">
+            </div>`;
         }
-        // Show key as a small muted badge when displayName differs from itemName
         const keyBadge = (displayName !== itemName)
-            ? `<span class="badge bg-secondary bg-opacity-25 text-body-secondary ms-2 small fw-normal">${esc(itemName)}</span>`
+            ? `<span class="badge bg-secondary bg-opacity-25 ms-2 fw-normal" style="font-size:.68rem">${esc(itemName)}</span>`
             : '';
         const body = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : []);
-        return `<div class="card mb-2">
-        <div class="card-header d-flex align-items-center py-1 px-2 bg-body"
-             role="button" onclick="toggleCollapseFromHeader(event,'${id}')">
-            <code class="me-auto small">${esc(displayName)}${keyBadge}</code>
-            ${sw}${renameBtn}${delBtn}
-            <button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" type="button" data-no-collapse="1"
-                data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
-                aria-label="Toggle details" onclick="event.stopPropagation()">
-                <i class="bi bi-chevron-down text-muted small"></i>
-            </button>
-        </div>
-        <div class="collapse" id="${id}">
-            <div class="card-body py-2 px-3">${body}</div>
-        </div></div>`;
+        const itemOpacity = itemOn ? '' : ';opacity:.6';
+        const isAutoExpand = (_autoExpandItemPath === pathStr);
+        if (isAutoExpand) _autoExpandItemPath = null;
+        return `<div class="rounded-3 overflow-hidden border" data-item-path="${escAttr(pathStr)}" style="background:var(--bs-body-bg)${itemOpacity}">
+            <div class="d-flex align-items-center gap-1 px-2 py-1"
+                 style="background:var(--bs-secondary-bg);cursor:pointer"
+                 role="button" onclick="toggleCollapseFromHeader(event,'${id}')">
+                <code class="flex-grow-1 min-w-0" style="font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}${keyBadge}</code>
+                ${sw}${renameBtn}${delBtn}
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                    data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"
+                    aria-label="Toggle details" onclick="event.stopPropagation()">
+                    <i class="bi bi-chevron-down text-muted small"></i>
+                </button>
+            </div>
+            <div class="collapse${isAutoExpand ? ' show' : ''}" id="${id}">
+                <div class="px-3 py-2" style="border-top:1px solid var(--bs-border-color)">${body}</div>
+            </div>
+        </div>`;
     }
     return '';
 }

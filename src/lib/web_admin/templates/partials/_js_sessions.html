@@ -16,7 +16,10 @@ function renderSessions() {
     const title = document.getElementById('sessions-title');
     if (title) title.textContent = t('active_sessions') + ' (' + allEntries.length + ')';
     if (!allEntries.length) {
-        c.innerHTML = '<p class="text-muted small mb-0">' + t('no_active_sessions') + '</p>';
+        c.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-person-slash" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <span>${t('no_active_sessions')}</span>
+        </div>`;
         return;
     }
     allEntries.sort((a, b) => (b[1].last_seen || '').localeCompare(a[1].last_seen || ''));
@@ -24,22 +27,45 @@ function renderSessions() {
     const ps = _sessionsPageSize || total;
     _sessionsPage = Math.max(1, Math.min(_sessionsPage, Math.ceil(total / ps)));
     const entries = allEntries.slice((_sessionsPage - 1) * ps, _sessionsPage * ps);
-    let h = '<div class="table-responsive"><table class="table table-sm table-hover table-striped align-middle mb-0">';
-    h += '<thead class="table-light"><tr><th>' + t('col_user') + '</th><th>' + t('col_ip') + '</th><th>' + t('col_created') + '</th><th>' + t('col_last_seen') + '</th><th style="width:70px"></th></tr></thead><tbody>';
+
+    let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:.7rem">`;
     for (const [sid, s] of entries) {
         const isCurrent = !!s.is_current;
-        const badge = isCurrent ? ' <span class="badge bg-success">' + t('current_session') + '</span>' : '';
-        h += `<tr${isCurrent ? ' class="table-success"' : ''}>
-            <td><code>${esc(s.username)}</code>${badge}</td>
-            <td class="small">${esc(s.ip)}</td>
-            <td class="small">${new Date(s.created).toLocaleString()}</td>
-            <td class="small">${new Date(s.last_seen).toLocaleString()}</td>
-            <td><button class="btn btn-sm btn-outline-danger py-0 px-1"
-                onclick="revokeSession('${escAttr(sid)}')" title="${t('revoke_session')}">
-                <i class="bi bi-x-lg"></i></button></td>
-        </tr>`;
+        const accentColor = isCurrent ? '#22c55e' : 'var(--bs-primary)';
+        const accentGrad  = isCurrent
+            ? 'linear-gradient(90deg,#22c55e,#4ade80)'
+            : 'linear-gradient(90deg,var(--bs-primary),#60a5fa)';
+        const avatarBg    = isCurrent ? '#dcfce7' : 'var(--bs-secondary-bg)';
+        const avatarColor = isCurrent ? '#15803d' : 'var(--bs-secondary-color)';
+        const created     = new Date(s.created).toLocaleString();
+        const lastSeen    = new Date(s.last_seen).toLocaleString();
+
+        h += `<div class="rounded-3 overflow-hidden border" style="background:var(--bs-body-bg);box-shadow:0 2px 6px rgba(0,0,0,.06)">
+            <div style="height:3px;background:${accentGrad}"></div>
+            <div class="d-flex align-items-center gap-2 px-3 py-2">
+                <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                      style="width:36px;height:36px;background:${avatarBg};color:${avatarColor};font-size:1rem">
+                    <i class="bi bi-person-fill"></i>
+                </span>
+                <div class="flex-grow-1 min-w-0">
+                    <div class="d-flex align-items-center gap-1 flex-wrap">
+                        <code class="fw-semibold" style="font-size:.88rem">${esc(s.username)}</code>
+                        ${isCurrent ? `<span class="badge rounded-pill" style="font-size:.6rem;background:#dcfce7;color:#15803d">${t('current_session')}</span>` : ''}
+                    </div>
+                    <div class="text-muted" style="font-size:.72rem"><i class="bi bi-geo-alt me-1"></i>${esc(s.ip)}</div>
+                </div>
+                <button class="btn btn-sm btn-outline-danger py-0 px-2 flex-shrink-0"
+                    onclick="revokeSession('${escAttr(sid)}')" title="${t('revoke_session')}">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="d-flex gap-3 px-3 pb-2 pt-0" style="font-size:.72rem;color:var(--bs-secondary-color)">
+                <span><i class="bi bi-clock-history me-1" style="opacity:.6"></i>${t('col_created')}: ${esc(created)}</span>
+                <span class="ms-auto"><i class="bi bi-activity me-1" style="opacity:.6"></i>${t('col_last_seen')}: ${esc(lastSeen)}</span>
+            </div>
+        </div>`;
     }
-    h += '</tbody></table></div>';
+    h += `</div>`;
     const pagination = _renderPagination(total, _sessionsPage, _sessionsPageSize, '_goSessionsPage', '_changeSessionsPageSize');
     c.innerHTML = pagination + h + pagination;
 }

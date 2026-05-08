@@ -44,7 +44,7 @@ function updatePrettyName(name, value) {
     // Update header text live
     const card = document.getElementById('card-' + name);
     if (card) {
-        const label = card.querySelector('.card-header .fw-semibold');
+        const label = card.querySelector('.module-header .fw-semibold');
         if (label) label.textContent = modulePrettyName(name, modulesData[name]);
     }
 }
@@ -113,10 +113,65 @@ function _doRenameItem() {
 
 // --- Add-item modal ---
 function openAddModal(target, pathStr) {
+    // Module collection items: skip the name prompt and add directly with an auto-generated key
+    if (target === 'modules' && pathStr !== null) {
+        _addAutoModuleItem(pathStr);
+        return;
+    }
     _addItemCtx = { target, pathStr };
     document.getElementById('newItemName').value = '';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('addItemModal')).show();
     setTimeout(() => document.getElementById('newItemName').focus(), 400);
+}
+
+function _addAutoModuleItem(pathStr) {
+    const parent = getPath(modulesData, pathStr.split('|'));
+    if (!parent || typeof parent !== 'object') return;
+
+    // Generate a unique key
+    const existing = new Set(Object.keys(parent));
+    let n = 1, key;
+    do { key = 'item_' + n++; } while (existing.has(key));
+
+    // Build default value — same logic as confirmAddItem
+    const schema = schemaFor(pathStr);
+    const defaults = schemaDefaults(schema);
+    let def = true;
+    if (defaults) {
+        def = {};
+        for (const [k, sv] of Object.entries(defaults)) {
+            def[k] = Array.isArray(sv) ? [...sv] : sv;
+        }
+    } else {
+        for (const v of Object.values(parent)) {
+            if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+                def = {};
+                for (const [k, val] of Object.entries(v)) {
+                    if (typeof val === 'boolean') def[k] = (k === 'enabled');
+                    else if (typeof val === 'number') def[k] = 0;
+                    else if (typeof val === 'string') def[k] = '';
+                    else if (Array.isArray(val)) def[k] = [];
+                    else def[k] = {};
+                }
+                break;
+            }
+        }
+    }
+
+    parent[key] = def;
+    _autoExpandItemPath = pathStr + '|' + key;
+    const modName = pathStr.split('|')[0];
+    _pendingExpandMods.add(modName);
+    markDirty('modules');
+    renderModules();
+
+    // Scroll the new item into view after render
+    setTimeout(() => {
+        const card = document.getElementById('card-' + modName);
+        if (!card) return;
+        const newItem = card.querySelector(`[data-item-path="${CSS.escape(pathStr + '|' + key)}"]`);
+        if (newItem) newItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
 }
 
 function confirmAddItem() {
