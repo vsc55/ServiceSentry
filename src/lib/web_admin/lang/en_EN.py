@@ -185,6 +185,8 @@ LANG = {
     'add_module_all_configured':     'All available modules are already configured',
     'add_module_already_configured': 'Already configured',
     'no_items':                      'No items',
+    'not_supported':                 'Not supported',
+    'platform_not_supported':        'Not supported on this platform',
     'rename_item': 'Rename',
     'rename_item_prompt': 'Enter new key (e.g. IP, domain, service name):',
     # Backend

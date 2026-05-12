@@ -4,5 +4,16 @@
         "enabled": "Habilitado",
         "label":   "Etiqueta",
         "alert":   "Alerta (\u00b0C)"
+    },
+    "hints": {
+        "enabled": "Habilitar o deshabilitar la monitorizaci\u00f3n de este sensor.",
+        "label":   "Nombre mostrado en notificaciones. Si est\u00e1 vac\u00edo se usa la etiqueta de psutil o el nombre del chip.",
+        "alert":   "Umbral de temperatura (\u00b0C). Se genera una alerta cuando el sensor supera este valor. Anula el umbral global del m\u00f3dulo."
+    },
+    "collections": {"list": "Sensores"},
+    "ui": {
+        "discover_title": "Descubrir Sensores",
+        "discover_error": "No se pudo cargar la lista de sensores de temperatura",
+        "item_added":     "Sensor \"{}\" a\u00f1adido"
     }
 }

@@ -393,7 +393,8 @@ class TestModuleItemSchemas:
     def test_temperature_list_schema_fields(self):
         """temperature|list schema has enabled, label, alert."""
         schema = self.schemas['temperature|list']
-        assert set(schema.keys()) == {'enabled', 'label', 'alert'}
+        user_keys = {k for k in schema.keys() if not k.startswith('__')}
+        assert user_keys == {'enabled', 'label', 'alert'}
         assert schema['alert']['type'] == 'float'
 
     def test_hddtemp_list_schema_fields(self):

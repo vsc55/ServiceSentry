@@ -4,5 +4,16 @@
         "enabled": "Enabled",
         "label":   "Label",
         "alert":   "Alert (\u00b0C)"
+    },
+    "hints": {
+        "enabled": "Enable or disable monitoring for this sensor.",
+        "label":   "Display name shown in notifications. Falls back to the psutil sensor label or chip name if empty.",
+        "alert":   "Temperature threshold (\u00b0C). An alert is triggered when the sensor exceeds this value. Overrides the module-level threshold."
+    },
+    "collections": {"list": "Sensors"},
+    "ui": {
+        "discover_title": "Discover Sensors",
+        "discover_error": "Could not load the list of temperature sensors",
+        "item_added":     "Sensor \"{}\" added"
     }
 }

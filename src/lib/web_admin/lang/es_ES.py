@@ -184,6 +184,8 @@ LANG = {
     'add_module_all_configured':     'Todos los módulos disponibles ya están configurados',
     'add_module_already_configured': 'Ya configurados',
     'no_items':                      'Sin elementos',
+    'not_supported':                 'No compatible',
+    'platform_not_supported':        'No compatible con esta plataforma',
     'rename_item': 'Renombrar',
     'rename_item_prompt': 'Introduce la nueva clave (ej: IP, dominio, nombre de servicio):',
     # Backend

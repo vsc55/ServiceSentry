@@ -123,6 +123,12 @@ class ModuleBase(ObjectBase):
             info = cls._load_module_info(mod_dir)
             lang_data = cls._load_module_langs(mod_dir)
 
+            supported_platforms = getattr(watchful_cls, 'SUPPORTED_PLATFORMS', None)
+            platform_unsupported = (
+                isinstance(supported_platforms, (list, tuple)) and
+                sys.platform not in supported_platforms
+            )
+
             for collection, fields in item_schema.items():
                 if collection == '__i18n__':
                     continue  # handled separately below
@@ -138,6 +144,8 @@ class ModuleBase(ObjectBase):
                             }
                             if label_i18n:
                                 col_fields[field_key] = {**field_meta, 'label_i18n': label_i18n}
+                if platform_unsupported:
+                    col_fields['__unsupported__'] = True
                 schemas[f'{mod_name}|{collection}'] = col_fields
 
             # Build __i18n__ entry.

@@ -370,9 +370,11 @@ Por cada servicio habilitado:
 
 ## 🌡️ temperature — Sensores Térmicos
 
-Monitoriza sensores de temperatura del sistema (zonas térmicas de Linux).
+Monitoriza sensores de temperatura del sistema usando `psutil.sensors_temperatures()`.
 
-**Plataforma:** Linux
+**Plataforma:** Linux, macOS
+
+> **Windows no soportado:** `psutil` no expone sensores térmicos en Windows. El módulo aparece deshabilitado en la UI y no permite activarlo ni añadir sensores manualmente.
 
 **Config:**
 ```json
@@ -381,10 +383,13 @@ Monitoriza sensores de temperatura del sistema (zonas térmicas de Linux).
         "enabled": true,
         "alert": 80,
         "list": {
-            "thermal_zone0": {
+            "coretemp_0": {
                 "enabled": true,
-                "label": "CPU",
+                "label": "CPU Package",
                 "alert": 90
+            },
+            "acpitz_0": {
+                "enabled": false
             }
         }
     }
@@ -392,12 +397,16 @@ Monitoriza sensores de temperatura del sistema (zonas térmicas de Linux).
 ```
 
 | Clave | Tipo | Por defecto | Descripción |
-|-------|------|-------------|-------------|
-| `alert` | float | 80 | Temperatura máxima global (°C) |
-| `list.*.label` | string | tipo del sensor | Nombre legible del sensor |
-| `list.*.alert` | float | global | Umbral específico por sensor |
+| --- | --- | --- | --- |
+| `alert` | float | 80 | Temperatura máxima global (°C), aplicada a todos los sensores sin umbral propio |
+| `list.*.enabled` | bool | `true` | Habilitar monitorización de este sensor |
+| `list.*.label` | string | etiqueta psutil o nombre del chip | Nombre mostrado en notificaciones |
+| `list.*.alert` | float | global | Umbral específico por sensor, anula el umbral global |
 
-**Flujo:** Lee `/sys/class/thermal/thermal_zone*/temp` y `*/type` → divide entre 1000 → compara con el umbral.
+> **Claves de sensor:** el formato es `{chip}_{índice}`, por ejemplo `coretemp_0`, `coretemp_1`, `acpitz_0`. El chip y el índice provienen de `psutil.sensors_temperatures()`. Los nombres exactos disponibles dependen del hardware y el sistema operativo.
+> **Descubrimiento:** la UI web incluye un botón para listar automáticamente los sensores disponibles e incorporarlos a la configuración con un solo clic. Muestra el nombre del chip, la etiqueta del sensor y la temperatura actual.
+
+**Flujo:** `psutil.sensors_temperatures()` → itera chips y lecturas → clave `{chip}_{idx}` → compara temperatura actual con el umbral → alerta si supera el umbral.
 
 ---
 

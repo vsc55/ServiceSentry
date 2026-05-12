@@ -25,7 +25,8 @@
 import json
 import os
 
-from lib.linux import ThermalInfoCollection
+import psutil
+
 from lib.modules import EnumConfigOptions as ConfigOptions
 from lib.modules import ModuleBase
 
@@ -35,8 +36,8 @@ _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'),
 class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
+    SUPPORTED_PLATFORMS = ('linux', 'darwin')
 
-    # Default values derived from schema.json (single source of truth).
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
                  if isinstance(v, dict) and 'default' in v}
 
@@ -44,45 +45,71 @@ class Watchful(ModuleBase):
         super().__init__(monitor, __package__)
 
     def check(self):
-        termal_info = ThermalInfoCollection(True)
+        if not self.is_enabled:
+            return self.dict_return
 
-        for item in termal_info.nodes:
-            if not self._get_conf(ConfigOptions.enabled, item.dev):
-                continue
+        for chip, readings in self._read_sensors().items():
+            for idx, reading in enumerate(readings):
+                dev_name = f"{chip}_{idx}"
 
-            dev_name = item.dev
-            type_name = item.type
-            type_label = self._get_conf(ConfigOptions.label, dev_name, type_name)
-            temp = item.temp
-            temp_alert = self._get_conf(ConfigOptions.alert, dev_name)
+                if not self._get_conf(ConfigOptions.enabled, dev_name):
+                    continue
 
-            if temp <= temp_alert:  # Función OK :)
-                is_warning = False
-            else:  # Esta echando fuego!!!
-                is_warning = True
+                default_label = reading.label.strip() if reading.label and reading.label.strip() else chip
+                type_label = self._get_conf(ConfigOptions.label, dev_name, default_label)
+                temp = reading.current
+                temp_alert = self._get_conf(ConfigOptions.alert, dev_name)
 
-            message = f"Sensor *{type_label}*, "
-            if is_warning:
-                message += f'*over temperature Warning {temp:.1f} ºC* 🔥'
-            else:
-                message += f'temperature Ok *{temp:.1f} ºC* ✅'
+                is_warning = temp > temp_alert
 
-            other_data = {'type': type_name, 'temp': temp, 'alert': temp_alert}
-            self.dict_return.set(dev_name, not is_warning, message, other_data=other_data)
+                message = f"Sensor *{type_label}*, "
+                if is_warning:
+                    message += f'*over temperature Warning {temp:.1f} ºC* 🔥'
+                else:
+                    message += f'temperature Ok *{temp:.1f} ºC* ✅'
+
+                other_data = {'type': chip, 'temp': temp, 'alert': temp_alert}
+                self.dict_return.set(dev_name, not is_warning, message, other_data=other_data)
 
         super().check()
         return self.dict_return
 
+    @classmethod
+    def discover(cls) -> list:
+        """Return [{name, display_name, status}] for all available temperature sensors."""
+        result = []
+        for chip, readings in cls._read_sensors().items():
+            for idx, reading in enumerate(readings):
+                label = reading.label.strip() if reading.label and reading.label.strip() else ''
+                display = chip + (f' — {label}' if label else f' [{idx}]')
+                try:
+                    status = f'{reading.current:.1f}°C'
+                except Exception:
+                    status = '?'
+                result.append({
+                    'name': f'{chip}_{idx}',
+                    'display_name': display,
+                    'status': status,
+                })
+        return result
+
+    @classmethod
+    def _read_sensors(cls) -> dict:
+        """Return {chip: [readings]} via psutil (Linux / macOS only)."""
+        if not hasattr(psutil, 'sensors_temperatures'):
+            return {}
+        try:
+            return psutil.sensors_temperatures() or {}
+        except Exception:
+            return {}
+
     def _get_conf(self, opt_find, dev_name: str, default_val=None):
-        # Sec - Get Default Val
         if default_val is None:
             match opt_find:
                 case ConfigOptions.alert:
                     val_def = self.get_conf(opt_find.name, self._DEFAULTS['alert'])
-
                 case ConfigOptions.enabled:
                     val_def = self.get_conf(opt_find.name, self._DEFAULTS['enabled'])
-
                 case None:
                     raise ValueError("opt_find it can not be None!")
                 case _:
@@ -90,16 +117,12 @@ class Watchful(ModuleBase):
         else:
             val_def = default_val
 
-        # Sec - Get Data
         value = self.get_conf_in_list(opt_find, dev_name, val_def)
 
-        # Sec - Format Return Data
         match opt_find:
             case ConfigOptions.alert:
                 return self._parse_conf_float(value, val_def)
             case ConfigOptions.enabled:
                 return bool(value)
-            case ConfigOptions.label:
-                return self._parse_conf_str(value, val_def)
             case _:
-                return value
+                return self._parse_conf_str(value, val_def)
