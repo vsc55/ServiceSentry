@@ -58,6 +58,8 @@ class ModuleBase(ObjectBase):
         """
         defaults: dict = {}
         for k, v in collection.items():
+            if k.startswith('__'):
+                continue
             if isinstance(v, dict) and 'default' in v:
                 val = v['default']
                 defaults[k] = list(val) if isinstance(val, list) else val
@@ -141,8 +143,13 @@ class ModuleBase(ObjectBase):
             # Build __i18n__ entry.
             if info or lang_data:
                 icon = info.get('icon', '\U0001f4e6')
+                _skip = {'pretty_name', 'labels'}
                 i18n = {
-                    lc: {'pretty_name': ld.get('pretty_name', mod_name), 'icon': icon}
+                    lc: {
+                        'pretty_name': ld.get('pretty_name', mod_name),
+                        'icon': icon,
+                        **{k: v for k, v in ld.items() if k not in _skip},
+                    }
                     for lc, ld in lang_data.items()
                 }
                 if i18n:

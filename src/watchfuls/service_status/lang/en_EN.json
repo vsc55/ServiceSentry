@@ -4,6 +4,26 @@
         "enabled":     "Enabled",
         "threads":     "Threads",
         "service":     "Service name",
+        "expected":    "Expected state",
         "remediation": "Auto-remediation"
+    },
+    "option_labels": {
+        "expected": {
+            "running": "Running",
+            "stopped": "Stopped"
+        }
+    },
+    "collections": {
+        "list": "Services"
+    },
+    "hints": {
+        "service":     "System service name. If empty, the item key is used as the service identifier.",
+        "expected":    "Expected state. An alert is triggered when the actual state differs.",
+        "remediation": "Automatically starts or stops the service to restore the expected state."
+    },
+    "ui": {
+        "discover_title": "Discover System Services",
+        "discover_error": "Could not load the list of system services",
+        "item_added":     "Service \"{}\" added"
     }
 }

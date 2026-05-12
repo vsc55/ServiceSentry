@@ -223,6 +223,126 @@ function deleteModule(name) {
     });
 }
 
+// ──────────────────────────── Service Discovery ───────────────────
+function _modUiStr(modName, key, fallback) {
+    const i18n = ITEM_SCHEMAS[modName + '|__i18n__'];
+    if (i18n) {
+        const d = i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG];
+        if (d && d.ui && key in d.ui) return d.ui[key];
+    }
+    return fallback;
+}
+
+let _discoverServices = null;
+let _discoverPathStr  = null;
+
+async function openDiscoverModal(pathStr, url) {
+    _discoverPathStr = pathStr;
+    _discoverServices = null;
+
+    const modName = pathStr.split('|')[0];
+    const titleEl = document.getElementById('discoverModalTitle');
+    if (titleEl) titleEl.textContent = _modUiStr(modName, 'discover_title', t('discover')) + ' — ' + modulePrettyName(modName, modulesData[modName] || {});
+
+    const body = document.getElementById('discoverModalBody');
+    if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    const filterEl = document.getElementById('discoverFilter');
+    if (filterEl) filterEl.value = '';
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('discoverModal')).show();
+
+    const data = await apiGet(url);
+    if (!Array.isArray(data)) {
+        if (body) body.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${esc(_modUiStr(modName, 'discover_error', t('error') || '?'))}</div>`;
+        return;
+    }
+    _discoverServices = data;
+    _renderDiscoverList();
+}
+
+function _renderDiscoverList() {
+    const body = document.getElementById('discoverModalBody');
+    if (!body || !_discoverServices) return;
+
+    const filter = (document.getElementById('discoverFilter')?.value || '').toLowerCase();
+
+    // Build set of service names already configured (lowercase for case-insensitive match)
+    const configured = new Set();
+    if (_discoverPathStr) {
+        const collection = getPath(modulesData, _discoverPathStr.split('|')) || {};
+        for (const [key, val] of Object.entries(collection)) {
+            const svcField = (typeof val === 'object' && val !== null ? val.service || '' : '').trim();
+            configured.add((svcField || key).toLowerCase());
+        }
+    }
+
+    const filtered = _discoverServices.filter(s =>
+        !filter ||
+        (s.name || '').toLowerCase().includes(filter) ||
+        (s.display_name || '').toLowerCase().includes(filter)
+    );
+
+    if (!filtered.length) {
+        body.innerHTML = `<div class="text-center py-4 text-muted">${esc(t('no_items'))}</div>`;
+        return;
+    }
+
+    let h = '<div class="d-flex flex-column gap-1">';
+    for (const svc of filtered) {
+        const isAdded = configured.has((svc.name || '').toLowerCase());
+        const statusColor = svc.status === 'running' ? '#22c55e' : (svc.status === 'stopped' ? '#ef4444' : 'var(--bs-secondary-color)');
+        const statusIcon  = svc.status === 'running' ? 'bi-check-circle-fill' : (svc.status === 'stopped' ? 'bi-stop-circle-fill' : 'bi-circle');
+        h += `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border${isAdded ? ' opacity-50' : ''}"
+                   style="background:var(--bs-body-bg)${isAdded ? '' : ';cursor:pointer'}"
+                   ${isAdded ? '' : `onclick="_addDiscoveredService(${jsStr(svc.name)})"`}>
+            <i class="bi ${statusIcon} flex-shrink-0" style="color:${statusColor};font-size:.9rem"></i>
+            <code class="flex-grow-1 text-truncate" style="font-size:.82rem" title="${escAttr(svc.display_name || svc.name)}">${esc(svc.name)}</code>
+            ${svc.display_name ? `<span class="text-muted text-truncate" style="font-size:.78rem;max-width:200px">${esc(svc.display_name)}</span>` : ''}
+            <span class="badge rounded-pill flex-shrink-0" style="font-size:.65rem;background:var(--bs-secondary-bg);color:var(--bs-secondary-color)">${esc(svc.status || '?')}</span>
+            ${isAdded
+                ? `<span class="badge bg-secondary flex-shrink-0" style="font-size:.65rem">${esc(t('already_added'))}</span>`
+                : `<i class="bi bi-plus-circle text-success flex-shrink-0"></i>`}
+        </div>`;
+    }
+    h += '</div>';
+    body.innerHTML = h;
+}
+
+function _addDiscoveredService(serviceName) {
+    if (!_discoverPathStr) return;
+    const parts = _discoverPathStr.split('|');
+    const collection = getPath(modulesData, parts);
+    if (!collection || typeof collection !== 'object') return;
+
+    // Use serviceName as key; suffix if already taken (case-insensitive check)
+    const _existingLower = new Set(Object.keys(collection).map(k => k.toLowerCase()));
+    let key = serviceName, n = 2;
+    while (_existingLower.has(key.toLowerCase())) key = serviceName + '_' + n++;
+
+    // Build item from schema defaults, leave 'service' empty (key encodes service name)
+    const defaults = schemaDefaults(ITEM_SCHEMAS[_discoverPathStr] || null) || {};
+    const item = {};
+    for (const [k, v] of Object.entries(defaults)) {
+        item[k] = Array.isArray(v) ? [...v] : v;
+    }
+    if ('service' in item) item.service = serviceName;
+
+    collection[key] = item;
+    _autoExpandItemPath = _discoverPathStr + '|' + key;
+    _pendingExpandMods.add(parts[0]);
+    markDirty('modules');
+    renderModules();
+    showToast(_modUiStr(parts[0], 'item_added', serviceName).replace('{}', serviceName));
+    _renderDiscoverList();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('discoverFilter')?.addEventListener('input', _renderDiscoverList);
+    document.getElementById('discoverModal')?.addEventListener('shown.bs.modal', () => {
+        document.getElementById('discoverFilter')?.focus();
+    });
+});
+
 function renderModuleBody(name, cfg) {
 // pretty_name field (always first, with placeholder)
 const pn = cfg.pretty_name || '';

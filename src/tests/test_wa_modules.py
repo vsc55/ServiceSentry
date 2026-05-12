@@ -383,9 +383,10 @@ class TestModuleItemSchemas:
         assert schema['password'].get('sensitive') is True
 
     def test_service_status_schema_fields(self):
-        """service_status|list schema has enabled, service and remediation."""
+        """service_status|list schema has enabled, service, expected and remediation."""
         schema = self.schemas['service_status|list']
-        assert set(schema.keys()) == {'enabled', 'service', 'remediation'}
+        user_keys = {k for k in schema.keys() if not k.startswith('__')}
+        assert user_keys == {'enabled', 'service', 'expected', 'remediation'}
         assert schema['enabled']['type'] == 'bool'
         assert schema['service']['type'] == 'str'
 

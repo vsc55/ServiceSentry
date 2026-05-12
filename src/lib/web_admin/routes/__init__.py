@@ -15,6 +15,7 @@ from .audit import register as _audit
 from .roles import register as _roles
 from .groups import register as _groups
 from .checks import register as _checks
+from .watchfuls import register as _watchfuls
 
 
 def register_all(app, wa):
@@ -31,3 +32,4 @@ def register_all(app, wa):
     _roles(app, wa)
     _groups(app, wa)
     _checks(app, wa)
+    _watchfuls(app, wa)

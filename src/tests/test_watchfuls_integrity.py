@@ -114,6 +114,8 @@ class TestRealModuleImport:
                 f"{mod_name}.ITEM_SCHEMA['{collection}'] is not a dict"
             )
             for field_key, field_meta in fields.items():
+                if field_key.startswith('__'):
+                    continue  # metadata keys (e.g. __discovery__) are not field defs
                 assert isinstance(field_meta, dict), (
                     f"{mod_name}.ITEM_SCHEMA['{collection}']['{field_key}'] "
                     f"is not a dict (got {type(field_meta).__name__})"

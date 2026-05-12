@@ -95,6 +95,8 @@ LANG = {
     'reload_modules': 'Recargar',
     'reload_modules_title': 'Descartar cambios y recargar desde el servidor',
     'modules_reloaded': 'Módulos recargados desde el servidor',
+    'discover':      'Descubrir',
+    'already_added': 'Ya añadido',
     'save_error': 'Error al guardar',
     # Config
     'save_config': 'Guardar configuración',
@@ -347,6 +349,8 @@ LANG = {
         'web_admin|audit_sort':         'Columna predeterminada para ordenar la tabla del registro de auditoría.',
         'web_admin|default_page_size':  'Número de filas mostradas por página en todas las tablas de listado. 0 = mostrar todas.',
         'web_admin|page_sizes':         'Lista de opciones de tamaño de página separadas por comas. Usa 0 para incluir la opción "Todos".',
+        'pretty_name':                  'Nombre de visualización opcional. Si está vacío, se usa el identificador del módulo.',
+        'threads':                      'Número de hilos paralelos utilizados para ejecutar las comprobaciones simultáneamente.',
     },
     # Etiquetas de secciones
     'sections': {

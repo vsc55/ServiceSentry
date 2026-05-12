@@ -269,11 +269,19 @@ Monitoriza el porcentaje de uso de RAM y SWAP usando `psutil`.
 
 ---
 
-## ⚙️ service_status — Estado de Servicios systemd
+## ⚙️ service_status — Estado de Servicios del Sistema
 
-Comprueba si los servicios systemd están en ejecución. Soporta **auto-remediación** (reinicio automático).
+Comprueba si los servicios del sistema están en ejecución. Soporta **auto-remediación** (inicio/detención automática) y permite definir el **estado esperado** por servicio (`running` o `stopped`).
 
-**Plataforma:** Linux (systemd)
+**Plataforma:** Linux (systemd / OpenRC / SysV init), Windows 🌐
+
+El init system de Linux se detecta automáticamente al arrancar:
+
+| Init system | Criterio de detección |
+| ----------- | --------------------- |
+| **systemd** | Existe `/run/systemd/system` |
+| **OpenRC** | `rc-service` disponible en `PATH` |
+| **SysV** | Fallback cuando ninguno de los anteriores aplica |
 
 **Config:**
 ```json
@@ -284,11 +292,19 @@ Comprueba si los servicios systemd están en ejecución. Soporta **auto-remediac
         "list": {
             "nginx": {
                 "enabled": true,
+                "service": "",
+                "expected": "running",
                 "remediation": true
             },
             "docker": {
                 "enabled": true,
+                "expected": "running",
                 "remediation": false
+            },
+            "bluetooth": {
+                "enabled": true,
+                "expected": "stopped",
+                "remediation": true
             }
         }
     }
@@ -297,20 +313,40 @@ Comprueba si los servicios systemd están en ejecución. Soporta **auto-remediac
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `list.*.enabled` | bool | true | Habilitar monitorización de este servicio |
-| `list.*.remediation` | bool | false | Si `true`, ejecuta `systemctl start` cuando el servicio está caído |
+| `list.*.enabled` | bool | `true` | Habilitar monitorización de este servicio |
+| `list.*.service` | string | `""` | Nombre del servicio en el sistema. Si está vacío, se usa la clave del ítem |
+| `list.*.expected` | string | `"running"` | Estado esperado: `running` o `stopped`. Se genera alerta cuando el estado real difiere |
+| `list.*.remediation` | bool | `false` | Si `true`, ejecuta start/stop automáticamente para restaurar el estado esperado |
+
+> **Descubrimiento:** la UI web incluye un botón para listar automáticamente los servicios del sistema e incorporarlos a la configuración con un solo clic.
 
 **Flujo:**
 ```
-systemctl status <servicio>
-├── Active: active (running) → OK ✅
-├── Active: inactive (dead)  → FALLO ❌
-│   └── Si remediation=true:
-│       ├── systemctl start <servicio>
-│       ├── Re-check del estado
-│       └── Notifica resultado de la recuperación
-└── stdout vacío → Error (servicio no encontrado, etc.)
+Detecta init system al arrancar (una sola vez)
+│
+├── Windows  → psutil.win_service_get(<servicio>)
+├── systemd  → systemctl status <servicio>  (parsea "Active:")
+├── OpenRC   → rc-service <servicio> status  (exit code: 0=running)
+└── SysV     → service <servicio> status     (exit code: 0=running)
+
+Por cada servicio habilitado:
+   estado_real vs. expected
+   ├── Coincide  → OK ✅
+   └── Difiere   → FALLO ⚠️
+       └── Si remediation=true:
+           ├── start / stop según expected
+           ├── Re-check del estado
+           └── Notifica resultado de la recuperación
 ```
+
+**Comandos de remediación por plataforma:**
+
+| Plataforma | start | stop |
+| ---------- | ----- | ---- |
+| Windows | `sc start <n>` | `sc stop <n>` |
+| systemd | `systemctl start <n>` | `systemctl stop <n>` |
+| OpenRC | `rc-service <n> start` | `rc-service <n> stop` |
+| SysV | `service <n> start` | `service <n> stop` |
 
 ---
 

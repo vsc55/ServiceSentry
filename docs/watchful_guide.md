@@ -294,7 +294,7 @@ Parámetros de `dict_return.set()`:
 |--------|-------------|
 | `self.paths.set(name, path)` | Registra una ruta de herramienta |
 | `self.paths.find(name, default='')` | Obtiene una ruta registrada |
-| `self._run_cmd(cmd, ignore_error=False)` | Ejecuta un comando del sistema → `(stdout, stderr)` |
+| `self._run_cmd(cmd, return_str_err=False, return_exit_code=False)` | Ejecuta un comando del sistema. Devuelve `stdout`, `(stdout, stderr)`, `(stdout, exit_code)` o `(stdout, stderr, exit_code)` según las flags |
 
 ### Debug
 

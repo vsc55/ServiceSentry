@@ -4,6 +4,26 @@
         "enabled":     "Habilitado",
         "threads":     "Hilos",
         "service":     "Nombre del servicio",
+        "expected":    "Estado esperado",
         "remediation": "Auto-remediaci\u00f3n"
+    },
+    "option_labels": {
+        "expected": {
+            "running": "Activo",
+            "stopped": "Detenido"
+        }
+    },
+    "collections": {
+        "list": "Servicios"
+    },
+    "hints": {
+        "service":     "Nombre del servicio en el sistema. Si está vacío, se usa el identificador del elemento.",
+        "expected":    "Estado esperado del servicio. Se genera una alerta cuando el estado real no coincide.",
+        "remediation": "Inicia o detiene automáticamente el servicio para restaurar el estado esperado."
+    },
+    "ui": {
+        "discover_title": "Descubrir Servicios del Sistema",
+        "discover_error": "No se pudo cargar la lista de servicios del sistema",
+        "item_added":     "Servicio \"{}\" a\u00f1adido"
     }
 }

@@ -85,12 +85,21 @@ let configSchema = {};
 
 /**
  * Return the hint text for a field identified by its pathStr, or null.
- * Looks up 'section|field' first, then falls back to just 'field'.
+ * Checks module-specific __i18n__.hints first, then falls back to global HINTS.
  */
 function fieldHint(pathStr) {
     const parts = pathStr.split('|');
     const field = parts[parts.length - 1];
-    const scoped = parts.length >= 2 ? parts[0] + '|' + field : field;
+    const modName = parts[0];
+    // Module-specific hint (from module lang file hints section)
+    if (modName) {
+        const i18n = ITEM_SCHEMAS[modName + '|__i18n__'];
+        if (i18n) {
+            const ld = i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG];
+            if (ld && ld.hints && ld.hints[field]) return ld.hints[field];
+        }
+    }
+    const scoped = parts.length >= 2 ? modName + '|' + field : field;
     return HINTS[scoped] || HINTS[field] || null;
 }
 
@@ -147,6 +156,7 @@ function schemaDefaults(schema) {
     if (!schema) return null;
     const d = {};
     for (const [k, v] of Object.entries(schema)) {
+        if (k.startsWith('__')) continue;
         d[k] = (v && typeof v === 'object' && !Array.isArray(v) && 'default' in v) ? v['default'] : v;
     }
     return d;
@@ -433,6 +443,25 @@ function renderField(key, value, pathStr, target = 'modules') {
                 </select>${_resetBtn}
             </div></div>`;
         }
+        // String select — options array defined in schema
+        if (meta && Array.isArray(meta.options)) {
+            const _modName = pathStr.split('|')[0];
+            const _modI18n = ITEM_SCHEMAS[_modName + '|__i18n__'];
+            const _modLd = _modI18n && (_modI18n[CURRENT_LANG] || _modI18n[SYSTEM_DEFAULT_LANG]);
+            const _optLbls = _modLd && _modLd.option_labels && _modLd.option_labels[key];
+            const opts = meta.options.map(o => {
+                const label = (_optLbls && _optLbls[o]) ? esc(_optLbls[o]) : esc(o);
+                return `<option value="${escAttr(o)}"${value === o ? ' selected' : ''}>${label}</option>`;
+            }).join('');
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8 d-flex gap-1 align-items-center">
+                <select class="form-select form-select-sm flex-grow-1"
+                    onchange="updateField(${tg},${sp},this.value)">
+                    ${opts}
+                </select>${_resetBtn}
+            </div></div>`;
+        }
         const isSensitive = (meta && meta.sensitive) || SENSITIVE.has(key);
         const tp = isSensitive ? 'password' : 'text';
         const _numKbd = (meta && meta.numericString)
@@ -444,7 +473,7 @@ function renderField(key, value, pathStr, target = 'modules') {
             <input type="${tp}" class="form-control form-control-sm flex-grow-1"
                 value="${escAttr(value)}"${_numKbd}
                 oninput="markDirty(${tg})"
-                onchange="updateField(${tg},${sp},this.value)">${_resetBtn}
+                onchange="updateField(${tg},${sp},this.value.trim())">${_resetBtn}
         </div></div>`;
     }
     if (Array.isArray(value)) {
@@ -538,15 +567,26 @@ function renderScalarFields(obj, pathPrefix, target, exclude = []) {
 
 // ──────────────────────────── Collection render ───────────────────
 function renderCollection(title, data, pathStr, target) {
-    const lbl = esc(fieldLabel(title));
+    const _modNameCol = pathStr.split('|')[0];
+    const _colI18n = ITEM_SCHEMAS[_modNameCol + '|__i18n__'];
+    const _colLd = _colI18n && (_colI18n[CURRENT_LANG] || _colI18n[SYSTEM_DEFAULT_LANG]);
+    const lbl = (_colLd && _colLd.collections && _colLd.collections[title])
+        ? esc(_colLd.collections[title])
+        : esc(fieldLabel(title));
     const itemCount = Object.keys(data).length;
+    const _colSchema = ITEM_SCHEMAS[pathStr] || null;
+    const _discoverUrl = _colSchema && _colSchema['__discovery__'] ? _colSchema['__discovery__'] : null;
     let h = `<div class="mt-3 mb-1">
     <div class="d-flex align-items-center gap-2 mb-2 pb-1" style="border-bottom:1px solid var(--bs-border-color)">
         <span class="fw-semibold text-muted" style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em">
             <i class="bi bi-list-ul me-1"></i>${lbl}
         </span>
         ${itemCount > 0 ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.68rem">${itemCount}</span>` : ''}
-        <button class="btn btn-sm btn-outline-success ms-auto py-0 px-2"
+        ${_discoverUrl ? `<button class="btn btn-sm btn-outline-info ms-auto py-0 px-2"
+            onclick="openDiscoverModal(${jsStr(pathStr)},${jsStr(_discoverUrl)})">
+            <i class="bi bi-search me-1"></i>${t('discover') || 'Discover'}
+        </button>` : ''}
+        <button class="btn btn-sm btn-outline-success ${_discoverUrl ? '' : 'ms-auto'} py-0 px-2"
             onclick="openAddModal(${jsStr(target)},${jsStr(pathStr)})">
             <i class="bi bi-plus-lg me-1"></i>${t('add') || 'Add'}
         </button>
@@ -641,7 +681,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                 <input class="form-check-input" type="checkbox" data-no-collapse="1"
                     ${itemValue.enabled ? 'checked' : ''}
                     onclick="event.stopPropagation()"
-                    onchange="event.stopPropagation();updateField(${tg},${spEnabled},this.checked)">
+                    onchange="event.stopPropagation();updateField(${tg},${spEnabled},this.checked);this.closest('[data-item-path]').style.opacity=this.checked?'':'0.6'">
             </div>`;
         }
         const keyBadge = (displayName !== itemName)

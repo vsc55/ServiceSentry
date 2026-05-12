@@ -96,6 +96,8 @@ LANG = {
     'reload_modules': 'Reload',
     'reload_modules_title': 'Discard unsaved changes and reload from server',
     'modules_reloaded': 'Modules reloaded from server',
+    'discover':      'Discover',
+    'already_added': 'Already added',
     'save_error': 'Save error',
     # Config
     'save_config': 'Save configuration',
@@ -346,6 +348,8 @@ LANG = {
         'web_admin|audit_sort':         'Default column used to sort the audit log table.',
         'web_admin|default_page_size':  'Default number of rows shown per page in all listing tables. 0 = show all rows.',
         'web_admin|page_sizes':         'Comma-separated list of page size options shown in the per-page selector. Use 0 to include an "All" option.',
+        'pretty_name':                  'Optional display name shown in the interface. If empty, the module identifier is used.',
+        'threads':                      'Number of parallel threads used to run checks simultaneously.',
     },
     # Section labels
     'sections': {
