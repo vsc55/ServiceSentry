@@ -395,7 +395,7 @@ class TestDefaults:
 
     def test_schema_has_all_fields(self):
         from watchfuls.ping import Watchful
-        expected = {'enabled', 'host', 'timeout', 'attempt', 'alert'}
+        expected = {'enabled', 'label', 'host', 'timeout', 'attempt', 'alert'}
         assert set(Watchful.ITEM_SCHEMA['list'].keys()) == expected
 
     def test_schema_has_type_metadata(self):

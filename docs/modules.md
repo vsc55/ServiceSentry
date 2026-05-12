@@ -94,9 +94,9 @@ Ignora automáticamente tipos de filesystem irrelevantes (squashfs, tmpfs, devtm
 
 ## 🌡️ hddtemp — Temperatura de Discos
 
-Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco.
+Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco. Al conectarse a un host remoto, es compatible con cualquier plataforma cliente (Linux, macOS, Windows).
 
-**Plataforma:** Linux (requiere demonio hddtemp)
+> El demonio `hddtemp` debe estar ejecutándose en el servidor remoto y escuchando en el puerto configurado.
 
 **Config:**
 ```json
@@ -120,10 +120,11 @@ Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco.
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
+| `enabled` | bool | `true` | Habilitar o deshabilitar la monitorización de este host |
 | `alert` | int | 50 | Temperatura máxima (°C) antes de alertar |
 | `timeout` | int | 5 | Timeout de conexión TCP en segundos |
 | `threads` | int | 5 | Hilos en paralelo para consultar hosts |
-| `list.*.host` | string | — | IP/hostname del demonio hddtemp |
+| `list.*.host` | string | — | IP/hostname del servidor donde corre el demonio hddtemp |
 | `list.*.port` | int | 7634 | Puerto TCP del demonio hddtemp |
 | `list.*.exclude` | list | `[]` | Dispositivos a ignorar (ej: `"/dev/sdc"`) |
 
@@ -190,6 +191,7 @@ Comprueba si los hosts son accesibles mediante ping ICMP.
         "list": {
             "Router": {
                 "enabled": true,
+                "label": "Router principal",
                 "host": "192.168.1.1",
                 "timeout": 3,
                 "attempt": 5
@@ -202,13 +204,16 @@ Comprueba si los hosts son accesibles mediante ping ICMP.
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
+| `threads` | int | 5 | Hosts a comprobar en paralelo |
 | `timeout` | int | 5 | Timeout global por intento (segundos) |
 | `attempt` | int | 3 | Número global de intentos antes de declarar fallo |
 | `alert` | int | 1 | Fallos consecutivos necesarios antes de alertar |
-| `list.*.host` | string | clave | IP o hostname a comprobar |
-| `list.*.timeout` | int | módulo | Timeout específico por host |
-| `list.*.attempt` | int | módulo | Intentos específicos por host |
-| `list.*.alert` | int | módulo | Umbral de alerta específico por host |
+| `list.*.enabled` | bool | `true` | Habilitar monitorización de este host |
+| `list.*.label` | string | `""` | Nombre mostrado en la UI. Si está vacío, se usa la clave del ítem |
+| `list.*.host` | string | clave | IP o hostname a comprobar. Si está vacío, se usa la clave del ítem |
+| `list.*.timeout` | int | módulo | Timeout específico por host, anula el valor global |
+| `list.*.attempt` | int | módulo | Intentos específicos por host, anula el valor global |
+| `list.*.alert` | int | módulo | Umbral de alerta específico por host, anula el valor global |
 
 **Flujo:** `pythonping` como método principal (multiplataforma, sin root en Windows); raw socket ICMP nativo (`SOCK_RAW` → `SOCK_DGRAM`) como fallback cuando `pythonping` no está instalado.
 Reintenta `attempt` veces; alerta cuando los fallos consecutivos superan `alert`.
@@ -425,8 +430,10 @@ Comprueba que las URLs responden con el código HTTP esperado.
         "list": {
             "Mi Web": {
                 "enabled": true,
+                "label": "Portal principal",
                 "url": "https://example.com",
-                "code": 200
+                "code": 200,
+                "timeout": 15
             },
             "https://api.example.com": true
         }
@@ -436,8 +443,11 @@ Comprueba que las URLs responden con el código HTTP esperado.
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `list.*.url` | string | clave | URL a comprobar (HTTP o HTTPS) |
-| `list.*.code` | int | 200 | Código HTTP de respuesta esperado |
+| `threads` | int | 5 | URLs a comprobar en paralelo |
+| `list.*.enabled` | bool | `true` | Habilitar monitorización de esta URL |
+| `list.*.label` | string | `""` | Nombre mostrado en la UI. Si está vacío, se usa la clave del ítem |
+| `list.*.url` | string | clave | URL a comprobar (HTTP o HTTPS). Si está vacío, se usa la clave del ítem |
+| `list.*.code` | int | 200 | Código HTTP de respuesta esperado. Se alerta cuando el código real difiere |
 | `list.*.timeout` | int | 15 | Timeout de la petición en segundos |
 
 **Flujo:** `urllib.request` (stdlib de Python) → compara el código HTTP real con el esperado. Soporta HTTP y HTTPS sin dependencias externas.

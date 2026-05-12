@@ -4,5 +4,10 @@
         "enabled":    "Habilitado",
         "alert_ram":  "Alerta RAM (%)",
         "alert_swap": "Alerta SWAP (%)"
+    },
+    "hints": {
+        "enabled":    "Habilitar o deshabilitar la monitorización de RAM y SWAP.",
+        "alert_ram":  "Umbral de uso de RAM (%). Se genera una alerta cuando el uso de RAM supera este valor.",
+        "alert_swap": "Umbral de uso de SWAP (%). Se genera una alerta cuando el uso de SWAP supera este valor."
     }
 }

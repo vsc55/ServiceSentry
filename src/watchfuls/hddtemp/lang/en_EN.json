@@ -3,10 +3,20 @@
     "labels": {
         "enabled": "Enabled",
         "threads": "Threads",
-        "alert":   "Alert (\u00b0C)",
+        "alert":   "Alert (°C)",
         "timeout": "Timeout (s)",
         "host":    "Host",
         "port":    "Port",
         "exclude": "Excluded devices"
-    }
+    },
+    "hints": {
+        "threads": "Number of hosts to query in parallel.",
+        "alert":   "Maximum temperature (°C) before triggering an alert. Applied to all disks on hosts that do not have a per-disk threshold.",
+        "timeout": "TCP connection timeout in seconds for each hddtemp daemon.",
+        "host":    "IP address or hostname of the hddtemp daemon.",
+        "port":    "TCP port the hddtemp daemon is listening on (default 7634).",
+        "exclude": "List of device paths to ignore, e.g. [\"/dev/sdc\"]. Useful to skip unreliable or unmonitored drives.",
+        "enabled": "Enable or disable monitoring for this host."
+    },
+    "collections": {"list": "Hosts"}
 }

@@ -2,10 +2,21 @@
     "pretty_name": "Ping",
     "labels": {
         "enabled": "Enabled",
+        "label":   "Label",
         "host":    "Host",
         "timeout": "Timeout (s)",
         "attempt": "Attempts",
         "alert":   "Alert threshold",
         "threads": "Threads"
-    }
+    },
+    "hints": {
+        "enabled": "Enable or disable monitoring for this host.",
+        "label":   "Display name shown in the UI. Falls back to the item key if empty.",
+        "host":    "IP address or hostname to ping. If empty, the item key is used as the host.",
+        "timeout": "Timeout per attempt in seconds. Per-host value overrides the module-level default.",
+        "attempt": "Number of ping attempts before declaring a host unreachable. Per-host value overrides the module-level default.",
+        "alert":   "Number of consecutive failures before triggering an alert. Per-host value overrides the module-level default.",
+        "threads": "Number of hosts to ping in parallel."
+    },
+    "collections": {"list": "Hosts"}
 }

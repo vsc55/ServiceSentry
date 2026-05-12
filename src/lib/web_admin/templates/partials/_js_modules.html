@@ -63,8 +63,8 @@ function renderModules() {
             <div style="height:3px;background:${accentGrad}"></div>
 
             <div class="module-header d-flex align-items-center gap-2 px-3 py-2"
-                 role="button" onclick="toggleCollapseFromHeader(event,'${id}')"
-                 style="cursor:pointer">
+                 ${!platformUnsupported ? `role="button" onclick="toggleCollapseFromHeader(event,'${id}')"` : ''}
+                 style="cursor:${platformUnsupported ? 'default' : 'pointer'}">
                 <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
                       style="width:40px;height:40px;background:${avBg};color:${avColor};font-size:1.15rem">${icon}</span>
                 <div class="flex-grow-1 min-w-0">
@@ -92,18 +92,18 @@ function renderModules() {
                     onclick="event.stopPropagation();deleteModule(${jsStr(name)})" title="${t('delete')}">
                     <i class="bi bi-trash3"></i>
                 </button>` : ''}
-                <button class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                ${!platformUnsupported ? `<button class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
                     aria-label="Toggle details" onclick="event.stopPropagation()">
                     <i class="bi bi-chevron-down text-muted small"></i>
-                </button>
+                </button>` : ''}
             </div>
 
-            <div class="collapse" id="${id}" data-module="${esc(name)}">
+            ${!platformUnsupported ? `<div class="collapse" id="${id}" data-module="${esc(name)}">
                 <div class="px-3 py-3" style="border-top:1px solid var(--bs-border-color)">
                     ${renderModuleBody(name, cfg)}
                 </div>
-            </div>
+            </div>` : ''}
         </div>`;
     }
     h += '</div>';
@@ -162,6 +162,8 @@ function openNewModuleModal() {
             const avBg    = `hsla(${hue},65%,55%,.14)`;
             const avColor = `hsl(${hue},60%,42%)`;
             const accentColor = `hsl(${hue},65%,55%)`;
+            const _modSch = ITEM_SCHEMAS[name + '|__module__'] || null;
+            const _pickerUnsupported = _modSch && _modSch['__unsupported__'] === true;
             h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
                        style="cursor:pointer;background:var(--bs-body-bg);transition:box-shadow .15s,border-color .15s"
                        onclick="addModuleFromPicker(${jsStr(name)})"
@@ -171,6 +173,10 @@ function openNewModuleModal() {
                       style="width:46px;height:46px;background:${avBg};color:${avColor};font-size:1.35rem">${icon}</span>
                 <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${esc(pname)}</div>
                 <code class="text-muted" style="font-size:.7rem">${esc(name)}</code>
+                ${_pickerUnsupported ? `<span class="badge bg-secondary bg-opacity-50" style="font-size:.65rem"
+                    title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
+                    <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
+                </span>` : ''}
             </div>`;
         }
         h += `</div>`;

@@ -2,10 +2,21 @@
     "pretty_name": "Ping",
     "labels": {
         "enabled": "Habilitado",
+        "label":   "Etiqueta",
         "host":    "Host",
         "timeout": "Timeout (s)",
         "attempt": "Intentos",
         "alert":   "Umbral de alerta",
         "threads": "Hilos"
-    }
+    },
+    "hints": {
+        "enabled": "Habilitar o deshabilitar la monitorización de este host.",
+        "label":   "Nombre mostrado en la interfaz. Usa la clave del ítem si está vacío.",
+        "host":    "Dirección IP o hostname al que hacer ping. Si está vacío, se usa la clave del ítem como host.",
+        "timeout": "Timeout por intento en segundos. El valor por host anula el valor global del módulo.",
+        "attempt": "Número de intentos de ping antes de declarar el host inaccesible. El valor por host anula el valor global del módulo.",
+        "alert":   "Número de fallos consecutivos necesarios para generar una alerta. El valor por host anula el valor global del módulo.",
+        "threads": "Número de hosts a comprobar en paralelo."
+    },
+    "collections": {"list": "Hosts"}
 }

@@ -5,6 +5,7 @@
     },
     "list": {
         "enabled": {"type": "bool", "default": true},
+        "label":   {"type": "str",  "default": ""},
         "url":     {"type": "str",  "default": ""},
         "code":    {"type": "int",  "default": 200, "min": 1,  "max": 9999},
         "timeout": {"type": "int",  "default": 15,  "min": 1,  "max": 300}

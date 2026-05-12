@@ -2,9 +2,19 @@
     "pretty_name": "Sitios Web",
     "labels": {
         "enabled": "Habilitado",
+        "label":   "Etiqueta",
         "threads": "Hilos",
         "url":     "URL",
-        "code":    "C\u00f3digo HTTP",
+        "code":    "Código HTTP",
         "timeout": "Timeout (s)"
-    }
+    },
+    "hints": {
+        "enabled": "Habilitar o deshabilitar la monitorización de esta URL.",
+        "label":   "Nombre mostrado en la interfaz. Usa la clave del ítem si está vacío.",
+        "threads": "Número de URLs a comprobar en paralelo.",
+        "url":     "URL HTTP o HTTPS a comprobar. Si está vacío, se usa la clave del ítem como URL.",
+        "code":    "Código de respuesta HTTP esperado. Se genera una alerta cuando el código real difiere de este valor.",
+        "timeout": "Timeout de la petición en segundos. El check falla si el servidor no responde en este tiempo."
+    },
+    "collections": {"list": "URLs"}
 }

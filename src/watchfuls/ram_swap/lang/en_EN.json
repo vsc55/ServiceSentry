@@ -4,5 +4,10 @@
         "enabled":    "Enabled",
         "alert_ram":  "RAM Alert (%)",
         "alert_swap": "SWAP Alert (%)"
+    },
+    "hints": {
+        "enabled":    "Enable or disable RAM and SWAP monitoring.",
+        "alert_ram":  "RAM usage threshold (%). An alert is triggered when used RAM exceeds this value.",
+        "alert_swap": "SWAP usage threshold (%). An alert is triggered when used SWAP exceeds this value."
     }
 }

@@ -361,9 +361,10 @@ class TestModuleItemSchemas:
         assert schema['url']['type'] == 'str'
 
     def test_ping_list_schema_fields(self):
-        """ping|list schema has enabled, host, timeout, attempt, alert."""
+        """ping|list schema has enabled, label, host, timeout, attempt, alert."""
         schema = self.schemas['ping|list']
-        assert set(schema.keys()) == {'enabled', 'host', 'timeout', 'attempt', 'alert'}
+        user_keys = {k for k in schema.keys() if not k.startswith('__')}
+        assert user_keys == {'enabled', 'label', 'host', 'timeout', 'attempt', 'alert'}
         assert schema['port']['min'] == 1 if 'port' in schema else True
         # Verify rich format
         assert schema['timeout']['default'] == 5
@@ -400,7 +401,8 @@ class TestModuleItemSchemas:
     def test_hddtemp_list_schema_fields(self):
         """hddtemp|list schema has enabled, host, port, exclude."""
         schema = self.schemas['hddtemp|list']
-        assert set(schema.keys()) == {'enabled', 'host', 'port', 'exclude'}
+        user_keys = {k for k in schema.keys() if not k.startswith('__')}
+        assert user_keys == {'enabled', 'host', 'port', 'exclude'}
         assert schema['exclude']['type'] == 'list'
 
     def test_raid_remote_schema_fields(self):

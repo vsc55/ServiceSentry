@@ -144,13 +144,20 @@ function _dwBuildModuleRows(modules) {
         const pname  = modulePrettyName(m.name, modulesData[m.name] || {});
         const icon   = moduleIcon(m.name, modulesData[m.name] || {});
         const hue    = _moduleHue(m.name);
-        const avBg   = m.enabled ? `hsla(${hue},65%,55%,.14)` : 'var(--bs-secondary-bg)';
-        const avClr  = m.enabled ? `hsl(${hue},60%,42%)`       : 'var(--bs-secondary-color)';
+        const _modSch = ITEM_SCHEMAS[m.name + '|__module__'] || null;
+        const _unsupported = _modSch && _modSch['__unsupported__'] === true;
+        const avBg   = (!_unsupported && m.enabled) ? `hsla(${hue},65%,55%,.14)` : 'var(--bs-secondary-bg)';
+        const avClr  = (!_unsupported && m.enabled) ? `hsl(${hue},60%,42%)`       : 'var(--bs-secondary-color)';
         const nameCell = `<span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
             style="width:26px;height:26px;background:${avBg};color:${avClr};font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
-        const active = m.enabled
-            ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:#16a34a;font-size:.72rem">ON</span>`
-            : `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">OFF</span>`;
+        const active = _unsupported
+            ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.72rem"
+                   title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
+                   <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
+               </span>`
+            : m.enabled
+                ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:#16a34a;font-size:.72rem">ON</span>`
+                : `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">OFF</span>`;
 
         // Compute active items from modulesData to decide if check results are meaningful
         const cfg = modulesData[m.name] || {};

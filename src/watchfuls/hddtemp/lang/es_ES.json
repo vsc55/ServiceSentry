@@ -3,10 +3,20 @@
     "labels": {
         "enabled": "Habilitado",
         "threads": "Hilos",
-        "alert":   "Alerta (\u00b0C)",
+        "alert":   "Alerta (°C)",
         "timeout": "Timeout (s)",
         "host":    "Host",
         "port":    "Puerto",
         "exclude": "Dispositivos excluidos"
-    }
+    },
+    "hints": {
+        "threads": "Número de hosts a consultar en paralelo.",
+        "alert":   "Temperatura máxima (°C) antes de generar una alerta. Se aplica a todos los discos de los hosts que no tienen un umbral propio.",
+        "timeout": "Timeout de conexión TCP en segundos para cada demonio hddtemp.",
+        "host":    "Dirección IP o hostname del demonio hddtemp.",
+        "port":    "Puerto TCP en el que escucha el demonio hddtemp (por defecto 7634).",
+        "exclude": "Lista de rutas de dispositivos a ignorar, p. ej. [\"/dev/sdc\"]. Útil para omitir discos no monitorizados o problemáticos.",
+        "enabled": "Habilitar o deshabilitar la monitorización de este host."
+    },
+    "collections": {"list": "Hosts"}
 }
