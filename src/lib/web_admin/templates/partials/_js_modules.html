@@ -266,13 +266,16 @@ function _renderDiscoverList() {
 
     const filter = (document.getElementById('discoverFilter')?.value || '').toLowerCase();
 
-    // Build set of service names already configured (lowercase for case-insensitive match)
+    // Build set of names already configured (lowercase for case-insensitive match).
+    // Uses __discovery_field__ from the collection schema to find the operative field.
     const configured = new Set();
     if (_discoverPathStr) {
+        const _colSch = ITEM_SCHEMAS[_discoverPathStr] || null;
+        const _discField = _colSch && _colSch['__discovery_field__'];
         const collection = getPath(modulesData, _discoverPathStr.split('|')) || {};
         for (const [key, val] of Object.entries(collection)) {
-            const svcField = (typeof val === 'object' && val !== null ? val.service || '' : '').trim();
-            configured.add((svcField || key).toLowerCase());
+            const fieldVal = (typeof val === 'object' && val !== null && _discField ? (val[_discField] || '') : '').trim();
+            configured.add((fieldVal || key).toLowerCase());
         }
     }
 
@@ -325,7 +328,9 @@ function _addDiscoveredService(serviceName) {
     for (const [k, v] of Object.entries(defaults)) {
         item[k] = Array.isArray(v) ? [...v] : v;
     }
-    if ('service' in item) item.service = serviceName;
+    const _colSch = ITEM_SCHEMAS[_discoverPathStr] || null;
+    const _discField = _colSch && _colSch['__discovery_field__'];
+    if (_discField && _discField in item) item[_discField] = serviceName;
 
     collection[key] = item;
     _autoExpandItemPath = _discoverPathStr + '|' + key;

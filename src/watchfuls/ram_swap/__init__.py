@@ -38,7 +38,8 @@ class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
 
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['config'].items()}
+    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['config'].items()
+                 if isinstance(v, dict) and 'default' in v}
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)

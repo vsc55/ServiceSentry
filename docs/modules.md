@@ -50,27 +50,45 @@ Monitoriza el porcentaje de uso de particiones usando `psutil`.
 
 **Plataforma:** Linux, Windows, macOS 🌐
 
-**Config (`modules.json`):**
+**Config:**
 ```json
 {
     "filesystemusage": {
         "enabled": true,
+        "threads": 5,
         "alert": 85,
         "list": {
-            "/": 90,
-            "/boot": 85
+            "Root": {
+                "enabled": true,
+                "partition": "/",
+                "alert": 90,
+                "label": "Root"
+            },
+            "Data": {
+                "enabled": true,
+                "partition": "/data",
+                "alert": 85
+            }
         }
     }
 }
 ```
 
 | Clave | Tipo | Por defecto | Descripción |
-|-------|------|-------------|-------------|
-| `alert` | int | 85 | Umbral global de alerta (% de uso) |
-| `list` | dict | `{}` | Umbrales por partición; el valor puede ser int o `{"enabled": true, "alert": N}` |
+| --- | --- | --- | --- |
+| `alert` | int | 85 | Umbral global de alerta (% de uso), aplicado a todas las particiones sin umbral propio |
+| `threads` | int | 5 | Particiones a comprobar en paralelo |
+| `list.*.enabled` | bool | `true` | Habilitar monitorización de esta partición |
+| `list.*.partition` | string | `""` | Punto de montaje o letra de unidad (p. ej. `/` o `C:\`). Si está vacío, se usa la clave del ítem |
+| `list.*.alert` | int | 85 | Umbral de alerta (%) para esta partición, anula el umbral global |
+| `list.*.label` | string | `""` | Nombre mostrado en notificaciones. Si está vacío, se usa la clave del ítem |
+
+> **Descubrimiento:** la UI web incluye un botón para listar automáticamente las particiones montadas e incorporarlas a la configuración con un solo clic. Muestra dispositivo, tipo de filesystem y porcentaje de uso actual.
+
+> **Formato legacy:** el valor de un ítem puede ser directamente un entero (`"/": 90`) — se interpreta como umbral de alerta para esa partición. La UI lo promueve automáticamente al formato dict al renderizarlo.
 
 **Flujo:** `psutil.disk_partitions()` → `psutil.disk_usage(mountpoint)` → compara % con el umbral.
-Ignora automáticamente tipos de filesystem irrelevantes (squashfs, tmpfs, devtmpfs, etc.).
+Ignora automáticamente tipos de filesystem irrelevantes (squashfs, tmpfs, devtmpfs, overlay, etc.).
 
 ---
 

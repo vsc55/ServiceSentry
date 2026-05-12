@@ -188,6 +188,14 @@ function promoteItem(data, parts, schema) {
     if (typeof val === 'boolean' && defaults) {
         val = Object.assign({}, defaults, { enabled: val });
         cur[itemKey] = val;
+    } else if (typeof val === 'number' && defaults) {
+        // Legacy numeric format: the number is the value for the first non-boolean
+        // numeric default field (e.g. "alert" in filesystemusage).
+        const base = Object.assign({}, defaults);
+        const numKey = Object.keys(base).find(k => k !== 'enabled' && typeof base[k] === 'number');
+        if (numKey) base[numKey] = val;
+        cur[itemKey] = base;
+        val = base;
     } else if (typeof val === 'object' && val !== null && !Array.isArray(val) && defaults) {
         for (const [sk, sv] of Object.entries(defaults)) {
             if (!(sk in val)) val[sk] = (Array.isArray(sv) ? [...sv] : sv);
@@ -617,9 +625,9 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     title="${esc(t('rename_item'))}">
     <i class="bi bi-pencil-square"></i></button>`;
 
-    // --- promote boolean → dict when a schema exists ---
+    // --- promote boolean/number → dict when a schema exists ---
     const schema = schemaFor(parentPathStr);
-    if (schema && typeof itemValue === 'boolean') {
+    if (schema && (typeof itemValue === 'boolean' || typeof itemValue === 'number')) {
         const parts = pathStr.split('|');
         const promoted = promoteItem(
             target === 'modules' ? modulesData : configData, parts, schema);

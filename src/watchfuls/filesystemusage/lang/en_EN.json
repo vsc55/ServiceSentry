@@ -6,5 +6,20 @@
         "alert":     "Alert (%)",
         "partition": "Partition",
         "label":     "Label"
+    },
+    "hints": {
+        "threads":   "Number of partitions to check in parallel.",
+        "alert":     "Usage threshold (%). An alert is triggered when disk usage exceeds this value. Overrides the module-level threshold for this partition.",
+        "partition": "Mountpoint or drive letter to monitor (e.g. / or C:\\). If empty, the item key is used as the mountpoint.",
+        "label":     "Display name shown in notifications. Falls back to the item key if empty.",
+        "enabled":   "Enable or disable monitoring for this partition."
+    },
+    "collections": {
+        "list": "Partitions"
+    },
+    "ui": {
+        "discover_title": "Discover Partitions",
+        "discover_error": "Could not load the list of mounted partitions",
+        "item_added":     "Partition \"{}\" added"
     }
 }

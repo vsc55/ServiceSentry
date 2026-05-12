@@ -37,7 +37,8 @@ class Watchful(ModuleBase):
     ITEM_SCHEMA = _SCHEMA
 
     # Default values derived from schema.json (single source of truth).
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()}
+    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
+                 if isinstance(v, dict) and 'default' in v}
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)

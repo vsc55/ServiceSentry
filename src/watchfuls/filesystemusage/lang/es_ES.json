@@ -4,7 +4,22 @@
         "enabled":   "Habilitado",
         "threads":   "Hilos",
         "alert":     "Alerta (%)",
-        "partition": "Partici\u00f3n",
+        "partition": "Partición",
         "label":     "Etiqueta"
+    },
+    "hints": {
+        "threads":   "Número de particiones a comprobar en paralelo.",
+        "alert":     "Umbral de uso (%). Se genera una alerta cuando el uso del disco supera este valor. Anula el umbral del módulo para esta partición.",
+        "partition": "Punto de montaje o letra de unidad a monitorizar (p. ej. / o C:\\). Si está vacío, se usa la clave del ítem como punto de montaje.",
+        "label":     "Nombre mostrado en las notificaciones. Si está vacío, se usa la clave del ítem.",
+        "enabled":   "Habilitar o deshabilitar la monitorización de esta partición."
+    },
+    "collections": {
+        "list": "Particiones"
+    },
+    "ui": {
+        "discover_title": "Descubrir Particiones",
+        "discover_error": "No se pudo cargar la lista de particiones montadas",
+        "item_added":     "Partición \"{}\" añadida"
     }
 }

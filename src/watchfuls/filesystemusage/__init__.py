@@ -47,7 +47,8 @@ class Watchful(ModuleBase):
 
     # Default values are derived from schema.json so there is a single
     # source of truth that the web UI can also consume.
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()}
+    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
+                 if isinstance(v, dict) and 'default' in v}
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -132,3 +133,27 @@ class Watchful(ModuleBase):
 
         super().check()
         return self.dict_return
+
+    @classmethod
+    def discover(cls) -> list:
+        """Return [{name, display_name, device, fstype, status}] for all mounted partitions."""
+        try:
+            partitions = []
+            for p in psutil.disk_partitions():
+                if p.fstype in cls._IGNORED_FSTYPES:
+                    continue
+                try:
+                    pct = f'{psutil.disk_usage(p.mountpoint).percent:.0f}%'
+                except (PermissionError, OSError):
+                    pct = '?'
+                display = p.device + (f' ({p.fstype})' if p.fstype else '')
+                partitions.append({
+                    'name': p.mountpoint,
+                    'display_name': display,
+                    'device': p.device,
+                    'fstype': p.fstype,
+                    'status': pct,
+                })
+            return sorted(partitions, key=lambda x: x['name'].lower())
+        except Exception:
+            return []

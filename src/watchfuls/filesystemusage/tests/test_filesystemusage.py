@@ -188,6 +188,101 @@ class TestFilesystemUsageCheck:
         assert '/restricted' not in items
 
     @patch('watchfuls.filesystemusage.psutil')
+    def test_discover_basic(self, mock_psutil):
+        """discover() returns mounted partitions with usage."""
+        mock_psutil.disk_partitions.return_value = [
+            _part('/dev/sda1', '/',     'ext4'),
+            _part('/dev/sda2', '/home', 'ext4'),
+        ]
+        mock_psutil.disk_usage.side_effect = lambda mp: {
+            '/':     _usage(45.0),
+            '/home': _usage(72.0),
+        }[mp]
+
+        from watchfuls.filesystemusage import Watchful
+        result = Watchful.discover()
+        names = [r['name'] for r in result]
+        assert '/' in names
+        assert '/home' in names
+
+    @patch('watchfuls.filesystemusage.psutil')
+    def test_discover_filters_ignored_fstypes(self, mock_psutil):
+        """discover() excludes virtual filesystems."""
+        from watchfuls.filesystemusage import Watchful
+        mock_psutil.disk_partitions.return_value = [
+            _part('/dev/sda1', '/',    'ext4'),
+            _part('tmpfs',     '/run', 'tmpfs'),
+            _part('squashfs',  '/snap/core', 'squashfs'),
+        ]
+        mock_psutil.disk_usage.return_value = _usage(50.0)
+
+        result = Watchful.discover()
+        names = [r['name'] for r in result]
+        assert '/' in names
+        assert '/run' not in names
+        assert '/snap/core' not in names
+
+    @patch('watchfuls.filesystemusage.psutil')
+    def test_discover_status_is_percentage(self, mock_psutil):
+        """discover() status field contains usage percentage string."""
+        from watchfuls.filesystemusage import Watchful
+        mock_psutil.disk_partitions.return_value = [_part('/dev/sda1', '/', 'ext4')]
+        mock_psutil.disk_usage.return_value = _usage(45.0)
+
+        result = Watchful.discover()
+        assert result[0]['status'] == '45%'
+
+    @patch('watchfuls.filesystemusage.psutil')
+    def test_discover_permission_error_shows_unknown(self, mock_psutil):
+        """discover() marks unreadable partitions with '?' instead of crashing."""
+        from watchfuls.filesystemusage import Watchful
+        mock_psutil.disk_partitions.return_value = [_part('/dev/sda1', '/', 'ext4')]
+        mock_psutil.disk_usage.side_effect = PermissionError('denied')
+
+        result = Watchful.discover()
+        assert result[0]['status'] == '?'
+        assert result[0]['name'] == '/'
+
+    @patch('watchfuls.filesystemusage.psutil')
+    def test_discover_sorted(self, mock_psutil):
+        """discover() returns partitions sorted by mountpoint (case-insensitive)."""
+        from watchfuls.filesystemusage import Watchful
+        mock_psutil.disk_partitions.return_value = [
+            _part('/dev/sdc1', '/var',  'ext4'),
+            _part('/dev/sda1', '/',     'ext4'),
+            _part('/dev/sdb1', '/home', 'ext4'),
+        ]
+        mock_psutil.disk_usage.return_value = _usage(50.0)
+
+        result = Watchful.discover()
+        assert [r['name'] for r in result] == ['/', '/home', '/var']
+
+    @patch('watchfuls.filesystemusage.psutil')
+    def test_discover_display_name_includes_device_and_fstype(self, mock_psutil):
+        """discover() display_name combines device and fstype."""
+        from watchfuls.filesystemusage import Watchful
+        mock_psutil.disk_partitions.return_value = [_part('/dev/sda1', '/', 'ext4')]
+        mock_psutil.disk_usage.return_value = _usage(50.0)
+
+        result = Watchful.discover()
+        assert '/dev/sda1' in result[0]['display_name']
+        assert 'ext4' in result[0]['display_name']
+
+    @patch('watchfuls.filesystemusage.psutil')
+    def test_discover_empty(self, mock_psutil):
+        """discover() returns empty list when no partitions found."""
+        from watchfuls.filesystemusage import Watchful
+        mock_psutil.disk_partitions.return_value = []
+        assert Watchful.discover() == []
+
+    @patch('watchfuls.filesystemusage.psutil')
+    def test_discover_exception(self, mock_psutil):
+        """discover() returns empty list on unexpected error."""
+        from watchfuls.filesystemusage import Watchful
+        mock_psutil.disk_partitions.side_effect = Exception('disk error')
+        assert Watchful.discover() == []
+
+    @patch('watchfuls.filesystemusage.psutil')
     def test_windows_style_partitions(self, mock_psutil):
         """Particiones estilo Windows (C:\\, D:\\)."""
         mock_psutil.disk_partitions.return_value = [

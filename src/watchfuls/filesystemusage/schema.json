@@ -5,6 +5,8 @@
         "alert":   {"type": "int", "default": 85, "min": 0, "max": 100}
     },
     "list": {
+        "__discovery__": "/api/watchfuls/filesystemusage/discover",
+        "__discovery_field__": "partition",
         "enabled":   {"type": "bool", "default": true},
         "alert":     {"type": "int",  "default": 85, "min": 0, "max": 100},
         "partition": {"type": "str",  "default": ""},
