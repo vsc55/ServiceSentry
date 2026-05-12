@@ -49,7 +49,7 @@ function renderRoles() {
 
     let h = `<div class="rounded-3 border overflow-hidden">
     <table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
-    <thead style="background:var(--bs-secondary-bg)"><tr>
+    <thead style="background:var(--bs-tertiary-bg)"><tr>
         <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">${t('col_role_name')}</th>
         <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">${t('col_role_label')}</th>
         <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_role_permissions')}</th>
@@ -73,14 +73,14 @@ function renderRoles() {
             <td style="line-height:1.9">${permBadges || `<span class="text-muted">\u2014</span>`}</td>
             ${showActions ? `<td class="text-center" style="white-space:nowrap;border-left:1px solid var(--bs-border-color)">
                 ${canEditRole ? `<button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-outline-secondary' : 'btn-outline-success'}"
-                    ${rd.builtin ? 'disabled' : `onclick="toggleRole('${escAttr(name)}',${isEnabled})"`}
+                    ${rd.builtin ? 'disabled' : `onclick="toggleRole(${jsStr(name)},${isEnabled})"`}
                     title="${isEnabled ? t('disable') : t('enable')}">
                     <i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i></button>` : ''}
                 ${canEditRole ? `<button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
-                    onclick="openEditRoleModal('${escAttr(name)}')" title="${t('edit')}">
+                    onclick="openEditRoleModal(${jsStr(name)})" title="${t('edit')}">
                     <i class="bi bi-pencil"></i></button>` : ''}
                 ${canDeleteRole ? `<button class="btn btn-sm btn-outline-danger py-0 px-1"
-                    ${rd.builtin ? 'disabled' : `onclick="deleteRole('${escAttr(name)}')"`} title="${t('delete')}">
+                    ${rd.builtin ? 'disabled' : `onclick="deleteRole(${jsStr(name)})"`} title="${t('delete')}">
                     <i class="bi bi-trash3"></i></button>` : ''}
             </td>` : ''}
         </tr>`;

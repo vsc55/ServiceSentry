@@ -97,35 +97,58 @@ async function renderStatus() {
     c.innerHTML = h;
 }
 
-function _renderStatusCards(data) {
-    const entries = Object.entries(data).filter(([, v]) => v && typeof v === 'object');
-    if (!entries.length) return `<div class="alert alert-info">${t('status_empty')}</div>`;
+function _renderWaitingCard(mod) {
+    const pname = modulePrettyName(mod, modulesData[mod] || {});
+    const icon  = moduleIcon(mod, modulesData[mod] || {});
+    const hue   = _moduleHue(mod);
+    const avBg  = `hsla(${hue},65%,55%,.14)`;
+    const avClr = `hsl(${hue},60%,42%)`;
+    return `<div class="rounded-3 overflow-hidden border status-waiting" data-status-card="${escAttr(mod)}"
+               style="background:var(--bs-body-bg);box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <div style="height:3px;background:linear-gradient(90deg,#94a3b8 0%,#e2e8f0 50%,#94a3b8 100%);background-size:200% 100%;animation:_statusPulse 1.4s ease-in-out infinite"></div>
+        <div class="d-flex align-items-center gap-2 px-3 py-2" style="border-bottom:1px solid var(--bs-border-color)">
+            <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                  style="width:38px;height:38px;background:${avBg};color:${avClr};font-size:1.1rem;opacity:.5">${icon}</span>
+            <div class="flex-grow-1 min-w-0">
+                <div class="fw-semibold" style="font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.55">${esc(pname)}</div>
+                <div class="text-muted" style="font-size:.75rem">—</div>
+            </div>
+            <span class="rounded-pill px-2 py-1 flex-shrink-0"
+                  style="font-size:.72rem;background:var(--bs-secondary-bg);color:var(--bs-secondary-color);border:1px solid var(--bs-border-color)">
+                <span class="spinner-border spinner-border-sm me-1" style="width:.6rem;height:.6rem;border-width:1.5px"></span>${t('checks_waiting') || '…'}
+            </span>
+        </div>
+        <div style="height:4px;background:var(--bs-border-color)"></div>
+    </div>`;
+}
 
-    // Two-column grid on wide screens
-    let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:.85rem">`;
-
-    for (const [mod, checks] of entries) {
-        const pname = modulePrettyName(mod, modulesData[mod]);
-        const icon  = moduleIcon(mod, modulesData[mod]);
+function _renderOneStatusCard(mod, checks) {
+        const pname = modulePrettyName(mod, modulesData[mod] || {});
+        const icon  = moduleIcon(mod, modulesData[mod] || {});
         const rows  = Object.entries(checks);
-        const okCnt = rows.filter(([, v]) => v?.status === true).length;
-        const total = rows.length;
-        const allOk = okCnt === total && total > 0;
-        const errCnt = total - okCnt;
-        const pct   = total ? Math.round(100 * okCnt / total) : 100;
+        const okCnt   = rows.filter(([, v]) => v?.status === true).length;
+        const total   = rows.length;
+        const allOk   = okCnt === total && total > 0;
+        const noItems = total === 0;
+        const errCnt  = total - okCnt;
+        const pct     = noItems ? 0 : Math.round(100 * okCnt / total);
 
-        const accentGrad = allOk
+        const accentGrad = noItems
+            ? 'linear-gradient(90deg,#94a3b8,#cbd5e1)'
+            : allOk
             ? 'linear-gradient(90deg,#22c55e,#4ade80,#0ea5e9)'
             : 'linear-gradient(90deg,#ef4444,#f97316)';
-        const avBg    = allOk ? '#dcfce7' : '#fee2e2';
-        const avColor = allOk ? '#15803d' : '#b91c1c';
-        const badgeBg    = allOk ? '#dcfce7' : '#fee2e2';
-        const badgeColor = allOk ? '#15803d' : '#b91c1c';
-        const pbarBg = allOk
+        const avBg    = noItems ? 'var(--bs-secondary-bg)'       : allOk ? '#dcfce7' : '#fee2e2';
+        const avColor = noItems ? 'var(--bs-secondary-color)'    : allOk ? '#15803d' : '#b91c1c';
+        const badgeBg    = noItems ? 'var(--bs-secondary-bg)'    : allOk ? '#dcfce7' : '#fee2e2';
+        const badgeColor = noItems ? 'var(--bs-secondary-color)' : allOk ? '#15803d' : '#b91c1c';
+        const pbarBg  = noItems
+            ? 'var(--bs-secondary-bg)'
+            : allOk
             ? 'linear-gradient(90deg,#22c55e,#4ade80)'
             : 'linear-gradient(90deg,#ef4444,#f97316)';
 
-        h += `<div class="rounded-3 overflow-hidden border" style="background:var(--bs-body-bg);box-shadow:0 2px 8px rgba(0,0,0,.06)">`;
+        let h = `<div class="rounded-3 overflow-hidden border" data-status-card="${escAttr(mod)}" style="background:var(--bs-body-bg);box-shadow:0 2px 8px rgba(0,0,0,.06)">`;
 
         // Accent strip
         h += `<div style="height:3px;background:${accentGrad}"></div>`;
@@ -140,7 +163,9 @@ function _renderStatusCards(data) {
             </div>
             <span class="rounded-pill px-2 py-1 fw-bold flex-shrink-0"
                   style="font-size:.72rem;background:${badgeBg};color:${badgeColor}">
-                ${allOk
+                ${noItems
+                    ? `<i class="bi bi-dash"></i> ${t('status_no_items') || '—'}`
+                    : allOk
                     ? `<i class="bi bi-check-lg"></i> ${t('status_ok')}`
                     : `<i class="bi bi-x-lg"></i> ${errCnt} ${t('status_error')}`}
             </span>
@@ -195,9 +220,15 @@ function _renderStatusCards(data) {
         }
 
         h += `</div>`; // card
-    }
+        return h;
+}
 
-    h += `</div>`; // grid
+function _renderStatusCards(data) {
+    const entries = Object.entries(data).filter(([, v]) => v && typeof v === 'object');
+    if (!entries.length) return `<div class="alert alert-info">${t('status_empty')}</div>`;
+    let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:.85rem">`;
+    for (const [mod, checks] of entries) h += _renderOneStatusCard(mod, checks);
+    h += `</div>`;
     return h;
 }
 
@@ -232,25 +263,60 @@ async function _doRunChecks(modules) {
     if (btnAll)  btnAll.disabled  = true;
     if (btnSel)  btnSel.disabled  = true;
 
+    // Modules that will run (approximate from modulesData for the waiting display)
+    const allEnabled = Object.keys(modulesData).filter(k => modulesData[k]?.enabled !== false);
+    const runMods    = new Set(modules === 'all' ? allEnabled : (modules || []).filter(m => typeof m === 'string'));
+
+    // Snapshot before run — used to detect when a module's data is fresh
+    const preSnap = await apiGet('/api/status') || {};
+
+    // Show waiting cards immediately for selected modules; keep others as-is
+    const area = document.getElementById('checksResultArea');
+    if (area) {
+        const otherEntries = Object.entries(preSnap).filter(([m]) => !runMods.has(m) && typeof preSnap[m] === 'object');
+        let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:.85rem">`;
+        for (const [m, checks] of otherEntries) h += _renderOneStatusCard(m, checks);
+        for (const m of runMods) h += _renderWaitingCard(m);
+        h += `</div>`;
+        area.innerHTML = h;
+    }
+
+    // Poll /api/status every 1.5 s — replace waiting cards as modules finish
+    let pollActive = true;
+    const doneSet  = new Set();
+    const pollFn   = async () => {
+        if (!pollActive) return;
+        const polled = await apiGet('/api/status');
+        if (!polled || !pollActive) return;
+        for (const mod of runMods) {
+            if (doneSet.has(mod) || !polled[mod]) continue;
+            if (JSON.stringify(polled[mod]) === JSON.stringify(preSnap[mod])) continue;
+            const card = area?.querySelector(`[data-status-card="${CSS.escape(mod)}"]`);
+            if (!card?.classList.contains('status-waiting')) continue;
+            const tmp = document.createElement('div');
+            tmp.innerHTML = _renderOneStatusCard(mod, polled[mod]);
+            if (tmp.firstElementChild) card.replaceWith(tmp.firstElementChild);
+            doneSet.add(mod);
+        }
+    };
+    const pollTimer = setInterval(pollFn, 1500);
+
     try {
         const res = await apiPost('/api/checks/run', { modules });
+        pollActive = false;
+        clearInterval(pollTimer);
+
         if (!res || res.status !== 200) {
             showToast(res?.data?.error || t('checks_error'), 'danger');
             return;
         }
         const { results, errors } = res.data;
-
-        const area = document.getElementById('checksResultArea');
-        if (area && results) {
-            area.innerHTML = _renderStatusCards(results);
-        }
-
-        if (errors && errors.length) {
-            showToast(t('checks_error') + ': ' + errors.join(', '), 'warning');
-        } else {
-            showToast(t('checks_done'));
-        }
+        if (area && results) area.innerHTML = _renderStatusCards(results);
+        if (errors?.length) showToast(t('checks_error') + ': ' + errors.join(', '), 'warning');
+        else showToast(t('checks_done'));
     } finally {
+        pollActive = false;
+        clearInterval(pollTimer);
         if (spinner) spinner.classList.add('d-none');
         if (btnAll)  btnAll.disabled  = false;
         if (btnSel)  btnSel.disabled  = false;

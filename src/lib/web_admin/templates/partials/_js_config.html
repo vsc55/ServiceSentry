@@ -114,7 +114,7 @@ function renderConfig() {
             title="${escAttr(_auditHint)}"></i>`
         : '';
     const _auditResetBtn = `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0"
-        onclick="resetConfigField('${escAttr(_auditSortPath)}')"
+        onclick="resetConfigField(${jsStr(_auditSortPath)})"
         data-bs-toggle="tooltip" data-bs-placement="top"
         title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
     const auditSortOpts = [['time', t('col_time')], ['event', t('col_event')], ['user', t('col_user')], ['ip', t('col_ip')]]
@@ -140,7 +140,7 @@ function renderConfig() {
             title="${escAttr(_psHint)}"></i>`
         : '';
     const _psResetBtn = `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0"
-        onclick="resetConfigField('${escAttr(_psPath)}')"
+        onclick="resetConfigField(${jsStr(_psPath)})"
         data-bs-toggle="tooltip" data-bs-placement="top"
         title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
     const psLabel = esc(LABELS['page_sizes'] || t('page_sizes'));

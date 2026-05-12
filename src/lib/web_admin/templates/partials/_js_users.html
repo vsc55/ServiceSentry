@@ -36,7 +36,7 @@ function renderUsers() {
 
     let h = `<div class="rounded-3 border overflow-hidden">
     <table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
-    <thead style="background:var(--bs-secondary-bg)"><tr>
+    <thead style="background:var(--bs-tertiary-bg)"><tr>
         <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_user')}</th>
         <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_name')}</th>
         <th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_role')}</th>
@@ -59,14 +59,14 @@ function renderUsers() {
         const disabledBadge = isEnabled ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
         const toggleBtn = canEdit
             ? `<button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-outline-secondary' : 'btn-outline-success'}"
-                ${isSelf ? 'disabled' : `onclick="toggleUser('${escAttr(uname)}',${isEnabled})"`}
+                ${isSelf ? 'disabled' : `onclick="toggleUser(${jsStr(uname)},${isEnabled})"`}
                 title="${isEnabled ? t('disable') : t('enable')}">
                 <i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i></button>` : '';
         const actionBtns = [
             toggleBtn,
-            canEdit   ? `<button class="btn btn-sm btn-outline-primary py-0 px-1 me-1" onclick="openEditUserModal('${escAttr(uname)}')" title="${t('edit')}"><i class="bi bi-pencil"></i></button>` : '',
-            canEdit   ? `<button class="btn btn-sm btn-outline-warning py-0 px-1 me-1" onclick="openResetPasswordModal('${escAttr(uname)}')" title="${t('reset_password')}"><i class="bi bi-key"></i></button>` : '',
-            canDelete ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteUser('${escAttr(uname)}')" title="${t('delete')}" ${isSelf ? 'disabled' : ''}><i class="bi bi-trash3"></i></button>` : '',
+            canEdit   ? `<button class="btn btn-sm btn-outline-primary py-0 px-1 me-1" onclick="openEditUserModal(${jsStr(uname)})" title="${t('edit')}"><i class="bi bi-pencil"></i></button>` : '',
+            canEdit   ? `<button class="btn btn-sm btn-outline-warning py-0 px-1 me-1" onclick="openResetPasswordModal(${jsStr(uname)})" title="${t('reset_password')}"><i class="bi bi-key"></i></button>` : '',
+            canDelete ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteUser(${jsStr(uname)})" title="${t('delete')}" ${isSelf ? 'disabled' : ''}><i class="bi bi-trash3"></i></button>` : '',
         ].join('');
 
         h += `<tr${rowStyle}>

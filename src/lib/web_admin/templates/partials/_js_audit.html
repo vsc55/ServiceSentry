@@ -251,7 +251,7 @@ function renderFlatAudit(entries) {
     const canDelete = new Set(currentUser.permissions || []).has('audit_delete');
     let h = `<div class="rounded-3 border overflow-hidden">
     <table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
-    <thead style="background:var(--bs-secondary-bg)"><tr>
+    <thead style="background:var(--bs-tertiary-bg)"><tr>
         <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_time')}</th>
         <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_event')}</th>
         <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_user')}</th>

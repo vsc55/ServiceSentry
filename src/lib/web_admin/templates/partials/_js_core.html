@@ -50,6 +50,7 @@ let _autoExpandItemPath = null;  // full pathStr of item to auto-expand after ne
 let _pendingExpandMods  = new Set(); // module names to force-expand on next renderModules()
 let _editingUser = null;    // null = new, string = editing username
 let _serverConfigData = null; // snapshot from last server load/save
+let _savedModulesData = null; // snapshot from last modules load/save
 const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
 const ALL_PERMISSIONS = {{ permissions_list | tojson }};
 const ITEM_SCHEMAS = {{ item_schemas | default({}) | tojson }};
@@ -196,6 +197,10 @@ function escAttr(s) {
     return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+/** Embed a value as a JS string literal inside an HTML attribute event handler.
+ * JSON.stringify escapes \, ", and control chars; escAttr then encodes the
+ * surrounding double-quotes so they don't terminate the HTML attribute. */
+function jsStr(s) { return escAttr(JSON.stringify(s)); }
 
 function setPath(obj, parts, val) {
     let cur = obj;
@@ -333,7 +338,7 @@ function renderField(key, value, pathStr, target = 'modules') {
             title="${escAttr(_hint)}"></i>`
         : '';
     const lblHtml = lbl + _infoIcon;
-    const sp = escAttr(pathStr), tg = escAttr(target);
+    const sp = jsStr(pathStr), tg = jsStr(target);
 
     // Get field metadata from schema
     const schema = schemaFor(pathStr.split('|').slice(0, 2).join('|') + '|_');
@@ -345,7 +350,7 @@ function renderField(key, value, pathStr, target = 'modules') {
     // Per-field reset button — only in config tab and only when a default is defined
     const _resetBtn = target === 'config' && (pathStr in CONFIG_FIELD_DEFAULTS)
         ? `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0"
-            onclick="resetConfigField('${sp}')"
+            onclick="resetConfigField(${sp})"
             data-bs-toggle="tooltip" data-bs-placement="top"
             title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`
         : '';
@@ -357,7 +362,7 @@ function renderField(key, value, pathStr, target = 'modules') {
             <div class="form-check form-switch mb-0">
                 <input class="form-check-input" type="checkbox" role="switch"
                     ${value ? 'checked' : ''}
-                    onchange="updateField('${tg}','${sp}',this.checked)">
+                    onchange="updateField(${tg},${sp},this.checked)">
             </div>${_resetBtn}</div></div>`;
     }
     if (typeof value === 'number' && meta && Array.isArray(meta.options_int)) {
@@ -369,7 +374,7 @@ function renderField(key, value, pathStr, target = 'modules') {
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
         <div class="col-sm-8 d-flex gap-1 align-items-center">
             <select class="form-select form-select-sm flex-grow-1"
-                onchange="updateField('${tg}','${sp}',parseInt(this.value,10))">
+                onchange="updateField(${tg},${sp},parseInt(this.value,10))">
                 ${opts}
             </select>${_resetBtn}
         </div></div>`;
@@ -390,7 +395,8 @@ function renderField(key, value, pathStr, target = 'modules') {
             <input type="number" class="form-control form-control-sm flex-grow-1"
                 value="${value}"${minA}${maxA}${stepA}
                 ${_onkeydown}
-                onchange="validateAndUpdateNumber(this,'${tg}','${sp}',${_minV},${_maxV})">${_resetBtn}
+                oninput="markDirty(${tg})"
+                onchange="validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})">${_resetBtn}
         </div></div>`;
     }
     if (typeof value === 'string') {
@@ -405,7 +411,7 @@ function renderField(key, value, pathStr, target = 'modules') {
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
             <div class="col-sm-8 d-flex gap-1 align-items-center">
                 <select class="form-select form-select-sm flex-grow-1"
-                    onchange="updateField('${tg}','${sp}',this.value)">
+                    onchange="updateField(${tg},${sp},this.value)">
                     ${opts}
                 </select>${_resetBtn}
             </div></div>`;
@@ -422,7 +428,7 @@ function renderField(key, value, pathStr, target = 'modules') {
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
             <div class="col-sm-8 d-flex gap-1 align-items-center">
                 <select class="form-select form-select-sm flex-grow-1"
-                    onchange="updateField('${tg}','${sp}',this.value)">
+                    onchange="updateField(${tg},${sp},this.value)">
                     ${opts}
                 </select>${_resetBtn}
             </div></div>`;
@@ -437,7 +443,8 @@ function renderField(key, value, pathStr, target = 'modules') {
         <div class="col-sm-8 d-flex gap-1 align-items-center">
             <input type="${tp}" class="form-control form-control-sm flex-grow-1"
                 value="${escAttr(value)}"${_numKbd}
-                onchange="updateField('${tg}','${sp}',this.value)">${_resetBtn}
+                oninput="markDirty(${tg})"
+                onchange="updateField(${tg},${sp},this.value)">${_resetBtn}
         </div></div>`;
     }
     if (Array.isArray(value)) {
@@ -447,7 +454,8 @@ function renderField(key, value, pathStr, target = 'modules') {
         <div class="col-sm-8 d-flex gap-1 align-items-center">
             <input type="text" class="form-control form-control-sm flex-grow-1"
                 value="${escAttr(csv)}" placeholder="${t('comma_separated')}"
-                onchange="updateArray('${tg}','${sp}',this.value)">${_resetBtn}
+                oninput="markDirty(${tg})"
+                onchange="updateArray(${tg},${sp},this.value)">${_resetBtn}
         </div></div>`;
     }
     return '';
@@ -539,7 +547,7 @@ function renderCollection(title, data, pathStr, target) {
         </span>
         ${itemCount > 0 ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.68rem">${itemCount}</span>` : ''}
         <button class="btn btn-sm btn-outline-success ms-auto py-0 px-2"
-            onclick="openAddModal('${escAttr(target)}','${escAttr(pathStr)}')">
+            onclick="openAddModal(${jsStr(target)},${jsStr(pathStr)})">
             <i class="bi bi-plus-lg me-1"></i>${t('add') || 'Add'}
         </button>
     </div>
@@ -556,15 +564,16 @@ function renderCollection(title, data, pathStr, target) {
 }
 
 function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, target) {
-    const sp = escAttr(pathStr), pp = escAttr(parentPathStr), tg = escAttr(target);
-    const nameEsc = escAttr(itemName);
+    const sp = jsStr(pathStr), pp = jsStr(parentPathStr), tg = jsStr(target);
+    const nameEsc = jsStr(itemName);
+    const spEnabled = jsStr(pathStr + '|enabled');
     const delBtn = `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1" data-no-collapse="1"
-    onclick="event.stopPropagation();removeItem('${tg}','${pp}','${nameEsc}')">
+    onclick="event.stopPropagation();removeItem(${tg},${pp},${nameEsc})">
     <i class="bi bi-trash3"></i></button>`;
 
     // Rename (key edit) button
     const renameBtn = `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" data-no-collapse="1"
-    onclick="event.stopPropagation();renameItem('${tg}','${pp}','${nameEsc}')"
+    onclick="event.stopPropagation();renameItem(${tg},${pp},${nameEsc})"
     title="${esc(t('rename_item'))}">
     <i class="bi bi-pencil-square"></i></button>`;
 
@@ -602,7 +611,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
             <code class="me-auto" style="font-size:.82rem">${esc(displayName)}</code>
             <div class="form-check form-switch mb-0 me-1">
                 <input class="form-check-input" type="checkbox" ${itemValue ? 'checked' : ''}
-                    onchange="updateField('${tg}','${sp}',this.checked)">
+                    onchange="updateField(${tg},${sp},this.checked)">
             </div>${delBtn}
         </div>`;
     }
@@ -615,7 +624,8 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
             <input type="number" class="form-control form-control-sm"
                 style="max-width:90px" value="${itemValue}"
                 onkeydown="blockNonNumericKey(event,false)"
-                onchange="validateAndUpdateNumber(this,'${tg}','${sp}',null,null)">
+                oninput="markDirty(${tg})"
+                onchange="validateAndUpdateNumber(this,${tg},${sp},null,null)">
             ${delBtn}
         </div>`;
     }
@@ -631,7 +641,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                 <input class="form-check-input" type="checkbox" data-no-collapse="1"
                     ${itemValue.enabled ? 'checked' : ''}
                     onclick="event.stopPropagation()"
-                    onchange="event.stopPropagation();updateField('${tg}','${sp}|enabled',this.checked)">
+                    onchange="event.stopPropagation();updateField(${tg},${spEnabled},this.checked)">
             </div>`;
         }
         const keyBadge = (displayName !== itemName)
@@ -683,7 +693,7 @@ function _renderPagination(total, page, pageSize, goFn, changeFn) {
         pageNums += `<li class="page-item${i === p ? ' active' : ''}"><a class="page-link" href="#" onclick="${goFn}(${i});return false;">${i}</a></li>`;
     if (hi < totalPages - 1) pageNums += `<li class="page-item disabled"><span class="page-link">&hellip;</span></li>`;
     if (hi < totalPages)     pageNums += `<li class="page-item"><a class="page-link" href="#" onclick="${goFn}(${totalPages});return false;">${totalPages}</a></li>`;
-    return `<div class="d-flex align-items-center justify-content-between mt-2 flex-wrap gap-2">
+    return `<div class="d-flex align-items-center justify-content-between mt-2 mb-2 flex-wrap gap-2">
         <span class="text-muted small">${tf('audit_showing', start, end, total)}</span>
         <div class="d-flex align-items-center gap-2">
             <div class="input-group input-group-sm">

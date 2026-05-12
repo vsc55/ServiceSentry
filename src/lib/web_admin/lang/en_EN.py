@@ -90,6 +90,12 @@ LANG = {
     'add_module':   'Add module',
     'modules_saved': 'Modules saved successfully',
     'unsaved_changes': 'Unsaved changes',
+    'undo_modules': 'Undo changes',
+    'confirm_revert_modules': 'Discard all unsaved changes to modules?',
+    'modules_reverted': 'Module changes discarded',
+    'reload_modules': 'Reload',
+    'reload_modules_title': 'Discard unsaved changes and reload from server',
+    'modules_reloaded': 'Modules reloaded from server',
     'save_error': 'Save error',
     # Config
     'save_config': 'Save configuration',
@@ -117,6 +123,8 @@ LANG = {
     'col_status': 'Status',
     'status_ok': 'OK',
     'status_error': 'Error',
+    'status_no_items': 'N/A',
+    'checks_waiting': 'Waiting…',
     # Users
     'user_management': 'User management',
     'new_user': 'New user',

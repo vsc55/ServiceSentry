@@ -41,6 +41,7 @@ class _ChecksMixin:
                 success, result_name, result_data = monitor.check_module(mod_name)
                 if success and result_data is not None:
                     monitor._process_module_result(result_name, result_data)
+                    monitor.status.save()  # save after each module so polling can read partial results
                     items: dict = {}
                     for key in result_data.list:
                         items[key] = {
@@ -52,6 +53,4 @@ class _ChecksMixin:
                     errors.append(mod_name)
             except Exception as exc:
                 errors.append(f'{mod_name}: {exc}')
-
-        monitor.status.save()
         return results, errors

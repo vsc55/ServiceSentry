@@ -78,10 +78,10 @@ function renderModules() {
                     <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1"
                            ${on ? 'checked' : ''}
                            onclick="event.stopPropagation()"
-                           onchange="event.stopPropagation();toggleModule('${escAttr(name)}',this.checked)">
+                           onchange="event.stopPropagation();toggleModule(${jsStr(name)},this.checked)">
                 </div>
                 ${canEdit ? `<button class="btn btn-sm btn-outline-danger py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
-                    onclick="event.stopPropagation();deleteModule('${escAttr(name)}')" title="${t('delete')}">
+                    onclick="event.stopPropagation();deleteModule(${jsStr(name)})" title="${t('delete')}">
                     <i class="bi bi-trash3"></i>
                 </button>` : ''}
                 <button class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
@@ -156,7 +156,7 @@ function openNewModuleModal() {
             const accentColor = `hsl(${hue},65%,55%)`;
             h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
                        style="cursor:pointer;background:var(--bs-body-bg);transition:box-shadow .15s,border-color .15s"
-                       onclick="addModuleFromPicker('${escAttr(name)}')"
+                       onclick="addModuleFromPicker(${jsStr(name)})"
                        onmouseover="this.style.boxShadow='0 4px 14px rgba(0,0,0,.13)';this.style.borderColor='${accentColor}'"
                        onmouseout="this.style.boxShadow='';this.style.borderColor=''">
                 <span class="rounded-2 d-flex align-items-center justify-content-center"
@@ -232,7 +232,8 @@ let h = `<div class="row mb-2 align-items-center">
     <div class="col-sm-8">
         <input type="text" class="form-control form-control-sm" value="${escAttr(pn)}"
             placeholder="${escAttr(placeholder)}"
-            onchange="updatePrettyName('${escAttr(name)}',this.value)">
+            oninput="markDirty('modules')"
+            onchange="updatePrettyName(${jsStr(name)},this.value)">
     </div>
 </div>`;
 

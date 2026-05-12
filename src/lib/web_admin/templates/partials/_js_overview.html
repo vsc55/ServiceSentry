@@ -7,11 +7,11 @@ let _overviewTimer = null;
 
 function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '') {
     const intervals = [0, 10, 30, 60];
-    let h = `<div class="d-flex flex-wrap align-items-center gap-2 mb-3">`;
+    let h = `<div class="d-flex flex-wrap align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border" style="background:var(--bs-secondary-bg)">`;
     h += `<button class="btn btn-sm btn-outline-secondary" onclick="${renderFn}()">`;
     h += `<i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`;
     h += `<div class="btn-group btn-group-sm" role="group">`;
-    h += `<span class="btn btn-sm btn-outline-secondary disabled">`;
+    h += `<span class="btn btn-sm btn-outline-secondary disabled px-2">`;
     h += `<i class="bi bi-clock me-1"></i>${t('auto_refresh')}</span>`;
     for (const s of intervals) {
         const label = s === 0 ? 'OFF' : tf('auto_refresh_seconds', s);
@@ -109,14 +109,14 @@ function _dwSortIcon(wid, col) {
 
 function _dwTh(wid, col, label) {
     return `<th style="cursor:pointer;user-select:none;white-space:nowrap"
-        onclick="_dwSortTable('${escAttr(wid)}','${escAttr(col)}')">${esc(label)}${_dwSortIcon(wid, col)}</th>`;
+        onclick="_dwSortTable(${jsStr(wid)},${jsStr(col)})">${esc(label)}${_dwSortIcon(wid, col)}</th>`;
 }
 
 function _dwChecksBadge(checks) {
-    if (!checks || checks.total === 0) return '<span class="text-muted">—</span>';
+    if (!checks || checks.total === 0) return '<span class="text-muted small">—</span>';
     if (checks.error > 0)
-        return `<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>${checks.error} err</span>`;
-    return '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>OK</span>';
+        return `<span class="badge rounded-pill" style="background:rgba(239,68,68,.15);color:#dc2626;font-size:.72rem"><i class="bi bi-x-circle me-1"></i>${checks.error}</span>`;
+    return `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:#16a34a;font-size:.72rem"><i class="bi bi-check-circle me-1"></i>OK</span>`;
 }
 
 function _dwBuildModuleRows(modules) {
@@ -141,10 +141,27 @@ function _dwBuildModuleRows(modules) {
     if (!rows.length)
         return `<tr><td colspan="4" class="text-center text-muted py-3">${t('status_empty')}</td></tr>`;
     return rows.map(m => {
-        const pname = modulePrettyName(m.name, modulesData[m.name]);
-        const icon  = moduleIcon(m.name, modulesData[m.name]);
-        const active = m.enabled ? '<span class="badge bg-success">ON</span>' : '<span class="badge bg-secondary">OFF</span>';
-        return `<tr><td>${icon} ${esc(pname)}</td><td>${active}</td><td>${_dwChecksBadge(m.checks)}</td><td>${m.items}</td></tr>`;
+        const pname  = modulePrettyName(m.name, modulesData[m.name] || {});
+        const icon   = moduleIcon(m.name, modulesData[m.name] || {});
+        const hue    = _moduleHue(m.name);
+        const avBg   = m.enabled ? `hsla(${hue},65%,55%,.14)` : 'var(--bs-secondary-bg)';
+        const avClr  = m.enabled ? `hsl(${hue},60%,42%)`       : 'var(--bs-secondary-color)';
+        const nameCell = `<span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+            style="width:26px;height:26px;background:${avBg};color:${avClr};font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
+        const active = m.enabled
+            ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:#16a34a;font-size:.72rem">ON</span>`
+            : `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">OFF</span>`;
+
+        // Compute active items from modulesData to decide if check results are meaningful
+        const cfg = modulesData[m.name] || {};
+        const colKeys = Object.keys(cfg).filter(k => typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
+        const activeItems = colKeys.reduce((s, k) =>
+            s + Object.values(cfg[k]).filter(v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
+        const checksBadge = (m.items === 0 || activeItems === 0)
+            ? `<span class="text-muted small">—</span>`
+            : _dwChecksBadge(m.checks);
+
+        return `<tr><td>${nameCell}</td><td>${active}</td><td>${checksBadge}</td><td class="text-muted">${m.items}</td></tr>`;
     }).join('');
 }
 
@@ -164,17 +181,20 @@ function _dwBuildActivityRows(events) {
     return rows.map(e => {
         const date  = new Date(e.ts).toLocaleString();
         const label = AE[e.event] || e.event;
-        let badge = 'bg-secondary';
-        if (e.event === 'login_failed') badge = 'bg-danger';
-        else if (e.event === 'login_ok') badge = 'bg-success';
-        else if (e.event === 'logout') badge = 'bg-warning text-dark';
-        else if (e.event.includes('error') || e.event.includes('revoked') || e.event.includes('deleted')) badge = 'bg-danger';
-        else if (e.event.includes('created') || e.event.includes('saved')) badge = 'bg-success';
-        else if (e.event.includes('updated') || e.event.includes('changed') || e.event === 'password_reset') badge = 'bg-info text-dark';
+        let bg = 'rgba(100,116,139,.12)', clr = '#64748b';
+        if (e.event === 'login_failed' || e.event.includes('error') || e.event.includes('revoked') || e.event.includes('deleted'))
+            { bg = 'rgba(239,68,68,.12)'; clr = '#dc2626'; }
+        else if (e.event === 'login_ok' || e.event.includes('created') || e.event.includes('saved'))
+            { bg = 'rgba(34,197,94,.12)'; clr = '#16a34a'; }
+        else if (e.event === 'logout')
+            { bg = 'rgba(245,158,11,.12)'; clr = '#d97706'; }
+        else if (e.event.includes('updated') || e.event.includes('changed') || e.event === 'password_reset')
+            { bg = 'rgba(6,182,212,.12)'; clr = '#0891b2'; }
+        const badgeStyle = `background:${bg};color:${clr};font-size:.72rem`;
         return `<tr>
-          <td class="small text-nowrap">${esc(date)}</td>
-          <td><span class="badge ${badge}">${esc(label)}</span></td>
-          <td><code>${esc(e.user)}</code></td></tr>`;
+          <td class="small text-nowrap text-muted">${esc(date)}</td>
+          <td><span class="badge rounded-pill" style="${badgeStyle}">${esc(label)}</span></td>
+          <td><code style="font-size:.8rem">${esc(e.user)}</code></td></tr>`;
     }).join('');
 }
 
@@ -320,7 +340,7 @@ function _dwRefreshAddBar() {
     for (const el of hidden) {
         const def = _DW_DEFS[el.dataset.wid];
         if (!def) continue;
-        h += `<button class="btn btn-sm btn-outline-primary" onclick="_dwAdd('${escAttr(el.dataset.wid)}')">
+        h += `<button class="btn btn-sm btn-outline-primary" onclick="_dwAdd(${jsStr(el.dataset.wid)})">
             <i class="bi ${def.icon} me-1"></i>${esc(t(def.lkey))}</button>`;
     }
     bar.innerHTML = h;
@@ -358,6 +378,43 @@ function _dwToolbar(id, cols, h) {
 }
 
 // ──────────────────────── Widget content ──────────────────────────
+function _dwStatCard(accent, avBg, avColor, icon, count, labelKey, subtitle) {
+    return `<div class="rounded-3 overflow-hidden border h-100" style="background:var(--bs-body-bg);box-shadow:0 1px 6px rgba(0,0,0,.06)">
+        <div style="height:3px;background:${accent}"></div>
+        <div class="p-3">
+            <div class="d-flex align-items-center gap-3 mb-2">
+                <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                      style="width:46px;height:46px;background:${avBg};color:${avColor};font-size:1.3rem">
+                    <i class="bi ${icon}"></i></span>
+                <div>
+                    <div class="fs-2 fw-bold lh-1">${count}</div>
+                    <div class="fw-semibold text-muted mt-1" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">${t(labelKey)}</div>
+                </div>
+            </div>
+            ${subtitle ? `<div class="d-flex flex-wrap gap-1 mt-1">${subtitle}</div>` : ''}
+        </div>
+    </div>`;
+}
+
+function _dwTableCard(accent, avBg, avColor, icon, title, tableHtml) {
+    return `<div class="rounded-3 overflow-hidden border h-100 d-flex flex-column" style="background:var(--bs-body-bg);box-shadow:0 1px 6px rgba(0,0,0,.06)">
+        <div style="height:3px;background:${accent};flex-shrink:0"></div>
+        <div class="d-flex align-items-center gap-2 px-3 py-2 flex-shrink-0" style="background:var(--bs-secondary-bg);border-bottom:1px solid var(--bs-border-color)">
+            <span class="rounded-2 d-flex align-items-center justify-content-center"
+                  style="width:30px;height:30px;background:${avBg};color:${avColor};font-size:.95rem">
+                <i class="bi ${icon}"></i></span>
+            <span class="fw-semibold" style="font-size:.92rem">${title}</span>
+        </div>
+        <div style="overflow-y:auto;flex:1">${tableHtml}</div>
+    </div>`;
+}
+
+function _dwTheadRow(...ths) {
+    return `<thead style="position:sticky;top:0;z-index:1;background:var(--bs-tertiary-bg)">
+        <tr style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--bs-secondary-color)">${ths.join('')}</tr>
+    </thead>`;
+}
+
 function _dwContent(id, data) {
     const perms   = new Set(currentUser.permissions || []);
     const isAdmin = currentUser.role === 'admin';
@@ -375,121 +432,84 @@ function _dwContent(id, data) {
 
     switch (id) {
 
-        case 'modules':
-            return `<div class="card h-100 border-start border-4 border-primary">
-              <div class="card-body">
-                <div class="d-flex align-items-center mb-2">
-                  <i class="bi bi-puzzle fs-4 text-primary me-2"></i>
-                  <h6 class="card-title mb-0">${t('overview_modules')}</h6>
-                </div>
-                <div class="fs-2 fw-bold">${modules.length}</div>
-                <small class="text-success">${enabled} ${t('overview_enabled')}</small>
-                ${disabled ? ' · <small class="text-secondary">' + disabled + ' ' + t('overview_disabled') + '</small>' : ''}
-              </div></div>`;
+        case 'modules': {
+            const sub = [
+                enabled  ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:#16a34a;font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${enabled} ${t('overview_enabled')}</span>` : '',
+                disabled ? `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">${disabled} ${t('overview_disabled')}</span>` : '',
+            ].filter(Boolean).join('');
+            return _dwStatCard('linear-gradient(90deg,#6366f1,#8b5cf6)', 'rgba(99,102,241,.12)', '#6366f1',
+                'bi-puzzle-fill', modules.length, 'overview_modules', sub);
+        }
 
         case 'checks': {
-            const err  = status.error > 0;
-            const b    = status.total === 0 ? 'secondary' : err ? 'danger' : 'success';
-            const ic   = status.total === 0 ? 'bi-dash-circle' : err ? 'bi-exclamation-triangle' : 'bi-check-circle';
-            const lbl  = status.total === 0 ? t('overview_no_status') : err ? tf('overview_has_errors', status.error) : t('overview_all_ok');
-            return `<div class="card h-100 border-start border-4 border-${b}">
-              <div class="card-body">
-                <div class="d-flex align-items-center mb-2">
-                  <i class="bi ${ic} fs-4 text-${b} me-2"></i>
-                  <h6 class="card-title mb-0">${t('overview_status')}</h6>
-                </div>
-                <div class="fs-2 fw-bold">${status.total}</div>
-                <small class="text-${b}">${lbl}</small>
-              </div></div>`;
+            const err    = status.error > 0;
+            const noData = status.total === 0;
+            const accent  = noData ? 'linear-gradient(90deg,#94a3b8,#cbd5e1)' : err ? 'linear-gradient(90deg,#ef4444,#f97316)' : 'linear-gradient(90deg,#22c55e,#10b981)';
+            const avBg    = noData ? 'var(--bs-secondary-bg)' : err ? 'rgba(239,68,68,.12)' : 'rgba(34,197,94,.12)';
+            const avColor = noData ? 'var(--bs-secondary-color)' : err ? '#ef4444' : '#22c55e';
+            const icon    = noData ? 'bi-dash-circle' : err ? 'bi-exclamation-triangle-fill' : 'bi-check-circle-fill';
+            const lbl     = noData ? t('overview_no_status') : err ? tf('overview_has_errors', status.error) : t('overview_all_ok');
+            const subClr  = noData ? 'var(--bs-secondary-color)' : err ? '#ef4444' : '#16a34a';
+            const sub     = `<span style="font-size:.8rem;color:${subClr}">${lbl}</span>`;
+            return _dwStatCard(accent, avBg, avColor, icon, status.total, 'overview_status', sub);
         }
 
         case 'sessions':
-            return `<div class="card h-100 border-start border-4 border-info">
-              <div class="card-body">
-                <div class="d-flex align-items-center mb-2">
-                  <i class="bi bi-plug fs-4 text-info me-2"></i>
-                  <h6 class="card-title mb-0">${t('overview_sessions')}</h6>
-                </div>
-                <div class="fs-2 fw-bold">${sessions.active || 0}</div>
-              </div></div>`;
+            return _dwStatCard('linear-gradient(90deg,#06b6d4,#3b82f6)', 'rgba(6,182,212,.12)', '#06b6d4',
+                'bi-plug-fill', sessions.active || 0, 'overview_sessions', '');
 
         case 'users': {
             const byRole = users.by_role || {};
-            const parts  = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)} me-1">${n} ${esc((rolesData[r]?.label) || ROLE_LABELS[r] || r)}</span>`)
-                .join('');
-            return `<div class="card h-100 border-start border-4 border-warning">
-              <div class="card-body">
-                <div class="d-flex align-items-center mb-2">
-                  <i class="bi bi-people fs-4 text-warning me-2"></i>
-                  <h6 class="card-title mb-0">${t('overview_users')}</h6>
-                </div>
-                <div class="fs-2 fw-bold">${users.total || 0}</div>
-                <small>${parts || '—'}</small>
-              </div></div>`;
+            const sub = Object.entries(byRole)
+                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)}" style="font-size:.72rem">${n} ${esc((rolesData[r]?.label) || ROLE_LABELS[r] || r)}</span>`)
+                .join('') || '<span class="text-muted small">—</span>';
+            return _dwStatCard('linear-gradient(90deg,#f59e0b,#f97316)', 'rgba(245,158,11,.12)', '#f59e0b',
+                'bi-people-fill', users.total || 0, 'overview_users', sub);
         }
 
-        case 'groups':
-            return `<div class="card h-100 border-start border-4 border-secondary">
-              <div class="card-body">
-                <div class="d-flex align-items-center mb-2">
-                  <i class="bi bi-diagram-3 fs-4 text-secondary me-2"></i>
-                  <h6 class="card-title mb-0">${t('overview_groups')}</h6>
-                </div>
-                <div class="fs-2 fw-bold">${groups.total || 0}</div>
-                ${groups.members ? `<small class="text-muted">${tf('overview_members', groups.members)}</small>` : ''}
-              </div></div>`;
+        case 'groups': {
+            const sub = groups.members ? `<span class="text-muted small">${tf('overview_members', groups.members)}</span>` : '';
+            return _dwStatCard('linear-gradient(90deg,#10b981,#14b8a6)', 'rgba(16,185,129,.12)', '#10b981',
+                'bi-diagram-3-fill', groups.total || 0, 'overview_groups', sub);
+        }
 
-        case 'roles':
-            return `<div class="card h-100 border-start border-4 border-dark">
-              <div class="card-body">
-                <div class="d-flex align-items-center mb-2">
-                  <i class="bi bi-shield-shaded fs-4 text-dark me-2"></i>
-                  <h6 class="card-title mb-0">${t('overview_roles')}</h6>
-                </div>
-                <div class="fs-2 fw-bold">${roles.total || 0}</div>
-                ${roles.custom ? `<small class="text-muted">${tf('overview_custom_roles', roles.custom)}</small>` : ''}
-              </div></div>`;
+        case 'roles': {
+            const sub = roles.custom ? `<span class="text-muted small">${tf('overview_custom_roles', roles.custom)}</span>` : '';
+            return _dwStatCard('linear-gradient(90deg,#8b5cf6,#ec4899)', 'rgba(139,92,246,.12)', '#8b5cf6',
+                'bi-shield-fill-check', roles.total || 0, 'overview_roles', sub);
+        }
 
         case 'modules_list': {
             if (!perms.has('modules_view'))
-                return `<div class="card h-100"><div class="card-body text-muted small">${t('no_permission')}</div></div>`;
-            return `<div class="card h-100">
-              <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>${t('overview_modules')}</h6></div>
-              <div class="card-body p-0">
-                <div class="table-responsive">
-                  <table class="table table-sm table-hover align-middle mb-0">
-                    <thead class="table-light"><tr>
-                      ${_dwTh('modules_list','name',t('col_module'))}
-                      ${_dwTh('modules_list','enabled',t('col_enabled'))}
-                      ${_dwTh('modules_list','checks',t('col_checks'))}
-                      ${_dwTh('modules_list','items',t('overview_items'))}
-                    </tr></thead>
-                    <tbody>${_dwBuildModuleRows(modules)}</tbody>
-                  </table>
-                </div>
-              </div></div>`;
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--bs-body-bg)">${t('no_permission')}</div>`;
+            const table = `<table class="table table-sm table-hover align-middle mb-0">
+                ${_dwTheadRow(
+                    _dwTh('modules_list','name',t('col_module')),
+                    _dwTh('modules_list','enabled',t('col_enabled')),
+                    _dwTh('modules_list','checks',t('col_checks')),
+                    _dwTh('modules_list','items',t('overview_items'))
+                )}
+                <tbody>${_dwBuildModuleRows(modules)}</tbody>
+            </table>`;
+            return _dwTableCard('linear-gradient(90deg,#6366f1,#8b5cf6)', 'rgba(99,102,241,.12)', '#6366f1',
+                'bi-puzzle', t('overview_modules'), table);
         }
 
         case 'activity': {
             if (!isAdmin)
-                return `<div class="card h-100"><div class="card-body text-muted small">${t('no_permission')}</div></div>`;
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--bs-body-bg)">${t('no_permission')}</div>`;
             if (!events.length)
-                return `<div class="card h-100"><div class="card-body text-muted small">${t('status_empty')}</div></div>`;
-            return `<div class="card h-100">
-              <div class="card-header py-2"><h6 class="mb-0"><i class="bi bi-clock-history me-2"></i>${t('overview_recent_activity')}</h6></div>
-              <div class="card-body p-0">
-                <div class="table-responsive">
-                  <table class="table table-sm table-hover align-middle mb-0">
-                    <thead class="table-light"><tr>
-                      ${_dwTh('activity','ts',t('col_time'))}
-                      ${_dwTh('activity','event',t('col_event'))}
-                      ${_dwTh('activity','user',t('col_user'))}
-                    </tr></thead>
-                    <tbody>${_dwBuildActivityRows(events)}</tbody>
-                  </table>
-                </div>
-              </div></div>`;
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--bs-body-bg)">${t('status_empty')}</div>`;
+            const table = `<table class="table table-sm table-hover align-middle mb-0">
+                ${_dwTheadRow(
+                    _dwTh('activity','ts',t('col_time')),
+                    _dwTh('activity','event',t('col_event')),
+                    _dwTh('activity','user',t('col_user'))
+                )}
+                <tbody>${_dwBuildActivityRows(events)}</tbody>
+            </table>`;
+            return _dwTableCard('linear-gradient(90deg,#64748b,#475569)', 'rgba(100,116,139,.12)', '#64748b',
+                'bi-clock-history', t('overview_recent_activity'), table);
         }
 
         default: return '';
@@ -522,7 +542,7 @@ async function renderOverview() {
         () => _overviewTimer, 'setOverviewAutoRefresh', ctrlBtns);
 
     // Add-widget bar (shown only in edit mode)
-    h += `<div id="dwAddBar" class="d-none d-flex flex-wrap align-items-center gap-2 mb-3 p-2 rounded border"></div>`;
+    h += `<div id="dwAddBar" class="d-none d-flex flex-wrap align-items-center gap-2 mb-3 px-3 py-2 rounded-3 border" style="background:var(--bs-secondary-bg)"></div>`;
 
     // Dashboard grid
     const gridEdit = _dwEditing ? ' dashboard-edit' : '';

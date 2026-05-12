@@ -53,7 +53,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 
 | Característica | Descripción |
 |---------------|-------------|
-| **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas |
+| **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas; barra de herramientas con **Añadir**, **Recargar** (descarta cambios y recarga desde el servidor) y **Deshacer** (revierte cambios no guardados al último estado guardado) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en `localStorage`; modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | 6 tarjetas de resumen (Modules, Checks, Sessions, Users, Groups, Roles) + 2 widgets de tabla (lista de módulos con estado por check, actividad reciente); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables |
 | **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador; paneles colapsables por sección |
@@ -65,6 +65,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado (permite editar roles y miembros, pero no nombre ni etiqueta) |
 | **Prueba de Telegram** | Enviar un mensaje de prueba para verificar la conectividad del bot |
 | **Modo oscuro** | Preferencia por usuario, persistida entre sesiones |
+| **Persistencia de pestaña activa** | La pestaña activa se guarda en `localStorage` y se restaura al recargar la página (F5); si la pestaña guardada deja de existir o el usuario pierde acceso, se muestra la pestaña por defecto |
 | **i18n** | Inglés y español; seleccionable por usuario y configurable globalmente con `web_admin.lang` |
 | **Registro de auditoría** | Seguimiento de cambios a nivel de campo con enmascarado de datos sensibles |
 | **Gestión de sesiones** | Ver sesiones activas; los usuarios con permiso `sessions_revoke` pueden revocar cualquier sesión |

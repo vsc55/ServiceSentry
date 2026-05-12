@@ -89,6 +89,12 @@ LANG = {
     'add_module':   'Añadir módulo',
     'modules_saved': 'Módulos guardados correctamente',
     'unsaved_changes': 'Cambios sin guardar',
+    'undo_modules': 'Deshacer cambios',
+    'confirm_revert_modules': '¿Descartar todos los cambios sin guardar en los módulos?',
+    'modules_reverted': 'Cambios en módulos descartados',
+    'reload_modules': 'Recargar',
+    'reload_modules_title': 'Descartar cambios y recargar desde el servidor',
+    'modules_reloaded': 'Módulos recargados desde el servidor',
     'save_error': 'Error al guardar',
     # Config
     'save_config': 'Guardar configuración',
@@ -116,6 +122,8 @@ LANG = {
     'col_status': 'Estado',
     'status_ok': 'OK',
     'status_error': 'Error',
+    'status_no_items': 'N/A',
+    'checks_waiting': 'Esperando…',
     # Users
     'user_management': 'Gestión de usuarios',
     'new_user': 'Nuevo usuario',

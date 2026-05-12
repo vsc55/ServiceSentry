@@ -29,6 +29,18 @@
     .cfg-chevron { transition: transform .2s; }
     .cfg-card-header[aria-expanded="false"] .cfg-chevron { transform: rotate(-90deg); }
 
+    @keyframes _statusPulse {
+        0%,100% { background-position: 200% 0; }
+        50%      { background-position: 0% 0; }
+    }
+
+    /* thead bottom border for definition in both themes */
+    .table thead tr { border-bottom: 2px solid var(--bs-border-color); }
+
+    /* dark mode: make table rows distinguishable from card background */
+    [data-bs-theme="dark"] .table > tbody > tr { --bs-table-bg: transparent; }
+    [data-bs-theme="dark"] .table-hover > tbody > tr:hover > * { --bs-table-hover-bg: rgba(255,255,255,.05); }
+
     #loading {
         position: fixed;
         inset: 0;
@@ -168,7 +180,13 @@
                 <button class="btn btn-sm btn-outline-secondary" id="btnNewModule" onclick="openNewModuleModal()">
                     <i class="bi bi-plus-lg me-1"></i>{{ i18n.add_module }}
                 </button>
-                <div class="ms-auto">
+                <button class="btn btn-sm btn-outline-secondary" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_modules }}
+                </button>
+                <div class="ms-auto d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-secondary d-none" id="btnUndoModules" onclick="revertModules()" title="{{ i18n.undo_modules }}">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo_modules }}
+                    </button>
                     <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()">
                         <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
                         <span class="badge bg-warning text-dark ms-1 d-none" id="badgeModulesDirty"

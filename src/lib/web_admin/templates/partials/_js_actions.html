@@ -6,10 +6,12 @@
 function markDirty(target) {
     const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
     document.getElementById(id)?.classList.remove('d-none');
+    if (target === 'modules') document.getElementById('btnUndoModules')?.classList.remove('d-none');
 }
 function clearDirty(target) {
     const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
     document.getElementById(id)?.classList.add('d-none');
+    if (target === 'modules') document.getElementById('btnUndoModules')?.classList.add('d-none');
 }
 
 function updateField(target, pathStr, value) {
@@ -218,8 +220,20 @@ function confirmAddItem() {
 // --- Save ---
 async function saveModules() {
     const r = await apiPut('/api/modules', modulesData);
-    if (r && r.ok) { showToast(t('modules_saved')); clearDirty('modules'); }
-    else showToast(r?.error || t('save_error'), 'danger');
+    if (r && r.ok) {
+        showToast(t('modules_saved'));
+        clearDirty('modules');
+        _savedModulesData = deepClone(modulesData);
+    } else showToast(r?.error || t('save_error'), 'danger');
+}
+function revertModules() {
+    if (!_savedModulesData) return;
+    showConfirmModal(t('confirm_revert_modules'), () => {
+        modulesData = deepClone(_savedModulesData);
+        clearDirty('modules');
+        renderModules();
+        showToast(t('modules_reverted'));
+    });
 }
 async function saveConfig() {
     const r = await apiPut('/api/config', configData);
@@ -237,6 +251,16 @@ async function saveConfig() {
             configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
         }
     } else showToast(r?.error || t('save_error'), 'danger');
+}
+async function reloadModules() {
+    const data = await apiGet('/api/modules');
+    if (!data) return;
+    modulesData = data;
+    applyModuleDefaults();
+    _savedModulesData = deepClone(modulesData);
+    clearDirty('modules');
+    renderModules();
+    showToast(t('modules_reloaded'));
 }
 async function reloadConfig() {
     const data = await apiGet('/api/config');
