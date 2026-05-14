@@ -220,13 +220,37 @@ Python inline. El archivo tiene una clave de primer nivel por **colección**:
         "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
     },
     "list": {
-        "enabled":   {"type": "bool",  "default": true},
-        "host":      {"type": "str",   "default": ""},
-        "port":      {"type": "int",   "default": 3306, "min": 1, "max": 65535},
-        "password":  {"type": "str",   "default": "", "sensitive": true},
-        "threshold": {"type": "float", "default": 80.0, "min": 0.0, "max": 100.0},
-        "alert":     {"type": "int",   "default": 1, "min": 1, "max": 100},
-        "exclude":   {"type": "list",  "default": []}
+        "__field_order__": ["enabled", "label", "mode", "host", "port", "password"],
+        "__group_when__": {
+            "advanced": {"mode": ["ssh"]}
+        },
+        "__actions__": [
+            {
+                "id":        "test_conn",
+                "url":       "/api/watchfuls/mi_modulo/test",
+                "extra":     {},
+                "icon":      "bi-plug",
+                "variant":   "outline-info",
+                "full_width": true,
+                "result":    "toast"
+            }
+        ],
+        "enabled":  {"type": "bool", "default": true},
+        "label":    {"type": "str",  "default": "", "group": "connection"},
+        "mode":     {"type": "str",  "default": "tcp", "options": ["tcp", "ssh"], "group": "connection"},
+        "host":     {"type": "str",  "default": "", "show_when": {"mode": ["tcp", "ssh"]}, "group": "server"},
+        "port":     {"type": "int",  "default": 3306, "min": 1, "max": 65535,
+                     "show_when": {"mode": ["tcp", "ssh"]}, "group": "server"},
+        "password": {"type": "str",  "default": "", "sensitive": true, "group": "server"},
+        "db":       {"type": "str",  "default": "", "group": "server",
+                     "input_action": {
+                         "id":           "list_dbs",
+                         "url":          "/api/watchfuls/mi_modulo/databases",
+                         "extra":        {},
+                         "icon":         "bi-database",
+                         "result":       "field_picker",
+                         "result_field": "db"
+                     }}
     }
 }
 ```
@@ -238,18 +262,167 @@ _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'),
 
 class Watchful(ModuleBase):
     ITEM_SCHEMA = _SCHEMA
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()}
+    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
+                 if not k.startswith('__')}
 ```
+
+### Claves de meta-colección (`__*__`)
+
+Estas claves controlan el comportamiento de la UI y no corresponden a campos de datos:
+
+| Clave | Descripción |
+|-------|-------------|
+| `__field_order__` | Lista de claves que fija el orden de renderizado en el formulario. Si se omite, se usan los campos en orden de declaración. |
+| `__group_when__` | Dict `{nombre_grupo: show_when}`. Controla cuándo el **encabezado** de un grupo es visible, independientemente de los campos que contiene. Si un grupo no aparece aquí, su encabezado siempre se muestra. |
+| `__actions__` | Lista de botones de acción que aparecen al pie del formulario (o dentro de un grupo, ver `group` abajo). |
+| `__test__` | URL a la que se envía el formulario al pulsar el botón de test rápido del encabezado de colección. |
 
 ### Propiedades de campo
 
-| Propiedad   | Tipo   | Obligatorio | Descripción |
-|-------------|--------|-------------|-------------|
-| `type`      | str    | Sí | `"bool"`, `"int"`, `"float"`, `"str"`, `"list"` |
-| `default`   | any    | Sí | Valor por defecto aplicado cuando el campo falta en `modules.json` |
-| `min`       | number | No | Valor mínimo (para `int` / `float`) |
-| `max`       | number | No | Valor máximo (para `int` / `float`) |
-| `sensitive` | bool   | No | Si es `true`, se renderiza como campo de contraseña en la UI web |
+| Propiedad      | Tipo   | Obligatorio | Descripción |
+|----------------|--------|-------------|-------------|
+| `type`         | str    | Sí | `"bool"`, `"int"`, `"float"`, `"str"`, `"list"` |
+| `default`      | any    | Sí | Valor por defecto cuando el campo falta en `modules.json` |
+| `min`          | number | No | Valor mínimo (`int` / `float`) |
+| `max`          | number | No | Valor máximo (`int` / `float`) |
+| `sensitive`    | bool   | No | Si `true`, se renderiza como campo de contraseña (oculto) en la UI |
+| `options`      | list   | No | Lista de valores permitidos para campos `str` → desplegable en la UI |
+| `group`        | str    | No | Nombre del grupo visual al que pertenece el campo. Los campos del mismo grupo se agrupan bajo un encabezado |
+| `show_when`    | dict   | No | Condición `{campo: [valores]}` que controla si el campo es visible en la UI. Ejemplo: `{"mode": ["ssh"]}` |
+| `input_action` | dict   | No | Define un botón de icono acoplado al input (ver más abajo) |
+
+### Acciones de formulario (`__actions__`)
+
+Cada acción en `__actions__` genera un botón en el formulario del ítem:
+
+| Propiedad      | Tipo   | Descripción |
+|----------------|--------|-------------|
+| `id`           | str    | Identificador de la acción. Debe coincidir con una clave en `action_labels` del archivo de idioma |
+| `url`          | str    | Endpoint al que se hace POST con el contenido actual del ítem |
+| `extra`        | dict   | Campos extra añadidos al payload (p. ej. `{"_test_mode": "ssh"}`) |
+| `icon`         | str    | Clase Bootstrap Icons (p. ej. `"bi-plug"`) |
+| `variant`      | str    | Variante Bootstrap del botón (p. ej. `"outline-info"`, `"outline-secondary"`) |
+| `full_width`   | bool   | Si `true`, el botón ocupa el 100 % del ancho disponible |
+| `show_when`    | dict   | Igual que en campos: oculta el botón según el valor de otro campo |
+| `group`        | str    | Si se especifica, el botón se inyecta dentro del bloque visual del grupo indicado (debajo del último campo de ese grupo) en lugar de al pie del formulario |
+| `result`       | str    | Cómo mostrar la respuesta: `"toast"` (notificación emergente) o `"field_picker"` (modal de selección) |
+| `result_field` | str    | Solo para `result: "field_picker"`: nombre del campo del ítem que se rellenará con el valor elegido |
+
+### Acción inline en campo (`input_action`)
+
+Un campo `str` puede tener un botón de icono acoplado como input-group Bootstrap:
+
+```json
+"db": {
+    "type": "str",
+    "default": "",
+    "group": "server",
+    "input_action": {
+        "id":           "list_databases",
+        "url":          "/api/watchfuls/mysql/databases",
+        "extra":        {},
+        "icon":         "bi-database",
+        "result":       "field_picker",
+        "result_field": "db"
+    }
+}
+```
+
+El botón hace POST al endpoint indicado, recibe `{"ok": true, "databases": [...]}` y abre el modal `#fieldPickerModal` con la lista. Al seleccionar un valor se escribe directamente en el campo `db` del ítem.
+
+### Archivos de idioma (`lang/*.json`)
+
+Además de `pretty_name` y `labels`, los archivos de idioma pueden incluir:
+
+```json
+{
+    "pretty_name": "Mi Módulo",
+    "labels": {
+        "enabled": "Habilitado",
+        "mode":    "Modo",
+        "host":    "Host"
+    },
+    "hints": {
+        "mode": "Cómo conectar al servidor: TCP directo o túnel SSH.",
+        "host": "Dirección IP o hostname del servidor."
+    },
+    "options": {},
+    "option_labels": {
+        "mode": {
+            "tcp": "TCP directo",
+            "ssh": "Túnel SSH"
+        }
+    },
+    "group_labels": {
+        "connection": "Conexión",
+        "server":     "Servidor"
+    },
+    "action_labels": {
+        "test_conn":  "Probar conexión",
+        "list_dbs":   "Listar bases de datos"
+    },
+    "collections": {"list": "Servidores"}
+}
+```
+
+| Sección | Descripción |
+|---------|-------------|
+| `labels` | Etiqueta visible de cada campo |
+| `hints` | Texto de ayuda que aparece bajo el campo en la UI |
+| `option_labels` | Etiquetas de las opciones de campos con `options` (desplegables) |
+| `group_labels` | Nombre visible de cada grupo visual |
+| `action_labels` | Etiqueta del botón de cada acción (`__actions__` e `input_action`) |
+| `collections` | Nombre del grupo de colección (p. ej. `"list": "Servidores"`) |
+
+---
+
+## 4b. Classmethods de integración con la UI
+
+La UI web puede invocar métodos de clase del módulo a través de endpoints REST. Para habilitarlos, implementa los siguientes classmethods en tu clase `Watchful`:
+
+### `test_connection(config: dict) -> dict`
+
+Invocado por `POST /api/watchfuls/<modulo>/test`. Recibe los datos del formulario del ítem y devuelve `{"ok": bool, "message": str}`.
+
+```python
+@classmethod
+def test_connection(cls, config: dict) -> dict:
+    try:
+        # ... lógica de prueba ...
+        return {"ok": True, "message": "Conexión correcta"}
+    except Exception as exc:
+        return {"ok": False, "message": str(exc)}
+```
+
+El resultado se muestra como un toast en la UI. La acción queda registrada en el **log de auditoría** bajo el evento `watchful_test`.
+
+### `list_databases(config: dict) -> dict`
+
+Invocado por `POST /api/watchfuls/<modulo>/databases`. Devuelve `{"ok": bool, "databases": list[str]}`.
+
+```python
+@classmethod
+def list_databases(cls, config: dict) -> dict:
+    try:
+        dbs = [...]  # lista de nombres
+        return {"ok": True, "databases": dbs}
+    except Exception as exc:
+        return {"ok": False, "databases": [], "message": str(exc)}
+```
+
+La acción queda registrada en el **log de auditoría** bajo el evento `watchful_list_databases`.
+
+### `discover() -> list[dict]`
+
+Invocado por `GET /api/watchfuls/<modulo>/discover`. Devuelve una lista de ítems descubiertos automáticamente (servicios, particiones, sensores…). La UI los muestra en el modal de descubrimiento para incorporarlos con un clic.
+
+```python
+@classmethod
+def discover(cls) -> list[dict]:
+    return [
+        {"key": "item1", "label": "Nombre visible", ...},
+    ]
+```
 
 ---
 
@@ -691,6 +864,8 @@ class Watchful(ModuleBase):
 
 ## 11. Lista de comprobación para la creación
 
+**Estructura básica (obligatorio)**
+
 - [ ] Crear carpeta `watchfuls/mi_modulo/`
 - [ ] Crear `__init__.py` con una clase `Watchful(ModuleBase)`
 - [ ] Crear `watchful.py` con `from . import Watchful`
@@ -699,7 +874,7 @@ class Watchful(ModuleBase):
 - [ ] Crear `lang/en_EN.json` con `pretty_name` y `labels`
 - [ ] Crear `lang/es_ES.json` con `pretty_name` y `labels` traducidos
 - [ ] Cargar `_SCHEMA` desde `schema.json` y asignar `ITEM_SCHEMA = _SCHEMA`
-- [ ] Definir `_DEFAULTS` a partir de `_SCHEMA['list']`
+- [ ] Definir `_DEFAULTS` a partir de `_SCHEMA['list']` excluyendo claves `__*__`
 - [ ] Implementar `__init__` llamando a `super().__init__(monitor, __package__)`
 - [ ] Implementar `check()` devolviendo `self.dict_return`
 - [ ] Llamar a `super().check()` antes de devolver
@@ -708,3 +883,18 @@ class Watchful(ModuleBase):
 - [ ] Añadir una sección en `modules.json` con `enabled: true`
 - [ ] Crear `tests/test_mi_modulo.py` con tests unitarios
 - [ ] Ejecutar `pytest tests/ watchfuls/ -q` y verificar que todo pasa
+
+**UI avanzada (opcional, según las necesidades del módulo)**
+
+- [ ] Añadir `__field_order__` si el orden de los campos importa
+- [ ] Añadir `group` en los campos y `group_labels` en los archivos de idioma para agrupar campos visualmente
+- [ ] Añadir `show_when` en campos que solo tienen sentido según el valor de otro campo
+- [ ] Añadir `__group_when__` si algún encabezado de grupo debe mostrarse condicionalmente
+- [ ] Añadir `options` + `option_labels` para campos con una lista cerrada de valores (desplegable)
+- [ ] Añadir `hints` en los archivos de idioma para los campos que necesiten explicación adicional
+- [ ] Añadir `__actions__` con botones de test (endpoint `test_connection`) o descubrimiento
+- [ ] Implementar classmethod `test_connection(cls, config)` si hay botón de test
+- [ ] Implementar classmethod `list_databases(cls, config)` si hay selector de recurso
+- [ ] Implementar classmethod `discover(cls)` si hay botón de descubrimiento automático
+- [ ] Añadir `input_action` en el campo de selección de recurso si aplica `field_picker`
+- [ ] Añadir `action_labels` en los archivos de idioma para cada acción definida

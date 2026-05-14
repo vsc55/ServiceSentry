@@ -29,6 +29,12 @@ class TestMysqlConfigOptions:
         assert hasattr(ConfigOptions, 'password')
         assert hasattr(ConfigOptions, 'db')
         assert hasattr(ConfigOptions, 'socket')
+        assert hasattr(ConfigOptions, 'conn_type')
+        assert hasattr(ConfigOptions, 'ssh_host')
+        assert hasattr(ConfigOptions, 'ssh_port')
+        assert hasattr(ConfigOptions, 'ssh_user')
+        assert hasattr(ConfigOptions, 'ssh_password')
+        assert hasattr(ConfigOptions, 'ssh_key')
 
 
 class TestMysqlCheck:
@@ -84,7 +90,7 @@ class TestMysqlCheck:
         # Mock conexión exitosa
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
-        mock_conn.cursor.return_value.__enter__ = lambda s: mock_cursor
+        mock_conn.cursor.return_value.__enter__ = lambda _: mock_cursor
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
         mock_connect.return_value = mock_conn
 
@@ -151,13 +157,14 @@ class TestMysqlCheck:
 
     @patch('watchfuls.mysql.os.path.exists', return_value=False)
     def test_check_db_socket_not_exist(self, mock_exists):
-        """Socket que no existe retorna error."""
+        """Socket mode with missing socket file returns error."""
         config = {
             'watchfuls.mysql': {
-                'socket': '/var/run/mysqld/mysqld.sock',
                 'list': {
                     'db1': {
                         'enabled': True,
+                        'conn_type': 'socket',
+                        'socket': '/var/run/mysqld/mysqld.sock',
                     }
                 }
             }
@@ -166,6 +173,25 @@ class TestMysqlCheck:
         w = self.Watchful(mock_monitor)
 
         result = w.check()
+        items = result.list
+        assert 'db1' in items
+        assert items['db1']['status'] is False
+
+    def test_check_db_socket_legacy_backwards_compat(self):
+        """Legacy config with socket path but no conn_type auto-promotes to socket mode."""
+        config = {
+            'watchfuls.mysql': {
+                'socket': '/var/run/mysqld/mysqld.sock',
+                'list': {
+                    'db1': {'enabled': True}
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+        w = self.Watchful(mock_monitor)
+
+        with patch('watchfuls.mysql.os.path.exists', return_value=False):
+            result = w.check()
         items = result.list
         assert 'db1' in items
         assert items['db1']['status'] is False
@@ -189,7 +215,7 @@ class TestMysqlCheck:
         with patch('watchfuls.mysql.pymysql.connect') as mock_connect:
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
-            mock_conn.cursor.return_value.__enter__ = lambda s: mock_cursor
+            mock_conn.cursor.return_value.__enter__ = lambda _: mock_cursor
             mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
             mock_connect.return_value = mock_conn
 
@@ -285,6 +311,62 @@ class TestMysqlCheck:
         result = w.check()
         items = result.list
         assert items['db1']['status'] is False
+
+
+class TestMysqlTestConnection:
+
+    def setup_method(self):
+        from watchfuls.mysql import Watchful
+        self.Watchful = Watchful
+
+    @patch('watchfuls.mysql.pymysql.connect')
+    def test_tcp_ok(self, mock_connect):
+        """test_connection returns ok=True on successful TCP connection."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = lambda _: mock_cursor
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_connect.return_value = mock_conn
+
+        result = self.Watchful.test_connection(
+            {'conn_type': 'tcp', 'host': 'localhost', 'port': 3306,
+             'user': 'root', 'password': '', 'db': ''})
+        assert result['ok'] is True
+
+    @patch('watchfuls.mysql.pymysql.connect')
+    def test_tcp_access_denied(self, mock_connect):
+        """test_connection returns ok=False on access denied."""
+        import pymysql as _pymysql
+        mock_connect.side_effect = _pymysql.OperationalError(1045, 'Access denied')
+        result = self.Watchful.test_connection(
+            {'conn_type': 'tcp', 'host': 'localhost', 'port': 3306,
+             'user': 'bad', 'password': 'bad', 'db': ''})
+        assert result['ok'] is False
+        assert 'Access denied' in result['message']
+
+    def test_socket_missing(self):
+        """test_connection returns ok=False when socket file is absent."""
+        with patch('watchfuls.mysql.os.path.exists', return_value=False):
+            result = self.Watchful.test_connection(
+                {'conn_type': 'socket', 'socket': '/nonexistent/mysqld.sock',
+                 'user': '', 'password': '', 'db': ''})
+        assert result['ok'] is False
+        assert 'socket' in result['message'].lower()
+
+    def test_ssh_unavailable(self):
+        """test_connection returns ok=False when paramiko is not installed."""
+        import watchfuls.mysql as _mod
+        orig = _mod._PARAMIKO_AVAILABLE
+        try:
+            _mod._PARAMIKO_AVAILABLE = False
+            result = self.Watchful.test_connection(
+                {'conn_type': 'ssh', 'ssh_host': 'jump', 'ssh_port': 22,
+                 'ssh_user': 'u', 'ssh_password': '', 'ssh_key': '',
+                 'host': 'db', 'port': 3306, 'user': '', 'password': '', 'db': ''})
+        finally:
+            _mod._PARAMIKO_AVAILABLE = orig
+        assert result['ok'] is False
+        assert 'paramiko' in result['message'].lower()
 
 
 class TestMysqlGetConf:

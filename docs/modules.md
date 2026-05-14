@@ -132,13 +132,23 @@ Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco. A
 
 ---
 
-## 🗄️ mysql — Conectividad MySQL
+## 🗄️ mysql — Conectividad MySQL / MariaDB
 
-Verifica que los servidores MySQL son accesibles y responden a consultas.
+Verifica que los servidores MySQL y MariaDB son accesibles y responden a consultas. Soporta conexión TCP directa, socket Unix y TCP tunelizado sobre SSH.
 
-**Plataforma:** Linux / Windows / macOS (requiere `PyMySQL`)
+**Plataforma:** Linux / Windows / macOS 🌐 (requiere `PyMySQL` y `paramiko` para el túnel SSH)
 
-**Config:**
+### Modos de conexión
+
+| `conn_type` | Descripción |
+|-------------|-------------|
+| `tcp` | Conexión TCP directa a `host:port` |
+| `socket` | Socket de dominio Unix local (solo Linux/macOS) |
+| `ssh` | TCP tunelizado sobre SSH — el cliente abre un túnel SSH al servidor de salto y se conecta a `host:port` a través de él |
+
+### Config
+
+**TCP directo:**
 ```json
 {
     "mysql": {
@@ -147,29 +157,91 @@ Verifica que los servidores MySQL son accesibles y responden a consultas.
         "list": {
             "db_produccion": {
                 "enabled": true,
+                "label": "Base de datos producción",
+                "conn_type": "tcp",
                 "host": "192.168.1.20",
                 "port": 3306,
                 "user": "monitor",
                 "password": "secret",
-                "db": "mydb",
-                "socket": ""
+                "db": "mydb"
             }
         }
     }
 }
 ```
 
+**Socket Unix:**
+```json
+{
+    "mysql": {
+        "list": {
+            "local": {
+                "conn_type": "socket",
+                "socket": "/var/run/mysqld/mysqld.sock",
+                "user": "monitor",
+                "password": "secret",
+                "db": "mydb"
+            }
+        }
+    }
+}
+```
+
+**Túnel SSH:**
+```json
+{
+    "mysql": {
+        "list": {
+            "remoto_ssh": {
+                "conn_type": "ssh",
+                "ssh_host": "bastion.ejemplo.com",
+                "ssh_port": 22,
+                "ssh_user": "ubuntu",
+                "ssh_key": "/home/usuario/.ssh/id_rsa",
+                "host": "127.0.0.1",
+                "port": 3306,
+                "user": "monitor",
+                "password": "secret",
+                "db": "mydb"
+            }
+        }
+    }
+}
+```
+
+### Referencia de campos
+
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `list.*.host` | string | `""` | Host MySQL |
-| `list.*.port` | int | 3306 | Puerto MySQL |
-| `list.*.user` | string | `""` | Usuario MySQL |
-| `list.*.password` | string | `""` | Contraseña |
-| `list.*.db` | string | `""` | Base de datos |
-| `list.*.socket` | string | `""` | Socket Unix (si se establece, ignora host/port) |
+| `enabled` | bool | `true` | Habilitar este ítem |
+| `label` | string | `""` | Nombre de visualización en notificaciones y panel. Si está vacío, se usa la clave |
+| `conn_type` | string | `"tcp"` | Modo de conexión: `tcp`, `socket` o `ssh` |
+| `host` | string | `""` | IP/hostname del servidor MySQL. Usado en modos `tcp` y `ssh` |
+| `port` | int | `3306` | Puerto TCP de MySQL. Usado en modos `tcp` y `ssh` |
+| `socket` | string | `""` | Ruta completa al socket Unix. Solo en modo `socket` |
+| `user` | string | `""` | Usuario MySQL |
+| `password` | string | `""` | Contraseña MySQL (**cifrada en disco** con `enc:`) |
+| `db` | string | `""` | Nombre de la base de datos |
+| `ssh_host` | string | `""` | Hostname/IP del servidor SSH de salto. Solo en modo `ssh` |
+| `ssh_port` | int | `22` | Puerto SSH del servidor de salto. Solo en modo `ssh` |
+| `ssh_user` | string | `""` | Usuario SSH. Solo en modo `ssh` |
+| `ssh_password` | string | `""` | Contraseña SSH (**cifrada en disco** con `enc:`). Ignorada si se especifica `ssh_key` |
+| `ssh_key` | string | `""` | Ruta al archivo de clave privada SSH. Tiene prioridad sobre `ssh_password` |
+
+### Acciones de la UI
+
+| Acción | Descripción |
+|--------|-------------|
+| **Probar SSH** | Verifica el túnel SSH sin establecer la conexión MySQL. Solo visible en modo `ssh`. Registrado en auditoría. |
+| **Probar conexión** | Establece la conexión completa (incluyendo SSH si aplica) y ejecuta `SHOW GLOBAL STATUS`. Registrado en auditoría. |
+| **Listar bases de datos** | Conecta y lista las bases de datos disponibles en un selector modal; al elegir, escribe el nombre en el campo `db`. |
+
+> **Descubrimiento:** el campo `db` incluye un botón de icono que abre un modal con la lista de bases de datos del servidor. Si ya hay una base de datos seleccionada se marca como "Seleccionada" en la lista.
 
 **Flujo:** `pymysql.connect()` → `SHOW GLOBAL STATUS` → clasifica errores con `match/case`
 (1045 = acceso denegado, 2003 = sin conexión con sub-clasificación por mensaje, etc.).
+
+En modo `ssh`, se levanta un túnel local con `paramiko` antes de intentar la conexión MySQL. El túnel se cierra automáticamente al terminar.
 
 ---
 

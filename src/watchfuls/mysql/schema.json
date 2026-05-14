@@ -1,15 +1,62 @@
 {
     "__module__": {
         "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5,    "min": 1, "max": 100}
+        "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
     },
     "list": {
-        "enabled":  {"type": "bool", "default": true},
-        "host":     {"type": "str",  "default": ""},
-        "port":     {"type": "int",  "default": 3306, "min": 1, "max": 65535},
-        "user":     {"type": "str",  "default": ""},
-        "password": {"type": "str",  "default": "", "sensitive": true},
-        "db":       {"type": "str",  "default": ""},
-        "socket":   {"type": "str",  "default": ""}
+        "__test__": "/api/watchfuls/mysql/test",
+        "__field_order__": [
+            "enabled", "label", "conn_type",
+            "ssh_host", "ssh_port", "ssh_user", "ssh_password", "ssh_key",
+            "host", "port", "socket",
+            "user", "password", "db"
+        ],
+        "__group_when__": {
+            "ssh": {"conn_type": ["ssh"]}
+        },
+        "__actions__": [
+            {
+                "id": "test_ssh",
+                "url": "/api/watchfuls/mysql/test",
+                "extra": {"_test_mode": "ssh"},
+                "show_when": {"conn_type": ["ssh"]},
+                "group": "ssh",
+                "icon": "bi-hdd-network",
+                "variant": "outline-secondary",
+                "full_width": true,
+                "result": "toast"
+            },
+            {
+                "id": "test_mysql",
+                "url": "/api/watchfuls/mysql/test",
+                "extra": {},
+                "icon": "bi-plug",
+                "variant": "outline-info",
+                "full_width": true,
+                "result": "toast"
+            }
+        ],
+        "enabled":      {"type": "bool", "default": true},
+        "label":        {"type": "str",  "default": "", "group": "connection"},
+        "conn_type":    {"type": "str",  "default": "tcp", "options": ["tcp", "socket", "ssh"], "group": "connection"},
+        "ssh_host":     {"type": "str",  "default": "", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_port":     {"type": "int",  "default": 22, "min": 1, "max": 65535, "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_user":     {"type": "str",  "default": "", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_password": {"type": "str",  "default": "", "sensitive": true, "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_key":      {"type": "str",  "default": "", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "host":         {"type": "str",  "default": "", "show_when": {"conn_type": ["tcp", "ssh"]}, "group": "server"},
+        "port":         {"type": "int",  "default": 3306, "min": 1, "max": 65535, "show_when": {"conn_type": ["tcp", "ssh"]}, "group": "server"},
+        "socket":       {"type": "str",  "default": "", "show_when": {"conn_type": ["socket"]}, "group": "server"},
+        "user":         {"type": "str",  "default": "", "group": "server"},
+        "password":     {"type": "str",  "default": "", "sensitive": true, "group": "server"},
+        "db":           {"type": "str",  "default": "", "group": "server",
+                         "input_action": {
+                             "id": "list_databases",
+                             "url": "/api/watchfuls/mysql/databases",
+                             "extra": {},
+                             "icon": "bi-database",
+                             "result": "field_picker",
+                             "result_field": "db"
+                         }}
     }
 }

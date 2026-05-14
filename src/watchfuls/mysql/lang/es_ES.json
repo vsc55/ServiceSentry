@@ -1,13 +1,54 @@
 {
     "pretty_name": "MySQL / MariaDB",
     "labels": {
-        "enabled":  "Habilitado",
-        "threads":  "Hilos",
-        "host":     "Host",
-        "port":     "Puerto",
-        "user":     "Usuario",
-        "password": "Contrase\u00f1a",
-        "db":       "Base de datos",
-        "socket":   "Socket"
-    }
+        "enabled":      "Habilitado",
+        "threads":      "Hilos",
+        "label":        "Etiqueta",
+        "conn_type":    "Tipo de conexión",
+        "host":         "Host",
+        "port":         "Puerto",
+        "user":         "Usuario",
+        "password":     "Contraseña",
+        "db":           "Base de datos",
+        "socket":       "Ruta del socket",
+        "ssh_host":     "Host SSH",
+        "ssh_port":     "Puerto SSH",
+        "ssh_user":     "Usuario SSH",
+        "ssh_password": "Contraseña SSH",
+        "ssh_key":      "Clave privada SSH"
+    },
+    "hints": {
+        "threads":      "Número de bases de datos a comprobar en paralelo.",
+        "label":        "Nombre de visualización opcional que aparece en las notificaciones y el panel en lugar de la clave del ítem.",
+        "conn_type":    "Cómo conectar al servidor MySQL/MariaDB: conexión TCP directa, socket Unix o TCP tunelizado vía SSH.",
+        "host":         "Dirección IP o nombre de host del servidor MySQL. Utilizado en los modos TCP y túnel SSH.",
+        "port":         "Puerto TCP en el que escucha MySQL (por defecto 3306). Utilizado en los modos TCP y túnel SSH.",
+        "user":         "Usuario MySQL para la autenticación.",
+        "password":     "Contraseña MySQL para la autenticación.",
+        "db":           "Nombre de la base de datos a la que conectar.",
+        "socket":       "Ruta completa al archivo de socket Unix (ej. /var/run/mysqld/mysqld.sock). Solo se usa en el modo socket.",
+        "ssh_host":     "Nombre de host o IP del servidor SSH de salto.",
+        "ssh_port":     "Puerto SSH en el servidor de salto (por defecto 22).",
+        "ssh_user":     "Nombre de usuario para la conexión SSH.",
+        "ssh_password": "Contraseña para la conexión SSH. Dejar vacío si se usa un archivo de clave.",
+        "ssh_key":      "Ruta al archivo de clave privada SSH. Tiene prioridad sobre la contraseña SSH si ambos están definidos."
+    },
+    "option_labels": {
+        "conn_type": {
+            "tcp":    "TCP",
+            "socket": "Socket Unix",
+            "ssh":    "Túnel SSH"
+        }
+    },
+    "group_labels": {
+        "connection": "Conexión",
+        "ssh": "Túnel SSH",
+        "server": "Servidor de base de datos"
+    },
+    "action_labels": {
+        "test_ssh":       "Probar SSH",
+        "test_mysql":     "Probar conexión",
+        "list_databases": "Listar bases de datos"
+    },
+    "collections": {"list": "Bases de datos"}
 }

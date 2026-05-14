@@ -13,6 +13,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
 from lib.config import ConfigControl
+from lib import secret_manager
 from .constants import (
     DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS,
     PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
@@ -346,14 +347,27 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         data = request.get_json(silent=True)
         return data if isinstance(data, dict) else {}
 
+    def _get_fernet(self):
+        """Return a cached Fernet instance derived from the Flask secret key."""
+        if not hasattr(self, '_fernet'):
+            self._fernet = secret_manager.fernet_from_secret_file(self._secret_key_path)
+        return self._fernet
+
     def _read_config_file(self, filename: str) -> dict:
-        """Read a JSON configuration file and return its contents."""
+        """Read a JSON configuration file, decrypting sensitive values."""
         cfg = ConfigControl(os.path.join(self._config_dir, filename))
         data = cfg.read()
+        if data:
+            fernet = self._get_fernet()
+            if fernet:
+                secret_manager.decrypt_all(data, fernet)
         return data if data else {}
 
     def _save_config_file(self, filename: str, data: dict) -> bool:
-        """Save *data* to a JSON configuration file."""
+        """Encrypt sensitive values in *data* and save to the config file."""
+        fernet = self._get_fernet()
+        if fernet:
+            data = secret_manager.encrypt_sensitive(data, fernet)
         cfg = ConfigControl(os.path.join(self._config_dir, filename))
         return cfg.save(data)
 

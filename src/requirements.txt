@@ -6,3 +6,4 @@ psutil>=5.9
 flask>=3.0
 werkzeug>=3.0
 pythonping>=1.1.4
+cryptography>=41.0

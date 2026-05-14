@@ -461,11 +461,12 @@ function renderField(key, value, pathStr, target = 'modules') {
                 const label = (_optLbls && _optLbls[o]) ? esc(_optLbls[o]) : esc(o);
                 return `<option value="${escAttr(o)}"${value === o ? ' selected' : ''}>${label}</option>`;
             }).join('');
+            const _itemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
             return `<div class="row mb-2 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
             <div class="col-sm-8 d-flex gap-1 align-items-center">
                 <select class="form-select form-select-sm flex-grow-1"
-                    onchange="updateField(${tg},${sp},this.value)">
+                    onchange="updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})">
                     ${opts}
                 </select>${_resetBtn}
             </div></div>`;
@@ -475,10 +476,42 @@ function renderField(key, value, pathStr, target = 'modules') {
         const _numKbd = (meta && meta.numericString)
             ? ` onkeydown="blockNonNumericKey(event,false)"`
             : '';
+        // input_action: render as Bootstrap input-group with an icon button appended
+        const _ia = meta && meta.input_action && typeof meta.input_action === 'object'
+            ? meta.input_action : null;
+        if (_ia) {
+            const _modName2 = pathStr.split('|')[0];
+            const _modI18n2 = ITEM_SCHEMAS[_modName2 + '|__i18n__'];
+            const _modLd2   = _modI18n2 && (_modI18n2[CURRENT_LANG] || _modI18n2[SYSTEM_DEFAULT_LANG]);
+            const _al2      = (_modLd2 && _modLd2.action_labels) || {};
+            const _iaLabel  = escAttr(_al2[_ia.id] || t(_ia.id) || _ia.id);
+            const _itemPath = escAttr(pathStr.split('|').slice(0, -1).join('|'));
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8 d-flex gap-1 align-items-center">
+                <div class="input-group input-group-sm flex-grow-1">
+                    <input type="${tp}" class="form-control"
+                        data-field-path="${escAttr(pathStr)}"
+                        value="${escAttr(value)}"${_numKbd}
+                        oninput="markDirty(${tg})"
+                        onchange="updateField(${tg},${sp},this.value.trim())">
+                    <button class="btn btn-outline-secondary" type="button"
+                        data-action-path="${_itemPath}"
+                        data-action-url="${escAttr(_ia.url || '')}"
+                        data-action-extra="${escAttr(JSON.stringify(_ia.extra || {}))}"
+                        data-action-result="${escAttr(_ia.result || 'toast')}"
+                        data-action-result-field="${escAttr(_ia.result_field || '')}"
+                        onclick="itemAction(this)"
+                        data-bs-toggle="tooltip" data-bs-placement="top"
+                        title="${_iaLabel}"><i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button>
+                </div>${_resetBtn}
+            </div></div>`;
+        }
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
         <div class="col-sm-8 d-flex gap-1 align-items-center">
             <input type="${tp}" class="form-control form-control-sm flex-grow-1"
+                data-field-path="${escAttr(pathStr)}"
                 value="${escAttr(value)}"${_numKbd}
                 oninput="markDirty(${tg})"
                 onchange="updateField(${tg},${sp},this.value.trim())">${_resetBtn}
@@ -557,20 +590,316 @@ function resetConfigField(pathStr) {
     renderConfig();
 }
 
-/** Render all scalar (non-object) fields of *obj*. */
-function renderScalarFields(obj, pathPrefix, target, exclude = []) {
+/** Render all scalar (non-object) fields of *obj*.
+ *  _postGroupHtml: optional map of groupName → HTML string injected after
+ *  the last field of that group (used to embed action buttons inside a group). */
+function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtml = {}) {
     let h = '';
+    const _sch = ITEM_SCHEMAS[pathPrefix.split('|').slice(0, 2).join('|')] || null;
+
+    // Module i18n for group labels
+    const _modName = pathPrefix.split('|')[0];
+    const _modI18n = ITEM_SCHEMAS[_modName + '|__i18n__'];
+    const _modLd = _modI18n && (_modI18n[CURRENT_LANG] || _modI18n[SYSTEM_DEFAULT_LANG]);
+    const _groupLabels = (_modLd && _modLd.group_labels) || {};
+
+    // __group_when__: explicit show_when for group headers (independent of field show_when)
+    const _groupWhen = (_sch && _sch['__group_when__']) || {};
+
+    // Sort keys: follow schema definition order when available, else enabled-first + alpha
+    const _schemaKeys = _sch
+        ? (_sch['__field_order__'] || Object.keys(_sch).filter(k => !k.startsWith('__')))
+        : null;
     const keys = Object.keys(obj).sort((a, b) => {
+        if (_schemaKeys) {
+            const ai = _schemaKeys.indexOf(a), bi = _schemaKeys.indexOf(b);
+            if (ai !== -1 && bi !== -1) return ai - bi;
+            if (ai !== -1) return -1;
+            if (bi !== -1) return 1;
+        }
         if (a === 'enabled') return -1; if (b === 'enabled') return 1;
         return a.localeCompare(b);
     });
+
+    let _curGroup = null;
     for (const k of keys) {
         if (exclude.includes(k)) continue;
         const v = obj[k];
         if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
-        h += renderField(k, v, pathPrefix + '|' + k, target);
+        const _meta = fieldMeta(_sch, k);
+        const _fhtml = renderField(k, v, pathPrefix + '|' + k, target);
+
+        const _group = _meta && _meta.group ? _meta.group : null;
+        const _showWhen = _meta && _meta.show_when && typeof _meta.show_when === 'object'
+            ? _meta.show_when : null;
+
+        // Detect group transition: inject post-group HTML when leaving a group
+        if (_group !== _curGroup) {
+            if (_curGroup !== null && _postGroupHtml[_curGroup]) {
+                h += _postGroupHtml[_curGroup];
+            }
+
+            // Group header uses __group_when__ for its own visibility (not the field's show_when)
+            if (_group) {
+                const _gWhen = _groupWhen[_group] || null;
+                let _gVisible = true;
+                if (_gWhen) {
+                    for (const [ctrl, allowed] of Object.entries(_gWhen)) {
+                        if (!Array.isArray(allowed) || !allowed.includes(obj[ctrl])) {
+                            _gVisible = false; break;
+                        }
+                    }
+                }
+                const _glabel = esc(_groupLabels[_group] || _group);
+                const _swAttr = _gWhen ? ` data-sw-when="${escAttr(JSON.stringify(_gWhen))}"` : '';
+                const _hdrDisp = _gVisible
+                    ? 'border-bottom:1px solid var(--bs-border-color);margin:.6rem 0 .5rem'
+                    : 'display:none;border-bottom:1px solid var(--bs-border-color);margin:.6rem 0 .5rem';
+                h += `<div class="sw-field"${_swAttr} style="${_hdrDisp}">
+                    <small class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">${_glabel}</small>
+                </div>`;
+            }
+            _curGroup = _group;
+        }
+
+        // Compute initial field visibility from current item data
+        let _visible = true;
+        if (_showWhen) {
+            for (const [ctrl, allowed] of Object.entries(_showWhen)) {
+                if (!Array.isArray(allowed) || !allowed.includes(obj[ctrl])) {
+                    _visible = false; break;
+                }
+            }
+        }
+        const _disp = _visible ? '' : ' style="display:none"';
+
+        if (_showWhen) {
+            h += `<div class="sw-field" data-sw-when="${escAttr(JSON.stringify(_showWhen))}"${_disp}>${_fhtml}</div>`;
+        } else {
+            h += _fhtml;
+        }
+    }
+    // Inject post-group HTML for the final group
+    if (_curGroup !== null && _postGroupHtml[_curGroup]) {
+        h += _postGroupHtml[_curGroup];
     }
     return h;
+}
+
+/**
+ * Show/hide fields wrapped in .sw-field[data-sw-when] inside the item container
+ * identified by itemPathStr. Called when a controlling select changes value and
+ * when the item's collapse panel opens.
+ */
+function _refreshConditionalFields(itemPathStr) {
+    const container = document.querySelector(`[data-sw-item-path="${CSS.escape(itemPathStr)}"]`);
+    if (!container) return;
+    const parts = itemPathStr.split('|');
+    const itemData = getPath(modulesData, parts) || getPath(configData, parts) || {};
+    container.querySelectorAll('.sw-field[data-sw-when]').forEach(el => {
+        try {
+            const cond = JSON.parse(el.dataset.swWhen);
+            let visible = true;
+            for (const [ctrl, allowed] of Object.entries(cond)) {
+                if (!Array.isArray(allowed) || !allowed.includes(itemData[ctrl])) {
+                    visible = false; break;
+                }
+            }
+            // Use removeProperty / setProperty to avoid clobbering other inline styles
+            if (visible) {
+                el.style.removeProperty('display');
+            } else {
+                el.style.setProperty('display', 'none');
+            }
+        } catch {}
+    });
+}
+
+document.addEventListener('show.bs.collapse', function(e) {
+    const p = e.target.dataset.swItemPath;
+    if (p) _refreshConditionalFields(p);
+});
+
+/**
+ * POST the current item config (+ optional extra fields) to a module endpoint
+ * and show the result as a toast. Used by the header test button and inline toast actions.
+ */
+async function testItemConnection(pathStr, url, btn, extra) {
+    const parts = pathStr.split('|');
+    const itemData = Object.assign(
+        {}, getPath(modulesData, parts) || getPath(configData, parts) || {},
+        extra || {});
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`;
+    const result = await apiPost(url, itemData);
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+    if (!result) return;
+    const ok = result.data && result.data.ok;
+    const msg = (result.data && result.data.message) || (ok ? t('connection_ok') : t('connection_error'));
+    showToast(msg, ok ? 'success' : 'danger');
+}
+
+/**
+ * Inline item action dispatcher — reads config from data-* attributes on the button.
+ * result="toast"        → shows a toast
+ * result="list"         → populates the sibling result panel with a badge list
+ * result="field_picker" → opens a picker modal and writes the selected value into data-action-result-field
+ */
+async function itemAction(btn) {
+    const pathStr   = btn.dataset.actionPath;
+    const url       = btn.dataset.actionUrl;
+    const extra     = JSON.parse(btn.dataset.actionExtra  || '{}');
+    const result    = btn.dataset.actionResult || 'toast';
+    const resultId  = btn.dataset.actionResultId;
+    const resultFld = btn.dataset.actionResultField || '';
+
+    const parts = pathStr.split('|');
+    const itemData = Object.assign({}, getPath(modulesData, parts) || getPath(configData, parts) || {}, extra);
+
+    // List result: toggle off if already showing
+    if (result === 'list') {
+        const panel = resultId ? document.getElementById(resultId) : null;
+        if (panel && panel.style.display !== 'none') {
+            panel.style.display = 'none';
+            return;
+        }
+    }
+
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`;
+    const res = await apiPost(url, itemData);
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+    if (!res) return;
+
+    const ok  = res.data && res.data.ok;
+    const msg = (res.data && res.data.message) || (ok ? t('connection_ok') : t('connection_error'));
+
+    if (result === 'list') {
+        const panel = resultId ? document.getElementById(resultId) : null;
+        if (!panel) { showToast(msg, ok ? 'success' : 'danger'); return; }
+        if (!ok) {
+            panel.style.display = 'block';
+            panel.innerHTML = `<div class="alert alert-danger py-1 mb-0 small mt-1">${esc(msg)}</div>`;
+            return;
+        }
+        const items = (res.data.databases || res.data.items || []).map(d => String(d));
+        if (!items.length) {
+            panel.style.display = 'none';
+            showToast(t('no_items') || 'No items', 'secondary');
+            return;
+        }
+        panel.style.display = 'block';
+        panel.innerHTML = `<div class="border rounded px-2 py-1 mt-1" style="background:var(--bs-body-bg)">
+            <div class="d-flex flex-wrap gap-1">
+                ${items.map(d => `<span class="badge bg-secondary bg-opacity-50 text-body" style="font-size:.75rem">${esc(d)}</span>`).join('')}
+            </div></div>`;
+    } else if (result === 'field_picker') {
+        if (!ok) { showToast(msg, 'danger'); return; }
+        const items = (res.data.databases || res.data.items || []).map(d => String(d));
+        if (!items.length) { showToast(t('no_items') || 'No items', 'secondary'); return; }
+        openFieldPickerModal(pathStr + '|' + resultFld, items, btn.textContent.trim());
+    } else {
+        showToast(msg, ok ? 'success' : 'danger');
+    }
+}
+
+/**
+ * Render inline action buttons defined in the collection schema's __actions__ array.
+ * Actions are shown at the bottom of the item body. show_when conditions use the
+ * same .sw-field mechanism as regular fields.
+ */
+function _renderInlineActions(pathStr, actions, itemData) {
+    if (!actions || !actions.length) return '';
+    const _modName = pathStr.split('|')[0];
+    const _modI18n = ITEM_SCHEMAS[_modName + '|__i18n__'];
+    const _modLd   = _modI18n && (_modI18n[CURRENT_LANG] || _modI18n[SYSTEM_DEFAULT_LANG]);
+    const _al      = (_modLd && _modLd.action_labels) || {};
+    const resultId = 'ar-' + uid();
+    let hasListAction = false;
+    let btns = '';
+
+    for (const action of actions) {
+        const label   = esc(_al[action.id] || t(action.id) || action.id);
+        const icon    = action.icon ? `<i class="bi ${escAttr(action.icon)} me-1"></i>` : '';
+        const variant = escAttr(action.variant || 'outline-secondary');
+        const isToast       = !action.result || action.result === 'toast';
+        const isList        = action.result === 'list';
+        const isFieldPicker = action.result === 'field_picker';
+        const isFullWidth   = action.full_width === true;
+        if (isList) hasListAction = true;
+
+        let _visible = true;
+        if (action.show_when) {
+            for (const [ctrl, allowed] of Object.entries(action.show_when)) {
+                if (!Array.isArray(allowed) || !allowed.includes(itemData[ctrl])) {
+                    _visible = false; break;
+                }
+            }
+        }
+        const _hdrDisp = _visible ? '' : 'display:none;';
+        const _wStyle  = isFullWidth ? 'flex-basis:100%;' : 'flex-shrink:0;';
+        const _swAttr  = action.show_when
+            ? ` data-sw-when="${escAttr(JSON.stringify(action.show_when))}"` : '';
+
+        const btn = `<button class="btn btn-sm btn-${variant}${isFullWidth ? ' w-100' : ''}"
+            data-action-path="${escAttr(pathStr)}"
+            data-action-url="${escAttr(action.url)}"
+            data-action-extra="${escAttr(JSON.stringify(action.extra || {}))}"
+            data-action-result="${escAttr(action.result || 'toast')}"
+            ${isList ? `data-action-result-id="${resultId}"` : ''}
+            ${isFieldPicker ? `data-action-result-field="${escAttr(action.result_field || '')}"` : ''}
+            onclick="itemAction(this)">${icon}${label}</button>`;
+
+        btns += `<div class="sw-field"${_swAttr} style="${_hdrDisp}${_wStyle}">${btn}</div>`;
+    }
+
+    return `<div class="d-flex flex-wrap gap-2 mt-2 pt-2" style="border-top:1px solid var(--bs-border-color)">${btns}</div>`
+        + (hasListAction ? `<div id="${resultId}" style="display:none"></div>` : '');
+}
+
+/**
+ * Render a small action-button strip to be injected inside a field group
+ * (via _postGroupHtml in renderScalarFields). No list result panel.
+ */
+function _renderGroupActionBtns(pathStr, actions, itemData) {
+    if (!actions || !actions.length) return '';
+    const _modName = pathStr.split('|')[0];
+    const _modI18n = ITEM_SCHEMAS[_modName + '|__i18n__'];
+    const _modLd   = _modI18n && (_modI18n[CURRENT_LANG] || _modI18n[SYSTEM_DEFAULT_LANG]);
+    const _al      = (_modLd && _modLd.action_labels) || {};
+    let btns = '';
+    for (const action of actions) {
+        const label   = esc(_al[action.id] || t(action.id) || action.id);
+        const icon    = action.icon ? `<i class="bi ${escAttr(action.icon)} me-1"></i>` : '';
+        const variant = escAttr(action.variant || 'outline-secondary');
+        const isFieldPicker = action.result === 'field_picker';
+        const isFullWidth   = action.full_width === true;
+        let _visible = true;
+        if (action.show_when) {
+            for (const [ctrl, allowed] of Object.entries(action.show_when)) {
+                if (!Array.isArray(allowed) || !allowed.includes(itemData[ctrl])) {
+                    _visible = false; break;
+                }
+            }
+        }
+        const _hdrDisp = _visible ? '' : 'display:none;';
+        const _wStyle  = isFullWidth ? 'flex-basis:100%;' : 'flex-shrink:0;';
+        const _swAttr  = action.show_when
+            ? ` data-sw-when="${escAttr(JSON.stringify(action.show_when))}"` : '';
+        const btn = `<button class="btn btn-sm btn-${variant}${isFullWidth ? ' w-100' : ''}"
+            data-action-path="${escAttr(pathStr)}"
+            data-action-url="${escAttr(action.url)}"
+            data-action-extra="${escAttr(JSON.stringify(action.extra || {}))}"
+            data-action-result="${escAttr(action.result || 'toast')}"
+            ${isFieldPicker ? `data-action-result-field="${escAttr(action.result_field || '')}"` : ''}
+            onclick="itemAction(this)">${icon}${label}</button>`;
+        btns += `<div class="sw-field"${_swAttr} style="${_hdrDisp}${_wStyle}">${btn}</div>`;
+    }
+    return `<div class="d-flex flex-wrap gap-2 mt-1" style="padding-top:.3rem;border-top:1px dashed var(--bs-border-color)">${btns}</div>`;
 }
 
 // ──────────────────────────── Collection render ───────────────────
@@ -697,7 +1026,34 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         const keyBadge = (displayName !== itemName)
             ? `<span class="badge bg-secondary bg-opacity-25 ms-2 fw-normal" style="font-size:.68rem">${esc(itemName)}</span>`
             : '';
-        const body = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : []);
+        const _colSchema    = ITEM_SCHEMAS[parentPathStr] || null;
+        const _testUrl      = _colSchema && _colSchema['__test__'] ? _colSchema['__test__'] : null;
+
+        // Split __actions__ into grouped (injected inside their group) and bottom (action strip)
+        const _allActions = (_colSchema && Array.isArray(_colSchema['__actions__'])) ? _colSchema['__actions__'] : [];
+        const _groupedActionMap = {};
+        const _bottomActions = [];
+        for (const a of _allActions) {
+            if (a.group) {
+                (_groupedActionMap[a.group] = _groupedActionMap[a.group] || []).push(a);
+            } else {
+                _bottomActions.push(a);
+            }
+        }
+        const _postGroupHtml = {};
+        for (const [grp, grpActs] of Object.entries(_groupedActionMap)) {
+            _postGroupHtml[grp] = _renderGroupActionBtns(pathStr, grpActs, itemValue);
+        }
+        const _inlineActions = _bottomActions.length
+            ? _renderInlineActions(pathStr, _bottomActions, itemValue)
+            : '';
+        const testBtn = _testUrl
+            ? `<button class="btn btn-sm btn-outline-info py-0 px-1 ms-1" data-no-collapse="1"
+                onclick="event.stopPropagation();testItemConnection(${sp},${jsStr(_testUrl)},this)"
+                title="${escAttr(t('test_connection'))}">
+                <i class="bi bi-plug"></i></button>`
+            : '';
+        const body = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : [], _postGroupHtml);
         const itemOpacity = itemOn ? '' : ';opacity:.6';
         const isAutoExpand = (_autoExpandItemPath === pathStr);
         if (isAutoExpand) _autoExpandItemPath = null;
@@ -706,15 +1062,15 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                  style="background:var(--bs-secondary-bg);cursor:pointer"
                  role="button" onclick="toggleCollapseFromHeader(event,'${id}')">
                 <code class="flex-grow-1 min-w-0" style="font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}${keyBadge}</code>
-                ${sw}${renameBtn}${delBtn}
+                ${sw}${testBtn}${renameBtn}${delBtn}
                 <button class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"
                     aria-label="Toggle details" onclick="event.stopPropagation()">
                     <i class="bi bi-chevron-down text-muted small"></i>
                 </button>
             </div>
-            <div class="collapse${isAutoExpand ? ' show' : ''}" id="${id}">
-                <div class="px-3 py-2" style="border-top:1px solid var(--bs-border-color)">${body}</div>
+            <div class="collapse${isAutoExpand ? ' show' : ''}" id="${id}" data-sw-item-path="${escAttr(pathStr)}">
+                <div class="px-3 py-2" style="border-top:1px solid var(--bs-border-color)">${body}${_inlineActions}</div>
             </div>
         </div>`;
     }

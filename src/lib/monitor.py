@@ -36,6 +36,7 @@ from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
 from lib.object_base import ObjectBase
 from lib.telegram import Telegram
+from lib import secret_manager
 
 __all__ = ['Monitor']
 
@@ -74,14 +75,21 @@ class Monitor(ObjectBase):
     def _read_config(self):
         """ Read the configuration files. """
         if self.dir_config:
+            _secret_file = os.path.join(self.dir_config, '.flask_secret')
+            _fernet = secret_manager.fernet_from_secret_file(_secret_file)
+
             self.config = ConfigControl(os.path.join(self.dir_config, 'config.json'))
             self.config.read()
+            if _fernet:
+                secret_manager.decrypt_all(self.config.data, _fernet)
 
             self.config_monitor = ConfigControl(os.path.join(self.dir_config, 'monitor.json'))
             self.config_monitor.read()
 
             self.config_modules = ConfigControl(os.path.join(self.dir_config, 'modules.json'))
             self.config_modules.read()
+            if _fernet:
+                secret_manager.decrypt_all(self.config_modules.data, _fernet)
         else:
             self.config = ConfigControl(None, {})
             self.config_monitor = ConfigControl(None, {})

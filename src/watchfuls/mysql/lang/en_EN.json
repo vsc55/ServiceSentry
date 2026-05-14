@@ -1,13 +1,54 @@
 {
     "pretty_name": "MySQL / MariaDB",
     "labels": {
-        "enabled":  "Enabled",
-        "threads":  "Threads",
-        "host":     "Host",
-        "port":     "Port",
-        "user":     "User",
-        "password": "Password",
-        "db":       "Database",
-        "socket":   "Socket"
-    }
+        "enabled":      "Enabled",
+        "threads":      "Threads",
+        "label":        "Label",
+        "conn_type":    "Connection type",
+        "host":         "Host",
+        "port":         "Port",
+        "user":         "User",
+        "password":     "Password",
+        "db":           "Database",
+        "socket":       "Socket path",
+        "ssh_host":     "SSH host",
+        "ssh_port":     "SSH port",
+        "ssh_user":     "SSH user",
+        "ssh_password": "SSH password",
+        "ssh_key":      "SSH private key"
+    },
+    "hints": {
+        "threads":      "Number of databases to check in parallel.",
+        "label":        "Optional display name shown in notifications and the dashboard instead of the item key.",
+        "conn_type":    "How to reach the MySQL/MariaDB server: TCP direct connection, Unix socket file, or TCP tunnelled over SSH.",
+        "host":         "IP address or hostname of the MySQL server. Used for TCP and SSH tunnel modes.",
+        "port":         "TCP port MySQL is listening on (default 3306). Used for TCP and SSH tunnel modes.",
+        "user":         "MySQL user for authentication.",
+        "password":     "MySQL password for authentication.",
+        "db":           "Database name to connect to.",
+        "socket":       "Full path to the Unix domain socket file (e.g. /var/run/mysqld/mysqld.sock). Used only in socket mode.",
+        "ssh_host":     "Hostname or IP of the SSH jump server.",
+        "ssh_port":     "SSH port on the jump server (default 22).",
+        "ssh_user":     "Username for the SSH connection.",
+        "ssh_password": "Password for the SSH connection. Leave empty when using a key file.",
+        "ssh_key":      "Path to the SSH private key file. Takes precedence over the SSH password when both are set."
+    },
+    "option_labels": {
+        "conn_type": {
+            "tcp":    "TCP",
+            "socket": "Unix socket",
+            "ssh":    "SSH tunnel"
+        }
+    },
+    "group_labels": {
+        "connection": "Connection",
+        "ssh": "SSH Tunnel",
+        "server": "Database Server"
+    },
+    "action_labels": {
+        "test_ssh":       "Test SSH",
+        "test_mysql":     "Test connection",
+        "list_databases": "List databases"
+    },
+    "collections": {"list": "Databases"}
 }

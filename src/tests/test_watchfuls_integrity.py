@@ -312,7 +312,7 @@ class TestDiscoverSchemasRealModules:
         ]
         for sk in schema_keys:
             for field_key, field_meta in self.schemas[sk].items():
-                if not isinstance(field_meta, dict):
+                if field_key.startswith('__') or not isinstance(field_meta, dict):
                     continue
                 assert "label_i18n" in field_meta, (
                     f"{sk}['{field_key}'] missing 'label_i18n' "

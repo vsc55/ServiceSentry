@@ -362,6 +362,65 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// ──────────────────────────── Field value picker ───────────────────
+let _fpFieldPathStr = null;
+let _fpItems        = null;
+
+function openFieldPickerModal(fieldPathStr, items, title) {
+    _fpFieldPathStr = fieldPathStr;
+    _fpItems = items;
+    const titleEl = document.getElementById('fieldPickerModalTitle');
+    if (titleEl) titleEl.textContent = title || '';
+    const filterEl = document.getElementById('fieldPickerFilter');
+    if (filterEl) filterEl.value = '';
+    _renderFieldPickerList();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fieldPickerModal')).show();
+}
+
+function _renderFieldPickerList() {
+    const body = document.getElementById('fieldPickerModalBody');
+    if (!body || !_fpItems) return;
+    const filter = (document.getElementById('fieldPickerFilter')?.value || '').toLowerCase();
+    const filtered = _fpItems.filter(s => !filter || s.toLowerCase().includes(filter));
+    if (!filtered.length) {
+        body.innerHTML = `<div class="text-center py-4 text-muted">${esc(t('no_items'))}</div>`;
+        return;
+    }
+    const currentVal = (_fpFieldPathStr
+        ? (getPath(modulesData, _fpFieldPathStr.split('|')) || '')
+        : '').trim().toLowerCase();
+    let h = '<div class="d-flex flex-column gap-1">';
+    for (const item of filtered) {
+        const isSelected = currentVal && item.toLowerCase() === currentVal;
+        h += `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border${isSelected ? ' border-primary' : ''}"
+                   style="background:var(--bs-body-bg);cursor:pointer"
+                   onclick="_pickFieldValue(${jsStr(item)})">
+            <i class="bi bi-database flex-shrink-0 ${isSelected ? 'text-primary' : 'text-secondary'}" style="font-size:.9rem"></i>
+            <code class="flex-grow-1 text-truncate" style="font-size:.82rem">${esc(item)}</code>
+            ${isSelected
+                ? `<span class="badge bg-primary flex-shrink-0" style="font-size:.65rem">${esc(t('selected') || 'Selected')}</span>`
+                : `<i class="bi bi-arrow-right-circle text-success flex-shrink-0"></i>`}
+        </div>`;
+    }
+    h += '</div>';
+    body.innerHTML = h;
+}
+
+function _pickFieldValue(value) {
+    if (!_fpFieldPathStr) return;
+    updateField('modules', _fpFieldPathStr, value);
+    const inp = document.querySelector(`input[data-field-path="${CSS.escape(_fpFieldPathStr)}"]`);
+    if (inp) inp.value = value;
+    bootstrap.Modal.getInstance(document.getElementById('fieldPickerModal'))?.hide();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('fieldPickerFilter')?.addEventListener('input', _renderFieldPickerList);
+    document.getElementById('fieldPickerModal')?.addEventListener('shown.bs.modal', () => {
+        document.getElementById('fieldPickerFilter')?.focus();
+    });
+});
+
 function renderModuleBody(name, cfg) {
 // pretty_name field (always first, with placeholder)
 const pn = cfg.pretty_name || '';
