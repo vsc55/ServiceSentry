@@ -1,13 +1,16 @@
 {
     "__module__": {
         "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int", "default": 5,  "min": 1, "max": 100}
+        "threads": {"type": "int", "default": 5,   "min": 1, "max": 100},
+        "code":    {"type": "int", "default": 200,  "min": 1, "max": 9999},
+        "timeout": {"type": "int", "default": 15,   "min": 1, "max": 300}
     },
     "list": {
-        "enabled": {"type": "bool", "default": true},
-        "label":   {"type": "str",  "default": ""},
-        "url":     {"type": "str",  "default": ""},
-        "code":    {"type": "int",  "default": 200, "min": 1,  "max": 9999},
-        "timeout": {"type": "int",  "default": 15,  "min": 1,  "max": 300}
+        "enabled":    {"type": "bool", "default": true},
+        "scheme":     {"type": "str",  "default": "https", "options": ["http", "https"]},
+        "url":        {"type": "str",  "default": "", "placeholder": "__key__"},
+        "code":       {"type": "int",  "default": 0, "min": 0, "max": 9999, "placeholder_module": "code"},
+        "timeout":    {"type": "int",  "default": 0, "min": 0, "max": 300,  "placeholder_module": "timeout"},
+        "verify_ssl": {"type": "bool", "default": true, "show_when": {"scheme": ["https"]}}
     }
 }

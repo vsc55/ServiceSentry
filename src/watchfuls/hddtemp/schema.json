@@ -8,7 +8,7 @@
     "list": {
         "enabled": {"type": "bool", "default": true},
         "host":    {"type": "str",  "default": ""},
-        "port":    {"type": "int",  "default": 7634, "min": 1, "max": 65535},
+        "port":    {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 7634},
         "exclude": {"type": "list", "default": []}
     }
 }

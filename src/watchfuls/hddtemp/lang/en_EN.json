@@ -18,5 +18,7 @@
         "exclude": "List of device paths to ignore, e.g. [\"/dev/sdc\"]. Useful to skip unreliable or unmonitored drives.",
         "enabled": "Enable or disable monitoring for this host."
     },
+    "new_item_key_label": "Host name or identifier:",
+    "rename_item_prompt": "Enter new host name or identifier:",
     "collections": {"list": "Hosts"}
 }

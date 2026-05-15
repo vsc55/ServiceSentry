@@ -53,7 +53,11 @@ let _serverConfigData = null; // snapshot from last server load/save
 let _savedModulesData = null; // snapshot from last modules load/save
 const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
 const ALL_PERMISSIONS = {{ permissions_list | tojson }};
-const ITEM_SCHEMAS = {{ item_schemas | default({}) | tojson }};
+const _rawItemSchemas = {{ item_schemas | default({}) | tojson }};
+const ITEM_SCHEMAS = Object.fromEntries([
+    ...Object.entries(_rawItemSchemas),
+    ...Object.entries(_rawItemSchemas).map(([k, v]) => [`watchfuls.${k}`, v])
+]);
 const HINTS = I18N.hints || {};
 
 /**
@@ -362,8 +366,18 @@ function renderField(key, value, pathStr, target = 'modules') {
     const schema = schemaFor(pathStr.split('|').slice(0, 2).join('|') + '|_');
     // schemaFor needs "module|collection|..." — but we can also look it up directly
     const parentKey = pathStr.split('|').slice(0, 2).join('|');
-    const sch = ITEM_SCHEMAS[parentKey] || null;
+    const sch = ITEM_SCHEMAS[parentKey] || ITEM_SCHEMAS[pathStr.split('|')[0] + '|__module__'] || null;
     const meta = fieldMeta(sch, key) || (configSchema[pathStr] || null);
+
+    if (meta && meta.__unsupported__) {
+        return `<div class="row mb-2 align-items-center opacity-50">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8">
+            <span class="badge bg-secondary bg-opacity-75" style="font-size:.75rem">
+                <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
+            </span>
+        </div></div>`;
+    }
 
     // Per-field reset button — only in config tab and only when a default is defined
     const _resetBtn = target === 'config' && (pathStr in CONFIG_FIELD_DEFAULTS)
@@ -407,11 +421,35 @@ function renderField(key, value, pathStr, target = 'modules') {
         const _onkeydown = isFloat
             ? `onkeydown="blockNonNumericKey(event,true)"`
             : `onkeydown="blockNonNumericKey(event,false)"`;
+        // placeholder_map / placeholder: show blank for 0 and use "use default" semantics.
+        let displayValue = value;
+        let extraAttrs = '';
+        if (meta && meta.placeholder_map) {
+            const _itemParts = pathStr.split('|').slice(0, -1);
+            const _itemData = getPath(modulesData, _itemParts) || getPath(configData, _itemParts) || {};
+            const _sibVal = _itemData['db_type'] || '';
+            const _ph = meta.placeholder_map[_sibVal];
+            if (_ph != null) extraAttrs += ` placeholder="${escAttr(String(_ph))}"`;
+            extraAttrs += ` data-placeholder-map="${escAttr(JSON.stringify(meta.placeholder_map))}"`;
+            extraAttrs += ` data-zero-as-blank="1"`;
+            if (value === 0) displayValue = '';
+        } else if (meta && meta.placeholder != null) {
+            extraAttrs += ` placeholder="${escAttr(String(meta.placeholder))}"`;
+            extraAttrs += ` data-zero-as-blank="1"`;
+            if (value === 0) displayValue = '';
+        } else if (meta && meta.placeholder_module != null) {
+            const _modName = pathStr.split('|')[0];
+            const _modPh = (modulesData[_modName] || {})[meta.placeholder_module];
+            if (_modPh != null && _modPh !== 0) extraAttrs += ` placeholder="${escAttr(String(_modPh))}"`;
+            extraAttrs += ` data-placeholder-module="${escAttr(String(meta.placeholder_module))}"`;
+            extraAttrs += ` data-zero-as-blank="1"`;
+            if (value === 0) displayValue = '';
+        }
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
         <div class="col-sm-8 d-flex gap-1 align-items-center">
             <input type="number" class="form-control form-control-sm flex-grow-1"
-                value="${value}"${minA}${maxA}${stepA}
+                value="${displayValue}"${minA}${maxA}${stepA}${extraAttrs}
                 ${_onkeydown}
                 oninput="markDirty(${tg})"
                 onchange="validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})">${_resetBtn}
@@ -476,6 +514,41 @@ function renderField(key, value, pathStr, target = 'modules') {
         const _numKbd = (meta && meta.numericString)
             ? ` onkeydown="blockNonNumericKey(event,false)"`
             : '';
+        // placeholder for string inputs (not applied to sensitive/password fields):
+        //   'label' field → item key; schema placeholder='__key__' → item key; schema placeholder → static text
+        let _strPh = '';
+        if (!isSensitive) {
+            const _phParts = pathStr.split('|');
+            const _itemKey = _phParts.length >= 4 ? _phParts[_phParts.length - 2] : '';
+            if (key === 'label' && _itemKey) {
+                _strPh = ` placeholder="${escAttr(_itemKey)}"`;
+            } else if (meta && meta.placeholder != null) {
+                const _phRaw = String(meta.placeholder);
+                _strPh = ` placeholder="${escAttr(_phRaw === '__key__' && _itemKey ? _itemKey : _phRaw)}"`;
+            }
+        }
+        const _strPhCls = _strPh ? ' item-key-ph' : '';
+        // Inline discover button for __discovery_field__ string fields
+        const _discoverFieldUrl = (sch && sch['__discovery_field__'] === key && sch['__discovery__'])
+            ? sch['__discovery__'] : null;
+        if (_discoverFieldUrl) {
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8 d-flex gap-1 align-items-center">
+                <div class="input-group input-group-sm flex-grow-1">
+                    <input type="${tp}" class="form-control${_strPhCls}"
+                        data-field-path="${escAttr(pathStr)}"
+                        value="${escAttr(value)}"${_numKbd}${_strPh}
+                        oninput="markDirty(${tg})"
+                        onchange="updateField(${tg},${sp},this.value.trim())">
+                    <button class="btn btn-outline-secondary" type="button"
+                        title="${escAttr(t('discover') || 'Discover')}"
+                        onclick="openDiscoverModalForField(${sp},${jsStr(_discoverFieldUrl)})">
+                        <i class="bi bi-search"></i>
+                    </button>
+                </div>${_resetBtn}
+            </div></div>`;
+        }
         // input_action: render as Bootstrap input-group with an icon button appended
         const _ia = meta && meta.input_action && typeof meta.input_action === 'object'
             ? meta.input_action : null;
@@ -490,9 +563,9 @@ function renderField(key, value, pathStr, target = 'modules') {
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
             <div class="col-sm-8 d-flex gap-1 align-items-center">
                 <div class="input-group input-group-sm flex-grow-1">
-                    <input type="${tp}" class="form-control"
+                    <input type="${tp}" class="form-control${_strPhCls}"
                         data-field-path="${escAttr(pathStr)}"
-                        value="${escAttr(value)}"${_numKbd}
+                        value="${escAttr(value)}"${_numKbd}${_strPh}
                         oninput="markDirty(${tg})"
                         onchange="updateField(${tg},${sp},this.value.trim())">
                     <button class="btn btn-outline-secondary" type="button"
@@ -510,9 +583,9 @@ function renderField(key, value, pathStr, target = 'modules') {
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
         <div class="col-sm-8 d-flex gap-1 align-items-center">
-            <input type="${tp}" class="form-control form-control-sm flex-grow-1"
+            <input type="${tp}" class="form-control form-control-sm flex-grow-1${_strPhCls}"
                 data-field-path="${escAttr(pathStr)}"
-                value="${escAttr(value)}"${_numKbd}
+                value="${escAttr(value)}"${_numKbd}${_strPh}
                 oninput="markDirty(${tg})"
                 onchange="updateField(${tg},${sp},this.value.trim())">${_resetBtn}
         </div></div>`;
@@ -568,15 +641,23 @@ function blockNonNumericKey(event, allowFloat) {
 function validateAndUpdateNumber(el, target, pathStr, min, max) {
     const raw = el.value;
     const v = parseInt(raw, 10);
+    const hasZeroAsBlank = el.hasAttribute('data-zero-as-blank');
     if (raw === '' || isNaN(v)) {
-        const parts = pathStr.split('|');
-        let cur = target === 'config' ? configData : modulesData;
-        for (const p of parts) cur = (cur != null) ? cur[p] : null;
-        el.value = (typeof cur === 'number') ? cur : (min ?? 0);
+        if (hasZeroAsBlank) {
+            // Blank means "use default" — store 0, keep display blank.
+            el.value = '';
+            updateField(target, pathStr, min ?? 0);
+        } else {
+            const parts = pathStr.split('|');
+            let cur = target === 'config' ? configData : modulesData;
+            for (const p of parts) cur = (cur != null) ? cur[p] : null;
+            el.value = (typeof cur === 'number') ? cur : (min ?? 0);
+        }
         return;
     }
     const clamped = (min != null && v < min) ? min : (max != null && v > max) ? max : v;
-    el.value = clamped;
+    // Show blank when clamped to 0 and this field treats 0 as "use default".
+    el.value = (clamped === 0 && hasZeroAsBlank) ? '' : clamped;
     updateField(target, pathStr, clamped);
 }
 
@@ -595,7 +676,8 @@ function resetConfigField(pathStr) {
  *  the last field of that group (used to embed action buttons inside a group). */
 function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtml = {}) {
     let h = '';
-    const _sch = ITEM_SCHEMAS[pathPrefix.split('|').slice(0, 2).join('|')] || null;
+    const _sch = ITEM_SCHEMAS[pathPrefix.split('|').slice(0, 2).join('|')]
+        || ITEM_SCHEMAS[pathPrefix.split('|')[0] + '|__module__'] || null;
 
     // Module i18n for group labels
     const _modName = pathPrefix.split('|')[0];
@@ -610,7 +692,7 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     const _schemaKeys = _sch
         ? (_sch['__field_order__'] || Object.keys(_sch).filter(k => !k.startsWith('__')))
         : null;
-    const keys = Object.keys(obj).sort((a, b) => {
+    const keys = (_schemaKeys ? Object.keys(obj).filter(k => _schemaKeys.includes(k)) : Object.keys(obj)).sort((a, b) => {
         if (_schemaKeys) {
             const ai = _schemaKeys.indexOf(a), bi = _schemaKeys.indexOf(b);
             if (ai !== -1 && bi !== -1) return ai - bi;
@@ -711,6 +793,23 @@ function _refreshConditionalFields(itemPathStr) {
             } else {
                 el.style.setProperty('display', 'none');
             }
+        } catch {}
+    });
+    // Update placeholder for inputs with a placeholder_map (e.g. port depends on db_type).
+    container.querySelectorAll('input[data-placeholder-map]').forEach(el => {
+        try {
+            const map = JSON.parse(el.dataset.placeholderMap);
+            const ph = map[itemData['db_type'] || ''];
+            el.placeholder = ph != null ? String(ph) : '';
+        } catch {}
+    });
+    // Update placeholder for inputs that inherit a module-level field value.
+    container.querySelectorAll('input[data-placeholder-module]').forEach(el => {
+        try {
+            const modField = el.dataset.placeholderModule;
+            const modName = (container.dataset.swItemPath || '').split('|')[0];
+            const ph = modName ? (modulesData[modName] || {})[modField] : null;
+            el.placeholder = (ph != null && ph !== 0) ? String(ph) : '';
         } catch {}
     });
 }
@@ -950,11 +1049,13 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     onclick="event.stopPropagation();removeItem(${tg},${pp},${nameEsc})">
     <i class="bi bi-trash3"></i></button>`;
 
-    // Rename (key edit) button
-    const renameBtn = `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" data-no-collapse="1"
-    onclick="event.stopPropagation();renameItem(${tg},${pp},${nameEsc})"
-    title="${esc(t('rename_item'))}">
-    <i class="bi bi-pencil-square"></i></button>`;
+    // Rename (key edit) button — hidden when schema uses __key_mirrors_field__
+    const _renameSch = ITEM_SCHEMAS[parentPathStr] || null;
+    const renameBtn = (_renameSch && _renameSch['__key_mirrors_field__']) ? '' :
+        `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" data-no-collapse="1"
+        onclick="event.stopPropagation();renameItem(${tg},${pp},${nameEsc})"
+        title="${esc(t('rename_item'))}">
+        <i class="bi bi-pencil-square"></i></button>`;
 
     // --- promote boolean/number → dict when a schema exists ---
     const schema = schemaFor(parentPathStr);

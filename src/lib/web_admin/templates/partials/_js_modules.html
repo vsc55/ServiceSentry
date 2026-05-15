@@ -124,6 +124,7 @@ function renderModules() {
 function _discoveredModuleNames() {
     const names = new Set();
     for (const key of Object.keys(ITEM_SCHEMAS)) {
+        if (key.startsWith('watchfuls.')) continue;  // skip watchfuls.-prefixed aliases
         const sep = key.indexOf('|');
         if (sep < 0) continue;
         const col = key.slice(sep + 1);
@@ -247,10 +248,12 @@ function _modUiStr(modName, key, fallback) {
     return fallback;
 }
 
-let _discoverServices = null;
-let _discoverPathStr  = null;
+let _discoverServices    = null;
+let _discoverPathStr     = null;
+let _discoverFieldPathStr = null;
 
 async function openDiscoverModal(pathStr, url) {
+    _discoverFieldPathStr = null;
     _discoverPathStr = pathStr;
     _discoverServices = null;
 
@@ -265,6 +268,27 @@ async function openDiscoverModal(pathStr, url) {
 
     bootstrap.Modal.getOrCreateInstance(document.getElementById('discoverModal')).show();
 
+    const data = await apiGet(url);
+    if (!Array.isArray(data)) {
+        if (body) body.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${esc(_modUiStr(modName, 'discover_error', t('error') || '?'))}</div>`;
+        return;
+    }
+    _discoverServices = data;
+    _renderDiscoverList();
+}
+
+async function openDiscoverModalForField(fieldPathStr, url) {
+    _discoverFieldPathStr = fieldPathStr;
+    _discoverPathStr = fieldPathStr.split('|').slice(0, 2).join('|');
+    _discoverServices = null;
+    const modName = fieldPathStr.split('|')[0];
+    const titleEl = document.getElementById('discoverModalTitle');
+    if (titleEl) titleEl.textContent = _modUiStr(modName, 'discover_title', t('discover') || 'Discover');
+    const body = document.getElementById('discoverModalBody');
+    if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    const filterEl = document.getElementById('discoverFilter');
+    if (filterEl) filterEl.value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('discoverModal')).show();
     const data = await apiGet(url);
     if (!Array.isArray(data)) {
         if (body) body.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${esc(_modUiStr(modName, 'discover_error', t('error') || '?'))}</div>`;
@@ -304,21 +328,39 @@ function _renderDiscoverList() {
         return;
     }
 
+    const _fieldMode = !!_discoverFieldPathStr;
+    let _currentFieldVal = '';
+    if (_fieldMode) {
+        const _fVal = getPath(modulesData, _discoverFieldPathStr.split('|'));
+        _currentFieldVal = (typeof _fVal === 'string' ? _fVal : '').trim().toLowerCase();
+    }
+
     let h = '<div class="d-flex flex-column gap-1">';
     for (const svc of filtered) {
-        const isAdded = configured.has((svc.name || '').toLowerCase());
+        const _svcName   = svc.name || '';
+        const _svcLower  = _svcName.toLowerCase();
+        const isAdded    = _fieldMode
+            ? (configured.has(_svcLower) && _svcLower !== _currentFieldVal)
+            : configured.has(_svcLower);
+        const _isCurrent = _fieldMode && _svcLower === _currentFieldVal;
         const statusColor = svc.status === 'running' ? '#22c55e' : (svc.status === 'stopped' ? '#ef4444' : 'var(--bs-secondary-color)');
         const statusIcon  = svc.status === 'running' ? 'bi-check-circle-fill' : (svc.status === 'stopped' ? 'bi-stop-circle-fill' : 'bi-circle');
+        const _clickAttr  = isAdded ? '' : (_fieldMode
+            ? `onclick="_selectDiscoveredServiceForField(${jsStr(_svcName)})"`
+            : `onclick="_addDiscoveredService(${jsStr(_svcName)})"`);
+        const _trailIcon  = isAdded
+            ? `<span class="badge bg-secondary flex-shrink-0" style="font-size:.65rem">${esc(t('already_added'))}</span>`
+            : _isCurrent
+                ? `<i class="bi bi-check-circle-fill text-success flex-shrink-0"></i>`
+                : `<i class="bi ${_fieldMode ? 'bi-circle text-muted opacity-50' : 'bi-plus-circle text-success'} flex-shrink-0"></i>`;
         h += `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border${isAdded ? ' opacity-50' : ''}"
                    style="background:var(--bs-body-bg)${isAdded ? '' : ';cursor:pointer'}"
-                   ${isAdded ? '' : `onclick="_addDiscoveredService(${jsStr(svc.name)})"`}>
+                   ${_clickAttr}>
             <i class="bi ${statusIcon} flex-shrink-0" style="color:${statusColor};font-size:.9rem"></i>
             <code class="flex-grow-1 text-truncate" style="font-size:.82rem" title="${escAttr(svc.display_name || svc.name)}">${esc(svc.name)}</code>
             ${svc.display_name ? `<span class="text-muted text-truncate" style="font-size:.78rem;max-width:200px">${esc(svc.display_name)}</span>` : ''}
             <span class="badge rounded-pill flex-shrink-0" style="font-size:.65rem;background:var(--bs-secondary-bg);color:var(--bs-secondary-color)">${esc(svc.status || '?')}</span>
-            ${isAdded
-                ? `<span class="badge bg-secondary flex-shrink-0" style="font-size:.65rem">${esc(t('already_added'))}</span>`
-                : `<i class="bi bi-plus-circle text-success flex-shrink-0"></i>`}
+            ${_trailIcon}
         </div>`;
     }
     h += '</div>';
@@ -353,6 +395,53 @@ function _addDiscoveredService(serviceName) {
     renderModules();
     showToast(_modUiStr(parts[0], 'item_added', serviceName).replace('{}', serviceName));
     _renderDiscoverList();
+}
+
+function _selectDiscoveredServiceForField(serviceName) {
+    if (!_discoverFieldPathStr) return;
+    const parts = _discoverFieldPathStr.split('|');
+    const target = parts[0] in modulesData ? 'modules' : 'config';
+
+    // If __key_mirrors_field__ matches this field, rename the item key too
+    const _colPathStr = parts.slice(0, 2).join('|');
+    const _colSch = ITEM_SCHEMAS[_colPathStr] || null;
+    const _mirrorField = _colSch && _colSch['__key_mirrors_field__'];
+    const _fieldKey = parts[parts.length - 1];
+
+    if (_mirrorField && _mirrorField === _fieldKey) {
+        const _oldKey        = parts[parts.length - 2];
+        const _collParts     = parts.slice(0, -2);
+        const _data          = target === 'modules' ? modulesData : configData;
+        const _collection    = getPath(_data, _collParts);
+        if (_collection && typeof _collection === 'object' && _oldKey in _collection && _oldKey !== serviceName) {
+            const _taken = new Set(Object.keys(_collection).filter(k => k !== _oldKey).map(k => k.toLowerCase()));
+            if (!_taken.has(serviceName.toLowerCase())) {
+                // Rename key and update field value in one step
+                const _entries = Object.entries(_collection);
+                const _idx = _entries.findIndex(([k]) => k === _oldKey);
+                const _itemVal = _entries[_idx][1];
+                _itemVal[_mirrorField] = serviceName;
+                for (const k of Object.keys(_collection)) delete _collection[k];
+                for (let i = 0; i < _entries.length; i++) {
+                    _collection[i === _idx ? serviceName : _entries[i][0]] = (i === _idx ? _itemVal : _entries[i][1]);
+                }
+                markDirty(target);
+                bootstrap.Modal.getInstance(document.getElementById('discoverModal'))?.hide();
+                _discoverFieldPathStr = null;
+                _autoExpandItemPath = _collParts.join('|') + '|' + serviceName;
+                _pendingExpandMods.add(parts[0]);
+                renderModules();
+                return;
+            }
+        }
+    }
+
+    // Default: update field value only
+    updateField(target, _discoverFieldPathStr, serviceName);
+    const inp = document.querySelector(`input[data-field-path="${CSS.escape(_discoverFieldPathStr)}"]`);
+    if (inp) inp.value = serviceName;
+    bootstrap.Modal.getInstance(document.getElementById('discoverModal'))?.hide();
+    _discoverFieldPathStr = null;
 }
 
 document.addEventListener('DOMContentLoaded', () => {

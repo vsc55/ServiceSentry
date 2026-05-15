@@ -395,7 +395,7 @@ class TestDefaults:
 
     def test_schema_has_all_fields(self):
         from watchfuls.ping import Watchful
-        expected = {'enabled', 'label', 'host', 'timeout', 'attempt', 'alert'}
+        expected = {'enabled', 'host', 'timeout', 'attempt', 'alert'}
         assert set(Watchful.ITEM_SCHEMA['list'].keys()) == expected
 
     def test_schema_has_type_metadata(self):
@@ -409,10 +409,18 @@ class TestDefaults:
         from watchfuls.ping import Watchful
         d = Watchful._DEFAULTS
         assert d['enabled'] is True
-        assert d['timeout'] == 5
-        assert d['attempt'] == 3
-        assert d['alert'] == 1
+        # 0 means "inherit from module-level setting"; module defaults are in _MODULE_DEFAULTS
+        assert d['timeout'] == 0
+        assert d['attempt'] == 0
+        assert d['alert'] == 0
         assert d['host'] == ''
+
+    def test_module_default_values(self):
+        from watchfuls.ping import Watchful
+        md = Watchful._MODULE_DEFAULTS
+        assert md['timeout'] == 5
+        assert md['attempt'] == 3
+        assert md['alert'] == 1
 
     def test_no_legacy_default_attributes(self):
         """_default_attempt / _default_timeout / _default_enabled removed."""

@@ -8,10 +8,9 @@
     },
     "list": {
         "enabled": {"type": "bool", "default": true},
-        "label":   {"type": "str",  "default": ""},
-        "host":    {"type": "str",  "default": ""},
-        "timeout": {"type": "int",  "default": 5, "min": 1, "max": 300},
-        "attempt": {"type": "int",  "default": 3, "min": 1, "max": 50},
-        "alert":   {"type": "int",  "default": 1, "min": 1, "max": 100}
+        "host":    {"type": "str",  "default": "", "placeholder": "__key__"},
+        "timeout": {"type": "int",  "default": 0, "min": 0, "max": 300, "placeholder_module": "timeout"},
+        "attempt": {"type": "int",  "default": 0, "min": 0, "max": 50,  "placeholder_module": "attempt"},
+        "alert":   {"type": "int",  "default": 0, "min": 0, "max": 100, "placeholder_module": "alert"}
     }
 }

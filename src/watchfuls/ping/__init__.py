@@ -59,6 +59,10 @@ class Watchful(ModuleBase):
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
                  if isinstance(v, dict) and 'default' in v}
 
+    # Module-level fallbacks: used when item value is 0 and module config is also absent.
+    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
+                        if isinstance(v, dict) and 'default' in v}
+
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
         # Consecutive failure counter per host (not persisted).
@@ -124,9 +128,9 @@ class Watchful(ModuleBase):
         return self.dict_return
 
     def _ping_check(self, name, host):
-        t_alert = self.get_conf_in_list("alert", name, self.get_conf('alert', self._DEFAULTS['alert']))
-        t_timeout = self.get_conf_in_list("timeout", name, self.get_conf('timeout', self._DEFAULTS['timeout']))
-        t_attempt = self.get_conf_in_list("attempt", name, self.get_conf('attempt', self._DEFAULTS['attempt']))
+        t_alert   = self.get_conf_in_list("alert",   name, 0) or self.get_conf('alert',   self._MODULE_DEFAULTS['alert'])
+        t_timeout = self.get_conf_in_list("timeout", name, 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+        t_attempt = self.get_conf_in_list("attempt", name, 0) or self.get_conf('attempt', self._MODULE_DEFAULTS['attempt'])
 
         # TODO: Pending implemantation latency measurement and reporting in other_data. pylint: disable=fixme
         ping_ok = self._ping_return(host, t_timeout, t_attempt)

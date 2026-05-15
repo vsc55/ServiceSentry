@@ -67,7 +67,7 @@ class Watchful(ModuleBase):
                 else:
                     new_hddtemp = self.Hddtemp_Info(key)
                     new_hddtemp.host = value.get("host")
-                    new_hddtemp.port = value.get("port", self._DEFAULTS['port'])
+                    new_hddtemp.port = value.get("port") or self._DEFAULTS['port']
                     new_hddtemp.alert = self.get_conf('alert', self._DEFAULT_ALERT)
                     new_hddtemp.exclude = value.get("exclude", [])
                     return_list.append(new_hddtemp)

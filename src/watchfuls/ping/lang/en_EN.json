@@ -18,5 +18,7 @@
         "alert":   "Number of consecutive failures before triggering an alert. Per-host value overrides the module-level default.",
         "threads": "Number of hosts to ping in parallel."
     },
+    "new_item_key_label": "Host name or identifier:",
+    "rename_item_prompt": "Enter new host name or identifier:",
     "collections": {"list": "Hosts"}
 }

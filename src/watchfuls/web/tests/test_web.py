@@ -323,3 +323,124 @@ class TestWebUrl:
             result = w.check()
             msg = result.list['Blog']['message']
             assert 'Blog' in msg
+
+
+class TestWebScheme:
+    """Tests for scheme and verify_ssl fields."""
+
+    def setup_method(self):
+        from watchfuls.web import Watchful
+        self.Watchful = Watchful
+
+    def test_scheme_http_prepended_when_no_scheme_in_url(self):
+        """When scheme='http', URLs without scheme get http:// prepended."""
+        w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch('urllib.request.urlopen', return_value=mock_resp) as mock_open:
+            w._web_return('example.com', scheme='http')
+            req = mock_open.call_args[0][0]
+            assert req.full_url.startswith('http://')
+
+    def test_scheme_default_is_https(self):
+        """Without explicit scheme, URLs without :// get https://."""
+        w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch('urllib.request.urlopen', return_value=mock_resp) as mock_open:
+            w._web_return('example.com')
+            req = mock_open.call_args[0][0]
+            assert req.full_url.startswith('https://')
+
+    def test_explicit_scheme_in_url_overrides_scheme_param(self):
+        """A URL that already contains :// is used as-is regardless of scheme param."""
+        w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch('urllib.request.urlopen', return_value=mock_resp) as mock_open:
+            w._web_return('http://example.com', scheme='https')
+            req = mock_open.call_args[0][0]
+            assert req.full_url.startswith('http://')
+
+    def test_verify_ssl_false_passes_ssl_context(self):
+        """verify_ssl=False passes an SSL context that skips verification."""
+        import ssl as ssl_mod
+        w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch('urllib.request.urlopen', return_value=mock_resp) as mock_open:
+            w._web_return('https://example.com', verify_ssl=False)
+            kwargs = mock_open.call_args[1]
+            ctx = kwargs.get('context')
+            assert ctx is not None
+            assert isinstance(ctx, ssl_mod.SSLContext)
+            assert ctx.verify_mode == ssl_mod.CERT_NONE
+
+    def test_verify_ssl_true_does_not_pass_context(self):
+        """verify_ssl=True (default) does not pass a custom SSL context."""
+        w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch('urllib.request.urlopen', return_value=mock_resp) as mock_open:
+            w._web_return('https://example.com', verify_ssl=True)
+            kwargs = mock_open.call_args[1]
+            assert 'context' not in kwargs
+
+    def test_verify_ssl_false_not_applied_to_http(self):
+        """verify_ssl=False has no effect for plain http:// URLs."""
+        w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch('urllib.request.urlopen', return_value=mock_resp) as mock_open:
+            w._web_return('http://example.com', verify_ssl=False)
+            kwargs = mock_open.call_args[1]
+            assert 'context' not in kwargs
+
+    def test_scheme_field_read_from_config(self):
+        """scheme field in item config is passed to _web_return."""
+        config = {
+            'watchfuls.web': {
+                'list': {'my-site': {'enabled': True, 'url': 'example.com', 'scheme': 'http'}}
+            }
+        }
+        w = self.Watchful(create_mock_monitor(config))
+        with patch.object(w, '_web_return', return_value=200) as mock_ret:
+            w.check()
+            _, _, _, scheme = mock_ret.call_args[0]
+            assert scheme == 'http'
+
+    def test_verify_ssl_field_read_from_config(self):
+        """verify_ssl=False in item config is passed to _web_return."""
+        config = {
+            'watchfuls.web': {
+                'list': {'my-site': {'enabled': True, 'url': 'example.com', 'verify_ssl': False}}
+            }
+        }
+        w = self.Watchful(create_mock_monitor(config))
+        with patch.object(w, '_web_return', return_value=200) as mock_ret:
+            w.check()
+            _, _, verify_ssl, _ = mock_ret.call_args[0]
+            assert verify_ssl is False
+
+    def test_schema_has_scheme_and_verify_ssl(self):
+        """Schema declares scheme and verify_ssl fields."""
+        from watchfuls.web import Watchful
+        schema = Watchful.ITEM_SCHEMA['list']
+        assert 'scheme' in schema
+        assert schema['scheme']['default'] == 'https'
+        assert schema['scheme']['options'] == ['http', 'https']
+        assert 'verify_ssl' in schema
+        assert schema['verify_ssl']['default'] is True
+        assert schema['verify_ssl']['show_when'] == {'scheme': ['https']}

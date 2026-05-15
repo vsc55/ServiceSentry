@@ -11,5 +11,20 @@
         "user":     "User",
         "password": "Password",
         "key_file": "SSH Key file"
-    }
+    },
+    "hints": {
+        "enabled":  "Enable or disable monitoring for this remote server.",
+        "local":    "Enable local RAID monitoring via /proc/mdstat.",
+        "threads":  "Number of remote servers to check in parallel.",
+        "timeout":  "SSH connection timeout in seconds.",
+        "label":    "Display name shown in the UI. Falls back to the item key if empty.",
+        "host":     "IP address or hostname of the remote server. If empty, the item key is used as the host.",
+        "port":     "SSH port of the remote server. Leave blank to use the default port (22).",
+        "user":     "SSH username for authentication.",
+        "password": "SSH password. Leave blank if authenticating with a key file.",
+        "key_file": "Path to the SSH private key file for authentication."
+    },
+    "new_item_key_label": "Server name or identifier:",
+    "rename_item_prompt": "Enter new server name or identifier:",
+    "collections": {"list": "Remote servers"}
 }

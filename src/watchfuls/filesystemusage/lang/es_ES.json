@@ -14,6 +14,8 @@
         "label":     "Nombre mostrado en las notificaciones. Si está vacío, se usa la clave del ítem.",
         "enabled":   "Habilitar o deshabilitar la monitorización de esta partición."
     },
+    "new_item_key_label": "Ruta de partición (p. ej. / o C:\\):",
+    "rename_item_prompt": "Introduce la nueva ruta de partición (p. ej. / o C:\\):",
     "collections": {
         "list": "Particiones"
     },

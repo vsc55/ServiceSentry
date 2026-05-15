@@ -1,17 +1,17 @@
 {
     "__module__": {
         "enabled": {"type": "bool", "default": true},
-        "local":   {"type": "bool", "default": true},
+        "local":   {"type": "bool", "default": true, "supported_platforms": ["linux"]},
         "threads": {"type": "int",  "default": 5,  "min": 1, "max": 100},
         "timeout": {"type": "int",  "default": 30, "min": 1, "max": 600}
     },
-    "remote": {
+    "list": {
+        "__field_order__": ["enabled", "host", "port", "user", "password", "key_file"],
         "enabled":  {"type": "bool", "default": true},
-        "label":    {"type": "str",  "default": ""},
-        "host":     {"type": "str",  "default": ""},
-        "port":     {"type": "int",  "default": 22,  "min": 1, "max": 65535},
+        "host":     {"type": "str",  "default": "", "placeholder": "__key__"},
+        "port":     {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 22},
         "user":     {"type": "str",  "default": ""},
         "password": {"type": "str",  "default": "", "sensitive": true},
-        "key_file": {"type": "str",  "default": ""}
+        "key_file": {"type": "str",  "default": "", "placeholder": "/path/to/id_rsa"}
     }
 }

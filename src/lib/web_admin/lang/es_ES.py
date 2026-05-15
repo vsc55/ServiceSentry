@@ -180,6 +180,7 @@ LANG = {
     'new_item': 'Nuevo elemento',
     'item_name': 'Nombre / clave',
     'item_placeholder': 'Ej: Router, Mi Web, nginx',
+    'item_name_required': 'El nombre es obligatorio',
     'already_exists': '"{}" ya existe',
     'confirm_delete_item':           '¿Eliminar "{}"?',
     'confirm_delete_module':         '¿Eliminar el módulo "{}" de la lista?',

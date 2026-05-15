@@ -6,8 +6,9 @@
     "list": {
         "__discovery__": "/api/watchfuls/service_status/discover",
         "__discovery_field__": "service",
+        "__key_mirrors_field__": "service",
         "enabled":     {"type": "bool",   "default": true},
-        "service":     {"type": "str",   "default": ""},
+        "service":     {"type": "str",   "default": "", "placeholder": "__key__"},
         "expected":    {"type": "str",   "default": "running", "options": ["running", "stopped"]},
         "remediation": {"type": "bool",  "default": false}
     }

@@ -10,6 +10,8 @@
         "label":   "Display name shown in notifications. Falls back to the psutil sensor label or chip name if empty.",
         "alert":   "Temperature threshold (\u00b0C). An alert is triggered when the sensor exceeds this value. Overrides the module-level threshold."
     },
+    "new_item_key_label": "Sensor name:",
+    "rename_item_prompt": "Enter new sensor name:",
     "collections": {"list": "Sensors"},
     "ui": {
         "discover_title": "Discover Sensors",

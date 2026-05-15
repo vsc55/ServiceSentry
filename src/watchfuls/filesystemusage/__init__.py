@@ -111,7 +111,7 @@ class Watchful(ModuleBase):
 
             used_percent = usage.percent
             cfg = partition_configs.get(mount_point, {})
-            for_usage_alert = cfg.get('alert', module_alert)
+            for_usage_alert = cfg.get('alert') or module_alert
 
             if used_percent > float(for_usage_alert):
                 status = False

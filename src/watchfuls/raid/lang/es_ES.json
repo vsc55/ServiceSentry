@@ -9,7 +9,22 @@
         "host":     "Host",
         "port":     "Puerto",
         "user":     "Usuario",
-        "password": "Contrase\u00f1a",
+        "password": "Contraseña",
         "key_file": "Archivo clave SSH"
-    }
+    },
+    "hints": {
+        "enabled":  "Activa o desactiva la monitorización de este servidor remoto.",
+        "local":    "Activa la monitorización RAID local mediante /proc/mdstat.",
+        "threads":  "Número de servidores remotos a comprobar en paralelo.",
+        "timeout":  "Tiempo de espera para la conexión SSH en segundos.",
+        "label":    "Nombre para mostrar en la interfaz. Si está vacío se usa la clave del ítem.",
+        "host":     "Dirección IP o nombre del servidor remoto. Si está vacío se usa la clave del ítem.",
+        "port":     "Puerto SSH del servidor remoto. Dejar en blanco para usar el puerto por defecto (22).",
+        "user":     "Nombre de usuario SSH para la autenticación.",
+        "password": "Contraseña SSH. Dejar en blanco si se usa un archivo de clave.",
+        "key_file": "Ruta al archivo de clave privada SSH para la autenticación."
+    },
+    "new_item_key_label": "Nombre del servidor o identificador:",
+    "rename_item_prompt": "Introduce el nuevo nombre del servidor o identificador:",
+    "collections": {"list": "Servidores remotos"}
 }

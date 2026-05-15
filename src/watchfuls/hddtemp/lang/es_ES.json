@@ -18,5 +18,7 @@
         "exclude": "Lista de rutas de dispositivos a ignorar, p. ej. [\"/dev/sdc\"]. Útil para omitir discos no monitorizados o problemáticos.",
         "enabled": "Habilitar o deshabilitar la monitorización de este host."
     },
+    "new_item_key_label": "Nombre de host o identificador:",
+    "rename_item_prompt": "Introduce el nuevo nombre de host o identificador:",
     "collections": {"list": "Hosts"}
 }

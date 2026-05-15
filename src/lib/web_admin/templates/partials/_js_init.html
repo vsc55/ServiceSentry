@@ -71,7 +71,7 @@ if (btnClearAudit) btnClearAudit.style.display = perms.has('audit_delete') ? '' 
 
 // ──────────────────────────── Init ────────────────────────────────
 document.getElementById('btnAddItemOk').addEventListener('click', confirmAddItem);
-document.getElementById('newItemName').addEventListener('keydown', e => {
+document.getElementById('addItemModal').addEventListener('keydown', e => {
 if (e.key === 'Enter') { e.preventDefault(); confirmAddItem(); }
 });
 document.getElementById('btnConfirmDeleteItemOk').addEventListener('click', _doDeleteItem);

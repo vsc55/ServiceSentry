@@ -181,6 +181,7 @@ LANG = {
     'new_item': 'New item',
     'item_name': 'Name / key',
     'item_placeholder': 'E.g.: Router, My Web, nginx',
+    'item_name_required': 'Name is required',
     'already_exists': '"{}" already exists',
     'confirm_delete_item':           'Delete "{}"?',
     'confirm_delete_module':         'Remove module "{}" from the list?',

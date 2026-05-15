@@ -1,5 +1,6 @@
 {# New/Edit user modal #}
-<div class="modal fade" id="userModal" tabindex="-1">
+<div class="modal fade" id="userModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnUserModalOk').click();}">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
@@ -57,7 +58,8 @@
 </div>
 
 {# Account settings modal #}
-<div class="modal fade" id="accountSettingsModal" tabindex="-1">
+<div class="modal fade" id="accountSettingsModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnAccountSettingsOk').click();}">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
@@ -105,7 +107,7 @@
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-primary" onclick="saveAccountPreferences()">
+                <button class="btn btn-sm btn-primary" id="btnAccountSettingsOk" onclick="saveAccountPreferences()">
                     <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
                 </button>
             </div>
@@ -114,17 +116,20 @@
 </div>
 
 {# Add-item modal #}
-<div class="modal fade" id="addItemModal" tabindex="-1">
+<div class="modal fade" id="addItemModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnAddItemOk').click();}">
     <div class="modal-dialog modal-dialog-centered modal-sm">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title">{{ i18n.new_item }}</h6>
+                <h6 class="modal-title" id="addItemModalTitle">{{ i18n.new_item }}</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <label class="form-label small">{{ i18n.item_name }}</label>
+                <label class="form-label small" id="newItemNameLabel">{{ i18n.item_name }}</label>
                 <input type="text" class="form-control form-control-sm" id="newItemName"
                     placeholder="{{ i18n.item_placeholder }}">
+                <div class="invalid-feedback" id="newItemNameError"></div>
+                <div id="newItemExtraFields"></div>
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
@@ -148,7 +153,8 @@
 
 
 {# Reset user password modal (admin) #}
-<div class="modal fade" id="resetPasswordModal" tabindex="-1">
+<div class="modal fade" id="resetPasswordModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnResetPasswordOk').click();}">
     <div class="modal-dialog modal-dialog-centered modal-sm">
         <div class="modal-content">
             <div class="modal-header py-2">
@@ -177,7 +183,8 @@
 </div>
 
 {# Confirm delete item modal #}
-<div class="modal fade" id="confirmDeleteItemModal" tabindex="-1">
+<div class="modal fade" id="confirmDeleteItemModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnConfirmDeleteItemOk').click();}">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
@@ -198,7 +205,8 @@
 </div>
 
 {# Rename item modal #}
-<div class="modal fade" id="renameItemModal" tabindex="-1">
+<div class="modal fade" id="renameItemModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnRenameItemOk').click();}">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
@@ -206,7 +214,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <label class="form-label small">{{ i18n.rename_item_prompt }}</label>
+                <label class="form-label small" id="renameItemPrompt">{{ i18n.rename_item_prompt }}</label>
                 <input type="text" class="form-control form-control-sm" id="renameItemInput">
             </div>
             <div class="modal-footer py-1">
@@ -258,7 +266,8 @@
 </div>
 
 {# Generic confirm modal — used by delete user/group/role, revoke session, audit #}
-<div class="modal fade" id="confirmModal" tabindex="-1">
+<div class="modal fade" id="confirmModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnConfirmModalOk').click();}">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
@@ -279,7 +288,8 @@
 </div>
 
 {# New/Edit group modal #}
-<div class="modal fade" id="groupModal" tabindex="-1">
+<div class="modal fade" id="groupModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'&&event.target.type!=='search'){event.preventDefault();document.getElementById('btnGroupModalOk').click();}">
     <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
@@ -330,7 +340,8 @@
 </div>
 
 {# New/Edit role modal #}
-<div class="modal fade" id="roleModal" tabindex="-1">
+<div class="modal fade" id="roleModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'&&event.target.type!=='search'){event.preventDefault();document.getElementById('btnRoleModalOk').click();}">
     <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">

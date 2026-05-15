@@ -108,6 +108,7 @@ class ModuleBase(ObjectBase):
 
         for mod_name in entries:
             fq = f'watchfuls.{mod_name}'
+            mod_dir = os.path.join(watchfuls_dir, mod_name)
             try:
                 mod = importlib.import_module(fq)
             except Exception:                           # pragma: no cover
@@ -115,11 +116,20 @@ class ModuleBase(ObjectBase):
             watchful_cls = getattr(mod, 'Watchful', None)
             if watchful_cls is None:
                 continue
-            item_schema = getattr(watchful_cls, 'ITEM_SCHEMA', None)
+
+            # Read schema.json from disk on every call so changes take effect
+            # without a server restart (bypasses the module-level import cache).
+            schema_path = os.path.join(mod_dir, 'schema.json')
+            if os.path.isfile(schema_path):
+                try:
+                    with open(schema_path, encoding='utf-8') as _f:
+                        item_schema = json.load(_f)
+                except Exception:                       # pragma: no cover
+                    item_schema = getattr(watchful_cls, 'ITEM_SCHEMA', None)
+            else:
+                item_schema = getattr(watchful_cls, 'ITEM_SCHEMA', None)
             if not item_schema or not isinstance(item_schema, dict):
                 continue
-
-            mod_dir = os.path.join(watchfuls_dir, mod_name)
             info = cls._load_module_info(mod_dir)
             lang_data = cls._load_module_langs(mod_dir)
 
@@ -144,6 +154,14 @@ class ModuleBase(ObjectBase):
                             }
                             if label_i18n:
                                 col_fields[field_key] = {**field_meta, 'label_i18n': label_i18n}
+                # Mark fields whose supported_platforms excludes the current platform.
+                for _fk, _fm in list(col_fields.items()):
+                    if _fk.startswith('__'):
+                        continue
+                    if isinstance(_fm, dict) and 'supported_platforms' in _fm:
+                        _fplats = _fm['supported_platforms']
+                        if isinstance(_fplats, (list, tuple)) and sys.platform not in _fplats:
+                            col_fields[_fk] = {**_fm, '__unsupported__': True}
                 if platform_unsupported:
                     col_fields['__unsupported__'] = True
                 schemas[f'{mod_name}|{collection}'] = col_fields

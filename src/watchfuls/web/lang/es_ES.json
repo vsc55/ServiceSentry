@@ -1,20 +1,24 @@
 {
     "pretty_name": "Sitios Web",
     "labels": {
-        "enabled": "Habilitado",
-        "label":   "Etiqueta",
-        "threads": "Hilos",
-        "url":     "URL",
-        "code":    "Código HTTP",
-        "timeout": "Timeout (s)"
+        "enabled":    "Habilitado",
+        "scheme":     "Protocolo",
+        "threads":    "Hilos",
+        "url":        "URL",
+        "code":       "Código HTTP",
+        "timeout":    "Timeout (s)",
+        "verify_ssl": "Verificar SSL"
     },
     "hints": {
-        "enabled": "Habilitar o deshabilitar la monitorización de esta URL.",
-        "label":   "Nombre mostrado en la interfaz. Usa la clave del ítem si está vacío.",
-        "threads": "Número de URLs a comprobar en paralelo.",
-        "url":     "URL HTTP o HTTPS a comprobar. Si está vacío, se usa la clave del ítem como URL.",
-        "code":    "Código de respuesta HTTP esperado. Se genera una alerta cuando el código real difiere de este valor.",
-        "timeout": "Timeout de la petición en segundos. El check falla si el servidor no responde en este tiempo."
+        "enabled":    "Habilitar o deshabilitar la monitorización de esta URL.",
+        "scheme":     "Protocolo a usar cuando la URL no incluye esquema (http:// o https://).",
+        "threads":    "Número de URLs a comprobar en paralelo.",
+        "url":        "Host o URL completa a comprobar. Si está vacío, se usa la clave del ítem.",
+        "code":       "Código de respuesta HTTP esperado. Se genera una alerta cuando el código real difiere de este valor.",
+        "timeout":    "Timeout de la petición en segundos. El check falla si el servidor no responde en este tiempo.",
+        "verify_ssl": "Verificar el certificado SSL del servidor. Deshabilitar solo para certificados autofirmados."
     },
+    "new_item_key_label": "URL o nombre de host:",
+    "rename_item_prompt": "Introduce la nueva URL o nombre de host:",
     "collections": {"list": "URLs"}
 }

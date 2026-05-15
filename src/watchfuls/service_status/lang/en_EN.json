@@ -13,6 +13,8 @@
             "stopped": "Stopped"
         }
     },
+    "new_item_key_label": "Service identifier:",
+    "rename_item_prompt": "Enter new service identifier:",
     "collections": {
         "list": "Services"
     },

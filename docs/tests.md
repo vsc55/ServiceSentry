@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: 1309 tests** | Todos deben pasar con `pytest` para que el build sea válido.
+**Total: 1400 tests** | Todos deben pasar con `pytest` para que el build sea válido.
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -30,7 +30,7 @@
 16b. [Panel Web — Helpers JSON y validación de payloads](#16b-panel-web--helpers-json-y-validación-de-payloads)
 17. [Watchful: filesystemusage](#17-watchful-filesystemusage)
 18. [Watchful: hddtemp](#18-watchful-hddtemp)
-19. [Watchful: mysql](#19-watchful-mysql)
+19. [Watchful: datastore](#19-watchful-datastore)
 20. [Watchful: ping](#20-watchful-ping)
 21. [Watchful: raid](#21-watchful-raid)
 22. [Watchful: ram\_swap](#22-watchful-ram_swap)
@@ -1096,22 +1096,71 @@ Verifica que todos los endpoints JSON del web admin se comportan correctamente a
 
 ---
 
-## 19. Watchful: mysql
+## 19. Watchful: datastore
 
-**Archivo:** `watchfuls/mysql/tests/test_mysql.py`
+**Archivo:** `watchfuls/datastore/tests/test_datastore.py`
 
-### `TestMysqlInit`, `TestMysqlConfigOptions`, `TestMysqlCheck`, `TestMysqlGetConf`
+### `TestDatastoreSchema`
 
 | Test | Qué comprueba | OK | Error |
-|---|---|---|---|
+| ---- | ------------- | -- | ----- |
+| `test_item_schema_loaded` | Esquema cargado correctamente | `ITEM_SCHEMA` no nulo, contiene `list` | Si no carga |
+| `test_defaults_from_schema` | Defaults extraídos del esquema | `db_type` = `mysql` | Si difiere |
+| `test_all_schema_fields_have_type_and_default` | Todos los campos tienen `type` y `default` | Sin excepción | Si falta alguno |
+
+### `TestDatastoreInit`, `TestDatastoreCheck`
+
+| Test | Qué comprueba | OK | Error |
+| ---- | ------------- | -- | ----- |
 | `test_init` | Instanciación | Sin excepción | Si lanza |
-| `test_config_options_enum` | Enum de opciones de config | Valores correctos | Si difieren |
-| `test_check_empty_list` | Lista vacía | `ReturnModuleCheck` vacío | Si lanza |
-| `test_check_disabled_db` | DB con `enabled: false` | Omitida del resultado | Si aparece |
-| `test_check_ok` | Conexión MySQL simulada OK | `status = True` | Si es `False` |
-| `test_check_connection_error` | Conexión MySQL falla | `status = False` | Si es `True` |
-| `test_get_conf_none_raises` | `get_conf(None)` | `ValueError` | Si no lanza |
-| `test_get_conf_invalid_raises` | Opción no válida | `TypeError` | Si no lanza |
+| `test_empty_list` | Lista vacía | Resultado vacío | Si lanza |
+| `test_disabled_item_skipped` | Ítem con `enabled: false` | Omitido del resultado | Si aparece |
+| `test_check_ok` | `_ds_check` llamado para ítem habilitado | Mock invocado una vez | Si no se llama |
+| `test_check_exception_sets_error` | Excepción en `_ds_check` | `status = False` | Si propaga |
+
+### `TestBackendDispatch`
+
+| Test | Qué comprueba | OK | Error |
+| ---- | ------------- | -- | ----- |
+| `test_unknown_db_type` | `db_type` desconocido | `ok = False`, mensaje con el nombre | Si devuelve `True` |
+| `test_ssh_unavailable_returns_error` | `paramiko` no instalado | `ok = False`, menciona `paramiko` | Si no lo menciona |
+
+### `TestMysqlBackend`, `TestPostgresBackend`, `TestMssqlBackend`, `TestMongoBackend`, `TestRedisBackend`, `TestMemcachedBackend`
+
+| Test | Qué comprueba | OK | Error |
+| ---- | ------------- | -- | ----- |
+| `test_success` (MySQL) | Conexión MySQL simulada OK | `ok = True` | Si es `False` |
+| `test_access_denied` (MySQL) | Error 1045 (credenciales) | `ok = False`, `Access denied` | Si no coincide |
+| `test_socket_missing_path` (MySQL) | Socket inexistente | `ok = False`, `Socket` en msg | Si no |
+| `test_driver_missing` (PostgreSQL) | `psycopg2` no instalado | `ok = False`, `psycopg2` en msg | Si no |
+| `test_mssql_msg_tuple_arg` | Excepción pymssql como `Error((code, bytes))` | Mensaje limpio | Si devuelve raw |
+| `test_mssql_msg_two_args` | Excepción pymssql como `Error(code, bytes)` | Mensaje limpio | Si devuelve raw |
+| `test_mssql_msg_conn_refused` | Código 20002 = sin conexión | `Connection failed…` | Si no coincide |
+| `test_driver_missing` (MSSQL) | `pymssql` no instalado | `ok = False`, `pymssql` en msg | Si no |
+| `test_driver_missing` (MongoDB) | `pymongo` no instalado | `ok = False`, `pymongo` en msg | Si no |
+| `test_driver_missing` (Redis) | `redis` no instalado | `ok = False`, `redis` en msg | Si no |
+| `test_driver_missing` (Memcached) | `pymemcache` no instalado | `ok = False`, `pymemcache` en msg | Si no |
+
+### `TestElasticsearchBackend`, `TestInfluxdbBackend`
+
+| Test | Qué comprueba | OK | Error |
+| ---- | ------------- | -- | ----- |
+| `test_cluster_status_red` | Estado del clúster `red` | `ok = False`, `RED` en msg | Si no |
+| `test_cluster_status_green` | Estado del clúster `green` | `ok = True` | Si es `False` |
+| `test_health_pass` | `/health` devuelve `status: pass` | `ok = True` | Si es `False` |
+| `test_health_fail` | `/health` devuelve `status: fail` | `ok = False`, `fail` en msg | Si no |
+
+### `TestTestConnection`, `TestListDatabases`
+
+| Test | Qué comprueba | OK | Error |
+| ---- | ------------- | -- | ----- |
+| `test_routes_to_mysql` | `db_type: mysql` llama `_test_mysql` | Mock invocado | Si no |
+| `test_routes_to_postgres` | `db_type: postgres` llama `_test_postgres` | Mock invocado | Si no |
+| `test_default_port_applied` | `port: 0` aplica el puerto por defecto del motor | Puerto correcto | Si usa 0 |
+| `test_ssh_only_mode` | `_test_mode: ssh` llama `_test_ssh_only` | Mock invocado | Si no |
+| `test_mysql_returns_databases` | Lista de BBs MySQL simulada | `databases = [a, b]` | Si difiere |
+| `test_unsupported_type_returns_error` | Motor sin soporte de listado (Redis) | `ok = False`, `databases = []` | Si devuelve lista |
+| `test_memcached_not_supported` | Memcached sin listado | `ok = False` | Si devuelve datos |
 
 ---
 

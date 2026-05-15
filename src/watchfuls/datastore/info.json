@@ -1,0 +1,7 @@
+{
+    "name": "datastore",
+    "version": "1.0.0",
+    "description": "Checks connectivity for MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, Valkey, Elasticsearch, OpenSearch and Memcached.",
+    "icon": "🗄️",
+    "dependencies": ["PyMySQL", "psycopg2-binary", "pymssql", "pymongo", "redis", "pymemcache", "paramiko"]
+}

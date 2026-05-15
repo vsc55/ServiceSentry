@@ -4,8 +4,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from lib.linux.raid_mdstat import RaidMdstat
 from conftest import create_mock_monitor
 
@@ -25,12 +23,33 @@ class TestRaidConfigOptions:
     def test_config_options_enum(self):
         from watchfuls.raid import ConfigOptions
         assert hasattr(ConfigOptions, 'enabled')
-        assert hasattr(ConfigOptions, 'label')
         assert hasattr(ConfigOptions, 'host')
         assert hasattr(ConfigOptions, 'port')
         assert hasattr(ConfigOptions, 'user')
         assert hasattr(ConfigOptions, 'password')
         assert hasattr(ConfigOptions, 'key_file')
+
+
+class TestRaidDefaults:
+
+    def test_defaults_from_list_schema(self):
+        from watchfuls.raid import Watchful
+        d = Watchful._DEFAULTS
+        assert d['enabled'] is True
+        assert d['port'] == 0  # 0 = use default SSH port (22); see placeholder in schema
+        assert d['host'] == ''
+
+    def test_module_defaults(self):
+        from watchfuls.raid import Watchful
+        md = Watchful._MODULE_DEFAULTS
+        assert md['threads'] == 5
+        assert md['timeout'] == 30
+        assert md['local'] is True
+
+    def test_schema_key_is_list(self):
+        from watchfuls.raid import Watchful
+        assert 'list' in Watchful.ITEM_SCHEMA
+        assert 'remote' not in Watchful.ITEM_SCHEMA
 
 
 class TestRaidCheckLocal:
@@ -58,8 +77,7 @@ class TestRaidCheckLocal:
         result = w.check()
         items = result.list
         assert len(items) > 0
-        # Si no hay RAIDs, debería tener un resultado con status True
-        for key, val in items.items():
+        for val in items.values():
             assert val['status'] is True
             assert "No RAID" in val['message']
 
@@ -165,8 +183,37 @@ class TestRaidCheckLocal:
         }
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
-        result = w.check()
+        w.check()
         mock_mdstat_cls.assert_not_called()
+
+    @patch('watchfuls.raid.RaidMdstat')
+    def test_md_analyze_unknown_status(self, mock_mdstat_cls):
+        """UpdateStatus desconocido produce 'Unknown Error'."""
+        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
+        config = {
+            'watchfuls.raid': {
+                'local': True,
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+
+        mock_mdstat = MagicMock()
+        mock_mdstat.read_status.return_value = {
+            'md0': {
+                'status': 'active',
+                'type': 'raid1',
+                'disk': ['sda1[0]'],
+                'update': 'unexpected_value',
+            }
+        }
+        mock_mdstat_cls.return_value = mock_mdstat
+
+        w = self.Watchful(mock_monitor)
+        result = w.check()
+        items = result.list
+        assert 'L_md0' in items
+        assert items['L_md0']['status'] is False
+        assert 'Unknown Error' in items['L_md0']['message']
 
 
 class TestRaidCheckRemote:
@@ -182,7 +229,7 @@ class TestRaidCheckRemote:
         config = {
             'watchfuls.raid': {
                 'local': False,
-                'remote': {
+                'list': {
                     '1': {
                         'enabled': True,
                         'label': 'Server1',
@@ -213,13 +260,12 @@ class TestRaidCheckRemote:
         assert 'R_1_md0' in items
         assert items['R_1_md0']['status'] is True
 
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_remote_disabled(self, mock_mdstat_cls):
+    def test_check_remote_disabled(self):
         """Remote deshabilitado no se procesa."""
         config = {
             'watchfuls.raid': {
                 'local': False,
-                'remote': {
+                'list': {
                     '1': {
                         'enabled': False,
                         'host': '192.168.1.10',
@@ -239,7 +285,7 @@ class TestRaidCheckRemote:
         config = {
             'watchfuls.raid': {
                 'local': False,
-                'remote': {
+                'list': {
                     '1': {
                         'enabled': True,
                         'label': 'NAS',
@@ -258,8 +304,74 @@ class TestRaidCheckRemote:
         result = w.check()
         items = result.list
         assert len(items) > 0
-        for key, val in items.items():
+        for val in items.values():
             assert val['status'] is True
+
+    @patch('watchfuls.raid.RaidMdstat')
+    def test_check_remote_bool_enabled(self, mock_mdstat_cls):
+        """Remote habilitado con booleano True."""
+        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
+        config = {
+            'watchfuls.raid': {
+                'local': False,
+                'list': {
+                    '192.168.1.10': True,
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+
+        mock_mdstat = MagicMock()
+        mock_mdstat.read_status.return_value = {}
+        mock_mdstat_cls.return_value = mock_mdstat
+
+        w = self.Watchful(mock_monitor)
+        result = w.check()
+        assert len(result.items()) > 0
+
+    @patch('watchfuls.raid.RaidMdstat')
+    def test_check_remote_bool_disabled(self, mock_mdstat_cls):
+        """Remote deshabilitado con booleano False."""
+        config = {
+            'watchfuls.raid': {
+                'local': False,
+                'list': {
+                    '192.168.1.10': False,
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+        w = self.Watchful(mock_monitor)
+        result = w.check()
+        mock_mdstat_cls.assert_not_called()
+        assert len(result.items()) == 0
+
+    @patch('watchfuls.raid.RaidMdstat')
+    def test_check_remote_key_used_as_host_when_host_empty(self, mock_mdstat_cls):
+        """Si host no está definido, el key se usa como host."""
+        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
+        config = {
+            'watchfuls.raid': {
+                'local': False,
+                'list': {
+                    '192.168.1.10': {
+                        'enabled': True,
+                        'user': 'root',
+                    }
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+
+        mock_mdstat = MagicMock()
+        mock_mdstat.read_status.return_value = {}
+        mock_mdstat_cls.return_value = mock_mdstat
+
+        w = self.Watchful(mock_monitor)
+        w.check()
+
+        call_kwargs = mock_mdstat_cls.call_args
+        assert call_kwargs.kwargs.get('host') == '192.168.1.10'
 
 
 class TestRaidGetLabelById:
@@ -277,7 +389,7 @@ class TestRaidGetLabelById:
     def test_label_remote_with_label(self):
         config = {
             'watchfuls.raid': {
-                'remote': {
+                'list': {
                     '1': {
                         'label': 'MyServer',
                     }
@@ -288,11 +400,12 @@ class TestRaidGetLabelById:
         w = self.Watchful(mock_monitor)
         assert w.get_label_by_id('1') == 'MyServer'
 
-    def test_label_remote_without_label(self):
+    def test_label_remote_without_label_uses_key(self):
+        """Sin label definido, get_label_by_id retorna el key."""
         config = {
             'watchfuls.raid': {
-                'remote': {
-                    '1': {
+                'list': {
+                    'nas-server': {
                         'host': '192.168.1.10',
                     }
                 }
@@ -300,8 +413,22 @@ class TestRaidGetLabelById:
         }
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
-        label = w.get_label_by_id('1')
-        assert 'Remote' in label
+        assert w.get_label_by_id('nas-server') == 'nas-server'
+
+    def test_label_remote_arbitrary_key(self):
+        """Keys arbitrarios (no numéricos) funcionan correctamente."""
+        config = {
+            'watchfuls.raid': {
+                'list': {
+                    'my-nas': {
+                        'label': 'Home NAS',
+                    }
+                }
+            }
+        }
+        mock_monitor = create_mock_monitor(config)
+        w = self.Watchful(mock_monitor)
+        assert w.get_label_by_id('my-nas') == 'Home NAS'
 
 
 class TestRaidCheckRemoteKeyFile:
@@ -317,7 +444,7 @@ class TestRaidCheckRemoteKeyFile:
         config = {
             'watchfuls.raid': {
                 'local': False,
-                'remote': {
+                'list': {
                     '1': {
                         'enabled': True,
                         'label': 'NAS',
@@ -348,7 +475,6 @@ class TestRaidCheckRemoteKeyFile:
         assert 'R_1_md0' in items
         assert items['R_1_md0']['status'] is True
 
-        # Verify key_file was passed to RaidMdstat constructor
         call_kwargs = mock_mdstat_cls.call_args
         assert call_kwargs.kwargs.get('key_file') == '/home/user/.ssh/id_rsa'
 
@@ -359,7 +485,7 @@ class TestRaidCheckRemoteKeyFile:
         config = {
             'watchfuls.raid': {
                 'local': False,
-                'remote': {
+                'list': {
                     '1': {
                         'enabled': True,
                         'host': '192.168.1.10',
@@ -379,61 +505,4 @@ class TestRaidCheckRemoteKeyFile:
         w.check()
 
         call_kwargs = mock_mdstat_cls.call_args
-        # key_file should be empty string (default from get_conf_item)
         assert call_kwargs.kwargs.get('key_file') == ''
-
-
-class TestRaidGetConfItem:
-
-    def setup_method(self):
-        from watchfuls.raid import ConfigOptions, Watchful
-        self.Watchful = Watchful
-        self.ConfigOptions = ConfigOptions
-
-    def test_get_conf_item_none_raises_value_error(self):
-        """opt_find=None lanza ValueError."""
-        config = {'watchfuls.raid': {'remote': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        with pytest.raises(ValueError, match="can not be None"):
-            w.get_conf_item(None, '1')
-
-    def test_get_conf_item_invalid_option_raises_type_error(self):
-        """opt_find inválido lanza TypeError."""
-        from enum import IntEnum
-
-        class FakeOption(IntEnum):
-            invalid = 999
-
-        config = {'watchfuls.raid': {'remote': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        with pytest.raises(TypeError, match="is not valid option"):
-            w.get_conf_item(FakeOption.invalid, '1')
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_md_analyze_unknown_status(self, mock_mdstat_cls):
-        """UpdateStatus desconocido produce 'Unknown Error'."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': True,
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {
-            'md0': {
-                'status': 'active',
-                'type': 'raid1',
-                'disk': ['sda1[0]'],
-                'update': 'unexpected_value',
-            }
-        }
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        items = result.list
-        assert 'L_md0' in items
-        assert items['L_md0']['status'] is False
-        assert 'Unknown Error' in items['L_md0']['message']

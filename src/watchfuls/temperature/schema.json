@@ -5,7 +5,6 @@
     "list": {
         "__discovery__": "/api/watchfuls/temperature/discover",
         "enabled": {"type": "bool",  "default": true},
-        "label":   {"type": "str",   "default": ""},
         "alert":   {"type": "float", "default": 80, "min": 0, "max": 150}
     }
 }

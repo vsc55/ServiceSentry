@@ -276,20 +276,24 @@ Estas claves controlan el comportamiento de la UI y no corresponden a campos de 
 | `__group_when__` | Dict `{nombre_grupo: show_when}`. Controla cuándo el **encabezado** de un grupo es visible, independientemente de los campos que contiene. Si un grupo no aparece aquí, su encabezado siempre se muestra. |
 | `__actions__` | Lista de botones de acción que aparecen al pie del formulario (o dentro de un grupo, ver `group` abajo). |
 | `__test__` | URL a la que se envía el formulario al pulsar el botón de test rápido del encabezado de colección. |
+| `__discovery__` | URL del endpoint `GET /api/watchfuls/<modulo>/discover`. Activa el botón de descubrimiento en el encabezado de la colección. |
+| `__discovery_field__` | Nombre del campo al que se añade un botón de búsqueda inline (input-group). Al pulsarlo abre el modal de descubrimiento en modo selección de campo: los ítems ya añadidos aparecen desactivados y seleccionar uno escribe su valor en el campo. Requiere `__discovery__`. |
+| `__key_mirrors_field__` | Nombre de un campo. Cuando está definido, la clave del ítem se renombra automáticamente para coincidir con el valor de ese campo cada vez que se selecciona un valor desde el modal de descubrimiento. El botón de renombrar se oculta para los ítems de esta colección. |
 
 ### Propiedades de campo
 
-| Propiedad      | Tipo   | Obligatorio | Descripción |
-|----------------|--------|-------------|-------------|
-| `type`         | str    | Sí | `"bool"`, `"int"`, `"float"`, `"str"`, `"list"` |
-| `default`      | any    | Sí | Valor por defecto cuando el campo falta en `modules.json` |
-| `min`          | number | No | Valor mínimo (`int` / `float`) |
-| `max`          | number | No | Valor máximo (`int` / `float`) |
-| `sensitive`    | bool   | No | Si `true`, se renderiza como campo de contraseña (oculto) en la UI |
-| `options`      | list   | No | Lista de valores permitidos para campos `str` → desplegable en la UI |
-| `group`        | str    | No | Nombre del grupo visual al que pertenece el campo. Los campos del mismo grupo se agrupan bajo un encabezado |
-| `show_when`    | dict   | No | Condición `{campo: [valores]}` que controla si el campo es visible en la UI. Ejemplo: `{"mode": ["ssh"]}` |
-| `input_action` | dict   | No | Define un botón de icono acoplado al input (ver más abajo) |
+| Propiedad             | Tipo   | Obligatorio | Descripción |
+|-----------------------|--------|-------------|-------------|
+| `type`                | str    | Sí | `"bool"`, `"int"`, `"float"`, `"str"`, `"list"` |
+| `default`             | any    | Sí | Valor por defecto cuando el campo falta en `modules.json` |
+| `min`                 | number | No | Valor mínimo (`int` / `float`) |
+| `max`                 | number | No | Valor máximo (`int` / `float`) |
+| `sensitive`           | bool   | No | Si `true`, se renderiza como campo de contraseña (oculto) en la UI |
+| `options`             | list   | No | Lista de valores permitidos para campos `str` → desplegable en la UI |
+| `group`               | str    | No | Nombre del grupo visual al que pertenece el campo. Los campos del mismo grupo se agrupan bajo un encabezado |
+| `show_when`           | dict   | No | Condición `{campo: [valores]}` que controla si el campo es visible en la UI. Ejemplo: `{"mode": ["ssh"]}` |
+| `input_action`        | dict   | No | Define un botón de icono acoplado al input (ver más abajo) |
+| `supported_platforms` | list   | No | Lista de plataformas en las que el campo está disponible (`"linux"`, `"win32"`, `"darwin"`). En plataformas no incluidas el campo se renderiza como un badge "No compatible" desactivado en lugar de un control interactivo. Ejemplo: `["linux"]` |
 
 ### Acciones de formulario (`__actions__`)
 
@@ -319,7 +323,7 @@ Un campo `str` puede tener un botón de icono acoplado como input-group Bootstra
     "group": "server",
     "input_action": {
         "id":           "list_databases",
-        "url":          "/api/watchfuls/mysql/databases",
+        "url":          "/api/watchfuls/datastore/databases",
         "extra":        {},
         "icon":         "bi-database",
         "result":       "field_picker",
@@ -373,6 +377,8 @@ Además de `pretty_name` y `labels`, los archivos de idioma pueden incluir:
 | `group_labels` | Nombre visible de cada grupo visual |
 | `action_labels` | Etiqueta del botón de cada acción (`__actions__` e `input_action`) |
 | `collections` | Nombre del grupo de colección (p. ej. `"list": "Servidores"`) |
+| `rename_item_prompt` | Texto personalizado para el modal de renombrar ítem (reemplaza el texto genérico). Ejemplo: `"Introduce el nuevo nombre de host:"` |
+| `new_item_key_label` | Etiqueta personalizada para el campo de clave en el modal de nuevo ítem. Ejemplo: `"Nombre de host o identificador:"` |
 
 ---
 
@@ -898,3 +904,8 @@ class Watchful(ModuleBase):
 - [ ] Implementar classmethod `discover(cls)` si hay botón de descubrimiento automático
 - [ ] Añadir `input_action` en el campo de selección de recurso si aplica `field_picker`
 - [ ] Añadir `action_labels` en los archivos de idioma para cada acción definida
+- [ ] Añadir `__discovery__` + `__discovery_field__` si se quiere botón de búsqueda inline en un campo `str`
+- [ ] Añadir `__key_mirrors_field__` si la clave del ítem debe sincronizarse con el campo descubierto
+- [ ] Añadir `supported_platforms` en campos que solo tienen sentido en determinadas plataformas
+- [ ] Añadir `rename_item_prompt` en los archivos de idioma para personalizar el texto del modal de renombrar
+- [ ] Añadir `new_item_key_label` en los archivos de idioma para personalizar la etiqueta del campo de clave en el modal de nuevo ítem

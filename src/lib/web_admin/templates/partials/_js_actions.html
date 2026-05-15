@@ -18,6 +18,14 @@ function updateField(target, pathStr, value) {
     const parts = pathStr.split('|');
     setPath(target === 'config' ? configData : modulesData, parts, value);
     markDirty(target);
+    // When a module-level field changes, refresh open item panels so their
+    // placeholder_module inputs pick up the new value immediately.
+    if (target === 'modules' && parts.length === 2) {
+        const modName = parts[0];
+        document.querySelectorAll(`[data-sw-item-path^="${CSS.escape(modName)}|"]`).forEach(el => {
+            if (el.dataset.swItemPath) _refreshConditionalFields(el.dataset.swItemPath);
+        });
+    }
 }
 
 function updateArray(target, pathStr, csv) {
@@ -75,6 +83,11 @@ function renameItem(target, parentPathStr, oldKey) {
     _renameItemCtx = { target, parentPathStr, oldKey };
     const input = document.getElementById('renameItemInput');
     input.value = oldKey;
+    const modName = parentPathStr ? parentPathStr.split('|')[0] : null;
+    const modI18n = modName && ITEM_SCHEMAS[modName + '|__i18n__'];
+    const modLd = modI18n && (modI18n[CURRENT_LANG] || modI18n[SYSTEM_DEFAULT_LANG]);
+    document.getElementById('renameItemPrompt').textContent =
+        (modLd && modLd.rename_item_prompt) || t('rename_item_prompt');
     const modalEl = document.getElementById('renameItemModal');
     modalEl.addEventListener('shown.bs.modal', () => {
         input.focus();
@@ -109,6 +122,10 @@ function _doRenameItem() {
     }
     bootstrap.Modal.getInstance(document.getElementById('renameItemModal')).hide();
     _renameItemCtx = null;
+    // Re-expand the item after re-render if it was open before the rename
+    const _oldPath = parentPathStr + '|' + oldKey;
+    const _colEl = document.querySelector(`[data-sw-item-path="${CSS.escape(_oldPath)}"]`);
+    if (_colEl && _colEl.classList.contains('show')) _autoExpandItemPath = parentPathStr + '|' + nk;
     markDirty(target);
     target === 'modules' ? renderModules() : renderConfig();
 }
@@ -126,23 +143,83 @@ function openAddModal(target, pathStr) {
             defaultKey = k;
         }
     }
+
+    // Reset validation state.
     const inp = document.getElementById('newItemName');
     inp.value = defaultKey;
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('addItemModal')).show();
-    setTimeout(() => { inp.focus(); inp.select(); }, 400);
+    inp.classList.remove('is-invalid');
+    document.getElementById('newItemNameError').textContent = '';
+
+    // Resolve module i18n (needed for title and option labels).
+    const schema = pathStr !== null ? schemaFor(pathStr) : null;
+    const modName = pathStr ? pathStr.split('|')[0] : null;
+    const modI18n = modName && ITEM_SCHEMAS[modName + '|__i18n__'];
+    const modLd = modI18n && (modI18n[CURRENT_LANG] || modI18n[SYSTEM_DEFAULT_LANG]);
+
+    // Set modal title and key label: prefer module-specific strings, fall back to generic.
+    document.getElementById('addItemModalTitle').textContent =
+        (modLd && modLd.new_item_title) || t('new_item');
+    document.getElementById('newItemNameLabel').textContent =
+        (modLd && modLd.new_item_key_label) || t('item_name');
+
+    // Render schema-declared extra fields (e.g. db_type for datastore).
+    const container = document.getElementById('newItemExtraFields');
+    container.innerHTML = '';
+    const extraFields = schema && schema['__new_item_fields__'];
+    if (extraFields && extraFields.length > 0) {
+        const optLabels = modLd && modLd.option_labels;
+        extraFields.forEach(fieldKey => {
+            const meta = schema[fieldKey];
+            if (!meta) return;
+            const label = (meta.label_i18n && (meta.label_i18n[CURRENT_LANG] || meta.label_i18n[SYSTEM_DEFAULT_LANG])) || fieldKey;
+            let inputHtml = '';
+            if (meta.options && Array.isArray(meta.options)) {
+                const fOptLbls = optLabels && optLabels[fieldKey];
+                const opts = meta.options.map(opt => {
+                    const lbl = fOptLbls ? (fOptLbls[opt] || opt) : opt;
+                    return `<option value="${opt}"${opt === meta.default ? ' selected' : ''}>${lbl}</option>`;
+                }).join('');
+                inputHtml = `<select class="form-select form-select-sm" id="newItemField_${fieldKey}">${opts}</select>`;
+            } else if (meta.type === 'int') {
+                inputHtml = `<input type="number" class="form-control form-control-sm" id="newItemField_${fieldKey}" value="${meta.default ?? 0}">`;
+            } else {
+                inputHtml = `<input type="text" class="form-control form-control-sm" id="newItemField_${fieldKey}" value="${meta.default ?? ''}">`;
+            }
+            container.insertAdjacentHTML('beforeend',
+                `<div class="mt-2"><label class="form-label small">${label}</label>${inputHtml}</div>`);
+        });
+    }
+
+    // Use shown.bs.modal event so focus fires after the animation completes.
+    const modalEl = document.getElementById('addItemModal');
+    modalEl.addEventListener('shown.bs.modal', () => { inp.focus(); inp.select(); }, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 
 
 function confirmAddItem() {
     if (!_addItemCtx) return;
-    const name = document.getElementById('newItemName').value.trim();
-    if (!name) return;
+    const inp = document.getElementById('newItemName');
+    const errEl = document.getElementById('newItemNameError');
+    const name = inp.value.trim();
+    if (!name) {
+        inp.classList.add('is-invalid');
+        errEl.textContent = t('item_name_required');
+        inp.focus();
+        return;
+    }
+    inp.classList.remove('is-invalid');
     const { target, pathStr } = _addItemCtx;
     const data = target === 'modules' ? modulesData : configData;
     const parent = pathStr === null ? data : getPath(data, pathStr.split('|'));
     if (!parent || typeof parent !== 'object') return;
     const _nameLower = name.toLowerCase();
-    if (Object.keys(parent).some(k => k.toLowerCase() === _nameLower)) { showToast(tf('already_exists', name), 'warning'); return; }
+    if (Object.keys(parent).some(k => k.toLowerCase() === _nameLower)) {
+        inp.classList.add('is-invalid');
+        errEl.textContent = tf('already_exists', name);
+        inp.focus();
+        return;
+    }
 
     // Smart default: schema > copy from first dict sibling > true
     const schema = pathStr !== null ? schemaFor(pathStr) : null;
@@ -168,6 +245,20 @@ function confirmAddItem() {
             }
         }
     }
+    // Override defaults with any extra fields the user set in the modal.
+    const extraFields = schema && schema['__new_item_fields__'];
+    if (extraFields && def && typeof def === 'object') {
+        extraFields.forEach(fieldKey => {
+            const el = document.getElementById('newItemField_' + fieldKey);
+            if (!el) return;
+            const meta = schema && schema[fieldKey];
+            let val = el.value;
+            if (meta && meta.type === 'int') val = parseInt(val, 10) || (meta.default ?? 0);
+            else if (meta && meta.type === 'bool') val = el.checked;
+            def[fieldKey] = val;
+        });
+    }
+
     parent[name] = def;
     bootstrap.Modal.getInstance(document.getElementById('addItemModal')).hide();
     markDirty(target);

@@ -10,6 +10,8 @@
         "label":   "Nombre mostrado en notificaciones. Si est\u00e1 vac\u00edo se usa la etiqueta de psutil o el nombre del chip.",
         "alert":   "Umbral de temperatura (\u00b0C). Se genera una alerta cuando el sensor supera este valor. Anula el umbral global del m\u00f3dulo."
     },
+    "new_item_key_label": "Nombre del sensor:",
+    "rename_item_prompt": "Introduce el nuevo nombre del sensor:",
     "collections": {"list": "Sensores"},
     "ui": {
         "discover_title": "Descubrir Sensores",

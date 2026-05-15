@@ -1,0 +1,83 @@
+{
+    "pretty_name": "Conectividad de Bases de Datos",
+    "labels": {
+        "enabled":      "Habilitado",
+        "threads":      "Hilos",
+        "label":        "Etiqueta",
+        "db_type":      "Tipo de base de datos",
+        "conn_type":    "Tipo de conexión",
+        "host":         "Host",
+        "port":         "Puerto",
+        "user":         "Usuario",
+        "password":     "Contraseña",
+        "token":        "Token (InfluxDB 2.x)",
+        "db":           "Base de datos / Bucket / Índice",
+        "socket":       "Ruta del socket",
+        "ssh_host":     "Host SSH",
+        "ssh_port":     "Puerto SSH",
+        "ssh_user":     "Usuario SSH",
+        "ssh_password": "Contraseña SSH",
+        "ssh_key":      "Clave privada SSH",
+        "scheme":       "Esquema",
+        "auth_db":      "Base de datos de autenticación",
+        "db_index":     "Índice de base de datos",
+        "tls":          "TLS / SSL"
+    },
+    "hints": {
+        "threads":      "Número de entradas a comprobar en paralelo.",
+        "label":        "Nombre de visualización opcional que aparece en las notificaciones y el panel en lugar de la clave del ítem.",
+        "db_type":      "Motor de base de datos al que conectar.",
+        "conn_type":    "Cómo conectar al servidor: conexión TCP directa, socket Unix o TCP tunelizado vía SSH.",
+        "host":         "Dirección IP o nombre de host del servidor. Utilizado en los modos TCP y túnel SSH.",
+        "port":         "Puerto TCP en el que escucha el servidor. Usa 0 para aplicar el puerto por defecto del motor (MySQL/MariaDB: 3306, PostgreSQL: 5432, MSSQL: 1433, MongoDB: 27017, Redis/Valkey: 6379, Elasticsearch/OpenSearch: 9200, InfluxDB: 8086, Memcached: 11211).",
+        "user":         "Usuario para la autenticación.",
+        "password":     "Contraseña para la autenticación.",
+        "token":        "Token de API de InfluxDB 2.x. Tiene prioridad sobre usuario/contraseña si está definido.",
+        "db":           "Nombre de la base de datos o bucket. Para Elasticsearch/OpenSearch/InfluxDB se usa como filtro en el selector.",
+        "socket":       "Ruta completa al archivo de socket Unix. Solo se usa en el modo socket.",
+        "ssh_host":     "Nombre de host o IP del servidor SSH de salto.",
+        "ssh_port":     "Puerto SSH en el servidor de salto (por defecto 22).",
+        "ssh_user":     "Nombre de usuario para la conexión SSH.",
+        "ssh_password": "Contraseña para la conexión SSH. Dejar vacío si se usa un archivo de clave.",
+        "ssh_key":      "Ruta al archivo de clave privada SSH. Tiene prioridad sobre la contraseña SSH si ambos están definidos.",
+        "scheme":       "HTTP o HTTPS para Elasticsearch / OpenSearch / InfluxDB.",
+        "auth_db":      "Base de datos de autenticación de MongoDB (por defecto: admin).",
+        "db_index":     "Índice de base de datos lógico de Redis / Valkey (0–15).",
+        "tls":          "Habilitar TLS / SSL para la conexión."
+    },
+    "option_labels": {
+        "db_type": {
+            "mysql":         "MySQL / MariaDB",
+            "postgres":      "PostgreSQL",
+            "mssql":         "Microsoft SQL Server",
+            "mongodb":       "MongoDB",
+            "redis":         "Redis / Valkey",
+            "elasticsearch": "Elasticsearch / OpenSearch",
+            "influxdb":      "InfluxDB",
+            "memcached":     "Memcached"
+        },
+        "conn_type": {
+            "tcp":    "TCP",
+            "socket": "Socket Unix",
+            "ssh":    "Túnel SSH"
+        },
+        "scheme": {
+            "http":  "HTTP",
+            "https": "HTTPS"
+        }
+    },
+    "group_labels": {
+        "connection": "Conexión",
+        "ssh":        "Túnel SSH",
+        "server":     "Servidor"
+    },
+    "action_labels": {
+        "test_ssh":        "Probar SSH",
+        "test_connection": "Probar conexión",
+        "list_databases":  "Listar bases de datos / buckets / índices"
+    },
+    "new_item_title": "Nuevo almacén de datos",
+    "new_item_key_label": "Nombre de conexión:",
+    "rename_item_prompt": "Introduce el nuevo nombre de conexión:",
+    "collections": {"list": "Almacenes de datos"}
+}

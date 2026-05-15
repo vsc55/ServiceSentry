@@ -7,7 +7,7 @@ jerarquía de clases, estructura de directorios y flujo de ejecución.
 
 ## Diagrama de Componentes
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │                     main.py                         │
 │  (CLI, argparse, daemon loop, config init)          │
@@ -36,7 +36,7 @@ jerarquía de clases, estructura de directorios y flujo de ejecución.
 
 ## Jerarquía de Clases
 
-```
+```text
 ObjectBase (lib/object_base.py)
 ├── debug: Debug  ← instancia compartida por TODAS las clases
 │
@@ -54,22 +54,22 @@ ObjectBase (lib/object_base.py)
 │   ├── _AuditMixin      (lib/web_admin/mixins/audit.py)
 │   └── _ChecksMixin     (lib/web_admin/mixins/checks.py)
 └── ModuleBase (lib/modules/module_base.py)
+    ├── watchfuls.datastore::Watchful         🌐 (multiplataforma)
     ├── watchfuls.filesystemusage::Watchful  🌐 (multiplataforma)
     ├── watchfuls.hddtemp::Watchful
-    ├── watchfuls.mysql::Watchful
-    ├── watchfuls.ping::Watchful
+    ├── watchfuls.ping::Watchful              🌐 (multiplataforma)
     ├── watchfuls.raid::Watchful
     ├── watchfuls.ram_swap::Watchful          🌐 (multiplataforma)
-    ├── watchfuls.service_status::Watchful
+    ├── watchfuls.service_status::Watchful   🌐 (multiplataforma)
     ├── watchfuls.temperature::Watchful
-    └── watchfuls.web::Watchful
+    └── watchfuls.web::Watchful              🌐 (multiplataforma)
 ```
 
 ---
 
 ## Estructura de Directorios
 
-```
+```text
 ServiceSentry/
 ├── README.md                            # Portada del repositorio
 ├── src/
@@ -87,6 +87,7 @@ ServiceSentry/
 │   │   ├── mem.py                       # Lectura de RAM/SWAP (multiplataforma vía psutil)
 │   │   ├── mem_info.py                  # Dataclass MemInfo (total, free, used, percent)
 │   │   ├── dict_files_path.py           # Diccionario de rutas de archivos
+│   │   ├── secret_manager.py            # Cifrado Fernet de valores sensibles (enc: prefix)
 │   │   ├── tools.py                     # Utilidades (bytes2human)
 │   │   ├── config/
 │   │   │   ├── config_store.py          # I/O JSON (lectura/escritura)
@@ -123,12 +124,15 @@ ServiceSentry/
 │   │           ├── users.py             # /api/users, /api/me
 │   │           ├── roles.py             # /api/roles
 │   │           ├── groups.py            # /api/groups
-│   │           ├── modules.py           # /api/modules, /api/status, /api/overview
+│   │           ├── modules.py           # /api/modules, /api/overview
+│   │           ├── watchfuls.py         # /api/watchfuls/<module>/test|discover|databases
 │   │           ├── config.py            # /api/config, /api/config/schema
 │   │           ├── sessions.py          # /api/sessions
+│   │           ├── status.py            # /status (página de estado pública)
 │   │           ├── telegram.py          # /api/telegram/test
 │   │           ├── audit.py             # /api/audit
 │   │           ├── checks.py            # /api/checks/run
+│   │           ├── errors.py            # Manejadores de errores HTTP (404, 500…)
 │   │           └── ui.py                # /, /lang, /theme
 │   ├── watchfuls/                       # Módulos de monitorización (packages)
 │   │   ├── filesystemusage/             # 🌐 Multiplataforma (psutil)
@@ -139,12 +143,12 @@ ServiceSentry/
 │   │   │   ├── lang/en_EN.json          # Etiquetas en inglés
 │   │   │   ├── lang/es_ES.json          # Etiquetas en español
 │   │   │   └── tests/test_filesystemusage.py
+│   │   ├── datastore/                   # 🌐 Multiplataforma (conectores BD)
 │   │   ├── hddtemp/                     # (misma estructura)
-│   │   ├── mysql/
 │   │   ├── ping/
 │   │   ├── raid/
 │   │   ├── ram_swap/                    # 🌐 Multiplataforma (psutil)
-│   │   ├── service_status/
+│   │   ├── service_status/              # 🌐 Multiplataforma (systemd/OpenRC/SysV/Windows)
 │   │   ├── temperature/
 │   │   └── web/
 │   └── tests/                           # Tests de core y web admin
@@ -189,7 +193,7 @@ ServiceSentry/
 
 ### Inicio
 
-```
+```text
 1. main.py: argparse procesa argumentos CLI
 2. Main.__init__():
    ├── Inicializa atributos defensivamente
@@ -209,7 +213,7 @@ ServiceSentry/
 
 ### Ciclo de Check
 
-```
+```text
 Monitor.check():
 │
 ├── 1. Escanea watchfuls/ (packages con __init__.py y archivos *.py heredados)
@@ -252,9 +256,9 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 ## Modelo de Concurrencia
 
 | Capa | Mecanismo |
-|------|-----------|
+| ---- | --------- |
 | Monitor → módulos | `ThreadPoolExecutor` (un hilo por módulo) |
-| Dentro de cada módulo | `ThreadPoolExecutor` (un hilo por ítem: ping, mysql, hddtemp…) |
+| Dentro de cada módulo | `ThreadPoolExecutor` (un hilo por ítem: ping, datastore, hddtemp…) |
 | Envío Telegram | Hilo daemon separado con cola de mensajes |
 
 ---
@@ -273,15 +277,15 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 ## Notas Multiplataforma
 
 | Módulo | Plataforma | Implementación |
-|--------|-----------|---------------|
+| ------ | ---------- | -------------- |
+| `datastore` | Linux / Windows / macOS | Conectores nativos de BD; túnel SSH vía `paramiko` |
 | `filesystemusage` | Linux / Windows / macOS | `psutil.disk_partitions()` + `psutil.disk_usage()` |
 | `ram_swap` / `mem` | Linux / Windows / macOS | `psutil.virtual_memory()` + `psutil.swap_memory()` |
 | `web` | Linux / Windows / macOS | `urllib.request` (stdlib) |
-| `ping` | Linux / macOS / Windows\* | `pythonping` (principal, multiplataforma, sin root en Windows); fallback raw socket ICMP |
-| `service_status` | Linux (systemd) | `systemctl` |
+| `ping` | Linux / macOS / Windows\* | `pythonping` (principal); fallback raw socket ICMP |
+| `service_status` | Linux (systemd / OpenRC / SysV) + Windows | `systemctl` / `rc-service` / `service` / `psutil` |
+| `temperature` | Linux / macOS | `psutil.sensors_temperatures()` |
+| `raid` | Linux (local) / cualquier plataforma (SSH remoto) | `/proc/mdstat` local + SSH/paramiko remoto. El campo `local` está guardado por `supported_platforms: ["linux"]` — en otras plataformas la UI lo muestra como "No compatible" |
+| `hddtemp` | Linux | Socket TCP al demonio hddtemp |
 
 > \* **Windows (ping):** requiere `pythonping` (`pip install pythonping`). Sin él se usa el fallback raw socket ICMP, que requiere privilegios de Administrador en Windows.
-
-| `temperature` | Linux | `/sys/class/thermal/` |
-| `raid` | Linux | `/proc/mdstat` + SSH |
-| `hddtemp` | Linux | Socket TCP al demonio hddtemp |

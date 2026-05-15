@@ -1,0 +1,84 @@
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
+    },
+    "list": {
+        "__test__": "/api/watchfuls/datastore/test",
+        "__new_item_fields__": ["db_type"],
+        "__field_order__": [
+            "enabled", "db_type", "conn_type",
+            "ssh_host", "ssh_port", "ssh_user", "ssh_password", "ssh_key",
+            "scheme", "host", "port", "socket",
+            "user", "password", "token", "db", "auth_db", "db_index", "tls"
+        ],
+        "__group_when__": {
+            "ssh": {"conn_type": ["ssh"]}
+        },
+        "__actions__": [
+            {
+                "id":         "test_ssh",
+                "url":        "/api/watchfuls/datastore/test",
+                "extra":      {"_test_mode": "ssh"},
+                "show_when":  {"conn_type": ["ssh"]},
+                "group":      "ssh",
+                "icon":       "bi-hdd-network",
+                "variant":    "outline-secondary",
+                "full_width": true,
+                "result":     "toast"
+            },
+            {
+                "id":         "test_connection",
+                "url":        "/api/watchfuls/datastore/test",
+                "extra":      {},
+                "icon":       "bi-plug",
+                "variant":    "outline-info",
+                "full_width": true,
+                "result":     "toast"
+            }
+        ],
+        "enabled":      {"type": "bool", "default": true},
+        "db_type":      {"type": "str",  "default": "mysql",
+                         "options": ["mysql","postgres","mssql","mongodb","redis","elasticsearch","influxdb","memcached"],
+                         "group": "connection"},
+        "conn_type":    {"type": "str",  "default": "tcp",  "options": ["tcp","socket","ssh"], "group": "connection"},
+        "ssh_host":     {"type": "str",  "default": "", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_port":     {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 22, "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_user":     {"type": "str",  "default": "", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_password": {"type": "str",  "default": "", "sensitive": true, "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_key":      {"type": "str",  "default": "", "placeholder": "/path/to/id_rsa", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "scheme":       {"type": "str",  "default": "http", "options": ["http","https"],
+                         "show_when": {"db_type": ["elasticsearch","opensearch","influxdb"]}, "group": "server"},
+        "host":         {"type": "str",  "default": "", "show_when": {"conn_type": ["tcp","ssh"]}, "group": "server"},
+        "port":         {"type": "int",  "default": 0, "min": 0, "max": 65535,
+                         "placeholder_map": {"mysql":3306,"mariadb":3306,"postgres":5432,"mssql":1433,"mongodb":27017,"redis":6379,"valkey":6379,"elasticsearch":9200,"opensearch":9200,"influxdb":8086,"memcached":11211},
+                         "show_when": {"conn_type": ["tcp","ssh"]}, "group": "server"},
+        "socket":       {"type": "str",  "default": "",
+                         "show_when": {"conn_type": ["socket"], "db_type": ["mysql","mariadb","postgres","redis","valkey"]},
+                         "group": "server"},
+        "user":         {"type": "str",  "default": "",
+                         "show_when": {"db_type": ["mysql","mariadb","postgres","mssql","mongodb","elasticsearch","opensearch","influxdb"]},
+                         "group": "server"},
+        "password":     {"type": "str",  "default": "", "sensitive": true, "group": "server"},
+        "token":        {"type": "str",  "default": "", "sensitive": true,
+                         "show_when": {"db_type": ["influxdb"]}, "group": "server"},
+        "db":           {"type": "str",  "default": "",
+                         "show_when": {"db_type": ["mysql","mariadb","postgres","mssql","mongodb","elasticsearch","opensearch","influxdb"]},
+                         "group": "server",
+                         "input_action": {
+                             "id":           "list_databases",
+                             "url":          "/api/watchfuls/datastore/databases",
+                             "extra":        {},
+                             "icon":         "bi-database",
+                             "result":       "field_picker",
+                             "result_field": "db"
+                         }},
+        "auth_db":      {"type": "str",  "default": "admin",
+                         "show_when": {"db_type": ["mongodb"]}, "group": "server"},
+        "db_index":     {"type": "int",  "default": 0, "min": 0, "max": 15,
+                         "show_when": {"db_type": ["redis","valkey"]}, "group": "server"},
+        "tls":          {"type": "bool", "default": false,
+                         "show_when": {"db_type": ["postgres","mssql","mongodb","redis","valkey"]},
+                         "group": "server"}
+    }
+}

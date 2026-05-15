@@ -1,0 +1,83 @@
+{
+    "pretty_name": "Database Connectivity",
+    "labels": {
+        "enabled":      "Enabled",
+        "threads":      "Threads",
+        "label":        "Label",
+        "db_type":      "Database type",
+        "conn_type":    "Connection type",
+        "host":         "Host",
+        "port":         "Port",
+        "user":         "User",
+        "password":     "Password",
+        "token":        "Token (InfluxDB 2.x)",
+        "db":           "Database / Bucket / Index",
+        "socket":       "Socket path",
+        "ssh_host":     "SSH host",
+        "ssh_port":     "SSH port",
+        "ssh_user":     "SSH user",
+        "ssh_password": "SSH password",
+        "ssh_key":      "SSH private key",
+        "scheme":       "Scheme",
+        "auth_db":      "Auth database",
+        "db_index":     "Database index",
+        "tls":          "TLS / SSL"
+    },
+    "hints": {
+        "threads":      "Number of entries to check in parallel.",
+        "label":        "Optional display name shown in notifications and the dashboard instead of the item key.",
+        "db_type":      "Database engine to connect to.",
+        "conn_type":    "How to reach the server: TCP direct connection, Unix socket file, or TCP tunnelled over SSH.",
+        "host":         "IP address or hostname of the server. Used for TCP and SSH tunnel modes.",
+        "port":         "TCP port the server is listening on. Use 0 to apply the engine default (MySQL/MariaDB: 3306, PostgreSQL: 5432, MSSQL: 1433, MongoDB: 27017, Redis/Valkey: 6379, Elasticsearch/OpenSearch: 9200, InfluxDB: 8086, Memcached: 11211).",
+        "user":         "Username for authentication.",
+        "password":     "Password for authentication.",
+        "token":        "InfluxDB 2.x API token. Takes precedence over user/password when set.",
+        "db":           "Database or bucket name. For Elasticsearch/OpenSearch/InfluxDB this is used as a filter in the picker.",
+        "socket":       "Full path to the Unix domain socket file. Used only in socket mode.",
+        "ssh_host":     "Hostname or IP of the SSH jump server.",
+        "ssh_port":     "SSH port on the jump server (default 22).",
+        "ssh_user":     "Username for the SSH connection.",
+        "ssh_password": "Password for the SSH connection. Leave empty when using a key file.",
+        "ssh_key":      "Path to the SSH private key file. Takes precedence over the SSH password when both are set.",
+        "scheme":       "HTTP or HTTPS for Elasticsearch / OpenSearch / InfluxDB.",
+        "auth_db":      "MongoDB authentication database (default: admin).",
+        "db_index":     "Redis / Valkey logical database index (0–15).",
+        "tls":          "Enable TLS / SSL for the connection."
+    },
+    "option_labels": {
+        "db_type": {
+            "mysql":         "MySQL / MariaDB",
+            "postgres":      "PostgreSQL",
+            "mssql":         "Microsoft SQL Server",
+            "mongodb":       "MongoDB",
+            "redis":         "Redis / Valkey",
+            "elasticsearch": "Elasticsearch / OpenSearch",
+            "influxdb":      "InfluxDB",
+            "memcached":     "Memcached"
+        },
+        "conn_type": {
+            "tcp":    "TCP",
+            "socket": "Unix socket",
+            "ssh":    "SSH tunnel"
+        },
+        "scheme": {
+            "http":  "HTTP",
+            "https": "HTTPS"
+        }
+    },
+    "group_labels": {
+        "connection": "Connection",
+        "ssh":        "SSH Tunnel",
+        "server":     "Server"
+    },
+    "action_labels": {
+        "test_ssh":        "Test SSH",
+        "test_connection": "Test connection",
+        "list_databases":  "List databases / buckets / indices"
+    },
+    "new_item_title": "New Datastore",
+    "new_item_key_label": "Connection name:",
+    "rename_item_prompt": "Enter new connection name:",
+    "collections": {"list": "Datastores"}
+}

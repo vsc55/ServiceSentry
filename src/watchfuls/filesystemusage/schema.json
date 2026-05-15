@@ -8,8 +8,7 @@
         "__discovery__": "/api/watchfuls/filesystemusage/discover",
         "__discovery_field__": "partition",
         "enabled":   {"type": "bool", "default": true},
-        "alert":     {"type": "int",  "default": 85, "min": 0, "max": 100},
-        "partition": {"type": "str",  "default": ""},
-        "label":     {"type": "str",  "default": ""}
+        "partition": {"type": "str",  "default": "", "placeholder": "__key__"},
+        "alert":     {"type": "int",  "default": 0, "min": 0, "max": 100, "placeholder_module": "alert"}
     }
 }

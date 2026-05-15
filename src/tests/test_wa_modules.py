@@ -354,7 +354,7 @@ class TestModuleItemSchemas:
         schema = self.schemas.get('web|list')
         assert schema is not None
         assert 'code' in schema
-        assert schema['code']['default'] == 200
+        assert schema['code']['default'] == 0
         assert schema['code']['type'] == 'int'
         assert 'enabled' in schema
         assert 'url' in schema
@@ -364,24 +364,31 @@ class TestModuleItemSchemas:
         """ping|list schema has enabled, label, host, timeout, attempt, alert."""
         schema = self.schemas['ping|list']
         user_keys = {k for k in schema.keys() if not k.startswith('__')}
-        assert user_keys == {'enabled', 'label', 'host', 'timeout', 'attempt', 'alert'}
+        assert user_keys == {'enabled', 'host', 'timeout', 'attempt', 'alert'}
         assert schema['port']['min'] == 1 if 'port' in schema else True
-        # Verify rich format
-        assert schema['timeout']['default'] == 5
+        # Verify rich format — 0 means "inherit from module-level setting"
+        assert schema['timeout']['default'] == 0
         assert schema['timeout']['type'] == 'int'
-        assert schema['timeout']['min'] == 1
+        assert schema['timeout']['min'] == 0
 
-    def test_mysql_list_schema_fields(self):
-        """mysql|list schema has all connection fields with metadata."""
-        schema = self.schemas['mysql|list']
-        for field in ('enabled', 'host', 'port', 'user', 'password', 'db', 'socket'):
+    def test_datastore_list_schema_fields(self):
+        """datastore|list schema has all connection fields across all engines."""
+        schema = self.schemas['datastore|list']
+        for field in ('enabled', 'db_type', 'conn_type', 'host', 'port',
+                      'user', 'password', 'db', 'socket'):
             assert field in schema
-        # Port has range constraints
-        assert schema['port']['default'] == 3306
-        assert schema['port']['min'] == 1
-        assert schema['port']['max'] == 65535
+        # db_type covers all supported engines (merged: mariadb→mysql, valkey→redis, opensearch→elasticsearch)
+        engines = schema['db_type']['options']
+        for eng in ('mysql', 'postgres', 'mssql', 'mongodb',
+                    'redis', 'elasticsearch', 'influxdb', 'memcached'):
+            assert eng in engines
+        for removed in ('mariadb', 'valkey', 'opensearch'):
+            assert removed not in engines
         # Password is marked sensitive
         assert schema['password'].get('sensitive') is True
+        # SSH fields exist
+        for f in ('ssh_host', 'ssh_port', 'ssh_user', 'ssh_password', 'ssh_key'):
+            assert f in schema
 
     def test_service_status_schema_fields(self):
         """service_status|list schema has enabled, service, expected and remediation."""
@@ -392,10 +399,10 @@ class TestModuleItemSchemas:
         assert schema['service']['type'] == 'str'
 
     def test_temperature_list_schema_fields(self):
-        """temperature|list schema has enabled, label, alert."""
+        """temperature|list schema has enabled, alert."""
         schema = self.schemas['temperature|list']
         user_keys = {k for k in schema.keys() if not k.startswith('__')}
-        assert user_keys == {'enabled', 'label', 'alert'}
+        assert user_keys == {'enabled', 'alert'}
         assert schema['alert']['type'] == 'float'
 
     def test_hddtemp_list_schema_fields(self):
@@ -405,12 +412,14 @@ class TestModuleItemSchemas:
         assert user_keys == {'enabled', 'host', 'port', 'exclude'}
         assert schema['exclude']['type'] == 'list'
 
-    def test_raid_remote_schema_fields(self):
-        """raid|remote schema has SSH connection fields."""
-        schema = self.schemas['raid|remote']
-        for field in ('enabled', 'label', 'host', 'port', 'user', 'password', 'key_file'):
+    def test_raid_list_schema_fields(self):
+        """raid|list schema has SSH connection fields."""
+        schema = self.schemas['raid|list']
+        for field in ('enabled', 'host', 'port', 'user', 'password', 'key_file'):
             assert field in schema
-        assert schema['port']['default'] == 22
+        # 0 means "use default SSH port"; placeholder shows 22 in the UI
+        assert schema['port']['default'] == 0
+        assert schema['port']['placeholder'] == 22
 
     # ---- modules with config-level schema ----
     def test_ram_swap_config_schema(self):
@@ -426,7 +435,7 @@ class TestModuleItemSchemas:
         """filesystemusage|list schema has the expected fields."""
         schema = self.schemas['filesystemusage|list']
         user_keys = {k for k in schema.keys() if not k.startswith('__')}
-        assert user_keys == {'enabled', 'alert', 'label', 'partition'}
+        assert user_keys == {'enabled', 'alert', 'partition'}
 
     # ---- ITEM_SCHEMA on the Watchful class directly ----
     def test_watchful_class_declares_schema(self):
@@ -434,7 +443,7 @@ class TestModuleItemSchemas:
         assert isinstance(WebWatchful.ITEM_SCHEMA, dict)
         assert 'list' in WebWatchful.ITEM_SCHEMA
         assert 'code' in WebWatchful.ITEM_SCHEMA['list']
-        assert WebWatchful.ITEM_SCHEMA['list']['code']['default'] == 200
+        assert WebWatchful.ITEM_SCHEMA['list']['code']['default'] == 0
 
     # ---- discover_schemas with invalid dir ----
     def test_discover_with_bad_dir_returns_empty(self):
@@ -448,7 +457,7 @@ class TestModuleItemSchemas:
         assert 'ITEM_SCHEMAS' in html
         assert 'web|list' in html
 
-    def test_schemas_passed_to_template(self, admin, client):
+    def test_schemas_passed_to_template(self, admin, client):  # noqa: ARG002
         """item_schemas variable is present in the rendered dashboard."""
         _login(client)
         html = client.get("/").data.decode()

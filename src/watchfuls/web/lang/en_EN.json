@@ -1,20 +1,24 @@
 {
     "pretty_name": "Websites",
     "labels": {
-        "enabled": "Enabled",
-        "label":   "Label",
-        "threads": "Threads",
-        "url":     "URL",
-        "code":    "HTTP Code",
-        "timeout": "Timeout (s)"
+        "enabled":    "Enabled",
+        "scheme":     "Scheme",
+        "threads":    "Threads",
+        "url":        "URL",
+        "code":       "HTTP Code",
+        "timeout":    "Timeout (s)",
+        "verify_ssl": "Verify SSL"
     },
     "hints": {
-        "enabled": "Enable or disable monitoring for this URL.",
-        "label":   "Display name shown in the UI. Falls back to the item key if empty.",
-        "threads": "Number of URLs to check in parallel.",
-        "url":     "HTTP or HTTPS URL to check. If empty, the item key is used as the URL.",
-        "code":    "Expected HTTP response code. An alert is triggered when the actual code differs from this value.",
-        "timeout": "Request timeout in seconds. The check fails if the server does not respond within this time."
+        "enabled":    "Enable or disable monitoring for this URL.",
+        "scheme":     "Protocol to use when the URL does not include a scheme (http:// or https://).",
+        "threads":    "Number of URLs to check in parallel.",
+        "url":        "Host or full URL to check. If empty, the item key is used.",
+        "code":       "Expected HTTP response code. An alert is triggered when the actual code differs from this value.",
+        "timeout":    "Request timeout in seconds. The check fails if the server does not respond within this time.",
+        "verify_ssl": "Verify the server's SSL certificate. Disable only for self-signed certificates."
     },
+    "new_item_key_label": "URL or hostname:",
+    "rename_item_prompt": "Enter new URL or hostname:",
     "collections": {"list": "URLs"}
 }

@@ -13,6 +13,8 @@
             "stopped": "Detenido"
         }
     },
+    "new_item_key_label": "Identificador del servicio:",
+    "rename_item_prompt": "Introduce el nuevo identificador del servicio:",
     "collections": {
         "list": "Servicios"
     },
