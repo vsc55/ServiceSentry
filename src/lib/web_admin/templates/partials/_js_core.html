@@ -885,7 +885,7 @@ async function itemAction(btn) {
             panel.innerHTML = `<div class="alert alert-danger py-1 mb-0 small mt-1">${esc(msg)}</div>`;
             return;
         }
-        const items = (res.data.databases || res.data.items || []).map(d => String(d));
+        const items = (res.data.items || []).map(d => String(d));
         if (!items.length) {
             panel.style.display = 'none';
             showToast(t('no_items') || 'No items', 'secondary');
@@ -898,7 +898,7 @@ async function itemAction(btn) {
             </div></div>`;
     } else if (result === 'field_picker') {
         if (!ok) { showToast(msg, 'danger'); return; }
-        const items = (res.data.databases || res.data.items || []).map(d => String(d));
+        const items = (res.data.items || []).map(d => String(d));
         if (!items.length) { showToast(t('no_items') || 'No items', 'secondary'); return; }
         openFieldPickerModal(pathStr + '|' + resultFld, items, btn.textContent.trim());
     } else {

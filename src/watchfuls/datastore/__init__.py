@@ -194,6 +194,7 @@ class ConfigOptions(IntEnum):
 class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset({'test_connection', 'list_databases'})
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
                  if isinstance(v, dict) and 'default' in v}
 
@@ -620,14 +621,14 @@ class Watchful(ModuleBase):
 
         if conn_type == 'ssh':
             if not _PARAMIKO:
-                return {'ok': False, 'message': 'paramiko is not installed', 'databases': []}
+                return {'ok': False, 'message': 'paramiko is not installed', 'items': []}
             try:
                 tunnel = _SSHTunnel(
                     cfg['ssh_host'], cfg['ssh_port'], cfg['ssh_user'],
                     cfg['ssh_password'], cfg['ssh_key'],
                     cfg['host'], port)
             except Exception as exc:
-                return {'ok': False, 'message': f'SSH error: {exc}', 'databases': []}
+                return {'ok': False, 'message': f'SSH error: {exc}', 'items': []}
             try:
                 return cls._list_databases_direct(db_type, {**cfg, 'host': '127.0.0.1', 'port': tunnel.local_port})
             finally:
@@ -648,7 +649,7 @@ class Watchful(ModuleBase):
             return cls._list_es_indices(cfg)
         if db_type == 'influxdb':
             return cls._list_influxdb(cfg)
-        return {'ok': False, 'message': f'{_PRETTY.get(db_type, db_type)} does not support database listing', 'databases': []}
+        return {'ok': False, 'message': f'{_PRETTY.get(db_type, db_type)} does not support database listing', 'items': []}
 
     @classmethod
     def _list_mysql(cls, cfg) -> dict:
@@ -663,13 +664,13 @@ class Watchful(ModuleBase):
                 kw['host'] = cfg['host']; kw['port'] = int(cfg['port'])
             conn = pymysql.connect(**kw)
         except Exception as exc:
-            return {'ok': False, 'message': repr(exc), 'databases': []}
+            return {'ok': False, 'message': repr(exc), 'items': []}
         try:
             with conn.cursor() as cur:
                 cur.execute('SHOW DATABASES')
-                return {'ok': True, 'message': '', 'databases': [r['Database'] for r in cur.fetchall()]}
+                return {'ok': True, 'message': '', 'items': [r['Database'] for r in cur.fetchall()]}
         except Exception as exc:
-            return {'ok': False, 'message': repr(exc), 'databases': []}
+            return {'ok': False, 'message': repr(exc), 'items': []}
         finally:
             conn.close()
 
@@ -692,9 +693,9 @@ class Watchful(ModuleBase):
                 cur.execute("SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname")
                 dbs = [r[0] for r in cur.fetchall()]
             conn.close()
-            return {'ok': True, 'message': '', 'databases': dbs}
+            return {'ok': True, 'message': '', 'items': dbs}
         except Exception as exc:
-            return {'ok': False, 'message': str(exc), 'databases': []}
+            return {'ok': False, 'message': str(exc), 'items': []}
 
     @classmethod
     def _list_mssql(cls, cfg) -> dict:
@@ -709,9 +710,9 @@ class Watchful(ModuleBase):
                 cur.execute('SELECT name FROM sys.databases ORDER BY name')
                 dbs = [r[0] for r in cur.fetchall()]
             conn.close()
-            return {'ok': True, 'message': '', 'databases': dbs}
+            return {'ok': True, 'message': '', 'items': dbs}
         except Exception as exc:
-            return {'ok': False, 'message': cls._mssql_msg(exc), 'databases': []}
+            return {'ok': False, 'message': cls._mssql_msg(exc), 'items': []}
 
     @classmethod
     def _list_mongodb(cls, cfg) -> dict:
@@ -729,9 +730,9 @@ class Watchful(ModuleBase):
             client = pymongo.MongoClient(**kw)
             dbs = client.list_database_names()
             client.close()
-            return {'ok': True, 'message': '', 'databases': sorted(dbs)}
+            return {'ok': True, 'message': '', 'items': sorted(dbs)}
         except Exception as exc:
-            return {'ok': False, 'message': str(exc), 'databases': []}
+            return {'ok': False, 'message': str(exc), 'items': []}
 
     @classmethod
     def _list_es_indices(cls, cfg) -> dict:
@@ -745,9 +746,9 @@ class Watchful(ModuleBase):
             with urllib.request.urlopen(req, timeout=10) as resp:
                 body = json.loads(resp.read())
             indices = sorted(e['index'] for e in body if not e['index'].startswith('.'))
-            return {'ok': True, 'message': '', 'databases': indices}
+            return {'ok': True, 'message': '', 'items': indices}
         except Exception as exc:
-            return {'ok': False, 'message': str(exc), 'databases': []}
+            return {'ok': False, 'message': str(exc), 'items': []}
 
     @classmethod
     def _list_influxdb(cls, cfg) -> dict:
@@ -772,12 +773,12 @@ class Watchful(ModuleBase):
             with urllib.request.urlopen(_req('/api/v2/buckets'), timeout=10) as resp:
                 body = json.loads(resp.read())
             buckets = sorted(b['name'] for b in body.get('buckets', []) if not b['name'].startswith('_'))
-            return {'ok': True, 'message': '', 'databases': buckets}
+            return {'ok': True, 'message': '', 'items': buckets}
         except urllib.error.HTTPError as exc:
             if exc.code != 404:
-                return {'ok': False, 'message': f'HTTP {exc.code}: {exc.reason}', 'databases': []}
+                return {'ok': False, 'message': f'HTTP {exc.code}: {exc.reason}', 'items': []}
         except Exception as exc:
-            return {'ok': False, 'message': str(exc), 'databases': []}
+            return {'ok': False, 'message': str(exc), 'items': []}
 
         # InfluxDB 1.x — SHOW DATABASES
         try:
@@ -785,9 +786,9 @@ class Watchful(ModuleBase):
                 body = json.loads(resp.read())
             values = body.get('results', [{}])[0].get('series', [{}])[0].get('values', [])
             dbs = sorted(r[0] for r in values if r[0] != '_internal')
-            return {'ok': True, 'message': '', 'databases': dbs}
+            return {'ok': True, 'message': '', 'items': dbs}
         except Exception as exc:
-            return {'ok': False, 'message': str(exc), 'databases': []}
+            return {'ok': False, 'message': str(exc), 'items': []}
 
     # ── Config helpers ─────────────────────────────────────────────────
 

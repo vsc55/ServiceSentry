@@ -36,6 +36,7 @@ _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'),
 class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
     SUPPORTED_PLATFORMS = ('linux', 'darwin')
 
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()

@@ -125,7 +125,7 @@ ServiceSentry/
 │   │           ├── roles.py             # /api/roles
 │   │           ├── groups.py            # /api/groups
 │   │           ├── modules.py           # /api/modules, /api/overview
-│   │           ├── watchfuls.py         # /api/watchfuls/<module>/test|discover|databases
+│   │           ├── watchfuls.py         # /api/watchfuls/<module_name>/<action> (GET|POST)
 │   │           ├── config.py            # /api/config, /api/config/schema
 │   │           ├── sessions.py          # /api/sessions
 │   │           ├── status.py            # /status (página de estado pública)

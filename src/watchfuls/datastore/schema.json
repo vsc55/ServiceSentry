@@ -4,7 +4,7 @@
         "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
     },
     "list": {
-        "__test__": "/api/watchfuls/datastore/test",
+        "__test__": "/api/watchfuls/datastore/test_connection",
         "__new_item_fields__": ["db_type"],
         "__field_order__": [
             "enabled", "db_type", "conn_type",
@@ -18,7 +18,7 @@
         "__actions__": [
             {
                 "id":         "test_ssh",
-                "url":        "/api/watchfuls/datastore/test",
+                "url":        "/api/watchfuls/datastore/test_connection",
                 "extra":      {"_test_mode": "ssh"},
                 "show_when":  {"conn_type": ["ssh"]},
                 "group":      "ssh",
@@ -29,7 +29,7 @@
             },
             {
                 "id":         "test_connection",
-                "url":        "/api/watchfuls/datastore/test",
+                "url":        "/api/watchfuls/datastore/test_connection",
                 "extra":      {},
                 "icon":       "bi-plug",
                 "variant":    "outline-info",
@@ -67,7 +67,7 @@
                          "group": "server",
                          "input_action": {
                              "id":           "list_databases",
-                             "url":          "/api/watchfuls/datastore/databases",
+                             "url":          "/api/watchfuls/datastore/list_databases",
                              "extra":        {},
                              "icon":         "bi-database",
                              "result":       "field_picker",

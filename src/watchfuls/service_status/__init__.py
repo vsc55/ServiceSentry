@@ -45,6 +45,7 @@ def _detect_linux_init() -> str:
 class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
     _PLATFORM: str = platform.system().lower()
     _INIT_SYSTEM: str = _detect_linux_init() if platform.system().lower() == 'linux' else 'systemd'
 

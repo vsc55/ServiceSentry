@@ -12,14 +12,14 @@
 
 ## Features
 
-- **9 built-in modules:** disk usage, disk temperature, MySQL, ping (cross-platform via `pythonping`), RAID, RAM/SWAP, systemd services, temperature sensors, web availability.
+- **9 built-in modules:** databases (MySQL/PostgreSQL/MSSQL/MongoDB/Redis/InfluxDB/Elasticsearch), disk usage, disk temperature, ping, RAID, RAM/SWAP, services, temperature sensors, web availability.
 - **Telegram notifications** — alerts only when state *changes* (no spam on repeated failures).
 - **Web admin panel** — browser UI to manage modules, config and users; granular per-action roles (15 permission flags); custom roles; dark mode; i18n (EN / ES).
 - **Plugin architecture** — each module is an independent Python package in `watchfuls/`.
 - **Parallel execution** — modules and per-module items run in `ThreadPoolExecutor`.
-- **Cross-platform modules** — `filesystemusage` and `ram_swap` work on Linux, Windows and macOS via `psutil`.
+- **Cross-platform** — 6 of 9 modules run on Linux, Windows and macOS; services module supports systemd, OpenRC, SysV and Windows SCM.
 - **Remote execution** — SSH command execution via paramiko for RAID and other remote checks.
-- **1176 tests** with pytest.
+- **Encrypted storage** — sensitive fields (passwords, tokens) are encrypted at rest in `modules.json`.
 - **Public status page** — optional `/status` endpoint (no login required) showing real-time health of all modules with collapsible cards and configurable auto-refresh.
 - **Custom error pages** — branded 400/403/404/405/500 pages that inherit dark/light theme; API routes return JSON errors.
 
@@ -76,8 +76,9 @@ Edit `data/config.json` to add your Telegram bot token and chat ID before runnin
 | [docs/security.md](docs/security.md) | Authentication, RBAC, sessions, XSS, path traversal, audit log and security tests |
 | [docs/development.md](docs/development.md) | Setup, tests, VS Code debug, conventions, dependencies |
 | [docs/watchful_guide.md](docs/watchful_guide.md) | Step-by-step guide to create a new watchful module |
+| [docs/schema.md](docs/schema.md) | Complete `schema.json` reference: all field properties, meta-keys, language files and `discover_schemas` pipeline |
 | [docs/i18n.md](docs/i18n.md) | Internationalisation system: two-tier architecture, `discover_schemas` pipeline, adding languages |
-| [docs/tests.md](docs/tests.md) | Full test inventory (1164 tests): what each test checks, pass and fail conditions, organized by group |
+| [docs/tests.md](docs/tests.md) | Full test inventory: what each test checks, pass and fail conditions, organized by group |
 
 ---
 

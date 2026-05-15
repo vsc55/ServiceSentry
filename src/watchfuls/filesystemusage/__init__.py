@@ -44,6 +44,7 @@ class Watchful(ModuleBase):
     })
 
     ITEM_SCHEMA = _SCHEMA
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
 
     # Default values are derived from schema.json so there is a single
     # source of truth that the web UI can also consume.

@@ -353,19 +353,19 @@ class TestListDatabases:
     def test_mysql_returns_databases(self):
         from watchfuls.datastore import Watchful
         with patch.object(Watchful, '_list_mysql',
-                          return_value={'ok': True, 'message': '', 'databases': ['a', 'b']}):
+                          return_value={'ok': True, 'message': '', 'items': ['a', 'b']}):
             result = Watchful.list_databases({'db_type': 'mysql', 'conn_type': 'tcp',
                                               'host': 'h', 'port': 3306,
                                               'user': 'u', 'password': 'p'})
             assert result['ok'] is True
-            assert result['databases'] == ['a', 'b']
+            assert result['items'] == ['a', 'b']
 
     def test_unsupported_type_returns_error(self):
         from watchfuls.datastore import Watchful
         result = Watchful.list_databases({'db_type': 'redis', 'conn_type': 'tcp',
                                           'host': 'h', 'port': 6379})
         assert result['ok'] is False
-        assert result['databases'] == []
+        assert result['items'] == []
 
     def test_memcached_not_supported(self):
         from watchfuls.datastore import Watchful

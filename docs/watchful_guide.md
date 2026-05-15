@@ -227,7 +227,7 @@ Python inline. El archivo tiene una clave de primer nivel por **colección**:
         "__actions__": [
             {
                 "id":        "test_conn",
-                "url":       "/api/watchfuls/mi_modulo/test",
+                "url":       "/api/watchfuls/mi_modulo/test_connection",
                 "extra":     {},
                 "icon":      "bi-plug",
                 "variant":   "outline-info",
@@ -245,7 +245,7 @@ Python inline. El archivo tiene una clave de primer nivel por **colección**:
         "db":       {"type": "str",  "default": "", "group": "server",
                      "input_action": {
                          "id":           "list_dbs",
-                         "url":          "/api/watchfuls/mi_modulo/databases",
+                         "url":          "/api/watchfuls/mi_modulo/list_databases",
                          "extra":        {},
                          "icon":         "bi-database",
                          "result":       "field_picker",
@@ -323,7 +323,7 @@ Un campo `str` puede tener un botón de icono acoplado como input-group Bootstra
     "group": "server",
     "input_action": {
         "id":           "list_databases",
-        "url":          "/api/watchfuls/datastore/databases",
+        "url":          "/api/watchfuls/datastore/list_databases",
         "extra":        {},
         "icon":         "bi-database",
         "result":       "field_picker",
@@ -332,7 +332,7 @@ Un campo `str` puede tener un botón de icono acoplado como input-group Bootstra
 }
 ```
 
-El botón hace POST al endpoint indicado, recibe `{"ok": true, "databases": [...]}` y abre el modal `#fieldPickerModal` con la lista. Al seleccionar un valor se escribe directamente en el campo `db` del ítem.
+El botón hace POST al endpoint indicado, recibe `{"ok": true, "items": [...]}` y abre el modal `#fieldPickerModal` con la lista. Al seleccionar un valor se escribe directamente en el campo `db` del ítem.
 
 ### Archivos de idioma (`lang/*.json`)
 
@@ -384,11 +384,33 @@ Además de `pretty_name` y `labels`, los archivos de idioma pueden incluir:
 
 ## 4b. Classmethods de integración con la UI
 
-La UI web puede invocar métodos de clase del módulo a través de endpoints REST. Para habilitarlos, implementa los siguientes classmethods en tu clase `Watchful`:
+La UI web puede invocar métodos de clase del módulo a través de un endpoint REST genérico:
+
+```text
+GET|POST /api/watchfuls/<module_name>/<action>
+```
+
+Para exponer un classmethod como acción web, debes añadir su nombre a la variable de clase `WATCHFUL_ACTIONS`:
+
+```python
+class Watchful(ModuleBase):
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset({'test_connection', 'list_databases'})
+```
+
+Solo los métodos listados en `WATCHFUL_ACTIONS` son accesibles desde la UI. Cualquier petición a un nombre de acción no incluido recibe un `404`. La base `ModuleBase` define por defecto `WATCHFUL_ACTIONS = frozenset()` (ninguna acción expuesta).
+
+| Módulo | `WATCHFUL_ACTIONS` |
+|--------|-------------------|
+| `datastore` | `{'test_connection', 'list_databases'}` |
+| `service_status` | `{'discover'}` |
+| `filesystemusage` | `{'discover'}` |
+| `temperature` | `{'discover'}` |
+
+---
 
 ### `test_connection(config: dict) -> dict`
 
-Invocado por `POST /api/watchfuls/<modulo>/test`. Recibe los datos del formulario del ítem y devuelve `{"ok": bool, "message": str}`.
+Invocado por `POST /api/watchfuls/<modulo>/test_connection`. Recibe los datos del formulario del ítem y devuelve `{"ok": bool, "message": str}`.
 
 ```python
 @classmethod
@@ -400,27 +422,27 @@ def test_connection(cls, config: dict) -> dict:
         return {"ok": False, "message": str(exc)}
 ```
 
-El resultado se muestra como un toast en la UI. La acción queda registrada en el **log de auditoría** bajo el evento `watchful_test`.
+El resultado se muestra como un toast en la UI. La acción queda registrada en el **log de auditoría** bajo el evento `watchful_action`.
 
 ### `list_databases(config: dict) -> dict`
 
-Invocado por `POST /api/watchfuls/<modulo>/databases`. Devuelve `{"ok": bool, "databases": list[str]}`.
+Invocado por `POST /api/watchfuls/<modulo>/list_databases`. Devuelve `{"ok": bool, "items": list[str]}`.
 
 ```python
 @classmethod
 def list_databases(cls, config: dict) -> dict:
     try:
         dbs = [...]  # lista de nombres
-        return {"ok": True, "databases": dbs}
+        return {"ok": True, "items": dbs}
     except Exception as exc:
-        return {"ok": False, "databases": [], "message": str(exc)}
+        return {"ok": False, "items": [], "message": str(exc)}
 ```
 
-La acción queda registrada en el **log de auditoría** bajo el evento `watchful_list_databases`.
+La acción queda registrada en el **log de auditoría** bajo el evento `watchful_action`.
 
 ### `discover() -> list[dict]`
 
-Invocado por `GET /api/watchfuls/<modulo>/discover`. Devuelve una lista de ítems descubiertos automáticamente (servicios, particiones, sensores…). La UI los muestra en el modal de descubrimiento para incorporarlos con un clic.
+Invocado por `GET /api/watchfuls/<modulo>/discover`, donde `discover` debe estar en `WATCHFUL_ACTIONS`. Devuelve una lista de ítems descubiertos automáticamente (servicios, particiones, sensores…). La UI los muestra en el modal de descubrimiento para incorporarlos con un clic.
 
 ```python
 @classmethod
@@ -429,6 +451,8 @@ def discover(cls) -> list[dict]:
         {"key": "item1", "label": "Nombre visible", ...},
     ]
 ```
+
+La UI solo consume los campos `key` y `label` de cada dict. Cualquier campo adicional es ignorado por el modal de descubrimiento. `key` es el identificador que se guarda en `modules.json`; `label` es el texto visible en la lista.
 
 ---
 
@@ -439,48 +463,395 @@ def discover(cls) -> list[dict]:
 | Método | Propósito | Ejemplo |
 |--------|-----------|---------|
 | `get_conf(key, default)` | Leer configuración a nivel de módulo | `self.get_conf('timeout', 10)` |
-| `get_conf_in_list(field, item_key, default)` | Leer un campo de un ítem | `self.get_conf_in_list('port', 'mibd', 3306)` |
-| `_parse_int(value, default)` | Parsear a entero | `self._parse_int('5', 0)` |
-| `_parse_float(value, default)` | Parsear a flotante | `self._parse_float('3.14', 0.0)` |
+| `get_conf_in_list(field, item_key, default)` | Leer un campo de un ítem de la colección `list` | `self.get_conf_in_list('port', 'mibd', 3306)` |
+| `get_conf_in_list(field, item_key, default, key_name_list='config')` | Leer un campo de una colección distinta a `list` | `self.get_conf_in_list('alert', 'ram', 80, 'config')` |
+| `_parse_conf_int(value, default, min_val=1)` | Parsear a entero (descarta valores < `min_val`) | `self._parse_conf_int('5', 0)` |
+| `_parse_conf_float(value, default, min_val=0)` | Parsear a flotante (descarta valores ≤ `min_val`) | `self._parse_conf_float('3.14', 0.0)` |
+| `_parse_conf_str(value, default='')` | Parsear a string (descarta cadenas vacías) | `self._parse_conf_str(val, 'localhost')` |
+
+**`key_name_list`** — por defecto `"list"`. Úsalo cuando tu módulo usa la colección `config` en lugar de `list` (p. ej. módulos sin ítems individuales como `ram_swap`):
+
+```python
+alert = self.get_conf_in_list('alert', 'ram', 80, key_name_list='config')
+```
+
+**`select_module`** — `get_conf()` acepta un parámetro adicional `select_module` para leer la configuración de otro módulo. No es necesario en el uso habitual; si se omite, se usa el módulo actual:
+
+```python
+ping_timeout = self.get_conf('timeout', 5, select_module='watchfuls.ping')
+```
 
 ### Resultados
 
-| Método | Descripción |
-|--------|-------------|
-| `self.dict_return.set(key, status, message, send_msg, other_data)` | Almacena un resultado de comprobación |
-
-Parámetros de `dict_return.set()`:
+```python
+self.dict_return.set(key, status, message, send_msg=False, other_data=None)
+```
 
 | Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
-| `key` | str | Nombre/ID del ítem (clave del dict) |
+| `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en `status.json` |
 | `status` | bool | `True` = OK, `False` = Error |
-| `message` | str | Mensaje de Telegram (soporta `*negrita*`) |
-| `send_msg` | bool | `False` = no enviar automáticamente |
-| `other_data` | dict | Datos extra visibles en la API de estado |
+| `message` | str | Mensaje para Telegram. Soporta formato Markdown: `*negrita*`, `_cursiva_`, `` `código` ``, `[texto](url)` |
+| `send_msg` | bool | `False` (por defecto) — no enviar el mensaje automáticamente. Usa `send_message()` después de `check_status()` para controlar cuándo se envía |
+| `other_data` | dict | Datos extra que se almacenan en `status.json` junto al resultado. Accesibles en la página pública `/status` bajo la clave `extra` de cada ítem |
+
+**`other_data` en la API de estado:** lo que pases en `other_data` aparece como `extra` en la respuesta de la página `/status`:
+
+```python
+# En el módulo:
+self.dict_return.set('Mi Servidor', False, 'Error', other_data={'message': 'Connection refused', 'latency_ms': 120})
+
+# En la respuesta /status:
+# {
+#   "name": "Mi Servidor",
+#   "ok": false,
+#   "extra": {"message": "Connection refused", "latency_ms": 120}
+# }
+```
+
+#### Métodos adicionales de `dict_return`
+
+| Método | Descripción |
+| --- | --- |
+| `update(key, option, value)` | Actualiza un campo de un resultado ya guardado. `option` puede ser `"status"`, `"message"`, `"send"` o `"other_data"` |
+| `get(key) -> dict` | Devuelve el dict completo de un resultado (`{"status": ..., "message": ..., "send": ..., "other_data": ...}`) |
+| `get_status(key) -> bool` | Devuelve solo el campo `status` de un resultado |
+| `get_message(key) -> str` | Devuelve solo el campo `message` |
+| `get_other_data(key) -> dict` | Devuelve solo el campo `other_data` |
+| `is_exist(key) -> bool` | Comprueba si ya existe un resultado para esa clave |
+| `remove(key) -> bool` | Elimina un resultado del dict |
+| `items()` | Itera sobre todos los resultados como pares `(key, dict)` — equivale a `dict.items()` |
+| `keys()` | Devuelve las claves de todos los resultados registrados |
+| `count` | Número de resultados almacenados (propiedad, no método) |
+
+```python
+# Corregir el mensaje de un resultado ya registrado
+self.dict_return.set('Mi Servidor', False, 'Error inicial')
+# ... más lógica ...
+self.dict_return.update('Mi Servidor', 'message', 'Error definitivo')
+
+# Leer el estado registrado antes de notificar
+if self.dict_return.get_status('Mi Servidor'):
+    self.send_message('OK', True)
+```
 
 ### Estado y notificaciones
 
-| Método | Descripción |
-|--------|-------------|
-| `self.check_status(status, module_name, key)` | Devuelve `True` si el estado **cambió** |
-| `self.check_status_custom(status, key, message)` | Como `check_status` pero también detecta cambios de mensaje |
-| `self.send_message(message, status)` | Envía mensaje a Telegram |
+#### `check_status(status, module_name, key) -> bool`
+
+Devuelve `True` si el estado del ítem **cambió** respecto al ciclo anterior. Solo en ese caso se debe enviar notificación.
+
+```python
+if self.check_status(ok, self.name_module, 'Mi Servidor'):
+    self.send_message(s_message, ok)
+```
+
+**Primera ejecución:** si el ítem no existe aún en `status.json`, se asume que el estado anterior era `None`. Como `None != cualquier_bool`, el primer ciclo **siempre** devuelve `True` y notifica — independientemente de si el estado es OK o Error. Esto garantiza que al arrancar el sistema se recibe un informe inicial del estado actual.
+
+#### `check_status_custom(status, key, status_msg) -> bool`
+
+Como `check_status`, pero también devuelve `True` cuando el estado sigue siendo `False` (error) pero el **mensaje de error ha cambiado**. Útil cuando el tipo de fallo importa.
+
+```python
+# Escenario: ayer era "Connection refused", hoy es "Access denied"
+# → ambos son False, pero el problema cambió → notificar igualmente
+if self.check_status_custom(ok, 'Mi Servidor', error_msg):
+    self.send_message(s_message, ok)
+```
+
+Lógica interna:
+1. Si el estado actual es `True` (OK), o el estado **cambió** → se comporta igual que `check_status`
+2. Si ambos estados son `False` (error persistente) → compara el campo `other_data.message` del ciclo anterior con `status_msg`. Si difieren, devuelve `True`
+
+> Usa `check_status_custom` cuando pasas el mensaje de error en `other_data={'message': ...}` y quieres que un cambio de tipo de error genere una nueva notificación.
+
+#### `send_message(message, status)`
+
+Envía un mensaje a Telegram. El parámetro `status` (`True`/`False`) determina si el mensaje se agrupa con otros OK o con errores al final del ciclo.
 
 ### Herramientas del sistema
 
-| Método | Descripción |
-|--------|-------------|
-| `self.paths.set(name, path)` | Registra una ruta de herramienta |
-| `self.paths.find(name, default='')` | Obtiene una ruta registrada |
-| `self._run_cmd(cmd, return_str_err=False, return_exit_code=False)` | Ejecuta un comando del sistema. Devuelve `stdout`, `(stdout, stderr)`, `(stdout, exit_code)` o `(stdout, stderr, exit_code)` según las flags |
+#### `self.paths` — registro de rutas
+
+`DictFilesPath` es un registro clave→ruta para herramientas del sistema. Permite que el módulo declare qué ficheros o ejecutables necesita sin harcodear rutas.
+
+```python
+# En __init__:
+self.paths.set('mdstat', '/proc/mdstat')
+self.paths.set('tool', '/usr/bin/mi_herramienta')
+
+# En el resto del módulo:
+path = self.paths.find('mdstat')          # devuelve '/proc/mdstat'
+path = self.paths.find('missing', '/tmp') # devuelve '/tmp' si no existe
+```
+
+#### `self._run_cmd(cmd, return_str_err=False, return_exit_code=False)`
+
+Ejecuta un comando local y devuelve su salida.
+
+| `return_str_err` | `return_exit_code` | Retorno |
+|:-:|:-:|---------|
+| `False` | `False` | `stdout: str` |
+| `True` | `False` | `(stdout, stderr)` |
+| `False` | `True` | `(stdout, exit_code)` |
+| `True` | `True` | `(stdout, stderr, exit_code)` |
+
+```python
+# Solo stdout
+output = self._run_cmd('systemctl status nginx')
+
+# Con stderr
+out, err = self._run_cmd('cat /proc/mdstat', return_str_err=True)
+
+# Con código de salida
+out, code = self._run_cmd('ping -c 1 8.8.8.8', return_exit_code=True)
+ok = (code == 0)
+```
+
+Para ejecución **remota por SSH** usa directamente `Exec` — ver sección 5b.
+
+### `SUPPORTED_PLATFORMS` — guardia de plataforma a nivel de módulo
+
+Si tu módulo solo funciona en determinadas plataformas, declara esta variable de clase:
+
+```python
+class Watchful(ModuleBase):
+    SUPPORTED_PLATFORMS = ('linux', 'darwin')   # no disponible en Windows
+```
+
+Cuando la plataforma actual no está en la lista, **la colección entera del módulo** se muestra en la UI con un badge "No compatible" en lugar de formularios interactivos. Los módulos `temperature` y `raid` (campo `local`) usan este mecanismo.
+
+Para restringir **solo un campo** (no el módulo entero), usa `supported_platforms` en `schema.json` — ver [`schema.md`](schema.md#supported_platforms).
 
 ### Debug
 
+Todos los niveles disponibles de `DebugLevel`:
+
+| Nivel | Valor | Uso recomendado |
+|-------|:-----:|-----------------|
+| `null` | 0 | Sin nivel (desactivado) |
+| `debug` | 1 | Trazas detalladas de ejecución interna |
+| `info` | 2 | Información general del ciclo |
+| `warning` | 3 | Advertencias no críticas (degradado, umbral superado) |
+| `error` | 4 | Errores recuperables |
+| `emergency` | 5 | Errores críticos irrecuperables |
+
 ```python
-self._debug("Mi mensaje", DebugLevel.info)
-self._debug("Error crítico", DebugLevel.error)
-self._debug("Datos extra", DebugLevel.debug)
+self._debug("Iniciando check", DebugLevel.info)
+self._debug(f"Resultado raw: {raw}", DebugLevel.debug)
+self._debug("Umbral superado", DebugLevel.warning)
+self._debug(f"Error al conectar: {exc}", DebugLevel.error)
+```
+
+---
+
+## 5b. Ejecución de comandos (`_run_cmd` y `Exec`)
+
+### Comandos locales — `_run_cmd`
+
+Para comandos locales simples usa el método heredado de `ModuleBase` (ver sección 5 arriba). Internamente usa `Exec.execute()`.
+
+### Comandos locales y remotos — `Exec` / `ExecResult`
+
+Para control completo — especialmente ejecución remota por SSH — usa directamente la clase `Exec` de `lib`:
+
+```python
+from lib import Exec, ExecResult
+```
+
+#### `ExecResult` — estructura del resultado
+
+Todos los métodos de `Exec` devuelven un `ExecResult`:
+
+| Atributo | Tipo | Descripción |
+|----------|------|-------------|
+| `.out` | `str \| None` | Salida estándar (stdout) |
+| `.err` | `str \| None` | Salida de error (stderr) |
+| `.code` | `int \| None` | Código de salida del proceso (`None` si no arrancó) |
+| `.exception` | `Exception \| None` | Excepción capturada si el comando no pudo ejecutarse |
+
+Comprueba siempre `.exception` antes de usar `.out`:
+
+```python
+result = Exec.execute('cat /proc/mdstat')
+if result.exception:
+    return False, f'Error: {result.exception}'
+stdout = result.out or ''
+```
+
+#### Ejecución local
+
+```python
+# Forma estática (más común)
+result = Exec.execute('systemctl status nginx')
+print(result.out)   # stdout
+print(result.code)  # 0 = OK, distinto de 0 = fallo
+
+# Equivalente usando _run_cmd (solo stdout)
+output = self._run_cmd('systemctl status nginx')
+```
+
+#### Ejecución remota por SSH
+
+```python
+# Con contraseña
+result = Exec.execute(
+    command='cat /proc/mdstat',
+    host='192.168.1.10',
+    port=22,
+    user='root',
+    password='mi_pass',
+    timeout=30.0,
+)
+
+# Con clave privada (recomendado)
+result = Exec.execute(
+    command='df -h',
+    host='192.168.1.10',
+    port=22,
+    user='root',
+    key_file='/home/user/.ssh/id_rsa',
+)
+
+if result.exception:
+    return False, f'SSH error: {result.exception}'
+if result.err:
+    return False, f'Remote error: {result.err}'
+output = result.out or ''
+```
+
+#### API orientada a objetos (para múltiples comandos al mismo host)
+
+```python
+from lib.exe import Exec
+
+runner = Exec()
+runner.set_remote(
+    host='192.168.1.10',
+    port=22,
+    user='root',
+    key_file='/home/user/.ssh/id_rsa',
+    timeout=15.0,
+)
+
+runner.command = 'uptime'
+r1 = runner.start()
+
+runner.command = 'df -h /'
+r2 = runner.start()
+```
+
+`set_remote()` parámetros:
+
+| Parámetro | Tipo | Por defecto | Descripción |
+|-----------|------|-------------|-------------|
+| `host` | str | `""` | Hostname o IP del servidor remoto |
+| `port` | int | `22` | Puerto SSH |
+| `user` | str | `"root"` | Usuario SSH |
+| `password` | str\|None | `None` | Contraseña (usar solo si no hay clave) |
+| `key_file` | str\|None | `None` | Ruta al fichero de clave privada |
+| `timeout` | float\|None | `None` | Timeout en segundos (mantiene el valor actual si `None`) |
+
+---
+
+## 5c. Utilidades Linux (`lib/linux/`)
+
+Utilidades para módulos que monitorizan hardware Linux específico. Solo disponibles en plataformas Linux.
+
+### `ThermalInfoCollection` — sensores térmicos
+
+Lee los sensores de `/sys/class/thermal/thermal_zone*`.
+
+```python
+from lib.linux import ThermalInfoCollection
+
+# Detectar automáticamente todos los sensores
+col = ThermalInfoCollection(autodetect=True)
+
+print(col.count)          # número de sensores encontrados
+for node in col.nodes:    # lista de ThermalNode
+    print(node.dev)       # "thermal_zone0", "thermal_zone1", …
+    print(node.type)      # "x86_pkg_temp", "acpitz", …
+    print(node.temp)      # temperatura en °C como float
+```
+
+```python
+# Detección manual (por si necesitas controlar el momento)
+col = ThermalInfoCollection()
+col.detect()
+col.clear()   # vacía la lista para volver a detectar
+```
+
+Cada `ThermalNode` expone:
+
+| Propiedad | Tipo | Descripción |
+|-----------|------|-------------|
+| `.dev` | str | Nombre del dispositivo (`thermal_zone0`, …) |
+| `.type` | str | Tipo del sensor (`x86_pkg_temp`, `acpitz`, …) |
+| `.temp` | float | Temperatura actual en °C |
+
+### `RaidMdstat` — estado de arrays RAID
+
+Parsea `/proc/mdstat` local o remoto (vía SSH).
+
+```python
+from lib.linux import RaidMdstat
+
+# ── Local ──────────────────────────────────────────────────
+md = RaidMdstat()
+if md.is_exist:
+    status = md.read_status()
+
+# ── Remoto vía SSH ─────────────────────────────────────────
+md = RaidMdstat(
+    host='192.168.1.10',
+    port=22,
+    user='root',
+    key_file='/path/to/id_rsa',   # o password='...'
+    timeout=30,
+)
+if md.is_exist:
+    status = md.read_status()
+```
+
+`RaidMdstat()` acepta un primer argumento opcional `mdstat` para usar una ruta alternativa en lugar de `/proc/mdstat` (útil en tests).
+
+#### Resultado de `read_status()`
+
+Devuelve un `dict[str, dict]` con un entry por array:
+
+```python
+{
+    'md0': {
+        'status': 'active',          # estado del array
+        'type':   'raid1',           # tipo RAID
+        'disk':   ['sda1', 'sdb1'],  # discos miembro
+        'blocks': '1953381376',      # bloques totales
+        'update': RaidMdstat.UpdateStatus.ok,
+
+        # Solo si hay recovery en curso:
+        'recovery': {
+            'percent': 23.4,
+            'blocks':  ['227033088', '975690432'],
+            'finish':  '63.5min',
+            'speed':   '234560K/sec',
+        }
+    }
+}
+```
+
+#### `RaidMdstat.UpdateStatus`
+
+| Valor | Descripción |
+|-------|-------------|
+| `ok` | Array saludable — todos los discos activos |
+| `error` | Array degradado — algún disco falla |
+| `recovery` | Array reconstruyéndose |
+| `unknown` | Estado no reconocido |
+
+```python
+update = status['md0'].get('update', RaidMdstat.UpdateStatus.unknown)
+is_ok = (update == RaidMdstat.UpdateStatus.ok)
 ```
 
 ---
@@ -533,6 +904,37 @@ se usa la clave como valor operativo.
 # Formato simple con dict (compat. hacia atrás)
 "192.168.1.1": {"enabled": true, "timeout": 2}
 ```
+
+### Valores sensibles — prefijo `enc:`
+
+Los campos marcados como `sensitive: true` en `schema.json` (contraseñas, tokens, claves SSH) se guardan cifrados en `modules.json` con el prefijo `enc:`:
+
+```json
+{
+    "datastore": {
+        "list": {
+            "Mi BD": {
+                "enabled": true,
+                "db_type": "mysql",
+                "host": "192.168.1.10",
+                "user": "root",
+                "password": "enc:gAAAAABl..."
+            }
+        }
+    }
+}
+```
+
+**No tienes que manejar este prefijo en tu código.** El `Monitor` descifra todos los valores `enc:` automáticamente antes de construir la configuración. Cuando tu módulo llama a `self.get_conf()` o `self.get_conf_in_list()`, recibe siempre el valor en texto plano.
+
+Hay dos mecanismos independientes:
+
+| Mecanismo | Cómo activarlo | Efecto |
+| --- | --- | --- |
+| **Campo contraseña en UI** | `"sensitive": true` en `schema.json` | El campo se renderiza como `<input type="password">` — el valor queda oculto en pantalla |
+| **Cifrado en disco** | El nombre del campo debe ser `password`, `ssh_password`, `token` o `secret` | El valor se guarda con prefijo `enc:` en `modules.json` y se descifra automáticamente al leerlo |
+
+Si añades un campo sensible con un nombre distinto a esos cuatro (p. ej. `api_key`), márcalo con `"sensitive": true` — la UI lo ocultará visualmente — pero **no se cifrará en disco** a menos que el nombre esté en `ENCRYPT_KEYS`. Para cifrado en disco, usa uno de los cuatro nombres reservados.
 
 ---
 
@@ -907,5 +1309,16 @@ class Watchful(ModuleBase):
 - [ ] Añadir `__discovery__` + `__discovery_field__` si se quiere botón de búsqueda inline en un campo `str`
 - [ ] Añadir `__key_mirrors_field__` si la clave del ítem debe sincronizarse con el campo descubierto
 - [ ] Añadir `supported_platforms` en campos que solo tienen sentido en determinadas plataformas
+- [ ] Declarar `SUPPORTED_PLATFORMS = ('linux', 'darwin')` en la clase si el módulo entero no soporta todas las plataformas
+- [ ] Declarar `WATCHFUL_ACTIONS: frozenset[str]` con los classmethods que se expondrán como endpoints web
+- [ ] Implementar los classmethods listados en `WATCHFUL_ACTIONS` como `@classmethod` con firma `(cls, config: dict)` para POST o `(cls)` para GET
 - [ ] Añadir `rename_item_prompt` en los archivos de idioma para personalizar el texto del modal de renombrar
 - [ ] Añadir `new_item_key_label` en los archivos de idioma para personalizar la etiqueta del campo de clave en el modal de nuevo ítem
+
+**Funcionalidades avanzadas de monitorización (opcional)**
+
+- [ ] Usar `check_status_custom(status, key, error_msg)` en lugar de `check_status` cuando el tipo de error importa (re-notifica si el mensaje cambia aunque el estado siga siendo `False`)
+- [ ] Usar `Exec.execute(command, host, port, user, ...)` para ejecución remota por SSH (ver sección 5b)
+- [ ] Usar `ThermalInfoCollection` para leer sensores de temperatura en Linux (ver sección 5c)
+- [ ] Usar `RaidMdstat` para parsear `/proc/mdstat` local o remotamente (ver sección 5c)
+- [ ] Pasar `other_data` en `dict_return.set()` para exponer datos extra en la página pública `/status`

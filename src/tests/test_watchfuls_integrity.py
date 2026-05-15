@@ -318,3 +318,51 @@ class TestDiscoverSchemasRealModules:
                     f"{sk}['{field_key}'] missing 'label_i18n' "
                     f"(lang/ files exist but labels not merged)"
                 )
+
+
+# ──────────────────── WATCHFUL_ACTIONS integrity ──────────────────
+
+
+# Modules known to expose web actions — maps module name to expected actions.
+_EXPECTED_ACTIONS: dict[str, frozenset] = {
+    'datastore':       frozenset({'test_connection', 'list_databases'}),
+    'filesystemusage': frozenset({'discover'}),
+    'service_status':  frozenset({'discover'}),
+    'temperature':     frozenset({'discover'}),
+}
+
+
+class TestWatchfulActions:
+    """WATCHFUL_ACTIONS is correctly declared on every module."""
+
+    @pytest.mark.parametrize("mod_name", _MODULE_NAMES)
+    def test_watchful_actions_is_frozenset(self, mod_name):
+        """WATCHFUL_ACTIONS must be a frozenset (or absent on base-only modules)."""
+        mod = importlib.import_module(f"watchfuls.{mod_name}")
+        actions = getattr(mod.Watchful, 'WATCHFUL_ACTIONS', None)
+        if actions is not None:
+            assert isinstance(actions, frozenset), (
+                f"{mod_name}.Watchful.WATCHFUL_ACTIONS must be a frozenset, "
+                f"got {type(actions).__name__}"
+            )
+
+    @pytest.mark.parametrize("mod_name,expected", list(_EXPECTED_ACTIONS.items()))
+    def test_expected_actions_declared(self, mod_name, expected):
+        """Modules that expose web actions must declare the correct WATCHFUL_ACTIONS."""
+        mod = importlib.import_module(f"watchfuls.{mod_name}")
+        actions = getattr(mod.Watchful, 'WATCHFUL_ACTIONS', frozenset())
+        assert actions == expected, (
+            f"{mod_name}.Watchful.WATCHFUL_ACTIONS = {actions!r}, "
+            f"expected {expected!r}"
+        )
+
+    @pytest.mark.parametrize("mod_name,expected", list(_EXPECTED_ACTIONS.items()))
+    def test_action_methods_exist(self, mod_name, expected):
+        """Every action in WATCHFUL_ACTIONS must be a callable classmethod."""
+        mod = importlib.import_module(f"watchfuls.{mod_name}")
+        for action in expected:
+            method = getattr(mod.Watchful, action, None)
+            assert callable(method), (
+                f"{mod_name}.Watchful.{action} is in WATCHFUL_ACTIONS "
+                f"but is not callable"
+            )

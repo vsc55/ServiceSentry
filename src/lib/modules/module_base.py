@@ -49,6 +49,10 @@ class ModuleBase(ObjectBase):
     # Example: { 'list': { 'enabled': True, 'code': 200 } }
     ITEM_SCHEMA: dict[str, dict] = {}
 
+    # Classmethods exposed as web actions via /api/watchfuls/<module>/<action>.
+    # Override in subclasses to whitelist callable classmethods.
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset()
+
     @staticmethod
     def _schema_defaults(collection: dict) -> dict:
         """Extract default values from an enriched ``ITEM_SCHEMA`` collection.
