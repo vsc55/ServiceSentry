@@ -1,0 +1,22 @@
+{
+    "pretty_name": "SSL Certificate",
+    "labels": {
+        "enabled":      "Enabled",
+        "threads":      "Threads",
+        "warning_days": "Warning threshold (days)",
+        "timeout":      "Timeout (s)",
+        "host":         "Host",
+        "port":         "Port"
+    },
+    "hints": {
+        "enabled":      "Enable or disable SSL certificate monitoring for this entry.",
+        "threads":      "Number of certificates to check in parallel.",
+        "warning_days": "Number of days before expiry to trigger a warning. Per-item value overrides the module-level default.",
+        "timeout":      "Connection timeout in seconds. Per-item value overrides the module-level default.",
+        "host":         "Hostname to connect to for certificate retrieval.",
+        "port":         "HTTPS port. Leave empty (0) to use the standard port 443."
+    },
+    "new_item_key_label": "Host name or identifier:",
+    "rename_item_prompt": "Enter new host name or identifier:",
+    "collections": {"list": "Certificates"}
+}

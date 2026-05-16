@@ -1,0 +1,7 @@
+{
+    "name": "ups",
+    "version": "1.0.0",
+    "description": "UPS status monitoring via NUT (Network UPS Tools) TCP protocol.",
+    "icon": "🔋",
+    "dependencies": []
+}

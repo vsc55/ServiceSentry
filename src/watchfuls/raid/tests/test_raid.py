@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 """Tests para watchfuls/raid.py."""
 
+import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from lib.linux.raid_mdstat import RaidMdstat
 from conftest import create_mock_monitor
@@ -52,6 +55,7 @@ class TestRaidDefaults:
         assert 'remote' not in Watchful.ITEM_SCHEMA
 
 
+@pytest.mark.skipif(sys.platform != 'linux', reason="local RAID checks only run on Linux")
 class TestRaidCheckLocal:
 
     def setup_method(self):

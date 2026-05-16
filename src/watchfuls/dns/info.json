@@ -1,0 +1,7 @@
+{
+    "name": "dns",
+    "version": "1.0.0",
+    "description": "DNS resolution monitoring.",
+    "icon": "🌐",
+    "dependencies": []
+}

@@ -1,0 +1,22 @@
+{
+    "pretty_name": "Monitor NTP",
+    "labels": {
+        "enabled":    "Habilitado",
+        "threads":    "Hilos",
+        "max_offset": "Offset máximo (s)",
+        "timeout":    "Timeout (s)",
+        "server":     "Servidor NTP",
+        "port":       "Puerto"
+    },
+    "hints": {
+        "enabled":    "Habilitar o deshabilitar la monitorización NTP para esta entrada.",
+        "threads":    "Número de servidores a comprobar en paralelo.",
+        "max_offset": "Desviación temporal máxima permitida en segundos. El valor por ítem anula el valor global del módulo.",
+        "timeout":    "Timeout del socket en segundos. El valor por ítem anula el valor global del módulo.",
+        "server":     "Nombre de host o IP del servidor NTP (por defecto: pool.ntp.org).",
+        "port":       "Puerto UDP al que conectar. Dejar vacío (0) para usar el puerto NTP estándar 123."
+    },
+    "new_item_key_label": "Servidor NTP o identificador:",
+    "rename_item_prompt": "Introduce el nuevo servidor NTP o identificador:",
+    "collections": {"list": "Servidores NTP"}
+}

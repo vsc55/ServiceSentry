@@ -458,7 +458,7 @@ Usa `SUPPORTED_PLATFORMS` en la clase cuando el módulo entero es inútil en esa
 | `hddtemp` | `__module__`, `list` | — | — | — | — | — |
 | `ping` | `__module__`, `list` | — | — | — | — | — |
 | `raid` | `__module__`, `list` | — | — | — | — | — |
-| `ram_swap` | `__module__`, `config` | — | — | — | — | — |
+| `ram_swap` | `__module__` | — | — | — | — | — |
 | `service_status` | `__module__`, `list` | — | — | ✓ | ✓ (`service`) | ✓ (`service`) |
 | `temperature` | `__module__`, `list` | — | — | ✓ | — | — |
 | `web` | `__module__`, `list` | — | — | — | — | — |

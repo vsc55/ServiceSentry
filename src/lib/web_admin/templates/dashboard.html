@@ -177,22 +177,21 @@
         <div class="tab-pane fade" id="tab-modules">
             <div class="d-flex align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border"
                  style="background:var(--bs-secondary-bg);position:sticky;top:0;z-index:10">
-                <button class="btn btn-sm btn-outline-secondary" id="btnNewModule" onclick="openNewModuleModal()">
+                <h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>{{ i18n.tab_modules }}</h6>
+                <button class="btn btn-sm btn-outline-secondary ms-auto" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <button class="btn btn-sm btn-success" id="btnNewModule" onclick="openNewModuleModal()">
                     <i class="bi bi-plus-lg me-1"></i>{{ i18n.add_module }}
                 </button>
-                <button class="btn btn-sm btn-outline-secondary" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
-                    <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_modules }}
+                <button class="btn btn-sm btn-outline-secondary d-none" id="btnUndoModules" onclick="revertModules()" title="{{ i18n.undo_modules }}">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo_modules }}
                 </button>
-                <div class="ms-auto d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-secondary d-none" id="btnUndoModules" onclick="revertModules()" title="{{ i18n.undo_modules }}">
-                        <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo_modules }}
-                    </button>
-                    <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()">
-                        <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
-                        <span class="badge bg-warning text-dark ms-1 d-none" id="badgeModulesDirty"
-                            title="{{ i18n.unsaved_changes }}">●</span>
-                    </button>
-                </div>
+                <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()">
+                    <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
+                    <span class="badge bg-warning text-dark ms-1 d-none" id="badgeModulesDirty"
+                        title="{{ i18n.unsaved_changes }}">●</span>
+                </button>
             </div>
             <div id="modules-container"></div>
         </div>
@@ -201,17 +200,16 @@
         <div class="tab-pane fade" id="tab-config">
             <div class="d-flex align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border"
                  style="background:var(--bs-secondary-bg);position:sticky;top:0;z-index:10">
-                <div class="ms-auto d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-secondary" id="btnReloadConfig" onclick="reloadConfig()"
-                        title="{{ i18n.reload_config_title }}">
-                        <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.reload_config }}
-                    </button>
-                    <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()">
-                        <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
-                        <span class="badge bg-warning text-dark ms-1 d-none" id="badgeConfigDirty"
-                            title="{{ i18n.unsaved_changes }}">●</span>
-                    </button>
-                </div>
+                <h6 class="mb-0"><i class="bi bi-gear me-2"></i>{{ i18n.tab_config }}</h6>
+                <button class="btn btn-sm btn-outline-secondary ms-auto" id="btnReloadConfig" onclick="reloadConfig()"
+                    title="{{ i18n.reload_config_title }}">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()">
+                    <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
+                    <span class="badge bg-warning text-dark ms-1 d-none" id="badgeConfigDirty"
+                        title="{{ i18n.unsaved_changes }}">●</span>
+                </button>
             </div>
             <div id="config-container"></div>
         </div>

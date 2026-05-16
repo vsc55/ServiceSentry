@@ -1,0 +1,13 @@
+{
+    "pretty_name": "CPU Usage",
+    "labels": {
+        "enabled":  "Enabled",
+        "alert":    "Alert threshold (%)",
+        "interval": "Sampling interval (s)"
+    },
+    "hints": {
+        "enabled":  "Enable or disable CPU usage monitoring.",
+        "alert":    "CPU usage threshold (%). An alert is triggered when usage exceeds this value.",
+        "interval": "Sampling interval in seconds passed to psutil.cpu_percent(). Higher values give more accurate readings."
+    }
+}

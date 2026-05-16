@@ -1,0 +1,7 @@
+{
+    "name": "ntp",
+    "version": "1.0.0",
+    "description": "NTP time offset monitoring via raw UDP (no external libraries).",
+    "icon": "🕐",
+    "dependencies": []
+}

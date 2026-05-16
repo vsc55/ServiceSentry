@@ -1,0 +1,13 @@
+{
+    "pretty_name": "Uso de CPU",
+    "labels": {
+        "enabled":  "Habilitado",
+        "alert":    "Umbral de alerta (%)",
+        "interval": "Intervalo de muestreo (s)"
+    },
+    "hints": {
+        "enabled":  "Habilitar o deshabilitar la monitorización del uso de CPU.",
+        "alert":    "Umbral de uso de CPU (%). Se genera una alerta cuando el uso supera este valor.",
+        "interval": "Intervalo de muestreo en segundos pasado a psutil.cpu_percent(). Valores más altos dan lecturas más precisas."
+    }
+}

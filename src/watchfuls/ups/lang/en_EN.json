@@ -1,0 +1,26 @@
+{
+    "pretty_name": "UPS Monitor (NUT)",
+    "labels": {
+        "enabled":  "Enabled",
+        "threads":  "Threads",
+        "timeout":  "Timeout (s)",
+        "host":     "UPSD host",
+        "port":     "UPSD port",
+        "ups_name": "UPS name",
+        "user":     "Username",
+        "password": "Password"
+    },
+    "hints": {
+        "enabled":  "Enable or disable UPS monitoring for this entry.",
+        "threads":  "Number of UPS units to check in parallel.",
+        "timeout":  "TCP connection timeout in seconds. Per-item value overrides the module-level default.",
+        "host":     "Hostname or IP of the NUT UPSD server.",
+        "port":     "NUT UPSD TCP port. Leave empty (0) to use the standard port 3493.",
+        "ups_name": "UPS name as configured in NUT (default: ups).",
+        "user":     "Username for NUT authentication. Leave empty for unauthenticated access.",
+        "password": "Password for NUT authentication."
+    },
+    "new_item_key_label": "UPS name or identifier:",
+    "rename_item_prompt": "Enter new UPS name or identifier:",
+    "collections": {"list": "UPS Units"}
+}

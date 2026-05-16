@@ -1,0 +1,15 @@
+{
+    "__module__": {
+        "enabled":      {"type": "bool", "default": true},
+        "threads":      {"type": "int",  "default": 5,  "min": 1, "max": 100},
+        "warning_days": {"type": "int",  "default": 30, "min": 1, "max": 365},
+        "timeout":      {"type": "int",  "default": 10, "min": 1, "max": 60}
+    },
+    "list": {
+        "enabled":      {"type": "bool", "default": true},
+        "host":         {"type": "str",  "default": ""},
+        "port":         {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 443},
+        "warning_days": {"type": "int",  "default": 0,   "min": 0, "max": 365, "placeholder_module": "warning_days"},
+        "timeout":      {"type": "int",  "default": 0,   "min": 0, "max": 60,  "placeholder_module": "timeout"}
+    }
+}

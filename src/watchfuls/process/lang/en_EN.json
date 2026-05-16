@@ -1,0 +1,23 @@
+{
+    "pretty_name": "Process Monitor",
+    "labels": {
+        "enabled":   "Enabled",
+        "threads":   "Threads",
+        "process":   "Process name",
+        "min_count": "Minimum instances"
+    },
+    "hints": {
+        "enabled":   "Enable or disable process monitoring for this entry.",
+        "threads":   "Number of entries to check in parallel.",
+        "process":   "Process name to search for (case-insensitive). If empty, the item key is used.",
+        "min_count": "Minimum number of running instances required to report OK. Module-level value is the global default; per-item value of 0 means use the global default."
+    },
+    "new_item_key_label": "Process name or identifier:",
+    "rename_item_prompt": "Enter new process name or identifier:",
+    "collections": {"list": "Processes"},
+    "ui": {
+        "discover_title": "Running Processes",
+        "discover_error": "Could not load the list of running processes",
+        "item_added":     "Process \"{}\" added"
+    }
+}

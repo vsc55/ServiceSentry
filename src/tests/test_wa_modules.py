@@ -421,12 +421,13 @@ class TestModuleItemSchemas:
         assert schema['port']['default'] == 0
         assert schema['port']['placeholder'] == 22
 
-    # ---- modules with config-level schema ----
-    def test_ram_swap_config_schema(self):
-        """ram_swap|config schema has alert_ram and alert_swap."""
-        schema = self.schemas.get('ram_swap|config')
+    # ---- modules with __module__-level scalar fields ----
+    def test_ram_swap_module_schema(self):
+        """ram_swap|__module__ schema has alert_ram and alert_swap."""
+        schema = self.schemas.get('ram_swap|__module__')
         assert schema is not None
-        assert set(schema.keys()) == {'alert_ram', 'alert_swap'}
+        assert 'alert_ram' in schema
+        assert 'alert_swap' in schema
         assert schema['alert_ram']['default'] == 60
         assert schema['alert_ram']['min'] == 0
         assert schema['alert_ram']['max'] == 100

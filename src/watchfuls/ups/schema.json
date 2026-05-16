@@ -1,0 +1,17 @@
+{
+    "__module__": {
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int",  "default": 3,  "min": 1, "max": 100},
+        "timeout": {"type": "int",  "default": 10, "min": 1, "max": 60}
+    },
+    "list": {
+        "__field_order__": ["enabled", "host", "port", "user", "password", "ups_name", "timeout"],
+        "enabled":  {"type": "bool", "default": true},
+        "host":     {"type": "str",  "default": ""},
+        "port":     {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 3493},
+        "user":     {"type": "str",  "default": ""},
+        "password": {"type": "str",  "default": "", "sensitive": true},
+        "ups_name": {"type": "str",  "default": "ups"},
+        "timeout":  {"type": "int",  "default": 0, "min": 0, "max": 60, "placeholder_module": "timeout"}
+    }
+}

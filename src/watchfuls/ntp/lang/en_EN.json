@@ -1,0 +1,22 @@
+{
+    "pretty_name": "NTP Monitor",
+    "labels": {
+        "enabled":    "Enabled",
+        "threads":    "Threads",
+        "max_offset": "Max offset (s)",
+        "timeout":    "Timeout (s)",
+        "server":     "NTP server",
+        "port":       "Port"
+    },
+    "hints": {
+        "enabled":    "Enable or disable NTP monitoring for this entry.",
+        "threads":    "Number of servers to check in parallel.",
+        "max_offset": "Maximum allowed time offset in seconds. Per-item value overrides the module-level default.",
+        "timeout":    "Socket timeout in seconds. Per-item value overrides the module-level default.",
+        "server":     "NTP server hostname or IP address (default: pool.ntp.org).",
+        "port":       "UDP port to connect to. Leave empty (0) to use the standard NTP port 123."
+    },
+    "new_item_key_label": "NTP server or identifier:",
+    "rename_item_prompt": "Enter new NTP server or identifier:",
+    "collections": {"list": "NTP Servers"}
+}

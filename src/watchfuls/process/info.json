@@ -1,0 +1,7 @@
+{
+    "name": "process",
+    "version": "1.0.0",
+    "description": "Process presence monitoring via psutil.",
+    "icon": "⚙️",
+    "dependencies": []
+}

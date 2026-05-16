@@ -12,7 +12,7 @@
 |-----------|-----------|
 | [architecture.md](architecture.md) | Diagrama de componentes, jerarquía de clases, estructura de directorios, flujo de ejecución, modelo de concurrencia |
 | [configuration.md](configuration.md) | config.json, monitor.json, modules.json, status.json, opciones CLI, Telegram, sistema de debug |
-| [modules.md](modules.md) | Los 9 módulos integrados: referencia de configuración, campos y flujo de cada uno |
+| [modules.md](modules.md) | Los 15 módulos integrados: referencia de configuración, campos y flujo de cada uno |
 | [web_admin.md](web_admin.md) | Interfaz web Flask: características, roles, seguridad, endpoints REST, i18n, formularios por schema |
 | [security.md](security.md) | Autenticación, RBAC, sesiones, XSS, path traversal, auditoría y tests de seguridad del panel web |
 | [development.md](development.md) | Setup local, tests, pytest, depuración en VS Code, convenciones de código, dependencias |
@@ -35,20 +35,26 @@ ServiceSentry es una herramienta de monitorización para sistemas que:
 - Ejecuta los módulos en **paralelo** usando `ThreadPoolExecutor`.
 - Arquitectura de **plugins**: cada módulo es un package independiente en `watchfuls/`.
 - Usa `match/case` nativo de Python 3.10+.
-- 6 de los 9 módulos son **multiplataforma** 🌐 (Linux / Windows / macOS).
+- 12 de los 15 módulos son **multiplataforma** 🌐 (Linux / Windows / macOS).
 
 ---
 
 ## Módulos incluidos
 
 | Módulo | Plataforma | Descripción |
-|--------|-----------|-------------|
+| --- | --- | --- |
+| `cpu` 🌐 | Linux / Win / macOS | Uso total de CPU (psutil) |
 | `datastore` 🌐 | Linux / Win / macOS | Conectividad a bases de datos (MySQL, PostgreSQL, MSSQL, MongoDB, Redis, InfluxDB, Elasticsearch) |
+| `dns` 🌐 | Linux / Win / macOS | Resolución DNS con validación de IP esperada |
 | `filesystemusage` 🌐 | Linux / Win / macOS | Uso de particiones (psutil) |
 | `hddtemp` | Linux | Temperatura de discos (demonio hddtemp) |
+| `ntp` 🌐 | Linux / Win / macOS | Offset de sincronización NTP (UDP nativo) |
 | `ping` 🌐 | Linux / macOS / Windows\* | Disponibilidad de hosts (`pythonping` o ICMP raw socket) |
+| `process` 🌐 | Linux / Win / macOS | Procesos en ejecución con mínimo de instancias (psutil) |
 | `raid` | Linux | Estado RAID mdstat (local + SSH remoto) |
 | `ram_swap` 🌐 | Linux / Win / macOS | Uso de RAM y SWAP (psutil) |
 | `service_status` 🌐 | Linux / Windows | Estado de servicios (systemd / OpenRC / SysV / Windows SCM) |
+| `ssl_cert` 🌐 | Linux / Win / macOS | Expiración de certificados SSL/TLS |
 | `temperature` | Linux / macOS | Sensores térmicos (psutil) |
+| `ups` 🌐 | Linux / Win / macOS | Estado de SAI/UPS vía NUT TCP |
 | `web` 🌐 | Linux / Win / macOS | Disponibilidad HTTP/HTTPS (urllib) |

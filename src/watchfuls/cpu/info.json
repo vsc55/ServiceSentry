@@ -1,0 +1,7 @@
+{
+    "name": "cpu",
+    "version": "1.0.0",
+    "description": "CPU usage monitoring via psutil.",
+    "icon": "🖥️",
+    "dependencies": []
+}

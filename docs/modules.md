@@ -44,6 +44,245 @@ Estructura devuelta por el método `check()` de cada módulo:
 
 ---
 
+## 🖥️ cpu — Uso de CPU
+
+Monitoriza el porcentaje total de uso de CPU usando `psutil`.
+
+**Plataforma:** Linux, Windows, macOS 🌐
+
+**Config:**
+```json
+{
+    "cpu": {
+        "enabled": true,
+        "alert": 85,
+        "interval": 1.0
+    }
+}
+```
+
+| Clave | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `alert` | int | 85 | % de uso de CPU para alertar |
+| `interval` | float | 1.0 | Segundos de muestreo para `psutil.cpu_percent()` (0.1–10.0) |
+
+**Flujo:** `psutil.cpu_percent(interval=interval)` → compara con el umbral → alerta si supera `alert`.
+
+---
+
+## 🔒 ssl_cert — Expiración de Certificados SSL/TLS
+
+Comprueba los días hasta la expiración de certificados SSL/TLS de servidores remotos. Funciona con cualquier servidor HTTPS/TLS sin dependencias externas.
+
+**Plataforma:** Linux, Windows, macOS 🌐
+
+**Config:**
+```json
+{
+    "ssl_cert": {
+        "enabled": true,
+        "threads": 5,
+        "warning_days": 30,
+        "timeout": 10,
+        "list": {
+            "mi_web": {
+                "enabled": true,
+                "host": "example.com",
+                "port": 443,
+                "warning_days": 0,
+                "timeout": 0
+            }
+        }
+    }
+}
+```
+
+| Clave | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `warning_days` | int | 30 | Días antes de vencimiento para alertar (umbral global) |
+| `timeout` | int | 10 | Timeout de conexión TCP en segundos (global) |
+| `list.*.host` | string | `""` | Hostname del servidor. Si está vacío, se usa la clave del ítem |
+| `list.*.port` | int | 0 | Puerto TLS. `0` aplica el puerto estándar 443. La UI muestra `443` como placeholder |
+| `list.*.warning_days` | int | 0 | Umbral de alerta por host. `0` usa el valor global |
+| `list.*.timeout` | int | 0 | Timeout por host en segundos. `0` usa el valor global |
+
+**Flujo:** `ssl.create_default_context()` + `socket.create_connection()` → `ssock.getpeercert()` → `ssl.cert_time_to_seconds(cert['notAfter'])` → calcula días restantes → alerta si `days_left <= warning_days`.
+
+---
+
+## ⚙️ process — Procesos en Ejecución
+
+Verifica que los procesos del sistema están en ejecución comprobando el número mínimo de instancias activas.
+
+**Plataforma:** Linux, Windows, macOS 🌐
+
+**Config:**
+```json
+{
+    "process": {
+        "enabled": true,
+        "threads": 5,
+        "list": {
+            "nginx": {
+                "enabled": true,
+                "process": "nginx",
+                "min_count": 1
+            },
+            "python3": {
+                "enabled": true,
+                "min_count": 2
+            }
+        }
+    }
+}
+```
+
+| Clave | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `list.*.process` | string | clave | Nombre del proceso a buscar (insensible a mayúsculas). Si está vacío, se usa la clave del ítem |
+| `list.*.min_count` | int | 1 | Número mínimo de instancias para considerar OK |
+
+**Discover:** El botón "Discover" en la cabecera de la colección y el botón inline junto al campo `process` enumeran todos los procesos activos del sistema ordenados alfabéticamente, con el número de instancias en ejecución. Al seleccionar uno se rellena automáticamente el campo y la clave del ítem.
+
+**Flujo:** `psutil.process_iter(['name'])` → cuenta instancias con nombre coincidente (case-insensitive) → alerta si `count < min_count`.
+
+---
+
+## 🌐 dns — Resolución DNS
+
+Comprueba que los hostnames resuelven correctamente para todos los tipos de registro DNS (A, AAAA, CNAME, MX, TXT, NS, PTR, SOA), con soporte opcional para validar que el valor resuelto contiene un texto esperado.
+
+**Plataforma:** Linux, Windows, macOS 🌐
+
+**Dependencia opcional:** `dnspython>=2.3` para tipos distintos de A/AAAA. Si no está instalado, las consultas A/AAAA siguen funcionando; otros tipos devolverán `status=False` con mensaje de error.
+
+**Config:**
+```json
+{
+    "dns": {
+        "enabled": true,
+        "threads": 5,
+        "timeout": 5,
+        "list": {
+            "google-a": {
+                "enabled": true,
+                "host": "google.com",
+                "record_type": "A",
+                "expected": "",
+                "timeout": 0
+            },
+            "mi_mail": {
+                "enabled": true,
+                "host": "example.com",
+                "record_type": "MX",
+                "expected": "mail.example.com"
+            },
+            "spf": {
+                "enabled": true,
+                "host": "example.com",
+                "record_type": "TXT",
+                "expected": "v=spf1"
+            }
+        }
+    }
+}
+```
+
+| Clave | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `timeout` | int | 5 | Timeout de resolución DNS en segundos (global) |
+| `list.*.host` | string | clave | Hostname a resolver. Si está vacío, se usa la clave del ítem |
+| `list.*.record_type` | string | `"A"` | Tipo de registro: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `PTR`, `SOA` |
+| `list.*.expected` | string | `""` | Valor que debe aparecer (subcadena, insensible a mayúsculas) en al menos un registro. Vacío = solo comprueba que resuelve |
+| `list.*.timeout` | int | 0 | Timeout por host. `0` usa el valor global |
+
+**Flujo:** A/AAAA → `socket.getaddrinfo()` con `AF_INET`/`AF_INET6`; demás tipos → `dns.resolver.resolve()` (dnspython). En ambos casos los resultados se normalizan a lista de strings y se comprueba `expected` como subcadena insensible a mayúsculas.
+
+---
+
+## 🕐 ntp — Sincronización de Tiempo NTP
+
+Comprueba el offset de tiempo consultando servidores NTP vía UDP. Implementación con stdlib de Python sin dependencias externas.
+
+**Plataforma:** Linux, Windows, macOS 🌐
+
+**Config:**
+```json
+{
+    "ntp": {
+        "enabled": true,
+        "threads": 3,
+        "max_offset": 5.0,
+        "timeout": 5,
+        "list": {
+            "pool": {
+                "enabled": true,
+                "server": "pool.ntp.org",
+                "max_offset": 0.0,
+                "timeout": 0
+            }
+        }
+    }
+}
+```
+
+| Clave | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `max_offset` | float | 5.0 | Offset máximo en segundos antes de alertar (global) |
+| `timeout` | float | 5 | Timeout UDP en segundos (global) |
+| `list.*.server` | string | `"pool.ntp.org"` | Hostname del servidor NTP |
+| `list.*.port` | int | 0 | Puerto UDP NTP. `0` aplica el puerto estándar 123. La UI muestra `123` como placeholder |
+| `list.*.max_offset` | float | 0.0 | Offset máximo por servidor. `0.0` usa el valor global |
+| `list.*.timeout` | int | 0 | Timeout por servidor. `0` usa el valor global |
+
+**Flujo:** Paquete UDP NTP `b'\x1b' + 47*b'\x00'` (LI=0, VN=3, Mode=3) → lee T2 (bytes 32-39) y T3 (bytes 40-47) → offset = `|((T2-T1)+(T3-T4))/2|` → alerta si `offset >= max_offset`.
+
+---
+
+## 🔋 ups — Estado SAI / UPS (NUT)
+
+Consulta el estado de SAIs/UPS a través del protocolo NUT (Network UPS Tools) por TCP. Soporta autenticación opcional.
+
+**Plataforma:** Linux, Windows, macOS 🌐
+
+**Config:**
+```json
+{
+    "ups": {
+        "enabled": true,
+        "threads": 3,
+        "timeout": 10,
+        "list": {
+            "ups_principal": {
+                "enabled": true,
+                "host": "192.168.1.5",
+                "port": 3493,
+                "ups_name": "ups",
+                "user": "",
+                "password": "",
+                "timeout": 0
+            }
+        }
+    }
+}
+```
+
+| Clave | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `timeout` | int | 10 | Timeout de conexión TCP en segundos (global) |
+| `list.*.host` | string | `""` | IP/hostname del demonio NUT (`upsd`) |
+| `list.*.port` | int | 0 | Puerto TCP de `upsd`. `0` aplica el puerto estándar 3493. La UI muestra `3493` como placeholder |
+| `list.*.ups_name` | string | `"ups"` | Nombre del UPS en `upsd` |
+| `list.*.user` | string | `""` | Usuario NUT (opcional) |
+| `list.*.password` | string | `""` | Contraseña NUT (**cifrada en disco** con `enc:`) |
+| `list.*.timeout` | int | 0 | Timeout por host. `0` usa el valor global |
+
+**Estados:** `OL` = en línea ✅, `OB` = funcionando con batería ⚠️, `LB` = batería baja ⚠️.
+
+**Flujo:** Conexión TCP al puerto 3493 → `USERNAME`/`PASSWORD` si hay credenciales → `LIST VAR <ups_name>` → parsea líneas `VAR` → comprueba `ups.status`.
+
+---
+
 ## 📁 filesystemusage — Uso de Disco
 
 Monitoriza el porcentaje de uso de particiones usando `psutil`.

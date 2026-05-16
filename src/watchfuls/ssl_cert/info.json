@@ -1,0 +1,7 @@
+{
+    "name": "ssl_cert",
+    "version": "1.0.0",
+    "description": "SSL/TLS certificate expiry monitoring.",
+    "icon": "🔒",
+    "dependencies": []
+}

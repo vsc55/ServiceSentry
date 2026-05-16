@@ -1,0 +1,34 @@
+{
+    "pretty_name": "Monitor DNS",
+    "labels": {
+        "enabled":     "Habilitado",
+        "threads":     "Hilos",
+        "timeout":     "Timeout (s)",
+        "host":        "Host",
+        "record_type": "Tipo de registro",
+        "expected":    "Valor esperado"
+    },
+    "hints": {
+        "enabled":     "Habilitar o deshabilitar la monitorización DNS para esta entrada.",
+        "threads":     "Número de entradas a comprobar en paralelo.",
+        "timeout":     "Timeout de resolución en segundos. El valor por ítem anula el valor global del módulo.",
+        "host":        "Nombre de host a resolver. Si está vacío, se usa la clave del ítem.",
+        "record_type": "Tipo de registro DNS a consultar: A (IPv4), AAAA (IPv6), CNAME, MX, TXT, NS, PTR o SOA. Los tipos distintos de A/AAAA requieren dnspython.",
+        "expected":    "Valor opcional que debe aparecer (coincidencia de subcadena, sin distinción de mayúsculas) en al menos un registro resuelto. Dejar vacío para comprobar solo que la consulta devuelve resultados."
+    },
+    "option_labels": {
+        "record_type": {
+            "A":    "A — Dirección IPv4",
+            "AAAA": "AAAA — Dirección IPv6",
+            "CNAME": "CNAME — Nombre canónico",
+            "MX":   "MX — Servidor de correo",
+            "TXT":  "TXT — Registro de texto",
+            "NS":   "NS — Servidor de nombres",
+            "PTR":  "PTR — Resolución inversa",
+            "SOA":  "SOA — Inicio de autoridad"
+        }
+    },
+    "new_item_key_label": "Nombre de host o identificador:",
+    "rename_item_prompt": "Introduce el nuevo nombre de host o identificador:",
+    "collections": {"list": "Hosts"}
+}

@@ -1,0 +1,23 @@
+{
+    "pretty_name": "Monitor de Procesos",
+    "labels": {
+        "enabled":   "Habilitado",
+        "threads":   "Hilos",
+        "process":   "Nombre del proceso",
+        "min_count": "Instancias mínimas"
+    },
+    "hints": {
+        "enabled":   "Habilitar o deshabilitar la monitorización de este proceso.",
+        "threads":   "Número de entradas a comprobar en paralelo.",
+        "process":   "Nombre del proceso a buscar (sin distinción de mayúsculas). Si está vacío, se usa la clave del ítem.",
+        "min_count": "Número mínimo de instancias en ejecución para reportar OK. El valor del módulo es el predeterminado global; un valor de 0 por ítem usa el predeterminado global."
+    },
+    "new_item_key_label": "Nombre del proceso o identificador:",
+    "rename_item_prompt": "Introduce el nuevo nombre del proceso o identificador:",
+    "collections": {"list": "Procesos"},
+    "ui": {
+        "discover_title": "Procesos en Ejecución",
+        "discover_error": "No se pudo cargar la lista de procesos en ejecución",
+        "item_added":     "Proceso \"{}\" añadido"
+    }
+}

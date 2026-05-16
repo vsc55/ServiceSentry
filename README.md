@@ -12,12 +12,12 @@
 
 ## Features
 
-- **9 built-in modules:** databases (MySQL/PostgreSQL/MSSQL/MongoDB/Redis/InfluxDB/Elasticsearch), disk usage, disk temperature, ping, RAID, RAM/SWAP, services, temperature sensors, web availability.
+- **15 built-in modules:** CPU usage, databases (MySQL/PostgreSQL/MSSQL/MongoDB/Redis/InfluxDB/Elasticsearch), DNS resolution, disk usage, disk temperature, NTP time sync, ping, process monitoring, RAID, RAM/SWAP, services, SSL certificate expiry, temperature sensors, UPS/SAI status, web availability.
 - **Telegram notifications** — alerts only when state *changes* (no spam on repeated failures).
 - **Web admin panel** — browser UI to manage modules, config and users; granular per-action roles (15 permission flags); custom roles; dark mode; i18n (EN / ES).
 - **Plugin architecture** — each module is an independent Python package in `watchfuls/`.
 - **Parallel execution** — modules and per-module items run in `ThreadPoolExecutor`.
-- **Cross-platform** — 6 of 9 modules run on Linux, Windows and macOS; services module supports systemd, OpenRC, SysV and Windows SCM.
+- **Cross-platform** — 12 of 15 modules run on Linux, Windows and macOS; services module supports systemd, OpenRC, SysV and Windows SCM.
 - **Remote execution** — SSH command execution via paramiko for RAID and other remote checks.
 - **Encrypted storage** — sensitive fields (passwords, tokens) are encrypted at rest in `modules.json`.
 - **Public status page** — optional `/status` endpoint (no login required) showing real-time health of all modules with collapsible cards and configurable auto-refresh.
@@ -71,7 +71,7 @@ Edit `data/config.json` to add your Telegram bot token and chat ID before runnin
 | [docs/README.md](docs/README.md) | Documentation index |
 | [docs/architecture.md](docs/architecture.md) | Component diagram, class hierarchy, directory structure, execution flow |
 | [docs/configuration.md](docs/configuration.md) | config.json, monitor.json, modules.json, CLI options, Telegram, debug |
-| [docs/modules.md](docs/modules.md) | All 9 modules: config reference, fields and flow |
+| [docs/modules.md](docs/modules.md) | All 15 modules: config reference, fields and flow |
 | [docs/web_admin.md](docs/web_admin.md) | Web admin features, roles, security, API endpoints |
 | [docs/security.md](docs/security.md) | Authentication, RBAC, sessions, XSS, path traversal, audit log and security tests |
 | [docs/development.md](docs/development.md) | Setup, tests, VS Code debug, conventions, dependencies |

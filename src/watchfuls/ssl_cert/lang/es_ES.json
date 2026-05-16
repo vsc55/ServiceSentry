@@ -1,0 +1,22 @@
+{
+    "pretty_name": "Certificado SSL",
+    "labels": {
+        "enabled":      "Habilitado",
+        "threads":      "Hilos",
+        "warning_days": "Umbral de aviso (días)",
+        "timeout":      "Timeout (s)",
+        "host":         "Host",
+        "port":         "Puerto"
+    },
+    "hints": {
+        "enabled":      "Habilitar o deshabilitar la monitorización del certificado SSL para esta entrada.",
+        "threads":      "Número de certificados a comprobar en paralelo.",
+        "warning_days": "Días antes de la expiración para generar un aviso. El valor por ítem anula el valor global del módulo.",
+        "timeout":      "Tiempo de espera de conexión en segundos. El valor por ítem anula el valor global del módulo.",
+        "host":         "Nombre de host al que conectarse para obtener el certificado.",
+        "port":         "Puerto HTTPS. Dejar vacío (0) para usar el puerto estándar 443."
+    },
+    "new_item_key_label": "Nombre de host o identificador:",
+    "rename_item_prompt": "Introduce el nuevo nombre de host o identificador:",
+    "collections": {"list": "Certificados"}
+}

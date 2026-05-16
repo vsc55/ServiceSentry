@@ -1,0 +1,7 @@
+{
+    "__module__": {
+        "enabled":  {"type": "bool",  "default": true},
+        "alert":    {"type": "int",   "default": 85,  "min": 1,   "max": 100},
+        "interval": {"type": "float", "default": 1.0, "min": 0.1, "max": 10.0}
+    }
+}

@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: 1400 tests** | Todos deben pasar con `pytest` para que el build sea válido.
+**Total: ~1662 tests** | Todos deben pasar con `pytest` para que el build sea válido. Los 6 tests de RAID local se saltan en Windows/macOS (`skipif sys.platform != 'linux'`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -28,6 +28,7 @@
 15d. [Panel Web — Páginas de error HTTP](#15d-panel-web--páginas-de-error-http)
 16. [Panel Web — Permisos granulares y roles personalizados](#16-panel-web--permisos-granulares-y-roles-personalizados)
 16b. [Panel Web — Helpers JSON y validación de payloads](#16b-panel-web--helpers-json-y-validación-de-payloads)
+16c. [Panel Web — Endpoint de acciones de watchfuls](#16c-panel-web--endpoint-de-acciones-de-watchfuls)
 17. [Watchful: filesystemusage](#17-watchful-filesystemusage)
 18. [Watchful: hddtemp](#18-watchful-hddtemp)
 19. [Watchful: datastore](#19-watchful-datastore)
@@ -37,6 +38,13 @@
 23. [Watchful: service\_status](#23-watchful-service_status)
 24. [Watchful: temperature](#24-watchful-temperature)
 25. [Watchful: web](#25-watchful-web)
+26. [Seguridad: secret\_manager](#26-seguridad-secret_manager)
+27. [Watchful: cpu](#27-watchful-cpu)
+28. [Watchful: ssl\_cert](#28-watchful-ssl_cert)
+29. [Watchful: process](#29-watchful-process)
+30. [Watchful: dns](#30-watchful-dns)
+31. [Watchful: ntp](#31-watchful-ntp)
+32. [Watchful: ups](#32-watchful-ups)
 
 ---
 
@@ -1055,6 +1063,57 @@ Verifica que todos los endpoints JSON del web admin se comportan correctamente a
 
 ---
 
+## 16c. Panel Web — Endpoint de acciones de watchfuls
+
+**Archivo:** `tests/test_wa_watchfuls.py`
+
+Verifica el endpoint `GET|POST /api/watchfuls/<module>/<action>` — autenticación, validación de entrada, despacho a classmethods y seguridad de importación.
+
+### `TestApiWatchfulActionAuth`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_get_requires_auth` | GET sin sesión | Redirección 302 | Si devuelve 200 |
+| `test_post_requires_auth` | POST sin sesión | Redirección 302 | Si devuelve 200 |
+
+### `TestApiWatchfulActionValidation`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_invalid_module_name_uppercase` | Nombre de módulo en mayúsculas | 400 con `error` en JSON | Si pasa la validación |
+| `test_invalid_module_name_with_dash` | Nombre de módulo con guión | 400 | Si pasa |
+| `test_invalid_action_name_uppercase` | Nombre de acción en mayúsculas | 400 | Si pasa |
+| `test_invalid_action_name_with_dash` | Nombre de acción con guión | 400 | Si pasa |
+| `test_no_modules_dir_returns_404` | Sin `modules_dir` configurado | 404 antes de importar | Si importa |
+
+### `TestApiWatchfulActionDispatch`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_unknown_module_returns_404` | Módulo inexistente | 404 | Si lanza ImportError |
+| `test_action_not_in_watchful_actions_returns_404` | Acción real pero fuera de `WATCHFUL_ACTIONS` | 404 con `"Action not supported"` | Si ejecuta la acción |
+| `test_get_discover_filesystemusage` | GET `discover` en `filesystemusage` | 200 con lista de particiones | Si falla el despacho |
+| `test_post_test_connection_datastore` | POST `test_connection` en `datastore` | 200 con `ok=True` | Si falla el despacho |
+| `test_post_list_databases_datastore` | POST `list_databases` devuelve `items` (no `databases`) | 200 con clave `items` | Si devuelve clave incorrecta |
+| `test_action_exception_returns_500` | Acción lanza `RuntimeError` | 500 con `ok=False` y mensaje de error | Si propaga la excepción |
+| `test_post_empty_body_passes_empty_dict` | POST sin cuerpo llama a la acción con `{}` | Config capturado = `{}` | Si pasa `None` |
+| `test_get_discover_service_status` | GET `discover` en `service_status` | 200 con lista de servicios | Si falla el despacho |
+
+### `TestApiWatchfulActionSecurity`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_stdlib_module_names_return_404` | Nombres stdlib (`os`, `sys`, `re`, …) → 404 sin importar el módulo stdlib | 404 para cada nombre | Si importa o devuelve otro código |
+| `test_third_party_package_names_return_404` | Paquetes de terceros (`flask`, `psutil`, …) → 404 | 404 para cada nombre | Si importa el paquete real |
+| `test_private_and_base_methods_blocked_by_whitelist` | Métodos reales del base class (`check`, `get_conf`, …) → bloqueados por whitelist | 404 para cada método | Si se ejecuta el método |
+| `test_dunder_method_names_blocked_by_validation` | Nombres `__init__`, `_private`, `__class__` → rechazados por regex | 400 | Si pasan la validación |
+| `test_numeric_leading_module_name_rejected` | Nombre comenzando con dígito (`1ping`) | 400 | Si pasa |
+| `test_long_action_name_not_in_whitelist_returns_404` | Acción de 200 chars válida según regex pero no en whitelist | 404 | Si ejecuta |
+| `test_enc_prefix_in_post_body_does_not_crash` | Valor `enc:attacker-payload` en POST body | 200, valor pasado tal cual al classmethod | Si lanza o descifra |
+| `test_unauthenticated_user_cannot_call_any_action` | GET y POST sin sesión en múltiples rutas | 302 en todas | Si alguna responde sin login |
+
+---
+
 ## 17. Watchful: filesystemusage
 
 **Archivo:** `watchfuls/filesystemusage/tests/test_filesystemusage.py`
@@ -1312,3 +1371,201 @@ Verifica que todos los endpoints JSON del web admin se comportan correctamente a
 | `test_backward_compat_key_as_url` | Sin campo `url` → se usa la clave como URL | Petición a la clave | Si lanza |
 | `test_empty_url_falls_back_to_key` | Campo `url` vacío → se usa la clave | Petición a la clave | Si lanza |
 | `test_key_used_in_message` | La clave (no la URL) aparece en el mensaje | Clave en el mensaje de estado | Si aparece la URL |
+
+---
+
+## 26. Seguridad: secret\_manager
+
+**Archivo:** `tests/test_secret_manager.py`
+
+### `TestFernetFromSecretFile` — Generación de clave Fernet
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_returns_fernet_for_valid_file` | Archivo hex válido devuelve instancia Fernet | Objeto Fernet no nulo | Si devuelve `None` |
+| `test_can_encrypt_and_decrypt_with_returned_fernet` | Cifrar y descifrar con la misma instancia | Texto descifrado igual al original | Si difiere |
+| `test_returns_none_for_missing_file` | Archivo inexistente | Devuelve `None` sin lanzar | Si lanza |
+| `test_returns_none_for_invalid_hex` | Contenido no es hex válido | Devuelve `None` | Si lanza o devuelve Fernet |
+| `test_returns_none_for_empty_file` | Archivo vacío | Devuelve `None` | Si lanza |
+| `test_two_instances_from_same_file_are_compatible` | Dos instancias del mismo archivo descifran mutuamente | Descifrado correcto | Si son incompatibles |
+
+### `TestDecryptAll` — Descifrado de configuración
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_decrypts_valid_token` | Token `enc:` válido se descifra | Valor en texto claro | Si queda cifrado |
+| `test_plain_string_unchanged` | Valor sin `enc:` no se altera | String intacto | Si se modifica |
+| `test_malformed_enc_token_kept_as_is` | Token `enc:` inválido no rompe | String original preservado | Si lanza o devuelve vacío |
+| `test_nested_dict_decrypted` | Dict anidado con token cifrado | Valor descifrado en la ruta anidada | Si no llega a la profundidad |
+| `test_nested_list_decrypted` | Lista anidada con dicts cifrados | Todos los valores descifrados | Si se omite alguno |
+| `test_none_fernet_does_not_crash` | `fernet=None` no lanza | Sin excepción, valores intactos | Si lanza |
+| `test_non_string_values_unchanged` | Bool, int, float, None no se tocan | Tipos y valores idénticos | Si se alteran |
+| `test_modifies_dict_in_place_and_returns_it` | Modifica el dict original y lo devuelve | `returned is data` y valor descifrado | Si devuelve copia |
+
+### `TestEncryptSensitive` — Cifrado de campos sensibles
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_sensitive_key_encrypted` | Clave sensible se cifra | Valor empieza con `enc:` | Si queda en claro |
+| `test_non_sensitive_key_unchanged` | Clave no sensible no se cifra | Valor intacto | Si se cifra |
+| `test_all_encrypt_keys_are_encrypted` | Todas las claves de `ENCRYPT_KEYS` se cifran | Cada una comienza con `enc:` | Si alguna queda en claro |
+| `test_already_encrypted_value_not_re_encrypted` | Valor ya con `enc:` no se vuelve a cifrar | Valor idéntico | Si se doble-cifra |
+| `test_empty_string_not_encrypted` | String vacío no se cifra | `""` intacto | Si se cifra |
+| `test_nested_dict_sensitive_fields_encrypted` | Dict anidado — campos sensibles cifrados, otros intactos | Solo `password` con `enc:` | Si se cifran campos no sensibles |
+| `test_returns_new_dict_does_not_mutate_input` | No muta el dict de entrada | Original sin `enc:`, copia con `enc:` | Si muta el original |
+| `test_none_fernet_returns_data_unchanged` | `fernet=None` devuelve datos sin cifrar | Valores intactos | Si lanza |
+| `test_roundtrip_encrypt_then_decrypt` | Cifrar y descifrar da el valor original | Texto claro recuperado | Si difiere |
+| `test_roundtrip_all_encrypt_keys` | Roundtrip completo sobre todas las claves de `ENCRYPT_KEYS` | Todos los valores recuperados | Si alguno difiere |
+
+### `TestEncPrefixInjection` — Ataques de inyección con prefijo `enc:`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_injected_bad_enc_token_not_decrypted_to_garbage` | Token `enc:AAAA...` inválido no se decodifica a basura | String original preservado | Si devuelve valor incorrecto |
+| `test_injected_enc_value_not_re_encrypted` | `enc:fake` en campo sensible pasa sin re-cifrar | Valor idéntico | Si se doble-cifra |
+| `test_fake_enc_sibling_does_not_affect_legitimate_encryption` | Valor falso en un campo no corrompe el cifrado real de otro | Campo real cifrado y descifrado correctamente | Si el vecino falso interfiere |
+| `test_enc_prefix_in_non_sensitive_key_never_decrypted` | `enc:` en clave no sensible no se descifra | Valor `enc:...` intacto en `decrypt_all` | Si se intenta descifrar |
+
+---
+
+## 27. Watchful: cpu
+
+**Archivo:** `watchfuls/cpu/tests/test_cpu.py`
+
+### `TestCpuInit`, `TestCpuCheck`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_init` | Instanciación del módulo | Sin excepción | Si lanza |
+| `test_check_disabled_returns_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
+| `test_check_ok_below_threshold` | Uso de CPU por debajo del umbral | `status = True` | Si es `False` |
+| `test_check_alert_above_threshold` | Uso de CPU por encima del umbral | `status = False` | Si es `True` |
+| `test_check_exact_threshold_is_not_ok` | Uso exactamente igual al umbral | `status = False` (no estrictamente menor) | Si es `True` |
+| `test_check_other_data_populated` | `other_data` contiene `used` y `alert` | Ambos campos presentes | Si faltan |
+| `test_check_uses_default_alert` | Sin config → usa `alert=85` por defecto | Umbral correcto | Si difiere |
+| `test_check_custom_interval` | Config con `interval` personalizado | `psutil.cpu_percent` llamado con ese intervalo | Si ignora el config |
+| `test_check_exception_handled` | Excepción en `psutil.cpu_percent` | Resultado con `status=False` sin lanzar | Si lanza al caller |
+
+---
+
+## 28. Watchful: ssl\_cert
+
+**Archivo:** `watchfuls/ssl_cert/tests/test_ssl_cert.py`
+
+### `TestSslCertInit`, `TestSslCertCheck`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_init` | Instanciación del módulo | Sin excepción | Si lanza |
+| `test_check_disabled_returns_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
+| `test_check_empty_list_returns_empty` | Lista vacía | Resultado vacío | Si lanza |
+| `test_check_disabled_item_skipped` | Ítem con `enabled: false` | Omitido del resultado | Si aparece |
+| `test_check_cert_valid_ok` | Certificado con días restantes > umbral | `status = True` | Si es `False` |
+| `test_check_cert_within_warning_window` | Certificado dentro de la ventana de aviso | `status = False` | Si es `True` |
+| `test_check_cert_expired` | Certificado expirado | `status = False`, mensaje "EXPIRED" | Si es `True` |
+| `test_check_connection_error_handled` | Error de conexión SSL | `status = False` sin lanzar | Si lanza al caller |
+| `test_check_other_data_populated` | `other_data` contiene `days_left`, `expires`, `host`, `port` | Todos los campos presentes | Si faltan |
+| `test_check_per_item_warning_days_overrides_module` | `warning_days` por ítem anula el valor del módulo | Umbral correcto del ítem | Si usa el global |
+
+---
+
+## 29. Watchful: process
+
+**Archivo:** `watchfuls/process/tests/test_process.py`
+
+### `TestProcessInit`, `TestProcessCheck`, `TestProcessDiscover`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_init` | Instanciación del módulo | Sin excepción | Si lanza |
+| `test_check_disabled_returns_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
+| `test_check_empty_list_returns_empty` | Lista vacía | Resultado vacío | Si lanza |
+| `test_check_disabled_item_skipped` | Ítem con `enabled: false` | Omitido del resultado | Si aparece |
+| `test_check_process_running_ok` | Proceso encontrado con instancias suficientes | `status = True` | Si es `False` |
+| `test_check_process_not_running` | Proceso no encontrado | `status = False` | Si es `True` |
+| `test_check_min_count_not_met` | Instancias encontradas < `min_count` | `status = False` | Si es `True` |
+| `test_check_min_count_exactly_met` | Instancias encontradas == `min_count` | `status = True` | Si es `False` |
+| `test_check_case_insensitive` | Nombre del proceso insensible a mayúsculas | Coincidencia independientemente del case | Si no coincide |
+| `test_check_empty_process_uses_key` | Campo `process` vacío → usa la clave del ítem | Búsqueda con la clave | Si usa string vacío |
+| `test_check_other_data_populated` | `other_data` contiene `process`, `count`, `min_count` | Todos los campos presentes | Si faltan |
+| `test_check_exception_handled` | Excepción en `psutil.process_iter` | `status = False` sin lanzar | Si lanza al caller |
+| `test_discover_returns_list` | `discover()` devuelve lista de dicts con `name`, `display_name`, `status` | Lista con claves requeridas | Si falta alguna clave |
+| `test_discover_counts_instances` | `discover()` cuenta múltiples instancias del mismo proceso | `status = '×2'` para 2 instancias | Si el conteo es incorrecto |
+| `test_discover_sorted_by_name` | `discover()` devuelve procesos ordenados alfabéticamente | Lista ordenada (insensible a mayúsculas) | Si el orden es incorrecto |
+| `test_discover_exception_returns_empty` | Excepción en `process_iter` durante discover | `[]` devuelto | Si lanza al caller |
+| `test_discover_skips_empty_names` | Procesos con nombre vacío excluidos del resultado | Ningún ítem con `name == ''` | Si aparecen procesos sin nombre |
+
+---
+
+## 30. Watchful: dns
+
+**Archivo:** `watchfuls/dns/tests/test_dns.py`
+
+### `TestDnsInit`, `TestDnsCheck`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_init` | Instanciación del módulo | Sin excepción | Si lanza |
+| `test_check_disabled_returns_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
+| `test_check_empty_list_returns_empty` | Lista vacía | Resultado vacío | Si lanza |
+| `test_check_disabled_item_skipped` | Ítem con `enabled: false` | Omitido del resultado | Si aparece |
+| `test_check_resolution_ok` | Registro A resuelve a al menos una IP | `status = True` | Si es `False` |
+| `test_check_resolution_fails` | Hostname no resuelve | `status = False` | Si es `True` |
+| `test_check_expected_match` | Valor resuelto contiene `expected` (subcadena) | `status = True` | Si es `False` |
+| `test_check_expected_mismatch` | Valor resuelto no contiene `expected` | `status = False` con mensaje | Si es `True` |
+| `test_check_other_data_populated` | `other_data` contiene `host`, `record_type`, `resolved`, `expected` | Todos los campos presentes | Si faltan |
+| `test_check_deduplicates_ips` | IPs duplicadas en la resolución se deducan | Lista sin duplicados | Si hay duplicados |
+| `test_check_empty_host_uses_key` | Campo `host` vacío → usa la clave del ítem | Resolución con la clave | Si usa string vacío |
+| `test_check_record_type_aaaa` | Registro AAAA usa `AF_INET6` en `getaddrinfo` | `AF_INET6` pasado como familia | Si usa `AF_INET` |
+| `test_check_mx_record_via_dnspython` | Registro MX usa `_resolve_dns` (dnspython) | `_resolve_dns` llamado con `('host', 'MX', timeout)` | Si usa socket |
+| `test_check_txt_expected_match` | Registro TXT con `expected` → subcadena encontrada | `status = True` | Si es `False` |
+| `test_check_non_a_without_dnspython_returns_false` | Tipo no-A/AAAA sin dnspython instalado | `status = False` con mensaje `dnspython` | Si lanza o da `True` |
+| `test_check_dns_no_results_is_false` | Consulta no-A que devuelve lista vacía | `status = False` | Si es `True` |
+
+---
+
+## 31. Watchful: ntp
+
+**Archivo:** `watchfuls/ntp/tests/test_ntp.py`
+
+### `TestNtpQuery`, `TestNtpInit`, `TestNtpCheck`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_ntp_query_returns_offset_and_delay` | Respuesta NTP válida devuelve offset y delay | Tupla `(float, float)` correcta | Si lanza o devuelve valores inválidos |
+| `test_ntp_query_short_response_raises` | Respuesta < 48 bytes lanza `ValueError` | `ValueError` lanzado | Si no lanza |
+| `test_ntp_query_socket_error_propagates` | Error de socket se propaga al caller | Excepción propagada | Si se silencia |
+| `test_init` | Instanciación del módulo | Sin excepción | Si lanza |
+| `test_check_disabled_returns_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
+| `test_check_empty_list_returns_empty` | Lista vacía | Resultado vacío | Si lanza |
+| `test_check_disabled_item_skipped` | Ítem con `enabled: false` | Omitido del resultado | Si aparece |
+| `test_check_offset_within_threshold` | Offset < `max_offset` | `status = True` | Si es `False` |
+| `test_check_offset_exceeds_threshold` | Offset ≥ `max_offset` | `status = False` | Si es `True` |
+| `test_check_socket_error_handled` | Error de red | `status = False` sin lanzar | Si lanza al caller |
+| `test_check_other_data_populated` | `other_data` contiene `offset_seconds`, `delay_seconds`, `server`, `max_offset` | Todos los campos presentes | Si faltan |
+| `test_check_per_item_max_offset_overrides_module` | `max_offset` por ítem anula el del módulo | Umbral correcto del ítem | Si usa el global |
+
+---
+
+## 32. Watchful: ups
+
+**Archivo:** `watchfuls/ups/tests/test_ups.py`
+
+### `TestNutQuery`, `TestUpsInit`, `TestUpsCheck`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_nut_query_ol_status` | Respuesta NUT con `OL` parsea variables correctamente | Dict con `ups.status = "OL"` | Si falla el parsing |
+| `test_nut_query_err_raises` | Respuesta `ERR` del demonio lanza `ConnectionError` | Excepción lanzada | Si no lanza |
+| `test_nut_query_connection_error` | Fallo de conexión TCP se propaga | Excepción propagada | Si se silencia |
+| `test_init` | Instanciación del módulo | Sin excepción | Si lanza |
+| `test_check_disabled_returns_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
+| `test_check_empty_list_returns_empty` | Lista vacía | Resultado vacío | Si lanza |
+| `test_check_item_without_host_skipped` | Ítem sin `host` | Omitido silenciosamente | Si lanza o aparece |
+| `test_check_disabled_item_skipped` | Ítem con `enabled: false` | Omitido del resultado | Si aparece |
+| `test_check_ol_status_ok` | UPS en línea (`OL`) | `status = True` | Si es `False` |
+| `test_check_ob_status_warning` | UPS en batería (`OB`) | `status = False` | Si es `True` |
+| `test_check_lb_status_critical` | Batería baja (`LB`) | `status = False` | Si es `True` |
+| `test_check_connection_error_handled` | Error de conexión al demonio NUT | `status = False` sin lanzar | Si lanza al caller |
+| `test_check_other_data_populated` | `other_data` contiene `status`, `battery_charge`, `runtime`, `load` | Todos los campos presentes | Si faltan |
+| `test_check_ol_lb_combination_is_not_ok` | Estado `OL LB` (en línea pero batería baja) | `status = False` | Si es `True` |

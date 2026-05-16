@@ -1,0 +1,26 @@
+{
+    "pretty_name": "Monitor UPS (NUT)",
+    "labels": {
+        "enabled":  "Habilitado",
+        "threads":  "Hilos",
+        "timeout":  "Timeout (s)",
+        "host":     "Host UPSD",
+        "port":     "Puerto UPSD",
+        "ups_name": "Nombre UPS",
+        "user":     "Usuario",
+        "password": "Contraseña"
+    },
+    "hints": {
+        "enabled":  "Habilitar o deshabilitar la monitorización UPS para esta entrada.",
+        "threads":  "Número de unidades UPS a comprobar en paralelo.",
+        "timeout":  "Timeout de conexión TCP en segundos. El valor por ítem anula el valor global del módulo.",
+        "host":     "Nombre de host o IP del servidor NUT UPSD.",
+        "port":     "Puerto TCP de NUT UPSD. Dejar vacío (0) para usar el puerto estándar 3493.",
+        "ups_name": "Nombre del UPS configurado en NUT (por defecto: ups).",
+        "user":     "Usuario para autenticación NUT. Dejar vacío para acceso sin autenticación.",
+        "password": "Contraseña para autenticación NUT."
+    },
+    "new_item_key_label": "Nombre del UPS o identificador:",
+    "rename_item_prompt": "Introduce el nuevo nombre del UPS o identificador:",
+    "collections": {"list": "Unidades UPS"}
+}
