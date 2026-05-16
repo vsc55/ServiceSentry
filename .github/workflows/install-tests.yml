@@ -24,6 +24,9 @@ on:
       - "data/**"
       - ".github/workflows/install-tests.yml"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   install:
     name: ${{ matrix.os }}
@@ -82,6 +85,15 @@ jobs:
 
       # ── install ──────────────────────────────────────────────────────────────
 
+      # data/*.json files are gitignored (they contain real credentials on the
+      # developer's machine). Create minimal empty templates so install.sh has
+      # something to copy to /etc/ServiSesentry/.
+      - name: Create template config files
+        run: |
+          printf '{"global":{"debug":false},"telegram":{"token":"","chat_id":""},"web_admin":{}}\n' > data/config.json
+          printf '{}\n' > data/modules.json
+          printf '{"admin":{"password_hash":"","role":"admin","display_name":"Admin"}}\n' > data/users.json
+
       - name: Run install.sh
         run: bash install.sh
 
@@ -113,7 +125,7 @@ jobs:
         run: echo "# ci-marker" >> src/main.py
 
       - name: Modify config to verify it is preserved by update.sh
-        run: echo '{}' > /etc/ServiSesentry/config.json
+        run: printf '{"ci-preserve-marker":true}\n' > /etc/ServiSesentry/config.json
 
       - name: Run update.sh
         run: bash update.sh
@@ -126,7 +138,7 @@ jobs:
             || fail "updated main.py was not deployed"
 
           # Config files that already existed must not be overwritten.
-          grep -q '{}' /etc/ServiSesentry/config.json \
+          grep -q 'ci-preserve-marker' /etc/ServiSesentry/config.json \
             || fail "config.json was overwritten by update.sh"
 
           echo "OK: update verified"
