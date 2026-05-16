@@ -73,9 +73,12 @@
         "server":     "Servidor"
     },
     "action_labels": {
-        "test_ssh":        "Probar SSH",
-        "test_connection": "Probar conexión",
-        "list_databases":  "Listar bases de datos / buckets / índices"
+        "test_ssh":            "Probar SSH",
+        "test_ssh_tt":         "Probar solo la conectividad del túnel SSH",
+        "test_connection":     "Probar conexión",
+        "test_connection_tt":  "Probar la conexión completa a la base de datos",
+        "list_databases":      "Listar bases de datos / buckets / índices",
+        "list_databases_tt":   "Obtener la lista de bases de datos disponibles del servidor"
     },
     "new_item_title": "Nuevo almacén de datos",
     "new_item_key_label": "Nombre de conexión:",

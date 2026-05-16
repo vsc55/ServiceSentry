@@ -78,7 +78,7 @@ function renderConfig() {
         const cfgId = 'cfgcol_' + sec;
         let extra = '';
         if (sec === 'telegram') {
-            extra = `<hr class="my-2"><button class="btn btn-outline-info btn-sm" onclick="testTelegram()" id="btnTestTelegram" data-test-btn>
+            extra = `<hr class="my-2"><button class="btn btn-outline-info btn-sm" onclick="testTelegram()" id="btnTestTelegram" data-test-btn title="${escAttr(t('telegram_test'))}">
                 <i class="bi bi-telegram me-1"></i>${t('telegram_test')}
             </button>`;
         }

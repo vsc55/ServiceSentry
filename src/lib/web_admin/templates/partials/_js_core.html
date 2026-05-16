@@ -976,6 +976,7 @@ function _renderInlineActions(pathStr, actions, itemData) {
         const _swAttr  = action.show_when
             ? ` data-sw-when="${escAttr(JSON.stringify(action.show_when))}"` : '';
 
+        const _tt = escAttr(_al[action.id + '_tt'] || '');
         const btn = `<button class="btn btn-sm btn-${variant}${isFullWidth ? ' w-100' : ''}" data-test-btn
             data-action-path="${escAttr(pathStr)}"
             data-action-url="${escAttr(action.url)}"
@@ -983,6 +984,7 @@ function _renderInlineActions(pathStr, actions, itemData) {
             data-action-result="${escAttr(action.result || 'toast')}"
             ${isList ? `data-action-result-id="${resultId}"` : ''}
             ${isFieldPicker ? `data-action-result-field="${escAttr(action.result_field || '')}"` : ''}
+            ${_tt ? `title="${_tt}"` : ''}
             onclick="itemAction(this)">${icon}${label}</button>`;
 
         btns += `<div class="sw-field"${_swAttr} style="${_hdrDisp}${_wStyle}">${btn}</div>`;
@@ -1021,12 +1023,14 @@ function _renderGroupActionBtns(pathStr, actions, itemData) {
         const _wStyle  = isFullWidth ? 'flex-basis:100%;' : 'flex-shrink:0;';
         const _swAttr  = action.show_when
             ? ` data-sw-when="${escAttr(JSON.stringify(action.show_when))}"` : '';
+        const _tt2 = escAttr(_al[action.id + '_tt'] || '');
         const btn = `<button class="btn btn-sm btn-${variant}${isFullWidth ? ' w-100' : ''}" data-test-btn
             data-action-path="${escAttr(pathStr)}"
             data-action-url="${escAttr(action.url)}"
             data-action-extra="${escAttr(JSON.stringify(action.extra || {}))}"
             data-action-result="${escAttr(action.result || 'toast')}"
             ${isFieldPicker ? `data-action-result-field="${escAttr(action.result_field || '')}"` : ''}
+            ${_tt2 ? `title="${_tt2}"` : ''}
             onclick="itemAction(this)">${icon}${label}</button>`;
         btns += `<div class="sw-field"${_swAttr} style="${_hdrDisp}${_wStyle}">${btn}</div>`;
     }
@@ -1052,13 +1056,15 @@ function renderCollection(title, data, pathStr, target) {
             <i class="bi bi-list-ul me-1"></i>${lbl}
         </span>
         ${itemCount > 0 ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.68rem">${itemCount}</span>` : ''}
-        ${_unsupported ? `<span class="ms-auto badge bg-secondary bg-opacity-50" style="font-size:.68rem" title="${t('platform_not_supported') || 'Not supported on this platform'}"><i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}</span>` : ''}
+        ${_unsupported ? `<span class="ms-auto badge bg-secondary bg-opacity-50" style="font-size:.68rem" title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}"><i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}</span>` : ''}
         ${!_unsupported && canAddItem && _discoverUrl ? `<button class="btn btn-sm btn-outline-info ms-auto py-0 px-2"
-            onclick="openDiscoverModal(${jsStr(pathStr)},${jsStr(_discoverUrl)})">
+            onclick="openDiscoverModal(${jsStr(pathStr)},${jsStr(_discoverUrl)})"
+            title="${escAttr(t('discover'))}">
             <i class="bi bi-search me-1"></i>${t('discover') || 'Discover'}
         </button>` : ''}
         ${!_unsupported && canAddItem ? `<button class="btn btn-sm btn-outline-success ${_discoverUrl ? '' : 'ms-auto'} py-0 px-2"
-            onclick="openAddModal(${jsStr(target)},${jsStr(pathStr)})">
+            onclick="openAddModal(${jsStr(target)},${jsStr(pathStr)})"
+            title="${escAttr(t('add_item_tt'))}">
             <i class="bi bi-plus-lg me-1"></i>${t('add') || 'Add'}
         </button>` : (!_unsupported && !canAddItem && !_discoverUrl ? '<span class="ms-auto"></span>' : '')}
     </div>
@@ -1083,7 +1089,8 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     const canEditItem   = target !== 'modules' || hasModulePerm(_modNameItem, 'edit');
     const delBtn = canDeleteItem
         ? `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1" data-no-collapse="1"
-    onclick="event.stopPropagation();removeItem(${tg},${pp},${nameEsc})">
+    onclick="event.stopPropagation();removeItem(${tg},${pp},${nameEsc})"
+    title="${escAttr(t('delete_tt'))}">
     <i class="bi bi-trash3"></i></button>`
         : '';
 
@@ -1092,7 +1099,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     const renameBtn = (canEditItem && !(_renameSch && _renameSch['__key_mirrors_field__']))
         ? `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" data-no-collapse="1"
         onclick="event.stopPropagation();renameItem(${tg},${pp},${nameEsc})"
-        title="${esc(t('rename_item'))}">
+        title="${escAttr(t('rename_item'))}">
         <i class="bi bi-pencil-square"></i></button>`
         : '';
 
@@ -1205,7 +1212,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                 ${sw}${testBtn}${renameBtn}${delBtn}
                 <button class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"
-                    aria-label="Toggle details" onclick="event.stopPropagation()">
+                    aria-label="${escAttr(t('module_details'))}" title="${escAttr(t('module_details'))}" onclick="event.stopPropagation()">
                     <i class="bi bi-chevron-down text-muted small"></i>
                 </button>
             </div>

@@ -185,9 +185,11 @@ function initAuditControls() {
     // Populate event filter dropdown with distinct events in this dataset
     const ef = document.getElementById('auditFilterEvent');
     if (ef) {
-        const events = [...new Set(_auditEntries.map(e => e.event))].sort();
+        const events = [...new Set(_auditEntries.map(e => e.event))]
+            .map(ev => ({ ev, label: AUDIT_EVENTS[ev] || ev }))
+            .sort((a, b) => a.label.localeCompare(b.label));
         ef.innerHTML = `<option value="">${t('all_events')}</option>` +
-            events.map(ev => `<option value="${esc(ev)}">${esc(AUDIT_EVENTS[ev] || ev)}</option>`).join('');
+            events.map(({ ev, label }) => `<option value="${esc(ev)}">${esc(label)}</option>`).join('');
     }
     // Populate user datalist
     const ul = document.getElementById('auditUserList');
@@ -266,7 +268,7 @@ function renderFlatAudit(entries) {
             <td><code style="font-size:.82rem">${esc(e.user)}</code></td>
             <td class="text-muted" style="font-size:.8rem">${esc(e.ip)}</td>
             <td style="font-size:.82rem">${auditSummaryHtml(e._idx, e.detail)}</td>
-            ${canDelete ? `<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteAuditEntry(${e._origIdx})" title="${t('delete')}"><i class="bi bi-trash3"></i></button></td>` : ''}
+            ${canDelete ? `<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteAuditEntry(${e._origIdx})" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button></td>` : ''}
         </tr>`;
     }
     h += `</tbody></table></div>`;

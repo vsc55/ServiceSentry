@@ -73,9 +73,12 @@
         "server":     "Server"
     },
     "action_labels": {
-        "test_ssh":        "Test SSH",
-        "test_connection": "Test connection",
-        "list_databases":  "List databases / buckets / indices"
+        "test_ssh":            "Test SSH",
+        "test_ssh_tt":         "Test SSH tunnel connectivity only",
+        "test_connection":     "Test connection",
+        "test_connection_tt":  "Test the full database connection",
+        "list_databases":      "List databases / buckets / indices",
+        "list_databases_tt":   "Fetch the list of available databases from the server"
     },
     "new_item_title": "New Datastore",
     "new_item_key_label": "Connection name:",

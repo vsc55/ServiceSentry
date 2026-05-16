@@ -8,7 +8,7 @@ let _overviewTimer = null;
 function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '') {
     const intervals = [0, 10, 30, 60];
     let h = `<div class="d-flex flex-wrap align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border" style="background:var(--bs-secondary-bg)">`;
-    h += `<button class="btn btn-sm btn-outline-secondary" onclick="${renderFn}()">`;
+    h += `<button class="btn btn-sm btn-outline-secondary" onclick="${renderFn}()" title="${escAttr(t('refresh_tt'))}">`;
     h += `<i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`;
     h += `<div class="btn-group btn-group-sm" role="group">`;
     h += `<span class="btn btn-sm btn-outline-secondary disabled px-2">`;
@@ -243,6 +243,7 @@ function _dwToggleEdit() {
         if (btn) {
             btn.className = 'btn btn-sm btn-warning ms-auto';
             btn.innerHTML = `<i class="bi bi-check-lg me-1"></i>${t('dashboard_save')}`;
+            btn.title = t('dashboard_save_tt');
         }
         _dwInitDnd(grid);
         _dwRefreshAddBar();
@@ -252,6 +253,7 @@ function _dwToggleEdit() {
         if (btn) {
             btn.className = 'btn btn-sm btn-outline-secondary ms-auto';
             btn.innerHTML = `<i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}`;
+            btn.title = t('dashboard_edit_tt');
         }
         _dwSave();
     }
@@ -363,23 +365,23 @@ function _dwReset() {
 function _dwToolbar(id, cols, h) {
     const def  = _DW_DEFS[id];
     const hasH = def?.hasH;
-    let tb = `<div class="dw-toolbar" title="${t('dashboard_drag')}">`;
+    let tb = `<div class="dw-toolbar" title="${escAttr(t('dashboard_drag'))}">`;
     tb += `<span class="dw-drag-handle"><i class="bi bi-grip-horizontal"></i></span>`;
     tb += `<span class="small text-muted text-truncate" style="max-width:8em">${esc(t(def?.lkey || id))}</span>`;
     tb += `<span class="d-flex align-items-center gap-1 ms-auto">`;
     // Width
-    tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleW(this,-1)" title="${t('widget_width')}"><i class="bi bi-chevron-left"></i></button>`;
+    tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;
     tb += `<span class="dw-w-lbl small fw-semibold" style="min-width:1.4em;text-align:center">${cols}</span>`;
-    tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleW(this,1)"><i class="bi bi-chevron-right"></i></button>`;
+    tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleW(this,1)" title="${escAttr(t('widget_grow_w'))}"><i class="bi bi-chevron-right"></i></button>`;
     // Height (tables only)
     if (hasH) {
         tb += `<span class="vr mx-1"></span>`;
-        tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleH(this,-1)" title="${t('widget_height')}"><i class="bi bi-chevron-up"></i></button>`;
+        tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleH(this,-1)" title="${escAttr(t('widget_shrink_h'))}"><i class="bi bi-chevron-up"></i></button>`;
         tb += `<span class="dw-h-lbl small fw-semibold" style="min-width:2em;text-align:center">${_DW_H_LABELS[h] || h}</span>`;
-        tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleH(this,1)"><i class="bi bi-chevron-down"></i></button>`;
+        tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleH(this,1)" title="${escAttr(t('widget_grow_h'))}"><i class="bi bi-chevron-down"></i></button>`;
     }
     tb += `<span class="vr mx-1"></span>`;
-    tb += `<button class="btn btn-dw btn-outline-danger" onclick="_dwRemove(this)" title="${t('widget_hide')}"><i class="bi bi-eye-slash"></i></button>`;
+    tb += `<button class="btn btn-dw btn-outline-danger" onclick="_dwRemove(this)" title="${escAttr(t('widget_hide'))}"><i class="bi bi-eye-slash"></i></button>`;
     tb += `</span></div>`;
     return tb;
 }
@@ -541,9 +543,9 @@ async function renderOverview() {
 
     const _canEditLayout = perms.has('overview_edit');
     const ctrlBtns = _canEditLayout ? `
-        <button class="btn btn-sm btn-outline-secondary ms-auto" id="dwEditBtn" onclick="_dwToggleEdit()">
+        <button class="btn btn-sm btn-outline-secondary ms-auto" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
             <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
-        <button class="btn btn-sm btn-outline-secondary" onclick="_dwReset()" title="${t('dashboard_reset')}">
+        <button class="btn btn-sm btn-outline-secondary" onclick="_dwReset()" title="${escAttr(t('dashboard_reset_tt'))}">
             <i class="bi bi-arrow-counterclockwise"></i></button>` : '';
 
     let h = _renderRefreshBar('overview-container', 'renderOverview',

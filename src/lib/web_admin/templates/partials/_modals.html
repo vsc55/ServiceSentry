@@ -5,7 +5,7 @@
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="userModalTitle">{{ i18n.new_user }}</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3">
@@ -48,8 +48,8 @@
                 </div>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-primary" id="btnUserModalOk">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnUserModalOk" title="{{ i18n.save }}">
                     <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
                 </button>
             </div>
@@ -64,7 +64,7 @@
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title"><i class="bi bi-person-gear me-1"></i>{{ i18n.account_settings }}</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
                 <p class="small fw-semibold text-muted mb-2 mt-1">
@@ -110,8 +110,8 @@
                 <div class="form-text mb-1">{{ i18n.leave_empty_no_change }}</div>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-primary" id="btnAccountSettingsOk" onclick="saveAccountPreferences()">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnAccountSettingsOk" onclick="saveAccountPreferences()" title="{{ i18n.save }}">
                     <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
                 </button>
             </div>
@@ -126,7 +126,7 @@
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="addItemModalTitle">{{ i18n.new_item }}</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
                 <label class="form-label small" id="newItemNameLabel">{{ i18n.item_name }}</label>
@@ -136,8 +136,8 @@
                 <div id="newItemExtraFields"></div>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-primary" id="btnAddItemOk">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnAddItemOk" title="{{ i18n.add_item_tt }}">
                     <i class="bi bi-plus-lg me-1"></i>{{ i18n.add }}
                 </button>
             </div>
@@ -150,7 +150,7 @@
     <div id="toast" class="toast align-items-center border-0" role="alert">
         <div class="d-flex">
             <div class="toast-body" id="toast-body"></div>
-            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
         </div>
     </div>
 </div>
@@ -163,7 +163,7 @@
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="resetPasswordTitle"><i class="bi bi-key me-1"></i>{{ i18n.reset_password }}</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3">
@@ -181,8 +181,8 @@
                 </div>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-warning" id="btnResetPasswordOk">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-warning" id="btnResetPasswordOk" title="{{ i18n.reset_password_tt }}">
                     <i class="bi bi-key me-1"></i>{{ i18n.reset_password }}
                 </button>
             </div>
@@ -197,14 +197,14 @@
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title"><i class="bi bi-trash3 me-1 text-danger"></i>{{ i18n.delete }}</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
                 <p class="mb-0 small" id="confirmDeleteItemMsg"></p>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-danger" id="btnConfirmDeleteItemOk">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-danger" id="btnConfirmDeleteItemOk" title="{{ i18n.delete_tt }}">
                     <i class="bi bi-trash3 me-1"></i>{{ i18n.delete }}
                 </button>
             </div>
@@ -219,15 +219,15 @@
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title"><i class="bi bi-pencil-square me-1"></i>{{ i18n.rename_item }}</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
                 <label class="form-label small" id="renameItemPrompt">{{ i18n.rename_item_prompt }}</label>
                 <input type="text" class="form-control form-control-sm" id="renameItemInput">
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-primary" id="btnRenameItemOk">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnRenameItemOk" title="{{ i18n.rename_item }}">
                     <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
                 </button>
             </div>
@@ -243,12 +243,12 @@
                 <h6 class="modal-title">
                     <i class="bi bi-puzzle me-1"></i><span id="addModuleModalTitle">{{ i18n.add_module }}</span>
                 </h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body" id="addModuleModalBody" style="max-height:65vh;overflow-y:auto">
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
             </div>
         </div>
     </div>
@@ -262,12 +262,12 @@
                 <h6 class="modal-title" id="auditDetailModalTitle">
                     <i class="bi bi-journal-text me-1"></i>{{ i18n.audit_detail_title }}
                 </h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body" id="auditDetailModalBody" style="max-height:70vh;overflow-y:auto;">
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
             </div>
         </div>
     </div>
@@ -282,14 +282,14 @@
                 <h6 class="modal-title">
                     <i class="bi bi-exclamation-triangle me-1 text-danger"></i>{{ i18n.confirm }}
                 </h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
                 <p class="mb-0" id="confirmModalMsg"></p>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-danger" id="btnConfirmModalOk">{{ i18n.confirm }}</button>
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-danger" id="btnConfirmModalOk" title="{{ i18n.delete_tt }}">{{ i18n.confirm }}</button>
             </div>
         </div>
     </div>
@@ -308,9 +308,9 @@
                 <p class="mb-0" id="unsavedChangesMsg"></p>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" id="btnUnsavedCancel">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-outline-danger" id="btnUnsavedDiscard">{{ i18n.discard_changes }}</button>
-                <button class="btn btn-sm btn-primary" id="btnUnsavedSave">
+                <button class="btn btn-sm btn-secondary" id="btnUnsavedCancel" title="{{ i18n.unsaved_cancel_tt }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-outline-danger" id="btnUnsavedDiscard" title="{{ i18n.discard_changes_tt }}">{{ i18n.discard_changes }}</button>
+                <button class="btn btn-sm btn-primary" id="btnUnsavedSave" title="{{ i18n.unsaved_save_tt }}">
                     <i class="bi bi-save me-1"></i>{{ i18n.save }}
                 </button>
             </div>
@@ -325,7 +325,7 @@
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="groupModalTitle">{{ i18n.new_group }}</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
                 <div class="row g-3 mb-3">
@@ -361,8 +361,8 @@
                 </div>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-primary" id="btnGroupModalOk">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnGroupModalOk" title="{{ i18n.save }}">
                     <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
                 </button>
             </div>
@@ -377,7 +377,7 @@
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="roleModalTitle">{{ i18n.new_role }}</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body" id="roleModalBody">
                 <div class="row g-3 mb-3 flex-shrink-0">
@@ -434,8 +434,8 @@
                 </div>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-primary" id="btnRoleModalOk">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnRoleModalOk" title="{{ i18n.save }}">
                     <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
                 </button>
             </div>
@@ -452,7 +452,7 @@
                     <i class="bi bi-database me-1"></i>
                     <span id="fieldPickerModalTitle"></span>
                 </h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body pb-2">
                 <input type="search" class="form-control form-control-sm mb-3"
@@ -461,7 +461,7 @@
                 <div id="fieldPickerModalBody" style="max-height:55vh;overflow-y:auto"></div>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
             </div>
         </div>
     </div>
@@ -476,7 +476,7 @@
                     <i class="bi bi-search me-1"></i>
                     <span id="discoverModalTitle">{{ i18n.discover_services }}</span>
                 </h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body pb-2">
                 <input type="search" class="form-control form-control-sm mb-3"
@@ -485,7 +485,7 @@
                 <div id="discoverModalBody" style="max-height:55vh;overflow-y:auto"></div>
             </div>
             <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
             </div>
         </div>
     </div>

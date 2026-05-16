@@ -174,13 +174,13 @@
                 <button class="btn btn-sm btn-outline-secondary ms-auto" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
                     <i class="bi bi-arrow-clockwise"></i>
                 </button>
-                <button class="btn btn-sm btn-success" id="btnNewModule" onclick="openNewModuleModal()">
+                <button class="btn btn-sm btn-success" id="btnNewModule" onclick="openNewModuleModal()" title="{{ i18n.add_module_tt }}">
                     <i class="bi bi-plus-lg me-1"></i>{{ i18n.add_module }}
                 </button>
                 <button class="btn btn-sm btn-outline-secondary d-none" id="btnUndoModules" onclick="revertModules()" title="{{ i18n.undo_modules }}">
                     <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo_modules }}
                 </button>
-                <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()">
+                <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()" title="{{ i18n.save_modules_tt }}">
                     <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
                     <span class="badge bg-warning text-dark ms-1 d-none" id="badgeModulesDirty"
                         title="{{ i18n.unsaved_changes }}">●</span>
@@ -198,7 +198,7 @@
                     title="{{ i18n.reload_config_title }}">
                     <i class="bi bi-arrow-clockwise"></i>
                 </button>
-                <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()">
+                <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()" title="{{ i18n.save_config_tt }}">
                     <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
                     <span class="badge bg-warning text-dark ms-1 d-none" id="badgeConfigDirty"
                         title="{{ i18n.unsaved_changes }}">●</span>
@@ -245,10 +245,10 @@
                     <div class="card mb-3" id="sessions-panel">
                         <div class="card-header d-flex align-items-center py-2">
                             <h6 class="mb-0"><i class="bi bi-plug me-2"></i><span id="sessions-title">{{ i18n.active_sessions }}</span></h6>
-                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh }}">
+                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
                                 <i class="bi bi-arrow-clockwise"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger ms-1" onclick="invalidateAllSessions()">
+                            <button class="btn btn-sm btn-outline-danger ms-1" onclick="invalidateAllSessions()" title="{{ i18n.close_all_sessions_tt }}">
                                 <i class="bi bi-x-circle me-1"></i>{{ i18n.close_all_sessions }}
                             </button>
                         </div>
@@ -260,10 +260,10 @@
                     <div class="card mb-3">
                         <div class="card-header d-flex align-items-center py-2">
                             <h6 class="mb-0"><i class="bi bi-people me-2"></i>{{ i18n.user_management }}</h6>
-                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh }}">
+                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
                                 <i class="bi bi-arrow-clockwise"></i>
                             </button>
-                            <button class="btn btn-sm btn-success ms-1" id="btnNewUser" onclick="openNewUserModal()">
+                            <button class="btn btn-sm btn-success ms-1" id="btnNewUser" onclick="openNewUserModal()" title="{{ i18n.new_user_tt }}">
                                 <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_user }}
                             </button>
                         </div>
@@ -275,11 +275,11 @@
                     <div class="card mb-3">
                         <div class="card-header d-flex align-items-center py-2">
                             <h6 class="mb-0"><i class="bi bi-collection me-2"></i>{{ i18n.group_management }}</h6>
-                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh }}">
+                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
                                 <i class="bi bi-arrow-clockwise"></i>
                             </button>
                             <button class="btn btn-sm btn-success ms-1" onclick="openNewGroupModal()"
-                                id="btnNewGroup" style="display:none">
+                                id="btnNewGroup" style="display:none" title="{{ i18n.new_group_tt }}">
                                 <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_group }}
                             </button>
                         </div>
@@ -291,11 +291,11 @@
                     <div class="card mb-3">
                         <div class="card-header d-flex align-items-center py-2">
                             <h6 class="mb-0"><i class="bi bi-shield-lock me-2"></i>{{ i18n.role_management }}</h6>
-                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh }}">
+                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
                                 <i class="bi bi-arrow-clockwise"></i>
                             </button>
                             <button class="btn btn-sm btn-success ms-1" onclick="openNewRoleModal()"
-                                id="btnNewRole" style="display:none">
+                                id="btnNewRole" style="display:none" title="{{ i18n.new_role_tt }}">
                                 <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_role }}
                             </button>
                         </div>
@@ -310,14 +310,14 @@
             <div class="d-flex align-items-center mb-2 gap-2">
                 <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>{{ i18n.audit_log }}</h5>
                 <div class="ms-auto d-flex gap-1">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="renderAudit()" title="{{ i18n.refresh }}">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="renderAudit()" title="{{ i18n.refresh_tt }}">
                         <i class="bi bi-arrow-clockwise"></i>
                     </button>
                     <div class="btn-group">
-                        <button class="btn btn-sm btn-outline-primary" onclick="exportAudit('csv')">
+                        <button class="btn btn-sm btn-outline-primary" onclick="exportAudit('csv')" title="{{ i18n.export_csv_tt }}">
                             <i class="bi bi-filetype-csv me-1"></i>{{ i18n.export_csv }}
                         </button>
-                        <button class="btn btn-sm btn-outline-primary" onclick="exportAudit('json')">
+                        <button class="btn btn-sm btn-outline-primary" onclick="exportAudit('json')" title="{{ i18n.export_json_tt }}">
                             <i class="bi bi-filetype-json me-1"></i>{{ i18n.export_json }}
                         </button>
                     </div>
@@ -357,7 +357,7 @@
                         </div>
                     </div>
                     <div class="col-auto ms-auto">
-                        <button class="btn btn-sm btn-outline-danger d-none" id="btnClearAuditFilters" onclick="clearAuditFilters()">
+                        <button class="btn btn-sm btn-outline-danger d-none" id="btnClearAuditFilters" onclick="clearAuditFilters()" title="{{ i18n.clear_filters_tt }}">
                             <i class="bi bi-x-circle me-1"></i>{{ i18n.clear_filters }}
                         </button>
                     </div>

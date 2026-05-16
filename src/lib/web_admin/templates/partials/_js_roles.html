@@ -236,13 +236,13 @@ function renderRoles() {
             ${showActions ? `<td class="text-center" style="white-space:nowrap;border-left:1px solid var(--bs-border-color)">
                 ${canEditRole ? `<button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-outline-secondary' : 'btn-outline-success'}"
                     ${rd.builtin ? 'disabled' : `onclick="toggleRole(${jsStr(name)},${isEnabled})"`}
-                    title="${isEnabled ? t('disable') : t('enable')}">
+                    title="${escAttr(isEnabled ? t('disable') : t('enable'))}">
                     <i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i></button>` : ''}
                 ${canEditRole ? `<button class="btn btn-sm btn-outline-primary py-0 px-1 me-1"
-                    onclick="openEditRoleModal(${jsStr(name)})" title="${t('edit')}">
+                    onclick="openEditRoleModal(${jsStr(name)})" title="${escAttr(t('edit'))}">
                     <i class="bi bi-pencil"></i></button>` : ''}
                 ${canDeleteRole ? `<button class="btn btn-sm btn-outline-danger py-0 px-1"
-                    ${rd.builtin ? 'disabled' : `onclick="deleteRole(${jsStr(name)})"`} title="${t('delete')}">
+                    ${rd.builtin ? 'disabled' : `onclick="deleteRole(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}">
                     <i class="bi bi-trash3"></i></button>` : ''}
             </td>` : ''}
         </tr>`;
