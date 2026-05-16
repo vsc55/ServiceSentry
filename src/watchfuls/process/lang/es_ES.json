@@ -1,5 +1,6 @@
 {
     "pretty_name": "Monitor de Procesos",
+    "module_description": "Monitoriza procesos en ejecución por nombre. Genera alertas cuando el número de instancias coincidentes cae por debajo del mínimo configurado.",
     "labels": {
         "enabled":   "Habilitado",
         "threads":   "Hilos",

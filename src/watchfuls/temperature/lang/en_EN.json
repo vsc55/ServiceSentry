@@ -1,5 +1,6 @@
 {
     "pretty_name": "CPU Temperature",
+    "module_description": "Monitors CPU and hardware sensor temperatures via psutil. Alerts when any sensor reading exceeds the configured threshold.",
     "labels": {
         "enabled": "Enabled",
         "label":   "Label",

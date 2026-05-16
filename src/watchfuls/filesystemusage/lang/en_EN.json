@@ -1,5 +1,6 @@
 {
     "pretty_name": "Disk Usage",
+    "module_description": "Monitors disk space usage on configured partitions and alerts when usage exceeds the configured percentage threshold.",
     "labels": {
         "enabled":   "Enabled",
         "threads":   "Threads",

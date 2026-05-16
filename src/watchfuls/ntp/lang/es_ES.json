@@ -1,5 +1,6 @@
 {
     "pretty_name": "Monitor NTP",
+    "module_description": "Monitoriza la sincronización horaria con servidores NTP. Genera alertas cuando el desfase entre el reloj del sistema y el servidor NTP supera el umbral configurado.",
     "labels": {
         "enabled":    "Habilitado",
         "threads":    "Hilos",

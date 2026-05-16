@@ -9,7 +9,8 @@ const hasAnyUser    = ['users_view','users_add','users_edit','users_delete'].som
 const hasAnyRole    = ['roles_view','roles_add','roles_edit','roles_delete'].some(p => perms.has(p));
 const hasAnyGroup   = ['groups_view','groups_add','groups_edit','groups_delete'].some(p => perms.has(p));
 const hasAnySessions = ['sessions_view','sessions_revoke'].some(p => perms.has(p));
-const hasAnyModule  = ['modules_view','modules_add','modules_edit'].some(p => perms.has(p));
+const hasAnyModule  = ['modules_view','modules_add','modules_edit'].some(p => perms.has(p))
+    || [...perms].some(p => p.startsWith('module.'));
 const hasAnyAccess  = hasAnyUser || hasAnyRole || hasAnyGroup || hasAnySessions;
 // Main access tab
 const accessLi = document.getElementById('tab-access-li');
@@ -23,11 +24,21 @@ const stGroups = document.getElementById('subtab-groups-li');
 if (stGroups) stGroups.style.display = hasAnyGroup ? '' : 'none';
 const stRoles = document.getElementById('subtab-roles-li');
 if (stRoles) stRoles.style.display = hasAnyRole ? '' : 'none';
-// Activate the first visible sub-tab
-const firstSubtab = ['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles']
-    .map(id => document.getElementById(id))
-    .find(btn => btn && btn.closest('li')?.style.display !== 'none');
-if (firstSubtab) bootstrap.Tab.getOrCreateInstance(firstSubtab).show();
+// Activate saved sub-tab (or fall back to first visible)
+const _savedSubtabTarget = localStorage.getItem('ss_active_subtab_access');
+const _savedSubtabBtn = _savedSubtabTarget
+    ? document.querySelector(`[data-bs-target="${_savedSubtabTarget}"]`) : null;
+const _activeSubtab = (
+    _savedSubtabBtn && _savedSubtabBtn.closest('li')?.style.display !== 'none'
+        ? _savedSubtabBtn
+        : ['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles']
+            .map(id => document.getElementById(id))
+            .find(btn => btn && btn.closest('li')?.style.display !== 'none')
+);
+if (_activeSubtab) bootstrap.Tab.getOrCreateInstance(_activeSubtab).show();
+// Overview tab
+const overviewLi = document.getElementById('tab-overview-li');
+if (overviewLi) overviewLi.style.display = perms.has('overview_view') ? '' : 'none';
 // Modules tab
 const modulesLi = document.getElementById('tab-modules-li');
 if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
@@ -36,9 +47,6 @@ const configLi = document.getElementById('tab-config-li');
 const hasConfigEdit = perms.has('config_edit');
 const hasConfigView = perms.has('config_view');
 if (configLi) configLi.style.display = (hasConfigEdit || hasConfigView) ? '' : 'none';
-if (hasConfigView && !hasConfigEdit) {
-    document.getElementById('config-container')?.classList.add('config-readonly');
-}
 // Status tab
 const statusLi = document.getElementById('tab-status-li');
 const hasChecks = perms.has('checks_view') || perms.has('checks_run');
@@ -108,6 +116,29 @@ document.getElementById('btnGroupModalOk').addEventListener('click', saveGroupMo
 document.getElementById('btn-tab-overview')?.addEventListener('shown.bs.tab', renderOverview);
 document.getElementById('mainTabs')?.addEventListener('shown.bs.tab', e => {
     localStorage.setItem('ss_active_tab', e.target.dataset.bsTarget);
+});
+// Warn when leaving a tab that has unsaved changes
+document.getElementById('mainTabs')?.addEventListener('hide.bs.tab', e => {
+    const leaving = e.target?.dataset?.bsTarget;
+    const dirtyTarget = (leaving === '#tab-modules' && _isDirty('modules')) ? 'modules'
+                      : (leaving === '#tab-config'  && _isDirty('config'))  ? 'config'
+                      : null;
+    if (!dirtyTarget) return;
+    e.preventDefault();
+    showUnsavedChangesModal(dirtyTarget, e.relatedTarget);
+});
+// Warn on page close / refresh if there are unsaved changes
+window.addEventListener('beforeunload', e => {
+    if (_isDirty('modules') || _isDirty('config')) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
+// Persist the active Access sub-tab across reloads
+['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles'].forEach(id => {
+    document.getElementById(id)?.addEventListener('shown.bs.tab', e => {
+        localStorage.setItem('ss_active_subtab_access', e.target.dataset.bsTarget);
+    });
 });
 
 (async function init() {

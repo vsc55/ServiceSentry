@@ -1,5 +1,6 @@
 {
     "pretty_name": "RAID",
+    "module_description": "Monitoriza la salud de arrays RAID a través de /proc/mdstat localmente o por SSH en servidores remotos. Genera alertas ante arrays degradados o con fallos.",
     "labels": {
         "enabled":  "Habilitado",
         "local":    "Monitor local",

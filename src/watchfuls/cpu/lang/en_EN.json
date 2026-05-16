@@ -1,5 +1,6 @@
 {
     "pretty_name": "CPU Usage",
+    "module_description": "Monitors CPU usage percentage and triggers alerts when it exceeds the configured threshold.",
     "labels": {
         "enabled":  "Enabled",
         "alert":    "Alert threshold (%)",

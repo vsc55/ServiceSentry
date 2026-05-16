@@ -1,5 +1,6 @@
 {
     "pretty_name": "Process Monitor",
+    "module_description": "Monitors running processes by name. Alerts when the number of matching instances falls below the configured minimum threshold.",
     "labels": {
         "enabled":   "Enabled",
         "threads":   "Threads",

@@ -1,5 +1,6 @@
 {
     "pretty_name": "Monitor UPS (NUT)",
+    "module_description": "Monitoriza el estado de SAIs (Sistemas de Alimentación Ininterrumpida) vía NUT (Network UPS Tools). Genera alertas ante cortes de corriente, batería baja y estados anómalos.",
     "labels": {
         "enabled":  "Habilitado",
         "threads":  "Hilos",

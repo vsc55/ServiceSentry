@@ -1,5 +1,6 @@
 {
     "pretty_name": "DNS Monitor",
+    "module_description": "Monitors DNS resolution for configured hostnames. Verifies that queries return results and optionally checks the resolved value against an expected string.",
     "labels": {
         "enabled":     "Enabled",
         "threads":     "Threads",

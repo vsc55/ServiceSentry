@@ -4,7 +4,7 @@
 
 from flask import session
 
-from ..constants import BUILTIN_ROLE_PERMISSIONS, PERMISSIONS
+from ..constants import BUILTIN_ROLE_PERMISSIONS, PERMISSIONS, is_module_perm
 
 
 class _PermissionsMixin:
@@ -21,7 +21,8 @@ class _PermissionsMixin:
         custom = self._custom_roles.get(role_name)
         if custom and custom.get('enabled', True):
             return frozenset(
-                p for p in custom.get('permissions', []) if p in PERMISSIONS
+                p for p in custom.get('permissions', [])
+                if p in PERMISSIONS or is_module_perm(p)
             )
         return frozenset()
 
@@ -48,3 +49,20 @@ class _PermissionsMixin:
         username = session.get('username', '')
         role_name = (self._users.get(username) or {}).get('role', 'viewer')
         return self._get_effective_permissions(username, role_name)
+
+    def _has_module_permission(self, module_name: str, action: str) -> bool:
+        """Return True if the current user may perform *action* on *module_name*.
+
+        Checks global module permissions first; falls back to per-module key
+        ``module.{module_name}.{action}`` when the global grant is absent.
+        Global mapping: view→modules_view, add/edit/delete→modules_edit.
+        modules_add and modules_delete govern whole-module creation/removal,
+        not item-level operations within a module.
+        """
+        perms = self._get_session_permissions()
+        _global = {'view': 'modules_view', 'add': 'modules_edit',
+                   'edit': 'modules_edit', 'delete': 'modules_edit'}
+        global_perm = _global.get(action)
+        if global_perm and global_perm in perms:
+            return True
+        return f'module.{module_name}.{action}' in perms

@@ -11,7 +11,8 @@ function tf(k, ...a) { let s = t(k); a.forEach(v => { s = s.replace('{}', v); })
 // ──────────────────────────── Constants ────────────────────────────
 const LABELS = I18N.labels || {};
 const SECTION_LABELS = I18N.sections || {};
-const SENSITIVE = new Set({{ wa_sensitive_fields | tojson }});
+const SENSITIVE   = new Set({{ wa_sensitive_fields | tojson }});
+const PERM_GROUPS = {{ permissions_groups | tojson }};
 const SUPPORTED_LANGS = {{ supported_langs| tojson }};
 const SYSTEM_DEFAULT_LANG      = '{{ default_lang }}';
 const CURRENT_LANG             = '{{ lang }}';
@@ -82,6 +83,7 @@ const CONFIG_FIELD_DEFAULTS = {
     'web_admin|proxy_count':       0,
     'web_admin|default_page_size': 25,
     'web_admin|page_sizes':        [25, 50, 100, 200, 0],
+    'web_admin|role_modal_scrollable': true,
 };
 
 // Field schema loaded from /api/config/schema — min, max, default per field.
@@ -116,6 +118,22 @@ function initTooltips(container) {
     root.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
         bootstrap.Tooltip.getOrCreateInstance(el, { trigger: 'hover focus' });
     });
+}
+
+/**
+ * Return true if the current user may perform *action* on *modName*.
+ * Global permissions (modules_view/add/edit) are checked first; per-module
+ * keys (module.{name}.{action}) serve as fallback.
+ */
+function hasModulePerm(modName, action) {
+    const perms = new Set(currentUser.permissions || []);
+    if (action === 'view'   && perms.has('modules_view'))   return true;
+    if (action === 'edit'   && perms.has('modules_edit'))   return true;
+    // add/delete refer to items *within* a module — modules_edit grants both globally.
+    // modules_add / modules_delete are for adding/removing whole modules, not items.
+    if (action === 'add'    && perms.has('modules_edit'))   return true;
+    if (action === 'delete' && perms.has('modules_edit'))   return true;
+    return perms.has('module.' + modName + '.' + action);
 }
 
 /**
@@ -387,6 +405,20 @@ function renderField(key, value, pathStr, target = 'modules') {
             title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`
         : '';
 
+    // Sensitive field masked by the server (null = value is set but never transmitted)
+    if (value === null && (SENSITIVE.has(key) || (meta && meta.sensitive))) {
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8 d-flex gap-1 align-items-center">
+            <input type="password" class="form-control form-control-sm flex-grow-1"
+                data-field-path="${escAttr(pathStr)}"
+                value=""
+                placeholder="${escAttr(t('secret_defined') || '••••••')}"
+                oninput="markDirty(${tg})"
+                onchange="updateField(${tg},${sp},this.value)">${_resetBtn}
+        </div></div>`;
+    }
+
     if (typeof value === 'boolean') {
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
@@ -568,7 +600,7 @@ function renderField(key, value, pathStr, target = 'modules') {
                         value="${escAttr(value)}"${_numKbd}${_strPh}
                         oninput="markDirty(${tg})"
                         onchange="updateField(${tg},${sp},this.value.trim())">
-                    <button class="btn btn-outline-secondary" type="button"
+                    <button class="btn btn-outline-secondary" type="button" data-test-btn
                         data-action-path="${_itemPath}"
                         data-action-url="${escAttr(_ia.url || '')}"
                         data-action-extra="${escAttr(JSON.stringify(_ia.extra || {}))}"
@@ -944,7 +976,7 @@ function _renderInlineActions(pathStr, actions, itemData) {
         const _swAttr  = action.show_when
             ? ` data-sw-when="${escAttr(JSON.stringify(action.show_when))}"` : '';
 
-        const btn = `<button class="btn btn-sm btn-${variant}${isFullWidth ? ' w-100' : ''}"
+        const btn = `<button class="btn btn-sm btn-${variant}${isFullWidth ? ' w-100' : ''}" data-test-btn
             data-action-path="${escAttr(pathStr)}"
             data-action-url="${escAttr(action.url)}"
             data-action-extra="${escAttr(JSON.stringify(action.extra || {}))}"
@@ -989,7 +1021,7 @@ function _renderGroupActionBtns(pathStr, actions, itemData) {
         const _wStyle  = isFullWidth ? 'flex-basis:100%;' : 'flex-shrink:0;';
         const _swAttr  = action.show_when
             ? ` data-sw-when="${escAttr(JSON.stringify(action.show_when))}"` : '';
-        const btn = `<button class="btn btn-sm btn-${variant}${isFullWidth ? ' w-100' : ''}"
+        const btn = `<button class="btn btn-sm btn-${variant}${isFullWidth ? ' w-100' : ''}" data-test-btn
             data-action-path="${escAttr(pathStr)}"
             data-action-url="${escAttr(action.url)}"
             data-action-extra="${escAttr(JSON.stringify(action.extra || {}))}"
@@ -1013,6 +1045,7 @@ function renderCollection(title, data, pathStr, target) {
     const _colSchema = ITEM_SCHEMAS[pathStr] || null;
     const _discoverUrl = _colSchema && _colSchema['__discovery__'] ? _colSchema['__discovery__'] : null;
     const _unsupported = _colSchema && _colSchema['__unsupported__'] === true;
+    const canAddItem = target !== 'modules' || hasModulePerm(_modNameCol, 'add');
     let h = `<div class="mt-3 mb-1">
     <div class="d-flex align-items-center gap-2 mb-2 pb-1" style="border-bottom:1px solid var(--bs-border-color)">
         <span class="fw-semibold text-muted" style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em">
@@ -1020,14 +1053,14 @@ function renderCollection(title, data, pathStr, target) {
         </span>
         ${itemCount > 0 ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.68rem">${itemCount}</span>` : ''}
         ${_unsupported ? `<span class="ms-auto badge bg-secondary bg-opacity-50" style="font-size:.68rem" title="${t('platform_not_supported') || 'Not supported on this platform'}"><i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}</span>` : ''}
-        ${!_unsupported && _discoverUrl ? `<button class="btn btn-sm btn-outline-info ms-auto py-0 px-2"
+        ${!_unsupported && canAddItem && _discoverUrl ? `<button class="btn btn-sm btn-outline-info ms-auto py-0 px-2"
             onclick="openDiscoverModal(${jsStr(pathStr)},${jsStr(_discoverUrl)})">
             <i class="bi bi-search me-1"></i>${t('discover') || 'Discover'}
         </button>` : ''}
-        ${!_unsupported ? `<button class="btn btn-sm btn-outline-success ${_discoverUrl ? '' : 'ms-auto'} py-0 px-2"
+        ${!_unsupported && canAddItem ? `<button class="btn btn-sm btn-outline-success ${_discoverUrl ? '' : 'ms-auto'} py-0 px-2"
             onclick="openAddModal(${jsStr(target)},${jsStr(pathStr)})">
             <i class="bi bi-plus-lg me-1"></i>${t('add') || 'Add'}
-        </button>` : ''}
+        </button>` : (!_unsupported && !canAddItem && !_discoverUrl ? '<span class="ms-auto"></span>' : '')}
     </div>
     <div class="d-flex flex-column gap-1">`;
 
@@ -1045,17 +1078,23 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     const sp = jsStr(pathStr), pp = jsStr(parentPathStr), tg = jsStr(target);
     const nameEsc = jsStr(itemName);
     const spEnabled = jsStr(pathStr + '|enabled');
-    const delBtn = `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1" data-no-collapse="1"
+    const _modNameItem = parentPathStr.split('|')[0];
+    const canDeleteItem = target !== 'modules' || hasModulePerm(_modNameItem, 'delete');
+    const canEditItem   = target !== 'modules' || hasModulePerm(_modNameItem, 'edit');
+    const delBtn = canDeleteItem
+        ? `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1" data-no-collapse="1"
     onclick="event.stopPropagation();removeItem(${tg},${pp},${nameEsc})">
-    <i class="bi bi-trash3"></i></button>`;
+    <i class="bi bi-trash3"></i></button>`
+        : '';
 
     // Rename (key edit) button — hidden when schema uses __key_mirrors_field__
     const _renameSch = ITEM_SCHEMAS[parentPathStr] || null;
-    const renameBtn = (_renameSch && _renameSch['__key_mirrors_field__']) ? '' :
-        `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" data-no-collapse="1"
+    const renameBtn = (canEditItem && !(_renameSch && _renameSch['__key_mirrors_field__']))
+        ? `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" data-no-collapse="1"
         onclick="event.stopPropagation();renameItem(${tg},${pp},${nameEsc})"
         title="${esc(t('rename_item'))}">
-        <i class="bi bi-pencil-square"></i></button>`;
+        <i class="bi bi-pencil-square"></i></button>`
+        : '';
 
     // --- promote boolean/number → dict when a schema exists ---
     const schema = schemaFor(parentPathStr);
@@ -1149,7 +1188,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
             ? _renderInlineActions(pathStr, _bottomActions, itemValue)
             : '';
         const testBtn = _testUrl
-            ? `<button class="btn btn-sm btn-outline-info py-0 px-1 ms-1" data-no-collapse="1"
+            ? `<button class="btn btn-sm btn-outline-info py-0 px-1 ms-1" data-no-collapse="1" data-test-btn
                 onclick="event.stopPropagation();testItemConnection(${sp},${jsStr(_testUrl)},this)"
                 title="${escAttr(t('test_connection'))}">
                 <i class="bi bi-plug"></i></button>`

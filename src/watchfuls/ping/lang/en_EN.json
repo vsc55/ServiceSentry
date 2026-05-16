@@ -1,5 +1,6 @@
 {
     "pretty_name": "Ping",
+    "module_description": "Monitors host reachability via ICMP ping. Alerts when a host becomes unreachable or exceeds the allowed number of consecutive failures.",
     "labels": {
         "enabled": "Enabled",
         "label":   "Label",

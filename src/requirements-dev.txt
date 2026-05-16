@@ -5,3 +5,4 @@ pytest-mock
 pytest-env
 pytest-xdist>=3.5.0
 flake8
+watchfiles>=0.21

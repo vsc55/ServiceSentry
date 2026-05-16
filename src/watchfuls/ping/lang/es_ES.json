@@ -1,5 +1,6 @@
 {
     "pretty_name": "Ping",
+    "module_description": "Monitoriza la accesibilidad de hosts mediante ping ICMP. Genera alertas cuando un host es inalcanzable o supera el número de fallos consecutivos permitido.",
     "labels": {
         "enabled": "Habilitado",
         "label":   "Etiqueta",

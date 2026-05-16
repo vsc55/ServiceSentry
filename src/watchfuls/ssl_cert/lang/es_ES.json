@@ -1,5 +1,6 @@
 {
     "pretty_name": "Certificado SSL",
+    "module_description": "Monitoriza la caducidad de certificados SSL/TLS para los hosts configurados. Genera alertas cuando un certificado está próximo a expirar según el periodo de aviso configurado.",
     "labels": {
         "enabled":      "Habilitado",
         "threads":      "Hilos",

@@ -1,5 +1,6 @@
 {
     "pretty_name": "RAM & Swap",
+    "module_description": "Monitors RAM and swap memory usage. Alerts when usage exceeds the configured percentage thresholds.",
     "labels": {
         "enabled":    "Enabled",
         "alert_ram":  "RAM Alert (%)",

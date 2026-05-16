@@ -1,5 +1,6 @@
 {
     "pretty_name": "Monitor DNS",
+    "module_description": "Monitoriza la resolución DNS de los nombres de host configurados. Verifica que las consultas devuelven resultados y opcionalmente comprueba el valor resuelto contra uno esperado.",
     "labels": {
         "enabled":     "Habilitado",
         "threads":     "Hilos",

@@ -31,7 +31,6 @@ function renderModules() {
     for (const m of _pendingExpandMods) expandedMods.add(m);
     _pendingExpandMods.clear();
 
-    const canEdit = new Set(currentUser.permissions || []).has('modules_edit');
     let h = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:.75rem;align-items:start">';
     for (const name of moduleKeys) {
         const cfg = modulesData[name];
@@ -81,14 +80,19 @@ function renderModules() {
                            title="${t('platform_not_supported') || 'Not supported on this platform'}">
                            <i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}
                        </span>`
-                    : `<div class="form-check form-switch mb-0 flex-shrink-0" data-no-collapse="1" onclick="event.stopPropagation()">
-                           <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1"
-                                  ${on ? 'checked' : ''}
-                                  onclick="event.stopPropagation()"
-                                  onchange="event.stopPropagation();toggleModule(${jsStr(name)},this.checked)">
-                       </div>`
+                    : (hasModulePerm(name, 'edit')
+                        ? `<div class="form-check form-switch mb-0 flex-shrink-0" data-no-collapse="1" onclick="event.stopPropagation()">
+                               <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1"
+                                      ${on ? 'checked' : ''}
+                                      onclick="event.stopPropagation()"
+                                      onchange="event.stopPropagation();toggleModule(${jsStr(name)},this.checked)">
+                           </div>`
+                        : `<div class="form-check form-switch mb-0 flex-shrink-0" data-no-collapse="1">
+                               <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1"
+                                      ${on ? 'checked' : ''} disabled>
+                           </div>`)
                 }
-                ${canEdit ? `<button class="btn btn-sm btn-outline-danger py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                ${new Set(currentUser.permissions||[]).has('modules_delete') ? `<button class="btn btn-sm btn-outline-danger py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     onclick="event.stopPropagation();deleteModule(${jsStr(name)})" title="${t('delete')}">
                     <i class="bi bi-trash3"></i>
                 </button>` : ''}
@@ -119,6 +123,13 @@ function renderModules() {
             if (col) col.classList.add('show');
         }
     });
+    // Disable inputs in modules the user may only view (not edit)
+    for (const name of moduleKeys) {
+        if (!hasModulePerm(name, 'edit')) {
+            const panel = c.querySelector(`[data-module="${CSS.escape(name)}"]`);
+            if (panel) _applyReadonly(panel);
+        }
+    }
 }
 
 function _discoveredModuleNames() {

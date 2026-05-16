@@ -53,7 +53,8 @@ class TestApiConfigGet:
         _login(client)
         data = client.get("/api/config").get_json()
         assert data["daemon"]["timer_check"] == 300
-        assert data["telegram"]["token"] == "test-token-123"
+        # Sensitive fields are masked (returned as null) — never sent to the client
+        assert data["telegram"]["token"] is None
 
 
 # ─────────────────────────── PUT básico ────────────────────────────

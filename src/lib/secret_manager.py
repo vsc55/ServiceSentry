@@ -11,7 +11,8 @@ import base64
 import binascii
 from typing import Any
 
-__all__ = ['ENCRYPT_KEYS', 'fernet_from_secret_file', 'decrypt_all', 'encrypt_sensitive']
+__all__ = ['ENCRYPT_KEYS', 'fernet_from_secret_file', 'decrypt_all', 'encrypt_sensitive',
+           'mask_sensitive', 'restore_sensitive']
 
 ENC_PREFIX = 'enc:'
 
@@ -59,6 +60,41 @@ def decrypt_all(data: Any, fernet) -> Any:
         except Exception:
             pass
     return data
+
+
+def mask_sensitive(data: Any, keys: frozenset = ENCRYPT_KEYS) -> Any:
+    """Return a copy of *data* with sensitive field values replaced by ``None``.
+
+    ``None`` serialises to JSON ``null``, which the frontend treats as
+    "value is set on the server but not transmitted to the client".
+    Empty strings and ``None`` values are left as-is (not yet set).
+    """
+    if isinstance(data, dict):
+        return {k: (None if (k in keys and v) else mask_sensitive(v, keys))
+                for k, v in data.items()}
+    if isinstance(data, list):
+        return [mask_sensitive(item, keys) for item in data]
+    return data
+
+
+def restore_sensitive(new_data: dict, old_data: dict,
+                      keys: frozenset = ENCRYPT_KEYS) -> None:
+    """In-place: restore sensitive fields that are ``None`` or ``''`` in
+    *new_data* by copying the existing value from *old_data*.
+
+    Called before saving submitted data so that the client's omission of a
+    sensitive value (represented as ``null`` / empty string) does not erase
+    the stored secret.
+    """
+    if not isinstance(old_data, dict):
+        return
+    for k in list(new_data.keys()):
+        nv = new_data[k]
+        ov = old_data.get(k)
+        if isinstance(nv, dict):
+            restore_sensitive(nv, ov if isinstance(ov, dict) else {}, keys)
+        elif k in keys and (nv is None or nv == '') and ov:
+            new_data[k] = ov
 
 
 def encrypt_sensitive(data: Any, fernet,

@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_23_flags(self):
+    def test_permissions_tuple_has_26_flags(self):
         from lib.web_admin.app import PERMISSIONS
-        assert len(PERMISSIONS) == 23
+        assert len(PERMISSIONS) == 26
 
     def test_permissions_are_unique(self):
         from lib.web_admin.app import PERMISSIONS
@@ -41,8 +41,8 @@ class TestPermissionsConstants:
             'roles_view', 'roles_add', 'roles_edit', 'roles_delete',
             'groups_view', 'groups_add', 'groups_edit', 'groups_delete',
             'audit_view', 'audit_delete',
-            'modules_view', 'modules_add', 'modules_edit',
-            'config_view', 'config_edit',
+            'modules_view', 'modules_add', 'modules_edit', 'modules_delete',
+            'config_view', 'config_edit', 'overview_view', 'overview_edit',
             'sessions_view', 'sessions_revoke',
             'checks_view', 'checks_run',
         }
@@ -76,6 +76,7 @@ class TestPermissionsConstants:
         assert 'perm_group_audit' in keys
         assert 'perm_group_modules' in keys
         assert 'perm_group_config' in keys
+        assert 'perm_group_overview' in keys
         assert 'perm_group_sessions' in keys
         assert 'perm_group_checks' in keys
 
@@ -87,9 +88,12 @@ class TestPermissionsConstants:
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
         ep = BUILTIN_ROLE_PERMISSIONS['editor']
         assert 'modules_view' in ep
-        assert 'modules_add' in ep
         assert 'modules_edit' in ep
+        assert 'modules_add' not in ep
+        assert 'modules_delete' not in ep
         assert 'config_edit' in ep
+        assert 'overview_view' in ep
+        assert 'overview_edit' in ep
         assert 'checks_view' in ep
         assert 'checks_run' in ep
         assert 'audit_view' in ep

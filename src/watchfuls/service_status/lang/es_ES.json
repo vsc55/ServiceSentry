@@ -1,5 +1,6 @@
 {
     "pretty_name": "Servicios",
+    "module_description": "Monitoriza el estado de servicios del sistema (en ejecución o detenido). Permite la auto-restauración para arrancar o detener servicios automáticamente.",
     "labels": {
         "enabled":     "Habilitado",
         "threads":     "Hilos",

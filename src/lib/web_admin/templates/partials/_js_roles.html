@@ -3,6 +3,158 @@
    and manage user/group assignments.
    ================================================================ #}
 
+// ──────────────────────── Permissions accordion ───────────────────
+// Persists across modal opens so users set their preferences once
+let _rmSearchFilters = { label: true, hint: true, modName: true, modDesc: true };
+
+function _togglePermFilter(key) {
+    _rmSearchFilters[key] = !_rmSearchFilters[key];
+    const btn = document.getElementById('rmSF_' + key);
+    if (btn) {
+        const on = _rmSearchFilters[key];
+        btn.classList.toggle('btn-primary', on);
+        btn.classList.toggle('btn-outline-secondary', !on);
+    }
+    _filterPermsAccordion(document.getElementById('rmPermSearch')?.value || '');
+}
+
+function _buildPermsAccordion(activePerms, isBuiltin) {
+    const grid = document.getElementById('rolePermissionsGrid');
+    if (!grid) return;
+    const PHINTS = I18N.permission_hints || {};
+
+    // Dispose any existing tooltips before replacing DOM
+    grid.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
+        bootstrap.Tooltip.getInstance(el)?.dispose()
+    );
+
+    // Sort groups alphabetically by their translated label
+    const sorted = [...PERM_GROUPS].sort((a, b) =>
+        (t(a[0]) || a[0]).localeCompare(t(b[0]) || b[0])
+    );
+
+    const _sfDefs = [
+        { key: 'label',   lkey: 'perm_filter_label' },
+        { key: 'hint',    lkey: 'perm_filter_hint' },
+        { key: 'modName', lkey: 'perm_filter_mod_name' },
+        { key: 'modDesc', lkey: 'perm_filter_mod_desc' },
+    ];
+    let h = `<div class="mb-2">
+        <input type="text" class="form-control form-control-sm" id="rmPermSearch"
+            placeholder="${escAttr(t('search_permissions'))}"
+            oninput="_filterPermsAccordion(this.value)">
+        <div class="d-flex flex-wrap gap-1 mt-1 align-items-center">
+            <small class="text-muted">${esc(t('perm_filter_search_in'))}</small>`;
+    for (const f of _sfDefs) {
+        const on = _rmSearchFilters[f.key];
+        h += `<button id="rmSF_${f.key}" type="button"
+            class="btn btn-sm py-0 px-2 ${on ? 'btn-primary' : 'btn-outline-secondary'}"
+            style="font-size:.72rem"
+            onclick="_togglePermFilter('${f.key}')">${esc(t(f.lkey))}</button>`;
+    }
+    h += `</div></div>
+    <div class="accordion accordion-flush rounded-3 overflow-hidden border" id="rmPermsAccordion">`;
+
+    for (const [groupKey, perms] of sorted) {
+        const collapseId = 'rmAccGroup_' + groupKey;
+        h += `<div class="accordion-item" id="rmAccGrpItem_${groupKey}">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed py-2 fw-semibold"
+                        type="button" data-bs-toggle="collapse"
+                        data-bs-target="#${collapseId}"
+                        style="font-size:.82rem">${esc(t(groupKey) || groupKey)}</button>
+            </h2>
+            <div id="${collapseId}" class="accordion-collapse collapse">
+                <div class="accordion-body pt-2 pb-3 px-3">
+                    <div class="row g-1" id="rmPermRow_${groupKey}">`;
+        for (const perm of perms) {
+            const label   = (I18N.permission_labels || {})[perm] || perm;
+            const hint    = PHINTS[perm] || '';
+            const infoBtn = hint
+                ? ` <i class="bi bi-info-circle text-muted" style="font-size:.72rem;cursor:help;vertical-align:middle"
+                        data-bs-toggle="tooltip" data-bs-placement="right"
+                        data-bs-title="${escAttr(hint)}"></i>`
+                : '';
+            const checked  = activePerms.has(perm) ? ' checked' : '';
+            const disabled = isBuiltin ? ' disabled' : '';
+            h += `<div class="col-sm-6 rm-perm-item"
+                    data-perm="${perm}"
+                    data-perm-label="${escAttr(label)}"
+                    data-perm-hint="${escAttr(hint)}">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox"
+                           id="rm_${perm}" value="${perm}"${checked}${disabled}>
+                    <label class="form-check-label small" for="rm_${perm}">${esc(label)}${infoBtn}</label>
+                </div>
+            </div>`;
+        }
+        h += `</div>`;
+        if (groupKey === 'perm_group_modules') {
+            h += `<div id="rmModulePermsSection" style="display:none" class="mt-3 pt-2"
+                      style="border-top:1px solid var(--bs-border-color)">
+                <p class="small text-muted mb-2">
+                    <i class="bi bi-info-circle me-1"></i>${esc(t('module_perms_info'))}</p>
+                <div id="rmModulePermsGrid"></div>
+            </div>`;
+        }
+        h += `</div></div></div>`;
+    }
+    h += `</div>`;
+    grid.innerHTML = h;
+
+    // Initialise tooltips
+    grid.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
+        new bootstrap.Tooltip(el, { trigger: 'hover focus' })
+    );
+}
+
+function _filterPermsAccordion(query) {
+    const q = query.trim().toLowerCase();
+    const accordion = document.getElementById('rmPermsAccordion');
+    if (!accordion) return;
+
+    for (const groupItem of accordion.querySelectorAll('.accordion-item[id^="rmAccGrpItem_"]')) {
+        const groupKey = groupItem.id.slice('rmAccGrpItem_'.length);
+        let visibleCount = 0;
+
+        // Filter global permission items
+        for (const row of groupItem.querySelectorAll('.rm-perm-item')) {
+            const matches = !q
+                || (_rmSearchFilters.label && (row.dataset.permLabel || '').toLowerCase().includes(q))
+                || (_rmSearchFilters.label && (row.dataset.perm      || '').toLowerCase().includes(q))
+                || (_rmSearchFilters.hint  && (row.dataset.permHint  || '').toLowerCase().includes(q));
+            row.style.display = matches ? '' : 'none';
+            if (matches) visibleCount++;
+        }
+
+        // Filter per-module rows inside rmModulePermsSection
+        const modSection = groupItem.querySelector('#rmModulePermsSection');
+        if (modSection) {
+            let modVisible = 0;
+            for (const row of modSection.querySelectorAll('.rm-mod-row')) {
+                const matches = !q
+                    || (_rmSearchFilters.modName && (row.dataset.modName  || '').toLowerCase().includes(q))
+                    || (_rmSearchFilters.modName && (row.dataset.modLabel || '').toLowerCase().includes(q))
+                    || (_rmSearchFilters.modDesc && (row.dataset.modDesc  || '').toLowerCase().includes(q));
+                row.style.display = matches ? '' : 'none';
+                if (matches) modVisible++;
+            }
+            const hasRows = modSection.querySelectorAll('.rm-mod-row').length > 0;
+            modSection.style.display = (q ? modVisible > 0 : hasRows) ? '' : 'none';
+            visibleCount += modVisible;
+        }
+
+        groupItem.style.display = visibleCount > 0 ? '' : 'none';
+
+        const panel = document.getElementById('rmAccGroup_' + groupKey);
+        if (panel) {
+            const inst = bootstrap.Collapse.getOrCreateInstance(panel, { toggle: false });
+            if (q && visibleCount > 0) inst.show();
+            else if (!q) inst.hide();
+        }
+    }
+}
+
 // ──────────────────────────── Role management ─────────────────────
 let _rolesPage = 1;
 let _rolesPageSize = null;
@@ -40,11 +192,20 @@ function renderRoles() {
         if (p.startsWith('roles_'))    return 'background:rgba(139,92,246,.12);color:#7c3aed';
         if (p.startsWith('groups_'))   return 'background:rgba(6,182,212,.12);color:var(--bs-info)';
         if (p.startsWith('sessions_')) return 'background:rgba(245,158,11,.12);color:var(--bs-warning)';
-        if (p.startsWith('modules_'))  return 'background:rgba(34,197,94,.12);color:var(--bs-success)';
+        if (p.startsWith('modules_') || p.startsWith('module.'))
+                                       return 'background:rgba(34,197,94,.12);color:var(--bs-success)';
         if (p.startsWith('checks_'))   return 'background:rgba(34,197,94,.12);color:var(--bs-success)';
         if (p.startsWith('config_'))   return 'background:var(--bs-secondary-bg);color:var(--bs-secondary-color)';
         if (p.startsWith('audit_'))    return 'background:var(--bs-secondary-bg);color:var(--bs-secondary-color)';
         return 'background:var(--bs-secondary-bg);color:var(--bs-secondary-color)';
+    }
+
+    function _modulePermLabel(p) {
+        const parts = p.split('.');
+        if (parts.length !== 3 || parts[0] !== 'module') return null;
+        const prettyMod = modulePrettyName(parts[1], modulesData[parts[1]] || {});
+        const actionLbl = t('module_perm_' + parts[2]) || parts[2];
+        return prettyMod + ': ' + actionLbl;
     }
 
     let h = `<div class="rounded-3 border overflow-hidden">
@@ -63,9 +224,10 @@ function renderRoles() {
             ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.6em;padding:.15em .35em">${t('role_builtin_badge')}</span>` : '';
         const disabledBadge = (!rd.builtin && !isEnabled)
             ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>` : '';
-        const permBadges = (rd.permissions || []).map(p =>
-            `<span class="badge fw-normal me-1" style="font-size:.7rem;${_permChipStyle(p)}">${esc(PERM_L[p] || p)}</span>`
-        ).join('');
+        const permBadges = (rd.permissions || []).map(p => {
+            const lbl = PERM_L[p] || _modulePermLabel(p) || p;
+            return `<span class="badge fw-normal me-1" style="font-size:.7rem;${_permChipStyle(p)}">${esc(lbl)}</span>`;
+        }).join('');
 
         h += `<tr${rowStyle}>
             <td style="white-space:nowrap"><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
@@ -92,18 +254,100 @@ function renderRoles() {
 
 let _editingRole = null;
 
+/** Apply or remove scrollable layout on the role modal based on the config flag.
+ *  When enabled: modal-dialog becomes scrollable and only the tab-content area
+ *  scrolls; the name/label row, tabs nav, and footer remain always visible. */
+function _applyRoleModalScrollable() {
+    const enabled = (_serverConfigData?.web_admin?.role_modal_scrollable) !== false;
+    const dlg  = document.getElementById('roleModalDialog');
+    const body = document.getElementById('roleModalBody');
+    const tc   = document.getElementById('roleModalTabContent');
+    if (!dlg || !body || !tc) return;
+    if (enabled) {
+        dlg.classList.add('modal-dialog-scrollable');
+        body.style.cssText = 'display:flex;flex-direction:column;overflow:hidden';
+        tc.style.cssText   = 'flex:1 1 auto;overflow-y:auto;overflow-x:hidden;min-height:0';
+    } else {
+        dlg.classList.remove('modal-dialog-scrollable');
+        body.style.cssText = '';
+        tc.style.cssText   = '';
+    }
+}
+
+/** Build the per-module permissions table inside #rmModulePermsGrid.
+ *  For built-in roles (disabled=true) the checked state is derived from global
+ *  module permissions so the table reflects effective access.
+ *  For custom roles (disabled=false) only explicit module.{n}.{a} keys are shown. */
+function _buildModulePermsGrid(activePerms, disabled) {
+    const section = document.getElementById('rmModulePermsSection');
+    const grid    = document.getElementById('rmModulePermsGrid');
+    if (!grid) return;
+    const mods = Object.keys(modulesData).sort();
+    if (!mods.length) { if (section) section.style.display = 'none'; return; }
+    if (section) section.style.display = '';
+    const actions = ['view', 'add', 'edit', 'delete'];
+    const _globalFor = { view: 'modules_view', add: 'modules_edit', edit: 'modules_edit', delete: 'modules_edit' };
+    const hdrs = actions.map(a => `<th class="text-center" style="width:62px">${esc(t('module_perm_' + a) || a)}</th>`).join('');
+    let h = `<table class="table table-sm table-bordered align-middle mb-0" style="font-size:.82rem;table-layout:fixed;width:100%">
+    <thead style="background:var(--bs-tertiary-bg)"><tr>
+        <th>${esc(t('col_module') || 'Module')}</th>${hdrs}
+    </tr></thead><tbody>`;
+    for (const name of mods) {
+        const cfg     = modulesData[name] || {};
+        const pname   = modulePrettyName(name, cfg);
+        const modSch  = ITEM_SCHEMAS[name + '|__module__'] || null;
+        const modI18n = ITEM_SCHEMAS[name + '|__i18n__'];
+        const modLd   = modI18n && (modI18n[CURRENT_LANG] || modI18n[SYSTEM_DEFAULT_LANG]);
+        const desc    = (modLd && modLd.module_description) || cfg.description || (modSch && modSch.description) || '';
+        const descHtml = desc
+            ? `<div style="display:flex;align-items:baseline;gap:3px;font-size:.7rem;color:var(--bs-secondary-color,#6c757d);line-height:1.2">
+                  <span id="rmDesc_${name}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0">${esc(desc)}</span>` +
+              (desc.length > 70
+                  ? `<button type="button" class="btn btn-link p-0 lh-1 flex-shrink-0" style="font-size:.65rem;color:inherit;opacity:.5"
+                             onclick="_toggleModDesc('rmDesc_${name}', this)">...</button>`
+                  : '') +
+              `</div>`
+            : '';
+        h += `<tr class="rm-mod-row"
+                data-mod-name="${escAttr(name)}"
+                data-mod-label="${escAttr(pname)}"
+                data-mod-desc="${escAttr(desc)}">
+            <td style="overflow:hidden">${esc(pname)}${descHtml}</td>`;
+        for (const action of actions) {
+            const key = `module.${name}.${action}`;
+            const checked = disabled
+                ? (activePerms.has(_globalFor[action]) || activePerms.has(key))
+                : activePerms.has(key);
+            h += `<td class="text-center"><input type="checkbox" class="form-check-input" value="${escAttr(key)}"
+                ${checked ? 'checked' : ''}${disabled ? ' disabled' : ''}></td>`;
+        }
+        h += '</tr>';
+    }
+    h += '</tbody></table>';
+    grid.innerHTML = h;
+}
+
+function _toggleModDesc(id, btn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const collapsed = el.style.whiteSpace === 'nowrap';
+    el.style.whiteSpace   = collapsed ? 'normal'  : 'nowrap';
+    el.style.overflow     = collapsed ? 'visible' : 'hidden';
+    el.style.textOverflow = collapsed ? 'clip'    : 'ellipsis';
+    btn.textContent       = collapsed ? '↑' : '...';
+}
+
 function openNewRoleModal() {
     _editingRole = null;
     document.getElementById('roleModalTitle').textContent = t('new_role');
     document.getElementById('rmName').value = '';
     document.getElementById('rmName').disabled = false;
     document.getElementById('rmLabel').value = '';
-    document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]').forEach(cb => {
-        cb.checked = false;
-        cb.disabled = false;
-    });
+    _buildPermsAccordion(new Set(), false);
+    _buildModulePermsGrid(new Set(), false);
     _populateRoleUsersGrid(null, []);
     _populateRoleGroupsGrid(null, []);
+    _applyRoleModalScrollable();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
 }
 
@@ -160,10 +404,8 @@ function openEditRoleModal(name) {
     document.getElementById('rmName').disabled = true;
     document.getElementById('rmLabel').value = rd.label || '';
     const activePerms = new Set(rd.permissions || []);
-    document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]').forEach(cb => {
-        cb.checked = activePerms.has(cb.value);
-        cb.disabled = isBuiltin;
-    });
+    _buildPermsAccordion(activePerms, isBuiltin);
+    _buildModulePermsGrid(activePerms, isBuiltin);
     // Reset search inputs and their bound flag so they rebind cleanly
     ['rmUserSearch', 'rmGroupSearch'].forEach(id => {
         const el = document.getElementById(id);
@@ -174,13 +416,16 @@ function openEditRoleModal(name) {
     // Built-ins: go straight to Assignments; custom: go to Permissions
     const targetTab = isBuiltin ? '#rmTabAssign' : '#rmTabPerms';
     bootstrap.Tab.getOrCreateInstance(document.querySelector(`[data-bs-target="${targetTab}"]`)).show();
+    _applyRoleModalScrollable();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
 }
 
 async function saveRoleModal() {
     const name = document.getElementById('rmName').value.trim();
     const label = document.getElementById('rmLabel').value.trim();
-    const permissions = Array.from(document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]:checked')).map(cb => cb.value);
+    const permissions = Array.from(
+        document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]:checked')
+    ).map(cb => cb.value);
     const selectedUsers = new Set(Array.from(document.querySelectorAll('#rmUsersGrid input[type=checkbox]:checked')).map(cb => cb.value));
     const selectedGroups = new Set(Array.from(document.querySelectorAll('#rmGroupsGrid input[type=checkbox]:checked')).map(cb => cb.value));
     if (!name) { showToast(t('role_name_required'), 'warning'); return; }

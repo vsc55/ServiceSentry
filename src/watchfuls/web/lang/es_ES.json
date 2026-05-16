@@ -1,5 +1,6 @@
 {
     "pretty_name": "Sitios Web",
+    "module_description": "Monitoriza la disponibilidad de URLs web y los códigos de respuesta HTTP esperados. Genera alertas cuando una URL es inaccesible o devuelve un código de estado inesperado.",
     "labels": {
         "enabled":    "Habilitado",
         "scheme":     "Protocolo",

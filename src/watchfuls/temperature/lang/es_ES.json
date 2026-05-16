@@ -1,5 +1,6 @@
 {
     "pretty_name": "Temperatura CPU",
+    "module_description": "Monitoriza la temperatura de la CPU y sensores de hardware vía psutil. Genera alertas cuando la lectura de algún sensor supera el umbral configurado.",
     "labels": {
         "enabled": "Habilitado",
         "label":   "Etiqueta",

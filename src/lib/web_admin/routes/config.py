@@ -8,6 +8,7 @@ from flask import jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from ..constants import SUPPORTED_LANGS
+from lib import secret_manager
 
 # Public schema for validated integer config fields.
 # Any route or module can import this to validate or inspect config constraints.
@@ -45,7 +46,7 @@ def register(app, wa):
     @config_view_req
     def api_get_config():
         """Return the contents of ``config.json``."""
-        return jsonify(wa._read_config_file(wa._CONFIG_FILE))
+        return jsonify(secret_manager.mask_sensitive(wa._read_config_file(wa._CONFIG_FILE)))
 
     @app.route('/api/config/schema', methods=['GET'])
     @config_view_req
@@ -73,6 +74,7 @@ def register(app, wa):
             'default': '',
         }
         schema['telegram|chat_id'] = {'numericString': True}
+        schema['web_admin|role_modal_scrollable'] = {'type': 'bool', 'default': True}
         return jsonify(schema)
 
     @app.route('/api/config', methods=['PUT'])
@@ -113,6 +115,7 @@ def register(app, wa):
                     isinstance(px, int) and not isinstance(px, bool) and
                     px < pm):
                 return jsonify({'error': wa._t('pw_max_less_than_min')}), 400
+        secret_manager.restore_sensitive(data, old_data)
         if wa._save_config_file(wa._CONFIG_FILE, data):
             # Apply web_admin.lang at runtime if changed
             new_lang = (data.get('web_admin') or {}).get('lang', '')

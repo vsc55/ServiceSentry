@@ -56,7 +56,9 @@ function openAccountSettingsModal() {
     document.getElementById('settingsLang').value = currentUser.pref_lang || '';
     document.getElementById('settingsPwCurrent').value = '';
     document.getElementById('settingsPwNew').value     = '';
-    document.getElementById('settingsPwConfirm').value = '';
+    const spConf = document.getElementById('settingsPwConfirm');
+    spConf.value = '';
+    spConf.classList.remove('is-valid', 'is-invalid');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('accountSettingsModal')).show();
 }
 

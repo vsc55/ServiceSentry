@@ -1,5 +1,6 @@
 {
     "pretty_name": "NTP Monitor",
+    "module_description": "Monitors NTP server time synchronization. Alerts when the time offset between the system clock and the NTP server exceeds the configured threshold.",
     "labels": {
         "enabled":    "Enabled",
         "threads":    "Threads",

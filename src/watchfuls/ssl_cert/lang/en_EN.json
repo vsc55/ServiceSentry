@@ -1,5 +1,6 @@
 {
     "pretty_name": "SSL Certificate",
+    "module_description": "Monitors SSL/TLS certificate expiry for configured hostnames. Alerts when a certificate is due to expire within the configured warning period.",
     "labels": {
         "enabled":      "Enabled",
         "threads":      "Threads",

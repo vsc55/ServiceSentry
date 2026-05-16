@@ -1,5 +1,6 @@
 {
     "pretty_name": "Uso de disco",
+    "module_description": "Monitoriza el uso de espacio en disco en las particiones configuradas y genera alertas cuando supera el umbral porcentual configurado.",
     "labels": {
         "enabled":   "Habilitado",
         "threads":   "Hilos",

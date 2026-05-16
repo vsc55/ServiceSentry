@@ -1,5 +1,6 @@
 {
     "pretty_name": "Temperatura HDD",
+    "module_description": "Monitoriza la temperatura de discos duros a través del demonio hddtemp. Genera alertas cuando algún disco de un host monitorizado supera el umbral de temperatura configurado.",
     "labels": {
         "enabled": "Habilitado",
         "threads": "Hilos",

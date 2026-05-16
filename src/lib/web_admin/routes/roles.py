@@ -4,7 +4,7 @@
 
 from flask import jsonify
 
-from ..constants import BUILTIN_ROLE_PERMISSIONS, PERMISSIONS, ROLES
+from ..constants import BUILTIN_ROLE_PERMISSIONS, PERMISSIONS, ROLES, is_module_perm
 
 
 def register(app, wa):
@@ -44,7 +44,7 @@ def register(app, wa):
             return err
         name = data.get('name', '').strip().lower().replace(' ', '_')
         label = data.get('label', '').strip() or name
-        perms = [p for p in data.get('permissions', []) if p in PERMISSIONS]
+        perms = [p for p in data.get('permissions', []) if p in PERMISSIONS or is_module_perm(p)]
         if not name:
             return jsonify({'error': wa._t('role_name_required')}), 400
         if name == '__builtin_labels__':
@@ -93,7 +93,7 @@ def register(app, wa):
                     changes.append({'field': 'label', 'old': old_label, 'new': new_label})
                 role['label'] = new_label
             if 'permissions' in data:
-                new_perms = sorted(p for p in data['permissions'] if p in PERMISSIONS)
+                new_perms = sorted(p for p in data['permissions'] if p in PERMISSIONS or is_module_perm(p))
                 old_perms = sorted(role.get('permissions', []))
                 if old_perms != new_perms:
                     changes.append({'field': 'permissions', 'old': old_perms, 'new': new_perms})

@@ -539,11 +539,12 @@ async function renderOverview() {
     const isAdmin = currentUser.role === 'admin';
     const layout  = _dwLoad();
 
-    const ctrlBtns = `
+    const _canEditLayout = perms.has('overview_edit');
+    const ctrlBtns = _canEditLayout ? `
         <button class="btn btn-sm btn-outline-secondary ms-auto" id="dwEditBtn" onclick="_dwToggleEdit()">
             <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
         <button class="btn btn-sm btn-outline-secondary" onclick="_dwReset()" title="${t('dashboard_reset')}">
-            <i class="bi bi-arrow-counterclockwise"></i></button>`;
+            <i class="bi bi-arrow-counterclockwise"></i></button>` : '';
 
     let h = _renderRefreshBar('overview-container', 'renderOverview',
         () => _overviewTimer, 'setOverviewAutoRefresh', ctrlBtns);

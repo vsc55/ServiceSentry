@@ -1,5 +1,6 @@
 {
     "pretty_name": "Services",
+    "module_description": "Monitors system service state (running or stopped). Supports auto-remediation to automatically start or stop services to restore the expected state.",
     "labels": {
         "enabled":     "Enabled",
         "threads":     "Threads",

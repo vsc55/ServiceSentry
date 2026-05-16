@@ -2,13 +2,23 @@
 # -*- coding: utf-8 -*-
 """Module-level constants for the web administration server."""
 
+import re
+
 from .i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS
 
 __all__ = [
     'DEFAULT_LANG', 'SUPPORTED_LANGS', 'TRANSLATIONS',
     'ROLES', 'PERMISSIONS', 'PERMISSION_GROUPS',
     '_BUILTIN_GROUPS', 'BUILTIN_ROLE_PERMISSIONS',
+    'is_module_perm',
 ]
+
+_MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
+
+
+def is_module_perm(p: str) -> bool:
+    """Return True if *p* is a valid per-module permission key (module.{name}.{action})."""
+    return bool(_MODULE_PERM_RE.match(p))
 
 # Valid user roles ordered by privilege (highest first).
 ROLES = ('admin', 'editor', 'viewer')
@@ -31,9 +41,12 @@ PERMISSIONS = (
     'audit_delete',    # delete audit entries
     'modules_view',    # view modules list
     'modules_add',     # create new module entries
-    'modules_edit',    # write modules.json
+    'modules_edit',    # edit module settings and items
+    'modules_delete',  # delete items from modules / remove whole modules
     'config_view',     # read config.json (without editing)
     'config_edit',     # write config.json
+    'overview_view',   # view the overview dashboard
+    'overview_edit',   # customise the overview dashboard layout
     'sessions_view',   # view active sessions
     'sessions_revoke', # revoke sessions
     'checks_view',     # view check results / status tab
@@ -46,8 +59,9 @@ PERMISSION_GROUPS = [
     ('perm_group_roles',    ['roles_view', 'roles_add', 'roles_edit', 'roles_delete']),
     ('perm_group_groups',   ['groups_view', 'groups_add', 'groups_edit', 'groups_delete']),
     ('perm_group_audit',    ['audit_view', 'audit_delete']),
-    ('perm_group_modules',  ['modules_view', 'modules_add', 'modules_edit']),
+    ('perm_group_modules',  ['modules_view', 'modules_add', 'modules_edit', 'modules_delete']),
     ('perm_group_config',   ['config_view', 'config_edit']),
+    ('perm_group_overview', ['overview_view', 'overview_edit']),
     ('perm_group_sessions', ['sessions_view', 'sessions_revoke']),
     ('perm_group_checks',   ['checks_view', 'checks_run']),
 ]
@@ -59,14 +73,14 @@ _BUILTIN_GROUPS: frozenset[str] = frozenset({'administrators'})
 BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
     'admin':  frozenset(PERMISSIONS),
     'editor': frozenset({
-        'modules_view', 'modules_add', 'modules_edit',
-        'config_edit', 'checks_view', 'checks_run', 'audit_view',
+        'modules_view', 'modules_edit',
+        'config_edit', 'overview_view', 'overview_edit', 'checks_view', 'checks_run', 'audit_view',
         'users_view', 'users_edit',
         'roles_view', 'roles_edit',
         'groups_view', 'groups_edit',
     }),
     'viewer': frozenset({
         'users_view', 'roles_view', 'groups_view',
-        'audit_view', 'sessions_view', 'modules_view', 'checks_view',
+        'audit_view', 'sessions_view', 'modules_view', 'checks_view', 'overview_view',
     }),
 }

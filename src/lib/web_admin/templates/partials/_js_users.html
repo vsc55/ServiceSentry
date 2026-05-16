@@ -192,12 +192,21 @@ async function deleteUser(username) {
 
 let _resetPasswordUser = null;
 
+function _checkPwMatch(newId, confId) {
+    const conf = document.getElementById(confId);
+    conf.classList.remove('is-valid', 'is-invalid');
+    if (!conf.value) return;
+    conf.classList.add(document.getElementById(newId).value === conf.value ? 'is-valid' : 'is-invalid');
+}
+
 function openResetPasswordModal(username) {
     _resetPasswordUser = username;
     document.getElementById('resetPasswordTitle').innerHTML =
         '<i class="bi bi-key me-1"></i>' + tf('reset_password_for', esc(username));
     document.getElementById('rpNewPassword').value = '';
-    document.getElementById('rpConfirmPassword').value = '';
+    const rpConf = document.getElementById('rpConfirmPassword');
+    rpConf.value = '';
+    rpConf.classList.remove('is-valid', 'is-invalid');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('resetPasswordModal')).show();
 }
 

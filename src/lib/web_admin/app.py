@@ -136,6 +136,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._load_audit()
         self._load_roles()
         self._load_groups()
+        self._apply_saved_config()
         self._app = self._create_app()
 
     # ------------------------------------------------------------------
@@ -256,6 +257,53 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _apply_saved_config(self) -> None:
+        """Read config.json and apply persisted settings to runtime attributes.
+
+        Called once at startup so that policy/preference changes saved from
+        a previous session take effect without requiring a manual re-save.
+        ``_create_app`` is intentionally called *after* this method so that
+        Flask-level settings (session lifetime, secure cookies, proxy count)
+        are already correct when the app is built.
+        """
+        from .routes.config import INT_RULES, BOOL_RULES  # local import avoids circular
+        data = self._read_config_file(self._CONFIG_FILE)
+        if not data:
+            return
+        wa_cfg = data.get('web_admin') or {}
+        # Integer rules (values in config.json are already in valid range)
+        for path, rule in INT_RULES.items():
+            section, field = path.split('|')
+            v = (data.get(section) or {}).get(field)
+            if isinstance(v, int) and not isinstance(v, bool):
+                setattr(self, rule['attr'], v)
+        # Boolean rules
+        for path, attr in BOOL_RULES.items():
+            section, field = path.split('|')
+            v = (data.get(section) or {}).get(field)
+            if isinstance(v, bool):
+                setattr(self, attr, v)
+        # Ensure pw_max_len >= pw_min_len after both are applied
+        if self._PW_MAX_LEN < self._PW_MIN_LEN:
+            self._PW_MAX_LEN = self._PW_MIN_LEN
+        # Language
+        new_lang = wa_cfg.get('lang', '')
+        if new_lang and new_lang in SUPPORTED_LANGS:
+            self._default_lang = new_lang
+        # Status-page language (empty string = use default)
+        if 'status_lang' in wa_cfg:
+            new_status_lang = wa_cfg['status_lang']
+            if isinstance(new_status_lang, str):
+                self._STATUS_LANG = new_status_lang if new_status_lang in SUPPORTED_LANGS else ''
+        # Dark mode default
+        new_dm = wa_cfg.get('dark_mode')
+        if isinstance(new_dm, bool):
+            self._default_dark_mode = new_dm
+        # Secure cookies (_create_app reads self._secure_cookies directly)
+        new_sec = wa_cfg.get('secure_cookies')
+        if isinstance(new_sec, bool):
+            self._secure_cookies = new_sec
 
     def _create_app(self) -> Flask:
         """Create and configure the Flask application."""

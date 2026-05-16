@@ -1,5 +1,6 @@
 {
     "pretty_name": "RAM y Swap",
+    "module_description": "Monitoriza el uso de memoria RAM y SWAP. Genera alertas cuando el uso supera los umbrales de porcentaje configurados.",
     "labels": {
         "enabled":    "Habilitado",
         "alert_ram":  "Alerta RAM (%)",

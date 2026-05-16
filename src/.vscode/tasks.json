@@ -10,6 +10,21 @@
       "problemMatcher": []
     },
     {
+      "label": "🔄 Watch & Restart Web",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python",
+      "args": ["${workspaceFolder}/dev_watch.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "echo": false
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
       "label": "flake8 full",
       "type": "shell",
       "command": ".venv/Scripts/python.exe",

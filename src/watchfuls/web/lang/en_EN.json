@@ -1,5 +1,6 @@
 {
     "pretty_name": "Websites",
+    "module_description": "Monitors web URL availability and expected HTTP response codes. Alerts when a URL is unreachable or returns an unexpected status code.",
     "labels": {
         "enabled":    "Enabled",
         "scheme":     "Scheme",

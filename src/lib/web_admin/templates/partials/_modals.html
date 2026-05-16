@@ -97,11 +97,15 @@
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
-                    <input type="password" class="form-control form-control-sm" id="settingsPwNew" autocomplete="new-password">
+                    <input type="password" class="form-control form-control-sm" id="settingsPwNew" autocomplete="new-password"
+                        oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm')">
                 </div>
                 <div class="mb-1">
                     <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
-                    <input type="password" class="form-control form-control-sm" id="settingsPwConfirm" autocomplete="new-password">
+                    <input type="password" class="form-control form-control-sm" id="settingsPwConfirm" autocomplete="new-password"
+                        oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm')">
+                    <div class="valid-feedback">{{ i18n.passwords_match }}</div>
+                    <div class="invalid-feedback">{{ i18n.passwords_dont_match }}</div>
                 </div>
                 <div class="form-text mb-1">{{ i18n.leave_empty_no_change }}</div>
             </div>
@@ -165,11 +169,15 @@
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
                     <input type="password" class="form-control form-control-sm" id="rpNewPassword"
-                        autocomplete="new-password">
+                        autocomplete="new-password"
+                        oninput="_checkPwMatch('rpNewPassword','rpConfirmPassword')">
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
-                    <input type="password" class="form-control form-control-sm" id="rpConfirmPassword">
+                    <input type="password" class="form-control form-control-sm" id="rpConfirmPassword"
+                        oninput="_checkPwMatch('rpNewPassword','rpConfirmPassword')">
+                    <div class="valid-feedback">{{ i18n.passwords_match }}</div>
+                    <div class="invalid-feedback">{{ i18n.passwords_dont_match }}</div>
                 </div>
             </div>
             <div class="modal-footer py-1">
@@ -287,6 +295,29 @@
     </div>
 </div>
 
+{# Unsaved changes modal — 3 buttons: Cancel / Discard / Save #}
+<div class="modal fade" id="unsavedChangesModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title">
+                    <i class="bi bi-exclamation-triangle me-1 text-warning"></i>{{ i18n.unsaved_changes }}
+                </h6>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0" id="unsavedChangesMsg"></p>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" id="btnUnsavedCancel">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-outline-danger" id="btnUnsavedDiscard">{{ i18n.discard_changes }}</button>
+                <button class="btn btn-sm btn-primary" id="btnUnsavedSave">
+                    <i class="bi bi-save me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# New/Edit group modal #}
 <div class="modal fade" id="groupModal" tabindex="-1"
      onkeydown="if(event.key==='Enter'&&event.target.type!=='search'){event.preventDefault();document.getElementById('btnGroupModalOk').click();}">
@@ -342,14 +373,14 @@
 {# New/Edit role modal #}
 <div class="modal fade" id="roleModal" tabindex="-1"
      onkeydown="if(event.key==='Enter'&&event.target.type!=='search'){event.preventDefault();document.getElementById('btnRoleModalOk').click();}">
-    <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-dialog modal-dialog-centered modal-xl" id="roleModalDialog">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="roleModalTitle">{{ i18n.new_role }}</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
-                <div class="row g-3 mb-3">
+            <div class="modal-body" id="roleModalBody">
+                <div class="row g-3 mb-3 flex-shrink-0">
                     <div class="col-sm-5">
                         <label class="form-label small fw-semibold">{{ i18n.role_name }}</label>
                         <input type="text" class="form-control form-control-sm" id="rmName" autocomplete="off"
@@ -362,7 +393,7 @@
                     </div>
                 </div>
                 {# Sub-tabs #}
-                <ul class="nav nav-tabs mb-3" id="roleModalTabs">
+                <ul class="nav nav-tabs mb-3 flex-shrink-0" id="roleModalTabs">
                     <li class="nav-item">
                         <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#rmTabPerms" type="button">
                             <i class="bi bi-shield-check me-1"></i>{{ i18n.role_tab_permissions }}
@@ -374,26 +405,10 @@
                         </button>
                     </li>
                 </ul>
-                <div class="tab-content">
-                    {# Permissions tab #}
+                <div class="tab-content" id="roleModalTabContent">
+                    {# Permissions tab — accordion built dynamically by _buildPermsAccordion() in _js_roles.html #}
                     <div class="tab-pane fade show active" id="rmTabPerms">
-                        <div id="rolePermissionsGrid">
-                            {% for group_key, perms in permissions_groups %}
-                            <p class="small fw-semibold text-muted mb-1 mt-2">{{ i18n.get(group_key, group_key) }}</p>
-                            <div class="row g-1 mb-1">
-                                {% for perm in perms %}
-                                <div class="col-sm-6">
-                                    <div class="form-check form-switch mb-0">
-                                        <input class="form-check-input" type="checkbox" id="rm_{{ perm }}" value="{{ perm }}">
-                                        <label class="form-check-label small" for="rm_{{ perm }}">
-                                            {{ i18n.get('permission_labels', {}).get(perm, perm) }}
-                                        </label>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                            </div>
-                            {% endfor %}
-                        </div>
+                        <div id="rolePermissionsGrid"></div>
                     </div>
                     {# Assignments tab #}
                     <div class="tab-pane fade" id="rmTabAssign">

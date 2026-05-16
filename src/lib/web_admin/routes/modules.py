@@ -6,33 +6,75 @@ import os
 
 from flask import jsonify
 
+from lib import secret_manager
+
 from lib.config import ConfigControl
 from ..constants import BUILTIN_ROLE_PERMISSIONS
 
 
 def register(app, wa):
     login_required = wa._login_required
-    modules_view_req = wa._perm_required('modules_view')
-    modules_edit_req = wa._perm_required('modules_edit')
 
     # --- API: modules.json ----------------------------------------
 
     @app.route('/api/modules', methods=['GET'])
-    @modules_view_req
+    @login_required
     def api_get_modules():
-        """Return the contents of ``modules.json``."""
-        return jsonify(wa._read_config_file(wa._MODULES_FILE))
+        """Return modules the current user may view.
+
+        Users with ``modules_view`` receive the full dataset.
+        Users without it receive only modules for which they hold a
+        ``module.{name}.view`` per-module permission.  Returns 403 when
+        no modules are accessible at all.
+        """
+        perms = wa._get_session_permissions()
+        all_data = wa._read_config_file(wa._MODULES_FILE)
+        if 'modules_view' in perms:
+            return jsonify(secret_manager.mask_sensitive(all_data))
+        visible = {n: c for n, c in all_data.items() if f'module.{n}.view' in perms}
+        if not visible:
+            return jsonify({'error': wa._t('access_denied')}), 403
+        return jsonify(secret_manager.mask_sensitive(visible))
 
     @app.route('/api/modules', methods=['PUT'])
-    @modules_edit_req
+    @login_required
     def api_save_modules():
-        """Overwrite ``modules.json`` with the request body."""
+        """Overwrite ``modules.json`` with the request body.
+
+        Users with ``modules_edit`` may save any change.  Without it, each
+        modified module is checked for a ``module.{name}.edit`` permission;
+        adding whole new modules still requires the global ``modules_add``.
+        """
+        perms = wa._get_session_permissions()
+        has_global_edit = 'modules_edit' in perms
+        # Reject immediately when the user has no write permission of any kind.
+        has_any_write = (
+            'modules_edit' in perms or 'modules_add' in perms or 'modules_delete' in perms or
+            any(p.startswith('module.') and (p.endswith('.edit') or p.endswith('.add') or p.endswith('.delete'))
+                for p in perms)
+        )
+        if not has_any_write:
+            return jsonify({'error': wa._t('access_denied')}), 403
         data, err = wa._require_json()
         if err:
             return err
         if not all(isinstance(v, dict) for v in data.values()):
             return jsonify({'error': wa._t('invalid_modules_data')}), 400
         old_data = wa._read_config_file(wa._MODULES_FILE)
+        if not has_global_edit:
+            for name in set(old_data) | set(data):
+                in_old, in_new = name in old_data, name in data
+                if in_old and in_new:
+                    if old_data[name] != data[name] and f'module.{name}.edit' not in perms:
+                        return jsonify({'error': wa._t('access_denied')}), 403
+                elif in_new and not in_old:
+                    if 'modules_add' not in perms:
+                        return jsonify({'error': wa._t('access_denied')}), 403
+                else:
+                    # whole-module removal requires global edit or delete
+                    if 'modules_delete' not in perms:
+                        return jsonify({'error': wa._t('access_denied')}), 403
+        secret_manager.restore_sensitive(data, old_data)
         if wa._save_config_file(wa._MODULES_FILE, data):
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._SENSITIVE_FIELDS,

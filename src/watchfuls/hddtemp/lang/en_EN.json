@@ -1,5 +1,6 @@
 {
     "pretty_name": "HDD Temperature",
+    "module_description": "Monitors hard disk temperatures via the hddtemp daemon. Alerts when any disk on a monitored host exceeds the configured temperature threshold.",
     "labels": {
         "enabled": "Enabled",
         "threads": "Threads",

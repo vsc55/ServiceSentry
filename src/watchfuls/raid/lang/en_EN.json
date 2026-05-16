@@ -1,5 +1,6 @@
 {
     "pretty_name": "RAID",
+    "module_description": "Monitors RAID array health via /proc/mdstat locally or over SSH on remote servers. Alerts on degraded or failed arrays.",
     "labels": {
         "enabled":  "Enabled",
         "local":    "Local monitor",

@@ -3,7 +3,17 @@
    ================================================================ #}
 
 // ──────────────────────────── Actions ─────────────────────────────
+/** Disable all interactive elements in *container* except buttons marked
+ *  with data-test-btn (test / action buttons that must remain usable). */
+function _applyReadonly(container) {
+    container.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = true; });
+    container.querySelectorAll('button:not([data-test-btn])').forEach(el => { el.disabled = true; });
+}
+
 function markDirty(target) {
+    const saved   = target === 'modules' ? _savedModulesData : _serverConfigData;
+    const current = target === 'modules' ? modulesData       : configData;
+    if (JSON.stringify(current) === JSON.stringify(saved)) { clearDirty(target); return; }
     const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
     document.getElementById(id)?.classList.remove('d-none');
     if (target === 'modules') document.getElementById('btnUndoModules')?.classList.remove('d-none');
@@ -12,6 +22,69 @@ function clearDirty(target) {
     const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
     document.getElementById(id)?.classList.add('d-none');
     if (target === 'modules') document.getElementById('btnUndoModules')?.classList.add('d-none');
+}
+function _isDirty(target) {
+    const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
+    return !document.getElementById(id)?.classList.contains('d-none');
+}
+
+/** Show the 3-button unsaved-changes modal (Cancel / Discard / Save).
+ *  After Discard or Save the tab switch to *nextTabBtn* is performed. */
+function showUnsavedChangesModal(dirtyTarget, nextTabBtn) {
+    document.getElementById('unsavedChangesMsg').textContent = t('unsaved_changes_leave');
+    const modal = bootstrap.Modal.getOrCreateInstance(
+        document.getElementById('unsavedChangesModal'));
+
+    function _dismiss() { modal.hide(); }
+    function _go()      { bootstrap.Tab.getOrCreateInstance(nextTabBtn).show(); }
+
+    const btnCancel  = document.getElementById('btnUnsavedCancel');
+    const btnDiscard = document.getElementById('btnUnsavedDiscard');
+    const btnSave    = document.getElementById('btnUnsavedSave');
+
+    // Clone nodes to remove any previous listeners
+    const newCancel  = btnCancel.cloneNode(true);
+    const newDiscard = btnDiscard.cloneNode(true);
+    const newSave    = btnSave.cloneNode(true);
+    btnCancel.replaceWith(newCancel);
+    btnDiscard.replaceWith(newDiscard);
+    btnSave.replaceWith(newSave);
+
+    newCancel.addEventListener('click', () => _dismiss());
+    newDiscard.addEventListener('click', () => {
+        if (dirtyTarget === 'modules') {
+            modulesData = deepClone(_savedModulesData);
+            clearDirty('modules');
+            renderModules();
+        } else {
+            configData = deepClone(_serverConfigData);
+            clearDirty('config');
+            renderConfig();
+        }
+        _dismiss();
+        showToast(t('changes_discarded'));
+        _go();
+    });
+    newSave.addEventListener('click', async () => {
+        if (dirtyTarget === 'modules') await saveModules();
+        else                           await saveConfig();
+        _dismiss();
+        if (!_isDirty(dirtyTarget)) _go(); // only navigate if save succeeded
+    });
+
+    // Keyboard shortcuts: Escape=Cancel, Enter=Save, Delete=Discard
+    function _onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); newCancel.click(); }
+        if (e.key === 'Enter')  { e.preventDefault(); newSave.click(); }
+        if (e.key === 'Delete') { e.preventDefault(); newDiscard.click(); }
+    }
+    const modalEl = document.getElementById('unsavedChangesModal');
+    modalEl.addEventListener('keydown', _onKey);
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        modalEl.removeEventListener('keydown', _onKey);
+    }, { once: true });
+
+    modal.show();
 }
 
 function updateField(target, pathStr, value) {

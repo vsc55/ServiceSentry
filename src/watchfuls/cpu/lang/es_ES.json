@@ -1,5 +1,6 @@
 {
     "pretty_name": "Uso de CPU",
+    "module_description": "Monitoriza el porcentaje de uso de CPU y genera alertas cuando supera el umbral configurado.",
     "labels": {
         "enabled":  "Habilitado",
         "alert":    "Umbral de alerta (%)",
