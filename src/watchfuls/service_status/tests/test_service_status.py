@@ -325,7 +325,7 @@ class TestServiceStatusReturnWindows:
     def test_service_running(self):
         w = self._make()
         with patch.object(w, '_PLATFORM', 'windows'), \
-             patch('psutil.win_service_get', return_value=self._mock_svc('running')):
+             patch('psutil.win_service_get', return_value=self._mock_svc('running'), create=True):
             status, error, message = w._service_return("nginx")
             assert status is True
             assert error is False
@@ -334,7 +334,7 @@ class TestServiceStatusReturnWindows:
     def test_service_stopped(self):
         w = self._make()
         with patch.object(w, '_PLATFORM', 'windows'), \
-             patch('psutil.win_service_get', return_value=self._mock_svc('stopped')):
+             patch('psutil.win_service_get', return_value=self._mock_svc('stopped'), create=True):
             status, error, message = w._service_return("nginx")
             assert status is False
             assert error is False
@@ -343,7 +343,7 @@ class TestServiceStatusReturnWindows:
     def test_service_paused(self):
         w = self._make()
         with patch.object(w, '_PLATFORM', 'windows'), \
-             patch('psutil.win_service_get', return_value=self._mock_svc('paused')):
+             patch('psutil.win_service_get', return_value=self._mock_svc('paused'), create=True):
             status, error, message = w._service_return("nginx")
             assert status is False
             assert error is False
@@ -352,7 +352,7 @@ class TestServiceStatusReturnWindows:
     def test_service_not_found(self):
         w = self._make()
         with patch.object(w, '_PLATFORM', 'windows'), \
-             patch('psutil.win_service_get', side_effect=Exception("service not found")):
+             patch('psutil.win_service_get', side_effect=Exception("service not found"), create=True):
             status, error, _ = w._service_return("fake")
             assert status is False
             assert error is True
@@ -360,7 +360,7 @@ class TestServiceStatusReturnWindows:
     def test_service_return_windows_direct(self):
         """_service_return_windows is callable directly."""
         w = self._make()
-        with patch('psutil.win_service_get', return_value=self._mock_svc('running')):
+        with patch('psutil.win_service_get', return_value=self._mock_svc('running'), create=True):
             status, _, _ = w._service_return_windows("nginx")
             assert status is True
 
@@ -607,7 +607,7 @@ class TestServiceStatusDiscover:
             ('wuauserv', 'Windows Update',   'stopped'),
         ])
         with patch.object(Watchful, '_PLATFORM', 'windows'), \
-             patch('psutil.win_service_iter', return_value=svcs):
+             patch('psutil.win_service_iter', return_value=svcs, create=True):
             services = Watchful.discover()
 
         names = [s['name'] for s in services]
@@ -623,7 +623,7 @@ class TestServiceStatusDiscover:
         from watchfuls.service_status import Watchful
         svcs = self._mock_win_services([('nginx', 'nginx web server', 'running')])
         with patch.object(Watchful, '_PLATFORM', 'windows'), \
-             patch('psutil.win_service_iter', return_value=svcs):
+             patch('psutil.win_service_iter', return_value=svcs, create=True):
             services = Watchful.discover()
         nginx = next(s for s in services if s['name'] == 'nginx')
         assert nginx['display_name'] == 'nginx web server'
@@ -631,13 +631,13 @@ class TestServiceStatusDiscover:
     def test_discover_windows_empty(self):
         from watchfuls.service_status import Watchful
         with patch.object(Watchful, '_PLATFORM', 'windows'), \
-             patch('psutil.win_service_iter', return_value=[]):
+             patch('psutil.win_service_iter', return_value=[], create=True):
             services = Watchful.discover()
         assert services == []
 
     def test_discover_windows_exception(self):
         from watchfuls.service_status import Watchful
         with patch.object(Watchful, '_PLATFORM', 'windows'), \
-             patch('psutil.win_service_iter', side_effect=Exception('access denied')):
+             patch('psutil.win_service_iter', side_effect=Exception('access denied'), create=True):
             services = Watchful.discover()
         assert services == []

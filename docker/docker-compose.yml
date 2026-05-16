@@ -54,6 +54,13 @@ services:
       # Misc
       # - VERBOSE=false
 
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -s http://localhost:${WEB_PORT:-8080}/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   # ── Background monitoring worker ────────────────────────────────────────────
   worker:
     image: servicesentry:latest
@@ -85,7 +92,8 @@ services:
       # - VERBOSE=false
 
     depends_on:
-      - web
+      web:
+        condition: service_healthy
 
 # ── Named volumes ─────────────────────────────────────────────────────────────
 # Docker manages these volumes; inspect their location with:

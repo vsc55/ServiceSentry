@@ -6,6 +6,7 @@ if [ "$(id -u)" != "0" ]; then
     exit 1
 fi
 
+# shellcheck source=/dev/null
 source check_dependencies.sh
 
 # ── Detect init system ────────────────────────────────────────────────────────

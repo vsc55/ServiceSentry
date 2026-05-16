@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
 setup() {
     MOCK_DIR="$(mktemp -d)"
+    BASH="$(command -v bash)"   # capture before any PATH manipulation
     # Extract detect_init() verbatim from install.sh so we test the real function.
     DETECT_FN="$(sed -n '/^detect_init() {/,/^}/p' "$REPO_ROOT/install.sh")"
 }
@@ -35,6 +36,7 @@ teardown() {
 
 @test "detect_init: returns 'unknown' when neither systemctl nor rc-service is found" {
     # Empty mock dir: no systemctl, no rc-service, no /sbin/openrc-run on CI.
-    result="$(PATH="$MOCK_DIR" bash -c "$DETECT_FN; detect_init")"
+    # Use absolute bash path — $MOCK_DIR-only PATH would hide bash itself.
+    result="$(PATH="$MOCK_DIR" "$BASH" -c "$DETECT_FN; detect_init")"
     [ "$result" = "unknown" ]
 }
