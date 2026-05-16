@@ -1,0 +1,13 @@
+[Unit]
+Description=ServiSesentry web admin panel
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py --web --web-host 0.0.0.0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

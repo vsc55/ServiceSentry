@@ -1,0 +1,9 @@
+#!/bin/bash
+# Mock python3 for entrypoint tests.
+# - Called with "-" (heredoc config write): consume stdin and succeed.
+# - Called with "main.py ...": echo the args so tests can assert them.
+if [ "$1" = "-" ]; then
+    cat >/dev/null
+    exit 0
+fi
+echo "exec: python3 $*"

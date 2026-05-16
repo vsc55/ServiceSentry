@@ -9,7 +9,9 @@
 ## Índice
 
 | Documento | Contenido |
-|-----------|-----------|
+| --------- | --------- |
+| [deployment.md](deployment.md) | Resumen de métodos de despliegue: install.sh, systemd y OpenRC |
+| [docker.md](docker.md) | Despliegue con Docker: variables de entorno, volúmenes, actualización y proxy inverso |
 | [architecture.md](architecture.md) | Diagrama de componentes, jerarquía de clases, estructura de directorios, flujo de ejecución, modelo de concurrencia |
 | [configuration.md](configuration.md) | config.json, monitor.json, modules.json, status.json, opciones CLI, Telegram, sistema de debug |
 | [modules.md](modules.md) | Los 15 módulos integrados: referencia de configuración, campos y flujo de cada uno |
@@ -42,7 +44,7 @@ ServiceSentry es una herramienta de monitorización para sistemas que:
 ## Módulos incluidos
 
 | Módulo | Plataforma | Descripción |
-| --- | --- | --- |
+| ------ | ---------- | ----------- |
 | `cpu` 🌐 | Linux / Win / macOS | Uso total de CPU (psutil) |
 | `datastore` 🌐 | Linux / Win / macOS | Conectividad a bases de datos (MySQL, PostgreSQL, MSSQL, MongoDB, Redis, InfluxDB, Elasticsearch) |
 | `dns` 🌐 | Linux / Win / macOS | Resolución DNS con validación de IP esperada |

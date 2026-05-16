@@ -1,0 +1,171 @@
+name: Install tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - "update.sh"
+      - "uninstall.sh"
+      - "check_dependencies.sh"
+      - "init/**"
+      - "src/**"
+      - "data/**"
+      - ".github/workflows/install-tests.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - "update.sh"
+      - "uninstall.sh"
+      - "check_dependencies.sh"
+      - "init/**"
+      - "src/**"
+      - "data/**"
+      - ".github/workflows/install-tests.yml"
+
+jobs:
+  install:
+    name: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            image: ubuntu:24.04
+            init: systemd
+          - os: debian-13
+            image: debian:trixie
+            init: systemd
+          - os: gentoo
+            image: gentoo/stage3
+            init: openrc
+
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python 3 is pre-installed on Gentoo (required by Portage).
+      # On Debian/Ubuntu images it must be installed explicitly.
+      - name: Install Python 3 (Debian / Ubuntu)
+        if: matrix.init == 'systemd'
+        run: apt-get update -qq && apt-get install -y --no-install-recommends python3
+
+      # Service management commands do not work inside a Docker container.
+      # We replace them with no-op mocks so install / update / uninstall can
+      # run to completion while we verify only the file-system operations.
+      - name: Set up mock init-system commands
+        run: |
+          mkdir -p /usr/local/bin
+
+          if [ "${{ matrix.init }}" = "systemd" ]; then
+            # Place mock before /usr/bin so it shadows the real systemctl.
+            cat > /usr/local/bin/systemctl <<'EOF'
+          #!/bin/sh
+          echo "mock systemctl: $*" >&2
+          exit 0
+          EOF
+            chmod +x /usr/local/bin/systemctl
+
+          else
+            # Gentoo / OpenRC: rc-service and rc-update.
+            for cmd in rc-service rc-update; do
+              printf '#!/bin/sh\necho "mock %s: $*" >&2\nexit 0\n' "$cmd" \
+                > "/usr/local/bin/$cmd"
+              chmod +x "/usr/local/bin/$cmd"
+            done
+          fi
+
+      # ── install ──────────────────────────────────────────────────────────────
+
+      - name: Run install.sh
+        run: bash install.sh
+
+      - name: Verify installation
+        run: |
+          fail() { echo "FAIL: $1"; exit 1; }
+
+          test -f /opt/ServiSesentry/main.py      || fail "main.py not installed"
+          test -f /etc/ServiSesentry/config.json  || fail "config.json not installed"
+          test -f /etc/ServiSesentry/modules.json || fail "modules.json not installed"
+          test -d /var/lib/ServiSesentry          || fail "/var/lib/ServiSesentry not created"
+
+          if [ "${{ matrix.init }}" = "systemd" ]; then
+            test -f /lib/systemd/system/ServiSesentry.service     || fail "ServiSesentry.service not installed"
+            test -f /lib/systemd/system/ServiSesentry.timer       || fail "ServiSesentry.timer not installed"
+            test -f /lib/systemd/system/ServiSesentry-web.service || fail "ServiSesentry-web.service not installed"
+          else
+            test -f /etc/init.d/ServiSesentry     || fail "init.d/ServiSesentry not installed"
+            test -f /etc/init.d/ServiSesentry-web || fail "init.d/ServiSesentry-web not installed"
+            test -f /etc/conf.d/ServiSesentry     || fail "conf.d/ServiSesentry not installed"
+            test -f /etc/conf.d/ServiSesentry-web || fail "conf.d/ServiSesentry-web not installed"
+          fi
+
+          echo "OK: installation verified"
+
+      # ── update ───────────────────────────────────────────────────────────────
+
+      - name: Simulate app update (add marker to source)
+        run: echo "# ci-marker" >> src/main.py
+
+      - name: Modify config to verify it is preserved by update.sh
+        run: echo '{}' > /etc/ServiSesentry/config.json
+
+      - name: Run update.sh
+        run: bash update.sh
+
+      - name: Verify update
+        run: |
+          fail() { echo "FAIL: $1"; exit 1; }
+
+          grep -q "# ci-marker" /opt/ServiSesentry/main.py \
+            || fail "updated main.py was not deployed"
+
+          # Config files that already existed must not be overwritten.
+          grep -q '{}' /etc/ServiSesentry/config.json \
+            || fail "config.json was overwritten by update.sh"
+
+          echo "OK: update verified"
+
+      # ── partial uninstall ────────────────────────────────────────────────────
+
+      - name: Run uninstall.sh (keep config)
+        run: bash uninstall.sh
+
+      - name: Verify partial uninstall
+        run: |
+          fail() { echo "FAIL: $1"; exit 1; }
+
+          test ! -d /opt/ServiSesentry \
+            || fail "/opt/ServiSesentry was not removed"
+          test ! -d /var/lib/ServiSesentry \
+            || fail "/var/lib/ServiSesentry was not removed"
+          test -d /etc/ServiSesentry \
+            || fail "/etc/ServiSesentry was removed (should be kept without -a)"
+
+          echo "OK: partial uninstall verified"
+
+      # ── full uninstall ───────────────────────────────────────────────────────
+
+      - name: Reinstall before full uninstall test
+        run: bash install.sh
+
+      - name: Run uninstall.sh -a (remove everything including config)
+        run: bash uninstall.sh -a
+
+      - name: Verify full uninstall
+        run: |
+          fail() { echo "FAIL: $1"; exit 1; }
+
+          test ! -d /opt/ServiSesentry \
+            || fail "/opt/ServiSesentry was not removed"
+          test ! -d /etc/ServiSesentry \
+            || fail "/etc/ServiSesentry was not removed"
+          test ! -d /var/lib/ServiSesentry \
+            || fail "/var/lib/ServiSesentry was not removed"
+
+          echo "OK: full uninstall verified"

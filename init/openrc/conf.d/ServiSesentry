@@ -1,0 +1,14 @@
+# ServiSesentry monitoring daemon — OpenRC configuration
+# This file is sourced by /etc/init.d/ServiSesentry
+
+# Python interpreter
+SS_PYTHON="/usr/bin/python3"
+
+# Application path
+SS_APP="/opt/ServiSesentry/main.py"
+
+# Startup arguments
+# -d  daemon mode (run continuously)
+# -c  clear status file on start
+# -t <seconds>  override check interval from config.json (e.g. -t 120)
+SS_ARGS="-d -c"

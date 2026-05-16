@@ -1,0 +1,68 @@
+name: Init scripts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - "update.sh"
+      - "uninstall.sh"
+      - "docker/entrypoint.sh"
+      - "init/**"
+      - "tests/init/**"
+      - ".github/workflows/scripts.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - "update.sh"
+      - "uninstall.sh"
+      - "docker/entrypoint.sh"
+      - "init/**"
+      - "tests/init/**"
+      - ".github/workflows/scripts.yml"
+
+jobs:
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint shell scripts
+        run: |
+          shellcheck install.sh update.sh uninstall.sh docker/entrypoint.sh
+
+      - name: Lint OpenRC init scripts
+        run: |
+          shellcheck --shell=sh \
+            init/openrc/init.d/ServiSesentry \
+            init/openrc/init.d/ServiSesentry-web
+
+  systemd:
+    name: systemd unit files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify unit files
+        run: |
+          systemd-analyze verify init/systemd/ServiSesentry.service
+          systemd-analyze verify init/systemd/ServiSesentry-web.service
+          systemd-analyze verify init/systemd/ServiSesentry.timer
+
+  bats:
+    name: bats
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats
+        run: sudo apt-get install -y bats
+
+      - name: Make mock helpers executable
+        run: chmod +x tests/init/helpers/python3
+
+      - name: Run init script tests
+        run: bats tests/init/

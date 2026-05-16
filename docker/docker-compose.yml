@@ -1,0 +1,96 @@
+services:
+
+  # ── Web admin panel ─────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: servicesentry:latest
+    container_name: servicesentry-web
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    cap_add:
+      # The web panel runs module checks in-process when triggered manually.
+      # Ping modules require raw ICMP sockets. Remove if not using ping monitoring.
+      - NET_RAW
+    environment:
+      - SERVICE_ROLE=web
+      - TZ=UTC
+
+      # Web server
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8080
+
+      # Credentials — change these before first run
+      - WA_USERNAME=admin
+      - WA_PASSWORD=admin
+
+      # Appearance / locale
+      - WA_LANG=en_EN
+      - WA_DARK_MODE=false
+
+      # Security
+      - WA_SECURE_COOKIES=false       # set true when serving over HTTPS
+      - WA_REMEMBER_ME_DAYS=30
+      - WA_PROXY_COUNT=0              # number of reverse proxies in front
+
+      # Public status page
+      - WA_PUBLIC_STATUS=false
+      - WA_STATUS_REFRESH_SECS=60
+      - WA_STATUS_LANG=               # defaults to WA_LANG when empty
+
+      # Audit log
+      - WA_AUDIT_MAX_ENTRIES=500
+
+      # Telegram notifications
+      # - TELEGRAM_TOKEN=
+      # - TELEGRAM_CHAT_ID=
+      # - TELEGRAM_GROUP_MESSAGES=false
+
+      # Misc
+      # - VERBOSE=false
+
+  # ── Background monitoring worker ────────────────────────────────────────────
+  worker:
+    image: servicesentry:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: servicesentry-worker
+    restart: unless-stopped
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    cap_add:
+      # Required by the ping watchful module (raw ICMP sockets).
+      # Remove if not using ping monitoring.
+      - NET_RAW
+    environment:
+      - SERVICE_ROLE=worker
+      - TZ=UTC
+
+      # Monitoring interval (seconds)
+      - CHECK_INTERVAL=300
+
+      # Telegram notifications
+      # - TELEGRAM_TOKEN=
+      # - TELEGRAM_CHAT_ID=
+      # - TELEGRAM_GROUP_MESSAGES=false
+
+      # Misc
+      # - VERBOSE=false
+
+    depends_on:
+      - web
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+# Docker manages these volumes; inspect their location with:
+#   docker volume inspect docker_config
+#   docker volume inspect docker_vardata
+volumes:
+  config:
+  vardata:

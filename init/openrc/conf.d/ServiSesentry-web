@@ -1,0 +1,12 @@
+# ServiSesentry web admin panel — OpenRC configuration
+# This file is sourced by /etc/init.d/ServiSesentry-web
+
+# Python interpreter
+SS_PYTHON="/usr/bin/python3"
+
+# Application path
+SS_APP="/opt/ServiSesentry/main.py"
+
+# Address and port the web admin panel listens on
+SS_WEB_HOST="0.0.0.0"
+SS_WEB_PORT="8080"

@@ -20,7 +20,7 @@
 - **Cross-platform** — 12 of 15 modules run on Linux, Windows and macOS; services module supports systemd, OpenRC, SysV and Windows SCM.
 - **Remote execution** — SSH command execution via paramiko for RAID and other remote checks.
 - **Encrypted storage** — sensitive fields (passwords, tokens) are encrypted at rest in `modules.json`.
-- **Public status page** — optional `/status` endpoint (no login required) showing real-time health of all modules with collapsible cards and configurable auto-refresh.
+- **Public status page** — optional `/status` endpoint (no login required) with real-time health and configurable auto-refresh.
 - **Custom error pages** — branded 400/403/404/405/500 pages that inherit dark/light theme; API routes return JSON errors.
 
 ---
@@ -44,30 +44,96 @@ python3 main.py
 
 # Run as daemon (check every 5 minutes)
 python3 main.py -d -t 300
+
+# Start the web admin panel
+python3 main.py --web
 ```
 
 Edit `data/config.json` to add your Telegram bot token and chat ID before running.
 
 ---
 
+## Deployment
+
+| Method | Best for |
+| ------ | -------- |
+| [Docker](#docker) | Any server — easiest setup, no system dependencies |
+| [install.sh](#installsh) | Quick automated install, auto-detects init system |
+| [systemd](#systemd) | Debian, Ubuntu, RHEL, Arch — manual setup |
+| [OpenRC](#openrc) | Gentoo, Alpine — manual setup |
+
+See [`docs/deployment.md`](docs/deployment.md) for the full deployment reference. Docker details (all environment variables, volumes, reverse proxy) are in [`docs/docker.md`](docs/docker.md).
+
+### Docker
+
+```bash
+# Build and start (web panel + background monitoring worker)
+docker compose -f docker/docker-compose.yml up -d
+```
+
+Edit `docker/docker-compose.yml` before first run — at minimum change `WA_USERNAME` and `WA_PASSWORD`.
+The web admin panel is available at `http://your-host:8080`.
+
+### install.sh
+
+Automatically detects systemd or OpenRC and installs the appropriate init scripts.
+
+```bash
+sudo bash install.sh         # install and start monitoring
+sudo bash update.sh          # update to latest version
+sudo bash uninstall.sh       # uninstall (keep config files)
+sudo bash uninstall.sh -a    # uninstall and remove all config
+```
+
+### systemd
+
+```bash
+sudo cp init/systemd/ServiSesentry.service     /lib/systemd/system/
+sudo cp init/systemd/ServiSesentry.timer       /lib/systemd/system/
+sudo cp init/systemd/ServiSesentry-web.service /lib/systemd/system/
+sudo systemctl daemon-reload
+
+sudo systemctl enable --now ServiSesentry.timer   # monitoring (every 5 min)
+sudo systemctl enable --now ServiSesentry-web      # web admin panel (optional)
+```
+
+### OpenRC
+
+```bash
+sudo cp init/openrc/init.d/ServiSesentry     /etc/init.d/
+sudo cp init/openrc/init.d/ServiSesentry-web /etc/init.d/
+sudo cp init/openrc/conf.d/ServiSesentry     /etc/conf.d/
+sudo cp init/openrc/conf.d/ServiSesentry-web /etc/conf.d/
+sudo chmod +x /etc/init.d/ServiSesentry /etc/init.d/ServiSesentry-web
+
+sudo rc-update add ServiSesentry default && sudo rc-service ServiSesentry start
+# web admin panel (optional):
+sudo rc-update add ServiSesentry-web default && sudo rc-service ServiSesentry-web start
+```
+
+---
+
 ## CLI Options
 
 | Option | Description |
-|--------|-------------|
+| ------ | ----------- |
 | `-d`, `--daemon` | Continuous daemon mode |
 | `-t N`, `--timer N` | Seconds between checks (requires `--daemon`) |
 | `-v`, `--verbose` | Verbose / debug output |
 | `-p PATH`, `--path PATH` | Custom config directory |
 | `-c`, `--clear` | Clear saved state before running |
 | `--web` | Start the web admin interface |
-| `--web-port N` | Port to listen on (default: 8080) |
+| `--web-host HOST` | Address to bind (default: `0.0.0.0`) |
+| `--web-port N` | Port to listen on (default: `8080`) |
 
 ---
 
 ## Documentation
 
 | Document | Content |
-|----------|---------|
+| -------- | ------- |
+| [docs/deployment.md](docs/deployment.md) | Deployment overview: install.sh, systemd and OpenRC |
+| [docs/docker.md](docs/docker.md) | Docker deployment: environment variables, volumes, update and reverse proxy |
 | [docs/README.md](docs/README.md) | Documentation index |
 | [docs/architecture.md](docs/architecture.md) | Component diagram, class hierarchy, directory structure, execution flow |
 | [docs/configuration.md](docs/configuration.md) | config.json, monitor.json, modules.json, CLI options, Telegram, debug |
@@ -77,7 +143,7 @@ Edit `data/config.json` to add your Telegram bot token and chat ID before runnin
 | [docs/development.md](docs/development.md) | Setup, tests, VS Code debug, conventions, dependencies |
 | [docs/watchful_guide.md](docs/watchful_guide.md) | Step-by-step guide to create a new watchful module |
 | [docs/schema.md](docs/schema.md) | Complete `schema.json` reference: all field properties, meta-keys, language files and `discover_schemas` pipeline |
-| [docs/i18n.md](docs/i18n.md) | Internationalisation system: two-tier architecture, `discover_schemas` pipeline, adding languages |
+| [docs/i18n.md](docs/i18n.md) | Internationalisation system: two-tier architecture, `discover_schemas` pipeline, adding new languages |
 | [docs/tests.md](docs/tests.md) | Full test inventory: what each test checks, pass and fail conditions, organized by group |
 
 ---

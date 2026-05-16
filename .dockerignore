@@ -1,0 +1,36 @@
+# Version control and IDE
+.git/
+.gitignore
+.vscode/
+.claude/
+
+# Documentation
+docs/
+*.md
+
+# Data files (mounted as volumes at runtime, not baked into the image)
+data/
+
+# Python virtual environment and caches
+src/.venv/
+src/__pycache__/
+src/**/__pycache__/
+src/.pytest_cache/
+
+# Development-only files
+src/tests/
+src/conftest.py
+src/pytest.ini
+src/dev_watch.py
+src/setup_env.ps1
+src/requirements-dev.txt
+
+# System init scripts (systemd / OpenRC) — not needed inside the image
+init/
+
+# Installation / packaging scripts
+install.sh
+uninstall.sh
+update.sh
+check_dependencies.sh
+dependencies.txt
