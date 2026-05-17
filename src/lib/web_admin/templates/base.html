@@ -132,6 +132,12 @@
             padding-bottom: .3rem;
             margin-bottom: 0 !important;
         }
+
+        /* Outer cell padding: keep backgrounds edge-to-edge, text inset from card border */
+        .table > thead > tr > th:first-child,
+        .table > tbody > tr > td:first-child { padding-left: 1rem; }
+        .table > thead > tr > th:last-child,
+        .table > tbody > tr > td:last-child  { padding-right: 1rem; }
     </style>
     {% block extra_head %}{% endblock %}
 </head>

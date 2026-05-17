@@ -1341,3 +1341,15 @@ function _renderPagination(total, page, pageSize, goFn, changeFn) {
         </div>
     </div>`;
 }
+
+// ──────────────────── Sortable table header cell ──────────────────
+// Returns an <th> string with a sort chevron; fn is the JS sort function name.
+function _thSort(label, field, sort, dir, fn, cls, extraStyle) {
+    const isActive = sort === field;
+    const icon = isActive ? (dir === 'asc' ? 'bi-sort-up' : 'bi-sort-down') : 'bi-chevron-expand';
+    const iOp  = isActive ? '.7' : '.25';
+    const st   = 'font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;user-select:none;white-space:nowrap'
+               + (extraStyle ? ';' + extraStyle : '');
+    return `<th class="fw-semibold text-muted${cls ? ' ' + cls : ''}" style="${st}" onclick="${fn}('${field}')">` +
+           `${label} <i class="bi ${icon}" style="opacity:${iOp};font-size:.85em"></i></th>`;
+}

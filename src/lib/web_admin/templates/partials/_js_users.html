@@ -6,8 +6,15 @@
 // ──────────────────────────── Users tab ───────────────────────────
 let _usersPage = 1;
 let _usersPageSize = null;
+let _usersSort = 'username';
+let _usersSortDir = 'asc';
 function _goUsersPage(p) { _usersPage = p; renderUsers(); }
 function _changeUsersPageSize(v) { _usersPageSize = parseInt(v, 10); _usersPage = 1; renderUsers(); }
+function _sortUsers(col) {
+    if (_usersSort === col) _usersSortDir = _usersSortDir === 'asc' ? 'desc' : 'asc';
+    else { _usersSort = col; _usersSortDir = 'asc'; }
+    renderUsers();
+}
 
 function renderUsers() {
     const c = document.getElementById('users-container');
@@ -17,7 +24,23 @@ function renderUsers() {
         sessionCounts[s.username] = (sessionCounts[s.username] || 0) + 1;
     }
     if (_usersPageSize === null) _usersPageSize = _defaultPageSize;
-    const names = Object.keys(usersData).sort();
+    const names = Object.keys(usersData).sort((a, b) => {
+        let va, vb;
+        if (_usersSort === 'display_name') {
+            va = (usersData[a].display_name || a).toLowerCase();
+            vb = (usersData[b].display_name || b).toLowerCase();
+        } else if (_usersSort === 'role') {
+            va = usersData[a].role || 'viewer';
+            vb = usersData[b].role || 'viewer';
+        } else if (_usersSort === 'sessions') {
+            va = sessionCounts[a] || 0;
+            vb = sessionCounts[b] || 0;
+            return _usersSortDir === 'asc' ? va - vb : vb - va;
+        } else {
+            va = a.toLowerCase(); vb = b.toLowerCase();
+        }
+        return _usersSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
     if (!names.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
             <i class="bi bi-people" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
@@ -36,10 +59,10 @@ function renderUsers() {
 
     let h = `<table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
     <thead style="background:var(--bs-tertiary-bg)"><tr>
-        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_user')}</th>
-        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_name')}</th>
-        <th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_role')}</th>
-        <th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;width:1%;white-space:nowrap">${t('col_sessions')}</th>
+        ${_thSort(t('col_user'),     'username',     _usersSort, _usersSortDir, '_sortUsers')}
+        ${_thSort(t('col_name'),     'display_name', _usersSort, _usersSortDir, '_sortUsers')}
+        ${_thSort(t('col_role'),     'role',         _usersSort, _usersSortDir, '_sortUsers', 'text-center')}
+        ${_thSort(t('col_sessions'), 'sessions',     _usersSort, _usersSortDir, '_sortUsers', 'text-center', 'width:1%')}
         ${showActions ? `<th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">${t('col_actions')}</th>` : ''}
     </tr></thead><tbody>`;
 

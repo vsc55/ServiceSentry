@@ -6,8 +6,15 @@
 // ──────────────────────────── Group management ────────────────────
 let _groupsPage = 1;
 let _groupsPageSize = null;
+let _groupsSort = 'name';
+let _groupsSortDir = 'asc';
 function _goGroupsPage(p) { _groupsPage = p; renderGroups(); }
 function _changeGroupsPageSize(v) { _groupsPageSize = parseInt(v, 10); _groupsPage = 1; renderGroups(); }
+function _sortGroups(col) {
+    if (_groupsSort === col) _groupsSortDir = _groupsSortDir === 'asc' ? 'desc' : 'asc';
+    else { _groupsSort = col; _groupsSortDir = 'asc'; }
+    renderGroups();
+}
 
 function renderGroups() {
     const c = document.getElementById('groups-container');
@@ -18,9 +25,22 @@ function renderGroups() {
     const showActions    = canEditGroup || canDeleteGroup;
     if (_groupsPageSize === null) _groupsPageSize = _defaultPageSize;
     const allEntries = Object.entries(groupsData).sort((a, b) => {
-        if (a[1].builtin && !b[1].builtin) return -1;
-        if (!a[1].builtin && b[1].builtin) return 1;
-        return a[0].localeCompare(b[0]);
+        const [na, gda] = a, [nb, gdb] = b;
+        let va, vb;
+        if (_groupsSort === 'label') {
+            va = (gda.label || na).toLowerCase(); vb = (gdb.label || nb).toLowerCase();
+        } else if (_groupsSort === 'roles') {
+            return _groupsSortDir === 'asc'
+                ? (gda.roles || []).length - (gdb.roles || []).length
+                : (gdb.roles || []).length - (gda.roles || []).length;
+        } else if (_groupsSort === 'members') {
+            return _groupsSortDir === 'asc'
+                ? (gda.members || []).length - (gdb.members || []).length
+                : (gdb.members || []).length - (gda.members || []).length;
+        } else {
+            va = na.toLowerCase(); vb = nb.toLowerCase();
+        }
+        return _groupsSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
     });
     if (!allEntries.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
@@ -36,10 +56,10 @@ function renderGroups() {
 
     let h = `<table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
     <thead style="background:var(--bs-tertiary-bg)"><tr>
-        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_group_name')}</th>
-        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_group_label')}</th>
-        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_group_roles')}</th>
-        <th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;width:1%;white-space:nowrap">${t('col_group_members')}</th>
+        ${_thSort(t('col_group_name'),    'name',    _groupsSort, _groupsSortDir, '_sortGroups')}
+        ${_thSort(t('col_group_label'),   'label',   _groupsSort, _groupsSortDir, '_sortGroups')}
+        ${_thSort(t('col_group_roles'),   'roles',   _groupsSort, _groupsSortDir, '_sortGroups')}
+        ${_thSort(t('col_group_members'), 'members', _groupsSort, _groupsSortDir, '_sortGroups', 'text-center', 'width:1%')}
         ${showActions ? `<th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">${t('col_actions')}</th>` : ''}
     </tr></thead><tbody>`;
 

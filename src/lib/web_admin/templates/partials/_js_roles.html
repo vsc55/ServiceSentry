@@ -158,8 +158,15 @@ function _filterPermsAccordion(query) {
 // ──────────────────────────── Role management ─────────────────────
 let _rolesPage = 1;
 let _rolesPageSize = null;
+let _rolesSort = 'name';
+let _rolesSortDir = 'asc';
 function _goRolesPage(p) { _rolesPage = p; renderRoles(); }
 function _changeRolesPageSize(v) { _rolesPageSize = parseInt(v, 10); _rolesPage = 1; renderRoles(); }
+function _sortRoles(col) {
+    if (_rolesSort === col) _rolesSortDir = _rolesSortDir === 'asc' ? 'desc' : 'asc';
+    else { _rolesSort = col; _rolesSortDir = 'asc'; }
+    renderRoles();
+}
 
 function renderRoles() {
     const c = document.getElementById('roles-container');
@@ -170,9 +177,14 @@ function renderRoles() {
     const showActions   = canEditRole || canDeleteRole;
     if (_rolesPageSize === null) _rolesPageSize = _defaultPageSize;
     const allEntries = Object.entries(rolesData).sort((a, b) => {
-        if (a[1].builtin && !b[1].builtin) return -1;
-        if (!a[1].builtin && b[1].builtin) return 1;
-        return a[0].localeCompare(b[0]);
+        const [na, rda] = a, [nb, rdb] = b;
+        let va, vb;
+        if (_rolesSort === 'label') {
+            va = (rda.label || na).toLowerCase(); vb = (rdb.label || nb).toLowerCase();
+        } else {
+            va = na.toLowerCase(); vb = nb.toLowerCase();
+        }
+        return _rolesSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
     });
     if (!allEntries.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
@@ -210,8 +222,8 @@ function renderRoles() {
 
     let h = `<table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
     <thead style="background:var(--bs-tertiary-bg)"><tr>
-        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">${t('col_role_name')}</th>
-        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">${t('col_role_label')}</th>
+        ${_thSort(t('col_role_name'),  'name',  _rolesSort, _rolesSortDir, '_sortRoles')}
+        ${_thSort(t('col_role_label'), 'label', _rolesSort, _rolesSortDir, '_sortRoles')}
         <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_role_permissions')}</th>
         ${showActions ? `<th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">${t('col_actions')}</th>` : ''}
     </tr></thead><tbody>`;
