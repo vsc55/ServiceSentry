@@ -45,14 +45,14 @@ async function renderStatus() {
           <button class="btn btn-sm btn-primary" id="btnRunAll" onclick="runAllChecks()" title="${escAttr(t('run_all_checks_tt'))}">
             <i class="bi bi-play-fill me-1"></i>${t('run_all_checks')}
           </button>
-          <button class="btn btn-sm btn-outline-primary" id="btnRunSelected" onclick="runSelectedChecks()" title="${escAttr(t('run_selected_checks_tt'))}">
+          <button class="btn btn-sm btn-primary" id="btnRunSelected" onclick="runSelectedChecks()" title="${escAttr(t('run_selected_checks_tt'))}">
             <i class="bi bi-check2-square me-1"></i>${t('run_selected_checks')}
           </button>
           <div class="vr mx-1 d-none d-sm-block"></div>
-          <button class="btn btn-sm btn-outline-secondary" onclick="toggleCheckSelection(true)" title="${escAttr(t('checks_select_all_tt'))}">
+          <button class="btn btn-sm btn-secondary" onclick="toggleCheckSelection(true)" title="${escAttr(t('checks_select_all_tt'))}">
             ${t('checks_select_all')}
           </button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="toggleCheckSelection(false)" title="${escAttr(t('checks_select_none_tt'))}">
+          <button class="btn btn-sm btn-secondary" onclick="toggleCheckSelection(false)" title="${escAttr(t('checks_select_none_tt'))}">
             ${t('checks_select_none')}
           </button>
           <span id="checksSpinner" class="d-none ms-auto text-muted small">
@@ -73,7 +73,7 @@ async function renderStatus() {
                 h += `<input class="btn-check check-module-cb" type="checkbox" value="${escAttr(m)}"
                          id="chk-${escAttr(m)}" autocomplete="off" ${enabled ? 'checked' : ''}
                          onchange="onCheckModuleToggle(this)">
-                      <label class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                      <label class="btn btn-sm btn-secondary d-flex align-items-center gap-1"
                              for="chk-${escAttr(m)}" style="font-size:.8rem">
                         ${icon} ${esc(pname)}
                       </label>`;
@@ -104,7 +104,7 @@ function _renderWaitingCard(mod) {
     const avBg  = `hsla(${hue},65%,55%,.14)`;
     const avClr = `hsl(${hue},60%,42%)`;
     return `<div class="rounded-3 overflow-hidden border status-waiting" data-status-card="${escAttr(mod)}"
-               style="background:var(--bs-body-bg);box-shadow:0 2px 8px rgba(0,0,0,.06)">
+               style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 2px 8px rgba(0,0,0,.06)">
         <div style="height:3px;background:linear-gradient(90deg,#94a3b8 0%,#e2e8f0 50%,#94a3b8 100%);background-size:200% 100%;animation:_statusPulse 1.4s ease-in-out infinite"></div>
         <div class="d-flex align-items-center gap-2 px-3 py-2" style="border-bottom:1px solid var(--bs-border-color)">
             <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
@@ -148,7 +148,7 @@ function _renderOneStatusCard(mod, checks) {
             ? 'linear-gradient(90deg,#22c55e,#4ade80)'
             : 'linear-gradient(90deg,#ef4444,#f97316)';
 
-        let h = `<div class="rounded-3 overflow-hidden border" data-status-card="${escAttr(mod)}" style="background:var(--bs-body-bg);box-shadow:0 2px 8px rgba(0,0,0,.06)">`;
+        let h = `<div class="rounded-3 overflow-hidden border" data-status-card="${escAttr(mod)}" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 2px 8px rgba(0,0,0,.06)">`;
 
         // Accent strip
         h += `<div style="height:3px;background:${accentGrad}"></div>`;

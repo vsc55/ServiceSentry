@@ -23,6 +23,7 @@ done
 
 # ── Config files (skip if destination already exists and is identical) ────────
 for f in data/*.json; do
+    [ -f "$f" ] || continue
     NAMEFILE="${f#data/}"
     DEST="/etc/ServiSesentry/${NAMEFILE}"
     BACKUP="${DEST}"

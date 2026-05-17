@@ -5,10 +5,34 @@
 import functools
 import os
 import threading
+import uuid
 from datetime import timedelta
 from urllib.parse import urlparse
 
 from flask import Flask, jsonify, redirect, request, session, url_for
+
+# Maps Docker environment variable names to (config_path, expected_type).
+# Env vars are runtime-only overrides — they are never written to config.json.
+# Fields with valid env vars appear locked in the UI.
+_ENV_FIELD_SPECS: dict[str, tuple[str, type]] = {
+    'WA_LANG':                ('web_admin|lang',               str),
+    'WA_DARK_MODE':           ('web_admin|dark_mode',          bool),
+    'WA_SECURE_COOKIES':      ('web_admin|secure_cookies',     bool),
+    'WA_REMEMBER_ME_DAYS':    ('web_admin|remember_me_days',   int),
+    'WA_AUDIT_MAX_ENTRIES':   ('web_admin|audit_max_entries',  int),
+    'WA_PUBLIC_STATUS':       ('web_admin|public_status',      bool),
+    'WA_STATUS_REFRESH_SECS': ('web_admin|status_refresh_secs', int),
+    'WA_STATUS_LANG':         ('web_admin|status_lang',        str),
+    'WA_PROXY_COUNT':         ('web_admin|proxy_count',        int),
+    'WA_PORT':                ('web_admin|port',               int),
+    'WA_PUBLIC_URL':          ('web_admin|public_url',         str),
+    'WA_FORCE_HTTPS':         ('web_admin|force_https',        bool),
+    'WA_FORCE_FQDN':          ('web_admin|force_fqdn',         bool),
+    'TELEGRAM_TOKEN':         ('telegram|token',               str),
+    'TELEGRAM_CHAT_ID':       ('telegram|chat_id',             str),
+    'TELEGRAM_GROUP_MESSAGES': ('telegram|group_messages',     bool),
+    'CHECK_INTERVAL':         ('daemon|timer_check',           int),
+}
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
@@ -47,6 +71,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _CONFIG_FILE = 'config.json'
     _MODULES_FILE = 'modules.json'
     _STATUS_FILE = 'status.json'
+    _WEB_PORT = DEFAULT_PORT
     _AUDIT_MAX_ENTRIES = 500
     _REMEMBER_ME_DAYS = 30
     _DEFAULT_PAGE_SIZE = 25
@@ -54,6 +79,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _PUBLIC_STATUS = False
     _STATUS_REFRESH_SECS = 60
     _STATUS_LANG = ''
+    _PUBLIC_URL = ''
+    _FORCE_HTTPS = False
+    _FORCE_FQDN  = False
     # Password-strength policy (can be overridden via config.json web_admin section)
     _PW_MIN_LEN = 8
     _PW_MAX_LEN = 128
@@ -90,6 +118,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         status_refresh_secs: int = 60,
         status_lang: str = '',
         proxy_count: int = 0,
+        public_url: str = '',
+        force_https: bool = False,
+        force_fqdn: bool = False,
     ):
         """Initialise the web administration server.
 
@@ -119,6 +150,15 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._STATUS_REFRESH_SECS = max(10, int(status_refresh_secs))
         self._STATUS_LANG = status_lang if status_lang in SUPPORTED_LANGS else ''
         self._proxy_count = max(0, int(proxy_count))
+        _pu = str(public_url).strip().rstrip('/')
+        self._public_url = _pu.split('://', 1)[1] if '://' in _pu else _pu
+        self._force_https = bool(force_https)
+        self._force_fqdn      = bool(force_fqdn)
+        self._restart_pending = False
+        self._startup_id      = str(uuid.uuid4())
+        self._config_version  = str(uuid.uuid4())
+        self._env_locked: frozenset[str] = frozenset()
+        self._env_override_values: dict[str, object] = {}
         self._check_lock = threading.Lock()
         self._data_lock = threading.RLock()
         self._default_lang = (
@@ -137,6 +177,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._load_roles()
         self._load_groups()
         self._apply_saved_config()
+        self._apply_env_overrides()
         self._app = self._create_app()
 
     # ------------------------------------------------------------------
@@ -304,6 +345,107 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         new_sec = wa_cfg.get('secure_cookies')
         if isinstance(new_sec, bool):
             self._secure_cookies = new_sec
+        # Public URL for external links and notifications (stored without scheme)
+        if 'public_url' in wa_cfg:
+            v = wa_cfg['public_url']
+            if isinstance(v, str):
+                v = v.strip().rstrip('/')
+                if '://' in v:
+                    v = v.split('://', 1)[1]
+                self._public_url = v
+
+    @staticmethod
+    def _parse_env_var(raw: str, cast: type) -> tuple:
+        """Parse and validate a raw env var string. Returns (value, error_str|None)."""
+        if cast is bool:
+            if raw.lower() in ('1', 'true', 'yes'):
+                return True, None
+            if raw.lower() in ('0', 'false', 'no'):
+                return False, None
+            return None, f"expected true/false/yes/no/1/0, got {raw!r}"
+        if cast is int:
+            try:
+                return int(raw), None
+            except ValueError:
+                return None, f"expected integer, got {raw!r}"
+        return raw, None  # str: always valid
+
+    def _apply_env_overrides(self) -> None:
+        """Apply env var overrides to runtime attrs. Never modifies config files.
+
+        Valid env vars override the saved config at runtime and lock the field in
+        the UI.  Invalid values (wrong type, out of range, unsupported language)
+        are printed as warnings; those fields are NOT locked and the saved config
+        value remains in effect.
+        """
+        from .routes.config import INT_RULES, BOOL_RULES  # local import avoids circular
+
+        locked: set[str] = set()
+        overrides: dict[str, object] = {}
+
+        for env_key, (path, cast) in _ENV_FIELD_SPECS.items():
+            raw = os.environ.get(env_key)
+            if not raw:
+                continue
+
+            value, err = self._parse_env_var(raw, cast)
+            if err:
+                print(
+                    f'[ServiceSentry] WARNING: env var {env_key}={raw!r} is invalid'
+                    f' ({err}) — saved config value will be used, field will not be locked',
+                    flush=True,
+                )
+                continue
+
+            section, field = path.split('|')
+
+            # Range check for integer fields defined in INT_RULES
+            if cast is int and path in INT_RULES:
+                rule = INT_RULES[path]
+                if not (rule['min'] <= value <= rule['max']):
+                    print(
+                        f'[ServiceSentry] WARNING: env var {env_key}={raw!r} value {value}'
+                        f' is out of range [{rule["min"]}, {rule["max"]}]'
+                        f' — saved config value will be used, field will not be locked',
+                        flush=True,
+                    )
+                    continue
+
+            # Language validation
+            if section == 'web_admin' and field == 'lang' and value not in SUPPORTED_LANGS:
+                print(
+                    f'[ServiceSentry] WARNING: env var {env_key}={raw!r} is not a'
+                    f' supported language ({", ".join(SUPPORTED_LANGS)})'
+                    f' — saved config value will be used, field will not be locked',
+                    flush=True,
+                )
+                continue
+
+            locked.add(path)
+            overrides[path] = value
+
+            # Apply to runtime attrs (web_admin section only)
+            if section != 'web_admin':
+                continue
+
+            if path in INT_RULES:
+                setattr(self, INT_RULES[path]['attr'], value)
+            elif path in BOOL_RULES:
+                setattr(self, BOOL_RULES[path], value)
+            elif field == 'lang':
+                self._default_lang = value
+            elif field == 'status_lang':
+                self._STATUS_LANG = value if value in SUPPORTED_LANGS else ''
+            elif field == 'dark_mode':
+                self._default_dark_mode = bool(value)
+            elif field == 'secure_cookies':
+                self._secure_cookies = bool(value)
+            elif field == 'public_url':
+                v = str(value).strip().rstrip('/')
+                self._public_url = v.split('://', 1)[1] if '://' in v else v
+
+        self._env_locked = frozenset(locked)
+        self._env_override_values = overrides
 
     def _create_app(self) -> Flask:
         """Create and configure the Flask application."""
@@ -332,6 +474,19 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 x_host=self._proxy_count,
                 x_prefix=self._proxy_count,
             )
+
+        @app.before_request
+        def _enforce_fqdn():
+            if not self._force_fqdn or not self._public_url:
+                return
+            if request.host == self._public_url:
+                return
+            scheme = 'https' if self._force_https else 'http'
+            qs = request.query_string.decode('utf-8')
+            target = f"{scheme}://{self._public_url}{request.path}"
+            if qs:
+                target += '?' + qs
+            return redirect(target, code=302)
 
         @app.context_processor
         def _inject_i18n():
@@ -363,7 +518,13 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_public_status': self._public_status,
                 'wa_status_refresh_secs': self._STATUS_REFRESH_SECS,
                 'wa_status_lang': self._STATUS_LANG,
+                'wa_web_port': self._WEB_PORT,
+                'wa_env_locked_fields': sorted(self._env_locked),
                 'wa_proxy_count': self._proxy_count,
+                'wa_public_url': self._public_url,
+                'wa_force_https': self._force_https,
+                'wa_force_fqdn':  self._force_fqdn,
+                'wa_startup_id':  self._startup_id,
                 'wa_default_dark_mode': self._default_dark_mode,
             }
 

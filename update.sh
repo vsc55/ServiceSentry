@@ -55,6 +55,7 @@ rm -f /var/lib/ServiSesentry/status.json
 # ── Update config files (install only if not already present) ─────────────────
 echo "Checking config files..."
 for f in data/*.json; do
+    [ -f "$f" ] || continue
     NAMEFILE="${f#data/}"
     DEST="/etc/ServiSesentry/${NAMEFILE}"
     if [ ! -f "${DEST}" ]; then

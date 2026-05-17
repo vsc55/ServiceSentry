@@ -30,8 +30,13 @@ const WA_PW_REQUIRE_SYMBOL     = {{ wa_pw_require_symbol | tojson }};
 const WA_PUBLIC_STATUS         = {{ wa_public_status | tojson }};
 const WA_STATUS_REFRESH_SECS   = {{ wa_status_refresh_secs }};
 const WA_STATUS_LANG           = {{ wa_status_lang | tojson }};
+const WA_WEB_PORT              = {{ wa_web_port }};
 const WA_PROXY_COUNT           = {{ wa_proxy_count }};
+const WA_PUBLIC_URL            = {{ wa_public_url | tojson }};
+const WA_FORCE_HTTPS           = {{ wa_force_https | tojson }};
+const WA_FORCE_FQDN            = {{ wa_force_fqdn  | tojson }};
 const WA_DEFAULT_DARK_MODE     = {{ wa_default_dark_mode | tojson }};
+const SERVER_STARTUP_ID        = {{ wa_startup_id | tojson }};
 
 // ──────────────────────────── State ───────────────────────────────
 let modulesData = {};
@@ -51,6 +56,7 @@ let _autoExpandItemPath = null;  // full pathStr of item to auto-expand after ne
 let _pendingExpandMods  = new Set(); // module names to force-expand on next renderModules()
 let _editingUser = null;    // null = new, string = editing username
 let _serverConfigData = null; // snapshot from last server load/save
+let _configEtag = null;       // ETag received from server; sent as If-Match on PUT
 let _savedModulesData = null; // snapshot from last modules load/save
 const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
 const ALL_PERMISSIONS = {{ permissions_list | tojson }};
@@ -60,6 +66,9 @@ const ITEM_SCHEMAS = Object.fromEntries([
     ...Object.entries(_rawItemSchemas).map(([k, v]) => [`watchfuls.${k}`, v])
 ]);
 const HINTS = I18N.hints || {};
+const ENV_LOCKED = new Set({{ wa_env_locked_fields | tojson }});
+// Fields that require a service restart to take effect after being saved
+const RESTART_REQUIRED_FIELDS = new Set(['web_admin|port', 'web_admin|proxy_count']);
 
 /**
  * Default values for config fields, keyed by 'section|field'.
@@ -80,7 +89,11 @@ const CONFIG_FIELD_DEFAULTS = {
     'web_admin|public_status':     false,
     'web_admin|status_refresh_secs': 60,
     'web_admin|status_lang':       '',
+    'web_admin|port':              8080,
     'web_admin|proxy_count':       0,
+    'web_admin|public_url':        '',
+    'web_admin|force_https':       false,
+    'web_admin|force_fqdn':        false,
     'web_admin|default_page_size': 25,
     'web_admin|page_sizes':        [25, 50, 100, 200, 0],
     'web_admin|role_modal_scrollable': true,
@@ -319,6 +332,38 @@ function showConfirmModal(msg, callback) {
     bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).show();
 }
 
+function _showReloadBanner() {
+    const banner = document.getElementById('page-reload-banner');
+    const msg    = document.getElementById('page-reload-msg');
+    if (!banner) return;
+    if (msg) msg.textContent = t('page_reload_banner');
+    banner.classList.remove('d-none');
+}
+
+function _startVersionPoll(intervalMs = 60000) {
+    setInterval(async () => {
+        try {
+            const r = await fetch('/api/health');
+            if (!r.ok) return;
+            const data = await r.json();
+            if (data.startup_id && data.startup_id !== SERVER_STARTUP_ID) {
+                _showReloadBanner();
+            }
+        } catch (_) { /* ignore network errors */ }
+    }, intervalMs);
+}
+
+function _showRestartBanner() {
+    const perms = new Set(currentUser.permissions || []);
+    if (!perms.has('config_view') && !perms.has('config_edit')) return;
+    const banner = document.getElementById('restart-pending-banner');
+    const msg    = document.getElementById('restart-pending-msg');
+    if (!banner) return;
+    if (msg) msg.textContent = t('restart_pending_banner');
+    banner.classList.remove('d-none');
+    currentUser.restart_pending = true;
+}
+
 function showToast(msg, type = 'success') {
     const t = document.getElementById('toast');
     const b = document.getElementById('toast-body');
@@ -335,6 +380,17 @@ async function apiGet(url) {
         if (!r.ok) return null;
         const ct = r.headers.get('content-type') || '';
         if (!ct.includes('application/json')) { location.href = '/login'; return null; }
+        return await r.json();
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}
+async function loadConfig() {
+    try {
+        const r = await fetch('/api/config');
+        if (r.status === 401 || r.status === 302) { location.href = '/login'; return null; }
+        if (!r.ok) return null;
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) { location.href = '/login'; return null; }
+        _configEtag = r.headers.get('ETag');
         return await r.json();
     } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
 }
@@ -370,13 +426,22 @@ async function apiDelete(url) {
 
 // ──────────────────────────── Field render ─────────────────────────
 function renderField(key, value, pathStr, target = 'modules') {
-    const lbl = esc(fieldLabel(key));
     const _hint = fieldHint(pathStr);
+    const _hintId = _hint ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
     const _infoIcon = _hint
-        ? ` <i class="bi bi-info-circle text-muted" style="cursor:help;font-size:.85em"
-            data-bs-toggle="tooltip" data-bs-placement="top"
-            title="${escAttr(_hint)}"></i>`
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+                style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+                data-bs-toggle="collapse" data-bs-target="#${_hintId}"
+                aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
         : '';
+    const _hintPanel = _hint
+        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(_hint)}</div></div>`
+        : '';
+    const _fhtml = _renderFieldInner(key, value, pathStr, target, _infoIcon, _hintPanel);
+    return _fhtml ? `<div class="cfg-field-wrap">${_fhtml}</div>` : _fhtml;
+}
+function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = '', _hintHtml = '') {
+    const lbl = esc(fieldLabel(key));
     const lblHtml = lbl + _infoIcon;
     const sp = jsStr(pathStr), tg = jsStr(target);
 
@@ -399,35 +464,45 @@ function renderField(key, value, pathStr, target = 'modules') {
 
     // Per-field reset button — only in config tab and only when a default is defined
     const _resetBtn = target === 'config' && (pathStr in CONFIG_FIELD_DEFAULTS)
-        ? `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0"
+        ? `<button type="button" class="btn btn-sm btn-secondary"
             onclick="resetConfigField(${sp})"
             data-bs-toggle="tooltip" data-bs-placement="top"
             title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`
         : '';
+    // Env-var lock — field is read-only when set by a Docker environment variable
+    const _isEnvLocked = target === 'config' && ENV_LOCKED.has(pathStr);
+    const _lockBtn = _isEnvLocked
+        ? `<span class="input-group-text text-warning" tabindex="-1"
+            data-bs-toggle="tooltip" data-bs-placement="top"
+            title="${escAttr(t('env_locked_tooltip'))}"><i class="bi bi-lock-fill" style="font-size:.75rem"></i></span>`
+        : '';
+    const _actionBtn = _isEnvLocked ? _lockBtn : _resetBtn;
 
     // Sensitive field masked by the server (null = value is set but never transmitted)
     if (value === null && (SENSITIVE.has(key) || (meta && meta.sensitive))) {
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8 d-flex gap-1 align-items-center">
-            <input type="password" class="form-control form-control-sm flex-grow-1"
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <input type="password" class="form-control"
                 data-field-path="${escAttr(pathStr)}"
                 value=""
                 placeholder="${escAttr(t('secret_defined') || '••••••')}"
                 oninput="markDirty(${tg})"
-                onchange="updateField(${tg},${sp},this.value)">${_resetBtn}
-        </div></div>`;
+                onchange="updateField(${tg},${sp},this.value)">${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
     }
 
     if (typeof value === 'boolean') {
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8 d-flex align-items-center gap-2">
-            <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" role="switch"
-                    ${value ? 'checked' : ''}
-                    onchange="updateField(${tg},${sp},this.checked)">
-            </div>${_resetBtn}</div></div>`;
+        <div class="col-sm-8">
+            <div class="d-flex align-items-center gap-2">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch"
+                        ${value ? 'checked' : ''}
+                        onchange="updateField(${tg},${sp},this.checked)">
+                </div>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
     }
     if (typeof value === 'number' && meta && Array.isArray(meta.options_int)) {
         const opts = meta.options_int.map(s => {
@@ -436,12 +511,12 @@ function renderField(key, value, pathStr, target = 'modules') {
         }).join('');
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8 d-flex gap-1 align-items-center">
-            <select class="form-select form-select-sm flex-grow-1"
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <select class="form-select"
                 onchange="updateField(${tg},${sp},parseInt(this.value,10))">
                 ${opts}
-            </select>${_resetBtn}
-        </div></div>`;
+            </select>${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
     }
     if (typeof value === 'number') {
         const minA = meta && meta.min != null ? ` min="${meta.min}"` : '';
@@ -479,13 +554,14 @@ function renderField(key, value, pathStr, target = 'modules') {
         }
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8 d-flex gap-1 align-items-center">
-            <input type="number" class="form-control form-control-sm flex-grow-1"
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <input type="number" class="form-control"
+                data-cfg-path="${escAttr(pathStr)}"
                 value="${displayValue}"${minA}${maxA}${stepA}${extraAttrs}
                 ${_onkeydown}
                 oninput="markDirty(${tg})"
-                onchange="validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})">${_resetBtn}
-        </div></div>`;
+                onchange="validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})">${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
     }
     if (typeof value === 'string') {
         // Language selector
@@ -497,12 +573,12 @@ function renderField(key, value, pathStr, target = 'modules') {
             }
             return `<div class="row mb-2 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8 d-flex gap-1 align-items-center">
-                <select class="form-select form-select-sm flex-grow-1"
+            <div class="col-sm-8"><div class="input-group input-group-sm">
+                <select class="form-select"
                     onchange="updateField(${tg},${sp},this.value)">
                     ${opts}
-                </select>${_resetBtn}
-            </div></div>`;
+                </select>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
         }
         // Status-page language selector (with empty = use default option)
         if (key === 'status_lang') {
@@ -514,12 +590,12 @@ function renderField(key, value, pathStr, target = 'modules') {
             }
             return `<div class="row mb-2 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8 d-flex gap-1 align-items-center">
-                <select class="form-select form-select-sm flex-grow-1"
+            <div class="col-sm-8"><div class="input-group input-group-sm">
+                <select class="form-select"
                     onchange="updateField(${tg},${sp},this.value)">
                     ${opts}
-                </select>${_resetBtn}
-            </div></div>`;
+                </select>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
         }
         // String select — options array defined in schema
         if (meta && Array.isArray(meta.options)) {
@@ -534,12 +610,12 @@ function renderField(key, value, pathStr, target = 'modules') {
             const _itemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
             return `<div class="row mb-2 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8 d-flex gap-1 align-items-center">
-                <select class="form-select form-select-sm flex-grow-1"
+            <div class="col-sm-8"><div class="input-group input-group-sm">
+                <select class="form-select"
                     onchange="updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})">
                     ${opts}
-                </select>${_resetBtn}
-            </div></div>`;
+                </select>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
         }
         const isSensitive = (meta && meta.sensitive) || SENSITIVE.has(key);
         const tp = isSensitive ? 'password' : 'text';
@@ -566,19 +642,19 @@ function renderField(key, value, pathStr, target = 'modules') {
         if (_discoverFieldUrl) {
             return `<div class="row mb-2 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8 d-flex gap-1 align-items-center">
-                <div class="input-group input-group-sm flex-grow-1">
+            <div class="col-sm-8">
+                <div class="input-group input-group-sm">
                     <input type="${tp}" class="form-control${_strPhCls}"
                         data-field-path="${escAttr(pathStr)}"
                         value="${escAttr(value)}"${_numKbd}${_strPh}
                         oninput="markDirty(${tg})"
                         onchange="updateField(${tg},${sp},this.value.trim())">
-                    <button class="btn btn-outline-secondary" type="button"
+                    <button class="btn btn-secondary" type="button"
                         title="${escAttr(t('discover') || 'Discover')}"
                         onclick="openDiscoverModalForField(${sp},${jsStr(_discoverFieldUrl)})">
                         <i class="bi bi-search"></i>
-                    </button>
-                </div>${_resetBtn}
+                    </button>${_actionBtn}
+                </div>${_hintHtml}
             </div></div>`;
         }
         // input_action: render as Bootstrap input-group with an icon button appended
@@ -593,14 +669,14 @@ function renderField(key, value, pathStr, target = 'modules') {
             const _itemPath = escAttr(pathStr.split('|').slice(0, -1).join('|'));
             return `<div class="row mb-2 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8 d-flex gap-1 align-items-center">
-                <div class="input-group input-group-sm flex-grow-1">
+            <div class="col-sm-8">
+                <div class="input-group input-group-sm">
                     <input type="${tp}" class="form-control${_strPhCls}"
                         data-field-path="${escAttr(pathStr)}"
                         value="${escAttr(value)}"${_numKbd}${_strPh}
                         oninput="markDirty(${tg})"
                         onchange="updateField(${tg},${sp},this.value.trim())">
-                    <button class="btn btn-outline-secondary" type="button" data-test-btn
+                    <button class="btn btn-secondary" type="button" data-test-btn
                         data-action-path="${_itemPath}"
                         data-action-url="${escAttr(_ia.url || '')}"
                         data-action-extra="${escAttr(JSON.stringify(_ia.extra || {}))}"
@@ -608,30 +684,30 @@ function renderField(key, value, pathStr, target = 'modules') {
                         data-action-result-field="${escAttr(_ia.result_field || '')}"
                         onclick="itemAction(this)"
                         data-bs-toggle="tooltip" data-bs-placement="top"
-                        title="${_iaLabel}"><i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button>
-                </div>${_resetBtn}
+                        title="${_iaLabel}"><i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button>${_actionBtn}
+                </div>${_hintHtml}
             </div></div>`;
         }
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8 d-flex gap-1 align-items-center">
-            <input type="${tp}" class="form-control form-control-sm flex-grow-1${_strPhCls}"
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <input type="${tp}" class="form-control${_strPhCls}"
                 data-field-path="${escAttr(pathStr)}"
                 value="${escAttr(value)}"${_numKbd}${_strPh}
                 oninput="markDirty(${tg})"
-                onchange="updateField(${tg},${sp},this.value.trim())">${_resetBtn}
-        </div></div>`;
+                onchange="updateField(${tg},${sp},this.value.trim())">${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
     }
     if (Array.isArray(value)) {
         const csv = value.map(v => String(v)).join(', ');
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8 d-flex gap-1 align-items-center">
-            <input type="text" class="form-control form-control-sm flex-grow-1"
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <input type="text" class="form-control"
                 value="${escAttr(csv)}" placeholder="${t('comma_separated')}"
                 oninput="markDirty(${tg})"
-                onchange="updateArray(${tg},${sp},this.value)">${_resetBtn}
-        </div></div>`;
+                onchange="updateArray(${tg},${sp},this.value)">${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
     }
     return '';
 }
@@ -741,7 +817,10 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         const v = obj[k];
         if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
         const _meta = fieldMeta(_sch, k);
-        const _fhtml = renderField(k, v, pathPrefix + '|' + k, target);
+        const _rawFHtml = renderField(k, v, pathPrefix + '|' + k, target);
+        const _fhtml = (target === 'config' && ENV_LOCKED.has(pathPrefix + '|' + k) && _rawFHtml)
+            ? _rawFHtml.replace(/^<div /, '<div data-env-locked="1" ')
+            : _rawFHtml;
 
         const _group = _meta && _meta.group ? _meta.group : null;
         const _showWhen = _meta && _meta.show_when && typeof _meta.show_when === 'object'
@@ -956,7 +1035,7 @@ function _renderInlineActions(pathStr, actions, itemData) {
     for (const action of actions) {
         const label   = esc(_al[action.id] || t(action.id) || action.id);
         const icon    = action.icon ? `<i class="bi ${escAttr(action.icon)} me-1"></i>` : '';
-        const variant = escAttr(action.variant || 'outline-secondary');
+        const variant = escAttr(action.variant || 'secondary');
         const isToast       = !action.result || action.result === 'toast';
         const isList        = action.result === 'list';
         const isFieldPicker = action.result === 'field_picker';
@@ -1008,7 +1087,7 @@ function _renderGroupActionBtns(pathStr, actions, itemData) {
     for (const action of actions) {
         const label   = esc(_al[action.id] || t(action.id) || action.id);
         const icon    = action.icon ? `<i class="bi ${escAttr(action.icon)} me-1"></i>` : '';
-        const variant = escAttr(action.variant || 'outline-secondary');
+        const variant = escAttr(action.variant || 'secondary');
         const isFieldPicker = action.result === 'field_picker';
         const isFullWidth   = action.full_width === true;
         let _visible = true;
@@ -1057,12 +1136,12 @@ function renderCollection(title, data, pathStr, target) {
         </span>
         ${itemCount > 0 ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.68rem">${itemCount}</span>` : ''}
         ${_unsupported ? `<span class="ms-auto badge bg-secondary bg-opacity-50" style="font-size:.68rem" title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}"><i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}</span>` : ''}
-        ${!_unsupported && canAddItem && _discoverUrl ? `<button class="btn btn-sm btn-outline-info ms-auto py-0 px-2"
+        ${!_unsupported && canAddItem && _discoverUrl ? `<button class="btn btn-sm btn-info ms-auto py-0 px-2"
             onclick="openDiscoverModal(${jsStr(pathStr)},${jsStr(_discoverUrl)})"
             title="${escAttr(t('discover'))}">
             <i class="bi bi-search me-1"></i>${t('discover') || 'Discover'}
         </button>` : ''}
-        ${!_unsupported && canAddItem ? `<button class="btn btn-sm btn-outline-success ${_discoverUrl ? '' : 'ms-auto'} py-0 px-2"
+        ${!_unsupported && canAddItem ? `<button class="btn btn-sm btn-success ${_discoverUrl ? '' : 'ms-auto'} py-0 px-2"
             onclick="openAddModal(${jsStr(target)},${jsStr(pathStr)})"
             title="${escAttr(t('add_item_tt'))}">
             <i class="bi bi-plus-lg me-1"></i>${t('add') || 'Add'}
@@ -1088,7 +1167,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     const canDeleteItem = target !== 'modules' || hasModulePerm(_modNameItem, 'delete');
     const canEditItem   = target !== 'modules' || hasModulePerm(_modNameItem, 'edit');
     const delBtn = canDeleteItem
-        ? `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1" data-no-collapse="1"
+        ? `<button class="btn btn-sm btn-danger py-0 px-1 ms-1" data-no-collapse="1"
     onclick="event.stopPropagation();removeItem(${tg},${pp},${nameEsc})"
     title="${escAttr(t('delete_tt'))}">
     <i class="bi bi-trash3"></i></button>`
@@ -1097,7 +1176,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     // Rename (key edit) button — hidden when schema uses __key_mirrors_field__
     const _renameSch = ITEM_SCHEMAS[parentPathStr] || null;
     const renameBtn = (canEditItem && !(_renameSch && _renameSch['__key_mirrors_field__']))
-        ? `<button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" data-no-collapse="1"
+        ? `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1" data-no-collapse="1"
         onclick="event.stopPropagation();renameItem(${tg},${pp},${nameEsc})"
         title="${escAttr(t('rename_item'))}">
         <i class="bi bi-pencil-square"></i></button>`
@@ -1195,7 +1274,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
             ? _renderInlineActions(pathStr, _bottomActions, itemValue)
             : '';
         const testBtn = _testUrl
-            ? `<button class="btn btn-sm btn-outline-info py-0 px-1 ms-1" data-no-collapse="1" data-test-btn
+            ? `<button class="btn btn-sm btn-info py-0 px-1 ms-1" data-no-collapse="1" data-test-btn
                 onclick="event.stopPropagation();testItemConnection(${sp},${jsStr(_testUrl)},this)"
                 title="${escAttr(t('test_connection'))}">
                 <i class="bi bi-plug"></i></button>`
@@ -1204,20 +1283,21 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         const itemOpacity = itemOn ? '' : ';opacity:.6';
         const isAutoExpand = (_autoExpandItemPath === pathStr);
         if (isAutoExpand) _autoExpandItemPath = null;
-        return `<div class="rounded-3 overflow-hidden border" data-item-path="${escAttr(pathStr)}" style="background:var(--bs-body-bg)${itemOpacity}">
+        return `<div class="rounded-3 overflow-hidden border" data-item-path="${escAttr(pathStr)}" style="background:var(--ss-surface-bg,var(--bs-body-bg))${itemOpacity}">
             <div class="d-flex align-items-center gap-1 px-2 py-1"
-                 style="background:var(--bs-secondary-bg);cursor:pointer"
+                 style="background:var(--bs-tertiary-bg);cursor:pointer"
                  role="button" onclick="toggleCollapseFromHeader(event,'${id}')">
                 <code class="flex-grow-1 min-w-0" style="font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}${keyBadge}</code>
                 ${sw}${testBtn}${renameBtn}${delBtn}
-                <button class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                <button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                    style="background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"
                     aria-label="${escAttr(t('module_details'))}" title="${escAttr(t('module_details'))}" onclick="event.stopPropagation()">
-                    <i class="bi bi-chevron-down text-muted small"></i>
+                    <i class="bi bi-chevron-down small"></i>
                 </button>
             </div>
             <div class="collapse${isAutoExpand ? ' show' : ''}" id="${id}" data-sw-item-path="${escAttr(pathStr)}">
-                <div class="px-3 py-2" style="border-top:1px solid var(--bs-border-color)">${body}${_inlineActions}</div>
+                <div class="px-3 py-2" style="background:var(--bs-body-bg);border-top:1px solid var(--bs-border-color)">${body}${_inlineActions}</div>
             </div>
         </div>`;
     }
@@ -1246,11 +1326,11 @@ function _renderPagination(total, page, pageSize, goFn, changeFn) {
         pageNums += `<li class="page-item${i === p ? ' active' : ''}"><a class="page-link" href="#" onclick="${goFn}(${i});return false;">${i}</a></li>`;
     if (hi < totalPages - 1) pageNums += `<li class="page-item disabled"><span class="page-link">&hellip;</span></li>`;
     if (hi < totalPages)     pageNums += `<li class="page-item"><a class="page-link" href="#" onclick="${goFn}(${totalPages});return false;">${totalPages}</a></li>`;
-    return `<div class="d-flex align-items-center justify-content-between mt-2 mb-2 flex-wrap gap-2">
+    return `<div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
         <span class="text-muted small">${tf('audit_showing', start, end, total)}</span>
         <div class="d-flex align-items-center gap-2">
             <div class="input-group input-group-sm">
-                <label class="input-group-text">${t('per_page')}</label>
+                <span class="input-group-text" data-bs-toggle="tooltip" title="${t('per_page')}"><i class="bi bi-list-ul"></i></span>
                 <select class="form-select form-select-sm" style="width:auto" onchange="${changeFn}(this.value)">${sizeOpts}</select>
             </div>
             <nav><ul class="pagination pagination-sm mb-0">

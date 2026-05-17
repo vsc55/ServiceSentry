@@ -73,8 +73,11 @@ class Main(ObjectBase):
         """
         self.cfg_general = ConfigControl(self._config_file)
         self.cfg_general.read()
+        _is_new = not self.cfg_general.is_data
         if self._check_config():
             self._default_conf()
+            if _is_new:
+                self.cfg_general.save()
             self._read_config()
         else:
             raise ValueError("Error load config.")
@@ -357,8 +360,9 @@ def start_web(args):
     cfg = _CC(os.path.join(config_dir, 'config.json'))
     cfg.read()
 
-    username = cfg.get_conf(['web_admin', 'username'], 'admin')
-    password = cfg.get_conf(['web_admin', 'password'], 'admin')
+    # Env vars take precedence for first-run credential setup (never written to disk)
+    username = os.environ.get('WA_USERNAME') or cfg.get_conf(['web_admin', 'username'], 'admin')
+    password = os.environ.get('WA_PASSWORD') or cfg.get_conf(['web_admin', 'password'], 'admin')
     lang = cfg.get_conf(['web_admin', 'lang'], 'en_EN')
     dark_mode = cfg.get_conf(['web_admin', 'dark_mode'], False)
     secure_cookies = cfg.get_conf(['web_admin', 'secure_cookies'], False)
@@ -368,6 +372,9 @@ def start_web(args):
     status_refresh_secs = cfg.get_conf(['web_admin', 'status_refresh_secs'], 60)
     status_lang = cfg.get_conf(['web_admin', 'status_lang'], '')
     proxy_count = cfg.get_conf(['web_admin', 'proxy_count'], 0)
+    public_url = cfg.get_conf(['web_admin', 'public_url'], '')
+    force_https = cfg.get_conf(['web_admin', 'force_https'], False)
+    force_fqdn  = cfg.get_conf(['web_admin', 'force_fqdn'],  False)
     host = getattr(args, 'web_host', None) or cfg.get_conf(
         ['web_admin', 'host'], WebAdmin.DEFAULT_HOST
     )
@@ -385,7 +392,10 @@ def start_web(args):
                      public_status=bool(public_status),
                      status_refresh_secs=int(status_refresh_secs),
                      status_lang=str(status_lang),
-                     proxy_count=int(proxy_count))
+                     proxy_count=int(proxy_count),
+                     public_url=str(public_url),
+                     force_https=bool(force_https),
+                     force_fqdn=bool(force_fqdn))
 
     print("ServiceSentry Web Admin")
     print(f"  URL:    http://{host}:{port}")

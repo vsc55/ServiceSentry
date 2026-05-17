@@ -71,10 +71,12 @@ class Telegram(ObjectBase):
         with self._count_lock:
             self.count_msg += 1
 
-    def send_message_end(self, hostname, timeout=30):
+    def send_message_end(self, hostname, public_url='', timeout=30):
         """ Add a summary message and wait up to *timeout* seconds for the queue to drain. """
         if self.count_msg > 0:
             s_message = f"ℹ️ Summary *{hostname}*, get *{self.count_msg}* new Message. ☝️☝️☝️"
+            if public_url:
+                s_message += f"\n🔗 [Status Page]({public_url}/status)"
             self.queue_msg.put(s_message)
             with self._count_lock:
                 self.count_msg += 1

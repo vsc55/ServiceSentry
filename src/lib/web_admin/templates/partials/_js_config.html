@@ -3,6 +3,52 @@
    ================================================================ #}
 
 // ──────────────────────────── Config tab ──────────────────────────
+let _cfgSearchTerm = '';
+let _cfgSearchInHints = true;
+
+function _toggleCfgSearchHints() {
+    _cfgSearchInHints = !_cfgSearchInHints;
+    const btn = document.getElementById('cfgSearchHintsToggle');
+    if (btn) btn.classList.toggle('active', _cfgSearchInHints);
+    _filterConfig(_cfgSearchTerm);
+}
+
+function _filterConfig(term) {
+    _cfgSearchTerm = term;
+    const q = term.trim().toLowerCase();
+    const container = document.getElementById('config-container');
+    if (!container) return;
+    container.querySelectorAll('.rounded-3.border.overflow-hidden.mb-3').forEach(card => {
+        let anyMatch = false;
+        card.querySelectorAll('.cfg-field-wrap').forEach(wrap => {
+            const labelEl  = wrap.querySelector('label');
+            const labelTxt = labelEl ? labelEl.textContent.trim().toLowerCase() : '';
+            const hintEl   = _cfgSearchInHints ? wrap.querySelector('[id^="fhint_"]') : null;
+            const hintTxt  = hintEl ? hintEl.textContent.trim().toLowerCase() : '';
+            const match    = !q || labelTxt.includes(q) || hintTxt.includes(q);
+            wrap.style.display = match ? '' : 'none';
+            if (match) anyMatch = true;
+        });
+        card.style.display = (!q || anyMatch) ? '' : 'none';
+        if (q && anyMatch) {
+            const body = card.querySelector('[id^="cfgcol_"]');
+            if (body) bootstrap.Collapse.getOrCreateInstance(body, { toggle: false }).show();
+        }
+    });
+}
+
+function _refreshStatusLink() {
+    const wa = configData.web_admin || {};
+    const base = wa.public_url
+        ? ((wa.force_https ? 'https://' : 'http://') + wa.public_url)
+        : window.location.origin;
+    const url = base + '/status';
+    const a   = document.getElementById('cfg-status-link');
+    const btn = document.getElementById('cfg-status-copy-btn');
+    if (a)   { a.textContent = url; a.title = url; }
+    if (btn) btn.onclick = () => navigator.clipboard.writeText(url).then(() => showToast(t('copy_url_ok')));
+}
+
 function renderConfig() {
     const c = document.getElementById('config-container');
     // Save collapse state so re-renders preserve open/closed panels
@@ -18,6 +64,7 @@ function renderConfig() {
     if (!('secure_cookies'    in wa)) wa.secure_cookies    = WA_SECURE_COOKIES;
     if (!('remember_me_days'  in wa)) wa.remember_me_days  = WA_REMEMBER_ME_DAYS;
     if (!('audit_max_entries' in wa)) wa.audit_max_entries = WA_AUDIT_MAX_ENTRIES;
+    if (!('audit_sort_dir'   in wa)) wa.audit_sort_dir    = 'desc';
     if (!('pw_min_len'        in wa)) wa.pw_min_len        = WA_PW_MIN_LEN;
     if (!('pw_max_len'        in wa)) wa.pw_max_len        = WA_PW_MAX_LEN;
     if (!('pw_require_upper'  in wa)) wa.pw_require_upper  = WA_PW_REQUIRE_UPPER;
@@ -26,7 +73,11 @@ function renderConfig() {
     if (!('public_status'     in wa)) wa.public_status     = WA_PUBLIC_STATUS;
     if (!('status_refresh_secs' in wa)) wa.status_refresh_secs = WA_STATUS_REFRESH_SECS;
     if (!('status_lang'       in wa)) wa.status_lang       = WA_STATUS_LANG;
+    if (!('port'              in wa)) wa.port              = WA_WEB_PORT;
     if (!('proxy_count'       in wa)) wa.proxy_count       = WA_PROXY_COUNT;
+    if (!('public_url'        in wa)) wa.public_url        = WA_PUBLIC_URL;
+    if (!('force_https'       in wa)) wa.force_https       = WA_FORCE_HTTPS;
+    if (!('force_fqdn'        in wa)) wa.force_fqdn        = WA_FORCE_FQDN;
     if (!('default_page_size' in wa)) wa.default_page_size = _defaultPageSize;
     if (!('page_sizes'        in wa)) wa.page_sizes        = [..._PAGE_SIZES];
     if (!('role_modal_scrollable' in wa)) wa.role_modal_scrollable = true;
@@ -46,24 +97,24 @@ function renderConfig() {
     function cfgCardOpen(id, icon, title) {
         const isShow = prevState[id] !== false;
         const accent = _cfgSectionAccent[id] || 'linear-gradient(90deg,var(--bs-primary),#60a5fa)';
-        return `<div class="rounded-3 border overflow-hidden mb-3" style="background:var(--bs-body-bg);box-shadow:0 1px 4px rgba(0,0,0,.05)">
+        return `<div class="rounded-3 border overflow-hidden mb-3" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 4px rgba(0,0,0,.05)">
             <div style="height:3px;background:${accent}"></div>
             <div class="d-flex align-items-center gap-2 px-3 py-2 fw-semibold cfg-card-header"
-                 style="cursor:pointer;background:var(--bs-secondary-bg);border-bottom:1px solid var(--bs-border-color)"
+                 style="cursor:pointer;background:var(--bs-tertiary-bg);border-bottom:1px solid var(--bs-border-color)"
                  data-bs-toggle="collapse" data-bs-target="#${id}"
                  aria-expanded="${isShow}" aria-controls="${id}">
                 <span class="me-auto d-flex align-items-center gap-1" style="font-size:.92rem">${icon}${esc(title)}</span>
                 <i class="bi bi-chevron-down cfg-chevron text-muted" style="font-size:.8rem;transition:transform .2s"></i>
             </div>
             <div class="collapse${isShow ? ' show' : ''}" id="${id}">
-                <div class="px-3 py-2">`;
+                <div class="cfg-fields px-3 py-2">`;
     }
     const cfgCardClose = `</div></div></div>`;
 
     const WA_EXCLUDE = [
         'pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol',
         'public_status', 'status_refresh_secs', 'status_lang',
-        'proxy_count', 'audit_sort', 'default_page_size', 'page_sizes',
+        'port', 'proxy_count', 'public_url', 'force_https', 'force_fqdn', 'audit_sort', 'audit_sort_dir', 'default_page_size', 'page_sizes',
     ];
     const order = ['daemon', 'global', 'telegram', 'web_admin'];
     const sections = Object.keys(configData).sort((a, b) => {
@@ -78,9 +129,9 @@ function renderConfig() {
         const cfgId = 'cfgcol_' + sec;
         let extra = '';
         if (sec === 'telegram') {
-            extra = `<hr class="my-2"><button class="btn btn-outline-info btn-sm" onclick="testTelegram()" id="btnTestTelegram" data-test-btn title="${escAttr(t('telegram_test'))}">
+            extra = `<hr class="my-2"><div class="cfg-field-wrap"><div class="row"><div class="col-sm-8 offset-sm-4 d-flex justify-content-end"><button class="btn btn-info btn-sm" onclick="testTelegram()" id="btnTestTelegram" data-test-btn title="${escAttr(t('telegram_test'))}">
                 <i class="bi bi-telegram me-1"></i>${t('telegram_test')}
-            </button>`;
+            </button></div></div></div>`;
         }
         h += cfgCardOpen(cfgId, '<i class="bi bi-gear me-1"></i>', lbl);
         h += renderScalarFields(data, sec, 'config', sec === 'web_admin' ? WA_EXCLUDE : []);
@@ -96,51 +147,111 @@ function renderConfig() {
 
     // Public status card
     const psFields = ['public_status', 'status_refresh_secs', 'status_lang'];
+    const _statusBase = wa.public_url
+        ? (wa.force_https ? 'https://' : 'http://') + wa.public_url
+        : window.location.origin;
+    const _statusUrl = _statusBase + '/status';
+    const _statusLinkRow = `<hr class="my-2">
+        <div class="cfg-field-wrap"><div class="row mb-1 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('status_page_link'))}</label>
+            <div class="col-sm-8">
+                <div class="input-group input-group-sm">
+                    <a id="cfg-status-link" href="/status" target="_blank" rel="noopener noreferrer"
+                       class="form-control text-decoration-none text-truncate"
+                       style="font-family:monospace;font-size:.8rem"
+                       title="${escAttr(_statusUrl)}">${esc(_statusUrl)}</a>
+                    <button id="cfg-status-copy-btn" type="button" class="btn btn-secondary"
+                        data-bs-toggle="tooltip" data-bs-placement="top"
+                        title="${escAttr(t('copy_url'))}"><i class="bi bi-clipboard"></i></button>
+                </div>
+            </div>
+        </div></div>`;
     h += cfgCardOpen('cfgcol_pub_status', '<i class="bi bi-globe me-1"></i>', t('public_status_section'));
     h += renderScalarFields(Object.fromEntries(psFields.map(f => [f, wa[f]])), 'web_admin', 'config', []);
+    h += _statusLinkRow;
     h += cfgCardClose;
 
-    // Reverse proxy card
+    // External access card
     h += cfgCardOpen('cfgcol_proxy', '<i class="bi bi-diagram-3 me-1"></i>', t('proxy_section'));
-    h += renderScalarFields({ proxy_count: wa.proxy_count }, 'web_admin', 'config', []);
+    h += renderScalarFields({ port: wa.port, proxy_count: wa.proxy_count, public_url: wa.public_url, force_https: wa.force_https, force_fqdn: wa.force_fqdn }, 'web_admin', 'config', []);
     h += cfgCardClose;
 
     // Audit preferences card — audit_sort rendered with a custom select
     const _auditSortPath = 'web_admin|audit_sort';
     const auditSort = wa.audit_sort || 'time';
     const _auditHint = fieldHint(_auditSortPath);
+    const _auditHintId = _auditHint ? 'fhint_' + _auditSortPath.replace(/\W/g, '_') : '';
     const _auditInfoIcon = _auditHint
-        ? ` <i class="bi bi-info-circle text-muted" style="cursor:help;font-size:.85em"
-            data-bs-toggle="tooltip" data-bs-placement="top"
-            title="${escAttr(_auditHint)}"></i>`
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+                style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+                data-bs-toggle="collapse" data-bs-target="#${_auditHintId}"
+                aria-expanded="false" aria-controls="${_auditHintId}"><i class="bi bi-info-circle"></i></button>`
         : '';
-    const _auditResetBtn = `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0"
+    const _auditHintPanel = _auditHint
+        ? `<div class="collapse" id="${_auditHintId}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(_auditHint)}</div></div>`
+        : '';
+    const _auditResetBtn = `<button type="button" class="btn btn-sm btn-secondary"
         onclick="resetConfigField(${jsStr(_auditSortPath)})"
         data-bs-toggle="tooltip" data-bs-placement="top"
         title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
     const auditSortOpts = [['time', t('col_time')], ['event', t('col_event')], ['user', t('col_user')], ['ip', t('col_ip')]]
         .map(([v, lbl]) => `<option value="${v}" ${auditSort === v ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
+    // audit_sort_dir row
+    const _auditDirPath = 'web_admin|audit_sort_dir';
+    const auditSortDir  = wa.audit_sort_dir || 'desc';
+    const _auditDirHint = fieldHint(_auditDirPath);
+    const _auditDirHintId = _auditDirHint ? 'fhint_' + _auditDirPath.replace(/\W/g, '_') : '';
+    const _auditDirInfoIcon = _auditDirHint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+                style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+                data-bs-toggle="collapse" data-bs-target="#${_auditDirHintId}"
+                aria-expanded="false" aria-controls="${_auditDirHintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _auditDirHintPanel = _auditDirHint
+        ? `<div class="collapse" id="${_auditDirHintId}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(_auditDirHint)}</div></div>`
+        : '';
+    const _auditDirResetBtn = `<button type="button" class="btn btn-sm btn-secondary"
+        onclick="resetConfigField(${jsStr(_auditDirPath)})"
+        data-bs-toggle="tooltip" data-bs-placement="top"
+        title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
+    const auditDirOpts = [['desc', t('sort_desc')], ['asc', t('sort_asc')]]
+        .map(([v, lbl]) => `<option value="${v}" ${auditSortDir === v ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
+
     h += cfgCardOpen('cfgcol_audit', '<i class="bi bi-journal-text me-1"></i>', t('tab_audit'));
-    h += `<div class="row mb-2 align-items-center">
+    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort'))}${_auditInfoIcon}</label>
-        <div class="col-sm-8 d-flex gap-1 align-items-center">
-            <select class="form-select form-select-sm flex-grow-1"
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <select class="form-select"
                 onchange="configData.web_admin = configData.web_admin || {}; configData.web_admin.audit_sort = this.value; markDirty('config')">
                 ${auditSortOpts}
             </select>${_auditResetBtn}
-        </div>
-    </div>`;
+        </div>${_auditHintPanel}</div>
+    </div></div>`;
+    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort_dir'))}${_auditDirInfoIcon}</label>
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <select class="form-select"
+                onchange="configData.web_admin = configData.web_admin || {}; configData.web_admin.audit_sort_dir = this.value; markDirty('config'); _applyAuditSortDir(this.value)">
+                ${auditDirOpts}
+            </select>${_auditDirResetBtn}
+        </div>${_auditDirHintPanel}</div>
+    </div></div>`;
     h += cfgCardClose;
 
     // Tables card — default_page_size select + page_sizes text input
     const _psPath = 'web_admin|page_sizes';
     const _psHint = fieldHint(_psPath);
+    const _psHintId = _psHint ? 'fhint_' + _psPath.replace(/\W/g, '_') : '';
     const _psInfoIcon = _psHint
-        ? ` <i class="bi bi-info-circle text-muted" style="cursor:help;font-size:.85em"
-            data-bs-toggle="tooltip" data-bs-placement="top"
-            title="${escAttr(_psHint)}"></i>`
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+                style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+                data-bs-toggle="collapse" data-bs-target="#${_psHintId}"
+                aria-expanded="false" aria-controls="${_psHintId}"><i class="bi bi-info-circle"></i></button>`
         : '';
-    const _psResetBtn = `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0"
+    const _psHintPanel = _psHint
+        ? `<div class="collapse" id="${_psHintId}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(_psHint)}</div></div>`
+        : '';
+    const _psResetBtn = `<button type="button" class="btn btn-sm btn-secondary"
         onclick="resetConfigField(${jsStr(_psPath)})"
         data-bs-toggle="tooltip" data-bs-placement="top"
         title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
@@ -148,27 +259,38 @@ function renderConfig() {
     const psValue = escAttr((wa.page_sizes || _PAGE_SIZES).join(', '));
     h += cfgCardOpen('cfgcol_tables', '<i class="bi bi-table me-1"></i>', t('tables_section'));
     h += renderField('default_page_size', wa.default_page_size, 'web_admin|default_page_size', 'config');
-    h += `<div class="row mb-2 align-items-center">
+    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${psLabel}${_psInfoIcon}</label>
-        <div class="col-sm-8 d-flex gap-1 align-items-center">
-            <input type="text" class="form-control form-control-sm flex-grow-1"
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <input type="text" class="form-control"
                 value="${psValue}" placeholder="25, 50, 100, 200, 0"
                 onchange="updateIntArray('config','${_psPath}',this.value)">${_psResetBtn}
-        </div>
-    </div>`;
+        </div>${_psHintPanel}</div>
+    </div></div>`;
     h += cfgCardClose;
 
     c.innerHTML = h;
+    c.querySelectorAll('[data-env-locked]').forEach(row => {
+        row.querySelectorAll('input, select, textarea').forEach(el => {
+            el.disabled = true;
+            el.classList.add('opacity-75');
+        });
+    });
     initTooltips(c);
+    // Re-compute status link on any field change (public_url / force_https)
+    c.removeEventListener('change', _refreshStatusLink);
+    c.addEventListener('change', _refreshStatusLink);
     const _cfgPerms = new Set(currentUser.permissions || []);
     if (_cfgPerms.has('config_view') && !_cfgPerms.has('config_edit')) _applyReadonly(c);
+    if (_cfgSearchTerm) _filterConfig(_cfgSearchTerm);
 }
 
 async function testTelegram() {
     const tg = configData.telegram || {};
-    const token = tg.token || '';
-    const chat_id = tg.chat_id || '';
-    if (!token || !chat_id) {
+    const token = tg.token;   // null = masked/stored, '' = not set
+    const chat_id = (tg.chat_id || '').trim();
+    // null means the token is stored server-side (sensitive field); only reject '' or undefined
+    if (token === '' || token === undefined || !chat_id) {
         showToast(t('telegram_test_missing'), 'warning');
         return;
     }

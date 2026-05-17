@@ -75,7 +75,7 @@
     "action_labels": {
         "test_ssh":            "Test SSH",
         "test_ssh_tt":         "Test SSH tunnel connectivity only",
-        "test_connection":     "Test connection",
+        "test_connection":     "Test Connection",
         "test_connection_tt":  "Test the full database connection",
         "list_databases":      "List databases / buckets / indices",
         "list_databases_tt":   "Fetch the list of available databases from the server"

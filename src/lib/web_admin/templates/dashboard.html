@@ -10,7 +10,10 @@
     }
 
     .card-header[role="button"]:hover {
-        background: rgba(0, 0, 0, .03) !important
+        background: rgba(0, 0, 0, .04) !important
+    }
+    [data-bs-theme="dark"] .card-header[role="button"]:hover {
+        background: rgba(255, 255, 255, .04) !important
     }
 
     .module-card {
@@ -52,7 +55,7 @@
     }
 
     [data-bs-theme="dark"] #loading {
-        background: rgba(33, 37, 41, .85)
+        background: rgba(24, 24, 24, .9)
     }
 
     /* ── Dashboard grid ──────────────────────────────────────────── */
@@ -117,6 +120,29 @@
 <!-- Navbar -->
 {% include "partials/_navbar.html" %}
 
+<!-- Restart-pending banner -->
+<div id="restart-pending-banner" class="d-none" role="alert">
+    <div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom"
+         style="background:var(--bs-warning-bg-subtle);color:var(--bs-warning-text-emphasis);font-size:.875rem">
+        <i class="bi bi-arrow-repeat flex-shrink-0" style="font-size:1rem"></i>
+        <span id="restart-pending-msg" class="fw-medium"></span>
+    </div>
+</div>
+<!-- Page-reload banner (shown when server startup_id changes) -->
+<div id="page-reload-banner" class="d-none" role="alert">
+    <div class="d-flex align-items-center justify-content-between gap-2 px-3 py-2 border-bottom"
+         style="background:var(--bs-info-bg-subtle);color:var(--bs-info-text-emphasis);font-size:.875rem">
+        <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-arrow-clockwise flex-shrink-0" style="font-size:1rem"></i>
+            <span id="page-reload-msg" class="fw-medium"></span>
+        </div>
+        <button type="button" class="btn btn-sm btn-info py-0 flex-shrink-0"
+                onclick="location.reload()">
+            <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload }}
+        </button>
+    </div>
+</div>
+
 <!-- Main content -->
 <div class="container-fluid py-3">
     <!-- Tabs -->
@@ -171,18 +197,18 @@
             <div class="d-flex align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border"
                  style="background:var(--bs-secondary-bg);position:sticky;top:0;z-index:10">
                 <h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>{{ i18n.tab_modules }}</h6>
-                <button class="btn btn-sm btn-outline-secondary ms-auto" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
-                    <i class="bi bi-arrow-clockwise"></i>
+                <button class="btn btn-sm btn-secondary ms-auto" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_modules }}
                 </button>
                 <button class="btn btn-sm btn-success" id="btnNewModule" onclick="openNewModuleModal()" title="{{ i18n.add_module_tt }}">
                     <i class="bi bi-plus-lg me-1"></i>{{ i18n.add_module }}
                 </button>
-                <button class="btn btn-sm btn-outline-secondary d-none" id="btnUndoModules" onclick="revertModules()" title="{{ i18n.undo_modules }}">
+                <button class="btn btn-sm btn-secondary d-none" id="btnUndoModules" onclick="revertModules()" title="{{ i18n.undo_modules }}">
                     <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo_modules }}
                 </button>
                 <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()" title="{{ i18n.save_modules_tt }}">
                     <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
-                    <span class="badge bg-warning text-dark ms-1 d-none" id="badgeModulesDirty"
+                    <span class="badge text-bg-warning ms-1 d-none" id="badgeModulesDirty"
                         title="{{ i18n.unsaved_changes }}">●</span>
                 </button>
             </div>
@@ -191,18 +217,35 @@
 
         <!-- ==================== Config Tab ===================== -->
         <div class="tab-pane fade" id="tab-config">
-            <div class="d-flex align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border"
-                 style="background:var(--bs-secondary-bg);position:sticky;top:0;z-index:10">
-                <h6 class="mb-0"><i class="bi bi-gear me-2"></i>{{ i18n.tab_config }}</h6>
-                <button class="btn btn-sm btn-outline-secondary ms-auto" id="btnReloadConfig" onclick="reloadConfig()"
-                    title="{{ i18n.reload_config_title }}">
-                    <i class="bi bi-arrow-clockwise"></i>
-                </button>
-                <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()" title="{{ i18n.save_config_tt }}">
-                    <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
-                    <span class="badge bg-warning text-dark ms-1 d-none" id="badgeConfigDirty"
-                        title="{{ i18n.unsaved_changes }}">●</span>
-                </button>
+            <div style="position:sticky;top:0;z-index:10">
+                <div class="d-flex align-items-center gap-2 px-3 py-2 rounded-top-3 border"
+                     style="background:var(--bs-secondary-bg)">
+                    <h6 class="mb-0"><i class="bi bi-gear me-2"></i>{{ i18n.tab_config }}</h6>
+                    <button class="btn btn-sm btn-secondary ms-auto" id="btnReloadConfig" onclick="reloadConfig()"
+                        title="{{ i18n.reload_config_title }}">
+                        <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_config }}
+                    </button>
+                    <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()" title="{{ i18n.save_config_tt }}">
+                        <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
+                        <span class="badge text-bg-warning ms-1 d-none" id="badgeConfigDirty"
+                            title="{{ i18n.unsaved_changes }}">●</span>
+                    </button>
+                </div>
+                <div class="px-3 py-2 border border-top-0 rounded-bottom-3 mb-3"
+                     style="background:var(--bs-tertiary-bg)">
+                    <div class="input-group input-group-sm">
+                        <label class="input-group-text" for="cfgSearch">{{ i18n.config_search_label }}</label>
+                        <input type="search" id="cfgSearch" class="form-control"
+                               placeholder="{{ i18n.config_search }}"
+                               oninput="_filterConfig(this.value)">
+                        <button type="button" id="cfgSearchHintsToggle"
+                                class="btn btn-secondary active"
+                                onclick="_toggleCfgSearchHints()"
+                                title="{{ i18n.config_search_hints_tt }}">
+                            <i class="bi bi-info-circle me-1"></i>{{ i18n.config_search_hints_label }}
+                        </button>
+                    </div>
+                </div>
             </div>
             <div id="config-container"></div>
         </div>
@@ -245,10 +288,10 @@
                     <div class="card mb-3" id="sessions-panel">
                         <div class="card-header d-flex align-items-center py-2">
                             <h6 class="mb-0"><i class="bi bi-plug me-2"></i><span id="sessions-title">{{ i18n.active_sessions }}</span></h6>
-                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
-                                <i class="bi bi-arrow-clockwise"></i>
+                            <button class="btn btn-sm btn-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
+                                <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}
                             </button>
-                            <button class="btn btn-sm btn-outline-danger ms-1" onclick="invalidateAllSessions()" title="{{ i18n.close_all_sessions_tt }}">
+                            <button class="btn btn-sm btn-danger ms-1" onclick="invalidateAllSessions()" title="{{ i18n.close_all_sessions_tt }}">
                                 <i class="bi bi-x-circle me-1"></i>{{ i18n.close_all_sessions }}
                             </button>
                         </div>
@@ -257,50 +300,15 @@
                 </div>
                 <!-- Users sub-tab -->
                 <div class="tab-pane fade" id="subtab-users">
-                    <div class="card mb-3">
-                        <div class="card-header d-flex align-items-center py-2">
-                            <h6 class="mb-0"><i class="bi bi-people me-2"></i>{{ i18n.user_management }}</h6>
-                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
-                                <i class="bi bi-arrow-clockwise"></i>
-                            </button>
-                            <button class="btn btn-sm btn-success ms-1" id="btnNewUser" onclick="openNewUserModal()" title="{{ i18n.new_user_tt }}">
-                                <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_user }}
-                            </button>
-                        </div>
-                        <div class="card-body py-2" id="users-container"></div>
-                    </div>
+                    <div id="users-container"></div>
                 </div>
                 <!-- Groups sub-tab -->
                 <div class="tab-pane fade" id="subtab-groups">
-                    <div class="card mb-3">
-                        <div class="card-header d-flex align-items-center py-2">
-                            <h6 class="mb-0"><i class="bi bi-collection me-2"></i>{{ i18n.group_management }}</h6>
-                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
-                                <i class="bi bi-arrow-clockwise"></i>
-                            </button>
-                            <button class="btn btn-sm btn-success ms-1" onclick="openNewGroupModal()"
-                                id="btnNewGroup" style="display:none" title="{{ i18n.new_group_tt }}">
-                                <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_group }}
-                            </button>
-                        </div>
-                        <div class="card-body py-2" id="groups-container"></div>
-                    </div>
+                    <div id="groups-container"></div>
                 </div>
                 <!-- Roles sub-tab -->
                 <div class="tab-pane fade" id="subtab-roles">
-                    <div class="card mb-3">
-                        <div class="card-header d-flex align-items-center py-2">
-                            <h6 class="mb-0"><i class="bi bi-shield-lock me-2"></i>{{ i18n.role_management }}</h6>
-                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
-                                <i class="bi bi-arrow-clockwise"></i>
-                            </button>
-                            <button class="btn btn-sm btn-success ms-1" onclick="openNewRoleModal()"
-                                id="btnNewRole" style="display:none" title="{{ i18n.new_role_tt }}">
-                                <i class="bi bi-plus-lg me-1"></i>{{ i18n.new_role }}
-                            </button>
-                        </div>
-                        <div class="card-body py-2" id="roles-container"></div>
-                    </div>
+                    <div id="roles-container"></div>
                 </div>
             </div>
         </div>
@@ -310,25 +318,32 @@
             <div class="d-flex align-items-center mb-2 gap-2">
                 <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>{{ i18n.audit_log }}</h5>
                 <div class="ms-auto d-flex gap-1">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="renderAudit()" title="{{ i18n.refresh_tt }}">
-                        <i class="bi bi-arrow-clockwise"></i>
+                    <button class="btn btn-sm btn-secondary" onclick="renderAudit()" title="{{ i18n.refresh_tt }}">
+                        <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}
                     </button>
                     <div class="btn-group">
-                        <button class="btn btn-sm btn-outline-primary" onclick="exportAudit('csv')" title="{{ i18n.export_csv_tt }}">
-                            <i class="bi bi-filetype-csv me-1"></i>{{ i18n.export_csv }}
+                        <button type="button" class="btn btn-sm btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-download me-1"></i>{{ i18n.export }}
                         </button>
-                        <button class="btn btn-sm btn-outline-primary" onclick="exportAudit('json')" title="{{ i18n.export_json_tt }}">
-                            <i class="bi bi-filetype-json me-1"></i>{{ i18n.export_json }}
-                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><h6 class="dropdown-header py-1">{{ i18n.export }}</h6></li>
+                            <li><hr class="dropdown-divider my-0"></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportAudit('csv');return false;" title="{{ i18n.export_csv_tt }}">
+                                <i class="bi bi-filetype-csv me-2 text-success"></i>{{ i18n.export_csv }}
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportAudit('json');return false;" title="{{ i18n.export_json_tt }}">
+                                <i class="bi bi-filetype-json me-2 text-warning"></i>{{ i18n.export_json }}
+                            </a></li>
+                        </ul>
                     </div>
-                    <button class="btn btn-sm btn-outline-danger" id="btnClearAudit" onclick="confirmClearAudit()" title="{{ i18n.audit_clear_all }}">
+                    <button class="btn btn-sm btn-danger" id="btnClearAudit" onclick="confirmClearAudit()" title="{{ i18n.audit_clear_all }}">
                         <i class="bi bi-trash3"></i>
                     </button>
                 </div>
             </div>
 
             <!-- Controls bar -->
-            <div class="card card-body py-2 mb-3 bg-light">
+            <div class="card card-body py-2 mb-3 bg-body-secondary">
                 <div class="row g-2 align-items-center">
                     <div class="col-auto">
                         <div class="input-group input-group-sm">
@@ -339,7 +354,7 @@
                                 <option value="user">{{ i18n.col_user }}</option>
                                 <option value="ip">{{ i18n.col_ip }}</option>
                             </select>
-                            <button class="btn btn-outline-secondary" id="btnAuditSortDir" onclick="toggleAuditSortDir()" title="{{ i18n.sort_dir }}">
+                            <button class="btn btn-secondary" id="btnAuditSortDir" onclick="toggleAuditSortDir()" title="{{ i18n.sort_dir }}">
                                 <i class="bi bi-sort-down" id="iconAuditSortDir"></i>
                             </button>
                         </div>
@@ -357,8 +372,8 @@
                         </div>
                     </div>
                     <div class="col-auto ms-auto">
-                        <button class="btn btn-sm btn-outline-danger d-none" id="btnClearAuditFilters" onclick="clearAuditFilters()" title="{{ i18n.clear_filters_tt }}">
-                            <i class="bi bi-x-circle me-1"></i>{{ i18n.clear_filters }}
+                        <button class="btn btn-sm btn-outline-secondary" id="btnClearAuditFilters" onclick="clearAuditFilters()" title="{{ i18n.clear_filters_tt }}">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.clear_filters }}
                         </button>
                     </div>
                 </div>

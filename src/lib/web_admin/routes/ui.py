@@ -63,6 +63,12 @@ def register(app, wa):
             'groups': user_data.get('groups', []),
             'pref_lang': user_data.get('lang', ''),
             'pref_dark_mode': user_data.get('dark_mode'),
+            'restart_pending': wa._restart_pending,
+            'startup_id':      wa._startup_id,
         })
 
+    @app.route('/api/health', methods=['GET'])
+    def api_health():
+        """Lightweight unauthenticated endpoint for client-side version checks."""
+        return jsonify({'startup_id': wa._startup_id})
 

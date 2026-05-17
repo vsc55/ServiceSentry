@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """Config routes: /api/config (GET, PUT)."""
 
+import uuid
 from datetime import timedelta
 
-from flask import jsonify
+from flask import jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from ..constants import SUPPORTED_LANGS
@@ -24,6 +25,7 @@ INT_RULES = {
     'web_admin|pw_max_len':        {'min': 8,  'max': 256,   'attr': '_PW_MAX_LEN'},
     'web_admin|status_refresh_secs': {'min': 10, 'max': 3600, 'attr': '_STATUS_REFRESH_SECS'},
     'web_admin|proxy_count':          {'min': 0,  'max': 10,   'attr': '_proxy_count'},
+    'web_admin|port':                 {'min': 1,  'max': 65535, 'attr': '_WEB_PORT'},
     'web_admin|default_page_size':    {'min': 0,  'max': 200,  'attr': '_DEFAULT_PAGE_SIZE'},
 }
 
@@ -33,6 +35,8 @@ BOOL_RULES = {
     'web_admin|pw_require_digit':  '_PW_REQUIRE_DIGIT',
     'web_admin|pw_require_symbol': '_PW_REQUIRE_SYMBOL',
     'web_admin|public_status':     '_public_status',
+    'web_admin|force_https':       '_force_https',
+    'web_admin|force_fqdn':        '_force_fqdn',
 }
 
 
@@ -45,8 +49,15 @@ def register(app, wa):
     @app.route('/api/config', methods=['GET'])
     @config_view_req
     def api_get_config():
-        """Return the contents of ``config.json``."""
-        return jsonify(secret_manager.mask_sensitive(wa._read_config_file(wa._CONFIG_FILE)))
+        """Return the effective config: saved values overlaid with active env var overrides."""
+        raw = wa._read_config_file(wa._CONFIG_FILE) or {}
+        # Overlay env var values so the UI always shows what is actually in effect.
+        for path, value in wa._env_override_values.items():
+            section, field = path.split('|')
+            raw.setdefault(section, {})[field] = value
+        resp = jsonify(secret_manager.mask_sensitive(raw))
+        resp.headers['ETag'] = f'"{wa._config_version}"'
+        return resp
 
     @app.route('/api/config/schema', methods=['GET'])
     @config_view_req
@@ -69,6 +80,10 @@ def register(app, wa):
             'options': ['time', 'event', 'user', 'ip'],
             'default': 'time',
         }
+        schema['web_admin|audit_sort_dir'] = {
+            'options': ['desc', 'asc'],
+            'default': 'desc',
+        }
         schema['web_admin|status_lang'] = {
             'options': [''] + list(SUPPORTED_LANGS),
             'default': '',
@@ -81,10 +96,26 @@ def register(app, wa):
     @config_edit_req
     def api_save_config():
         """Overwrite ``config.json`` with the request body."""
+        if_match = request.headers.get('If-Match', '')
+        expected = f'"{wa._config_version}"'
+        if if_match and if_match != expected:
+            return jsonify({'error': wa._t('config_conflict')}), 412
         data, err = wa._require_json()
         if err:
             return err
-        old_data = wa._read_config_file(wa._CONFIG_FILE)
+        old_data = wa._read_config_file(wa._CONFIG_FILE) or {}
+        # Env-locked fields must not be persisted to config.json — restore the
+        # original saved values so the env var never overwrites user config.
+        for path in wa._env_locked:
+            section, field = path.split('|')
+            sec_new = data.get(section)
+            if not isinstance(sec_new, dict):
+                continue
+            sec_old = old_data.get(section)
+            if isinstance(sec_old, dict) and field in sec_old:
+                sec_new[field] = sec_old[field]
+            elif field in sec_new:
+                del sec_new[field]
         # Validate integer fields: reject with 400 if type or range is wrong.
         for path, rule in INT_RULES.items():
             section, field = path.split('|')
@@ -115,6 +146,18 @@ def register(app, wa):
                     isinstance(px, int) and not isinstance(px, bool) and
                     px < pm):
                 return jsonify({'error': wa._t('pw_max_less_than_min')}), 400
+        # Validate and normalise public_url: strip scheme and trailing slash
+        web_data = data.get('web_admin')
+        if isinstance(web_data, dict) and 'public_url' in web_data:
+            v = web_data.get('public_url', '')
+            if not isinstance(v, str):
+                return jsonify({'error': wa._t('invalid_public_url')}), 400
+            v = v.strip().rstrip('/')
+            if '://' in v:
+                v = v.split('://', 1)[1]  # auto-strip accidental scheme
+            if v and (' ' in v or '\n' in v or '\t' in v):
+                return jsonify({'error': wa._t('invalid_public_url')}), 400
+            web_data['public_url'] = v
         secret_manager.restore_sensitive(data, old_data)
         if wa._save_config_file(wa._CONFIG_FILE, data):
             # Apply web_admin.lang at runtime if changed
@@ -132,6 +175,9 @@ def register(app, wa):
             if isinstance(new_sec, bool):
                 wa._secure_cookies = new_sec
                 wa._app.config['SESSION_COOKIE_SECURE'] = new_sec
+            # Snapshot restart-required values before INT_RULES update
+            _pre_port  = wa._WEB_PORT
+            _pre_proxy = wa._proxy_count
             # Apply integer rules at runtime (values already sanitized above)
             for path, rule in INT_RULES.items():
                 section, field = path.split('|')
@@ -142,6 +188,8 @@ def register(app, wa):
                 if 'flask_cfg' in rule:
                     cfg_key, transform = rule['flask_cfg']
                     wa._app.config[cfg_key] = transform(v)
+            if wa._WEB_PORT != _pre_port or wa._proxy_count != _pre_proxy:
+                wa._restart_pending = True
             # Apply boolean policy rules at runtime
             for path, attr in BOOL_RULES.items():
                 section, field = path.split('|')
@@ -151,6 +199,10 @@ def register(app, wa):
             # Ensure pw_max_len >= pw_min_len after applying both
             if wa._PW_MAX_LEN < wa._PW_MIN_LEN:
                 wa._PW_MAX_LEN = wa._PW_MIN_LEN
+            # Apply public_url at runtime
+            new_public_url = (data.get('web_admin') or {}).get('public_url')
+            if new_public_url is not None and isinstance(new_public_url, str):
+                wa._public_url = new_public_url.strip().rstrip('/')
             # Update ProxyFix middleware to reflect current proxy_count
             if isinstance(wa._app.wsgi_app, ProxyFix):
                 wa._app.wsgi_app = wa._app.wsgi_app.app
@@ -166,5 +218,8 @@ def register(app, wa):
                 old_data, data, sensitive=wa._SENSITIVE_FIELDS,
             )
             wa._audit('config_saved', detail=changes or '')
-            return jsonify({'ok': True})
+            wa._config_version = str(uuid.uuid4())
+            resp = jsonify({'ok': True})
+            resp.headers['ETag'] = f'"{wa._config_version}"'
+            return resp
         return jsonify({'error': wa._t('save_file_error')}), 500

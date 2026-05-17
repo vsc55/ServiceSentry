@@ -56,7 +56,7 @@ jobs:
       # On Debian/Ubuntu images it must be installed explicitly.
       - name: Install Python 3 (Debian / Ubuntu)
         if: matrix.init == 'systemd'
-        run: apt-get update -qq && apt-get install -y --no-install-recommends python3
+        run: apt-get update -qq && apt-get install -y --no-install-recommends python3 python3-pip curl
 
       # Service management commands do not work inside a Docker container.
       # We replace them with no-op mocks so install / update / uninstall can
@@ -85,15 +85,6 @@ jobs:
 
       # ── install ──────────────────────────────────────────────────────────────
 
-      # data/*.json files are gitignored (they contain real credentials on the
-      # developer's machine). Create minimal empty templates so install.sh has
-      # something to copy to /etc/ServiSesentry/.
-      - name: Create template config files
-        run: |
-          printf '{"global":{"debug":false},"telegram":{"token":"","chat_id":""},"web_admin":{}}\n' > data/config.json
-          printf '{}\n' > data/modules.json
-          printf '{"admin":{"password_hash":"","role":"admin","display_name":"Admin"}}\n' > data/users.json
-
       - name: Run install.sh
         run: bash install.sh
 
@@ -101,10 +92,8 @@ jobs:
         run: |
           fail() { echo "FAIL: $1"; exit 1; }
 
-          test -f /opt/ServiSesentry/main.py      || fail "main.py not installed"
-          test -f /etc/ServiSesentry/config.json  || fail "config.json not installed"
-          test -f /etc/ServiSesentry/modules.json || fail "modules.json not installed"
-          test -d /var/lib/ServiSesentry          || fail "/var/lib/ServiSesentry not created"
+          test -f /opt/ServiSesentry/main.py || fail "main.py not installed"
+          test -d /var/lib/ServiSesentry    || fail "/var/lib/ServiSesentry not created"
 
           if [ "${{ matrix.init }}" = "systemd" ]; then
             test -f /lib/systemd/system/ServiSesentry.service     || fail "ServiSesentry.service not installed"
@@ -118,6 +107,47 @@ jobs:
           fi
 
           echo "OK: installation verified"
+
+      # ── service startup tests ─────────────────────────────────────────────────
+
+      # Install only the packages needed to start the app.
+      # Heavy optional drivers (pymssql, pymongo…) are skipped; modules with
+      # empty target lists exit immediately without making real connections.
+      - name: Install Python dependencies
+        run: python3 -m pip install --quiet flask werkzeug cryptography psutil requests
+
+      - name: Test monitoring daemon (single check, no modules)
+        run: |
+          fail() { echo "FAIL: $1"; exit 1; }
+          python3 /opt/ServiSesentry/main.py \
+            || fail "monitoring daemon exited with non-zero status"
+          echo "OK: monitoring daemon single check passed"
+
+      - name: Verify first-run config files were created
+        run: |
+          fail() { echo "FAIL: $1"; exit 1; }
+          test -f /etc/ServiSesentry/config.json  || fail "config.json not created on first run"
+          test -f /etc/ServiSesentry/modules.json || fail "modules.json not created on first run"
+          echo "OK: first-run config files verified"
+
+      - name: Test web service startup
+        run: |
+          fail() { echo "FAIL: $1"; exit 1; }
+
+          python3 /opt/ServiSesentry/main.py --web --web-host 127.0.0.1 --web-port 18080 &
+          WEB_PID=$!
+
+          # Wait up to 15 s for Flask to start accepting connections.
+          timeout 15 sh -c \
+            'until curl -sf http://127.0.0.1:18080/login >/dev/null 2>&1; do sleep 1; done' \
+            || { kill "$WEB_PID" 2>/dev/null; fail "web service did not start within 15 s"; }
+
+          curl -sf http://127.0.0.1:18080/login >/dev/null \
+            || { kill "$WEB_PID" 2>/dev/null; fail "login page returned an HTTP error"; }
+
+          kill "$WEB_PID" 2>/dev/null || true
+          wait "$WEB_PID" 2>/dev/null || true
+          echo "OK: web service started and served /login"
 
       # ── update ───────────────────────────────────────────────────────────────
 

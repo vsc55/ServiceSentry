@@ -90,10 +90,22 @@ class Monitor(ObjectBase):
             self.config_modules.read()
             if _fernet:
                 secret_manager.decrypt_all(self.config_modules.data, _fernet)
+            if not self.config_modules.is_data:
+                self.config_modules.data = {}
+                self.config_modules.save()
+
+            _raw_url = self.config.get_conf(['web_admin', 'public_url'], '').strip().rstrip('/')
+            if _raw_url:
+                _force_https = self.config.get_conf(['web_admin', 'force_https'], False)
+                _scheme = 'https://' if _force_https else 'http://'
+                self._public_url = _scheme + _raw_url
+            else:
+                self._public_url = ''
         else:
             self.config = ConfigControl(None, {})
             self.config_monitor = ConfigControl(None, {})
             self.config_modules = ConfigControl(None, {})
+            self._public_url = ''
 
     def _read_status(self):
         """ Read the status file. If the file does not exist, it will be created. """
@@ -185,7 +197,7 @@ class Monitor(ObjectBase):
         """ Send a summary message to Telegram at the end of the check. """
         if self.tg is not None:
             hostname = socket.gethostname()
-            self.tg.send_message_end(hostname)
+            self.tg.send_message_end(hostname, public_url=self._public_url)
 
     def check_status(self, status, module, module_sub_key='') -> bool:
         """ Check if the status has changed for a given module and sub-key. """

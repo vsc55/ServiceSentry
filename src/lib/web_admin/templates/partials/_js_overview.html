@@ -8,16 +8,16 @@ let _overviewTimer = null;
 function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '') {
     const intervals = [0, 10, 30, 60];
     let h = `<div class="d-flex flex-wrap align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border" style="background:var(--bs-secondary-bg)">`;
-    h += `<button class="btn btn-sm btn-outline-secondary" onclick="${renderFn}()" title="${escAttr(t('refresh_tt'))}">`;
+    h += `<button class="btn btn-sm btn-secondary" onclick="${renderFn}()" title="${escAttr(t('refresh_tt'))}">`;
     h += `<i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`;
     h += `<div class="btn-group btn-group-sm" role="group">`;
-    h += `<span class="btn btn-sm btn-outline-secondary disabled px-2">`;
+    h += `<span class="btn btn-sm btn-secondary disabled px-2">`;
     h += `<i class="bi bi-clock me-1"></i>${t('auto_refresh')}</span>`;
     for (const s of intervals) {
         const label = s === 0 ? 'OFF' : tf('auto_refresh_seconds', s);
         const activeInterval = timerGet()?._interval || 0;
         const active = (s === 0 && !timerGet()) || (s > 0 && activeInterval === s);
-        h += `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-outline-primary'}" `;
+        h += `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}" `;
         h += `onclick="${timerSet}(${s})">${label}</button>`;
     }
     h += `</div>`;
@@ -115,8 +115,8 @@ function _dwTh(wid, col, label) {
 function _dwChecksBadge(checks) {
     if (!checks || checks.total === 0) return '<span class="text-muted small">—</span>';
     if (checks.error > 0)
-        return `<span class="badge rounded-pill" style="background:rgba(239,68,68,.15);color:#dc2626;font-size:.72rem"><i class="bi bi-x-circle me-1"></i>${checks.error}</span>`;
-    return `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:#16a34a;font-size:.72rem"><i class="bi bi-check-circle me-1"></i>OK</span>`;
+        return `<span class="badge rounded-pill" style="background:rgba(239,68,68,.15);color:var(--ss-err-text,#dc2626);font-size:.72rem"><i class="bi bi-x-circle me-1"></i>${checks.error}</span>`;
+    return `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>OK</span>`;
 }
 
 function _dwBuildModuleRows(modules) {
@@ -156,7 +156,7 @@ function _dwBuildModuleRows(modules) {
                    <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
                </span>`
             : m.enabled
-                ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:#16a34a;font-size:.72rem">ON</span>`
+                ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem">ON</span>`
                 : `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">OFF</span>`;
 
         // Compute active items from modulesData to decide if check results are meaningful
@@ -190,9 +190,9 @@ function _dwBuildActivityRows(events) {
         const label = AE[e.event] || e.event;
         let bg = 'rgba(100,116,139,.12)', clr = '#64748b';
         if (e.event === 'login_failed' || e.event.includes('error') || e.event.includes('revoked') || e.event.includes('deleted'))
-            { bg = 'rgba(239,68,68,.12)'; clr = '#dc2626'; }
+            { bg = 'rgba(239,68,68,.12)'; clr = 'var(--ss-err-text,#dc2626)'; }
         else if (e.event === 'login_ok' || e.event.includes('created') || e.event.includes('saved'))
-            { bg = 'rgba(34,197,94,.12)'; clr = '#16a34a'; }
+            { bg = 'rgba(34,197,94,.12)'; clr = 'var(--ss-ok-text,#16a34a)'; }
         else if (e.event === 'logout')
             { bg = 'rgba(245,158,11,.12)'; clr = '#d97706'; }
         else if (e.event.includes('updated') || e.event.includes('changed') || e.event === 'password_reset')
@@ -242,7 +242,7 @@ function _dwToggleEdit() {
         addBar?.classList.remove('d-none');
         if (btn) {
             btn.className = 'btn btn-sm btn-warning ms-auto';
-            btn.innerHTML = `<i class="bi bi-check-lg me-1"></i>${t('dashboard_save')}`;
+            btn.innerHTML = `<i class="bi bi-x-lg me-1"></i>${t('dashboard_save')}`;
             btn.title = t('dashboard_save_tt');
         }
         _dwInitDnd(grid);
@@ -251,7 +251,7 @@ function _dwToggleEdit() {
         grid.classList.remove('dashboard-edit');
         addBar?.classList.add('d-none');
         if (btn) {
-            btn.className = 'btn btn-sm btn-outline-secondary ms-auto';
+            btn.className = 'btn btn-sm btn-secondary ms-auto';
             btn.innerHTML = `<i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}`;
             btn.title = t('dashboard_edit_tt');
         }
@@ -349,7 +349,7 @@ function _dwRefreshAddBar() {
     for (const el of hidden) {
         const def = _DW_DEFS[el.dataset.wid];
         if (!def) continue;
-        h += `<button class="btn btn-sm btn-outline-primary" onclick="_dwAdd(${jsStr(el.dataset.wid)})">
+        h += `<button class="btn btn-sm btn-primary" onclick="_dwAdd(${jsStr(el.dataset.wid)})">
             <i class="bi ${def.icon} me-1"></i>${esc(t(def.lkey))}</button>`;
     }
     bar.innerHTML = h;
@@ -370,25 +370,25 @@ function _dwToolbar(id, cols, h) {
     tb += `<span class="small text-muted text-truncate" style="max-width:8em">${esc(t(def?.lkey || id))}</span>`;
     tb += `<span class="d-flex align-items-center gap-1 ms-auto">`;
     // Width
-    tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;
+    tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;
     tb += `<span class="dw-w-lbl small fw-semibold" style="min-width:1.4em;text-align:center">${cols}</span>`;
-    tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleW(this,1)" title="${escAttr(t('widget_grow_w'))}"><i class="bi bi-chevron-right"></i></button>`;
+    tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,1)" title="${escAttr(t('widget_grow_w'))}"><i class="bi bi-chevron-right"></i></button>`;
     // Height (tables only)
     if (hasH) {
         tb += `<span class="vr mx-1"></span>`;
-        tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleH(this,-1)" title="${escAttr(t('widget_shrink_h'))}"><i class="bi bi-chevron-up"></i></button>`;
+        tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleH(this,-1)" title="${escAttr(t('widget_shrink_h'))}"><i class="bi bi-chevron-up"></i></button>`;
         tb += `<span class="dw-h-lbl small fw-semibold" style="min-width:2em;text-align:center">${_DW_H_LABELS[h] || h}</span>`;
-        tb += `<button class="btn btn-dw btn-outline-secondary" onclick="_dwCycleH(this,1)" title="${escAttr(t('widget_grow_h'))}"><i class="bi bi-chevron-down"></i></button>`;
+        tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleH(this,1)" title="${escAttr(t('widget_grow_h'))}"><i class="bi bi-chevron-down"></i></button>`;
     }
     tb += `<span class="vr mx-1"></span>`;
-    tb += `<button class="btn btn-dw btn-outline-danger" onclick="_dwRemove(this)" title="${escAttr(t('widget_hide'))}"><i class="bi bi-eye-slash"></i></button>`;
+    tb += `<button class="btn btn-dw btn-danger" onclick="_dwRemove(this)" title="${escAttr(t('widget_hide'))}"><i class="bi bi-eye-slash"></i></button>`;
     tb += `</span></div>`;
     return tb;
 }
 
 // ──────────────────────── Widget content ──────────────────────────
 function _dwStatCard(accent, avBg, avColor, icon, count, labelKey, subtitle) {
-    return `<div class="rounded-3 overflow-hidden border h-100" style="background:var(--bs-body-bg);box-shadow:0 1px 6px rgba(0,0,0,.06)">
+    return `<div class="rounded-3 overflow-hidden border h-100" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
         <div style="height:3px;background:${accent}"></div>
         <div class="p-3">
             <div class="d-flex align-items-center gap-3 mb-2">
@@ -406,7 +406,7 @@ function _dwStatCard(accent, avBg, avColor, icon, count, labelKey, subtitle) {
 }
 
 function _dwTableCard(accent, avBg, avColor, icon, title, tableHtml) {
-    return `<div class="rounded-3 overflow-hidden border h-100 d-flex flex-column" style="background:var(--bs-body-bg);box-shadow:0 1px 6px rgba(0,0,0,.06)">
+    return `<div class="rounded-3 overflow-hidden border h-100 d-flex flex-column" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
         <div style="height:3px;background:${accent};flex-shrink:0"></div>
         <div class="d-flex align-items-center gap-2 px-3 py-2 flex-shrink-0" style="background:var(--bs-secondary-bg);border-bottom:1px solid var(--bs-border-color)">
             <span class="rounded-2 d-flex align-items-center justify-content-center"
@@ -443,7 +443,7 @@ function _dwContent(id, data) {
 
         case 'modules': {
             const sub = [
-                enabled  ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:#16a34a;font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${enabled} ${t('overview_enabled')}</span>` : '',
+                enabled  ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${enabled} ${t('overview_enabled')}</span>` : '',
                 disabled ? `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">${disabled} ${t('overview_disabled')}</span>` : '',
             ].filter(Boolean).join('');
             return _dwStatCard('linear-gradient(90deg,#6366f1,#8b5cf6)', 'rgba(99,102,241,.12)', '#6366f1',
@@ -458,7 +458,7 @@ function _dwContent(id, data) {
             const avColor = noData ? 'var(--bs-secondary-color)' : err ? '#ef4444' : '#22c55e';
             const icon    = noData ? 'bi-dash-circle' : err ? 'bi-exclamation-triangle-fill' : 'bi-check-circle-fill';
             const lbl     = noData ? t('overview_no_status') : err ? tf('overview_has_errors', status.error) : t('overview_all_ok');
-            const subClr  = noData ? 'var(--bs-secondary-color)' : err ? '#ef4444' : '#16a34a';
+            const subClr  = noData ? 'var(--bs-secondary-color)' : err ? 'var(--ss-err-text,#ef4444)' : 'var(--ss-ok-text,#16a34a)';
             const sub     = `<span style="font-size:.8rem;color:${subClr}">${lbl}</span>`;
             return _dwStatCard(accent, avBg, avColor, icon, status.total, 'overview_status', sub);
         }
@@ -490,7 +490,7 @@ function _dwContent(id, data) {
 
         case 'modules_list': {
             if (!perms.has('modules_view'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--bs-body-bg)">${t('no_permission')}</div>`;
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
             const table = `<table class="table table-sm table-hover align-middle mb-0">
                 ${_dwTheadRow(
                     _dwTh('modules_list','name',t('col_module')),
@@ -506,9 +506,9 @@ function _dwContent(id, data) {
 
         case 'activity': {
             if (!isAdmin)
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--bs-body-bg)">${t('no_permission')}</div>`;
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
             if (!events.length)
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--bs-body-bg)">${t('status_empty')}</div>`;
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('status_empty')}</div>`;
             const table = `<table class="table table-sm table-hover align-middle mb-0">
                 ${_dwTheadRow(
                     _dwTh('activity','ts',t('col_time')),
@@ -543,10 +543,10 @@ async function renderOverview() {
 
     const _canEditLayout = perms.has('overview_edit');
     const ctrlBtns = _canEditLayout ? `
-        <button class="btn btn-sm btn-outline-secondary ms-auto" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
+        <button class="btn btn-sm btn-secondary ms-auto" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
             <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
-        <button class="btn btn-sm btn-outline-secondary" onclick="_dwReset()" title="${escAttr(t('dashboard_reset_tt'))}">
-            <i class="bi bi-arrow-counterclockwise"></i></button>` : '';
+        <button class="btn btn-sm btn-secondary" onclick="_dwReset()" title="${escAttr(t('dashboard_reset_tt'))}">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>${t('dashboard_reset')}</button>` : '';
 
     let h = _renderRefreshBar('overview-container', 'renderOverview',
         () => _overviewTimer, 'setOverviewAutoRefresh', ctrlBtns);
@@ -580,7 +580,7 @@ async function renderOverview() {
         grid?.classList.add('dashboard-edit');
         if (btn) {
             btn.className = 'btn btn-sm btn-warning ms-auto';
-            btn.innerHTML = `<i class="bi bi-check-lg me-1"></i>${t('dashboard_save')}`;
+            btn.innerHTML = `<i class="bi bi-x-lg me-1"></i>${t('dashboard_save')}`;
         }
         bar?.classList.remove('d-none');
         if (grid) { _dwInitDnd(grid); _dwRefreshAddBar(); }

@@ -149,7 +149,7 @@ try {
     modulesData = await apiGet('/api/modules') || {};
     applyModuleDefaults();
     _savedModulesData = deepClone(modulesData);
-    configData = await apiGet('/api/config') || {};
+    configData = await loadConfig() || {};
     _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
     const _rawPS = configData?.web_admin?.page_sizes;
     if (Array.isArray(_rawPS) && _rawPS.length > 0) {
@@ -168,6 +168,8 @@ try {
         configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
     }
     _serverConfigData = deepClone(configData);
+    if (currentUser.restart_pending) _showRestartBanner();
+    _startVersionPoll();
     renderModules();
     renderConfig();
     applyRoleRestrictions();

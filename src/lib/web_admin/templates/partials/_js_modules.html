@@ -57,7 +57,7 @@ function renderModules() {
 
         h += `<div class="rounded-3 overflow-hidden border module-card${on ? ' enabled' : ''}"
                id="card-${esc(name)}"
-               style="background:var(--bs-body-bg);box-shadow:0 2px 8px rgba(0,0,0,.06)${on ? '' : ';opacity:.65'}">
+               style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 2px 8px rgba(0,0,0,.06)${on ? '' : ';opacity:.65'}">
 
             <div style="height:3px;background:${accentGrad}"></div>
 
@@ -92,14 +92,15 @@ function renderModules() {
                                       ${on ? 'checked' : ''} disabled>
                            </div>`)
                 }
-                ${new Set(currentUser.permissions||[]).has('modules_delete') ? `<button class="btn btn-sm btn-outline-danger py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                ${new Set(currentUser.permissions||[]).has('modules_delete') ? `<button class="btn btn-sm btn-danger py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     onclick="event.stopPropagation();deleteModule(${jsStr(name)})" title="${escAttr(t('delete_tt'))}">
                     <i class="bi bi-trash3"></i>
                 </button>` : ''}
-                ${!platformUnsupported ? `<button class="btn btn-sm btn-outline-secondary py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                ${!platformUnsupported ? `<button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                    style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
                     aria-label="${escAttr(t('module_details'))}" title="${escAttr(t('module_details'))}" onclick="event.stopPropagation()">
-                    <i class="bi bi-chevron-down text-muted small"></i>
+                    <i class="bi bi-chevron-down small"></i>
                 </button>` : ''}
             </div>
 
@@ -177,7 +178,7 @@ function openNewModuleModal() {
             const _modSch = ITEM_SCHEMAS[name + '|__module__'] || null;
             const _pickerUnsupported = _modSch && _modSch['__unsupported__'] === true;
             h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
-                       style="cursor:pointer;background:var(--bs-body-bg);transition:box-shadow .15s,border-color .15s"
+                       style="cursor:pointer;background:var(--ss-surface-bg,var(--bs-body-bg));transition:box-shadow .15s,border-color .15s"
                        onclick="addModuleFromPicker(${jsStr(name)})"
                        onmouseover="this.style.boxShadow='0 4px 14px rgba(0,0,0,.13)';this.style.borderColor='${accentColor}'"
                        onmouseout="this.style.boxShadow='';this.style.borderColor=''">

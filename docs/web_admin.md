@@ -394,6 +394,9 @@ Los contadores de `status` se calculan como la suma de `checks.total/ok/error` d
 
 La ruta `/status` muestra el estado actual de todos los módulos en una página pública, sin panel de navegación ni menú de administración.
 
+> **Acceso directo:** [http://localhost:8080/status](http://localhost:8080/status)
+> (sustituye `localhost:8080` por el host y puerto de tu instalación)
+
 ![Estado de servicios](images/status_public.svg)
 
 ### Comportamiento de acceso

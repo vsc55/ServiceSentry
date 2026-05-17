@@ -23,6 +23,33 @@
             ],
         },
         {
+            "name": "🔒 Python: Web (Env Vars)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "envFile": "${workspaceFolder}/.env.dev",
+            "args": [
+                "--web"
+            ],
+            "env": {
+                // ── Valores válidos — campo bloqueado en la UI ──────────────
+                "WA_DARK_MODE": "true",
+                "WA_REMEMBER_ME_DAYS": "7",
+                "WA_LANG": "es_ES",
+                // ── Valores inválidos — warning en consola, campo NO bloqueado
+                // Descomenta para probar:
+                // "WA_AUDIT_MAX_ENTRIES": "Pepito",   // int inválido
+                // "WA_PUBLIC_STATUS": "quizas",       // bool inválido
+                // "WA_PORT": "99999",                 // int fuera de rango
+                // "WA_LANG": "klingon",               // idioma no soportado
+                // ── Credenciales primer arranque ────────────────────────────
+                "WA_USERNAME": "admin",
+                "WA_PASSWORD": "admin"
+            }
+        },
+        {
             "name": "🩺 Python: pytest (usa pytest.ini)",
             "type": "debugpy",
             "request": "launch",

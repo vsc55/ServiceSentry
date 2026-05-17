@@ -371,9 +371,39 @@ function revertModules() {
     });
 }
 async function saveConfig() {
-    const r = await apiPut('/api/config', configData);
-    if (r && r.ok) {
-        showToast(t('config_saved'));
+    // Capture which restart-required fields changed before overwriting _serverConfigData
+    const _needsRestart = [];
+    for (const path of RESTART_REQUIRED_FIELDS) {
+        const [sec, field] = path.split('|');
+        const oldVal = (_serverConfigData?.[sec] ?? {})[field];
+        const newVal = (configData?.[sec] ?? {})[field];
+        if (newVal !== undefined && oldVal !== newVal) _needsRestart.push(path);
+    }
+    let _saveResp;
+    try {
+        const _fetchResp = await fetch('/api/config', {
+            method: 'PUT',
+            headers: Object.assign(
+                { 'Content-Type': 'application/json' },
+                _configEtag ? { 'If-Match': _configEtag } : {}
+            ),
+            body: JSON.stringify(configData)
+        });
+        if (_fetchResp.status === 401) { location.href = '/login'; return; }
+        if (_fetchResp.status === 412) {
+            showToast(t('config_conflict'), 'danger');
+            return;
+        }
+        _saveResp = await _fetchResp.json();
+        if (_saveResp?.ok) _configEtag = _fetchResp.headers.get('ETag') ?? _configEtag;
+    } catch (_e) { showToast(t('connection_error'), 'danger'); return; }
+    if (_saveResp && _saveResp.ok) {
+        if (_needsRestart.length > 0) {
+            showToast(t('config_saved_restart'), 'warning');
+            _showRestartBanner();
+        } else {
+            showToast(t('config_saved'));
+        }
         clearDirty('config');
         _serverConfigData = deepClone(configData);
         const rawPS = configData?.web_admin?.page_sizes;
@@ -385,7 +415,7 @@ async function saveConfig() {
         if (configSchema['web_admin|default_page_size']) {
             configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
         }
-    } else showToast(r?.error || t('save_error'), 'danger');
+    } else showToast(_saveResp?.error || t('save_error'), 'danger');
 }
 async function reloadModules() {
     const data = await apiGet('/api/modules');
@@ -398,7 +428,7 @@ async function reloadModules() {
     showToast(t('modules_reloaded'));
 }
 async function reloadConfig() {
-    const data = await apiGet('/api/config');
+    const data = await loadConfig();
     if (!data) return;
     configData = data;
     _serverConfigData = deepClone(configData);

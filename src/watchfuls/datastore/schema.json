@@ -23,7 +23,7 @@
                 "show_when":  {"conn_type": ["ssh"]},
                 "group":      "ssh",
                 "icon":       "bi-hdd-network",
-                "variant":    "outline-secondary",
+                "variant":    "info",
                 "full_width": true,
                 "result":     "toast"
             },
@@ -32,7 +32,7 @@
                 "url":        "/api/watchfuls/datastore/test_connection",
                 "extra":      {},
                 "icon":       "bi-plug",
-                "variant":    "outline-info",
+                "variant":    "info",
                 "full_width": true,
                 "result":     "toast"
             }

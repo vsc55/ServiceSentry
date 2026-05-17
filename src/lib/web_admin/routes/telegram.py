@@ -19,8 +19,14 @@ def register(app, wa):
     def api_test_telegram():
         """Send a test message via Telegram to verify settings."""
         data = wa._optional_json()
-        token = data.get('token', '').strip()
-        chat_id = data.get('chat_id', '').strip()
+        raw_token = data.get('token')
+        # null means "use stored token" (sensitive field masked in UI)
+        if raw_token is None:
+            stored = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('telegram') or {}
+            token = (stored.get('token') or '').strip()
+        else:
+            token = (raw_token or '').strip()
+        chat_id = (data.get('chat_id') or '').strip()
         if not token or not chat_id:
             return jsonify({'error': wa._t('telegram_test_missing')}), 400
         if not _TOKEN_RE.match(token):
@@ -38,10 +44,13 @@ def register(app, wa):
                 timeout=10,
             )
             if result.status_code == 200:
+                wa._audit('telegram_test_ok')
                 return jsonify({'ok': True})
             ct = result.headers.get('content-type', '')
             body = result.json() if 'json' in ct else {}
             desc = body.get('description', f'HTTP {result.status_code}')
+            wa._audit('telegram_test_fail', detail=desc)
             return jsonify({'error': desc}), 502
         except Exception as exc:
+            wa._audit('telegram_test_fail', detail=str(exc))
             return jsonify({'error': str(exc)}), 502
