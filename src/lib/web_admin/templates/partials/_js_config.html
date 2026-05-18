@@ -81,6 +81,8 @@ function renderConfig() {
     if (!('default_page_size' in wa)) wa.default_page_size = _defaultPageSize;
     if (!('page_sizes'        in wa)) wa.page_sizes        = [..._PAGE_SIZES];
     if (!('role_modal_scrollable' in wa)) wa.role_modal_scrollable = true;
+    if (!('config_poll_secs'          in wa)) wa.config_poll_secs          = 30;
+    if (!('config_update_banner_secs' in wa)) wa.config_update_banner_secs = 8;
 
     const _cfgSectionAccent = {
         cfgcol_daemon:     'linear-gradient(90deg,#6366f1,#8b5cf6)',
@@ -90,8 +92,9 @@ function renderConfig() {
         cfgcol_pw_policy:  'linear-gradient(90deg,#ef4444,#f97316)',
         cfgcol_pub_status: 'linear-gradient(90deg,#22c55e,#4ade80)',
         cfgcol_proxy:      'linear-gradient(90deg,#8b5cf6,#a78bfa)',
-        cfgcol_audit:      'linear-gradient(90deg,#64748b,#94a3b8)',
-        cfgcol_tables:     'linear-gradient(90deg,#14b8a6,#2dd4bf)',
+        cfgcol_audit:       'linear-gradient(90deg,#64748b,#94a3b8)',
+        cfgcol_tables:      'linear-gradient(90deg,#14b8a6,#2dd4bf)',
+        cfgcol_live_update: 'linear-gradient(90deg,#06b6d4,#3b82f6)',
     };
 
     function cfgCardOpen(id, icon, title) {
@@ -115,6 +118,7 @@ function renderConfig() {
         'pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol',
         'public_status', 'status_refresh_secs', 'status_lang',
         'port', 'proxy_count', 'public_url', 'force_https', 'force_fqdn', 'audit_sort', 'audit_sort_dir', 'default_page_size', 'page_sizes',
+        'config_poll_secs', 'config_update_banner_secs',
     ];
     const order = ['daemon', 'global', 'telegram', 'web_admin'];
     const sections = Object.keys(configData).sort((a, b) => {
@@ -267,6 +271,12 @@ function renderConfig() {
                 onchange="updateIntArray('config','${_psPath}',this.value)">${_psResetBtn}
         </div>${_psHintPanel}</div>
     </div></div>`;
+    h += cfgCardClose;
+
+    // Live updates card — poll interval and auto-update banner duration
+    h += cfgCardOpen('cfgcol_live_update', '<i class="bi bi-arrow-repeat me-1"></i>', t('live_update_section'));
+    h += renderField('config_poll_secs', wa.config_poll_secs, 'web_admin|config_poll_secs', 'config');
+    h += renderField('config_update_banner_secs', wa.config_update_banner_secs, 'web_admin|config_update_banner_secs', 'config');
     h += cfgCardClose;
 
     c.innerHTML = h;

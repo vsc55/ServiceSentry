@@ -28,7 +28,7 @@ function renderSessions() {
     _sessionsPage = Math.max(1, Math.min(_sessionsPage, Math.ceil(total / ps)));
     const entries = allEntries.slice((_sessionsPage - 1) * ps, _sessionsPage * ps);
 
-    let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:.7rem">`;
+    let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:.7rem;margin-top:.75rem;margin-bottom:.75rem">`;
     for (const [sid, s] of entries) {
         const isCurrent = !!s.is_current;
         const accentColor = isCurrent ? '#22c55e' : 'var(--bs-primary)';

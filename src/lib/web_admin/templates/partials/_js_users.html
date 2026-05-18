@@ -4,6 +4,25 @@
    ================================================================ #}
 
 // ──────────────────────────── Users tab ───────────────────────────
+// User modal selection state — single source of truth for role/groups
+let _umSelectedRole   = 'none';
+let _umSelectedGroups = new Set();
+
+// Bind search inputs and event delegation once (after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('umRoleContainer')?.addEventListener('change', e => {
+        if (e.target.type === 'radio') _umSelectedRole = e.target.value;
+    });
+    document.getElementById('umGroupsContainer')?.addEventListener('change', e => {
+        if (e.target.type === 'checkbox') {
+            if (e.target.checked) _umSelectedGroups.add(e.target.value);
+            else _umSelectedGroups.delete(e.target.value);
+        }
+    });
+    document.getElementById('umRoleSearch')?.addEventListener('input', e => _umPopulateRoles(e.target.value));
+    document.getElementById('umGroupSearch')?.addEventListener('input', e => _umPopulateGroups(e.target.value));
+});
+
 let _usersPage = 1;
 let _usersPageSize = null;
 let _usersSort = 'username';
@@ -57,13 +76,13 @@ function renderUsers() {
     _usersPage = Math.max(1, Math.min(_usersPage, Math.ceil(total / ps)));
     const pageNames = names.slice((_usersPage - 1) * ps, _usersPage * ps);
 
-    let h = `<table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
-    <thead style="background:var(--bs-tertiary-bg)"><tr>
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table">
+    <thead class="ss-thead"><tr>
         ${_thSort(t('col_user'),     'username',     _usersSort, _usersSortDir, '_sortUsers')}
         ${_thSort(t('col_name'),     'display_name', _usersSort, _usersSortDir, '_sortUsers')}
         ${_thSort(t('col_role'),     'role',         _usersSort, _usersSortDir, '_sortUsers', 'text-center')}
-        ${_thSort(t('col_sessions'), 'sessions',     _usersSort, _usersSortDir, '_sortUsers', 'text-center', 'width:1%')}
-        ${showActions ? `<th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">${t('col_actions')}</th>` : ''}
+        ${_thSort(t('col_sessions'), 'sessions',     _usersSort, _usersSortDir, '_sortUsers', 'text-center ss-th-narrow')}
+        ${showActions ? `<th class="ss-th ss-th-actions">${t('col_actions')}</th>` : ''}
     </tr></thead><tbody>`;
 
     for (const uname of pageNames) {
@@ -79,45 +98,92 @@ function renderUsers() {
         const isEnabled = u.enabled !== false;
         const rowStyle = isEnabled ? '' : ' style="opacity:.55"';
         const disabledBadge = isEnabled ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
-        const toggleBtn = canEdit
-            ? `<button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-secondary' : 'btn-success'}"
-                ${isSelf ? 'disabled' : `onclick="toggleUser(${jsStr(uname)},${isEnabled})"`}
-                title="${escAttr(isEnabled ? t('disable') : t('enable'))}">
-                <i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i></button>` : '';
         const actionBtns = [
-            toggleBtn,
             canEdit   ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditUserModal(${jsStr(uname)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : '',
             canEdit   ? `<button class="btn btn-sm btn-warning py-0 px-1 me-1" onclick="openResetPasswordModal(${jsStr(uname)})" title="${escAttr(t('reset_password_tt'))}"><i class="bi bi-key"></i></button>` : '',
             canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteUser(${jsStr(uname)})" title="${escAttr(t('delete_tt'))}" ${isSelf ? 'disabled' : ''}><i class="bi bi-trash3"></i></button>` : '',
         ].join('');
 
         h += `<tr${rowStyle}>
-            <td style="white-space:nowrap">
+            <td class="text-nowrap">
                 <code>${esc(uname)}</code>
                 ${isSelf ? `<span class="badge text-bg-info fw-normal ms-1" style="font-size:.62rem">${t('you_badge')}</span>` : ''}
                 ${disabledBadge}
             </td>
             <td class="text-muted small">${esc(u.display_name || uname)}</td>
             <td class="text-center"><span class="badge ${badge}">${esc(roleLabel)}</span></td>
-            <td class="text-center" style="white-space:nowrap">${scHtml}</td>
-            ${showActions ? `<td class="text-center" style="white-space:nowrap;border-left:1px solid var(--bs-border-color)">${actionBtns}</td>` : ''}
+            <td class="text-center text-nowrap">${scHtml}</td>
+            ${showActions ? `<td class="ss-td-actions"${isEnabled ? '' : ' style="opacity:1"'}>${actionBtns}</td>` : ''}
         </tr>`;
     }
     h += `</tbody></table>`;
     const pagination = _renderPagination(total, _usersPage, _usersPageSize, '_goUsersPage', '_changeUsersPageSize');
     const _addBtn = canEdit || userPerms.has('users_add')
         ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewUserModal()" title="${escAttr(t('new_user_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_user')}</button>` : '';
-    c.innerHTML = `<div class="rounded-3 overflow-hidden border" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
-        <div style="height:3px;background:linear-gradient(90deg,#f59e0b,#f97316)"></div>
-        <div class="d-flex align-items-center gap-1 px-3 py-2" style="background:var(--ss-card-header-bg);border-bottom:1px solid var(--bs-border-color)">
+    c.innerHTML = `<div class="ss-card">
+        <div class="ss-accent ss-accent-amber"></div>
+        <div class="ss-card-header">
             <h6 class="mb-0 me-auto"><i class="bi bi-people me-2"></i>${t('user_management')}</h6>
             <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>
             ${_addBtn}
         </div>
-        <div class="px-3 py-2" style="background:var(--ss-pagination-bg);border-bottom:1px solid var(--bs-border-color)">${pagination}</div>
+        <div class="ss-card-band ss-card-band-top">${pagination}</div>
         <div>${h}</div>
-        <div class="px-3 py-2" style="background:var(--ss-pagination-bg);border-top:1px solid var(--bs-border-color)">${pagination}</div>
+        <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
     </div>`;
+}
+
+let _umSessionsSort = 'last_seen';
+let _umSessionsSortDir = 'desc';
+let _umSessionsUsername = null;
+
+function _umSortSessions(col) {
+    if (_umSessionsSort === col) _umSessionsSortDir = _umSessionsSortDir === 'asc' ? 'desc' : 'asc';
+    else { _umSessionsSort = col; _umSessionsSortDir = col === 'last_seen' ? 'desc' : 'asc'; }
+    _umRenderSessions(_umSessionsUsername);
+}
+
+function _umRenderSessions(username) {
+    _umSessionsUsername = username;
+    const group = document.getElementById('umSessionsGroup');
+    const table = document.getElementById('umSessionsTable');
+    const countEl = document.getElementById('umSessionsCount');
+    if (!group || !table) return;
+    const entries = Object.values(sessionsData).filter(s => s.username === username);
+    countEl.textContent = entries.length || '';
+    if (!entries.length) {
+        group.style.display = '';
+        table.innerHTML = `<p class="text-muted small m-2">${t('no_active_sessions')}</p>`;
+        return;
+    }
+    entries.sort((a, b) => {
+        let va, vb;
+        if (_umSessionsSort === 'ip') { va = a.ip || ''; vb = b.ip || ''; }
+        else if (_umSessionsSort === 'created') { va = a.created || ''; vb = b.created || ''; }
+        else { va = a.last_seen || ''; vb = b.last_seen || ''; }
+        return _umSessionsSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    const s = _umSessionsSort, d = _umSessionsSortDir;
+    let h = `<table class="table table-sm align-middle mb-0" style="font-size:.8rem">
+        <thead class="ss-thead"><tr>
+            ${_thSort(t('col_ip'),       'ip',       s, d, '_umSortSessions')}
+            ${_thSort(t('col_created'),  'created',  s, d, '_umSortSessions')}
+            ${_thSort(t('col_last_seen'),'last_seen', s, d, '_umSortSessions')}
+        </tr></thead><tbody>`;
+    for (const sess of entries) {
+        const created  = new Date(sess.created).toLocaleString();
+        const lastSeen = new Date(sess.last_seen).toLocaleString();
+        const cur = sess.is_current
+            ? `<span class="badge text-bg-success rounded-pill ms-1" style="font-size:.6rem">${t('current_session')}</span>` : '';
+        h += `<tr>
+            <td class="text-nowrap"><code>${esc(sess.ip)}</code>${cur}</td>
+            <td class="text-nowrap text-muted">${esc(created)}</td>
+            <td class="text-nowrap text-muted">${esc(lastSeen)}</td>
+        </tr>`;
+    }
+    h += `</tbody></table>`;
+    group.style.display = '';
+    table.innerHTML = h;
 }
 
 function openNewUserModal() {
@@ -126,12 +192,22 @@ function openNewUserModal() {
     document.getElementById('umUsername').value = '';
     document.getElementById('umUsername').disabled = false;
     document.getElementById('umDisplayName').value = '';
-    populateRoleDropdown('umRole', 'viewer');
     document.getElementById('umLang').value = '';
     document.getElementById('umPassword').value = '';
-    document.getElementById('umPasswordLabel').textContent = t('password');
-    document.getElementById('umPasswordHint').style.display = 'none';
-    populateGroupCheckboxes([]);
+    document.getElementById('umPasswordGroup').style.display = '';
+    document.getElementById('umEmail').value = '';
+    document.getElementById('umEnabledGroup').style.display = '';
+    const umEnabledNew = document.getElementById('umEnabled');
+    umEnabledNew.checked = true;
+    umEnabledNew.disabled = false;
+    document.getElementById('umSessionsGroup').style.display = 'none';
+    document.getElementById('umRoleSearch').value = '';
+    document.getElementById('umGroupSearch').value = '';
+    _umSelectedRole = 'none';
+    _umSelectedGroups = new Set();
+    _umPopulateRoles('');
+    _umPopulateGroups('');
+    bootstrap.Tab.getOrCreateInstance(document.querySelector('#userModalTabs [data-bs-target="#umTabGeneral"]')).show();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
 }
 
@@ -142,26 +218,38 @@ function openEditUserModal(username) {
     document.getElementById('umUsername').value = username;
     document.getElementById('umUsername').disabled = true;
     document.getElementById('umDisplayName').value = u.display_name || '';
-    populateRoleDropdown('umRole', u.role || 'viewer');
     document.getElementById('umLang').value = u.lang || '';
-    document.getElementById('umPassword').value = '';
-    document.getElementById('umPasswordLabel').textContent = t('new_password');
-    document.getElementById('umPasswordHint').style.display = '';
-    populateGroupCheckboxes(u.groups || []);
+    document.getElementById('umPasswordGroup').style.display = 'none';
+    document.getElementById('umEmail').value = u.email || '';
+    const isSelf = username === currentUser.username;
+    const enabledChk = document.getElementById('umEnabled');
+    enabledChk.checked = u.enabled !== false;
+    enabledChk.disabled = isSelf;
+    document.getElementById('umEnabledGroup').style.display = '';
+    _umSessionsSort = 'last_seen';
+    _umSessionsSortDir = 'desc';
+    _umRenderSessions(username);
+    document.getElementById('umRoleSearch').value = '';
+    document.getElementById('umGroupSearch').value = '';
+    _umSelectedRole = u.role || 'viewer';
+    _umSelectedGroups = new Set(u.groups || []);
+    _umPopulateRoles('');
+    _umPopulateGroups('');
+    bootstrap.Tab.getOrCreateInstance(document.querySelector('#userModalTabs [data-bs-target="#umTabGeneral"]')).show();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
 }
 
 async function saveUserModal() {
     const username = document.getElementById('umUsername').value.trim();
     const display_name = document.getElementById('umDisplayName').value.trim();
-    const role = document.getElementById('umRole').value;
+    const role = _umSelectedRole || 'none';
     const lang = document.getElementById('umLang').value;
-    const password = document.getElementById('umPassword').value;
-    const groups = Array.from(document.querySelectorAll('#umGroupsContainer input[type=checkbox]:checked')).map(cb => cb.value);
+    const groups = [..._umSelectedGroups];
     if (!username) { showToast(t('username_required'), 'warning'); return; }
     if (_editingUser) {
-        const body = { role, display_name, lang, groups };
-        if (password) body.password = password;
+        const enabled = document.getElementById('umEnabled').checked;
+        const email   = document.getElementById('umEmail').value.trim();
+        const body = { role, display_name, lang, groups, enabled, email };
         const r = await apiPut('/api/users/' + encodeURIComponent(_editingUser), body);
         if (r && r.ok) {
             showToast(t('user_updated'));
@@ -177,7 +265,7 @@ async function saveUserModal() {
                     if (!groupsData[g].members.includes(_editingUser)) groupsData[g].members.push(_editingUser);
                 }
             }
-            usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups };
+            usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email };
             if (_editingUser === currentUser.username) {
                 currentUser.role = role;
                 currentUser.display_name = display_name || _editingUser;
@@ -187,11 +275,14 @@ async function saveUserModal() {
             showToast(r?.error || t('update_error'), 'danger'); return;
         }
     } else {
+        const password = document.getElementById('umPassword').value;
         if (!password) { showToast(t('password_required'), 'warning'); return; }
-        const r = await apiPost('/api/users', { username, password, role, display_name, lang, groups });
+        const email = document.getElementById('umEmail').value.trim();
+        const enabled = document.getElementById('umEnabled').checked;
+        const r = await apiPost('/api/users', { username, password, role, display_name, lang, groups, email, enabled });
         if (r && r.status === 201) {
             showToast(t('user_created'));
-            usersData[username] = { role, display_name: display_name || username, lang, groups };
+            usersData[username] = { role, display_name: display_name || username, lang, groups, email, enabled };
             for (const g of groups) {
                 if (groupsData[g]) {
                     if (!groupsData[g].members) groupsData[g].members = [];
@@ -258,16 +349,5 @@ async function resetUserPassword() {
     }
 }
 
-async function toggleUser(username, currentEnabled) {
-    const newEnabled = !currentEnabled;
-    const r = await apiPut('/api/users/' + encodeURIComponent(username), { enabled: newEnabled });
-    if (r && r.ok) {
-        showToast(newEnabled ? t('user_enabled') : t('user_disabled'));
-        usersData[username] = { ...usersData[username], enabled: newEnabled };
-        renderUsers();
-    } else {
-        showToast(r?.error || t('update_error'), 'danger');
-    }
-}
 
 

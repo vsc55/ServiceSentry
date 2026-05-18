@@ -56,8 +56,13 @@ let _autoExpandItemPath = null;  // full pathStr of item to auto-expand after ne
 let _pendingExpandMods  = new Set(); // module names to force-expand on next renderModules()
 let _editingUser = null;    // null = new, string = editing username
 let _serverConfigData = null; // snapshot from last server load/save
-let _configEtag = null;       // ETag received from server; sent as If-Match on PUT
+let _configEtag = null;       // ETag from server (informational)
 let _savedModulesData = null; // snapshot from last modules load/save
+let _fieldVersions = {};      // {path: token} per-field version tokens from server
+let _dirtyFields = new Set(); // config field paths edited since last clean state
+let _configConflicts = {};    // {path: {server_value, server_version}} — conflict results
+let _serverChangedDirtyPaths = new Set(); // paths changed on server while we have them dirty
+let _autoupdatedFields = new Set(); // paths silently updated by background poll (shown briefly)
 const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
 const ALL_PERMISSIONS = {{ permissions_list | tojson }};
 const _rawItemSchemas = {{ item_schemas | default({}) | tojson }};
@@ -97,6 +102,8 @@ const CONFIG_FIELD_DEFAULTS = {
     'web_admin|default_page_size': 25,
     'web_admin|page_sizes':        [25, 50, 100, 200, 0],
     'web_admin|role_modal_scrollable': true,
+    'web_admin|config_poll_secs':          30,
+    'web_admin|config_update_banner_secs': 8,
 };
 
 // Field schema loaded from /api/config/schema — min, max, default per field.
@@ -351,6 +358,120 @@ function _startVersionPoll(intervalMs = 60000) {
             }
         } catch (_) { /* ignore network errors */ }
     }, intervalMs);
+    // Config field version poll — interval is read dynamically from configData each cycle.
+    _scheduleConfigPoll();
+}
+
+function _scheduleConfigPoll() {
+    const secs = configData?.web_admin?.config_poll_secs ?? 30;
+    const ms = Math.max(10, secs) * 1000;
+    setTimeout(async () => {
+        await _doConfigFieldPoll();
+        _scheduleConfigPoll();
+    }, ms);
+}
+
+async function _doConfigFieldPoll() {
+    if (!Object.keys(_fieldVersions).length && !Object.keys(configData).length) return;
+    try {
+        const r = await fetch('/api/config/versions');
+        if (!r.ok) return;
+        const { versions: serverVersions } = await r.json();
+        const changedDirty = new Set();
+        const changedNonDirty = new Set();
+        for (const [path, serverToken] of Object.entries(serverVersions || {})) {
+            if (serverToken === _fieldVersions[path]) continue;
+            if (_dirtyFields.has(path)) changedDirty.add(path);
+            else changedNonDirty.add(path);
+        }
+        if (!changedDirty.size && !changedNonDirty.size) return;
+        if (changedNonDirty.size) {
+            // Fetch full config to apply updated non-dirty field values silently.
+            const cr = await fetch('/api/config');
+            if (cr.ok) {
+                const payload = await cr.json();
+                const newCfg = (payload && typeof payload.config === 'object') ? payload.config : payload;
+                const newVer = (payload && payload.versions) || {};
+                for (const path of changedNonDirty) {
+                    const [sec, field] = path.split('|');
+                    if (newCfg[sec] && field in newCfg[sec]) {
+                        if (!configData[sec]) configData[sec] = {};
+                        configData[sec][field] = newCfg[sec][field];
+                        if (!_serverConfigData) _serverConfigData = {};
+                        if (!_serverConfigData[sec]) _serverConfigData[sec] = {};
+                        _serverConfigData[sec][field] = newCfg[sec][field];
+                    }
+                    _fieldVersions[path] = newVer[path] || serverVersions[path];
+                    _autoupdatedFields.add(path);
+                    // Auto-remove indicator after the configured duration; 0 = manual dismiss only.
+                    const _bannerSecs = configData?.web_admin?.config_update_banner_secs ?? 8;
+                    if (_bannerSecs > 0) {
+                        setTimeout(() => {
+                            _autoupdatedFields.delete(path);
+                            const el = document.querySelector(`.cfg-field-wrap[data-cfg-path="${CSS.escape(path)}"]`);
+                            if (el) {
+                                el.classList.remove('cfg-auto-updated');
+                                el.querySelector('.cfg-auto-update-bar')?.remove();
+                            }
+                        }, _bannerSecs * 1000);
+                    }
+                }
+            }
+        }
+        for (const path of changedDirty) {
+            _serverChangedDirtyPaths.add(path);
+        }
+        if (changedNonDirty.size) _showConfigUpdatedBanner(changedNonDirty.size);
+        renderConfig();
+    } catch (_) { /* ignore network errors during poll */ }
+}
+
+function _overwriteConflictField(pathStr) {
+    const serverVersion = _configConflicts[pathStr]?.server_version;
+    if (serverVersion) _fieldVersions[pathStr] = serverVersion;
+    delete _configConflicts[pathStr];
+    _serverChangedDirtyPaths.delete(pathStr);
+    _dirtyFields.add(pathStr);
+    renderConfig();
+}
+
+function _acceptServerField(pathStr) {
+    const ci = _configConflicts[pathStr];
+    if (ci && ci.server_value !== undefined) {
+        const [sec, field] = pathStr.split('|');
+        if (sec && field) {
+            if (!configData[sec]) configData[sec] = {};
+            configData[sec][field] = ci.server_value;
+        }
+    }
+    if (ci?.server_version) _fieldVersions[pathStr] = ci.server_version;
+    delete _configConflicts[pathStr];
+    _dirtyFields.delete(pathStr);
+    _serverChangedDirtyPaths.delete(pathStr);
+    if (!_dirtyFields.size && !Object.keys(_configConflicts).length) clearDirty('config');
+    else renderConfig();
+}
+
+function _dismissServerChange(pathStr) {
+    _serverChangedDirtyPaths.delete(pathStr);
+    renderConfig();
+}
+
+function _dismissAutoUpdate(pathStr) {
+    _autoupdatedFields.delete(pathStr);
+    const el = document.querySelector(`.cfg-field-wrap[data-cfg-path="${CSS.escape(pathStr)}"]`);
+    if (el) {
+        el.classList.remove('cfg-auto-updated');
+        el.querySelector('.cfg-auto-update-bar')?.remove();
+    }
+}
+
+function _showConfigUpdatedBanner(count) {
+    const banner = document.getElementById('config-updated-banner');
+    const msg    = document.getElementById('config-updated-msg');
+    if (!banner) return;
+    if (msg) msg.textContent = count === 1 ? t('config_updated_banner_one') : tf('config_updated_banner', count);
+    banner.classList.remove('d-none');
 }
 
 function _showRestartBanner() {
@@ -391,7 +512,12 @@ async function loadConfig() {
         const ct = r.headers.get('content-type') || '';
         if (!ct.includes('application/json')) { location.href = '/login'; return null; }
         _configEtag = r.headers.get('ETag');
-        return await r.json();
+        const payload = await r.json();
+        if (payload && typeof payload.config === 'object') {
+            _fieldVersions = payload.versions || {};
+            return payload.config;
+        }
+        return payload;
     } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
 }
 async function apiPut(url, data) {
@@ -438,7 +564,37 @@ function renderField(key, value, pathStr, target = 'modules') {
         ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(_hint)}</div></div>`
         : '';
     const _fhtml = _renderFieldInner(key, value, pathStr, target, _infoIcon, _hintPanel);
-    return _fhtml ? `<div class="cfg-field-wrap">${_fhtml}</div>` : _fhtml;
+    if (!_fhtml) return _fhtml;
+    let _conflictBanner = '';
+    let _wrapCls = '';
+    if (target === 'config') {
+        const _ci = _configConflicts[pathStr];
+        const _sc = _serverChangedDirtyPaths.has(pathStr);
+        const _au = _autoupdatedFields.has(pathStr);
+        if (_ci) {
+            _wrapCls = ' cfg-has-conflict';
+            const _sv = _ci.server_value;
+            const _svDisp = _sv === null ? t('secret_defined') : (_sv === undefined ? '—' : esc(String(_sv)));
+            _conflictBanner = `<div class="cfg-conflict-bar">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i>${t('cfg_conflict_msg')} <code class="ms-1">${_svDisp}</code>
+                <button class="btn btn-xs btn-warning ms-2" onclick="_overwriteConflictField(${jsStr(pathStr)})" title="${escAttr(t('cfg_overwrite'))}">${t('cfg_overwrite')}</button>
+                <button class="btn btn-xs btn-outline-secondary ms-1" onclick="_acceptServerField(${jsStr(pathStr)})" title="${escAttr(t('cfg_accept_server'))}">${t('cfg_accept_server')}</button>
+            </div>`;
+        } else if (_sc) {
+            _wrapCls = ' cfg-has-server-change';
+            _conflictBanner = `<div class="cfg-server-change-bar">
+                <i class="bi bi-info-circle me-1"></i>${t('cfg_server_changed_warn')}
+                <button class="btn btn-xs btn-outline-secondary ms-2" onclick="_dismissServerChange(${jsStr(pathStr)})">${t('dismiss')}</button>
+            </div>`;
+        } else if (_au) {
+            _wrapCls = ' cfg-auto-updated';
+            _conflictBanner = `<div class="cfg-auto-update-bar">
+                <i class="bi bi-arrow-repeat me-1"></i>${t('cfg_auto_updated')}
+                <button class="cfg-dismiss-btn ms-auto" onclick="_dismissAutoUpdate(${jsStr(pathStr)})" data-bs-toggle="tooltip" data-bs-placement="top" title="${escAttr(t('dismiss'))}">&times;</button>
+            </div>`;
+        }
+    }
+    return `<div class="cfg-field-wrap${_wrapCls}" data-cfg-path="${escAttr(pathStr)}">${_conflictBanner}${_fhtml}</div>`;
 }
 function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = '', _hintHtml = '') {
     const lbl = esc(fieldLabel(key));
@@ -1344,12 +1500,10 @@ function _renderPagination(total, page, pageSize, goFn, changeFn) {
 
 // ──────────────────── Sortable table header cell ──────────────────
 // Returns an <th> string with a sort chevron; fn is the JS sort function name.
-function _thSort(label, field, sort, dir, fn, cls, extraStyle) {
+function _thSort(label, field, sort, dir, fn, cls) {
     const isActive = sort === field;
     const icon = isActive ? (dir === 'asc' ? 'bi-sort-up' : 'bi-sort-down') : 'bi-chevron-expand';
     const iOp  = isActive ? '.7' : '.25';
-    const st   = 'font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;user-select:none;white-space:nowrap'
-               + (extraStyle ? ';' + extraStyle : '');
-    return `<th class="fw-semibold text-muted${cls ? ' ' + cls : ''}" style="${st}" onclick="${fn}('${field}')">` +
-           `${label} <i class="bi ${icon}" style="opacity:${iOp};font-size:.85em"></i></th>`;
+    return `<th class="ss-th ss-th-sort${cls ? ' ' + cls : ''}" onclick="${fn}('${field}')">` +
+           `${label} <i class="bi ${icon}" style="opacity:${iOp};font-size:.85em"></i></th>`;
 }

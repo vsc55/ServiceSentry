@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Authentication routes: /login, /logout."""
 
-from flask import redirect, render_template, request, session, url_for
+from flask import flash, redirect, render_template, request, session, url_for
 
 from ..constants import SUPPORTED_LANGS
 
@@ -38,11 +38,20 @@ def register(app, wa):
                     session['dark_mode'] = user_dm
                 wa._audit('login_ok', username, request.remote_addr)
                 return redirect(url_for('dashboard'))
-            wa._audit(
-                'login_failed', username, request.remote_addr,
-            )
-            return render_template(
-                'login.html', error=wa._t('invalid_credentials'))
+            raw = wa._users.get(username)
+            if not raw:
+                error = wa._t('invalid_credentials')
+                reason = 'user_not_found'
+            elif not raw.get('enabled', True):
+                error = wa._t('account_disabled')
+                reason = 'account_disabled'
+            else:
+                error = wa._t('invalid_credentials')
+                reason = 'invalid_credentials'
+            wa._audit('login_failed', username, request.remote_addr,
+                      detail={'reason': reason})
+            flash(error, 'danger')
+            return redirect(url_for('login'))
         return render_template('login.html')
 
     @app.route('/logout')

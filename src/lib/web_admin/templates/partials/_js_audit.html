@@ -26,6 +26,7 @@ function formatAuditDetailFull(detail) {
 
     if (typeof detail === 'object') {
         let html = '';
+        if (detail.reason)   html += `<p class="mb-1">${esc(t(detail.reason) || detail.reason)}</p>`;
         if (detail.name)     html += `<p class="mb-1"><strong>${t('col_group_name') || 'Group'}:</strong> <code>${esc(detail.name)}</code></p>`;
         if (detail.username) html += `<p class="mb-1"><strong>${t('col_user')}:</strong> ${esc(detail.username)}</p>`;
         if (detail.role)     html += `<p class="mb-1"><strong>Role:</strong> ${esc(detail.role)}</p>`;
@@ -82,7 +83,9 @@ function auditSummaryHtml(idx, detail) {
     } else if (Array.isArray(detail)) {
         label = tf('audit_n_changes', detail.length);
     } else if (typeof detail === 'object') {
-        if (detail.username) {
+        if (detail.reason) {
+            return `<span class="text-muted small">${esc(t(detail.reason) || detail.reason)}</span>`;
+        } else if (detail.username) {
             const n = Array.isArray(detail.changes) ? detail.changes.length : 0;
             label = n
                 ? esc(detail.username) + ' · ' + tf('audit_n_changes', n)
@@ -301,23 +304,21 @@ function _auditEventBadge(event) {
 
 function renderFlatAudit(entries, hideCol = null) {
     const canDelete = new Set(currentUser.permissions || []).has('audit_delete');
-    const _thBase = 'font-size:.78rem;text-transform:uppercase;letter-spacing:.05em';
-    const _thSort = _thBase + ';cursor:pointer;user-select:none;white-space:nowrap';
     const _sTh = (field, label) => {
         if (hideCol === field) return '';
         const active = _auditSort === field;
-        const iCls   = active ? (_auditSortDir === 'asc' ? 'bi-sort-up' : 'bi-sort-down') : 'bi-sort-down';
+        const iCls   = active ? (_auditSortDir === 'asc' ? 'bi-sort-up' : 'bi-sort-down') : 'bi-chevron-expand';
         const iOp    = active ? '.75' : '.2';
-        return `<th class="fw-semibold text-muted" style="${_thSort}" onclick="_sortAuditByCol('${field}')">`
-             + `${label}<i class="bi ${iCls} ms-1" style="font-size:.8rem;opacity:${iOp}"></i></th>`;
+        return `<th class="ss-th ss-th-sort" onclick="_sortAuditByCol('${field}')">`
+             + `${label} <i class="bi ${iCls}" style="font-size:.85em;opacity:${iOp}"></i></th>`;
     };
-    let h = `<table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
-    <thead style="position:sticky;top:0;z-index:1;background:var(--bs-tertiary-bg)"><tr>
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table">
+    <thead class="ss-thead-sticky"><tr>
         ${_sTh('time',  t('col_time'))}
         ${_sTh('event', t('col_event'))}
         ${_sTh('user',  t('col_user'))}
         ${_sTh('ip',    t('col_ip'))}
-        <th class="fw-semibold text-muted" style="${_thBase}">${t('col_detail')}</th>
+        <th class="ss-th">${t('col_detail')}</th>
         ${canDelete ? '<th style="width:1%"></th>' : ''}
     </tr></thead><tbody>`;
     for (const e of entries) {
@@ -462,13 +463,13 @@ function renderAuditTable() {
     const paginationBottom = _renderAuditPagination(total);
     const tableHtml = _auditGroup !== 'none' ? renderGroupedAudit(pageEntries) : renderFlatAudit(pageEntries);
     c.innerHTML = `
-    <div class="rounded-3 overflow-hidden border" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
-        <div style="height:3px;background:linear-gradient(90deg,#64748b,#475569)"></div>
-        <div class="px-3 py-2" style="background:var(--ss-pagination-bg);border-bottom:1px solid var(--bs-border-color)">
+    <div class="ss-card">
+        <div class="ss-accent ss-accent-slate"></div>
+        <div class="ss-card-band ss-card-band-top">
             ${paginationTop}
         </div>
         <div>${tableHtml}</div>
-        <div class="px-3 py-2" style="background:var(--ss-pagination-bg);border-top:1px solid var(--bs-border-color)">${paginationBottom}</div>
+        <div class="ss-card-band ss-card-band-bottom">${paginationBottom}</div>
     </div>`;
 }
 

@@ -21,7 +21,8 @@ def is_module_perm(p: str) -> bool:
     return bool(_MODULE_PERM_RE.match(p))
 
 # Valid user roles ordered by privilege (highest first).
-ROLES = ('admin', 'editor', 'viewer')
+# 'none' is a built-in role with zero permissions — user gets access only through groups.
+ROLES = ('admin', 'editor', 'viewer', 'none')
 
 # All available permission flags (granular, per-action).
 PERMISSIONS = (
@@ -83,4 +84,5 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
         'users_view', 'roles_view', 'groups_view',
         'audit_view', 'sessions_view', 'modules_view', 'checks_view', 'overview_view',
     }),
+    'none': frozenset(),
 }

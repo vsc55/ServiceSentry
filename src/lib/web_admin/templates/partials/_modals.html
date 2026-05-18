@@ -1,49 +1,91 @@
 {# New/Edit user modal #}
 <div class="modal fade" id="userModal" tabindex="-1"
-     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnUserModalOk').click();}">
-    <div class="modal-dialog modal-dialog-centered">
+     onkeydown="if(event.key==='Enter'&&document.activeElement?.type!=='search'){event.preventDefault();document.getElementById('btnUserModalOk').click();}">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="userModalTitle">{{ i18n.new_user }}</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">{{ i18n.username }}</label>
-                    <input type="text" class="form-control form-control-sm" id="umUsername" autocomplete="off">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">{{ i18n.display_name }}</label>
-                    <input type="text" class="form-control form-control-sm" id="umDisplayName">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">{{ i18n.role }}</label>
-                    <select class="form-select form-select-sm" id="umRole">
-                        {# Options are populated dynamically by populateRoleDropdown() #}
-                        <option value="viewer" selected>{{ i18n.role_viewer_desc }}</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">{{ i18n.language }}</label>
-                    <select class="form-select form-select-sm" id="umLang">
-                        <option value="">{{ i18n.system_default }}</option>
-                        {% for l in supported_langs %}
-                        <option value="{{ l }}">{{ i18n['lang_' + l] }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="mb-3" id="umPasswordGroup">
-                    <label class="form-label small fw-semibold" id="umPasswordLabel">{{ i18n.password }}</label>
-                    <input type="password" class="form-control form-control-sm" id="umPassword"
-                        autocomplete="new-password">
-                    <div class="form-text" id="umPasswordHint" style="display:none">{{ i18n.leave_empty_no_change }}
+            <div class="modal-body p-0">
+                <ul class="nav nav-tabs px-3 pt-2" id="userModalTabs">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#umTabGeneral" type="button">
+                            <i class="bi bi-person me-1"></i>{{ i18n.tab_general }}
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#umTabRole" type="button">
+                            <i class="bi bi-shield me-1"></i>{{ i18n.role }}
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#umTabGroups" type="button">
+                            <i class="bi bi-collection me-1"></i>{{ i18n.col_groups }}
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content px-3 py-3 gm-tab-content" id="userModalTabContent">
+                    <div class="tab-pane fade show active" id="umTabGeneral">
+                        <div class="row g-3 mb-2 flex-shrink-0">
+                            <div class="col-sm-6">
+                                <label class="form-label small fw-semibold">{{ i18n.username }}</label>
+                                <input type="text" class="form-control form-control-sm" id="umUsername" autocomplete="off">
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label small fw-semibold">{{ i18n.display_name }}</label>
+                                <input type="text" class="form-control form-control-sm" id="umDisplayName">
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-2 flex-shrink-0">
+                            <div class="col-sm-6">
+                                <label class="form-label small fw-semibold">{{ i18n.language }}</label>
+                                <select class="form-select form-select-sm" id="umLang">
+                                    <option value="">{{ i18n.system_default }}</option>
+                                    {% for l in supported_langs %}
+                                    <option value="{{ l }}">{{ i18n['lang_' + l] }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label small fw-semibold">{{ i18n.email }}</label>
+                                <input type="email" class="form-control form-control-sm" id="umEmail" autocomplete="off">
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-2 flex-shrink-0" id="umPasswordGroup">
+                            <div class="col-sm-6">
+                                <label class="form-label small fw-semibold">{{ i18n.password }}</label>
+                                <input type="password" class="form-control form-control-sm" id="umPassword" autocomplete="new-password">
+                            </div>
+                        </div>
+                        <div class="mb-2 flex-shrink-0" id="umEnabledGroup" style="display:none">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="umEnabled">
+                                <label class="form-check-label small fw-semibold" for="umEnabled">{{ i18n.user_enabled }}</label>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-column flex-grow-1" id="umSessionsGroup" style="display:none">
+                            <label class="form-label small fw-semibold flex-shrink-0">
+                                <i class="bi bi-plug me-1"></i>{{ i18n.active_sessions }}
+                                <span id="umSessionsCount" class="badge bg-secondary fw-normal ms-1"></span>
+                            </label>
+                            <div id="umSessionsTable" class="flex-grow-1"
+                                style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem"></div>
+                        </div>
                     </div>
-                </div>
-                <div class="mb-2" id="umGroupsGroup">
-                    <label class="form-label small fw-semibold">{{ i18n.col_groups }}</label>
-                    <div id="umGroupsContainer" class="border rounded p-2" style="max-height:120px;overflow-y:auto;">
-                        {# Populated dynamically by populateGroupCheckboxes() #}
-                        <p class="text-muted small mb-0">{{ i18n.no_groups }}</p>
+                    <div class="tab-pane fade" id="umTabRole">
+                        <input type="search" class="form-control form-control-sm mb-2 flex-shrink-0" id="umRoleSearch"
+                            placeholder="{{ i18n.config_search }}">
+                        <div id="umRoleContainer" class="flex-grow-1"
+                            style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:6px 10px">
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="umTabGroups">
+                        <input type="search" class="form-control form-control-sm mb-2 flex-shrink-0" id="umGroupSearch"
+                            placeholder="{{ i18n.config_search }}">
+                        <div id="umGroupsContainer" class="flex-grow-1"
+                            style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:6px 10px">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -327,35 +369,62 @@
                 <h6 class="modal-title" id="groupModalTitle">{{ i18n.new_group }}</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
-            <div class="modal-body">
-                <div class="row g-3 mb-3">
-                    <div class="col-sm-5">
-                        <label class="form-label small fw-semibold">{{ i18n.group_name }}</label>
-                        <input type="text" class="form-control form-control-sm" id="gmName" autocomplete="off"
-                            placeholder="e.g. ops_team">
+            <div class="modal-body p-0">
+                <ul class="nav nav-tabs px-3 pt-2" id="groupModalTabs">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#gmTabGeneral" type="button">
+                            <i class="bi bi-info-circle me-1"></i>{{ i18n.tab_general }}
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#gmTabRoles" type="button">
+                            <i class="bi bi-shield me-1"></i>{{ i18n.group_roles }}
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#gmTabMembers" type="button">
+                            <i class="bi bi-people me-1"></i>{{ i18n.col_group_members }}
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content px-3 py-3 gm-tab-content" id="groupModalTabContent">
+                    <div class="tab-pane fade show active" id="gmTabGeneral">
+                        <div class="row g-3 mb-2 flex-shrink-0">
+                            <div class="col-sm-5">
+                                <label class="form-label small fw-semibold">{{ i18n.group_name }}</label>
+                                <input type="text" class="form-control form-control-sm" id="gmName" autocomplete="off"
+                                    placeholder="e.g. ops_team">
+                            </div>
+                            <div class="col-sm-7">
+                                <label class="form-label small fw-semibold">{{ i18n.group_label }}</label>
+                                <input type="text" class="form-control form-control-sm" id="gmLabel" autocomplete="off"
+                                    placeholder="e.g. Operations Team">
+                            </div>
+                        </div>
+                        <div class="mb-2 flex-shrink-0" id="gmEnabledGroup" style="display:none">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="gmEnabled">
+                                <label class="form-check-label small fw-semibold" for="gmEnabled">{{ i18n.group_enabled_label }}</label>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-column flex-grow-1 mb-1">
+                            <label class="form-label small fw-semibold flex-shrink-0">{{ i18n.group_description }}</label>
+                            <textarea class="form-control form-control-sm flex-grow-1" id="gmDescription"
+                                style="resize:none" placeholder="{{ i18n.group_description }}"></textarea>
+                        </div>
                     </div>
-                    <div class="col-sm-7">
-                        <label class="form-label small fw-semibold">{{ i18n.group_label }}</label>
-                        <input type="text" class="form-control form-control-sm" id="gmLabel" autocomplete="off"
-                            placeholder="e.g. Operations Team">
+                    <div class="tab-pane fade" id="gmTabRoles">
+                        <input type="search" class="form-control form-control-sm mb-2 flex-shrink-0" id="gmRoleSearch"
+                            placeholder="{{ i18n.config_search }}">
+                        <div id="groupRolesGrid" class="flex-grow-1"
+                            style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:6px 10px">
+                        </div>
                     </div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">{{ i18n.group_description }}</label>
-                    <input type="text" class="form-control form-control-sm" id="gmDescription" autocomplete="off"
-                        placeholder="{{ i18n.group_description }}">
-                </div>
-                <div class="row g-3">
-                    <div class="col-md-5">
-                        <label class="form-label small fw-semibold">{{ i18n.group_roles }}</label>
-                        <div id="groupRolesGrid" class="mt-1"></div>
-                    </div>
-                    <div class="col-md-7">
-                        <label class="form-label small fw-semibold">{{ i18n.col_group_members }}</label>
-                        <input type="search" class="form-control form-control-sm mt-1 mb-2"
-                            id="gmMemberSearch" placeholder="{{ i18n.group_members_search }}">
-                        <div id="groupMembersGrid"
-                            style="max-height:180px;overflow-y:auto;border:1px solid #dee2e6;border-radius:4px;padding:6px 10px">
+                    <div class="tab-pane fade" id="gmTabMembers">
+                        <input type="search" class="form-control form-control-sm mb-2 flex-shrink-0" id="gmMemberSearch"
+                            placeholder="{{ i18n.group_members_search }}">
+                        <div id="groupMembersGrid" class="flex-grow-1"
+                            style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:6px 10px">
                         </div>
                     </div>
                 </div>
@@ -373,29 +442,21 @@
 {# New/Edit role modal #}
 <div class="modal fade" id="roleModal" tabindex="-1"
      onkeydown="if(event.key==='Enter'&&event.target.type!=='search'){event.preventDefault();document.getElementById('btnRoleModalOk').click();}">
-    <div class="modal-dialog modal-dialog-centered modal-xl" id="roleModalDialog">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="roleModalTitle">{{ i18n.new_role }}</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
-            <div class="modal-body" id="roleModalBody">
-                <div class="row g-3 mb-3 flex-shrink-0">
-                    <div class="col-sm-5">
-                        <label class="form-label small fw-semibold">{{ i18n.role_name }}</label>
-                        <input type="text" class="form-control form-control-sm" id="rmName" autocomplete="off"
-                            placeholder="e.g. ops_viewer">
-                    </div>
-                    <div class="col-sm-7">
-                        <label class="form-label small fw-semibold">{{ i18n.role_label }}</label>
-                        <input type="text" class="form-control form-control-sm" id="rmLabel" autocomplete="off"
-                            placeholder="e.g. Operations Viewer">
-                    </div>
-                </div>
-                {# Sub-tabs #}
-                <ul class="nav nav-tabs mb-3 flex-shrink-0" id="roleModalTabs">
+            <div class="modal-body p-0">
+                <ul class="nav nav-tabs px-3 pt-2" id="roleModalTabs">
                     <li class="nav-item">
-                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#rmTabPerms" type="button">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#rmTabGeneral" type="button">
+                            <i class="bi bi-info-circle me-1"></i>{{ i18n.tab_general }}
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#rmTabPerms" type="button">
                             <i class="bi bi-shield-check me-1"></i>{{ i18n.role_tab_permissions }}
                         </button>
                     </li>
@@ -405,28 +466,54 @@
                         </button>
                     </li>
                 </ul>
-                <div class="tab-content" id="roleModalTabContent">
+                <div class="tab-content px-3 py-3 gm-tab-content" id="roleModalTabContent">
+                    {# General tab #}
+                    <div class="tab-pane fade show active" id="rmTabGeneral">
+                        <div class="row g-3 mb-2 flex-shrink-0">
+                            <div class="col-sm-5">
+                                <label class="form-label small fw-semibold">{{ i18n.role_name }}</label>
+                                <input type="text" class="form-control form-control-sm" id="rmName" autocomplete="off"
+                                    placeholder="e.g. ops_viewer">
+                            </div>
+                            <div class="col-sm-7">
+                                <label class="form-label small fw-semibold">{{ i18n.role_label }}</label>
+                                <input type="text" class="form-control form-control-sm" id="rmLabel" autocomplete="off"
+                                    placeholder="e.g. Operations Viewer">
+                            </div>
+                        </div>
+                        <div class="mb-2 flex-shrink-0" id="rmEnabledGroup" style="display:none">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="rmEnabled">
+                                <label class="form-check-label small fw-semibold" for="rmEnabled">{{ i18n.role_enabled_label }}</label>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-column flex-grow-1 mb-1">
+                            <label class="form-label small fw-semibold flex-shrink-0">{{ i18n.role_description }}</label>
+                            <textarea class="form-control form-control-sm flex-grow-1" id="rmDescription"
+                                style="resize:none" autocomplete="off"></textarea>
+                        </div>
+                    </div>
                     {# Permissions tab — accordion built dynamically by _buildPermsAccordion() in _js_roles.html #}
-                    <div class="tab-pane fade show active" id="rmTabPerms">
-                        <div id="rolePermissionsGrid"></div>
+                    <div class="tab-pane fade" id="rmTabPerms">
+                        <div id="rolePermissionsGrid" class="flex-grow-1" style="overflow-y:auto;min-height:0"></div>
                     </div>
                     {# Assignments tab #}
                     <div class="tab-pane fade" id="rmTabAssign">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="form-label small fw-semibold">{{ i18n.role_assign_users }}</label>
-                                <input type="search" class="form-control form-control-sm mt-1 mb-2"
+                        <div class="row g-3 flex-grow-1" style="min-height:0">
+                            <div class="col-md-6 d-flex flex-column" style="min-height:0">
+                                <label class="form-label small fw-semibold flex-shrink-0">{{ i18n.role_assign_users }}</label>
+                                <input type="search" class="form-control form-control-sm mb-2 flex-shrink-0"
                                     id="rmUserSearch" placeholder="{{ i18n.group_members_search }}">
-                                <div id="rmUsersGrid"
-                                    style="max-height:220px;overflow-y:auto;border:1px solid #dee2e6;border-radius:4px;padding:6px 10px">
+                                <div id="rmUsersGrid" class="flex-grow-1"
+                                    style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:6px 10px">
                                 </div>
                             </div>
-                            <div class="col-md-6">
-                                <label class="form-label small fw-semibold">{{ i18n.role_assign_groups }}</label>
-                                <input type="search" class="form-control form-control-sm mt-1 mb-2"
+                            <div class="col-md-6 d-flex flex-column" style="min-height:0">
+                                <label class="form-label small fw-semibold flex-shrink-0">{{ i18n.role_assign_groups }}</label>
+                                <input type="search" class="form-control form-control-sm mb-2 flex-shrink-0"
                                     id="rmGroupSearch" placeholder="{{ i18n.group_members_search }}">
-                                <div id="rmGroupsGrid"
-                                    style="max-height:220px;overflow-y:auto;border:1px solid #dee2e6;border-radius:4px;padding:6px 10px">
+                                <div id="rmGroupsGrid" class="flex-grow-1"
+                                    style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:6px 10px">
                                 </div>
                             </div>
                         </div>

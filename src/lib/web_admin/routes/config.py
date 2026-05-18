@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Config routes: /api/config (GET, PUT)."""
+"""Config routes: /api/config (GET, PUT) with per-field version tracking."""
 
+import copy
 import uuid
 from datetime import timedelta
 
-from flask import jsonify, request
+from flask import jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from ..constants import SUPPORTED_LANGS
@@ -26,7 +27,9 @@ INT_RULES = {
     'web_admin|status_refresh_secs': {'min': 10, 'max': 3600, 'attr': '_STATUS_REFRESH_SECS'},
     'web_admin|proxy_count':          {'min': 0,  'max': 10,   'attr': '_proxy_count'},
     'web_admin|port':                 {'min': 1,  'max': 65535, 'attr': '_WEB_PORT'},
-    'web_admin|default_page_size':    {'min': 0,  'max': 200,  'attr': '_DEFAULT_PAGE_SIZE'},
+    'web_admin|default_page_size':       {'min': 0,  'max': 200,  'attr': '_DEFAULT_PAGE_SIZE'},
+    'web_admin|config_poll_secs':         {'min': 10, 'max': 300,  'attr': '_CONFIG_POLL_SECS'},
+    'web_admin|config_update_banner_secs':{'min': 0,  'max': 60,   'attr': '_CONFIG_BANNER_SECS'},
 }
 
 # Boolean config fields in web_admin that are synced to wa instance attributes.
@@ -41,6 +44,14 @@ BOOL_RULES = {
 
 
 def register(app, wa):
+    # Per-field version tokens: {path_str: uuid} updated each time a field is saved.
+    if not hasattr(wa, '_field_versions'):
+        wa._field_versions = {}
+    if not hasattr(wa, '_CONFIG_POLL_SECS'):
+        wa._CONFIG_POLL_SECS = 30
+    if not hasattr(wa, '_CONFIG_BANNER_SECS'):
+        wa._CONFIG_BANNER_SECS = 8
+
     config_view_req = wa._perm_required('config_view', 'config_edit')
     config_edit_req = wa._perm_required('config_edit')
 
@@ -49,15 +60,24 @@ def register(app, wa):
     @app.route('/api/config', methods=['GET'])
     @config_view_req
     def api_get_config():
-        """Return the effective config: saved values overlaid with active env var overrides."""
+        """Return the effective config and per-field version tokens."""
         raw = wa._read_config_file(wa._CONFIG_FILE) or {}
         # Overlay env var values so the UI always shows what is actually in effect.
         for path, value in wa._env_override_values.items():
             section, field = path.split('|')
             raw.setdefault(section, {})[field] = value
-        resp = jsonify(secret_manager.mask_sensitive(raw))
+        resp = jsonify({
+            'config': secret_manager.mask_sensitive(raw),
+            'versions': dict(wa._field_versions),
+        })
         resp.headers['ETag'] = f'"{wa._config_version}"'
         return resp
+
+    @app.route('/api/config/versions', methods=['GET'])
+    @config_view_req
+    def api_get_config_versions():
+        """Lightweight poll endpoint — returns only per-field version tokens."""
+        return jsonify({'versions': dict(wa._field_versions)})
 
     @app.route('/api/config/schema', methods=['GET'])
     @config_view_req
@@ -95,20 +115,64 @@ def register(app, wa):
     @app.route('/api/config', methods=['PUT'])
     @config_edit_req
     def api_save_config():
-        """Overwrite ``config.json`` with the request body."""
-        if_match = request.headers.get('If-Match', '')
-        expected = f'"{wa._config_version}"'
-        if if_match and if_match != expected:
-            return jsonify({'error': wa._t('config_conflict')}), 412
+        """Partial versioned save: only write fields that were actually edited.
+
+        Request body: ``{"fields": {"section|field": {"value": ..., "version": "uuid"}}}``
+
+        Each field is checked against its stored version token. If the token
+        matches (or the field has no stored version yet), the field is saved.
+        Mismatches are returned as conflicts with the server's current value.
+        """
         data, err = wa._require_json()
         if err:
             return err
+
+        fields = data.get('fields')
+        if not isinstance(fields, dict) or not fields:
+            return jsonify({'error': wa._t('save_file_error')}), 400
+
         old_data = wa._read_config_file(wa._CONFIG_FILE) or {}
-        # Env-locked fields must not be persisted to config.json — restore the
-        # original saved values so the env var never overwrites user config.
+
+        # Separate fields to apply from conflicts.
+        to_apply = {}   # path -> new value
+        conflicts = {}  # path -> {server_value, server_version}
+
+        for path, info in fields.items():
+            if not isinstance(info, dict) or 'value' not in info:
+                continue
+            submitted_version = info.get('version')
+            current_version = wa._field_versions.get(path)
+            # No stored version yet means this field was never written by the new
+            # system — always allow (first save after upgrade).
+            if current_version is None or submitted_version == current_version:
+                to_apply[path] = info['value']
+            else:
+                parts = path.split('|', 1)
+                section, field = parts[0], parts[1] if len(parts) > 1 else None
+                server_val = (old_data.get(section) or {}).get(field) if field else None
+                conflicts[path] = {
+                    'server_value': server_val,
+                    'server_version': current_version,
+                }
+
+        if not to_apply:
+            # All fields conflicted — nothing to write.
+            return jsonify({'ok': False, 'saved': [], 'conflicts': conflicts, 'versions': {}})
+
+        # Build merged config: current saved + fields to apply.
+        new_data = copy.deepcopy(old_data)
+        for path, value in to_apply.items():
+            parts = path.split('|', 1)
+            section, field = parts[0], parts[1] if len(parts) > 1 else None
+            if field:
+                new_data.setdefault(section, {})[field] = value
+            else:
+                new_data[section] = value
+
+        # Env-locked fields must not be persisted — restore original saved values.
         for path in wa._env_locked:
             section, field = path.split('|')
-            sec_new = data.get(section)
+            sec_new = new_data.get(section)
             if not isinstance(sec_new, dict):
                 continue
             sec_old = old_data.get(section)
@@ -116,10 +180,11 @@ def register(app, wa):
                 sec_new[field] = sec_old[field]
             elif field in sec_new:
                 del sec_new[field]
-        # Validate integer fields: reject with 400 if type or range is wrong.
+
+        # Validate integer fields.
         for path, rule in INT_RULES.items():
             section, field = path.split('|')
-            sec_data = data.get(section)
+            sec_data = new_data.get(section)
             if not isinstance(sec_data, dict) or field not in sec_data:
                 continue
             v = sec_data[field]
@@ -128,8 +193,9 @@ def register(app, wa):
                 return jsonify({'error': wa._t(
                     'invalid_config_int', field, rule['min'], rule['max'],
                 )}), 400
-        # Validate page_sizes: must be a list of non-negative integers.
-        web_data = data.get('web_admin')
+
+        # Validate page_sizes.
+        web_data = new_data.get('web_admin')
         if isinstance(web_data, dict) and 'page_sizes' in web_data:
             raw_ps = web_data['page_sizes']
             if not isinstance(raw_ps, list) or len(raw_ps) == 0:
@@ -137,8 +203,9 @@ def register(app, wa):
             for v in raw_ps:
                 if not (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
                     return jsonify({'error': wa._t('invalid_page_sizes')}), 400
-        # Reject pw_max_len < pw_min_len explicitly.
-        web_data = data.get('web_admin')
+
+        # Reject pw_max_len < pw_min_len.
+        web_data = new_data.get('web_admin')
         if isinstance(web_data, dict):
             pm = web_data.get('pw_min_len')
             px = web_data.get('pw_max_len')
@@ -146,42 +213,42 @@ def register(app, wa):
                     isinstance(px, int) and not isinstance(px, bool) and
                     px < pm):
                 return jsonify({'error': wa._t('pw_max_less_than_min')}), 400
-        # Validate and normalise public_url: strip scheme and trailing slash
-        web_data = data.get('web_admin')
+
+        # Validate and normalise public_url.
+        web_data = new_data.get('web_admin')
         if isinstance(web_data, dict) and 'public_url' in web_data:
             v = web_data.get('public_url', '')
             if not isinstance(v, str):
                 return jsonify({'error': wa._t('invalid_public_url')}), 400
             v = v.strip().rstrip('/')
             if '://' in v:
-                v = v.split('://', 1)[1]  # auto-strip accidental scheme
+                v = v.split('://', 1)[1]
             if v and (' ' in v or '\n' in v or '\t' in v):
                 return jsonify({'error': wa._t('invalid_public_url')}), 400
             web_data['public_url'] = v
-        secret_manager.restore_sensitive(data, old_data)
-        if wa._save_config_file(wa._CONFIG_FILE, data):
+
+        secret_manager.restore_sensitive(new_data, old_data)
+
+        if wa._save_config_file(wa._CONFIG_FILE, new_data):
             # Apply web_admin.lang at runtime if changed
-            new_lang = (data.get('web_admin') or {}).get('lang', '')
+            new_lang = (new_data.get('web_admin') or {}).get('lang', '')
             if new_lang and new_lang in SUPPORTED_LANGS:
                 wa._default_lang = new_lang
-            # Apply web_admin.status_lang at runtime if changed
-            new_status_lang = (data.get('web_admin') or {}).get('status_lang', '')
+            new_status_lang = (new_data.get('web_admin') or {}).get('status_lang', '')
             if isinstance(new_status_lang, str):
                 wa._STATUS_LANG = new_status_lang if new_status_lang in SUPPORTED_LANGS else ''
-            new_dm = (data.get('web_admin') or {}).get('dark_mode')
+            new_dm = (new_data.get('web_admin') or {}).get('dark_mode')
             if isinstance(new_dm, bool):
                 wa._default_dark_mode = new_dm
-            new_sec = (data.get('web_admin') or {}).get('secure_cookies')
+            new_sec = (new_data.get('web_admin') or {}).get('secure_cookies')
             if isinstance(new_sec, bool):
                 wa._secure_cookies = new_sec
                 wa._app.config['SESSION_COOKIE_SECURE'] = new_sec
-            # Snapshot restart-required values before INT_RULES update
             _pre_port  = wa._WEB_PORT
             _pre_proxy = wa._proxy_count
-            # Apply integer rules at runtime (values already sanitized above)
             for path, rule in INT_RULES.items():
                 section, field = path.split('|')
-                v = (data.get(section) or {}).get(field)
+                v = (new_data.get(section) or {}).get(field)
                 if not (isinstance(v, int) and not isinstance(v, bool)):
                     continue
                 setattr(wa, rule['attr'], v)
@@ -190,20 +257,16 @@ def register(app, wa):
                     wa._app.config[cfg_key] = transform(v)
             if wa._WEB_PORT != _pre_port or wa._proxy_count != _pre_proxy:
                 wa._restart_pending = True
-            # Apply boolean policy rules at runtime
             for path, attr in BOOL_RULES.items():
                 section, field = path.split('|')
-                v = (data.get(section) or {}).get(field)
+                v = (new_data.get(section) or {}).get(field)
                 if isinstance(v, bool):
                     setattr(wa, attr, v)
-            # Ensure pw_max_len >= pw_min_len after applying both
             if wa._PW_MAX_LEN < wa._PW_MIN_LEN:
                 wa._PW_MAX_LEN = wa._PW_MIN_LEN
-            # Apply public_url at runtime
-            new_public_url = (data.get('web_admin') or {}).get('public_url')
+            new_public_url = (new_data.get('web_admin') or {}).get('public_url')
             if new_public_url is not None and isinstance(new_public_url, str):
                 wa._public_url = new_public_url.strip().rstrip('/')
-            # Update ProxyFix middleware to reflect current proxy_count
             if isinstance(wa._app.wsgi_app, ProxyFix):
                 wa._app.wsgi_app = wa._app.wsgi_app.app
             if wa._proxy_count > 0:
@@ -214,12 +277,23 @@ def register(app, wa):
                     x_host=wa._proxy_count,
                     x_prefix=wa._proxy_count,
                 )
-            changes = wa._diff_dicts(
-                old_data, data, sensitive=wa._SENSITIVE_FIELDS,
-            )
+            changes = wa._diff_dicts(old_data, new_data, sensitive=wa._SENSITIVE_FIELDS)
             wa._audit('config_saved', detail=changes or '')
             wa._config_version = str(uuid.uuid4())
-            resp = jsonify({'ok': True})
+
+            # Update per-field version tokens for every saved field.
+            new_token = str(uuid.uuid4())
+            for path in to_apply:
+                wa._field_versions[path] = new_token
+            saved_versions = {p: new_token for p in to_apply}
+
+            resp = jsonify({
+                'ok': len(conflicts) == 0,
+                'saved': list(to_apply.keys()),
+                'conflicts': conflicts,
+                'versions': saved_versions,
+            })
             resp.headers['ETag'] = f'"{wa._config_version}"'
             return resp
+
         return jsonify({'error': wa._t('save_file_error')}), 500

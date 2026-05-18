@@ -64,11 +64,11 @@ def register(app, wa):
             return jsonify({'error': wa._t('description_too_long', wa._MAX_GROUP_DESC_LEN)}), 400
         if name in wa._groups:
             return jsonify({'error': wa._t('group_already_exists', name)}), 409
-        wa._groups[name] = {
-            'label': label,
-            'description': description,
-            'roles': roles,
-        }
+        enabled = bool(data.get('enabled', True))
+        group_data: dict = {'label': label, 'description': description, 'roles': roles}
+        if not enabled:
+            group_data['enabled'] = False
+        wa._groups[name] = group_data
         wa._persist_groups()
         wa._audit('group_created', detail={
             'name': name, 'label': label, 'roles': roles,

@@ -117,6 +117,14 @@ document.getElementById('btn-tab-overview')?.addEventListener('shown.bs.tab', re
 document.getElementById('mainTabs')?.addEventListener('shown.bs.tab', e => {
     localStorage.setItem('ss_active_tab', e.target.dataset.bsTarget);
 });
+// Clear auto-update field indicators when navigating away from the config tab.
+document.getElementById('btn-tab-config')?.addEventListener('hide.bs.tab', () => {
+    _autoupdatedFields.clear();
+    document.querySelectorAll('.cfg-field-wrap.cfg-auto-updated').forEach(el => {
+        el.classList.remove('cfg-auto-updated');
+        el.querySelector('.cfg-auto-update-bar')?.remove();
+    });
+});
 // Warn when leaving a tab that has unsaved changes
 document.getElementById('mainTabs')?.addEventListener('hide.bs.tab', e => {
     const leaving = e.target?.dataset?.bsTarget;

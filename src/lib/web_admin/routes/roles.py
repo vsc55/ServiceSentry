@@ -25,12 +25,14 @@ def register(app, wa):
                 'builtin': True,
                 'label': wa._builtin_role_labels.get(r, r.title()),
                 'permissions': list(BUILTIN_ROLE_PERMISSIONS[r]),
+                'description': wa._t(f'builtin_role_desc_{r}'),
             }
         for name, rdata in wa._custom_roles.items():
             all_roles[name] = {
                 'builtin': False,
                 'label': rdata.get('label', name),
                 'permissions': rdata.get('permissions', []),
+                'description': rdata.get('description', ''),
                 'enabled': rdata.get('enabled', True),
             }
         return jsonify(all_roles)
@@ -42,8 +44,9 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
-        name = data.get('name', '').strip().lower().replace(' ', '_')
+        name  = data.get('name', '').strip().lower().replace(' ', '_')
         label = data.get('label', '').strip() or name
+        description = data.get('description', '').strip()
         perms = [p for p in data.get('permissions', []) if p in PERMISSIONS or is_module_perm(p)]
         if not name:
             return jsonify({'error': wa._t('role_name_required')}), 400
@@ -55,7 +58,11 @@ def register(app, wa):
             return jsonify({'error': wa._t('label_too_long', wa._MAX_ROLE_LABEL_LEN)}), 400
         if name in ROLES or name in wa._custom_roles:
             return jsonify({'error': wa._t('role_already_exists', name)}), 409
-        wa._custom_roles[name] = {'label': label, 'permissions': perms}
+        enabled = bool(data.get('enabled', True))
+        role_data: dict = {'label': label, 'description': description, 'permissions': perms}
+        if not enabled:
+            role_data['enabled'] = False
+        wa._custom_roles[name] = role_data
         wa._persist_roles()
         wa._audit('role_created', detail={'name': name, 'label': label, 'permissions': perms})
         return jsonify({'ok': True}), 201
@@ -92,8 +99,16 @@ def register(app, wa):
                 if old_label != new_label:
                     changes.append({'field': 'label', 'old': old_label, 'new': new_label})
                 role['label'] = new_label
+            if 'description' in data:
+                new_desc = data['description'].strip()
+                old_desc = role.get('description', '')
+                if old_desc != new_desc:
+                    changes.append({'field': 'description', 'old': old_desc, 'new': new_desc})
+                role['description'] = new_desc
             if 'permissions' in data:
-                new_perms = sorted(p for p in data['permissions'] if p in PERMISSIONS or is_module_perm(p))
+                new_perms = sorted(
+                    p for p in data['permissions'] if p in PERMISSIONS or is_module_perm(p)
+                )
                 old_perms = sorted(role.get('permissions', []))
                 if old_perms != new_perms:
                     changes.append({'field': 'permissions', 'old': old_perms, 'new': new_perms})

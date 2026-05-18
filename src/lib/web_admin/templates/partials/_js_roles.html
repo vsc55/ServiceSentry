@@ -197,35 +197,12 @@ function renderRoles() {
     const ps = _rolesPageSize || total;
     _rolesPage = Math.max(1, Math.min(_rolesPage, Math.ceil(total / ps)));
     const entries = allEntries.slice((_rolesPage - 1) * ps, _rolesPage * ps);
-    const PERM_L = PERM_LABELS;
-
-    function _permChipStyle(p) {
-        if (p.startsWith('users_'))    return 'background:rgba(59,130,246,.12);color:var(--bs-primary)';
-        if (p.startsWith('roles_'))    return 'background:rgba(139,92,246,.12);color:#7c3aed';
-        if (p.startsWith('groups_'))   return 'background:rgba(6,182,212,.12);color:var(--bs-info)';
-        if (p.startsWith('sessions_')) return 'background:rgba(245,158,11,.12);color:var(--bs-warning)';
-        if (p.startsWith('modules_') || p.startsWith('module.'))
-                                       return 'background:rgba(34,197,94,.12);color:var(--bs-success)';
-        if (p.startsWith('checks_'))   return 'background:rgba(34,197,94,.12);color:var(--bs-success)';
-        if (p.startsWith('config_'))   return 'background:var(--bs-secondary-bg);color:var(--bs-secondary-color)';
-        if (p.startsWith('audit_'))    return 'background:var(--bs-secondary-bg);color:var(--bs-secondary-color)';
-        return 'background:var(--bs-secondary-bg);color:var(--bs-secondary-color)';
-    }
-
-    function _modulePermLabel(p) {
-        const parts = p.split('.');
-        if (parts.length !== 3 || parts[0] !== 'module') return null;
-        const prettyMod = modulePrettyName(parts[1], modulesData[parts[1]] || {});
-        const actionLbl = t('module_perm_' + parts[2]) || parts[2];
-        return prettyMod + ': ' + actionLbl;
-    }
-
-    let h = `<table class="table table-sm table-hover align-middle mb-0" style="--bs-table-cell-padding-x:0.7rem">
-    <thead style="background:var(--bs-tertiary-bg)"><tr>
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table">
+    <thead class="ss-thead"><tr>
         ${_thSort(t('col_role_name'),  'name',  _rolesSort, _rolesSortDir, '_sortRoles')}
         ${_thSort(t('col_role_label'), 'label', _rolesSort, _rolesSortDir, '_sortRoles')}
-        <th class="fw-semibold text-muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${t('col_role_permissions')}</th>
-        ${showActions ? `<th class="fw-semibold text-muted text-center" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;width:1%;white-space:nowrap;border-left:1px solid var(--bs-border-color)">${t('col_actions')}</th>` : ''}
+        <th class="ss-th">${t('role_description')}</th>
+        ${showActions ? `<th class="ss-th ss-th-actions">${t('col_actions')}</th>` : ''}
     </tr></thead><tbody>`;
 
     for (const [name, rd] of entries) {
@@ -235,20 +212,12 @@ function renderRoles() {
             ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.6em;padding:.15em .35em">${t('role_builtin_badge')}</span>` : '';
         const disabledBadge = (!rd.builtin && !isEnabled)
             ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>` : '';
-        const permBadges = (rd.permissions || []).map(p => {
-            const lbl = PERM_L[p] || _modulePermLabel(p) || p;
-            return `<span class="badge fw-normal me-1" style="font-size:.7rem;${_permChipStyle(p)}">${esc(lbl)}</span>`;
-        }).join('');
 
         h += `<tr${rowStyle}>
-            <td style="white-space:nowrap"><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
-            <td class="text-muted small" style="white-space:nowrap">${esc(rd.label || name)}</td>
-            <td style="line-height:1.9">${permBadges || `<span class="text-muted">\u2014</span>`}</td>
-            ${showActions ? `<td class="text-center" style="white-space:nowrap;border-left:1px solid var(--bs-border-color)">
-                ${canEditRole ? `<button class="btn btn-sm py-0 px-1 me-1 ${isEnabled ? 'btn-secondary' : 'btn-success'}"
-                    ${rd.builtin ? 'disabled' : `onclick="toggleRole(${jsStr(name)},${isEnabled})"`}
-                    title="${escAttr(isEnabled ? t('disable') : t('enable'))}">
-                    <i class="bi bi-${isEnabled ? 'pause-circle' : 'play-circle'}"></i></button>` : ''}
+            <td class="text-nowrap"><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
+            <td class="text-muted small text-nowrap">${esc(rd.label || name)}</td>
+            <td class="text-muted small">${esc(rd.description || '')}</td>
+            ${showActions ? `<td class="ss-td-actions">
                 ${canEditRole ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1"
                     onclick="openEditRoleModal(${jsStr(name)})" title="${escAttr(t('edit'))}">
                     <i class="bi bi-pencil"></i></button>` : ''}
@@ -262,40 +231,20 @@ function renderRoles() {
     const pagination = _renderPagination(total, _rolesPage, _rolesPageSize, '_goRolesPage', '_changeRolesPageSize');
     const _addBtn = rolePerms.has('roles_add')
         ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewRoleModal()" title="${escAttr(t('new_role_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_role')}</button>` : '';
-    c.innerHTML = `<div class="rounded-3 overflow-hidden border" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
-        <div style="height:3px;background:linear-gradient(90deg,#8b5cf6,#ec4899)"></div>
-        <div class="d-flex align-items-center gap-1 px-3 py-2" style="background:var(--ss-card-header-bg);border-bottom:1px solid var(--bs-border-color)">
+    c.innerHTML = `<div class="ss-card">
+        <div class="ss-accent ss-accent-purple"></div>
+        <div class="ss-card-header">
             <h6 class="mb-0 me-auto"><i class="bi bi-shield-lock me-2"></i>${t('role_management')}</h6>
             <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>
             ${_addBtn}
         </div>
-        <div class="px-3 py-2" style="background:var(--ss-pagination-bg);border-bottom:1px solid var(--bs-border-color)">${pagination}</div>
+        <div class="ss-card-band ss-card-band-top">${pagination}</div>
         <div>${h}</div>
-        <div class="px-3 py-2" style="background:var(--ss-pagination-bg);border-top:1px solid var(--bs-border-color)">${pagination}</div>
+        <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
     </div>`;
 }
 
 let _editingRole = null;
-
-/** Apply or remove scrollable layout on the role modal based on the config flag.
- *  When enabled: modal-dialog becomes scrollable and only the tab-content area
- *  scrolls; the name/label row, tabs nav, and footer remain always visible. */
-function _applyRoleModalScrollable() {
-    const enabled = (_serverConfigData?.web_admin?.role_modal_scrollable) !== false;
-    const dlg  = document.getElementById('roleModalDialog');
-    const body = document.getElementById('roleModalBody');
-    const tc   = document.getElementById('roleModalTabContent');
-    if (!dlg || !body || !tc) return;
-    if (enabled) {
-        dlg.classList.add('modal-dialog-scrollable');
-        body.style.cssText = 'display:flex;flex-direction:column;overflow:hidden';
-        tc.style.cssText   = 'flex:1 1 auto;overflow-y:auto;overflow-x:hidden;min-height:0';
-    } else {
-        dlg.classList.remove('modal-dialog-scrollable');
-        body.style.cssText = '';
-        tc.style.cssText   = '';
-    }
-}
 
 /** Build the per-module permissions table inside #rmModulePermsGrid.
  *  For built-in roles (disabled=true) the checked state is derived from global
@@ -312,7 +261,7 @@ function _buildModulePermsGrid(activePerms, disabled) {
     const _globalFor = { view: 'modules_view', add: 'modules_edit', edit: 'modules_edit', delete: 'modules_edit' };
     const hdrs = actions.map(a => `<th class="text-center" style="width:62px">${esc(t('module_perm_' + a) || a)}</th>`).join('');
     let h = `<table class="table table-sm table-bordered align-middle mb-0" style="font-size:.82rem;table-layout:fixed;width:100%">
-    <thead style="background:var(--bs-tertiary-bg)"><tr>
+    <thead class="ss-thead"><tr>
         <th>${esc(t('col_module') || 'Module')}</th>${hdrs}
     </tr></thead><tbody>`;
     for (const name of mods) {
@@ -366,11 +315,17 @@ function openNewRoleModal() {
     document.getElementById('rmName').value = '';
     document.getElementById('rmName').disabled = false;
     document.getElementById('rmLabel').value = '';
+    document.getElementById('rmDescription').value = '';
+    document.getElementById('rmDescription').disabled = false;
+    document.getElementById('rmEnabledGroup').style.display = '';
+    const rmEnabledNew = document.getElementById('rmEnabled');
+    rmEnabledNew.checked = true;
+    rmEnabledNew.disabled = false;
     _buildPermsAccordion(new Set(), false);
     _buildModulePermsGrid(new Set(), false);
     _populateRoleUsersGrid(null, []);
     _populateRoleGroupsGrid(null, []);
-    _applyRoleModalScrollable();
+    bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#rmTabGeneral"]')).show();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
 }
 
@@ -383,9 +338,11 @@ function _populateRoleUsersGrid(roleName, searchFilterUsers) {
         if (q && !uname.toLowerCase().includes(q)) continue;
         const id = 'rmuser_' + uname;
         const checked = roleName && ud.role === roleName;
-        h += `<div class="form-check">
+        const isDisabled = ud.enabled === false;
+        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(uname)}" ${checked ? 'checked' : ''}>
-            <label class="form-check-label small" for="${id}">${esc(uname)}</label>
+            <label class="form-check-label small" for="${id}">${esc(uname)}${badge}</label>
         </div>`;
     }
     grid.innerHTML = h || '<span class="text-muted small">' + t('no_users') + '</span>';
@@ -405,9 +362,11 @@ function _populateRoleGroupsGrid(roleName) {
         if (q && !gname.toLowerCase().includes(q) && !(gd.label || '').toLowerCase().includes(q)) continue;
         const id = 'rmgroup_' + gname;
         const checked = roleName && (gd.roles || []).includes(roleName);
-        h += `<div class="form-check">
+        const isDisabled = gd.enabled === false;
+        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(gname)}" ${checked ? 'checked' : ''}>
-            <label class="form-check-label small" for="${id}">${esc(gd.label || gname)}</label>
+            <label class="form-check-label small" for="${id}">${esc(gd.label || gname)}${badge}</label>
         </div>`;
     }
     grid.innerHTML = h || '<span class="text-muted small">' + t('no_groups') + '</span>';
@@ -426,6 +385,13 @@ function openEditRoleModal(name) {
     document.getElementById('rmName').value = name;
     document.getElementById('rmName').disabled = true;
     document.getElementById('rmLabel').value = rd.label || '';
+    document.getElementById('rmDescription').value = rd.description || '';
+    document.getElementById('rmDescription').disabled = isBuiltin;
+    const rmEnabledGroup = document.getElementById('rmEnabledGroup');
+    rmEnabledGroup.style.display = '';
+    const rmEnabled = document.getElementById('rmEnabled');
+    rmEnabled.checked = isBuiltin || rd.enabled !== false;
+    rmEnabled.disabled = isBuiltin;
     const activePerms = new Set(rd.permissions || []);
     _buildPermsAccordion(activePerms, isBuiltin);
     _buildModulePermsGrid(activePerms, isBuiltin);
@@ -439,13 +405,13 @@ function openEditRoleModal(name) {
     // Built-ins: go straight to Assignments; custom: go to Permissions
     const targetTab = isBuiltin ? '#rmTabAssign' : '#rmTabPerms';
     bootstrap.Tab.getOrCreateInstance(document.querySelector(`[data-bs-target="${targetTab}"]`)).show();
-    _applyRoleModalScrollable();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
 }
 
 async function saveRoleModal() {
-    const name = document.getElementById('rmName').value.trim();
-    const label = document.getElementById('rmLabel').value.trim();
+    const name        = document.getElementById('rmName').value.trim();
+    const label       = document.getElementById('rmLabel').value.trim();
+    const description = document.getElementById('rmDescription').value.trim();
     const permissions = Array.from(
         document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]:checked')
     ).map(cb => cb.value);
@@ -455,12 +421,17 @@ async function saveRoleModal() {
     const rd = rolesData[name] || {};
     const isBuiltin = !!rd.builtin;
     if (_editingRole) {
-        const payload = isBuiltin ? { label } : { label, permissions };
+        const enabled = document.getElementById('rmEnabled').checked;
+        const payload = isBuiltin ? { label } : { label, description, permissions, enabled };
         const r = await apiPut('/api/roles/' + encodeURIComponent(_editingRole), payload);
         if (r && r.ok) {
-            showToast(t('role_updated'));
+            const wasEnabled = rolesData[_editingRole]?.builtin || rolesData[_editingRole]?.enabled !== false;
+            if (!isBuiltin && wasEnabled !== enabled)
+                showToast(enabled ? t('role_enabled') : t('role_disabled'));
+            else
+                showToast(t('role_updated'));
             rolesData[_editingRole] = { ...rolesData[_editingRole], label: label || _editingRole };
-            if (!isBuiltin) rolesData[_editingRole].permissions = permissions;
+            if (!isBuiltin) { rolesData[_editingRole].permissions = permissions; rolesData[_editingRole].description = description; rolesData[_editingRole].enabled = enabled; }
         } else {
             showToast(r?.error || t('update_error'), 'danger'); return;
         }
@@ -489,10 +460,11 @@ async function saveRoleModal() {
         }
         await Promise.all([...userUpdates, ...groupUpdates]);
     } else {
-        const r = await apiPost('/api/roles', { name, label, permissions });
+        const enabled = document.getElementById('rmEnabled').checked;
+        const r = await apiPost('/api/roles', { name, label, description, permissions, enabled });
         if (r && r.status === 201) {
             showToast(t('role_created'));
-            rolesData[name] = { builtin: false, label: label || name, permissions };
+            rolesData[name] = { builtin: false, label: label || name, description, permissions, enabled };
         } else {
             showToast(r?.data?.error || t('create_error'), 'danger'); return;
         }
@@ -503,17 +475,6 @@ async function saveRoleModal() {
     renderUsers();
 }
 
-async function toggleRole(name, currentEnabled) {
-    const newEnabled = !currentEnabled;
-    const r = await apiPut('/api/roles/' + encodeURIComponent(name), { enabled: newEnabled });
-    if (r && r.ok) {
-        showToast(newEnabled ? t('role_enabled') : t('role_disabled'));
-        rolesData[name] = { ...rolesData[name], enabled: newEnabled };
-        renderRoles();
-    } else {
-        showToast(r?.error || t('update_error'), 'danger');
-    }
-}
 
 async function deleteRole(name) {
     showConfirmModal(t('role_confirm_delete'), async () => {

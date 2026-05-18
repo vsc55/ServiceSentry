@@ -31,6 +31,7 @@ def register(app, wa):
                 'dark_mode': udata.get('dark_mode'),
                 'groups': udata.get('groups', []),
                 'enabled': udata.get('enabled', True),
+                'email': udata.get('email', ''),
             }
         return jsonify(safe)
 
@@ -45,6 +46,7 @@ def register(app, wa):
         pw = data.get('password', '')
         role = data.get('role', 'viewer')
         dname = data.get('display_name', '').strip() or uname
+        email = data.get('email', '').strip()
         if not uname:
             return jsonify({'error': wa._t('username_required')}), 400
         if len(uname) > wa._MAX_USERNAME_LEN:
@@ -76,10 +78,14 @@ def register(app, wa):
             'role': role,
             'display_name': dname,
         }
+        if email:
+            wa._users[uname]['email'] = email
         if user_lang:
             wa._users[uname]['lang'] = user_lang
         if user_groups:
             wa._users[uname]['groups'] = user_groups
+        if not bool(data.get('enabled', True)):
+            wa._users[uname]['enabled'] = False
         wa._persist_users()
         wa._audit('user_created', detail={
             'username': uname, 'role': role,
@@ -128,6 +134,12 @@ def register(app, wa):
                 return jsonify({'error': wa._t(*pw_err)}), 400
             user['password_hash'] = generate_password_hash(data['password'])
             has_password_reset = True
+        if 'email' in data:
+            new_email = data['email'].strip()
+            old_email = user.get('email', '')
+            if old_email != new_email:
+                changes.append({'field': 'email', 'old': old_email, 'new': new_email})
+            user['email'] = new_email
         if 'lang' in data:
             lang = data['lang']
             if lang != '' and lang not in SUPPORTED_LANGS:
