@@ -454,6 +454,7 @@ LANG = {
     'status_page_link': 'Status page URL',
     'copy_url': 'Copy URL',
     'copy_url_ok': 'URL copied to clipboard',
+    'copy_uid': 'Copy UID',
     'invalid_public_url': 'Public URL must be a valid hostname without spaces (e.g. monitor.example.com)',
     'env_locked_tooltip': 'Value set by environment variable — change it there to override',
     'config_conflict':        'Configuration was modified by another user — reload and reapply your changes.',

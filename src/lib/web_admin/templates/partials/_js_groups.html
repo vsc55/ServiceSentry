@@ -242,6 +242,8 @@ function openNewGroupModal() {
     document.getElementById('gmLabel').disabled = false;
     document.getElementById('gmDescription').value = '';
     document.getElementById('gmDescription').disabled = false;
+    document.getElementById('gmUidRow').classList.add('d-none');
+    document.getElementById('gmUid').value = '';
     document.getElementById('gmEnabledGroup').style.display = '';
     const gmEnabledNew = document.getElementById('gmEnabled');
     gmEnabledNew.checked = true;
@@ -267,6 +269,8 @@ function openEditGroupModal(name) {
     document.getElementById('gmLabel').disabled = _gmIsBuiltin;
     document.getElementById('gmDescription').value = gd.description || '';
     document.getElementById('gmDescription').disabled = _gmIsBuiltin;
+    document.getElementById('gmUidRow').classList.remove('d-none');
+    document.getElementById('gmUid').value = gd.uid || '';
     const gmEnabledGroup = document.getElementById('gmEnabledGroup');
     gmEnabledGroup.style.display = '';
     document.getElementById('gmEnabled').checked = gd.enabled !== false;

@@ -5,6 +5,9 @@
 import json
 import os
 import tempfile
+import uuid
+
+from ..constants import BUILTIN_GROUP_UIDS
 
 
 class _GroupsMixin:
@@ -26,11 +29,26 @@ class _GroupsMixin:
         else:
             self._groups = {
                 'administrators': {
+                    'uid': BUILTIN_GROUP_UIDS['administrators'],
                     'label': 'Administrators',
                     'description': 'Default administrators group',
                     'roles': ['admin'],
                 },
             }
+            self._persist_groups()
+            return
+        # Ensure every group has a stable uid
+        dirty = False
+        for gname, gdata in self._groups.items():
+            builtin_uid = BUILTIN_GROUP_UIDS.get(gname)
+            if builtin_uid:
+                if gdata.get('uid') != builtin_uid:
+                    gdata['uid'] = builtin_uid
+                    dirty = True
+            elif not gdata.get('uid'):
+                gdata['uid'] = str(uuid.uuid4())
+                dirty = True
+        if dirty:
             self._persist_groups()
 
     def _persist_groups(self) -> bool:

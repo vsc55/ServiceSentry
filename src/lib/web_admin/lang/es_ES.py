@@ -455,6 +455,7 @@ LANG = {
     'status_page_link': 'URL de la página de estado',
     'copy_url': 'Copiar URL',
     'copy_url_ok': 'URL copiada al portapapeles',
+    'copy_uid': 'Copiar UID',
     'invalid_public_url': 'La URL pública debe ser un nombre de host válido sin espacios (p. ej. monitor.example.com)',
     'env_locked_tooltip': 'Valor establecido por variable de entorno — cámbiala ahí para modificarlo',
     'config_conflict':        'La configuración fue modificada por otro usuario — recarga y vuelve a aplicar tus cambios.',

@@ -16,6 +16,24 @@ def register(app, wa):
     users_edit_req   = wa._perm_required('users_edit')
     users_delete_req = wa._perm_required('users_delete')
 
+    def _role_display(uid_or_name: str) -> str:
+        """Translate a stored role value (UID or name) to a display name."""
+        if wa._is_uid(uid_or_name):
+            return wa._uid_to_role_name(uid_or_name) or uid_or_name
+        return uid_or_name
+
+    def _groups_display(uid_or_name_list: list) -> list:
+        """Translate stored group values (UIDs or names) to display names."""
+        result = []
+        for g in uid_or_name_list:
+            if wa._is_uid(g):
+                name = wa._uid_to_group_name(g)
+                if name:
+                    result.append(name)
+            else:
+                result.append(g)
+        return result
+
     # --- API: user management (admin only) ------------------------
 
     @app.route('/api/users', methods=['GET'])
@@ -25,11 +43,12 @@ def register(app, wa):
         safe = {}
         for uname, udata in wa._users.items():
             safe[uname] = {
-                'role': udata.get('role', 'viewer'),
+                'uid': udata.get('uid', ''),
+                'role': _role_display(udata.get('role', 'viewer')),
                 'display_name': udata.get('display_name', uname),
                 'lang': udata.get('lang', ''),
                 'dark_mode': udata.get('dark_mode'),
-                'groups': udata.get('groups', []),
+                'groups': _groups_display(udata.get('groups', [])),
                 'enabled': udata.get('enabled', True),
                 'email': udata.get('email', ''),
             }
@@ -70,27 +89,31 @@ def register(app, wa):
         unknown_groups = [g for g in user_groups_raw if g not in wa._groups]
         if unknown_groups:
             return jsonify({'error': wa._t('invalid_groups', ', '.join(unknown_groups))}), 400
-        user_groups = list(user_groups_raw)
         if uname in wa._users:
             return jsonify({'error': wa._t('user_already_exists', uname)}), 409
+        # Translate names → UIDs for storage
+        role_uid = wa._role_name_to_uid(role) or role
+        group_uids = [wa._group_name_to_uid(g) or g for g in user_groups_raw]
+        import uuid as _uuid
         wa._users[uname] = {
+            'uid': str(_uuid.uuid4()),
             'password_hash': generate_password_hash(pw),
-            'role': role,
+            'role': role_uid,
             'display_name': dname,
         }
         if email:
             wa._users[uname]['email'] = email
         if user_lang:
             wa._users[uname]['lang'] = user_lang
-        if user_groups:
-            wa._users[uname]['groups'] = user_groups
+        if group_uids:
+            wa._users[uname]['groups'] = group_uids
         if not bool(data.get('enabled', True)):
             wa._users[uname]['enabled'] = False
         wa._persist_users()
         wa._audit('user_created', detail={
             'username': uname, 'role': role,
             'display_name': dname,
-            'groups': user_groups,
+            'groups': list(user_groups_raw),
         })
         return jsonify({'ok': True}), 201
 
@@ -104,21 +127,24 @@ def register(app, wa):
         if err:
             return err
         user = wa._users[username]
+        admin_uid = wa._role_name_to_uid('admin')
         changes: list[dict] = []
         if 'role' in data:
             valid_roles = set(ROLES) | set(wa._custom_roles.keys())
             if data['role'] not in valid_roles:
                 return jsonify({'error': wa._t('invalid_role')}), 400
+            new_role_uid = wa._role_name_to_uid(data['role']) or data['role']
             # Prevent removing the last admin
-            if user['role'] == 'admin' and data['role'] != 'admin':
+            if user['role'] == admin_uid and new_role_uid != admin_uid:
                 admin_count = sum(
-                    1 for u in wa._users.values() if u.get('role') == 'admin'
+                    1 for u in wa._users.values() if u.get('role') == admin_uid
                 )
                 if admin_count <= 1:
                     return jsonify({'error': wa._t('must_have_admin')}), 400
-            if user['role'] != data['role']:
-                changes.append({'field': 'role', 'old': user['role'], 'new': data['role']})
-            user['role'] = data['role']
+            old_role_name = _role_display(user['role'])
+            if old_role_name != data['role']:
+                changes.append({'field': 'role', 'old': old_role_name, 'new': data['role']})
+            user['role'] = new_role_uid
         if 'display_name' in data:
             new_dn = data['display_name'].strip() or username
             if len(new_dn) > wa._MAX_DISPLAY_NAME_LEN:
@@ -161,11 +187,12 @@ def register(app, wa):
             unknown_groups = [g for g in data['groups'] if g not in wa._groups]
             if unknown_groups:
                 return jsonify({'error': wa._t('invalid_groups', ', '.join(unknown_groups))}), 400
-            new_groups = list(data['groups'])
-            old_groups = sorted(user.get('groups', []))
-            if old_groups != sorted(new_groups):
-                changes.append({'field': 'groups', 'old': old_groups, 'new': sorted(new_groups)})
-            user['groups'] = new_groups
+            new_group_uids = [wa._group_name_to_uid(g) or g for g in data['groups']]
+            old_groups_names = sorted(_groups_display(user.get('groups', [])))
+            new_groups_names = sorted(data['groups'])
+            if old_groups_names != new_groups_names:
+                changes.append({'field': 'groups', 'old': old_groups_names, 'new': new_groups_names})
+            user['groups'] = new_group_uids
         if 'enabled' in data:
             new_enabled = bool(data['enabled'])
             old_enabled = user.get('enabled', True)
@@ -173,10 +200,10 @@ def register(app, wa):
                 if not new_enabled:
                     if username == session.get('username'):
                         return jsonify({'error': wa._t('cannot_disable_self')}), 400
-                    if user.get('role') == 'admin':
+                    if user.get('role') == admin_uid:
                         active_admin_count = sum(
                             1 for _, d in wa._users.items()
-                            if d.get('role') == 'admin' and d.get('enabled', True)
+                            if d.get('role') == admin_uid and d.get('enabled', True)
                         )
                         if active_admin_count <= 1:
                             return jsonify({'error': wa._t('cannot_disable_last_admin')}), 400
@@ -193,7 +220,7 @@ def register(app, wa):
             wa._audit('password_reset', detail=username)
         # Update session if the user edited themselves
         if username == session.get('username'):
-            session['role'] = user['role']
+            session['role'] = _role_display(user['role'])
             session['display_name'] = user.get('display_name', username)
             user_lang = user.get('lang')
             if user_lang and user_lang in SUPPORTED_LANGS:
@@ -210,9 +237,10 @@ def register(app, wa):
             return jsonify({'error': wa._t('user_not_found')}), 404
         if username == session.get('username'):
             return jsonify({'error': wa._t('cannot_delete_self')}), 400
-        if wa._users[username].get('role') == 'admin':
+        admin_uid = wa._role_name_to_uid('admin')
+        if wa._users[username].get('role') == admin_uid:
             admin_count = sum(
-                1 for u in wa._users.values() if u.get('role') == 'admin'
+                1 for u in wa._users.values() if u.get('role') == admin_uid
             )
             if admin_count <= 1:
                 return jsonify({'error': wa._t('must_have_admin')}), 400

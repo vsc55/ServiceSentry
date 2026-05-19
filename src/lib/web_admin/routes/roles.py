@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 """Custom roles management routes: /api/roles, /api/roles/<name>."""
 
+import uuid
+
 from flask import jsonify
 
-from ..constants import BUILTIN_ROLE_PERMISSIONS, PERMISSIONS, ROLES, is_module_perm
+from ..constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, ROLES, is_module_perm
 
 
 def register(app, wa):
@@ -22,6 +24,7 @@ def register(app, wa):
         all_roles: dict[str, dict] = {}
         for r in ROLES:
             all_roles[r] = {
+                'uid': BUILTIN_ROLE_UIDS.get(r, ''),
                 'builtin': True,
                 'label': wa._builtin_role_labels.get(r, r.title()),
                 'permissions': list(BUILTIN_ROLE_PERMISSIONS[r]),
@@ -29,6 +32,7 @@ def register(app, wa):
             }
         for name, rdata in wa._custom_roles.items():
             all_roles[name] = {
+                'uid': rdata.get('uid', ''),
                 'builtin': False,
                 'label': rdata.get('label', name),
                 'permissions': rdata.get('permissions', []),
@@ -59,7 +63,12 @@ def register(app, wa):
         if name in ROLES or name in wa._custom_roles:
             return jsonify({'error': wa._t('role_already_exists', name)}), 409
         enabled = bool(data.get('enabled', True))
-        role_data: dict = {'label': label, 'description': description, 'permissions': perms}
+        role_data: dict = {
+            'uid': str(uuid.uuid4()),
+            'label': label,
+            'description': description,
+            'permissions': perms,
+        }
         if not enabled:
             role_data['enabled'] = False
         wa._custom_roles[name] = role_data
@@ -132,9 +141,24 @@ def register(app, wa):
             return jsonify({'error': wa._t('role_builtin')}), 400
         if name not in wa._custom_roles:
             return jsonify({'error': wa._t('role_not_found')}), 404
-        users_with_role = [u for u, d in wa._users.items() if d.get('role') == name]
+        role_uid = wa._custom_roles[name].get('uid', '')
+        # Check if any user is assigned this role (by UID)
+        users_with_role = [
+            u for u, d in wa._users.items()
+            if d.get('role') == role_uid or d.get('role') == name
+        ]
         if users_with_role:
             return jsonify({'error': wa._t('role_in_use', ', '.join(users_with_role))}), 409
+        # Remove role from any groups that reference it
+        groups_dirty = False
+        for gdata in wa._groups.values():
+            old_roles = gdata.get('roles', [])
+            new_roles = [r for r in old_roles if r != role_uid and r != name]
+            if len(new_roles) != len(old_roles):
+                gdata['roles'] = new_roles
+                groups_dirty = True
+        if groups_dirty:
+            wa._persist_groups()
         del wa._custom_roles[name]
         wa._persist_roles()
         wa._audit('role_deleted', detail={'name': name})

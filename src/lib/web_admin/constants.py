@@ -10,6 +10,7 @@ __all__ = [
     'DEFAULT_LANG', 'SUPPORTED_LANGS', 'TRANSLATIONS',
     'ROLES', 'PERMISSIONS', 'PERMISSION_GROUPS',
     '_BUILTIN_GROUPS', 'BUILTIN_ROLE_PERMISSIONS',
+    'BUILTIN_ROLE_UIDS', 'BUILTIN_GROUP_UIDS',
     'is_module_perm',
 ]
 
@@ -66,6 +67,17 @@ PERMISSION_GROUPS = [
     ('perm_group_sessions', ['sessions_view', 'sessions_revoke']),
     ('perm_group_checks',   ['checks_view', 'checks_run']),
 ]
+
+# Stable UUIDs for built-in roles and groups (never change these).
+BUILTIN_ROLE_UIDS: dict[str, str] = {
+    'admin':    '00000000-0000-4000-8000-000000000001',
+    'editor':   '00000000-0000-4000-8000-000000000002',
+    'viewer':   '00000000-0000-4000-8000-000000000003',
+    'none':     '00000000-0000-4000-8000-000000000004',
+}
+BUILTIN_GROUP_UIDS: dict[str, str] = {
+    'administrators': '00000000-0000-4000-8000-000000000010',
+}
 
 # Built-in groups (cannot be deleted or modified via API).
 _BUILTIN_GROUPS: frozenset[str] = frozenset({'administrators'})

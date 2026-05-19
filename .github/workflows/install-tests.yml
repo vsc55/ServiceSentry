@@ -2,27 +2,7 @@ name: Install tests
 
 on:
   push:
-    branches: [main]
-    paths:
-      - "install.sh"
-      - "update.sh"
-      - "uninstall.sh"
-      - "check_dependencies.sh"
-      - "init/**"
-      - "src/**"
-      - "data/**"
-      - ".github/workflows/install-tests.yml"
-  pull_request:
-    branches: [main]
-    paths:
-      - "install.sh"
-      - "update.sh"
-      - "uninstall.sh"
-      - "check_dependencies.sh"
-      - "init/**"
-      - "src/**"
-      - "data/**"
-      - ".github/workflows/install-tests.yml"
+    tags: ["test"]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

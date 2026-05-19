@@ -5,6 +5,7 @@
 import json
 import os
 import tempfile
+import uuid
 
 
 class _RolesMixin:
@@ -29,6 +30,14 @@ class _RolesMixin:
         else:
             self._custom_roles = {}
             self._builtin_role_labels = {}
+        # Ensure every custom role has a stable uid
+        dirty = False
+        for rdata in self._custom_roles.values():
+            if not rdata.get('uid'):
+                rdata['uid'] = str(uuid.uuid4())
+                dirty = True
+        if dirty:
+            self._persist_roles()
 
     def _persist_roles(self) -> bool:
         """Write custom roles to ``roles.json`` atomically."""

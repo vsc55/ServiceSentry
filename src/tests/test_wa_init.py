@@ -45,7 +45,7 @@ class TestWebAdminInit:
         with open(path, encoding="utf-8") as f:
             users = json.load(f)
         assert "myadmin" in users
-        assert users["myadmin"]["role"] == "admin"
+        assert wa._uid_to_role_name(users["myadmin"]["role"]) == "admin"
         assert "password_hash" in users["myadmin"]
 
     def test_loads_existing_users_json(self, config_dir):

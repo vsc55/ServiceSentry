@@ -2,13 +2,53 @@
 # -*- coding: utf-8 -*-
 """Permissions resolution mixin for WebAdmin."""
 
+import re
+
 from flask import session
 
-from ..constants import BUILTIN_ROLE_PERMISSIONS, PERMISSIONS, is_module_perm
+from ..constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, is_module_perm
+
+_UUID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE,
+)
 
 
 class _PermissionsMixin:
     """Resolve effective permissions for roles, groups and the active session."""
+
+    # ── UID helpers ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _is_uid(s: str) -> bool:
+        return bool(_UUID_RE.match(s))
+
+    def _uid_to_role_name(self, uid: str) -> str | None:
+        for name, builtin_uid in BUILTIN_ROLE_UIDS.items():
+            if builtin_uid == uid:
+                return name
+        for name, rdata in self._custom_roles.items():
+            if rdata.get('uid') == uid:
+                return name
+        return None
+
+    def _role_name_to_uid(self, name: str) -> str | None:
+        if name in BUILTIN_ROLE_UIDS:
+            return BUILTIN_ROLE_UIDS[name]
+        rdata = self._custom_roles.get(name)
+        return rdata.get('uid') if rdata else None
+
+    def _uid_to_group_name(self, uid: str) -> str | None:
+        for name, gdata in self._groups.items():
+            if gdata.get('uid') == uid:
+                return name
+        return None
+
+    def _group_name_to_uid(self, name: str) -> str | None:
+        gdata = self._groups.get(name)
+        return gdata.get('uid') if gdata else None
+
+    # ── Permission resolution ────────────────────────────────────────────────
 
     def _get_role_permissions(self, role_name: str) -> frozenset:
         """Return the set of permissions for the given role name.
@@ -30,14 +70,18 @@ class _PermissionsMixin:
         """Return merged permissions: role perms ∪ perms from all roles in user's groups.
 
         Disabled groups are skipped entirely — their roles don't contribute.
+        Supports both UID-based and name-based group/role references.
         """
         perms = self._get_role_permissions(role_name)
         user = self._users.get(username, {})
-        for gname in user.get('groups', []):
-            g = self._groups.get(gname)
+        for g_ref in user.get('groups', []):
+            gname = self._uid_to_group_name(g_ref) if self._is_uid(g_ref) else g_ref
+            g = self._groups.get(gname) if gname else None
             if g and g.get('enabled', True):
-                for rname in g.get('roles', []):
-                    perms = perms | self._get_role_permissions(rname)
+                for r_ref in g.get('roles', []):
+                    rname = self._uid_to_role_name(r_ref) if self._is_uid(r_ref) else r_ref
+                    if rname:
+                        perms = perms | self._get_role_permissions(rname)
         return perms
 
     def _get_session_permissions(self) -> frozenset:
@@ -47,7 +91,11 @@ class _PermissionsMixin:
         effect immediately without requiring a re-login.
         """
         username = session.get('username', '')
-        role_name = (self._users.get(username) or {}).get('role', 'viewer')
+        user = self._users.get(username) or {}
+        role_ref = user.get('role', 'viewer')
+        role_name = self._uid_to_role_name(role_ref) if self._is_uid(role_ref) else role_ref
+        if role_name is None:
+            role_name = 'viewer'
         return self._get_effective_permissions(username, role_name)
 
     def _has_module_permission(self, module_name: str, action: str) -> bool:

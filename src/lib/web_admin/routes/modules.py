@@ -153,7 +153,8 @@ def register(app, wa):
         users_by_role: dict[str, int] = {}
         for u in wa._users.values():
             r = u.get('role', 'viewer')
-            users_by_role[r] = users_by_role.get(r, 0) + 1
+            r_name = wa._uid_to_role_name(r) if wa._is_uid(r) else r
+            users_by_role[r_name] = users_by_role.get(r_name, 0) + 1
 
         # Groups summary
         total_groups = len(wa._groups)

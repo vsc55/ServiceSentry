@@ -41,8 +41,10 @@ from lib import secret_manager
 from .constants import (
     DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS,
     PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
+    BUILTIN_ROLE_UIDS,
     ROLES,
 )
+from .migrations import run_all as _run_migrations
 from .mixins import (
     _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _SessionsMixin, _AuditMixin, _ChecksMixin,
@@ -183,6 +185,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._load_audit()
         self._load_roles()
         self._load_groups()
+        _run_migrations(self)
         self._apply_saved_config()
         self._apply_env_overrides()
         self._app = self._create_app()

@@ -28,7 +28,9 @@ def register(app, wa):
                 session['session_id'] = sid
                 session['logged_in'] = True
                 session['username'] = username
-                session['role'] = user.get('role', 'viewer')
+                role_ref = user.get('role', 'viewer')
+                role_name = wa._uid_to_role_name(role_ref) if wa._is_uid(role_ref) else role_ref
+                session['role'] = role_name or 'viewer'
                 session['display_name'] = user.get('display_name', username)
                 user_lang = user.get('lang')
                 if user_lang and user_lang in SUPPORTED_LANGS:

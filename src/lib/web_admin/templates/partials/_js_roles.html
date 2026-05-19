@@ -371,6 +371,8 @@ function openNewRoleModal() {
     document.getElementById('rmLabel').value = '';
     document.getElementById('rmDescription').value = '';
     document.getElementById('rmDescription').disabled = false;
+    document.getElementById('rmUidRow').classList.add('d-none');
+    document.getElementById('rmUid').value = '';
     document.getElementById('rmEnabledGroup').style.display = '';
     const rmEnabledNew = document.getElementById('rmEnabled');
     rmEnabledNew.checked = true;
@@ -441,6 +443,8 @@ function openEditRoleModal(name) {
     document.getElementById('rmLabel').value = rd.label || '';
     document.getElementById('rmDescription').value = rd.description || '';
     document.getElementById('rmDescription').disabled = isBuiltin;
+    document.getElementById('rmUidRow').classList.remove('d-none');
+    document.getElementById('rmUid').value = rd.uid || '';
     const rmEnabledGroup = document.getElementById('rmEnabledGroup');
     rmEnabledGroup.style.display = '';
     const rmEnabled = document.getElementById('rmEnabled');

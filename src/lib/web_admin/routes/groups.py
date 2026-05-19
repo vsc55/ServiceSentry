@@ -13,6 +13,18 @@ def register(app, wa):
     groups_edit_req   = wa._perm_required('groups_edit')
     groups_delete_req = wa._perm_required('groups_delete')
 
+    def _roles_display(uid_or_name_list: list) -> list:
+        """Translate stored role values (UIDs or names) to display names."""
+        result = []
+        for r in uid_or_name_list:
+            if wa._is_uid(r):
+                name = wa._uid_to_role_name(r)
+                if name:
+                    result.append(name)
+            else:
+                result.append(r)
+        return result
+
     # --- API: groups management -----------------------------------
 
     @app.route('/api/groups', methods=['GET'])
@@ -21,17 +33,20 @@ def register(app, wa):
         """Return all groups with their roles and member count."""
         all_role_names = set(BUILTIN_ROLE_PERMISSIONS.keys()) | set(wa._custom_roles.keys())
         result: dict[str, dict] = {}
-        for name, gdata in wa._groups.items():
+        for gname, gdata in wa._groups.items():
+            group_uid = gdata.get('uid', '')
             members = [
                 u for u, d in wa._users.items()
-                if name in d.get('groups', [])
+                if group_uid in d.get('groups', []) or gname in d.get('groups', [])
             ]
-            result[name] = {
-                'label': gdata.get('label', name),
+            role_names = [r for r in _roles_display(gdata.get('roles', [])) if r in all_role_names]
+            result[gname] = {
+                'uid': group_uid,
+                'label': gdata.get('label', gname),
                 'description': gdata.get('description', ''),
-                'roles': [r for r in gdata.get('roles', []) if r in all_role_names],
+                'roles': role_names,
                 'members': members,
-                'builtin': name in _BUILTIN_GROUPS,
+                'builtin': gname in _BUILTIN_GROUPS,
                 'enabled': gdata.get('enabled', True),
             }
         return jsonify(result)
@@ -40,6 +55,7 @@ def register(app, wa):
     @groups_add_req
     def api_create_group():
         """Create a new group."""
+        import uuid as _uuid
         data, err = wa._require_json()
         if err:
             return err
@@ -53,7 +69,6 @@ def register(app, wa):
         unknown_roles = [r for r in roles_raw if r not in all_role_names]
         if unknown_roles:
             return jsonify({'error': wa._t('invalid_roles', ', '.join(unknown_roles))}), 400
-        roles = list(roles_raw)
         if not name:
             return jsonify({'error': wa._t('group_name_required')}), 400
         if len(name) > wa._MAX_GROUP_NAME_LEN:
@@ -65,13 +80,20 @@ def register(app, wa):
         if name in wa._groups:
             return jsonify({'error': wa._t('group_already_exists', name)}), 409
         enabled = bool(data.get('enabled', True))
-        group_data: dict = {'label': label, 'description': description, 'roles': roles}
+        # Translate role names → UIDs for storage
+        role_uids = [wa._role_name_to_uid(r) or r for r in roles_raw]
+        group_data: dict = {
+            'uid': str(_uuid.uuid4()),
+            'label': label,
+            'description': description,
+            'roles': role_uids,
+        }
         if not enabled:
             group_data['enabled'] = False
         wa._groups[name] = group_data
         wa._persist_groups()
         wa._audit('group_created', detail={
-            'name': name, 'label': label, 'roles': roles,
+            'name': name, 'label': label, 'roles': list(roles_raw),
         })
         return jsonify({'ok': True}), 201
 
@@ -86,6 +108,7 @@ def register(app, wa):
         if err:
             return err
         group = wa._groups[name]
+        group_uid = group.get('uid', '')
         changes: list[dict] = []
         # Built-in groups: allow roles and members changes, but not label/description
         if not is_builtin:
@@ -112,11 +135,12 @@ def register(app, wa):
             unknown_roles = [r for r in data['roles'] if r not in all_role_names]
             if unknown_roles:
                 return jsonify({'error': wa._t('invalid_roles', ', '.join(unknown_roles))}), 400
-            new_roles = sorted(data['roles'])
-            old_roles = sorted(group.get('roles', []))
-            if old_roles != new_roles:
-                changes.append({'field': 'roles', 'old': old_roles, 'new': new_roles})
-            group['roles'] = new_roles
+            new_role_uids = sorted(wa._role_name_to_uid(r) or r for r in data['roles'])
+            old_roles_names = sorted(_roles_display(group.get('roles', [])))
+            new_roles_names = sorted(data['roles'])
+            if old_roles_names != new_roles_names:
+                changes.append({'field': 'roles', 'old': old_roles_names, 'new': new_roles_names})
+            group['roles'] = new_role_uids
         if 'members' in data:
             if not isinstance(data['members'], list):
                 return jsonify({'error': wa._t('invalid_members', '')}), 400
@@ -125,15 +149,21 @@ def register(app, wa):
             if unknown_members:
                 return jsonify({'error': wa._t('invalid_members', ', '.join(unknown_members))}), 400
             new_members = set(data['members'])
-            old_members = {u for u, d in wa._users.items() if name in d.get('groups', [])}
+            old_members = {
+                u for u, d in wa._users.items()
+                if group_uid in d.get('groups', []) or name in d.get('groups', [])
+            }
             users_changed = False
             for uname in old_members - new_members:
-                wa._users[uname]['groups'] = [g for g in wa._users[uname].get('groups', []) if g != name]
+                wa._users[uname]['groups'] = [
+                    g for g in wa._users[uname].get('groups', [])
+                    if g != group_uid and g != name
+                ]
                 users_changed = True
             for uname in new_members - old_members:
                 if 'groups' not in wa._users[uname]:
                     wa._users[uname]['groups'] = []
-                wa._users[uname]['groups'].append(name)
+                wa._users[uname]['groups'].append(group_uid or name)
                 users_changed = True
             if users_changed:
                 wa._persist_users()
@@ -160,11 +190,13 @@ def register(app, wa):
             return jsonify({'error': wa._t('group_not_found')}), 404
         if name in _BUILTIN_GROUPS:
             return jsonify({'error': wa._t('group_builtin')}), 403
+        group_uid = wa._groups[name].get('uid', '')
         # Remove group from every user that belongs to it
         affected = []
         for uname, udata in wa._users.items():
-            if name in udata.get('groups', []):
-                udata['groups'] = [g for g in udata['groups'] if g != name]
+            grps = udata.get('groups', [])
+            if group_uid in grps or name in grps:
+                udata['groups'] = [g for g in grps if g != group_uid and g != name]
                 affected.append(uname)
         if affected:
             wa._persist_users()

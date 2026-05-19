@@ -216,6 +216,8 @@ function openNewUserModal() {
     const umEnabledNew = document.getElementById('umEnabled');
     umEnabledNew.checked = true;
     umEnabledNew.disabled = false;
+    document.getElementById('umUidRow').classList.add('d-none');
+    document.getElementById('umUid').value = '';
     document.getElementById('umSessionsGroup').style.display = 'none';
     document.getElementById('umRoleSearch').value = '';
     document.getElementById('umGroupSearch').value = '';
@@ -241,6 +243,8 @@ function openEditUserModal(username) {
     const enabledChk = document.getElementById('umEnabled');
     enabledChk.checked = u.enabled !== false;
     enabledChk.disabled = isSelf;
+    document.getElementById('umUidRow').classList.remove('d-none');
+    document.getElementById('umUid').value = u.uid || '';
     document.getElementById('umEnabledGroup').style.display = '';
     _umSessionsSort = 'last_seen';
     _umSessionsSortDir = 'desc';

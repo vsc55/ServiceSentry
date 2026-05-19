@@ -53,6 +53,12 @@ def register(app, wa):
         """Return current logged-in user info."""
         uname_me = session.get('username', '')
         user_data = wa._users.get(uname_me, {})
+        raw_groups = user_data.get('groups', [])
+        group_names = [
+            wa._uid_to_group_name(g) if wa._is_uid(g) else g
+            for g in raw_groups
+            if not wa._is_uid(g) or wa._uid_to_group_name(g)
+        ]
         return jsonify({
             'username': uname_me,
             'display_name': session.get('display_name', ''),
@@ -60,7 +66,7 @@ def register(app, wa):
             'lang': session.get('lang', wa._default_lang),
             'dark_mode': session.get('dark_mode', wa._default_dark_mode),
             'permissions': list(wa._get_session_permissions()),
-            'groups': user_data.get('groups', []),
+            'groups': group_names,
             'pref_lang': user_data.get('lang', ''),
             'pref_dark_mode': user_data.get('dark_mode'),
             'restart_pending': wa._restart_pending,

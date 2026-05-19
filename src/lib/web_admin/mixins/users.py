@@ -5,6 +5,7 @@
 import json
 import os
 import tempfile
+import uuid
 
 from werkzeug.security import generate_password_hash
 
@@ -31,11 +32,20 @@ class _UsersMixin:
                     self._users = data
             except (json.JSONDecodeError, OSError):
                 pass  # File corrupt — do NOT overwrite, keep existing in-memory state
+            # Ensure every user has a stable uid
+            dirty = False
+            for udata in self._users.values():
+                if not udata.get('uid'):
+                    udata['uid'] = str(uuid.uuid4())
+                    dirty = True
+            if dirty:
+                self._persist_users()
             return  # File existed (valid or corrupt) — never reset credentials
         # First run: file does not exist yet
         if not self._users:
             self._users = {
                 default_user: {
+                    'uid': str(uuid.uuid4()),
                     'password_hash': generate_password_hash(default_pass),
                     'role': 'admin',
                     'display_name': 'Administrator',

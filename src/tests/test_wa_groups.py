@@ -177,9 +177,10 @@ class TestGroups:
             "username": "grp_user", "password": "testpass", "role": "viewer",
             "groups": ["cleanup_grp"],
         })
-        assert "cleanup_grp" in admin._users["grp_user"].get("groups", [])
+        cleanup_uid = admin._group_name_to_uid("cleanup_grp")
+        assert cleanup_uid in admin._users["grp_user"].get("groups", [])
         client.delete("/api/groups/cleanup_grp")
-        assert "cleanup_grp" not in admin._users["grp_user"].get("groups", [])
+        assert cleanup_uid not in admin._users["grp_user"].get("groups", [])
 
     def test_group_members_listed_in_get(self, client):
         _login(client)
@@ -231,7 +232,8 @@ class TestGroups:
         with open(admin._groups_path, encoding="utf-8") as f:
             data = json.load(f)
         assert "persist_grp" in data
-        assert "viewer" in data["persist_grp"]["roles"]
+        viewer_uid = admin._role_name_to_uid("viewer")
+        assert viewer_uid in data["persist_grp"]["roles"]
 
     def test_groups_loaded_from_disk(self, config_dir, var_dir):
         """Groups written to disk are loaded on next WebAdmin init."""
@@ -519,7 +521,8 @@ class TestGroupInputValidation:
         _login(client)
         client.post("/api/groups", json={"name": "persist_role_grp", "label": "P", "roles": ["viewer"]})
         client.put("/api/groups/persist_role_grp", json={"roles": ["viewer", "FAKE"]})
-        assert admin._groups["persist_role_grp"]["roles"] == ["viewer"]
+        viewer_uid = admin._role_name_to_uid("viewer")
+        assert admin._groups["persist_role_grp"]["roles"] == [viewer_uid]
 
     def test_update_group_non_list_roles_rejected(self, client):
         _login(client)
@@ -565,7 +568,8 @@ class TestGroupInputValidation:
         client.post("/api/groups", json={"name": "real_mem_grp", "label": "R", "roles": []})
         resp = client.put("/api/groups/real_mem_grp", json={"members": ["admin"]})
         assert resp.status_code == 200
-        assert "real_mem_grp" in admin._users["admin"].get("groups", [])
+        grp_uid = admin._group_name_to_uid("real_mem_grp")
+        assert grp_uid in admin._users["admin"].get("groups", [])
 
     def test_update_group_mixed_valid_and_invalid_members_rejected(self, client):
         _login(client)

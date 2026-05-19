@@ -227,7 +227,8 @@ class TestUserInputValidation:
             "groups": ["administrators"],
         })
         assert resp.status_code == 201
-        assert "administrators" in admin._users["u6"].get("groups", [])
+        grp_uid = admin._group_name_to_uid("administrators")
+        assert grp_uid in admin._users["u6"].get("groups", [])
 
     # --- update user: lang ---
 
@@ -312,7 +313,8 @@ class TestUserInputValidation:
         })
         resp = client.put("/api/users/grp3", json={"groups": ["administrators"]})
         assert resp.status_code == 200
-        assert "administrators" in admin._users["grp3"]["groups"]
+        grp_uid = admin._group_name_to_uid("administrators")
+        assert grp_uid in admin._users["grp3"]["groups"]
 
     # --- preferences endpoint ---
 
