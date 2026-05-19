@@ -94,7 +94,15 @@ document.getElementById('renameItemInput').addEventListener('keydown', e => {
 if (e.key === 'Enter') { e.preventDefault(); _doRenameItem(); }
 });
 document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', renderStatus);
-document.getElementById('btn-tab-access')?.addEventListener('shown.bs.tab', refreshAccessData);
+let _accessPollTimer = null;
+document.getElementById('btn-tab-access')?.addEventListener('shown.bs.tab', () => {
+    refreshAccessData();
+    _accessPollTimer = setInterval(refreshAccessData, (configData?.web_admin?.access_poll_secs ?? 30) * 1000);
+});
+document.getElementById('btn-tab-access')?.addEventListener('hide.bs.tab', () => {
+    clearInterval(_accessPollTimer);
+    _accessPollTimer = null;
+});
 
 async function refreshAccessData() {
 const [u, s, ro, gr] = await Promise.all([apiGet('/api/users'), apiGet('/api/sessions'), apiGet('/api/roles'), apiGet('/api/groups')]);

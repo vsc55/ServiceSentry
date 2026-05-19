@@ -6,7 +6,7 @@ import functools
 import os
 import threading
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from flask import Flask, jsonify, redirect, request, session, url_for
@@ -96,6 +96,13 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _MAX_GROUP_NAME_LEN = 64
     _MAX_GROUP_LABEL_LEN = 128
     _MAX_GROUP_DESC_LEN = 512
+    # Account lockout (0 = disabled)
+    _LOCKOUT_MAX_ATTEMPTS = 5
+    _LOCKOUT_DURATION_SECS = 900  # 15 min
+    # Session timers
+    _SESSION_CHECK_SECS = 20
+    _SESSION_REVOKE_REDIRECT_SECS = 3
+    _ACCESS_POLL_SECS = 30
 
     def __init__(
         self,
@@ -199,6 +206,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             @functools.wraps(f)
             def wrapper(*args, **kwargs):
                 if not self._check_session():
+                    if request.path.startswith('/api/'):
+                        return jsonify({'error': 'Unauthorized'}), 401
                     return redirect(url_for('login'))
                 if not any(p in self._get_session_permissions() for p in perms):
                     return jsonify({'error': self._t('access_denied')}), 403
@@ -211,6 +220,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             if not self._check_session():
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Unauthorized'}), 401
                 return redirect(url_for('login'))
             return f(*args, **kwargs)
         return wrapper
@@ -220,6 +231,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             if not self._check_session():
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Unauthorized'}), 401
                 return redirect(url_for('login'))
             if 'users_view' not in self._get_session_permissions():
                 return jsonify({'error': self._t('access_denied')}), 403
@@ -231,6 +244,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             if not self._check_session():
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Unauthorized'}), 401
                 return redirect(url_for('login'))
             perms = self._get_session_permissions()
             if not ('modules_edit' in perms or 'config_edit' in perms):
@@ -238,12 +253,47 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             return f(*args, **kwargs)
         return wrapper
 
-    def _authenticate(self, username: str, password: str) -> dict | None:
-        """Return user record if credentials are valid and account is enabled, else ``None``."""
+    def _authenticate(self, username: str, password: str) -> tuple[dict | None, str | None]:
+        """Return ``(user, None)`` on success or ``(None, reason)`` on failure.
+
+        Reasons: ``'user_not_found'``, ``'account_disabled'``,
+        ``'account_locked'``, ``'invalid_credentials'``.
+        """
         user = self._users.get(username)
-        if user and user.get('enabled', True) and check_password_hash(user['password_hash'], password):
-            return user
-        return None
+        if not user:
+            return None, 'user_not_found'
+        if not user.get('enabled', True):
+            return None, 'account_disabled'
+
+        # Check active lockout
+        locked_until_str = user.get('_locked_until')
+        if locked_until_str:
+            locked_until = datetime.fromisoformat(locked_until_str)
+            now = datetime.now(timezone.utc)
+            if now < locked_until:
+                return None, 'account_locked'
+            # Lockout expired — clear it
+            user.pop('_locked_until', None)
+            user.pop('_failed_attempts', None)
+            self._persist_users()
+
+        if not check_password_hash(user['password_hash'], password):
+            max_attempts = self._LOCKOUT_MAX_ATTEMPTS
+            if max_attempts > 0:
+                attempts = user.get('_failed_attempts', 0) + 1
+                user['_failed_attempts'] = attempts
+                if attempts >= max_attempts:
+                    locked_until = datetime.now(timezone.utc) + timedelta(seconds=self._LOCKOUT_DURATION_SECS)
+                    user['_locked_until'] = locked_until.isoformat()
+                    self._persist_users()
+                    return None, 'account_locked'
+                self._persist_users()
+            return None, 'invalid_credentials'
+
+        # Success — clear any lockout state
+        if user.pop('_failed_attempts', None) is not None or user.pop('_locked_until', None) is not None:
+            self._persist_users()
+        return user, None
 
     @staticmethod
     def _safe_referrer(fallback: str = 'login') -> str:

@@ -51,9 +51,9 @@ const _DW_DEFS = {
                     canShow: (p)         => true },
     sessions:     { icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => true },
-    users:        { icon: 'bi-people',        lkey: 'overview_users',            dCols: 2,  dH: 'auto', hasH: false,
+    users:        { icon: 'bi-person',         lkey: 'overview_users',            dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => true },
-    groups:       { icon: 'bi-diagram-3',     lkey: 'overview_groups',           dCols: 2,  dH: 'auto', hasH: false,
+    groups:       { icon: 'bi-people',        lkey: 'overview_groups',           dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => true },
     roles:        { icon: 'bi-shield-shaded',   lkey: 'overview_roles',            dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => true },
@@ -473,13 +473,13 @@ function _dwContent(id, data) {
                 .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)}" style="font-size:.72rem">${n} ${esc((rolesData[r]?.label) || ROLE_LABELS[r] || r)}</span>`)
                 .join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#f59e0b,#f97316)', 'rgba(245,158,11,.12)', '#f59e0b',
-                'bi-people-fill', users.total || 0, 'overview_users', sub);
+                'bi-person-fill', users.total || 0, 'overview_users', sub);
         }
 
         case 'groups': {
             const sub = groups.members ? `<span class="text-muted small">${tf('overview_members', groups.members)}</span>` : '';
             return _dwStatCard('linear-gradient(90deg,#10b981,#14b8a6)', 'rgba(16,185,129,.12)', '#10b981',
-                'bi-diagram-3-fill', groups.total || 0, 'overview_groups', sub);
+                'bi-people-fill', groups.total || 0, 'overview_groups', sub);
         }
 
         case 'roles': {

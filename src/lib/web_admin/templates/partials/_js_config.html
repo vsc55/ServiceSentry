@@ -83,6 +83,11 @@ function renderConfig() {
     if (!('role_modal_scrollable' in wa)) wa.role_modal_scrollable = true;
     if (!('config_poll_secs'          in wa)) wa.config_poll_secs          = 30;
     if (!('config_update_banner_secs' in wa)) wa.config_update_banner_secs = 8;
+    if (!('lockout_max_attempts'      in wa)) wa.lockout_max_attempts      = 5;
+    if (!('lockout_duration_secs'     in wa)) wa.lockout_duration_secs     = 900;
+    if (!('session_check_secs'        in wa)) wa.session_check_secs        = 20;
+    if (!('session_revoke_redirect_secs' in wa)) wa.session_revoke_redirect_secs = 3;
+    if (!('access_poll_secs'             in wa)) wa.access_poll_secs             = 30;
 
     const _cfgSectionAccent = {
         cfgcol_daemon:     'linear-gradient(90deg,#6366f1,#8b5cf6)',
@@ -94,7 +99,8 @@ function renderConfig() {
         cfgcol_proxy:      'linear-gradient(90deg,#8b5cf6,#a78bfa)',
         cfgcol_audit:       'linear-gradient(90deg,#64748b,#94a3b8)',
         cfgcol_tables:      'linear-gradient(90deg,#14b8a6,#2dd4bf)',
-        cfgcol_live_update: 'linear-gradient(90deg,#06b6d4,#3b82f6)',
+        cfgcol_live_update:     'linear-gradient(90deg,#06b6d4,#3b82f6)',
+        cfgcol_login_security:  'linear-gradient(90deg,#ef4444,#f43f5e)',
     };
 
     function cfgCardOpen(id, icon, title) {
@@ -119,6 +125,8 @@ function renderConfig() {
         'public_status', 'status_refresh_secs', 'status_lang',
         'port', 'proxy_count', 'public_url', 'force_https', 'force_fqdn', 'audit_sort', 'audit_sort_dir', 'default_page_size', 'page_sizes',
         'config_poll_secs', 'config_update_banner_secs',
+        'lockout_max_attempts', 'lockout_duration_secs',
+        'session_check_secs', 'session_revoke_redirect_secs', 'access_poll_secs',
     ];
     const order = ['daemon', 'global', 'telegram', 'web_admin'];
     const sections = Object.keys(configData).sort((a, b) => {
@@ -273,10 +281,19 @@ function renderConfig() {
     </div></div>`;
     h += cfgCardClose;
 
-    // Live updates card — poll interval and auto-update banner duration
+    // Live updates card — poll interval, auto-update banner, session timers
     h += cfgCardOpen('cfgcol_live_update', '<i class="bi bi-arrow-repeat me-1"></i>', t('live_update_section'));
     h += renderField('config_poll_secs', wa.config_poll_secs, 'web_admin|config_poll_secs', 'config');
     h += renderField('config_update_banner_secs', wa.config_update_banner_secs, 'web_admin|config_update_banner_secs', 'config');
+    h += renderField('session_check_secs', wa.session_check_secs, 'web_admin|session_check_secs', 'config');
+    h += renderField('session_revoke_redirect_secs', wa.session_revoke_redirect_secs, 'web_admin|session_revoke_redirect_secs', 'config');
+    h += renderField('access_poll_secs', wa.access_poll_secs, 'web_admin|access_poll_secs', 'config');
+    h += cfgCardClose;
+
+    // Login security card — lockout settings
+    h += cfgCardOpen('cfgcol_login_security', '<i class="bi bi-shield-exclamation me-1"></i>', t('login_security_section'));
+    h += renderField('lockout_max_attempts', wa.lockout_max_attempts, 'web_admin|lockout_max_attempts', 'config');
+    h += renderField('lockout_duration_secs', wa.lockout_duration_secs, 'web_admin|lockout_duration_secs', 'config');
     h += cfgCardClose;
 
     c.innerHTML = h;

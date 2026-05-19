@@ -38,6 +38,30 @@ class TestAuditLog:
         events = [e['event'] for e in admin._audit_log]
         assert 'login_failed' in events
 
+    def test_failed_login_reason_invalid_credentials(self, admin, client):
+        """Wrong password records reason=invalid_credentials in audit detail."""
+        client.post("/login", data={"username": "admin", "password": "wrong"})
+        entry = next(e for e in reversed(admin._audit_log) if e['event'] == 'login_failed')
+        assert entry['detail']['reason'] == 'invalid_credentials'
+
+    def test_failed_login_reason_user_not_found(self, admin, client):
+        """Non-existent username records reason=user_not_found in audit detail."""
+        client.post("/login", data={"username": "nobody", "password": "x"})
+        entry = next(e for e in reversed(admin._audit_log) if e['event'] == 'login_failed')
+        assert entry['detail']['reason'] == 'user_not_found'
+
+    def test_failed_login_reason_account_disabled(self, admin, client):
+        """Disabled account records reason=account_disabled in audit detail."""
+        from werkzeug.security import generate_password_hash
+        admin._users["locked"] = {
+            "password_hash": generate_password_hash("secret", method="pbkdf2:sha256"),
+            "role": "viewer",
+            "enabled": False,
+        }
+        client.post("/login", data={"username": "locked", "password": "secret"})
+        entry = next(e for e in reversed(admin._audit_log) if e['event'] == 'login_failed')
+        assert entry['detail']['reason'] == 'account_disabled'
+
     def test_logout_audited(self, admin, client):
         """Logout creates an audit entry."""
         _login(client)

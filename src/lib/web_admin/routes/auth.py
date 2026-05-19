@@ -16,7 +16,7 @@ def register(app, wa):
         if request.method == 'POST':
             username = request.form.get('username', '')
             password = request.form.get('password', '')
-            user = wa._authenticate(username, password)
+            user, reason = wa._authenticate(username, password)
             if user:
                 remember = request.form.get('remember_me') == 'on'
                 session.permanent = remember
@@ -38,16 +38,21 @@ def register(app, wa):
                     session['dark_mode'] = user_dm
                 wa._audit('login_ok', username, request.remote_addr)
                 return redirect(url_for('dashboard'))
-            raw = wa._users.get(username)
-            if not raw:
-                error = wa._t('invalid_credentials')
-                reason = 'user_not_found'
-            elif not raw.get('enabled', True):
+            if reason == 'account_locked':
+                import math
+                from datetime import datetime, timezone
+                raw = wa._users.get(username, {})
+                locked_until_str = raw.get('_locked_until', '')
+                try:
+                    secs_left = (datetime.fromisoformat(locked_until_str) - datetime.now(timezone.utc)).total_seconds()
+                    mins_left = math.ceil(max(secs_left, 0) / 60)
+                except (ValueError, TypeError):
+                    mins_left = 1
+                error = wa._t('account_locked', str(mins_left))
+            elif reason == 'account_disabled':
                 error = wa._t('account_disabled')
-                reason = 'account_disabled'
             else:
                 error = wa._t('invalid_credentials')
-                reason = 'invalid_credentials'
             wa._audit('login_failed', username, request.remote_addr,
                       detail={'reason': reason})
             flash(error, 'danger')

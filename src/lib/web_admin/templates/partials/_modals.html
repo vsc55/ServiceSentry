@@ -4,14 +4,14 @@
     <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title" id="userModalTitle">{{ i18n.new_user }}</h6>
+                <h6 class="modal-title"><i class="bi bi-person me-1"></i><span id="userModalTitle">{{ i18n.new_user }}</span></h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body p-0">
                 <ul class="nav nav-tabs px-3 pt-2" id="userModalTabs">
                     <li class="nav-item">
                         <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#umTabGeneral" type="button">
-                            <i class="bi bi-person me-1"></i>{{ i18n.tab_general }}
+                            <i class="bi bi-info-circle me-1"></i>{{ i18n.tab_general }}
                         </button>
                     </li>
                     <li class="nav-item">
@@ -55,7 +55,10 @@
                         <div class="row g-3 mb-2 flex-shrink-0" id="umPasswordGroup">
                             <div class="col-sm-6">
                                 <label class="form-label small fw-semibold">{{ i18n.password }}</label>
-                                <input type="password" class="form-control form-control-sm" id="umPassword" autocomplete="new-password">
+                                <input type="password" class="form-control form-control-sm" id="umPassword" autocomplete="new-password"
+                                    oninput="_updatePasswordStrength('umPassword','umPwStrengthBar','umPwStrengthLabel')">
+                                <div class="progress mt-1" style="height:4px" id="umPwStrengthBar"><div class="progress-bar" role="progressbar"></div></div>
+                                <div class="text-muted small mt-1" id="umPwStrengthLabel" style="min-height:1.1em"></div>
                             </div>
                         </div>
                         <div class="mb-2 flex-shrink-0" id="umEnabledGroup" style="display:none">
@@ -140,7 +143,9 @@
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
                     <input type="password" class="form-control form-control-sm" id="settingsPwNew" autocomplete="new-password"
-                        oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm')">
+                        oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm');_updatePasswordStrength('settingsPwNew','settingsPwStrengthBar','settingsPwStrengthLabel')">
+                    <div class="progress mt-1" style="height:4px" id="settingsPwStrengthBar"><div class="progress-bar" role="progressbar"></div></div>
+                    <div class="text-muted small mt-1" id="settingsPwStrengthLabel" style="min-height:1.1em"></div>
                 </div>
                 <div class="mb-1">
                     <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
@@ -167,7 +172,7 @@
     <div class="modal-dialog modal-dialog-centered modal-sm">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title" id="addItemModalTitle">{{ i18n.new_item }}</h6>
+                <h6 class="modal-title"><i class="bi bi-plus-circle me-1"></i><span id="addItemModalTitle">{{ i18n.new_item }}</span></h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
@@ -212,7 +217,9 @@
                     <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
                     <input type="password" class="form-control form-control-sm" id="rpNewPassword"
                         autocomplete="new-password"
-                        oninput="_checkPwMatch('rpNewPassword','rpConfirmPassword')">
+                        oninput="_checkPwMatch('rpNewPassword','rpConfirmPassword');_updatePasswordStrength('rpNewPassword','rpPwStrengthBar','rpPwStrengthLabel')">
+                    <div class="progress mt-1" style="height:4px" id="rpPwStrengthBar"><div class="progress-bar" role="progressbar"></div></div>
+                    <div class="text-muted small mt-1" id="rpPwStrengthLabel" style="min-height:1.1em"></div>
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
@@ -366,7 +373,7 @@
     <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title" id="groupModalTitle">{{ i18n.new_group }}</h6>
+                <h6 class="modal-title"><i class="bi bi-people me-1"></i><span id="groupModalTitle">{{ i18n.new_group }}</span></h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body p-0">
@@ -445,7 +452,7 @@
     <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title" id="roleModalTitle">{{ i18n.new_role }}</h6>
+                <h6 class="modal-title"><i class="bi bi-shield me-1"></i><span id="roleModalTitle">{{ i18n.new_role }}</span></h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body p-0">

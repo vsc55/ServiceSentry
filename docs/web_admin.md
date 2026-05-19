@@ -60,15 +60,15 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/*` devuelven JSON en lugar de HTML |
-| **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles; cambiar contraseña propia |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + roles personalizados con 23 flags granulares; los roles integrados permiten editar la etiqueta y gestionar qué usuarios/grupos tienen asignado ese rol; sus permisos se muestran en solo lectura |
-| **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado (permite editar roles y miembros, pero no nombre ni etiqueta) |
+| **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 23 flags granulares; activar/desactivar desde el modal |
+| **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Prueba de Telegram** | Enviar un mensaje de prueba para verificar la conectividad del bot |
 | **Modo oscuro** | Preferencia por usuario, persistida entre sesiones |
 | **Persistencia de pestaña activa** | La pestaña activa se guarda en `localStorage` y se restaura al recargar la página (F5); si la pestaña guardada deja de existir o el usuario pierde acceso, se muestra la pestaña por defecto |
 | **i18n** | Inglés y español; seleccionable por usuario y configurable globalmente con `web_admin.lang` |
 | **Registro de auditoría** | Seguimiento de cambios a nivel de campo con enmascarado de datos sensibles |
-| **Gestión de sesiones** | Ver sesiones activas; los usuarios con permiso `sessions_revoke` pueden revocar cualquier sesión |
+| **Gestión de sesiones** | Ver sesiones activas en tarjetas con animación hover; revocación con animación de desvanecimiento; auto-refresco del tab Access cada 30 s; poll de keepalive cada 20 s — si la sesión es revocada por otro admin, el usuario ve un toast y es redirigido al login automáticamente |
 | **Soporte proxy inverso** | `proxy_count` activa `ProxyFix` de Werkzeug para leer la IP real del cliente cuando Flask está detrás de uno o más proxies (nginx, Traefik…) |
 
 ---
@@ -245,6 +245,8 @@ Los campos numéricos del bloque `web_admin` se validan contra reglas definidas 
 | `web_admin\|pw_max_len` | `_PW_MAX_LEN` | 8 | 256 |
 | `web_admin\|proxy_count` | `_proxy_count` | 0 | 10 |
 | `web_admin\|default_page_size` | `_DEFAULT_PAGE_SIZE` | 0 | 200 |
+| `web_admin\|lockout_max_attempts` | `_LOCKOUT_MAX_ATTEMPTS` | 0 | 100 |
+| `web_admin\|lockout_duration_secs` | `_LOCKOUT_DURATION_SECS` | 60 | 86400 |
 
 Los campos booleanos se validan vía `BOOL_RULES`:
 

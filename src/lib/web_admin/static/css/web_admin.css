@@ -88,10 +88,9 @@
     --bs-btn-hover-color:  #000;
 }
 
-/* Modal backdrop — dark reddish-gray for contrast in dark mode */
+/* Modal backdrop — slightly darker than Bootstrap default in dark mode */
 [data-bs-theme="dark"] .modal-backdrop {
-    background-color: #2a1a1a;
-    --bs-backdrop-opacity: 0.72;
+    --bs-backdrop-opacity: 0.7;
 }
 
 /* Navbar — blend with deep bg in dark mode */
@@ -267,6 +266,13 @@
     border-radius: .2rem;
 }
 
+/* ── Modal title ────────────────────────────────────────────────── */
+.modal-title {
+    color: var(--bs-secondary-color);
+    font-size: .9rem;
+    font-weight: 500;
+}
+
 /* ── Modal depth layering ───────────────────────────────────────── */
 [data-bs-theme="dark"] .modal-content {
     background-color: var(--bs-secondary-bg);
@@ -276,6 +282,22 @@
 [data-bs-theme="dark"] .modal-footer {
     background-color: var(--bs-tertiary-bg);
     border-color: var(--bs-border-color);
+}
+
+/* ── Session cards ───────────────────────────────────────────────── */
+.ss-session-card {
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    cursor: default;
+}
+.ss-session-card:hover {
+    transform: scale(1.025);
+    box-shadow: 0 6px 20px rgba(0,0,0,.18) !important;
+    border-color: var(--bs-primary) !important;
+}
+.ss-session-card-removing {
+    transform: scale(0.75) !important;
+    opacity: 0 !important;
+    transition: transform .45s ease, opacity .45s ease !important;
 }
 
 /* ── Permission group accordion headers ─────────────────────────── */

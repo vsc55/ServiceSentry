@@ -177,20 +177,21 @@ function exportAudit(format) {
 let _auditSort    = 'time';   // time | event | user | ip
 let _auditSortDir = 'desc';   // asc | desc
 let _auditGroup   = 'none';   // none | date | event | user | ip
-let _auditFilters = { event: '', user: '', ip: '', dateFrom: '', dateTo: '' };
+let _auditFilters = { event: '', user: '', ip: '', dateFrom: '', dateTo: '', detail: '' };
 
 const _AUDIT_UI_KEY = 'ss_audit_ui';
 function _saveAuditUiState() {
     try {
-        sessionStorage.setItem(_AUDIT_UI_KEY, JSON.stringify({
+        localStorage.setItem(_AUDIT_UI_KEY, JSON.stringify({
             sort: _auditSort, sortDir: _auditSortDir, group: _auditGroup,
             event: _auditFilters.event, user: _auditFilters.user, ip: _auditFilters.ip,
             dateFrom: _auditFilters.dateFrom, dateTo: _auditFilters.dateTo,
+            detail: _auditFilters.detail,
         }));
     } catch {}
 }
 function _loadAuditUiState() {
-    try { return JSON.parse(sessionStorage.getItem(_AUDIT_UI_KEY) || 'null'); } catch { return null; }
+    try { return JSON.parse(localStorage.getItem(_AUDIT_UI_KEY) || 'null'); } catch { return null; }
 }
 
 function initAuditControls() {
@@ -216,11 +217,13 @@ function initAuditControls() {
         _auditFilters.ip       = saved.ip       || '';
         _auditFilters.dateFrom = saved.dateFrom || '';
         _auditFilters.dateTo   = saved.dateTo   || '';
+        _auditFilters.detail   = saved.detail   || '';
         const _setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
-        _setVal('auditFilterUser', _auditFilters.user);
-        _setVal('auditFilterIp',   _auditFilters.ip);
-        _setVal('auditFilterFrom', _auditFilters.dateFrom);
-        _setVal('auditFilterTo',   _auditFilters.dateTo);
+        _setVal('auditFilterUser',   _auditFilters.user);
+        _setVal('auditFilterIp',     _auditFilters.ip);
+        _setVal('auditFilterFrom',   _auditFilters.dateFrom);
+        _setVal('auditFilterTo',     _auditFilters.dateTo);
+        _setVal('auditFilterDetail', _auditFilters.detail);
     }
     // Populate event filter dropdown (must be done before restoring its value)
     const ef = document.getElementById('auditFilterEvent');
@@ -258,11 +261,12 @@ function applyAuditControls() {
     const gb = document.getElementById('auditGroupBy');
     if (sf) _auditSort = sf.value;
     if (gb) _auditGroup = gb.value;
-    _auditFilters.event    = document.getElementById('auditFilterEvent')?.value || '';
-    _auditFilters.user     = document.getElementById('auditFilterUser')?.value  || '';
-    _auditFilters.ip       = document.getElementById('auditFilterIp')?.value    || '';
-    _auditFilters.dateFrom = document.getElementById('auditFilterFrom')?.value  || '';
-    _auditFilters.dateTo   = document.getElementById('auditFilterTo')?.value    || '';
+    _auditFilters.event    = document.getElementById('auditFilterEvent')?.value  || '';
+    _auditFilters.user     = document.getElementById('auditFilterUser')?.value   || '';
+    _auditFilters.ip       = document.getElementById('auditFilterIp')?.value     || '';
+    _auditFilters.dateFrom = document.getElementById('auditFilterFrom')?.value   || '';
+    _auditFilters.dateTo   = document.getElementById('auditFilterTo')?.value     || '';
+    _auditFilters.detail   = document.getElementById('auditFilterDetail')?.value || '';
     const hasFilters = _auditFilters.event || _auditFilters.user || _auditFilters.ip ||
                        _auditFilters.dateFrom || _auditFilters.dateTo;
     _auditPage = 1;
@@ -282,8 +286,8 @@ function clearAuditFilters() {
     const ic = document.getElementById('iconAuditSortDir');
     if (ic) ic.className = _auditSortDir === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
     // Reset all filters
-    _auditFilters = { event: '', user: '', ip: '', dateFrom: '', dateTo: '' };
-    ['auditFilterEvent','auditFilterUser','auditFilterIp','auditFilterFrom','auditFilterTo']
+    _auditFilters = { event: '', user: '', ip: '', dateFrom: '', dateTo: '', detail: '' };
+    ['auditFilterEvent','auditFilterUser','auditFilterIp','auditFilterFrom','auditFilterTo','auditFilterDetail']
         .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     _auditPage = 1;
     _saveAuditUiState();
@@ -420,14 +424,16 @@ function renderAuditTable() {
     _initAuditPageSize();
 
     // Filter
-    const userRx  = _auditFilterRegex(_auditFilters.user);
-    const ipRx    = _auditFilterRegex(_auditFilters.ip);
+    const userRx     = _auditFilterRegex(_auditFilters.user);
+    const ipRx       = _auditFilterRegex(_auditFilters.ip);
+    const detailLow  = _auditFilters.detail ? _auditFilters.detail.toLowerCase() : '';
     const filtered = _auditEntries.filter(e => {
         if (_auditFilters.event && e.event !== _auditFilters.event) return false;
         if (userRx && !userRx.test(e.user || '')) return false;
         if (ipRx   && !ipRx.test(e.ip   || '')) return false;
         if (_auditFilters.dateFrom && new Date(e.ts) < new Date(_auditFilters.dateFrom + 'T00:00:00')) return false;
         if (_auditFilters.dateTo   && new Date(e.ts) > new Date(_auditFilters.dateTo   + 'T23:59:59')) return false;
+        if (detailLow && !JSON.stringify(e.detail ?? '').toLowerCase().includes(detailLow)) return false;
         return true;
     });
 

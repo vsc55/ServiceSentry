@@ -53,6 +53,31 @@ class TestAuthentication:
         assert resp.status_code == 200
         assert "Invalid credentials" in resp.data.decode()
 
+    def test_login_account_disabled(self, admin, client):
+        """Disabled user sees a distinct error message, not generic invalid credentials."""
+        from werkzeug.security import generate_password_hash
+        admin._users["disabled_user"] = {
+            "password_hash": generate_password_hash("secret", method="pbkdf2:sha256"),
+            "role": "viewer",
+            "display_name": "Disabled",
+            "enabled": False,
+        }
+        resp = _login(client, username="disabled_user", password="secret")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "disabled" in body.lower()
+        assert "Invalid credentials" not in body
+
+    def test_login_uses_post_redirect_get(self, client):
+        """Failed login returns 302 redirect (PRG pattern), not a direct 200 render."""
+        resp = client.post(
+            "/login",
+            data={"username": "admin", "password": "wrong"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302
+        assert "/login" in resp.headers["Location"]
+
     def test_logout(self, client):
         _login(client)
         resp = client.get("/logout")
@@ -121,3 +146,98 @@ class TestRememberMe:
         wa1 = WebAdmin(config_dir, "admin", "secret", var_dir)
         wa2 = WebAdmin(config_dir, "admin", "secret", var_dir)
         assert wa1.app.secret_key == wa2.app.secret_key
+
+
+# ──────────────────────────── Account lockout ──────────────────────
+
+class TestAccountLockout:
+    """Account lockout after N failed login attempts."""
+
+    def _set_lockout(self, admin, max_attempts=3, duration_secs=900):
+        admin._LOCKOUT_MAX_ATTEMPTS = max_attempts
+        admin._LOCKOUT_DURATION_SECS = duration_secs
+
+    def test_lockout_triggers_after_n_attempts(self, admin, client):
+        """After N wrong passwords the account is locked."""
+        self._set_lockout(admin, max_attempts=3)
+        for _ in range(3):
+            resp = _login(client, password="wrong")
+            assert resp.status_code == 200
+        # Next attempt should mention lockout
+        resp = _login(client, password="wrong")
+        body = resp.data.decode()
+        assert "locked" in body.lower() or "bloqueada" in body.lower()
+
+    def test_locked_account_rejects_correct_password(self, admin, client):
+        """A locked account rejects even the correct password."""
+        self._set_lockout(admin, max_attempts=2)
+        for _ in range(2):
+            _login(client, password="wrong")
+        resp = _login(client, password="secret")
+        body = resp.data.decode()
+        assert "locked" in body.lower() or "bloqueada" in body.lower()
+
+    def test_lockout_returns_minutes_remaining(self, admin, client):
+        """Error message contains the minutes remaining."""
+        self._set_lockout(admin, max_attempts=2, duration_secs=600)
+        for _ in range(2):
+            _login(client, password="wrong")
+        resp = _login(client, password="wrong")
+        body = resp.data.decode()
+        # 600 s = 10 min, so '10' should appear in the message
+        assert "10" in body
+
+    def test_successful_login_resets_failed_attempts(self, admin, client):
+        """A successful login clears the failed-attempts counter."""
+        self._set_lockout(admin, max_attempts=5)
+        for _ in range(3):
+            _login(client, password="wrong")
+        _login(client, password="secret")
+        assert admin._users["admin"].get("_failed_attempts") is None
+        assert admin._users["admin"].get("_locked_until") is None
+
+    def test_lockout_disabled_when_max_attempts_zero(self, admin, client):
+        """With max_attempts=0 the account is never locked."""
+        self._set_lockout(admin, max_attempts=0)
+        for _ in range(20):
+            _login(client, password="wrong")
+        resp = _login(client, password="secret")
+        assert b"modules-container" in resp.data
+
+    def test_account_unlocks_after_duration(self, admin, client):
+        """After the lockout duration expires the user can log in again."""
+        from datetime import datetime, timedelta, timezone
+        self._set_lockout(admin, max_attempts=2)
+        for _ in range(2):
+            _login(client, password="wrong")
+        # Backdate the locked_until to simulate expiry
+        admin._users["admin"]["_locked_until"] = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+        resp = _login(client, password="secret")
+        assert b"modules-container" in resp.data
+        assert admin._users["admin"].get("_locked_until") is None
+
+    def test_authenticate_returns_tuple(self, admin):
+        """_authenticate() always returns a 2-tuple."""
+        with admin.app.test_request_context():
+            result = admin._authenticate("admin", "secret")
+            assert isinstance(result, tuple) and len(result) == 2
+            user, reason = result
+            assert user is not None
+            assert reason is None
+
+    def test_authenticate_wrong_password_reason(self, admin):
+        """Wrong password returns (None, 'invalid_credentials') when lockout not reached."""
+        admin._LOCKOUT_MAX_ATTEMPTS = 0
+        with admin.app.test_request_context():
+            user, reason = admin._authenticate("admin", "wrong")
+            assert user is None
+            assert reason == "invalid_credentials"
+
+    def test_authenticate_unknown_user_reason(self, admin):
+        """Unknown username returns (None, 'user_not_found')."""
+        with admin.app.test_request_context():
+            user, reason = admin._authenticate("nobody", "x")
+            assert user is None
+            assert reason == "user_not_found"

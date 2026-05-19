@@ -379,27 +379,28 @@ class TestSecurityInjection:
         ]
         for method, path in protected_endpoints:
             resp = getattr(c, method.lower())(path)
-            assert resp.status_code in (302, 401, 403), \
-                f"Unauthenticated {method} {path} returned {resp.status_code}"
+            assert resp.status_code == 401, \
+                f"Unauthenticated {method} {path} returned {resp.status_code}, expected 401"
+            assert resp.is_json, \
+                f"Unauthenticated {method} {path} did not return JSON"
 
     def test_login_wrong_password(self, config_dir, var_dir):
-        """Wrong password returns the login page, not a crash."""
+        """Wrong password redirects back to login (PRG pattern), not a crash."""
         wa = self._make_admin(config_dir, var_dir)
         c = wa.app.test_client()
         resp = c.post("/login", data={
             "username": "secadmin", "password": "WRONG",
-        })
-        assert resp.status_code == 200  # stays on login page
+        }, follow_redirects=True)
+        assert resp.status_code == 200
         assert b'logged_in' not in resp.data
 
     def test_login_nonexistent_user(self, config_dir, var_dir):
         """Login with a non-existent user is cleanly rejected."""
         wa = self._make_admin(config_dir, var_dir)
         c = wa.app.test_client()
-        resp = c.post("/login", data={
+        c.post("/login", data={
             "username": "nobody_exists_here", "password": "testpass",
-        })
-        assert resp.status_code == 200
+        }, follow_redirects=True)
         with c.session_transaction() as s:
             assert 'logged_in' not in s
 
@@ -423,7 +424,7 @@ class TestSecurityInjection:
         with c.session_transaction() as s:
             s['session_token'] = 'a' * 64
         resp = c.get("/api/me", follow_redirects=False)
-        assert resp.status_code == 302  # kicked back to login
+        assert resp.status_code == 401  # API returns 401 for invalid session
 
     def test_reused_session_token_after_logout(self, config_dir, var_dir):
         """After logout the token is no longer valid."""
@@ -440,7 +441,7 @@ class TestSecurityInjection:
             s['username'] = 'secadmin'
             s['role'] = 'admin'
         resp = c.get("/api/me", follow_redirects=False)
-        assert resp.status_code == 302  # session invalidated
+        assert resp.status_code == 401  # API returns 401 for invalidated session
 
     # ── HTTP method abuse ─────────────────────────────────────────
 

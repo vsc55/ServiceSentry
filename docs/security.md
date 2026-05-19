@@ -9,10 +9,11 @@ Referencia completa de los mecanismos de seguridad implementados en la interfaz 
 ### Flujo de login
 
 1. `POST /login` recibe `username` + `password`.
-2. Se busca el usuario en `users.json`; si no existe → respuesta genérica **"Invalid credentials"** (mismo mensaje para usuario inexistente que para contraseña errónea — evita enumeración de usuarios).
+2. Se busca el usuario en `users.json`; si no existe o la contraseña es incorrecta → el **formulario muestra siempre "Invalid credentials"** (mensaje genérico — evita enumeración de usuarios). Si la cuenta existe pero está desactivada → mensaje específico "account disabled". Si la cuenta está bloqueada → mensaje con los minutos restantes.
 3. La contraseña se verifica con `werkzeug.security.check_password_hash` (PBKDF2-SHA256).
 4. Si es correcta → se crea una entrada en el **registro de sesiones** del servidor (`_sessions`) con un token de 32 bytes aleatorios (64 hex) y se guarda en la cookie de sesión Flask.
-5. El evento `login_ok` o `login_failed` se escribe en el **registro de auditoría**.
+5. El evento `login_ok` o `login_failed` se escribe en el **registro de auditoría**. En caso de fallo, el campo `detail.reason` almacena la clave i18n que describe la causa real (`user_not_found`, `account_disabled`, `account_locked` o `invalid_credentials`).
+6. El login usa el patrón **POST / Redirect / GET**: en caso de fallo se usa `flash()` y se redirige al `GET /login`, evitando el diálogo de reenvío de formulario al pulsar F5.
 
 ### Sesiones persistentes ("Remember me")
 
@@ -26,13 +27,42 @@ Referencia completa de los mecanismos de seguridad implementados en la interfaz 
 |------|-------------|
 | `test_root_redirects_to_login` | Ruta `/` redirige a `/login` sin sesión |
 | `test_login_success` | Login correcto da acceso al dashboard |
-| `test_login_wrong_password` | Contraseña incorrecta → página de login + mensaje de error |
+| `test_login_wrong_password` | Contraseña incorrecta → redirección PRG a login + mensaje de error |
 | `test_login_wrong_username` | Usuario inexistente → mismo mensaje genérico (sin enumerar) |
 | `test_login_empty_fields` | Credenciales vacías → rechazado |
+| `test_login_account_disabled` | Cuenta desactivada → mensaje específico "account disabled" |
+| `test_login_uses_post_redirect_get` | Login fallido → 302 redirect (PRG), no render directo |
 | `test_logout` | Logout invalida la sesión; rutas protegidas redirigen a login |
 | `test_login_with_remember_me` | `remember_me` marca la sesión como permanente |
 | `test_secret_key_persisted` | La `secret_key` se escribe en disco al crear la instancia |
 | `test_secret_key_reused` | Una segunda instancia reutiliza la clave existente |
+
+### Bloqueo de cuenta por intentos fallidos
+
+Tras `_LOCKOUT_MAX_ATTEMPTS` (por defecto **5**) intentos de login fallidos con la contraseña incorrecta, la cuenta queda bloqueada durante `_LOCKOUT_DURATION_SECS` (por defecto **900 s = 15 min**). Mientras está bloqueada, incluso la contraseña correcta es rechazada. El mensaje de error indica los minutos restantes.
+
+Configuración en `config.json → web_admin`:
+
+| Campo                   | Por defecto | Descripción                                                     |
+|-------------------------|-------------|----------------------------------------------------------------- |
+| `lockout_max_attempts`  | `5`         | Intentos fallidos antes del bloqueo. `0` desactiva el bloqueo.  |
+| `lockout_duration_secs` | `900`       | Duración del bloqueo en segundos (60–86400).                    |
+
+Los campos `_failed_attempts` y `_locked_until` se almacenan en `users.json` y se limpian automáticamente tras un login exitoso o cuando expira el bloqueo. Estos campos no se exponen en `GET /api/users`.
+
+### Tests de bloqueo de cuenta
+
+| Test | Qué verifica |
+|------|-------------|
+| `test_lockout_triggers_after_n_attempts` | Tras N intentos fallidos el mensaje menciona "locked" |
+| `test_locked_account_rejects_correct_password` | Cuenta bloqueada rechaza la contraseña correcta |
+| `test_lockout_returns_minutes_remaining` | El mensaje incluye los minutos restantes |
+| `test_successful_login_resets_failed_attempts` | Login correcto limpia `_failed_attempts` y `_locked_until` |
+| `test_lockout_disabled_when_max_attempts_zero` | Con `max_attempts=0` nunca se bloquea |
+| `test_account_unlocks_after_duration` | Tras expirar el bloqueo, el login correcto funciona |
+| `test_authenticate_returns_tuple` | `_authenticate()` devuelve siempre una 2-tupla |
+| `test_authenticate_wrong_password_reason` | Contraseña incorrecta → `reason='invalid_credentials'` |
+| `test_authenticate_unknown_user_reason` | Usuario inexistente → `reason='user_not_found'` |
 
 ---
 
@@ -63,7 +93,9 @@ Las sesiones se persisten en `sessions.json` y se cargan al iniciar.
 | `POST /api/sessions/revoke-user/<user>` | `sessions_revoke` | Revoca todas las sesiones de un usuario |
 | `POST /api/sessions/invalidate` | `sessions_revoke` | Revoca **todas** las sesiones |
 
-Una petición con un token revocado (incluso si la cookie Flask sigue siendo válida) es redirigida a `/login`.
+Una petición con un token revocado (incluso si la cookie Flask sigue siendo válida) recibe **401** en rutas `/api/` o redirección a `/login` en rutas HTML.
+
+El cliente JS detecta el 401 mediante un poll de `/api/me` cada 20 segundos y mediante cualquier llamada API activa. Al detectarlo muestra un toast "Tu sesión ha sido cerrada por un administrador" y redirige al login tras 3,5 segundos.
 
 ### Tests de sesiones
 
@@ -73,9 +105,9 @@ Una petición con un token revocado (incluso si la cookie Flask sigue siendo vá
 | `test_session_token_in_flask_session` | La cookie contiene un token de 64 hex |
 | `test_session_records_username` | La entrada registra el nombre de usuario |
 | `test_session_removed_on_logout` | Logout elimina la entrada del registro |
-| `test_session_invalid_after_revocation` | Token revocado → redirige a login |
-| `test_forged_session_token_rejected` | Token fabricado a mano → redirige a login |
-| `test_reused_session_token_after_logout` | Token antiguo re-inyectado → redirige a login |
+| `test_session_invalid_after_revocation` | Token revocado → 401 en `/api/me` |
+| `test_forged_session_token_rejected` | Token fabricado a mano → 401 en `/api/me` |
+| `test_reused_session_token_after_logout` | Token antiguo re-inyectado → 401 en `/api/me` |
 | `test_sessions_persisted_to_file` | Las sesiones se guardan en `sessions.json` |
 | `test_api_revoke_session_404` | Revocar sesión inexistente → 404 |
 | `test_sessions_api_admin_only` | No-admin → 403 en todos los endpoints de sesiones |
@@ -401,7 +433,7 @@ Todos los eventos relevantes para la seguridad quedan registrados en `audit.json
 | Evento | Cuándo se genera |
 |--------|-----------------|
 | `login_ok` | Login exitoso |
-| `login_failed` | Contraseña incorrecta o usuario inexistente |
+| `login_failed` | Credenciales inválidas, usuario inexistente o cuenta desactivada. El campo `detail.reason` almacena la clave i18n: `invalid_credentials`, `user_not_found` o `account_disabled` |
 | `logout` | Cierre de sesión |
 | `modules_saved` | Guardado de `modules.json` (con diff de campos) |
 | `config_saved` | Guardado de `config.json` (con diff de campos) |
@@ -435,6 +467,9 @@ El log se recorta automáticamente a `_AUDIT_MAX_ENTRIES` entradas (≤ 500) par
 |------|-------------|
 | `test_login_audited` | Login correcto → evento `login_ok` |
 | `test_failed_login_audited` | Login fallido → evento `login_failed` |
+| `test_failed_login_reason_invalid_credentials` | Contraseña errónea → `detail.reason == 'invalid_credentials'` |
+| `test_failed_login_reason_user_not_found` | Usuario inexistente → `detail.reason == 'user_not_found'` |
+| `test_failed_login_reason_account_disabled` | Cuenta desactivada → `detail.reason == 'account_disabled'` |
 | `test_logout_audited` | Logout → evento `logout` |
 | `test_modules_save_audited` | Cambio en módulos → evento con diff de campos |
 | `test_config_save_audited` | Cambio en config → evento con diff de campos |
@@ -457,7 +492,7 @@ El log se recorta automáticamente a `_AUDIT_MAX_ENTRIES` entradas (≤ 500) par
 
 ## Acceso No Autenticado
 
-Todos los endpoints protegidos devuelven 302 (redirect a `/login`), 401 o 403 ante peticiones sin sesión válida.
+Las rutas `/api/*` devuelven **401 JSON** ante peticiones sin sesión válida. Las rutas HTML (dashboard, login) devuelven **302** redirect a `/login`. Esto permite que el cliente JS detecte la sesión expirada sin seguir el redirect automáticamente.
 
 Lista completa verificada en `test_unauthenticated_api_access`:
 

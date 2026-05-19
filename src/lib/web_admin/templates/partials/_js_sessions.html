@@ -5,6 +5,16 @@
 // ──────────────────────────── Session management ─────────────────
 let _sessionsPage = 1;
 let _sessionsPageSize = null;
+let _selectedSessions = new Set();
+
+function _updateSessionsBulkBar() {
+    const bar   = document.getElementById('sessionsBulkBar');
+    const count = document.getElementById('sessionsBulkCount');
+    if (!bar) return;
+    const n = _selectedSessions.size;
+    bar.style.display = n > 0 ? '' : 'none';
+    if (count) count.textContent = n;
+}
 function _goSessionsPage(p) { _sessionsPage = p; renderSessions(); }
 function _changeSessionsPageSize(v) { _sessionsPageSize = parseInt(v, 10); _sessionsPage = 1; renderSessions(); }
 
@@ -40,9 +50,11 @@ function renderSessions() {
         const created     = new Date(s.created).toLocaleString();
         const lastSeen    = new Date(s.last_seen).toLocaleString();
 
-        h += `<div class="rounded-3 overflow-hidden border" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 2px 6px rgba(0,0,0,.06)">
+        h += `<div class="rounded-3 overflow-hidden border ss-session-card" data-sid="${escAttr(sid)}" style="background:var(--bs-tertiary-bg);box-shadow:0 2px 6px rgba(0,0,0,.06)">
             <div style="height:3px;background:${accentGrad}"></div>
             <div class="d-flex align-items-center gap-2 px-3 py-2">
+                <input type="checkbox" class="form-check-input flex-shrink-0" ${_selectedSessions.has(sid) ? 'checked' : ''}
+                    onchange="_sessionsToggleOne(${jsStr(sid)}, this.checked)">
                 <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
                       style="width:36px;height:36px;background:${avatarBg};color:${avatarColor};font-size:1rem">
                     <i class="bi bi-person-fill"></i>
@@ -59,6 +71,7 @@ function renderSessions() {
                     <i class="bi bi-x-lg"></i>
                 </button>
             </div>
+            ${s.user_agent ? `<div class="px-3 pb-1" style="font-size:.7rem;color:var(--bs-secondary-color);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(s.user_agent)}"><i class="bi bi-window me-1" style="opacity:.6"></i>${esc(s.user_agent.length > 72 ? s.user_agent.slice(0, 72) + '…' : s.user_agent)}</div>` : ''}
             <div class="d-flex gap-3 px-3 pb-2 pt-0" style="font-size:.72rem;color:var(--bs-secondary-color)">
                 <span><i class="bi bi-clock-history me-1" style="opacity:.6"></i>${t('col_created')}: ${esc(created)}</span>
                 <span class="ms-auto"><i class="bi bi-activity me-1" style="opacity:.6"></i>${t('col_last_seen')}: ${esc(lastSeen)}</span>
@@ -68,6 +81,25 @@ function renderSessions() {
     h += `</div>`;
     const pagination = _renderPagination(total, _sessionsPage, _sessionsPageSize, '_goSessionsPage', '_changeSessionsPageSize');
     c.innerHTML = pagination + h + pagination;
+    _updateSessionsBulkBar();
+}
+
+function _sessionsToggleOne(sid, checked) {
+    checked ? _selectedSessions.add(sid) : _selectedSessions.delete(sid);
+    _updateSessionsBulkBar();
+}
+
+async function _bulkRevokeSessions() {
+    const sids = [..._selectedSessions];
+    if (!sids.length) return;
+    showConfirmModal(`${t('revoke_session')} ${sids.length} ${t('selected').toLowerCase()}?`, async () => {
+        for (const sid of sids) {
+            const r = await apiPost('/api/sessions/revoke/' + encodeURIComponent(sid), {});
+            if (r?.status === 200 && r.data?.ok) delete sessionsData[sid];
+        }
+        _selectedSessions.clear();
+        renderSessions(); renderUsers();
+    });
 }
 
 async function revokeSession(sid) {
@@ -78,11 +110,17 @@ async function revokeSession(sid) {
             showToast(t('session_revoked'));
             delete sessionsData[sid];
             if (isCurrent) {
-                setTimeout(() => { location.href = '/login'; }, 800);
+                setTimeout(() => { location.href = '/login'; }, Math.max((configData?.web_admin?.session_revoke_redirect_secs ?? 3) * 1000, 300));
                 return;
             }
-            renderSessions();
-            renderUsers();
+            const card = document.querySelector(`.ss-session-card[data-sid="${CSS.escape(sid)}"]`);
+            if (card) {
+                card.classList.add('ss-session-card-removing');
+                setTimeout(() => { renderSessions(); renderUsers(); }, 470);
+            } else {
+                renderSessions();
+                renderUsers();
+            }
         } else {
             showToast(r?.data?.error || t('connection_error'), 'danger');
         }
@@ -95,7 +133,7 @@ async function revokeUserSessions(username) {
         if (r && r.status === 200 && r.data?.ok) {
             showToast(t('user_sessions_revoked'));
             if (username === currentUser.username) {
-                setTimeout(() => { location.href = '/login'; }, 800);
+                setTimeout(() => { location.href = '/login'; }, Math.max((configData?.web_admin?.session_revoke_redirect_secs ?? 3) * 1000, 300));
                 return;
             }
             for (const [sid, s] of Object.entries(sessionsData)) {
@@ -114,7 +152,7 @@ async function invalidateAllSessions() {
         const r = await apiPost('/api/sessions/invalidate', {});
         if (r && r.status === 200 && r.data?.ok) {
             showToast(t('sessions_closed'));
-            setTimeout(() => { location.href = '/login'; }, 1000);
+            setTimeout(() => { location.href = '/login'; }, Math.max((configData?.web_admin?.session_revoke_redirect_secs ?? 3) * 1000, 300));
         } else {
             showToast(r?.data?.error || t('connection_error'), 'danger');
         }

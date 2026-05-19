@@ -8,6 +8,8 @@ let _groupsPage = 1;
 let _groupsPageSize = null;
 let _groupsSort = 'name';
 let _groupsSortDir = 'asc';
+let _selectedGroups = new Set();
+let _groupsCurrentPage = [];
 function _goGroupsPage(p) { _groupsPage = p; renderGroups(); }
 function _changeGroupsPageSize(v) { _groupsPageSize = parseInt(v, 10); _groupsPage = 1; renderGroups(); }
 function _sortGroups(col) {
@@ -53,9 +55,12 @@ function renderGroups() {
     const ps = _groupsPageSize || total;
     _groupsPage = Math.max(1, Math.min(_groupsPage, Math.ceil(total / ps)));
     const entries = allEntries.slice((_groupsPage - 1) * ps, _groupsPage * ps);
+    _groupsCurrentPage = entries.map(([name]) => name);
+    const _allPageSelected = _groupsCurrentPage.length > 0 && _groupsCurrentPage.every(n => _selectedGroups.has(n));
 
     let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table">
     <thead class="ss-thead"><tr>
+        ${showActions ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected ? 'checked' : ''} onchange="_groupsSelectAll(this.checked)"></th>` : ''}
         ${_thSort(t('col_group_name'),    'name',    _groupsSort, _groupsSortDir, '_sortGroups')}
         ${_thSort(t('col_group_label'),   'label',   _groupsSort, _groupsSortDir, '_sortGroups')}
         ${_thSort(t('col_group_roles'),   'roles',   _groupsSort, _groupsSortDir, '_sortGroups')}
@@ -79,6 +84,7 @@ function renderGroups() {
             : `<span class="text-muted small">\u2014</span>`;
 
         h += `<tr${rowStyle}>
+            ${showActions ? `<td><input type="checkbox" class="form-check-input" ${_selectedGroups.has(name) ? 'checked' : ''} onchange="_groupsToggleOne(${jsStr(name)}, this.checked)"></td>` : ''}
             <td class="text-nowrap"><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
             <td class="text-muted small">${esc(gd.label || name)}</td>
             <td style="line-height:1.9">${roleBadges || `<span class="text-muted">\u2014</span>`}</td>
@@ -97,10 +103,19 @@ function renderGroups() {
     const pagination = _renderPagination(total, _groupsPage, _groupsPageSize, '_goGroupsPage', '_changeGroupsPageSize');
     const _addBtn = grpPerms.has('groups_add')
         ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewGroupModal()" title="${escAttr(t('new_group_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_group')}</button>` : '';
+    const _bulkBar = showActions && _selectedGroups.size > 0 ? `
+        <div class="d-flex align-items-center gap-1 border-start ps-2 ms-1">
+            <span class="badge bg-secondary rounded-pill">${_selectedGroups.size}</span>
+            ${canEditGroup ? `<button class="btn btn-sm btn-success py-0 px-2" onclick="_bulkEnableGroups(true)" title="${escAttr(t('enable'))}"><i class="bi bi-toggle-on"></i></button>` : ''}
+            ${canEditGroup ? `<button class="btn btn-sm btn-secondary py-0 px-2" onclick="_bulkEnableGroups(false)" title="${escAttr(t('disable'))}"><i class="bi bi-toggle-off"></i></button>` : ''}
+            ${canDeleteGroup ? `<button class="btn btn-sm btn-danger py-0 px-2" onclick="_bulkDeleteGroups()" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
+            <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedGroups.clear();renderGroups()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
+        </div>` : '';
     c.innerHTML = `<div class="ss-card">
         <div class="ss-accent ss-accent-teal"></div>
         <div class="ss-card-header">
-            <h6 class="mb-0 me-auto"><i class="bi bi-collection me-2"></i>${t('group_management')}</h6>
+            <h6 class="mb-0 me-auto"><i class="bi bi-people me-2"></i>${t('group_management')}</h6>
+            ${_bulkBar}
             <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>
             ${_addBtn}
         </div>
@@ -108,6 +123,47 @@ function renderGroups() {
         <div>${h}</div>
         <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
     </div>`;
+}
+
+function _groupsSelectAll(checked) {
+    _groupsCurrentPage.forEach(n => checked ? _selectedGroups.add(n) : _selectedGroups.delete(n));
+    renderGroups();
+}
+function _groupsToggleOne(name, checked) {
+    checked ? _selectedGroups.add(name) : _selectedGroups.delete(name);
+    renderGroups();
+}
+async function _bulkEnableGroups(enabled) {
+    const names = [..._selectedGroups].filter(n => !groupsData[n]?.builtin);
+    if (!names.length) return;
+    showConfirmModal(`${t(enabled ? 'enable' : 'disable')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
+        for (const name of names) {
+            const g = groupsData[name]; if (!g) continue;
+            const body = { label: g.label || '', description: g.description || '',
+                           roles: g.roles || [], members: g.members || [], enabled };
+            const r = await apiPut('/api/groups/' + encodeURIComponent(name), body);
+            if (r?.status === 200 && r.data?.ok) groupsData[name] = { ...groupsData[name], enabled };
+        }
+        _selectedGroups.clear();
+        renderGroups(); renderUsers();
+    });
+}
+async function _bulkDeleteGroups() {
+    const names = [..._selectedGroups].filter(n => !groupsData[n]?.builtin);
+    if (!names.length) return;
+    showConfirmModal(`${t('delete_tt')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
+        for (const name of names) {
+            const r = await apiDelete('/api/groups/' + encodeURIComponent(name));
+            if (r?.status === 200 && r.data?.ok) {
+                for (const ud of Object.values(usersData)) {
+                    if (ud.groups) ud.groups = ud.groups.filter(g => g !== name);
+                }
+                delete groupsData[name];
+            }
+        }
+        _selectedGroups.clear();
+        renderGroups(); renderUsers();
+    });
 }
 
 let _editingGroup    = null;
@@ -231,6 +287,9 @@ async function saveGroupModal() {
     const roles   = [..._gmSelectedRoles];
     const members = [..._gmSelectedMembers];
     if (!name) { showToast(t('group_name_required'), 'warning'); return; }
+    if (!_editingGroup && Object.keys(groupsData).some(k => k.toLowerCase() === name.toLowerCase())) {
+        showToast(tf('group_already_exists', name), 'warning'); return;
+    }
     const isBuiltin = !!(groupsData[name] || {}).builtin;
     if (_editingGroup) {
         const enabled = document.getElementById('gmEnabled').checked;

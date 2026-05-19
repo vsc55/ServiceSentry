@@ -104,6 +104,11 @@ const CONFIG_FIELD_DEFAULTS = {
     'web_admin|role_modal_scrollable': true,
     'web_admin|config_poll_secs':          30,
     'web_admin|config_update_banner_secs': 8,
+    'web_admin|lockout_max_attempts':      5,
+    'web_admin|lockout_duration_secs':     900,
+    'web_admin|session_check_secs':        20,
+    'web_admin|session_revoke_redirect_secs': 3,
+    'web_admin|access_poll_secs':             30,
 };
 
 // Field schema loaded from /api/config/schema — min, max, default per field.
@@ -358,6 +363,14 @@ function _startVersionPoll(intervalMs = 60000) {
             }
         } catch (_) { /* ignore network errors */ }
     }, intervalMs);
+    // Session keepalive poll — detects revoked sessions for idle users.
+    setInterval(async () => {
+        if (_sessionTerminated) return;
+        try {
+            const r = await fetch('/api/me');
+            if (r.status === 401) _onSessionTerminated();
+        } catch (_) { /* ignore network errors */ }
+    }, (configData?.web_admin?.session_check_secs ?? 20) * 1000);
     // Config field version poll — interval is read dynamically from configData each cycle.
     _scheduleConfigPoll();
 }
@@ -485,32 +498,41 @@ function _showRestartBanner() {
     currentUser.restart_pending = true;
 }
 
-function showToast(msg, type = 'success') {
+function showToast(msg, type = 'success', delay = 3000) {
     const t = document.getElementById('toast');
     const b = document.getElementById('toast-body');
     t.className = 'toast align-items-center border-0 text-bg-' + type;
     b.textContent = msg;
-    bootstrap.Toast.getOrCreateInstance(t, { delay: 3000 }).show();
+    bootstrap.Toast.getOrCreateInstance(t, { delay }).show();
 }
 
 // ──────────────────────────── API ─────────────────────────────────
+let _sessionTerminated = false;
+function _onSessionTerminated() {
+    if (_sessionTerminated) return;
+    _sessionTerminated = true;
+    const _rrMs = Math.max((configData?.web_admin?.session_revoke_redirect_secs ?? 3) * 1000, 300);
+    showToast(t('session_terminated'), 'danger', _rrMs + 500);
+    setTimeout(() => { location.href = '/login'; }, _rrMs);
+}
+
 async function apiGet(url) {
     try {
         const r = await fetch(url);
-        if (r.status === 401 || r.status === 302) { location.href = '/login'; return null; }
+        if (r.status === 401 || r.status === 302) { _onSessionTerminated(); return null; }
         if (!r.ok) return null;
         const ct = r.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) { location.href = '/login'; return null; }
+        if (!ct.includes('application/json')) { _onSessionTerminated(); return null; }
         return await r.json();
     } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
 }
 async function loadConfig() {
     try {
         const r = await fetch('/api/config');
-        if (r.status === 401 || r.status === 302) { location.href = '/login'; return null; }
+        if (r.status === 401 || r.status === 302) { _onSessionTerminated(); return null; }
         if (!r.ok) return null;
         const ct = r.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) { location.href = '/login'; return null; }
+        if (!ct.includes('application/json')) { _onSessionTerminated(); return null; }
         _configEtag = r.headers.get('ETag');
         const payload = await r.json();
         if (payload && typeof payload.config === 'object') {
@@ -527,7 +549,7 @@ async function apiPut(url, data) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
-        if (r.status === 401) { location.href = '/login'; return null; }
+        if (r.status === 401) { _onSessionTerminated(); return null; }
         return await r.json();
     } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
 }
@@ -538,14 +560,14 @@ async function apiPost(url, data) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
-        if (r.status === 401) { location.href = '/login'; return null; }
+        if (r.status === 401) { _onSessionTerminated(); return null; }
         return { status: r.status, data: await r.json() };
     } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
 }
 async function apiDelete(url) {
     try {
         const r = await fetch(url, { method: 'DELETE' });
-        if (r.status === 401) { location.href = '/login'; return null; }
+        if (r.status === 401) { _onSessionTerminated(); return null; }
         return { status: r.status, data: await r.json() };
     } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
 }
@@ -578,13 +600,13 @@ function renderField(key, value, pathStr, target = 'modules') {
             _conflictBanner = `<div class="cfg-conflict-bar">
                 <i class="bi bi-exclamation-triangle-fill me-1"></i>${t('cfg_conflict_msg')} <code class="ms-1">${_svDisp}</code>
                 <button class="btn btn-xs btn-warning ms-2" onclick="_overwriteConflictField(${jsStr(pathStr)})" title="${escAttr(t('cfg_overwrite'))}">${t('cfg_overwrite')}</button>
-                <button class="btn btn-xs btn-outline-secondary ms-1" onclick="_acceptServerField(${jsStr(pathStr)})" title="${escAttr(t('cfg_accept_server'))}">${t('cfg_accept_server')}</button>
+                <button class="btn btn-xs btn-secondary ms-1" onclick="_acceptServerField(${jsStr(pathStr)})" title="${escAttr(t('cfg_accept_server'))}">${t('cfg_accept_server')}</button>
             </div>`;
         } else if (_sc) {
             _wrapCls = ' cfg-has-server-change';
             _conflictBanner = `<div class="cfg-server-change-bar">
                 <i class="bi bi-info-circle me-1"></i>${t('cfg_server_changed_warn')}
-                <button class="btn btn-xs btn-outline-secondary ms-2" onclick="_dismissServerChange(${jsStr(pathStr)})">${t('dismiss')}</button>
+                <button class="btn btn-xs btn-secondary ms-2" onclick="_dismissServerChange(${jsStr(pathStr)})">${t('dismiss')}</button>
             </div>`;
         } else if (_au) {
             _wrapCls = ' cfg-auto-updated';
@@ -1482,6 +1504,11 @@ function _renderPagination(total, page, pageSize, goFn, changeFn) {
         pageNums += `<li class="page-item${i === p ? ' active' : ''}"><a class="page-link" href="#" onclick="${goFn}(${i});return false;">${i}</a></li>`;
     if (hi < totalPages - 1) pageNums += `<li class="page-item disabled"><span class="page-link">&hellip;</span></li>`;
     if (hi < totalPages)     pageNums += `<li class="page-item"><a class="page-link" href="#" onclick="${goFn}(${totalPages});return false;">${totalPages}</a></li>`;
+    const gotoInput = totalPages > 5
+        ? `<input type="number" class="form-control form-control-sm" min="1" max="${totalPages}" placeholder="→" style="width:52px;text-align:center"
+            title="${t('goto_page')}"
+            onkeydown="if(event.key==='Enter'){const v=parseInt(this.value);if(v>=1&&v<=${totalPages}){${goFn}(v);}this.value='';}">`
+        : '';
     return `<div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
         <span class="text-muted small">${tf('audit_showing', start, end, total)}</span>
         <div class="d-flex align-items-center gap-2">
@@ -1494,6 +1521,7 @@ function _renderPagination(total, page, pageSize, goFn, changeFn) {
                 ${pageNums}
                 <li class="page-item${p >= totalPages ? ' disabled' : ''}"><a class="page-link" href="#" onclick="${goFn}(${p + 1});return false;">&raquo;</a></li>
             </ul></nav>
+            ${gotoInput}
         </div>
     </div>`;
 }

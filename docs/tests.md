@@ -424,7 +424,7 @@
 
 ## 11. Panel Web — Inicialización y autenticación
 
-**Archivos:** `tests/test_wa_init.py` — `TestWebAdminInit` · `tests/test_wa_auth.py` — `TestAuthentication`, `TestRememberMe`
+**Archivos:** `tests/test_wa_init.py` — `TestWebAdminInit` · `tests/test_wa_auth.py` — `TestAuthentication`, `TestRememberMe`, `TestAccountLockout`
 
 ### `TestWebAdminInit`
 
@@ -439,10 +439,26 @@
 |---|---|---|---|
 | `test_login_get` | `GET /login` devuelve el formulario | `200` con HTML | Si es otro código |
 | `test_login_ok` | Login con credenciales correctas | Redirección al dashboard | Si devuelve `401` |
-| `test_login_wrong_password` | Login con contraseña incorrecta | `401` o redirección a `/login` | Si entra al dashboard |
-| `test_login_wrong_user` | Login con usuario inexistente | `401` o redirección a `/login` | Si entra |
+| `test_login_wrong_password` | Login con contraseña incorrecta | `302` a `/login` + mensaje flash | Si entra al dashboard |
+| `test_login_wrong_user` | Login con usuario inexistente | `302` a `/login` + mensaje flash | Si entra |
+| `test_login_account_disabled` | Cuenta desactivada | Mensaje "account disabled", no "invalid credentials" | Si muestra mensaje genérico |
+| `test_login_uses_post_redirect_get` | Login fallido usa PRG | `302` sin `follow_redirects` | Si devuelve `200` directo |
 | `test_logout` | `GET /logout` cierra la sesión | Redirección a `/login` | Si sigue logueado |
 | `test_protected_redirect` | Acceder a `/` sin login | Redirección a `/login` | Si devuelve `200` |
+
+### `TestAccountLockout`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_lockout_triggers_after_n_attempts` | Tras N intentos fallidos, mensaje menciona "locked" | `200` con "locked"/"bloqueada" | Si sigue sin bloquear |
+| `test_locked_account_rejects_correct_password` | Cuenta bloqueada rechaza contraseña correcta | Mensaje de bloqueo | Si permite el login |
+| `test_lockout_returns_minutes_remaining` | Mensaje incluye los minutos restantes | "10" en el cuerpo (600 s) | Si no aparece el tiempo |
+| `test_successful_login_resets_failed_attempts` | Login correcto limpia `_failed_attempts` y `_locked_until` | Ambos campos `None` | Si persisten |
+| `test_lockout_disabled_when_max_attempts_zero` | `max_attempts=0` no bloquea nunca | Login correcto tras 20 fallos | Si bloquea |
+| `test_account_unlocks_after_duration` | Tras expirar el bloqueo, login correcto funciona | `200` con dashboard | Si sigue bloqueado |
+| `test_authenticate_returns_tuple` | `_authenticate()` devuelve siempre 2-tupla | `(user, None)` con credenciales correctas | Si devuelve tipo incorrecto |
+| `test_authenticate_wrong_password_reason` | Contraseña incorrecta → `reason='invalid_credentials'` | Tupla correcta | Si `reason` es otro valor |
+| `test_authenticate_unknown_user_reason` | Usuario inexistente → `reason='user_not_found'` | Tupla correcta | Si `reason` es otro valor |
 
 ---
 
@@ -755,6 +771,9 @@
 |---|---|---|---|
 | `test_login_audited` | Login exitoso genera evento | `"login"` en audit | Si no aparece |
 | `test_failed_login_audited` | Login fallido genera evento | `"login_failed"` en audit | Si no aparece |
+| `test_failed_login_reason_invalid_credentials` | Contraseña errónea → razón en audit | `detail.reason == 'invalid_credentials'` | Si falta el campo |
+| `test_failed_login_reason_user_not_found` | Usuario inexistente → razón en audit | `detail.reason == 'user_not_found'` | Si falta el campo |
+| `test_failed_login_reason_account_disabled` | Cuenta desactivada → razón en audit | `detail.reason == 'account_disabled'` | Si falta el campo |
 | `test_logout_audited` | Logout genera evento | `"logout"` en audit | Si no aparece |
 | `test_modules_save_audited` | Guardar módulos genera evento | `"modules_updated"` en audit | Si no aparece |
 | `test_config_save_audited` | Guardar config genera evento | `"config_updated"` en audit | Si no aparece |
@@ -809,11 +828,12 @@
 | `test_viewer_cannot_write_config` | Viewer no puede editar config | `403` | Si guarda datos |
 | `test_viewer_can_access_audit` | Viewer sí puede leer audit | `200` | Si es `403` |
 | `test_self_promotion_via_update` | Usuario se intenta promover a admin | `403` | Si lo permite |
-| `test_unauthenticated_api_access` | Acceso sin autenticar a múltiples endpoints | `302` en todos | Si alguno devuelve `200` |
-| `test_login_wrong_password` | Credenciales incorrectas | `401` o redirección al login | Si entra |
-| `test_login_nonexistent_user` | Usuario inexistente | `401` o redirección al login | Si entra |
-| `test_login_empty_credentials` | Credenciales vacías | `401` o redirección al login | Si entra |
-| `test_forged_session_token_rejected` | Token de sesión falsificado | Redirección a login | Si acepta la sesión |
+| `test_unauthenticated_api_access` | Acceso sin autenticar a todas las rutas `/api/*` | `401` JSON en todos | Si alguno devuelve `200` o `302` |
+| `test_login_wrong_password` | Credenciales incorrectas | `302` + mensaje flash | Si entra |
+| `test_login_nonexistent_user` | Usuario inexistente | `302` + sesión sin `logged_in` | Si entra |
+| `test_login_empty_credentials` | Credenciales vacías | `302` + sesión sin `logged_in` | Si entra |
+| `test_forged_session_token_rejected` | Token de sesión falsificado | `401` en `/api/me` | Si acepta la sesión |
+| `test_reused_session_token_after_logout` | Token antiguo tras logout | `401` en `/api/me` | Si acepta la sesión |
 | `test_reused_session_token_after_logout` | Token de sesión reutilizado tras logout | Redirección a login | Si reutiliza la sesión |
 | `test_wrong_http_methods_rejected` | Métodos HTTP incorrectos en endpoints | `405` o `302` | Si devuelve `200` |
 | `test_ssti_in_display_name` | SSTI `{{7*7}}` en display name | Almacenado como literal `"{{7*7}}"` | Si se evalúa como `49` |

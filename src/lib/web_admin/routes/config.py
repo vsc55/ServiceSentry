@@ -30,6 +30,11 @@ INT_RULES = {
     'web_admin|default_page_size':       {'min': 0,  'max': 200,  'attr': '_DEFAULT_PAGE_SIZE'},
     'web_admin|config_poll_secs':         {'min': 10, 'max': 300,  'attr': '_CONFIG_POLL_SECS'},
     'web_admin|config_update_banner_secs':{'min': 0,  'max': 60,   'attr': '_CONFIG_BANNER_SECS'},
+    'web_admin|lockout_max_attempts':     {'min': 0,  'max': 100,  'attr': '_LOCKOUT_MAX_ATTEMPTS'},
+    'web_admin|lockout_duration_secs':    {'min': 60, 'max': 86400,'attr': '_LOCKOUT_DURATION_SECS'},
+    'web_admin|session_check_secs':       {'min': 5,  'max': 300,  'attr': '_SESSION_CHECK_SECS'},
+    'web_admin|session_revoke_redirect_secs': {'min': 0, 'max': 30,'attr': '_SESSION_REVOKE_REDIRECT_SECS'},
+    'web_admin|access_poll_secs':             {'min': 5, 'max': 300,'attr': '_ACCESS_POLL_SECS'},
 }
 
 # Boolean config fields in web_admin that are synced to wa instance attributes.

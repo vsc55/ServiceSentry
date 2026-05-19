@@ -184,7 +184,7 @@
         </li>
         <li class="nav-item" role="presentation" id="tab-access-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-access" type="button" id="btn-tab-access">
-                <i class="bi bi-people me-1"></i>{{ i18n.tab_users }}
+                <i class="bi bi-person-lock me-1"></i>{{ i18n.tab_users }}
             </button>
         </li>
         <li class="nav-item" role="presentation" id="tab-audit-li" style="display:none">
@@ -280,12 +280,12 @@
                 </li>
                 <li class="nav-item" role="presentation" id="subtab-users-li" style="display:none">
                     <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-users" type="button" id="btn-subtab-users">
-                        <i class="bi bi-people me-1"></i>{{ i18n.subtab_users }}
+                        <i class="bi bi-person me-1"></i>{{ i18n.subtab_users }}
                     </button>
                 </li>
                 <li class="nav-item" role="presentation" id="subtab-groups-li" style="display:none">
                     <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-groups" type="button" id="btn-subtab-groups">
-                        <i class="bi bi-collection me-1"></i>{{ i18n.subtab_groups }}
+                        <i class="bi bi-people me-1"></i>{{ i18n.subtab_groups }}
                     </button>
                 </li>
                 <li class="nav-item" role="presentation" id="subtab-roles-li" style="display:none">
@@ -297,17 +297,23 @@
             <div class="tab-content">
                 <!-- Sessions sub-tab -->
                 <div class="tab-pane fade" id="subtab-sessions">
-                    <div class="card mb-3" id="sessions-panel">
-                        <div class="card-header d-flex align-items-center py-2">
-                            <h6 class="mb-0"><i class="bi bi-plug me-2"></i><span id="sessions-title">{{ i18n.active_sessions }}</span></h6>
-                            <button class="btn btn-sm btn-secondary ms-auto" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
+                    <div class="ss-card mb-3" id="sessions-panel">
+                        <div class="ss-accent ss-accent-slate"></div>
+                        <div class="ss-card-header">
+                            <h6 class="mb-0 me-auto"><i class="bi bi-plug me-2"></i><span id="sessions-title">{{ i18n.active_sessions }}</span></h6>
+                            <div id="sessionsBulkBar" class="d-flex align-items-center gap-1 border-start ps-2 me-1" style="display:none!important">
+                                <span id="sessionsBulkCount" class="badge bg-secondary rounded-pill">0</span>
+                                <button class="btn btn-sm btn-danger py-0 px-2" onclick="_bulkRevokeSessions()" title="{{ i18n.revoke_session_tt }}"><i class="bi bi-x-lg me-1"></i>{{ i18n.revoke_session }}</button>
+                                <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedSessions.clear();renderSessions()" title="{{ i18n.clear_filters }}"><i class="bi bi-x-lg"></i></button>
+                            </div>
+                            <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
                                 <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}
                             </button>
                             <button class="btn btn-sm btn-danger ms-1" onclick="invalidateAllSessions()" title="{{ i18n.close_all_sessions_tt }}">
                                 <i class="bi bi-x-circle me-1"></i>{{ i18n.close_all_sessions }}
                             </button>
                         </div>
-                        <div class="card-body py-2" id="sessions-container"></div>
+                        <div class="p-3" id="sessions-container"></div>
                     </div>
                 </div>
                 <!-- Users sub-tab -->
@@ -384,7 +390,7 @@
                         </div>
                     </div>
                     <div class="col-auto ms-auto">
-                        <button class="btn btn-sm btn-outline-secondary" id="btnClearAuditFilters" onclick="clearAuditFilters()" title="{{ i18n.clear_filters_tt }}">
+                        <button class="btn btn-sm btn-secondary" id="btnClearAuditFilters" onclick="clearAuditFilters()" title="{{ i18n.clear_filters_tt }}">
                             <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.clear_filters }}
                         </button>
                     </div>
@@ -418,6 +424,11 @@
                             <label class="input-group-text">{{ i18n.date_to }}</label>
                             <input type="date" class="form-control form-control-sm" id="auditFilterTo" onchange="applyAuditControls()">
                         </div>
+                    </div>
+                    <div class="col-auto">
+                        <input class="form-control form-control-sm" id="auditFilterDetail"
+                            placeholder="{{ i18n.filter_detail }}" oninput="applyAuditControls()"
+                            autocomplete="off" style="width:160px">
                     </div>
                 </div>
             </div>
