@@ -28,11 +28,11 @@ class TestApiModules:
 
     def test_get_requires_auth(self, client):
         resp = client.get("/api/modules")
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_put_requires_auth(self, client):
         resp = client.put("/api/modules", json={"x": 1})
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_get_returns_data(self, client):
         _login(client)
@@ -86,7 +86,7 @@ class TestApiStatus:
 
     def test_get_requires_auth(self, client):
         resp = client.get("/api/status")
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_get_returns_data(self, client):
         _login(client)
@@ -124,7 +124,7 @@ class TestApiOverview:
 
     def test_requires_auth(self, client):
         resp = client.get("/api/overview")
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_returns_200(self, client):
         _login(client)

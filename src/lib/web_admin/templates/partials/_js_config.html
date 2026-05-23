@@ -5,6 +5,7 @@
 // ──────────────────────────── Config tab ──────────────────────────
 let _cfgSearchTerm = '';
 let _cfgSearchInHints = true;
+let _activeCfgTab = localStorage.getItem('cfg_active_tab') || 'cfg-tab-general';
 
 function _toggleCfgSearchHints() {
     _cfgSearchInHints = !_cfgSearchInHints;
@@ -18,6 +19,21 @@ function _filterConfig(term) {
     const q = term.trim().toLowerCase();
     const container = document.getElementById('config-container');
     if (!container) return;
+    const nav  = container.querySelector('#cfg-tab-nav');
+    const panes = container.querySelectorAll('.tab-pane');
+    if (q) {
+        // Show all panes side-by-side while filtering
+        if (nav) nav.style.display = 'none';
+        panes.forEach(p => { p.classList.add('show', 'active'); p.style.cssText = ''; });
+    } else {
+        // Restore tab nav + active pane only
+        if (nav) nav.style.display = '';
+        panes.forEach(p => {
+            const active = p.id === _activeCfgTab;
+            p.classList.toggle('show', active);
+            p.classList.toggle('active', active);
+        });
+    }
     container.querySelectorAll('.rounded-3.border.overflow-hidden.mb-3').forEach(card => {
         let anyMatch = false;
         card.querySelectorAll('.cfg-field-wrap').forEach(wrap => {
@@ -45,8 +61,7 @@ function _refreshStatusLink() {
     const url = base + '/status';
     const a   = document.getElementById('cfg-status-link');
     const btn = document.getElementById('cfg-status-copy-btn');
-    if (a)   { a.textContent = url; a.title = url; }
-    if (btn) btn.onclick = () => navigator.clipboard.writeText(url).then(() => showToast(t('copy_url_ok')));
+    if (a)   { a.textContent = url; a.title = url; a.href = url; }
 }
 
 function renderConfig() {
@@ -101,6 +116,10 @@ function renderConfig() {
         cfgcol_tables:      'linear-gradient(90deg,#14b8a6,#2dd4bf)',
         cfgcol_live_update:     'linear-gradient(90deg,#06b6d4,#3b82f6)',
         cfgcol_login_security:  'linear-gradient(90deg,#ef4444,#f43f5e)',
+        cfgcol_ldap:            'linear-gradient(90deg,#7c3aed,#a855f7)',
+        cfgcol_oidc:            'linear-gradient(90deg,#0369a1,#0ea5e9)',
+        cfgcol_saml2:           'linear-gradient(90deg,#b45309,#f59e0b)',
+        cfgcol_email:           'linear-gradient(90deg,#dc2626,#f97316)',
     };
 
     function cfgCardOpen(id, icon, title) {
@@ -128,35 +147,154 @@ function renderConfig() {
         'lockout_max_attempts', 'lockout_duration_secs',
         'session_check_secs', 'session_revoke_redirect_secs', 'access_poll_secs',
     ];
-    const order = ['daemon', 'global', 'telegram', 'web_admin'];
+    // Pre-populate LDAP section defaults so it always appears in the config UI
+    if (!configData.ldap) configData.ldap = {};
+    const _ldap = configData.ldap;
+    if (!('enabled'           in _ldap)) _ldap.enabled           = false;
+    if (!('server'            in _ldap)) _ldap.server            = '';
+    if (!('port'              in _ldap)) _ldap.port              = 389;
+    if (!('use_ssl'           in _ldap)) _ldap.use_ssl           = false;
+    if (!('timeout'           in _ldap)) _ldap.timeout           = 5;
+    if (!('bind_dn'           in _ldap)) _ldap.bind_dn           = '';
+    if (!('bind_password'     in _ldap)) _ldap.bind_password     = '';
+    if (!('base_dn'           in _ldap)) _ldap.base_dn           = '';
+    if (!('user_filter'       in _ldap)) _ldap.user_filter       = '(sAMAccountName={username})';
+    if (!('email_attr'        in _ldap)) _ldap.email_attr        = 'mail';
+    if (!('name_attr'         in _ldap)) _ldap.name_attr         = 'displayName';
+    if (!('group_attr'        in _ldap)) _ldap.group_attr        = 'memberOf';
+    if (!('group_role_map'      in _ldap)) _ldap.group_role_map      = '{}';
+    if (!('group_display_names' in _ldap)) _ldap.group_display_names = '{}';
+    if (!('default_role'        in _ldap)) _ldap.default_role        = (rolesData.none?.uid || 'none');
+    if (!('fallback_to_local' in _ldap)) _ldap.fallback_to_local = true;
+    if (!('auto_create_users' in _ldap)) _ldap.auto_create_users = true;
+
+    // Pre-populate OIDC section defaults
+    if (!configData.oidc) configData.oidc = {};
+    const _oidc = configData.oidc;
+    if (!('enabled'          in _oidc)) _oidc.enabled          = false;
+    if (!('provider_url'     in _oidc)) _oidc.provider_url     = '';
+    if (!('client_id'        in _oidc)) _oidc.client_id        = '';
+    if (!('client_secret'    in _oidc)) _oidc.client_secret    = '';
+    if (!('scopes'           in _oidc)) _oidc.scopes           = 'openid email profile';
+    if (!('username_claim'   in _oidc)) _oidc.username_claim   = 'preferred_username';
+    if (!('email_claim'      in _oidc)) _oidc.email_claim      = 'email';
+    if (!('name_claim'       in _oidc)) _oidc.name_claim       = 'name';
+    if (!('groups_claim'     in _oidc)) _oidc.groups_claim     = 'groups';
+    if (!('group_role_map'      in _oidc)) _oidc.group_role_map      = '{}';
+    if (!('group_display_names' in _oidc)) _oidc.group_display_names = '{}';
+    if (!('default_role'        in _oidc)) _oidc.default_role        = (rolesData.none?.uid || 'none');
+    if (!('auto_create_users' in _oidc)) _oidc.auto_create_users = true;
+
+    // Pre-populate Email section defaults
+    if (!configData.email) configData.email = {};
+    const _email = configData.email;
+    if (!('enabled'             in _email)) _email.enabled             = false;
+    if (!('provider'            in _email)) _email.provider            = 'smtp';
+    if (!('from_email'          in _email)) _email.from_email          = '';
+    if (!('from_name'           in _email)) _email.from_name           = 'ServiceSentry';
+    if (!('recipients'          in _email)) _email.recipients          = '';
+    if (!('subject_prefix'      in _email)) _email.subject_prefix      = '[ServiceSentry]';
+    if (!('notify_on_down'      in _email)) _email.notify_on_down      = true;
+    if (!('notify_on_recovery'  in _email)) _email.notify_on_recovery  = true;
+    if (!('notify_on_warn'      in _email)) _email.notify_on_warn      = false;
+    if (!('smtp_host'           in _email)) _email.smtp_host           = '';
+    if (!('smtp_port'           in _email)) _email.smtp_port           = 587;
+    if (!('smtp_use_tls'        in _email)) _email.smtp_use_tls        = true;
+    if (!('smtp_use_ssl'        in _email)) _email.smtp_use_ssl        = false;
+    if (!('smtp_username'       in _email)) _email.smtp_username       = '';
+    if (!('smtp_password'       in _email)) _email.smtp_password       = '';
+    if (!('ms365_tenant_id'     in _email)) _email.ms365_tenant_id     = '';
+    if (!('ms365_client_id'     in _email)) _email.ms365_client_id     = '';
+    if (!('ms365_client_secret' in _email)) _email.ms365_client_secret = '';
+    if (!('gmail_client_id'     in _email)) _email.gmail_client_id     = '';
+    if (!('gmail_client_secret' in _email)) _email.gmail_client_secret = '';
+    if (!('gmail_refresh_token' in _email)) _email.gmail_refresh_token = '';
+
+    // Pre-populate SAML2 section defaults
+    if (!configData.saml2) configData.saml2 = {};
+    const _saml2 = configData.saml2;
+    if (!('enabled'          in _saml2)) _saml2.enabled          = false;
+    if (!('idp_entity_id'    in _saml2)) _saml2.idp_entity_id    = '';
+    if (!('idp_sso_url'      in _saml2)) _saml2.idp_sso_url      = '';
+    if (!('idp_cert'         in _saml2)) _saml2.idp_cert         = '';
+    if (!('sp_entity_id'     in _saml2)) _saml2.sp_entity_id     = '';
+    if (!('sp_acs_url'       in _saml2)) _saml2.sp_acs_url       = '';
+    if (!('sp_cert'          in _saml2)) _saml2.sp_cert          = '';
+    if (!('sp_key'           in _saml2)) _saml2.sp_key           = '';
+    if (!('username_attr'    in _saml2)) _saml2.username_attr    = 'uid';
+    if (!('email_attr'       in _saml2)) _saml2.email_attr       = 'email';
+    if (!('name_attr'        in _saml2)) _saml2.name_attr        = 'displayName';
+    if (!('groups_attr'      in _saml2)) _saml2.groups_attr      = 'groups';
+    if (!('group_role_map'      in _saml2)) _saml2.group_role_map      = '{}';
+    if (!('group_display_names' in _saml2)) _saml2.group_display_names = '{}';
+    if (!('default_role'        in _saml2)) _saml2.default_role        = (rolesData.none?.uid || 'none');
+    if (!('auto_create_users' in _saml2)) _saml2.auto_create_users = true;
+
+    const AUTH_SECS  = new Set(['ldap', 'oidc', 'saml2']);
+    const NOTIF_SECS = new Set(['telegram']);
+
+    const order = ['daemon', 'global', 'telegram', 'web_admin', 'email', 'ldap', 'oidc', 'saml2'];
     const sections = Object.keys(configData).sort((a, b) => {
         const ai = order.indexOf(a), bi = order.indexOf(b);
         return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
     });
-    let h = '';
+
+    let hGeneral = '', hServer = '', hAuthExt = '', hNotifs = '', hInterface = '';
+
     for (const sec of sections) {
         const data = configData[sec];
         if (typeof data !== 'object' || data === null) continue;
         const lbl = SECTION_LABELS[sec] || sec;
         const cfgId = 'cfgcol_' + sec;
-        let extra = '';
-        if (sec === 'telegram') {
-            extra = `<hr class="my-2"><div class="cfg-field-wrap"><div class="row"><div class="col-sm-8 offset-sm-4 d-flex justify-content-end"><button class="btn btn-info btn-sm" onclick="testTelegram()" id="btnTestTelegram" data-test-btn title="${escAttr(t('telegram_test'))}">
-                <i class="bi bi-telegram me-1"></i>${t('telegram_test')}
-            </button></div></div></div>`;
+
+        if (sec === 'email') continue; // built separately below
+
+        if (AUTH_SECS.has(sec)) {
+            hAuthExt += _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose);
+            continue;
         }
-        h += cfgCardOpen(cfgId, '<i class="bi bi-gear me-1"></i>', lbl);
-        h += renderScalarFields(data, sec, 'config', sec === 'web_admin' ? WA_EXCLUDE : []);
-        h += extra;
-        h += cfgCardClose;
+
+        if (NOTIF_SECS.has(sec)) {
+            const extra = sec === 'telegram' ? `<hr class="my-2"><div class="cfg-field-wrap"><div class="row"><div class="col-sm-8 offset-sm-4 d-flex justify-content-end"><button class="btn btn-info btn-sm" onclick="testTelegram()" id="btnTestTelegram" data-test-btn title="${escAttr(t('telegram_test'))}">
+                <i class="bi bi-telegram me-1"></i>${t('telegram_test')}
+            </button></div></div></div>` : '';
+            hNotifs += cfgCardOpen(cfgId, '<i class="bi bi-bell me-1"></i>', lbl);
+            hNotifs += renderScalarFields(data, sec, 'config', []);
+            hNotifs += extra;
+            hNotifs += cfgCardClose;
+            continue;
+        }
+
+        if (sec === 'daemon') {
+            // Server tab: daemon process settings
+            hServer += cfgCardOpen(cfgId, '<i class="bi bi-cpu me-1"></i>', lbl);
+            hServer += renderScalarFields(data, sec, 'config', []);
+            hServer += cfgCardClose;
+            continue;
+        }
+
+        // General tab: global, web_admin (main fields only)
+        hGeneral += cfgCardOpen(cfgId, '<i class="bi bi-gear me-1"></i>', lbl);
+        hGeneral += renderScalarFields(data, sec, 'config', sec === 'web_admin' ? WA_EXCLUDE : []);
+        hGeneral += cfgCardClose;
     }
 
-    // Password policy card
+    // ── Authentication tab: pw_policy + login_security + ldap/oidc/saml2
     const pwFields = ['pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol'];
-    h += cfgCardOpen('cfgcol_pw_policy', '<i class="bi bi-shield-lock me-1"></i>', t('pw_policy_section'));
-    h += renderScalarFields(Object.fromEntries(pwFields.map(f => [f, wa[f]])), 'web_admin', 'config', []);
-    h += cfgCardClose;
+    let hAuth = '';
+    hAuth += cfgCardOpen('cfgcol_pw_policy', '<i class="bi bi-shield-lock me-1"></i>', t('pw_policy_section'));
+    hAuth += renderScalarFields(Object.fromEntries(pwFields.map(f => [f, wa[f]])), 'web_admin', 'config', []);
+    hAuth += cfgCardClose;
+    hAuth += cfgCardOpen('cfgcol_login_security', '<i class="bi bi-shield-exclamation me-1"></i>', t('login_security_section'));
+    hAuth += renderField('lockout_max_attempts', wa.lockout_max_attempts, 'web_admin|lockout_max_attempts', 'config');
+    hAuth += renderField('lockout_duration_secs', wa.lockout_duration_secs, 'web_admin|lockout_duration_secs', 'config');
+    hAuth += cfgCardClose;
+    hAuth += hAuthExt;
 
+    // ── Notifications tab: telegram (built in loop above) + email
+    hNotifs += _renderEmailSection(cfgCardOpen, cfgCardClose);
+
+    // ── Interface tab: pub_status + proxy + audit + tables + live_update
     // Public status card
     const psFields = ['public_status', 'status_refresh_secs', 'status_lang'];
     const _statusBase = wa.public_url
@@ -173,22 +311,23 @@ function renderConfig() {
                        style="font-family:monospace;font-size:.8rem"
                        title="${escAttr(_statusUrl)}">${esc(_statusUrl)}</a>
                     <button id="cfg-status-copy-btn" type="button" class="btn btn-secondary"
+                        onclick="_copyToClipboard(document.getElementById('cfg-status-link').textContent.trim())"
                         data-bs-toggle="tooltip" data-bs-placement="top"
                         title="${escAttr(t('copy_url'))}"><i class="bi bi-clipboard"></i></button>
                 </div>
             </div>
         </div></div>`;
-    h += cfgCardOpen('cfgcol_pub_status', '<i class="bi bi-globe me-1"></i>', t('public_status_section'));
-    h += renderScalarFields(Object.fromEntries(psFields.map(f => [f, wa[f]])), 'web_admin', 'config', []);
-    h += _statusLinkRow;
-    h += cfgCardClose;
+    // External access card (network/connectivity — lives in Server tab)
+    hServer += cfgCardOpen('cfgcol_proxy', '<i class="bi bi-diagram-3 me-1"></i>', t('proxy_section'));
+    hServer += renderScalarFields({ port: wa.port, proxy_count: wa.proxy_count, public_url: wa.public_url, force_https: wa.force_https, force_fqdn: wa.force_fqdn }, 'web_admin', 'config', []);
+    hServer += cfgCardClose;
 
-    // External access card
-    h += cfgCardOpen('cfgcol_proxy', '<i class="bi bi-diagram-3 me-1"></i>', t('proxy_section'));
-    h += renderScalarFields({ port: wa.port, proxy_count: wa.proxy_count, public_url: wa.public_url, force_https: wa.force_https, force_fqdn: wa.force_fqdn }, 'web_admin', 'config', []);
-    h += cfgCardClose;
+    hInterface += cfgCardOpen('cfgcol_pub_status', '<i class="bi bi-globe me-1"></i>', t('public_status_section'));
+    hInterface += renderScalarFields(Object.fromEntries(psFields.map(f => [f, wa[f]])), 'web_admin', 'config', []);
+    hInterface += _statusLinkRow;
+    hInterface += cfgCardClose;
 
-    // Audit preferences card — audit_sort rendered with a custom select
+    // Audit card — audit_sort + audit_sort_dir rendered with custom selects
     const _auditSortPath = 'web_admin|audit_sort';
     const auditSort = wa.audit_sort || 'time';
     const _auditHint = fieldHint(_auditSortPath);
@@ -208,7 +347,6 @@ function renderConfig() {
         title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
     const auditSortOpts = [['time', t('col_time')], ['event', t('col_event')], ['user', t('col_user')], ['ip', t('col_ip')]]
         .map(([v, lbl]) => `<option value="${v}" ${auditSort === v ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
-    // audit_sort_dir row
     const _auditDirPath = 'web_admin|audit_sort_dir';
     const auditSortDir  = wa.audit_sort_dir || 'desc';
     const _auditDirHint = fieldHint(_auditDirPath);
@@ -229,8 +367,8 @@ function renderConfig() {
     const auditDirOpts = [['desc', t('sort_desc')], ['asc', t('sort_asc')]]
         .map(([v, lbl]) => `<option value="${v}" ${auditSortDir === v ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
 
-    h += cfgCardOpen('cfgcol_audit', '<i class="bi bi-journal-text me-1"></i>', t('tab_audit'));
-    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+    hInterface += cfgCardOpen('cfgcol_audit', '<i class="bi bi-journal-text me-1"></i>', t('tab_audit'));
+    hInterface += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort'))}${_auditInfoIcon}</label>
         <div class="col-sm-8"><div class="input-group input-group-sm">
             <select class="form-select"
@@ -239,7 +377,7 @@ function renderConfig() {
             </select>${_auditResetBtn}
         </div>${_auditHintPanel}</div>
     </div></div>`;
-    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+    hInterface += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort_dir'))}${_auditDirInfoIcon}</label>
         <div class="col-sm-8"><div class="input-group input-group-sm">
             <select class="form-select"
@@ -248,7 +386,7 @@ function renderConfig() {
             </select>${_auditDirResetBtn}
         </div>${_auditDirHintPanel}</div>
     </div></div>`;
-    h += cfgCardClose;
+    hInterface += cfgCardClose;
 
     // Tables card — default_page_size select + page_sizes text input
     const _psPath = 'web_admin|page_sizes';
@@ -269,9 +407,9 @@ function renderConfig() {
         title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
     const psLabel = esc(LABELS['page_sizes'] || t('page_sizes'));
     const psValue = escAttr((wa.page_sizes || _PAGE_SIZES).join(', '));
-    h += cfgCardOpen('cfgcol_tables', '<i class="bi bi-table me-1"></i>', t('tables_section'));
-    h += renderField('default_page_size', wa.default_page_size, 'web_admin|default_page_size', 'config');
-    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+    hInterface += cfgCardOpen('cfgcol_tables', '<i class="bi bi-table me-1"></i>', t('tables_section'));
+    hInterface += renderField('default_page_size', wa.default_page_size, 'web_admin|default_page_size', 'config');
+    hInterface += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${psLabel}${_psInfoIcon}</label>
         <div class="col-sm-8"><div class="input-group input-group-sm">
             <input type="text" class="form-control"
@@ -279,24 +417,43 @@ function renderConfig() {
                 onchange="updateIntArray('config','${_psPath}',this.value)">${_psResetBtn}
         </div>${_psHintPanel}</div>
     </div></div>`;
-    h += cfgCardClose;
+    hInterface += cfgCardClose;
 
-    // Live updates card — poll interval, auto-update banner, session timers
-    h += cfgCardOpen('cfgcol_live_update', '<i class="bi bi-arrow-repeat me-1"></i>', t('live_update_section'));
-    h += renderField('config_poll_secs', wa.config_poll_secs, 'web_admin|config_poll_secs', 'config');
-    h += renderField('config_update_banner_secs', wa.config_update_banner_secs, 'web_admin|config_update_banner_secs', 'config');
-    h += renderField('session_check_secs', wa.session_check_secs, 'web_admin|session_check_secs', 'config');
-    h += renderField('session_revoke_redirect_secs', wa.session_revoke_redirect_secs, 'web_admin|session_revoke_redirect_secs', 'config');
-    h += renderField('access_poll_secs', wa.access_poll_secs, 'web_admin|access_poll_secs', 'config');
-    h += cfgCardClose;
+    // Live updates card — poll intervals + session timers
+    hInterface += cfgCardOpen('cfgcol_live_update', '<i class="bi bi-arrow-repeat me-1"></i>', t('live_update_section'));
+    hInterface += renderField('config_poll_secs', wa.config_poll_secs, 'web_admin|config_poll_secs', 'config');
+    hInterface += renderField('config_update_banner_secs', wa.config_update_banner_secs, 'web_admin|config_update_banner_secs', 'config');
+    hInterface += renderField('session_check_secs', wa.session_check_secs, 'web_admin|session_check_secs', 'config');
+    hInterface += renderField('session_revoke_redirect_secs', wa.session_revoke_redirect_secs, 'web_admin|session_revoke_redirect_secs', 'config');
+    hInterface += renderField('access_poll_secs', wa.access_poll_secs, 'web_admin|access_poll_secs', 'config');
+    hInterface += cfgCardClose;
 
-    // Login security card — lockout settings
-    h += cfgCardOpen('cfgcol_login_security', '<i class="bi bi-shield-exclamation me-1"></i>', t('login_security_section'));
-    h += renderField('lockout_max_attempts', wa.lockout_max_attempts, 'web_admin|lockout_max_attempts', 'config');
-    h += renderField('lockout_duration_secs', wa.lockout_duration_secs, 'web_admin|lockout_duration_secs', 'config');
-    h += cfgCardClose;
+    // ── Assemble Bootstrap tabs
+    const _cfgTabs = [
+        { id: 'cfg-tab-general',   label: t('cfg_tab_general'),       icon: 'bi-sliders',      html: hGeneral   },
+        { id: 'cfg-tab-server',    label: t('cfg_tab_server'),        icon: 'bi-hdd-network',  html: hServer    },
+        { id: 'cfg-tab-auth',      label: t('cfg_tab_auth'),          icon: 'bi-person-lock',  html: hAuth      },
+        { id: 'cfg-tab-notifs',    label: t('cfg_tab_notifications'), icon: 'bi-bell',         html: hNotifs    },
+        { id: 'cfg-tab-interface', label: t('cfg_tab_interface'),     icon: 'bi-layout-wtf',   html: hInterface },
+    ];
+    let tabNav = `<ul class="nav nav-tabs mb-3" id="cfg-tab-nav" role="tablist">`;
+    let tabContent = `<div class="tab-content">`;
+    _cfgTabs.forEach(tab => {
+        const active = tab.id === _activeCfgTab;
+        tabNav += `<li class="nav-item" role="presentation">
+            <button class="nav-link${active ? ' active' : ''}" id="${tab.id}-btn"
+                data-bs-toggle="tab" data-bs-target="#${tab.id}"
+                type="button" role="tab"
+                onclick="_activeCfgTab='${tab.id}';localStorage.setItem('cfg_active_tab','${tab.id}')">
+                <i class="bi ${tab.icon} me-1"></i>${esc(tab.label)}
+            </button>
+        </li>`;
+        tabContent += `<div class="tab-pane fade${active ? ' show active' : ''}" id="${tab.id}" role="tabpanel">${tab.html}</div>`;
+    });
+    tabNav += `</ul>`;
+    tabContent += `</div>`;
 
-    c.innerHTML = h;
+    c.innerHTML = tabNav + tabContent;
     c.querySelectorAll('[data-env-locked]').forEach(row => {
         row.querySelectorAll('input, select, textarea').forEach(el => {
             el.disabled = true;
@@ -310,6 +467,1796 @@ function renderConfig() {
     const _cfgPerms = new Set(currentUser.permissions || []);
     if (_cfgPerms.has('config_view') && !_cfgPerms.has('config_edit')) _applyReadonly(c);
     if (_cfgSearchTerm) _filterConfig(_cfgSearchTerm);
+}
+
+// ──────────────────────── External auth section renderer ──────────────────
+function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
+    const icons = { ldap: 'bi-server', oidc: 'bi-cloud-check', saml2: 'bi-shield-lock' };
+    const available = { ldap: LDAP_AVAILABLE, oidc: OIDC_AVAILABLE, saml2: SAML2_AVAILABLE };
+    const unavailKey = { ldap: 'ldap_unavailable', oidc: 'oidc_unavailable', saml2: 'saml2_unavailable_cfg' };
+
+    let h = cfgCardOpen(cfgId, `<i class="bi ${icons[sec]} me-1"></i>`, lbl);
+
+    if (!available[sec]) {
+        h += `<div class="alert alert-warning py-2 mb-2 small">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t(unavailKey[sec]))}
+        </div>`;
+    }
+
+    // OIDC quick-setup preset buttons
+    if (sec === 'oidc') {
+        h += `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">${esc(t('oidc_preset_label'))}</small></div>
+            <div class="col-sm-8 d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-secondary btn-sm" onclick="_applyOidcPreset('entraid')" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('oidc_preset_entraid'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applyOidcPreset('google')" type="button">
+                    <i class="bi bi-google me-1"></i>${esc(t('oidc_preset_google'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applyOidcPreset('keycloak')" type="button">
+                    <i class="bi bi-key-fill me-1"></i>${esc(t('oidc_preset_keycloak'))}
+                </button>
+                <small class="text-muted" style="font-size:.78em">${esc(t('oidc_preset_hint'))}</small>
+            </div>
+        </div></div>
+        <div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">Entra ID</small></div>
+            <div class="col-sm-8">
+                <button class="btn btn-primary btn-sm" onclick="showEntraWizard()" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('entra_wizard_btn'))}
+                </button>
+            </div>
+        </div></div>`;
+    }
+
+    // LDAP quick-setup preset buttons
+    if (sec === 'ldap') {
+        h += `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">${esc(t('ldap_preset_label'))}</small></div>
+            <div class="col-sm-8 d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-secondary btn-sm" onclick="_applyLdapPreset('ad')" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('ldap_preset_ad'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applyLdapPreset('openldap')" type="button">
+                    <i class="bi bi-diagram-3 me-1"></i>${esc(t('ldap_preset_openldap'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applyLdapPreset('freeipa')" type="button">
+                    <i class="bi bi-hat-fill me-1"></i>${esc(t('ldap_preset_freeipa'))}
+                </button>
+                <small class="text-muted" style="font-size:.78em">${esc(t('ldap_preset_hint'))}</small>
+            </div>
+        </div></div>`;
+    }
+
+    // SAML2 quick-setup preset buttons
+    if (sec === 'saml2') {
+        h += `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">${esc(t('saml2_preset_label'))}</small></div>
+            <div class="col-sm-8 d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-secondary btn-sm" onclick="_applySaml2Preset('entraid')" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('saml2_preset_entraid'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applySaml2Preset('google')" type="button">
+                    <i class="bi bi-google me-1"></i>${esc(t('saml2_preset_google'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applySaml2Preset('okta')" type="button">
+                    <i class="bi bi-box-arrow-in-right me-1"></i>${esc(t('saml2_preset_okta'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applySaml2Preset('keycloak')" type="button">
+                    <i class="bi bi-key-fill me-1"></i>${esc(t('saml2_preset_keycloak'))}
+                </button>
+                <small class="text-muted" style="font-size:.78em">${esc(t('saml2_preset_hint'))}</small>
+            </div>
+        </div></div>`;
+        h += `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">Entra ID</small></div>
+            <div class="col-sm-8">
+                <button class="btn btn-primary btn-sm" onclick="showEntraSaml2Wizard()" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('entra_saml2_wizard_btn'))}
+                </button>
+            </div>
+        </div></div>`;
+    }
+
+    // Inject field order so renderScalarFields respects logical grouping
+    const _FIELD_ORDER = {
+        ldap: [
+            'enabled', 'button_label',
+            'server', 'port', 'use_ssl', 'timeout',
+            'bind_dn', 'bind_password',
+            'base_dn', 'user_filter',
+            'email_attr', 'name_attr', 'group_attr',
+            'fallback_to_local', 'allow_email_login', 'auto_create_users',
+        ],
+        oidc: [
+            'enabled', 'button_label',
+            'provider_url', 'client_id', 'client_secret', 'scopes',
+            'username_claim', 'email_claim', 'name_claim', 'groups_claim',
+            'auto_create_users',
+        ],
+        saml2: [
+            'enabled', 'button_label',
+            'idp_entity_id', 'idp_sso_url', 'idp_cert',
+            'sp_entity_id', 'sp_acs_url', 'sp_key', 'sp_cert',
+            'username_attr', 'email_attr', 'name_attr', 'groups_attr',
+            'auto_create_users',
+        ],
+    };
+    if (_FIELD_ORDER[sec]) {
+        if (!ITEM_SCHEMAS[sec]) ITEM_SCHEMAS[sec] = {};
+        ITEM_SCHEMAS[sec].__field_order__ = _FIELD_ORDER[sec];
+    }
+
+    // Ensure button_label appears for auth sections even when not yet saved in config
+    if ((sec === 'ldap' || sec === 'oidc' || sec === 'saml2') && !('button_label' in data)) {
+        data = { ...data, button_label: '' };
+    }
+
+    // Render all scalar fields except group_role_map and default_role (rendered manually below)
+    h += renderScalarFields(data, sec, 'config', ['group_role_map', 'default_role']);
+
+    // Default role for unmatched users
+    h += _renderDefaultRoleField(sec, data.default_role || 'none');
+
+    // Group → Role mapping widget
+    const grpMap = data.group_role_map || '{}';
+    h += _renderGroupRoleMap(sec, grpMap);
+
+    // LDAP test connection + optional user auth test
+    if (sec === 'ldap') {
+        h += `<hr class="my-2"><div class="cfg-field-wrap">
+            <div class="row mb-2 align-items-center">
+                <label class="col-sm-4 col-form-label col-form-label-sm text-sm-end fw-semibold">${esc(t('ldap_test_user_label'))}</label>
+                <div class="col-sm-4 pe-1">
+                    <input type="text" id="ldapTestUser" class="form-control form-control-sm"
+                        placeholder="${escAttr(t('ldap_test_user_ph'))}" autocomplete="off">
+                </div>
+                <div class="col-sm-4 ps-1">
+                    <input type="password" id="ldapTestPass" class="form-control form-control-sm"
+                        placeholder="${escAttr(t('ldap_test_pass_ph'))}" autocomplete="new-password">
+                </div>
+            </div>
+            <div class="row mb-1">
+                <div class="col-sm-8 offset-sm-4">
+                    <small class="text-muted">${esc(t('ldap_test_user_hint'))}</small>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-8 offset-sm-4 d-flex justify-content-end">
+                    <button class="btn btn-info btn-sm" id="btnTestLdap" data-test-btn
+                        onclick="testLdap()" title="${escAttr(t('ldap_test'))}">
+                        <i class="bi bi-plug me-1"></i>${esc(t('ldap_test'))}
+                    </button>
+                </div>
+            </div>
+            <div class="row mt-2" id="ldapTestResult" style="display:none">
+                <div class="col-sm-8 offset-sm-4">
+                    <div id="ldapTestResultBody"></div>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    h += cfgCardClose;
+    return h;
+}
+
+function _renderDefaultRoleField(sec, current) {
+    const pathStr = `${sec}|default_role`;
+    const _hint = fieldHint(pathStr);
+    const _hintId = _hint ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
+    const _infoIcon = _hint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+                style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+                data-bs-toggle="collapse" data-bs-target="#${_hintId}"
+                aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _hintPanel = _hint
+        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(_hint)}</div></div>`
+        : '';
+    const allRoleNames = ['none', 'viewer', 'editor', 'admin',
+        ...Object.keys(rolesData).filter(r => !['admin','editor','viewer','none'].includes(r))];
+    const items = allRoleNames
+        .map(r => {
+            const rd = rolesData[r] || {};
+            return {
+                r,
+                uid: rd.uid || r,
+                lbl: rd.label || (I18N.role_labels && I18N.role_labels[r]) || r,
+                desc: rd.description || '',
+            };
+        })
+        .sort((a, b) => a.lbl.localeCompare(b.lbl));
+    const selectedItem = items.find(x => x.uid === current || x.r === current) || items[0] || { lbl: current };
+    const liItems = items.map(({ r, uid, lbl, desc }, idx) => {
+        const isActive = (current === uid || current === r);
+        const sep = idx > 0 ? '<li><hr class="dropdown-divider my-0"></li>' : '';
+        return `${sep}<li><button class="dropdown-item px-3 py-2${isActive ? ' active' : ''}" type="button"
+            data-dr-uid="${escAttr(uid)}" data-dr-lbl="${escAttr(lbl)}" data-dr-path="${escAttr(pathStr)}"
+            onclick="_drPickRole(this)">
+            <div class="fw-semibold" style="font-size:.875em">${esc(lbl)}</div>
+            ${desc ? `<div style="font-size:.78em;white-space:normal;line-height:1.35;opacity:.75">${esc(desc)}</div>` : ''}
+        </button></li>`;
+    }).join('');
+    return `<div class="cfg-field-wrap mb-2" data-cfg-path="${escAttr(pathStr)}">
+    <div class="row align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('default_role'))}${_infoIcon}</label>
+        <div class="col-sm-8">
+            <div class="dropdown">
+                <button class="btn btn-secondary btn-sm dropdown-toggle w-100 text-start" type="button"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="dr-lbl">${esc(selectedItem.lbl)}</span>
+                </button>
+                <ul class="dropdown-menu dr-dropdown-menu w-100 py-0">${liItems}</ul>
+            </div>
+            ${_hintPanel}
+        </div>
+    </div>
+    </div>`;
+}
+
+function _drPickRole(el) {
+    const dd = el.closest('.dropdown');
+    dd.querySelector('.dr-lbl').textContent = el.dataset.drLbl;
+    dd.querySelectorAll('.dropdown-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    updateField('config', el.dataset.drPath, el.dataset.drUid);
+}
+
+/**
+ * Render the group→role mapping table widget for a given auth section.
+ * The value is stored as a JSON string in configData[sec].group_role_map.
+ */
+function _renderGroupRoleMap(sec, rawValue) {
+    let mapObj = {};
+    try { mapObj = JSON.parse(typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue || {})); } catch (_) {}
+
+    const pathStr = `${sec}|group_role_map`;
+    const _hint = fieldHint(pathStr);
+    const _hintId = _hint ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
+    const _infoIcon = _hint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+                style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+                data-bs-toggle="collapse" data-bs-target="#${_hintId}"
+                aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _hintPanel = _hint
+        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(_hint)}</div></div>`
+        : '';
+
+    const hasNames = (sec === 'oidc' || sec === 'ldap');
+    let displayNames = {};
+    if (hasNames) {
+        try { displayNames = JSON.parse(configData[sec]?.group_display_names || '{}'); } catch (_) {}
+    }
+
+    const entries = Object.entries(mapObj);
+    const tableId = `grm_${sec}`;
+    const _rowOnChange = hasNames
+        ? `_grmRowIdChanged(this,'${escAttr(sec)}')`
+        : `_grmUpdate('${escAttr(sec)}')`;
+    let rows = '';
+    let _needsAutoFetch = false;
+    entries.forEach(([grp, role], i) => {
+        const dnRaw  = hasNames ? displayNames[grp] : undefined;
+        const dn     = (typeof dnRaw === 'string' && dnRaw) ? dnRaw : '';
+        const dnNF   = hasNames && (grp in displayNames) && dnRaw === '';
+        if (hasNames && dnRaw === undefined) _needsAutoFetch = true;
+        rows += `<tr data-grm-idx="${i}"${dn ? ` data-grm-name="${escAttr(dn)}"` : ''}>
+            <td class="pe-2">
+                <input type="text" class="form-control form-control-sm grm-group font-monospace"
+                    value="${escAttr(grp)}" placeholder="${escAttr(t('grm_group'))}"
+                    style="font-size:.8em"
+                    oninput="markDirty('config')"
+                    onchange="${_rowOnChange}">
+            </td>
+            ${hasNames ? `<td class="pe-2 grm-name-cell">
+                <span class="d-block text-truncate small ${dnNF ? 'text-warning-emphasis fw-medium' : 'text-muted'} py-1"
+                      ${dnNF ? 'data-grm-state="not_found"' : ''}
+                      title="${escAttr(dn)}">${dnNF ? esc(t('grm_not_found')) : esc(dn || '—')}</span>
+            </td>` : ''}
+            <td class="pe-2">
+                <select class="form-select form-select-sm grm-role"
+                    onchange="_grmUpdate('${escAttr(sec)}')">${_grmRoleOpts(role)}</select>
+            </td>
+            <td style="width:2rem">
+                <button type="button" class="btn btn-sm btn-danger py-0 px-1"
+                    onclick="_grmRemoveRow(this,'${escAttr(sec)}')"
+                    title="${escAttr(t('delete_tt'))}">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </td>
+        </tr>`;
+    });
+    if (_needsAutoFetch) setTimeout(() => _grmFetchDisplayNames(sec, false), 0);
+
+    const emptyMsg = !entries.length
+        ? `<div class="grm-empty-msg text-muted small py-1">${esc(t('grm_empty'))}</div>` : '';
+
+    const colgroup = hasNames
+        ? `<colgroup><col><col style="width:8rem"><col style="width:7rem"><col style="width:2.2rem"></colgroup>`
+        : `<colgroup><col><col style="width:7rem"><col style="width:2.2rem"></colgroup>`;
+    const thead = hasNames
+        ? `<tr><th class="small py-1">${esc(t('grm_group_id'))}</th><th class="small py-1">${esc(t('grm_display_name'))}</th><th class="small py-1">${esc(t('grm_role'))}</th><th></th></tr>`
+        : `<tr><th class="small py-1">${esc(t('grm_group'))}</th><th class="small py-1">${esc(t('grm_role'))}</th><th></th></tr>`;
+
+    return `<div class="cfg-field-wrap" data-cfg-path="${escAttr(pathStr)}">
+    <div class="row mb-2 align-items-start">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('group_role_map'))}${_infoIcon}</label>
+        <div class="col-sm-8">
+            <table class="table table-sm table-borderless mb-1 grm-table" id="${tableId}" style="table-layout:fixed;width:100%">
+                ${colgroup}
+                <thead class="table-light">${thead}</thead>
+                <tbody>${rows}</tbody>
+            </table>
+            ${emptyMsg}
+            <div class="d-flex align-items-start gap-2 flex-wrap">
+                <button type="button" class="btn btn-sm btn-secondary"
+                    onclick="_grmAddRow('${escAttr(sec)}')">
+                    <i class="bi bi-plus-lg me-1"></i>${esc(t('grm_add'))}
+                </button>
+                ${sec === 'ldap' ? `<button type="button" class="btn btn-sm btn-secondary"
+                    id="btnFetchLdapGroups" onclick="_ldapFetchGroups()">
+                    <i class="bi bi-cloud-download me-1"></i>${esc(t('grm_fetch_groups'))}
+                </button>` : ''}
+                ${sec === 'oidc' ? `<button type="button" class="btn btn-sm btn-secondary"
+                    id="btnFetchEntraGroups" onclick="_oidcFetchGroups()">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('entra_fetch_groups'))}
+                </button>` : ''}
+                ${hasNames && entries.length ? `<button type="button" class="btn btn-sm btn-secondary"
+                    id="btnRefreshGrmNames_${escAttr(sec)}" onclick="_grmFetchDisplayNames('${escAttr(sec)}',true)">
+                    <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('grm_refresh_names'))}
+                </button>` : ''}
+            </div>
+            ${sec === 'ldap' ? `<div id="ldapGroupPicker" class="mt-2" style="display:none">
+                <div class="small text-muted mb-1"><i class="bi bi-hand-index me-1"></i>${esc(t('grm_pick_hint'))}</div>
+                <input type="search" class="form-control form-control-sm mb-1" id="ldapGroupFilter"
+                    placeholder="${escAttr(t('grm_filter_placeholder'))}">
+                <div id="ldapGroupList" class="border rounded" style="max-height:160px;overflow-y:auto;font-size:.8rem"></div>
+            </div>` : ''}
+            ${sec === 'oidc' ? `<div id="oidcGroupPicker" class="mt-2" style="display:none">
+                <div class="small text-muted mb-1"><i class="bi bi-info-circle me-1"></i>${esc(t('entra_groups_pick_hint'))}</div>
+                <input type="search" class="form-control form-control-sm mb-1" id="oidcGroupFilter"
+                    placeholder="${escAttr(t('grm_filter_placeholder'))}">
+                <div id="oidcGroupList" class="border rounded" style="max-height:200px;overflow-y:auto;font-size:.8rem"></div>
+            </div>` : ''}
+            ${_hintPanel}
+        </div>
+    </div></div>`;
+}
+
+function _grmRoleOpts(sel) {
+    const allRoles = ['admin', 'editor', 'viewer',
+        ...Object.keys(rolesData).filter(r => !['admin','editor','viewer','none'].includes(r)),
+        'none'];
+    return allRoles.map(r => {
+        const lbl = (I18N.role_labels && I18N.role_labels[r]) || r;
+        return `<option value="${escAttr(r)}"${sel === r ? ' selected' : ''}>${esc(lbl)}</option>`;
+    }).join('');
+}
+
+const _grmNameCache = { ldap: {}, oidc: {} };
+
+async function _grmFetchDisplayNames(sec, refreshAll) {
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    const rows = [...tbl.querySelectorAll('tbody tr')].filter(tr => {
+        const input = tr.querySelector('.grm-group');
+        if (!input || !input.value.trim()) return false;
+        if (!refreshAll) {
+            if (tr.dataset.grmName) return false;
+            const span = tr.querySelector('.grm-name-cell span');
+            if (span && span.dataset.grmState === 'not_found') return false;
+        }
+        return true;
+    });
+    if (!rows.length) return;
+
+    const btn = document.getElementById(`btnRefreshGrmNames_${sec}`);
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('grm_refresh_names')); }
+
+    rows.forEach(tr => {
+        if (refreshAll) delete tr.dataset.grmName;
+        const span = tr.querySelector('.grm-name-cell span');
+        if (span) {
+            span.textContent = t('grm_searching');
+            span.title = '';
+            span.className = 'd-block text-truncate small text-muted fst-italic py-1';
+            span.dataset.grmState = 'searching';
+        }
+    });
+
+    for (const tr of rows) {
+        const grp = tr.querySelector('.grm-group').value.trim();
+        const name = await _lookupGroupName(sec, grp);
+        const span = tr.querySelector('.grm-name-cell span');
+        if (name) {
+            tr.dataset.grmName = name;
+            _grmNameCache[sec][grp.toLowerCase()] = name;
+            if (span) { span.textContent = name; span.title = name; span.className = 'd-block text-truncate small text-muted py-1'; delete span.dataset.grmState; }
+        } else {
+            if (span) { span.textContent = t('grm_not_found'); span.title = ''; span.className = 'd-block text-truncate small text-warning-emphasis fw-medium py-1'; span.dataset.grmState = 'not_found'; }
+        }
+    }
+
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>' + esc(t('grm_refresh_names')); }
+    _grmUpdateNamesOnly(sec);
+    const _saved = await _saveDisplayNames(sec);
+    if (refreshAll) showToast(_saved ? t('grm_refresh_saved') : t('save_error'), _saved ? 'success' : 'danger');
+}
+
+function _grmMarkSearching(sec) {
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const input = tr.querySelector('.grm-group');
+        if (!input || !input.value.trim()) return;
+        const span = tr.querySelector('.grm-name-cell span');
+        if (span) {
+            span.textContent = t('grm_searching');
+            span.title = '';
+            span.className = 'd-block text-truncate small text-muted fst-italic py-1';
+            span.dataset.grmState = 'searching';
+        }
+    });
+}
+
+function _grmMarkNotFound(sec) {
+    let changed = false;
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const span = tr.querySelector('.grm-name-cell span');
+        if (span && span.dataset.grmState === 'searching') {
+            span.textContent = t('grm_not_found');
+            span.title = '';
+            span.className = 'd-block text-truncate small text-warning-emphasis fw-medium py-1';
+            span.dataset.grmState = 'not_found';
+            changed = true;
+        }
+    });
+    if (changed) _grmUpdateNamesOnly(sec);
+}
+
+async function _lookupGroupName(sec, id) {
+    try {
+        if (sec === 'ldap') {
+            const r = await apiPost('/api/ldap/group_lookup', { dn: id });
+            if (r?.data?.ok && r.data.found) return r.data.name || null;
+        } else if (sec === 'oidc') {
+            const r = await apiPost('/api/entra/group_lookup', { group_id: id });
+            if (r?.data?.ok && r.data.found) return r.data.name || null;
+        }
+    } catch (_) {}
+    return null;
+}
+
+async function _grmRowIdChanged(input, sec) {
+    const tr = input.closest('tr');
+    const grp = input.value.trim();
+    delete tr.dataset.grmName;
+    const span = tr.querySelector('.grm-name-cell span');
+    if (!span) { _grmUpdate(sec); return; }
+
+    if (!grp) {
+        span.textContent = '—';
+        span.title = '';
+        span.className = 'd-block text-truncate small text-muted py-1';
+        delete span.dataset.grmState;
+        _grmUpdate(sec);
+        return;
+    }
+
+    // Cache hit → instant resolve
+    const cache = _grmNameCache[sec] || {};
+    const cachedName = cache[grp] || cache[grp.toLowerCase()];
+    if (cachedName) {
+        tr.dataset.grmName = cachedName;
+        span.textContent = cachedName;
+        span.title = cachedName;
+        span.className = 'd-block text-truncate small text-muted py-1';
+        delete span.dataset.grmState;
+        _grmUpdate(sec);
+        await _saveDisplayNames(sec);
+        return;
+    }
+
+    // Server lookup
+    span.textContent = t('grm_searching');
+    span.title = '';
+    span.className = 'd-block text-truncate small text-muted fst-italic py-1';
+    span.dataset.grmState = 'searching';
+
+    const name = await _lookupGroupName(sec, grp);
+    if (name) {
+        tr.dataset.grmName = name;
+        _grmNameCache[sec][grp.toLowerCase()] = name;
+        span.textContent = name;
+        span.title = name;
+        span.className = 'd-block text-truncate small text-muted py-1';
+        delete span.dataset.grmState;
+    } else {
+        span.textContent = t('grm_not_found');
+        span.title = '';
+        span.className = 'd-block text-truncate small text-warning-emphasis fw-medium py-1';
+        span.dataset.grmState = 'not_found';
+    }
+    _grmUpdate(sec);
+    await _saveDisplayNames(sec);
+}
+
+function _grmAddRow(sec, prefill, label) {
+    prefill = prefill || '';
+    label   = (label && label !== prefill) ? label : '';
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    const tbody = tbl.querySelector('tbody');
+    const i = tbody.rows.length;
+    const tr = document.createElement('tr');
+    tr.dataset.grmIdx = i;
+    if (label) tr.dataset.grmName = label;
+    const hasNames = (sec === 'oidc' || sec === 'ldap');
+    const _inputOnChange = hasNames
+        ? `_grmRowIdChanged(this,'${escAttr(sec)}')`
+        : `_grmUpdate('${escAttr(sec)}')`;
+    tr.innerHTML = `
+        <td class="pe-2">
+            <input type="text" class="form-control form-control-sm grm-group${hasNames ? ' font-monospace' : ''}"
+                value="${escAttr(prefill)}"
+                placeholder="${escAttr(t('grm_group'))}"
+                ${hasNames ? 'style="font-size:.8em"' : ''}
+                oninput="markDirty('config')"
+                onchange="${_inputOnChange}">
+        </td>
+        ${hasNames ? `<td class="pe-2 grm-name-cell">
+            <span class="d-block text-truncate small text-muted py-1"
+                  title="${escAttr(label)}">${label ? esc(label) : '—'}</span>
+        </td>` : ''}
+        <td class="pe-2">
+            <select class="form-select form-select-sm grm-role"
+                onchange="_grmUpdate('${escAttr(sec)}')">${_grmRoleOpts('none')}</select>
+        </td>
+        <td style="width:2rem">
+            <button type="button" class="btn btn-sm btn-danger py-0 px-1"
+                onclick="_grmRemoveRow(this,'${escAttr(sec)}')"
+                title="${escAttr(t('delete_tt'))}">
+                <i class="bi bi-trash3"></i>
+            </button>
+        </td>`;
+    tbody.appendChild(tr);
+    const wrap = tbl.closest('.cfg-field-wrap');
+    if (wrap) wrap.querySelectorAll('.grm-empty-msg').forEach(el => el.remove());
+    if (prefill) _grmUpdate(sec);
+    markDirty('config');
+}
+
+function _grmRemoveRow(btn, sec) {
+    btn.closest('tr').remove();
+    _grmUpdate(sec);
+    markDirty('config');
+}
+
+function _grmBuildNames(sec) {
+    const tbl = document.getElementById(`grm_${sec}`);
+    const names = {};
+    if (!tbl) return names;
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const input = tr.querySelector('.grm-group');
+        const grp = (input?.value || '').trim();
+        if (!grp) return;
+        const name = tr.dataset.grmName || '';
+        if (name) {
+            names[grp] = name;
+        } else {
+            const span = tr.querySelector('.grm-name-cell span');
+            if (span && span.dataset.grmState === 'not_found') names[grp] = '';
+        }
+    });
+    return names;
+}
+
+function _grmUpdate(sec) {
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    const map = {};
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const input = tr.querySelector('.grm-group');
+        const grp  = (input?.value || '').trim();
+        const role = tr.querySelector('.grm-role')?.value || 'none';
+        if (grp) map[grp] = role;
+    });
+    updateField('config', `${sec}|group_role_map`, JSON.stringify(map));
+    if (configData[sec] && 'group_display_names' in configData[sec]) {
+        updateField('config', `${sec}|group_display_names`, JSON.stringify(_grmBuildNames(sec)));
+    }
+}
+
+function _grmUpdateNamesOnly(sec) {
+    if (!configData[sec] || !('group_display_names' in configData[sec])) return;
+    updateField('config', `${sec}|group_display_names`, JSON.stringify(_grmBuildNames(sec)));
+}
+
+async function _saveDisplayNames(sec) {
+    const pathStr = `${sec}|group_display_names`;
+    if (!configData[sec] || !('group_display_names' in configData[sec])) return false;
+    const value = configData[sec]['group_display_names'];
+    const fields = { [pathStr]: { value, version: _fieldVersions[pathStr] ?? null } };
+    try {
+        const resp = await fetch('/api/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields })
+        });
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        if (data.saved?.includes(pathStr)) {
+            if (data.versions?.[pathStr]) _fieldVersions[pathStr] = data.versions[pathStr];
+            _dirtyFields.delete(pathStr);
+            return true;
+        }
+        return false;
+    } catch (_) { return false; }
+}
+
+async function _ldapFetchGroups() {
+    const cfg = configData.ldap || {};
+    if (!cfg.server) {
+        showToast(t('ldap_test_missing'), 'warning');
+        return;
+    }
+    const btn    = document.getElementById('btnFetchLdapGroups');
+    const picker = document.getElementById('ldapGroupPicker');
+    const list   = document.getElementById('ldapGroupList');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('grm_fetch_groups')); }
+    if (picker) picker.style.display = 'none';
+    _grmMarkSearching('ldap');
+
+    const r = await apiPost('/api/ldap/groups', cfg);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download me-1"></i>' + esc(t('grm_fetch_groups')); }
+
+    if (!r || !r.data || !r.data.ok) {
+        _grmMarkNotFound('ldap');
+        await _saveDisplayNames('ldap');
+        showToast((r && r.data && r.data.message) || t('ldap_test_error'), 'danger');
+        return;
+    }
+    const groups = r.data.groups || [];
+    if (!groups.length) {
+        _grmMarkNotFound('ldap');
+        await _saveDisplayNames('ldap');
+        showToast(t('grm_no_groups'), 'info');
+        return;
+    }
+    if (list) {
+        list.innerHTML = groups.map(g =>
+            `<div class="d-flex align-items-center justify-content-between py-1 px-2 border-bottom grm-group-pick"
+                  data-grm-name="${escAttr((g.name || '').toLowerCase())}"
+                  style="cursor:pointer;transition:background .1s" title="${escAttr(g.dn)}"
+                  onmouseover="this.style.background='var(--bs-tertiary-bg,#f0f0f0)'" onmouseout="this.style.background=''"
+                  onclick="_ldapPickGroup(${jsStr(g.dn)},${jsStr(g.name)})">
+                <span class="me-3 fw-medium small text-truncate">${esc(g.name)}</span>
+                <span class="text-muted text-truncate" style="font-size:.7rem;flex-shrink:0;max-width:55%">${esc(g.dn)}</span>
+            </div>`
+        ).join('');
+        _grmBindFilter('ldap');
+        const _ldapNameMap = {};
+        groups.forEach(g => { if (g.dn) { _ldapNameMap[g.dn] = g.name; _grmNameCache.ldap[g.dn.toLowerCase()] = g.name; } });
+        _grmAutoResolveNames('ldap', _ldapNameMap);
+        _grmMarkNotFound('ldap');
+        await _saveDisplayNames('ldap');
+    }
+    if (picker) picker.style.display = '';
+}
+
+function _grmAutoResolveNames(sec, idNameMap) {
+    // Build a case-insensitive fallback map (DNs can differ in case between storage and server)
+    const ciMap = {};
+    for (const [k, v] of Object.entries(idNameMap)) ciMap[k.toLowerCase()] = v;
+
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    let updated = false;
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const input = tr.querySelector('.grm-group');
+        const grp = (input?.value || '').trim();
+        if (!grp) return;
+        const name = idNameMap[grp] || ciMap[grp.toLowerCase()];
+        if (name) {
+            tr.dataset.grmName = name;
+            const nameCell = tr.querySelector('.grm-name-cell span');
+            if (nameCell) {
+                nameCell.textContent = name;
+                nameCell.title = name;
+                nameCell.className = 'd-block text-truncate small text-muted py-1';
+                delete nameCell.dataset.grmState;
+            }
+            updated = true;
+        }
+    });
+    if (updated) _grmUpdate(sec);
+}
+
+function _grmBindFilter(sec) {
+    const input = document.getElementById(`${sec}GroupFilter`);
+    if (!input) return;
+    input.value = '';
+    input.oninput = function() {
+        const q = this.value.trim().toLowerCase();
+        const list = document.getElementById(`${sec}GroupList`);
+        if (!list) return;
+        list.querySelectorAll('.grm-group-pick').forEach(row => {
+            const name = (row.dataset.grmName || '');
+            row.style.display = (!q || name.includes(q)) ? '' : 'none';
+        });
+    };
+}
+
+function _grmFilter(sec, term) {
+    const q = term.trim().toLowerCase();
+    const list = document.getElementById(`${sec}GroupList`);
+    if (!list) return;
+    list.querySelectorAll('.grm-group-pick').forEach(row => {
+        const text = row.dataset.grmName || '';
+        row.style.display = (!q || text.includes(q)) ? '' : 'none';
+    });
+}
+
+function _ldapPickGroup(dn, name) {
+    _grmAddRow('ldap', dn, name);
+}
+
+async function _oidcFetchGroups() {
+    const cfg = configData.oidc || {};
+    // client_secret is masked (null) after page load; it is plaintext immediately
+    // after the wizard fills it in. Always send it if present so Fetch Groups works
+    // right after the wizard without requiring a page refresh.
+    if (!cfg.provider_url || !cfg.client_id) {
+        showToast(t('entra_groups_missing_creds'), 'warning');
+        return;
+    }
+    const btn    = document.getElementById('btnFetchEntraGroups');
+    const picker = document.getElementById('oidcGroupPicker');
+    const list   = document.getElementById('oidcGroupList');
+    if (btn)    { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('entra_fetch_groups')); }
+    if (picker) picker.style.display = 'none';
+    _grmMarkSearching('oidc');
+
+    const body = { provider_url: cfg.provider_url, client_id: cfg.client_id };
+    // Send the secret only when it is a real value (not masked null from server)
+    if (cfg.client_secret) body.client_secret = cfg.client_secret;
+
+    const r = await apiPost('/api/entra/groups', body);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-microsoft me-1"></i>' + esc(t('entra_fetch_groups')); }
+
+    if (!r || !r.data || !r.data.ok) {
+        _grmMarkNotFound('oidc');
+        await _saveDisplayNames('oidc');
+        showToast((r && r.data && r.data.message) || t('ldap_test_error'), 'danger');
+        return;
+    }
+    const groups = r.data.groups || [];
+    if (!groups.length) {
+        _grmMarkNotFound('oidc');
+        await _saveDisplayNames('oidc');
+        showToast(t('grm_no_groups'), 'info');
+        return;
+    }
+    if (list) {
+        list.innerHTML = groups.map(g =>
+            `<div class="py-1 px-2 border-bottom grm-group-pick"
+                data-grm-name="${escAttr((g.name || '').toLowerCase())}"
+                style="cursor:pointer"
+                onmouseover="this.style.background='var(--bs-tertiary-bg,#f0f0f0)'" onmouseout="this.style.background=''"
+                onclick="_oidcPickGroup(${jsStr(g.id)},${jsStr(g.name)})">
+                <div class="fw-medium small">${esc(g.name)}</div>
+                <div class="font-monospace text-muted" style="font-size:.7rem;user-select:all">${esc(g.id)}</div>
+            </div>`
+        ).join('');
+        _grmBindFilter('oidc');
+        const _oidcNameMap = {};
+        groups.forEach(g => { if (g.id) { _oidcNameMap[g.id] = g.name; _grmNameCache.oidc[g.id.toLowerCase()] = g.name; } });
+        _grmAutoResolveNames('oidc', _oidcNameMap);
+        _grmMarkNotFound('oidc');
+        await _saveDisplayNames('oidc');
+    }
+    if (picker) picker.style.display = '';
+}
+
+function _oidcPickGroup(id, name) {
+    // Store the Object ID as the map key (Entra ID sends Object IDs in the groups claim).
+    // Pass the display name as the label so the input shows something readable.
+    _grmAddRow('oidc', id, name);
+}
+
+function _applyLdapPreset(preset) {
+    const PRESETS = {
+        ad: {
+            port: 389, use_ssl: false, timeout: 10,
+            user_filter: '(sAMAccountName={username})',
+            email_attr: 'mail', name_attr: 'displayName', group_attr: 'memberOf',
+            button_label: 'Active Directory',
+        },
+        openldap: {
+            port: 389, use_ssl: false, timeout: 5,
+            user_filter: '(uid={username})',
+            email_attr: 'mail', name_attr: 'cn', group_attr: 'memberOf',
+            button_label: 'OpenLDAP',
+        },
+        freeipa: {
+            port: 389, use_ssl: false, timeout: 10,
+            user_filter: '(uid={username})',
+            email_attr: 'mail', name_attr: 'displayName', group_attr: 'memberOf',
+            button_label: 'FreeIPA',
+        },
+    };
+    const vals = PRESETS[preset];
+    if (!vals) return;
+    for (const [field, value] of Object.entries(vals)) {
+        updateField('config', `ldap|${field}`, value);
+    }
+    renderConfig();
+}
+
+// ─────────────────────── Entra ID wizard ───────────────────────
+let _entraFlowToken  = null;
+let _entraPolling    = null;
+let _entraDeviceCode = '';
+
+function _copyToClipboard(text) {
+    // Append inside the active modal (if any) to avoid Bootstrap's focus trap
+    // blocking focus on elements outside the modal.
+    const container = document.querySelector('.modal.show .modal-body') || document.body;
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+    container.appendChild(ta);
+    ta.focus(); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch(_) {}
+    container.removeChild(ta);
+    if (ok) { showToast(t('copied'), 'success'); return; }
+    // Fallback: Clipboard API
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text)
+            .then(() => showToast(t('copied'), 'success'))
+            .catch(() => showToast('Copy failed', 'danger'));
+    } else {
+        showToast('Copy failed', 'danger');
+    }
+}
+
+function _entraRedirectUri() {
+    let pu = ((configData.web_admin || {}).public_url || '').trim().replace(/\/$/, '');
+    if (!pu) return window.location.origin + '/auth/oidc/callback';
+    // public_url is stored without scheme — add https:// (required by Entra ID)
+    if (!/^https?:\/\//i.test(pu)) pu = 'https://' + pu;
+    return pu + '/auth/oidc/callback';
+}
+
+function _entraAzCliScript(uri, appName = 'ServiceSentry') {
+    return `#!/bin/bash
+# ${t('entra_script_requires')}: az CLI  (https://docs.microsoft.com/cli/azure/install-azure-cli)
+# ${t('entra_script_run_first')}: az login
+
+APP_NAME="${appName}"
+REDIRECT_URI="${uri}"
+
+# 1 — ${t('entra_script_step1')}
+APP=$(az ad app create \\
+  --display-name "$APP_NAME" \\
+  --sign-in-audience AzureADMyOrg \\
+  --web-redirect-uris "$REDIRECT_URI" \\
+  --output json)
+OBJECT_ID=$(echo "$APP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+CLIENT_ID=$(echo "$APP" | python3 -c "import sys,json; print(json.load(sys.stdin)['appId'])")
+TENANT_ID=$(az account show --query tenantId -o tsv)
+
+# 1b — ${t('entra_script_step1b')}
+az rest --method PATCH \\
+  --url "https://graph.microsoft.com/v1.0/applications/$OBJECT_ID" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"groupMembershipClaims":"SecurityGroup","optionalClaims":{"idToken":[{"name":"groups","essential":false}],"accessToken":[{"name":"groups","essential":false}]},"requiredResourceAccess":[{"resourceAppId":"00000003-0000-0000-c000-000000000000","resourceAccess":[{"id":"37f7f235-527c-4136-accd-4a02d197296e","type":"Scope"},{"id":"64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0","type":"Scope"},{"id":"14dad69e-099b-42c9-810b-d002981feec1","type":"Scope"},{"id":"e1fe6dd8-ba31-4d61-89e7-88639da4683d","type":"Scope"},{"id":"5b567255-7703-4780-807c-7be8301ae99b","type":"Role"}]}]}'
+
+# 2 — ${t('entra_script_step2')}
+SECRET=$(az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/applications/$OBJECT_ID/addPassword" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"passwordCredential":{"displayName":"'"$APP_NAME"'","endDateTime":"2099-12-31T00:00:00Z"}}')
+CLIENT_SECRET=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['secretText'])")
+
+# 3 — ${t('entra_script_step3')}
+SP=$(az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"appId":"'"$CLIENT_ID"'","tags":["WindowsAzureActiveDirectoryIntegratedApp"]}')
+SP_ID=$(echo "$SP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+# 4 — ${t('entra_script_step4')}
+az rest --method PATCH \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"appRoleAssignmentRequired":true}'
+
+# 5 — ${t('entra_script_step5')}
+GRAPH_SP_ID=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
+az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID/appRoleAssignments" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"principalId":"'"$SP_ID"'","resourceId":"'"$GRAPH_SP_ID"'","appRoleId":"5b567255-7703-4780-807c-7be8301ae99b"}'
+
+echo ""
+echo "Provider URL:  https://login.microsoftonline.com/$TENANT_ID/v2.0"
+echo "Client ID:     $CLIENT_ID"
+echo "Client Secret: $CLIENT_SECRET"`;
+}
+
+function _entraPs1Script(uri, appName = 'ServiceSentry') {
+    return `# ${t('entra_script_requires')}: Install-Module Microsoft.Graph -Scope CurrentUser
+Connect-MgGraph -Scopes "Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All"
+
+$appName     = "${appName}"
+$redirectUri = "${uri}"
+
+# ${t('entra_script_graph_perms')}
+$reqAccess = @(@{
+    ResourceAppId  = "00000003-0000-0000-c000-000000000000"
+    ResourceAccess = @(
+        @{ Id = "37f7f235-527c-4136-accd-4a02d197296e"; Type = "Scope" },
+        @{ Id = "64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0"; Type = "Scope" },
+        @{ Id = "14dad69e-099b-42c9-810b-d002981feec1"; Type = "Scope" },
+        @{ Id = "e1fe6dd8-ba31-4d61-89e7-88639da4683d"; Type = "Scope" },
+        @{ Id = "5b567255-7703-4780-807c-7be8301ae99b"; Type = "Role"  }
+    )
+})
+$optClaims = @{
+    IdToken     = @(@{ Name = "groups"; Essential = $false })
+    AccessToken = @(@{ Name = "groups"; Essential = $false })
+}
+
+# 1 — ${t('entra_script_step1')}
+$app = New-MgApplication \`
+    -DisplayName $appName \`
+    -SignInAudience "AzureADMyOrg" \`
+    -Web @{ RedirectUris = @($redirectUri) } \`
+    -GroupMembershipClaims "SecurityGroup" \`
+    -OptionalClaims $optClaims \`
+    -RequiredResourceAccess $reqAccess
+
+# 2 — ${t('entra_script_step2')}
+$secret = Add-MgApplicationPassword -ApplicationId $app.Id \`
+    -PasswordCredential @{ DisplayName = $appName; EndDateTime = [DateTime]::new(2099,12,31) }
+
+# 3 — ${t('entra_script_step3')}
+$sp = New-MgServicePrincipal -AppId $app.AppId \`
+    -Tags @("WindowsAzureActiveDirectoryIntegratedApp")
+
+# 4 — ${t('entra_script_step4')}
+Update-MgServicePrincipal -ServicePrincipalId $sp.Id -AppRoleAssignmentRequired:$true
+
+# 5 — ${t('entra_script_step5')}
+$graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'"
+New-MgServicePrincipalAppRoleAssignment \`
+    -ServicePrincipalId $sp.Id -PrincipalId $sp.Id \`
+    -ResourceId $graphSp.Id \`
+    -AppRoleId "5b567255-7703-4780-807c-7be8301ae99b"
+
+$tenantId = (Get-MgOrganization).Id
+Write-Host "Provider URL:  https://login.microsoftonline.com/$tenantId/v2.0"
+Write-Host "Client ID:     $($app.AppId)"
+Write-Host "Client Secret: $($secret.SecretText)"`;
+}
+
+function showEntraWizard() {
+    const uri = _entraRedirectUri();
+    document.getElementById('modalEntraWizard')?.remove();
+    document.body.insertAdjacentHTML('beforeend', `
+<div class="modal fade" id="modalEntraWizard" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-microsoft me-2"></i>${esc(t('entra_wizard_title'))}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="_entraCleanup()"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs mb-3">
+          <li class="nav-item"><button class="nav-link active" id="entraNavAuto" onclick="_entraTab('auto')" type="button">
+            <i class="bi bi-magic me-1"></i>${esc(t('entra_tab_auto'))}</button></li>
+          <li class="nav-item"><button class="nav-link" id="entraNavScript" onclick="_entraTab('script')" type="button">
+            <i class="bi bi-terminal me-1"></i>${esc(t('entra_tab_script'))}</button></li>
+        </ul>
+        <div id="entraContentScript" style="display:none">
+          <div class="mb-3">
+            <label class="form-label small fw-semibold text-muted">${esc(t('entra_redirect_uri_label'))}</label>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" readonly id="entraUriInput" value="${escAttr(uri)}">
+              <button class="btn btn-secondary" onclick="_copyToClipboard(document.getElementById('entraUriInput').value)">
+                <i class="bi bi-clipboard"></i>
+              </button>
+            </div>
+          </div>
+          <p class="small text-muted">${esc(t('entra_script_note'))}</p>
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="fw-semibold small">Azure CLI</span>
+              <button class="btn btn-secondary btn-sm" onclick="_copyToClipboard(document.getElementById('entraAzCli').textContent)">
+                <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}</button>
+            </div>
+            <pre class="bg-body-secondary rounded p-3 overflow-auto" id="entraAzCli" style="max-height:180px;font-size:.76em">${esc(_entraAzCliScript(uri, 'ServiceSentry'))}</pre>
+          </div>
+          <div>
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="fw-semibold small">PowerShell <span class="text-muted">(Microsoft.Graph)</span></span>
+              <button class="btn btn-secondary btn-sm" onclick="_copyToClipboard(document.getElementById('entraPs1').textContent)">
+                <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}</button>
+            </div>
+            <pre class="bg-body-secondary rounded p-3 overflow-auto" id="entraPs1" style="max-height:180px;font-size:.76em">${esc(_entraPs1Script(uri, 'ServiceSentry'))}</pre>
+          </div>
+        </div>
+        <div id="entraContentAuto">
+          <div id="entraStateIdle">
+            <p class="small text-muted mb-3">${esc(t('entra_auto_intro'))}</p>
+            <div class="mb-3">
+              <label class="form-label small fw-semibold text-muted" for="entraAppName">${esc(t('entra_saml2_app_name_label'))}</label>
+              <input type="text" class="form-control form-control-sm" id="entraAppName"
+                     value="ServiceSentry" autocomplete="off"
+                     oninput="_entraUpdateScripts(this.value)">
+            </div>
+            <button class="btn btn-primary" onclick="_entraStart()" type="button">
+              <i class="bi bi-play-fill me-1"></i>${esc(t('entra_auto_start'))}</button>
+          </div>
+          <div id="entraStateWaiting" style="display:none">
+            <p class="small text-muted mb-3">${esc(t('entra_auto_open_browser'))}</p>
+            <div class="mb-2">
+              <div class="small text-muted mb-1">${esc(t('entra_auto_code_label'))}</div>
+              <div class="input-group">
+                <input type="text" class="form-control font-monospace fs-4 fw-bold text-center bg-body-secondary"
+                       readonly id="entraUserCode" value="—">
+                <button class="btn btn-secondary" type="button"
+                  onclick="_copyToClipboard(document.getElementById('entraUserCode').value)">
+                  <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}
+                </button>
+              </div>
+            </div>
+            <div class="mb-3">
+              <a id="entraVerifLink" href="#" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
+                <i class="bi bi-box-arrow-up-right me-1"></i>microsoft.com/devicelogin
+              </a>
+            </div>
+            <div class="d-flex align-items-center gap-2 text-muted small">
+              <span class="spinner-border spinner-border-sm"></span>${esc(t('entra_auto_waiting'))}</div>
+          </div>
+          <div id="entraStateSuccess" style="display:none">
+            <div class="alert alert-success mb-2">
+              <i class="bi bi-check-circle-fill me-2"></i>${esc(t('entra_auto_success'))}</div>
+            <div id="entraSpError" style="display:none" class="alert alert-warning mb-2 py-2 small">
+              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSpErrorMsg"></span></div>
+            <div id="entraConsentOk" style="display:none" class="alert alert-success mb-0 py-2 small">
+              <i class="bi bi-shield-check me-1"></i>${esc(t('entra_consent_granted'))}</div>
+            <div id="entraConsentPending" style="display:none" class="alert alert-warning mb-0 py-2 small">
+              <i class="bi bi-exclamation-triangle me-1"></i>${esc(t('entra_consent_pending'))}</div>
+          </div>
+          <div id="entraStateError" style="display:none">
+            <div class="alert alert-danger mb-2">
+              <i class="bi bi-x-circle-fill me-2"></i><span id="entraErrorMsg"></span></div>
+            <button class="btn btn-secondary btn-sm" onclick="_entraRetry()" type="button">
+              <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('retry'))}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>`);
+    const modal = new bootstrap.Modal(document.getElementById('modalEntraWizard'));
+    modal.show();
+}
+
+function _entraTab(tab) {
+    document.getElementById('entraContentScript').style.display = tab === 'script' ? '' : 'none';
+    document.getElementById('entraContentAuto').style.display   = tab === 'auto'   ? '' : 'none';
+    document.getElementById('entraNavScript').classList.toggle('active', tab === 'script');
+    document.getElementById('entraNavAuto').classList.toggle('active',   tab === 'auto');
+}
+
+async function _entraStart() {
+    document.getElementById('entraStateIdle').style.display = 'none';
+    const appName = (document.getElementById('entraAppName')?.value || '').trim() || 'ServiceSentry';
+    const r = await apiPost('/api/entra/device-code', { app_name: appName });
+    if (!r?.data || r.data.error) {
+        document.getElementById('entraStateIdle').style.display = '';
+        showToast((r?.data?.error) || t('entra_device_code_error'), 'danger');
+        return;
+    }
+    const d = r.data;
+    _entraFlowToken  = d.flow_token;
+    _entraDeviceCode = d.user_code;
+    document.getElementById('entraUserCode').value = d.user_code;
+    const lnk = document.getElementById('entraVerifLink');
+    lnk.href = d.verification_uri;
+    document.getElementById('entraStateWaiting').style.display = '';
+    _copyToClipboard(d.user_code);
+    window.open(d.verification_uri, '_blank', 'noopener');
+    _entraPolling = setTimeout(() => _entraPoll(d.interval || 5), (d.interval || 5) * 1000);
+}
+
+async function _entraPoll(interval) {
+    if (!_entraFlowToken) return;
+    const r = await apiPost('/api/entra/device-poll', { flow_token: _entraFlowToken });
+    if (!r?.data) return;
+    const d = r.data;
+    if (d.status === 'pending') {
+        const next = d.interval || interval;
+        _entraPolling = setTimeout(() => _entraPoll(next), next * 1000);
+        return;
+    }
+    document.getElementById('entraStateWaiting').style.display = 'none';
+    _entraFlowToken = null;
+    if (d.status === 'complete') {
+        _entraApply(d);
+        document.getElementById('entraStateSuccess').style.display = '';
+        const spOk = d.sp_created !== false;
+        const spErrEl = document.getElementById('entraSpError');
+        if (!spOk) {
+            document.getElementById('entraSpErrorMsg').textContent =
+                t('entra_sp_error') + (d.sp_error ? ` (${d.sp_error})` : '');
+            spErrEl.style.display = '';
+        } else {
+            spErrEl.style.display = 'none';
+        }
+        document.getElementById('entraConsentOk').style.display      = (spOk && d.consent_granted) ? '' : 'none';
+        document.getElementById('entraConsentPending').style.display  = (spOk && !d.consent_granted) ? '' : 'none';
+        saveConfig().then(() => {
+            if (spOk && d.consent_granted) {
+                setTimeout(() => bootstrap.Modal.getInstance(document.getElementById('modalEntraWizard'))?.hide(), 2000);
+            }
+        });
+    } else {
+        document.getElementById('entraErrorMsg').textContent = d.message || t('entra_auto_error');
+        document.getElementById('entraStateError').style.display = '';
+    }
+}
+
+function _entraApply(d) {
+    const patch = {
+        username_claim: 'preferred_username',
+        email_claim: 'email', name_claim: 'name', groups_claim: 'groups',
+        scopes: 'openid email profile',
+        button_label: 'Microsoft Entra ID',
+    };
+    if (d.provider_url)  patch.provider_url  = d.provider_url;
+    else if (d.tenant_id) patch.provider_url = `https://login.microsoftonline.com/${d.tenant_id}/v2.0`;
+    if (d.client_id)     patch.client_id     = d.client_id;
+    if (d.client_secret) patch.client_secret = d.client_secret;
+    // updateField registers each path in _dirtyFields so saveConfig() picks them up
+    for (const [field, value] of Object.entries(patch)) {
+        updateField('config', `oidc|${field}`, value);
+    }
+    renderConfig();
+}
+
+function _entraUpdateScripts(name) {
+    const appName = name.trim() || 'ServiceSentry';
+    const uri = document.getElementById('entraUriInput')?.value || '';
+    const azCliEl = document.getElementById('entraAzCli');
+    const ps1El   = document.getElementById('entraPs1');
+    if (azCliEl) azCliEl.textContent = _entraAzCliScript(uri, appName);
+    if (ps1El)   ps1El.textContent   = _entraPs1Script(uri, appName);
+}
+
+function _entraRetry() {
+    document.getElementById('entraStateError').style.display = 'none';
+    document.getElementById('entraStateIdle').style.display  = '';
+    _entraFlowToken = null;
+}
+
+function _entraCleanup() {
+    clearTimeout(_entraPolling);
+    _entraFlowToken = null;
+}
+
+// ── SAML2 Entra ID wizard ──────────────────────────────────────────────────────
+let _s2EntraFlowToken  = null;
+let _s2EntraPolling    = null;
+let _s2EntraDeviceCode = '';
+
+function _entraSaml2CertEnd() {
+    // addTokenSigningCertificate max = now + 3 years
+    return new Date(Date.now() + 3 * 365 * 24 * 3600 * 1000).toISOString().slice(0, 19) + 'Z';
+}
+
+function _entraSaml2AzCliScript(acsUrl, entityId, appName = 'ServiceSentry') {
+    const certEnd = _entraSaml2CertEnd();
+    return `#!/bin/bash
+# ${t('entra_script_requires')}: az CLI  (https://docs.microsoft.com/cli/azure/install-azure-cli)
+# ${t('entra_script_run_first')}: az login
+
+APP_NAME="${appName}"
+ACS_URL="${acsUrl}"
+SP_ENTITY_ID="${entityId}"
+
+# 1 — ${t('entra_saml2_step1')}
+APP=$(az ad app create \\
+  --display-name "$APP_NAME" \\
+  --sign-in-audience AzureADMyOrg \\
+  --output json)
+OBJECT_ID=$(echo "$APP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+CLIENT_ID=$(echo "$APP" | python3 -c "import sys,json; print(json.load(sys.stdin)['appId'])")
+TENANT_ID=$(az account show --query tenantId -o tsv)
+
+# 1b — ${t('entra_saml2_step1b')}
+az rest --method PATCH \\
+  --url "https://graph.microsoft.com/v1.0/applications/$OBJECT_ID" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"identifierUris":["'"$SP_ENTITY_ID"'"],"groupMembershipClaims":"SecurityGroup","requiredResourceAccess":[{"resourceAppId":"00000003-0000-0000-c000-000000000000","resourceAccess":[{"id":"5b567255-7703-4780-807c-7be8301ae99b","type":"Role"}]}]}'
+
+# 2 — ${t('entra_saml2_step2')}
+SP=$(az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"appId":"'"$CLIENT_ID"'","tags":["WindowsAzureActiveDirectoryIntegratedApp"]}')
+SP_ID=$(echo "$SP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+az rest --method PATCH \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"preferredSingleSignOnMode":"saml","replyUrls":["'"$ACS_URL"'"]}'
+
+# 3 — ${t('entra_saml2_step3')}
+CERT_JSON=$(az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID/addTokenSigningCertificate" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"displayName":"CN='"$APP_NAME"'","endDateTime":"${certEnd}"}')
+IDP_CERT_B64=$(echo "$CERT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])")
+IDP_CERT_PEM=$(echo "$IDP_CERT_B64" | python3 -c 'import sys,textwrap
+b=sys.stdin.read().strip()
+print("-----BEGIN CERTIFICATE-----")
+[print(b[i:i+64]) for i in range(0,len(b),64)]
+print("-----END CERTIFICATE-----")
+')
+
+# 4 — ${t('entra_saml2_step4')}
+GRAPH_SP_ID=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
+az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID/appRoleAssignments" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"principalId":"'"$SP_ID"'","resourceId":"'"$GRAPH_SP_ID"'","appRoleId":"5b567255-7703-4780-807c-7be8301ae99b"}'
+
+echo ""
+echo "IdP Entity ID: https://sts.windows.net/$TENANT_ID/"
+echo "IdP SSO URL:   https://login.microsoftonline.com/$TENANT_ID/saml2"
+echo ""
+echo "IdP Certificate (paste in idp_cert field):"
+echo "$IDP_CERT_PEM"`;
+}
+
+function _entraSaml2Ps1Script(acsUrl, entityId, appName = 'ServiceSentry') {
+    const certEnd = _entraSaml2CertEnd();
+    return `# ${t('entra_script_requires')}: Install-Module Microsoft.Graph -Scope CurrentUser
+Connect-MgGraph -Scopes "Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All"
+
+$appName  = "${appName}"
+$acsUrl   = "${acsUrl}"
+$entityId = "${entityId}"
+
+# ${t('entra_saml2_step1')}
+$reqAccess = @(@{
+    ResourceAppId  = "00000003-0000-0000-c000-000000000000"
+    ResourceAccess = @(@{ Id = "5b567255-7703-4780-807c-7be8301ae99b"; Type = "Role" })
+})
+
+$app = New-MgApplication \`
+    -DisplayName $appName \`
+    -SignInAudience "AzureADMyOrg" \`
+    -IdentifierUris @($entityId) \`
+    -GroupMembershipClaims "SecurityGroup" \`
+    -RequiredResourceAccess $reqAccess
+
+# ${t('entra_saml2_step2')}
+$sp = New-MgServicePrincipal -AppId $app.AppId \`
+    -Tags @("WindowsAzureActiveDirectoryIntegratedApp")
+
+Invoke-MgGraphRequest -Method PATCH \`
+    -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.Id)" \`
+    -Body @{ preferredSingleSignOnMode = "saml"; replyUrls = @($acsUrl) } \`
+    -ContentType "application/json"
+
+# ${t('entra_saml2_step3')}
+$certResult = Invoke-MgGraphRequest -Method POST \`
+    -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.Id)/addTokenSigningCertificate" \`
+    -Body @{ displayName = "CN=$appName"; endDateTime = "${certEnd}" } \`
+    -ContentType "application/json"
+
+$b64     = $certResult.value
+$wrapped = ($b64 -replace '.{64}', "$0\`n").TrimEnd()
+$idpCert = "-----BEGIN CERTIFICATE-----\`n" + $wrapped + "\`n-----END CERTIFICATE-----"
+
+# ${t('entra_saml2_step4')}
+$graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'"
+New-MgServicePrincipalAppRoleAssignment \`
+    -ServicePrincipalId $sp.Id -PrincipalId $sp.Id \`
+    -ResourceId $graphSp.Id \`
+    -AppRoleId "5b567255-7703-4780-807c-7be8301ae99b"
+
+$tenantId = (Get-MgOrganization).Id
+Write-Host "IdP Entity ID: https://sts.windows.net/$tenantId/"
+Write-Host "IdP SSO URL:   https://login.microsoftonline.com/$tenantId/saml2"
+Write-Host ""
+Write-Host "IdP Certificate (paste in idp_cert field):"
+Write-Host $idpCert`;
+}
+
+function _entraSaml2BaseUrl() {
+    let pu = ((configData.web_admin || {}).public_url || '').trim().replace(/\/$/, '');
+    if (!pu) return window.location.origin;
+    if (!/^https?:\/\//i.test(pu)) pu = 'https://' + pu;
+    return pu;
+}
+
+function showEntraSaml2Wizard() {
+    const _base  = _entraSaml2BaseUrl();
+    const acsUrl   = (configData?.saml2?.sp_acs_url   || '').trim() || (_base + '/auth/saml2/acs');
+    const entityId = (configData?.saml2?.sp_entity_id || '').trim() || _base;
+    document.getElementById('modalEntraSaml2Wizard')?.remove();
+    document.body.insertAdjacentHTML('beforeend', `
+<div class="modal fade" id="modalEntraSaml2Wizard" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-microsoft me-2"></i>${esc(t('entra_saml2_wizard_title'))}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="_entraSaml2Cleanup()"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs mb-3">
+          <li class="nav-item"><button class="nav-link active" id="entraSaml2NavAuto" onclick="_entraSaml2Tab('auto')" type="button">
+            <i class="bi bi-magic me-1"></i>${esc(t('entra_tab_auto'))}</button></li>
+          <li class="nav-item"><button class="nav-link" id="entraSaml2NavScript" onclick="_entraSaml2Tab('script')" type="button">
+            <i class="bi bi-terminal me-1"></i>${esc(t('entra_tab_script'))}</button></li>
+        </ul>
+        <div id="entraSaml2ContentScript" style="display:none">
+          <div class="mb-2">
+            <label class="form-label small fw-semibold text-muted">${esc(t('entra_saml2_acs_url_label'))}</label>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" readonly id="entraSaml2AcsInput" value="${escAttr(acsUrl)}">
+              <button class="btn btn-secondary" onclick="_copyToClipboard(document.getElementById('entraSaml2AcsInput').value)">
+                <i class="bi bi-clipboard"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-semibold text-muted">${esc(t('entra_saml2_entity_id_label'))}</label>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" readonly id="entraSaml2EntityInput" value="${escAttr(entityId)}">
+              <button class="btn btn-secondary" onclick="_copyToClipboard(document.getElementById('entraSaml2EntityInput').value)">
+                <i class="bi bi-clipboard"></i>
+              </button>
+            </div>
+          </div>
+          <p class="small text-muted">${esc(t('entra_saml2_script_note'))}</p>
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="fw-semibold small">Azure CLI</span>
+              <button class="btn btn-secondary btn-sm" onclick="_copyToClipboard(document.getElementById('entraSaml2AzCli').textContent)">
+                <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}</button>
+            </div>
+            <pre class="bg-body-secondary rounded p-3 overflow-auto" id="entraSaml2AzCli" style="max-height:180px;font-size:.76em">${esc(_entraSaml2AzCliScript(acsUrl, entityId))}</pre>
+          </div>
+          <div>
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="fw-semibold small">PowerShell <span class="text-muted">(Microsoft.Graph)</span></span>
+              <button class="btn btn-secondary btn-sm" onclick="_copyToClipboard(document.getElementById('entraSaml2Ps1').textContent)">
+                <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}</button>
+            </div>
+            <pre class="bg-body-secondary rounded p-3 overflow-auto" id="entraSaml2Ps1" style="max-height:180px;font-size:.76em">${esc(_entraSaml2Ps1Script(acsUrl, entityId))}</pre>
+          </div>
+        </div>
+        <div id="entraSaml2ContentAuto">
+          <div id="entraSaml2StateIdle">
+            <p class="small text-muted mb-3">${esc(t('entra_saml2_auto_intro'))}</p>
+            <div class="mb-3">
+              <label class="form-label small fw-semibold text-muted" for="entraSaml2AppName">${esc(t('entra_saml2_app_name_label'))}</label>
+              <input type="text" class="form-control form-control-sm" id="entraSaml2AppName"
+                     value="ServiceSentry" autocomplete="off"
+                     oninput="_entraSaml2UpdateScripts(this.value)">
+            </div>
+            <button class="btn btn-primary" onclick="_entraSaml2Start()" type="button">
+              <i class="bi bi-play-fill me-1"></i>${esc(t('entra_auto_start'))}</button>
+          </div>
+          <div id="entraSaml2StateWaiting" style="display:none">
+            <p class="small text-muted mb-3">${esc(t('entra_auto_open_browser'))}</p>
+            <div class="mb-2">
+              <div class="small text-muted mb-1">${esc(t('entra_auto_code_label'))}</div>
+              <div class="input-group">
+                <input type="text" class="form-control font-monospace fs-4 fw-bold text-center bg-body-secondary"
+                       readonly id="entraSaml2UserCode" value="—">
+                <button class="btn btn-secondary" type="button"
+                  onclick="_copyToClipboard(document.getElementById('entraSaml2UserCode').value)">
+                  <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}
+                </button>
+              </div>
+            </div>
+            <div class="mb-3">
+              <a id="entraSaml2VerifLink" href="#" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
+                <i class="bi bi-box-arrow-up-right me-1"></i>microsoft.com/devicelogin
+              </a>
+            </div>
+            <div class="d-flex align-items-center gap-2 text-muted small">
+              <span class="spinner-border spinner-border-sm"></span>${esc(t('entra_auto_waiting'))}</div>
+          </div>
+          <div id="entraSaml2StateSuccess" style="display:none">
+            <div class="alert alert-success mb-2">
+              <i class="bi bi-check-circle-fill me-2"></i>${esc(t('entra_saml2_auto_success'))}</div>
+            <div id="entraSaml2SpError" style="display:none" class="alert alert-warning mb-2 py-2 small">
+              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSaml2SpErrorMsg"></span></div>
+            <div id="entraSaml2CertError" style="display:none" class="alert alert-warning mb-2 py-2 small">
+              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSaml2CertErrorMsg"></span></div>
+            <div id="entraSaml2SamlModeError" style="display:none" class="alert alert-warning mb-2 py-2 small">
+              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSaml2SamlModeErrorMsg"></span></div>
+            <div id="entraSaml2EntityIdWarning" style="display:none" class="alert alert-warning mb-2 py-2 small">
+              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSaml2EntityIdWarningMsg"></span></div>
+            <div id="entraSaml2ConsentOk" style="display:none" class="alert alert-success mb-0 py-2 small">
+              <i class="bi bi-shield-check me-1"></i>${esc(t('entra_consent_granted'))}</div>
+            <div id="entraSaml2ConsentPending" style="display:none" class="alert alert-warning mb-0 py-2 small">
+              <i class="bi bi-exclamation-triangle me-1"></i>${esc(t('entra_consent_pending'))}</div>
+          </div>
+          <div id="entraSaml2StateError" style="display:none">
+            <div class="alert alert-danger mb-2">
+              <i class="bi bi-x-circle-fill me-2"></i><span id="entraSaml2ErrorMsg"></span></div>
+            <button class="btn btn-secondary btn-sm" onclick="_entraSaml2Retry()" type="button">
+              <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('retry'))}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>`);
+    const modal = new bootstrap.Modal(document.getElementById('modalEntraSaml2Wizard'));
+    modal.show();
+}
+
+function _entraSaml2Tab(tab) {
+    document.getElementById('entraSaml2ContentScript').style.display = tab === 'script' ? '' : 'none';
+    document.getElementById('entraSaml2ContentAuto').style.display   = tab === 'auto'   ? '' : 'none';
+    document.getElementById('entraSaml2NavScript').classList.toggle('active', tab === 'script');
+    document.getElementById('entraSaml2NavAuto').classList.toggle('active',   tab === 'auto');
+}
+
+function _entraSaml2UpdateScripts(name) {
+    const appName  = name.trim() || 'ServiceSentry';
+    const acsUrl   = document.getElementById('entraSaml2AcsInput')?.value   || '';
+    const entityId = document.getElementById('entraSaml2EntityInput')?.value || '';
+    const azCliEl  = document.getElementById('entraSaml2AzCli');
+    const ps1El    = document.getElementById('entraSaml2Ps1');
+    if (azCliEl) azCliEl.textContent = _entraSaml2AzCliScript(acsUrl, entityId, appName);
+    if (ps1El)   ps1El.textContent   = _entraSaml2Ps1Script(acsUrl, entityId, appName);
+}
+
+async function _entraSaml2Start() {
+    document.getElementById('entraSaml2StateIdle').style.display = 'none';
+    const appName = (document.getElementById('entraSaml2AppName')?.value || '').trim() || 'ServiceSentry';
+    const r = await apiPost('/api/entra/saml2/device-code', { app_name: appName });
+    if (!r?.data || r.data.error) {
+        document.getElementById('entraSaml2StateIdle').style.display = '';
+        showToast((r?.data?.error) || t('entra_device_code_error'), 'danger');
+        return;
+    }
+    const d = r.data;
+    _s2EntraFlowToken  = d.flow_token;
+    _s2EntraDeviceCode = d.user_code;
+    document.getElementById('entraSaml2UserCode').value = d.user_code;
+    const lnk = document.getElementById('entraSaml2VerifLink');
+    lnk.href = d.verification_uri;
+    document.getElementById('entraSaml2StateWaiting').style.display = '';
+    _copyToClipboard(d.user_code);
+    window.open(d.verification_uri, '_blank', 'noopener');
+    _s2EntraPolling = setTimeout(() => _entraSaml2Poll(d.interval || 5), (d.interval || 5) * 1000);
+}
+
+async function _entraSaml2Poll(interval) {
+    if (!_s2EntraFlowToken) return;
+    const r = await apiPost('/api/entra/saml2/device-poll', { flow_token: _s2EntraFlowToken });
+    if (!r?.data) return;
+    const d = r.data;
+    if (d.status === 'pending') {
+        const next = d.interval || interval;
+        _s2EntraPolling = setTimeout(() => _entraSaml2Poll(next), next * 1000);
+        return;
+    }
+    document.getElementById('entraSaml2StateWaiting').style.display = 'none';
+    _s2EntraFlowToken = null;
+    if (d.status === 'complete') {
+        _entraSaml2Apply(d);
+        document.getElementById('entraSaml2StateSuccess').style.display = '';
+        const spOk = d.sp_created !== false;
+        document.getElementById('entraSaml2SpError').style.display = spOk ? 'none' : '';
+        if (!spOk) document.getElementById('entraSaml2SpErrorMsg').textContent =
+            t('entra_sp_error') + (d.sp_error ? ` (${d.sp_error})` : '');
+        document.getElementById('entraSaml2CertError').style.display = d.cert_error ? '' : 'none';
+        if (d.cert_error) document.getElementById('entraSaml2CertErrorMsg').textContent =
+            t('entra_saml2_cert_error') + ` (${d.cert_error})`;
+        const _saml2AppName = d.app_name || 'ServiceSentry';
+        document.getElementById('entraSaml2SamlModeError').style.display = d.saml_patch_error ? '' : 'none';
+        if (d.saml_patch_error) document.getElementById('entraSaml2SamlModeErrorMsg').textContent =
+            t('entra_saml2_saml_mode_error').replace('{error}', d.saml_patch_error).replace('{app_name}', _saml2AppName);
+        document.getElementById('entraSaml2EntityIdWarning').style.display = d.entity_id_warning ? '' : 'none';
+        if (d.entity_id_warning) document.getElementById('entraSaml2EntityIdWarningMsg').textContent =
+            t('entra_saml2_entity_id_warning').replace('{id}', d.entity_id_warning).replace('{app_name}', _saml2AppName);
+        document.getElementById('entraSaml2ConsentOk').style.display      = (spOk && d.consent_granted)  ? '' : 'none';
+        document.getElementById('entraSaml2ConsentPending').style.display  = (spOk && !d.consent_granted) ? '' : 'none';
+        saveConfig().then(() => {
+            if (spOk && d.consent_granted && !d.cert_error && !d.entity_id_warning && !d.saml_patch_error)
+                setTimeout(() => bootstrap.Modal.getInstance(document.getElementById('modalEntraSaml2Wizard'))?.hide(), 2000);
+        });
+    } else {
+        document.getElementById('entraSaml2ErrorMsg').textContent = d.message || t('entra_auto_error');
+        document.getElementById('entraSaml2StateError').style.display = '';
+    }
+}
+
+function _entraSaml2Apply(d) {
+    const patch = {
+        idp_entity_id: d.idp_entity_id || (d.tenant_id ? `https://sts.windows.net/${d.tenant_id}/` : ''),
+        idp_sso_url:   d.idp_sso_url   || (d.tenant_id ? `https://login.microsoftonline.com/${d.tenant_id}/saml2` : ''),
+        button_label:  'Microsoft Entra ID',
+        username_attr: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name',
+        email_attr:    'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
+        name_attr:     'http://schemas.microsoft.com/identity/claims/displayname',
+        groups_attr:   'http://schemas.microsoft.com/ws/2008/06/identity/claims/groups',
+    };
+    if (d.idp_cert)    patch.idp_cert    = d.idp_cert;
+    if (d.sp_entity_id && !(configData?.saml2?.sp_entity_id || '').trim()) patch.sp_entity_id = d.sp_entity_id;
+    if (d.sp_acs_url   && !(configData?.saml2?.sp_acs_url   || '').trim()) patch.sp_acs_url   = d.sp_acs_url;
+    for (const [field, value] of Object.entries(patch)) {
+        updateField('config', `saml2|${field}`, value);
+    }
+    renderConfig();
+}
+
+function _entraSaml2Retry() {
+    document.getElementById('entraSaml2StateError').style.display = 'none';
+    document.getElementById('entraSaml2StateIdle').style.display  = '';
+    _s2EntraFlowToken = null;
+}
+
+function _entraSaml2Cleanup() {
+    clearTimeout(_s2EntraPolling);
+    _s2EntraFlowToken = null;
+}
+
+function _applyOidcPreset(preset) {
+    const PRESETS = {
+        entraid: {
+            provider_url: 'https://login.microsoftonline.com/{tenant_id}/v2.0',
+            username_claim: 'preferred_username',
+            email_claim: 'email', name_claim: 'name', groups_claim: 'groups',
+            scopes: 'openid email profile',
+            button_label: 'Microsoft Entra ID',
+        },
+        google: {
+            provider_url: 'https://accounts.google.com',
+            username_claim: 'email',
+            email_claim: 'email', name_claim: 'name', groups_claim: '',
+            scopes: 'openid email profile',
+            button_label: 'Google Workspace',
+        },
+        keycloak: {
+            provider_url: 'https://{keycloak_host}/realms/{realm}',
+            username_claim: 'preferred_username',
+            email_claim: 'email', name_claim: 'name', groups_claim: 'groups',
+            scopes: 'openid email profile',
+            button_label: 'Keycloak',
+        },
+    };
+    const vals = PRESETS[preset];
+    if (!vals) return;
+    for (const [field, value] of Object.entries(vals)) {
+        updateField('config', `oidc|${field}`, value);
+    }
+    renderConfig();
+}
+
+function _applySaml2Preset(preset) {
+    const PRESETS = {
+        entraid: {
+            idp_entity_id: 'https://sts.windows.net/{tenant_id}/',
+            idp_sso_url: 'https://login.microsoftonline.com/{tenant_id}/saml2',
+            username_attr: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name',
+            email_attr: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
+            name_attr: 'http://schemas.microsoft.com/identity/claims/displayname',
+            groups_attr: 'http://schemas.microsoft.com/ws/2008/06/identity/claims/groups',
+            button_label: 'Microsoft Entra ID',
+        },
+        google: {
+            idp_entity_id: 'https://accounts.google.com/o/saml2?idpid={idp_id}',
+            idp_sso_url: 'https://accounts.google.com/o/saml2/idp?idpid={idp_id}',
+            username_attr: 'email',
+            email_attr: 'email',
+            name_attr: 'displayName',
+            groups_attr: '',
+            button_label: 'Google Workspace',
+        },
+        okta: {
+            idp_entity_id: 'http://www.okta.com/{app_id}',
+            idp_sso_url: 'https://{subdomain}.okta.com/app/{app_name}/{app_id}/sso/saml',
+            username_attr: 'email',
+            email_attr: 'email',
+            name_attr: 'displayName',
+            groups_attr: 'groups',
+            button_label: 'Okta',
+        },
+        keycloak: {
+            idp_entity_id: 'https://{keycloak_host}/realms/{realm}',
+            idp_sso_url: 'https://{keycloak_host}/realms/{realm}/protocol/saml',
+            username_attr: 'username',
+            email_attr: 'email',
+            name_attr: 'firstName',
+            groups_attr: 'roles',
+            button_label: 'Keycloak',
+        },
+    };
+    const vals = PRESETS[preset];
+    if (!vals) return;
+    for (const [field, value] of Object.entries(vals)) {
+        updateField('config', `saml2|${field}`, value);
+    }
+    renderConfig();
+}
+
+async function testLdap() {
+    const cfg = configData.ldap || {};
+    if (!cfg.server) {
+        showToast(t('ldap_test_missing'), 'warning');
+        return;
+    }
+    const testUser = (document.getElementById('ldapTestUser')?.value || '').trim();
+    const testPass = document.getElementById('ldapTestPass')?.value || '';
+    const payload  = { ...cfg };
+    if (testUser) { payload.test_username = testUser; payload.test_password = testPass; }
+
+    const btn        = document.getElementById('btnTestLdap');
+    const resultDiv  = document.getElementById('ldapTestResult');
+    const resultBody = document.getElementById('ldapTestResultBody');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('ldap_test'); }
+    if (resultDiv) resultDiv.style.display = 'none';
+
+    const r = await apiPost('/api/ldap/test', payload);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-plug me-1"></i>' + t('ldap_test'); }
+
+    if (!r || !r.data) return;
+    const d = r.data;
+
+    if (!d.auth_tested) {
+        showToast(d.message || (d.ok ? t('ldap_test_ok') : t('ldap_test_error')),
+                  d.ok ? 'success' : 'danger');
+        return;
+    }
+
+    // Show inline detailed result for user auth test
+    const color = d.ok ? 'success' : 'danger';
+    const icon  = d.ok ? 'bi-check-circle-fill' : 'bi-x-circle-fill';
+    let html = `<div class="alert alert-${color} py-2 mb-0 small">
+        <i class="bi ${icon} me-1"></i><strong>${esc(d.message || '')}</strong>`;
+    if (d.dn)           html += `<div class="mt-1 text-break"><span class="text-muted">DN: </span>${esc(d.dn)}</div>`;
+    if (d.display_name) html += `<div><span class="text-muted">${esc(t('display_name'))}: </span>${esc(d.display_name)}</div>`;
+    if (d.email)        html += `<div><span class="text-muted">${esc(t('email'))}: </span>${esc(d.email)}</div>`;
+    if (d.groups && d.groups.length) {
+        html += `<div class="mt-1"><span class="text-muted">${esc(t('col_groups'))}: </span>`;
+        html += d.groups.map(g => `<span class="badge bg-secondary fw-normal me-1">${esc(g)}</span>`).join('');
+        html += '</div>';
+    }
+    html += '</div>';
+    if (resultBody) resultBody.innerHTML = html;
+    if (resultDiv)  resultDiv.style.display = '';
+}
+
+// ──────────────────────── Email section renderer ──────────────────────────
+function _renderEmailSection(cfgCardOpen, cfgCardClose) {
+    const data = configData.email || {};
+    const provider = data.provider || 'smtp';
+
+    let h = cfgCardOpen('cfgcol_email', '<i class="bi bi-envelope me-1"></i>', t('email_section'));
+
+    h += renderField('enabled', data.enabled, 'email|enabled', 'config');
+
+    // Provider select (custom render — not a simple scalar field)
+    const _pvPath = 'email|provider';
+    const _pvHint = fieldHint(_pvPath);
+    const _pvHintId = _pvHint ? 'fhint_' + _pvPath.replace(/\W/g, '_') : '';
+    const _pvInfoIcon = _pvHint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+                style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+                data-bs-toggle="collapse" data-bs-target="#${_pvHintId}"
+                aria-expanded="false" aria-controls="${_pvHintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _pvHintPanel = _pvHint
+        ? `<div class="collapse" id="${_pvHintId}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(_pvHint)}</div></div>`
+        : '';
+    const _pvResetBtn = `<button type="button" class="btn btn-sm btn-secondary"
+        onclick="resetConfigField(${jsStr(_pvPath)})"
+        data-bs-toggle="tooltip" data-bs-placement="top"
+        title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
+    const pvOpts = [
+        ['smtp',         t('email_provider_smtp')],
+        ['microsoft365', t('email_provider_ms365')],
+        ['gmail',        t('email_provider_gmail')],
+    ].map(([v, l]) => `<option value="${escAttr(v)}"${provider === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
+    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(LABELS['provider'] || t('provider'))}${_pvInfoIcon}</label>
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <select class="form-select"
+                onchange="configData.email=configData.email||{};configData.email.provider=this.value;markDirty('config');_emailProviderChanged(this.value)">
+                ${pvOpts}
+            </select>${_pvResetBtn}
+        </div>${_pvHintPanel}</div>
+    </div></div>`;
+
+    // Common notification fields
+    h += renderField('from_email',         data.from_email,         'email|from_email',         'config');
+    h += renderField('from_name',          data.from_name,          'email|from_name',           'config');
+    h += renderField('recipients',         data.recipients,         'email|recipients',          'config');
+    h += renderField('subject_prefix',     data.subject_prefix,     'email|subject_prefix',      'config');
+    h += renderField('notify_on_down',     data.notify_on_down,     'email|notify_on_down',      'config');
+    h += renderField('notify_on_recovery', data.notify_on_recovery, 'email|notify_on_recovery',  'config');
+    h += renderField('notify_on_warn',     data.notify_on_warn,     'email|notify_on_warn',      'config');
+
+    // SMTP section
+    h += `<div id="email-smtp-section"${provider !== 'smtp' ? ' style="display:none"' : ''}>`;
+    h += `<hr class="my-2"><p class="small fw-semibold text-muted mb-1">SMTP</p>`;
+    h += renderField('smtp_host',     data.smtp_host,     'email|smtp_host',     'config');
+    h += renderField('smtp_port',     data.smtp_port,     'email|smtp_port',     'config');
+    h += renderField('smtp_use_tls',  data.smtp_use_tls,  'email|smtp_use_tls',  'config');
+    h += renderField('smtp_use_ssl',  data.smtp_use_ssl,  'email|smtp_use_ssl',  'config');
+    h += renderField('smtp_username', data.smtp_username, 'email|smtp_username', 'config');
+    h += renderField('smtp_password', data.smtp_password, 'email|smtp_password', 'config');
+    h += `</div>`;
+
+    // Microsoft 365 section
+    h += `<div id="email-ms365-section"${provider !== 'microsoft365' ? ' style="display:none"' : ''}>`;
+    h += `<hr class="my-2"><p class="small fw-semibold text-muted mb-1">Microsoft 365 — Graph API</p>`;
+    h += renderField('ms365_tenant_id',     data.ms365_tenant_id,     'email|ms365_tenant_id',     'config');
+    h += renderField('ms365_client_id',     data.ms365_client_id,     'email|ms365_client_id',     'config');
+    h += renderField('ms365_client_secret', data.ms365_client_secret, 'email|ms365_client_secret', 'config');
+    h += `</div>`;
+
+    // Gmail section
+    h += `<div id="email-gmail-section"${provider !== 'gmail' ? ' style="display:none"' : ''}>`;
+    h += `<hr class="my-2"><p class="small fw-semibold text-muted mb-1">Gmail — OAuth2</p>`;
+    h += renderField('gmail_client_id',     data.gmail_client_id,     'email|gmail_client_id',     'config');
+    h += renderField('gmail_client_secret', data.gmail_client_secret, 'email|gmail_client_secret', 'config');
+    h += renderField('gmail_refresh_token', data.gmail_refresh_token, 'email|gmail_refresh_token', 'config');
+    h += `</div>`;
+
+    // Test button
+    h += `<hr class="my-2"><div class="cfg-field-wrap"><div class="row">
+        <div class="col-sm-8 offset-sm-4 d-flex justify-content-end">
+            <button class="btn btn-info btn-sm" id="btnTestEmail" data-test-btn
+                onclick="testEmail()" title="${escAttr(t('email_test'))}">
+                <i class="bi bi-envelope-check me-1"></i>${esc(t('email_test'))}
+            </button>
+        </div>
+    </div></div>`;
+
+    h += cfgCardClose;
+    return h;
+}
+
+function _emailProviderChanged(val) {
+    const map = { smtp: 'email-smtp-section', microsoft365: 'email-ms365-section', gmail: 'email-gmail-section' };
+    Object.entries(map).forEach(([provider, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = provider === val ? '' : 'none';
+    });
+}
+
+async function testEmail() {
+    const cfg = configData.email || {};
+    const btn = document.getElementById('btnTestEmail');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('email_test'); }
+    const r = await apiPost('/api/email/test', cfg);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-envelope-check me-1"></i>' + t('email_test'); }
+    if (r && r.data) {
+        showToast(r.data.message || (r.data.ok ? t('email_test_ok') : t('email_test_error')),
+                  r.data.ok ? 'success' : 'danger');
+    }
 }
 
 async function testTelegram() {

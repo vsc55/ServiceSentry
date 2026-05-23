@@ -90,6 +90,69 @@ Configuración global de la aplicación.
 | `web_admin.pw_require_symbol` | bool | `false` | Exigir al menos un símbolo (`!`, `@`, `#`…) en la contraseña |
 | `web_admin.proxy_count` | int | `0` | Número de proxies inversos delante del servidor Flask (0–10). Activa `ProxyFix` de Werkzeug para leer correctamente la IP real del cliente. |
 
+### Sección `ldap`
+
+Requiere el paquete opcional `ldap3` (`pip install ldap3`). Si no está instalado, el campo `enabled` es ignorado.
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `ldap.enabled` | bool | `false` | Activar autenticación LDAP/Active Directory |
+| `ldap.server` | string | `""` | Hostname o IP del servidor LDAP |
+| `ldap.port` | int | `389` | Puerto (389 sin TLS / 636 con LDAPS) (1–65535) |
+| `ldap.use_ssl` | bool | `false` | Usar LDAPS (TLS) en lugar de LDAP plano |
+| `ldap.timeout` | int | `5` | Timeout de conexión en segundos (1–60) |
+| `ldap.bind_dn` | string | `""` | DN de la cuenta de servicio para búsquedas |
+| `ldap.bind_password` | string | `""` | Contraseña de la cuenta de servicio (cifrada en disco) |
+| `ldap.base_dn` | string | `""` | Base DN para búsqueda de usuarios |
+| `ldap.user_filter` | string | `"(sAMAccountName={username})"` | Filtro LDAP para localizar al usuario; `{username}` se sustituye en tiempo de ejecución |
+| `ldap.email_attr` | string | `"mail"` | Atributo LDAP del que se lee el email |
+| `ldap.name_attr` | string | `"displayName"` | Atributo LDAP del que se lee el nombre visible |
+| `ldap.group_attr` | string | `"memberOf"` | Atributo LDAP del que se leen los grupos |
+| `ldap.group_role_map` | string (JSON) | `"{}"` | Objeto JSON `{"CN=Admins,...": "admin", ...}` que mapea grupos LDAP a roles de la app |
+| `ldap.fallback_to_local` | bool | `true` | Si LDAP falla por error de red (no por credenciales incorrectas), intentar autenticación local |
+| `ldap.allow_email_login` | bool | `false` | Permitir que los usuarios introduzcan su dirección de email en lugar del username LDAP |
+
+Los usuarios autenticados por LDAP se crean o sincronizan automáticamente en `users.json` con `auth_source: "ldap"`. Los usuarios locales (`auth_source: "local"`) nunca pasan por LDAP.
+
+### Sección `oidc`
+
+Requiere el paquete opcional `authlib` (`pip install authlib`).
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `oidc.enabled` | bool | `false` | Activar SSO OIDC/OAuth2 |
+| `oidc.provider_url` | string | `""` | URL de discovery del IdP (p.ej. `https://login.microsoftonline.com/{tenant}/v2.0`) |
+| `oidc.client_id` | string | `""` | Client ID de la aplicación registrada en el IdP |
+| `oidc.client_secret` | string | `""` | Client Secret (cifrado en disco con Fernet) |
+| `oidc.scopes` | string | `"openid email profile"` | Scopes OAuth2 separados por espacio |
+| `oidc.username_claim` | string | `"preferred_username"` | Claim del ID token del que se extrae el username |
+| `oidc.email_claim` | string | `"email"` | Claim del que se extrae el email |
+| `oidc.name_claim` | string | `"name"` | Claim del que se extrae el nombre visible |
+| `oidc.groups_claim` | string | `"groups"` | Claim del que se leen los grupos (p.ej. Object IDs en Entra ID) |
+| `oidc.group_role_map` | string (JSON) | `"{}"` | Objeto JSON que mapea valores del claim de grupos a roles de la app |
+| `oidc.auto_create_users` | bool | `true` | Crear automáticamente el usuario en `users.json` en el primer login |
+
+Cuando está habilitado, aparece el botón **Login with SSO** en la pantalla de login. El wizard integrado en la pestaña de configuración puede registrar la aplicación en Microsoft Entra ID automáticamente mediante Device Code Flow.
+
+### Sección `email`
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `email.enabled` | bool | `false` | Activar notificaciones por email |
+| `email.provider` | string | `"smtp"` | Proveedor de envío: `smtp`, `ms365` o `gmail` |
+| `email.recipients` | string | `""` | Direcciones de destino separadas por comas |
+| `email.subject_prefix` | string | `""` | Prefijo opcional para el asunto del mensaje |
+| `email.notify_on_down` | bool | `true` | Enviar alerta cuando un check falla |
+| `email.notify_on_recovery` | bool | `true` | Enviar alerta cuando se recupera un check |
+| `email.notify_on_warn` | bool | `false` | Enviar alerta en estado de advertencia |
+| `email.from_email` | string | `""` | Dirección de envío (campo `From:`) |
+| `email.smtp_host` | string | `""` | Servidor SMTP (solo para `provider=smtp`) |
+| `email.smtp_port` | int | `587` | Puerto SMTP (1–65535) |
+| `email.smtp_use_tls` | bool | `true` | Usar STARTTLS (habitual en el puerto 587) |
+| `email.smtp_use_ssl` | bool | `false` | Usar SSL/TLS directo (habitual en el puerto 465) |
+| `email.smtp_username` | string | `""` | Usuario para autenticación SMTP |
+| `email.smtp_password` | string | `""` | Contraseña SMTP (cifrada en disco) |
+
 ---
 
 ## monitor.json

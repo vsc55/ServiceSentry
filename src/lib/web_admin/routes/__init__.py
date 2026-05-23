@@ -9,6 +9,7 @@ from .errors import register as _errors
 from .modules import register as _modules
 from .config import register as _config
 from .telegram import register as _telegram
+from .ldap import register as _ldap
 from .users import register as _users
 from .sessions import register as _sessions
 from .audit import register as _audit
@@ -16,6 +17,8 @@ from .roles import register as _roles
 from .groups import register as _groups
 from .checks import register as _checks
 from .watchfuls import register as _watchfuls
+from .email import register as _email
+from .entra import register as _entra
 
 
 def register_all(app, wa):
@@ -26,6 +29,9 @@ def register_all(app, wa):
     _modules(app, wa)
     _config(app, wa)
     _telegram(app, wa)
+    _ldap(app, wa)
+    _email(app, wa)
+    _entra(app, wa)
     _users(app, wa)
     _sessions(app, wa)
     _audit(app, wa)

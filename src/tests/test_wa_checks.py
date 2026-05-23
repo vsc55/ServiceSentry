@@ -25,7 +25,7 @@ class TestApiRunChecks:
     def test_run_checks_requires_auth(self, client):
         resp = client.post("/api/checks/run",
                            json={"modules": "all"})
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_run_checks_viewer_denied(self, admin, client):
         _login(client)

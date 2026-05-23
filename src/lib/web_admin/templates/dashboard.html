@@ -117,41 +117,43 @@
     </div>
 </div>
 
-<!-- Navbar -->
-{% include "partials/_navbar.html" %}
+<!-- Navbar + sticky banners wrapper -->
+<div class="sticky-top" id="ss-sticky-top" style="z-index:1020">
+    {% include "partials/_navbar.html" %}
 
-<!-- Restart-pending banner -->
-<div id="restart-pending-banner" class="d-none" role="alert">
-    <div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom"
-         style="background:var(--bs-warning-bg-subtle);color:var(--bs-warning-text-emphasis);font-size:.875rem">
-        <i class="bi bi-arrow-repeat flex-shrink-0" style="font-size:1rem"></i>
-        <span id="restart-pending-msg" class="fw-medium"></span>
-    </div>
-</div>
-<!-- Config-updated banner (shown when background poll refreshes fields) -->
-<div id="config-updated-banner" class="d-none" role="alert">
-    <div class="d-flex align-items-center justify-content-between gap-2 px-3 py-2 border-bottom"
-         style="background:var(--ss-cfg-update-bg);color:var(--ss-cfg-update-color);font-size:.875rem">
-        <div class="d-flex align-items-center gap-2">
+    <!-- Restart-pending banner -->
+    <div id="restart-pending-banner" class="d-none" role="alert">
+        <div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom"
+             style="background:var(--bs-warning-bg-subtle);color:var(--bs-warning-text-emphasis);font-size:.875rem">
             <i class="bi bi-arrow-repeat flex-shrink-0" style="font-size:1rem"></i>
-            <span id="config-updated-msg" class="fw-medium"></span>
+            <span id="restart-pending-msg" class="fw-medium"></span>
         </div>
-        <button type="button" class="btn-close flex-shrink-0" style="font-size:.7rem;opacity:.5"
-                onclick="document.getElementById('config-updated-banner').classList.add('d-none')"></button>
     </div>
-</div>
-<!-- Page-reload banner (shown when server startup_id changes) -->
-<div id="page-reload-banner" class="d-none" role="alert">
-    <div class="d-flex align-items-center justify-content-between gap-2 px-3 py-2 border-bottom"
-         style="background:var(--bs-info-bg-subtle);color:var(--bs-info-text-emphasis);font-size:.875rem">
-        <div class="d-flex align-items-center gap-2">
-            <i class="bi bi-arrow-clockwise flex-shrink-0" style="font-size:1rem"></i>
-            <span id="page-reload-msg" class="fw-medium"></span>
+    <!-- Config-updated banner (shown when background poll refreshes fields) -->
+    <div id="config-updated-banner" class="d-none" role="alert">
+        <div class="d-flex align-items-center justify-content-between gap-2 px-3 py-2 border-bottom"
+             style="background:var(--ss-cfg-update-bg);color:var(--ss-cfg-update-color);font-size:.875rem">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-arrow-repeat flex-shrink-0" style="font-size:1rem"></i>
+                <span id="config-updated-msg" class="fw-medium"></span>
+            </div>
+            <button type="button" class="btn-close flex-shrink-0" style="font-size:.7rem;opacity:.5"
+                    onclick="document.getElementById('config-updated-banner').classList.add('d-none');_updateStickyOffset()"></button>
         </div>
-        <button type="button" class="btn btn-sm btn-info py-0 flex-shrink-0"
-                onclick="location.reload()">
-            <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload }}
-        </button>
+    </div>
+    <!-- Page-reload banner (shown when server startup_id changes) -->
+    <div id="page-reload-banner" class="d-none" role="alert">
+        <div class="d-flex align-items-center justify-content-between gap-2 px-3 py-2 border-bottom"
+             style="background:var(--bs-info-bg-subtle);color:var(--bs-info-text-emphasis);font-size:.875rem">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-arrow-clockwise flex-shrink-0" style="font-size:1rem"></i>
+                <span id="page-reload-msg" class="fw-medium"></span>
+            </div>
+            <button type="button" class="btn btn-sm btn-info py-0 flex-shrink-0"
+                    onclick="location.reload()">
+                <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload }}
+            </button>
+        </div>
     </div>
 </div>
 
@@ -207,7 +209,7 @@
         <!-- ==================== Modules Tab ==================== -->
         <div class="tab-pane fade" id="tab-modules">
             <div class="d-flex align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border"
-                 style="background:var(--bs-secondary-bg);position:sticky;top:0;z-index:10">
+                 style="background:var(--bs-secondary-bg);position:sticky;top:calc(var(--ss-top-offset,0px) + 8px);z-index:10">
                 <h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>{{ i18n.tab_modules }}</h6>
                 <button class="btn btn-sm btn-secondary ms-auto" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
                     <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_modules }}
@@ -229,7 +231,7 @@
 
         <!-- ==================== Config Tab ===================== -->
         <div class="tab-pane fade" id="tab-config">
-            <div style="position:sticky;top:0;z-index:10">
+            <div style="position:sticky;top:calc(var(--ss-top-offset,0px) + 8px);z-index:10">
                 <div class="d-flex align-items-center gap-2 px-3 py-2 rounded-top-3 border"
                      style="background:var(--bs-secondary-bg)">
                     <h6 class="mb-0"><i class="bi bi-gear me-2"></i>{{ i18n.tab_config }}</h6>

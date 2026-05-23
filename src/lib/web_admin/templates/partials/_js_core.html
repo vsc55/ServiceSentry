@@ -72,6 +72,9 @@ const ITEM_SCHEMAS = Object.fromEntries([
 ]);
 const HINTS = I18N.hints || {};
 const ENV_LOCKED = new Set({{ wa_env_locked_fields | tojson }});
+const LDAP_AVAILABLE  = {{ ldap_available  | tojson }};
+const OIDC_AVAILABLE  = {{ oidc_available  | tojson }};
+const SAML2_AVAILABLE = {{ saml2_available | tojson }};
 // Fields that require a service restart to take effect after being saved
 const RESTART_REQUIRED_FIELDS = new Set(['web_admin|port', 'web_admin|proxy_count']);
 
@@ -342,6 +345,11 @@ function showConfirmModal(msg, callback) {
     _confirmModalCallback = callback;
     document.getElementById('confirmModalMsg').textContent = msg;
     bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).show();
+}
+
+function _updateStickyOffset() {
+    const el = document.getElementById('ss-sticky-top');
+    if (el) document.documentElement.style.setProperty('--ss-top-offset', el.offsetHeight + 'px');
 }
 
 function _showReloadBanner() {
@@ -665,8 +673,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 data-field-path="${escAttr(pathStr)}"
                 value=""
                 placeholder="${escAttr(t('secret_defined') || '••••••')}"
-                oninput="markDirty(${tg})"
-                onchange="updateField(${tg},${sp},this.value)">${_actionBtn}
+                oninput="updateField(${tg},${sp},this.value)">${_actionBtn}
         </div>${_hintHtml}</div></div>`;
     }
 

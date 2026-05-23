@@ -9,17 +9,33 @@ Referencia completa de los mecanismos de seguridad implementados en la interfaz 
 ### Flujo de login
 
 1. `POST /login` recibe `username` + `password`.
-2. Se busca el usuario en `users.json`; si no existe o la contraseña es incorrecta → el **formulario muestra siempre "Invalid credentials"** (mensaje genérico — evita enumeración de usuarios). Si la cuenta existe pero está desactivada → mensaje específico "account disabled". Si la cuenta está bloqueada → mensaje con los minutos restantes.
-3. La contraseña se verifica con `werkzeug.security.check_password_hash` (PBKDF2-SHA256).
-4. Si es correcta → se crea una entrada en el **registro de sesiones** del servidor (`_sessions`) con un token de 32 bytes aleatorios (64 hex) y se guarda en la cookie de sesión Flask.
-5. El evento `login_ok` o `login_failed` se escribe en el **registro de auditoría**. En caso de fallo, el campo `detail.reason` almacena la clave i18n que describe la causa real (`user_not_found`, `account_disabled`, `account_locked` o `invalid_credentials`).
-6. El login usa el patrón **POST / Redirect / GET**: en caso de fallo se usa `flash()` y se redirige al `GET /login`, evitando el diálogo de reenvío de formulario al pulsar F5.
+2. Si **LDAP está habilitado** (`ldap.enabled = true`): se evalúa el campo `auth_source` del usuario en `users.json`:
+   - `auth_source: "ldap"` o usuario desconocido → autenticación contra LDAP primero.
+   - `auth_source: "local"` → siempre autenticación local, LDAP ignorado.
+   - Si LDAP falla por error de red y `fallback_to_local = true` → intenta autenticación local.
+3. Se busca el usuario en `users.json`; si no existe o la contraseña es incorrecta → el **formulario muestra siempre "Invalid credentials"** (mensaje genérico — evita enumeración de usuarios). Si la cuenta existe pero está desactivada → mensaje específico "account disabled". Si la cuenta está bloqueada → mensaje con los minutos restantes.
+4. La contraseña se verifica con `werkzeug.security.check_password_hash` (PBKDF2-SHA256).
+5. Si es correcta → se crea una entrada en el **registro de sesiones** del servidor (`_sessions`) con un token de 32 bytes aleatorios (64 hex) y se guarda en la cookie de sesión Flask.
+6. El evento `login_ok` o `login_failed` se escribe en el **registro de auditoría**. En caso de fallo, el campo `detail.reason` almacena la clave i18n que describe la causa real (`user_not_found`, `account_disabled`, `account_locked`, `invalid_credentials`, `ldap_invalid_credentials`, `ldap_user_not_found` o `ldap_connection_error`). Los logins LDAP/OIDC exitosos incluyen `detail.auth_source`.
+7. El login usa el patrón **POST / Redirect / GET**: en caso de fallo se usa `flash()` y se redirige al `GET /login`, evitando el diálogo de reenvío de formulario al pulsar F5.
 
 ### Sesiones persistentes ("Remember me")
 
 - El formulario de login incluye un checkbox `remember_me`.
 - Si se activa, `session.permanent = True` (duración configurable).
 - La `secret_key` de Flask se genera aleatoriamente la primera vez y se persiste en disco (`secret_key.txt`); las instancias posteriores reutilizan la misma clave — las sesiones no se invalidan al reiniciar el proceso.
+
+### Campo `auth_source` en usuarios
+
+Cada usuario en `users.json` tiene un campo `auth_source` que determina cómo se autentica:
+
+| Valor | Significado |
+| ----- | ----------- |
+| `"local"` | Contraseña hash local; LDAP/OIDC nunca se aplican |
+| `"ldap"` | Autenticado contra LDAP; no tiene `password_hash` |
+| `"oidc"` | Autenticado mediante SSO OIDC; no tiene `password_hash` |
+
+La migración `m002_add_auth_source` añade `auth_source: "local"` a los usuarios existentes al arrancar, garantizando compatibilidad hacia atrás.
 
 ### Tests de autenticación
 
@@ -63,6 +79,44 @@ Los campos `_failed_attempts` y `_locked_until` se almacenan en `users.json` y s
 | `test_authenticate_returns_tuple` | `_authenticate()` devuelve siempre una 2-tupla |
 | `test_authenticate_wrong_password_reason` | Contraseña incorrecta → `reason='invalid_credentials'` |
 | `test_authenticate_unknown_user_reason` | Usuario inexistente → `reason='user_not_found'` |
+
+---
+
+## Autenticación Externa (LDAP / OIDC)
+
+### LDAP / Active Directory
+
+Cuando `ldap.enabled = true` y el paquete `ldap3` está instalado, el flujo de login de `POST /login` intenta autenticar contra LDAP antes de (o en lugar de) la verificación local, dependiendo del campo `auth_source` del usuario. Ver [Flujo de login](#flujo-de-login) para la lógica completa.
+
+**Seguridad:**
+
+- Las credenciales del usuario nunca se almacenan localmente; el bind LDAP es el único verificador.
+- La contraseña de la cuenta de servicio (`bind_password`) se cifra en disco con Fernet.
+- Los usuarios LDAP reciben `auth_source: "ldap"` y no tienen `password_hash` en `users.json`.
+- El mapeo grupo → rol se recalcula en cada login para reflejar cambios en el directorio.
+
+### OIDC / OAuth2
+
+Cuando `oidc.enabled = true` y `authlib` está instalado, aparece el botón **Login with SSO** en `/login`. El flujo es:
+
+1. `GET /auth/oidc/login` genera un `state` + `nonce` aleatorios (guardados en sesión Flask) y redirige al IdP.
+2. El IdP redirige a `GET /auth/oidc/callback` con el `code` de autorización.
+3. El servidor intercambia el code por tokens, verifica la firma del ID token y valida `state` y `nonce`.
+4. Se extrae el username del claim configurado (`username_claim`), se sincroniza el usuario en `users.json` y se crea la sesión.
+
+**Seguridad:**
+
+- El `client_secret` se cifra en disco con Fernet.
+- El `state` previene ataques CSRF en el callback.
+- El `nonce` previene ataques de replay del ID token.
+- Si `auto_create_users = false` y el usuario no existe previamente, el login es rechazado (403).
+
+### Tests de autenticación externa
+
+| Archivo | Qué cubre |
+| ------- | --------- |
+| `test_wa_ldap.py` | Autenticación LDAP correcta, credenciales incorrectas, servidor caído, fallback a local, sincronización de usuario, mapeo de grupos, `allow_email_login` |
+| `test_wa_oidc.py` | Callback OIDC correcto, `state` inválido, `auto_create_users=false`, sincronización de usuario, mapeo de claims |
 
 ---
 
@@ -244,6 +298,11 @@ Los campos sensibles almacenados en `modules.json` y `config.json` se cifran en 
 | `ssh_password` | Contraseña SSH del módulo MySQL (modo túnel) |
 | `token` | Token del bot de Telegram en `config.json` |
 | `secret` | Cualquier campo con esta clave en módulos futuros |
+| `bind_password` | Contraseña de la cuenta de servicio LDAP (`config.json → ldap`) |
+| `client_secret` | Client Secret OIDC (`config.json → oidc`) |
+| `smtp_password` | Contraseña SMTP para notificaciones por email (`config.json → email`) |
+| `ms365_client_secret` | Client Secret de la app Microsoft 365 para email |
+| `gmail_client_secret` | Client Secret de la app Gmail para email |
 
 ### Derivación de clave
 

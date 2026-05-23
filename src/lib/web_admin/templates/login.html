@@ -49,6 +49,26 @@
                     <i class="bi bi-box-arrow-in-right me-1"></i> {{ i18n.login_btn }}
                 </button>
             </form>
+            {% if oidc_enabled or saml2_enabled or ldap_enabled %}
+            <div class="d-flex align-items-center my-3">
+                <hr class="flex-grow-1"><span class="px-2 text-muted small">{{ i18n.or }}</span><hr class="flex-grow-1">
+            </div>
+            {% endif %}
+            {% if oidc_enabled %}
+            <a href="/auth/oidc/login" class="btn btn-secondary w-100 mb-2">
+                <i class="bi {{ oidc_button_icon }} me-1"></i> {{ oidc_button_label or i18n.login_with_oidc }}
+            </a>
+            {% endif %}
+            {% if saml2_enabled %}
+            <a href="/auth/saml2/login" class="btn btn-secondary w-100 mb-2">
+                <i class="bi {{ saml2_button_icon }} me-1"></i> {{ saml2_button_label or i18n.login_with_saml2 }}
+            </a>
+            {% endif %}
+            {% if ldap_enabled %}
+            <p class="text-center text-muted small mb-0">
+                <i class="bi bi-diagram-3 me-1"></i>{{ ldap_button_label or i18n.ldap_login_note }}
+            </p>
+            {% endif %}
             <div class="text-center mt-3">
                 <small class="text-muted">{% for l in supported_langs %}{% if l == lang %}<strong>{{ i18n['lang_' + l]
                         }}</strong>{% else %}<a href="/lang/{{ l }}">{{ i18n['lang_' + l] }}</a>{% endif %}{% if not

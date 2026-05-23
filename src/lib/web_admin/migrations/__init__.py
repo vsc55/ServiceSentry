@@ -9,6 +9,7 @@ import os
 # Ordered list of migration module names. Add new entries at the end.
 _MIGRATIONS = [
     'm001_uid_relationships',
+    'm002_add_auth_source',
 ]
 
 _STATE_FILE = '_migrations.json'

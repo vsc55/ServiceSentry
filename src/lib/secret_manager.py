@@ -17,7 +17,16 @@ __all__ = ['ENCRYPT_KEYS', 'fernet_from_secret_file', 'decrypt_all', 'encrypt_se
 ENC_PREFIX = 'enc:'
 
 # Field names whose values are encrypted when written to disk.
-ENCRYPT_KEYS: frozenset[str] = frozenset({'password', 'ssh_password', 'token', 'secret'})
+ENCRYPT_KEYS: frozenset[str] = frozenset({
+    'password', 'ssh_password', 'token', 'secret',
+    'bind_password',        # LDAP service-account password
+    'client_secret',        # OIDC client secret
+    'sp_key',               # SAML2 SP private key
+    'smtp_password',        # Email SMTP password
+    'ms365_client_secret',  # Email Microsoft 365 client secret
+    'gmail_client_secret',  # Email Gmail client secret
+    'gmail_refresh_token',  # Email Gmail refresh token
+})
 
 
 def fernet_from_secret_file(path: str):

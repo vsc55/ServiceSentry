@@ -12,6 +12,11 @@ La lógica de `WebAdmin` está dividida en **mixins** (lógica de negocio) y **r
 ```
 lib/web_admin/
 ├── app.py            # class WebAdmin(hereda todos los mixins)
+├── auth/
+│   ├── __init__.py
+│   ├── ldap_auth.py  # autenticación LDAP/AD (requiere ldap3)
+│   └── oidc_auth.py  # SSO OIDC/OAuth2, rutas /auth/oidc/* (requiere authlib)
+├── email_notify.py   # envío de notificaciones por email (SMTP / MS365 / Gmail)
 ├── mixins/
 │   ├── users.py      # _UsersMixin
 │   ├── roles.py      # _RolesMixin
@@ -22,7 +27,7 @@ lib/web_admin/
 │   └── checks.py     # _ChecksMixin
 └── routes/
     ├── __init__.py   # register_all(app, wa)
-    ├── auth.py       # /login, /logout
+    ├── auth.py       # /login, /logout (integra LDAP + OIDC)
     ├── users.py      # /api/users, /api/me
     ├── roles.py      # /api/roles
     ├── groups.py     # /api/groups
@@ -30,6 +35,10 @@ lib/web_admin/
     ├── config.py     # /api/config, /api/config/schema
     ├── sessions.py   # /api/sessions
     ├── telegram.py   # /api/telegram/test
+    ├── ldap.py       # /api/ldap/test, /api/ldap/groups
+    ├── email.py      # /api/email/test
+    ├── entra.py      # /api/entra/* (wizard de registro de app en Entra ID)
+    ├── watchfuls.py  # /api/watchfuls/<module>/<action>
     ├── audit.py      # /api/audit
     ├── checks.py     # /api/checks/run
     ├── status.py     # /status (página pública de estado, sin autenticación)
@@ -63,6 +72,9 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal |
 | **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 23 flags granulares; activar/desactivar desde el modal |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
+| **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Requiere el paquete opcional `ldap3`. |
+| **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Registro automático de app en Entra ID con wizard integrado. Requiere `authlib`. |
+| **Notificaciones por Email** | Envío de alertas por correo electrónico vía SMTP, Microsoft 365 o Gmail. Configurable desde la pestaña de configuración. |
 | **Prueba de Telegram** | Enviar un mensaje de prueba para verificar la conectividad del bot |
 | **Modo oscuro** | Preferencia por usuario, persistida entre sesiones |
 | **Persistencia de pestaña activa** | La pestaña activa se guarda en `localStorage` y se restaura al recargar la página (F5); si la pestaña guardada deja de existir o el usuario pierde acceso, se muestra la pestaña por defecto |
@@ -213,9 +225,11 @@ El permiso requerido se indica entre paréntesis.
 ### Autenticación
 
 | Método | Ruta | Descripción |
-|--------|------|-------------|
-| `POST` | `/login` | Iniciar sesión con usuario y contraseña |
+| ------ | ---- | ----------- |
+| `POST` | `/login` | Iniciar sesión con usuario y contraseña (también maneja LDAP si está habilitado) |
 | `GET` | `/logout` | Cerrar sesión e invalidar la sesión actual |
+| `GET` | `/auth/oidc/login` | Inicia el flujo OIDC; redirige al IdP (requiere `oidc.enabled = true` y `authlib`) |
+| `GET` | `/auth/oidc/callback` | Callback OIDC; crea sesión tras verificar el token del IdP |
 
 ### Módulos
 
@@ -247,6 +261,9 @@ Los campos numéricos del bloque `web_admin` se validan contra reglas definidas 
 | `web_admin\|default_page_size` | `_DEFAULT_PAGE_SIZE` | 0 | 200 |
 | `web_admin\|lockout_max_attempts` | `_LOCKOUT_MAX_ATTEMPTS` | 0 | 100 |
 | `web_admin\|lockout_duration_secs` | `_LOCKOUT_DURATION_SECS` | 60 | 86400 |
+| `ldap\|port` | — | 1 | 65535 |
+| `ldap\|timeout` | — | 1 | 60 |
+| `email\|smtp_port` | — | 1 | 65535 |
 
 Los campos booleanos se validan vía `BOOL_RULES`:
 
@@ -256,6 +273,18 @@ Los campos booleanos se validan vía `BOOL_RULES`:
 | `web_admin\|pw_require_upper` | `_PW_REQUIRE_UPPER` |
 | `web_admin\|pw_require_digit` | `_PW_REQUIRE_DIGIT` |
 | `web_admin\|pw_require_symbol` | `_PW_REQUIRE_SYMBOL` |
+| `ldap\|enabled` | — |
+| `ldap\|use_ssl` | — |
+| `ldap\|fallback_to_local` | — |
+| `ldap\|allow_email_login` | — |
+| `oidc\|enabled` | — |
+| `oidc\|auto_create_users` | — |
+| `email\|enabled` | — |
+| `email\|smtp_use_tls` | — |
+| `email\|smtp_use_ssl` | — |
+| `email\|notify_on_down` | — |
+| `email\|notify_on_recovery` | — |
+| `email\|notify_on_warn` | — |
 
 El endpoint `/api/config/schema` también expone metadatos para:
 
@@ -325,6 +354,44 @@ El campo `web_admin.page_sizes` es un array de enteros no negativos que define l
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
 | `POST` | `/api/checks/run` | `checks_run` | Lanzar comprobaciones bajo demanda |
+
+### LDAP
+
+Requiere `ldap.enabled = true` y el paquete opcional `ldap3`.
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `POST` | `/api/ldap/test` | `config_edit` | Verificar conectividad con el servidor LDAP y, opcionalmente, autenticar un usuario de prueba |
+| `POST` | `/api/ldap/groups` | `config_edit` | Listar grupos del directorio LDAP (para poblar el mapeo grupo → rol) |
+| `POST` | `/api/ldap/group_lookup` | `config_edit` | Resolver el nombre visible de un grupo LDAP por su DN (usado para auto-completar el mapeo) |
+
+### Email
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `POST` | `/api/email/test` | `config_edit` | Enviar un email de prueba con la configuración actual (guardada o no) |
+
+### Entra ID
+
+Wizard interactivo de registro de aplicación en Microsoft Entra ID (Azure AD).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `POST` | `/api/entra/device-code` | `config_edit` | Inicia el flujo Device Code; devuelve `user_code` para autenticar en el navegador |
+| `POST` | `/api/entra/device-poll` | `config_edit` | Sondea el estado del flujo; al completarse crea la app, el service principal y el consentimiento de admin, y devuelve `client_id`, `client_secret`, `tenant_id` y `provider_url` |
+| `POST` | `/api/entra/groups` | `config_edit` | Obtiene todos los grupos del tenant mediante las credenciales OIDC guardadas (client credentials flow) |
+| `POST` | `/api/entra/group_lookup` | `config_edit` | Resolver el nombre visible de un grupo de Entra ID por su Object ID (usado para auto-completar el mapeo) |
+
+### Watchfuls (acciones dinámicas)
+
+Endpoint genérico para exponer acciones de los módulos watchful a la UI (p.ej. descubrir ítems disponibles, probar conexiones).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/watchfuls/<module>/<action>` | auth | Invoca `Watchful.<action>()` sin argumentos |
+| `POST` | `/api/watchfuls/<module>/<action>` | auth | Invoca `Watchful.<action>(config)` pasando el cuerpo JSON como configuración |
+
+El nombre del módulo y de la acción deben coincidir con la regex `^[a-z][a-z0-9_]*$`. Solo se permiten las acciones declaradas en `WATCHFUL_ACTIONS` de cada módulo.
 
 ### Preferencias de UI
 
@@ -529,3 +596,7 @@ Todos los eventos auditados:
 | `role_updated` | Se cambia etiqueta o permisos de un rol |
 | `role_deleted` | Se elimina un rol personalizado |
 | `checks_run` | Ejecución manual de comprobaciones desde la UI |
+| `ldap_test` | Prueba de conexión LDAP (con o sin usuario de prueba) desde la UI de configuración |
+| `ldap_groups` | Obtención de grupos desde el directorio LDAP |
+| `entra_groups` | Obtención de grupos del tenant de Microsoft Entra ID |
+| `session_ip_changed` | La IP del cliente cambia respecto a la IP con la que se creó la sesión; `detail` contiene `previous_ip` y `current_ip` |

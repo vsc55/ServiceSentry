@@ -51,6 +51,7 @@ def register(app, wa):
                 'groups': _groups_display(udata.get('groups', [])),
                 'enabled': udata.get('enabled', True),
                 'email': udata.get('email', ''),
+                'auth_source': udata.get('auth_source', 'local'),
             }
         return jsonify(safe)
 
@@ -145,7 +146,8 @@ def register(app, wa):
             if old_role_name != data['role']:
                 changes.append({'field': 'role', 'old': old_role_name, 'new': data['role']})
             user['role'] = new_role_uid
-        if 'display_name' in data:
+        _is_sso = user.get('auth_source', 'local') != 'local'
+        if 'display_name' in data and not _is_sso:
             new_dn = data['display_name'].strip() or username
             if len(new_dn) > wa._MAX_DISPLAY_NAME_LEN:
                 return jsonify({'error': wa._t('display_name_too_long', wa._MAX_DISPLAY_NAME_LEN)}), 400
@@ -155,12 +157,14 @@ def register(app, wa):
             user['display_name'] = new_dn
         has_password_reset = False
         if 'password' in data and data['password']:
+            if _is_sso:
+                return jsonify({'error': wa._t('sso_user_no_password')}), 400
             pw_err = wa._validate_password(data['password'])
             if pw_err:
                 return jsonify({'error': wa._t(*pw_err)}), 400
             user['password_hash'] = generate_password_hash(data['password'])
             has_password_reset = True
-        if 'email' in data:
+        if 'email' in data and not _is_sso:
             new_email = data['email'].strip()
             old_email = user.get('email', '')
             if old_email != new_email:
@@ -244,6 +248,7 @@ def register(app, wa):
             )
             if admin_count <= 1:
                 return jsonify({'error': wa._t('must_have_admin')}), 400
+        wa._revoke_user_sessions(username)
         del wa._users[username]
         wa._persist_users()
         wa._audit('user_deleted', detail={'username': username})
@@ -298,7 +303,11 @@ def register(app, wa):
             return jsonify({'error': wa._t('new_password_required')}), 400
         uname = session.get('username', '')
         user = wa._users.get(uname)
-        if not user or not check_password_hash(user['password_hash'], current_pw):
+        if not user:
+            return jsonify({'error': wa._t('user_not_found')}), 404
+        if user.get('auth_source', 'local') != 'local':
+            return jsonify({'error': wa._t('sso_user_no_password')}), 403
+        if not check_password_hash(user.get('password_hash', ''), current_pw):
             return jsonify({'error': wa._t('wrong_current_password')}), 403
         pw_err = wa._validate_password(new_pw)
         if pw_err:

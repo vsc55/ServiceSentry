@@ -35,6 +35,13 @@ INT_RULES = {
     'web_admin|session_check_secs':       {'min': 5,  'max': 300,  'attr': '_SESSION_CHECK_SECS'},
     'web_admin|session_revoke_redirect_secs': {'min': 0, 'max': 30,'attr': '_SESSION_REVOKE_REDIRECT_SECS'},
     'web_admin|access_poll_secs':             {'min': 5, 'max': 300,'attr': '_ACCESS_POLL_SECS'},
+    # LDAP
+    'ldap|port':    {'min': 1,  'max': 65535, 'attr': None},
+    'ldap|timeout': {'min': 1,  'max': 60,    'attr': None},
+    # Email
+    'email|smtp_port': {'min': 1, 'max': 65535, 'attr': None},
+    # OIDC (no runtime int attrs yet)
+    # SAML2 (no runtime int attrs yet)
 }
 
 # Boolean config fields in web_admin that are synced to wa instance attributes.
@@ -45,6 +52,34 @@ BOOL_RULES = {
     'web_admin|public_status':     '_public_status',
     'web_admin|force_https':       '_force_https',
     'web_admin|force_fqdn':        '_force_fqdn',
+    # LDAP
+    'ldap|enabled':           None,
+    'ldap|use_ssl':           None,
+    'ldap|fallback_to_local': None,
+    'ldap|allow_email_login': None,
+    # OIDC
+    'oidc|enabled':           None,
+    'oidc|auto_create_users': None,
+    # SAML2
+    'saml2|enabled':           None,
+    'saml2|auto_create_users': None,
+    # Email
+    'email|enabled':            None,
+    'email|smtp_use_tls':       None,
+    'email|smtp_use_ssl':       None,
+    'email|notify_on_down':     None,
+    'email|notify_on_recovery': None,
+    'email|notify_on_warn':     None,
+}
+
+# JSON-object config fields that must parse as valid JSON dicts when set.
+JSON_DICT_FIELDS = {
+    'ldap|group_role_map',
+    'oidc|group_role_map',
+    'saml2|group_role_map',
+    'ldap|group_display_names',
+    'oidc|group_display_names',
+    'saml2|group_display_names',
 }
 
 
@@ -90,12 +125,16 @@ def register(app, wa):
         """Return field-level metadata (min, max, default) for config fields."""
         schema = {}
         for path, rule in INT_RULES.items():
+            if rule['attr'] is None:
+                continue
             schema[path] = {
                 'min': rule['min'],
                 'max': rule['max'],
                 'default': getattr(wa, rule['attr']),
             }
         for path, attr in BOOL_RULES.items():
+            if attr is None:
+                continue
             schema[path] = {'type': 'bool', 'default': getattr(wa, attr)}
         schema['web_admin|default_page_size'] = {
             'options_int': [25, 50, 100, 200, 0],
@@ -127,42 +166,54 @@ def register(app, wa):
         Each field is checked against its stored version token. If the token
         matches (or the field has no stored version yet), the field is saved.
         Mismatches are returned as conflicts with the server's current value.
+
+        Also accepts the legacy flat format ``{"section": {"field": value}}``
+        for backwards compatibility with older API clients.
         """
         data, err = wa._require_json()
         if err:
             return err
 
-        fields = data.get('fields')
-        if not isinstance(fields, dict) or not fields:
-            return jsonify({'error': wa._t('save_file_error')}), 400
-
         old_data = wa._read_config_file(wa._CONFIG_FILE) or {}
 
-        # Separate fields to apply from conflicts.
-        to_apply = {}   # path -> new value
-        conflicts = {}  # path -> {server_value, server_version}
+        fields = data.get('fields')
+        legacy_mode = not (isinstance(fields, dict) and fields)
 
-        for path, info in fields.items():
-            if not isinstance(info, dict) or 'value' not in info:
-                continue
-            submitted_version = info.get('version')
-            current_version = wa._field_versions.get(path)
-            # No stored version yet means this field was never written by the new
-            # system — always allow (first save after upgrade).
-            if current_version is None or submitted_version == current_version:
-                to_apply[path] = info['value']
-            else:
-                parts = path.split('|', 1)
-                section, field = parts[0], parts[1] if len(parts) > 1 else None
-                server_val = (old_data.get(section) or {}).get(field) if field else None
-                conflicts[path] = {
-                    'server_value': server_val,
-                    'server_version': current_version,
-                }
+        if legacy_mode:
+            # Legacy format: nested dict {"section": {"field": value}}
+            to_apply = {}
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    for field_name, fval in value.items():
+                        to_apply[f"{key}|{field_name}"] = fval
+                elif value is not None:
+                    to_apply[key] = value
+            conflicts = {}
+        else:
+            # New versioned format: {"fields": {"section|field": {"value": ..., "version": "uuid"}}}
+            to_apply = {}
+            conflicts = {}
+            for path, info in fields.items():
+                if not isinstance(info, dict) or 'value' not in info:
+                    continue
+                submitted_version = info.get('version')
+                current_version = wa._field_versions.get(path)
+                # No stored version yet means this field was never written by the new
+                # system — always allow (first save after upgrade).
+                if current_version is None or submitted_version == current_version:
+                    to_apply[path] = info['value']
+                else:
+                    parts = path.split('|', 1)
+                    section, field = parts[0], parts[1] if len(parts) > 1 else None
+                    server_val = (old_data.get(section) or {}).get(field) if field else None
+                    conflicts[path] = {
+                        'server_value': server_val,
+                        'server_version': current_version,
+                    }
 
-        if not to_apply:
-            # All fields conflicted — nothing to write.
-            return jsonify({'ok': False, 'saved': [], 'conflicts': conflicts, 'versions': {}})
+            if not to_apply:
+                # All fields conflicted — nothing to write.
+                return jsonify({'ok': False, 'saved': [], 'conflicts': conflicts, 'versions': {}})
 
         # Build merged config: current saved + fields to apply.
         new_data = copy.deepcopy(old_data)
@@ -198,6 +249,26 @@ def register(app, wa):
                 return jsonify({'error': wa._t(
                     'invalid_config_int', field, rule['min'], rule['max'],
                 )}), 400
+
+        # Validate JSON-dict fields (ldap|group_role_map, oidc|group_role_map).
+        import json as _json
+        for path in JSON_DICT_FIELDS:
+            section, field = path.split('|')
+            sec_data = new_data.get(section)
+            if not isinstance(sec_data, dict) or field not in sec_data:
+                continue
+            v = sec_data[field]
+            if v is None or v == '':
+                continue
+            if isinstance(v, str):
+                try:
+                    parsed = _json.loads(v)
+                except _json.JSONDecodeError:
+                    return jsonify({'error': wa._t('invalid_json_field', field)}), 400
+                if not isinstance(parsed, dict):
+                    return jsonify({'error': wa._t('invalid_json_field', field)}), 400
+            elif not isinstance(v, dict):
+                return jsonify({'error': wa._t('invalid_json_field', field)}), 400
 
         # Validate page_sizes.
         web_data = new_data.get('web_admin')
@@ -252,6 +323,8 @@ def register(app, wa):
             _pre_port  = wa._WEB_PORT
             _pre_proxy = wa._proxy_count
             for path, rule in INT_RULES.items():
+                if rule['attr'] is None:
+                    continue
                 section, field = path.split('|')
                 v = (new_data.get(section) or {}).get(field)
                 if not (isinstance(v, int) and not isinstance(v, bool)):
@@ -263,6 +336,8 @@ def register(app, wa):
             if wa._WEB_PORT != _pre_port or wa._proxy_count != _pre_proxy:
                 wa._restart_pending = True
             for path, attr in BOOL_RULES.items():
+                if attr is None:
+                    continue
                 section, field = path.split('|')
                 v = (new_data.get(section) or {}).get(field)
                 if isinstance(v, bool):

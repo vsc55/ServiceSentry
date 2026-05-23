@@ -66,11 +66,11 @@ class TestApiWatchfulActionAuth:
 
     def test_get_requires_auth(self, client):
         resp = client.get("/api/watchfuls/filesystemusage/discover")
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_post_requires_auth(self, client):
         resp = client.post("/api/watchfuls/datastore/test_connection", json={})
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
 
 # ── Input validation ──────────────────────────────────────────────────────────
@@ -286,4 +286,4 @@ class TestApiWatchfulActionSecurity:
             ("GET",  "/api/watchfuls/os/discover"),
         ):
             resp = getattr(client_with_modules, method.lower())(url, json={})
-            assert resp.status_code == 302, f"{method} {url} must redirect unauthenticated"
+            assert resp.status_code == 401, f"{method} {url} must return 401 unauthenticated"

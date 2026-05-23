@@ -44,6 +44,9 @@ from .constants import (
     BUILTIN_ROLE_UIDS,
     ROLES,
 )
+from .auth import ldap_auth as _ldap_auth
+from .auth import oidc_auth as _oidc_auth
+from .auth import saml_auth as _saml_auth
 from .migrations import run_all as _run_migrations
 from .mixins import (
     _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
@@ -105,6 +108,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _SESSION_CHECK_SECS = 20
     _SESSION_REVOKE_REDIRECT_SECS = 3
     _ACCESS_POLL_SECS = 30
+    # OIDC client lazy-init state
+    _oidc_config_hash: str | None = None
 
     def __init__(
         self,
@@ -368,12 +373,16 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         wa_cfg = data.get('web_admin') or {}
         # Integer rules (values in config.json are already in valid range)
         for path, rule in INT_RULES.items():
+            if rule['attr'] is None:
+                continue
             section, field = path.split('|')
             v = (data.get(section) or {}).get(field)
             if isinstance(v, int) and not isinstance(v, bool):
                 setattr(self, rule['attr'], v)
         # Boolean rules
         for path, attr in BOOL_RULES.items():
+            if attr is None:
+                continue
             section, field = path.split('|')
             v = (data.get(section) or {}).get(field)
             if isinstance(v, bool):
@@ -546,6 +555,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             lang = session.get('lang', self._default_lang)
             dark_mode = session.get('dark_mode', self._default_dark_mode)
             trans = TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG])
+            _cfg = self._read_config_file(self._CONFIG_FILE) or {}
+            _ldap_cfg  = _cfg.get('ldap')  or {}
+            _oidc_cfg  = _cfg.get('oidc')  or {}
+            _saml2_cfg = _cfg.get('saml2') or {}
             return {
                 'lang': lang,
                 'default_lang': self._default_lang,
@@ -579,6 +592,25 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_force_fqdn':  self._force_fqdn,
                 'wa_startup_id':  self._startup_id,
                 'wa_default_dark_mode': self._default_dark_mode,
+                'ldap_enabled':       _ldap_auth.is_available()  and bool(_ldap_cfg.get('enabled')),
+                'ldap_button_label':  (_ldap_cfg.get('button_label')  or '').strip(),
+                'oidc_enabled':       _oidc_auth.is_available()  and bool(_oidc_cfg.get('enabled')),
+                'saml2_enabled':      _saml_auth.is_available() and bool(_saml2_cfg.get('enabled')),
+                'oidc_button_label':  (_oidc_cfg.get('button_label')  or '').strip(),
+                'saml2_button_label': (_saml2_cfg.get('button_label') or '').strip(),
+                'oidc_button_icon': (
+                    'bi-microsoft' if 'microsoftonline.com' in (_oidc_cfg.get('provider_url') or '').lower()
+                    else 'bi-google' if 'accounts.google.com' in (_oidc_cfg.get('provider_url') or '').lower()
+                    else 'bi-box-arrow-in-right'
+                ),
+                'saml2_button_icon': (
+                    'bi-microsoft' if any(kw in (_saml2_cfg.get('idp_sso_url') or '').lower()
+                                         for kw in ('microsoftonline.com', 'microsoft.com', 'azure'))
+                    else 'bi-shield-lock'
+                ),
+                'ldap_available':  _ldap_auth.is_available(),
+                'oidc_available':  _oidc_auth.is_available(),
+                'saml2_available': _saml_auth.is_available(),
             }
 
         self._register_routes(app)
@@ -641,6 +673,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         """Register all routes — delegates to routes sub-package."""
         from .routes import register_all
         register_all(app, self)
+        _oidc_auth.register_routes(app, self)
+        _saml_auth.register_routes(app, self)
 
     # ------------------------------------------------------------------
     # Server entry-point

@@ -66,7 +66,7 @@
                             <div class="input-group input-group-sm">
                                 <input type="text" class="form-control form-control-sm font-monospace text-muted" id="umUid" readonly>
                                 <button class="btn btn-sm btn-secondary" type="button"
-                                    onclick="navigator.clipboard.writeText(document.getElementById('umUid').value)"
+                                    onclick="_copyToClipboard(document.getElementById('umUid').value)"
                                     title="{{ i18n.copy_uid }}"><i class="bi bi-copy"></i></button>
                             </div>
                         </div>
@@ -422,7 +422,7 @@
                             <div class="input-group input-group-sm">
                                 <input type="text" class="form-control form-control-sm font-monospace text-muted" id="gmUid" readonly>
                                 <button class="btn btn-sm btn-secondary" type="button"
-                                    onclick="navigator.clipboard.writeText(document.getElementById('gmUid').value)"
+                                    onclick="_copyToClipboard(document.getElementById('gmUid').value)"
                                     title="{{ i18n.copy_uid }}"><i class="bi bi-copy"></i></button>
                             </div>
                         </div>
@@ -511,7 +511,7 @@
                             <div class="input-group input-group-sm">
                                 <input type="text" class="form-control form-control-sm font-monospace text-muted" id="rmUid" readonly>
                                 <button class="btn btn-sm btn-secondary" type="button"
-                                    onclick="navigator.clipboard.writeText(document.getElementById('rmUid').value)"
+                                    onclick="_copyToClipboard(document.getElementById('rmUid').value)"
                                     title="{{ i18n.copy_uid }}"><i class="bi bi-copy"></i></button>
                             </div>
                         </div>

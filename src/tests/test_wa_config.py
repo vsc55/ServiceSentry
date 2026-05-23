@@ -30,10 +30,10 @@ class TestApiConfigAuth:
     """Autenticación / autorización para /api/config."""
 
     def test_get_requires_auth(self, client):
-        assert client.get("/api/config").status_code == 302
+        assert client.get("/api/config").status_code == 401
 
     def test_put_requires_auth(self, client):
-        assert client.put("/api/config", json={}).status_code == 302
+        assert client.put("/api/config", json={}).status_code == 401
 
 
 # ──────────────────────────────── GET ──────────────────────────────
@@ -51,7 +51,7 @@ class TestApiConfigGet:
 
     def test_get_includes_config_values(self, client):
         _login(client)
-        data = client.get("/api/config").get_json()
+        data = client.get("/api/config").get_json()["config"]
         assert data["daemon"]["timer_check"] == 300
         # Sensitive fields are masked (returned as null) — never sent to the client
         assert data["telegram"]["token"] is None
@@ -612,7 +612,7 @@ class TestApiConfigSchema:
         assert isinstance(data, dict)
 
     def test_schema_requires_auth(self, client):
-        assert client.get("/api/config/schema").status_code == 302
+        assert client.get("/api/config/schema").status_code == 401
 
     def test_schema_bool_fields_present(self, client):
         _login(client)

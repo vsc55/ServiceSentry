@@ -197,6 +197,12 @@ try {
         }
     }
     renderOverview();
+    // Keep --ss-top-offset in sync with the sticky header height (navbar + visible banners)
+    const _stickyTop = document.getElementById('ss-sticky-top');
+    if (_stickyTop) {
+        _updateStickyOffset();
+        new ResizeObserver(_updateStickyOffset).observe(_stickyTop);
+    }
 } catch (e) {
     console.error('Init error:', e);
 } finally {

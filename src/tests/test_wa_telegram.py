@@ -27,7 +27,7 @@ class TestTelegramTest:
         resp = client.post("/api/telegram/test", json={
             "token": "x", "chat_id": "y",
         })
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_viewer_denied(self, client):
         """Viewer role cannot send test messages."""

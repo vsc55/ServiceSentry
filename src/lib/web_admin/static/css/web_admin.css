@@ -59,6 +59,18 @@
     --bs-dropdown-divider-bg: rgba(255,255,255,.08);
 }
 
+/* Default-role picker dropdown */
+.dr-dropdown-menu {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 2px solid var(--bs-primary);
+    box-shadow: 0 4px 16px rgba(0,0,0,.35);
+}
+[data-bs-theme="dark"] .dr-dropdown-menu {
+    background-color: #1e2530;
+    border-color: var(--bs-primary);
+}
+
 /* Outline buttons — brighter on deep dark background */
 [data-bs-theme="dark"] .btn-outline-secondary {
     --bs-btn-color:                 #adb5bd;

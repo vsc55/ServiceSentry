@@ -15,6 +15,9 @@ class _AuditMixin:
 
     _SENSITIVE_FIELDS = frozenset({
         'password', 'password_hash', 'token', 'secret', 'key_file',
+        'bind_password', 'client_secret', 'sp_key',
+        'smtp_password', 'ms365_client_secret',
+        'gmail_client_secret', 'gmail_refresh_token',
     })
 
     @property

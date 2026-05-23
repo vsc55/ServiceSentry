@@ -103,9 +103,18 @@ function renderUsers() {
         const isEnabled = u.enabled !== false;
         const rowStyle = isEnabled ? '' : ' style="opacity:.55"';
         const disabledBadge = isEnabled ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
+        const authSource = u.auth_source || 'local';
+        const _ssoLabels = { ldap: 'LDAP', oidc: 'OIDC', saml2: 'SAML2' };
+        const authBadge = _ssoLabels[authSource]
+            ? ` <span class="badge text-bg-secondary fw-normal ms-1" style="font-size:.62rem">${_ssoLabels[authSource]}</span>`
+            : '';
+        const isLocalUser = (authSource === 'local');
         const actionBtns = [
             canEdit   ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditUserModal(${jsStr(uname)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : '',
-            canEdit   ? `<button class="btn btn-sm btn-warning py-0 px-1 me-1" onclick="openResetPasswordModal(${jsStr(uname)})" title="${escAttr(t('reset_password_tt'))}"><i class="bi bi-key"></i></button>` : '',
+            canEdit   ? (isLocalUser
+                ? `<button class="btn btn-sm btn-warning py-0 px-1 me-1" onclick="openResetPasswordModal(${jsStr(uname)})" title="${escAttr(t('reset_password_tt'))}"><i class="bi bi-key"></i></button>`
+                : `<button class="btn btn-sm btn-warning py-0 px-1 me-1" style="visibility:hidden" tabindex="-1" aria-hidden="true"><i class="bi bi-key"></i></button>`)
+                : '',
             canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteUser(${jsStr(uname)})" title="${escAttr(t('delete_tt'))}" ${isSelf ? 'disabled' : ''}><i class="bi bi-trash3"></i></button>` : '',
         ].join('');
 
@@ -114,6 +123,7 @@ function renderUsers() {
             <td class="text-nowrap">
                 <code>${esc(uname)}</code>
                 ${isSelf ? `<span class="badge text-bg-info fw-normal ms-1" style="font-size:.62rem">${t('you_badge')}</span>` : ''}
+                ${authBadge}
                 ${disabledBadge}
             </td>
             <td class="text-muted small">${esc(u.display_name || uname)}</td>
@@ -207,11 +217,15 @@ function openNewUserModal() {
     document.getElementById('umUsername').value = '';
     document.getElementById('umUsername').disabled = false;
     document.getElementById('umDisplayName').value = '';
+    document.getElementById('umDisplayName').readOnly = false;
+    document.getElementById('umDisplayName').removeAttribute('title');
     document.getElementById('umLang').value = '';
     document.getElementById('umPassword').value = '';
     document.getElementById('umPasswordGroup').style.display = '';
     _updatePasswordStrength('umPassword', 'umPwStrengthBar', 'umPwStrengthLabel');
     document.getElementById('umEmail').value = '';
+    document.getElementById('umEmail').readOnly = false;
+    document.getElementById('umEmail').removeAttribute('title');
     document.getElementById('umEnabledGroup').style.display = '';
     const umEnabledNew = document.getElementById('umEnabled');
     umEnabledNew.checked = true;
@@ -239,6 +253,12 @@ function openEditUserModal(username) {
     document.getElementById('umLang').value = u.lang || '';
     document.getElementById('umPasswordGroup').style.display = 'none';
     document.getElementById('umEmail').value = u.email || '';
+    const _isSsoUser = (u.auth_source && u.auth_source !== 'local');
+    const _ssoHint = _isSsoUser ? t('sso_field_managed_externally') : '';
+    document.getElementById('umDisplayName').readOnly = _isSsoUser;
+    document.getElementById('umDisplayName').title    = _ssoHint;
+    document.getElementById('umEmail').readOnly = _isSsoUser;
+    document.getElementById('umEmail').title    = _ssoHint;
     const isSelf = username === currentUser.username;
     const enabledChk = document.getElementById('umEnabled');
     enabledChk.checked = u.enabled !== false;
@@ -426,6 +446,11 @@ function _updatePasswordStrength(inputId, barWrapperId, labelId) {
 }
 
 function openResetPasswordModal(username) {
+    const u = usersData[username] || {};
+    if (u.auth_source && u.auth_source !== 'local') {
+        showToast(t('sso_user_no_password'), 'warning');
+        return;
+    }
     _resetPasswordUser = username;
     document.getElementById('resetPasswordTitle').innerHTML =
         '<i class="bi bi-key me-1"></i>' + tf('reset_password_for', esc(username));

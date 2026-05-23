@@ -131,9 +131,10 @@ class _SessionsMixin:
             session.clear()
             return False
         entry = self._sessions[token]
-        # Kick disabled users immediately
+        # Kick deleted or disabled users immediately
         uname = entry.get('username', session.get('username', ''))
-        if not self._users.get(uname, {}).get('enabled', True):
+        user_rec = self._users.get(uname)
+        if user_rec is None or not user_rec.get('enabled', True):
             del self._sessions[token]
             self._persist_sessions()
             session.clear()

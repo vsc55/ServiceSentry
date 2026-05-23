@@ -225,7 +225,7 @@ class TestCustomRoles:
 
     def test_get_roles_requires_auth(self, client):
         resp = client.get("/api/roles")
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_get_roles_returns_builtin_roles(self, client):
         _login(client)

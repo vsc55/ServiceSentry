@@ -59,7 +59,7 @@ class TestSessionRegistry:
         assert client.get("/api/me").status_code == 200
         admin._revoke_all_sessions()
         resp = client.get("/api/me", follow_redirects=False)
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_revoke_user_sessions(self, admin, client):
         """_revoke_user_sessions removes only the target user's sessions."""

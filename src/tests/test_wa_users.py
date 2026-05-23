@@ -27,7 +27,7 @@ class TestApiUsers:
 
     def test_get_users_requires_auth(self, client):
         resp = client.get("/api/users")
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_get_users_as_admin(self, client):
         _login(client)
@@ -474,4 +474,4 @@ class TestChangeOwnPassword:
             "current_password": "x",
             "new_password": "y",
         })
-        assert resp.status_code == 302
+        assert resp.status_code == 401

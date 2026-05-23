@@ -27,7 +27,7 @@ class TestGroups:
 
     def test_get_groups_requires_auth(self, client):
         resp = client.get("/api/groups")
-        assert resp.status_code == 302
+        assert resp.status_code == 401
 
     def test_get_groups_has_default_administrators(self, client):
         _login(client)
