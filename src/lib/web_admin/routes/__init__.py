@@ -3,22 +3,25 @@
 """Route registration — delegates to sub-modules."""
 
 from .auth import register as _auth
+from .auth.ldap import register as _ldap
+from .auth.entra import register as _entra
+from .notify.telegram import register as _telegram
+from .notify.email import register as _email
+from .notify.webhook import register as _webhook
+from .notify.templates import register as _notif_templates
+from .webhooks import register as _webhooks
+from .modules import register as _modules
+from .modules.checks import register as _checks
+from .users import register as _users
+from .users.roles import register as _roles
+from .users.groups import register as _groups
+from .sessions import register as _sessions
+from .sessions.audit import register as _audit
+from .config import register as _config
+from .watchfuls import register as _watchfuls
 from .ui import register as _ui
 from .status import register as _status
 from .errors import register as _errors
-from .modules import register as _modules
-from .config import register as _config
-from .telegram import register as _telegram
-from .ldap import register as _ldap
-from .users import register as _users
-from .sessions import register as _sessions
-from .audit import register as _audit
-from .roles import register as _roles
-from .groups import register as _groups
-from .checks import register as _checks
-from .watchfuls import register as _watchfuls
-from .email import register as _email
-from .entra import register as _entra
 
 
 def register_all(app, wa):
@@ -31,6 +34,9 @@ def register_all(app, wa):
     _telegram(app, wa)
     _ldap(app, wa)
     _email(app, wa)
+    _webhook(app, wa)
+    _notif_templates(app, wa)
+    _webhooks(app, wa)
     _entra(app, wa)
     _users(app, wa)
     _sessions(app, wa)

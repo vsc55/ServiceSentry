@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for custom HTTP error pages (400, 403, 404, 405, 500)."""
 
@@ -38,15 +38,15 @@ class TestErrorPages:
 
     def test_404_api_returns_json(self, client):
         """API routes return JSON on 404, not HTML."""
-        resp = client.get("/api/nonexistent", headers={"Accept": "application/json"})
+        resp = client.get("/api/v1/nonexistent", headers={"Accept": "application/json"})
         assert resp.status_code == 404
         data = resp.get_json()
         assert data is not None
         assert "error" in data
 
     def test_404_api_path_returns_json(self, client):
-        """/api/* paths always return JSON regardless of Accept header."""
-        resp = client.get("/api/does-not-exist")
+        """/api/v1/* paths always return JSON regardless of Accept header."""
+        resp = client.get("/api/v1/does-not-exist")
         assert resp.status_code == 404
         # May be JSON or HTML depending on client Accept, but must not crash
         assert resp.status_code == 404
@@ -68,18 +68,14 @@ class TestErrorPages:
 
     def test_405_on_wrong_method(self, client):
         """Sending a POST to a GET-only route returns 405."""
-        resp = client.post("/login", data={}, content_type="application/json",
-                           headers={"Accept": "text/html"})
-        # /login accepts POST (login form), try a static-style route instead
-        # Use a route we know is GET-only: /theme/<mode>
-        resp = client.post("/theme/dark")
+        resp = client.post("/lang/en_EN")
         assert resp.status_code == 405
         assert b"405" in resp.data or b"Method" in resp.data
 
     def test_error_page_respects_dark_mode(self, client):
         """Error page inherits dark/light theme from session."""
         _login(client)
-        client.get("/theme/dark")
+        client.put("/api/v1/users/me/preferences", json={"dark_mode": True})
         resp = client.get("/nonexistent-path")
         html = resp.data.decode()
         assert 'data-bs-theme="dark"' in html

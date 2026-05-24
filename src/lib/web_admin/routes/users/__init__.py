@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""User management routes: /api/users, /api/users/<username>,
-/api/users/me/password."""
+"""User management routes: /api/v1/users, /api/v1/users/<username>,
+/api/v1/users/me/password."""
 
 from flask import jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from ..constants import ROLES, SUPPORTED_LANGS
+from ...constants import ROLES, SUPPORTED_LANGS
 
 
 def register(app, wa):
@@ -36,7 +36,7 @@ def register(app, wa):
 
     # --- API: user management (admin only) ------------------------
 
-    @app.route('/api/users', methods=['GET'])
+    @app.route('/api/v1/users', methods=['GET'])
     @users_view_req
     def api_get_users():
         """Return all users (without password hashes)."""
@@ -55,7 +55,7 @@ def register(app, wa):
             }
         return jsonify(safe)
 
-    @app.route('/api/users', methods=['POST'])
+    @app.route('/api/v1/users', methods=['POST'])
     @users_add_req
     def api_create_user():
         """Create a new user."""
@@ -118,7 +118,7 @@ def register(app, wa):
         })
         return jsonify({'ok': True}), 201
 
-    @app.route('/api/users/<username>', methods=['PUT'])
+    @app.route('/api/v1/users/<username>', methods=['PUT'])
     @users_edit_req
     def api_update_user(username: str):
         """Update an existing user (role, display_name, password)."""
@@ -179,12 +179,16 @@ def register(app, wa):
                 changes.append({'field': 'lang', 'old': old_lang, 'new': lang})
             user['lang'] = lang
         if 'dark_mode' in data:
-            if not isinstance(data['dark_mode'], bool):
+            dm = data['dark_mode']
+            if dm is not None and not isinstance(dm, bool):
                 return jsonify({'error': wa._t('invalid_dark_mode')}), 400
             old_dm = user.get('dark_mode')
-            if old_dm != data['dark_mode']:
-                changes.append({'field': 'dark_mode', 'old': old_dm, 'new': data['dark_mode']})
-            user['dark_mode'] = data['dark_mode']
+            if old_dm != dm:
+                changes.append({'field': 'dark_mode', 'old': old_dm, 'new': dm})
+            if dm is None:
+                user.pop('dark_mode', None)
+            else:
+                user['dark_mode'] = dm
         if 'groups' in data:
             if not isinstance(data['groups'], list):
                 return jsonify({'error': wa._t('invalid_groups', '')}), 400
@@ -221,7 +225,7 @@ def register(app, wa):
                 'username': username, 'changes': changes,
             })
         if has_password_reset:
-            wa._audit('password_reset', detail=username)
+            wa._audit('password_reset', detail={'username': username})
         # Update session if the user edited themselves
         if username == session.get('username'):
             session['role'] = _role_display(user['role'])
@@ -229,11 +233,11 @@ def register(app, wa):
             user_lang = user.get('lang')
             if user_lang and user_lang in SUPPORTED_LANGS:
                 session['lang'] = user_lang
-            if 'dark_mode' in user:
-                session['dark_mode'] = user['dark_mode']
+            if 'dark_mode' in data:
+                session['dark_mode'] = user.get('dark_mode', wa._default_dark_mode)
         return jsonify({'ok': True})
 
-    @app.route('/api/users/<username>', methods=['DELETE'])
+    @app.route('/api/v1/users/<username>', methods=['DELETE'])
     @users_delete_req
     def api_delete_user(username: str):
         """Delete a user account."""
@@ -254,7 +258,7 @@ def register(app, wa):
         wa._audit('user_deleted', detail={'username': username})
         return jsonify({'ok': True})
 
-    @app.route('/api/users/me/preferences', methods=['PUT'])
+    @app.route('/api/v1/users/me/preferences', methods=['PUT'])
     @login_required
     def api_save_my_preferences():
         """Save the current user's own appearance preferences (lang, dark_mode)."""
@@ -265,32 +269,41 @@ def register(app, wa):
         user = wa._users.get(uname)
         if not user:
             return jsonify({'error': wa._t('user_not_found')}), 404
+        changes = {}
         if 'lang' in data:
             lang = data['lang']
             if not isinstance(lang, str):
                 return jsonify({'error': wa._t('invalid_lang', '')}), 400
             if lang and lang not in SUPPORTED_LANGS:
                 return jsonify({'error': wa._t('invalid_lang', lang)}), 400
+            old_lang = user.get('lang', '')
             if not lang:
                 user.pop('lang', None)
                 session['lang'] = wa._default_lang
             else:
                 user['lang'] = lang
                 session['lang'] = lang
+            if old_lang != lang:
+                changes['lang'] = {'old': old_lang, 'new': lang}
         if 'dark_mode' in data:
             dm = data['dark_mode']
             if dm is not None and not isinstance(dm, bool):
                 return jsonify({'error': wa._t('invalid_dark_mode')}), 400
+            old_dm = user.get('dark_mode')
             if dm is None:
                 user.pop('dark_mode', None)
                 session['dark_mode'] = wa._default_dark_mode
             else:
                 user['dark_mode'] = dm
                 session['dark_mode'] = dm
+            if old_dm != dm:
+                changes['dark_mode'] = {'old': old_dm, 'new': dm}
         wa._persist_users()
+        if changes:
+            wa._audit('user_preferences_changed', detail={'username': uname, 'changes': changes})
         return jsonify({'ok': True})
 
-    @app.route('/api/users/me/password', methods=['PUT'])
+    @app.route('/api/v1/users/me/password', methods=['PUT'])
     @login_required
     def api_change_own_password():
         """Allow any logged-in user to change their own password."""

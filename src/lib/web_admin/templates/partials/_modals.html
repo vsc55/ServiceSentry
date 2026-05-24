@@ -38,7 +38,7 @@
                             </div>
                         </div>
                         <div class="row g-3 mb-2 flex-shrink-0">
-                            <div class="col-sm-6">
+                            <div class="col-sm-4">
                                 <label class="form-label small fw-semibold">{{ i18n.language }}</label>
                                 <select class="form-select form-select-sm" id="umLang">
                                     <option value="">{{ i18n.system_default }}</option>
@@ -47,7 +47,15 @@
                                     {% endfor %}
                                 </select>
                             </div>
-                            <div class="col-sm-6">
+                            <div class="col-sm-4">
+                                <label class="form-label small fw-semibold">{{ i18n.dark_mode }}</label>
+                                <select class="form-select form-select-sm" id="umDarkMode">
+                                    <option value="">{{ i18n.settings_theme_auto }}</option>
+                                    <option value="light">{{ i18n.settings_theme_light }}</option>
+                                    <option value="dark">{{ i18n.settings_theme_dark }}</option>
+                                </select>
+                            </div>
+                            <div class="col-sm-4">
                                 <label class="form-label small fw-semibold">{{ i18n.email }}</label>
                                 <input type="email" class="form-control form-control-sm" id="umEmail" autocomplete="off">
                             </div>
@@ -307,6 +315,24 @@
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Config update detail modal — shown when background poll refreshes fields #}
+<div class="modal fade" id="cfgUpdateDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title">
+                    <i class="bi bi-arrow-repeat me-1"></i><span id="cfgUpdateDetailTitle"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0" id="cfgUpdateDetailBody"></div>
+            <div class="modal-footer py-1">
+                <button id="cfgUpdateDetailClose" class="btn btn-sm btn-secondary" data-bs-dismiss="modal"></button>
             </div>
         </div>
     </div>
@@ -607,6 +633,37 @@
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Notification HTML template preview modal ─────────────────────────── -->
+<div class="modal fade" id="notifHtmlPreviewModal" tabindex="-1"
+     aria-labelledby="notifHtmlPreviewLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="notifHtmlPreviewLabel">
+                    <i class="bi bi-eye me-1"></i>
+                    <span id="notifHtmlPreviewTitle">{{ i18n.notif_html_tpl_preview_title }}</span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-0" style="min-height:420px">
+                <div id="notifHtmlPreviewSpinner"
+                     class="d-flex align-items-center justify-content-center"
+                     style="min-height:420px">
+                    <span class="spinner-border text-secondary"></span>
+                </div>
+                <iframe id="notifHtmlPreviewFrame"
+                    class="d-none border-0 w-100"
+                    style="min-height:600px;height:70vh"
+                    sandbox="allow-same-origin"></iframe>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
             </div>
         </div>
     </div>

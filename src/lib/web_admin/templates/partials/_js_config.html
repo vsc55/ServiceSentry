@@ -1,11 +1,12 @@
-{# ================================================================
+﻿{# ================================================================
    Config tab — rendering logic + Telegram test.
    ================================================================ #}
 
 // ──────────────────────────── Config tab ──────────────────────────
 let _cfgSearchTerm = '';
 let _cfgSearchInHints = true;
-let _activeCfgTab = localStorage.getItem('cfg_active_tab') || 'cfg-tab-general';
+let _activeCfgTab    = localStorage.getItem('cfg_active_tab')    || 'cfg-tab-general';
+let _activeNotifSubTab = localStorage.getItem('cfg_notif_subtab') || 'cfg-notif-routing';
 
 function _toggleCfgSearchHints() {
     _cfgSearchInHints = !_cfgSearchInHints;
@@ -120,6 +121,8 @@ function renderConfig() {
         cfgcol_oidc:            'linear-gradient(90deg,#0369a1,#0ea5e9)',
         cfgcol_saml2:           'linear-gradient(90deg,#b45309,#f59e0b)',
         cfgcol_email:           'linear-gradient(90deg,#dc2626,#f97316)',
+        cfgcol_notifications:   'linear-gradient(90deg,#10b981,#06b6d4)',
+        cfgcol_webhook:         'linear-gradient(90deg,#8b5cf6,#ec4899)',
     };
 
     function cfgCardOpen(id, icon, title) {
@@ -161,6 +164,7 @@ function renderConfig() {
     if (!('user_filter'       in _ldap)) _ldap.user_filter       = '(sAMAccountName={username})';
     if (!('email_attr'        in _ldap)) _ldap.email_attr        = 'mail';
     if (!('name_attr'         in _ldap)) _ldap.name_attr         = 'displayName';
+    if (!('username_attr'     in _ldap)) _ldap.username_attr     = '';
     if (!('group_attr'        in _ldap)) _ldap.group_attr        = 'memberOf';
     if (!('group_role_map'      in _ldap)) _ldap.group_role_map      = '{}';
     if (!('group_display_names' in _ldap)) _ldap.group_display_names = '{}';
@@ -194,6 +198,7 @@ function renderConfig() {
     if (!('from_name'           in _email)) _email.from_name           = 'ServiceSentry';
     if (!('recipients'          in _email)) _email.recipients          = '';
     if (!('subject_prefix'      in _email)) _email.subject_prefix      = '[ServiceSentry]';
+    if (!('lang'                in _email)) _email.lang                = '';
     if (!('notify_on_down'      in _email)) _email.notify_on_down      = true;
     if (!('notify_on_recovery'  in _email)) _email.notify_on_recovery  = true;
     if (!('notify_on_warn'      in _email)) _email.notify_on_warn      = false;
@@ -209,6 +214,22 @@ function renderConfig() {
     if (!('gmail_client_id'     in _email)) _email.gmail_client_id     = '';
     if (!('gmail_client_secret' in _email)) _email.gmail_client_secret = '';
     if (!('gmail_refresh_token' in _email)) _email.gmail_refresh_token = '';
+
+    // Pre-populate Webhooks list (array — CRUD managed separately)
+    if (!Array.isArray(configData.webhooks)) configData.webhooks = [];
+
+    // Pre-populate Notifications routing defaults
+    if (!configData.notifications) configData.notifications = {};
+    const _notif = configData.notifications;
+    if (!('telegram_on_down'     in _notif)) _notif.telegram_on_down     = true;
+    if (!('telegram_on_recovery' in _notif)) _notif.telegram_on_recovery = true;
+    if (!('telegram_on_warn'     in _notif)) _notif.telegram_on_warn     = false;
+    if (!('email_on_down'        in _notif)) _notif.email_on_down        = true;
+    if (!('email_on_recovery'    in _notif)) _notif.email_on_recovery    = true;
+    if (!('email_on_warn'        in _notif)) _notif.email_on_warn        = false;
+    if (!('webhook_on_down'      in _notif)) _notif.webhook_on_down      = true;
+    if (!('webhook_on_recovery'  in _notif)) _notif.webhook_on_recovery  = true;
+    if (!('webhook_on_warn'      in _notif)) _notif.webhook_on_warn      = false;
 
     // Pre-populate SAML2 section defaults
     if (!configData.saml2) configData.saml2 = {};
@@ -233,7 +254,7 @@ function renderConfig() {
     const AUTH_SECS  = new Set(['ldap', 'oidc', 'saml2']);
     const NOTIF_SECS = new Set(['telegram']);
 
-    const order = ['daemon', 'global', 'telegram', 'web_admin', 'email', 'ldap', 'oidc', 'saml2'];
+    const order = ['daemon', 'global', 'telegram', 'web_admin', 'email', 'webhooks', 'notifications', 'ldap', 'oidc', 'saml2'];
     const sections = Object.keys(configData).sort((a, b) => {
         const ai = order.indexOf(a), bi = order.indexOf(b);
         return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
@@ -247,7 +268,9 @@ function renderConfig() {
         const lbl = SECTION_LABELS[sec] || sec;
         const cfgId = 'cfgcol_' + sec;
 
-        if (sec === 'email') continue; // built separately below
+        if (sec === 'email') continue;           // built separately below
+        if (sec === 'webhooks') continue;       // built separately via _renderWebhooksSection
+        if (sec === 'notifications') continue;  // built separately via _renderNotificationsMatrix
 
         if (AUTH_SECS.has(sec)) {
             hAuthExt += _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose);
@@ -291,8 +314,35 @@ function renderConfig() {
     hAuth += cfgCardClose;
     hAuth += hAuthExt;
 
-    // ── Notifications tab: telegram (built in loop above) + email
-    hNotifs += _renderEmailSection(cfgCardOpen, cfgCardClose);
+    // ── Notifications tab: three sub-tabs — Routing | Providers | Templates
+    const hNotifRouting   = _renderNotificationsMatrix(cfgCardOpen, cfgCardClose);
+    const hNotifProviders = hNotifs   // telegram section already accumulated above
+        + _renderWebhooksSection(cfgCardOpen, cfgCardClose)
+        + _renderEmailSection(cfgCardOpen, cfgCardClose);
+    const hNotifTemplates = _renderNotifTemplatesSection();
+    const _notifSubTabs = [
+        { id: 'cfg-notif-routing',   label: t('cfg_notif_subtab_routing'),   icon: 'bi-diagram-3', html: hNotifRouting   },
+        { id: 'cfg-notif-providers', label: t('cfg_notif_subtab_providers'), icon: 'bi-plug',      html: hNotifProviders },
+        { id: 'cfg-notif-templates', label: t('cfg_notif_subtab_templates'), icon: 'bi-file-text', html: hNotifTemplates },
+    ];
+    let _nNav = `<ul class="nav nav-pills mb-3 gap-1" id="cfg-notif-subtabs" role="tablist">`;
+    let _nContent = `<div class="tab-content">`;
+    for (const st of _notifSubTabs) {
+        const active = st.id === _activeNotifSubTab;
+        const extraClick = st.id === 'cfg-notif-templates' ? ';_notifTplLoad()' : '';
+        _nNav += `<li class="nav-item" role="presentation">
+            <button class="nav-link${active ? ' active' : ''}" id="${st.id}-btn"
+                    data-bs-toggle="tab" data-bs-target="#${st.id}" type="button" role="tab"
+                    onclick="_activeNotifSubTab='${st.id}';localStorage.setItem('cfg_notif_subtab','${st.id}')${extraClick}">
+                <i class="bi ${st.icon} me-1"></i>${esc(st.label)}
+            </button></li>`;
+        _nContent += `<div class="tab-pane fade${active ? ' show active' : ''}" id="${st.id}" role="tabpanel">${st.html}</div>`;
+    }
+    hNotifs = _nNav + `</ul>` + _nContent + `</div>`;
+    // Auto-load templates data if that sub-tab is already active when the config renders
+    if (_activeNotifSubTab === 'cfg-notif-templates') {
+        setTimeout(_notifTplLoad, 0);
+    }
 
     // ── Interface tab: pub_status + proxy + audit + tables + live_update
     // Public status card
@@ -566,7 +616,7 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
             'server', 'port', 'use_ssl', 'timeout',
             'bind_dn', 'bind_password',
             'base_dn', 'user_filter',
-            'email_attr', 'name_attr', 'group_attr',
+            'email_attr', 'name_attr', 'username_attr', 'group_attr',
             'fallback_to_local', 'allow_email_login', 'auto_create_users',
         ],
         oidc: [
@@ -922,10 +972,10 @@ function _grmMarkNotFound(sec) {
 async function _lookupGroupName(sec, id) {
     try {
         if (sec === 'ldap') {
-            const r = await apiPost('/api/ldap/group_lookup', { dn: id });
+            const r = await apiPost('/api/v1/auth/ldap/group_lookup', { dn: id });
             if (r?.data?.ok && r.data.found) return r.data.name || null;
         } else if (sec === 'oidc') {
-            const r = await apiPost('/api/entra/group_lookup', { group_id: id });
+            const r = await apiPost('/api/v1/auth/entra/group_lookup', { group_id: id });
             if (r?.data?.ok && r.data.found) return r.data.name || null;
         }
     } catch (_) {}
@@ -1083,7 +1133,7 @@ async function _saveDisplayNames(sec) {
     const value = configData[sec]['group_display_names'];
     const fields = { [pathStr]: { value, version: _fieldVersions[pathStr] ?? null } };
     try {
-        const resp = await fetch('/api/config', {
+        const resp = await fetch('/api/v1/config', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fields })
@@ -1112,7 +1162,7 @@ async function _ldapFetchGroups() {
     if (picker) picker.style.display = 'none';
     _grmMarkSearching('ldap');
 
-    const r = await apiPost('/api/ldap/groups', cfg);
+    const r = await apiPost('/api/v1/auth/ldap/groups', cfg);
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download me-1"></i>' + esc(t('grm_fetch_groups')); }
 
     if (!r || !r.data || !r.data.ok) {
@@ -1226,7 +1276,7 @@ async function _oidcFetchGroups() {
     // Send the secret only when it is a real value (not masked null from server)
     if (cfg.client_secret) body.client_secret = cfg.client_secret;
 
-    const r = await apiPost('/api/entra/groups', body);
+    const r = await apiPost('/api/v1/auth/entra/groups', body);
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-microsoft me-1"></i>' + esc(t('entra_fetch_groups')); }
 
     if (!r || !r.data || !r.data.ok) {
@@ -1274,19 +1324,19 @@ function _applyLdapPreset(preset) {
         ad: {
             port: 389, use_ssl: false, timeout: 10,
             user_filter: '(sAMAccountName={username})',
-            email_attr: 'mail', name_attr: 'displayName', group_attr: 'memberOf',
+            email_attr: 'mail', name_attr: 'displayName', username_attr: 'sAMAccountName', group_attr: 'memberOf',
             button_label: 'Active Directory',
         },
         openldap: {
             port: 389, use_ssl: false, timeout: 5,
             user_filter: '(uid={username})',
-            email_attr: 'mail', name_attr: 'cn', group_attr: 'memberOf',
+            email_attr: 'mail', name_attr: 'displayName', username_attr: 'uid', group_attr: 'memberOf',
             button_label: 'OpenLDAP',
         },
         freeipa: {
             port: 389, use_ssl: false, timeout: 10,
             user_filter: '(uid={username})',
-            email_attr: 'mail', name_attr: 'displayName', group_attr: 'memberOf',
+            email_attr: 'mail', name_attr: 'displayName', username_attr: 'uid', group_attr: 'memberOf',
             button_label: 'FreeIPA',
         },
     };
@@ -1561,7 +1611,7 @@ function _entraTab(tab) {
 async function _entraStart() {
     document.getElementById('entraStateIdle').style.display = 'none';
     const appName = (document.getElementById('entraAppName')?.value || '').trim() || 'ServiceSentry';
-    const r = await apiPost('/api/entra/device-code', { app_name: appName });
+    const r = await apiPost('/api/v1/auth/entra/device-code', { app_name: appName });
     if (!r?.data || r.data.error) {
         document.getElementById('entraStateIdle').style.display = '';
         showToast((r?.data?.error) || t('entra_device_code_error'), 'danger');
@@ -1581,7 +1631,7 @@ async function _entraStart() {
 
 async function _entraPoll(interval) {
     if (!_entraFlowToken) return;
-    const r = await apiPost('/api/entra/device-poll', { flow_token: _entraFlowToken });
+    const r = await apiPost('/api/v1/auth/entra/device-poll', { flow_token: _entraFlowToken });
     if (!r?.data) return;
     const d = r.data;
     if (d.status === 'pending') {
@@ -1933,7 +1983,7 @@ function _entraSaml2UpdateScripts(name) {
 async function _entraSaml2Start() {
     document.getElementById('entraSaml2StateIdle').style.display = 'none';
     const appName = (document.getElementById('entraSaml2AppName')?.value || '').trim() || 'ServiceSentry';
-    const r = await apiPost('/api/entra/saml2/device-code', { app_name: appName });
+    const r = await apiPost('/api/v1/auth/entra/saml2/device-code', { app_name: appName });
     if (!r?.data || r.data.error) {
         document.getElementById('entraSaml2StateIdle').style.display = '';
         showToast((r?.data?.error) || t('entra_device_code_error'), 'danger');
@@ -1953,7 +2003,7 @@ async function _entraSaml2Start() {
 
 async function _entraSaml2Poll(interval) {
     if (!_s2EntraFlowToken) return;
-    const r = await apiPost('/api/entra/saml2/device-poll', { flow_token: _s2EntraFlowToken });
+    const r = await apiPost('/api/v1/auth/entra/saml2/device-poll', { flow_token: _s2EntraFlowToken });
     if (!r?.data) return;
     const d = r.data;
     if (d.status === 'pending') {
@@ -2118,7 +2168,7 @@ async function testLdap() {
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('ldap_test'); }
     if (resultDiv) resultDiv.style.display = 'none';
 
-    const r = await apiPost('/api/ldap/test', payload);
+    const r = await apiPost('/api/v1/auth/ldap/test', payload);
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-plug me-1"></i>' + t('ldap_test'); }
 
     if (!r || !r.data) return;
@@ -2146,6 +2196,378 @@ async function testLdap() {
     html += '</div>';
     if (resultBody) resultBody.innerHTML = html;
     if (resultDiv)  resultDiv.style.display = '';
+}
+
+// ──────────────────────── Webhook section renderer ───────────────────────
+function _whTextarea(labelKey, value, cfgPath, placeholder) {
+    const hint    = fieldHint(cfgPath);
+    const hintId  = 'fhint_' + cfgPath.replace(/\W/g, '_');
+    const infoIcon = hint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+               style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+               data-bs-toggle="collapse" data-bs-target="#${hintId}"
+               aria-expanded="false" aria-controls="${hintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const hintPanel = hint
+        ? `<div class="collapse" id="${hintId}"><div class="small text-muted mt-1 py-1 px-2"
+               style="border-left:3px solid var(--bs-info-color,#0dcaf0);
+                      background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));
+                      border-radius:0 .25rem .25rem 0">${esc(hint)}</div></div>`
+        : '';
+    const resetBtn = `<button type="button" class="btn btn-sm btn-secondary align-self-start"
+        onclick="resetConfigField(${jsStr(cfgPath)})"
+        data-bs-toggle="tooltip" data-bs-placement="top"
+        title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
+    const lbl = LABELS[labelKey] || labelKey;
+    return `<div class="cfg-field-wrap"><div class="row mb-2 align-items-start">
+        <label class="col-sm-4 col-form-label col-form-label-sm pt-1">${esc(lbl)}${infoIcon}</label>
+        <div class="col-sm-8">
+            <div class="input-group input-group-sm align-items-start">
+                <textarea class="form-control font-monospace" rows="3" style="resize:vertical"
+                    placeholder="${escAttr(placeholder || '')}"
+                    onchange="updateField('config',${jsStr(cfgPath)},this.value)">${esc(value || '')}</textarea>
+                ${resetBtn}
+            </div>
+            ${hintPanel}
+        </div>
+    </div></div>`;
+}
+
+// ──────────────────────── Webhooks section renderer ──────────────────────
+let _webhookEditId = null;
+
+function _renderWebhooksSection(cfgCardOpen, cfgCardClose) {
+    const webhooks = configData.webhooks || [];
+    let h = cfgCardOpen('cfgcol_webhook', '<i class="bi bi-send me-1"></i>', SECTION_LABELS['webhooks'] || 'Webhooks');
+    h += `<div class="cfg-field-wrap">`;
+    if (webhooks.length) {
+        const _whl = k => (I18N.labels || {})[k] || k;
+        h += `<table class="table table-sm table-bordered mb-2 align-middle" style="font-size:.875rem">
+            <thead><tr>
+                <th style="width:22%">${esc(_whl('webhook_name'))}</th>
+                <th>${esc(_whl('webhook_url_col'))}</th>
+                <th class="text-center" style="width:6rem;white-space:nowrap">${esc(_whl('webhook_method'))}</th>
+                <th class="text-center" style="width:5rem;white-space:nowrap">${esc(_whl('enabled'))}</th>
+                <th style="width:8rem"></th>
+            </tr></thead><tbody>`;
+        webhooks.forEach(wh => {
+            h += `<tr>
+                <td class="align-middle">${esc(wh.name || '—')}</td>
+                <td class="align-middle text-truncate" style="max-width:180px" title="${escAttr(wh.url || '')}">${esc(wh.url || '—')}</td>
+                <td class="text-center align-middle"><span class="badge bg-secondary">${esc(wh.method || 'POST')}</span></td>
+                <td class="text-center align-middle">
+                    <input type="checkbox" class="form-check-input"${wh.enabled ? ' checked' : ''}
+                        onchange="_webhookToggleEnabled(${jsStr(wh.id)},this.checked)">
+                </td>
+                <td class="text-end align-middle" style="white-space:nowrap">
+                    <button class="btn btn-info btn-sm me-1" onclick="testWebhookById(${jsStr(wh.id)})"
+                        title="${escAttr(t('webhook_test'))}"><i class="bi bi-send"></i></button>
+                    <button class="btn btn-secondary btn-sm me-1" onclick="showWebhookModal(${jsStr(wh.id)})"
+                        title="${escAttr(t('edit_tt'))}"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteWebhook(${jsStr(wh.id)})"
+                        title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>
+                </td>
+            </tr>`;
+        });
+        h += `</tbody></table>`;
+    } else {
+        h += `<p class="text-muted small mb-2">${esc(t('webhook_empty'))}</p>`;
+    }
+    h += `<button class="btn btn-secondary btn-sm" onclick="showWebhookModal()">
+        <i class="bi bi-plus-lg me-1"></i>${esc(t('webhook_add'))}
+    </button></div>`;
+    h += cfgCardClose;
+    return h;
+}
+
+async function _webhookToggleEnabled(id, enabled) {
+    configData.webhooks = (configData.webhooks || []).map(w => w.id === id ? {...w, enabled} : w);
+    const wh = configData.webhooks.find(w => w.id === id);
+    if (!wh) return;
+    const body = {...wh, secret: null};  // null = keep stored secret
+    const r = await apiPut(`/api/v1/webhooks/${id}`, body);
+    if (!r?.ok) showToast(r?.error || t('save_error'), 'danger');
+    else showToast(tf(enabled ? 'webhook_enabled_ok' : 'webhook_disabled_ok', wh.name || ''), 'success');
+}
+
+async function testWebhookById(id) {
+    const r = await apiPost(`/api/v1/webhooks/${id}/test`, {});
+    showToast(r?.data?.message || (r?.data?.ok ? t('webhook_test_ok') : t('webhook_test_error')),
+              r?.data?.ok ? 'success' : 'danger');
+}
+
+function deleteWebhook(id) {
+    const wh = (configData.webhooks || []).find(w => w.id === id);
+    showConfirmModal(tf('confirm_delete_webhook', wh?.name || id), async () => {
+        const r = await apiDelete(`/api/v1/webhooks/${id}`);
+        if (r?.data?.ok) {
+            configData.webhooks = (configData.webhooks || []).filter(w => w.id !== id);
+            renderConfig();
+            showToast(t('webhook_deleted_ok'), 'success');
+        } else {
+            showToast(r?.data?.error || t('delete_error'), 'danger');
+        }
+    });
+}
+
+function _webhookValidateModal() {
+    let firstInvalid = null;
+    const mark = (id, msg) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.add('is-invalid');
+        const fb = el.parentElement?.querySelector('.invalid-feedback');
+        if (fb) fb.textContent = msg;
+        if (!firstInvalid) firstInvalid = el;
+    };
+    ['whUrl', 'whTimeout', 'whHeaders'].forEach(id =>
+        document.getElementById(id)?.classList.remove('is-invalid'));
+
+    const url     = (document.getElementById('whUrl')?.value     || '').trim();
+    const timeout = parseInt(document.getElementById('whTimeout')?.value, 10);
+    const headers = (document.getElementById('whHeaders')?.value || '').trim();
+    let valid = true;
+
+    if (!url) {
+        mark('whUrl', t('webhook_url_required'));
+        valid = false;
+    }
+    if (isNaN(timeout) || timeout < 1 || timeout > 60) {
+        mark('whTimeout', t('webhook_timeout_range'));
+        valid = false;
+    }
+    if (headers) {
+        try { JSON.parse(headers); } catch (e) {
+            mark('whHeaders', t('invalid_json'));
+            valid = false;
+        }
+    }
+    if (firstInvalid) firstInvalid.focus();
+    return valid;
+}
+
+function showWebhookModal(id) {
+    _webhookEditId = id || null;
+    const wh = id ? (configData.webhooks || []).find(w => w.id === id) : null;
+    const _DEFAULT_BODY_TPL = '{"kind":"{kind}","module":"{module}","item":"{item}","status":"{status}","message":"{message}","timestamp":"{timestamp}"}';
+    const methodOpts = ['POST','PUT','GET'].map(m =>
+        `<option value="${m}"${(wh?.method || 'POST') === m ? ' selected' : ''}>${m}</option>`).join('');
+    const _whl = k => (I18N.labels || {})[k] || k;
+
+    // Info icon + collapsible hint panel helpers
+    const _hi = (k, uid) => {
+        const h = fieldHint('webhook|' + k);
+        if (!h) return {icon: '', panel: ''};
+        const hid = `whhint_${uid}_${k}`;
+        return {
+            icon:  ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+                        style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+                        data-bs-toggle="collapse" data-bs-target="#${hid}"
+                        aria-expanded="false"><i class="bi bi-info-circle"></i></button>`,
+            panel: `<div class="collapse" id="${hid}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(h)}</div></div>`,
+        };
+    };
+    const uid = Date.now();  // unique suffix so re-opening doesn't collide
+    const hi = k => _hi(k, uid);
+
+    document.getElementById('modalWebhookWrap')?.remove();
+    document.body.insertAdjacentHTML('beforeend', `
+<div id="modalWebhookWrap">
+<div class="modal fade" id="modalWebhook" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-send me-2"></i>${esc(id ? t('webhook_edit_title') : t('webhook_new_title'))}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row mb-2 align-items-start">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_name'))}${hi('name').icon}</label>
+          <div class="col-sm-9">
+            <input type="text" id="whName" class="form-control form-control-sm"
+              value="${escAttr(wh?.name || '')}" placeholder="${escAttr(t('webhook_name_ph'))}">
+            ${hi('name').panel}
+          </div>
+        </div>
+        <div class="row mb-2 align-items-center">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('enabled'))}</label>
+          <div class="col-sm-9"><input type="checkbox" id="whEnabled" class="form-check-input"${(wh ? wh.enabled : true) ? ' checked' : ''}></div>
+        </div>
+        <div class="row mb-2 align-items-start">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_url'))} <span class="text-danger">*</span>${hi('url').icon}</label>
+          <div class="col-sm-9">
+            <input type="url" id="whUrl" class="form-control form-control-sm"
+              value="${escAttr(wh?.url || '')}" placeholder="https://hooks.example.com/notify"
+              oninput="this.classList.remove('is-invalid')">
+            <div class="invalid-feedback"></div>
+            ${hi('url').panel}
+          </div>
+        </div>
+        <div class="row mb-2 align-items-start">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_method'))}${hi('method').icon}</label>
+          <div class="col-sm-9">
+            <select id="whMethod" class="form-select form-select-sm">${methodOpts}</select>
+            ${hi('method').panel}
+          </div>
+        </div>
+        <div class="row mb-2 align-items-start">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_timeout'))}${hi('timeout').icon}</label>
+          <div class="col-sm-9">
+            <input type="number" id="whTimeout" class="form-control form-control-sm"
+              value="${escAttr(String(wh?.timeout ?? 10))}" min="1" max="60"
+              oninput="this.classList.remove('is-invalid')">
+            <div class="invalid-feedback"></div>
+            ${hi('timeout').panel}
+          </div>
+        </div>
+        <div class="row mb-2 align-items-start">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_headers'))}${hi('headers').icon}</label>
+          <div class="col-sm-9">
+            <textarea id="whHeaders" class="form-control form-control-sm font-monospace"
+              rows="2" placeholder='{"Authorization": "Bearer token"}'
+              oninput="this.classList.remove('is-invalid')">${esc(wh?.headers || '')}</textarea>
+            <div class="invalid-feedback"></div>
+            ${hi('headers').panel}
+          </div>
+        </div>
+        <div class="row mb-2 align-items-start">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_body_template'))}${hi('body_template').icon}</label>
+          <div class="col-sm-9">
+            <textarea id="whBodyTemplate" class="form-control form-control-sm font-monospace"
+              rows="3" placeholder="${escAttr(_DEFAULT_BODY_TPL)}">${esc(wh?.body_template || '')}</textarea>
+            ${hi('body_template').panel}
+          </div>
+        </div>
+        <hr class="my-2">
+        <div class="row mb-2 align-items-start">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_secret'))}${hi('secret').icon}</label>
+          <div class="col-sm-9">
+            <input type="password" id="whSecret" class="form-control form-control-sm"
+              placeholder="${escAttr(wh?.secret === null ? t('webhook_secret_keep') : '')}">
+            ${hi('secret').panel}
+          </div>
+        </div>
+        <div class="row mb-2 align-items-start">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_secret_header'))}${hi('secret_header').icon}</label>
+          <div class="col-sm-9">
+            <input type="text" id="whSecretHeader" class="form-control form-control-sm"
+              value="${escAttr(wh?.secret_header || 'X-Hub-Signature-256')}">
+            ${hi('secret_header').panel}
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">${esc(t('cancel'))}</button>
+        <button class="btn btn-info" id="btnTestWebhookForm" onclick="testWebhookForm()">
+          <i class="bi bi-send me-1"></i>${esc(t('webhook_test'))}
+        </button>
+        <button class="btn btn-primary" onclick="saveWebhook()">
+          <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>`);
+    new bootstrap.Modal(document.getElementById('modalWebhook')).show();
+}
+
+function _webhookFormData() {
+    const secretInput = document.getElementById('whSecret')?.value || '';
+    return {
+        name: document.getElementById('whName')?.value.trim() || 'Webhook',
+        enabled: document.getElementById('whEnabled')?.checked ?? true,
+        url: document.getElementById('whUrl')?.value.trim() || '',
+        method: document.getElementById('whMethod')?.value || 'POST',
+        timeout: parseInt(document.getElementById('whTimeout')?.value, 10) || 10,
+        headers: document.getElementById('whHeaders')?.value.trim() || '',
+        body_template: document.getElementById('whBodyTemplate')?.value.trim() || '',
+        secret: secretInput || null,  // null = keep stored
+        secret_header: document.getElementById('whSecretHeader')?.value.trim() || 'X-Hub-Signature-256',
+    };
+}
+
+async function saveWebhook() {
+    if (!_webhookValidateModal()) return;
+    const data = _webhookFormData();
+    const url = _webhookEditId ? `/api/v1/webhooks/${_webhookEditId}` : '/api/v1/webhooks';
+    const method = _webhookEditId ? 'PUT' : 'POST';
+    const r = _webhookEditId ? await apiPut(url, data) : await apiPost(url, data);
+    // apiPut returns raw JSON; apiPost returns {status, data}
+    const rData = _webhookEditId ? r : r?.data;
+    if (rData?.ok) {
+        const wh = rData.webhook;
+        if (_webhookEditId) {
+            const idx = (configData.webhooks || []).findIndex(w => w.id === _webhookEditId);
+            if (idx >= 0) configData.webhooks[idx] = wh; else (configData.webhooks = configData.webhooks || []).push(wh);
+        } else {
+            if (!Array.isArray(configData.webhooks)) configData.webhooks = [];
+            configData.webhooks.push(wh);
+        }
+        bootstrap.Modal.getInstance(document.getElementById('modalWebhook'))?.hide();
+        renderConfig();
+        const msg = _webhookEditId
+            ? tf('webhook_updated_ok', wh?.name || '')
+            : tf('webhook_created_ok', wh?.name || '');
+        showToast(msg, 'success');
+    } else {
+        showToast(rData?.error || t('save_error'), 'danger');
+    }
+}
+
+async function testWebhookForm() {
+    const data = _webhookFormData();
+    if (_webhookEditId) data.id = _webhookEditId;
+    const btn = document.getElementById('btnTestWebhookForm');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>'; }
+    const r = await apiPost('/api/v1/notify/webhook/test', data);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-send me-1"></i>' + esc(t('webhook_test')); }
+    showToast(r?.data?.message || (r?.data?.ok ? t('webhook_test_ok') : t('webhook_test_error')),
+              r?.data?.ok ? 'success' : 'danger');
+}
+
+// ──────────────────── Notification routing matrix renderer ────────────────
+function _renderNotificationsMatrix(cfgCardOpen, cfgCardClose) {
+    const data = configData.notifications || {};
+    const events = [
+        { key: 'down',     label: t('notif_event_down') },
+        { key: 'recovery', label: t('notif_event_recovery') },
+        { key: 'warn',     label: t('notif_event_warn') },
+    ];
+    const channels = [
+        { key: 'telegram', label: t('notif_channel_telegram') },
+        { key: 'email',    label: t('notif_channel_email') },
+        { key: 'webhook',  label: t('notif_channel_webhook') },
+    ];
+
+    let h = cfgCardOpen('cfgcol_notifications', '<i class="bi bi-grid-3x3-gap me-1"></i>', SECTION_LABELS['notifications'] || 'Notification Routing');
+
+    h += `<div class="cfg-field-wrap pt-1">
+        <table class="table table-sm table-bordered mb-1" style="font-size:.875rem">
+            <thead><tr>
+                <th style="width:40%;font-weight:600;color:var(--bs-secondary-color)">${esc(t('notif_event'))}</th>`;
+    for (const ch of channels) {
+        h += `<th class="text-center" style="font-weight:600;color:var(--bs-secondary-color)">${esc(ch.label)}</th>`;
+    }
+    h += `</tr></thead><tbody>`;
+
+    for (const ev of events) {
+        h += `<tr><td class="align-middle" style="color:var(--bs-body-color)">${esc(ev.label)}</td>`;
+        for (const ch of channels) {
+            const fieldKey = `${ch.key}_on_${ev.key}`;
+            const cfgPath  = `notifications|${fieldKey}`;
+            const val      = data[fieldKey] !== undefined ? data[fieldKey] : (ev.key !== 'warn');
+            h += `<td class="text-center align-middle">
+                <input type="checkbox" class="form-check-input"${val ? ' checked' : ''}
+                    onchange="updateField('config',${jsStr(cfgPath)},this.checked)">
+            </td>`;
+        }
+        h += `</tr>`;
+    }
+
+    h += `</tbody></table></div>`;
+    h += cfgCardClose;
+    return h;
 }
 
 // ──────────────────────── Email section renderer ──────────────────────────
@@ -2194,9 +2616,7 @@ function _renderEmailSection(cfgCardOpen, cfgCardClose) {
     h += renderField('from_name',          data.from_name,          'email|from_name',           'config');
     h += renderField('recipients',         data.recipients,         'email|recipients',          'config');
     h += renderField('subject_prefix',     data.subject_prefix,     'email|subject_prefix',      'config');
-    h += renderField('notify_on_down',     data.notify_on_down,     'email|notify_on_down',      'config');
-    h += renderField('notify_on_recovery', data.notify_on_recovery, 'email|notify_on_recovery',  'config');
-    h += renderField('notify_on_warn',     data.notify_on_warn,     'email|notify_on_warn',      'config');
+    h += renderField('email_lang',         data.lang,               'email|lang',                 'config');
 
     // SMTP section
     h += `<div id="email-smtp-section"${provider !== 'smtp' ? ' style="display:none"' : ''}>`;
@@ -2225,15 +2645,35 @@ function _renderEmailSection(cfgCardOpen, cfgCardClose) {
     h += renderField('gmail_refresh_token', data.gmail_refresh_token, 'email|gmail_refresh_token', 'config');
     h += `</div>`;
 
-    // Test button
-    h += `<hr class="my-2"><div class="cfg-field-wrap"><div class="row">
-        <div class="col-sm-8 offset-sm-4 d-flex justify-content-end">
-            <button class="btn btn-info btn-sm" id="btnTestEmail" data-test-btn
-                onclick="testEmail()" title="${escAttr(t('email_test'))}">
-                <i class="bi bi-envelope-check me-1"></i>${esc(t('email_test'))}
-            </button>
+    // Test row: recipient override + button
+    const _testToHintId = 'fhint_email_test_to';
+    const _testToHint = t('email_test_to_hint');
+    const _testToInfoIcon = _testToHint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted"
+                style="font-size:.85em;line-height:1;vertical-align:text-bottom"
+                data-bs-toggle="collapse" data-bs-target="#${_testToHintId}"
+                aria-expanded="false"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _testToHintPanel = _testToHint
+        ? `<div class="collapse" id="${_testToHintId}"><div class="small text-muted mt-1 py-1 px-2" style="border-left:3px solid var(--bs-info-color,#0dcaf0);background:var(--bs-info-bg-subtle,rgba(13,202,240,.1));border-radius:0 .25rem .25rem 0">${esc(_testToHint)}</div></div>`
+        : '';
+    h += `<hr class="my-2"><div class="cfg-field-wrap">
+        <div class="row mb-2 align-items-start">
+            <label class="col-sm-4 col-form-label col-form-label-sm pt-1">${esc(LABELS['email_test_to'] || t('email_test_to') || 'Test recipient')}${_testToInfoIcon}</label>
+            <div class="col-sm-8">
+                <div class="input-group input-group-sm">
+                    <input type="text" id="emailTestTo" class="form-control"
+                        placeholder="${escAttr(t('email_test_to_ph'))}"
+                        autocomplete="off">
+                    <button class="btn btn-info" id="btnTestEmail" data-test-btn
+                        onclick="testEmail()" title="${escAttr(t('email_test'))}">
+                        <i class="bi bi-envelope-check me-1"></i>${esc(t('email_test'))}
+                    </button>
+                </div>
+                ${_testToHintPanel}
+            </div>
         </div>
-    </div></div>`;
+    </div>`;
 
     h += cfgCardClose;
     return h;
@@ -2249,13 +2689,863 @@ function _emailProviderChanged(val) {
 
 async function testEmail() {
     const cfg = configData.email || {};
+    const testTo = (document.getElementById('emailTestTo')?.value || '').trim();
+    const body = testTo ? {...cfg, test_to: testTo} : cfg;
     const btn = document.getElementById('btnTestEmail');
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('email_test'); }
-    const r = await apiPost('/api/email/test', cfg);
+    const r = await apiPost('/api/v1/notify/email/test', body);
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-envelope-check me-1"></i>' + t('email_test'); }
     if (r && r.data) {
         showToast(r.data.message || (r.data.ok ? t('email_test_ok') : t('email_test_error')),
                   r.data.ok ? 'success' : 'danger');
+    }
+}
+
+// ── Notification template editor ────────────────────────────────────────────
+
+// State: {lang: string, data: {defaults:{}, overrides:{lang:{}}}}
+let _notifTplState = { lang: 'en_EN', data: null };
+
+// Runtime variable descriptions keyed by {var} placeholder
+const _HTML_VAR_DESC_KEYS = {
+    '{sender_name}': 'notif_html_var_sender_name',
+    '{kind}':        'notif_html_var_kind',
+    '{module}':      'notif_html_var_module',
+    '{item}':        'notif_html_var_item',
+    '{status}':      'notif_html_var_status',
+    '{message}':     'notif_html_var_message',
+    '{timestamp}':   'notif_html_var_timestamp',
+    '{public_url}':  'notif_html_var_public_url',
+    '{n}':           'notif_html_var_n',
+};
+
+// Template key groups: { groupKey, entries: [{key, labelKey, multiline, vars}] }
+const _NOTIF_TPL_GROUPS = [
+    { key: 'notif_tpl_group_general', entries: [
+        { key: 'footer',      labelKey: 'notif_tpl_lbl_footer',      multiline: true },
+        { key: 'view_status', labelKey: 'notif_tpl_lbl_view_status' },
+    ]},
+    { key: 'notif_tpl_group_badges', entries: [
+        { key: 'badge_test',     labelKey: 'notif_tpl_lbl_badge_test' },
+        { key: 'badge_down',     labelKey: 'notif_tpl_lbl_badge_down' },
+        { key: 'badge_warn',     labelKey: 'notif_tpl_lbl_badge_warn' },
+        { key: 'badge_recovery', labelKey: 'notif_tpl_lbl_badge_recovery' },
+        { key: 'badge_info',     labelKey: 'notif_tpl_lbl_badge_info' },
+    ]},
+    { key: 'notif_tpl_group_test', entries: [
+        { key: 'test_subject', labelKey: 'notif_tpl_lbl_test_subject' },
+        { key: 'test_title',   labelKey: 'notif_tpl_lbl_test_title' },
+        { key: 'test_body_1',  labelKey: 'notif_tpl_lbl_test_body_1', multiline: true, vars: '{sender}' },
+        { key: 'test_body_2',  labelKey: 'notif_tpl_lbl_test_body_2', multiline: true },
+        { key: 'test_body_3',  labelKey: 'notif_tpl_lbl_test_body_3', multiline: true },
+    ]},
+    { key: 'notif_tpl_group_alert', entries: [
+        { key: 'alert_down',     labelKey: 'notif_tpl_lbl_alert_down',     vars: '{item}' },
+        { key: 'alert_warn',     labelKey: 'notif_tpl_lbl_alert_warn',     vars: '{item}' },
+        { key: 'alert_recovery', labelKey: 'notif_tpl_lbl_alert_recovery', vars: '{item}' },
+        { key: 'alert_info',     labelKey: 'notif_tpl_lbl_alert_info',     vars: '{item}' },
+        { key: 'alert_intro',    labelKey: 'notif_tpl_lbl_alert_intro',    multiline: true },
+    ]},
+    { key: 'notif_tpl_group_labels', entries: [
+        { key: 'label_module',    labelKey: 'notif_tpl_lbl_label_module' },
+        { key: 'label_item',      labelKey: 'notif_tpl_lbl_label_item' },
+        { key: 'label_status',    labelKey: 'notif_tpl_lbl_label_status' },
+        { key: 'label_detail',    labelKey: 'notif_tpl_lbl_label_detail' },
+        { key: 'label_timestamp', labelKey: 'notif_tpl_lbl_label_timestamp' },
+    ]},
+    { key: 'notif_tpl_group_summary', entries: [
+        { key: 'summary_one',   labelKey: 'notif_tpl_lbl_summary_one' },
+        { key: 'summary_many',  labelKey: 'notif_tpl_lbl_summary_many',  vars: '{n}' },
+        { key: 'summary_intro', labelKey: 'notif_tpl_lbl_summary_intro', multiline: true },
+        { key: 'summary_ts',    labelKey: 'notif_tpl_lbl_summary_ts',    vars: '{ts}' },
+    ]},
+];
+
+function _renderNotifTemplatesSection() {
+    return _renderNotifStringSection() + _renderNotifHtmlSection();
+}
+
+function _renderNotifStringSection() {
+    const langOpts = SUPPORTED_LANGS.map(lc => {
+        const sel = _notifTplState.lang === lc ? ' selected' : '';
+        return `<option value="${escAttr(lc)}"${sel}>${esc(I18N['lang_' + lc] || lc)}</option>`;
+    }).join('');
+
+    return `<div class="rounded-3 border overflow-hidden mb-3">
+        <div class="px-3 py-2 border-bottom d-flex align-items-center gap-2"
+             style="background:var(--bs-tertiary-bg)">
+            <i class="bi bi-file-text text-primary"></i>
+            <strong class="small">${esc(t('notif_tpl_title'))}</strong>
+        </div>
+        <div class="px-3 py-3">
+            <p class="small text-muted mb-3">${esc(t('notif_tpl_desc'))}</p>
+            <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+                <label class="col-form-label col-form-label-sm fw-semibold text-nowrap" for="notifTplLangSel">
+                    <i class="bi bi-translate me-1"></i>${esc(t('notif_tpl_lang_label'))}
+                </label>
+                <select id="notifTplLangSel" class="form-select form-select-sm" style="max-width:180px"
+                    onchange="_notifTplLangChanged(this.value)">${langOpts}</select>
+                <div class="ms-auto d-flex gap-2">
+                    <button class="btn btn-sm btn-secondary" onclick="_notifTplResetLang()"
+                        title="${escAttr(t('notif_tpl_reset_lang'))}">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('notif_tpl_reset_lang'))}
+                    </button>
+                    <button class="btn btn-sm btn-primary" onclick="_notifTplSave()">
+                        <i class="bi bi-floppy me-1"></i>${esc(t('save'))}
+                    </button>
+                </div>
+            </div>
+            <div id="notifTplBody">
+                <div class="text-center text-muted py-4" style="background:var(--bs-secondary-bg);border-radius:.375rem">
+                    <span class="spinner-border spinner-border-sm me-1"></span>${esc(t('loading'))}
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function _notifTplLoad() {
+    // Load string overrides and HTML overrides in parallel
+    await Promise.all([_notifTplLoadStrings(), _notifHtmlLoad()]);
+}
+
+async function _notifTplLoadStrings() {
+    try {
+        const r = await fetch('/api/v1/notify/templates');
+        if (r.status === 401) { _onSessionTerminated(); return; }
+        if (!r.ok) { showToast(t('connection_error'), 'danger'); return; }
+        _notifTplState.data = await r.json();
+        _notifTplRender();
+    } catch (e) {
+        showToast(t('connection_error'), 'danger');
+    }
+}
+
+function _notifTplRender() {
+    const container = document.getElementById('notifTplBody');
+    if (!container || !_notifTplState.data) return;
+    const { defaults, overrides, lang_strings } = _notifTplState.data;
+    const langOverrides = overrides[_notifTplState.lang] || {};
+    // Use lang-specific built-in strings as placeholder/reference (fall back to English defaults)
+    const langDefaults = lang_strings[_notifTplState.lang] || defaults;
+    let html = '';
+    for (const grp of _NOTIF_TPL_GROUPS) {
+        html += `<div class="mb-3">
+            <p class="small fw-semibold mb-2 pb-1 border-bottom" style="color:var(--bs-secondary-color)">${esc(t(grp.key))}</p>`;
+        for (const entry of grp.entries) {
+            const { key, labelKey, multiline, vars } = entry;
+            const defVal  = langDefaults[key] || defaults[key] || '';
+            const custVal = langOverrides[key] || '';
+            const label   = t(labelKey) || key;
+            const varBadge = vars
+                ? `<code class="ms-2 small text-muted">${esc(vars)}</code>`
+                : '';
+            const inputEl = multiline
+                ? `<textarea class="form-control form-control-sm notif-tpl-input" rows="2"
+                        data-tpl-key="${escAttr(key)}"
+                        placeholder="${escAttr(defVal)}"
+                        style="resize:vertical;font-size:.82rem">${esc(custVal)}</textarea>`
+                : `<input type="text" class="form-control form-control-sm notif-tpl-input"
+                        data-tpl-key="${escAttr(key)}"
+                        value="${escAttr(custVal)}"
+                        placeholder="${escAttr(defVal)}">`;
+            html += `<div class="row mb-2 align-items-start">
+                <label class="col-sm-4 col-form-label col-form-label-sm pt-1 text-truncate" title="${escAttr(label)}">
+                    ${esc(label)}${varBadge}
+                </label>
+                <div class="col-sm-8">${inputEl}
+                    <div class="small text-muted mt-1" style="white-space:pre-wrap;word-break:break-word;font-size:.78rem;opacity:.7">${esc(defVal)}</div>
+                </div>
+            </div>`;
+        }
+        html += `</div>`;
+    }
+    container.innerHTML = html;
+}
+
+function _notifTplLangChanged(lang) {
+    _notifTplState.lang = lang;
+    // Keep HTML editor in sync
+    _notifHtmlState.lang = lang;
+    const htmlSel = document.getElementById('notifHtmlLangSel');
+    if (htmlSel) htmlSel.value = lang;
+    _notifHtmlRefresh();
+    if (_notifTplState.data) {
+        _notifTplRender();
+    } else {
+        _notifTplLoad();
+    }
+}
+
+async function _notifTplSave() {
+    const inputs = document.querySelectorAll('#notifTplBody .notif-tpl-input');
+    const payload = {};
+    inputs.forEach(inp => {
+        const key = inp.dataset.tplKey;
+        const val = inp.value.trim();
+        if (key && val) payload[key] = val;
+    });
+    const r = await apiPut(`/api/v1/notify/templates/${encodeURIComponent(_notifTplState.lang)}`, payload);
+    if (r && r.ok) {
+        // Update local state
+        if (_notifTplState.data) {
+            _notifTplState.data.overrides[_notifTplState.lang] = r.overrides || {};
+        }
+        showToast(t('notif_tpl_saved'), 'success');
+    } else {
+        showToast((r?.error) || t('connection_error'), 'danger');
+    }
+}
+
+async function _notifTplResetLang() {
+    if (!confirm(t('notif_tpl_reset_lang_confirm'))) return;
+    const r = await apiDelete(`/api/v1/notify/templates/${encodeURIComponent(_notifTplState.lang)}`);
+    if (r && r.status === 200) {
+        if (_notifTplState.data) {
+            delete _notifTplState.data.overrides[_notifTplState.lang];
+        }
+        _notifTplRender();
+        showToast(t('notif_tpl_reset_ok'), 'success');
+    } else {
+        showToast((r?.data?.error) || t('connection_error'), 'danger');
+    }
+}
+
+// ── HTML body template editor ────────────────────────────────────────────────
+
+let _notifHtmlState = {
+    type: 'alert',    // current email type: test | alert | summary
+    lang: 'en_EN',    // current language
+    stored: {},       // {type: {lang: html}} — loaded from server
+    vars: {},         // {type: [var1, var2]} — loaded from server
+};
+
+/** CodeMirror instance (null = not yet initialized or CM unavailable). */
+let _cmEditor = null;
+/** Pending load promise — prevents double-loading. */
+let _cmLoadPromise = null;
+
+/** Inject a <script> or <link> tag and return a Promise that resolves when loaded. */
+function _cmLoadAsset(src, isStyle) {
+    return new Promise((resolve, reject) => {
+        const selector = isStyle ? `link[href="${src}"]` : `script[src="${src}"]`;
+        if (document.querySelector(selector)) { resolve(); return; }
+        const el = document.createElement(isStyle ? 'link' : 'script');
+        if (isStyle) { el.rel = 'stylesheet'; el.href = src; }
+        else         { el.src = src; }
+        el.onload = resolve;
+        el.onerror = () => reject(new Error('Failed to load ' + src));
+        document.head.appendChild(el);
+    });
+}
+
+/**
+ * Lazy-load CodeMirror 5 from local static assets.
+ * Safe to call multiple times — loads only once.
+ * Returns true on success, false if any asset fails.
+ */
+async function _ensureCodeMirror() {
+    if (typeof CodeMirror !== 'undefined') return true;
+    if (_cmLoadPromise) return _cmLoadPromise;
+    _cmLoadPromise = (async () => {
+        try {
+            // All CSS assets (non-blocking; browser parallelises link tags)
+            [
+                '/static/css/codemirror/codemirror.min.css',
+                '/static/css/codemirror/cm-theme-material-darker.min.css',
+                '/static/css/codemirror/cm-theme-eclipse.min.css',
+                '/static/css/codemirror/cm-show-hint.min.css',
+                '/static/css/codemirror/cm-foldgutter.min.css',
+            ].forEach(u => _cmLoadAsset(u, true));
+
+            // Core JS — must be first
+            await _cmLoadAsset('/static/js/codemirror/codemirror.min.js', false);
+
+            // Mode dependencies (parallel); htmlmixed needs all three
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-xml.min.js', false),
+                _cmLoadAsset('/static/js/codemirror/cm-css.min.js', false),
+                _cmLoadAsset('/static/js/codemirror/cm-javascript.min.js', false),
+            ]);
+            await _cmLoadAsset('/static/js/codemirror/cm-htmlmixed.min.js', false);
+
+            // Addons — all can load in parallel after htmlmixed
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-matchbrackets.min.js',  false),
+                _cmLoadAsset('/static/js/codemirror/cm-closebrackets.min.js',  false),
+                _cmLoadAsset('/static/js/codemirror/cm-closetag.min.js',       false),
+                _cmLoadAsset('/static/js/codemirror/cm-activeline.min.js',     false),
+                // Hints
+                _cmLoadAsset('/static/js/codemirror/cm-show-hint.min.js',      false),
+                // Folding (foldcode must precede gutter/xml/brace)
+            ]);
+            // Folding: foldcode base first, then gutter + range finders
+            await _cmLoadAsset('/static/js/codemirror/cm-foldcode.min.js', false);
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-foldgutter.min.js', false),
+                _cmLoadAsset('/static/js/codemirror/cm-xml-fold.min.js',   false),
+                _cmLoadAsset('/static/js/codemirror/cm-brace-fold.min.js', false),
+            ]);
+            // Hint engines (depend on show-hint + mode files)
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-html-hint.min.js', false),
+                _cmLoadAsset('/static/js/codemirror/cm-css-hint.min.js',  false),
+            ]);
+            // Search & Replace (dialog must load before search)
+            _cmLoadAsset('/static/css/codemirror/cm-dialog.min.css', true);
+            await _cmLoadAsset('/static/js/codemirror/cm-dialog.min.js', false);
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-searchcursor.min.js',  false),
+                _cmLoadAsset('/static/js/codemirror/cm-comment.min.js',       false),
+            ]);
+            await _cmLoadAsset('/static/js/codemirror/cm-search.min.js', false);
+            await _cmLoadAsset('/static/js/codemirror/cm-jump-to-line.min.js', false);
+            // HTML Beautify
+            await _cmLoadAsset('/static/js/codemirror/beautify-html.min.js', false);
+            return true;
+        } catch (e) {
+            console.warn('[ServiceSentry] CodeMirror could not be loaded:', e);
+            _cmLoadPromise = null; // allow retry
+            return false;
+        }
+    })();
+    return _cmLoadPromise;
+}
+
+/** Format/beautify the HTML in the editor using js-beautify. */
+async function _cmFormatHtml() {
+    if (!_cmEditor) return;
+    const btn = document.querySelector('[onclick="_cmFormatHtml()"]');
+
+    // If beautify hasn't loaded yet, wait for it (it's part of the same CM load chain)
+    if (typeof html_beautify === 'undefined') {
+        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+        await _ensureCodeMirror();
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Format'; }
+    }
+    if (typeof html_beautify === 'undefined') {
+        showToast('Formatter not available', 'warning');
+        return;
+    }
+
+    const raw = _cmEditor.getValue();
+    if (!raw.trim()) return;
+
+    const pretty = html_beautify(raw, {
+        indent_size:          2,
+        indent_char:          ' ',
+        max_preserve_newlines: 1,
+        preserve_newlines:    true,
+        wrap_line_length:     0,        // keep long inline-style lines intact
+        wrap_attributes:      'auto',
+        end_with_newline:     true,
+        extra_liners:         ['head', 'body', '/html'],
+        unformatted:          ['span', 'a', 'b', 'em', 'i', 'strong',
+                               'br', 'img', 'abbr', 'acronym', 'cite',
+                               'code', 'dfn', 'kbd', 'label', 'map',
+                               'object', 'output', 'q', 's', 'samp',
+                               'select', 'small', 'sub', 'sup', 'time',
+                               'tt', 'u', 'var'],
+        content_unformatted:  ['pre', 'textarea', 'script', 'style'],
+    });
+
+    if (pretty === raw) { showToast('Already formatted', 'info'); return; }
+
+    const cursor = _cmEditor.getCursor();
+    _cmEditor.setValue(pretty);
+    _cmEditor.setCursor(cursor);
+    _cmEditor.focus();
+    showToast('Formatted ✓', 'success');
+}
+
+/** Toggle line wrapping in the editor and update the button appearance. */
+function _cmToggleWrap() {
+    if (!_cmEditor) return;
+    const wrap = !_cmEditor.getOption('lineWrapping');
+    _cmEditor.setOption('lineWrapping', wrap);
+    _cmUpdateWrapBtn(wrap);
+}
+
+/** Sync the wrap button colour/title to the current wrap state. */
+function _cmUpdateWrapBtn(wrap) {
+    const btn = document.getElementById('notifHtmlWrapBtn');
+    if (!btn) return;
+    btn.title = wrap ? 'Line wrap ON — click to disable' : 'Line wrap OFF — click to enable';
+    btn.className = btn.className
+        .replace(/\bbtn-(secondary|info|primary)\b/g, '')
+        .trim() + (wrap ? ' btn-info' : ' btn-secondary');
+}
+
+/**
+ * Show the appropriate hint (HTML or CSS) based on the cursor's inner mode.
+ * Falls back to HTML hints if the inner mode can't be determined.
+ */
+function _cmShowHint(cm) {
+    if (typeof CodeMirror === 'undefined' || !CodeMirror.showHint) return;
+    const cur   = cm.getCursor();
+    const token = cm.getTokenAt(cur);
+    const inner = CodeMirror.innerMode(cm.getMode(), token.state);
+    const hint  = (inner.mode && inner.mode.name === 'css')
+        ? CodeMirror.hint.css
+        : CodeMirror.hint.html;
+    CodeMirror.showHint(cm, hint, { completeSingle: false });
+}
+
+/**
+ * Attach CodeMirror to #notifHtmlEditor if not already attached.
+ * Safe to call repeatedly — skips if already attached to the same textarea.
+ * Detects stale instances when the config section is re-rendered.
+ */
+async function _notifHtmlMaybeInitEditor() {
+    // Clear stale instance if the textarea was removed from the DOM
+    if (_cmEditor && !_cmEditor.getTextArea().isConnected) {
+        _cmEditor = null;
+    }
+    const ta = document.getElementById('notifHtmlEditor');
+    if (!ta) return;
+    // Already attached to this exact textarea
+    if (_cmEditor && _cmEditor.getTextArea() === ta) {
+        _cmEditor.refresh();
+        return;
+    }
+    const ok = await _ensureCodeMirror();
+    // Re-fetch after async — DOM may have changed
+    const ta2 = document.getElementById('notifHtmlEditor');
+    if (!ok || !ta2) return;
+
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    _cmEditor = CodeMirror.fromTextArea(ta2, {
+        mode:               'htmlmixed',
+        theme:              isDark ? 'material-darker' : 'eclipse',
+        lineNumbers:        true,
+        lineWrapping:       false,
+        tabSize:            2,
+        indentWithTabs:     false,
+        styleActiveLine:    true,
+        matchBrackets:      true,
+        autoCloseBrackets:  true,
+        autoCloseTags:      true,
+        // Code folding in the gutter
+        foldGutter:         true,
+        gutters:            ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
+        foldOptions:        { widget: '⋯' },
+        extraKeys: {
+            Tab:            cm => cm.execCommand('indentMore'),
+            'Shift-Tab':    cm => cm.execCommand('indentLess'),
+            'Ctrl-Space':   cm => _cmShowHint(cm),
+            'Ctrl-/':       cm => cm.execCommand('toggleComment'),
+            'Cmd-/':        cm => cm.execCommand('toggleComment'),
+            'Ctrl-F':       'findPersistent',
+            'Ctrl-H':       'replace',
+            'Ctrl-G':       'jumpToLine',
+            'Alt-F':        cm => cm.execCommand('fold'),
+            'Alt-U':        cm => cm.execCommand('unfold'),
+            'F11':          () => _notifHtmlToggleFullscreen(),
+        },
+    });
+
+    // Auto-trigger hints only on specific trigger characters to avoid constant popups
+    _cmEditor.on('inputRead', (cm, change) => {
+        if (cm.state.completionActive) return; // already open
+        if (!CodeMirror.showHint) return;       // addon not loaded yet
+        if (change.origin !== '+input') return;
+        const ch = change.text[0];
+        if (!ch || ch === '\n' || ch === '\r') return;
+
+        const cur   = cm.getCursor();
+        const token = cm.getTokenAt(cur);
+        const inner = CodeMirror.innerMode(cm.getMode(), token.state);
+        const mode  = inner?.mode?.name;
+
+        // < → always start a tag completion
+        // space / : → only inside xml (tag attributes) or css (property values)
+        if (ch === '<' ||
+           ((ch === ' ' || ch === ':') && (mode === 'xml' || mode === 'css'))) {
+            _cmShowHint(cm);
+        }
+    });
+
+    _cmEditor.on('change', cm => cm.save()); // keep hidden textarea in sync
+    _cmEditor.setSize(null, '400px');
+
+    // Sync wrap button to initial state (wrap is OFF by default)
+    _cmUpdateWrapBtn(false);
+}
+
+function _renderNotifHtmlSection() {
+    const typeOpts = ['test', 'alert', 'summary'].map(tp => {
+        const sel = _notifHtmlState.type === tp ? ' selected' : '';
+        const lbl = t(`notif_html_tpl_type_${tp}`);
+        return `<option value="${escAttr(tp)}"${sel}>${esc(lbl)}</option>`;
+    }).join('');
+    const langOpts = SUPPORTED_LANGS.map(lc => {
+        const sel = _notifHtmlState.lang === lc ? ' selected' : '';
+        return `<option value="${escAttr(lc)}"${sel}>${esc(I18N['lang_' + lc] || lc)}</option>`;
+    }).join('');
+
+    return `<div class="rounded-3 border overflow-hidden mb-3">
+        <div class="px-3 py-2 border-bottom d-flex align-items-center gap-2"
+             style="background:var(--bs-tertiary-bg)">
+            <i class="bi bi-code-slash text-warning"></i>
+            <strong class="small">${esc(t('notif_html_tpl_title'))}</strong>
+        </div>
+        <div class="px-3 py-3">
+            <p class="small text-muted mb-3">${esc(t('notif_html_tpl_desc'))}</p>
+            <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                <label class="col-form-label col-form-label-sm fw-semibold text-nowrap">
+                    <i class="bi bi-envelope me-1"></i>${esc(t('notif_html_tpl_type_label'))}
+                </label>
+                <select id="notifHtmlTypeSel" class="form-select form-select-sm" style="max-width:160px"
+                    onchange="_notifHtmlTypeChanged(this.value)">${typeOpts}</select>
+                <label class="col-form-label col-form-label-sm fw-semibold text-nowrap ms-2">
+                    <i class="bi bi-translate me-1"></i>${esc(t('notif_tpl_lang_label'))}
+                </label>
+                <select id="notifHtmlLangSel" class="form-select form-select-sm" style="max-width:160px"
+                    onchange="_notifHtmlLangChanged(this.value)">${langOpts}</select>
+                <div class="ms-auto d-flex gap-2 flex-wrap">
+                    <button class="btn btn-sm btn-secondary" onclick="_notifHtmlLoadBuiltin()"
+                        title="${escAttr(t('notif_html_tpl_load_builtin_tt'))}">
+                        <i class="bi bi-download me-1"></i>${esc(t('notif_html_tpl_load_builtin'))}
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="_notifHtmlReset()">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('notif_html_tpl_reset'))}
+                    </button>
+                    <button class="btn btn-sm btn-primary" onclick="_notifHtmlSave()">
+                        <i class="bi bi-floppy me-1"></i>${esc(t('save'))}
+                    </button>
+                </div>
+            </div>
+            <div id="notifHtmlEditorWrap">
+                <div id="notifHtmlVarsBar" class="mb-2"></div>
+                <textarea id="notifHtmlEditor" class="form-control font-monospace"
+                    style="font-size:.78rem;resize:vertical;white-space:pre;overflow-wrap:normal;overflow-x:auto;min-height:400px"
+                    spellcheck="false"
+                    placeholder="&lt;!DOCTYPE html&gt;&#10;&lt;html&gt;...&lt;/html&gt;"></textarea>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function _notifHtmlLoad() {
+    try {
+        const r = await fetch('/api/v1/notify/html-templates');
+        if (r.status === 401) { _onSessionTerminated(); return; }
+        if (!r.ok) return;
+        const data = await r.json();
+        _notifHtmlState.stored = data.stored || {};
+        _notifHtmlState.vars   = data.vars   || {};
+        _notifHtmlRefresh();
+    } catch (_) { /* silent */ }
+}
+
+function _notifHtmlRefresh() {
+    // If CM is attached to the current textarea, update it; otherwise update the textarea
+    const ta = document.getElementById('notifHtmlEditor');
+    const html = (_notifHtmlState.stored[_notifHtmlState.type] || {})[_notifHtmlState.lang] || '';
+    if (_cmEditor && ta && _cmEditor.getTextArea() === ta) {
+        _cmEditor.setValue(html);
+    } else if (ta) {
+        ta.value = html;
+    }
+
+    // Update vars toolbar
+    const bar = document.getElementById('notifHtmlVarsBar');
+    if (!bar) return;
+    const runtimeVars = (_notifHtmlState.vars[_notifHtmlState.type] || []);
+
+    // Build grouped string-keys dropdown
+    const groupsHtml = _NOTIF_TPL_GROUPS.map(g => {
+        const items = g.entries.map(e => {
+            const v = '{' + e.key + '}';
+            return `<li><a class="dropdown-item font-monospace py-1 small" href="#"
+                onclick="event.preventDefault();_notifHtmlInsertVar('${escAttr(v)}')">${esc(v)}</a></li>`;
+        }).join('');
+        return `<li><h6 class="dropdown-header small">${esc(t(g.key))}</h6></li>${items}`;
+    }).join('<li><hr class="dropdown-divider my-1"></li>');
+
+    const runtimeBtns = runtimeVars.map(v =>
+        `<button type="button" class="btn btn-sm btn-warning font-monospace lh-1 py-1 px-2"
+            style="font-size:.75rem"
+            onclick="_notifHtmlInsertVar('${escAttr(v)}')">${esc(v)}</button>`
+    ).join('');
+
+    const isFs = document.getElementById('notifHtmlEditorWrap')?.classList.contains('notif-html-fs');
+    bar.innerHTML = `
+        <div class="d-flex align-items-center gap-2 flex-wrap p-2 rounded border"
+             style="background:var(--bs-tertiary-bg)">
+            <span class="fw-semibold small text-muted text-nowrap">
+                <i class="bi bi-braces me-1"></i>${esc(t('notif_html_tpl_vars_label'))}:
+            </span>
+            ${runtimeBtns}
+            ${runtimeVars.length ? '<span class="text-muted">|</span>' : ''}
+            <div class="dropdown">
+                <button type="button"
+                        class="btn btn-sm btn-info lh-1 py-1 px-2 dropdown-toggle"
+                        style="font-size:.75rem"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-key me-1"></i>${esc(t('notif_html_tpl_string_keys'))}
+                </button>
+                <ul class="dropdown-menu" style="max-height:320px;overflow-y:auto;min-width:220px">
+                    ${groupsHtml}
+                </ul>
+            </div>
+            <div class="ms-auto d-flex gap-2 flex-nowrap">
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2"
+                        style="font-size:.75rem" onclick="_cmFormatHtml()"
+                        title="Format / Beautify HTML">
+                    <i class="bi bi-magic me-1"></i>Format
+                </button>
+                <button type="button" id="notifHtmlWrapBtn"
+                        class="btn btn-sm btn-secondary lh-1 py-1 px-2"
+                        style="font-size:.75rem" onclick="_cmToggleWrap()"
+                        title="Toggle line wrap">
+                    <i class="bi bi-text-wrap"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2"
+                        style="font-size:.75rem"
+                        onclick="if(_cmEditor)_cmEditor.execCommand('findPersistent')"
+                        title="Find (Ctrl+F) / Replace (Ctrl+H)">
+                    <i class="bi bi-search"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2"
+                        style="font-size:.75rem" onclick="_notifHtmlPreview()"
+                        title="${escAttr(t('notif_html_tpl_preview'))}">
+                    <i class="bi bi-eye me-1"></i>${esc(t('notif_html_tpl_preview'))}
+                </button>
+                <button type="button" id="notifHtmlFsBtn"
+                        class="btn btn-sm btn-secondary lh-1 py-1 px-2"
+                        style="font-size:.75rem" onclick="_notifHtmlToggleFullscreen()"
+                        title="${escAttr(t(isFs ? 'notif_html_tpl_exit_fullscreen' : 'notif_html_tpl_fullscreen'))}">
+                    <i class="bi bi-${isFs ? 'fullscreen-exit' : 'arrows-fullscreen'}"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2"
+                        style="font-size:.75rem"
+                        data-bs-toggle="collapse" data-bs-target="#notifHtmlVarRef"
+                        title="${escAttr(t('notif_html_tpl_var_ref'))}">
+                    <i class="bi bi-braces-asterisk"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2"
+                        style="font-size:.75rem"
+                        data-bs-toggle="collapse" data-bs-target="#notifHtmlShortcuts"
+                        title="Keyboard shortcuts">
+                    <i class="bi bi-keyboard"></i>
+                </button>
+            </div>
+        </div>
+        <div class="collapse" id="notifHtmlVarRef">
+            <div class="px-3 py-2 rounded border mt-1" style="background:var(--bs-tertiary-bg);font-size:.8rem;max-height:360px;overflow-y:auto">
+                <div class="row g-3">
+                    <div class="${runtimeVars.length ? 'col-sm-5' : 'd-none'}">
+                        <div class="fw-semibold mb-2 small">${esc(t('notif_html_var_runtime_section'))} — ${esc(t('notif_html_tpl_type_' + _notifHtmlState.type))}</div>
+                        <table class="w-100 small" style="border-collapse:collapse">
+                            ${runtimeVars.map(v => `<tr>
+                                <td class="py-1 pe-3 font-monospace text-warning" style="white-space:nowrap">${esc(v)}</td>
+                                <td class="text-muted">${esc(t(_HTML_VAR_DESC_KEYS[v] || v))}</td>
+                            </tr>`).join('')}
+                        </table>
+                    </div>
+                    <div class="${runtimeVars.length ? 'col-sm-7' : 'col-12'}">
+                        <div class="fw-semibold mb-2 small">${esc(t('notif_html_var_string_section'))}</div>
+                        ${_NOTIF_TPL_GROUPS.map(g => `
+                            <div class="fw-semibold mt-2 mb-1" style="font-size:.75rem;color:var(--bs-secondary-color)">${esc(t(g.key))}</div>
+                            <table class="w-100 small" style="border-collapse:collapse">
+                                ${g.entries.map(e => `<tr>
+                                    <td class="py-1 pe-3 font-monospace" style="white-space:nowrap">{${esc(e.key)}}</td>
+                                    <td class="text-muted">${esc(t(e.labelKey))}${e.vars ? ` <span class="opacity-50 font-monospace small">${esc(e.vars)}</span>` : ''}</td>
+                                </tr>`).join('')}
+                            </table>`).join('')}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="collapse" id="notifHtmlShortcuts">
+            <div class="px-2 py-2 small rounded border mt-1" style="background:var(--bs-tertiary-bg);font-size:.8rem">
+                <div class="fw-semibold mb-2 small">Keyboard shortcuts</div>
+                <table class="w-100 small" style="border-collapse:collapse">
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+Space</kbd></td><td class="text-muted">Autocomplete</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+F</kbd></td><td class="text-muted">Find</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+H</kbd></td><td class="text-muted">Find &amp; Replace</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+G</kbd></td><td class="text-muted">Go to line</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+/</kbd></td><td class="text-muted">Toggle comment</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Alt+F</kbd></td><td class="text-muted">Fold block</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Alt+U</kbd></td><td class="text-muted">Unfold block</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Tab / Shift+Tab</kbd></td><td class="text-muted">Indent / Dedent</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>F11</kbd></td><td class="text-muted">Toggle fullscreen</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Esc</kbd></td><td class="text-muted">Exit fullscreen</td></tr>
+                </table>
+            </div>
+        </div>`;
+
+    // Initialize / refresh CodeMirror (async, fires-and-forgets if CM not loaded yet)
+    _notifHtmlMaybeInitEditor();
+}
+
+/** Insert {varName} at the current cursor position (CodeMirror or plain textarea). */
+function _notifHtmlInsertVar(varName) {
+    const ta = document.getElementById('notifHtmlEditor');
+    if (_cmEditor && ta && _cmEditor.getTextArea() === ta) {
+        const doc = _cmEditor.getDoc();
+        const sel = doc.getSelection();
+        if (sel) doc.replaceSelection(varName);
+        else     doc.replaceRange(varName, doc.getCursor());
+        _cmEditor.focus();
+        return;
+    }
+    // Fallback: plain textarea
+    if (!ta) return;
+    ta.focus();
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    ta.value = ta.value.substring(0, start) + varName + ta.value.substring(end);
+    const pos = start + varName.length;
+    ta.selectionStart = ta.selectionEnd = pos;
+    ta.dispatchEvent(new Event('input'));
+}
+
+/** Toggle fullscreen mode for the HTML editor. */
+function _notifHtmlToggleFullscreen() {
+    const wrap = document.getElementById('notifHtmlEditorWrap');
+    if (!wrap) return;
+    const isFs = wrap.classList.toggle('notif-html-fs');
+    // Resize CodeMirror to fill available height
+    if (_cmEditor) {
+        _cmEditor.setSize(null, isFs ? 'calc(100vh - 110px)' : '400px');
+        setTimeout(() => _cmEditor.refresh(), 10);
+    }
+    // Update toolbar button label
+    _notifHtmlRefreshFsBtn(isFs);
+}
+
+/** Update only the fullscreen button label without re-rendering the entire toolbar. */
+function _notifHtmlRefreshFsBtn(isFs) {
+    const btn = document.getElementById('notifHtmlFsBtn');
+    if (!btn) return;
+    btn.innerHTML = `<i class="bi bi-${isFs ? 'fullscreen-exit' : 'arrows-fullscreen'} me-1"></i>${esc(t(isFs ? 'notif_html_tpl_exit_fullscreen' : 'notif_html_tpl_fullscreen'))}`;
+}
+
+// Exit fullscreen on Escape key
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        const wrap = document.getElementById('notifHtmlEditorWrap');
+        if (wrap && wrap.classList.contains('notif-html-fs')) {
+            _notifHtmlToggleFullscreen();
+            e.stopPropagation();
+        }
+    }
+}, true);
+
+/** Open the preview modal and render the current template with sample data. */
+async function _notifHtmlPreview() {
+    const ta = document.getElementById('notifHtmlEditor');
+    const html = (_cmEditor && ta && _cmEditor.getTextArea() === ta)
+        ? _cmEditor.getValue()
+        : (ta ? ta.value : '');
+
+    const modalEl  = document.getElementById('notifHtmlPreviewModal');
+    const titleEl  = document.getElementById('notifHtmlPreviewTitle');
+    const spinner  = document.getElementById('notifHtmlPreviewSpinner');
+    const frame    = document.getElementById('notifHtmlPreviewFrame');
+
+    if (titleEl)  titleEl.textContent = t('notif_html_tpl_preview_title');
+    if (spinner)  { spinner.classList.remove('d-none'); spinner.innerHTML = '<span class="spinner-border text-secondary"></span>'; }
+    if (frame)    { frame.classList.add('d-none'); frame.srcdoc = ''; }
+
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+
+    try {
+        const r = await fetch(
+            `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/preview`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ html, lang: _notifHtmlState.lang }),
+            }
+        );
+        if (r.status === 401) { modal.hide(); _onSessionTerminated(); return; }
+        if (r.ok) {
+            const data = await r.json();
+            const previewHtml = data.html || '';
+            if (!previewHtml.trim()) {
+                if (spinner) spinner.innerHTML = `<p class="text-muted p-4">${esc(t('notif_html_tpl_preview_empty'))}</p>`;
+                return;
+            }
+            if (frame) {
+                frame.srcdoc = previewHtml;
+                frame.classList.remove('d-none');
+            }
+            if (spinner) spinner.classList.add('d-none');
+        } else {
+            if (spinner) spinner.innerHTML = `<p class="text-danger p-4">${esc(t('connection_error'))}</p>`;
+        }
+    } catch (_) {
+        if (spinner) spinner.innerHTML = `<p class="text-danger p-4">${esc(t('connection_error'))}</p>`;
+    }
+}
+
+function _notifHtmlTypeChanged(val) {
+    _notifHtmlState.type = val;
+    _notifHtmlRefresh();
+}
+
+function _notifHtmlLangChanged(val) {
+    _notifHtmlState.lang = val;
+    _notifHtmlRefresh();
+}
+
+async function _notifHtmlLoadBuiltin() {
+    const btn = document.querySelector('[onclick="_notifHtmlLoadBuiltin()"]');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+    try {
+        const url = `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/built-in`
+            + `?lang=${encodeURIComponent(_notifHtmlState.lang)}`;
+        const r = await fetch(url);
+        if (r.ok) {
+            const data = await r.json();
+            const ta = document.getElementById('notifHtmlEditor');
+            const newHtml = data.html || '';
+            if (_cmEditor && ta && _cmEditor.getTextArea() === ta) {
+                _cmEditor.setValue(newHtml);
+            } else if (ta) {
+                ta.value = newHtml;
+            }
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = `<i class="bi bi-download me-1"></i>${esc(t('notif_html_tpl_load_builtin'))}`; }
+    }
+}
+
+async function _notifHtmlSave() {
+    const ta = document.getElementById('notifHtmlEditor');
+    const html = (_cmEditor && ta && _cmEditor.getTextArea() === ta)
+        ? _cmEditor.getValue()
+        : (ta ? ta.value : '');
+    const r = await apiPut(
+        `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/${encodeURIComponent(_notifHtmlState.lang)}`,
+        { html }
+    );
+    if (r && r.ok) {
+        if (!_notifHtmlState.stored[_notifHtmlState.type]) _notifHtmlState.stored[_notifHtmlState.type] = {};
+        _notifHtmlState.stored[_notifHtmlState.type][_notifHtmlState.lang] = html;
+        showToast(t('notif_html_tpl_saved'), 'success');
+    } else {
+        showToast((r?.error) || t('connection_error'), 'danger');
+    }
+}
+
+async function _notifHtmlReset() {
+    if (!confirm(t('notif_tpl_reset_lang_confirm'))) return;
+    const r = await apiDelete(
+        `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/${encodeURIComponent(_notifHtmlState.lang)}`
+    );
+    if (r && r.status === 200) {
+        if (_notifHtmlState.stored[_notifHtmlState.type]) {
+            delete _notifHtmlState.stored[_notifHtmlState.type][_notifHtmlState.lang];
+        }
+        _notifHtmlRefresh();
+        showToast(t('notif_html_tpl_reset_ok'), 'success');
+    } else {
+        showToast((r?.data?.error) || t('connection_error'), 'danger');
     }
 }
 
@@ -2270,7 +3560,7 @@ async function testTelegram() {
     }
     const btn = document.getElementById('btnTestTelegram');
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('telegram_test'); }
-    const r = await apiPost('/api/telegram/test', { token, chat_id });
+    const r = await apiPost('/api/v1/notify/telegram/test', { token, chat_id });
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-telegram me-1"></i>' + t('telegram_test'); }
     if (r && r.status === 200 && r.data?.ok) {
         showToast(t('telegram_test_ok'));

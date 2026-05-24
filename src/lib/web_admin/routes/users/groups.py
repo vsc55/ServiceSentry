@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Groups management routes: /api/groups, /api/groups/<name>."""
+"""Groups management routes: /api/v1/groups, /api/v1/groups/<name>."""
 
 from flask import jsonify
 
-from ..constants import BUILTIN_ROLE_PERMISSIONS, _BUILTIN_GROUPS
+from ...constants import BUILTIN_ROLE_PERMISSIONS, _BUILTIN_GROUPS
 
 
 def register(app, wa):
@@ -27,7 +27,7 @@ def register(app, wa):
 
     # --- API: groups management -----------------------------------
 
-    @app.route('/api/groups', methods=['GET'])
+    @app.route('/api/v1/groups', methods=['GET'])
     @groups_view_req
     def api_get_groups():
         """Return all groups with their roles and member count."""
@@ -51,7 +51,7 @@ def register(app, wa):
             }
         return jsonify(result)
 
-    @app.route('/api/groups', methods=['POST'])
+    @app.route('/api/v1/groups', methods=['POST'])
     @groups_add_req
     def api_create_group():
         """Create a new group."""
@@ -97,7 +97,7 @@ def register(app, wa):
         })
         return jsonify({'ok': True}), 201
 
-    @app.route('/api/groups/<name>', methods=['PUT'])
+    @app.route('/api/v1/groups/<name>', methods=['PUT'])
     @groups_edit_req
     def api_update_group(name: str):
         """Update a group's label, description, roles and members."""
@@ -182,7 +182,7 @@ def register(app, wa):
             wa._audit('group_updated', detail={'name': name, 'changes': changes})
         return jsonify({'ok': True})
 
-    @app.route('/api/groups/<name>', methods=['DELETE'])
+    @app.route('/api/v1/groups/<name>', methods=['DELETE'])
     @groups_delete_req
     def api_delete_group(name: str):
         """Delete a group and remove it from all users."""

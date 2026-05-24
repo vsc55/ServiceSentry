@@ -1,4 +1,4 @@
-{# ================================================================
+﻿{# ================================================================
    Account — shared role constants, shared utilities, and own
    account actions (change password, dark mode toggle).
    Must be included before _js_users, _js_roles and _js_groups.
@@ -109,11 +109,11 @@ async function saveAccountPreferences() {
         if (!pwCur)           { showToast(t('enter_current_password'), 'warning'); return; }
         if (!pwNew)           { showToast(t('enter_new_password'),     'warning'); return; }
         if (pwNew !== pwConf) { showToast(t('passwords_dont_match'),   'warning'); return; }
-        const rp = await apiPut('/api/users/me/password', { current_password: pwCur, new_password: pwNew });
+        const rp = await apiPut('/api/v1/users/me/password', { current_password: pwCur, new_password: pwNew });
         if (!rp || !rp.ok) { showToast(rp?.error || t('password_change_error'), 'danger'); return; }
     }
 
-    const r = await apiPut('/api/users/me/preferences', { lang: langVal, dark_mode: darkMode });
+    const r = await apiPut('/api/v1/users/me/preferences', { lang: langVal, dark_mode: darkMode });
     if (r && r.ok) {
         const resolved = darkMode === null ? WA_DEFAULT_DARK_MODE : darkMode;
         document.documentElement.setAttribute('data-bs-theme', resolved ? 'dark' : 'light');

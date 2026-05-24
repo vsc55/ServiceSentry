@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for the /api/checks/run endpoint."""
 
@@ -23,7 +23,7 @@ class TestApiRunChecks:
     """Tests for the /api/checks/run endpoint."""
 
     def test_run_checks_requires_auth(self, client):
-        resp = client.post("/api/checks/run",
+        resp = client.post("/api/v1/modules/checks/run",
                            json={"modules": "all"})
         assert resp.status_code == 401
 
@@ -34,7 +34,7 @@ class TestApiRunChecks:
         admin._users['admin']['role'] = 'viewer'
         with client.session_transaction() as sess:
             sess['role'] = 'viewer'
-        resp = client.post("/api/checks/run",
+        resp = client.post("/api/v1/modules/checks/run",
                            json={"modules": "all"})
         assert resp.status_code in (302, 403)
         admin._users['admin']['role'] = 'admin'
@@ -43,7 +43,7 @@ class TestApiRunChecks:
         _login(client)
         orig = admin._modules_dir
         admin._modules_dir = None
-        resp = client.post("/api/checks/run",
+        resp = client.post("/api/v1/modules/checks/run",
                            json={"modules": "all"})
         assert resp.status_code == 500
         admin._modules_dir = orig
@@ -56,7 +56,7 @@ class TestApiRunChecks:
         admin._modules_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), '..', 'watchfuls'
         )
-        client.post("/api/checks/run",
+        client.post("/api/v1/modules/checks/run",
                      json={"modules": []})
         admin._modules_dir = orig
         events = [e['event'] for e in admin._audit_log]
@@ -89,7 +89,7 @@ class TestApiRunChecks:
         _login(client)
         orig = admin._modules_dir
         admin._modules_dir = str(mods_dir)
-        resp = client.post("/api/checks/run", json={"modules": "all"})
+        resp = client.post("/api/v1/modules/checks/run", json={"modules": "all"})
         admin._modules_dir = orig
 
         assert resp.status_code == 200
@@ -108,7 +108,7 @@ class TestApiRunChecks:
         _login(client)
         orig = admin._modules_dir
         admin._modules_dir = str(mods_dir)
-        resp = client.post("/api/checks/run", json={"modules": "all"})
+        resp = client.post("/api/v1/modules/checks/run", json={"modules": "all"})
         admin._modules_dir = orig
 
         assert resp.status_code == 200
@@ -123,7 +123,7 @@ class TestApiRunChecks:
         admin._modules_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), '..', 'watchfuls'
         )
-        resp = client.post("/api/checks/run", json={"modules": []})
+        resp = client.post("/api/v1/modules/checks/run", json={"modules": []})
         admin._modules_dir = orig
         assert resp.status_code == 200
         body = resp.get_json()
@@ -140,7 +140,7 @@ class TestApiRunChecks:
         admin._modules_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), '..', 'watchfuls'
         )
-        resp = client.post("/api/checks/run",
+        resp = client.post("/api/v1/modules/checks/run",
                            json={"modules": ["nonexistent_xyz"]})
         admin._modules_dir = orig
         assert resp.status_code == 200

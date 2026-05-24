@@ -1,4 +1,4 @@
-{# ================================================================
+﻿{# ================================================================
    Audit log tab — event history table (admin only).
    ================================================================ #}
 
@@ -486,7 +486,7 @@ async function renderAudit() {
         <div class="spinner-border spinner-border-sm me-2"></div>
         <span>${t('loading')}</span>
     </div>`;
-    const entries = await apiGet('/api/audit');
+    const entries = await apiGet('/api/v1/audit');
     // _origIdx = real index in the backend array (0=oldest, reversed from API)
     const raw = entries || [];
     _auditEntries = raw.map((e, i) => ({ ...e, _idx: i, _origIdx: raw.length - 1 - i }));
@@ -515,7 +515,7 @@ async function deleteAuditEntry(origIdx) {
 
 async function confirmClearAudit() {
     _showAuditConfirm(t('audit_confirm_clear_all'), async () => {
-        const r = await apiDelete('/api/audit');
+        const r = await apiDelete('/api/v1/audit');
         if (r && r.status === 200) { _auditEntries = []; renderAuditTable(); }
         else showToast(r?.data?.error || t('save_error'), 'danger');
     });

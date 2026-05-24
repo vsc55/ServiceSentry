@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for authentication routes: /login, /logout."""
 
@@ -100,7 +100,7 @@ class TestAuthentication:
     def test_session_stores_user_info(self, client):
         """Login populates session with username, role and display_name."""
         _login(client)
-        resp = client.get("/api/me")
+        resp = client.get("/api/v1/me")
         data = resp.get_json()
         assert data["username"] == "admin"
         assert data["role"] == "admin"

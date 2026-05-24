@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 
 from flask import flash, redirect, render_template, request, session, url_for
 
-from ..auth import ldap_auth
-from ..constants import SUPPORTED_LANGS
+from ...auth import ldap_auth
+from ...constants import SUPPORTED_LANGS
 
 
 def _establish_session(wa, username: str, user: dict, remember: bool = False) -> None:
@@ -56,14 +56,15 @@ def register(app, wa):
                 if existing.get('auth_source', 'local') != 'local':
                     attrs, reason = ldap_auth.authenticate(wa, username, password)
                     if attrs:
-                        user = ldap_auth.sync_user(wa, username, attrs)
+                        canonical = attrs.get('username') or username
+                        user = ldap_auth.sync_user(wa, canonical, attrs)
                         if not user.get('enabled', True):
                             flash(wa._t('account_disabled'), 'danger')
-                            wa._audit('login_failed', username, request.remote_addr,
+                            wa._audit('login_failed', canonical, request.remote_addr,
                                       detail={'reason': 'account_disabled'})
                             return redirect(url_for('login'))
-                        _establish_session(wa, username, user, remember)
-                        wa._audit('login_ok', username, request.remote_addr,
+                        _establish_session(wa, canonical, user, remember)
+                        wa._audit('login_ok', canonical, request.remote_addr,
                                   detail={'auth_source': 'ldap'})
                         return redirect(url_for('dashboard'))
                     # SSO users have no local password — never fall through to local auth
@@ -78,14 +79,15 @@ def register(app, wa):
                     # Unknown user + LDAP enabled → try LDAP first
                     attrs, reason = ldap_auth.authenticate(wa, username, password)
                     if attrs:
-                        user = ldap_auth.sync_user(wa, username, attrs)
+                        canonical = attrs.get('username') or username
+                        user = ldap_auth.sync_user(wa, canonical, attrs)
                         if not user.get('enabled', True):
                             flash(wa._t('account_disabled'), 'danger')
-                            wa._audit('login_failed', username, request.remote_addr,
+                            wa._audit('login_failed', canonical, request.remote_addr,
                                       detail={'reason': 'account_disabled'})
                             return redirect(url_for('login'))
-                        _establish_session(wa, username, user, remember)
-                        wa._audit('login_ok', username, request.remote_addr,
+                        _establish_session(wa, canonical, user, remember)
+                        wa._audit('login_ok', canonical, request.remote_addr,
                                   detail={'auth_source': 'ldap'})
                         return redirect(url_for('dashboard'))
                     if reason in ('ldap_invalid_credentials', 'ldap_user_not_found'):

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Watchful-module utility routes: /api/watchfuls/<module_name>/<action>."""
 
@@ -13,7 +13,7 @@ from flask import jsonify, request
 def register(app, wa):
     modules_view_req = wa._perm_required('modules_view')
 
-    @app.route('/api/watchfuls/<module_name>/<action>', methods=['GET', 'POST'])
+    @app.route('/api/v1/watchfuls/<module_name>/<action>', methods=['GET', 'POST'])
     @modules_view_req
     def api_watchful_action(module_name, action):
         if not re.match(r'^[a-z][a-z0-9_]*$', module_name):

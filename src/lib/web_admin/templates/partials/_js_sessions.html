@@ -1,4 +1,4 @@
-{# ================================================================
+﻿{# ================================================================
    Sessions tab — list active sessions, revoke, invalidate all.
    ================================================================ #}
 
@@ -94,7 +94,7 @@ async function _bulkRevokeSessions() {
     if (!sids.length) return;
     showConfirmModal(`${t('revoke_session')} ${sids.length} ${t('selected').toLowerCase()}?`, async () => {
         for (const sid of sids) {
-            const r = await apiPost('/api/sessions/revoke/' + encodeURIComponent(sid), {});
+            const r = await apiPost('/api/v1/sessions/revoke/' + encodeURIComponent(sid), {});
             if (r?.status === 200 && r.data?.ok) delete sessionsData[sid];
         }
         _selectedSessions.clear();
@@ -105,7 +105,7 @@ async function _bulkRevokeSessions() {
 async function revokeSession(sid) {
     showConfirmModal(t('revoke_session') + '?', async () => {
         const isCurrent = !!sessionsData[sid]?.is_current;
-        const r = await apiPost('/api/sessions/revoke/' + encodeURIComponent(sid), {});
+        const r = await apiPost('/api/v1/sessions/revoke/' + encodeURIComponent(sid), {});
         if (r && r.status === 200 && r.data?.ok) {
             showToast(t('session_revoked'));
             delete sessionsData[sid];
@@ -129,7 +129,7 @@ async function revokeSession(sid) {
 
 async function revokeUserSessions(username) {
     showConfirmModal(tf('confirm_revoke_user_sessions', username), async () => {
-        const r = await apiPost('/api/sessions/revoke-user/' + encodeURIComponent(username), {});
+        const r = await apiPost('/api/v1/sessions/revoke-user/' + encodeURIComponent(username), {});
         if (r && r.status === 200 && r.data?.ok) {
             showToast(t('user_sessions_revoked'));
             if (username === currentUser.username) {
@@ -149,7 +149,7 @@ async function revokeUserSessions(username) {
 
 async function invalidateAllSessions() {
     showConfirmModal(t('confirm_close_all_sessions'), async () => {
-        const r = await apiPost('/api/sessions/invalidate', {});
+        const r = await apiPost('/api/v1/sessions/invalidate', {});
         if (r && r.status === 200 && r.data?.ok) {
             showToast(t('sessions_closed'));
             setTimeout(() => { location.href = '/login'; }, Math.max((configData?.web_admin?.session_revoke_redirect_secs ?? 3) * 1000, 300));

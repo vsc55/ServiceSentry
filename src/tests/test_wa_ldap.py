@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for LDAP authentication integration."""
 
@@ -352,7 +352,7 @@ class TestLdapLoginFlow:
                                follow_redirects=True)
         # Should redirect back to login with error flash — session must NOT be active
         assert resp.status_code == 200
-        me = client.get('/api/me')
+        me = client.get('/api/v1/me')
         assert not me.get_json().get('logged_in', False)
 
 
@@ -371,7 +371,7 @@ class TestLdapTestEndpoint:
             conn_inst.entries = []
             MockConn.return_value = conn_inst
             # Pass bind_password explicitly to avoid secret_manager.decrypt branch
-            r = client.post('/api/ldap/test',
+            r = client.post('/api/v1/auth/ldap/test',
                             json={'server': 'ldap.example.com', 'bind_password': 'svcpass'})
         assert r.status_code == 200
         assert r.get_json()['ok'] is True
@@ -388,7 +388,7 @@ class TestLdapTestEndpoint:
              patch('ldap3.Server'):
             MockConn.side_effect = Exception('connection refused')
             # Pass bind_password explicitly to avoid secret_manager.decrypt branch
-            r_conn = client.post('/api/ldap/test',
+            r_conn = client.post('/api/v1/auth/ldap/test',
                                  json={'server': 'ldap.example.com',
                                        'bind_password': 'svcpass',
                                        'test_username': 'john', 'test_password': 'pass'})

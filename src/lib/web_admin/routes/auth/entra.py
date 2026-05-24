@@ -1,10 +1,12 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Microsoft Entra ID app-registration wizard.
+"""Microsoft Entra ID app-registration wizard API routes: /api/v1/entra/*.
 
-POST /api/entra/device-code  — inicia Device Code Flow, devuelve user_code
-POST /api/entra/device-poll  — sondea estado; al completarse crea la app via
-                               Graph API y devuelve client_id/secret/tenant
+POST /api/v1/entra/device-code        — inicia Device Code Flow, devuelve user_code
+POST /api/v1/entra/device-poll        — sondea estado; al completarse crea la app via
+                                        Graph API y devuelve client_id/secret/tenant
+POST /api/v1/entra/saml2/device-code  — igual pero registra una app SAML2
+POST /api/v1/entra/saml2/device-poll  — sondea y devuelve IdP metadata SAML2
 """
 
 import base64
@@ -113,7 +115,7 @@ def register(app, wa):
             base = f'https://{base}'
         return f'{base}/auth/oidc/callback'
 
-    @app.route('/api/entra/groups', methods=['POST'])
+    @app.route('/api/v1/auth/entra/groups', methods=['POST'])
     @config_edit_req
     def api_entra_groups():
         """Fetch all groups from Microsoft Graph API using the saved OIDC credentials."""
@@ -162,12 +164,16 @@ def register(app, wa):
                 r = _req.get(url, headers=hdrs, timeout=15)
                 if not r.ok:
                     err = ((r.json().get('error') or {}).get('message') or r.text) if r.content else r.reason
+                    wa._audit('entra_groups', session.get('username', ''), request.remote_addr,
+                              detail={'ok': False, 'error': err})
                     return jsonify({'ok': False, 'message': err}), 200
                 body = r.json()
                 for g in body.get('value', []):
                     groups.append({'id': g['id'], 'name': g.get('displayName') or g['id']})
                 url = body.get('@odata.nextLink')
         except Exception as exc:
+            wa._audit('entra_groups', session.get('username', ''), request.remote_addr,
+                      detail={'ok': False, 'error': str(exc)})
             return jsonify({'ok': False, 'message': str(exc)}), 200
 
         groups.sort(key=lambda g: g['name'].lower())
@@ -175,7 +181,7 @@ def register(app, wa):
                   detail={'count': len(groups)})
         return jsonify({'ok': True, 'groups': groups})
 
-    @app.route('/api/entra/group_lookup', methods=['POST'])
+    @app.route('/api/v1/auth/entra/group_lookup', methods=['POST'])
     @config_edit_req
     def api_entra_group_lookup():
         """Look up a single group by ID from Microsoft Graph API."""
@@ -233,7 +239,7 @@ def register(app, wa):
         except Exception as exc:
             return jsonify({'ok': False, 'message': str(exc)}), 200
 
-    @app.route('/api/entra/device-code', methods=['POST'])
+    @app.route('/api/v1/auth/entra/device-code', methods=['POST'])
     @config_edit_req
     def api_entra_device_code():
         req_body = wa._optional_json() or {}
@@ -270,7 +276,7 @@ def register(app, wa):
             'redirect_uri': _callback_uri(),
         })
 
-    @app.route('/api/entra/device-poll', methods=['POST'])
+    @app.route('/api/v1/auth/entra/device-poll', methods=['POST'])
     @config_edit_req
     def api_entra_device_poll():
         data, err = wa._require_json()
@@ -323,7 +329,7 @@ def register(app, wa):
         wa._entra_flows.pop(flow_token, None)
         return jsonify({'status': 'complete', **result})
 
-    @app.route('/api/entra/saml2/device-code', methods=['POST'])
+    @app.route('/api/v1/auth/entra/saml2/device-code', methods=['POST'])
     @config_edit_req
     def api_entra_saml2_device_code():
         req_body = wa._optional_json() or {}
@@ -362,7 +368,7 @@ def register(app, wa):
             'entity_id':        _saml_entity_id(wa),
         })
 
-    @app.route('/api/entra/saml2/device-poll', methods=['POST'])
+    @app.route('/api/v1/auth/entra/saml2/device-poll', methods=['POST'])
     @config_edit_req
     def api_entra_saml2_device_poll():
         data, err = wa._require_json()

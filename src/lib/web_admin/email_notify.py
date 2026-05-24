@@ -36,7 +36,10 @@ def _dispatch(cfg: dict, subject: str, body_html: str,
     if not cfg.get('enabled'):
         return False, 'Email notifications are not enabled'
     provider = cfg.get('provider', 'smtp')
-    rcpts = recipients or _parse_recipients(cfg.get('recipients', ''))
+    if isinstance(recipients, str):
+        rcpts = _parse_recipients(recipients)
+    else:
+        rcpts = recipients or _parse_recipients(cfg.get('recipients', ''))
     if not rcpts:
         return False, 'No recipients configured'
     prefix = (cfg.get('subject_prefix') or '').strip()

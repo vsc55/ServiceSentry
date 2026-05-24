@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""UI routes: / (dashboard), /api/me, /lang, /theme."""
+"""UI routes: / (dashboard), /api/v1/me, /api/v1/health, /lang."""
 
-from flask import jsonify, redirect, render_template, session, url_for
+from flask import jsonify, redirect, render_template, session
 
 from lib.modules import ModuleBase
 
@@ -16,23 +16,14 @@ def register(app, wa):
     def set_lang(code):
         """Switch UI language and persist to user profile."""
         if code in SUPPORTED_LANGS:
+            old_lang = session.get('lang', wa._default_lang)
             session['lang'] = code
             uname = session.get('username')
             if uname and uname in wa._users:
                 wa._users[uname]['lang'] = code
                 wa._persist_users()
-        return redirect(wa._safe_referrer('login'))
-
-    @app.route('/theme/<mode>')
-    def set_theme(mode):
-        """Switch dark/light theme and persist to user profile."""
-        if mode in ('dark', 'light'):
-            dark_mode = mode == 'dark'
-            session['dark_mode'] = dark_mode
-            uname = session.get('username')
-            if uname and uname in wa._users:
-                wa._users[uname]['dark_mode'] = dark_mode
-                wa._persist_users()
+            if old_lang != code:
+                wa._audit('language_changed', detail={'old': old_lang, 'new': code})
         return redirect(wa._safe_referrer('login'))
 
     @app.route('/')
@@ -47,7 +38,7 @@ def register(app, wa):
             item_schemas=ModuleBase.discover_schemas(wa._modules_dir),
         )
 
-    @app.route('/api/me', methods=['GET'])
+    @app.route('/api/v1/me', methods=['GET'])
     @login_required
     def api_me():
         """Return current logged-in user info."""
@@ -73,7 +64,7 @@ def register(app, wa):
             'startup_id':      wa._startup_id,
         })
 
-    @app.route('/api/health', methods=['GET'])
+    @app.route('/api/v1/health', methods=['GET'])
     def api_health():
         """Lightweight unauthenticated endpoint for client-side version checks."""
         return jsonify({'startup_id': wa._startup_id})

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Session management routes: /api/sessions, /api/sessions/invalidate,
-/api/sessions/revoke/<sid>, /api/sessions/revoke-user/<username>."""
+"""Session management routes: /api/v1/sessions, /api/v1/sessions/invalidate,
+/api/v1/sessions/revoke/<sid>, /api/v1/sessions/revoke-user/<username>."""
 
 from flask import jsonify, session
 
@@ -12,7 +12,7 @@ def register(app, wa):
 
     # --- API: sessions (admin only) --------------------------------
 
-    @app.route('/api/sessions', methods=['GET'])
+    @app.route('/api/v1/sessions', methods=['GET'])
     @sessions_view_req
     def api_get_sessions():
         """Return all active sessions (keyed by sid, token never exposed)."""
@@ -30,7 +30,7 @@ def register(app, wa):
             }
         return jsonify(result)
 
-    @app.route('/api/sessions/invalidate', methods=['POST'])
+    @app.route('/api/v1/sessions/invalidate', methods=['POST'])
     @sessions_revoke_req
     def api_invalidate_sessions():
         """Revoke ALL active sessions."""
@@ -39,7 +39,7 @@ def register(app, wa):
         session.clear()
         return jsonify({'ok': True, 'count': count})
 
-    @app.route('/api/sessions/revoke/<sid>', methods=['POST'])
+    @app.route('/api/v1/sessions/revoke/<sid>', methods=['POST'])
     @sessions_revoke_req
     def api_revoke_session_route(sid):
         """Revoke a specific session by its sid."""
@@ -52,7 +52,7 @@ def register(app, wa):
             return jsonify({'ok': True})
         return jsonify({'error': wa._t('session_not_found')}), 404
 
-    @app.route('/api/sessions/revoke-user/<username>', methods=['POST'])
+    @app.route('/api/v1/sessions/revoke-user/<username>', methods=['POST'])
     @sessions_revoke_req
     def api_revoke_user_sessions_route(username):
         """Revoke all sessions for a specific user."""

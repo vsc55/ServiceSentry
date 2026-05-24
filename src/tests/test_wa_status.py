@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for the /status public status page and language priority logic."""
 
@@ -201,7 +201,7 @@ class TestPublicStatusPage:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         _login(c)
-        c.put("/api/config", json={"web_admin": {"status_refresh_secs": 300}})
+        c.put("/api/v1/config", json={"web_admin": {"status_refresh_secs": 300}})
         assert wa._STATUS_REFRESH_SECS == 300
 
     def test_status_hidden_from_anonymous_when_disabled(self, config_dir, var_dir):
@@ -290,7 +290,7 @@ class TestStatusPageLanguage:
                       default_lang='en_EN', status_lang='')
         c = wa.app.test_client()
         _login(c)
-        c.put("/api/config", json={"web_admin": {"status_lang": "es_ES"}})
+        c.put("/api/v1/config", json={"web_admin": {"status_lang": "es_ES"}})
         # Logout so there's no user session lang
         c.get("/logout")
         html = c.get("/status").data

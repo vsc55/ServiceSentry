@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for UI routes: /, /api/me, /lang/<code>, /theme/<mode>."""
+"""Tests for UI routes: /, /api/v1/me, /api/v1/health, /lang/<code>."""
 
 import pytest
 
@@ -29,26 +29,26 @@ class TestDarkMode:
         assert b'data-bs-theme="light"' in html
 
     def test_toggle_to_dark(self, client):
-        """Hitting /theme/dark switches the session to dark mode."""
+        """Saving dark_mode=True via preferences API switches the session theme."""
         _login(client)
-        client.get("/theme/dark")
+        client.put("/api/v1/users/me/preferences", json={"dark_mode": True})
         html = client.get("/").data
         assert b'data-bs-theme="dark"' in html
 
     def test_toggle_back_to_light(self, client):
-        """Hitting /theme/light switches back to light mode."""
+        """Saving dark_mode=False via preferences API reverts to light theme."""
         _login(client)
-        client.get("/theme/dark")
-        client.get("/theme/light")
+        client.put("/api/v1/users/me/preferences", json={"dark_mode": True})
+        client.put("/api/v1/users/me/preferences", json={"dark_mode": False})
         html = client.get("/").data
         assert b'data-bs-theme="light"' in html
 
     def test_theme_persisted_to_user(self, admin, client):
-        """Theme preference is saved in the user record."""
+        """Theme preference is saved in the user record via preferences API."""
         _login(client)
-        client.get("/theme/dark")
+        client.put("/api/v1/users/me/preferences", json={"dark_mode": True})
         assert admin._users["admin"]["dark_mode"] is True
-        client.get("/theme/light")
+        client.put("/api/v1/users/me/preferences", json={"dark_mode": False})
         assert admin._users["admin"]["dark_mode"] is False
 
     def test_theme_loaded_on_login(self, admin, client):
@@ -61,16 +61,15 @@ class TestDarkMode:
     def test_api_me_includes_dark_mode(self, client):
         """GET /api/me includes the dark_mode field."""
         _login(client)
-        data = client.get("/api/me").get_json()
+        data = client.get("/api/v1/me").get_json()
         assert "dark_mode" in data
         assert data["dark_mode"] is False
 
-    def test_invalid_theme_ignored(self, client):
-        """Invalid theme mode is silently ignored."""
+    def test_invalid_theme_rejected(self, client):
+        """Preferences API rejects non-boolean dark_mode values."""
         _login(client)
-        client.get("/theme/purple")
-        html = client.get("/").data
-        assert b'data-bs-theme="light"' in html
+        resp = client.put("/api/v1/users/me/preferences", json={"dark_mode": "purple"})
+        assert resp.status_code == 400
 
     def test_global_default_dark_mode(self, config_dir, var_dir):
         """WebAdmin can be initialised with dark mode as default."""
@@ -86,25 +85,25 @@ class TestDarkMode:
         """Saving config.json web_admin.dark_mode updates the runtime default."""
         _login(client)
         assert admin._default_dark_mode is False
-        client.put("/api/config", json={
+        client.put("/api/v1/config", json={
             "web_admin": {"dark_mode": True},
         })
         assert admin._default_dark_mode is True
 
     def test_user_dark_mode_in_users_list(self, admin, client):
-        """GET /api/users includes dark_mode for each user."""
+        """GET /api/v1/users includes dark_mode for each user."""
         _login(client)
-        client.get("/theme/dark")
-        users = client.get("/api/users").get_json()
+        client.put("/api/v1/users/me/preferences", json={"dark_mode": True})
+        users = client.get("/api/v1/users").get_json()
         assert users["admin"]["dark_mode"] is True
 
     def test_admin_can_set_user_dark_mode(self, admin, client):
         """Admin can set dark_mode for another user via PUT."""
         _login(client)
-        client.post("/api/users", json={
+        client.post("/api/v1/users", json={
             "username": "dmuser", "password": "testpass", "role": "viewer",
         })
-        resp = client.put("/api/users/dmuser", json={"dark_mode": True})
+        resp = client.put("/api/v1/users/dmuser", json={"dark_mode": True})
         assert resp.status_code == 200
         assert admin._users["dmuser"]["dark_mode"] is True
 
@@ -130,26 +129,26 @@ class TestI18n:
 
     def test_default_language_is_english(self, client):
         _login(client)
-        resp = client.get("/api/me")
+        resp = client.get("/api/v1/me")
         assert resp.get_json()["lang"] == "en_EN"
 
     def test_switch_to_spanish(self, client):
         _login(client)
         client.get("/lang/es_ES")
-        resp = client.get("/api/me")
+        resp = client.get("/api/v1/me")
         assert resp.get_json()["lang"] == "es_ES"
 
     def test_switch_back_to_english(self, client):
         _login(client)
         client.get("/lang/es_ES")
         client.get("/lang/en_EN")
-        resp = client.get("/api/me")
+        resp = client.get("/api/v1/me")
         assert resp.get_json()["lang"] == "en_EN"
 
     def test_invalid_language_ignored(self, client):
         _login(client)
         client.get("/lang/fr")
-        resp = client.get("/api/me")
+        resp = client.get("/api/v1/me")
         assert resp.get_json()["lang"] == "en_EN"
 
     def test_spanish_error_messages(self, client):
@@ -177,7 +176,7 @@ class TestI18n:
         """API validation errors respect the session language."""
         _login(client)
         client.get("/lang/es_ES")
-        resp = client.put("/api/modules", content_type="application/json")
+        resp = client.put("/api/v1/modules", content_type="application/json")
         assert resp.status_code == 400
         assert "JSON" in resp.get_json()["error"]
 
@@ -191,7 +190,7 @@ class TestI18n:
         """User's saved language is loaded on login."""
         admin._users["admin"]["lang"] = "es_ES"
         _login(client)
-        resp = client.get("/api/me")
+        resp = client.get("/api/v1/me")
         assert resp.get_json()["lang"] == "es_ES"
 
     def test_global_default_lang(self, config_dir, var_dir):
@@ -200,7 +199,7 @@ class TestI18n:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         _login(c)
-        resp = c.get("/api/me")
+        resp = c.get("/api/v1/me")
         assert resp.get_json()["lang"] == "es_ES"
 
     def test_global_default_invalid_falls_back(self, config_dir, var_dir):
@@ -209,60 +208,60 @@ class TestI18n:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         _login(c)
-        resp = c.get("/api/me")
+        resp = c.get("/api/v1/me")
         assert resp.get_json()["lang"] == "en_EN"
 
     def test_user_lang_in_users_list(self, client):
         """Language preference appears in the users API."""
         _login(client)
         client.get("/lang/es_ES")
-        users = client.get("/api/users").get_json()
+        users = client.get("/api/v1/users").get_json()
         assert users["admin"]["lang"] == "es_ES"
 
     def test_admin_can_set_user_lang(self, client):
         """Admin can update another user's language via PUT."""
         _login(client)
-        client.post("/api/users", json={
+        client.post("/api/v1/users", json={
             "username": "languser", "password": "testpass", "role": "viewer",
         })
-        resp = client.put("/api/users/languser", json={"lang": "es_ES"})
+        resp = client.put("/api/v1/users/languser", json={"lang": "es_ES"})
         assert resp.status_code == 200
-        users = client.get("/api/users").get_json()
+        users = client.get("/api/v1/users").get_json()
         assert users["languser"]["lang"] == "es_ES"
 
     def test_create_user_with_lang(self, client):
         """Creating a user with a specific language saves it."""
         _login(client)
-        resp = client.post("/api/users", json={
+        resp = client.post("/api/v1/users", json={
             "username": "langcreate", "password": "testpass",
             "role": "viewer", "lang": "es_ES",
         })
         assert resp.status_code == 201
-        users = client.get("/api/users").get_json()
+        users = client.get("/api/v1/users").get_json()
         assert users["langcreate"]["lang"] == "es_ES"
 
     def test_create_user_without_lang(self, client):
         """Creating a user without lang defaults to empty (system default)."""
         _login(client)
-        resp = client.post("/api/users", json={
+        resp = client.post("/api/v1/users", json={
             "username": "nolang", "password": "testpass", "role": "viewer",
         })
         assert resp.status_code == 201
-        users = client.get("/api/users").get_json()
+        users = client.get("/api/v1/users").get_json()
         assert users["nolang"]["lang"] == ""
 
     def test_update_own_lang_updates_session(self, client):
         """Editing own user's language updates the active session."""
         _login(client)
-        resp = client.put("/api/users/admin", json={"lang": "es_ES"})
+        resp = client.put("/api/v1/users/admin", json={"lang": "es_ES"})
         assert resp.status_code == 200
-        me = client.get("/api/me").get_json()
+        me = client.get("/api/v1/me").get_json()
         assert me["lang"] == "es_ES"
 
     def test_save_config_updates_default_lang(self, admin, client):
         """Saving config.json with web_admin.lang updates runtime default."""
         _login(client)
-        resp = client.put("/api/config", json={
+        resp = client.put("/api/v1/config", json={
             "web_admin": {"lang": "es_ES"},
         })
         assert resp.status_code == 200
@@ -271,7 +270,7 @@ class TestI18n:
     def test_save_config_invalid_lang_ignored(self, admin, client):
         """Saving config.json with invalid lang keeps current default."""
         _login(client)
-        client.put("/api/config", json={
+        client.put("/api/v1/config", json={
             "web_admin": {"lang": "xx"},
         })
         assert admin._default_lang == "en_EN"
@@ -332,10 +331,10 @@ class TestUIReorganisation:
     def test_reset_password_via_admin_api(self, admin, client):
         """Admin can reset another user's password via PUT /api/users/<u>."""
         _login(client)
-        client.post("/api/users", json={
+        client.post("/api/v1/users", json={
             "username": "resetme", "password": "testpass", "role": "viewer",
         })
-        resp = client.put("/api/users/resetme", json={"password": "brandnew"})
+        resp = client.put("/api/v1/users/resetme", json={"password": "brandnew"})
         assert resp.status_code == 200
         assert check_password_hash(
             admin._users["resetme"]["password_hash"], "brandnew"

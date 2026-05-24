@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Telegram routes: /api/telegram/test."""
+"""Telegram routes: /api/v1/notify/telegram/test."""
 
 import re
 
@@ -14,7 +14,7 @@ _CHAT_ID_RE = re.compile(r'^-?[0-9]{1,20}$')
 def register(app, wa):
     config_edit_req = wa._perm_required('config_edit')
 
-    @app.route('/api/telegram/test', methods=['POST'])
+    @app.route('/api/v1/notify/telegram/test', methods=['POST'])
     @config_edit_req
     def api_test_telegram():
         """Send a test message via Telegram to verify settings."""
@@ -49,8 +49,8 @@ def register(app, wa):
             ct = result.headers.get('content-type', '')
             body = result.json() if 'json' in ct else {}
             desc = body.get('description', f'HTTP {result.status_code}')
-            wa._audit('telegram_test_fail', detail=desc)
+            wa._audit('telegram_test_fail', detail={'error': desc})
             return jsonify({'error': desc}), 502
         except Exception as exc:
-            wa._audit('telegram_test_fail', detail=str(exc))
+            wa._audit('telegram_test_fail', detail={'error': str(exc)})
             return jsonify({'error': str(exc)}), 502

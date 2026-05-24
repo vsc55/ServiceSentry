@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for Telegram routes: /api/telegram/test."""
 
@@ -24,7 +24,7 @@ class TestTelegramTest:
 
     def test_requires_auth(self, client):
         """Unauthenticated request redirects to login."""
-        resp = client.post("/api/telegram/test", json={
+        resp = client.post("/api/v1/notify/telegram/test", json={
             "token": "x", "chat_id": "y",
         })
         assert resp.status_code == 401
@@ -32,12 +32,12 @@ class TestTelegramTest:
     def test_viewer_denied(self, client):
         """Viewer role cannot send test messages."""
         _login(client)
-        client.post("/api/users", json={
+        client.post("/api/v1/users", json={
             "username": "v1", "password": "testpass", "role": "viewer",
         })
         client.get("/logout")
         _login(client, "v1", "testpass")
-        resp = client.post("/api/telegram/test", json={
+        resp = client.post("/api/v1/notify/telegram/test", json={
             "token": "x", "chat_id": "y",
         })
         assert resp.status_code == 403
@@ -45,19 +45,19 @@ class TestTelegramTest:
     def test_missing_fields(self, client):
         """Returns 400 when body is empty."""
         _login(client)
-        resp = client.post("/api/telegram/test", json={})
+        resp = client.post("/api/v1/notify/telegram/test", json={})
         assert resp.status_code == 400
 
     def test_missing_token(self, client):
         """Returns 400 when token is empty."""
         _login(client)
-        resp = client.post("/api/telegram/test", json={"chat_id": "123"})
+        resp = client.post("/api/v1/notify/telegram/test", json={"chat_id": "123"})
         assert resp.status_code == 400
 
     def test_missing_chat_id(self, client):
         """Returns 400 when chat_id is empty."""
         _login(client)
-        resp = client.post("/api/telegram/test", json={"token": "abc"})
+        resp = client.post("/api/v1/notify/telegram/test", json={"token": "abc"})
         assert resp.status_code == 400
 
     def test_success(self, client):
@@ -65,7 +65,7 @@ class TestTelegramTest:
         _login(client)
         with unittest.mock.patch("requests.post") as mock_post:
             mock_post.return_value = unittest.mock.Mock(status_code=200)
-            resp = client.post("/api/telegram/test", json={
+            resp = client.post("/api/v1/notify/telegram/test", json={
                 "token": "123456789:ABCDefGHiJklMNoPqrSTuV", "chat_id": "456",
             })
         assert resp.status_code == 200
@@ -79,7 +79,7 @@ class TestTelegramTest:
         mock_resp.headers = {"content-type": "application/json"}
         mock_resp.json.return_value = {"description": "Unauthorized"}
         with unittest.mock.patch("requests.post", return_value=mock_resp):
-            resp = client.post("/api/telegram/test", json={
+            resp = client.post("/api/v1/notify/telegram/test", json={
                 "token": "123456789:ABCDefGHiJklMNoPqrSTuV", "chat_id": "456",
             })
         assert resp.status_code == 502
@@ -89,7 +89,7 @@ class TestTelegramTest:
         """Returns 502 on network exceptions."""
         _login(client)
         with unittest.mock.patch("requests.post", side_effect=Exception("timeout")):
-            resp = client.post("/api/telegram/test", json={
+            resp = client.post("/api/v1/notify/telegram/test", json={
                 "token": "123456789:ABCDefGHiJklMNoPqrSTuV", "chat_id": "456",
             })
         assert resp.status_code == 502
@@ -102,7 +102,7 @@ class TestTelegramTest:
         mock_resp.status_code = 500
         mock_resp.headers = {"content-type": "text/html"}
         with unittest.mock.patch("requests.post", return_value=mock_resp):
-            resp = client.post("/api/telegram/test", json={
+            resp = client.post("/api/v1/notify/telegram/test", json={
                 "token": "123456789:ABCDefGHiJklMNoPqrSTuV", "chat_id": "456",
             })
         assert resp.status_code == 502

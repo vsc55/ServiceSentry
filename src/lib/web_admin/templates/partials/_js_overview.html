@@ -1,4 +1,4 @@
-{# ================================================================
+﻿{# ================================================================
    Overview tab — fully customisable drag/resize dashboard.
    ================================================================ #}
 
@@ -530,7 +530,7 @@ async function renderOverview() {
     const c = document.getElementById('overview-container');
     if (!c) return;
     c.innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>';
-    const data = await apiGet('/api/overview');
+    const data = await apiGet('/api/v1/modules/overview');
     if (!data) {
         c.innerHTML = '<div class="alert alert-warning">' + t('connection_error') + '</div>';
         return;

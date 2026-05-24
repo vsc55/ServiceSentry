@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for server-side session registry and management."""
 
@@ -56,9 +56,9 @@ class TestSessionRegistry:
     def test_session_invalid_after_revocation(self, admin, client):
         """Revoking all sessions invalidates the cookie."""
         _login(client)
-        assert client.get("/api/me").status_code == 200
+        assert client.get("/api/v1/me").status_code == 200
         admin._revoke_all_sessions()
-        resp = client.get("/api/me", follow_redirects=False)
+        resp = client.get("/api/v1/me", follow_redirects=False)
         assert resp.status_code == 401
 
     def test_revoke_user_sessions(self, admin, client):
@@ -86,7 +86,7 @@ class TestSessionRegistry:
     def test_api_get_sessions(self, client):
         """GET /api/sessions returns sessions keyed by sid with is_current flag."""
         _login(client)
-        resp = client.get("/api/sessions")
+        resp = client.get("/api/v1/sessions")
         assert resp.status_code == 200
         data = resp.get_json()
         assert len(data) == 1
@@ -106,7 +106,7 @@ class TestSessionRegistry:
         # sid comes from the entry's 'sid' field, not the token key
         token = list(admin._sessions.keys())[0]
         sid = admin._sessions[token]['sid']
-        resp = client.post(f"/api/sessions/revoke/{sid}",
+        resp = client.post(f"/api/v1/sessions/revoke/{sid}",
                            content_type="application/json", data="{}")
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
@@ -115,7 +115,7 @@ class TestSessionRegistry:
     def test_api_revoke_session_404(self, client):
         """Revoking a non-existent session returns 404."""
         _login(client)
-        resp = client.post("/api/sessions/revoke/nonexistent",
+        resp = client.post("/api/v1/sessions/revoke/nonexistent",
                            content_type="application/json", data="{}")
         assert resp.status_code == 404
 
@@ -126,7 +126,7 @@ class TestSessionRegistry:
             'username': 'victim', 'created': '', 'last_seen': '',
             'ip': '', 'user_agent': '',
         }
-        resp = client.post("/api/sessions/revoke-user/victim",
+        resp = client.post("/api/v1/sessions/revoke-user/victim",
                            content_type="application/json", data="{}")
         assert resp.status_code == 200
         assert resp.get_json()["count"] == 1
@@ -141,8 +141,8 @@ class TestSessionRegistry:
             "role": "viewer", "display_name": "V",
         }
         _login(client, "viewer1", "v")
-        assert client.get("/api/sessions").status_code == 200  # viewer has sessions_view
-        assert client.post("/api/sessions/invalidate",
+        assert client.get("/api/v1/sessions").status_code == 200  # viewer has sessions_view
+        assert client.post("/api/v1/sessions/invalidate",
                            content_type="application/json",
                            data="{}").status_code == 403
 
@@ -150,7 +150,7 @@ class TestSessionRegistry:
         """POST /api/sessions/invalidate clears all sessions."""
         _login(client)
         assert len(admin._sessions) == 1
-        resp = client.post("/api/sessions/invalidate",
+        resp = client.post("/api/v1/sessions/invalidate",
                            content_type="application/json", data="{}")
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
@@ -183,7 +183,7 @@ class TestSessionRegistry:
         token = list(admin._sessions.keys())[0]
         admin._sessions[token]['ip'] = '10.0.0.1'
         # Make any authenticated request — triggers _check_session
-        resp = client.get("/api/me")
+        resp = client.get("/api/v1/me")
         assert resp.status_code == 200
         events = [e['event'] for e in admin._audit_log]
         assert 'session_ip_changed' in events
@@ -193,7 +193,7 @@ class TestSessionRegistry:
     def test_session_same_ip_not_audited(self, admin, client):
         """No audit event when the IP stays the same between requests."""
         _login(client)
-        resp = client.get("/api/me")
+        resp = client.get("/api/v1/me")
         assert resp.status_code == 200
         events = [e['event'] for e in admin._audit_log]
         assert 'session_ip_changed' not in events

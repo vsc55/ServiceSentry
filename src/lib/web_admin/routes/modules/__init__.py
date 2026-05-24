@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Module routes: /api/modules (GET, PUT), /api/status, /api/overview."""
+"""Module routes: /api/v1/modules (GET, PUT), /api/v1/modules/status, /api/v1/modules/overview."""
 
 import os
 
@@ -9,7 +9,7 @@ from flask import jsonify
 from lib import secret_manager
 
 from lib.config import ConfigControl
-from ..constants import BUILTIN_ROLE_PERMISSIONS
+from ...constants import BUILTIN_ROLE_PERMISSIONS
 
 
 def register(app, wa):
@@ -17,7 +17,7 @@ def register(app, wa):
 
     # --- API: modules.json ----------------------------------------
 
-    @app.route('/api/modules', methods=['GET'])
+    @app.route('/api/v1/modules', methods=['GET'])
     @login_required
     def api_get_modules():
         """Return modules the current user may view.
@@ -36,7 +36,7 @@ def register(app, wa):
             return jsonify({'error': wa._t('access_denied')}), 403
         return jsonify(secret_manager.mask_sensitive(visible))
 
-    @app.route('/api/modules', methods=['PUT'])
+    @app.route('/api/v1/modules', methods=['PUT'])
     @login_required
     def api_save_modules():
         """Overwrite ``modules.json`` with the request body.
@@ -87,7 +87,7 @@ def register(app, wa):
 
     checks_view_req = wa._perm_required('checks_view', 'checks_run')
 
-    @app.route('/api/status', methods=['GET'])
+    @app.route('/api/v1/modules/status', methods=['GET'])
     @checks_view_req
     def api_get_status():
         """Return the contents of ``status.json`` (read-only)."""
@@ -100,7 +100,7 @@ def register(app, wa):
 
     # --- API: overview (dashboard summary) -----------------------
 
-    @app.route('/api/overview', methods=['GET'])
+    @app.route('/api/v1/modules/overview', methods=['GET'])
     @login_required
     def api_get_overview():
         """Return a summary snapshot for the overview dashboard."""

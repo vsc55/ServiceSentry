@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Checks route: /api/checks/run."""
+"""Checks route: /api/v1/modules/checks/run."""
 
 from flask import jsonify
 
@@ -10,7 +10,7 @@ def register(app, wa):
 
     # --- API: run checks (editor+) ---------------------------------
 
-    @app.route('/api/checks/run', methods=['POST'])
+    @app.route('/api/v1/modules/checks/run', methods=['POST'])
     @checks_run_req
     def api_run_checks():
         """Run module checks on demand.

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for the audit log — recording, persistence and API access."""
 
@@ -72,7 +72,7 @@ class TestAuditLog:
     def test_modules_save_audited(self, admin, client):
         """Saving modules logs the specific field changes."""
         _login(client)
-        client.put("/api/modules", json={"ping": {"enabled": False, "threads": 5}})
+        client.put("/api/v1/modules", json={"ping": {"enabled": False, "threads": 5}})
         entry = [e for e in admin._audit_log if e['event'] == 'modules_saved'][-1]
         assert isinstance(entry['detail'], list)
         assert any(c['field'] == 'ping.enabled' for c in entry['detail'])
@@ -80,7 +80,7 @@ class TestAuditLog:
     def test_config_save_audited(self, admin, client):
         """Saving config logs the specific field changes."""
         _login(client)
-        client.put("/api/config", json={"daemon": {"timer_check": 60}})
+        client.put("/api/v1/config", json={"daemon": {"timer_check": 60}})
         entry = [e for e in admin._audit_log if e['event'] == 'config_saved'][-1]
         assert isinstance(entry['detail'], list)
         assert any(c['field'] == 'daemon.timer_check' for c in entry['detail'])
@@ -88,7 +88,7 @@ class TestAuditLog:
     def test_user_create_audited(self, admin, client):
         """Creating a user logs username, role and display_name."""
         _login(client)
-        client.post("/api/users", json={
+        client.post("/api/v1/users", json={
             "username": "auduser", "password": "testpass", "role": "viewer",
         })
         entry = [e for e in admin._audit_log if e['event'] == 'user_created'][-1]
@@ -98,7 +98,7 @@ class TestAuditLog:
     def test_user_update_audited(self, admin, client):
         """Updating a user logs old and new values per changed field."""
         _login(client)
-        client.put("/api/users/admin", json={"display_name": "Boss"})
+        client.put("/api/v1/users/admin", json={"display_name": "Boss"})
         entry = [e for e in admin._audit_log if e['event'] == 'user_updated'][-1]
         assert entry['detail']['username'] == 'admin'
         changes = entry['detail']['changes']
@@ -112,14 +112,14 @@ class TestAuditLog:
             "role": "viewer", "display_name": "Del",
         }
         _login(client)
-        client.delete("/api/users/delme")
+        client.delete("/api/v1/users/delme")
         entry = [e for e in admin._audit_log if e['event'] == 'user_deleted'][-1]
         assert entry['detail']['username'] == 'delme'
 
     def test_password_change_audited(self, admin, client):
         """Changing own password creates an audit entry."""
         _login(client)
-        client.put("/api/users/me/password", json={
+        client.put("/api/v1/users/me/password", json={
             "current_password": "secret", "new_password": "newsecret",
         })
         events = [e['event'] for e in admin._audit_log]
@@ -128,7 +128,7 @@ class TestAuditLog:
     def test_all_sessions_revoked_audited(self, admin, client):
         """Invalidating all sessions creates an audit entry."""
         _login(client)
-        client.post("/api/sessions/invalidate",
+        client.post("/api/v1/sessions/invalidate",
                     content_type="application/json", data="{}")
         events = [e['event'] for e in admin._audit_log]
         assert 'all_sessions_revoked' in events
@@ -136,7 +136,7 @@ class TestAuditLog:
     def test_audit_api_returns_entries(self, admin, client):
         """GET /api/audit returns the audit log."""
         _login(client)
-        resp = client.get("/api/audit")
+        resp = client.get("/api/v1/audit")
         assert resp.status_code == 200
         entries = resp.get_json()
         assert isinstance(entries, list)
@@ -150,8 +150,8 @@ class TestAuditLog:
             "role": "viewer", "display_name": "V",
         }
         _login(client, "viewer1", "v")
-        assert client.get("/api/audit").status_code == 200
-        assert client.delete("/api/audit").status_code == 403
+        assert client.get("/api/v1/audit").status_code == 200
+        assert client.delete("/api/v1/audit").status_code == 403
 
     def test_audit_persisted_to_file(self, admin, client, config_dir):
         """Audit log is written to audit.json on disk."""
@@ -191,11 +191,11 @@ class TestAuditLog:
             "role": "viewer", "display_name": "PW",
         }
         _login(client)
-        client.put("/api/users/pwuser", json={"password": "newpass1"})
+        client.put("/api/v1/users/pwuser", json={"password": "newpass1"})
         events = [e['event'] for e in admin._audit_log]
         assert 'password_reset' in events
         entry = [e for e in admin._audit_log if e['event'] == 'password_reset'][-1]
-        assert entry['detail'] == 'pwuser'
+        assert entry['detail'] == {'username': 'pwuser'}
 
     def test_password_reset_separate_from_update(self, admin, client):
         """Changing role + password creates both user_updated and password_reset."""
@@ -204,7 +204,7 @@ class TestAuditLog:
             "role": "viewer", "display_name": "B",
         }
         _login(client)
-        client.put("/api/users/both", json={
+        client.put("/api/v1/users/both", json={
             "role": "editor", "password": "newpass1",
         })
         events = [e['event'] for e in admin._audit_log]
@@ -217,7 +217,7 @@ class TestAuditLog:
     def test_config_save_records_old_and_new(self, admin, client):
         """Config change detail includes old and new values."""
         _login(client)
-        client.put("/api/config", json={"daemon": {"timer_check": 99}})
+        client.put("/api/v1/config", json={"daemon": {"timer_check": 99}})
         entry = [e for e in admin._audit_log if e['event'] == 'config_saved'][-1]
         change = [c for c in entry['detail']
                   if c['field'] == 'daemon.timer_check'][0]
@@ -227,7 +227,7 @@ class TestAuditLog:
     def test_sensitive_fields_masked_in_audit(self, admin, client):
         """Sensitive fields (token, password) are masked in config audit."""
         _login(client)
-        client.put("/api/config", json={
+        client.put("/api/v1/config", json={
             "daemon": {"timer_check": 300},
             "global": {"debug": False},
             "telegram": {
@@ -248,7 +248,7 @@ class TestAuditLog:
         """Updating a user with same values does not emit user_updated."""
         _login(client)
         before = len(admin._audit_log)
-        client.put("/api/users/admin", json={
+        client.put("/api/v1/users/admin", json={
             "role": "admin",
             "display_name": admin._users["admin"].get("display_name", "admin"),
         })
@@ -272,22 +272,25 @@ class TestAuditLog:
     # ── DELETE /api/audit (clear all) ─────────────────────────────
 
     def test_clear_all_entries(self, admin, client):
-        """DELETE /api/audit removes all entries and returns ok."""
+        """DELETE /api/audit removes previous entries; only the audit_cleared event remains."""
         _login(client)
         assert len(admin._audit_log) >= 1
-        resp = client.delete("/api/audit")
+        resp = client.delete("/api/v1/audit")
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
-        assert admin._audit_log == []
+        # The log is not empty: the clear operation itself is recorded as the first entry
+        assert len(admin._audit_log) == 1
+        assert admin._audit_log[0]['event'] == 'audit_cleared'
 
     def test_clear_all_persisted_to_disk(self, admin, client, config_dir):
-        """After DELETE /api/audit the on-disk file reflects the empty log."""
+        """After DELETE /api/audit the on-disk file contains only the audit_cleared entry."""
         _login(client)
-        client.delete("/api/audit")
+        client.delete("/api/v1/audit")
         path = os.path.join(config_dir, "audit.json")
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
-        assert data == []
+        assert len(data) == 1
+        assert data[0]['event'] == 'audit_cleared'
 
     # ── DELETE /api/audit/<idx> (single entry) ────────────────────
 
@@ -300,7 +303,7 @@ class TestAuditLog:
         ]
         _login(client)
         # Delete oldest entry (index 0)
-        resp = client.delete("/api/audit/0")
+        resp = client.delete("/api/v1/audit/0")
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
         events = [e['event'] for e in admin._audit_log
@@ -312,14 +315,14 @@ class TestAuditLog:
     def test_delete_single_entry_oob(self, admin, client):
         """DELETE /api/audit/<idx> returns 404 for an out-of-range index."""
         _login(client)
-        resp = client.delete("/api/audit/9999")
+        resp = client.delete("/api/v1/audit/9999")
         assert resp.status_code == 404
 
     def test_delete_single_entry_negative(self, admin, client):
         """Negative index is out-of-range → 404."""
         _login(client)
         # Flask converts /<int:idx> so -1 does not match the route; expect 404
-        resp = client.delete("/api/audit/-1")
+        resp = client.delete("/api/v1/audit/-1")
         assert resp.status_code == 404
 
     def test_delete_single_entry_viewer_forbidden(self, admin, client):
@@ -332,7 +335,7 @@ class TestAuditLog:
             {'ts': 'x', 'event': 'sentinel', 'user': '', 'ip': '', 'detail': ''}
         )
         _login(client, "viewer2", "v")
-        resp = client.delete(f"/api/audit/{len(admin._audit_log) - 1}")
+        resp = client.delete(f"/api/v1/audit/{len(admin._audit_log) - 1}")
         assert resp.status_code == 403
 
     def test_delete_single_entry_persisted(self, admin, client, config_dir):
@@ -343,7 +346,7 @@ class TestAuditLog:
         ]
         _login(client)
         # Remove the first entry (index 0)
-        resp = client.delete("/api/audit/0")
+        resp = client.delete("/api/v1/audit/0")
         assert resp.status_code == 200
         path = os.path.join(config_dir, "audit.json")
         with open(path, encoding="utf-8") as fh:

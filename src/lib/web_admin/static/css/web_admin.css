@@ -351,3 +351,71 @@
     height: 100%;
     min-height: 0;
 }
+
+/* ── Notification HTML editor (CodeMirror) ───────────────────────── */
+#notifHtmlEditorWrap { display: flex; flex-direction: column; }
+#notifHtmlEditorWrap .CodeMirror {
+    border: 1px solid var(--bs-border-color);
+    border-radius: .375rem;
+    font-size: .8rem;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    height: 400px;
+    transition: none;
+}
+/* Fullscreen mode */
+#notifHtmlEditorWrap.notif-html-fs {
+    position: fixed;
+    inset: 0;
+    z-index: 1800;
+    background: var(--bs-body-bg);
+    padding: .75rem;
+    gap: .5rem;
+    overflow: hidden;
+}
+#notifHtmlEditorWrap.notif-html-fs > #notifHtmlVarsBar { flex-shrink: 0; }
+#notifHtmlEditorWrap.notif-html-fs .CodeMirror {
+    height: calc(100vh - 110px) !important;
+    border-radius: .375rem;
+}
+/* Fallback textarea when CodeMirror is not loaded */
+#notifHtmlEditorWrap.notif-html-fs #notifHtmlEditor {
+    flex: 1;
+    height: calc(100vh - 110px) !important;
+    resize: none;
+}
+/* Integrate themes with Bootstrap border system */
+.CodeMirror { border: 1px solid var(--bs-border-color); border-radius: .375rem; }
+/* Fold gutter — dark mode */
+[data-bs-theme="dark"] .CodeMirror-foldgutter-open,
+[data-bs-theme="dark"] .CodeMirror-foldgutter-folded { color: #858585; }
+[data-bs-theme="dark"] .CodeMirror-foldgutter-open:hover,
+[data-bs-theme="dark"] .CodeMirror-foldgutter-folded:hover { color: #d4d4d4; cursor: pointer; }
+/* Search dialog — dark mode */
+[data-bs-theme="dark"] .CodeMirror-dialog {
+    background: #252526 !important;
+    border-top: 1px solid #444 !important;
+    color: #d4d4d4 !important;
+    padding: .4rem .6rem !important;
+}
+[data-bs-theme="dark"] .CodeMirror-dialog input,
+[data-bs-theme="dark"] .CodeMirror-dialog button {
+    background: #3c3c3c !important;
+    color: #d4d4d4 !important;
+    border: 1px solid #555 !important;
+    border-radius: .25rem !important;
+    padding: .1rem .5rem !important;
+    font-size: .82rem !important;
+}
+[data-bs-theme="dark"] .CodeMirror-dialog button:hover { background: #4c4c4c !important; }
+[data-bs-theme="dark"] .CodeMirror-search-hint { color: #858585; }
+/* Hint dropdown — dark mode */
+[data-bs-theme="dark"] .CodeMirror-hints {
+    background: #252526;
+    border-color: #555;
+    box-shadow: 2px 3px 5px rgba(0,0,0,.5);
+}
+[data-bs-theme="dark"] .CodeMirror-hint { color: #d4d4d4; }
+[data-bs-theme="dark"] .CodeMirror-hint-active {
+    background: #094771;
+    color: #fff;
+}

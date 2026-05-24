@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for the configurable password policy (_validate_password + API enforcement)."""
 
@@ -180,7 +180,7 @@ class TestPasswordPolicyApi:
         wa = _make_wa(config_dir, var_dir, pw_min_len=12)
         with wa.app.test_client() as c:
             _login(c, password="Admin123!")
-            resp = c.post("/api/users", json={
+            resp = c.post("/api/v1/users", json={
                 "username": "u1", "password": "Short123!", "role": "viewer",
             })
         assert resp.status_code == 400
@@ -190,7 +190,7 @@ class TestPasswordPolicyApi:
         wa = _make_wa(config_dir, var_dir, pw_require_digit=True)
         with wa.app.test_client() as c:
             _login(c, password="Admin123!")
-            resp = c.post("/api/users", json={
+            resp = c.post("/api/v1/users", json={
                 "username": "u2", "password": "NoDigitsHere!", "role": "viewer",
             })
         assert resp.status_code == 400
@@ -200,7 +200,7 @@ class TestPasswordPolicyApi:
         wa = _make_wa(config_dir, var_dir, pw_require_upper=True)
         with wa.app.test_client() as c:
             _login(c, password="Admin123!")
-            resp = c.post("/api/users", json={
+            resp = c.post("/api/v1/users", json={
                 "username": "u3", "password": "alllower123!", "role": "viewer",
             })
         assert resp.status_code == 400
@@ -209,7 +209,7 @@ class TestPasswordPolicyApi:
         wa = _make_wa(config_dir, var_dir, pw_require_symbol=True)
         with wa.app.test_client() as c:
             _login(c, password="Admin123!")
-            resp = c.post("/api/users", json={
+            resp = c.post("/api/v1/users", json={
                 "username": "u4", "password": "NoSymbol1Abcd", "role": "viewer",
             })
         assert resp.status_code == 400
@@ -220,7 +220,7 @@ class TestPasswordPolicyApi:
                       pw_require_symbol=True)
         with wa.app.test_client() as c:
             _login(c, password="Admin123!")
-            resp = c.post("/api/users", json={
+            resp = c.post("/api/v1/users", json={
                 "username": "u5", "password": "Strong1!Aa", "role": "viewer",
             })
         assert resp.status_code == 201
@@ -232,20 +232,20 @@ class TestPasswordPolicyApi:
         with wa.app.test_client() as c:
             _login(c, password="Admin123!")
             # first create the user with a valid password
-            c.post("/api/users", json={
+            c.post("/api/v1/users", json={
                 "username": "victim", "password": "Admin123!", "role": "viewer",
             })
-            resp = c.put("/api/users/victim", json={"password": "NoDigitHere!"})
+            resp = c.put("/api/v1/users/victim", json={"password": "NoDigitHere!"})
         assert resp.status_code == 400
 
     def test_update_password_accepts_compliant_password(self, config_dir, var_dir):
         wa = _make_wa(config_dir, var_dir, pw_require_digit=True)
         with wa.app.test_client() as c:
             _login(c, password="Admin123!")
-            c.post("/api/users", json={
+            c.post("/api/v1/users", json={
                 "username": "victim2", "password": "Admin123!", "role": "viewer",
             })
-            resp = c.put("/api/users/victim2", json={"password": "HasDigit1A"})
+            resp = c.put("/api/v1/users/victim2", json={"password": "HasDigit1A"})
         assert resp.status_code == 200
 
     # ── POST /api/users/me/password (change own password) ───────────
@@ -254,7 +254,7 @@ class TestPasswordPolicyApi:
         wa = _make_wa(config_dir, var_dir, pw_require_symbol=True)
         with wa.app.test_client() as c:
             _login(c, password="Admin123!")
-            resp = c.put("/api/users/me/password", json={
+            resp = c.put("/api/v1/users/me/password", json={
                 "current_password": "Admin123!",
                 "new_password": "NoSymbol1Ab",
             })
@@ -264,7 +264,7 @@ class TestPasswordPolicyApi:
         wa = _make_wa(config_dir, var_dir, pw_require_symbol=True)
         with wa.app.test_client() as c:
             _login(c, password="Admin123!")
-            resp = c.put("/api/users/me/password", json={
+            resp = c.put("/api/v1/users/me/password", json={
                 "current_password": "Admin123!",
                 "new_password": "NewPass123!",
             })

@@ -1,4 +1,4 @@
-{# ================================================================
+﻿{# ================================================================
    Users tab — user table, create/edit/delete, reset password.
    Depends on: _js_account.html (shared constants + utilities)
    ================================================================ #}
@@ -220,6 +220,7 @@ function openNewUserModal() {
     document.getElementById('umDisplayName').readOnly = false;
     document.getElementById('umDisplayName').removeAttribute('title');
     document.getElementById('umLang').value = '';
+    document.getElementById('umDarkMode').value = '';
     document.getElementById('umPassword').value = '';
     document.getElementById('umPasswordGroup').style.display = '';
     _updatePasswordStrength('umPassword', 'umPwStrengthBar', 'umPwStrengthLabel');
@@ -251,6 +252,8 @@ function openEditUserModal(username) {
     document.getElementById('umUsername').disabled = true;
     document.getElementById('umDisplayName').value = u.display_name || '';
     document.getElementById('umLang').value = u.lang || '';
+    const _dm = u.dark_mode;
+    document.getElementById('umDarkMode').value = _dm === true ? 'dark' : _dm === false ? 'light' : '';
     document.getElementById('umPasswordGroup').style.display = 'none';
     document.getElementById('umEmail').value = u.email || '';
     const _isSsoUser = (u.auth_source && u.auth_source !== 'local');
@@ -292,8 +295,10 @@ async function saveUserModal() {
     if (_editingUser) {
         const enabled = document.getElementById('umEnabled').checked;
         const email   = document.getElementById('umEmail').value.trim();
-        const body = { role, display_name, lang, groups, enabled, email };
-        const r = await apiPut('/api/users/' + encodeURIComponent(_editingUser), body);
+        const _dmVal  = document.getElementById('umDarkMode').value;
+        const dark_mode = _dmVal === 'dark' ? true : _dmVal === 'light' ? false : null;
+        const body = { role, display_name, lang, groups, enabled, email, dark_mode };
+        const r = await apiPut('/api/v1/users/' + encodeURIComponent(_editingUser), body);
         if (r && r.ok) {
             showToast(t('user_updated'));
             const oldGroups = new Set(usersData[_editingUser]?.groups || []);
@@ -308,7 +313,7 @@ async function saveUserModal() {
                     if (!groupsData[g].members.includes(_editingUser)) groupsData[g].members.push(_editingUser);
                 }
             }
-            usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email };
+            usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email, dark_mode };
             if (_editingUser === currentUser.username) {
                 currentUser.role = role;
                 currentUser.display_name = display_name || _editingUser;
@@ -322,7 +327,7 @@ async function saveUserModal() {
         if (!password) { showToast(t('password_required'), 'warning'); return; }
         const email = document.getElementById('umEmail').value.trim();
         const enabled = document.getElementById('umEnabled').checked;
-        const r = await apiPost('/api/users', { username, password, role, display_name, lang, groups, email, enabled });
+        const r = await apiPost('/api/v1/users', { username, password, role, display_name, lang, groups, email, enabled });
         if (r && r.status === 201) {
             showToast(t('user_created'));
             usersData[username] = { role, display_name: display_name || username, lang, groups, email, enabled };
@@ -343,7 +348,7 @@ async function saveUserModal() {
 
 async function deleteUser(username) {
     showConfirmModal(tf('confirm_delete_user', username), async () => {
-        const r = await apiDelete('/api/users/' + encodeURIComponent(username));
+        const r = await apiDelete('/api/v1/users/' + encodeURIComponent(username));
         if (r && r.status === 200 && r.data.ok) {
             showToast(t('user_deleted'));
             for (const gd of Object.values(groupsData)) {
@@ -375,7 +380,7 @@ async function _bulkEnableUsers(enabled) {
             if (!enabled && uname === currentUser.username) continue;
             const body = { role: u.role || 'none', display_name: u.display_name || '', lang: u.lang || '',
                            groups: u.groups || [], enabled, email: u.email || '' };
-            const r = await apiPut('/api/users/' + encodeURIComponent(uname), body);
+            const r = await apiPut('/api/v1/users/' + encodeURIComponent(uname), body);
             if (r?.status === 200 && r.data?.ok) {
                 usersData[uname] = { ...usersData[uname], enabled };
             }
@@ -389,7 +394,7 @@ async function _bulkDeleteUsers() {
     if (!names.length) return;
     showConfirmModal(`${t('delete_tt')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
         for (const uname of names) {
-            const r = await apiDelete('/api/users/' + encodeURIComponent(uname));
+            const r = await apiDelete('/api/v1/users/' + encodeURIComponent(uname));
             if (r?.status === 200 && r.data?.ok) {
                 for (const gd of Object.values(groupsData)) {
                     if (gd.members) gd.members = gd.members.filter(m => m !== uname);
@@ -466,7 +471,7 @@ async function resetUserPassword() {
     const conf = document.getElementById('rpConfirmPassword').value;
     if (!nw) { showToast(t('enter_new_password'), 'warning'); return; }
     if (nw !== conf) { showToast(t('passwords_dont_match'), 'warning'); return; }
-    const r = await apiPut('/api/users/' + encodeURIComponent(_resetPasswordUser), { password: nw });
+    const r = await apiPut('/api/v1/users/' + encodeURIComponent(_resetPasswordUser), { password: nw });
     if (r && r.ok) {
         showToast(t('password_reset_success'));
         bootstrap.Modal.getInstance(document.getElementById('resetPasswordModal'))?.hide();

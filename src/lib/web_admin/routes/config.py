@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Config routes: /api/config (GET, PUT) with per-field version tracking."""
 
@@ -70,6 +70,16 @@ BOOL_RULES = {
     'email|notify_on_down':     None,
     'email|notify_on_recovery': None,
     'email|notify_on_warn':     None,
+    # Notification routing matrix
+    'notifications|telegram_on_down':     None,
+    'notifications|telegram_on_recovery': None,
+    'notifications|telegram_on_warn':     None,
+    'notifications|email_on_down':        None,
+    'notifications|email_on_recovery':    None,
+    'notifications|email_on_warn':        None,
+    'notifications|webhook_on_down':      None,
+    'notifications|webhook_on_recovery':  None,
+    'notifications|webhook_on_warn':      None,
 }
 
 # JSON-object config fields that must parse as valid JSON dicts when set.
@@ -97,7 +107,7 @@ def register(app, wa):
 
     # --- API: config.json -----------------------------------------
 
-    @app.route('/api/config', methods=['GET'])
+    @app.route('/api/v1/config', methods=['GET'])
     @config_view_req
     def api_get_config():
         """Return the effective config and per-field version tokens."""
@@ -113,13 +123,13 @@ def register(app, wa):
         resp.headers['ETag'] = f'"{wa._config_version}"'
         return resp
 
-    @app.route('/api/config/versions', methods=['GET'])
+    @app.route('/api/v1/config/versions', methods=['GET'])
     @config_view_req
     def api_get_config_versions():
         """Lightweight poll endpoint — returns only per-field version tokens."""
         return jsonify({'versions': dict(wa._field_versions)})
 
-    @app.route('/api/config/schema', methods=['GET'])
+    @app.route('/api/v1/config/schema', methods=['GET'])
     @config_view_req
     def api_get_config_schema():
         """Return field-level metadata (min, max, default) for config fields."""
@@ -152,11 +162,15 @@ def register(app, wa):
             'options': [''] + list(SUPPORTED_LANGS),
             'default': '',
         }
+        schema['email|lang'] = {
+            'options': [''] + list(SUPPORTED_LANGS),
+            'default': '',
+        }
         schema['telegram|chat_id'] = {'numericString': True}
         schema['web_admin|role_modal_scrollable'] = {'type': 'bool', 'default': True}
         return jsonify(schema)
 
-    @app.route('/api/config', methods=['PUT'])
+    @app.route('/api/v1/config', methods=['PUT'])
     @config_edit_req
     def api_save_config():
         """Partial versioned save: only write fields that were actually edited.

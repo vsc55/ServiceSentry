@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Custom roles management routes: /api/roles, /api/roles/<name>."""
+"""Custom roles management routes: /api/v1/roles, /api/v1/roles/<name>."""
 
 import uuid
 
 from flask import jsonify
 
-from ..constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, ROLES, is_module_perm
+from ...constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, ROLES, is_module_perm
 
 
 def register(app, wa):
@@ -17,7 +17,7 @@ def register(app, wa):
 
     # --- API: custom roles management -----------------------------
 
-    @app.route('/api/roles', methods=['GET'])
+    @app.route('/api/v1/roles', methods=['GET'])
     @roles_view_req
     def api_get_roles():
         """Return all roles (builtin + custom) with their permissions."""
@@ -41,7 +41,7 @@ def register(app, wa):
             }
         return jsonify(all_roles)
 
-    @app.route('/api/roles', methods=['POST'])
+    @app.route('/api/v1/roles', methods=['POST'])
     @roles_add_req
     def api_create_role():
         """Create a new custom role."""
@@ -76,7 +76,7 @@ def register(app, wa):
         wa._audit('role_created', detail={'name': name, 'label': label, 'permissions': perms})
         return jsonify({'ok': True}), 201
 
-    @app.route('/api/roles/<name>', methods=['PUT'])
+    @app.route('/api/v1/roles/<name>', methods=['PUT'])
     @roles_edit_req
     def api_update_role(name: str):
         """Update a role's label or permissions. Built-in roles: label only."""
@@ -133,7 +133,7 @@ def register(app, wa):
             wa._audit('role_updated', detail={'name': name, 'changes': changes})
         return jsonify({'ok': True})
 
-    @app.route('/api/roles/<name>', methods=['DELETE'])
+    @app.route('/api/v1/roles/<name>', methods=['DELETE'])
     @roles_delete_req
     def api_delete_role(name: str):
         """Delete a custom role (fails if any user is assigned to it)."""

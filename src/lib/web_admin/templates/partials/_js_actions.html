@@ -1,4 +1,4 @@
-{# ================================================================
+﻿{# ================================================================
    Actions — field updates, item add/remove, save operations.
    ================================================================ #}
 
@@ -360,7 +360,7 @@ function confirmAddItem() {
 
 // --- Save ---
 async function saveModules() {
-    const r = await apiPut('/api/modules', modulesData);
+    const r = await apiPut('/api/v1/modules', modulesData);
     if (r && r.ok) {
         showToast(t('modules_saved'));
         clearDirty('modules');
@@ -399,7 +399,7 @@ async function saveConfig() {
     }
     let _saveResp;
     try {
-        const _fetchResp = await fetch('/api/config', {
+        const _fetchResp = await fetch('/api/v1/config', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fields })
@@ -447,7 +447,7 @@ function _updateConfigPageSizes() {
         configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
 }
 async function reloadModules() {
-    const data = await apiGet('/api/modules');
+    const data = await apiGet('/api/v1/modules');
     if (!data) return;
     modulesData = data;
     applyModuleDefaults();

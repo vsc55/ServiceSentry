@@ -1,4 +1,4 @@
-{# ================================================================
+﻿{# ================================================================
    Roles tab — list, create, edit (incl. built-in), delete roles
    and manage user/group assignments.
    ================================================================ #}
@@ -278,7 +278,7 @@ async function _bulkEnableRoles(enabled) {
             const rd = rolesData[name]; if (!rd) continue;
             const body = { label: rd.label || '', description: rd.description || '',
                            permissions: rd.permissions || [], enabled };
-            const r = await apiPut('/api/roles/' + encodeURIComponent(name), body);
+            const r = await apiPut('/api/v1/roles/' + encodeURIComponent(name), body);
             if (r?.status === 200 && r.data?.ok) rolesData[name] = { ...rolesData[name], enabled };
         }
         _selectedRoles.clear();
@@ -290,7 +290,7 @@ async function _bulkDeleteRoles() {
     if (!names.length) return;
     showConfirmModal(`${t('delete_tt')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
         for (const name of names) {
-            const r = await apiDelete('/api/roles/' + encodeURIComponent(name));
+            const r = await apiDelete('/api/v1/roles/' + encodeURIComponent(name));
             if (r?.status === 200 && r.data?.ok) delete rolesData[name];
         }
         _selectedRoles.clear();
@@ -484,7 +484,7 @@ async function saveRoleModal() {
     if (_editingRole) {
         const enabled = document.getElementById('rmEnabled').checked;
         const payload = isBuiltin ? { label } : { label, description, permissions, enabled };
-        const r = await apiPut('/api/roles/' + encodeURIComponent(_editingRole), payload);
+        const r = await apiPut('/api/v1/roles/' + encodeURIComponent(_editingRole), payload);
         if (r && r.ok) {
             const wasEnabled = rolesData[_editingRole]?.builtin || rolesData[_editingRole]?.enabled !== false;
             if (!isBuiltin && wasEnabled !== enabled)
@@ -502,7 +502,7 @@ async function saveRoleModal() {
             const hadRole = ud.role === _editingRole;
             const wantsRole = selectedUsers.has(uname);
             if (hadRole !== wantsRole) {
-                userUpdates.push(apiPut('/api/users/' + encodeURIComponent(uname), { role: wantsRole ? _editingRole : 'viewer' }));
+                userUpdates.push(apiPut('/api/v1/users/' + encodeURIComponent(uname), { role: wantsRole ? _editingRole : 'viewer' }));
                 usersData[uname] = { ...ud, role: wantsRole ? _editingRole : 'viewer' };
             }
         }
@@ -515,14 +515,14 @@ async function saveRoleModal() {
                 const newRoles = wantsRole
                     ? [...(gd.roles || []), _editingRole]
                     : (gd.roles || []).filter(r => r !== _editingRole);
-                groupUpdates.push(apiPut('/api/groups/' + encodeURIComponent(gname), { roles: newRoles }));
+                groupUpdates.push(apiPut('/api/v1/groups/' + encodeURIComponent(gname), { roles: newRoles }));
                 groupsData[gname] = { ...gd, roles: newRoles };
             }
         }
         await Promise.all([...userUpdates, ...groupUpdates]);
     } else {
         const enabled = document.getElementById('rmEnabled').checked;
-        const r = await apiPost('/api/roles', { name, label, description, permissions, enabled });
+        const r = await apiPost('/api/v1/roles', { name, label, description, permissions, enabled });
         if (r && r.status === 201) {
             showToast(t('role_created'));
             rolesData[name] = { builtin: false, label: label || name, description, permissions, enabled };
@@ -539,7 +539,7 @@ async function saveRoleModal() {
 
 async function deleteRole(name) {
     showConfirmModal(t('role_confirm_delete'), async () => {
-        const r = await apiDelete('/api/roles/' + encodeURIComponent(name));
+        const r = await apiDelete('/api/v1/roles/' + encodeURIComponent(name));
         if (r && r.status === 200 && r.data?.ok) {
             showToast(t('role_deleted'));
             delete rolesData[name];

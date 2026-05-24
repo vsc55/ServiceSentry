@@ -100,6 +100,7 @@ def authenticate(wa, username: str, password: str) -> tuple:
     user_filter   = cfg.get('user_filter', '(sAMAccountName={username})')
     email_attr    = cfg.get('email_attr', 'mail') or 'mail'
     name_attr     = cfg.get('name_attr', 'displayName') or 'displayName'
+    username_attr = cfg.get('username_attr', '') or ''
     group_attr    = cfg.get('group_attr', 'memberOf') or 'memberOf'
     allow_email   = bool(cfg.get('allow_email_login', False))
 
@@ -111,6 +112,8 @@ def authenticate(wa, username: str, password: str) -> tuple:
         search_filter = f'(|{base_filter}{email_attr_filter})'
     # 'dn' is not a valid LDAP attribute — it is always available as entry.entry_dn
     attrs = [email_attr, name_attr, group_attr]
+    if username_attr:
+        attrs.append(username_attr)
 
     try:
         srv  = Server(server_host, port=port, use_ssl=use_ssl, get_info=NONE, connect_timeout=timeout)
@@ -196,6 +199,8 @@ def authenticate(wa, username: str, password: str) -> tuple:
         'email':        _val(email_attr),
         'groups':       all_groups,
     }
+    if username_attr:
+        result['username'] = _val(username_attr)
 
     conn.unbind()
     return result, None
@@ -236,7 +241,6 @@ def sync_user(wa, username: str, attrs: dict) -> dict:
             'groups':         [],
             'enabled':        True,
             'lang':           '',
-            'dark_mode':      False,
         }
         wa._users[username] = user
     else:

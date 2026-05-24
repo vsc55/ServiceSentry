@@ -1,4 +1,4 @@
-{# ================================================================
+﻿{# ================================================================
    Status tab — rendering logic + run checks.
    ================================================================ #}
 
@@ -24,7 +24,7 @@ async function renderStatus() {
         <div class="spinner-border spinner-border-sm me-2"></div>
         <span>${t('loading')}</span>
     </div>`;
-    const data = await apiGet('/api/status');
+    const data = await apiGet('/api/v1/modules/status');
     if (!data) {
         c.innerHTML = `<div class="alert alert-warning d-flex align-items-center gap-2">
             <i class="bi bi-exclamation-triangle-fill"></i>${t('status_load_error')}
@@ -268,7 +268,7 @@ async function _doRunChecks(modules) {
     const runMods    = new Set(modules === 'all' ? allEnabled : (modules || []).filter(m => typeof m === 'string'));
 
     // Snapshot before run — used to detect when a module's data is fresh
-    const preSnap = await apiGet('/api/status') || {};
+    const preSnap = await apiGet('/api/v1/modules/status') || {};
 
     // Show waiting cards immediately for selected modules; keep others as-is
     const area = document.getElementById('checksResultArea');
@@ -286,7 +286,7 @@ async function _doRunChecks(modules) {
     const doneSet  = new Set();
     const pollFn   = async () => {
         if (!pollActive) return;
-        const polled = await apiGet('/api/status');
+        const polled = await apiGet('/api/v1/modules/status');
         if (!polled || !pollActive) return;
         for (const mod of runMods) {
             if (doneSet.has(mod) || !polled[mod]) continue;
@@ -302,7 +302,7 @@ async function _doRunChecks(modules) {
     const pollTimer = setInterval(pollFn, 1500);
 
     try {
-        const res = await apiPost('/api/checks/run', { modules });
+        const res = await apiPost('/api/v1/modules/checks/run', { modules });
         pollActive = false;
         clearInterval(pollTimer);
 

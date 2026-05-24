@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for module routes: /api/modules, /api/status, /api/overview."""
 
@@ -27,16 +27,16 @@ class TestApiModules:
     """GET / PUT /api/modules."""
 
     def test_get_requires_auth(self, client):
-        resp = client.get("/api/modules")
+        resp = client.get("/api/v1/modules")
         assert resp.status_code == 401
 
     def test_put_requires_auth(self, client):
-        resp = client.put("/api/modules", json={"x": 1})
+        resp = client.put("/api/v1/modules", json={"x": 1})
         assert resp.status_code == 401
 
     def test_get_returns_data(self, client):
         _login(client)
-        resp = client.get("/api/modules")
+        resp = client.get("/api/v1/modules")
         assert resp.status_code == 200
         data = resp.get_json()
         assert "ping" in data
@@ -46,7 +46,7 @@ class TestApiModules:
     def test_put_saves_data(self, client, config_dir):
         _login(client)
         new = {"ping": {"enabled": False, "timeout": 10}}
-        resp = client.put("/api/modules", json=new)
+        resp = client.put("/api/v1/modules", json=new)
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
 
@@ -58,24 +58,24 @@ class TestApiModules:
 
     def test_put_roundtrip(self, client):
         _login(client)
-        original = client.get("/api/modules").get_json()
+        original = client.get("/api/v1/modules").get_json()
         original["web"]["enabled"] = False
-        client.put("/api/modules", json=original)
-        reloaded = client.get("/api/modules").get_json()
+        client.put("/api/v1/modules", json=original)
+        reloaded = client.get("/api/v1/modules").get_json()
         assert reloaded["web"]["enabled"] is False
         assert reloaded["ping"]["enabled"] is True  # unchanged
 
     def test_put_invalid_json(self, client):
         _login(client)
         resp = client.put(
-            "/api/modules", data="not-json", content_type="application/json"
+            "/api/v1/modules", data="not-json", content_type="application/json"
         )
         assert resp.status_code == 400
         assert "error" in resp.get_json()
 
     def test_put_no_body(self, client):
         _login(client)
-        resp = client.put("/api/modules", content_type="application/json")
+        resp = client.put("/api/v1/modules", content_type="application/json")
         assert resp.status_code == 400
 
 
@@ -85,12 +85,12 @@ class TestApiStatus:
     """GET /api/status (read-only)."""
 
     def test_get_requires_auth(self, client):
-        resp = client.get("/api/status")
+        resp = client.get("/api/v1/modules/status")
         assert resp.status_code == 401
 
     def test_get_returns_data(self, client):
         _login(client)
-        resp = client.get("/api/status")
+        resp = client.get("/api/v1/modules/status")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["ping"]["192.168.1.1"]["status"] is True
@@ -100,7 +100,7 @@ class TestApiStatus:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
-        resp = c.get("/api/status")
+        resp = c.get("/api/v1/modules/status")
         assert resp.status_code == 200
         assert resp.get_json() == {}
 
@@ -112,7 +112,7 @@ class TestApiStatus:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
-        resp = c.get("/api/status")
+        resp = c.get("/api/v1/modules/status")
         assert resp.status_code == 200
         assert resp.get_json() == {}
 
@@ -123,31 +123,31 @@ class TestApiOverview:
     """GET /api/overview — dashboard summary."""
 
     def test_requires_auth(self, client):
-        resp = client.get("/api/overview")
+        resp = client.get("/api/v1/modules/overview")
         assert resp.status_code == 401
 
     def test_returns_200(self, client):
         _login(client)
-        resp = client.get("/api/overview")
+        resp = client.get("/api/v1/modules/overview")
         assert resp.status_code == 200
 
     def test_response_keys(self, client):
         _login(client)
-        data = client.get("/api/overview").get_json()
+        data = client.get("/api/v1/modules/overview").get_json()
         for key in ("modules", "status", "sessions", "users", "groups", "roles", "last_events"):
             assert key in data
 
     def test_modules_list(self, client):
         """Modules list contains the two sample modules (ping, web)."""
         _login(client)
-        data = client.get("/api/overview").get_json()
+        data = client.get("/api/v1/modules/overview").get_json()
         names = {m["name"] for m in data["modules"]}
         assert names == {"ping", "web"}
 
     def test_modules_enabled_flag(self, client):
         """Both sample modules are enabled."""
         _login(client)
-        modules = client.get("/api/overview").get_json()["modules"]
+        modules = client.get("/api/v1/modules/overview").get_json()["modules"]
         assert all(m["enabled"] for m in modules)
 
     def test_modules_items_count(self, client):
@@ -155,7 +155,7 @@ class TestApiOverview:
         _login(client)
         modules = {
             m["name"]: m for m in
-            client.get("/api/overview").get_json()["modules"]
+            client.get("/api/v1/modules/overview").get_json()["modules"]
         }
         assert modules["ping"]["items"] == 2
         assert modules["web"]["items"] == 1
@@ -163,7 +163,7 @@ class TestApiOverview:
     def test_status_counts(self, client):
         """status.json has 1 check (ping/192.168.1.1 OK)."""
         _login(client)
-        status = client.get("/api/overview").get_json()["status"]
+        status = client.get("/api/v1/modules/overview").get_json()["status"]
         assert status["total"] == 1
         assert status["ok"] == 1
         assert status["error"] == 0
@@ -174,27 +174,27 @@ class TestApiOverview:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
-        status = c.get("/api/overview").get_json()["status"]
+        status = c.get("/api/v1/modules/overview").get_json()["status"]
         assert status == {"total": 0, "ok": 0, "error": 0}
 
     def test_sessions_contains_current(self, client):
         """After login, at least 1 active session listed."""
         _login(client)
-        sessions = client.get("/api/overview").get_json()["sessions"]
+        sessions = client.get("/api/v1/modules/overview").get_json()["sessions"]
         assert sessions["active"] >= 1
         assert "admin" in sessions["users"]
 
     def test_users_total(self, client):
         """Default fixture has a single admin user."""
         _login(client)
-        users = client.get("/api/overview").get_json()["users"]
+        users = client.get("/api/v1/modules/overview").get_json()["users"]
         assert users["total"] == 1
         assert users["by_role"].get("admin", 0) == 1
 
     def test_last_events_list(self, admin, client):
         """last_events returns most-recent-first audit entries."""
         _login(client)
-        data = client.get("/api/overview").get_json()
+        data = client.get("/api/v1/modules/overview").get_json()
         # The login itself should have generated an audit event
         assert isinstance(data["last_events"], list)
         if data["last_events"]:
@@ -206,7 +206,7 @@ class TestApiOverview:
         # Generate extra audit entries
         for _ in range(15):
             admin._audit("admin", "test_event", "filler")
-        events = client.get("/api/overview").get_json()["last_events"]
+        events = client.get("/api/v1/modules/overview").get_json()["last_events"]
         assert len(events) <= 10
 
     def test_dashboard_has_overview_tab(self, client):
@@ -222,14 +222,14 @@ class TestApiOverview:
     def test_groups_summary_keys(self, client):
         """groups key has total and members sub-keys."""
         _login(client)
-        groups = client.get("/api/overview").get_json()["groups"]
+        groups = client.get("/api/v1/modules/overview").get_json()["groups"]
         assert "total" in groups
         assert "members" in groups
 
     def test_groups_default_administrators(self, client):
         """No groups.json → WebAdmin auto-creates 'administrators' group with no members."""
         _login(client)
-        groups = client.get("/api/overview").get_json()["groups"]
+        groups = client.get("/api/v1/modules/overview").get_json()["groups"]
         assert groups["total"] == 1
         assert groups["members"] == 0
 
@@ -238,7 +238,7 @@ class TestApiOverview:
     def test_roles_summary_keys(self, client):
         """roles key has total, builtin and custom sub-keys."""
         _login(client)
-        roles = client.get("/api/overview").get_json()["roles"]
+        roles = client.get("/api/v1/modules/overview").get_json()["roles"]
         assert "total" in roles
         assert "builtin" in roles
         assert "custom" in roles
@@ -247,7 +247,7 @@ class TestApiOverview:
         """Builtin roles match BUILTIN_ROLE_PERMISSIONS length (admin, editor, viewer = 3)."""
         from lib.web_admin.constants import BUILTIN_ROLE_PERMISSIONS
         _login(client)
-        roles = client.get("/api/overview").get_json()["roles"]
+        roles = client.get("/api/v1/modules/overview").get_json()["roles"]
         assert roles["builtin"] == len(BUILTIN_ROLE_PERMISSIONS)
         assert roles["custom"] == 0
         assert roles["total"] == roles["builtin"] + roles["custom"]
@@ -257,7 +257,7 @@ class TestApiOverview:
         from lib.web_admin.constants import BUILTIN_ROLE_PERMISSIONS
         _login(client)
         admin._custom_roles["superuser"] = {"permissions": ["modules_view"]}
-        roles = client.get("/api/overview").get_json()["roles"]
+        roles = client.get("/api/v1/modules/overview").get_json()["roles"]
         assert roles["custom"] == 1
         assert roles["total"] == len(BUILTIN_ROLE_PERMISSIONS) + 1
 
@@ -266,7 +266,7 @@ class TestApiOverview:
     def test_modules_have_checks_key(self, client):
         """Every module entry in overview has a checks dict."""
         _login(client)
-        modules = client.get("/api/overview").get_json()["modules"]
+        modules = client.get("/api/v1/modules/overview").get_json()["modules"]
         for m in modules:
             assert "checks" in m
             assert isinstance(m["checks"], dict)
@@ -274,7 +274,7 @@ class TestApiOverview:
     def test_module_checks_structure(self, client):
         """checks dict has total, ok and error keys."""
         _login(client)
-        modules = client.get("/api/overview").get_json()["modules"]
+        modules = client.get("/api/v1/modules/overview").get_json()["modules"]
         for m in modules:
             for key in ("total", "ok", "error"):
                 assert key in m["checks"], f"{m['name']}.checks missing '{key}'"
@@ -284,7 +284,7 @@ class TestApiOverview:
         _login(client)
         modules = {
             m["name"]: m["checks"]
-            for m in client.get("/api/overview").get_json()["modules"]
+            for m in client.get("/api/v1/modules/overview").get_json()["modules"]
         }
         assert modules["ping"] == {"total": 1, "ok": 1, "error": 0}
         assert modules["web"] == {"total": 0, "ok": 0, "error": 0}
@@ -306,7 +306,7 @@ class TestApiOverview:
         c.post("/login", data={"username": "admin", "password": "pass"})
         modules = {
             m["name"]: m["checks"]
-            for m in c.get("/api/overview").get_json()["modules"]
+            for m in c.get("/api/v1/modules/overview").get_json()["modules"]
         }
         assert modules["ping"]["total"] == 2
         assert modules["ping"]["ok"] == 1
@@ -318,14 +318,14 @@ class TestApiOverview:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
-        modules = c.get("/api/overview").get_json()["modules"]
+        modules = c.get("/api/v1/modules/overview").get_json()["modules"]
         for m in modules:
             assert m["checks"] == {"total": 0, "ok": 0, "error": 0}
 
     def test_status_aggregated_from_module_checks(self, client):
         """Top-level status counts equal the sum of per-module check counts."""
         _login(client)
-        data = client.get("/api/overview").get_json()
+        data = client.get("/api/v1/modules/overview").get_json()
         total = sum(m["checks"]["total"] for m in data["modules"])
         ok    = sum(m["checks"]["ok"]    for m in data["modules"])
         error = sum(m["checks"]["error"] for m in data["modules"])
@@ -477,7 +477,7 @@ class TestConfigEdgeCases:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "a", "password": "b"})
-        resp = c.get("/api/modules")
+        resp = c.get("/api/v1/modules")
         assert resp.status_code == 200
         assert resp.get_json() == {}
 
@@ -487,6 +487,6 @@ class TestConfigEdgeCases:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "a", "password": "b"})
-        resp = c.put("/api/modules", json={"test": {"enabled": True}})
+        resp = c.put("/api/v1/modules", json={"test": {"enabled": True}})
         assert resp.status_code == 200
         assert (tmp_path / "modules.json").exists()

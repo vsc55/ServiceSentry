@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""LDAP routes: /api/ldap/test."""
+"""LDAP API routes: /api/v1/ldap/*."""
 
 from flask import jsonify, request, session
 
@@ -8,7 +8,7 @@ from flask import jsonify, request, session
 def register(app, wa):
     config_edit_req = wa._perm_required('config_edit')
 
-    @app.route('/api/ldap/test', methods=['POST'])
+    @app.route('/api/v1/auth/ldap/test', methods=['POST'])
     @config_edit_req
     def api_test_ldap():
         """Test LDAP connection and, optionally, a user's credentials."""
@@ -133,7 +133,7 @@ def register(app, wa):
             'dn':           user_dn,
         })
 
-    @app.route('/api/ldap/group_lookup', methods=['POST'])
+    @app.route('/api/v1/auth/ldap/group_lookup', methods=['POST'])
     @config_edit_req
     def api_ldap_group_lookup():
         """Look up a single group by DN and return its display name."""
@@ -190,7 +190,7 @@ def register(app, wa):
         except Exception as exc:
             return jsonify({'ok': False, 'message': f"{wa._t('ldap_test_error')}: {exc}"})
 
-    @app.route('/api/ldap/groups', methods=['POST'])
+    @app.route('/api/v1/auth/ldap/groups', methods=['POST'])
     @config_edit_req
     def api_ldap_groups():
         """List groups from the LDAP directory."""

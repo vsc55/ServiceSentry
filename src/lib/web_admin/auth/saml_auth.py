@@ -163,7 +163,6 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
             'groups':         [],
             'enabled':        True,
             'lang':           '',
-            'dark_mode':      False,
         }
         wa._users[username] = user
     else:

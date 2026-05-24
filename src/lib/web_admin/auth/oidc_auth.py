@@ -155,7 +155,6 @@ def sync_user(wa, userinfo: dict) -> dict | None:
             'groups':         [],
             'enabled':        True,
             'lang':           '',
-            'dark_mode':      False,
         }
         wa._users[username] = user
     else:
@@ -177,8 +176,7 @@ def register_routes(app, wa):
     if not _HAS_AUTHLIB:
         return
 
-    from flask import redirect, render_template, request, session, url_for
-    from flask import flash
+    from flask import flash, redirect, request, url_for
     from ..routes.auth import _establish_session
 
     @app.route('/auth/oidc/login')

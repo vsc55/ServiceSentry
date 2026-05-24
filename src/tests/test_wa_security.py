@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Security, injection and abuse-resistance tests for the web API."""
 
@@ -83,7 +83,7 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c)
         for payload in self._XSS_PAYLOADS:
-            resp = c.post("/api/users", json={
+            resp = c.post("/api/v1/users", json={
                 "username": payload, "password": "testpass", "role": "viewer",
             })
             # Server must not crash; response is 201 or 400/409
@@ -95,7 +95,7 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c)
         payload = '<script>alert("xss")</script>'
-        c.post("/api/users", json={
+        c.post("/api/v1/users", json={
             "username": "xssuser", "password": "testpass", "role": "viewer",
             "display_name": payload,
         })
@@ -128,7 +128,7 @@ class TestSecurityInjection:
             "' UNION SELECT * FROM users--",
         ]
         for payload in payloads:
-            resp = c.post("/api/users", json={
+            resp = c.post("/api/v1/users", json={
                 "username": payload, "password": "testpass", "role": "viewer",
             })
             assert resp.status_code in (201, 400, 409)
@@ -144,9 +144,9 @@ class TestSecurityInjection:
             "../../../etc/passwd",
         ]
         for payload in payloads:
-            resp = c.put(f"/api/users/{payload}", json={"role": "viewer"})
+            resp = c.put(f"/api/v1/users/{payload}", json={"role": "viewer"})
             assert resp.status_code in (404, 400)
-            resp = c.delete(f"/api/users/{payload}")
+            resp = c.delete(f"/api/v1/users/{payload}")
             assert resp.status_code in (404, 400)
 
     # ── Path traversal ────────────────────────────────────────────
@@ -167,15 +167,6 @@ class TestSecurityInjection:
             # Must not crash; language stays unchanged
             assert resp.status_code in (200, 302, 404)
 
-    def test_path_traversal_theme_endpoint(self, config_dir, var_dir):
-        """Path traversal via /theme/<mode> doesn't break the app."""
-        wa = self._make_admin(config_dir, var_dir)
-        c = wa.app.test_client()
-        self._login(c)
-        for payload in ["../../etc/shadow", "light/../../../etc/passwd"]:
-            resp = c.get(f"/theme/{payload}", follow_redirects=True)
-            assert resp.status_code in (200, 302, 404)
-
     def test_path_traversal_session_revoke(self, config_dir, var_dir):
         """Path traversal in session revoke endpoint."""
         wa = self._make_admin(config_dir, var_dir)
@@ -188,7 +179,7 @@ class TestSecurityInjection:
         ]
         for payload in payloads:
             resp = c.post(
-                f"/api/sessions/revoke/{payload}",
+                f"/api/v1/sessions/revoke/{payload}",
                 content_type="application/json", data="{}",
             )
             assert resp.status_code in (404, 400)
@@ -201,11 +192,11 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c)
         endpoints = [
-            ("/api/modules", "PUT"),
-            ("/api/config", "PUT"),
-            ("/api/users", "POST"),
-            ("/api/users/secadmin", "PUT"),
-            ("/api/users/me/password", "PUT"),
+            ("/api/v1/modules", "PUT"),
+            ("/api/v1/config", "PUT"),
+            ("/api/v1/users", "POST"),
+            ("/api/v1/users/secadmin", "PUT"),
+            ("/api/v1/users/me/password", "PUT"),
         ]
         for path, method in endpoints:
             resp = getattr(c, method.lower())(
@@ -220,10 +211,10 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c)
         endpoints = [
-            ("/api/modules", "PUT"),
-            ("/api/config", "PUT"),
-            ("/api/users", "POST"),
-            ("/api/users/me/password", "PUT"),
+            ("/api/v1/modules", "PUT"),
+            ("/api/v1/config", "PUT"),
+            ("/api/v1/users", "POST"),
+            ("/api/v1/users/me/password", "PUT"),
         ]
         for path, method in endpoints:
             resp = getattr(c, method.lower())(
@@ -241,7 +232,7 @@ class TestSecurityInjection:
         nested = {"end": True}
         for i in range(50):
             nested = {f"level_{i}": nested}
-        resp = c.put("/api/modules", json=nested)
+        resp = c.put("/api/v1/modules", json=nested)
         # Must not crash — 200 (saved) is fine
         assert resp.status_code in (200, 400)
 
@@ -251,7 +242,7 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c)
         big = {"key_" + str(i): "x" * 1000 for i in range(500)}
-        resp = c.put("/api/modules", json=big)
+        resp = c.put("/api/v1/modules", json=big)
         # Accept or reject — just don't crash
         assert resp.status_code in (200, 400, 413)
 
@@ -260,7 +251,7 @@ class TestSecurityInjection:
         wa = self._make_admin(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c)
-        resp = c.post("/api/users", json={
+        resp = c.post("/api/v1/users", json={
             "username": "null\x00user", "password": "p\x00wd",
             "role": "viewer",
         })
@@ -279,7 +270,7 @@ class TestSecurityInjection:
             "Ā" * 5000,          # long multibyte string
         ]
         for p in payloads:
-            resp = c.post("/api/users", json={
+            resp = c.post("/api/v1/users", json={
                 "username": p, "password": "testpass", "role": "viewer",
             })
             assert resp.status_code in (201, 400, 409)
@@ -291,7 +282,7 @@ class TestSecurityInjection:
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "viewer", "vpass")
-        resp = c.post("/api/users", json={
+        resp = c.post("/api/v1/users", json={
             "username": "hacker", "password": "testpass", "role": "admin",
         })
         assert resp.status_code == 403
@@ -301,7 +292,7 @@ class TestSecurityInjection:
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "viewer", "vpass")
-        resp = c.delete("/api/users/editor")
+        resp = c.delete("/api/v1/users/editor")
         assert resp.status_code == 403
 
     def test_editor_cannot_create_or_delete_users(self, config_dir, var_dir):
@@ -309,25 +300,25 @@ class TestSecurityInjection:
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "editor", "epass")
-        assert c.get("/api/users").status_code == 200
-        assert c.post("/api/users", json={
+        assert c.get("/api/v1/users").status_code == 200
+        assert c.post("/api/v1/users", json={
             "username": "h", "password": "testpass", "role": "viewer",
         }).status_code == 403
-        assert c.delete("/api/users/viewer").status_code == 403
+        assert c.delete("/api/v1/users/viewer").status_code == 403
 
     def test_editor_cannot_access_sessions(self, config_dir, var_dir):
         """Editor cannot access session management."""
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "editor", "epass")
-        assert c.get("/api/sessions").status_code == 403
+        assert c.get("/api/v1/sessions").status_code == 403
 
     def test_viewer_cannot_write_modules(self, config_dir, var_dir):
         """Viewer cannot PUT modules."""
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "viewer", "vpass")
-        resp = c.put("/api/modules", json={"evil": True})
+        resp = c.put("/api/v1/modules", json={"evil": True})
         assert resp.status_code == 403
 
     def test_viewer_cannot_write_config(self, config_dir, var_dir):
@@ -335,7 +326,7 @@ class TestSecurityInjection:
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "viewer", "vpass")
-        resp = c.put("/api/config", json={"evil": True})
+        resp = c.put("/api/v1/config", json={"evil": True})
         assert resp.status_code == 403
 
     def test_viewer_can_access_audit(self, config_dir, var_dir):
@@ -343,14 +334,14 @@ class TestSecurityInjection:
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "viewer", "vpass")
-        assert c.get("/api/audit").status_code == 200
+        assert c.get("/api/v1/audit").status_code == 200
 
     def test_self_promotion_via_update(self, config_dir, var_dir):
         """A non-admin cannot promote themselves by calling PUT /api/users."""
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "viewer", "vpass")
-        resp = c.put("/api/users/viewer", json={"role": "admin"})
+        resp = c.put("/api/v1/users/viewer", json={"role": "admin"})
         assert resp.status_code == 403
 
     # ── Authentication bypass attempts ────────────────────────────
@@ -360,22 +351,22 @@ class TestSecurityInjection:
         wa = self._make_admin(config_dir, var_dir)
         c = wa.app.test_client()
         protected_endpoints = [
-            ("GET", "/api/modules"),
-            ("PUT", "/api/modules"),
-            ("GET", "/api/config"),
-            ("PUT", "/api/config"),
-            ("GET", "/api/status"),
-            ("GET", "/api/overview"),
-            ("GET", "/api/users"),
-            ("POST", "/api/users"),
-            ("PUT", "/api/users/x"),
-            ("DELETE", "/api/users/x"),
-            ("PUT", "/api/users/me/password"),
-            ("GET", "/api/sessions"),
-            ("POST", "/api/sessions/invalidate"),
-            ("POST", "/api/sessions/revoke/x"),
-            ("GET", "/api/audit"),
-            ("GET", "/api/me"),
+            ("GET", "/api/v1/modules"),
+            ("PUT", "/api/v1/modules"),
+            ("GET", "/api/v1/config"),
+            ("PUT", "/api/v1/config"),
+            ("GET", "/api/v1/modules/status"),
+            ("GET", "/api/v1/modules/overview"),
+            ("GET", "/api/v1/users"),
+            ("POST", "/api/v1/users"),
+            ("PUT", "/api/v1/users/x"),
+            ("DELETE", "/api/v1/users/x"),
+            ("PUT", "/api/v1/users/me/password"),
+            ("GET", "/api/v1/sessions"),
+            ("POST", "/api/v1/sessions/invalidate"),
+            ("POST", "/api/v1/sessions/revoke/x"),
+            ("GET", "/api/v1/audit"),
+            ("GET", "/api/v1/me"),
         ]
         for method, path in protected_endpoints:
             resp = getattr(c, method.lower())(path)
@@ -423,7 +414,7 @@ class TestSecurityInjection:
         # Replace the real token with a forged one
         with c.session_transaction() as s:
             s['session_token'] = 'a' * 64
-        resp = c.get("/api/me", follow_redirects=False)
+        resp = c.get("/api/v1/me", follow_redirects=False)
         assert resp.status_code == 401  # API returns 401 for invalid session
 
     def test_reused_session_token_after_logout(self, config_dir, var_dir):
@@ -440,7 +431,7 @@ class TestSecurityInjection:
             s['logged_in'] = True
             s['username'] = 'secadmin'
             s['role'] = 'admin'
-        resp = c.get("/api/me", follow_redirects=False)
+        resp = c.get("/api/v1/me", follow_redirects=False)
         assert resp.status_code == 401  # API returns 401 for invalidated session
 
     # ── HTTP method abuse ─────────────────────────────────────────
@@ -451,14 +442,14 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c)
         tests = [
-            ("DELETE", "/api/modules"),
-            ("POST", "/api/modules"),
-            ("PATCH", "/api/modules"),
-            ("DELETE", "/api/config"),
-            ("POST", "/api/config"),
-            ("PUT", "/api/users"),          # should be POST for create
-            ("PATCH", "/api/users/admin"),
-            ("GET", "/api/sessions/invalidate"),
+            ("DELETE", "/api/v1/modules"),
+            ("POST", "/api/v1/modules"),
+            ("PATCH", "/api/v1/modules"),
+            ("DELETE", "/api/v1/config"),
+            ("POST", "/api/v1/config"),
+            ("PUT", "/api/v1/users"),          # should be POST for create
+            ("PATCH", "/api/v1/users/admin"),
+            ("GET", "/api/v1/sessions/invalidate"),
         ]
         for method, path in tests:
             resp = getattr(c, method.lower())(path)
@@ -472,7 +463,7 @@ class TestSecurityInjection:
         wa = self._make_admin(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c)
-        c.post("/api/users", json={
+        c.post("/api/v1/users", json={
             "username": "sstiuser", "password": "testpass", "role": "viewer",
             "display_name": "{{ config.items() }}",
         })
@@ -487,7 +478,7 @@ class TestSecurityInjection:
         wa = self._make_admin(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c)
-        resp = c.post("/api/users", json={
+        resp = c.post("/api/v1/users", json={
             "username": "badrole", "password": "testpass", "role": "superadmin",
         })
         assert resp.status_code == 400
@@ -497,7 +488,7 @@ class TestSecurityInjection:
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "secadmin", "secpass")
-        resp = c.put("/api/users/viewer", json={"role": "superadmin"})
+        resp = c.put("/api/v1/users/viewer", json={"role": "superadmin"})
         assert resp.status_code == 400
 
     # ── Special characters in config/module keys ──────────────────
@@ -512,10 +503,10 @@ class TestSecurityInjection:
             "mod<script>": {"enabled": False},
             "mod\x00null": {"enabled": True},
         }
-        resp = c.put("/api/modules", json=tricky)
+        resp = c.put("/api/v1/modules", json=tricky)
         assert resp.status_code == 200
         # Re-read and verify keys are stored literally
-        data = c.get("/api/modules").get_json()
+        data = c.get("/api/v1/modules").get_json()
         for key in tricky:
             assert key in data
 
@@ -527,10 +518,10 @@ class TestSecurityInjection:
         c = wa.app.test_client()
         self._login(c)
         payload = '<script>alert("audit")</script>'
-        c.post("/api/users", json={
+        c.post("/api/v1/users", json={
             "username": payload, "password": "testpass", "role": "viewer",
         })
-        entries = c.get("/api/audit").get_json()
+        entries = c.get("/api/v1/audit").get_json()
         # If there's a user_created entry, the username should be literal
         created = [e for e in entries if e['event'] == 'user_created']
         if created:
