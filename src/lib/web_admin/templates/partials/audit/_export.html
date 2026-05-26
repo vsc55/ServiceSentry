@@ -1,0 +1,78 @@
+{# ================================================================
+   Audit export — CSV/JSON download, delete entry, and clear all.
+   ================================================================ #}
+
+// ─────────────────────── Export ──────────────────────────────────
+function auditDetailText(detail) {
+    if (!detail) return '';
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        return detail.map(c => {
+            const o = c.old === null || c.old === undefined ? '∅' :
+                      typeof c.old === 'object' ? JSON.stringify(c.old) : String(c.old);
+            const n = c.new === null || c.new === undefined ? '∅' :
+                      typeof c.new === 'object' ? JSON.stringify(c.new) : String(c.new);
+            return `${c.field || ''}: ${o} → ${n}`;
+        }).join('; ');
+    }
+    if (typeof detail === 'object') {
+        const parts = [];
+        if (detail.username) parts.push(detail.username);
+        if (detail.role) parts.push('role=' + detail.role);
+        if (Array.isArray(detail.changes) && detail.changes.length)
+            parts.push(auditDetailText(detail.changes));
+        return parts.join(' | ') || JSON.stringify(detail);
+    }
+    return String(detail);
+}
+
+function exportAudit(format) {
+    if (!_auditEntries.length) return;
+    let content, mime, ext;
+    const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+    if (format === 'json') {
+        content = JSON.stringify(_auditEntries, null, 2);
+        mime = 'application/json';
+        ext = 'json';
+    } else {
+        const escape = v => '"' + String(v).replace(/"/g, '""') + '"';
+        const headers = ['time', 'event', 'user', 'ip', 'detail'];
+        const rows = _auditEntries.map(e => [
+            escape(new Date(e.ts).toLocaleString()),
+            escape(AUDIT_EVENTS[e.event] || e.event),
+            escape(e.user),
+            escape(e.ip),
+            escape(auditDetailText(e.detail)),
+        ].join(','));
+        content = [headers.join(','), ...rows].join('\r\n');
+        mime = 'text/csv;charset=utf-8;';
+        ext = 'csv';
+    }
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit_${ts}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function _showAuditConfirm(msg, callback) {
+    showConfirmModal(msg, callback);
+}
+
+async function deleteAuditEntry(origIdx) {
+    _showAuditConfirm(t('audit_confirm_delete'), async () => {
+        const r = await apiDelete(`/api/audit/${origIdx}`);
+        if (r && r.status === 200) renderAudit();
+        else showToast(r?.data?.error || t('save_error'), 'danger');
+    });
+}
+
+async function confirmClearAudit() {
+    _showAuditConfirm(t('audit_confirm_clear_all'), async () => {
+        const r = await apiDelete('/api/v1/audit');
+        if (r && r.status === 200) { _auditEntries = []; renderAuditTable(); }
+        else showToast(r?.data?.error || t('save_error'), 'danger');
+    });
+}

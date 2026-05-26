@@ -1,0 +1,194 @@
+{# ================================================================
+   Role modal — openNewRoleModal, _populateRoleUsersGrid,
+   _populateRoleGroupsGrid, openEditRoleModal, saveRoleModal,
+   deleteRole.
+   ================================================================ #}
+
+let _editingRole = null;
+
+function openNewRoleModal() {
+    _editingRole = null;
+    document.getElementById('roleModalTitle').textContent = t('new_role');
+    document.getElementById('rmName').value = '';
+    document.getElementById('rmName').disabled = false;
+    document.getElementById('rmLabel').value = '';
+    document.getElementById('rmDescription').value = '';
+    document.getElementById('rmDescription').disabled = false;
+    document.getElementById('rmUidRow').classList.add('d-none');
+    document.getElementById('rmUid').value = '';
+    document.getElementById('rmEnabledGroup').style.display = '';
+    const rmEnabledNew = document.getElementById('rmEnabled');
+    rmEnabledNew.checked = true;
+    rmEnabledNew.disabled = false;
+    _buildPermsAccordion(new Set(), false);
+    _buildModulePermsGrid(new Set(), false);
+    _populateRoleUsersGrid(null, []);
+    _populateRoleGroupsGrid(null, []);
+    bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#rmTabGeneral"]')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
+}
+
+function _populateRoleUsersGrid(roleName, searchFilterUsers) {
+    const grid = document.getElementById('rmUsersGrid');
+    if (!grid) return;
+    const q = (document.getElementById('rmUserSearch')?.value || '').toLowerCase();
+    let h = '';
+    for (const [uname, ud] of Object.entries(usersData).sort((a, b) => a[0].localeCompare(b[0]))) {
+        if (q && !uname.toLowerCase().includes(q)) continue;
+        const id = 'rmuser_' + uname;
+        const checked = roleName && ud.role === roleName;
+        const isDisabled = ud.enabled === false;
+        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
+            <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(uname)}" ${checked ? 'checked' : ''}>
+            <label class="form-check-label small" for="${id}">${esc(uname)}${badge}</label>
+        </div>`;
+    }
+    grid.innerHTML = h || '<span class="text-muted small">' + t('no_users') + '</span>';
+    const srch = document.getElementById('rmUserSearch');
+    if (srch && !srch.dataset.bound) {
+        srch.dataset.bound = '1';
+        srch.addEventListener('input', () => _populateRoleUsersGrid(_editingRole, []));
+    }
+}
+
+function _populateRoleGroupsGrid(roleName) {
+    const grid = document.getElementById('rmGroupsGrid');
+    if (!grid) return;
+    const q = (document.getElementById('rmGroupSearch')?.value || '').toLowerCase();
+    let h = '';
+    for (const [gname, gd] of Object.entries(groupsData).sort((a, b) => a[0].localeCompare(b[0]))) {
+        if (q && !gname.toLowerCase().includes(q) && !(gd.label || '').toLowerCase().includes(q)) continue;
+        const id = 'rmgroup_' + gname;
+        const checked = roleName && (gd.roles || []).includes(roleName);
+        const isDisabled = gd.enabled === false;
+        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
+            <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(gname)}" ${checked ? 'checked' : ''}>
+            <label class="form-check-label small" for="${id}">${esc(gd.label || gname)}${badge}</label>
+        </div>`;
+    }
+    grid.innerHTML = h || '<span class="text-muted small">' + t('no_groups') + '</span>';
+    const srch = document.getElementById('rmGroupSearch');
+    if (srch && !srch.dataset.bound) {
+        srch.dataset.bound = '1';
+        srch.addEventListener('input', () => _populateRoleGroupsGrid(_editingRole));
+    }
+}
+
+function openEditRoleModal(name) {
+    _editingRole = name;
+    const rd = rolesData[name] || {};
+    const isBuiltin = !!rd.builtin;
+    document.getElementById('roleModalTitle').textContent = t('edit_role_title') + ': ' + name;
+    document.getElementById('rmName').value = name;
+    document.getElementById('rmName').disabled = true;
+    document.getElementById('rmLabel').value = rd.label || '';
+    document.getElementById('rmDescription').value = rd.description || '';
+    document.getElementById('rmDescription').disabled = isBuiltin;
+    document.getElementById('rmUidRow').classList.remove('d-none');
+    document.getElementById('rmUid').value = rd.uid || '';
+    const rmEnabledGroup = document.getElementById('rmEnabledGroup');
+    rmEnabledGroup.style.display = '';
+    const rmEnabled = document.getElementById('rmEnabled');
+    rmEnabled.checked = isBuiltin || rd.enabled !== false;
+    rmEnabled.disabled = isBuiltin;
+    const activePerms = new Set(rd.permissions || []);
+    _buildPermsAccordion(activePerms, isBuiltin);
+    _buildModulePermsGrid(activePerms, isBuiltin);
+    // Reset search inputs and their bound flag so they rebind cleanly
+    ['rmUserSearch', 'rmGroupSearch'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.value = ''; delete el.dataset.bound; }
+    });
+    _populateRoleUsersGrid(name, []);
+    _populateRoleGroupsGrid(name);
+    // Built-ins: go straight to Assignments; custom: go to Permissions
+    const targetTab = isBuiltin ? '#rmTabAssign' : '#rmTabPerms';
+    bootstrap.Tab.getOrCreateInstance(document.querySelector(`[data-bs-target="${targetTab}"]`)).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
+}
+
+async function saveRoleModal() {
+    const name        = document.getElementById('rmName').value.trim();
+    const label       = document.getElementById('rmLabel').value.trim();
+    const description = document.getElementById('rmDescription').value.trim();
+    const permissions = Array.from(
+        document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]:checked')
+    ).map(cb => cb.value);
+    const selectedUsers = new Set(Array.from(document.querySelectorAll('#rmUsersGrid input[type=checkbox]:checked')).map(cb => cb.value));
+    const selectedGroups = new Set(Array.from(document.querySelectorAll('#rmGroupsGrid input[type=checkbox]:checked')).map(cb => cb.value));
+    if (!name) { showToast(t('role_name_required'), 'warning'); return; }
+    if (!_editingRole && Object.keys(rolesData).some(k => k.toLowerCase() === name.toLowerCase())) {
+        showToast(tf('role_already_exists', name), 'warning'); return;
+    }
+    const rd = rolesData[name] || {};
+    const isBuiltin = !!rd.builtin;
+    if (_editingRole) {
+        const enabled = document.getElementById('rmEnabled').checked;
+        const payload = isBuiltin ? { label } : { label, description, permissions, enabled };
+        const r = await apiPut('/api/v1/roles/' + encodeURIComponent(_editingRole), payload);
+        if (r && r.ok) {
+            const wasEnabled = rolesData[_editingRole]?.builtin || rolesData[_editingRole]?.enabled !== false;
+            if (!isBuiltin && wasEnabled !== enabled)
+                showToast(enabled ? t('role_enabled') : t('role_disabled'));
+            else
+                showToast(t('role_updated'));
+            rolesData[_editingRole] = { ...rolesData[_editingRole], label: label || _editingRole };
+            if (!isBuiltin) { rolesData[_editingRole].permissions = permissions; rolesData[_editingRole].description = description; rolesData[_editingRole].enabled = enabled; }
+        } else {
+            showToast(r?.error || t('update_error'), 'danger'); return;
+        }
+        // Update user role assignments
+        const userUpdates = [];
+        for (const [uname, ud] of Object.entries(usersData)) {
+            const hadRole = ud.role === _editingRole;
+            const wantsRole = selectedUsers.has(uname);
+            if (hadRole !== wantsRole) {
+                userUpdates.push(apiPut('/api/v1/users/' + encodeURIComponent(uname), { role: wantsRole ? _editingRole : 'viewer' }));
+                usersData[uname] = { ...ud, role: wantsRole ? _editingRole : 'viewer' };
+            }
+        }
+        // Update group role assignments
+        const groupUpdates = [];
+        for (const [gname, gd] of Object.entries(groupsData)) {
+            const hadRole = (gd.roles || []).includes(_editingRole);
+            const wantsRole = selectedGroups.has(gname);
+            if (hadRole !== wantsRole) {
+                const newRoles = wantsRole
+                    ? [...(gd.roles || []), _editingRole]
+                    : (gd.roles || []).filter(r => r !== _editingRole);
+                groupUpdates.push(apiPut('/api/v1/groups/' + encodeURIComponent(gname), { roles: newRoles }));
+                groupsData[gname] = { ...gd, roles: newRoles };
+            }
+        }
+        await Promise.all([...userUpdates, ...groupUpdates]);
+    } else {
+        const enabled = document.getElementById('rmEnabled').checked;
+        const r = await apiPost('/api/v1/roles', { name, label, description, permissions, enabled });
+        if (r && r.status === 201) {
+            showToast(t('role_created'));
+            rolesData[name] = { builtin: false, label: label || name, description, permissions, enabled };
+        } else {
+            showToast(r?.data?.error || t('create_error'), 'danger'); return;
+        }
+    }
+    bootstrap.Modal.getInstance(document.getElementById('roleModal')).hide();
+    renderRoles();
+    renderGroups();
+    renderUsers();
+}
+
+
+async function deleteRole(name) {
+    showConfirmModal(t('role_confirm_delete'), async () => {
+        const r = await apiDelete('/api/v1/roles/' + encodeURIComponent(name));
+        if (r && r.status === 200 && r.data?.ok) {
+            showToast(t('role_deleted'));
+            delete rolesData[name];
+            renderRoles();
+        } else {
+            showToast(r?.data?.error || t('delete_error'), 'danger');
+        }
+    });
+}

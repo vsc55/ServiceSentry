@@ -1,0 +1,203 @@
+{# ================================================================
+   Config — Notifications tab: string template editor.
+   _notifTplState, _NOTIF_TPL_GROUPS, _renderNotifTemplatesSection,
+   _renderNotifStringSection, _notifTplLoad, _notifTplLoadStrings,
+   _notifTplRender, _notifTplLangChanged, _notifTplSave,
+   _notifTplResetLang.
+   ================================================================ #}
+
+// ── Notification template editor ────────────────────────────────────────────
+
+// State: {lang: string, data: {defaults:{}, overrides:{lang:{}}}}
+let _notifTplState = { lang: 'en_EN', data: null };
+
+// Template key groups: { groupKey, entries: [{key, labelKey, multiline, vars}] }
+const _NOTIF_TPL_GROUPS = [
+    { key: 'notif_tpl_group_general', entries: [
+        { key: 'footer',      labelKey: 'notif_tpl_lbl_footer',      multiline: true },
+        { key: 'view_status', labelKey: 'notif_tpl_lbl_view_status' },
+    ]},
+    { key: 'notif_tpl_group_badges', entries: [
+        { key: 'badge_test',     labelKey: 'notif_tpl_lbl_badge_test' },
+        { key: 'badge_down',     labelKey: 'notif_tpl_lbl_badge_down' },
+        { key: 'badge_warn',     labelKey: 'notif_tpl_lbl_badge_warn' },
+        { key: 'badge_recovery', labelKey: 'notif_tpl_lbl_badge_recovery' },
+        { key: 'badge_info',     labelKey: 'notif_tpl_lbl_badge_info' },
+    ]},
+    { key: 'notif_tpl_group_test', entries: [
+        { key: 'test_subject', labelKey: 'notif_tpl_lbl_test_subject' },
+        { key: 'test_title',   labelKey: 'notif_tpl_lbl_test_title' },
+        { key: 'test_body_1',  labelKey: 'notif_tpl_lbl_test_body_1', multiline: true, vars: '{sender}' },
+        { key: 'test_body_2',  labelKey: 'notif_tpl_lbl_test_body_2', multiline: true },
+        { key: 'test_body_3',  labelKey: 'notif_tpl_lbl_test_body_3', multiline: true },
+    ]},
+    { key: 'notif_tpl_group_alert', entries: [
+        { key: 'alert_down',     labelKey: 'notif_tpl_lbl_alert_down',     vars: '{item}' },
+        { key: 'alert_warn',     labelKey: 'notif_tpl_lbl_alert_warn',     vars: '{item}' },
+        { key: 'alert_recovery', labelKey: 'notif_tpl_lbl_alert_recovery', vars: '{item}' },
+        { key: 'alert_info',     labelKey: 'notif_tpl_lbl_alert_info',     vars: '{item}' },
+        { key: 'alert_intro',    labelKey: 'notif_tpl_lbl_alert_intro',    multiline: true },
+    ]},
+    { key: 'notif_tpl_group_labels', entries: [
+        { key: 'label_module',    labelKey: 'notif_tpl_lbl_label_module' },
+        { key: 'label_item',      labelKey: 'notif_tpl_lbl_label_item' },
+        { key: 'label_status',    labelKey: 'notif_tpl_lbl_label_status' },
+        { key: 'label_detail',    labelKey: 'notif_tpl_lbl_label_detail' },
+        { key: 'label_timestamp', labelKey: 'notif_tpl_lbl_label_timestamp' },
+    ]},
+    { key: 'notif_tpl_group_summary', entries: [
+        { key: 'summary_one',   labelKey: 'notif_tpl_lbl_summary_one' },
+        { key: 'summary_many',  labelKey: 'notif_tpl_lbl_summary_many',  vars: '{n}' },
+        { key: 'summary_intro', labelKey: 'notif_tpl_lbl_summary_intro', multiline: true },
+        { key: 'summary_ts',    labelKey: 'notif_tpl_lbl_summary_ts',    vars: '{ts}' },
+    ]},
+];
+
+function _renderNotifTemplatesSection() {
+    return _renderNotifStringSection() + _renderNotifHtmlSection();
+}
+
+function _renderNotifStringSection() {
+    const langOpts = SUPPORTED_LANGS.map(lc => {
+        const sel = _notifTplState.lang === lc ? ' selected' : '';
+        return `<option value="${escAttr(lc)}"${sel}>${esc(I18N['lang_' + lc] || lc)}</option>`;
+    }).join('');
+
+    return `<div class="rounded-3 border overflow-hidden mb-3 cfg-card">
+        <div class="px-3 py-2 d-flex align-items-center gap-2 cfg-card-header">
+            <i class="bi bi-file-text text-primary"></i>
+            <strong class="small">${esc(t('notif_tpl_title'))}</strong>
+        </div>
+        <div class="px-3 py-3 cfg-fields">
+            <p class="small text-muted mb-3">${esc(t('notif_tpl_desc'))}</p>
+            <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+                <label class="col-form-label col-form-label-sm fw-semibold text-nowrap" for="notifTplLangSel">
+                    <i class="bi bi-translate me-1"></i>${esc(t('notif_tpl_lang_label'))}
+                </label>
+                <select id="notifTplLangSel" class="form-select form-select-sm" style="max-width:180px"
+                    onchange="_notifTplLangChanged(this.value)">${langOpts}</select>
+                <div class="ms-auto d-flex gap-2">
+                    <button class="btn btn-sm btn-secondary" onclick="_notifTplResetLang()"
+                        title="${escAttr(t('notif_tpl_reset_lang'))}">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('notif_tpl_reset_lang'))}
+                    </button>
+                    <button class="btn btn-sm btn-primary" onclick="_notifTplSave()">
+                        <i class="bi bi-floppy me-1"></i>${esc(t('save'))}
+                    </button>
+                </div>
+            </div>
+            <div id="notifTplBody">
+                <div class="text-center text-muted py-4 rounded cfg-toolbar-bg">
+                    <span class="spinner-border spinner-border-sm me-1"></span>${esc(t('loading'))}
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function _notifTplLoad() {
+    // Load string overrides and HTML overrides in parallel
+    await Promise.all([_notifTplLoadStrings(), _notifHtmlLoad()]);
+}
+
+async function _notifTplLoadStrings() {
+    try {
+        const r = await fetch('/api/v1/notify/templates');
+        if (r.status === 401) { _onSessionTerminated(); return; }
+        if (!r.ok) { showToast(t('connection_error'), 'danger'); return; }
+        _notifTplState.data = await r.json();
+        _notifTplRender();
+    } catch (e) {
+        showToast(t('connection_error'), 'danger');
+    }
+}
+
+function _notifTplRender() {
+    const container = document.getElementById('notifTplBody');
+    if (!container || !_notifTplState.data) return;
+    const { defaults, overrides, lang_strings } = _notifTplState.data;
+    const langOverrides = overrides[_notifTplState.lang] || {};
+    // Use lang-specific built-in strings as placeholder/reference (fall back to English defaults)
+    const langDefaults = lang_strings[_notifTplState.lang] || defaults;
+    let html = '';
+    for (const grp of _NOTIF_TPL_GROUPS) {
+        html += `<div class="mb-3">
+            <p class="small fw-semibold mb-2 pb-1 border-bottom" style="color:var(--bs-secondary-color)">${esc(t(grp.key))}</p>`;
+        for (const entry of grp.entries) {
+            const { key, labelKey, multiline, vars } = entry;
+            const defVal  = langDefaults[key] || defaults[key] || '';
+            const custVal = langOverrides[key] || '';
+            const label   = t(labelKey) || key;
+            const varBadge = vars
+                ? `<code class="ms-2 small text-muted">${esc(vars)}</code>`
+                : '';
+            const inputEl = multiline
+                ? `<textarea class="form-control form-control-sm notif-tpl-input" rows="2"
+                        data-tpl-key="${escAttr(key)}"
+                        placeholder="${escAttr(defVal)}"
+                        style="resize:vertical;font-size:.82rem">${esc(custVal)}</textarea>`
+                : `<input type="text" class="form-control form-control-sm notif-tpl-input"
+                        data-tpl-key="${escAttr(key)}"
+                        value="${escAttr(custVal)}"
+                        placeholder="${escAttr(defVal)}">`;
+            html += `<div class="row mb-2 align-items-start">
+                <label class="col-sm-4 col-form-label col-form-label-sm pt-1 text-truncate" title="${escAttr(label)}">
+                    ${esc(label)}${varBadge}
+                </label>
+                <div class="col-sm-8">${inputEl}
+                    <div class="small text-muted mt-1" style="white-space:pre-wrap;word-break:break-word;font-size:.78rem;opacity:.7">${esc(defVal)}</div>
+                </div>
+            </div>`;
+        }
+        html += `</div>`;
+    }
+    container.innerHTML = html;
+}
+
+function _notifTplLangChanged(lang) {
+    _notifTplState.lang = lang;
+    // Keep HTML editor in sync
+    _notifHtmlState.lang = lang;
+    const htmlSel = document.getElementById('notifHtmlLangSel');
+    if (htmlSel) htmlSel.value = lang;
+    _notifHtmlRefresh();
+    if (_notifTplState.data) {
+        _notifTplRender();
+    } else {
+        _notifTplLoad();
+    }
+}
+
+async function _notifTplSave() {
+    const inputs = document.querySelectorAll('#notifTplBody .notif-tpl-input');
+    const payload = {};
+    inputs.forEach(inp => {
+        const key = inp.dataset.tplKey;
+        const val = inp.value.trim();
+        if (key && val) payload[key] = val;
+    });
+    const r = await apiPut(`/api/v1/notify/templates/${encodeURIComponent(_notifTplState.lang)}`, payload);
+    if (r && r.ok) {
+        // Update local state
+        if (_notifTplState.data) {
+            _notifTplState.data.overrides[_notifTplState.lang] = r.overrides || {};
+        }
+        showToast(t('notif_tpl_saved'), 'success');
+    } else {
+        showToast((r?.error) || t('connection_error'), 'danger');
+    }
+}
+
+async function _notifTplResetLang() {
+    if (!confirm(t('notif_tpl_reset_lang_confirm'))) return;
+    const r = await apiDelete(`/api/v1/notify/templates/${encodeURIComponent(_notifTplState.lang)}`);
+    if (r && r.status === 200) {
+        if (_notifTplState.data) {
+            delete _notifTplState.data.overrides[_notifTplState.lang];
+        }
+        _notifTplRender();
+        showToast(t('notif_tpl_reset_ok'), 'success');
+    } else {
+        showToast((r?.data?.error) || t('connection_error'), 'danger');
+    }
+}

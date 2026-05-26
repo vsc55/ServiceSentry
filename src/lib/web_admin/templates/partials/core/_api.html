@@ -1,0 +1,70 @@
+{# ================================================================
+   API helpers: session termination, apiGet, loadConfig, apiPut,
+   apiPost, apiDelete.
+   ================================================================ #}
+
+// ──────────────────────────── API ─────────────────────────────────
+let _sessionTerminated = false;
+function _onSessionTerminated() {
+    if (_sessionTerminated) return;
+    _sessionTerminated = true;
+    const _rrMs = Math.max((configData?.web_admin?.session_revoke_redirect_secs ?? 3) * 1000, 300);
+    showToast(t('session_terminated'), 'danger', _rrMs + 500);
+    setTimeout(() => { location.href = '/login'; }, _rrMs);
+}
+
+async function apiGet(url) {
+    try {
+        const r = await fetch(url);
+        if (r.status === 401 || r.status === 302) { _onSessionTerminated(); return null; }
+        if (!r.ok) return null;
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) { _onSessionTerminated(); return null; }
+        return await r.json();
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}
+async function loadConfig() {
+    try {
+        const r = await fetch('/api/v1/config');
+        if (r.status === 401 || r.status === 302) { _onSessionTerminated(); return null; }
+        if (!r.ok) return null;
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) { _onSessionTerminated(); return null; }
+        _configEtag = r.headers.get('ETag');
+        const payload = await r.json();
+        if (payload && typeof payload.config === 'object') {
+            _fieldVersions = payload.versions || {};
+            return payload.config;
+        }
+        return payload;
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}
+async function apiPut(url, data) {
+    try {
+        const r = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (r.status === 401) { _onSessionTerminated(); return null; }
+        return await r.json();
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}
+async function apiPost(url, data) {
+    try {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (r.status === 401) { _onSessionTerminated(); return null; }
+        return { status: r.status, data: await r.json() };
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}
+async function apiDelete(url) {
+    try {
+        const r = await fetch(url, { method: 'DELETE' });
+        if (r.status === 401) { _onSessionTerminated(); return null; }
+        return { status: r.status, data: await r.json() };
+    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+}

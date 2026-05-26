@@ -1,0 +1,101 @@
+{# ================================================================
+   Overview render — main render function and auto-refresh bar.
+   ================================================================ #}
+
+// ──────────────────────── Auto-refresh bar ────────────────────────
+let _overviewTimer = null;
+
+function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '') {
+    const intervals = [0, 10, 30, 60];
+    let h = `<div class="d-flex flex-wrap align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border" style="background:var(--bs-secondary-bg)">`;
+    h += `<button class="btn btn-sm btn-secondary" onclick="${renderFn}()" title="${escAttr(t('refresh_tt'))}">`;
+    h += `<i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`;
+    h += `<div class="btn-group btn-group-sm" role="group">`;
+    h += `<span class="btn btn-sm btn-secondary disabled px-2">`;
+    h += `<i class="bi bi-clock me-1"></i>${t('auto_refresh')}</span>`;
+    for (const s of intervals) {
+        const label = s === 0 ? 'OFF' : tf('auto_refresh_seconds', s);
+        const activeInterval = timerGet()?._interval || 0;
+        const active = (s === 0 && !timerGet()) || (s > 0 && activeInterval === s);
+        h += `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}" `;
+        h += `onclick="${timerSet}(${s})">${label}</button>`;
+    }
+    h += `</div>`;
+    if (extraBtns) h += extraBtns;
+    h += `</div>`;
+    return h;
+}
+
+function setOverviewAutoRefresh(seconds) {
+    if (_overviewTimer) { clearInterval(_overviewTimer._id); _overviewTimer = null; }
+    if (seconds > 0) {
+        const id = setInterval(() => {
+            const pane = document.getElementById('tab-overview');
+            if (pane && pane.classList.contains('active')) renderOverview();
+        }, seconds * 1000);
+        _overviewTimer = { _id: id, _interval: seconds };
+    }
+    renderOverview();
+}
+
+// ──────────────────────── Main render ─────────────────────────────
+async function renderOverview() {
+    const c = document.getElementById('overview-container');
+    if (!c) return;
+    c.innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>';
+    const data = await apiGet('/api/v1/modules/overview');
+    if (!data) {
+        c.innerHTML = '<div class="alert alert-warning">' + t('connection_error') + '</div>';
+        return;
+    }
+    _lastOverviewData = data;
+
+    const perms   = new Set(currentUser.permissions || []);
+    const isAdmin = currentUser.role === 'admin';
+    const layout  = _dwLoad();
+
+    const _canEditLayout = perms.has('overview_edit');
+    const ctrlBtns = _canEditLayout ? `
+        <button class="btn btn-sm btn-secondary ms-auto" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
+            <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_dwReset()" title="${escAttr(t('dashboard_reset_tt'))}">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>${t('dashboard_reset')}</button>` : '';
+
+    let h = _renderRefreshBar('overview-container', 'renderOverview',
+        () => _overviewTimer, 'setOverviewAutoRefresh', ctrlBtns);
+
+    // Add-widget bar (shown only in edit mode)
+    h += `<div id="dwAddBar" class="d-none d-flex flex-wrap align-items-center gap-2 mb-3 px-3 py-2 rounded-3 border" style="background:var(--bs-secondary-bg)"></div>`;
+
+    // Dashboard grid
+    const gridEdit = _dwEditing ? ' dashboard-edit' : '';
+    h += `<div class="dashboard-grid${gridEdit}" id="dashboardGrid">`;
+    for (const item of layout) {
+        const def = _DW_DEFS[item.id];
+        if (!def || !def.canShow(perms, isAdmin)) continue;
+        const hClass  = item.h && item.h !== 'auto' ? ` dw-h-${item.h}` : '';
+        const display = item.hidden ? ' style="display:none"' : '';
+        h += `<div class="dw dw-c${item.cols}${hClass}" data-wid="${escAttr(item.id)}"
+               data-cols="${item.cols}" data-h="${item.h || 'auto'}"${display}>`;
+        h += _dwToolbar(item.id, item.cols, item.h || 'auto');
+        h += `<div class="dw-content">${_dwContent(item.id, data)}</div>`;
+        h += `</div>`;
+    }
+    h += `</div>`;
+
+    c.innerHTML = h;
+
+    // Re-apply edit mode after DOM rebuild
+    if (_dwEditing) {
+        const grid = document.getElementById('dashboardGrid');
+        const btn  = document.getElementById('dwEditBtn');
+        const bar  = document.getElementById('dwAddBar');
+        grid?.classList.add('dashboard-edit');
+        if (btn) {
+            btn.className = 'btn btn-sm btn-warning ms-auto';
+            btn.innerHTML = `<i class="bi bi-x-lg me-1"></i>${t('dashboard_save')}`;
+        }
+        bar?.classList.remove('d-none');
+        if (grid) { _dwInitDnd(grid); _dwRefreshAddBar(); }
+    }
+}

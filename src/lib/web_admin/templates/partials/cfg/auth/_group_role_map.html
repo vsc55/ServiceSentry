@@ -1,0 +1,574 @@
+{# ================================================================
+   Config — Auth tab: group→role mapping widget.
+   _renderGroupRoleMap and all its helpers (_grmRoleOpts,
+   _grmNameCache, _grmFetchDisplayNames, _grmMarkSearching,
+   _grmMarkNotFound, _lookupGroupName, _grmRowIdChanged,
+   _grmAddRow, _grmRemoveRow, _grmBuildNames, _grmUpdate,
+   _grmUpdateNamesOnly, _saveDisplayNames, _ldapFetchGroups,
+   _grmAutoResolveNames, _grmBindFilter, _grmFilter,
+   _ldapPickGroup, _oidcFetchGroups, _oidcPickGroup).
+   ================================================================ #}
+
+/**
+ * Render the group→role mapping table widget for a given auth section.
+ * The value is stored as a JSON string in configData[sec].group_role_map.
+ */
+function _renderGroupRoleMap(sec, rawValue) {
+    let mapObj = {};
+    try { mapObj = JSON.parse(typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue || {})); } catch (_) {}
+
+    const pathStr = `${sec}|group_role_map`;
+    const _hint = fieldHint(pathStr);
+    const _hintId = _hint ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
+    const _infoIcon = _hint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+                data-bs-toggle="collapse" data-bs-target="#${_hintId}"
+                aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _hintPanel = _hint
+        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_hint)}</div></div>`
+        : '';
+
+    const hasNames = (sec === 'oidc' || sec === 'ldap');
+    let displayNames = {};
+    if (hasNames) {
+        try { displayNames = JSON.parse(configData[sec]?.group_display_names || '{}'); } catch (_) {}
+    }
+
+    const entries = Object.entries(mapObj);
+    const tableId = `grm_${sec}`;
+    const _rowOnChange = hasNames
+        ? `_grmRowIdChanged(this,'${escAttr(sec)}')`
+        : `_grmUpdate('${escAttr(sec)}')`;
+    let rows = '';
+    let _needsAutoFetch = false;
+    entries.forEach(([grp, role], i) => {
+        const dnRaw  = hasNames ? displayNames[grp] : undefined;
+        const dn     = (typeof dnRaw === 'string' && dnRaw) ? dnRaw : '';
+        const dnNF   = hasNames && (grp in displayNames) && dnRaw === '';
+        if (hasNames && dnRaw === undefined) _needsAutoFetch = true;
+        rows += `<tr data-grm-idx="${i}"${dn ? ` data-grm-name="${escAttr(dn)}"` : ''}>
+            <td class="pe-2">
+                <input type="text" class="form-control form-control-sm grm-group font-monospace"
+                    value="${escAttr(grp)}" placeholder="${escAttr(t('grm_group'))}"
+                    style="font-size:.8em"
+                    oninput="markDirty('config')"
+                    onchange="${_rowOnChange}">
+            </td>
+            ${hasNames ? `<td class="pe-2 grm-name-cell">
+                <span class="d-block text-truncate small ${dnNF ? 'text-warning-emphasis fw-medium' : 'text-muted'} py-1"
+                      ${dnNF ? 'data-grm-state="not_found"' : ''}
+                      title="${escAttr(dn)}">${dnNF ? esc(t('grm_not_found')) : esc(dn || '—')}</span>
+            </td>` : ''}
+            <td class="pe-2">
+                <select class="form-select form-select-sm grm-role"
+                    onchange="_grmUpdate('${escAttr(sec)}')">${_grmRoleOpts(role)}</select>
+            </td>
+            <td style="width:2rem">
+                <button type="button" class="btn btn-sm btn-danger py-0 px-1"
+                    onclick="_grmRemoveRow(this,'${escAttr(sec)}')"
+                    title="${escAttr(t('delete_tt'))}">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </td>
+        </tr>`;
+    });
+    if (_needsAutoFetch) setTimeout(() => _grmFetchDisplayNames(sec, false), 0);
+
+    const emptyMsg = !entries.length
+        ? `<div class="grm-empty-msg text-muted small py-1">${esc(t('grm_empty'))}</div>` : '';
+
+    const colgroup = hasNames
+        ? `<colgroup><col><col style="width:8rem"><col style="width:7rem"><col style="width:2.2rem"></colgroup>`
+        : `<colgroup><col><col style="width:7rem"><col style="width:2.2rem"></colgroup>`;
+    const thead = hasNames
+        ? `<tr><th class="small py-1">${esc(t('grm_group_id'))}</th><th class="small py-1">${esc(t('grm_display_name'))}</th><th class="small py-1">${esc(t('grm_role'))}</th><th></th></tr>`
+        : `<tr><th class="small py-1">${esc(t('grm_group'))}</th><th class="small py-1">${esc(t('grm_role'))}</th><th></th></tr>`;
+
+    return `<div class="cfg-field-wrap" data-cfg-path="${escAttr(pathStr)}">
+    <div class="row mb-2 align-items-start">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('group_role_map'))}${_infoIcon}</label>
+        <div class="col-sm-8">
+            <table class="table table-sm table-borderless mb-1 grm-table" id="${tableId}">
+                ${colgroup}
+                <thead class="table-light">${thead}</thead>
+                <tbody>${rows}</tbody>
+            </table>
+            ${emptyMsg}
+            <div class="d-flex align-items-start gap-2 flex-wrap">
+                <button type="button" class="btn btn-sm btn-secondary"
+                    onclick="_grmAddRow('${escAttr(sec)}')">
+                    <i class="bi bi-plus-lg me-1"></i>${esc(t('grm_add'))}
+                </button>
+                ${sec === 'ldap' ? `<button type="button" class="btn btn-sm btn-secondary"
+                    id="btnFetchLdapGroups" onclick="_ldapFetchGroups()">
+                    <i class="bi bi-cloud-download me-1"></i>${esc(t('grm_fetch_groups'))}
+                </button>` : ''}
+                ${sec === 'oidc' ? `<button type="button" class="btn btn-sm btn-secondary"
+                    id="btnFetchEntraGroups" onclick="_oidcFetchGroups()">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('entra_fetch_groups'))}
+                </button>` : ''}
+                ${hasNames && entries.length ? `<button type="button" class="btn btn-sm btn-secondary"
+                    id="btnRefreshGrmNames_${escAttr(sec)}" onclick="_grmFetchDisplayNames('${escAttr(sec)}',true)">
+                    <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('grm_refresh_names'))}
+                </button>` : ''}
+            </div>
+            ${sec === 'ldap' ? `<div id="ldapGroupPicker" class="mt-2" style="display:none">
+                <div class="small text-muted mb-1"><i class="bi bi-hand-index me-1"></i>${esc(t('grm_pick_hint'))}</div>
+                <input type="search" class="form-control form-control-sm mb-1" id="ldapGroupFilter"
+                    placeholder="${escAttr(t('grm_filter_placeholder'))}">
+                <div id="ldapGroupList" class="border rounded" style="max-height:160px;overflow-y:auto;font-size:.8rem"></div>
+            </div>` : ''}
+            ${sec === 'oidc' ? `<div id="oidcGroupPicker" class="mt-2" style="display:none">
+                <div class="small text-muted mb-1"><i class="bi bi-info-circle me-1"></i>${esc(t('entra_groups_pick_hint'))}</div>
+                <input type="search" class="form-control form-control-sm mb-1" id="oidcGroupFilter"
+                    placeholder="${escAttr(t('grm_filter_placeholder'))}">
+                <div id="oidcGroupList" class="border rounded" style="max-height:200px;overflow-y:auto;font-size:.8rem"></div>
+            </div>` : ''}
+            ${_hintPanel}
+        </div>
+    </div></div>`;
+}
+
+function _grmRoleOpts(sel) {
+    const allRoles = ['admin', 'editor', 'viewer',
+        ...Object.keys(rolesData).filter(r => !['admin','editor','viewer','none'].includes(r)),
+        'none'];
+    return allRoles.map(r => {
+        const lbl = (I18N.role_labels && I18N.role_labels[r]) || r;
+        return `<option value="${escAttr(r)}"${sel === r ? ' selected' : ''}>${esc(lbl)}</option>`;
+    }).join('');
+}
+
+const _grmNameCache = { ldap: {}, oidc: {} };
+
+async function _grmFetchDisplayNames(sec, refreshAll) {
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    const rows = [...tbl.querySelectorAll('tbody tr')].filter(tr => {
+        const input = tr.querySelector('.grm-group');
+        if (!input || !input.value.trim()) return false;
+        if (!refreshAll) {
+            if (tr.dataset.grmName) return false;
+            const span = tr.querySelector('.grm-name-cell span');
+            if (span && span.dataset.grmState === 'not_found') return false;
+        }
+        return true;
+    });
+    if (!rows.length) return;
+
+    const btn = document.getElementById(`btnRefreshGrmNames_${sec}`);
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('grm_refresh_names')); }
+
+    rows.forEach(tr => {
+        if (refreshAll) delete tr.dataset.grmName;
+        const span = tr.querySelector('.grm-name-cell span');
+        if (span) {
+            span.textContent = t('grm_searching');
+            span.title = '';
+            span.className = 'd-block text-truncate small text-muted fst-italic py-1';
+            span.dataset.grmState = 'searching';
+        }
+    });
+
+    for (const tr of rows) {
+        const grp = tr.querySelector('.grm-group').value.trim();
+        const name = await _lookupGroupName(sec, grp);
+        const span = tr.querySelector('.grm-name-cell span');
+        if (name) {
+            tr.dataset.grmName = name;
+            _grmNameCache[sec][grp.toLowerCase()] = name;
+            if (span) { span.textContent = name; span.title = name; span.className = 'd-block text-truncate small text-muted py-1'; delete span.dataset.grmState; }
+        } else {
+            if (span) { span.textContent = t('grm_not_found'); span.title = ''; span.className = 'd-block text-truncate small text-warning-emphasis fw-medium py-1'; span.dataset.grmState = 'not_found'; }
+        }
+    }
+
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>' + esc(t('grm_refresh_names')); }
+    _grmUpdateNamesOnly(sec);
+    const _saved = await _saveDisplayNames(sec);
+    if (refreshAll) showToast(_saved ? t('grm_refresh_saved') : t('save_error'), _saved ? 'success' : 'danger');
+}
+
+function _grmMarkSearching(sec) {
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const input = tr.querySelector('.grm-group');
+        if (!input || !input.value.trim()) return;
+        const span = tr.querySelector('.grm-name-cell span');
+        if (span) {
+            span.textContent = t('grm_searching');
+            span.title = '';
+            span.className = 'd-block text-truncate small text-muted fst-italic py-1';
+            span.dataset.grmState = 'searching';
+        }
+    });
+}
+
+function _grmMarkNotFound(sec) {
+    let changed = false;
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const span = tr.querySelector('.grm-name-cell span');
+        if (span && span.dataset.grmState === 'searching') {
+            span.textContent = t('grm_not_found');
+            span.title = '';
+            span.className = 'd-block text-truncate small text-warning-emphasis fw-medium py-1';
+            span.dataset.grmState = 'not_found';
+            changed = true;
+        }
+    });
+    if (changed) _grmUpdateNamesOnly(sec);
+}
+
+async function _lookupGroupName(sec, id) {
+    try {
+        if (sec === 'ldap') {
+            const r = await apiPost('/api/v1/auth/ldap/group_lookup', { dn: id });
+            if (r?.data?.ok && r.data.found) return r.data.name || null;
+        } else if (sec === 'oidc') {
+            const r = await apiPost('/api/v1/auth/entra/group_lookup', { group_id: id });
+            if (r?.data?.ok && r.data.found) return r.data.name || null;
+        }
+    } catch (_) {}
+    return null;
+}
+
+async function _grmRowIdChanged(input, sec) {
+    const tr = input.closest('tr');
+    const grp = input.value.trim();
+    delete tr.dataset.grmName;
+    const span = tr.querySelector('.grm-name-cell span');
+    if (!span) { _grmUpdate(sec); return; }
+
+    if (!grp) {
+        span.textContent = '—';
+        span.title = '';
+        span.className = 'd-block text-truncate small text-muted py-1';
+        delete span.dataset.grmState;
+        _grmUpdate(sec);
+        return;
+    }
+
+    // Cache hit → instant resolve
+    const cache = _grmNameCache[sec] || {};
+    const cachedName = cache[grp] || cache[grp.toLowerCase()];
+    if (cachedName) {
+        tr.dataset.grmName = cachedName;
+        span.textContent = cachedName;
+        span.title = cachedName;
+        span.className = 'd-block text-truncate small text-muted py-1';
+        delete span.dataset.grmState;
+        _grmUpdate(sec);
+        await _saveDisplayNames(sec);
+        return;
+    }
+
+    // Server lookup
+    span.textContent = t('grm_searching');
+    span.title = '';
+    span.className = 'd-block text-truncate small text-muted fst-italic py-1';
+    span.dataset.grmState = 'searching';
+
+    const name = await _lookupGroupName(sec, grp);
+    if (name) {
+        tr.dataset.grmName = name;
+        _grmNameCache[sec][grp.toLowerCase()] = name;
+        span.textContent = name;
+        span.title = name;
+        span.className = 'd-block text-truncate small text-muted py-1';
+        delete span.dataset.grmState;
+    } else {
+        span.textContent = t('grm_not_found');
+        span.title = '';
+        span.className = 'd-block text-truncate small text-warning-emphasis fw-medium py-1';
+        span.dataset.grmState = 'not_found';
+    }
+    _grmUpdate(sec);
+    await _saveDisplayNames(sec);
+}
+
+function _grmAddRow(sec, prefill, label) {
+    prefill = prefill || '';
+    label   = (label && label !== prefill) ? label : '';
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    const tbody = tbl.querySelector('tbody');
+    const i = tbody.rows.length;
+    const tr = document.createElement('tr');
+    tr.dataset.grmIdx = i;
+    if (label) tr.dataset.grmName = label;
+    const hasNames = (sec === 'oidc' || sec === 'ldap');
+    const _inputOnChange = hasNames
+        ? `_grmRowIdChanged(this,'${escAttr(sec)}')`
+        : `_grmUpdate('${escAttr(sec)}')`;
+    tr.innerHTML = `
+        <td class="pe-2">
+            <input type="text" class="form-control form-control-sm grm-group${hasNames ? ' font-monospace' : ''}"
+                value="${escAttr(prefill)}"
+                placeholder="${escAttr(t('grm_group'))}"
+                ${hasNames ? 'style="font-size:.8em"' : ''}
+                oninput="markDirty('config')"
+                onchange="${_inputOnChange}">
+        </td>
+        ${hasNames ? `<td class="pe-2 grm-name-cell">
+            <span class="d-block text-truncate small text-muted py-1"
+                  title="${escAttr(label)}">${label ? esc(label) : '—'}</span>
+        </td>` : ''}
+        <td class="pe-2">
+            <select class="form-select form-select-sm grm-role"
+                onchange="_grmUpdate('${escAttr(sec)}')">${_grmRoleOpts('none')}</select>
+        </td>
+        <td style="width:2rem">
+            <button type="button" class="btn btn-sm btn-danger py-0 px-1"
+                onclick="_grmRemoveRow(this,'${escAttr(sec)}')"
+                title="${escAttr(t('delete_tt'))}">
+                <i class="bi bi-trash3"></i>
+            </button>
+        </td>`;
+    tbody.appendChild(tr);
+    const wrap = tbl.closest('.cfg-field-wrap');
+    if (wrap) wrap.querySelectorAll('.grm-empty-msg').forEach(el => el.remove());
+    if (prefill) _grmUpdate(sec);
+    markDirty('config');
+}
+
+function _grmRemoveRow(btn, sec) {
+    btn.closest('tr').remove();
+    _grmUpdate(sec);
+    markDirty('config');
+}
+
+function _grmBuildNames(sec) {
+    const tbl = document.getElementById(`grm_${sec}`);
+    const names = {};
+    if (!tbl) return names;
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const input = tr.querySelector('.grm-group');
+        const grp = (input?.value || '').trim();
+        if (!grp) return;
+        const name = tr.dataset.grmName || '';
+        if (name) {
+            names[grp] = name;
+        } else {
+            const span = tr.querySelector('.grm-name-cell span');
+            if (span && span.dataset.grmState === 'not_found') names[grp] = '';
+        }
+    });
+    return names;
+}
+
+function _grmUpdate(sec) {
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    const map = {};
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const input = tr.querySelector('.grm-group');
+        const grp  = (input?.value || '').trim();
+        const role = tr.querySelector('.grm-role')?.value || 'none';
+        if (grp) map[grp] = role;
+    });
+    updateField('config', `${sec}|group_role_map`, JSON.stringify(map));
+    if (configData[sec] && 'group_display_names' in configData[sec]) {
+        updateField('config', `${sec}|group_display_names`, JSON.stringify(_grmBuildNames(sec)));
+    }
+}
+
+function _grmUpdateNamesOnly(sec) {
+    if (!configData[sec] || !('group_display_names' in configData[sec])) return;
+    updateField('config', `${sec}|group_display_names`, JSON.stringify(_grmBuildNames(sec)));
+}
+
+async function _saveDisplayNames(sec) {
+    const pathStr = `${sec}|group_display_names`;
+    if (!configData[sec] || !('group_display_names' in configData[sec])) return false;
+    const value = configData[sec]['group_display_names'];
+    const fields = { [pathStr]: { value, version: _fieldVersions[pathStr] ?? null } };
+    try {
+        const resp = await fetch('/api/v1/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields })
+        });
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        if (data.saved?.includes(pathStr)) {
+            if (data.versions?.[pathStr]) _fieldVersions[pathStr] = data.versions[pathStr];
+            _dirtyFields.delete(pathStr);
+            return true;
+        }
+        return false;
+    } catch (_) { return false; }
+}
+
+async function _ldapFetchGroups() {
+    const cfg = configData.ldap || {};
+    if (!cfg.server) {
+        showToast(t('ldap_test_missing'), 'warning');
+        return;
+    }
+    const btn    = document.getElementById('btnFetchLdapGroups');
+    const picker = document.getElementById('ldapGroupPicker');
+    const list   = document.getElementById('ldapGroupList');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('grm_fetch_groups')); }
+    if (picker) picker.style.display = 'none';
+    _grmMarkSearching('ldap');
+
+    const r = await apiPost('/api/v1/auth/ldap/groups', cfg);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download me-1"></i>' + esc(t('grm_fetch_groups')); }
+
+    if (!r || !r.data || !r.data.ok) {
+        _grmMarkNotFound('ldap');
+        await _saveDisplayNames('ldap');
+        showToast((r && r.data && r.data.message) || t('ldap_test_error'), 'danger');
+        return;
+    }
+    const groups = r.data.groups || [];
+    if (!groups.length) {
+        _grmMarkNotFound('ldap');
+        await _saveDisplayNames('ldap');
+        showToast(t('grm_no_groups'), 'info');
+        return;
+    }
+    if (list) {
+        list.innerHTML = groups.map(g =>
+            `<div class="d-flex align-items-center justify-content-between py-1 px-2 border-bottom grm-group-pick"
+                  data-grm-name="${escAttr((g.name || '').toLowerCase())}"
+                  style="cursor:pointer;transition:background .1s" title="${escAttr(g.dn)}"
+                  onmouseover="this.style.background='var(--bs-tertiary-bg,#f0f0f0)'" onmouseout="this.style.background=''"
+                  onclick="_ldapPickGroup(${jsStr(g.dn)},${jsStr(g.name)})">
+                <span class="me-3 fw-medium small text-truncate">${esc(g.name)}</span>
+                <span class="text-muted text-truncate" style="font-size:.7rem;flex-shrink:0;max-width:55%">${esc(g.dn)}</span>
+            </div>`
+        ).join('');
+        _grmBindFilter('ldap');
+        const _ldapNameMap = {};
+        groups.forEach(g => { if (g.dn) { _ldapNameMap[g.dn] = g.name; _grmNameCache.ldap[g.dn.toLowerCase()] = g.name; } });
+        _grmAutoResolveNames('ldap', _ldapNameMap);
+        _grmMarkNotFound('ldap');
+        await _saveDisplayNames('ldap');
+    }
+    if (picker) picker.style.display = '';
+}
+
+function _grmAutoResolveNames(sec, idNameMap) {
+    // Build a case-insensitive fallback map (DNs can differ in case between storage and server)
+    const ciMap = {};
+    for (const [k, v] of Object.entries(idNameMap)) ciMap[k.toLowerCase()] = v;
+
+    const tbl = document.getElementById(`grm_${sec}`);
+    if (!tbl) return;
+    let updated = false;
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const input = tr.querySelector('.grm-group');
+        const grp = (input?.value || '').trim();
+        if (!grp) return;
+        const name = idNameMap[grp] || ciMap[grp.toLowerCase()];
+        if (name) {
+            tr.dataset.grmName = name;
+            const nameCell = tr.querySelector('.grm-name-cell span');
+            if (nameCell) {
+                nameCell.textContent = name;
+                nameCell.title = name;
+                nameCell.className = 'd-block text-truncate small text-muted py-1';
+                delete nameCell.dataset.grmState;
+            }
+            updated = true;
+        }
+    });
+    if (updated) _grmUpdate(sec);
+}
+
+function _grmBindFilter(sec) {
+    const input = document.getElementById(`${sec}GroupFilter`);
+    if (!input) return;
+    input.value = '';
+    input.oninput = function() {
+        const q = this.value.trim().toLowerCase();
+        const list = document.getElementById(`${sec}GroupList`);
+        if (!list) return;
+        list.querySelectorAll('.grm-group-pick').forEach(row => {
+            const name = (row.dataset.grmName || '');
+            row.style.display = (!q || name.includes(q)) ? '' : 'none';
+        });
+    };
+}
+
+function _grmFilter(sec, term) {
+    const q = term.trim().toLowerCase();
+    const list = document.getElementById(`${sec}GroupList`);
+    if (!list) return;
+    list.querySelectorAll('.grm-group-pick').forEach(row => {
+        const text = row.dataset.grmName || '';
+        row.style.display = (!q || text.includes(q)) ? '' : 'none';
+    });
+}
+
+function _ldapPickGroup(dn, name) {
+    _grmAddRow('ldap', dn, name);
+}
+
+async function _oidcFetchGroups() {
+    const cfg = configData.oidc || {};
+    // client_secret is masked (null) after page load; it is plaintext immediately
+    // after the wizard fills it in. Always send it if present so Fetch Groups works
+    // right after the wizard without requiring a page refresh.
+    if (!cfg.provider_url || !cfg.client_id) {
+        showToast(t('entra_groups_missing_creds'), 'warning');
+        return;
+    }
+    const btn    = document.getElementById('btnFetchEntraGroups');
+    const picker = document.getElementById('oidcGroupPicker');
+    const list   = document.getElementById('oidcGroupList');
+    if (btn)    { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('entra_fetch_groups')); }
+    if (picker) picker.style.display = 'none';
+    _grmMarkSearching('oidc');
+
+    const body = { provider_url: cfg.provider_url, client_id: cfg.client_id };
+    // Send the secret only when it is a real value (not masked null from server)
+    if (cfg.client_secret) body.client_secret = cfg.client_secret;
+
+    const r = await apiPost('/api/v1/auth/entra/groups', body);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-microsoft me-1"></i>' + esc(t('entra_fetch_groups')); }
+
+    if (!r || !r.data || !r.data.ok) {
+        _grmMarkNotFound('oidc');
+        await _saveDisplayNames('oidc');
+        showToast((r && r.data && r.data.message) || t('ldap_test_error'), 'danger');
+        return;
+    }
+    const groups = r.data.groups || [];
+    if (!groups.length) {
+        _grmMarkNotFound('oidc');
+        await _saveDisplayNames('oidc');
+        showToast(t('grm_no_groups'), 'info');
+        return;
+    }
+    if (list) {
+        list.innerHTML = groups.map(g =>
+            `<div class="py-1 px-2 border-bottom grm-group-pick"
+                data-grm-name="${escAttr((g.name || '').toLowerCase())}"
+                style="cursor:pointer"
+                onmouseover="this.style.background='var(--bs-tertiary-bg,#f0f0f0)'" onmouseout="this.style.background=''"
+                onclick="_oidcPickGroup(${jsStr(g.id)},${jsStr(g.name)})">
+                <div class="fw-medium small">${esc(g.name)}</div>
+                <div class="font-monospace text-muted" style="font-size:.7rem;user-select:all">${esc(g.id)}</div>
+            </div>`
+        ).join('');
+        _grmBindFilter('oidc');
+        const _oidcNameMap = {};
+        groups.forEach(g => { if (g.id) { _oidcNameMap[g.id] = g.name; _grmNameCache.oidc[g.id.toLowerCase()] = g.name; } });
+        _grmAutoResolveNames('oidc', _oidcNameMap);
+        _grmMarkNotFound('oidc');
+        await _saveDisplayNames('oidc');
+    }
+    if (picker) picker.style.display = '';
+}
+
+function _oidcPickGroup(id, name) {
+    // Store the Object ID as the map key (Entra ID sends Object IDs in the groups claim).
+    // Pass the display name as the label so the input shows something readable.
+    _grmAddRow('oidc', id, name);
+}

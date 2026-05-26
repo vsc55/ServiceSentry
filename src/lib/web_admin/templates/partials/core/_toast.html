@@ -1,0 +1,21 @@
+{# ================================================================
+   Toast notification and generic confirm modal helpers.
+   ================================================================ #}
+
+// ──────────────────────────── Toast ───────────────────────────────
+// ──────────────────────────── Generic confirm modal ───────────────
+let _confirmModalCallback = null;
+
+function showConfirmModal(msg, callback) {
+    _confirmModalCallback = callback;
+    document.getElementById('confirmModalMsg').textContent = msg;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).show();
+}
+
+function showToast(msg, type = 'success', delay = 3000) {
+    const t = document.getElementById('toast');
+    const b = document.getElementById('toast-body');
+    t.className = 'toast align-items-center border-0 text-bg-' + type;
+    b.textContent = msg;
+    bootstrap.Toast.getOrCreateInstance(t, { delay }).show();
+}

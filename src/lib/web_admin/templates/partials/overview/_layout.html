@@ -1,0 +1,221 @@
+{# ================================================================
+   Overview layout — persistence, drag-and-drop, edit mode,
+   toolbar actions (add/remove/resize/reset widgets), widget
+   toolbar HTML builder, and widget definitions constants.
+   ================================================================ #}
+
+// ──────────────────────── Widget definitions ──────────────────────
+// cols: default column span (out of 12); hasH: allow height control
+const _DW_COLS_CYCLE  = [2, 3, 4, 6, 8, 9, 12];
+const _DW_H_CYCLE     = ['auto', 'sm', 'md', 'lg', 'xl'];
+const _DW_H_LABELS    = { auto: 'Auto', sm: 'S', md: 'M', lg: 'L', xl: 'XL' };
+
+const _DW_DEFS = {
+    modules:      { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    checks:       { icon: 'bi-activity',      lkey: 'overview_status',           dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    sessions:     { icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    users:        { icon: 'bi-person',         lkey: 'overview_users',            dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    groups:       { icon: 'bi-people',        lkey: 'overview_groups',           dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    roles:        { icon: 'bi-shield-shaded',   lkey: 'overview_roles',            dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    modules_list: { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 6,  dH: 'md',   hasH: true,
+                    canShow: (p)         => p.has('modules_view') },
+    activity:     { icon: 'bi-clock-history', lkey: 'overview_recent_activity',  dCols: 6,  dH: 'md',   hasH: true,
+                    canShow: (p, admin)  => admin },
+};
+
+// ──────────────────────── Layout persistence ──────────────────────
+function _dwKey() { return 'ss_layout2_' + (currentUser.username || '_'); }
+
+function _dwLoad() {
+    try {
+        const raw = localStorage.getItem(_dwKey());
+        if (raw) {
+            const saved = JSON.parse(raw);
+            const known = new Set(Object.keys(_DW_DEFS));
+            const layout = (Array.isArray(saved) ? saved : []).filter(w => known.has(w.id));
+            for (const [id, d] of Object.entries(_DW_DEFS)) {
+                if (!layout.find(w => w.id === id))
+                    layout.push({ id, cols: d.dCols, h: d.dH, hidden: false });
+            }
+            return layout;
+        }
+    } catch (_) {}
+    return Object.entries(_DW_DEFS).map(([id, d]) => ({ id, cols: d.dCols, h: d.dH, hidden: false }));
+}
+
+function _dwSave() {
+    const grid = document.getElementById('dashboardGrid');
+    if (!grid) return;
+    const layout = [...grid.querySelectorAll('.dw[data-wid]')].map(el => ({
+        id:     el.dataset.wid,
+        cols:   parseInt(el.dataset.cols) || 3,
+        h:      el.dataset.h  || 'auto',
+        hidden: el.style.display === 'none',
+    }));
+    localStorage.setItem(_dwKey(), JSON.stringify(layout));
+}
+
+// ──────────────────────── Edit mode ───────────────────────────────
+let _dwEditing = false;
+let _dwDragSrc = null;
+
+function _dwToggleEdit() {
+    _dwEditing = !_dwEditing;
+    const grid   = document.getElementById('dashboardGrid');
+    const addBar = document.getElementById('dwAddBar');
+    const btn    = document.getElementById('dwEditBtn');
+    if (!grid) return;
+    if (_dwEditing) {
+        grid.classList.add('dashboard-edit');
+        addBar?.classList.remove('d-none');
+        if (btn) {
+            btn.className = 'btn btn-sm btn-warning ms-auto';
+            btn.innerHTML = `<i class="bi bi-x-lg me-1"></i>${t('dashboard_save')}`;
+            btn.title = t('dashboard_save_tt');
+        }
+        _dwInitDnd(grid);
+        _dwRefreshAddBar();
+    } else {
+        grid.classList.remove('dashboard-edit');
+        addBar?.classList.add('d-none');
+        if (btn) {
+            btn.className = 'btn btn-sm btn-secondary ms-auto';
+            btn.innerHTML = `<i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}`;
+            btn.title = t('dashboard_edit_tt');
+        }
+        _dwSave();
+    }
+}
+
+// ──────────────────────── Drag & drop ─────────────────────────────
+function _dwInitDnd(grid) {
+    grid.querySelectorAll('.dw[data-wid]').forEach(el => {
+        el.setAttribute('draggable', 'true');
+        el.ondragstart = e => {
+            if (!e.target.closest('.dw-toolbar')) { e.preventDefault(); return; }
+            _dwDragSrc = el;
+            e.dataTransfer.effectAllowed = 'move';
+            setTimeout(() => el.classList.add('dw-dragging'), 0);
+        };
+        el.ondragend = () => {
+            el.classList.remove('dw-dragging');
+            grid.querySelectorAll('.dw').forEach(w => w.classList.remove('dw-over'));
+            _dwDragSrc = null;
+        };
+        el.ondragover = e => {
+            e.preventDefault();
+            if (_dwDragSrc && el !== _dwDragSrc) {
+                grid.querySelectorAll('.dw').forEach(w => w.classList.remove('dw-over'));
+                el.classList.add('dw-over');
+            }
+        };
+        el.ondragleave = () => el.classList.remove('dw-over');
+        el.ondrop = e => {
+            e.preventDefault();
+            el.classList.remove('dw-over');
+            if (!_dwDragSrc || _dwDragSrc === el) return;
+            const mid = el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2;
+            if (e.clientX < mid) grid.insertBefore(_dwDragSrc, el);
+            else el.after(_dwDragSrc);
+            _dwSave();
+        };
+    });
+}
+
+// ──────────────────────── Toolbar actions ─────────────────────────
+function _dwCycleW(btn, dir) {
+    const dw   = btn.closest('.dw');
+    const cur  = parseInt(dw.dataset.cols) || 3;
+    const idx  = _DW_COLS_CYCLE.indexOf(cur);
+    const next = _DW_COLS_CYCLE[(idx + dir + _DW_COLS_CYCLE.length) % _DW_COLS_CYCLE.length];
+    dw.dataset.cols = next;
+    _DW_COLS_CYCLE.forEach(c => dw.classList.remove('dw-c' + c));
+    dw.classList.add('dw-c' + next);
+    dw.querySelector('.dw-w-lbl').textContent = next;
+    _dwSave();
+}
+
+function _dwCycleH(btn, dir) {
+    const dw   = btn.closest('.dw');
+    const cur  = dw.dataset.h || 'auto';
+    const idx  = _DW_H_CYCLE.indexOf(cur);
+    const next = _DW_H_CYCLE[(idx + dir + _DW_H_CYCLE.length) % _DW_H_CYCLE.length];
+    dw.dataset.h = next;
+    _DW_H_CYCLE.forEach(h => dw.classList.remove('dw-h-' + h));
+    if (next !== 'auto') dw.classList.add('dw-h-' + next);
+    dw.querySelector('.dw-h-lbl').textContent = _DW_H_LABELS[next] || next;
+    _dwSave();
+}
+
+function _dwRemove(btn) {
+    btn.closest('.dw').style.display = 'none';
+    _dwSave();
+    _dwRefreshAddBar();
+}
+
+function _dwAdd(id) {
+    const grid = document.getElementById('dashboardGrid');
+    const el   = grid?.querySelector(`.dw[data-wid="${id}"]`);
+    if (!el) return;
+    el.style.display = '';
+    _dwSave();
+    _dwRefreshAddBar();
+    _dwInitDnd(grid);
+}
+
+function _dwRefreshAddBar() {
+    const bar  = document.getElementById('dwAddBar');
+    const grid = document.getElementById('dashboardGrid');
+    if (!bar || !grid) return;
+    const hidden = [...grid.querySelectorAll('.dw[data-wid]')]
+        .filter(el => el.style.display === 'none');
+    if (!hidden.length) {
+        bar.innerHTML = `<span class="text-muted small">${t('dashboard_all_visible')}</span>`;
+        return;
+    }
+    let h = `<span class="text-muted small me-2">${t('dashboard_add_widget')}:</span>`;
+    for (const el of hidden) {
+        const def = _DW_DEFS[el.dataset.wid];
+        if (!def) continue;
+        h += `<button class="btn btn-sm btn-primary" onclick="_dwAdd(${jsStr(el.dataset.wid)})">
+            <i class="bi ${def.icon} me-1"></i>${esc(t(def.lkey))}</button>`;
+    }
+    bar.innerHTML = h;
+}
+
+function _dwReset() {
+    localStorage.removeItem(_dwKey());
+    _dwEditing = false;
+    renderOverview();
+}
+
+// ──────────────────────── Widget toolbar HTML ─────────────────────
+function _dwToolbar(id, cols, h) {
+    const def  = _DW_DEFS[id];
+    const hasH = def?.hasH;
+    let tb = `<div class="dw-toolbar" title="${escAttr(t('dashboard_drag'))}">`;
+    tb += `<span class="dw-drag-handle"><i class="bi bi-grip-horizontal"></i></span>`;
+    tb += `<span class="small text-muted text-truncate" style="max-width:8em">${esc(t(def?.lkey || id))}</span>`;
+    tb += `<span class="d-flex align-items-center gap-1 ms-auto">`;
+    // Width
+    tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;
+    tb += `<span class="dw-w-lbl small fw-semibold" style="min-width:1.4em;text-align:center">${cols}</span>`;
+    tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,1)" title="${escAttr(t('widget_grow_w'))}"><i class="bi bi-chevron-right"></i></button>`;
+    // Height (tables only)
+    if (hasH) {
+        tb += `<span class="vr mx-1"></span>`;
+        tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleH(this,-1)" title="${escAttr(t('widget_shrink_h'))}"><i class="bi bi-chevron-up"></i></button>`;
+        tb += `<span class="dw-h-lbl small fw-semibold" style="min-width:2em;text-align:center">${_DW_H_LABELS[h] || h}</span>`;
+        tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleH(this,1)" title="${escAttr(t('widget_grow_h'))}"><i class="bi bi-chevron-down"></i></button>`;
+    }
+    tb += `<span class="vr mx-1"></span>`;
+    tb += `<button class="btn btn-dw btn-danger" onclick="_dwRemove(this)" title="${escAttr(t('widget_hide'))}"><i class="bi bi-eye-slash"></i></button>`;
+    tb += `</span></div>`;
+    return tb;
+}

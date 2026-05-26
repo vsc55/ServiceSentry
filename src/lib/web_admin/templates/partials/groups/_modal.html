@@ -1,0 +1,200 @@
+{# ================================================================
+   Group modal — openNewGroupModal, openEditGroupModal, saveGroupModal,
+   deleteGroup, _gmPopulateRoles, _gmPopulateMembers,
+   and DOMContentLoaded bindings for the group modal.
+   ================================================================ #}
+
+let _editingGroup    = null;
+let _gmIsBuiltin     = false;
+let _gmSelectedRoles   = new Set();
+let _gmSelectedMembers = new Set();
+
+// Bind search inputs and event delegation once (after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('groupRolesGrid')?.addEventListener('change', e => {
+        if (e.target.type === 'checkbox') {
+            if (e.target.checked) _gmSelectedRoles.add(e.target.value);
+            else _gmSelectedRoles.delete(e.target.value);
+        }
+    });
+    document.getElementById('groupMembersGrid')?.addEventListener('change', e => {
+        if (e.target.type === 'checkbox') {
+            if (e.target.checked) _gmSelectedMembers.add(e.target.value);
+            else _gmSelectedMembers.delete(e.target.value);
+        }
+    });
+    document.getElementById('gmRoleSearch')?.addEventListener('input',   e => _gmPopulateRoles(e.target.value));
+    document.getElementById('gmMemberSearch')?.addEventListener('input', e => _gmPopulateMembers(e.target.value));
+});
+
+function _gmPopulateRoles(searchVal) {
+    const grid = document.getElementById('groupRolesGrid');
+    if (!grid) return;
+    const q   = (searchVal || '').toLowerCase();
+    const dis = _gmIsBuiltin ? 'disabled' : '';
+    let h = '';
+    for (const [rname, rd] of Object.entries(rolesData).sort((a, b) => a[0].localeCompare(b[0]))) {
+        const label = rd.label || rname;
+        const desc  = rd.description || '';
+        if (q && !rname.toLowerCase().includes(q) && !label.toLowerCase().includes(q) && !desc.toLowerCase().includes(q)) continue;
+        const id = 'grole_' + rname;
+        const isDisabled = !rd.builtin && rd.enabled === false;
+        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
+            <input class="form-check-input" type="checkbox" id="${escAttr(id)}" value="${escAttr(rname)}" ${_gmSelectedRoles.has(rname) ? 'checked' : ''} ${dis}>
+            <label class="form-check-label small" for="${escAttr(id)}">
+                <span class="badge ${roleBadgeClass(rname)} fw-normal">${esc(label)}</span>
+                ${desc ? `<span class="text-muted ms-1">${esc(desc)}</span>` : ''}${badge}
+            </label>
+        </div>`;
+    }
+    grid.innerHTML = h || '<span class="text-muted small">' + t('no_roles') + '</span>';
+}
+
+function _gmPopulateMembers(searchVal) {
+    const grid = document.getElementById('groupMembersGrid');
+    if (!grid) return;
+    const q = (searchVal || '').toLowerCase();
+    let h = '';
+    for (const [uname, ud] of Object.entries(usersData).sort((a, b) => a[0].localeCompare(b[0]))) {
+        const display = ud.display_name || '';
+        if (q && !uname.toLowerCase().includes(q) && !display.toLowerCase().includes(q)) continue;
+        const id = 'gmember_' + uname;
+        const isDisabled = ud.enabled === false;
+        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
+            <input class="form-check-input" type="checkbox" id="${escAttr(id)}" value="${escAttr(uname)}" ${_gmSelectedMembers.has(uname) ? 'checked' : ''}>
+            <label class="form-check-label small" for="${escAttr(id)}">${esc(uname)}${display ? ` <span class="text-muted">(${esc(display)})</span>` : ''}${badge}</label>
+        </div>`;
+    }
+    grid.innerHTML = h || '<span class="text-muted small">' + t('no_users') + '</span>';
+}
+
+function openNewGroupModal() {
+    _editingGroup = null;
+    _gmIsBuiltin  = false;
+    document.getElementById('groupModalTitle').textContent = t('new_group');
+    document.getElementById('gmName').value = '';
+    document.getElementById('gmName').disabled = false;
+    document.getElementById('gmLabel').value = '';
+    document.getElementById('gmLabel').disabled = false;
+    document.getElementById('gmDescription').value = '';
+    document.getElementById('gmDescription').disabled = false;
+    document.getElementById('gmUidRow').classList.add('d-none');
+    document.getElementById('gmUid').value = '';
+    document.getElementById('gmEnabledGroup').style.display = '';
+    const gmEnabledNew = document.getElementById('gmEnabled');
+    gmEnabledNew.checked = true;
+    gmEnabledNew.disabled = false;
+    document.getElementById('gmRoleSearch').value   = '';
+    document.getElementById('gmMemberSearch').value = '';
+    _gmSelectedRoles   = new Set(['none']);
+    _gmSelectedMembers = new Set();
+    _gmPopulateRoles('');
+    _gmPopulateMembers('');
+    bootstrap.Tab.getOrCreateInstance(document.querySelector('#groupModalTabs [data-bs-target="#gmTabGeneral"]')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('groupModal')).show();
+}
+
+function openEditGroupModal(name) {
+    _editingGroup = name;
+    const gd = groupsData[name] || {};
+    _gmIsBuiltin  = !!gd.builtin;
+    document.getElementById('groupModalTitle').textContent = t('edit_group_title') + ': ' + name;
+    document.getElementById('gmName').value = name;
+    document.getElementById('gmName').disabled = true;
+    document.getElementById('gmLabel').value = gd.label || '';
+    document.getElementById('gmLabel').disabled = _gmIsBuiltin;
+    document.getElementById('gmDescription').value = gd.description || '';
+    document.getElementById('gmDescription').disabled = _gmIsBuiltin;
+    document.getElementById('gmUidRow').classList.remove('d-none');
+    document.getElementById('gmUid').value = gd.uid || '';
+    const gmEnabledGroup = document.getElementById('gmEnabledGroup');
+    gmEnabledGroup.style.display = '';
+    document.getElementById('gmEnabled').checked = gd.enabled !== false;
+    document.getElementById('gmRoleSearch').value   = '';
+    document.getElementById('gmMemberSearch').value = '';
+    _gmSelectedRoles   = new Set(gd.roles   || []);
+    _gmSelectedMembers = new Set(gd.members || []);
+    _gmPopulateRoles('');
+    _gmPopulateMembers('');
+    bootstrap.Tab.getOrCreateInstance(document.querySelector('#groupModalTabs [data-bs-target="#gmTabGeneral"]')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('groupModal')).show();
+}
+
+async function saveGroupModal() {
+    const name        = document.getElementById('gmName').value.trim();
+    const label       = document.getElementById('gmLabel').value.trim();
+    const description = document.getElementById('gmDescription').value.trim();
+    const roles   = [..._gmSelectedRoles];
+    const members = [..._gmSelectedMembers];
+    if (!name) { showToast(t('group_name_required'), 'warning'); return; }
+    if (!_editingGroup && Object.keys(groupsData).some(k => k.toLowerCase() === name.toLowerCase())) {
+        showToast(tf('group_already_exists', name), 'warning'); return;
+    }
+    const isBuiltin = !!(groupsData[name] || {}).builtin;
+    if (_editingGroup) {
+        const enabled = document.getElementById('gmEnabled').checked;
+        const payload = { roles, members, enabled };
+        if (!isBuiltin) { payload.label = label; payload.description = description; }
+        const r = await apiPut('/api/v1/groups/' + encodeURIComponent(_editingGroup), payload);
+        if (r && r.ok) {
+            const wasEnabled = groupsData[_editingGroup]?.enabled !== false;
+            if (wasEnabled !== enabled)
+                showToast(enabled ? t('group_enabled') : t('group_disabled'));
+            else
+                showToast(t('group_updated'));
+            const oldMembers = new Set(groupsData[_editingGroup]?.members || []);
+            const newMembers = new Set(members);
+            for (const u of oldMembers) {
+                if (!newMembers.has(u) && usersData[u])
+                    usersData[u].groups = (usersData[u].groups || []).filter(g => g !== _editingGroup);
+            }
+            for (const u of newMembers) {
+                if (!oldMembers.has(u) && usersData[u]) {
+                    if (!usersData[u].groups) usersData[u].groups = [];
+                    if (!usersData[u].groups.includes(_editingGroup)) usersData[u].groups.push(_editingGroup);
+                }
+            }
+            groupsData[_editingGroup] = { ...groupsData[_editingGroup], roles, members, enabled };
+            if (!isBuiltin) { groupsData[_editingGroup].label = label || _editingGroup; groupsData[_editingGroup].description = description; }
+        } else {
+            showToast(r?.error || t('update_error'), 'danger'); return;
+        }
+    } else {
+        const enabled = document.getElementById('gmEnabled').checked;
+        const r = await apiPost('/api/v1/groups', { name, label, description, roles, members, enabled });
+        if (r && r.status === 201) {
+            showToast(t('group_created'));
+            groupsData[name] = { builtin: false, label: label || name, description, roles, members, enabled };
+            for (const u of members) {
+                if (usersData[u]) {
+                    if (!usersData[u].groups) usersData[u].groups = [];
+                    if (!usersData[u].groups.includes(name)) usersData[u].groups.push(name);
+                }
+            }
+        } else {
+            showToast(r?.data?.error || t('create_error'), 'danger'); return;
+        }
+    }
+    bootstrap.Modal.getInstance(document.getElementById('groupModal')).hide();
+    renderGroups();
+    renderUsers();
+}
+
+async function deleteGroup(name) {
+    showConfirmModal(t('group_confirm_delete'), async () => {
+        const r = await apiDelete('/api/v1/groups/' + encodeURIComponent(name));
+        if (r && r.status === 200 && r.data?.ok) {
+            showToast(t('group_deleted'));
+            for (const ud of Object.values(usersData)) {
+                if (ud.groups) ud.groups = ud.groups.filter(g => g !== name);
+            }
+            delete groupsData[name];
+            renderGroups();
+            renderUsers();
+        } else {
+            showToast(r?.data?.error || t('delete_error'), 'danger');
+        }
+    });
+}

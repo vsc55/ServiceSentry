@@ -1,0 +1,181 @@
+{# ================================================================
+   Audit sort / group / filter controls — state, init, and helpers.
+   ================================================================ #}
+
+// ──────────────────── Sort / Group / Filter ────────────────────────
+let _auditSort    = 'time';   // time | event | user | ip
+let _auditSortDir = 'desc';   // asc | desc
+let _auditGroup   = 'none';   // none | date | event | user | ip
+let _auditFilters = { event: '', user: '', ip: '', dateFrom: '', dateTo: '', detail: '' };
+
+const _AUDIT_UI_KEY = 'ss_audit_ui';
+function _saveAuditUiState() {
+    try {
+        localStorage.setItem(_AUDIT_UI_KEY, JSON.stringify({
+            sort: _auditSort, sortDir: _auditSortDir, group: _auditGroup,
+            event: _auditFilters.event, user: _auditFilters.user, ip: _auditFilters.ip,
+            dateFrom: _auditFilters.dateFrom, dateTo: _auditFilters.dateTo,
+            detail: _auditFilters.detail,
+        }));
+    } catch {}
+}
+function _loadAuditUiState() {
+    try { return JSON.parse(localStorage.getItem(_AUDIT_UI_KEY) || 'null'); } catch { return null; }
+}
+
+function initAuditControls() {
+    const saved = _loadAuditUiState();
+    // Apply sort (saved state > config default)
+    const defaultSort = configData?.web_admin?.audit_sort || 'time';
+    _auditSort = saved?.sort || defaultSort;
+    const sf = document.getElementById('auditSortField');
+    if (sf) sf.value = _auditSort;
+    // Apply sort direction (saved state > config default)
+    const defaultSortDir = configData?.web_admin?.audit_sort_dir || 'desc';
+    _auditSortDir = saved?.sortDir || defaultSortDir;
+    const icon = document.getElementById('iconAuditSortDir');
+    if (icon) icon.className = _auditSortDir === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
+    // Apply group by (saved state > 'none')
+    _auditGroup = saved?.group || 'none';
+    const gb = document.getElementById('auditGroupBy');
+    if (gb) gb.value = _auditGroup;
+    // Restore text/date filters
+    if (saved) {
+        _auditFilters.event    = saved.event    || '';
+        _auditFilters.user     = saved.user     || '';
+        _auditFilters.ip       = saved.ip       || '';
+        _auditFilters.dateFrom = saved.dateFrom || '';
+        _auditFilters.dateTo   = saved.dateTo   || '';
+        _auditFilters.detail   = saved.detail   || '';
+        const _setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+        _setVal('auditFilterUser',   _auditFilters.user);
+        _setVal('auditFilterIp',     _auditFilters.ip);
+        _setVal('auditFilterFrom',   _auditFilters.dateFrom);
+        _setVal('auditFilterTo',     _auditFilters.dateTo);
+        _setVal('auditFilterDetail', _auditFilters.detail);
+    }
+    // Populate event filter dropdown (must be done before restoring its value)
+    const ef = document.getElementById('auditFilterEvent');
+    if (ef) {
+        const events = [...new Set(_auditEntries.map(e => e.event))]
+            .map(ev => ({ ev, label: AUDIT_EVENTS[ev] || ev }))
+            .sort((a, b) => a.label.localeCompare(b.label));
+        ef.innerHTML = `<option value="">${t('all_events')}</option>` +
+            events.map(({ ev, label }) => `<option value="${esc(ev)}">${esc(label)}</option>`).join('');
+        if (saved?.event) ef.value = saved.event;
+    }
+    // Populate user datalist
+    const ul = document.getElementById('auditUserList');
+    if (ul) {
+        const users = [...new Set(_auditEntries.map(e => e.user).filter(Boolean))].sort();
+        ul.innerHTML = users.map(u => `<option value="${esc(u)}"></option>`).join('');
+    }
+    // Populate ip datalist
+    const il = document.getElementById('auditIpList');
+    if (il) {
+        const ips = [...new Set(_auditEntries.map(e => e.ip).filter(Boolean))].sort();
+        il.innerHTML = ips.map(ip => `<option value="${esc(ip)}"></option>`).join('');
+    }
+}
+
+function toggleAuditSortDir() {
+    _auditSortDir = _auditSortDir === 'asc' ? 'desc' : 'asc';
+    const icon = document.getElementById('iconAuditSortDir');
+    if (icon) icon.className = _auditSortDir === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
+    applyAuditControls();
+}
+
+function applyAuditControls() {
+    const sf = document.getElementById('auditSortField');
+    const gb = document.getElementById('auditGroupBy');
+    if (sf) _auditSort = sf.value;
+    if (gb) _auditGroup = gb.value;
+    _auditFilters.event    = document.getElementById('auditFilterEvent')?.value  || '';
+    _auditFilters.user     = document.getElementById('auditFilterUser')?.value   || '';
+    _auditFilters.ip       = document.getElementById('auditFilterIp')?.value     || '';
+    _auditFilters.dateFrom = document.getElementById('auditFilterFrom')?.value   || '';
+    _auditFilters.dateTo   = document.getElementById('auditFilterTo')?.value     || '';
+    _auditFilters.detail   = document.getElementById('auditFilterDetail')?.value || '';
+    const hasFilters = _auditFilters.event || _auditFilters.user || _auditFilters.ip ||
+                       _auditFilters.dateFrom || _auditFilters.dateTo;
+    _auditPage = 1;
+    _saveAuditUiState();
+    renderAuditTable();
+}
+
+function clearAuditFilters() {
+    // Reset sort to config defaults
+    const defaultSort    = configData?.web_admin?.audit_sort     || 'time';
+    const defaultSortDir = configData?.web_admin?.audit_sort_dir || 'desc';
+    _auditSort    = defaultSort;
+    _auditSortDir = defaultSortDir;
+    _auditGroup   = 'none';
+    const sf = document.getElementById('auditSortField');  if (sf) sf.value = _auditSort;
+    const gb = document.getElementById('auditGroupBy');    if (gb) gb.value = 'none';
+    const ic = document.getElementById('iconAuditSortDir');
+    if (ic) ic.className = _auditSortDir === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
+    // Reset all filters
+    _auditFilters = { event: '', user: '', ip: '', dateFrom: '', dateTo: '', detail: '' };
+    ['auditFilterEvent','auditFilterUser','auditFilterIp','auditFilterFrom','auditFilterTo','auditFilterDetail']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    _auditPage = 1;
+    _saveAuditUiState();
+    renderAuditTable();
+}
+
+function _auditEventBadge(event) {
+    let cls = 'text-bg-secondary';
+    if (event === 'login_failed') cls = 'text-bg-danger';
+    else if (event === 'login_ok') cls = 'text-bg-success';
+    else if (event === 'logout') cls = 'text-bg-warning';
+    else if (event.includes('deleted') || event.includes('revoked')) cls = 'text-bg-danger';
+    else if (event.includes('created')) cls = 'text-bg-success';
+    else if (event === 'password_reset') cls = 'text-bg-warning';
+    else if (event.includes('saved') || event.includes('updated') || event.includes('changed')) cls = 'text-bg-info';
+    return `<span class="badge ${cls}">${esc(AUDIT_EVENTS[event] || event)}</span>`;
+}
+
+// Convert a filter string (may contain * wildcard) to a RegExp
+function _auditFilterRegex(pattern) {
+    if (!pattern) return null;
+    // Escape regex special chars except *, then convert * to .*
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    return new RegExp(escaped, 'i');
+}
+
+function _applyAuditSortDir(val) {
+    _auditSortDir = val;
+    const icon = document.getElementById('iconAuditSortDir');
+    if (icon) icon.className = val === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
+    renderAuditTable();
+}
+
+function _sortAuditByCol(field) {
+    if (_auditSort === field) {
+        _auditSortDir = _auditSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _auditSort    = field;
+        _auditSortDir = 'desc';
+    }
+    const sf = document.getElementById('auditSortField');
+    if (sf) sf.value = _auditSort;
+    const icon = document.getElementById('iconAuditSortDir');
+    if (icon) icon.className = _auditSortDir === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
+    _auditPage = 1;
+    renderAuditTable();
+}
+
+function _goAuditPage(p) {
+    _auditPage = p;
+    renderAuditTable();
+}
+
+function _changeAuditPageSize(val) {
+    _auditPageSize = parseInt(val, 10);
+    _auditPage = 1;
+    renderAuditTable();
+}
+
+function _initAuditPageSize() {
+    if (_auditPageSize === null) _auditPageSize = _defaultPageSize;
+}

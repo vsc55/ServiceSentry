@@ -1,0 +1,119 @@
+{# ================================================================
+   Audit detail modal — formatters and modal display logic.
+   ================================================================ #}
+
+// ──────────────────────────── Audit log ──────────────────────────
+const AUDIT_EVENTS = I18N.audit_events || {};
+let _auditEntries  = [];
+let _auditPage     = 1;
+let _auditPageSize = null; // lazy init from _defaultPageSize
+
+// Full detail renderer — used in the modal
+function formatAuditDetailFull(detail) {
+    if (!detail) return '';
+    if (typeof detail === 'string') return '<p class="mb-0">' + esc(detail) + '</p>';
+
+    if (Array.isArray(detail)) {
+        if (!detail.length) return '';
+        let rows = detail.map(c => {
+            const f = esc(c.field || '');
+            const o = auditVal(c.old);
+            const n = auditVal(c.new);
+            return `<tr><td class="text-nowrap pe-3"><strong>${f}</strong></td><td>${o}</td><td class="px-2 text-muted">→</td><td>${n}</td></tr>`;
+        }).join('');
+        return `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
+    }
+
+    if (typeof detail === 'object') {
+        let html = '';
+        if (detail.reason)   html += `<p class="mb-1">${esc(t(detail.reason) || detail.reason)}</p>`;
+        if (detail.name)     html += `<p class="mb-1"><strong>${t('col_group_name') || 'Group'}:</strong> <code>${esc(detail.name)}</code></p>`;
+        if (detail.username) html += `<p class="mb-1"><strong>${t('col_user')}:</strong> ${esc(detail.username)}</p>`;
+        if (detail.role)     html += `<p class="mb-1"><strong>Role:</strong> ${esc(detail.role)}</p>`;
+        if (detail.display_name && !detail.changes) html += `<p class="mb-1">${esc(detail.display_name)}</p>`;
+        if (Array.isArray(detail.changes) && detail.changes.length) {
+            html += formatAuditDetailFull(detail.changes);
+        }
+        return html || renderReadable(detail);
+    }
+    return '<p class="mb-0">' + esc(String(detail)) + '</p>';
+}
+
+// Recursive pretty renderer for any value
+function renderReadable(v) {
+    if (v === null || v === undefined) return '<span class="text-muted">∅</span>';
+    if (typeof v === 'boolean') {
+        return v ? '<span class="badge bg-success">true</span>'
+                 : '<span class="badge bg-secondary">false</span>';
+    }
+    if (typeof v === 'number') return `<span>${esc(String(v))}</span>`;
+    if (typeof v === 'string') {
+        if (v === '') return '<span class="text-muted">—</span>';
+        return esc(v);
+    }
+    if (Array.isArray(v)) {
+        if (!v.length) return '<span class="text-muted">∅</span>';
+        // Array of primitives → inline badges
+        if (v.every(x => x === null || typeof x !== 'object')) {
+            return v.map(x => `<span class="badge bg-secondary-subtle text-secondary-emphasis border me-1">${esc(String(x))}</span>`).join('');
+        }
+        // Array of objects → stacked
+        return v.map(x => renderReadable(x)).join('<hr class="my-1">');
+    }
+    if (typeof v === 'object') {
+        const rows = Object.entries(v).map(([k, val]) =>
+            `<tr><td class="pe-3 text-muted small text-nowrap">${esc(k)}</td><td>${renderReadable(val)}</td></tr>`
+        ).join('');
+        return `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
+    }
+    return esc(String(v));
+}
+
+function auditVal(v) {
+    return renderReadable(v);
+}
+
+// Compact summary for the table cell
+function auditSummaryHtml(idx, detail) {
+    if (!detail || (Array.isArray(detail) && !detail.length)) return '';
+    let label;
+    if (typeof detail === 'string') {
+        if (detail.length <= 28) return `<span class="text-muted small">${esc(detail)}</span>`;
+        label = esc(detail.slice(0, 28)) + '…';
+    } else if (Array.isArray(detail)) {
+        label = tf('audit_n_changes', detail.length);
+    } else if (typeof detail === 'object') {
+        if (detail.reason) {
+            return `<span class="text-muted small">${esc(t(detail.reason) || detail.reason)}</span>`;
+        } else if (detail.username) {
+            const n = Array.isArray(detail.changes) ? detail.changes.length : 0;
+            label = n
+                ? esc(detail.username) + ' · ' + tf('audit_n_changes', n)
+                : esc(detail.username);
+            if (!n) return `<span class="text-muted small">${label}</span>`;
+        } else if (detail.name) {
+            const n = Array.isArray(detail.changes) ? detail.changes.length : 0;
+            label = n
+                ? esc(detail.name) + ' · ' + tf('audit_n_changes', n)
+                : esc(detail.name);
+            if (!n) return `<span class="text-muted small">${label}</span>`;
+        } else {
+            label = '···';
+        }
+    } else {
+        return `<span class="text-muted small">${esc(String(detail))}</span>`;
+    }
+    return `<a href="#" class="badge bg-secondary-subtle text-secondary-emphasis border text-decoration-none" onclick="showAuditDetail(${idx});return false;">${label}</a>`;
+}
+
+function showAuditDetail(idx) {
+    const e = _auditEntries[idx];
+    if (!e) return;
+    const eventLabel = AUDIT_EVENTS[e.event] || e.event;
+    const date = new Date(e.ts).toLocaleString();
+    document.getElementById('auditDetailModalTitle').innerHTML =
+        `<i class="bi bi-journal-text me-1"></i>${esc(eventLabel)} <small class="text-muted fw-normal ms-2">${esc(date)}</small>`;
+    document.getElementById('auditDetailModalBody').innerHTML =
+        formatAuditDetailFull(e.detail) || `<p class="text-muted mb-0">${t('no_audit_entries')}</p>`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('auditDetailModal')).show();
+}

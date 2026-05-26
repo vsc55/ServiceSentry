@@ -1,0 +1,133 @@
+{# ================================================================
+   Config — Notifications tab: email section renderer.
+   _renderEmailSection, _emailProviderChanged, testEmail.
+   ================================================================ #}
+
+// ──────────────────────── Email section renderer ──────────────────────────
+function _renderEmailSection(cfgCardOpen, cfgCardClose) {
+    const data = configData.email || {};
+    const provider = data.provider || 'smtp';
+
+    let h = cfgCardOpen('cfgcol_email', '<i class="bi bi-envelope me-1"></i>', t('email_section'));
+
+    h += renderField('enabled', data.enabled, 'email|enabled', 'config');
+
+    // Provider select (custom render — not a simple scalar field)
+    const _pvPath = 'email|provider';
+    const _pvHint = fieldHint(_pvPath);
+    const _pvHintId = _pvHint ? 'fhint_' + _pvPath.replace(/\W/g, '_') : '';
+    const _pvInfoIcon = _pvHint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+                data-bs-toggle="collapse" data-bs-target="#${_pvHintId}"
+                aria-expanded="false" aria-controls="${_pvHintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _pvHintPanel = _pvHint
+        ? `<div class="collapse" id="${_pvHintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_pvHint)}</div></div>`
+        : '';
+    const _pvResetBtn = `<button type="button" class="btn btn-sm btn-secondary"
+        onclick="resetConfigField(${jsStr(_pvPath)})"
+        data-bs-toggle="tooltip" data-bs-placement="top"
+        title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
+    const pvOpts = [
+        ['smtp',         t('email_provider_smtp')],
+        ['microsoft365', t('email_provider_ms365')],
+        ['gmail',        t('email_provider_gmail')],
+    ].map(([v, l]) => `<option value="${escAttr(v)}"${provider === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
+    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(LABELS['provider'] || t('provider'))}${_pvInfoIcon}</label>
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <select class="form-select"
+                onchange="configData.email=configData.email||{};configData.email.provider=this.value;markDirty('config');_emailProviderChanged(this.value)">
+                ${pvOpts}
+            </select>${_pvResetBtn}
+        </div>${_pvHintPanel}</div>
+    </div></div>`;
+
+    // Common notification fields
+    h += renderField('from_email',         data.from_email,         'email|from_email',         'config');
+    h += renderField('from_name',          data.from_name,          'email|from_name',           'config');
+    h += renderField('recipients',         data.recipients,         'email|recipients',          'config');
+    h += renderField('subject_prefix',     data.subject_prefix,     'email|subject_prefix',      'config');
+    h += renderField('email_lang',         data.lang,               'email|lang',                 'config');
+
+    // SMTP section
+    h += `<div id="email-smtp-section"${provider !== 'smtp' ? ' style="display:none"' : ''}>`;
+    h += `<hr class="my-2"><p class="small fw-semibold text-muted mb-1">SMTP</p>`;
+    h += renderField('smtp_host',     data.smtp_host,     'email|smtp_host',     'config');
+    h += renderField('smtp_port',     data.smtp_port,     'email|smtp_port',     'config');
+    h += renderField('smtp_use_tls',  data.smtp_use_tls,  'email|smtp_use_tls',  'config');
+    h += renderField('smtp_use_ssl',  data.smtp_use_ssl,  'email|smtp_use_ssl',  'config');
+    h += renderField('smtp_username', data.smtp_username, 'email|smtp_username', 'config');
+    h += renderField('smtp_password', data.smtp_password, 'email|smtp_password', 'config');
+    h += `</div>`;
+
+    // Microsoft 365 section
+    h += `<div id="email-ms365-section"${provider !== 'microsoft365' ? ' style="display:none"' : ''}>`;
+    h += `<hr class="my-2"><p class="small fw-semibold text-muted mb-1">Microsoft 365 — Graph API</p>`;
+    h += renderField('ms365_tenant_id',     data.ms365_tenant_id,     'email|ms365_tenant_id',     'config');
+    h += renderField('ms365_client_id',     data.ms365_client_id,     'email|ms365_client_id',     'config');
+    h += renderField('ms365_client_secret', data.ms365_client_secret, 'email|ms365_client_secret', 'config');
+    h += `</div>`;
+
+    // Gmail section
+    h += `<div id="email-gmail-section"${provider !== 'gmail' ? ' style="display:none"' : ''}>`;
+    h += `<hr class="my-2"><p class="small fw-semibold text-muted mb-1">Gmail — OAuth2</p>`;
+    h += renderField('gmail_client_id',     data.gmail_client_id,     'email|gmail_client_id',     'config');
+    h += renderField('gmail_client_secret', data.gmail_client_secret, 'email|gmail_client_secret', 'config');
+    h += renderField('gmail_refresh_token', data.gmail_refresh_token, 'email|gmail_refresh_token', 'config');
+    h += `</div>`;
+
+    // Test row: recipient override + button
+    const _testToHintId = 'fhint_email_test_to';
+    const _testToHint = t('email_test_to_hint');
+    const _testToInfoIcon = _testToHint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+                data-bs-toggle="collapse" data-bs-target="#${_testToHintId}"
+                aria-expanded="false"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _testToHintPanel = _testToHint
+        ? `<div class="collapse" id="${_testToHintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_testToHint)}</div></div>`
+        : '';
+    h += `<hr class="my-2"><div class="cfg-field-wrap">
+        <div class="row mb-2 align-items-start">
+            <label class="col-sm-4 col-form-label col-form-label-sm pt-1">${esc(LABELS['email_test_to'] || t('email_test_to') || 'Test recipient')}${_testToInfoIcon}</label>
+            <div class="col-sm-8">
+                <div class="input-group input-group-sm">
+                    <input type="text" id="emailTestTo" class="form-control"
+                        placeholder="${escAttr(t('email_test_to_ph'))}"
+                        autocomplete="off">
+                    <button class="btn btn-info" id="btnTestEmail" data-test-btn
+                        onclick="testEmail()" title="${escAttr(t('email_test'))}">
+                        <i class="bi bi-envelope-check me-1"></i>${esc(t('email_test'))}
+                    </button>
+                </div>
+                ${_testToHintPanel}
+            </div>
+        </div>
+    </div>`;
+
+    h += cfgCardClose;
+    return h;
+}
+
+function _emailProviderChanged(val) {
+    const map = { smtp: 'email-smtp-section', microsoft365: 'email-ms365-section', gmail: 'email-gmail-section' };
+    Object.entries(map).forEach(([provider, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = provider === val ? '' : 'none';
+    });
+}
+
+async function testEmail() {
+    const cfg = configData.email || {};
+    const testTo = (document.getElementById('emailTestTo')?.value || '').trim();
+    const body = testTo ? {...cfg, test_to: testTo} : cfg;
+    const btn = document.getElementById('btnTestEmail');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('email_test'); }
+    const r = await apiPost('/api/v1/notify/email/test', body);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-envelope-check me-1"></i>' + t('email_test'); }
+    if (r && r.data) {
+        showToast(r.data.message || (r.data.ok ? t('email_test_ok') : t('email_test_error')),
+                  r.data.ok ? 'success' : 'danger');
+    }
+}

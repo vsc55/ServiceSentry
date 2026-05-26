@@ -1,0 +1,138 @@
+{# ================================================================
+   User modal — openNewUserModal, openEditUserModal, saveUserModal.
+   ================================================================ #}
+
+function openNewUserModal() {
+    _editingUser = null;
+    document.getElementById('userModalTitle').textContent = t('new_user');
+    document.getElementById('umUsername').value = '';
+    document.getElementById('umUsername').disabled = false;
+    document.getElementById('umDisplayName').value = '';
+    document.getElementById('umDisplayName').readOnly = false;
+    document.getElementById('umDisplayName').removeAttribute('title');
+    document.getElementById('umLang').value = '';
+    document.getElementById('umDarkMode').value = '';
+    document.getElementById('umPassword').value = '';
+    document.getElementById('umPasswordGroup').style.display = '';
+    _updatePasswordStrength('umPassword', 'umPwStrengthBar', 'umPwStrengthLabel');
+    document.getElementById('umEmail').value = '';
+    document.getElementById('umEmail').readOnly = false;
+    document.getElementById('umEmail').removeAttribute('title');
+    document.getElementById('umEnabledGroup').style.display = '';
+    const umEnabledNew = document.getElementById('umEnabled');
+    umEnabledNew.checked = true;
+    umEnabledNew.disabled = false;
+    document.getElementById('umUidRow').classList.add('d-none');
+    document.getElementById('umUid').value = '';
+    document.getElementById('umSessionsGroup').style.display = 'none';
+    document.getElementById('umRoleSearch').value = '';
+    document.getElementById('umGroupSearch').value = '';
+    _umSelectedRole = 'none';
+    _umSelectedGroups = new Set();
+    _umPopulateRoles('');
+    _umPopulateGroups('');
+    bootstrap.Tab.getOrCreateInstance(document.querySelector('#userModalTabs [data-bs-target="#umTabGeneral"]')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
+}
+
+function openEditUserModal(username) {
+    _editingUser = username;
+    const u = usersData[username] || {};
+    document.getElementById('userModalTitle').textContent = t('edit_user_title') + ': ' + username;
+    document.getElementById('umUsername').value = username;
+    document.getElementById('umUsername').disabled = true;
+    document.getElementById('umDisplayName').value = u.display_name || '';
+    document.getElementById('umLang').value = u.lang || '';
+    const _dm = u.dark_mode;
+    document.getElementById('umDarkMode').value = _dm === true ? 'dark' : _dm === false ? 'light' : '';
+    document.getElementById('umPasswordGroup').style.display = 'none';
+    document.getElementById('umEmail').value = u.email || '';
+    const _isSsoUser = (u.auth_source && u.auth_source !== 'local');
+    const _ssoHint = _isSsoUser ? t('sso_field_managed_externally') : '';
+    document.getElementById('umDisplayName').readOnly = _isSsoUser;
+    document.getElementById('umDisplayName').title    = _ssoHint;
+    document.getElementById('umEmail').readOnly = _isSsoUser;
+    document.getElementById('umEmail').title    = _ssoHint;
+    const isSelf = username === currentUser.username;
+    const enabledChk = document.getElementById('umEnabled');
+    enabledChk.checked = u.enabled !== false;
+    enabledChk.disabled = isSelf;
+    document.getElementById('umUidRow').classList.remove('d-none');
+    document.getElementById('umUid').value = u.uid || '';
+    document.getElementById('umEnabledGroup').style.display = '';
+    _umSessionsSort = 'last_seen';
+    _umSessionsSortDir = 'desc';
+    _umRenderSessions(username);
+    document.getElementById('umRoleSearch').value = '';
+    document.getElementById('umGroupSearch').value = '';
+    _umSelectedRole = u.role || 'viewer';
+    _umSelectedGroups = new Set(u.groups || []);
+    _umPopulateRoles('');
+    _umPopulateGroups('');
+    bootstrap.Tab.getOrCreateInstance(document.querySelector('#userModalTabs [data-bs-target="#umTabGeneral"]')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
+}
+
+async function saveUserModal() {
+    const username = document.getElementById('umUsername').value.trim();
+    const display_name = document.getElementById('umDisplayName').value.trim();
+    const role = _umSelectedRole || 'none';
+    const lang = document.getElementById('umLang').value;
+    const groups = [..._umSelectedGroups];
+    if (!username) { showToast(t('username_required'), 'warning'); return; }
+    if (!_editingUser && Object.keys(usersData).some(k => k.toLowerCase() === username.toLowerCase())) {
+        showToast(tf('user_already_exists', username), 'warning'); return;
+    }
+    if (_editingUser) {
+        const enabled = document.getElementById('umEnabled').checked;
+        const email   = document.getElementById('umEmail').value.trim();
+        const _dmVal  = document.getElementById('umDarkMode').value;
+        const dark_mode = _dmVal === 'dark' ? true : _dmVal === 'light' ? false : null;
+        const body = { role, display_name, lang, groups, enabled, email, dark_mode };
+        const r = await apiPut('/api/v1/users/' + encodeURIComponent(_editingUser), body);
+        if (r && r.ok) {
+            showToast(t('user_updated'));
+            const oldGroups = new Set(usersData[_editingUser]?.groups || []);
+            const newGroups = new Set(groups);
+            for (const g of oldGroups) {
+                if (!newGroups.has(g) && groupsData[g])
+                    groupsData[g].members = (groupsData[g].members || []).filter(m => m !== _editingUser);
+            }
+            for (const g of newGroups) {
+                if (!oldGroups.has(g) && groupsData[g]) {
+                    if (!groupsData[g].members) groupsData[g].members = [];
+                    if (!groupsData[g].members.includes(_editingUser)) groupsData[g].members.push(_editingUser);
+                }
+            }
+            usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email, dark_mode };
+            if (_editingUser === currentUser.username) {
+                currentUser.role = role;
+                currentUser.display_name = display_name || _editingUser;
+                if (lang && lang !== currentUser.lang) { location.reload(); return; }
+            }
+        } else {
+            showToast(r?.error || t('update_error'), 'danger'); return;
+        }
+    } else {
+        const password = document.getElementById('umPassword').value;
+        if (!password) { showToast(t('password_required'), 'warning'); return; }
+        const email = document.getElementById('umEmail').value.trim();
+        const enabled = document.getElementById('umEnabled').checked;
+        const r = await apiPost('/api/v1/users', { username, password, role, display_name, lang, groups, email, enabled });
+        if (r && r.status === 201) {
+            showToast(t('user_created'));
+            usersData[username] = { role, display_name: display_name || username, lang, groups, email, enabled };
+            for (const g of groups) {
+                if (groupsData[g]) {
+                    if (!groupsData[g].members) groupsData[g].members = [];
+                    if (!groupsData[g].members.includes(username)) groupsData[g].members.push(username);
+                }
+            }
+        } else {
+            showToast(r?.data?.error || t('create_error'), 'danger'); return;
+        }
+    }
+    bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
+    renderUsers();
+    renderGroups();
+}

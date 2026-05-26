@@ -1,0 +1,556 @@
+{# ================================================================
+   Field rendering: renderField, _renderFieldInner, blockNonNumericKey,
+   validateAndUpdateNumber, resetConfigField, renderScalarFields,
+   _refreshConditionalFields.
+   ================================================================ #}
+
+// ──────────────────────────── Field render ─────────────────────────
+function renderField(key, value, pathStr, target = 'modules') {
+    const _hint = fieldHint(pathStr);
+    const _hintId = _hint ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
+    const _infoIcon = _hint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+                data-bs-toggle="collapse" data-bs-target="#${_hintId}"
+                aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _hintPanel = _hint
+        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_hint)}</div></div>`
+        : '';
+    const _fhtml = _renderFieldInner(key, value, pathStr, target, _infoIcon, _hintPanel);
+    if (!_fhtml) return _fhtml;
+    let _conflictBanner = '';
+    let _wrapCls = '';
+    if (target === 'config') {
+        const _ci = _configConflicts[pathStr];
+        const _sc = _serverChangedDirtyPaths.has(pathStr);
+        const _au = _autoupdatedFields.has(pathStr);
+        if (_ci) {
+            _wrapCls = ' cfg-has-conflict';
+            const _sv = _ci.server_value;
+            const _svDisp = _sv === null ? t('secret_defined') : (_sv === undefined ? '—' : esc(String(_sv)));
+            _conflictBanner = `<div class="cfg-conflict-bar">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i>${t('cfg_conflict_msg')} <code class="ms-1">${_svDisp}</code>
+                <button class="btn btn-xs btn-warning ms-2" onclick="_overwriteConflictField(${jsStr(pathStr)})" title="${escAttr(t('cfg_overwrite'))}">${t('cfg_overwrite')}</button>
+                <button class="btn btn-xs btn-secondary ms-1" onclick="_acceptServerField(${jsStr(pathStr)})" title="${escAttr(t('cfg_accept_server'))}">${t('cfg_accept_server')}</button>
+            </div>`;
+        } else if (_sc) {
+            _wrapCls = ' cfg-has-server-change';
+            _conflictBanner = `<div class="cfg-server-change-bar">
+                <i class="bi bi-info-circle me-1"></i>${t('cfg_server_changed_warn')}
+                <button class="btn btn-xs btn-secondary ms-2" onclick="_dismissServerChange(${jsStr(pathStr)})">${t('dismiss')}</button>
+            </div>`;
+        } else if (_au) {
+            _wrapCls = ' cfg-auto-updated';
+            _conflictBanner = `<div class="cfg-auto-update-bar">
+                <i class="bi bi-arrow-repeat me-1"></i>${t('cfg_auto_updated')}
+                <button class="cfg-dismiss-btn ms-auto" onclick="_dismissAutoUpdate(${jsStr(pathStr)})" data-bs-toggle="tooltip" data-bs-placement="top" title="${escAttr(t('dismiss'))}">&times;</button>
+            </div>`;
+        }
+    }
+    return `<div class="cfg-field-wrap${_wrapCls}" data-cfg-path="${escAttr(pathStr)}">${_conflictBanner}${_fhtml}</div>`;
+}
+function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = '', _hintHtml = '') {
+    const lbl = esc(fieldLabel(key));
+    const lblHtml = lbl + _infoIcon;
+    const sp = jsStr(pathStr), tg = jsStr(target);
+
+    // Get field metadata from schema
+    const schema = schemaFor(pathStr.split('|').slice(0, 2).join('|') + '|_');
+    // schemaFor needs "module|collection|..." — but we can also look it up directly
+    const parentKey = pathStr.split('|').slice(0, 2).join('|');
+    const sch = ITEM_SCHEMAS[parentKey] || ITEM_SCHEMAS[pathStr.split('|')[0] + '|__module__'] || null;
+    const meta = fieldMeta(sch, key) || (configSchema[pathStr] || null);
+
+    if (meta && meta.__unsupported__) {
+        return `<div class="row mb-2 align-items-center opacity-50">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8">
+            <span class="badge bg-secondary bg-opacity-75" style="font-size:.75rem">
+                <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
+            </span>
+        </div></div>`;
+    }
+
+    // Per-field reset button — only in config tab and only when a default is defined
+    const _resetBtn = target === 'config' && (pathStr in CONFIG_FIELD_DEFAULTS)
+        ? `<button type="button" class="btn btn-sm btn-secondary"
+            onclick="resetConfigField(${sp})"
+            data-bs-toggle="tooltip" data-bs-placement="top"
+            title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`
+        : '';
+    // Env-var lock — field is read-only when set by a Docker environment variable
+    const _isEnvLocked = target === 'config' && ENV_LOCKED.has(pathStr);
+    const _lockBtn = _isEnvLocked
+        ? `<span class="input-group-text text-warning" tabindex="-1"
+            data-bs-toggle="tooltip" data-bs-placement="top"
+            title="${escAttr(t('env_locked_tooltip'))}"><i class="bi bi-lock-fill" style="font-size:.75rem"></i></span>`
+        : '';
+    const _actionBtn = _isEnvLocked ? _lockBtn : _resetBtn;
+
+    // Sensitive field masked by the server (null = value is set but never transmitted)
+    if (value === null && (SENSITIVE.has(key) || (meta && meta.sensitive))) {
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <input type="password" class="form-control"
+                data-field-path="${escAttr(pathStr)}"
+                value=""
+                placeholder="${escAttr(t('secret_defined') || '••••••')}"
+                oninput="updateField(${tg},${sp},this.value)">${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
+    }
+
+    if (typeof value === 'boolean') {
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8">
+            <div class="d-flex align-items-center gap-2">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch"
+                        ${value ? 'checked' : ''}
+                        onchange="updateField(${tg},${sp},this.checked)">
+                </div>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
+    }
+    if (typeof value === 'number' && meta && Array.isArray(meta.options_int)) {
+        const opts = meta.options_int.map(s => {
+            const label = s === 0 ? t('all') : s;
+            return `<option value="${s}"${value === s ? ' selected' : ''}>${label}</option>`;
+        }).join('');
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <select class="form-select"
+                onchange="updateField(${tg},${sp},parseInt(this.value,10))">
+                ${opts}
+            </select>${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
+    }
+    if (typeof value === 'number') {
+        const minA = meta && meta.min != null ? ` min="${meta.min}"` : '';
+        const maxA = meta && meta.max != null ? ` max="${meta.max}"` : '';
+        const isFloat = meta && meta.type === 'float';
+        const stepA = isFloat ? ' step="0.1"' : ' step="1"';
+        const _minV = meta && meta.min != null ? meta.min : 'null';
+        const _maxV = meta && meta.max != null ? meta.max : 'null';
+        const _onkeydown = isFloat
+            ? `onkeydown="blockNonNumericKey(event,true)"`
+            : `onkeydown="blockNonNumericKey(event,false)"`;
+        // placeholder_map / placeholder: show blank for 0 and use "use default" semantics.
+        let displayValue = value;
+        let extraAttrs = '';
+        if (meta && meta.placeholder_map) {
+            const _itemParts = pathStr.split('|').slice(0, -1);
+            const _itemData = getPath(modulesData, _itemParts) || getPath(configData, _itemParts) || {};
+            const _sibVal = _itemData['db_type'] || '';
+            const _ph = meta.placeholder_map[_sibVal];
+            if (_ph != null) extraAttrs += ` placeholder="${escAttr(String(_ph))}"`;
+            extraAttrs += ` data-placeholder-map="${escAttr(JSON.stringify(meta.placeholder_map))}"`;
+            extraAttrs += ` data-zero-as-blank="1"`;
+            if (value === 0) displayValue = '';
+        } else if (meta && meta.placeholder != null) {
+            extraAttrs += ` placeholder="${escAttr(String(meta.placeholder))}"`;
+            extraAttrs += ` data-zero-as-blank="1"`;
+            if (value === 0) displayValue = '';
+        } else if (meta && meta.placeholder_module != null) {
+            const _modName = pathStr.split('|')[0];
+            const _modPh = (modulesData[_modName] || {})[meta.placeholder_module];
+            if (_modPh != null && _modPh !== 0) extraAttrs += ` placeholder="${escAttr(String(_modPh))}"`;
+            extraAttrs += ` data-placeholder-module="${escAttr(String(meta.placeholder_module))}"`;
+            extraAttrs += ` data-zero-as-blank="1"`;
+            if (value === 0) displayValue = '';
+        }
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <input type="number" class="form-control"
+                data-cfg-path="${escAttr(pathStr)}"
+                value="${displayValue}"${minA}${maxA}${stepA}${extraAttrs}
+                ${_onkeydown}
+                oninput="markDirty(${tg})"
+                onchange="validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})">${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
+    }
+    if (typeof value === 'string') {
+        // Language selector
+        if (key === 'lang') {
+            let opts = '';
+            for (const code of SUPPORTED_LANGS) {
+                const sel = value === code ? ' selected' : '';
+                opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
+            }
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8"><div class="input-group input-group-sm">
+                <select class="form-select"
+                    onchange="updateField(${tg},${sp},this.value)">
+                    ${opts}
+                </select>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
+        }
+        // Status-page language selector (with empty = use default option)
+        if (key === 'status_lang') {
+            const defLabel = esc(I18N['status_lang_default'] || '— ' + (I18N['use_default'] || 'Use default') + ' —');
+            let opts = `<option value=""${value === '' ? ' selected' : ''}>${defLabel}</option>`;
+            for (const code of SUPPORTED_LANGS) {
+                const sel = value === code ? ' selected' : '';
+                opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
+            }
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8"><div class="input-group input-group-sm">
+                <select class="form-select"
+                    onchange="updateField(${tg},${sp},this.value)">
+                    ${opts}
+                </select>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
+        }
+        // Email / Telegram notification language selector (empty = follow system language)
+        if (key === 'email_lang' || key === 'telegram_lang') {
+            const sysLabel = esc(I18N['system_default'] || '— System —');
+            let opts = `<option value=""${value === '' ? ' selected' : ''}>${sysLabel}</option>`;
+            for (const code of SUPPORTED_LANGS) {
+                const sel = value === code ? ' selected' : '';
+                opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
+            }
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8"><div class="input-group input-group-sm">
+                <select class="form-select"
+                    onchange="updateField(${tg},${sp},this.value)">
+                    ${opts}
+                </select>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
+        }
+        // String select — options array defined in schema
+        if (meta && Array.isArray(meta.options)) {
+            const _modName = pathStr.split('|')[0];
+            const _modI18n = ITEM_SCHEMAS[_modName + '|__i18n__'];
+            const _modLd = _modI18n && (_modI18n[CURRENT_LANG] || _modI18n[SYSTEM_DEFAULT_LANG]);
+            const _optLbls = _modLd && _modLd.option_labels && _modLd.option_labels[key];
+            const opts = meta.options.map(o => {
+                const label = (_optLbls && _optLbls[o]) ? esc(_optLbls[o]) : esc(o);
+                return `<option value="${escAttr(o)}"${value === o ? ' selected' : ''}>${label}</option>`;
+            }).join('');
+            const _itemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8"><div class="input-group input-group-sm">
+                <select class="form-select"
+                    onchange="updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})">
+                    ${opts}
+                </select>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
+        }
+        const isSensitive = (meta && meta.sensitive) || SENSITIVE.has(key);
+        const tp = isSensitive ? 'password' : 'text';
+        const _numKbd = (meta && meta.numericString)
+            ? ` onkeydown="blockNonNumericKey(event,false)"`
+            : '';
+        // placeholder for string inputs (not applied to sensitive/password fields):
+        //   'label' field → item key; schema placeholder='__key__' → item key; schema placeholder → static text
+        let _strPh = '';
+        if (!isSensitive) {
+            const _phParts = pathStr.split('|');
+            const _itemKey = _phParts.length >= 4 ? _phParts[_phParts.length - 2] : '';
+            if (key === 'label' && _itemKey) {
+                _strPh = ` placeholder="${escAttr(_itemKey)}"`;
+            } else if (meta && meta.placeholder != null) {
+                const _phRaw = String(meta.placeholder);
+                _strPh = ` placeholder="${escAttr(_phRaw === '__key__' && _itemKey ? _itemKey : _phRaw)}"`;
+            }
+        }
+        const _strPhCls = _strPh ? ' item-key-ph' : '';
+        // Inline discover button for __discovery_field__ string fields
+        const _discoverFieldUrl = (sch && sch['__discovery_field__'] === key && sch['__discovery__'])
+            ? sch['__discovery__'] : null;
+        if (_discoverFieldUrl) {
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8">
+                <div class="input-group input-group-sm">
+                    <input type="${tp}" class="form-control${_strPhCls}"
+                        data-field-path="${escAttr(pathStr)}"
+                        value="${escAttr(value)}"${_numKbd}${_strPh}
+                        oninput="markDirty(${tg})"
+                        onchange="updateField(${tg},${sp},this.value.trim())">
+                    <button class="btn btn-secondary" type="button"
+                        title="${escAttr(t('discover') || 'Discover')}"
+                        onclick="openDiscoverModalForField(${sp},${jsStr(_discoverFieldUrl)})">
+                        <i class="bi bi-search"></i>
+                    </button>${_actionBtn}
+                </div>${_hintHtml}
+            </div></div>`;
+        }
+        // input_action: render as Bootstrap input-group with an icon button appended
+        const _ia = meta && meta.input_action && typeof meta.input_action === 'object'
+            ? meta.input_action : null;
+        if (_ia) {
+            const _modName2 = pathStr.split('|')[0];
+            const _modI18n2 = ITEM_SCHEMAS[_modName2 + '|__i18n__'];
+            const _modLd2   = _modI18n2 && (_modI18n2[CURRENT_LANG] || _modI18n2[SYSTEM_DEFAULT_LANG]);
+            const _al2      = (_modLd2 && _modLd2.action_labels) || {};
+            const _iaLabel  = escAttr(_al2[_ia.id] || t(_ia.id) || _ia.id);
+            const _itemPath = escAttr(pathStr.split('|').slice(0, -1).join('|'));
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8">
+                <div class="input-group input-group-sm">
+                    <input type="${tp}" class="form-control${_strPhCls}"
+                        data-field-path="${escAttr(pathStr)}"
+                        value="${escAttr(value)}"${_numKbd}${_strPh}
+                        oninput="markDirty(${tg})"
+                        onchange="updateField(${tg},${sp},this.value.trim())">
+                    <button class="btn btn-secondary" type="button" data-test-btn
+                        data-action-path="${_itemPath}"
+                        data-action-url="${escAttr(_ia.url || '')}"
+                        data-action-extra="${escAttr(JSON.stringify(_ia.extra || {}))}"
+                        data-action-result="${escAttr(_ia.result || 'toast')}"
+                        data-action-result-field="${escAttr(_ia.result_field || '')}"
+                        onclick="itemAction(this)"
+                        data-bs-toggle="tooltip" data-bs-placement="top"
+                        title="${_iaLabel}"><i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button>${_actionBtn}
+                </div>${_hintHtml}
+            </div></div>`;
+        }
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <input type="${tp}" class="form-control${_strPhCls}"
+                data-field-path="${escAttr(pathStr)}"
+                value="${escAttr(value)}"${_numKbd}${_strPh}
+                oninput="markDirty(${tg})"
+                onchange="updateField(${tg},${sp},this.value.trim())">${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
+    }
+    if (Array.isArray(value)) {
+        const csv = value.map(v => String(v)).join(', ');
+        return `<div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8"><div class="input-group input-group-sm">
+            <input type="text" class="form-control"
+                value="${escAttr(csv)}" placeholder="${t('comma_separated')}"
+                oninput="markDirty(${tg})"
+                onchange="updateArray(${tg},${sp},this.value)">${_actionBtn}
+        </div>${_hintHtml}</div></div>`;
+    }
+    return '';
+}
+
+/**
+ * Block non-numeric keypresses before they reach the input.
+ * Allows: digits, one leading minus, one decimal point (floats only),
+ * and all control/navigation keys (Backspace, Delete, arrows, Tab, etc.)
+ * and clipboard shortcuts (Ctrl/Cmd + A/C/V/X).
+ */
+function blockNonNumericKey(event, allowFloat) {
+    const k = event.key;
+    // Always pass through: control keys (length > 1 = named key like 'Backspace'),
+    // and keyboard shortcuts with Ctrl/Meta
+    if (k.length > 1 || event.ctrlKey || event.metaKey) return;
+    // Digits: always ok
+    if (k >= '0' && k <= '9') return;
+    // Minus: only if cursor is at position 0 and no minus already present
+    if (k === '-') {
+        const el = event.target;
+        if (el.selectionStart === 0 && !el.value.includes('-')) return;
+        event.preventDefault(); return;
+    }
+    // Decimal point: only for floats and only once
+    if (k === '.') {
+        if (allowFloat && !event.target.value.includes('.')) return;
+        event.preventDefault(); return;
+    }
+    // Block everything else
+    event.preventDefault();
+}
+
+/**
+ * Validate and apply a numeric input change:
+ *  - empty / non-numeric  → revert el.value to the current state value (no updateField call)
+ *  - out of [min, max]    → clamp to boundary, then call updateField
+ *  - valid integer        → call updateField
+ */
+function validateAndUpdateNumber(el, target, pathStr, min, max) {
+    const raw = el.value;
+    const v = parseInt(raw, 10);
+    const hasZeroAsBlank = el.hasAttribute('data-zero-as-blank');
+    if (raw === '' || isNaN(v)) {
+        if (hasZeroAsBlank) {
+            // Blank means "use default" — store 0, keep display blank.
+            el.value = '';
+            updateField(target, pathStr, min ?? 0);
+        } else {
+            const parts = pathStr.split('|');
+            let cur = target === 'config' ? configData : modulesData;
+            for (const p of parts) cur = (cur != null) ? cur[p] : null;
+            el.value = (typeof cur === 'number') ? cur : (min ?? 0);
+        }
+        return;
+    }
+    const clamped = (min != null && v < min) ? min : (max != null && v > max) ? max : v;
+    // Show blank when clamped to 0 and this field treats 0 as "use default".
+    el.value = (clamped === 0 && hasZeroAsBlank) ? '' : clamped;
+    updateField(target, pathStr, clamped);
+}
+
+/**
+ * Restore a config field to its built-in default value.
+ */
+function resetConfigField(pathStr) {
+    if (!(pathStr in CONFIG_FIELD_DEFAULTS)) return;
+    const dflt = CONFIG_FIELD_DEFAULTS[pathStr];
+    updateField('config', pathStr, typeof dflt === 'object' && dflt !== null ? deepClone(dflt) : dflt);
+    renderConfig();
+}
+
+/** Render all scalar (non-object) fields of *obj*.
+ *  _postGroupHtml: optional map of groupName → HTML string injected after
+ *  the last field of that group (used to embed action buttons inside a group). */
+function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtml = {}) {
+    let h = '';
+    const _sch = ITEM_SCHEMAS[pathPrefix.split('|').slice(0, 2).join('|')]
+        || ITEM_SCHEMAS[pathPrefix.split('|')[0] + '|__module__'] || null;
+
+    // Module i18n for group labels
+    const _modName = pathPrefix.split('|')[0];
+    const _modI18n = ITEM_SCHEMAS[_modName + '|__i18n__'];
+    const _modLd = _modI18n && (_modI18n[CURRENT_LANG] || _modI18n[SYSTEM_DEFAULT_LANG]);
+    const _groupLabels = (_modLd && _modLd.group_labels) || {};
+
+    // __group_when__: explicit show_when for group headers (independent of field show_when)
+    const _groupWhen = (_sch && _sch['__group_when__']) || {};
+
+    // Sort keys: follow schema definition order when available, else enabled-first + alpha
+    const _schemaKeys = _sch
+        ? (_sch['__field_order__'] || Object.keys(_sch).filter(k => !k.startsWith('__')))
+        : null;
+    const keys = (_schemaKeys ? Object.keys(obj).filter(k => _schemaKeys.includes(k)) : Object.keys(obj)).sort((a, b) => {
+        if (_schemaKeys) {
+            const ai = _schemaKeys.indexOf(a), bi = _schemaKeys.indexOf(b);
+            if (ai !== -1 && bi !== -1) return ai - bi;
+            if (ai !== -1) return -1;
+            if (bi !== -1) return 1;
+        }
+        if (a === 'enabled') return -1; if (b === 'enabled') return 1;
+        return a.localeCompare(b);
+    });
+
+    let _curGroup = null;
+    for (const k of keys) {
+        if (exclude.includes(k)) continue;
+        const v = obj[k];
+        if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
+        const _meta = fieldMeta(_sch, k);
+        const _rawFHtml = renderField(k, v, pathPrefix + '|' + k, target);
+        const _fhtml = (target === 'config' && ENV_LOCKED.has(pathPrefix + '|' + k) && _rawFHtml)
+            ? _rawFHtml.replace(/^<div /, '<div data-env-locked="1" ')
+            : _rawFHtml;
+
+        const _group = _meta && _meta.group ? _meta.group : null;
+        const _showWhen = _meta && _meta.show_when && typeof _meta.show_when === 'object'
+            ? _meta.show_when : null;
+
+        // Detect group transition: inject post-group HTML when leaving a group
+        if (_group !== _curGroup) {
+            if (_curGroup !== null && _postGroupHtml[_curGroup]) {
+                h += _postGroupHtml[_curGroup];
+            }
+
+            // Group header uses __group_when__ for its own visibility (not the field's show_when)
+            if (_group) {
+                const _gWhen = _groupWhen[_group] || null;
+                let _gVisible = true;
+                if (_gWhen) {
+                    for (const [ctrl, allowed] of Object.entries(_gWhen)) {
+                        if (!Array.isArray(allowed) || !allowed.includes(obj[ctrl])) {
+                            _gVisible = false; break;
+                        }
+                    }
+                }
+                const _glabel = esc(_groupLabels[_group] || _group);
+                const _swAttr = _gWhen ? ` data-sw-when="${escAttr(JSON.stringify(_gWhen))}"` : '';
+                const _hdrDisp = _gVisible
+                    ? 'border-bottom:1px solid var(--bs-border-color);margin:.6rem 0 .5rem'
+                    : 'display:none;border-bottom:1px solid var(--bs-border-color);margin:.6rem 0 .5rem';
+                h += `<div class="sw-field"${_swAttr} style="${_hdrDisp}">
+                    <small class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">${_glabel}</small>
+                </div>`;
+            }
+            _curGroup = _group;
+        }
+
+        // Compute initial field visibility from current item data
+        let _visible = true;
+        if (_showWhen) {
+            for (const [ctrl, allowed] of Object.entries(_showWhen)) {
+                if (!Array.isArray(allowed) || !allowed.includes(obj[ctrl])) {
+                    _visible = false; break;
+                }
+            }
+        }
+        const _disp = _visible ? '' : ' style="display:none"';
+
+        if (_showWhen) {
+            h += `<div class="sw-field" data-sw-when="${escAttr(JSON.stringify(_showWhen))}"${_disp}>${_fhtml}</div>`;
+        } else {
+            h += _fhtml;
+        }
+    }
+    // Inject post-group HTML for the final group
+    if (_curGroup !== null && _postGroupHtml[_curGroup]) {
+        h += _postGroupHtml[_curGroup];
+    }
+    return h;
+}
+
+/**
+ * Show/hide fields wrapped in .sw-field[data-sw-when] inside the item container
+ * identified by itemPathStr. Called when a controlling select changes value and
+ * when the item's collapse panel opens.
+ */
+function _refreshConditionalFields(itemPathStr) {
+    const container = document.querySelector(`[data-sw-item-path="${CSS.escape(itemPathStr)}"]`);
+    if (!container) return;
+    const parts = itemPathStr.split('|');
+    const itemData = getPath(modulesData, parts) || getPath(configData, parts) || {};
+    container.querySelectorAll('.sw-field[data-sw-when]').forEach(el => {
+        try {
+            const cond = JSON.parse(el.dataset.swWhen);
+            let visible = true;
+            for (const [ctrl, allowed] of Object.entries(cond)) {
+                if (!Array.isArray(allowed) || !allowed.includes(itemData[ctrl])) {
+                    visible = false; break;
+                }
+            }
+            // Use removeProperty / setProperty to avoid clobbering other inline styles
+            if (visible) {
+                el.style.removeProperty('display');
+            } else {
+                el.style.setProperty('display', 'none');
+            }
+        } catch {}
+    });
+    // Update placeholder for inputs with a placeholder_map (e.g. port depends on db_type).
+    container.querySelectorAll('input[data-placeholder-map]').forEach(el => {
+        try {
+            const map = JSON.parse(el.dataset.placeholderMap);
+            const ph = map[itemData['db_type'] || ''];
+            el.placeholder = ph != null ? String(ph) : '';
+        } catch {}
+    });
+    // Update placeholder for inputs that inherit a module-level field value.
+    container.querySelectorAll('input[data-placeholder-module]').forEach(el => {
+        try {
+            const modField = el.dataset.placeholderModule;
+            const modName = (container.dataset.swItemPath || '').split('|')[0];
+            const ph = modName ? (modulesData[modName] || {})[modField] : null;
+            el.placeholder = (ph != null && ph !== 0) ? String(ph) : '';
+        } catch {}
+    });
+}
+
+document.addEventListener('show.bs.collapse', function(e) {
+    const p = e.target.dataset.swItemPath;
+    if (p) _refreshConditionalFields(p);
+});

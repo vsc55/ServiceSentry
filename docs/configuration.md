@@ -32,6 +32,17 @@ Configuración global de la aplicación.
         "chat_id": "CHAT_ID_AQUÍ",
         "group_messages": false
     },
+    "notifications": {
+        "telegram_on_down": true,
+        "telegram_on_recovery": true,
+        "telegram_on_warn": false,
+        "email_on_down": true,
+        "email_on_recovery": true,
+        "email_on_warn": false,
+        "webhook_on_down": true,
+        "webhook_on_recovery": true,
+        "webhook_on_warn": false
+    },
     "web_admin": {
         "lang": "en_EN",
         "dark_mode": false,
@@ -71,6 +82,24 @@ Configuración global de la aplicación.
 | `telegram.chat_id` | string | `""` | ID del chat o grupo de Telegram (solo dígitos) |
 | `telegram.group_messages` | bool | false | Si `true`, agrupa todos los mensajes en un bloque por ciclo |
 
+### Sección `notifications`
+
+Matriz de routing: qué eventos se envían por cada canal. Los webhooks individuales también tienen su propio flag `enabled`, por lo que un evento solo se entrega a los webhooks que estén activos.
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `notifications.telegram_on_down` | bool | `true` | Enviar por Telegram cuando un check falla |
+| `notifications.telegram_on_recovery` | bool | `true` | Enviar por Telegram cuando un check se recupera |
+| `notifications.telegram_on_warn` | bool | `false` | Enviar por Telegram en estado de advertencia |
+| `notifications.email_on_down` | bool | `true` | Enviar por email cuando un check falla |
+| `notifications.email_on_recovery` | bool | `true` | Enviar por email cuando un check se recupera |
+| `notifications.email_on_warn` | bool | `false` | Enviar por email en estado de advertencia |
+| `notifications.webhook_on_down` | bool | `true` | Enviar a webhooks cuando un check falla |
+| `notifications.webhook_on_recovery` | bool | `true` | Enviar a webhooks cuando un check se recupera |
+| `notifications.webhook_on_warn` | bool | `false` | Enviar a webhooks en estado de advertencia |
+
+Esta matriz es configurable desde la pestaña **Configuración → Notifications → Routing** del panel web.
+
 ### Sección `web_admin`
 
 | Clave | Tipo | Por defecto | Descripción |
@@ -89,6 +118,8 @@ Configuración global de la aplicación.
 | `web_admin.pw_require_digit` | bool | `true` | Exigir al menos un dígito en la contraseña |
 | `web_admin.pw_require_symbol` | bool | `false` | Exigir al menos un símbolo (`!`, `@`, `#`…) en la contraseña |
 | `web_admin.proxy_count` | int | `0` | Número de proxies inversos delante del servidor Flask (0–10). Activa `ProxyFix` de Werkzeug para leer correctamente la IP real del cliente. |
+| `web_admin.port` | int | `8080` | Puerto TCP del servidor web. Puede sobreescribirse con `--web-port`. |
+| `web_admin.host` | string | `"0.0.0.0"` | Dirección IP donde escucha el servidor. Puede sobreescribirse con `--web-host`. |
 
 ### Sección `ldap`
 
@@ -142,16 +173,26 @@ Cuando está habilitado, aparece el botón **Login with SSO** en la pantalla de 
 | `email.provider` | string | `"smtp"` | Proveedor de envío: `smtp`, `ms365` o `gmail` |
 | `email.recipients` | string | `""` | Direcciones de destino separadas por comas |
 | `email.subject_prefix` | string | `""` | Prefijo opcional para el asunto del mensaje |
-| `email.notify_on_down` | bool | `true` | Enviar alerta cuando un check falla |
-| `email.notify_on_recovery` | bool | `true` | Enviar alerta cuando se recupera un check |
-| `email.notify_on_warn` | bool | `false` | Enviar alerta en estado de advertencia |
+| `email.notify_on_down` | bool | `true` | Enviar alerta cuando un check falla *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
+| `email.notify_on_recovery` | bool | `true` | Enviar alerta cuando se recupera un check *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
+| `email.notify_on_warn` | bool | `false` | Enviar alerta en estado de advertencia *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
 | `email.from_email` | string | `""` | Dirección de envío (campo `From:`) |
+| `email.from_name` | string | `""` | Nombre del remitente que aparece en el campo `From:` |
+| `email.lang` | string | `""` | Idioma de las notificaciones de email. Vacío = usa el idioma por defecto del panel (`web_admin.lang`). |
 | `email.smtp_host` | string | `""` | Servidor SMTP (solo para `provider=smtp`) |
 | `email.smtp_port` | int | `587` | Puerto SMTP (1–65535) |
 | `email.smtp_use_tls` | bool | `true` | Usar STARTTLS (habitual en el puerto 587) |
 | `email.smtp_use_ssl` | bool | `false` | Usar SSL/TLS directo (habitual en el puerto 465) |
 | `email.smtp_username` | string | `""` | Usuario para autenticación SMTP |
 | `email.smtp_password` | string | `""` | Contraseña SMTP (cifrada en disco) |
+| `email.ms365_tenant_id` | string | `""` | ID del tenant de Microsoft 365 (solo `provider=ms365`) |
+| `email.ms365_client_id` | string | `""` | Client ID de la app Microsoft 365 (solo `provider=ms365`) |
+| `email.ms365_client_secret` | string | `""` | Client Secret de Microsoft 365 (cifrado en disco; solo `provider=ms365`) |
+| `email.gmail_client_id` | string | `""` | Client ID de la app Gmail OAuth2 (solo `provider=gmail`) |
+| `email.gmail_client_secret` | string | `""` | Client Secret de Gmail (cifrado en disco; solo `provider=gmail`) |
+| `email.gmail_refresh_token` | string | `""` | Refresh token de OAuth2 para Gmail (cifrado en disco; solo `provider=gmail`) |
+
+> **Nota:** los campos `email.notify_on_*` han sido reemplazados por la matriz de routing de la sección `notifications` y se conservan únicamente por compatibilidad con configuraciones anteriores. Los nuevos despliegues deben usar `notifications.email_on_*`.
 
 ---
 
@@ -185,6 +226,46 @@ Configuración por módulo. Cada clave de primer nivel debe coincidir con el nom
 ```
 
 Consulta [modules.md](modules.md) para la referencia completa de configuración de cada módulo.
+
+---
+
+## webhooks.json (auto-gestionado)
+
+Lista de webhooks HTTP para notificaciones salientes. Este fichero es **gestionado automáticamente** por el panel web — no es necesario editarlo a mano. Los webhooks se crean, editan y eliminan desde la pestaña **Configuración → Notifications → Providers**.
+
+```json
+[
+    {
+        "id": "uuid4-aquí",
+        "name": "Slack Alertas",
+        "enabled": true,
+        "url": "https://hooks.slack.com/services/...",
+        "method": "POST",
+        "timeout": 10,
+        "headers": "",
+        "body_template": "{\"text\": \"[{kind}] {module}/{item} → {status}\"}",
+        "secret": "enc:gAAAAABn...",
+        "secret_header": "X-Hub-Signature-256"
+    }
+]
+```
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `id` | string (UUID4) | Identificador único del webhook |
+| `name` | string | Nombre descriptivo |
+| `enabled` | bool | Si `false`, el webhook no recibe notificaciones aunque la matriz de routing lo habilite |
+| `url` | string | URL de destino (HTTP o HTTPS) |
+| `method` | string | Método HTTP: `POST`, `PUT` o `GET` |
+| `timeout` | int | Timeout de la petición en segundos (1–60) |
+| `headers` | string (JSON) | Cabeceras HTTP adicionales en formato `{"X-Key": "val"}`. Vacío = sin cabeceras extra. |
+| `body_template` | string | Plantilla del cuerpo. Variables disponibles: `{kind}`, `{module}`, `{item}`, `{status}`, `{message}`, `{timestamp}`. |
+| `secret` | string | Secreto para firmar el payload con HMAC-SHA256 (cifrado en disco con Fernet). Vacío = sin firma. |
+| `secret_header` | string | Cabecera HTTP donde se incluye la firma (por defecto `X-Hub-Signature-256`) |
+
+### Firma HMAC
+
+Si `secret` no está vacío, el servidor añade la cabecera `<secret_header>: sha256=<firma>` a cada petición, donde la firma es `HMAC-SHA256(body, secret)` codificada en hex. El receptor puede verificar la autenticidad del payload calculando la misma firma.
 
 ---
 

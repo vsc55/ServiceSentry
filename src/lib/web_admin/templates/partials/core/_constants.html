@@ -1,0 +1,284 @@
+{# ================================================================
+   i18n helpers, global constants, and state variable declarations.
+   ================================================================ #}
+
+// ──────────────────────────── i18n ─────────────────────────────────
+const I18N = {{ i18n| tojson }};
+function t(k) { return I18N[k] || k; }
+function tf(k, ...a) { let s = t(k); a.forEach(v => { s = s.replace('{}', v); }); return s; }
+
+// ──────────────────────────── Constants ────────────────────────────
+const LABELS = I18N.labels || {};
+const SECTION_LABELS = I18N.sections || {};
+const SENSITIVE   = new Set({{ wa_sensitive_fields | tojson }});
+const PERM_GROUPS = {{ permissions_groups | tojson }};
+const SUPPORTED_LANGS = {{ supported_langs| tojson }};
+const SYSTEM_DEFAULT_LANG      = '{{ default_lang }}';
+const CURRENT_LANG             = '{{ lang }}';
+const WA_REMEMBER_ME_DAYS      = {{ wa_remember_me_days }};
+const WA_AUDIT_MAX_ENTRIES     = {{ wa_audit_max_entries }};
+const WA_SECURE_COOKIES        = {{ wa_secure_cookies | tojson }};
+const WA_DEFAULT_SECURE_COOKIES    = {{ wa_default_secure_cookies | tojson }};
+const WA_DEFAULT_REMEMBER_ME_DAYS  = {{ wa_default_remember_me_days }};
+const WA_DEFAULT_AUDIT_MAX_ENTRIES = {{ wa_default_audit_max_entries }};
+const WA_PW_MIN_LEN            = {{ wa_pw_min_len }};
+const WA_PW_MAX_LEN            = {{ wa_pw_max_len }};
+const WA_PW_REQUIRE_UPPER      = {{ wa_pw_require_upper | tojson }};
+const WA_PW_REQUIRE_DIGIT      = {{ wa_pw_require_digit | tojson }};
+const WA_PW_REQUIRE_SYMBOL     = {{ wa_pw_require_symbol | tojson }};
+const WA_PUBLIC_STATUS         = {{ wa_public_status | tojson }};
+const WA_STATUS_REFRESH_SECS   = {{ wa_status_refresh_secs }};
+const WA_STATUS_LANG           = {{ wa_status_lang | tojson }};
+const WA_WEB_PORT              = {{ wa_web_port }};
+const WA_PROXY_COUNT           = {{ wa_proxy_count }};
+const WA_PUBLIC_URL            = {{ wa_public_url | tojson }};
+const WA_FORCE_HTTPS           = {{ wa_force_https | tojson }};
+const WA_FORCE_FQDN            = {{ wa_force_fqdn  | tojson }};
+const WA_DEFAULT_DARK_MODE     = {{ wa_default_dark_mode | tojson }};
+const SERVER_STARTUP_ID        = {{ wa_startup_id | tojson }};
+
+// ──────────────────────────── State ───────────────────────────────
+let modulesData = {};
+let configData = {};
+let usersData = {};
+let sessionsData = {};
+let rolesData = {};
+let groupsData = {};
+let currentUser = {};
+let _uid = 0;
+let _defaultPageSize = 25;
+let _PAGE_SIZES = [25, 50, 100, 200, 0];
+let _addItemCtx = null;          // {target, pathStr}
+let _deleteItemCtx = null;       // {target, parentPathStr, key}
+let _renameItemCtx = null;       // {target, parentPathStr, oldKey}
+let _autoExpandItemPath = null;  // full pathStr of item to auto-expand after next render
+let _pendingExpandMods  = new Set(); // module names to force-expand on next renderModules()
+let _editingUser = null;    // null = new, string = editing username
+let _serverConfigData = null; // snapshot from last server load/save
+let _configEtag = null;       // ETag from server (informational)
+let _savedModulesData = null; // snapshot from last modules load/save
+let _fieldVersions = {};      // {path: token} per-field version tokens from server
+let _dirtyFields = new Set(); // config field paths edited since last clean state
+let _configConflicts = {};    // {path: {server_value, server_version}} — conflict results
+let _serverChangedDirtyPaths = new Set(); // paths changed on server while we have them dirty
+let _autoupdatedFields = new Set(); // paths silently updated by background poll (shown briefly)
+let _lastAutoupdateDetails = []; // [{path,sec,field,isArray,newValue}] — last poll cycle details
+// Section-level fallback: which config tab a section lives in.
+const _CFG_SECTION_TAB = {
+    'global': 'cfg-tab-general', 'web_admin': 'cfg-tab-general',
+    'daemon': 'cfg-tab-server',
+    'ldap': 'cfg-tab-auth', 'oidc': 'cfg-tab-auth', 'saml2': 'cfg-tab-auth',
+    'telegram': 'cfg-tab-notifs', 'webhooks': 'cfg-tab-notifs',
+    'email': 'cfg-tab-notifs', 'notifications': 'cfg-tab-notifs',
+};
+// Path-level overrides for web_admin fields that live outside cfg-tab-general.
+const _CFG_PATH_TAB = {
+    // Server tab
+    'web_admin|port': 'cfg-tab-server', 'web_admin|proxy_count': 'cfg-tab-server',
+    'web_admin|public_url': 'cfg-tab-server', 'web_admin|force_https': 'cfg-tab-server',
+    'web_admin|force_fqdn': 'cfg-tab-server',
+    // Auth tab
+    'web_admin|pw_min_len': 'cfg-tab-auth', 'web_admin|pw_max_len': 'cfg-tab-auth',
+    'web_admin|pw_require_upper': 'cfg-tab-auth', 'web_admin|pw_require_digit': 'cfg-tab-auth',
+    'web_admin|pw_require_symbol': 'cfg-tab-auth',
+    'web_admin|lockout_max_attempts': 'cfg-tab-auth', 'web_admin|lockout_duration_secs': 'cfg-tab-auth',
+    // Interface tab
+    'web_admin|public_status': 'cfg-tab-interface', 'web_admin|status_refresh_secs': 'cfg-tab-interface',
+    'web_admin|status_lang': 'cfg-tab-interface', 'web_admin|audit_sort': 'cfg-tab-interface',
+    'web_admin|audit_sort_dir': 'cfg-tab-interface', 'web_admin|default_page_size': 'cfg-tab-interface',
+    'web_admin|page_sizes': 'cfg-tab-interface', 'web_admin|config_poll_secs': 'cfg-tab-interface',
+    'web_admin|config_update_banner_secs': 'cfg-tab-interface',
+    'web_admin|session_check_secs': 'cfg-tab-interface',
+    'web_admin|session_revoke_redirect_secs': 'cfg-tab-interface',
+    'web_admin|access_poll_secs': 'cfg-tab-interface',
+};
+const CURRENT_SESSION_TOKEN = '{{ current_session_token }}';
+const ALL_PERMISSIONS = {{ permissions_list | tojson }};
+const _rawItemSchemas = {{ item_schemas | default({}) | tojson }};
+const ITEM_SCHEMAS = Object.fromEntries([
+    ...Object.entries(_rawItemSchemas),
+    ...Object.entries(_rawItemSchemas).map(([k, v]) => [`watchfuls.${k}`, v])
+]);
+const HINTS = I18N.hints || {};
+const ENV_LOCKED = new Set({{ wa_env_locked_fields | tojson }});
+const LDAP_AVAILABLE  = {{ ldap_available  | tojson }};
+const OIDC_AVAILABLE  = {{ oidc_available  | tojson }};
+const SAML2_AVAILABLE = {{ saml2_available | tojson }};
+// Fields that require a service restart to take effect after being saved
+const RESTART_REQUIRED_FIELDS = new Set(['web_admin|port', 'web_admin|proxy_count']);
+
+/**
+ * Default values for config fields, keyed by 'section|field'.
+ * Only fields listed here will show the "Restore default" button.
+ */
+const CONFIG_FIELD_DEFAULTS = {
+    'web_admin|lang':              SYSTEM_DEFAULT_LANG,
+    'web_admin|dark_mode':         false,
+    'web_admin|secure_cookies':    WA_DEFAULT_SECURE_COOKIES,
+    'web_admin|remember_me_days':  WA_DEFAULT_REMEMBER_ME_DAYS,
+    'web_admin|audit_max_entries': WA_DEFAULT_AUDIT_MAX_ENTRIES,
+    'web_admin|audit_sort':        'time',
+    'web_admin|pw_min_len':        8,
+    'web_admin|pw_max_len':        128,
+    'web_admin|pw_require_upper':  true,
+    'web_admin|pw_require_digit':  true,
+    'web_admin|pw_require_symbol': false,
+    'web_admin|public_status':     false,
+    'web_admin|status_refresh_secs': 60,
+    'web_admin|status_lang':       '',
+    'web_admin|port':              8080,
+    'web_admin|proxy_count':       0,
+    'web_admin|public_url':        '',
+    'web_admin|force_https':       false,
+    'web_admin|force_fqdn':        false,
+    'web_admin|default_page_size': 25,
+    'web_admin|page_sizes':        [25, 50, 100, 200, 0],
+    'web_admin|role_modal_scrollable': true,
+    'web_admin|config_poll_secs':          30,
+    'web_admin|config_update_banner_secs': 8,
+    'web_admin|lockout_max_attempts':      5,
+    'web_admin|lockout_duration_secs':     900,
+    'web_admin|session_check_secs':        20,
+    'web_admin|session_revoke_redirect_secs': 3,
+    'web_admin|access_poll_secs':             30,
+};
+
+// Field schema loaded from /api/config/schema — min, max, default per field.
+let configSchema = {};
+
+/**
+ * Return the hint text for a field identified by its pathStr, or null.
+ * Checks module-specific __i18n__.hints first, then falls back to global HINTS.
+ */
+function fieldHint(pathStr) {
+    const parts = pathStr.split('|');
+    const field = parts[parts.length - 1];
+    const modName = parts[0];
+    // Module-specific hint (from module lang file hints section)
+    if (modName) {
+        const i18n = ITEM_SCHEMAS[modName + '|__i18n__'];
+        if (i18n) {
+            const ld = i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG];
+            if (ld && ld.hints && ld.hints[field]) return ld.hints[field];
+        }
+    }
+    const scoped = parts.length >= 2 ? modName + '|' + field : field;
+    return HINTS[scoped] || HINTS[field] || null;
+}
+
+/**
+ * Initialise (or re-initialise) Bootstrap tooltips inside *container*.
+ * Safe to call multiple times — uses getOrCreateInstance.
+ */
+function initTooltips(container) {
+    const root = container || document;
+    root.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+        bootstrap.Tooltip.getOrCreateInstance(el, { trigger: 'hover focus' });
+    });
+}
+
+/**
+ * Return true if the current user may perform *action* on *modName*.
+ * Global permissions (modules_view/add/edit) are checked first; per-module
+ * keys (module.{name}.{action}) serve as fallback.
+ */
+function hasModulePerm(modName, action) {
+    const perms = new Set(currentUser.permissions || []);
+    if (action === 'view'   && perms.has('modules_view'))   return true;
+    if (action === 'edit'   && perms.has('modules_edit'))   return true;
+    // add/delete refer to items *within* a module — modules_edit grants both globally.
+    // modules_add / modules_delete are for adding/removing whole modules, not items.
+    if (action === 'add'    && perms.has('modules_edit'))   return true;
+    if (action === 'delete' && perms.has('modules_edit'))   return true;
+    return perms.has('module.' + modName + '.' + action);
+}
+
+/**
+ * Return the per-module schema (top-level module keys).
+ */
+function moduleSchema(moduleName) {
+    return ITEM_SCHEMAS[moduleName + '|__module__'] || null;
+}
+
+/**
+ * Apply module-level defaults from schema for missing keys.
+ */
+function applyModuleDefaults() {
+    for (const [name, cfg] of Object.entries(modulesData)) {
+        if (typeof cfg !== 'object' || cfg === null || Array.isArray(cfg)) continue;
+        const defaults = schemaDefaults(moduleSchema(name));
+        if (!defaults) continue;
+        for (const [k, v] of Object.entries(defaults)) {
+            if (!(k in cfg)) cfg[k] = Array.isArray(v) ? [...v] : v;
+        }
+    }
+}
+
+/**
+ * Return the schema key for a path like "web|list|www.example.com".
+ * Checks "module|collection" (first two segments).
+ */
+function schemaFor(pathStr) {
+    const parts = pathStr.split('|');
+    if (parts.length >= 2) {
+        const key = parts[0] + '|' + parts[1];
+        if (ITEM_SCHEMAS[key]) return ITEM_SCHEMAS[key];
+    }
+    return null;
+}
+
+/**
+ * Extract plain default values from a rich schema.
+ * Handles both simple ({field: value}) and rich ({field: {default, type, ...}}) formats.
+ */
+function schemaDefaults(schema) {
+    if (!schema) return null;
+    const d = {};
+    for (const [k, v] of Object.entries(schema)) {
+        if (k.startsWith('__')) continue;
+        d[k] = (v && typeof v === 'object' && !Array.isArray(v) && 'default' in v) ? v['default'] : v;
+    }
+    return d;
+}
+
+/**
+ * Return metadata for a single field from the schema, or null.
+ */
+function fieldMeta(schema, key) {
+    if (!schema) return null;
+    const v = schema[key];
+    return (v && typeof v === 'object' && !Array.isArray(v) && 'type' in v) ? v : null;
+}
+
+/**
+ * Ensure an item matches its schema.  If the current value is a bare
+ * boolean but the schema says it should be a dict, promote it in-place
+ * and return the dict.  Missing schema fields are also added.
+ */
+function promoteItem(data, parts, schema) {
+    let cur = data;
+    for (let i = 0; i < parts.length - 1; i++) {
+        cur = cur[parts[i]];
+        if (!cur) return null;
+    }
+    const itemKey = parts[parts.length - 1];
+    let val = cur[itemKey];
+    const defaults = schemaDefaults(schema);
+    if (typeof val === 'boolean' && defaults) {
+        val = Object.assign({}, defaults, { enabled: val });
+        cur[itemKey] = val;
+    } else if (typeof val === 'number' && defaults) {
+        // Legacy numeric format: the number is the value for the first non-boolean
+        // numeric default field (e.g. "alert" in filesystemusage).
+        const base = Object.assign({}, defaults);
+        const numKey = Object.keys(base).find(k => k !== 'enabled' && typeof base[k] === 'number');
+        if (numKey) base[numKey] = val;
+        cur[itemKey] = base;
+        val = base;
+    } else if (typeof val === 'object' && val !== null && !Array.isArray(val) && defaults) {
+        for (const [sk, sv] of Object.entries(defaults)) {
+            if (!(sk in val)) val[sk] = (Array.isArray(sv) ? [...sv] : sv);
+        }
+    }
+    return val;
+}

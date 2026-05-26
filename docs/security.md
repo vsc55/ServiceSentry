@@ -34,6 +34,7 @@ Cada usuario en `users.json` tiene un campo `auth_source` que determina cómo se
 | `"local"` | Contraseña hash local; LDAP/OIDC nunca se aplican |
 | `"ldap"` | Autenticado contra LDAP; no tiene `password_hash` |
 | `"oidc"` | Autenticado mediante SSO OIDC; no tiene `password_hash` |
+| `"saml2"` | Autenticado mediante SSO SAML2; no tiene `password_hash` |
 
 La migración `m002_add_auth_source` añade `auth_source: "local"` a los usuarios existentes al arrancar, garantizando compatibilidad hacia atrás.
 
@@ -111,12 +112,29 @@ Cuando `oidc.enabled = true` y `authlib` está instalado, aparece el botón **Lo
 - El `nonce` previene ataques de replay del ID token.
 - Si `auto_create_users = false` y el usuario no existe previamente, el login es rechazado (403).
 
+### SAML2 [alpha]
+
+Cuando `saml2.enabled = true` y el paquete `pysaml2` está instalado, el flujo es:
+
+1. `GET /auth/saml2/login` genera una `AuthnRequest` y redirige al IdP.
+2. El IdP envía la aserción `SAMLResponse` (HTTP POST) a `POST /auth/saml2/acs`.
+3. El servidor valida la firma y los atributos de la aserción.
+4. Se extrae el username del atributo configurado (`username_attr`), se sincroniza el usuario en `users.json` con `auth_source: "saml2"` y se crea la sesión.
+5. `GET /auth/saml2/metadata` expone el XML de metadatos para registrar la app en el IdP.
+
+**Seguridad:**
+
+- La firma de la aserción SAML se valida con el certificado del IdP.
+- Los usuarios SAML2 reciben `auth_source: "saml2"` y no tienen `password_hash`.
+- El mapeo grupo → rol funciona igual que en LDAP/OIDC.
+
 ### Tests de autenticación externa
 
 | Archivo | Qué cubre |
 | ------- | --------- |
 | `test_wa_ldap.py` | Autenticación LDAP correcta, credenciales incorrectas, servidor caído, fallback a local, sincronización de usuario, mapeo de grupos, `allow_email_login` |
 | `test_wa_oidc.py` | Callback OIDC correcto, `state` inválido, `auto_create_users=false`, sincronización de usuario, mapeo de claims |
+| `test_wa_saml.py` | Callback ACS SAML2 correcto, sincronización de usuario, mapeo de grupos, firma inválida → rechazado |
 
 ---
 
@@ -297,12 +315,13 @@ Los campos sensibles almacenados en `modules.json` y `config.json` se cifran en 
 | `password` | Contraseña MySQL/MariaDB, contraseña SSH del módulo RAID, etc. |
 | `ssh_password` | Contraseña SSH del módulo MySQL (modo túnel) |
 | `token` | Token del bot de Telegram en `config.json` |
-| `secret` | Cualquier campo con esta clave en módulos futuros |
 | `bind_password` | Contraseña de la cuenta de servicio LDAP (`config.json → ldap`) |
 | `client_secret` | Client Secret OIDC (`config.json → oidc`) |
 | `smtp_password` | Contraseña SMTP para notificaciones por email (`config.json → email`) |
-| `ms365_client_secret` | Client Secret de la app Microsoft 365 para email |
-| `gmail_client_secret` | Client Secret de la app Gmail para email |
+| `gmail_refresh_token` | Refresh token de OAuth2 para Gmail (`config.json → email`) |
+| `ms365_client_secret` | Client Secret de Microsoft 365 para email (`config.json → email`) |
+| `gmail_client_secret` | Client Secret de Gmail para email (`config.json → email`) |
+| `secret` | Secreto HMAC de cada webhook (`webhooks.json`) |
 
 ### Derivación de clave
 
@@ -491,8 +510,8 @@ Todos los eventos relevantes para la seguridad quedan registrados en `audit.json
 
 | Evento | Cuándo se genera |
 |--------|-----------------|
-| `login_ok` | Login exitoso |
-| `login_failed` | Credenciales inválidas, usuario inexistente o cuenta desactivada. El campo `detail.reason` almacena la clave i18n: `invalid_credentials`, `user_not_found` o `account_disabled` |
+| `login_ok` | Login exitoso (local, LDAP, OIDC o SAML2). Los logins externos incluyen `detail.auth_source`. |
+| `login_failed` | Credenciales inválidas, usuario inexistente, cuenta desactivada/bloqueada o error LDAP/SAML2. `detail.reason` almacena la clave i18n: `invalid_credentials`, `user_not_found`, `account_disabled`, `account_locked`, `ldap_invalid_credentials`, `ldap_user_not_found`, `ldap_connection_error`, `saml2_error`, `saml2_not_authenticated`. |
 | `logout` | Cierre de sesión |
 | `modules_saved` | Guardado de `modules.json` (con diff de campos) |
 | `config_saved` | Guardado de `config.json` (con diff de campos) |
@@ -501,9 +520,11 @@ Todos los eventos relevantes para la seguridad quedan registrados en `audit.json
 | `user_deleted` | Eliminación de usuario |
 | `password_changed` | Usuario cambia su propia contraseña |
 | `password_reset` | Admin resetea la contraseña de otro usuario |
+| `user_preferences_changed` | Cambio de preferencias de UI (idioma, tema) |
 | `all_sessions_revoked` | Invalidación global de sesiones |
 | `session_revoked` | Revocación de una sesión concreta |
 | `user_sessions_revoked` | Revocación de todas las sesiones de un usuario |
+| `session_ip_changed` | La IP del cliente cambia respecto a la de creación; `detail` contiene `previous_ip` y `current_ip` |
 | `group_created` | Creación de grupo |
 | `group_updated` | Modificación de grupo (roles, miembros, label o descripción) |
 | `group_deleted` | Eliminación de grupo |
@@ -511,6 +532,24 @@ Todos los eventos relevantes para la seguridad quedan registrados en `audit.json
 | `role_updated` | Modificación de rol (etiqueta o permisos) |
 | `role_deleted` | Eliminación de rol personalizado |
 | `checks_run` | Ejecución manual de comprobaciones desde la UI |
+| `ldap_test` | Prueba de conexión LDAP desde la UI de configuración |
+| `ldap_groups` | Obtención de grupos del directorio LDAP |
+| `entra_groups` | Obtención de grupos del tenant de Microsoft Entra ID |
+| `telegram_test_ok` / `telegram_test_fail` | Envío de mensaje de prueba por Telegram |
+| `email_test_ok` / `email_test_fail` | Envío de email de prueba desde la UI de configuración |
+| `webhook_created` | Creación de un nuevo webhook |
+| `webhook_updated` | Modificación de un webhook |
+| `webhook_enabled` / `webhook_disabled` | Activación o desactivación de un webhook |
+| `webhook_deleted` | Eliminación de un webhook |
+| `webhook_test_ok` / `webhook_test_fail` | Envío de payload de prueba a un webhook |
+| `notif_template_saved` | Guardado de sobrescrituras de cadenas de notificación |
+| `notif_template_reset` | Restablecimiento de sobrescrituras de un idioma a los valores por defecto |
+| `notif_html_template_saved` | Guardado de plantilla HTML de email personalizada |
+| `notif_html_template_reset` | Restablecimiento de plantilla HTML a la integrada |
+| `audit_cleared` | Borrado completo del registro de auditoría |
+| `audit_entry_deleted` | Borrado de una entrada concreta del registro |
+| `language_changed` | Cambio del idioma de la interfaz |
+| `watchful_action` | Invocación de una acción dinámica de un módulo watchful |
 
 ### Enmascarado de datos sensibles
 
@@ -518,7 +557,7 @@ Los campos sensibles (`token`, `password`, claves de contraseña) se muestran co
 
 ### Límite de entradas
 
-El log se recorta automáticamente a `_AUDIT_MAX_ENTRIES` entradas (≤ 500) para evitar crecimiento ilimitado en disco.
+El log se recorta automáticamente a `_AUDIT_MAX_ENTRIES` entradas (por defecto 500, configurable hasta 10 000 mediante `web_admin.audit_max_entries`) para evitar crecimiento ilimitado en disco.
 
 ### Tests de auditoría
 
@@ -561,6 +600,8 @@ GET  /api/v1/modules/overview       GET  /api/v1/users           POST /api/v1/us
 PUT  /api/v1/users/<x>      DELETE /api/v1/users/<x>     PUT  /api/v1/users/me/password
 GET  /api/v1/sessions       POST /api/v1/sessions/invalidate
 POST /api/v1/sessions/revoke/<x>   GET /api/v1/audit     GET  /api/v1/me
+GET  /api/v1/webhooks        POST /api/v1/webhooks
+GET  /api/v1/notify/templates   GET /api/v1/notify/html-templates
 ```
 
 ---

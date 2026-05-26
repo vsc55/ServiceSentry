@@ -1,4 +1,4 @@
-﻿# Interfaz Web de Administración
+# Interfaz Web de Administración
 
 ServiceSentry incluye un panel de administración web basado en **Flask**.
 Permite gestionar módulos, configuración y usuarios sin tocar archivos directamente.
@@ -11,41 +11,51 @@ La lógica de `WebAdmin` está dividida en **mixins** (lógica de negocio) y **r
 
 ```
 lib/web_admin/
-├── app.py            # class WebAdmin(hereda todos los mixins)
+├── app.py                    # class WebAdmin (hereda todos los mixins)
 ├── auth/
 │   ├── __init__.py
-│   ├── ldap_auth.py  # autenticación LDAP/AD (requiere ldap3)
-│   ├── oidc_auth.py  # SSO OIDC/OAuth2, rutas /auth/oidc/* (requiere authlib)
-│   └── saml_auth.py  # SSO SAML2, rutas /auth/saml2/* (requiere pysaml2) [alpha]
-├── email_notify.py   # envío de notificaciones por email (SMTP / MS365 / Gmail)
+│   ├── ldap_auth.py          # autenticación LDAP/AD (requiere ldap3)
+│   ├── oidc_auth.py          # SSO OIDC/OAuth2, rutas /auth/oidc/* (requiere authlib)
+│   └── saml_auth.py          # SSO SAML2, rutas /auth/saml2/* (requiere pysaml2) [alpha]
+├── email_notify.py           # envío de notificaciones por email (SMTP / MS365 / Gmail)
+├── email_templates.py        # motor de plantillas HTML para email (test, alert, summary)
+├── notification_dispatcher.py# despachador central de notificaciones (Telegram, Email, Webhook)
 ├── mixins/
-│   ├── users.py      # _UsersMixin
-│   ├── roles.py      # _RolesMixin
-│   ├── groups.py     # _GroupsMixin
-│   ├── permissions.py# _PermissionsMixin
-│   ├── sessions.py   # _SessionsMixin
-│   ├── audit.py      # _AuditMixin
-│   └── checks.py     # _ChecksMixin
+│   ├── users.py              # _UsersMixin
+│   ├── roles.py              # _RolesMixin
+│   ├── groups.py             # _GroupsMixin
+│   ├── permissions.py        # _PermissionsMixin
+│   ├── sessions.py           # _SessionsMixin
+│   ├── audit.py              # _AuditMixin
+│   └── checks.py             # _ChecksMixin
 └── routes/
-    ├── __init__.py   # register_all(app, wa)
+    ├── __init__.py           # register_all(app, wa)
     ├── auth/
-    │   ├── __init__.py  # /login, /logout (integra LDAP + OIDC)
-    │   ├── ldap.py      # /api/v1/auth/ldap/* (test, groups, group_lookup)
-    │   └── entra.py     # /api/v1/auth/entra/* (wizard Device Code, groups, group_lookup)
-    ├── users.py      # /api/v1/users, /api/v1/me
-    ├── roles.py      # /api/v1/roles
-    ├── groups.py     # /api/v1/groups
-    ├── modules.py    # /api/v1/modules, /api/v1/modules/status, /api/v1/modules/overview
-    ├── config.py     # /api/v1/config, /api/v1/config/schema
-    ├── sessions.py   # /api/v1/sessions
-    ├── telegram.py   # /api/v1/notify/telegram/test
-    ├── email.py      # /api/v1/notify/email/test
-    ├── watchfuls.py  # /api/v1/watchfuls/<module>/<action>
-    ├── audit.py      # /api/v1/audit
-    ├── checks.py     # /api/v1/modules/checks/run
-    ├── status.py     # /status (página pública de estado, sin autenticación)
-    ├── errors.py     # handlers 400, 403, 404, 405, 500
-    └── ui.py         # /, /lang, /theme
+    │   ├── __init__.py       # /login, /logout (integra LDAP + OIDC + SAML2)
+    │   ├── ldap.py           # /api/v1/auth/ldap/* (test, groups, group_lookup)
+    │   └── entra.py          # /api/v1/auth/entra/* (wizard Device Code, groups, group_lookup)
+    ├── modules/
+    │   ├── __init__.py       # /api/v1/modules, /api/v1/modules/status, /api/v1/modules/overview
+    │   └── checks.py         # /api/v1/modules/checks/run
+    ├── users/
+    │   ├── __init__.py       # /api/v1/users, /api/v1/me
+    │   ├── groups.py         # /api/v1/groups
+    │   └── roles.py          # /api/v1/roles
+    ├── sessions/
+    │   ├── __init__.py       # /api/v1/sessions, /api/v1/sessions/invalidate, /api/v1/sessions/revoke/*
+    │   └── audit.py          # /api/v1/audit
+    ├── notify/
+    │   ├── __init__.py       # registro de subrutas de notificación
+    │   ├── telegram.py       # /api/v1/notify/telegram/test
+    │   ├── email.py          # /api/v1/notify/email/test
+    │   ├── webhook.py        # /api/v1/notify/webhook/test
+    │   └── templates.py      # /api/v1/notify/templates, /api/v1/notify/html-templates
+    ├── config.py             # /api/v1/config, /api/v1/config/schema
+    ├── webhooks.py           # /api/v1/webhooks (CRUD de webhooks)
+    ├── watchfuls.py          # /api/v1/watchfuls/<module>/<action>
+    ├── status.py             # /status (página pública de estado)
+    ├── errors.py             # handlers 400, 403, 404, 405, 500
+    └── ui.py                 # /, /lang, /theme
 ```
 
 ---
@@ -74,9 +84,13 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal |
 | **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 23 flags granulares; activar/desactivar desde el modal |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
-| **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Requiere el paquete opcional `ldap3`. |
-| **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Registro automático de app en Entra ID con wizard integrado. Requiere `authlib`. |
-| **Notificaciones por Email** | Envío de alertas por correo electrónico vía SMTP, Microsoft 365 o Gmail. Configurable desde la pestaña de configuración. |
+| **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
+| **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
+| **SSO SAML2** | Login federado mediante SAML2 (cualquier IdP compatible: ADFS, Keycloak, Okta…). Rutas `/auth/saml2/login`, `/auth/saml2/acs`, `/auth/saml2/metadata`. Sincronización automática de usuarios y mapeo de grupos a roles. Requiere `python3-saml`. [alpha] |
+| **Notificaciones por Email** | Envío de alertas por correo vía SMTP, Microsoft 365 (Graph API) o Gmail (OAuth2). Plantilla HTML personalizable por idioma y tipo (alert/summary/test). Configurable desde la pestaña Configuración → Notifications. |
+| **Webhooks** | Lista de webhooks HTTP personalizables para notificaciones salientes. Cada webhook tiene URL, método (POST/PUT/GET), cabeceras personalizadas, plantilla de cuerpo JSON, timeout, secreto HMAC opcional y flag habilitado/deshabilitado. Se gestionan con un modal dedicado en la pestaña de configuración → Notifications. |
+| **Despachador de notificaciones** | `notification_dispatcher.dispatch()` enruta cada evento a los canales habilitados (Telegram, Email, Webhook) según la matriz de routing configurable en `config.json → notifications`. |
+| **Plantillas de notificación** | Editor de cadenas de texto (sujetos, badges, frases) con soporte multi-idioma y sobrescritura por idioma. Editor de HTML (con CodeMirror 5, resaltado de sintaxis, autocompletado, formateo, previsualización en vivo) para la plantilla del cuerpo de email. |
 | **Prueba de Telegram** | Enviar un mensaje de prueba para verificar la conectividad del bot |
 | **Modo oscuro** | Preferencia por usuario, persistida entre sesiones |
 | **Persistencia de pestaña activa** | La pestaña activa se guarda en `localStorage` y se restaura al recargar la página (F5); si la pestaña guardada deja de existir o el usuario pierde acceso, se muestra la pestaña por defecto |
@@ -104,7 +118,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 ### Roles personalizados
 
 Se pueden crear roles adicionales desde la pestaña **Acceso → Roles** asignando
-cualquier combinación de los 21 permisos disponibles. Los roles personalizados se
+cualquier combinación de los 23 permisos disponibles. Los roles personalizados se
 persisten en `roles.json`.
 
 ```
@@ -232,6 +246,9 @@ El permiso requerido se indica entre paréntesis.
 | `GET` | `/logout` | Cerrar sesión e invalidar la sesión actual |
 | `GET` | `/auth/oidc/login` | Inicia el flujo OIDC; redirige al IdP (requiere `oidc.enabled = true` y `authlib`) |
 | `GET` | `/auth/oidc/callback` | Callback OIDC; crea sesión tras verificar el token del IdP |
+| `GET` | `/auth/saml2/login` | Inicia flujo SAML2; redirige al IdP (requiere `saml2.enabled = true` y `pysaml2`) |
+| `POST` | `/auth/saml2/acs` | Assertion Consumer Service: procesa la respuesta SAML del IdP y crea sesión |
+| `GET` | `/auth/saml2/metadata` | Devuelve el XML de metadatos de la aplicación para registrarla en el IdP |
 
 ### Módulos
 
@@ -305,6 +322,39 @@ El campo `web_admin.page_sizes` es un array de enteros no negativos que define l
 |--------|------|---------|-------------|
 | `POST` | `/api/v1/notify/telegram/test` | `config_edit` | Enviar un mensaje de prueba por Telegram |
 
+### Webhooks
+
+Gestión de webhooks HTTP para notificaciones salientes.
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/webhooks` | `config_view` o `config_edit` | Listar todos los webhooks configurados |
+| `POST` | `/api/v1/webhooks` | `config_edit` | Crear un nuevo webhook |
+| `PUT` | `/api/v1/webhooks/<id>` | `config_edit` | Editar un webhook existente |
+| `DELETE` | `/api/v1/webhooks/<id>` | `config_edit` | Eliminar un webhook |
+| `POST` | `/api/v1/webhooks/<id>/test` | `config_edit` | Enviar un payload de prueba al webhook |
+| `POST` | `/api/v1/notify/webhook/test` | `config_edit` | Probar un webhook con configuración arbitraria (desde el modal) |
+
+Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `timeout` (1–60 s), `headers` (JSON), `body_template` (cadena con `{vars}`), `secret` (cifrado en disco), `secret_header`, `enabled`.
+
+### Plantillas de Notificación
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/notify/templates` | `config_view` o `config_edit` | Obtener valores por defecto, sobrescrituras y cadenas por idioma |
+| `PUT` | `/api/v1/notify/templates/<lang>` | `config_edit` | Guardar sobrescrituras de cadenas para un idioma |
+| `DELETE` | `/api/v1/notify/templates/<lang>` | `config_edit` | Restablecer sobrescrituras de un idioma a los valores por defecto |
+| `GET` | `/api/v1/notify/html-templates` | `config_view` o `config_edit` | Obtener plantillas HTML almacenadas y variables disponibles por tipo |
+| `PUT` | `/api/v1/notify/html-templates/<type>/<lang>` | `config_edit` | Guardar plantilla HTML personalizada (tipo: `test`, `alert`, `summary`) |
+| `DELETE` | `/api/v1/notify/html-templates/<type>/<lang>` | `config_edit` | Eliminar plantilla HTML personalizada (restaura la integrada) |
+| `GET` | `/api/v1/notify/html-templates/<type>/built-in` | `config_edit` | Previsualizar la plantilla HTML integrada renderizada con datos de muestra |
+
+### Email (prueba)
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `POST` | `/api/v1/notify/email/test` | `config_edit` | Enviar un email de prueba con la configuración actual (guardada o no) |
+
 ### Usuarios
 
 | Método | Ruta | Permiso | Descripción |
@@ -366,12 +416,6 @@ Requiere `ldap.enabled = true` y el paquete opcional `ldap3`.
 | `POST` | `/api/v1/auth/ldap/test` | `config_edit` | Verificar conectividad con el servidor LDAP y, opcionalmente, autenticar un usuario de prueba |
 | `POST` | `/api/v1/auth/ldap/groups` | `config_edit` | Listar grupos del directorio LDAP (para poblar el mapeo grupo → rol) |
 | `POST` | `/api/v1/auth/ldap/group_lookup` | `config_edit` | Resolver el nombre visible de un grupo LDAP por su DN (usado para auto-completar el mapeo) |
-
-### Email
-
-| Método | Ruta | Permiso | Descripción |
-|--------|------|---------|-------------|
-| `POST` | `/api/v1/notify/email/test` | `config_edit` | Enviar un email de prueba con la configuración actual (guardada o no) |
 
 ### Entra ID
 
@@ -527,7 +571,7 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 21 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 23 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |
@@ -578,27 +622,43 @@ Todos los eventos auditados:
 
 | Evento | Cuándo se registra |
 |--------|--------------------|
-| `login_ok` | Login exitoso |
-| `login_failed` | Contraseña incorrecta o usuario inexistente |
+| `login_ok` | Login exitoso (local, LDAP, OIDC o SAML2). Los logins externos incluyen `detail.auth_source`. |
+| `login_failed` | Credenciales incorrectas, usuario inexistente, cuenta desactivada/bloqueada o error LDAP. `detail.reason` indica la causa (`invalid_credentials`, `user_not_found`, `account_disabled`, `account_locked`, `ldap_invalid_credentials`, `ldap_user_not_found`, `ldap_connection_error`, `saml2_error`…). |
 | `logout` | Cierre de sesión |
-| `modules_saved` | Guardado de `modules.json` |
-| `config_saved` | Guardado de `config.json` |
+| `modules_saved` | Guardado de `modules.json` (con diff de campos) |
+| `config_saved` | Guardado de `config.json` (con diff de campos) |
 | `user_created` | Creación de usuario |
-| `user_updated` | Modificación de usuario |
+| `user_updated` | Modificación de usuario (con diff por campo) |
 | `user_deleted` | Eliminación de usuario |
 | `password_changed` | Usuario cambia su propia contraseña |
 | `password_reset` | Admin resetea la contraseña de otro usuario |
+| `user_preferences_changed` | Cambio de preferencias de UI de un usuario (idioma, tema) |
 | `all_sessions_revoked` | Invalidación global de sesiones |
 | `session_revoked` | Revocación de una sesión concreta |
 | `user_sessions_revoked` | Revocación de todas las sesiones de un usuario |
+| `session_ip_changed` | La IP del cliente cambia respecto a la IP de creación; `detail` contiene `previous_ip` y `current_ip` |
 | `group_created` | Creación de grupo |
 | `group_updated` | Modificación de grupo (roles, miembros, label o descripción) |
 | `group_deleted` | Eliminación de grupo |
-| `role_created` | Se crea un rol personalizado |
-| `role_updated` | Se cambia etiqueta o permisos de un rol |
-| `role_deleted` | Se elimina un rol personalizado |
+| `role_created` | Creación de rol personalizado |
+| `role_updated` | Cambio de etiqueta o permisos de un rol |
+| `role_deleted` | Eliminación de rol personalizado |
 | `checks_run` | Ejecución manual de comprobaciones desde la UI |
 | `ldap_test` | Prueba de conexión LDAP (con o sin usuario de prueba) desde la UI de configuración |
 | `ldap_groups` | Obtención de grupos desde el directorio LDAP |
 | `entra_groups` | Obtención de grupos del tenant de Microsoft Entra ID |
-| `session_ip_changed` | La IP del cliente cambia respecto a la IP con la que se creó la sesión; `detail` contiene `previous_ip` y `current_ip` |
+| `telegram_test_ok` / `telegram_test_fail` | Envío de mensaje de prueba por Telegram |
+| `email_test_ok` / `email_test_fail` | Envío de email de prueba desde la UI de configuración |
+| `webhook_created` | Creación de un nuevo webhook |
+| `webhook_updated` | Modificación de un webhook (con diff de campos) |
+| `webhook_enabled` / `webhook_disabled` | Activación o desactivación de un webhook |
+| `webhook_deleted` | Eliminación de un webhook |
+| `webhook_test_ok` / `webhook_test_fail` | Envío de payload de prueba a un webhook |
+| `notif_template_saved` | Guardado de sobrescrituras de cadenas de notificación |
+| `notif_template_reset` | Restablecimiento de sobrescrituras de un idioma a los valores por defecto |
+| `notif_html_template_saved` | Guardado de plantilla HTML de email personalizada |
+| `notif_html_template_reset` | Restablecimiento de plantilla HTML a la integrada |
+| `audit_cleared` | Borrado completo del registro de auditoría |
+| `audit_entry_deleted` | Borrado de una entrada concreta del registro |
+| `language_changed` | Cambio del idioma de la interfaz |
+| `watchful_action` | Invocación de una acción dinámica de un módulo watchful |

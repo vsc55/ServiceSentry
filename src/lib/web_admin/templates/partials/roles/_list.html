@@ -1,0 +1,146 @@
+{# ================================================================
+   Roles list — renderRoles, bulk actions, sort/page state vars.
+   ================================================================ #}
+
+// ──────────────────────────── Role management ─────────────────────
+let _rolesPage = 1;
+let _rolesPageSize = null;
+let _rolesSort = 'name';
+let _rolesSortDir = 'asc';
+let _selectedRoles = new Set();
+let _rolesCurrentPage = [];
+function _goRolesPage(p) { _rolesPage = p; renderRoles(); }
+function _changeRolesPageSize(v) { _rolesPageSize = parseInt(v, 10); _rolesPage = 1; renderRoles(); }
+function _sortRoles(col) {
+    if (_rolesSort === col) _rolesSortDir = _rolesSortDir === 'asc' ? 'desc' : 'asc';
+    else { _rolesSort = col; _rolesSortDir = 'asc'; }
+    renderRoles();
+}
+
+function renderRoles() {
+    const c = document.getElementById('roles-container');
+    if (!c) return;
+    const rolePerms = new Set(currentUser.permissions || []);
+    const canEditRole   = rolePerms.has('roles_edit');
+    const canDeleteRole = rolePerms.has('roles_delete');
+    const showActions   = canEditRole || canDeleteRole;
+    if (_rolesPageSize === null) _rolesPageSize = _defaultPageSize;
+    const allEntries = Object.entries(rolesData).sort((a, b) => {
+        const [na, rda] = a, [nb, rdb] = b;
+        let va, vb;
+        if (_rolesSort === 'label') {
+            va = (rda.label || na).toLowerCase(); vb = (rdb.label || nb).toLowerCase();
+        } else {
+            va = na.toLowerCase(); vb = nb.toLowerCase();
+        }
+        return _rolesSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    if (!allEntries.length) {
+        c.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-shield" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <span>${t('no_roles')}</span>
+        </div>`;
+        return;
+    }
+    const total = allEntries.length;
+    const ps = _rolesPageSize || total;
+    _rolesPage = Math.max(1, Math.min(_rolesPage, Math.ceil(total / ps)));
+    const entries = allEntries.slice((_rolesPage - 1) * ps, _rolesPage * ps);
+    _rolesCurrentPage = entries.map(([name]) => name);
+    const _allPageSelected = _rolesCurrentPage.length > 0 && _rolesCurrentPage.every(n => _selectedRoles.has(n));
+
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table">
+    <thead class="ss-thead"><tr>
+        ${showActions ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected ? 'checked' : ''} onchange="_rolesSelectAll(this.checked)"></th>` : ''}
+        ${_thSort(t('col_role_name'),  'name',  _rolesSort, _rolesSortDir, '_sortRoles')}
+        ${_thSort(t('col_role_label'), 'label', _rolesSort, _rolesSortDir, '_sortRoles')}
+        <th class="ss-th">${t('role_description')}</th>
+        ${showActions ? `<th class="ss-th ss-th-actions">${t('col_actions')}</th>` : ''}
+    </tr></thead><tbody>`;
+
+    for (const [name, rd] of entries) {
+        const isEnabled = rd.builtin || rd.enabled !== false;
+        const rowStyle = isEnabled ? '' : ' style="opacity:.55"';
+        const builtinBadge = rd.builtin
+            ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.6em;padding:.15em .35em">${t('role_builtin_badge')}</span>` : '';
+        const disabledBadge = (!rd.builtin && !isEnabled)
+            ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>` : '';
+
+        h += `<tr${rowStyle}>
+            ${showActions ? `<td><input type="checkbox" class="form-check-input" ${_selectedRoles.has(name) ? 'checked' : ''} onchange="_rolesToggleOne(${jsStr(name)}, this.checked)" ${rd.builtin ? 'disabled' : ''}></td>` : ''}
+            <td class="text-nowrap"><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
+            <td class="text-muted small text-nowrap">${esc(rd.label || name)}</td>
+            <td class="text-muted small">${esc(rd.description || '')}</td>
+            ${showActions ? `<td class="ss-td-actions">
+                ${canEditRole ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1"
+                    onclick="openEditRoleModal(${jsStr(name)})" title="${escAttr(t('edit'))}">
+                    <i class="bi bi-pencil"></i></button>` : ''}
+                ${canDeleteRole ? `<button class="btn btn-sm btn-danger py-0 px-1"
+                    ${rd.builtin ? 'disabled' : `onclick="deleteRole(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}">
+                    <i class="bi bi-trash3"></i></button>` : ''}
+            </td>` : ''}
+        </tr>`;
+    }
+    h += `</tbody></table>`;
+    const pagination = _renderPagination(total, _rolesPage, _rolesPageSize, '_goRolesPage', '_changeRolesPageSize');
+    const _addBtn = rolePerms.has('roles_add')
+        ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewRoleModal()" title="${escAttr(t('new_role_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_role')}</button>` : '';
+    const _nonBuiltinSelected = [..._selectedRoles].filter(n => !rolesData[n]?.builtin).length;
+    const _bulkBar = showActions && _selectedRoles.size > 0 ? `
+        <div class="d-flex align-items-center gap-1 border-start ps-2 ms-1">
+            <span class="badge bg-secondary rounded-pill">${_selectedRoles.size}</span>
+            ${canEditRole && _nonBuiltinSelected > 0 ? `<button class="btn btn-sm btn-success py-0 px-2" onclick="_bulkEnableRoles(true)" title="${escAttr(t('enable'))}"><i class="bi bi-toggle-on"></i></button>` : ''}
+            ${canEditRole && _nonBuiltinSelected > 0 ? `<button class="btn btn-sm btn-secondary py-0 px-2" onclick="_bulkEnableRoles(false)" title="${escAttr(t('disable'))}"><i class="bi bi-toggle-off"></i></button>` : ''}
+            ${canDeleteRole && _nonBuiltinSelected > 0 ? `<button class="btn btn-sm btn-danger py-0 px-2" onclick="_bulkDeleteRoles()" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
+            <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedRoles.clear();renderRoles()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
+        </div>` : '';
+    c.innerHTML = `<div class="ss-card">
+        <div class="ss-accent ss-accent-purple"></div>
+        <div class="ss-card-header">
+            <h6 class="mb-0 me-auto"><i class="bi bi-shield-lock me-2"></i>${t('role_management')}</h6>
+            ${_bulkBar}
+            <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>
+            ${_addBtn}
+        </div>
+        <div class="ss-card-band ss-card-band-top">${pagination}</div>
+        <div>${h}</div>
+        <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
+    </div>`;
+}
+
+function _rolesSelectAll(checked) {
+    _rolesCurrentPage.filter(n => !rolesData[n]?.builtin)
+        .forEach(n => checked ? _selectedRoles.add(n) : _selectedRoles.delete(n));
+    renderRoles();
+}
+function _rolesToggleOne(name, checked) {
+    checked ? _selectedRoles.add(name) : _selectedRoles.delete(name);
+    renderRoles();
+}
+async function _bulkEnableRoles(enabled) {
+    const names = [..._selectedRoles].filter(n => !rolesData[n]?.builtin);
+    if (!names.length) return;
+    showConfirmModal(`${t(enabled ? 'enable' : 'disable')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
+        for (const name of names) {
+            const rd = rolesData[name]; if (!rd) continue;
+            const body = { label: rd.label || '', description: rd.description || '',
+                           permissions: rd.permissions || [], enabled };
+            const r = await apiPut('/api/v1/roles/' + encodeURIComponent(name), body);
+            if (r?.status === 200 && r.data?.ok) rolesData[name] = { ...rolesData[name], enabled };
+        }
+        _selectedRoles.clear();
+        renderRoles();
+    });
+}
+async function _bulkDeleteRoles() {
+    const names = [..._selectedRoles].filter(n => !rolesData[n]?.builtin);
+    if (!names.length) return;
+    showConfirmModal(`${t('delete_tt')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
+        for (const name of names) {
+            const r = await apiDelete('/api/v1/roles/' + encodeURIComponent(name));
+            if (r?.status === 200 && r.data?.ok) delete rolesData[name];
+        }
+        _selectedRoles.clear();
+        renderRoles(); renderGroups(); renderUsers();
+    });
+}

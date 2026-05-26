@@ -1,0 +1,255 @@
+{# ================================================================
+   Config polling, version polling, sticky offset, reload/restart banners,
+   conflict resolution, and config-updated banner.
+   ================================================================ #}
+
+function _updateStickyOffset() {
+    const el = document.getElementById('ss-sticky-top');
+    if (el) document.documentElement.style.setProperty('--ss-top-offset', el.offsetHeight + 'px');
+}
+
+function _showReloadBanner() {
+    const banner = document.getElementById('page-reload-banner');
+    const msg    = document.getElementById('page-reload-msg');
+    if (!banner) return;
+    if (msg) msg.textContent = t('page_reload_banner');
+    banner.classList.remove('d-none');
+}
+
+function _startVersionPoll(intervalMs = 60000) {
+    setInterval(async () => {
+        try {
+            const r = await fetch('/api/v1/health');
+            if (!r.ok) return;
+            const data = await r.json();
+            if (data.startup_id && data.startup_id !== SERVER_STARTUP_ID) {
+                _showReloadBanner();
+            }
+        } catch (_) { /* ignore network errors */ }
+    }, intervalMs);
+    // Session keepalive poll — detects revoked sessions for idle users.
+    setInterval(async () => {
+        if (_sessionTerminated) return;
+        try {
+            const r = await fetch('/api/v1/me');
+            if (r.status === 401) _onSessionTerminated();
+        } catch (_) { /* ignore network errors */ }
+    }, (configData?.web_admin?.session_check_secs ?? 20) * 1000);
+    // Config field version poll — interval is read dynamically from configData each cycle.
+    _scheduleConfigPoll();
+}
+
+function _scheduleConfigPoll() {
+    const secs = configData?.web_admin?.config_poll_secs ?? 30;
+    const ms = Math.max(10, secs) * 1000;
+    setTimeout(async () => {
+        await _doConfigFieldPoll();
+        _scheduleConfigPoll();
+    }, ms);
+}
+
+async function _doConfigFieldPoll() {
+    if (!Object.keys(_fieldVersions).length && !Object.keys(configData).length) return;
+    try {
+        const r = await fetch('/api/v1/config/versions');
+        if (!r.ok) return;
+        const { versions: serverVersions } = await r.json();
+        const changedDirty = new Set();
+        const changedNonDirty = new Set();
+        for (const [path, serverToken] of Object.entries(serverVersions || {})) {
+            if (serverToken === _fieldVersions[path]) continue;
+            if (_dirtyFields.has(path)) changedDirty.add(path);
+            else changedNonDirty.add(path);
+        }
+        if (!changedDirty.size && !changedNonDirty.size) return;
+        const _updateDetails = [];
+        if (changedNonDirty.size) {
+            // Fetch full config to apply updated non-dirty field values silently.
+            const cr = await fetch('/api/v1/config');
+            if (cr.ok) {
+                const payload = await cr.json();
+                const newCfg = (payload && typeof payload.config === 'object') ? payload.config : payload;
+                const newVer = (payload && payload.versions) || {};
+                for (const path of changedNonDirty) {
+                    const [sec, field] = path.split('|');
+                    const isArray = Array.isArray(newCfg[sec]);
+                    if (!isArray && newCfg[sec] && field in newCfg[sec]) {
+                        if (!configData[sec]) configData[sec] = {};
+                        configData[sec][field] = newCfg[sec][field];
+                        if (!_serverConfigData) _serverConfigData = {};
+                        if (!_serverConfigData[sec]) _serverConfigData[sec] = {};
+                        _serverConfigData[sec][field] = newCfg[sec][field];
+                    } else if (isArray) {
+                        // Array-type section (e.g. webhooks list) — replace the whole array
+                        configData[sec] = newCfg[sec];
+                        if (_serverConfigData) _serverConfigData[sec] = newCfg[sec];
+                    }
+                    _updateDetails.push({ path, sec, field, isArray,
+                        newValue: isArray ? null : newCfg[sec]?.[field] });
+                    _fieldVersions[path] = newVer[path] || serverVersions[path];
+                    _autoupdatedFields.add(path);
+                    // Auto-remove indicator after the configured duration; 0 = manual dismiss only.
+                    const _bannerSecs = configData?.web_admin?.config_update_banner_secs ?? 8;
+                    if (_bannerSecs > 0) {
+                        setTimeout(() => {
+                            _autoupdatedFields.delete(path);
+                            const el = document.querySelector(`.cfg-field-wrap[data-cfg-path="${CSS.escape(path)}"]`);
+                            if (el) {
+                                el.classList.remove('cfg-auto-updated');
+                                el.querySelector('.cfg-auto-update-bar')?.remove();
+                            }
+                        }, _bannerSecs * 1000);
+                    }
+                }
+            }
+        }
+        for (const path of changedDirty) {
+            _serverChangedDirtyPaths.add(path);
+        }
+        if (changedNonDirty.size) _showConfigUpdatedBanner(changedNonDirty.size, _updateDetails);
+        renderConfig();
+    } catch (_) { /* ignore network errors during poll */ }
+}
+
+function _overwriteConflictField(pathStr) {
+    const serverVersion = _configConflicts[pathStr]?.server_version;
+    if (serverVersion) _fieldVersions[pathStr] = serverVersion;
+    delete _configConflicts[pathStr];
+    _serverChangedDirtyPaths.delete(pathStr);
+    _dirtyFields.add(pathStr);
+    renderConfig();
+}
+
+function _acceptServerField(pathStr) {
+    const ci = _configConflicts[pathStr];
+    if (ci && ci.server_value !== undefined) {
+        const [sec, field] = pathStr.split('|');
+        if (sec && field) {
+            if (!configData[sec]) configData[sec] = {};
+            configData[sec][field] = ci.server_value;
+        }
+    }
+    if (ci?.server_version) _fieldVersions[pathStr] = ci.server_version;
+    delete _configConflicts[pathStr];
+    _dirtyFields.delete(pathStr);
+    _serverChangedDirtyPaths.delete(pathStr);
+    if (!_dirtyFields.size && !Object.keys(_configConflicts).length) clearDirty('config');
+    else renderConfig();
+}
+
+function _dismissServerChange(pathStr) {
+    _serverChangedDirtyPaths.delete(pathStr);
+    renderConfig();
+}
+
+function _dismissAutoUpdate(pathStr) {
+    _autoupdatedFields.delete(pathStr);
+    const el = document.querySelector(`.cfg-field-wrap[data-cfg-path="${CSS.escape(pathStr)}"]`);
+    if (el) {
+        el.classList.remove('cfg-auto-updated');
+        el.querySelector('.cfg-auto-update-bar')?.remove();
+    }
+}
+
+function _showConfigUpdatedBanner(count, details) {
+    _lastAutoupdateDetails = details || [];
+    const banner  = document.getElementById('config-updated-banner');
+    const msg     = document.getElementById('config-updated-msg');
+    const moreBtn = document.getElementById('config-updated-more-btn');
+    if (!banner) return;
+    if (msg) msg.textContent = count === 1 ? t('config_updated_banner_one') : tf('config_updated_banner', count);
+    if (moreBtn) moreBtn.textContent = t('cfg_update_more_info') || 'More info';
+    banner.classList.remove('d-none');
+    _updateStickyOffset();
+}
+
+function showConfigUpdateDetail() {
+    const items = _lastAutoupdateDetails;
+    if (!items.length) return;
+    const _tabLabelKey = {
+        'cfg-tab-general':   'cfg_tab_general',
+        'cfg-tab-server':    'cfg_tab_server',
+        'cfg-tab-auth':      'cfg_tab_auth',
+        'cfg-tab-notifs':    'cfg_tab_notifications',
+        'cfg-tab-interface': 'cfg_tab_interface',
+    };
+    const _pfy = s => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const rows = items.map(item => {
+        // Path-level lookup first (for web_admin fields spread across tabs), then section fallback
+        const tabId    = _CFG_PATH_TAB[item.path] || _CFG_SECTION_TAB[item.sec];
+        const tabLabel = tabId ? t(_tabLabelKey[tabId]) : _pfy(item.sec);
+        // Use the real i18n label for the field name (fieldLabel reads from I18N.labels and humanizes)
+        const fieldCell = item.isArray
+            ? `<em class="text-muted small">${esc(t('cfg_update_list_refreshed'))}</em>`
+            : esc(fieldLabel(item.field));
+        const valCell = item.isArray ? '<span class="text-muted">—</span>' : renderReadable(item.newValue);
+        const goCell  = tabId
+            ? `<button class="btn btn-sm btn-secondary py-0 px-2"
+                        onclick="_goCfgField(${jsStr(tabId)},${jsStr(item.isArray ? null : item.path)})">
+                   <i class="bi bi-arrow-right-circle me-1"></i>${esc(t('cfg_update_goto'))}</button>`
+            : '';
+        return `<tr>
+            <td class="small align-middle text-nowrap">${esc(_pfy(item.sec))}</td>
+            <td class="align-middle"><span class="badge bg-secondary-subtle text-secondary-emphasis border small text-nowrap">${esc(tabLabel)}</span></td>
+            <td class="small align-middle">${fieldCell}</td>
+            <td class="small align-middle">${valCell}</td>
+            <td class="text-end align-middle">${goCell}</td>
+        </tr>`;
+    }).join('');
+    const modal = document.getElementById('cfgUpdateDetailModal');
+    if (!modal) return;
+    modal.querySelector('#cfgUpdateDetailTitle').textContent = t('cfg_update_detail_title');
+    modal.querySelector('#cfgUpdateDetailClose').textContent = t('close') || t('cancel');
+    modal.querySelector('#cfgUpdateDetailBody').innerHTML =
+        `<table class="table table-sm table-borderless table-striped mb-0">
+            <thead class="text-muted small"><tr>
+                <th class="px-3">${esc(t('cfg_update_col_section'))}</th>
+                <th>${esc(t('cfg_update_col_tab'))}</th>
+                <th>${esc(t('cfg_update_col_field'))}</th>
+                <th>${esc(t('cfg_update_col_value'))}</th>
+                <th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+    bootstrap.Modal.getOrCreateInstance(modal).show();
+}
+
+function _goCfgField(tabId, pathStr) {
+    // Close the detail modal
+    bootstrap.Modal.getInstance(document.getElementById('cfgUpdateDetailModal'))?.hide();
+    // Set target config sub-tab
+    if (typeof _activeCfgTab !== 'undefined') {
+        _activeCfgTab = tabId;
+        localStorage.setItem('cfg_active_tab', tabId);
+    }
+    // Helper: re-render config and optionally scroll to the field
+    const _doRenderAndScroll = () => {
+        renderConfig();
+        if (pathStr) {
+            setTimeout(() => {
+                const el = document.querySelector(`.cfg-field-wrap[data-cfg-path="${CSS.escape(pathStr)}"]`);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+        }
+    };
+    // Navigate to the main Config tab if not already there
+    const cfgTabBtn = document.querySelector('[data-bs-target="#tab-config"]');
+    if (cfgTabBtn && !cfgTabBtn.classList.contains('active')) {
+        // Wait for Bootstrap's tab animation to finish before rendering/scrolling
+        cfgTabBtn.addEventListener('shown.bs.tab', _doRenderAndScroll, { once: true });
+        cfgTabBtn.click();
+    } else {
+        _doRenderAndScroll();
+    }
+}
+
+function _showRestartBanner() {
+    const perms = new Set(currentUser.permissions || []);
+    if (!perms.has('config_view') && !perms.has('config_edit')) return;
+    const banner = document.getElementById('restart-pending-banner');
+    const msg    = document.getElementById('restart-pending-msg');
+    if (!banner) return;
+    if (msg) msg.textContent = t('restart_pending_banner');
+    banner.classList.remove('d-none');
+    currentUser.restart_pending = true;
+}

@@ -1,0 +1,48 @@
+{# ================================================================
+   Config — Notifications tab: routing matrix renderer.
+   _renderNotificationsMatrix.
+   ================================================================ #}
+
+// ──────────────────── Notification routing matrix renderer ────────────────
+function _renderNotificationsMatrix(cfgCardOpen, cfgCardClose) {
+    const data = configData.notifications || {};
+    const events = [
+        { key: 'down',     label: t('notif_event_down') },
+        { key: 'recovery', label: t('notif_event_recovery') },
+        { key: 'warn',     label: t('notif_event_warn') },
+    ];
+    const channels = [
+        { key: 'telegram', label: t('notif_channel_telegram') },
+        { key: 'email',    label: t('notif_channel_email') },
+        { key: 'webhook',  label: t('notif_channel_webhook') },
+    ];
+
+    let h = cfgCardOpen('cfgcol_notifications', '<i class="bi bi-grid-3x3-gap me-1"></i>', SECTION_LABELS['notifications'] || 'Notification Routing');
+
+    h += `<div class="cfg-field-wrap pt-1">
+        <table class="table table-sm table-bordered mb-1" style="font-size:.875rem">
+            <thead><tr>
+                <th style="width:40%;font-weight:600;color:var(--bs-secondary-color)">${esc(t('notif_event'))}</th>`;
+    for (const ch of channels) {
+        h += `<th class="text-center" style="font-weight:600;color:var(--bs-secondary-color)">${esc(ch.label)}</th>`;
+    }
+    h += `</tr></thead><tbody>`;
+
+    for (const ev of events) {
+        h += `<tr><td class="align-middle" style="color:var(--bs-body-color)">${esc(ev.label)}</td>`;
+        for (const ch of channels) {
+            const fieldKey = `${ch.key}_on_${ev.key}`;
+            const cfgPath  = `notifications|${fieldKey}`;
+            const val      = data[fieldKey] !== undefined ? data[fieldKey] : (ev.key !== 'warn');
+            h += `<td class="text-center align-middle">
+                <input type="checkbox" class="form-check-input"${val ? ' checked' : ''}
+                    onchange="updateField('config',${jsStr(cfgPath)},this.checked)">
+            </td>`;
+        }
+        h += `</tr>`;
+    }
+
+    h += `</tbody></table></div>`;
+    h += cfgCardClose;
+    return h;
+}

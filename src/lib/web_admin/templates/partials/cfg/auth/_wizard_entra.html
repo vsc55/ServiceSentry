@@ -1,0 +1,363 @@
+{# ================================================================
+   Config — Auth tab: Entra ID (OIDC) wizard.
+   _copyToClipboard, _entraRedirectUri, _entraAzCliScript,
+   _entraPs1Script, showEntraWizard, _entraTab, _entraStart,
+   _entraPoll, _entraApply, _entraUpdateScripts, _entraRetry,
+   _entraCleanup.
+   ================================================================ #}
+
+// ─────────────────────── Entra ID wizard ───────────────────────
+let _entraFlowToken  = null;
+let _entraPolling    = null;
+let _entraDeviceCode = '';
+
+function _copyToClipboard(text) {
+    // Append inside the active modal (if any) to avoid Bootstrap's focus trap
+    // blocking focus on elements outside the modal.
+    const container = document.querySelector('.modal.show .modal-body') || document.body;
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+    container.appendChild(ta);
+    ta.focus(); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch(_) {}
+    container.removeChild(ta);
+    if (ok) { showToast(t('copied'), 'success'); return; }
+    // Fallback: Clipboard API
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text)
+            .then(() => showToast(t('copied'), 'success'))
+            .catch(() => showToast('Copy failed', 'danger'));
+    } else {
+        showToast('Copy failed', 'danger');
+    }
+}
+
+function _entraRedirectUri() {
+    let pu = ((configData.web_admin || {}).public_url || '').trim().replace(/\/$/, '');
+    if (!pu) return window.location.origin + '/auth/oidc/callback';
+    // public_url is stored without scheme — add https:// (required by Entra ID)
+    if (!/^https?:\/\//i.test(pu)) pu = 'https://' + pu;
+    return pu + '/auth/oidc/callback';
+}
+
+function _entraAzCliScript(uri, appName = 'ServiceSentry') {
+    return `#!/bin/bash
+# ${t('entra_script_requires')}: az CLI  (https://docs.microsoft.com/cli/azure/install-azure-cli)
+# ${t('entra_script_run_first')}: az login
+
+APP_NAME="${appName}"
+REDIRECT_URI="${uri}"
+
+# 1 — ${t('entra_script_step1')}
+APP=$(az ad app create \\
+  --display-name "$APP_NAME" \\
+  --sign-in-audience AzureADMyOrg \\
+  --web-redirect-uris "$REDIRECT_URI" \\
+  --output json)
+OBJECT_ID=$(echo "$APP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+CLIENT_ID=$(echo "$APP" | python3 -c "import sys,json; print(json.load(sys.stdin)['appId'])")
+TENANT_ID=$(az account show --query tenantId -o tsv)
+
+# 1b — ${t('entra_script_step1b')}
+az rest --method PATCH \\
+  --url "https://graph.microsoft.com/v1.0/applications/$OBJECT_ID" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"groupMembershipClaims":"SecurityGroup","optionalClaims":{"idToken":[{"name":"groups","essential":false}],"accessToken":[{"name":"groups","essential":false}]},"requiredResourceAccess":[{"resourceAppId":"00000003-0000-0000-c000-000000000000","resourceAccess":[{"id":"37f7f235-527c-4136-accd-4a02d197296e","type":"Scope"},{"id":"64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0","type":"Scope"},{"id":"14dad69e-099b-42c9-810b-d002981feec1","type":"Scope"},{"id":"e1fe6dd8-ba31-4d61-89e7-88639da4683d","type":"Scope"},{"id":"5b567255-7703-4780-807c-7be8301ae99b","type":"Role"}]}]}'
+
+# 2 — ${t('entra_script_step2')}
+SECRET=$(az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/applications/$OBJECT_ID/addPassword" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"passwordCredential":{"displayName":"'"$APP_NAME"'","endDateTime":"2099-12-31T00:00:00Z"}}')
+CLIENT_SECRET=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['secretText'])")
+
+# 3 — ${t('entra_script_step3')}
+SP=$(az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"appId":"'"$CLIENT_ID"'","tags":["WindowsAzureActiveDirectoryIntegratedApp"]}')
+SP_ID=$(echo "$SP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+# 4 — ${t('entra_script_step4')}
+az rest --method PATCH \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"appRoleAssignmentRequired":true}'
+
+# 5 — ${t('entra_script_step5')}
+GRAPH_SP_ID=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
+az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID/appRoleAssignments" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"principalId":"'"$SP_ID"'","resourceId":"'"$GRAPH_SP_ID"'","appRoleId":"5b567255-7703-4780-807c-7be8301ae99b"}'
+
+echo ""
+echo "Provider URL:  https://login.microsoftonline.com/$TENANT_ID/v2.0"
+echo "Client ID:     $CLIENT_ID"
+echo "Client Secret: $CLIENT_SECRET"`;
+}
+
+function _entraPs1Script(uri, appName = 'ServiceSentry') {
+    return `# ${t('entra_script_requires')}: Install-Module Microsoft.Graph -Scope CurrentUser
+Connect-MgGraph -Scopes "Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All"
+
+$appName     = "${appName}"
+$redirectUri = "${uri}"
+
+# ${t('entra_script_graph_perms')}
+$reqAccess = @(@{
+    ResourceAppId  = "00000003-0000-0000-c000-000000000000"
+    ResourceAccess = @(
+        @{ Id = "37f7f235-527c-4136-accd-4a02d197296e"; Type = "Scope" },
+        @{ Id = "64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0"; Type = "Scope" },
+        @{ Id = "14dad69e-099b-42c9-810b-d002981feec1"; Type = "Scope" },
+        @{ Id = "e1fe6dd8-ba31-4d61-89e7-88639da4683d"; Type = "Scope" },
+        @{ Id = "5b567255-7703-4780-807c-7be8301ae99b"; Type = "Role"  }
+    )
+})
+$optClaims = @{
+    IdToken     = @(@{ Name = "groups"; Essential = $false })
+    AccessToken = @(@{ Name = "groups"; Essential = $false })
+}
+
+# 1 — ${t('entra_script_step1')}
+$app = New-MgApplication \`
+    -DisplayName $appName \`
+    -SignInAudience "AzureADMyOrg" \`
+    -Web @{ RedirectUris = @($redirectUri) } \`
+    -GroupMembershipClaims "SecurityGroup" \`
+    -OptionalClaims $optClaims \`
+    -RequiredResourceAccess $reqAccess
+
+# 2 — ${t('entra_script_step2')}
+$secret = Add-MgApplicationPassword -ApplicationId $app.Id \`
+    -PasswordCredential @{ DisplayName = $appName; EndDateTime = [DateTime]::new(2099,12,31) }
+
+# 3 — ${t('entra_script_step3')}
+$sp = New-MgServicePrincipal -AppId $app.AppId \`
+    -Tags @("WindowsAzureActiveDirectoryIntegratedApp")
+
+# 4 — ${t('entra_script_step4')}
+Update-MgServicePrincipal -ServicePrincipalId $sp.Id -AppRoleAssignmentRequired:$true
+
+# 5 — ${t('entra_script_step5')}
+$graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'"
+New-MgServicePrincipalAppRoleAssignment \`
+    -ServicePrincipalId $sp.Id -PrincipalId $sp.Id \`
+    -ResourceId $graphSp.Id \`
+    -AppRoleId "5b567255-7703-4780-807c-7be8301ae99b"
+
+$tenantId = (Get-MgOrganization).Id
+Write-Host "Provider URL:  https://login.microsoftonline.com/$tenantId/v2.0"
+Write-Host "Client ID:     $($app.AppId)"
+Write-Host "Client Secret: $($secret.SecretText)"`;
+}
+
+function showEntraWizard() {
+    const uri = _entraRedirectUri();
+    document.getElementById('modalEntraWizard')?.remove();
+    document.body.insertAdjacentHTML('beforeend', `
+<div class="modal fade" id="modalEntraWizard" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-microsoft me-2"></i>${esc(t('entra_wizard_title'))}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="_entraCleanup()"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs mb-3">
+          <li class="nav-item"><button class="nav-link active" id="entraNavAuto" onclick="_entraTab('auto')" type="button">
+            <i class="bi bi-magic me-1"></i>${esc(t('entra_tab_auto'))}</button></li>
+          <li class="nav-item"><button class="nav-link" id="entraNavScript" onclick="_entraTab('script')" type="button">
+            <i class="bi bi-terminal me-1"></i>${esc(t('entra_tab_script'))}</button></li>
+        </ul>
+        <div id="entraContentScript" style="display:none">
+          <div class="mb-3">
+            <label class="form-label small fw-semibold text-muted">${esc(t('entra_redirect_uri_label'))}</label>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" readonly id="entraUriInput" value="${escAttr(uri)}">
+              <button class="btn btn-secondary" onclick="_copyToClipboard(document.getElementById('entraUriInput').value)">
+                <i class="bi bi-clipboard"></i>
+              </button>
+            </div>
+          </div>
+          <p class="small text-muted">${esc(t('entra_script_note'))}</p>
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="fw-semibold small">Azure CLI</span>
+              <button class="btn btn-secondary btn-sm" onclick="_copyToClipboard(document.getElementById('entraAzCli').textContent)">
+                <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}</button>
+            </div>
+            <pre class="bg-body-secondary rounded p-3 overflow-auto" id="entraAzCli" style="max-height:180px;font-size:.76em">${esc(_entraAzCliScript(uri, 'ServiceSentry'))}</pre>
+          </div>
+          <div>
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="fw-semibold small">PowerShell <span class="text-muted">(Microsoft.Graph)</span></span>
+              <button class="btn btn-secondary btn-sm" onclick="_copyToClipboard(document.getElementById('entraPs1').textContent)">
+                <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}</button>
+            </div>
+            <pre class="bg-body-secondary rounded p-3 overflow-auto" id="entraPs1" style="max-height:180px;font-size:.76em">${esc(_entraPs1Script(uri, 'ServiceSentry'))}</pre>
+          </div>
+        </div>
+        <div id="entraContentAuto">
+          <div id="entraStateIdle">
+            <p class="small text-muted mb-3">${esc(t('entra_auto_intro'))}</p>
+            <div class="mb-3">
+              <label class="form-label small fw-semibold text-muted" for="entraAppName">${esc(t('entra_saml2_app_name_label'))}</label>
+              <input type="text" class="form-control form-control-sm" id="entraAppName"
+                     value="ServiceSentry" autocomplete="off"
+                     oninput="_entraUpdateScripts(this.value)">
+            </div>
+            <button class="btn btn-primary" onclick="_entraStart()" type="button">
+              <i class="bi bi-play-fill me-1"></i>${esc(t('entra_auto_start'))}</button>
+          </div>
+          <div id="entraStateWaiting" style="display:none">
+            <p class="small text-muted mb-3">${esc(t('entra_auto_open_browser'))}</p>
+            <div class="mb-2">
+              <div class="small text-muted mb-1">${esc(t('entra_auto_code_label'))}</div>
+              <div class="input-group">
+                <input type="text" class="form-control font-monospace fs-4 fw-bold text-center bg-body-secondary"
+                       readonly id="entraUserCode" value="—">
+                <button class="btn btn-secondary" type="button"
+                  onclick="_copyToClipboard(document.getElementById('entraUserCode').value)">
+                  <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}
+                </button>
+              </div>
+            </div>
+            <div class="mb-3">
+              <a id="entraVerifLink" href="#" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
+                <i class="bi bi-box-arrow-up-right me-1"></i>microsoft.com/devicelogin
+              </a>
+            </div>
+            <div class="d-flex align-items-center gap-2 text-muted small">
+              <span class="spinner-border spinner-border-sm"></span>${esc(t('entra_auto_waiting'))}</div>
+          </div>
+          <div id="entraStateSuccess" style="display:none">
+            <div class="alert alert-success mb-2">
+              <i class="bi bi-check-circle-fill me-2"></i>${esc(t('entra_auto_success'))}</div>
+            <div id="entraSpError" style="display:none" class="alert alert-warning mb-2 py-2 small">
+              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSpErrorMsg"></span></div>
+            <div id="entraConsentOk" style="display:none" class="alert alert-success mb-0 py-2 small">
+              <i class="bi bi-shield-check me-1"></i>${esc(t('entra_consent_granted'))}</div>
+            <div id="entraConsentPending" style="display:none" class="alert alert-warning mb-0 py-2 small">
+              <i class="bi bi-exclamation-triangle me-1"></i>${esc(t('entra_consent_pending'))}</div>
+          </div>
+          <div id="entraStateError" style="display:none">
+            <div class="alert alert-danger mb-2">
+              <i class="bi bi-x-circle-fill me-2"></i><span id="entraErrorMsg"></span></div>
+            <button class="btn btn-secondary btn-sm" onclick="_entraRetry()" type="button">
+              <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('retry'))}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>`);
+    const modal = new bootstrap.Modal(document.getElementById('modalEntraWizard'));
+    modal.show();
+}
+
+function _entraTab(tab) {
+    document.getElementById('entraContentScript').style.display = tab === 'script' ? '' : 'none';
+    document.getElementById('entraContentAuto').style.display   = tab === 'auto'   ? '' : 'none';
+    document.getElementById('entraNavScript').classList.toggle('active', tab === 'script');
+    document.getElementById('entraNavAuto').classList.toggle('active',   tab === 'auto');
+}
+
+async function _entraStart() {
+    document.getElementById('entraStateIdle').style.display = 'none';
+    const appName = (document.getElementById('entraAppName')?.value || '').trim() || 'ServiceSentry';
+    const r = await apiPost('/api/v1/auth/entra/device-code', { app_name: appName });
+    if (!r?.data || r.data.error) {
+        document.getElementById('entraStateIdle').style.display = '';
+        showToast((r?.data?.error) || t('entra_device_code_error'), 'danger');
+        return;
+    }
+    const d = r.data;
+    _entraFlowToken  = d.flow_token;
+    _entraDeviceCode = d.user_code;
+    document.getElementById('entraUserCode').value = d.user_code;
+    const lnk = document.getElementById('entraVerifLink');
+    lnk.href = d.verification_uri;
+    document.getElementById('entraStateWaiting').style.display = '';
+    _copyToClipboard(d.user_code);
+    window.open(d.verification_uri, '_blank', 'noopener');
+    _entraPolling = setTimeout(() => _entraPoll(d.interval || 5), (d.interval || 5) * 1000);
+}
+
+async function _entraPoll(interval) {
+    if (!_entraFlowToken) return;
+    const r = await apiPost('/api/v1/auth/entra/device-poll', { flow_token: _entraFlowToken });
+    if (!r?.data) return;
+    const d = r.data;
+    if (d.status === 'pending') {
+        const next = d.interval || interval;
+        _entraPolling = setTimeout(() => _entraPoll(next), next * 1000);
+        return;
+    }
+    document.getElementById('entraStateWaiting').style.display = 'none';
+    _entraFlowToken = null;
+    if (d.status === 'complete') {
+        _entraApply(d);
+        document.getElementById('entraStateSuccess').style.display = '';
+        const spOk = d.sp_created !== false;
+        const spErrEl = document.getElementById('entraSpError');
+        if (!spOk) {
+            document.getElementById('entraSpErrorMsg').textContent =
+                t('entra_sp_error') + (d.sp_error ? ` (${d.sp_error})` : '');
+            spErrEl.style.display = '';
+        } else {
+            spErrEl.style.display = 'none';
+        }
+        document.getElementById('entraConsentOk').style.display      = (spOk && d.consent_granted) ? '' : 'none';
+        document.getElementById('entraConsentPending').style.display  = (spOk && !d.consent_granted) ? '' : 'none';
+        saveConfig().then(() => {
+            if (spOk && d.consent_granted) {
+                setTimeout(() => bootstrap.Modal.getInstance(document.getElementById('modalEntraWizard'))?.hide(), 2000);
+            }
+        });
+    } else {
+        document.getElementById('entraErrorMsg').textContent = d.message || t('entra_auto_error');
+        document.getElementById('entraStateError').style.display = '';
+    }
+}
+
+function _entraApply(d) {
+    const patch = {
+        username_claim: 'preferred_username',
+        email_claim: 'email', name_claim: 'name', groups_claim: 'groups',
+        scopes: 'openid email profile',
+        button_label: 'Microsoft Entra ID',
+    };
+    if (d.provider_url)  patch.provider_url  = d.provider_url;
+    else if (d.tenant_id) patch.provider_url = `https://login.microsoftonline.com/${d.tenant_id}/v2.0`;
+    if (d.client_id)     patch.client_id     = d.client_id;
+    if (d.client_secret) patch.client_secret = d.client_secret;
+    // updateField registers each path in _dirtyFields so saveConfig() picks them up
+    for (const [field, value] of Object.entries(patch)) {
+        updateField('config', `oidc|${field}`, value);
+    }
+    renderConfig();
+}
+
+function _entraUpdateScripts(name) {
+    const appName = name.trim() || 'ServiceSentry';
+    const uri = document.getElementById('entraUriInput')?.value || '';
+    const azCliEl = document.getElementById('entraAzCli');
+    const ps1El   = document.getElementById('entraPs1');
+    if (azCliEl) azCliEl.textContent = _entraAzCliScript(uri, appName);
+    if (ps1El)   ps1El.textContent   = _entraPs1Script(uri, appName);
+}
+
+function _entraRetry() {
+    document.getElementById('entraStateError').style.display = 'none';
+    document.getElementById('entraStateIdle').style.display  = '';
+    _entraFlowToken = null;
+}
+
+function _entraCleanup() {
+    clearTimeout(_entraPolling);
+    _entraFlowToken = null;
+}

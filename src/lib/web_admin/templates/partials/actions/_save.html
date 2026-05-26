@@ -1,0 +1,112 @@
+{# ================================================================
+   Save, revert, and reload operations.
+   ================================================================ #}
+
+// --- Save ---
+async function saveModules() {
+    const r = await apiPut('/api/v1/modules', modulesData);
+    if (r && r.ok) {
+        showToast(t('modules_saved'));
+        clearDirty('modules');
+        _savedModulesData = deepClone(modulesData);
+    } else showToast(r?.error || t('save_error'), 'danger');
+}
+function revertModules() {
+    if (!_savedModulesData) return;
+    showConfirmModal(t('confirm_revert_modules'), () => {
+        modulesData = deepClone(_savedModulesData);
+        clearDirty('modules');
+        renderModules();
+        showToast(t('modules_reverted'));
+    });
+}
+async function saveConfig() {
+    if (!_dirtyFields.size) {
+        clearDirty('config');
+        return;
+    }
+    // Build partial payload: only edited fields with their version tokens.
+    const fields = {};
+    for (const pathStr of _dirtyFields) {
+        const [sec, field] = pathStr.split('|');
+        const value = (configData[sec] ?? {})[field];
+        fields[pathStr] = { value, version: _fieldVersions[pathStr] ?? null };
+    }
+    // Detect restart-required changes among dirty fields only.
+    const _needsRestart = [];
+    for (const path of RESTART_REQUIRED_FIELDS) {
+        if (!_dirtyFields.has(path)) continue;
+        const [sec, field] = path.split('|');
+        const oldVal = (_serverConfigData?.[sec] ?? {})[field];
+        const newVal = (configData?.[sec] ?? {})[field];
+        if (newVal !== undefined && oldVal !== newVal) _needsRestart.push(path);
+    }
+    let _saveResp;
+    try {
+        const _fetchResp = await fetch('/api/v1/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields })
+        });
+        if (_fetchResp.status === 401) { location.href = '/login'; return; }
+        _saveResp = await _fetchResp.json();
+    } catch (_e) { showToast(t('connection_error'), 'danger'); return; }
+    if (!_saveResp) { showToast(t('save_error'), 'danger'); return; }
+    if (_saveResp.error) { showToast(_saveResp.error, 'danger'); return; }
+    // Apply results: update version tokens and serverConfigData for saved fields.
+    for (const path of (_saveResp.saved || [])) {
+        if (_saveResp.versions?.[path]) _fieldVersions[path] = _saveResp.versions[path];
+        _dirtyFields.delete(path);
+        const [sec, field] = path.split('|');
+        if (!_serverConfigData) _serverConfigData = {};
+        if (!_serverConfigData[sec]) _serverConfigData[sec] = {};
+        if (configData[sec] && field in configData[sec])
+            _serverConfigData[sec][field] = configData[sec][field];
+    }
+    // Store conflict info for any fields that were rejected.
+    _configConflicts = _saveResp.conflicts || {};
+    const hasSaved    = (_saveResp.saved || []).length > 0;
+    const hasConflicts = Object.keys(_configConflicts).length > 0;
+    if (hasSaved) {
+        _updateConfigPageSizes();
+        if (_needsRestart.length > 0) { showToast(t('config_saved_restart'), 'warning'); _showRestartBanner(); }
+        else if (hasConflicts)          showToast(t('cfg_partial_conflict'), 'warning');
+        else                            showToast(t('config_saved'));
+    }
+    if (!_dirtyFields.size && !hasConflicts) {
+        clearDirty('config');
+    } else {
+        if (!hasSaved && hasConflicts) showToast(t('cfg_all_conflict'), 'danger');
+        renderConfig();
+    }
+}
+function _updateConfigPageSizes() {
+    const rawPS = configData?.web_admin?.page_sizes;
+    if (Array.isArray(rawPS) && rawPS.length > 0) {
+        const parsed = rawPS.map(s => parseInt(s, 10)).filter(s => !isNaN(s) && s >= 0);
+        if (parsed.length > 0) _PAGE_SIZES = parsed;
+    }
+    _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
+    if (configSchema['web_admin|default_page_size'])
+        configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
+}
+async function reloadModules() {
+    const data = await apiGet('/api/v1/modules');
+    if (!data) return;
+    modulesData = data;
+    applyModuleDefaults();
+    _savedModulesData = deepClone(modulesData);
+    clearDirty('modules');
+    renderModules();
+    showToast(t('modules_reloaded'));
+}
+async function reloadConfig() {
+    const data = await loadConfig(); // side effect: updates _fieldVersions
+    if (!data) return;
+    configData = data;
+    _serverConfigData = deepClone(configData);
+    _updateConfigPageSizes();
+    clearDirty('config'); // also clears _dirtyFields, _configConflicts, _serverChangedDirtyPaths
+    renderConfig();
+    showToast(t('config_reloaded'));
+}

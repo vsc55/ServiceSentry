@@ -1,0 +1,394 @@
+{# ================================================================
+   Config — Auth tab: _renderAuthSection, _renderDefaultRoleField,
+   _drPickRole, _applyLdapPreset, _applyOidcPreset, _applySaml2Preset,
+   and testLdap.
+   ================================================================ #}
+
+// ──────────────────────── External auth section renderer ──────────────────
+function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
+    const icons = { ldap: 'bi-server', oidc: 'bi-cloud-check', saml2: 'bi-shield-lock' };
+    const available = { ldap: LDAP_AVAILABLE, oidc: OIDC_AVAILABLE, saml2: SAML2_AVAILABLE };
+    const unavailKey = { ldap: 'ldap_unavailable', oidc: 'oidc_unavailable', saml2: 'saml2_unavailable_cfg' };
+
+    let h = cfgCardOpen(cfgId, `<i class="bi ${icons[sec]} me-1"></i>`, lbl);
+
+    if (!available[sec]) {
+        h += `<div class="alert alert-warning py-2 mb-2 small">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t(unavailKey[sec]))}
+        </div>`;
+    }
+
+    // OIDC quick-setup preset buttons
+    if (sec === 'oidc') {
+        h += `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">${esc(t('oidc_preset_label'))}</small></div>
+            <div class="col-sm-8 d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-secondary btn-sm" onclick="_applyOidcPreset('entraid')" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('oidc_preset_entraid'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applyOidcPreset('google')" type="button">
+                    <i class="bi bi-google me-1"></i>${esc(t('oidc_preset_google'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applyOidcPreset('keycloak')" type="button">
+                    <i class="bi bi-key-fill me-1"></i>${esc(t('oidc_preset_keycloak'))}
+                </button>
+                <small class="text-muted cfg-preset-hint">${esc(t('oidc_preset_hint'))}</small>
+            </div>
+        </div></div>
+        <div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">Entra ID</small></div>
+            <div class="col-sm-8">
+                <button class="btn btn-primary btn-sm" onclick="showEntraWizard()" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('entra_wizard_btn'))}
+                </button>
+            </div>
+        </div></div>`;
+    }
+
+    // LDAP quick-setup preset buttons
+    if (sec === 'ldap') {
+        h += `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">${esc(t('ldap_preset_label'))}</small></div>
+            <div class="col-sm-8 d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-secondary btn-sm" onclick="_applyLdapPreset('ad')" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('ldap_preset_ad'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applyLdapPreset('openldap')" type="button">
+                    <i class="bi bi-diagram-3 me-1"></i>${esc(t('ldap_preset_openldap'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applyLdapPreset('freeipa')" type="button">
+                    <i class="bi bi-hat-fill me-1"></i>${esc(t('ldap_preset_freeipa'))}
+                </button>
+                <small class="text-muted cfg-preset-hint">${esc(t('ldap_preset_hint'))}</small>
+            </div>
+        </div></div>`;
+    }
+
+    // SAML2 quick-setup preset buttons
+    if (sec === 'saml2') {
+        h += `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">${esc(t('saml2_preset_label'))}</small></div>
+            <div class="col-sm-8 d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-secondary btn-sm" onclick="_applySaml2Preset('entraid')" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('saml2_preset_entraid'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applySaml2Preset('google')" type="button">
+                    <i class="bi bi-google me-1"></i>${esc(t('saml2_preset_google'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applySaml2Preset('okta')" type="button">
+                    <i class="bi bi-box-arrow-in-right me-1"></i>${esc(t('saml2_preset_okta'))}
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="_applySaml2Preset('keycloak')" type="button">
+                    <i class="bi bi-key-fill me-1"></i>${esc(t('saml2_preset_keycloak'))}
+                </button>
+                <small class="text-muted cfg-preset-hint">${esc(t('saml2_preset_hint'))}</small>
+            </div>
+        </div></div>`;
+        h += `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">Entra ID</small></div>
+            <div class="col-sm-8">
+                <button class="btn btn-primary btn-sm" onclick="showEntraSaml2Wizard()" type="button">
+                    <i class="bi bi-microsoft me-1"></i>${esc(t('entra_saml2_wizard_btn'))}
+                </button>
+            </div>
+        </div></div>`;
+    }
+
+    // Inject field order so renderScalarFields respects logical grouping
+    const _FIELD_ORDER = {
+        ldap: [
+            'enabled', 'button_label',
+            'server', 'port', 'use_ssl', 'timeout',
+            'bind_dn', 'bind_password',
+            'base_dn', 'user_filter',
+            'email_attr', 'name_attr', 'username_attr', 'group_attr',
+            'fallback_to_local', 'allow_email_login', 'auto_create_users',
+        ],
+        oidc: [
+            'enabled', 'button_label',
+            'provider_url', 'client_id', 'client_secret', 'scopes',
+            'username_claim', 'email_claim', 'name_claim', 'groups_claim',
+            'auto_create_users',
+        ],
+        saml2: [
+            'enabled', 'button_label',
+            'idp_entity_id', 'idp_sso_url', 'idp_cert',
+            'sp_entity_id', 'sp_acs_url', 'sp_key', 'sp_cert',
+            'username_attr', 'email_attr', 'name_attr', 'groups_attr',
+            'auto_create_users',
+        ],
+    };
+    if (_FIELD_ORDER[sec]) {
+        if (!ITEM_SCHEMAS[sec]) ITEM_SCHEMAS[sec] = {};
+        ITEM_SCHEMAS[sec].__field_order__ = _FIELD_ORDER[sec];
+    }
+
+    // Ensure button_label appears for auth sections even when not yet saved in config
+    if ((sec === 'ldap' || sec === 'oidc' || sec === 'saml2') && !('button_label' in data)) {
+        data = { ...data, button_label: '' };
+    }
+
+    // Render all scalar fields except group_role_map and default_role (rendered manually below)
+    h += renderScalarFields(data, sec, 'config', ['group_role_map', 'default_role']);
+
+    // Default role for unmatched users
+    h += _renderDefaultRoleField(sec, data.default_role || 'none');
+
+    // Group → Role mapping widget
+    const grpMap = data.group_role_map || '{}';
+    h += _renderGroupRoleMap(sec, grpMap);
+
+    // LDAP test connection + optional user auth test
+    if (sec === 'ldap') {
+        h += `<hr class="my-2"><div class="cfg-field-wrap">
+            <div class="row mb-2 align-items-center">
+                <label class="col-sm-4 col-form-label col-form-label-sm text-sm-end fw-semibold">${esc(t('ldap_test_user_label'))}</label>
+                <div class="col-sm-4 pe-1">
+                    <input type="text" id="ldapTestUser" class="form-control form-control-sm"
+                        placeholder="${escAttr(t('ldap_test_user_ph'))}" autocomplete="off">
+                </div>
+                <div class="col-sm-4 ps-1">
+                    <input type="password" id="ldapTestPass" class="form-control form-control-sm"
+                        placeholder="${escAttr(t('ldap_test_pass_ph'))}" autocomplete="new-password">
+                </div>
+            </div>
+            <div class="row mb-1">
+                <div class="col-sm-8 offset-sm-4">
+                    <small class="text-muted">${esc(t('ldap_test_user_hint'))}</small>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-8 offset-sm-4 d-flex justify-content-end">
+                    <button class="btn btn-info btn-sm" id="btnTestLdap" data-test-btn
+                        onclick="testLdap()" title="${escAttr(t('ldap_test'))}">
+                        <i class="bi bi-plug me-1"></i>${esc(t('ldap_test'))}
+                    </button>
+                </div>
+            </div>
+            <div class="row mt-2" id="ldapTestResult" style="display:none">
+                <div class="col-sm-8 offset-sm-4">
+                    <div id="ldapTestResultBody"></div>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    h += cfgCardClose;
+    return h;
+}
+
+function _renderDefaultRoleField(sec, current) {
+    const pathStr = `${sec}|default_role`;
+    const _hint = fieldHint(pathStr);
+    const _hintId = _hint ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
+    const _infoIcon = _hint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+                data-bs-toggle="collapse" data-bs-target="#${_hintId}"
+                aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _hintPanel = _hint
+        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_hint)}</div></div>`
+        : '';
+    const allRoleNames = ['none', 'viewer', 'editor', 'admin',
+        ...Object.keys(rolesData).filter(r => !['admin','editor','viewer','none'].includes(r))];
+    const items = allRoleNames
+        .map(r => {
+            const rd = rolesData[r] || {};
+            return {
+                r,
+                uid: rd.uid || r,
+                lbl: rd.label || (I18N.role_labels && I18N.role_labels[r]) || r,
+                desc: rd.description || '',
+            };
+        })
+        .sort((a, b) => a.lbl.localeCompare(b.lbl));
+    const selectedItem = items.find(x => x.uid === current || x.r === current) || items[0] || { lbl: current };
+    const liItems = items.map(({ r, uid, lbl, desc }, idx) => {
+        const isActive = (current === uid || current === r);
+        const sep = idx > 0 ? '<li><hr class="dropdown-divider my-0"></li>' : '';
+        return `${sep}<li><button class="dropdown-item px-3 py-2${isActive ? ' active' : ''}" type="button"
+            data-dr-uid="${escAttr(uid)}" data-dr-lbl="${escAttr(lbl)}" data-dr-path="${escAttr(pathStr)}"
+            onclick="_drPickRole(this)">
+            <div class="fw-semibold" style="font-size:.875em">${esc(lbl)}</div>
+            ${desc ? `<div style="font-size:.78em;white-space:normal;line-height:1.35;opacity:.75">${esc(desc)}</div>` : ''}
+        </button></li>`;
+    }).join('');
+    return `<div class="cfg-field-wrap mb-2" data-cfg-path="${escAttr(pathStr)}">
+    <div class="row align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('default_role'))}${_infoIcon}</label>
+        <div class="col-sm-8">
+            <div class="dropdown">
+                <button class="btn btn-secondary btn-sm dropdown-toggle w-100 text-start" type="button"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="dr-lbl">${esc(selectedItem.lbl)}</span>
+                </button>
+                <ul class="dropdown-menu dr-dropdown-menu w-100 py-0">${liItems}</ul>
+            </div>
+            ${_hintPanel}
+        </div>
+    </div>
+    </div>`;
+}
+
+function _drPickRole(el) {
+    const dd = el.closest('.dropdown');
+    dd.querySelector('.dr-lbl').textContent = el.dataset.drLbl;
+    dd.querySelectorAll('.dropdown-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    updateField('config', el.dataset.drPath, el.dataset.drUid);
+}
+
+function _applyLdapPreset(preset) {
+    const PRESETS = {
+        ad: {
+            port: 389, use_ssl: false, timeout: 10,
+            user_filter: '(sAMAccountName={username})',
+            email_attr: 'mail', name_attr: 'displayName', username_attr: 'sAMAccountName', group_attr: 'memberOf',
+            button_label: 'Active Directory',
+        },
+        openldap: {
+            port: 389, use_ssl: false, timeout: 5,
+            user_filter: '(uid={username})',
+            email_attr: 'mail', name_attr: 'displayName', username_attr: 'uid', group_attr: 'memberOf',
+            button_label: 'OpenLDAP',
+        },
+        freeipa: {
+            port: 389, use_ssl: false, timeout: 10,
+            user_filter: '(uid={username})',
+            email_attr: 'mail', name_attr: 'displayName', username_attr: 'uid', group_attr: 'memberOf',
+            button_label: 'FreeIPA',
+        },
+    };
+    const vals = PRESETS[preset];
+    if (!vals) return;
+    for (const [field, value] of Object.entries(vals)) {
+        updateField('config', `ldap|${field}`, value);
+    }
+    renderConfig();
+}
+
+function _applyOidcPreset(preset) {
+    const PRESETS = {
+        entraid: {
+            provider_url: 'https://login.microsoftonline.com/{tenant_id}/v2.0',
+            username_claim: 'preferred_username',
+            email_claim: 'email', name_claim: 'name', groups_claim: 'groups',
+            scopes: 'openid email profile',
+            button_label: 'Microsoft Entra ID',
+        },
+        google: {
+            provider_url: 'https://accounts.google.com',
+            username_claim: 'email',
+            email_claim: 'email', name_claim: 'name', groups_claim: '',
+            scopes: 'openid email profile',
+            button_label: 'Google Workspace',
+        },
+        keycloak: {
+            provider_url: 'https://{keycloak_host}/realms/{realm}',
+            username_claim: 'preferred_username',
+            email_claim: 'email', name_claim: 'name', groups_claim: 'groups',
+            scopes: 'openid email profile',
+            button_label: 'Keycloak',
+        },
+    };
+    const vals = PRESETS[preset];
+    if (!vals) return;
+    for (const [field, value] of Object.entries(vals)) {
+        updateField('config', `oidc|${field}`, value);
+    }
+    renderConfig();
+}
+
+function _applySaml2Preset(preset) {
+    const PRESETS = {
+        entraid: {
+            idp_entity_id: 'https://sts.windows.net/{tenant_id}/',
+            idp_sso_url: 'https://login.microsoftonline.com/{tenant_id}/saml2',
+            username_attr: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name',
+            email_attr: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
+            name_attr: 'http://schemas.microsoft.com/identity/claims/displayname',
+            groups_attr: 'http://schemas.microsoft.com/ws/2008/06/identity/claims/groups',
+            button_label: 'Microsoft Entra ID',
+        },
+        google: {
+            idp_entity_id: 'https://accounts.google.com/o/saml2?idpid={idp_id}',
+            idp_sso_url: 'https://accounts.google.com/o/saml2/idp?idpid={idp_id}',
+            username_attr: 'email',
+            email_attr: 'email',
+            name_attr: 'displayName',
+            groups_attr: '',
+            button_label: 'Google Workspace',
+        },
+        okta: {
+            idp_entity_id: 'http://www.okta.com/{app_id}',
+            idp_sso_url: 'https://{subdomain}.okta.com/app/{app_name}/{app_id}/sso/saml',
+            username_attr: 'email',
+            email_attr: 'email',
+            name_attr: 'displayName',
+            groups_attr: 'groups',
+            button_label: 'Okta',
+        },
+        keycloak: {
+            idp_entity_id: 'https://{keycloak_host}/realms/{realm}',
+            idp_sso_url: 'https://{keycloak_host}/realms/{realm}/protocol/saml',
+            username_attr: 'username',
+            email_attr: 'email',
+            name_attr: 'firstName',
+            groups_attr: 'roles',
+            button_label: 'Keycloak',
+        },
+    };
+    const vals = PRESETS[preset];
+    if (!vals) return;
+    for (const [field, value] of Object.entries(vals)) {
+        updateField('config', `saml2|${field}`, value);
+    }
+    renderConfig();
+}
+
+async function testLdap() {
+    const cfg = configData.ldap || {};
+    if (!cfg.server) {
+        showToast(t('ldap_test_missing'), 'warning');
+        return;
+    }
+    const testUser = (document.getElementById('ldapTestUser')?.value || '').trim();
+    const testPass = document.getElementById('ldapTestPass')?.value || '';
+    const payload  = { ...cfg };
+    if (testUser) { payload.test_username = testUser; payload.test_password = testPass; }
+
+    const btn        = document.getElementById('btnTestLdap');
+    const resultDiv  = document.getElementById('ldapTestResult');
+    const resultBody = document.getElementById('ldapTestResultBody');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('ldap_test'); }
+    if (resultDiv) resultDiv.style.display = 'none';
+
+    const r = await apiPost('/api/v1/auth/ldap/test', payload);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-plug me-1"></i>' + t('ldap_test'); }
+
+    if (!r || !r.data) return;
+    const d = r.data;
+
+    if (!d.auth_tested) {
+        showToast(d.message || (d.ok ? t('ldap_test_ok') : t('ldap_test_error')),
+                  d.ok ? 'success' : 'danger');
+        return;
+    }
+
+    // Show inline detailed result for user auth test
+    const color = d.ok ? 'success' : 'danger';
+    const icon  = d.ok ? 'bi-check-circle-fill' : 'bi-x-circle-fill';
+    let html = `<div class="alert alert-${color} py-2 mb-0 small">
+        <i class="bi ${icon} me-1"></i><strong>${esc(d.message || '')}</strong>`;
+    if (d.dn)           html += `<div class="mt-1 text-break"><span class="text-muted">DN: </span>${esc(d.dn)}</div>`;
+    if (d.display_name) html += `<div><span class="text-muted">${esc(t('display_name'))}: </span>${esc(d.display_name)}</div>`;
+    if (d.email)        html += `<div><span class="text-muted">${esc(t('email'))}: </span>${esc(d.email)}</div>`;
+    if (d.groups && d.groups.length) {
+        html += `<div class="mt-1"><span class="text-muted">${esc(t('col_groups'))}: </span>`;
+        html += d.groups.map(g => `<span class="badge bg-secondary fw-normal me-1">${esc(g)}</span>`).join('');
+        html += '</div>';
+    }
+    html += '</div>';
+    if (resultBody) resultBody.innerHTML = html;
+    if (resultDiv)  resultDiv.style.display = '';
+}

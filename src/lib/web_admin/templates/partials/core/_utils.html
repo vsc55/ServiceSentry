@@ -1,0 +1,87 @@
+{# ================================================================
+   Utility functions: uid, deepClone, escaping, path helpers,
+   collapse toggle, humanizeKey, fieldLabel, modulePrettyName, moduleIcon.
+   ================================================================ #}
+
+// ──────────────────────────── Utilities ───────────────────────────
+function uid() { return 'u' + (++_uid); }
+function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+function esc(s) {
+    const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML;
+}
+function escAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+/** Embed a value as a JS string literal inside an HTML attribute event handler.
+ * JSON.stringify escapes \, ", and control chars; escAttr then encodes the
+ * surrounding double-quotes so they don't terminate the HTML attribute. */
+function jsStr(s) { return escAttr(JSON.stringify(s)); }
+
+function setPath(obj, parts, val) {
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+        if (!(parts[i] in cur) || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
+        cur = cur[parts[i]];
+    }
+    cur[parts[parts.length - 1]] = val;
+}
+function getPath(obj, parts) {
+    let cur = obj;
+    for (const p of parts) {
+        if (cur == null || typeof cur !== 'object' || !(p in cur)) return undefined;
+        cur = cur[p];
+    }
+    return cur;
+}
+
+function toggleCollapseFromHeader(event, collapseId) {
+    // Ignore clicks from controls that must not toggle collapse.
+    if (event.target.closest('[data-no-collapse="1"]')) return;
+    const el = document.getElementById(collapseId);
+    if (!el) return;
+    bootstrap.Collapse.getOrCreateInstance(el).toggle();
+}
+
+function humanizeKey(k) {
+    return String(k).replace(/[_\-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function fieldLabel(k, meta = null) {
+    // Priority: schema metadata -> i18n labels -> generated human label.
+    if (meta && typeof meta.label === 'string' && meta.label.trim()) {
+        return meta.label.trim();
+    }
+    if (meta && meta.label_i18n && typeof meta.label_i18n === 'object') {
+        const v = meta.label_i18n[CURRENT_LANG] || meta.label_i18n[SYSTEM_DEFAULT_LANG];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return LABELS[k] || humanizeKey(k);
+}
+
+/** Return pretty name for a module.
+ * Priority: user config pretty_name > schema __i18n__ > humanized key.
+ */
+function modulePrettyName(name, cfg) {
+    if (cfg && cfg.pretty_name) return cfg.pretty_name;
+    const i18n = ITEM_SCHEMAS[name + '|__i18n__'];
+    if (i18n) {
+        const d = i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG];
+        if (d && d.pretty_name) return d.pretty_name;
+    }
+    return String(name).replace(/[_\-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/** Return icon for a module.
+ * Priority: user config icon > schema __i18n__ > generic fallback.
+ */
+function moduleIcon(name, cfg) {
+    if (cfg && typeof cfg.icon === 'string' && cfg.icon.trim()) return cfg.icon.trim();
+    const i18n = ITEM_SCHEMAS[name + '|__i18n__'];
+    if (i18n) {
+        const d = i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG];
+        if (d && typeof d.icon === 'string' && d.icon.trim()) return d.icon.trim();
+    }
+    return '\u{1F4E6}';
+}

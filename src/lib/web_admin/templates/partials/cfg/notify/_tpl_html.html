@@ -1,0 +1,655 @@
+{# ================================================================
+   Config — Notifications tab: HTML body template editor + CodeMirror.
+   _HTML_VAR_DESC_KEYS, _notifHtmlState, _cmEditor, _cmLoadPromise,
+   _cmLoadAsset, _ensureCodeMirror, _cmFormatHtml, _cmToggleWrap,
+   _cmUpdateWrapBtn, _cmShowHint, _notifHtmlMaybeInitEditor,
+   _renderNotifHtmlSection, _notifHtmlLoad, _notifHtmlRefresh,
+   _notifHtmlInsertVar, _notifHtmlToggleFullscreen,
+   _notifHtmlRefreshFsBtn, document keydown listener (Escape/fullscreen),
+   _notifHtmlPreview, _notifHtmlTypeChanged, _notifHtmlLangChanged,
+   _notifHtmlLoadBuiltin, _notifHtmlSave, _notifHtmlReset.
+   ================================================================ #}
+
+// ── HTML body template editor ────────────────────────────────────────────────
+
+// Runtime variable descriptions keyed by {var} placeholder
+const _HTML_VAR_DESC_KEYS = {
+    '{sender_name}': 'notif_html_var_sender_name',
+    '{kind}':        'notif_html_var_kind',
+    '{module}':      'notif_html_var_module',
+    '{item}':        'notif_html_var_item',
+    '{status}':      'notif_html_var_status',
+    '{message}':     'notif_html_var_message',
+    '{timestamp}':   'notif_html_var_timestamp',
+    '{public_url}':  'notif_html_var_public_url',
+    '{n}':           'notif_html_var_n',
+};
+
+let _notifHtmlState = {
+    type: 'alert',    // current email type: test | alert | summary
+    lang: 'en_EN',    // current language
+    stored: {},       // {type: {lang: html}} — loaded from server
+    vars: {},         // {type: [var1, var2]} — loaded from server
+};
+
+/** CodeMirror instance (null = not yet initialized or CM unavailable). */
+let _cmEditor = null;
+/** Pending load promise — prevents double-loading. */
+let _cmLoadPromise = null;
+
+/** Inject a <script> or <link> tag and return a Promise that resolves when loaded. */
+function _cmLoadAsset(src, isStyle) {
+    return new Promise((resolve, reject) => {
+        const selector = isStyle ? `link[href="${src}"]` : `script[src="${src}"]`;
+        if (document.querySelector(selector)) { resolve(); return; }
+        const el = document.createElement(isStyle ? 'link' : 'script');
+        if (isStyle) { el.rel = 'stylesheet'; el.href = src; }
+        else         { el.src = src; }
+        el.onload = resolve;
+        el.onerror = () => reject(new Error('Failed to load ' + src));
+        document.head.appendChild(el);
+    });
+}
+
+/**
+ * Lazy-load CodeMirror 5 from local static assets.
+ * Safe to call multiple times — loads only once.
+ * Returns true on success, false if any asset fails.
+ */
+async function _ensureCodeMirror() {
+    if (typeof CodeMirror !== 'undefined') return true;
+    if (_cmLoadPromise) return _cmLoadPromise;
+    _cmLoadPromise = (async () => {
+        try {
+            // All CSS assets (non-blocking; browser parallelises link tags)
+            [
+                '/static/css/codemirror/codemirror.min.css',
+                '/static/css/codemirror/cm-theme-material-darker.min.css',
+                '/static/css/codemirror/cm-theme-eclipse.min.css',
+                '/static/css/codemirror/cm-show-hint.min.css',
+                '/static/css/codemirror/cm-foldgutter.min.css',
+            ].forEach(u => _cmLoadAsset(u, true));
+
+            // Core JS — must be first
+            await _cmLoadAsset('/static/js/codemirror/codemirror.min.js', false);
+
+            // Mode dependencies (parallel); htmlmixed needs all three
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-xml.min.js', false),
+                _cmLoadAsset('/static/js/codemirror/cm-css.min.js', false),
+                _cmLoadAsset('/static/js/codemirror/cm-javascript.min.js', false),
+            ]);
+            await _cmLoadAsset('/static/js/codemirror/cm-htmlmixed.min.js', false);
+
+            // Addons — all can load in parallel after htmlmixed
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-matchbrackets.min.js',  false),
+                _cmLoadAsset('/static/js/codemirror/cm-closebrackets.min.js',  false),
+                _cmLoadAsset('/static/js/codemirror/cm-closetag.min.js',       false),
+                _cmLoadAsset('/static/js/codemirror/cm-activeline.min.js',     false),
+                // Hints
+                _cmLoadAsset('/static/js/codemirror/cm-show-hint.min.js',      false),
+                // Folding (foldcode must precede gutter/xml/brace)
+            ]);
+            // Folding: foldcode base first, then gutter + range finders
+            await _cmLoadAsset('/static/js/codemirror/cm-foldcode.min.js', false);
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-foldgutter.min.js', false),
+                _cmLoadAsset('/static/js/codemirror/cm-xml-fold.min.js',   false),
+                _cmLoadAsset('/static/js/codemirror/cm-brace-fold.min.js', false),
+            ]);
+            // Hint engines (depend on show-hint + mode files)
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-html-hint.min.js', false),
+                _cmLoadAsset('/static/js/codemirror/cm-css-hint.min.js',  false),
+            ]);
+            // Search & Replace (dialog must load before search)
+            _cmLoadAsset('/static/css/codemirror/cm-dialog.min.css', true);
+            await _cmLoadAsset('/static/js/codemirror/cm-dialog.min.js', false);
+            await Promise.all([
+                _cmLoadAsset('/static/js/codemirror/cm-searchcursor.min.js',  false),
+                _cmLoadAsset('/static/js/codemirror/cm-comment.min.js',       false),
+            ]);
+            await _cmLoadAsset('/static/js/codemirror/cm-search.min.js', false);
+            await _cmLoadAsset('/static/js/codemirror/cm-jump-to-line.min.js', false);
+            // HTML Beautify
+            await _cmLoadAsset('/static/js/codemirror/beautify-html.min.js', false);
+            return true;
+        } catch (e) {
+            console.warn('[ServiceSentry] CodeMirror could not be loaded:', e);
+            _cmLoadPromise = null; // allow retry
+            return false;
+        }
+    })();
+    return _cmLoadPromise;
+}
+
+/** Format/beautify the HTML in the editor using js-beautify. */
+async function _cmFormatHtml() {
+    if (!_cmEditor) return;
+    const btn = document.querySelector('[onclick="_cmFormatHtml()"]');
+
+    // If beautify hasn't loaded yet, wait for it (it's part of the same CM load chain)
+    if (typeof html_beautify === 'undefined') {
+        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+        await _ensureCodeMirror();
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Format'; }
+    }
+    if (typeof html_beautify === 'undefined') {
+        showToast('Formatter not available', 'warning');
+        return;
+    }
+
+    const raw = _cmEditor.getValue();
+    if (!raw.trim()) return;
+
+    const pretty = html_beautify(raw, {
+        indent_size:          2,
+        indent_char:          ' ',
+        max_preserve_newlines: 1,
+        preserve_newlines:    true,
+        wrap_line_length:     0,        // keep long inline-style lines intact
+        wrap_attributes:      'auto',
+        end_with_newline:     true,
+        extra_liners:         ['head', 'body', '/html'],
+        unformatted:          ['span', 'a', 'b', 'em', 'i', 'strong',
+                               'br', 'img', 'abbr', 'acronym', 'cite',
+                               'code', 'dfn', 'kbd', 'label', 'map',
+                               'object', 'output', 'q', 's', 'samp',
+                               'select', 'small', 'sub', 'sup', 'time',
+                               'tt', 'u', 'var'],
+        content_unformatted:  ['pre', 'textarea', 'script', 'style'],
+    });
+
+    if (pretty === raw) { showToast('Already formatted', 'info'); return; }
+
+    const cursor = _cmEditor.getCursor();
+    _cmEditor.setValue(pretty);
+    _cmEditor.setCursor(cursor);
+    _cmEditor.focus();
+    showToast('Formatted ✓', 'success');
+}
+
+/** Toggle line wrapping in the editor and update the button appearance. */
+function _cmToggleWrap() {
+    if (!_cmEditor) return;
+    const wrap = !_cmEditor.getOption('lineWrapping');
+    _cmEditor.setOption('lineWrapping', wrap);
+    _cmUpdateWrapBtn(wrap);
+}
+
+/** Sync the wrap button colour/title to the current wrap state. */
+function _cmUpdateWrapBtn(wrap) {
+    const btn = document.getElementById('notifHtmlWrapBtn');
+    if (!btn) return;
+    btn.title = wrap ? 'Line wrap ON — click to disable' : 'Line wrap OFF — click to enable';
+    btn.className = btn.className
+        .replace(/\bbtn-(secondary|info|primary)\b/g, '')
+        .trim() + (wrap ? ' btn-info' : ' btn-secondary');
+}
+
+/**
+ * Show the appropriate hint (HTML or CSS) based on the cursor's inner mode.
+ * Falls back to HTML hints if the inner mode can't be determined.
+ */
+function _cmShowHint(cm) {
+    if (typeof CodeMirror === 'undefined' || !CodeMirror.showHint) return;
+    const cur   = cm.getCursor();
+    const token = cm.getTokenAt(cur);
+    const inner = CodeMirror.innerMode(cm.getMode(), token.state);
+    const hint  = (inner.mode && inner.mode.name === 'css')
+        ? CodeMirror.hint.css
+        : CodeMirror.hint.html;
+    CodeMirror.showHint(cm, hint, { completeSingle: false });
+}
+
+/**
+ * Attach CodeMirror to #notifHtmlEditor if not already attached.
+ * Safe to call repeatedly — skips if already attached to the same textarea.
+ * Detects stale instances when the config section is re-rendered.
+ */
+async function _notifHtmlMaybeInitEditor() {
+    // Clear stale instance if the textarea was removed from the DOM
+    if (_cmEditor && !_cmEditor.getTextArea().isConnected) {
+        _cmEditor = null;
+    }
+    const ta = document.getElementById('notifHtmlEditor');
+    if (!ta) return;
+    // Already attached to this exact textarea
+    if (_cmEditor && _cmEditor.getTextArea() === ta) {
+        _cmEditor.refresh();
+        return;
+    }
+    const ok = await _ensureCodeMirror();
+    // Re-fetch after async — DOM may have changed
+    const ta2 = document.getElementById('notifHtmlEditor');
+    if (!ok || !ta2) return;
+
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    _cmEditor = CodeMirror.fromTextArea(ta2, {
+        mode:               'htmlmixed',
+        theme:              isDark ? 'material-darker' : 'eclipse',
+        lineNumbers:        true,
+        lineWrapping:       false,
+        tabSize:            2,
+        indentWithTabs:     false,
+        styleActiveLine:    true,
+        matchBrackets:      true,
+        autoCloseBrackets:  true,
+        autoCloseTags:      true,
+        // Code folding in the gutter
+        foldGutter:         true,
+        gutters:            ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
+        foldOptions:        { widget: '⋯' },
+        extraKeys: {
+            Tab:            cm => cm.execCommand('indentMore'),
+            'Shift-Tab':    cm => cm.execCommand('indentLess'),
+            'Ctrl-Space':   cm => _cmShowHint(cm),
+            'Ctrl-/':       cm => cm.execCommand('toggleComment'),
+            'Cmd-/':        cm => cm.execCommand('toggleComment'),
+            'Ctrl-F':       'findPersistent',
+            'Ctrl-H':       'replace',
+            'Ctrl-G':       'jumpToLine',
+            'Alt-F':        cm => cm.execCommand('fold'),
+            'Alt-U':        cm => cm.execCommand('unfold'),
+            'F11':          () => _notifHtmlToggleFullscreen(),
+        },
+    });
+
+    // Auto-trigger hints only on specific trigger characters to avoid constant popups
+    _cmEditor.on('inputRead', (cm, change) => {
+        if (cm.state.completionActive) return; // already open
+        if (!CodeMirror.showHint) return;       // addon not loaded yet
+        if (change.origin !== '+input') return;
+        const ch = change.text[0];
+        if (!ch || ch === '\n' || ch === '\r') return;
+
+        const cur   = cm.getCursor();
+        const token = cm.getTokenAt(cur);
+        const inner = CodeMirror.innerMode(cm.getMode(), token.state);
+        const mode  = inner?.mode?.name;
+
+        // < → always start a tag completion
+        // space / : → only inside xml (tag attributes) or css (property values)
+        if (ch === '<' ||
+           ((ch === ' ' || ch === ':') && (mode === 'xml' || mode === 'css'))) {
+            _cmShowHint(cm);
+        }
+    });
+
+    _cmEditor.on('change', cm => cm.save()); // keep hidden textarea in sync
+    _cmEditor.setSize(null, '400px');
+
+    // Sync wrap button to initial state (wrap is OFF by default)
+    _cmUpdateWrapBtn(false);
+}
+
+function _renderNotifHtmlSection() {
+    const typeOpts = ['test', 'alert', 'summary'].map(tp => {
+        const sel = _notifHtmlState.type === tp ? ' selected' : '';
+        const lbl = t(`notif_html_tpl_type_${tp}`);
+        return `<option value="${escAttr(tp)}"${sel}>${esc(lbl)}</option>`;
+    }).join('');
+    const langOpts = SUPPORTED_LANGS.map(lc => {
+        const sel = _notifHtmlState.lang === lc ? ' selected' : '';
+        return `<option value="${escAttr(lc)}"${sel}>${esc(I18N['lang_' + lc] || lc)}</option>`;
+    }).join('');
+
+    return `<div class="rounded-3 border overflow-hidden mb-3 cfg-card">
+        <div class="px-3 py-2 d-flex align-items-center gap-2 cfg-card-header">
+            <i class="bi bi-code-slash text-warning"></i>
+            <strong class="small">${esc(t('notif_html_tpl_title'))}</strong>
+        </div>
+        <div class="px-3 py-3 cfg-fields">
+            <p class="small text-muted mb-3">${esc(t('notif_html_tpl_desc'))}</p>
+            <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                <label class="col-form-label col-form-label-sm fw-semibold text-nowrap">
+                    <i class="bi bi-envelope me-1"></i>${esc(t('notif_html_tpl_type_label'))}
+                </label>
+                <select id="notifHtmlTypeSel" class="form-select form-select-sm" style="max-width:160px"
+                    onchange="_notifHtmlTypeChanged(this.value)">${typeOpts}</select>
+                <label class="col-form-label col-form-label-sm fw-semibold text-nowrap ms-2">
+                    <i class="bi bi-translate me-1"></i>${esc(t('notif_tpl_lang_label'))}
+                </label>
+                <select id="notifHtmlLangSel" class="form-select form-select-sm" style="max-width:160px"
+                    onchange="_notifHtmlLangChanged(this.value)">${langOpts}</select>
+                <div class="ms-auto d-flex gap-2 flex-wrap">
+                    <button class="btn btn-sm btn-secondary" onclick="_notifHtmlLoadBuiltin()"
+                        title="${escAttr(t('notif_html_tpl_load_builtin_tt'))}">
+                        <i class="bi bi-download me-1"></i>${esc(t('notif_html_tpl_load_builtin'))}
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="_notifHtmlReset()">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('notif_html_tpl_reset'))}
+                    </button>
+                    <button class="btn btn-sm btn-primary" onclick="_notifHtmlSave()">
+                        <i class="bi bi-floppy me-1"></i>${esc(t('save'))}
+                    </button>
+                </div>
+            </div>
+            <div id="notifHtmlEditorWrap">
+                <div id="notifHtmlVarsBar" class="mb-2"></div>
+                <textarea id="notifHtmlEditor" class="form-control font-monospace"
+                    style="font-size:.78rem;resize:vertical;white-space:pre;overflow-wrap:normal;overflow-x:auto;min-height:400px"
+                    spellcheck="false"
+                    placeholder="&lt;!DOCTYPE html&gt;&#10;&lt;html&gt;...&lt;/html&gt;"></textarea>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function _notifHtmlLoad() {
+    try {
+        const r = await fetch('/api/v1/notify/html-templates');
+        if (r.status === 401) { _onSessionTerminated(); return; }
+        if (!r.ok) return;
+        const data = await r.json();
+        _notifHtmlState.stored = data.stored || {};
+        _notifHtmlState.vars   = data.vars   || {};
+        _notifHtmlRefresh();
+    } catch (_) { /* silent */ }
+}
+
+function _notifHtmlRefresh() {
+    // If CM is attached to the current textarea, update it; otherwise update the textarea
+    const ta = document.getElementById('notifHtmlEditor');
+    const html = (_notifHtmlState.stored[_notifHtmlState.type] || {})[_notifHtmlState.lang] || '';
+    if (_cmEditor && ta && _cmEditor.getTextArea() === ta) {
+        _cmEditor.setValue(html);
+    } else if (ta) {
+        ta.value = html;
+    }
+
+    // Update vars toolbar
+    const bar = document.getElementById('notifHtmlVarsBar');
+    if (!bar) return;
+    const runtimeVars = (_notifHtmlState.vars[_notifHtmlState.type] || []);
+
+    // Build grouped string-keys dropdown
+    const groupsHtml = _NOTIF_TPL_GROUPS.map(g => {
+        const items = g.entries.map(e => {
+            const v = '{' + e.key + '}';
+            return `<li><a class="dropdown-item font-monospace py-1 small" href="#"
+                onclick="event.preventDefault();_notifHtmlInsertVar('${escAttr(v)}')">${esc(v)}</a></li>`;
+        }).join('');
+        return `<li><h6 class="dropdown-header small">${esc(t(g.key))}</h6></li>${items}`;
+    }).join('<li><hr class="dropdown-divider my-1"></li>');
+
+    const runtimeBtns = runtimeVars.map(v =>
+        `<button type="button" class="btn btn-sm btn-warning font-monospace lh-1 py-1 px-2 notif-tpl-btn"
+            onclick="_notifHtmlInsertVar('${escAttr(v)}')">${esc(v)}</button>`
+    ).join('');
+
+    const isFs = document.getElementById('notifHtmlEditorWrap')?.classList.contains('notif-html-fs');
+    bar.innerHTML = `
+        <div class="d-flex align-items-center gap-2 flex-wrap p-2 rounded border cfg-toolbar-bg">
+            <span class="fw-semibold small text-muted text-nowrap">
+                <i class="bi bi-braces me-1"></i>${esc(t('notif_html_tpl_vars_label'))}:
+            </span>
+            ${runtimeBtns}
+            ${runtimeVars.length ? '<span class="text-muted">|</span>' : ''}
+            <div class="dropdown">
+                <button type="button"
+                        class="btn btn-sm btn-info lh-1 py-1 px-2 dropdown-toggle notif-tpl-btn"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-key me-1"></i>${esc(t('notif_html_tpl_string_keys'))}
+                </button>
+                <ul class="dropdown-menu" style="max-height:320px;overflow-y:auto;min-width:220px">
+                    ${groupsHtml}
+                </ul>
+            </div>
+            <div class="ms-auto d-flex gap-2 flex-nowrap">
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
+                        onclick="_cmFormatHtml()"
+                        title="Format / Beautify HTML">
+                    <i class="bi bi-magic me-1"></i>Format
+                </button>
+                <button type="button" id="notifHtmlWrapBtn"
+                        class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
+                        onclick="_cmToggleWrap()"
+                        title="Toggle line wrap">
+                    <i class="bi bi-text-wrap"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
+                        onclick="if(_cmEditor)_cmEditor.execCommand('findPersistent')"
+                        title="Find (Ctrl+F) / Replace (Ctrl+H)">
+                    <i class="bi bi-search"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
+                        onclick="_notifHtmlPreview()"
+                        title="${escAttr(t('notif_html_tpl_preview'))}">
+                    <i class="bi bi-eye me-1"></i>${esc(t('notif_html_tpl_preview'))}
+                </button>
+                <button type="button" id="notifHtmlFsBtn"
+                        class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
+                        onclick="_notifHtmlToggleFullscreen()"
+                        title="${escAttr(t(isFs ? 'notif_html_tpl_exit_fullscreen' : 'notif_html_tpl_fullscreen'))}">
+                    <i class="bi bi-${isFs ? 'fullscreen-exit' : 'arrows-fullscreen'}"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
+                        data-bs-toggle="collapse" data-bs-target="#notifHtmlVarRef"
+                        title="${escAttr(t('notif_html_tpl_var_ref'))}">
+                    <i class="bi bi-braces-asterisk"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
+                        data-bs-toggle="collapse" data-bs-target="#notifHtmlShortcuts"
+                        title="Keyboard shortcuts">
+                    <i class="bi bi-keyboard"></i>
+                </button>
+            </div>
+        </div>
+        <div class="collapse" id="notifHtmlVarRef">
+            <div class="px-3 py-2 rounded border mt-1 cfg-toolbar-bg" style="font-size:.8rem;max-height:360px;overflow-y:auto">
+                <div class="row g-3">
+                    <div class="${runtimeVars.length ? 'col-sm-5' : 'd-none'}">
+                        <div class="fw-semibold mb-2 small">${esc(t('notif_html_var_runtime_section'))} — ${esc(t('notif_html_tpl_type_' + _notifHtmlState.type))}</div>
+                        <table class="w-100 small" style="border-collapse:collapse">
+                            ${runtimeVars.map(v => `<tr>
+                                <td class="py-1 pe-3 font-monospace text-warning" style="white-space:nowrap">${esc(v)}</td>
+                                <td class="text-muted">${esc(t(_HTML_VAR_DESC_KEYS[v] || v))}</td>
+                            </tr>`).join('')}
+                        </table>
+                    </div>
+                    <div class="${runtimeVars.length ? 'col-sm-7' : 'col-12'}">
+                        <div class="fw-semibold mb-2 small">${esc(t('notif_html_var_string_section'))}</div>
+                        ${_NOTIF_TPL_GROUPS.map(g => `
+                            <div class="fw-semibold mt-2 mb-1" style="font-size:.75rem;color:var(--bs-secondary-color)">${esc(t(g.key))}</div>
+                            <table class="w-100 small" style="border-collapse:collapse">
+                                ${g.entries.map(e => `<tr>
+                                    <td class="py-1 pe-3 font-monospace" style="white-space:nowrap">{${esc(e.key)}}</td>
+                                    <td class="text-muted">${esc(t(e.labelKey))}${e.vars ? ` <span class="opacity-50 font-monospace small">${esc(e.vars)}</span>` : ''}</td>
+                                </tr>`).join('')}
+                            </table>`).join('')}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="collapse" id="notifHtmlShortcuts">
+            <div class="px-2 py-2 small rounded border mt-1 cfg-toolbar-bg" style="font-size:.8rem">
+                <div class="fw-semibold mb-2 small">Keyboard shortcuts</div>
+                <table class="w-100 small" style="border-collapse:collapse">
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+Space</kbd></td><td class="text-muted">Autocomplete</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+F</kbd></td><td class="text-muted">Find</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+H</kbd></td><td class="text-muted">Find &amp; Replace</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+G</kbd></td><td class="text-muted">Go to line</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+/</kbd></td><td class="text-muted">Toggle comment</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Alt+F</kbd></td><td class="text-muted">Fold block</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Alt+U</kbd></td><td class="text-muted">Unfold block</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Tab / Shift+Tab</kbd></td><td class="text-muted">Indent / Dedent</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>F11</kbd></td><td class="text-muted">Toggle fullscreen</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Esc</kbd></td><td class="text-muted">Exit fullscreen</td></tr>
+                </table>
+            </div>
+        </div>`;
+
+    // Initialize / refresh CodeMirror (async, fires-and-forgets if CM not loaded yet)
+    _notifHtmlMaybeInitEditor();
+}
+
+/** Insert {varName} at the current cursor position (CodeMirror or plain textarea). */
+function _notifHtmlInsertVar(varName) {
+    const ta = document.getElementById('notifHtmlEditor');
+    if (_cmEditor && ta && _cmEditor.getTextArea() === ta) {
+        const doc = _cmEditor.getDoc();
+        const sel = doc.getSelection();
+        if (sel) doc.replaceSelection(varName);
+        else     doc.replaceRange(varName, doc.getCursor());
+        _cmEditor.focus();
+        return;
+    }
+    // Fallback: plain textarea
+    if (!ta) return;
+    ta.focus();
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    ta.value = ta.value.substring(0, start) + varName + ta.value.substring(end);
+    const pos = start + varName.length;
+    ta.selectionStart = ta.selectionEnd = pos;
+    ta.dispatchEvent(new Event('input'));
+}
+
+/** Toggle fullscreen mode for the HTML editor. */
+function _notifHtmlToggleFullscreen() {
+    const wrap = document.getElementById('notifHtmlEditorWrap');
+    if (!wrap) return;
+    const isFs = wrap.classList.toggle('notif-html-fs');
+    // Resize CodeMirror to fill available height
+    if (_cmEditor) {
+        _cmEditor.setSize(null, isFs ? 'calc(100vh - 110px)' : '400px');
+        setTimeout(() => _cmEditor.refresh(), 10);
+    }
+    // Update toolbar button label
+    _notifHtmlRefreshFsBtn(isFs);
+}
+
+/** Update only the fullscreen button label without re-rendering the entire toolbar. */
+function _notifHtmlRefreshFsBtn(isFs) {
+    const btn = document.getElementById('notifHtmlFsBtn');
+    if (!btn) return;
+    btn.innerHTML = `<i class="bi bi-${isFs ? 'fullscreen-exit' : 'arrows-fullscreen'} me-1"></i>${esc(t(isFs ? 'notif_html_tpl_exit_fullscreen' : 'notif_html_tpl_fullscreen'))}`;
+}
+
+// Exit fullscreen on Escape key
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        const wrap = document.getElementById('notifHtmlEditorWrap');
+        if (wrap && wrap.classList.contains('notif-html-fs')) {
+            _notifHtmlToggleFullscreen();
+            e.stopPropagation();
+        }
+    }
+}, true);
+
+/** Open the preview modal and render the current template with sample data. */
+async function _notifHtmlPreview() {
+    const ta = document.getElementById('notifHtmlEditor');
+    const html = (_cmEditor && ta && _cmEditor.getTextArea() === ta)
+        ? _cmEditor.getValue()
+        : (ta ? ta.value : '');
+
+    const modalEl  = document.getElementById('notifHtmlPreviewModal');
+    const titleEl  = document.getElementById('notifHtmlPreviewTitle');
+    const spinner  = document.getElementById('notifHtmlPreviewSpinner');
+    const frame    = document.getElementById('notifHtmlPreviewFrame');
+
+    if (titleEl)  titleEl.textContent = t('notif_html_tpl_preview_title');
+    if (spinner)  { spinner.classList.remove('d-none'); spinner.innerHTML = '<span class="spinner-border text-secondary"></span>'; }
+    if (frame)    { frame.classList.add('d-none'); frame.srcdoc = ''; }
+
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+
+    try {
+        const r = await fetch(
+            `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/preview`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ html, lang: _notifHtmlState.lang }),
+            }
+        );
+        if (r.status === 401) { modal.hide(); _onSessionTerminated(); return; }
+        if (r.ok) {
+            const data = await r.json();
+            const previewHtml = data.html || '';
+            if (!previewHtml.trim()) {
+                if (spinner) spinner.innerHTML = `<p class="text-muted p-4">${esc(t('notif_html_tpl_preview_empty'))}</p>`;
+                return;
+            }
+            if (frame) {
+                frame.srcdoc = previewHtml;
+                frame.classList.remove('d-none');
+            }
+            if (spinner) spinner.classList.add('d-none');
+        } else {
+            if (spinner) spinner.innerHTML = `<p class="text-danger p-4">${esc(t('connection_error'))}</p>`;
+        }
+    } catch (_) {
+        if (spinner) spinner.innerHTML = `<p class="text-danger p-4">${esc(t('connection_error'))}</p>`;
+    }
+}
+
+function _notifHtmlTypeChanged(val) {
+    _notifHtmlState.type = val;
+    _notifHtmlRefresh();
+}
+
+function _notifHtmlLangChanged(val) {
+    _notifHtmlState.lang = val;
+    _notifHtmlRefresh();
+}
+
+async function _notifHtmlLoadBuiltin() {
+    const btn = document.querySelector('[onclick="_notifHtmlLoadBuiltin()"]');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+    try {
+        const url = `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/built-in`
+            + `?lang=${encodeURIComponent(_notifHtmlState.lang)}`;
+        const r = await fetch(url);
+        if (r.ok) {
+            const data = await r.json();
+            const ta = document.getElementById('notifHtmlEditor');
+            const newHtml = data.html || '';
+            if (_cmEditor && ta && _cmEditor.getTextArea() === ta) {
+                _cmEditor.setValue(newHtml);
+            } else if (ta) {
+                ta.value = newHtml;
+            }
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = `<i class="bi bi-download me-1"></i>${esc(t('notif_html_tpl_load_builtin'))}`; }
+    }
+}
+
+async function _notifHtmlSave() {
+    const ta = document.getElementById('notifHtmlEditor');
+    const html = (_cmEditor && ta && _cmEditor.getTextArea() === ta)
+        ? _cmEditor.getValue()
+        : (ta ? ta.value : '');
+    const r = await apiPut(
+        `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/${encodeURIComponent(_notifHtmlState.lang)}`,
+        { html }
+    );
+    if (r && r.ok) {
+        if (!_notifHtmlState.stored[_notifHtmlState.type]) _notifHtmlState.stored[_notifHtmlState.type] = {};
+        _notifHtmlState.stored[_notifHtmlState.type][_notifHtmlState.lang] = html;
+        showToast(t('notif_html_tpl_saved'), 'success');
+    } else {
+        showToast((r?.error) || t('connection_error'), 'danger');
+    }
+}
+
+async function _notifHtmlReset() {
+    if (!confirm(t('notif_tpl_reset_lang_confirm'))) return;
+    const r = await apiDelete(
+        `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/${encodeURIComponent(_notifHtmlState.lang)}`
+    );
+    if (r && r.status === 200) {
+        if (_notifHtmlState.stored[_notifHtmlState.type]) {
+            delete _notifHtmlState.stored[_notifHtmlState.type][_notifHtmlState.lang];
+        }
+        _notifHtmlRefresh();
+        showToast(t('notif_html_tpl_reset_ok'), 'success');
+    } else {
+        showToast((r?.data?.error) || t('connection_error'), 'danger');
+    }
+}

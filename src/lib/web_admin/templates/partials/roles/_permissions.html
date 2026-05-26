@@ -1,0 +1,220 @@
+{# ================================================================
+   Permissions accordion — _togglePermFilter, _buildPermsAccordion,
+   _filterPermsAccordion, _buildModulePermsGrid, _toggleModDesc.
+   Module-level state for permission filtering.
+   ================================================================ #}
+
+// ──────────────────────── Permissions accordion ───────────────────
+// Persists across modal opens so users set their preferences once
+let _rmSearchFilters = { label: true, hint: true, modName: true, modDesc: true };
+
+function _togglePermFilter(key) {
+    _rmSearchFilters[key] = !_rmSearchFilters[key];
+    const btn = document.getElementById('rmSF_' + key);
+    if (btn) {
+        const on = _rmSearchFilters[key];
+        btn.classList.toggle('btn-primary', on);
+        btn.classList.toggle('btn-secondary', !on);
+    }
+    _filterPermsAccordion(document.getElementById('rmPermSearch')?.value || '');
+}
+
+function _buildPermsAccordion(activePerms, isBuiltin) {
+    const grid = document.getElementById('rolePermissionsGrid');
+    if (!grid) return;
+    const PHINTS = I18N.permission_hints || {};
+
+    // Dispose any existing tooltips before replacing DOM
+    grid.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
+        bootstrap.Tooltip.getInstance(el)?.dispose()
+    );
+
+    // Sort groups alphabetically by their translated label
+    const sorted = [...PERM_GROUPS].sort((a, b) =>
+        (t(a[0]) || a[0]).localeCompare(t(b[0]) || b[0])
+    );
+
+    const _sfDefs = [
+        { key: 'label',   lkey: 'perm_filter_label' },
+        { key: 'hint',    lkey: 'perm_filter_hint' },
+        { key: 'modName', lkey: 'perm_filter_mod_name' },
+        { key: 'modDesc', lkey: 'perm_filter_mod_desc' },
+    ];
+    let h = `<div class="mb-2">
+        <input type="text" class="form-control form-control-sm" id="rmPermSearch"
+            placeholder="${escAttr(t('search_permissions'))}"
+            oninput="_filterPermsAccordion(this.value)">
+        <div class="d-flex flex-wrap gap-1 mt-1 align-items-center">
+            <small class="text-muted">${esc(t('perm_filter_search_in'))}</small>`;
+    for (const f of _sfDefs) {
+        const on = _rmSearchFilters[f.key];
+        h += `<button id="rmSF_${f.key}" type="button"
+            class="btn btn-sm py-0 px-2 ${on ? 'btn-primary' : 'btn-secondary'}"
+            style="font-size:.72rem"
+            onclick="_togglePermFilter('${f.key}')">${esc(t(f.lkey))}</button>`;
+    }
+    h += `</div></div>
+    <div class="accordion accordion-flush rounded-3 overflow-hidden border" id="rmPermsAccordion">`;
+
+    for (const [groupKey, perms] of sorted) {
+        const collapseId = 'rmAccGroup_' + groupKey;
+        h += `<div class="accordion-item" id="rmAccGrpItem_${groupKey}">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed py-2 fw-semibold"
+                        type="button" data-bs-toggle="collapse"
+                        data-bs-target="#${collapseId}"
+                        style="font-size:.82rem">${esc(t(groupKey) || groupKey)}</button>
+            </h2>
+            <div id="${collapseId}" class="accordion-collapse collapse">
+                <div class="accordion-body pt-2 pb-3 px-3">
+                    <div class="row g-1" id="rmPermRow_${groupKey}">`;
+        for (const perm of perms) {
+            const label   = (I18N.permission_labels || {})[perm] || perm;
+            const hint    = PHINTS[perm] || '';
+            const infoBtn = hint
+                ? ` <i class="bi bi-info-circle text-muted" style="font-size:.72rem;cursor:help;vertical-align:middle"
+                        data-bs-toggle="tooltip" data-bs-placement="right"
+                        data-bs-title="${escAttr(hint)}"></i>`
+                : '';
+            const checked  = activePerms.has(perm) ? ' checked' : '';
+            const disabled = isBuiltin ? ' disabled' : '';
+            h += `<div class="col-sm-6 rm-perm-item"
+                    data-perm="${perm}"
+                    data-perm-label="${escAttr(label)}"
+                    data-perm-hint="${escAttr(hint)}">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox"
+                           id="rm_${perm}" value="${perm}"${checked}${disabled}>
+                    <label class="form-check-label small" for="rm_${perm}">${esc(label)}${infoBtn}</label>
+                </div>
+            </div>`;
+        }
+        h += `</div>`;
+        if (groupKey === 'perm_group_modules') {
+            h += `<div id="rmModulePermsSection" style="display:none" class="mt-3 pt-2"
+                      style="border-top:1px solid var(--bs-border-color)">
+                <p class="small text-muted mb-2">
+                    <i class="bi bi-info-circle me-1"></i>${esc(t('module_perms_info'))}</p>
+                <div id="rmModulePermsGrid"></div>
+            </div>`;
+        }
+        h += `</div></div></div>`;
+    }
+    h += `</div>`;
+    grid.innerHTML = h;
+
+    // Initialise tooltips
+    grid.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
+        new bootstrap.Tooltip(el, { trigger: 'hover focus' })
+    );
+}
+
+function _filterPermsAccordion(query) {
+    const q = query.trim().toLowerCase();
+    const accordion = document.getElementById('rmPermsAccordion');
+    if (!accordion) return;
+
+    for (const groupItem of accordion.querySelectorAll('.accordion-item[id^="rmAccGrpItem_"]')) {
+        const groupKey = groupItem.id.slice('rmAccGrpItem_'.length);
+        let visibleCount = 0;
+
+        // Filter global permission items
+        for (const row of groupItem.querySelectorAll('.rm-perm-item')) {
+            const matches = !q
+                || (_rmSearchFilters.label && (row.dataset.permLabel || '').toLowerCase().includes(q))
+                || (_rmSearchFilters.label && (row.dataset.perm      || '').toLowerCase().includes(q))
+                || (_rmSearchFilters.hint  && (row.dataset.permHint  || '').toLowerCase().includes(q));
+            row.style.display = matches ? '' : 'none';
+            if (matches) visibleCount++;
+        }
+
+        // Filter per-module rows inside rmModulePermsSection
+        const modSection = groupItem.querySelector('#rmModulePermsSection');
+        if (modSection) {
+            let modVisible = 0;
+            for (const row of modSection.querySelectorAll('.rm-mod-row')) {
+                const matches = !q
+                    || (_rmSearchFilters.modName && (row.dataset.modName  || '').toLowerCase().includes(q))
+                    || (_rmSearchFilters.modName && (row.dataset.modLabel || '').toLowerCase().includes(q))
+                    || (_rmSearchFilters.modDesc && (row.dataset.modDesc  || '').toLowerCase().includes(q));
+                row.style.display = matches ? '' : 'none';
+                if (matches) modVisible++;
+            }
+            const hasRows = modSection.querySelectorAll('.rm-mod-row').length > 0;
+            modSection.style.display = (q ? modVisible > 0 : hasRows) ? '' : 'none';
+            visibleCount += modVisible;
+        }
+
+        groupItem.style.display = visibleCount > 0 ? '' : 'none';
+
+        const panel = document.getElementById('rmAccGroup_' + groupKey);
+        if (panel) {
+            const inst = bootstrap.Collapse.getOrCreateInstance(panel, { toggle: false });
+            if (q && visibleCount > 0) inst.show();
+            else if (!q) inst.hide();
+        }
+    }
+}
+
+/** Build the per-module permissions table inside #rmModulePermsGrid.
+ *  For built-in roles (disabled=true) the checked state is derived from global
+ *  module permissions so the table reflects effective access.
+ *  For custom roles (disabled=false) only explicit module.{n}.{a} keys are shown. */
+function _buildModulePermsGrid(activePerms, disabled) {
+    const section = document.getElementById('rmModulePermsSection');
+    const grid    = document.getElementById('rmModulePermsGrid');
+    if (!grid) return;
+    const mods = Object.keys(modulesData).sort();
+    if (!mods.length) { if (section) section.style.display = 'none'; return; }
+    if (section) section.style.display = '';
+    const actions = ['view', 'add', 'edit', 'delete'];
+    const _globalFor = { view: 'modules_view', add: 'modules_edit', edit: 'modules_edit', delete: 'modules_edit' };
+    const hdrs = actions.map(a => `<th class="text-center" style="width:62px">${esc(t('module_perm_' + a) || a)}</th>`).join('');
+    let h = `<table class="table table-sm table-bordered align-middle mb-0" style="font-size:.82rem;table-layout:fixed;width:100%">
+    <thead class="ss-thead"><tr>
+        <th>${esc(t('col_module') || 'Module')}</th>${hdrs}
+    </tr></thead><tbody>`;
+    for (const name of mods) {
+        const cfg     = modulesData[name] || {};
+        const pname   = modulePrettyName(name, cfg);
+        const modSch  = ITEM_SCHEMAS[name + '|__module__'] || null;
+        const modI18n = ITEM_SCHEMAS[name + '|__i18n__'];
+        const modLd   = modI18n && (modI18n[CURRENT_LANG] || modI18n[SYSTEM_DEFAULT_LANG]);
+        const desc    = (modLd && modLd.module_description) || cfg.description || (modSch && modSch.description) || '';
+        const descHtml = desc
+            ? `<div style="display:flex;align-items:baseline;gap:3px;font-size:.7rem;color:var(--bs-secondary-color,#6c757d);line-height:1.2">
+                  <span id="rmDesc_${name}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0">${esc(desc)}</span>` +
+              (desc.length > 70
+                  ? `<button type="button" class="btn btn-link p-0 lh-1 flex-shrink-0" style="font-size:.65rem;color:inherit;opacity:.5"
+                             onclick="_toggleModDesc('rmDesc_${name}', this)">...</button>`
+                  : '') +
+              `</div>`
+            : '';
+        h += `<tr class="rm-mod-row"
+                data-mod-name="${escAttr(name)}"
+                data-mod-label="${escAttr(pname)}"
+                data-mod-desc="${escAttr(desc)}">
+            <td style="overflow:hidden">${esc(pname)}${descHtml}</td>`;
+        for (const action of actions) {
+            const key = `module.${name}.${action}`;
+            const checked = disabled
+                ? (activePerms.has(_globalFor[action]) || activePerms.has(key))
+                : activePerms.has(key);
+            h += `<td class="text-center"><input type="checkbox" class="form-check-input" value="${escAttr(key)}"
+                ${checked ? 'checked' : ''}${disabled ? ' disabled' : ''}></td>`;
+        }
+        h += '</tr>';
+    }
+    h += '</tbody></table>';
+    grid.innerHTML = h;
+}
+
+function _toggleModDesc(id, btn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const collapsed = el.style.whiteSpace === 'nowrap';
+    el.style.whiteSpace   = collapsed ? 'normal'  : 'nowrap';
+    el.style.overflow     = collapsed ? 'visible' : 'hidden';
+    el.style.textOverflow = collapsed ? 'clip'    : 'ellipsis';
+    btn.textContent       = collapsed ? '↑' : '...';
+}
