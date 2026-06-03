@@ -1,10 +1,12 @@
 {
     "__module__": {
+        "api_ver": "v1",
         "enabled": {"type": "bool", "default": true},
         "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
     },
+    "__history__": {"field": null, "unit": null, "label": "Service Status"},
     "list": {
-        "__discovery__": "/api/watchfuls/service_status/discover",
+        "__discovery__": "discover",
         "__discovery_field__": "service",
         "__key_mirrors_field__": "service",
         "enabled":     {"type": "bool",   "default": true},

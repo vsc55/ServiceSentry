@@ -132,6 +132,11 @@ function _auditEventBadge(event) {
     else if (event.includes('created')) cls = 'text-bg-success';
     else if (event === 'password_reset') cls = 'text-bg-warning';
     else if (event.includes('saved') || event.includes('updated') || event.includes('changed')) cls = 'text-bg-info';
+    else if (event === 'daemon_started') cls = 'text-bg-success';
+    else if (event === 'daemon_stopped') cls = 'text-bg-warning';
+    else if (event === 'daemon_error' || event === 'daemon_checks_run'
+          || event === 'module_check_error' || event === 'module_check_timeout'
+          || event === 'file_write_error') cls = 'text-bg-danger';
     return `<span class="badge ${cls}">${esc(AUDIT_EVENTS[event] || event)}</span>`;
 }
 

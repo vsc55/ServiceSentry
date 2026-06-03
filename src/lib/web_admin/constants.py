@@ -11,7 +11,7 @@ __all__ = [
     'ROLES', 'PERMISSIONS', 'PERMISSION_GROUPS',
     '_BUILTIN_GROUPS', 'BUILTIN_ROLE_PERMISSIONS',
     'BUILTIN_ROLE_UIDS', 'BUILTIN_GROUP_UIDS',
-    'is_module_perm',
+    'SYSTEM_USER', 'is_module_perm',
 ]
 
 _MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
@@ -53,6 +53,8 @@ PERMISSIONS = (
     'sessions_revoke', # revoke sessions
     'checks_view',     # view check results / status tab
     'checks_run',      # trigger module checks on demand
+    'history_view',    # view historical check data and charts
+    'history_delete',  # delete historical data
 )
 
 # Permissions grouped for the role editor UI.
@@ -66,6 +68,7 @@ PERMISSION_GROUPS = [
     ('perm_group_overview', ['overview_view', 'overview_edit']),
     ('perm_group_sessions', ['sessions_view', 'sessions_revoke']),
     ('perm_group_checks',   ['checks_view', 'checks_run']),
+    ('perm_group_history',  ['history_view', 'history_delete']),
 ]
 
 # Stable UUIDs for built-in roles and groups (never change these).
@@ -79,8 +82,12 @@ BUILTIN_GROUP_UIDS: dict[str, str] = {
     'administrators': '00000000-0000-4000-8000-000000000010',
 }
 
-# Built-in groups (cannot be deleted or modified via API).
-_BUILTIN_GROUPS: frozenset[str] = frozenset({'administrators'})
+# Built-in groups identified by their stable UID (cannot be deleted or modified).
+_BUILTIN_GROUPS: frozenset[str] = frozenset(BUILTIN_GROUP_UIDS.values())
+
+# Reserved internal username for system-generated audit entries.
+# This name MUST NOT be assigned to any real user account.
+SYSTEM_USER: str = 'system'
 
 # Built-in role → permission mapping (immutable).
 BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
@@ -91,10 +98,12 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
         'users_view', 'users_edit',
         'roles_view', 'roles_edit',
         'groups_view', 'groups_edit',
+        'history_view', 'history_delete',
     }),
     'viewer': frozenset({
         'users_view', 'roles_view', 'groups_view',
         'audit_view', 'sessions_view', 'modules_view', 'checks_view', 'overview_view',
+        'history_view',
     }),
     'none': frozenset(),
 }

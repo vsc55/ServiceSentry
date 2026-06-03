@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests for the audit log — recording, persistence and API access."""
 
-import json
-import os
-
 import pytest
 
 try:
@@ -153,22 +150,29 @@ class TestAuditLog:
         assert client.get("/api/v1/audit").status_code == 200
         assert client.delete("/api/v1/audit").status_code == 403
 
-    def test_audit_persisted_to_file(self, admin, client, config_dir):
-        """Audit log is written to audit.json on disk."""
+    def test_audit_persisted_to_db(self, admin, client):
+        """Audit log is written to the SQLite database, not a JSON file."""
         _login(client)
-        path = os.path.join(config_dir, 'audit.json')
-        assert os.path.isfile(path)
-        with open(path, encoding='utf-8') as fh:
-            data = json.load(fh)
-        assert len(data) >= 1
+        # Audit store should have at least the login_ok entry
+        assert admin._audit_store.count() >= 1
+        entries = admin._audit_store.get_all()
+        assert any(e['event'] == 'login_ok' for e in entries)
 
     def test_audit_max_entries(self, admin):
-        """Audit log is capped to _AUDIT_MAX_ENTRIES."""
-        admin._audit_log = [
-            {'ts': '', 'event': 'test', 'user': '', 'ip': '', 'detail': ''}
-        ] * 600
-        admin._persist_audit()
-        assert len(admin._audit_log) == admin._AUDIT_MAX_ENTRIES
+        """Audit log is capped to _AUDIT_MAX_ENTRIES when inserting via _audit_system."""
+        admin._AUDIT_MAX_ENTRIES = 5
+        admin._audit_store.delete_all()
+        for i in range(10):
+            admin._audit_system(f'test_{i}')
+        assert admin._audit_store.count() == 5
+
+    def test_audit_unlimited_when_zero(self, admin):
+        """Audit log keeps all entries when _AUDIT_MAX_ENTRIES is 0."""
+        admin._AUDIT_MAX_ENTRIES = 0
+        admin._audit_store.delete_all()
+        for i in range(20):
+            admin._audit_system(f'test_{i}')
+        assert admin._audit_store.count() == 20
 
     def test_audit_tab_in_ui(self, client):
         """Dashboard has the audit tab for admins."""
@@ -282,35 +286,34 @@ class TestAuditLog:
         assert len(admin._audit_log) == 1
         assert admin._audit_log[0]['event'] == 'audit_cleared'
 
-    def test_clear_all_persisted_to_disk(self, admin, client, config_dir):
-        """After DELETE /api/audit the on-disk file contains only the audit_cleared entry."""
+    def test_clear_all_persisted_to_db(self, admin, client):
+        """After DELETE /api/audit the DB contains only the audit_cleared entry."""
         _login(client)
         client.delete("/api/v1/audit")
-        path = os.path.join(config_dir, "audit.json")
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        assert len(data) == 1
-        assert data[0]['event'] == 'audit_cleared'
+        entries = admin._audit_store.get_all()
+        assert len(entries) == 1
+        assert entries[0]['event'] == 'audit_cleared'
 
     # ── DELETE /api/audit/<idx> (single entry) ────────────────────
 
     def test_delete_single_entry(self, admin, client):
-        """DELETE /api/audit/<idx> removes the entry at that position."""
-        admin._audit_log = [
-            {'ts': 'a', 'event': 'evt_0', 'user': '', 'ip': '', 'detail': ''},
-            {'ts': 'b', 'event': 'evt_1', 'user': '', 'ip': '', 'detail': ''},
-            {'ts': 'c', 'event': 'evt_2', 'user': '', 'ip': '', 'detail': ''},
-        ]
+        """DELETE /api/audit/<id> removes the entry with that DB id."""
+        admin._audit_store.delete_all()
+        admin._audit_store.insert('a', 'evt_0', '', '', '')
+        admin._audit_store.insert('b', 'evt_1', '', '', '')
+        admin._audit_store.insert('c', 'evt_2', '', '', '')
         _login(client)
-        # Delete oldest entry (index 0)
-        resp = client.delete("/api/v1/audit/0")
+        # Get the DB id of evt_0 (oldest entry)
+        entries = admin._audit_store.get_all(newest_first=False)
+        target_id = next(e['_id'] for e in entries if e['event'] == 'evt_0')
+        resp = client.delete(f"/api/v1/audit/{target_id}")
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
-        events = [e['event'] for e in admin._audit_log
-                  if e['event'].startswith('evt_')]
-        assert 'evt_0' not in events
-        assert 'evt_1' in events
-        assert 'evt_2' in events
+        remaining = [e['event'] for e in admin._audit_log
+                     if e['event'].startswith('evt_')]
+        assert 'evt_0' not in remaining
+        assert 'evt_1' in remaining
+        assert 'evt_2' in remaining
 
     def test_delete_single_entry_oob(self, admin, client):
         """DELETE /api/audit/<idx> returns 404 for an out-of-range index."""
@@ -331,27 +334,24 @@ class TestAuditLog:
             "password_hash": generate_password_hash("v"),
             "role": "viewer", "display_name": "V2",
         }
-        admin._audit_log.append(
-            {'ts': 'x', 'event': 'sentinel', 'user': '', 'ip': '', 'detail': ''}
-        )
+        admin._audit_store.insert('x', 'sentinel', '', '', '')
+        entries = admin._audit_store.get_all()
+        sentinel_id = next(e['_id'] for e in entries if e['event'] == 'sentinel')
         _login(client, "viewer2", "v")
-        resp = client.delete(f"/api/v1/audit/{len(admin._audit_log) - 1}")
+        resp = client.delete(f"/api/v1/audit/{sentinel_id}")
         assert resp.status_code == 403
 
-    def test_delete_single_entry_persisted(self, admin, client, config_dir):
-        """After DELETE /api/audit/<idx> the on-disk file reflects the change."""
-        admin._audit_log = [
-            {'ts': 't1', 'event': 'keep', 'user': '', 'ip': '', 'detail': ''},
-            {'ts': 't2', 'event': 'remove', 'user': '', 'ip': '', 'detail': ''},
-        ]
+    def test_delete_single_entry_persisted(self, admin, client):
+        """After DELETE /api/audit/<id> the DB reflects the change."""
+        admin._audit_store.delete_all()
+        admin._audit_store.insert('t1', 'keep', '', '', '')
+        admin._audit_store.insert('t2', 'remove', '', '', '')
+        entries = admin._audit_store.get_all(newest_first=False)
+        remove_id = next(e['_id'] for e in entries if e['event'] == 'remove')
         _login(client)
-        # Remove the first entry (index 0)
-        resp = client.delete("/api/v1/audit/0")
+        resp = client.delete(f"/api/v1/audit/{remove_id}")
         assert resp.status_code == 200
-        path = os.path.join(config_dir, "audit.json")
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        events_on_disk = [e['event'] for e in data]
-        assert 'remove' in events_on_disk
-        assert 'keep' not in events_on_disk
+        remaining_events = [e['event'] for e in admin._audit_store.get_all()]
+        assert 'remove' not in remaining_events
+        assert 'keep' in remaining_events
 

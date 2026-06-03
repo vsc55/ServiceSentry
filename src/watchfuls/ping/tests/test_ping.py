@@ -66,8 +66,8 @@ class TestPingCheck:
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
 
-        # Mock _icmp_ping para simular ping exitoso
-        with patch.object(w, '_icmp_ping', return_value=True):
+        # Mock _icmp_ping para simular ping exitoso (returns RTT ms)
+        with patch.object(w, '_icmp_ping', return_value=1.5):
             result = w.check()
             items = result.list
             assert '192.168.1.1' in items
@@ -87,8 +87,8 @@ class TestPingCheck:
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
 
-        # Mock _icmp_ping para simular ping fallido; mock sleep para no esperar
-        with patch.object(w, '_icmp_ping', return_value=False), \
+        # Mock _icmp_ping returns None (failure); mock sleep para no esperar
+        with patch.object(w, '_icmp_ping', return_value=None), \
              patch('watchfuls.ping.time.sleep'):
             result = w.check()
             items = result.list
@@ -110,7 +110,7 @@ class TestPingCheck:
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
 
-        with patch.object(w, '_icmp_ping', return_value=True):
+        with patch.object(w, '_icmp_ping', return_value=1.5):
             result = w.check()
             items = result.list
             assert 'Router' in items
@@ -131,7 +131,7 @@ class TestPingCheck:
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
 
-        with patch.object(w, '_icmp_ping', return_value=True):
+        with patch.object(w, '_icmp_ping', return_value=1.5):
             result = w.check()
             items = result.list
             assert '192.168.1.1' in items
@@ -152,7 +152,7 @@ class TestPingCheck:
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
 
-        with patch.object(w, '_icmp_ping', return_value=True):
+        with patch.object(w, '_icmp_ping', return_value=1.5):
             result = w.check()
             items = result.list
             assert '192.168.1.1' in items
@@ -283,18 +283,18 @@ class TestIcmpNative:
     # ── _icmp_ping integration ─────────────────────────────────────
 
     def test_icmp_ping_unresolvable_host(self):
-        """Unresolvable hostname returns False."""
-        assert self.w._icmp_ping('host.invalid.test', 1) is False
+        """Unresolvable hostname returns None."""
+        assert self.w._icmp_ping('host.invalid.test', 1) is None
 
     def test_icmp_ping_no_socket(self):
-        """If no socket can be created, returns False (native path)."""
+        """If no socket can be created, returns None (native path)."""
         with patch('watchfuls.ping._PYTHONPING_AVAILABLE', False):
             with patch.object(self.Watchful, '_create_icmp_socket',
                               return_value=None):
-                assert self.w._icmp_ping('127.0.0.1', 1) is False
+                assert self.w._icmp_ping('127.0.0.1', 1) is None
 
     def test_icmp_ping_sendto_fails(self):
-        """If sendto raises OSError, returns False (native path)."""
+        """If sendto raises OSError, returns None (native path)."""
         import socket
         mock_sock = patch('socket.socket').start()
         mock_instance = mock_sock.return_value
@@ -303,28 +303,34 @@ class TestIcmpNative:
             with patch.object(self.Watchful, '_create_icmp_socket',
                               return_value=mock_instance):
                 result = self.w._icmp_ping('127.0.0.1', 1)
-                assert result is False
+                assert result is None
         patch.stopall()
 
     # ── _ping_return retries ───────────────────────────────────────
 
     def test_ping_return_succeeds_first_try(self):
-        """Returns True immediately if first ICMP ping succeeds."""
-        with patch.object(self.w, '_icmp_ping', return_value=True):
-            assert self.w._ping_return('127.0.0.1', 1, 3) is True
+        """Returns (True, rtt_ms) immediately if first ICMP ping succeeds."""
+        with patch.object(self.w, '_icmp_ping', return_value=1.5):
+            ok, rtt = self.w._ping_return('127.0.0.1', 1, 3)
+            assert ok is True
+            assert rtt == 1.5
 
     def test_ping_return_retries_on_failure(self):
         """Retries up to 'attempt' times before giving up."""
-        with patch.object(self.w, '_icmp_ping', return_value=False), \
+        with patch.object(self.w, '_icmp_ping', return_value=None), \
              patch('time.sleep'):
-            assert self.w._ping_return('127.0.0.1', 1, 2) is False
+            ok, rtt = self.w._ping_return('127.0.0.1', 1, 2)
+            assert ok is False
+            assert rtt is None
 
     def test_ping_return_succeeds_on_second_attempt(self):
         """Succeeds on second attempt after first failure."""
         with patch.object(self.w, '_icmp_ping',
-                          side_effect=[False, True]), \
+                          side_effect=[None, 2.3]), \
              patch('time.sleep'):
-            assert self.w._ping_return('127.0.0.1', 1, 3) is True
+            ok, rtt = self.w._ping_return('127.0.0.1', 1, 3)
+            assert ok is True
+            assert rtt == 2.3
 
     # ── receive reply parsing ──────────────────────────────────────
 
@@ -449,7 +455,7 @@ class TestAlertThreshold:
             }
         }
         w = self._make(config)
-        with patch.object(w, '_icmp_ping', return_value=False), \
+        with patch.object(w, '_icmp_ping', return_value=None), \
              patch('time.sleep'):
             result = w.check()
         assert result.list['10.0.0.1']['status'] is False
@@ -464,7 +470,7 @@ class TestAlertThreshold:
             }
         }
         w = self._make(config)
-        with patch.object(w, '_icmp_ping', return_value=False), \
+        with patch.object(w, '_icmp_ping', return_value=None), \
              patch('time.sleep'):
             r1 = w.check()
         # First failure — still OK because alert=2
@@ -480,7 +486,7 @@ class TestAlertThreshold:
             }
         }
         w = self._make(config)
-        with patch.object(w, '_icmp_ping', return_value=False), \
+        with patch.object(w, '_icmp_ping', return_value=None), \
              patch('time.sleep'):
             w.check()  # first failure
             w.dict_return._dict_return.clear()
@@ -499,7 +505,7 @@ class TestAlertThreshold:
         w = self._make(config)
         with patch('time.sleep'):
             # Two failures
-            with patch.object(w, '_icmp_ping', return_value=False):
+            with patch.object(w, '_icmp_ping', return_value=None):
                 w.check()
                 w.dict_return._dict_return.clear()
                 w.check()
@@ -507,7 +513,7 @@ class TestAlertThreshold:
 
             # One success — counter resets
             w.dict_return._dict_return.clear()
-            with patch.object(w, '_icmp_ping', return_value=True):
+            with patch.object(w, '_icmp_ping', return_value=1.5):
                 r = w.check()
             assert w._fail_count['10.0.0.1'] == 0
             assert r.list['10.0.0.1']['status'] is True
@@ -524,7 +530,7 @@ class TestAlertThreshold:
             }
         }
         w = self._make(config)
-        with patch.object(w, '_icmp_ping', return_value=False), \
+        with patch.object(w, '_icmp_ping', return_value=None), \
              patch('time.sleep'):
             r = w.check()
         # host with alert=1 → KO immediately
@@ -567,7 +573,7 @@ class TestEmojiMessages:
             }
         }
         w = self.Watchful(create_mock_monitor(config))
-        with patch.object(w, '_icmp_ping', return_value=False), \
+        with patch.object(w, '_icmp_ping', return_value=None), \
              patch('time.sleep'):
             r = w.check()
         assert '🔽' in r.list['10.0.0.1']['message']

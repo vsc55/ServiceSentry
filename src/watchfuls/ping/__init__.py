@@ -23,6 +23,7 @@
 import concurrent.futures
 import json
 import os
+import concurrent.futures
 import secrets
 import socket
 import struct
@@ -53,6 +54,10 @@ class Watchful(ModuleBase):
     """Watchful module to check if a host is reachable via ICMP ping."""
 
     ITEM_SCHEMA = _SCHEMA
+
+    # pythonping is a convenience library; the module ships its own native ICMP
+    # implementation and works fully without it.
+    MISSING_DEPS: list[str] = []
 
     # Default values are derived from schema.json so there is a single
     # source of truth that the web UI can also consume.
@@ -132,8 +137,8 @@ class Watchful(ModuleBase):
         t_timeout = self.get_conf_in_list("timeout", name, 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
         t_attempt = self.get_conf_in_list("attempt", name, 0) or self.get_conf('attempt', self._MODULE_DEFAULTS['attempt'])
 
-        # TODO: Pending implemantation latency measurement and reporting in other_data. pylint: disable=fixme
-        ping_ok = self._ping_return(host, t_timeout, t_attempt)
+        ping_ok, rtt_ms = self._ping_return(host, t_timeout, t_attempt)
+        other_data = {'latency_ms': round(rtt_ms, 2)} if rtt_ms is not None else {}
 
         # ── Alert threshold: only declare KO after *alert* consecutive
         #    full-check failures. ──
@@ -147,18 +152,19 @@ class Watchful(ModuleBase):
         icon = '🔼' if status else '🔽'
         s_message = f'Ping: *{name}* {icon}'
 
-        self.dict_return.set(name, status, s_message, False)
+        self.dict_return.set(name, status, s_message, False, other_data=other_data)
 
         if self.check_status(status, self.name_module, name):
             self.send_message(s_message, status)
 
-    def _ping_return(self, host, timeout, attempt):
-        """Try to ping *host* up to *attempt* times using native ICMP."""
+    def _ping_return(self, host, timeout, attempt) -> tuple[bool, float | None]:
+        """Try to ping *host* up to *attempt* times.  Returns (success, rtt_ms)."""
         for _ in range(attempt):
-            if self._icmp_ping(host, timeout):
-                return True
+            rtt = self._icmp_ping(host, timeout)
+            if rtt is not None:
+                return True, rtt
             time.sleep(1)
-        return False
+        return False, None
 
     # ── Native ICMP implementation ────────────────────────────────
 
@@ -175,7 +181,7 @@ class Watchful(ModuleBase):
         s += s >> 16
         return ~s & 0xFFFF
 
-    def _icmp_ping(self, host: str, timeout: int) -> bool:
+    def _icmp_ping(self, host: str, timeout: int) -> float | None:
         """Send a single ICMP Echo Request and wait for a reply.
 
         Uses ``pythonping`` when available (cross-platform, no root needed
@@ -184,36 +190,42 @@ class Watchful(ModuleBase):
         (requires elevated privileges) and then ``SOCK_DGRAM`` (allowed
         on many Linux distributions for unprivileged users).
 
-        Returns ``True`` if a valid Echo Reply is received within
-        *timeout* seconds, ``False`` otherwise.
+        Returns RTT in milliseconds on success, or ``None`` on failure.
         """
         if _PYTHONPING_AVAILABLE:
             try:
                 result = _pythonping(host, timeout=timeout, count=1, verbose=False)
-                return result.success()
+                if result.success():
+                    return result.rtt_avg_ms
+                return None
             except Exception:  # pylint: disable=broad-except
-                return False
+                return None
         else:
             # pythonping not available — native ICMP fallback
             try:
-                dest = socket.gethostbyname(host)
-            except socket.gaierror:
-                return False
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
+                    _fut = _ex.submit(socket.gethostbyname, host)
+                    dest = _fut.result(timeout=timeout)
+            except (socket.gaierror, concurrent.futures.TimeoutError):
+                return None
 
             icmp_proto = socket.getprotobyname('icmp')
             sock = self._create_icmp_socket(icmp_proto)
             if sock is None:
-                return False
+                return None
 
             try:
                 sock.settimeout(timeout)
                 packet_id = secrets.randbits(16)
                 seq = 1
                 packet = self._build_icmp_packet(packet_id, seq)
+                t0 = time.monotonic()
                 sock.sendto(packet, (dest, 0))
-                return self._receive_icmp_reply(sock, packet_id, seq, timeout)
+                if self._receive_icmp_reply(sock, packet_id, seq, timeout):
+                    return (time.monotonic() - t0) * 1000
+                return None
             except (OSError, socket.error):
-                return False
+                return None
             finally:
                 sock.close()
 

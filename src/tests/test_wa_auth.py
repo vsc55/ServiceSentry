@@ -54,7 +54,8 @@ class TestAuthentication:
         assert "Invalid credentials" in resp.data.decode()
 
     def test_login_account_disabled(self, admin, client):
-        """Disabled user sees a distinct error message, not generic invalid credentials."""
+        """Disabled account shows the SAME generic error as wrong credentials (anti-enumeration).
+        The real reason is recorded only in the audit log."""
         from werkzeug.security import generate_password_hash
         admin._users["disabled_user"] = {
             "password_hash": generate_password_hash("secret", method="pbkdf2:sha256"),
@@ -65,8 +66,10 @@ class TestAuthentication:
         resp = _login(client, username="disabled_user", password="secret")
         assert resp.status_code == 200
         body = resp.data.decode()
-        assert "disabled" in body.lower()
-        assert "Invalid credentials" not in body
+        # Anti-enumeration: must NOT reveal the account is disabled
+        assert "disabled" not in body.lower()
+        # Must show the same generic error as an invalid password
+        assert "invalid" in body.lower() or "credentials" in body.lower() or "incorrect" in body.lower()
 
     def test_login_uses_post_redirect_get(self, client):
         """Failed login returns 302 redirect (PRG pattern), not a direct 200 render."""
@@ -158,34 +161,41 @@ class TestAccountLockout:
         admin._LOCKOUT_DURATION_SECS = duration_secs
 
     def test_lockout_triggers_after_n_attempts(self, admin, client):
-        """After N wrong passwords the account is locked."""
+        """After N wrong passwords the account is locked and shows a generic error (anti-enumeration).
+        The real reason (account_locked) is recorded only in the audit log."""
         self._set_lockout(admin, max_attempts=3)
         for _ in range(3):
             resp = _login(client, password="wrong")
             assert resp.status_code == 200
-        # Next attempt should mention lockout
+        # Next attempt: account is now locked — must NOT reveal lockout status
         resp = _login(client, password="wrong")
         body = resp.data.decode()
-        assert "locked" in body.lower() or "bloqueada" in body.lower()
+        assert "locked" not in body.lower() and "bloqueada" not in body.lower()
+        # Must show the generic invalid-credentials error
+        assert "invalid" in body.lower() or "credentials" in body.lower() or "incorrect" in body.lower()
 
     def test_locked_account_rejects_correct_password(self, admin, client):
-        """A locked account rejects even the correct password."""
+        """A locked account rejects even the correct password with a generic error."""
         self._set_lockout(admin, max_attempts=2)
         for _ in range(2):
             _login(client, password="wrong")
         resp = _login(client, password="secret")
         body = resp.data.decode()
-        assert "locked" in body.lower() or "bloqueada" in body.lower()
+        # Anti-enumeration: must NOT reveal the account is locked
+        assert "locked" not in body.lower() and "bloqueada" not in body.lower()
+        # Must not reach the dashboard either (login failed)
+        assert "dashboard" not in body.lower()
 
-    def test_lockout_returns_minutes_remaining(self, admin, client):
-        """Error message contains the minutes remaining."""
-        self._set_lockout(admin, max_attempts=2, duration_secs=600)
+    def test_lockout_audit_records_reason(self, admin, client):
+        """Locked-account login is recorded in the audit log with reason 'account_locked',
+        even though the UI only shows a generic message."""
+        self._set_lockout(admin, max_attempts=2)
         for _ in range(2):
             _login(client, password="wrong")
-        resp = _login(client, password="wrong")
-        body = resp.data.decode()
-        # 600 s = 10 min, so '10' should appear in the message
-        assert "10" in body
+        _login(client, password="wrong")  # triggers lockout
+        # Audit log must record the real reason for security monitoring
+        reasons = [e.get('detail', {}).get('reason', '') for e in admin._audit_log]
+        assert 'account_locked' in reasons
 
     def test_successful_login_resets_failed_attempts(self, admin, client):
         """A successful login clears the failed-attempts counter."""

@@ -152,14 +152,19 @@
 
 .ss-card {
     border-radius: var(--bs-border-radius-lg);
-    overflow: hidden;
     border: 1px solid var(--bs-border-color);
     background: var(--ss-surface-bg, var(--bs-body-bg));
     box-shadow: 0 1px 6px rgba(0,0,0,.06);
+    /* overflow: visible so dropdowns inside the card are not clipped */
 }
 
 /* Accent bar — 3px gradient strip at the top of each card */
-.ss-accent          { height: 3px; }
+.ss-accent {
+    height: 3px;
+    /* Clip to the card's top rounded corners */
+    border-top-left-radius:  var(--bs-border-radius-lg);
+    border-top-right-radius: var(--bs-border-radius-lg);
+}
 .ss-accent-amber    { background: linear-gradient(90deg, #f59e0b, #f97316); }
 .ss-accent-teal     { background: linear-gradient(90deg, #10b981, #14b8a6); }
 .ss-accent-purple   { background: linear-gradient(90deg, #8b5cf6, #ec4899); }
@@ -210,17 +215,43 @@
 /* Fixed-width column — shrinks to content width */
 .ss-th-narrow { width: 1%; }
 
+/* Resize handle — always shows a subtle grip indicator */
+.ss-resize-handle::before {
+    content: '';
+    display: block;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 20%;
+    bottom: 20%;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--bs-border-color);
+    opacity: 0.45;
+    transition: opacity .15s, background-color .15s;
+    pointer-events: none;
+}
+.ss-resize-handle:hover::before {
+    background: var(--bs-primary);
+    opacity: 1;
+    width: 3px;
+}
+
 /* Actions column header and cell — fixed width, left separator, centred */
 .ss-th-actions {
     width: 1%;
     white-space: nowrap;
     text-align: center;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
     border-left: 1px solid var(--bs-border-color);
 }
 .ss-td-actions {
     width: 1%;
     white-space: nowrap;
     text-align: center;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
     border-left: 1px solid var(--bs-border-color);
 }
 
@@ -499,4 +530,14 @@
 #cfg-status-link {
     font-family: monospace;
     font-size: .8rem;
+}
+
+
+/* ── Group table: drag-and-drop column reorder indicator ── */
+.ss-th-drag-over {
+    background-color: rgba(13, 110, 253, 0.15) !important;
+    border-left: 2px solid #0d6efd !important;
+}
+[data-bs-theme="dark"] .ss-th-drag-over {
+    background-color: rgba(13, 110, 253, 0.25) !important;
 }

@@ -1,11 +1,13 @@
 {
     "__module__": {
+        "api_ver":   "v1",
         "enabled":   {"type": "bool", "default": true},
         "threads":   {"type": "int",  "default": 5,  "min": 1, "max": 100},
         "min_count": {"type": "int",  "default": 1,  "min": 1, "max": 1000}
     },
+    "__history__": {"field": "count", "unit": "", "label": "Process Count"},
     "list": {
-        "__discovery__":         "/api/watchfuls/process/discover",
+        "__discovery__":         "discover",
         "__discovery_field__":   "process",
         "__key_mirrors_field__": "process",
         "enabled":   {"type": "bool", "default": true},

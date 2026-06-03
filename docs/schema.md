@@ -195,6 +195,92 @@ Modos de resultado (`result`):
 
 ---
 
+### `hidden`
+
+Si es `true`, el campo se almacena en `modules.json` pero nunca se renderiza en la UI. Útil para guardar metadatos internos generados automáticamente (p. ej. el tipo SNMP detectado al hacer un Discover).
+
+```json
+"snmp_type": {"type": "str", "default": "", "hidden": true}
+```
+
+---
+
+### `readonly`
+
+Si es `true`, el campo se renderiza como un input no editable (sin `onchange`). El usuario puede ver el valor pero no modificarlo manualmente. Para campos que solo deben cambiarse a través de la acción de descubrimiento integrada.
+
+```json
+"oid": {"type": "str", "default": "1.3.6.1.2.1.1.1.0", "readonly": true}
+```
+
+---
+
+### `numericString`
+
+Si es `true` en un campo `str`, el input restringe las pulsaciones de teclado a solo dígitos (sin letras ni símbolos). Útil para campos como `chat_id` de Telegram que son strings numéricas.
+
+```json
+"chat_id": {"type": "str", "default": "", "numericString": true}
+```
+
+---
+
+### `options_int`
+
+Lista de enteros permitidos para un campo `int`. La UI genera un `<select>` con estas opciones en lugar de un input numérico libre. A diferencia de `options` (para strings), aquí los valores son enteros.
+
+```json
+"page_size": {"type": "int", "default": 25, "options_int": [10, 25, 50, 100, 0]}
+```
+
+El valor `0` se muestra con la etiqueta `t('all')` (traducida como "Todos").
+
+---
+
+### `zero_as_blank`
+
+Si es `true`, el valor `0` se muestra como campo vacío (placeholder en lugar de `0`). Semántica: "0 significa usar el valor por defecto del módulo". Se combina con `placeholder_module` o `placeholder_map`.
+
+```json
+"port": {"type": "int", "default": 0, "zero_as_blank": true, "placeholder_module": "port"}
+```
+
+---
+
+### `options_deps`
+
+Mapa de valores de un campo `options` a paquetes Python opcionales requeridos. Si el paquete no está instalado, la opción se muestra desactivada con un tooltip de instalación.
+
+```json
+"db_type": {
+    "type": "str",
+    "default": "mysql",
+    "options": ["mysql", "postgres", "mssql", "mongodb", "redis"],
+    "options_deps": {
+        "postgres": "psycopg2-binary",
+        "mssql":    "pyodbc"
+    }
+}
+```
+
+`discover_schemas()` comprueba la presencia de cada paquete e inyecta `options_disabled` en el schema si alguno falta. La UI renderiza las opciones afectadas como disabled con el mensaje de instalación.
+
+---
+
+### `__pick_from_collection__`
+
+Nombre de otra colección del mismo módulo. Añade un botón picker al input que abre un modal con las claves de esa colección para selección directa.
+
+```json
+"server": {
+    "type": "str",
+    "default": "",
+    "__pick_from_collection__": "servers"
+}
+```
+
+---
+
 ### `supported_platforms`
 
 Lista de plataformas en las que el campo está disponible. En plataformas no incluidas, el campo se renderiza como un badge "No compatible" desactivado en lugar de un control interactivo.
@@ -301,13 +387,21 @@ La acción invocada debe estar en `WATCHFUL_ACTIONS` del módulo.
 
 ### `__discovery__`
 
-URL del endpoint de descubrimiento automático. Activa el botón "Descubrir" en el encabezado de la colección. La UI hace GET a esa URL y muestra los resultados en un modal para incorporarlos con un clic.
+Nombre de la acción de descubrimiento (sin URL completa). La URL se construye con `api_ver` del `__module__`. Activa el botón "Descubrir" en el encabezado. Por defecto la UI hace GET; si se define `__discovery_method__: "POST"`, hace POST con la configuración como body.
 
 ```json
-"__discovery__": "/api/watchfuls/filesystemusage/discover"
+"__discovery__": "discover"
 ```
 
-El endpoint debe devolver una lista de objetos con al menos `{"key": "...", "label": "..."}`. La acción invocada debe estar en `WATCHFUL_ACTIONS` del módulo.
+---
+
+### `__discovery_method__`
+
+Método HTTP para la llamada de descubrimiento. Omitir equivale a `"GET"`. Usar `"POST"` cuando el endpoint necesita la configuración del módulo en el body (p. ej. credenciales de conexión para filtrar resultados por servidor).
+
+```json
+"__discovery_method__": "POST"
+```
 
 ---
 
@@ -317,6 +411,77 @@ Nombre del campo que recibe un botón de búsqueda inline (input-group). Al puls
 
 ```json
 "__discovery_field__": "partition"
+```
+
+---
+
+### `__discovery_subtitle__`
+
+Plantilla de cadena para el subtítulo visible en cada fila del modal de descubrimiento. Los placeholders `{campo}` se sustituyen con los valores del ítem descubierto.
+
+```json
+"__discovery_subtitle__": "{mib_module}::{mib_name}"
+```
+
+Los separadores que queden vacíos (`::`) se colapsan automáticamente.
+
+---
+
+### `__discovery_type_field__`
+
+Nombre del campo del ítem descubierto que contiene el tipo o sintaxis del elemento. Se usa para renderizar el badge de tipo en el modal. Valor por defecto: `"status"`.
+
+```json
+"__discovery_type_field__": "mib_type"
+```
+
+---
+
+### `__discovery_category_field__`
+
+Nombre del campo del ítem descubierto que contiene la categoría. La categoría se usa para seleccionar el icono y color del badge, y para asignar el operador por defecto al añadir.
+
+```json
+"__discovery_category_field__": "mib_category"
+```
+
+---
+
+### `__discovery_categories__`
+
+Mapa de nombres de categoría a definición visual `{icon, color}`. El icono es una clase Bootstrap Icons y el color es cualquier valor CSS válido.
+
+```json
+"__discovery_categories__": {
+    "numeric": {"icon": "bi-hash",   "color": "#38bdf8"},
+    "string":  {"icon": "bi-fonts",  "color": "#4ade80"},
+    "ip":      {"icon": "bi-globe2", "color": "#818cf8"}
+}
+```
+
+---
+
+### `__discovery_default_operators__`
+
+Mapa de categoría a operador que se preselecciona al añadir el ítem. El campo `operator` del nuevo ítem se rellena automáticamente con este valor.
+
+```json
+"__discovery_default_operators__": {
+    "numeric": "any",
+    "string":  "contains",
+    "ip":      "eq",
+    "oid":     "eq"
+}
+```
+
+---
+
+### `__discovery_type_store_field__`
+
+Nombre del campo (oculto, `hidden: true`) donde se almacena el tipo del ítem al añadirlo desde el modal de descubrimiento. Permite que la UI adapte los controles del formulario según el tipo sin necesidad de cargar datos externos.
+
+```json
+"__discovery_type_store_field__": "snmp_type"
 ```
 
 ---
@@ -343,6 +508,37 @@ Lista de campos que deben rellenarse obligatoriamente al crear un ítem nuevo. L
 
 ---
 
+---
+
+## Sub-colecciones (`type: "sub_collection"`)
+
+Una colección puede contener otra colección anidada. Se declara como un campo normal con `"type": "sub_collection"` y su propia definición de campos y meta-claves.
+
+```json
+{
+    "servers": {
+        "__new_item_fields__": ["host"],
+        "enabled": {"type": "bool", "default": true},
+        "host":    {"type": "str",  "default": ""},
+        "port":    {"type": "int",  "default": 161},
+        "checks": {
+            "type":                 "sub_collection",
+            "__discovery__":        "discover",
+            "__discovery_method__": "POST",
+            "__discovery_field__":  "oid",
+            "enabled":  {"type": "bool", "default": true},
+            "oid":      {"type": "str",  "default": "", "readonly": true},
+            "operator": {"type": "str",  "default": "any", "options": ["any", "eq", "ne"]},
+            "value":    {"type": "str",  "default": ""}
+        }
+    }
+}
+```
+
+La sub-colección se muestra como una colección anidada dentro de cada ítem padre. Los botones de discover de la sub-colección reciben en su POST body tanto los escalares del módulo como el ítem padre completo.
+
+---
+
 ## Colección `__module__`
 
 Define los ajustes a nivel de módulo. Campos habituales:
@@ -356,6 +552,22 @@ Define los ajustes a nivel de módulo. Campos habituales:
 | `alert` | int | Umbral de alerta en porcentaje o grados |
 | `code` | int | Código HTTP esperado (módulo `web`) |
 | `local` | bool | Usar monitorización local (módulo `raid`) |
+
+Además de los campos de datos, `__module__` puede contener la propiedad especial:
+
+### `api_ver`
+
+Versión de la API que usa el módulo para sus endpoints watchful. Controla el prefijo de la URL (`/api/v1/`, `/api/v2/`, etc.). Por defecto `"v1"`.
+
+```json
+"__module__": {
+    "api_ver": "v1",
+    "enabled": {"type": "bool", "default": true},
+    "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
+}
+```
+
+La UI usa este valor para construir todas las URLs de acciones del módulo (`discover`, `test_connection`, etc.).
 
 ---
 
@@ -451,14 +663,15 @@ Usa `SUPPORTED_PLATFORMS` en la clase cuando el módulo entero es inútil en esa
 
 ## Módulos y sus características de schema
 
-| Módulo | Colecciones | `__actions__` | `__test__` | `__discovery__` | `__discovery_field__` | `__key_mirrors_field__` |
-|--------|-------------|:-------------:|:----------:|:---------------:|:---------------------:|:-----------------------:|
-| `datastore` | `__module__`, `list` | ✓ | ✓ | — | — | — |
-| `filesystemusage` | `__module__`, `list` | — | — | ✓ | ✓ (`partition`) | — |
-| `hddtemp` | `__module__`, `list` | — | — | — | — | — |
-| `ping` | `__module__`, `list` | — | — | — | — | — |
-| `raid` | `__module__`, `list` | — | — | — | — | — |
-| `ram_swap` | `__module__` | — | — | — | — | — |
-| `service_status` | `__module__`, `list` | — | — | ✓ | ✓ (`service`) | ✓ (`service`) |
-| `temperature` | `__module__`, `list` | — | — | ✓ | — | — |
-| `web` | `__module__`, `list` | — | — | — | — | — |
+| Módulo | Colecciones | `__actions__` | `__test__` | `__discovery__` | POST discovery | Sub-colección | `__discovery_field__` | `__key_mirrors_field__` | `WATCHFUL_TOOLBAR` |
+|--------|-------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `datastore` | `__module__`, `list` | ✓ | ✓ | — | — | — | — | — | — |
+| `filesystemusage` | `__module__`, `list` | — | — | ✓ | — | — | ✓ (`partition`) | — | — |
+| `hddtemp` | `__module__`, `list` | — | — | — | — | — | — | — | — |
+| `ping` | `__module__`, `list` | — | — | — | — | — | — | — | — |
+| `raid` | `__module__`, `list` | — | — | — | — | — | — | — | — |
+| `ram_swap` | `__module__` | — | — | — | — | — | — | — | — |
+| `service_status` | `__module__`, `list` | — | — | ✓ | — | — | ✓ (`service`) | ✓ (`service`) | — |
+| `snmp` | `__module__`, `servers` → `checks` | — | — | ✓ | ✓ | ✓ (`checks`) | ✓ (`oid`) | ✓ (`oid`) | ✓ (file_manager, mib_browser) |
+| `temperature` | `__module__`, `list` | — | — | ✓ | — | — | — | — | — |
+| `web` | `__module__`, `list` | — | — | — | — | — | — | — | — |

@@ -25,6 +25,7 @@ import concurrent.futures
 import json
 import os
 import socket
+import time
 
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
@@ -60,7 +61,12 @@ def _nut_query(host, port, ups_name, user, password, timeout):
 
         _send(f'LIST VAR {ups_name}')
         variables = {}
+        # Use a wall-clock deadline so a slow NUT server that dribbles data
+        # one byte at a time cannot extend the wait beyond the configured timeout.
+        _deadline = time.monotonic() + timeout
         for line in f:
+            if time.monotonic() > _deadline:
+                raise TimeoutError('NUT response timeout waiting for END LIST VAR')
             line = line.rstrip('\n')
             if line.startswith(f'VAR {ups_name} '):
                 # VAR upsname key "value"

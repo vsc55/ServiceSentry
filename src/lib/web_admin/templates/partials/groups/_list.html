@@ -6,12 +6,83 @@
 // ──────────────────────────── Group management ────────────────────
 let _groupsPage = 1;
 let _groupsPageSize = null;
-let _groupsSort = 'name';
+let _groupsSort = 'label';
 let _groupsSortDir = 'asc';
 let _selectedGroups = new Set();
 let _groupsCurrentPage = [];
+let _grpDragSrc = null;  // column being dragged
+
+// ── Column definitions ─────────────────────────────────────────────
+// id: internal key | label: display fn | sortKey: sort field (null=no sort) | always: can't hide
+const _GRP_COLS = [
+    { id: 'uid',         label: () => 'UID',                                      sortKey: 'uid',        always: false },
+    { id: 'name',        label: () => t('col_group_name'),                         sortKey: 'name',       always: true  },
+    { id: 'description', label: () => t('group_description'),                      sortKey: 'description', always: false },
+    { id: 'roles',       label: () => t('col_group_roles'),                        sortKey: 'roles',       always: false },
+    { id: 'members',     label: () => t('col_group_members'),                      sortKey: 'members',     always: false },
+    { id: 'created_at',  label: () => t('col_created_at')||'Created',              sortKey: 'created_at',  always: false },
+    { id: 'updated_at',  label: () => t('col_updated_at')||'Last Updated',         sortKey: 'updated_at',  always: false },
+    { id: 'updated_by',  label: () => t('col_updated_by')||'Updated By',           sortKey: 'updated_by',  always: false },
+];
+const _GROUPS_ALL_COLS = _GRP_COLS.filter(c => !c.always).map(c => c.id);
+const _GROUPS_DEFAULT_COLS = new Set(['roles', 'members', 'updated_by']);
+
+// Visibility — persisted
+let _groupsVisibleCols = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_groups_cols')||'null'); if(Array.isArray(s)) return new Set(s); } catch(_){}
+    return new Set(_GROUPS_DEFAULT_COLS);
+})();
+
+// Order — persisted (drag-and-drop reordering)
+let _groupsColOrder = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_groups_col_order')||'null'); if(Array.isArray(s)) return s; } catch(_){}
+    return _GRP_COLS.map(c => c.id);
+})();
+
+function _resetGroupsCols() {
+    _groupsVisibleCols = new Set(_GROUPS_DEFAULT_COLS);
+    _groupsColOrder    = _GRP_COLS.map(c => c.id);
+    localStorage.setItem('ss_groups_cols',       JSON.stringify([..._groupsVisibleCols]));
+    localStorage.setItem('ss_groups_col_order',  JSON.stringify(_groupsColOrder));
+    localStorage.removeItem('ss_groups_col_w');
+    _persistTableConfig();
+    renderGroups();
+}
+function _groupsToggleCol(col) {
+    const adding = !_groupsVisibleCols.has(col);
+    _groupsVisibleCols.has(col) ? _groupsVisibleCols.delete(col) : _groupsVisibleCols.add(col);
+    if (adding && col === 'uid') {
+        // Place UID as absolute first column
+        _groupsColOrder = ['uid', ..._groupsColOrder.filter(c => c !== 'uid')];
+        localStorage.setItem('ss_groups_col_order', JSON.stringify(_groupsColOrder));
+    }
+    localStorage.setItem('ss_groups_cols', JSON.stringify([..._groupsVisibleCols]));
+    _persistTableConfig();
+    renderGroups();
+}
+function _grpSaveOrder() {
+    localStorage.setItem('ss_groups_col_order', JSON.stringify(_groupsColOrder));
+    _persistTableConfig();
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+function _thSortInner(label, col, currentSort, dir, fn) {
+    const icon = currentSort === col
+        ? (dir === 'asc' ? '<i class="bi bi-sort-up ms-1"></i>' : '<i class="bi bi-sort-down ms-1"></i>')
+        : '<i class="bi bi-arrow-down-up ms-1 opacity-25"></i>';
+    return `<span class="ss-sort-link" style="cursor:pointer;user-select:none" onclick="${fn}('${col}')">${esc(label)}${icon}</span>`;
+}
+function _fmtDt(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(iso), pad = n => String(n).padStart(2,'0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch(_) { return iso; }
+}
+
+// ── Page / sort controls ───────────────────────────────────────────
 function _goGroupsPage(p) { _groupsPage = p; renderGroups(); }
-function _changeGroupsPageSize(v) { _groupsPageSize = parseInt(v, 10); _groupsPage = 1; renderGroups(); }
+function _changeGroupsPageSize(v) { _groupsPageSize = parseInt(v,10); _groupsPage=1; renderGroups(); }
 function _sortGroups(col) {
     if (_groupsSort === col) _groupsSortDir = _groupsSortDir === 'asc' ? 'desc' : 'asc';
     else { _groupsSort = col; _groupsSortDir = 'asc'; }
@@ -21,85 +92,105 @@ function _sortGroups(col) {
 function renderGroups() {
     const c = document.getElementById('groups-container');
     if (!c) return;
-    const grpPerms = new Set(currentUser.permissions || []);
+    const grpPerms    = new Set(currentUser.permissions || []);
     const canEditGroup   = grpPerms.has('groups_edit');
     const canDeleteGroup = grpPerms.has('groups_delete');
     const showActions    = canEditGroup || canDeleteGroup;
     if (_groupsPageSize === null) _groupsPageSize = _defaultPageSize;
+
+    // ── Sort ───────────────────────────────────────────────────────
     const allEntries = Object.entries(groupsData).sort((a, b) => {
         const [na, gda] = a, [nb, gdb] = b;
-        let va, vb;
-        if (_groupsSort === 'label') {
-            va = (gda.label || na).toLowerCase(); vb = (gdb.label || nb).toLowerCase();
-        } else if (_groupsSort === 'roles') {
-            return _groupsSortDir === 'asc'
-                ? (gda.roles || []).length - (gdb.roles || []).length
-                : (gdb.roles || []).length - (gda.roles || []).length;
-        } else if (_groupsSort === 'members') {
-            return _groupsSortDir === 'asc'
-                ? (gda.members || []).length - (gdb.members || []).length
-                : (gdb.members || []).length - (gda.members || []).length;
-        } else {
-            va = na.toLowerCase(); vb = nb.toLowerCase();
+        const mul = _groupsSortDir === 'asc' ? 1 : -1;
+        switch (_groupsSort) {
+            case 'name':      return mul * (gda.name||na).toLowerCase().localeCompare((gdb.name||nb).toLowerCase());
+            case 'uid':        return mul * na.localeCompare(nb);
+            case 'description':return mul * (gda.description||'').toLowerCase().localeCompare((gdb.description||'').toLowerCase());
+            case 'roles':      return mul * ((gda.roles||[]).length - (gdb.roles||[]).length);
+            case 'members':    return mul * ((gda.members||[]).length - (gdb.members||[]).length);
+            case 'created_at':
+            case 'updated_at': return mul * (gda[_groupsSort]||'').localeCompare(gdb[_groupsSort]||'');
+            case 'updated_by': return mul * (gda.updated_by||'').toLowerCase().localeCompare((gdb.updated_by||'').toLowerCase());
+            default:           return 0;
         }
-        return _groupsSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
     });
+
     if (!allEntries.length) {
-        c.innerHTML = `<div class="text-center py-5 text-muted">
-            <i class="bi bi-diagram-3" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
-            <span>${t('no_groups')}</span>
-        </div>`;
+        c.innerHTML = `<div class="text-center py-5 text-muted"><i class="bi bi-diagram-3" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i><span>${t('no_groups')}</span></div>`;
         return;
     }
     const total = allEntries.length;
     const ps = _groupsPageSize || total;
-    _groupsPage = Math.max(1, Math.min(_groupsPage, Math.ceil(total / ps)));
-    const entries = allEntries.slice((_groupsPage - 1) * ps, _groupsPage * ps);
-    _groupsCurrentPage = entries.map(([name]) => name);
+    _groupsPage = Math.max(1, Math.min(_groupsPage, Math.ceil(total/ps)));
+    const entries = allEntries.slice((_groupsPage-1)*ps, _groupsPage*ps);
+    _groupsCurrentPage = entries.map(([n]) => n);
     const _allPageSelected = _groupsCurrentPage.length > 0 && _groupsCurrentPage.every(n => _selectedGroups.has(n));
 
-    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table">
+    // ── Ordered visible columns ────────────────────────────────────
+    // Ensure order array contains all known columns (handles newly added cols)
+    const knownIds = new Set(_GRP_COLS.map(c => c.id));
+    _GRP_COLS.forEach(c => { if (!_groupsColOrder.includes(c.id)) _groupsColOrder.push(c.id); });
+    _groupsColOrder = _groupsColOrder.filter(id => knownIds.has(id));
+
+    const orderedCols = _groupsColOrder
+        .map(id => _GRP_COLS.find(c => c.id === id))
+        .filter(c => c && (c.always || _groupsVisibleCols.has(c.id)));
+
+    // ── Column widths ──────────────────────────────────────────────
+    const _cw = (() => { try { return JSON.parse(localStorage.getItem('ss_groups_col_w')||'{}'); } catch(_){ return {}; } })();
+    const _thW = id => _cw[id] ? ` style="width:${_cw[id]}"` : '';
+
+    // ── Build table ────────────────────────────────────────────────
+    const thRow = orderedCols.map(col => {
+        const inner = col.sortKey
+            ? _thSortInner(col.label(), col.sortKey, _groupsSort, _groupsSortDir, '_sortGroups')
+            : `<span class="small">${esc(col.label())}</span>`;
+        const isNameCol = col.id === 'name';
+        const extra = col.id === 'members' ? ' text-center ss-th-narrow' : '';
+        return `<th class="ss-th ss-th-resizable${extra}" data-col="${col.id}" draggable="true"${_thW(col.id)}>${inner}</th>`;
+    }).join('');
+
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table" id="groups-table">
     <thead class="ss-thead"><tr>
-        ${showActions ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected ? 'checked' : ''} onchange="_groupsSelectAll(this.checked)"></th>` : ''}
-        ${_thSort(t('col_group_name'),    'name',    _groupsSort, _groupsSortDir, '_sortGroups')}
-        ${_thSort(t('col_group_label'),   'label',   _groupsSort, _groupsSortDir, '_sortGroups')}
-        ${_thSort(t('col_group_roles'),   'roles',   _groupsSort, _groupsSortDir, '_sortGroups')}
-        ${_thSort(t('col_group_members'), 'members', _groupsSort, _groupsSortDir, '_sortGroups', 'text-center ss-th-narrow')}
+        ${showActions ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected?'checked':''} onchange="_groupsSelectAll(this.checked)"></th>` : ''}
+        ${thRow}
         ${showActions ? `<th class="ss-th ss-th-actions">${t('col_actions')}</th>` : ''}
     </tr></thead><tbody>`;
 
     for (const [name, gd] of entries) {
-        const isEnabled = gd.enabled !== false;
-        const rowStyle = isEnabled ? '' : ' style="opacity:.55"';
-        const builtinBadge = gd.builtin
-            ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.6em;padding:.15em .35em">${t('group_builtin_badge')}</span>` : '';
-        const disabledBadge = isEnabled ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
-        const roleBadges = (gd.roles || []).map(r => {
-            const rd = rolesData[r] || {};
-            return `<span class="badge ${roleBadgeClass(r)} me-1">${esc(rd.label || r)}</span>`;
+        const isEnabled   = gd.enabled !== false;
+        const rowStyle    = isEnabled ? '' : ' style="opacity:.55"';
+        const builtinBadge  = gd.builtin ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.6em;padding:.15em .35em">${t('group_builtin_badge')}</span>` : '';
+        const disabledBadge = isEnabled  ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
+        const roleBadges    = (gd.roles||[]).map(r => { const rd=rolesData[r]||{}; return `<span class="badge ${roleBadgeClass(r)} me-1">${esc(rd.name||r)}</span>`; }).join('');
+        const memberCount   = (gd.members||[]).length;
+        const memberHtml    = memberCount>0 ? `<span class="badge bg-secondary bg-opacity-50 rounded-pill">${memberCount}</span>` : `<span class="text-muted small">—</span>`;
+
+        const cells = orderedCols.map(col => {
+            switch (col.id) {
+                case 'name':       return `<td class="text-nowrap"><span class="fw-semibold">${esc(gd.name||name)}</span>${builtinBadge}${disabledBadge}</td>`;
+                case 'uid':        return `<td><code class="text-muted" style="font-size:.7rem">${esc(name)}</code></td>`;
+                case 'description':return `<td class="text-muted small">${esc(gd.description||'—')}</td>`;
+                case 'roles':      return `<td style="line-height:1.9">${roleBadges||'<span class="text-muted">—</span>'}</td>`;
+                case 'members':    return `<td class="text-center text-nowrap">${memberHtml}</td>`;
+                case 'created_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDt(gd.created_at))}</td>`;
+                case 'updated_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDt(gd.updated_at))}</td>`;
+                case 'updated_by': return `<td class="small text-muted">${esc(gd.updated_by||'—')}</td>`;
+                default:           return '<td></td>';
+            }
         }).join('');
-        const memberCount = (gd.members || []).length;
-        const memberHtml = memberCount > 0
-            ? `<span class="badge bg-secondary bg-opacity-50 rounded-pill">${memberCount}</span>`
-            : `<span class="text-muted small">—</span>`;
 
         h += `<tr${rowStyle}>
-            ${showActions ? `<td><input type="checkbox" class="form-check-input" ${_selectedGroups.has(name) ? 'checked' : ''} onchange="_groupsToggleOne(${jsStr(name)}, this.checked)"></td>` : ''}
-            <td class="text-nowrap"><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
-            <td class="text-muted small">${esc(gd.label || name)}</td>
-            <td style="line-height:1.9">${roleBadges || `<span class="text-muted">—</span>`}</td>
-            <td class="text-center text-nowrap">${memberHtml}</td>
+            ${showActions ? `<td><input type="checkbox" class="form-check-input" ${_selectedGroups.has(name)?'checked':''} onchange="_groupsToggleOne(${jsStr(name)}, this.checked)"></td>` : ''}
+            ${cells}
             ${showActions ? `<td class="ss-td-actions">
-                ${canEditGroup ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1"
-                    onclick="openEditGroupModal(${jsStr(name)})" title="${escAttr(t('edit'))}">
-                    <i class="bi bi-pencil"></i></button>` : ''}
-                ${canDeleteGroup ? `<button class="btn btn-sm btn-danger py-0 px-1"
-                    ${gd.builtin ? 'disabled' : `onclick="deleteGroup(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}">
-                    <i class="bi bi-trash3"></i></button>` : ''}
+                ${canEditGroup ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditGroupModal(${jsStr(name)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : ''}
+                ${canDeleteGroup ? `<button class="btn btn-sm btn-danger py-0 px-1" ${gd.builtin?'disabled':`onclick="deleteGroup(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
             </td>` : ''}
         </tr>`;
     }
     h += `</tbody></table>`;
+
     const pagination = _renderPagination(total, _groupsPage, _groupsPageSize, '_goGroupsPage', '_changeGroupsPageSize');
     const _addBtn = grpPerms.has('groups_add')
         ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewGroupModal()" title="${escAttr(t('new_group_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_group')}</button>` : '';
@@ -111,11 +202,34 @@ function renderGroups() {
             ${canDeleteGroup ? `<button class="btn btn-sm btn-danger py-0 px-2" onclick="_bulkDeleteGroups()" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
             <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedGroups.clear();renderGroups()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
         </div>` : '';
+
+    // Column chooser dropdown
+    const colChooser = `<div class="dropdown">
+      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
+        <i class="bi bi-layout-three-columns"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:170px">
+        ${_GRP_COLS.map(col => `<li>
+          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
+            <input type="checkbox" class="form-check-input m-0"
+                   ${col.always || _groupsVisibleCols.has(col.id) ? 'checked' : ''}
+                   ${col.always ? 'disabled' : `onchange="_groupsToggleCol('${col.id}')"`}>
+            <span class="small">${esc(col.label())}</span>
+            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
+          </label></li>`).join('')}
+        <li><hr class="dropdown-divider my-1"></li>
+        <li><button class="dropdown-item small py-1 text-muted" onclick="_resetGroupsCols()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>${t('col_reset_defaults')||'Reset defaults'}
+        </button></li>
+      </ul>
+    </div>`;
+
     c.innerHTML = `<div class="ss-card">
         <div class="ss-accent ss-accent-teal"></div>
         <div class="ss-card-header">
             <h6 class="mb-0 me-auto"><i class="bi bi-people me-2"></i>${t('group_management')}</h6>
             ${_bulkBar}
+            ${colChooser}
             <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>
             ${_addBtn}
         </div>
@@ -123,8 +237,85 @@ function renderGroups() {
         <div>${h}</div>
         <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
     </div>`;
+    setTimeout(_initGroupsTableFeatures, 0);
 }
 
+// ── Table features: resize + drag-and-drop reorder ─────────────────
+function _initGroupsTableFeatures() {
+    const tbl = document.getElementById('groups-table');
+    if (!tbl) return;
+    tbl.querySelectorAll('th.ss-th-resizable').forEach(th => {
+        th.querySelector('.ss-resize-handle')?.remove();
+        th.style.position = 'relative'; th.style.overflow = 'hidden';
+
+        // ── Resize handle (right edge) ──────────────────────────────
+        const handle = document.createElement('div');
+        handle.className = 'ss-resize-handle';
+        handle.style.cssText = 'position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:2;background:transparent';
+        handle.addEventListener('mousedown', e => {
+            e.preventDefault(); e.stopPropagation();
+            const startX = e.clientX, startW = th.offsetWidth, col = th.dataset.col;
+            function onMove(ev) { th.style.width = Math.max(40, startW + ev.clientX - startX) + 'px'; }
+            function onUp(ev) {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                const nw = Math.max(40, startW + ev.clientX - startX) + 'px';
+                const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_groups_col_w')||'{}'); } catch(_){ return {}; } })();
+                cw[col] = nw; localStorage.setItem('ss_groups_col_w', JSON.stringify(cw));
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+        handle.addEventListener('dblclick', e => {
+            e.preventDefault(); e.stopPropagation();
+            const col = th.dataset.col;
+            const tbl = th.closest('table');
+            if (!tbl) return;
+            const colIdx = Array.from(th.closest('tr').querySelectorAll('th')).indexOf(th);
+            const tmp = document.createElement('div');
+            tmp.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden';
+            document.body.appendChild(tmp);
+            let maxW = 0;
+            const measure = cell => {
+                const clone = cell.cloneNode(true);
+                clone.querySelector?.('.ss-resize-handle')?.remove();
+                clone.style.cssText = 'display:inline-block;white-space:nowrap;width:auto;padding:2px 11px';
+                tmp.appendChild(clone);
+                maxW = Math.max(maxW, clone.scrollWidth);
+                tmp.removeChild(clone);
+            };
+            measure(th);
+            tbl.querySelectorAll('tbody tr').forEach(tr => { const td = tr.cells[colIdx]; if (td) measure(td); });
+            document.body.removeChild(tmp);
+            const newW = Math.max(40, maxW + 8) + 'px';
+            th.style.width = newW;
+            const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_groups_col_w')||'{}'); } catch(_){ return {}; } })();
+            cw[col] = newW; localStorage.setItem('ss_groups_col_w', JSON.stringify(cw));
+        });
+        th.appendChild(handle);
+
+        // ── Drag-and-drop reorder ───────────────────────────────────
+        th.addEventListener('dragstart', e => {
+            _grpDragSrc = th.dataset.col;
+            e.dataTransfer.effectAllowed = 'move';
+            th.style.opacity = '0.4';
+        });
+        th.addEventListener('dragend', () => { th.style.opacity = ''; _grpDragSrc = null; });
+        th.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.classList.add('ss-th-drag-over'); });
+        th.addEventListener('dragleave', () => th.classList.remove('ss-th-drag-over'));
+        th.addEventListener('drop', e => {
+            e.preventDefault(); th.classList.remove('ss-th-drag-over');
+            const src = _grpDragSrc, dst = th.dataset.col;
+            if (!src || src === dst) return;
+            const srcIdx = _groupsColOrder.indexOf(src), dstIdx = _groupsColOrder.indexOf(dst);
+            if (srcIdx < 0 || dstIdx < 0) return;
+            _groupsColOrder.splice(srcIdx, 1);
+            _groupsColOrder.splice(dstIdx, 0, src);
+            _grpSaveOrder();
+            renderGroups();
+        });
+    });
+}
 function _groupsSelectAll(checked) {
     _groupsCurrentPage.forEach(n => checked ? _selectedGroups.add(n) : _selectedGroups.delete(n));
     renderGroups();
@@ -139,7 +330,7 @@ async function _bulkEnableGroups(enabled) {
     showConfirmModal(`${t(enabled ? 'enable' : 'disable')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
         for (const name of names) {
             const g = groupsData[name]; if (!g) continue;
-            const body = { label: g.label || '', description: g.description || '',
+            const body = { label: g.name || '', description: g.description || '',
                            roles: g.roles || [], members: g.members || [], enabled };
             const r = await apiPut('/api/v1/groups/' + encodeURIComponent(name), body);
             if (r?.status === 200 && r.data?.ok) groupsData[name] = { ...groupsData[name], enabled };
@@ -175,7 +366,7 @@ function populateGroupCheckboxes(activeGroups) {
         const id = 'umgrp_' + gname;
         h += `<div class="form-check form-check-inline me-2 mb-1">
             <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(gname)}" ${active.has(gname) ? 'checked' : ''}>
-            <label class="form-check-label small" for="${id}">${esc(gd.label || gname)}</label>
+            <label class="form-check-label small" for="${id}">${esc(gd.name || gname)}</label>
         </div>`;
     }
     container.innerHTML = h || '<span class="text-muted small">' + t('no_groups') + '</span>';
@@ -189,7 +380,7 @@ function _umPopulateGroups(searchVal) {
     const q = (searchVal || '').toLowerCase();
     let h = '';
     for (const [gname, gd] of Object.entries(groupsData).sort((a, b) => a[0].localeCompare(b[0]))) {
-        const label = gd.label || gname;
+        const label = gd.name || gname;
         if (q && !gname.toLowerCase().includes(q) && !label.toLowerCase().includes(q)) continue;
         const id = 'umgrp_' + gname;
         const isDisabled = gd.enabled === false;

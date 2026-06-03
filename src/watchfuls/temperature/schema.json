@@ -1,9 +1,11 @@
 {
     "__module__": {
+        "api_ver": "v1",
         "enabled": {"type": "bool",  "default": true}
     },
+    "__history__": {"field": "temp", "unit": "°C", "label": "Temperature"},
     "list": {
-        "__discovery__": "/api/watchfuls/temperature/discover",
+        "__discovery__": "discover",
         "enabled": {"type": "bool",  "default": true},
         "alert":   {"type": "float", "default": 80, "min": 0, "max": 150}
     }

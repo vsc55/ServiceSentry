@@ -23,6 +23,54 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('umGroupSearch')?.addEventListener('input', e => _umPopulateGroups(e.target.value));
 });
 
+// ── Column definitions ─────────────────────────────────────────────
+const _USR_COLS = [
+    { id: 'uid',          label: () => 'UID',                                     sortKey: 'uid',          always: false },
+    { id: 'username',     label: () => t('col_user'),                              sortKey: 'username',     always: true  },
+    { id: 'display_name', label: () => t('col_display_name')||'Display Name',       sortKey: 'display_name', always: false },
+    { id: 'role',         label: () => t('col_role'),                              sortKey: 'role',         always: false },
+    { id: 'sessions',     label: () => t('col_sessions'),                          sortKey: 'sessions',     always: false },
+    { id: 'created_at',   label: () => t('col_created_at')||'Created',             sortKey: 'created_at',   always: false },
+    { id: 'updated_at',   label: () => t('col_updated_at')||'Last Updated',        sortKey: 'updated_at',   always: false },
+    { id: 'updated_by',   label: () => t('col_updated_by')||'Updated By',          sortKey: 'updated_by',   always: false },
+];
+const _USERS_DEFAULT_COLS = new Set(['display_name', 'role', 'sessions']);
+
+let _usersVisibleCols = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_users_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){}
+    return new Set(_USERS_DEFAULT_COLS);
+})();
+let _usersColOrder = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_users_col_order')||'null'); if (Array.isArray(s)) return s; } catch(_){}
+    return _USR_COLS.map(c => c.id);
+})();
+function _resetUsersCols() {
+    _usersVisibleCols = new Set(_USERS_DEFAULT_COLS);
+    _usersColOrder    = _USR_COLS.map(c => c.id);
+    localStorage.setItem('ss_users_cols',       JSON.stringify([..._usersVisibleCols]));
+    localStorage.setItem('ss_users_col_order',  JSON.stringify(_usersColOrder));
+    localStorage.removeItem('ss_users_col_w');
+    _persistTableConfig();
+    renderUsers();
+}
+function _usersToggleCol(col) {
+    const adding = !_usersVisibleCols.has(col);
+    _usersVisibleCols.has(col) ? _usersVisibleCols.delete(col) : _usersVisibleCols.add(col);
+    if (adding && col === 'uid') {
+        _usersColOrder = ['uid', ..._usersColOrder.filter(c => c !== 'uid')];
+        localStorage.setItem('ss_users_col_order', JSON.stringify(_usersColOrder));
+    }
+    localStorage.setItem('ss_users_cols', JSON.stringify([..._usersVisibleCols]));
+    _persistTableConfig();
+    renderUsers();
+}
+function _usrSaveColOrder() { localStorage.setItem('ss_users_col_order', JSON.stringify(_usersColOrder)); _persistTableConfig(); }
+function _fmtUsrDt(iso) {
+    if (!iso) return '—';
+    try { const d = new Date(iso), p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; } catch(_) { return iso; }
+}
+
+// ── Sort / page state ──────────────────────────────────────────────
 let _usersPage = 1;
 let _usersPageSize = null;
 let _usersSort = 'username';
@@ -47,15 +95,22 @@ function renderUsers() {
     if (_usersPageSize === null) _usersPageSize = _defaultPageSize;
     const names = Object.keys(usersData).sort((a, b) => {
         let va, vb;
-        if (_usersSort === 'display_name') {
+        if (_usersSort === 'uid') {
+            va = (usersData[a].uid || '').toLowerCase();
+            vb = (usersData[b].uid || '').toLowerCase();
+        } else if (_usersSort === 'created_at' || _usersSort === 'updated_at') {
+            va = usersData[a][_usersSort] || '';
+            vb = usersData[b][_usersSort] || '';
+        } else if (_usersSort === 'updated_by') {
+            va = (usersData[a].updated_by || '').toLowerCase();
+            vb = (usersData[b].updated_by || '').toLowerCase();
+        } else if (_usersSort === 'display_name') {
             va = (usersData[a].display_name || a).toLowerCase();
             vb = (usersData[b].display_name || b).toLowerCase();
         } else if (_usersSort === 'role') {
-            va = usersData[a].role || 'viewer';
-            vb = usersData[b].role || 'viewer';
+            va = usersData[a].role || 'viewer'; vb = usersData[b].role || 'viewer';
         } else if (_usersSort === 'sessions') {
-            va = sessionCounts[a] || 0;
-            vb = sessionCounts[b] || 0;
+            va = sessionCounts[a] || 0; vb = sessionCounts[b] || 0;
             return _usersSortDir === 'asc' ? va - vb : vb - va;
         } else {
             va = a.toLowerCase(); vb = b.toLowerCase();
@@ -65,74 +120,98 @@ function renderUsers() {
     if (!names.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
             <i class="bi bi-people" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
-            <span>${t('no_users')}</span>
-        </div>`;
+            <span>${t('no_users')}</span></div>`;
         return;
     }
-    const userPerms = new Set(currentUser.permissions || []);
-    const canEdit   = userPerms.has('users_edit');
-    const canDelete = userPerms.has('users_delete');
+    const userPerms   = new Set(currentUser.permissions || []);
+    const canEdit     = userPerms.has('users_edit');
+    const canDelete   = userPerms.has('users_delete');
     const showActions = canEdit || canDelete;
     const total = names.length;
-    const ps = _usersPageSize || total;
-    _usersPage = Math.max(1, Math.min(_usersPage, Math.ceil(total / ps)));
-    const pageNames = names.slice((_usersPage - 1) * ps, _usersPage * ps);
-    _usersCurrentPage = pageNames;
+    const ps    = _usersPageSize || total;
+    _usersPage  = Math.max(1, Math.min(_usersPage, Math.ceil(total / ps)));
+    const pageNames        = names.slice((_usersPage - 1) * ps, _usersPage * ps);
+    _usersCurrentPage      = pageNames;
     const _allPageSelected = pageNames.length > 0 && pageNames.every(n => _selectedUsers.has(n));
 
-    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table">
+    // ── Ordered visible columns ────────────────────────────────────
+    const knownIds = new Set(_USR_COLS.map(c => c.id));
+    _USR_COLS.forEach(c => { if (!_usersColOrder.includes(c.id)) _usersColOrder.push(c.id); });
+    _usersColOrder = _usersColOrder.filter(id => knownIds.has(id));
+    const orderedCols = _usersColOrder
+        .map(id => _USR_COLS.find(c => c.id === id))
+        .filter(c => c && (c.always || _usersVisibleCols.has(c.id)));
+
+    // ── Column widths ──────────────────────────────────────────────
+    const _cw = (() => { try { return JSON.parse(localStorage.getItem('ss_users_col_w')||'{}'); } catch(_){ return {}; } })();
+    const _thW = id => _cw[id] ? ` style="width:${_cw[id]}"` : '';
+
+    // ── TH row ─────────────────────────────────────────────────────
+    const _usrExtra = { role: 'text-center', sessions: 'text-center ss-th-narrow' };
+    const thRow = orderedCols.map(col => {
+        const inner = col.sortKey
+            ? _thSortInner(col.label(), col.sortKey, _usersSort, _usersSortDir, '_sortUsers')
+            : `<span class="small">${esc(col.label())}</span>`;
+        const extra = _usrExtra[col.id] ? ' ' + _usrExtra[col.id] : '';
+        return `<th class="ss-th ss-th-resizable${extra}" data-col="${col.id}" draggable="true"${_thW(col.id)}>${inner}</th>`;
+    }).join('');
+
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table" id="users-table">
     <thead class="ss-thead"><tr>
-        ${showActions ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected ? 'checked' : ''} onchange="_usersSelectAll(this.checked)"></th>` : ''}
-        ${_thSort(t('col_user'),     'username',     _usersSort, _usersSortDir, '_sortUsers')}
-        ${_thSort(t('col_name'),     'display_name', _usersSort, _usersSortDir, '_sortUsers')}
-        ${_thSort(t('col_role'),     'role',         _usersSort, _usersSortDir, '_sortUsers', 'text-center')}
-        ${_thSort(t('col_sessions'), 'sessions',     _usersSort, _usersSortDir, '_sortUsers', 'text-center ss-th-narrow')}
+        ${showActions ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected?'checked':''} onchange="_usersSelectAll(this.checked)"></th>` : ''}
+        ${thRow}
         ${showActions ? `<th class="ss-th ss-th-actions">${t('col_actions')}</th>` : ''}
     </tr></thead><tbody>`;
 
     for (const uname of pageNames) {
-        const u = usersData[uname];
-        const role = u.role || 'viewer';
-        const badge = roleBadgeClass(role);
-        const roleLabel = (rolesData[role] && rolesData[role].label) || ROLE_LABELS[role] || role;
-        const isSelf = (uname === currentUser.username);
-        const sc = sessionCounts[uname] || 0;
-        const scHtml = sc > 0
+        const u           = usersData[uname];
+        const role        = u.role || 'viewer';
+        const badge       = roleBadgeClass(role);
+        const roleLabel   = (rolesData[role] && rolesData[role].name) || ROLE_LABELS[rolesData[role]?.key || role] || role;
+        const isSelf      = (uname === currentUser.username);
+        const sc          = sessionCounts[uname] || 0;
+        const scHtml      = sc > 0
             ? `<span class="badge bg-primary bg-opacity-75 rounded-pill">${sc}</span>`
             : `<span class="text-muted small">—</span>`;
-        const isEnabled = u.enabled !== false;
-        const rowStyle = isEnabled ? '' : ' style="opacity:.55"';
+        const isEnabled     = u.enabled !== false;
+        const rowStyle      = isEnabled ? '' : ' style="opacity:.55"';
         const disabledBadge = isEnabled ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
-        const authSource = u.auth_source || 'local';
-        const _ssoLabels = { ldap: 'LDAP', oidc: 'OIDC', saml2: 'SAML2' };
-        const authBadge = _ssoLabels[authSource]
-            ? ` <span class="badge text-bg-secondary fw-normal ms-1" style="font-size:.62rem">${_ssoLabels[authSource]}</span>`
-            : '';
-        const isLocalUser = (authSource === 'local');
-        const actionBtns = [
+        const authSource    = u.auth_source || 'local';
+        const _ssoLabels    = { ldap: 'LDAP', oidc: 'OIDC', saml2: 'SAML2' };
+        const authBadge     = _ssoLabels[authSource]
+            ? ` <span class="badge text-bg-secondary fw-normal ms-1" style="font-size:.62rem">${_ssoLabels[authSource]}</span>` : '';
+        const isLocalUser   = (authSource === 'local');
+        const actionBtns    = [
             canEdit   ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditUserModal(${jsStr(uname)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : '',
             canEdit   ? (isLocalUser
                 ? `<button class="btn btn-sm btn-warning py-0 px-1 me-1" onclick="openResetPasswordModal(${jsStr(uname)})" title="${escAttr(t('reset_password_tt'))}"><i class="bi bi-key"></i></button>`
-                : `<button class="btn btn-sm btn-warning py-0 px-1 me-1" style="visibility:hidden" tabindex="-1" aria-hidden="true"><i class="bi bi-key"></i></button>`)
-                : '',
-            canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteUser(${jsStr(uname)})" title="${escAttr(t('delete_tt'))}" ${isSelf ? 'disabled' : ''}><i class="bi bi-trash3"></i></button>` : '',
+                : `<button class="btn btn-sm btn-warning py-0 px-1 me-1" style="visibility:hidden" tabindex="-1" aria-hidden="true"><i class="bi bi-key"></i></button>`) : '',
+            canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteUser(${jsStr(uname)})" title="${escAttr(t('delete_tt'))}" ${isSelf?'disabled':''}><i class="bi bi-trash3"></i></button>` : '',
         ].join('');
 
+        const cells = orderedCols.map(col => {
+            switch (col.id) {
+                case 'username':
+                    return `<td class="text-nowrap"><code>${esc(uname)}</code>${isSelf?`<span class="badge text-bg-info fw-normal ms-1" style="font-size:.62rem">${t('you_badge')}</span>`:''}${authBadge}${disabledBadge}</td>`;
+                case 'uid':          return `<td><code class="text-muted" style="font-size:.7rem">${esc(u.uid||'')}</code></td>`;
+                case 'created_at':   return `<td class="text-nowrap small text-muted">${esc(_fmtUsrDt(u.created_at))}</td>`;
+                case 'updated_at':   return `<td class="text-nowrap small text-muted">${esc(_fmtUsrDt(u.updated_at))}</td>`;
+                case 'updated_by':   return `<td class="small text-muted">${esc(u.updated_by||'—')}</td>`;
+                case 'display_name': return `<td class="text-muted small">${esc(u.display_name || uname)}</td>`;
+                case 'role':         return `<td class="text-center"><span class="badge ${badge}">${esc(roleLabel)}</span></td>`;
+                case 'sessions':     return `<td class="text-center text-nowrap">${scHtml}</td>`;
+                default:             return '<td></td>';
+            }
+        }).join('');
+
         h += `<tr${rowStyle}>
-            ${showActions ? `<td><input type="checkbox" class="form-check-input" ${_selectedUsers.has(uname) ? 'checked' : ''} onchange="_usersToggleOne(${jsStr(uname)}, this.checked)"></td>` : ''}
-            <td class="text-nowrap">
-                <code>${esc(uname)}</code>
-                ${isSelf ? `<span class="badge text-bg-info fw-normal ms-1" style="font-size:.62rem">${t('you_badge')}</span>` : ''}
-                ${authBadge}
-                ${disabledBadge}
-            </td>
-            <td class="text-muted small">${esc(u.display_name || uname)}</td>
-            <td class="text-center"><span class="badge ${badge}">${esc(roleLabel)}</span></td>
-            <td class="text-center text-nowrap">${scHtml}</td>
-            ${showActions ? `<td class="ss-td-actions"${isEnabled ? '' : ' style="opacity:1"'}>${actionBtns}</td>` : ''}
+            ${showActions ? `<td><input type="checkbox" class="form-check-input" ${_selectedUsers.has(uname)?'checked':''} onchange="_usersToggleOne(${jsStr(uname)}, this.checked)"></td>` : ''}
+            ${cells}
+            ${showActions ? `<td class="ss-td-actions"${isEnabled?'':' style="opacity:1"'}>${actionBtns}</td>` : ''}
         </tr>`;
     }
     h += `</tbody></table>`;
+
     const pagination = _renderPagination(total, _usersPage, _usersPageSize, '_goUsersPage', '_changeUsersPageSize');
     const _addBtn = canEdit || userPerms.has('users_add')
         ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewUserModal()" title="${escAttr(t('new_user_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_user')}</button>` : '';
@@ -144,11 +223,33 @@ function renderUsers() {
             ${canDelete ? `<button class="btn btn-sm btn-danger py-0 px-2" onclick="_bulkDeleteUsers()" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
             <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedUsers.clear();renderUsers()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
         </div>` : '';
+
+    const colChooser = `<div class="dropdown">
+      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
+        <i class="bi bi-layout-three-columns"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:160px">
+        ${_USR_COLS.map(col => `<li>
+          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
+            <input type="checkbox" class="form-check-input m-0"
+                   ${col.always || _usersVisibleCols.has(col.id) ? 'checked' : ''}
+                   ${col.always ? 'disabled' : `onchange="_usersToggleCol('${col.id}')"`}>
+            <span class="small">${esc(col.label())}</span>
+            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
+          </label></li>`).join('')}
+        <li><hr class="dropdown-divider my-1"></li>
+        <li><button class="dropdown-item small py-1 text-muted" onclick="_resetUsersCols()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>${t('col_reset_defaults')||'Reset defaults'}
+        </button></li>
+      </ul>
+    </div>`;
+
     c.innerHTML = `<div class="ss-card">
         <div class="ss-accent ss-accent-amber"></div>
         <div class="ss-card-header">
             <h6 class="mb-0 me-auto"><i class="bi bi-people me-2"></i>${t('user_management')}</h6>
             ${_bulkBar}
+            ${colChooser}
             <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>
             ${_addBtn}
         </div>
@@ -156,8 +257,23 @@ function renderUsers() {
         <div>${h}</div>
         <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
     </div>`;
+    setTimeout(_initUsersTableFeatures, 0);
 }
 
+function _initUsersTableFeatures() {
+    _attachColFeatures('users-table',
+        () => _usersColOrder,
+        order => { _usersColOrder = order; },
+        _usrSaveColOrder,
+        renderUsers,
+        (col, w) => {
+            const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_users_col_w')||'{}'); } catch(_){ return {}; } })();
+            cw[col] = w; localStorage.setItem('ss_users_col_w', JSON.stringify(cw));
+        }
+    );
+}
+
+// ── Sessions sub-table ─────────────────────────────────────────────
 let _umSessionsSort = 'last_seen';
 let _umSessionsSortDir = 'desc';
 let _umSessionsUsername = null;
@@ -170,8 +286,8 @@ function _umSortSessions(col) {
 
 function _umRenderSessions(username) {
     _umSessionsUsername = username;
-    const group = document.getElementById('umSessionsGroup');
-    const table = document.getElementById('umSessionsTable');
+    const group   = document.getElementById('umSessionsGroup');
+    const table   = document.getElementById('umSessionsTable');
     const countEl = document.getElementById('umSessionsCount');
     if (!group || !table) return;
     const entries = Object.values(sessionsData).filter(s => s.username === username);
@@ -183,17 +299,17 @@ function _umRenderSessions(username) {
     }
     entries.sort((a, b) => {
         let va, vb;
-        if (_umSessionsSort === 'ip') { va = a.ip || ''; vb = b.ip || ''; }
+        if (_umSessionsSort === 'ip')           { va = a.ip || '';      vb = b.ip || '';      }
         else if (_umSessionsSort === 'created') { va = a.created || ''; vb = b.created || ''; }
-        else { va = a.last_seen || ''; vb = b.last_seen || ''; }
+        else                                    { va = a.last_seen||''; vb = b.last_seen||''; }
         return _umSessionsSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
     });
     const s = _umSessionsSort, d = _umSessionsSortDir;
     let h = `<table class="table table-sm align-middle mb-0" style="font-size:.8rem">
         <thead class="ss-thead"><tr>
-            ${_thSort(t('col_ip'),       'ip',       s, d, '_umSortSessions')}
-            ${_thSort(t('col_created'),  'created',  s, d, '_umSortSessions')}
-            ${_thSort(t('col_last_seen'),'last_seen', s, d, '_umSortSessions')}
+            ${_thSort(t('col_ip'),        'ip',        s, d, '_umSortSessions')}
+            ${_thSort(t('col_created'),   'created',   s, d, '_umSortSessions')}
+            ${_thSort(t('col_last_seen'), 'last_seen', s, d, '_umSortSessions')}
         </tr></thead><tbody>`;
     for (const sess of entries) {
         const created  = new Date(sess.created).toLocaleString();
@@ -246,9 +362,7 @@ async function _bulkEnableUsers(enabled) {
             const body = { role: u.role || 'none', display_name: u.display_name || '', lang: u.lang || '',
                            groups: u.groups || [], enabled, email: u.email || '' };
             const r = await apiPut('/api/v1/users/' + encodeURIComponent(uname), body);
-            if (r?.status === 200 && r.data?.ok) {
-                usersData[uname] = { ...usersData[uname], enabled };
-            }
+            if (r?.status === 200 && r.data?.ok) usersData[uname] = { ...usersData[uname], enabled };
         }
         _selectedUsers.clear();
         renderUsers();

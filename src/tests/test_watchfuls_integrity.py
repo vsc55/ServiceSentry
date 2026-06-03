@@ -115,7 +115,9 @@ class TestRealModuleImport:
             )
             for field_key, field_meta in fields.items():
                 if field_key.startswith('__'):
-                    continue  # metadata keys (e.g. __discovery__) are not field defs
+                    continue  # dunder metadata keys (e.g. __discovery__) are not field defs
+                if not isinstance(field_meta, dict):
+                    continue  # scalar metadata (e.g. api_ver) are not field defs
                 assert isinstance(field_meta, dict), (
                     f"{mod_name}.ITEM_SCHEMA['{collection}']['{field_key}'] "
                     f"is not a dict (got {type(field_meta).__name__})"
@@ -313,6 +315,14 @@ class TestDiscoverSchemasRealModules:
         for sk in schema_keys:
             for field_key, field_meta in self.schemas[sk].items():
                 if field_key.startswith('__') or not isinstance(field_meta, dict):
+                    continue
+                # Sub-collection fields are rendered as nested collections, not as
+                # scalar form fields — their title comes from lang.collections, so
+                # they intentionally have no label_i18n on the parent schema entry.
+                if field_meta.get('type') == 'sub_collection':
+                    continue
+                # Hidden fields are never rendered, so they need no display label.
+                if field_meta.get('hidden'):
                     continue
                 assert "label_i18n" in field_meta, (
                     f"{sk}['{field_key}'] missing 'label_i18n' "

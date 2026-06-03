@@ -26,9 +26,48 @@
 import json
 import os
 import tempfile
+import threading
+import time
 
 from lib.debug import DebugLevel
 from lib.object_base import ObjectBase
+
+# Module-level lock serialises concurrent writes from multiple threads in the
+# same process (e.g. parallel watchful checks each calling status.save()).
+_write_lock = threading.Lock()
+
+# Optional error callback — set by the web admin so file-write errors are
+# forwarded to the audit log in addition to the debug terminal.
+# Signature: callback(event: str, detail: str) -> None
+_error_callback = None
+
+
+def set_error_callback(callback) -> None:
+    """Register a function to be called when a file write fails."""
+    global _error_callback
+    _error_callback = callback
+
+
+def _atomic_replace(src: str, dst: str, retries: int = 8, base_delay: float = 0.05) -> None:
+    """Rename *src* to *dst* atomically, retrying on Windows [WinError 5].
+
+    On Windows, ``os.replace()`` raises ``PermissionError`` (WinError 5) when
+    the destination file is briefly locked by another thread or process doing
+    its own rename.  Retrying with exponential back-off resolves the transient
+    conflict in practice without requiring cross-process file locking.
+    """
+    with _write_lock:
+        for attempt in range(retries):
+            try:
+                os.replace(src, dst)
+                return
+            except OSError as exc:
+                # WinError 5 = Access Denied — target briefly locked by a
+                # concurrent rename.  Any other OSError is re-raised immediately.
+                if getattr(exc, 'winerror', None) != 5 or attempt == retries - 1:
+                    raise
+                time.sleep(base_delay * (2 ** attempt))  # 50 ms, 100 ms, 200 ms …
+
 
 __all__ = ['ConfigStore']
 
@@ -118,7 +157,7 @@ class ConfigStore(ObjectBase):
             ) as tmp:
                 json.dump(data, tmp, ensure_ascii=False, indent=4)
                 tmp_path = tmp.name
-            os.replace(tmp_path, self.file)
+            _atomic_replace(tmp_path, self.file)
             tmp_path = None
 
         except TypeError as e:
@@ -129,14 +168,22 @@ class ConfigStore(ObjectBase):
             return False
 
         except OSError as e:
-            self.debug.print(
-                f"Config >> Warning: Cannot write file ({self.file}) ({e})",
-                DebugLevel.error
-            )
+            msg = f"Config >> Warning: Cannot write file ({self.file}) ({e})"
+            self.debug.print(msg, DebugLevel.error)
+            if _error_callback:
+                try:
+                    _error_callback('file_write_error', {'file': self.file, 'error': str(e)})
+                except Exception:  # pylint: disable=broad-except
+                    pass
             return False
 
         except Exception as e:
             self.debug.exception(e)
+            if _error_callback:
+                try:
+                    _error_callback('file_write_error', {'file': self.file, 'error': str(e)})
+                except Exception:  # pylint: disable=broad-except
+                    pass
             return False
 
         finally:

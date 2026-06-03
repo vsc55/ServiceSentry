@@ -24,11 +24,15 @@
 """ Monitor class to check the status of the system. """
 
 import concurrent.futures
+import datetime
 import glob
 import importlib
+import json
 import os
 import pprint
 import socket
+import sys
+import tempfile
 import time
 
 from lib.config import ConfigControl
@@ -56,6 +60,8 @@ class Monitor(ObjectBase):
     _DEFAULT_THREADS = 5     # Number of threads to use for parallel processing as default value.
     _DEFAULT_ENABLED = True
 
+    _AUDIT_MAX_ENTRIES = 500
+
     def __init__(self, dir_base: str, dir_config: str, dir_modules: str, dir_var: str):
         self.dir_base = dir_base
         self.dir_config = dir_config
@@ -65,7 +71,85 @@ class Monitor(ObjectBase):
         self._read_config()
         self._read_status()
         self._init_telegram()
+        self._history = self._init_history()
         self.debug.print("> Monitor >> Monitor Init OK")
+
+    def _init_history(self):
+        """Create a HistoryStore using the configured database connector."""
+        if not self.dir_var:
+            return None
+        try:
+            from lib.history import create as _create_history  # noqa: PLC0415
+            db_cfg = self.cfg_general.get_conf(['database']) or {}
+            return _create_history(db_cfg or None,
+                                   sqlite_path=os.path.join(self.dir_var, 'data.db'))
+        except Exception:  # pylint: disable=broad-except
+            return None
+
+    def _get_item_uid(self, module_name: str, key: str) -> str | None:
+        """Return the stable UID for *key* within *module_name*, or None."""
+        module_cfg = self.config_modules.get_conf([module_name])
+        if not isinstance(module_cfg, dict):
+            return None
+        for section_val in module_cfg.values():
+            if isinstance(section_val, dict):
+                item = section_val.get(key)
+                if isinstance(item, dict):
+                    uid = item.get('uid')
+                    if uid:
+                        return str(uid)
+        return None
+
+    # ── Audit helpers ─────────────────────────────────────────────────────────
+
+    def _audit_system(self, event: str, detail: str | dict = '') -> None:
+        """Append a system-generated entry to audit.json without Flask context.
+
+        Safe to call from background threads and the systemd monitoring process.
+        Writes directly to the audit file; concurrent access is serialised by
+        the same atomic-replace logic used everywhere else.
+        """
+        if not self.dir_config:
+            return
+        audit_path = os.path.join(self.dir_config, 'audit.json')
+        try:
+            # Read existing log
+            try:
+                with open(audit_path, encoding='utf-8') as f:
+                    log: list = json.load(f)
+                if not isinstance(log, list):
+                    log = []
+            except (OSError, json.JSONDecodeError):
+                log = []
+
+            log.append({
+                'ts':     datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                'event':  event,
+                'user':   'system',
+                'ip':     'internal',
+                'detail': detail,
+            })
+            log = log[-self._AUDIT_MAX_ENTRIES:]
+
+            # Atomic write
+            tmp_path = None
+            with tempfile.NamedTemporaryFile(
+                'w', dir=self.dir_config, suffix='.tmp',
+                delete=False, encoding='utf-8',
+            ) as tmp:
+                json.dump(log, tmp, indent=2, ensure_ascii=False)
+                tmp_path = tmp.name
+            os.replace(tmp_path, audit_path)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.debug.print(
+                f'> Monitor >> _audit_system failed: {exc}',
+                DebugLevel.warning,
+            )
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     @staticmethod
     def _check_dir(path_dir):
@@ -248,6 +332,23 @@ class Monitor(ObjectBase):
         """
         try:
             self.debug.print(f"> Monitor > check_module >> Module: {module_name}", DebugLevel.info)
+            # Ensure watchfuls/ is at the front of sys.path so local packages
+            # (e.g. watchfuls/dns/) take precedence over same-named third-party
+            # packages (e.g. dnspython, also importable as 'dns').
+            if self.dir_modules and self.dir_modules not in sys.path:
+                sys.path.insert(0, self.dir_modules)
+
+            # Python caches imports in sys.modules.  If a third-party package
+            # with the same short name was imported first (e.g. dnspython→'dns'),
+            # importlib.import_module() would return the wrong cached module.
+            # Detect that case and evict the stale entry so a clean re-import
+            # picks up the correct watchful from sys.path.
+            cached = sys.modules.get(module_name)
+            if cached is not None and not hasattr(cached, 'Watchful'):
+                del sys.modules[module_name]
+                for _k in [k for k in sys.modules if k.startswith(module_name + '.')]:
+                    del sys.modules[_k]
+
             module_import = importlib.import_module(module_name)
             module = module_import.Watchful(self)
             result_data = module.check()
@@ -264,6 +365,10 @@ class Monitor(ObjectBase):
 
         except Exception as e: # pylint: disable=broad-except
             self.debug.exception(e)
+            self._audit_system('module_check_error', {
+                'module': module_name,
+                'error':  f'{type(e).__name__}: {e}',
+            })
 
         return False, module_name, None
 
@@ -301,13 +406,24 @@ class Monitor(ObjectBase):
             DebugLevel.info
         )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+        # Per-module hard timeout (seconds).  Prevents a single hanging module
+        # from blocking the entire monitoring cycle.  Each module enforces its
+        # own internal timeouts; this is a last-resort safety net.
+        _MODULE_TIMEOUT = 120
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_threads)
+        try:
             future_to_module = {
                 executor.submit(self.check_module, module): module
                 for module in list_modules
             }
 
-            for future in concurrent.futures.as_completed(future_to_module):
+            done, not_done = concurrent.futures.wait(
+                future_to_module.keys(),
+                timeout=_MODULE_TIMEOUT,
+            )
+
+            for future in done:
                 module_name = future_to_module[future]
                 try:
                     success, result_module_name, result_data = future.result()
@@ -319,9 +435,29 @@ class Monitor(ObjectBase):
                             f"> Monitor > check >> Module failed: {module_name}",
                             DebugLevel.warning
                         )
-
-                except Exception as exc: # pylint: disable=broad-except
+                        # Already audited inside check_module's except block
+                except Exception as exc:  # pylint: disable=broad-except
                     self.debug.exception(exc)
+                    self._audit_system('module_check_error', {
+                        'module': module_name,
+                        'error':  f'{type(exc).__name__}: {exc}',
+                    })
+
+            for future in not_done:
+                module_name = future_to_module[future]
+                self.debug.print(
+                    f"> Monitor > check >> Module timed out after {_MODULE_TIMEOUT}s: {module_name}",
+                    DebugLevel.warning
+                )
+                self._audit_system('module_check_timeout', {
+                    'module':  module_name,
+                    'timeout': _MODULE_TIMEOUT,
+                })
+                future.cancel()
+        finally:
+            # wait=False: do not block for hanging threads; they will finish
+            # on their own module-level timeouts (socket/subprocess timeouts).
+            executor.shutdown(wait=False, cancel_futures=True)
 
         self.debug.debug_obj(__name__, self.status.data, "Debug Status Save")
 

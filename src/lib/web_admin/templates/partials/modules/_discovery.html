@@ -1,5 +1,8 @@
 {# ================================================================
    Modules discovery — service discovery modal and logic.
+   All rendering hints (icons, colours, subtitle template, default
+   operators) are read from the collection schema so this file
+   contains zero module-specific knowledge.
    ================================================================ #}
 
 // ──────────────────────────── Service Discovery ───────────────────
@@ -32,7 +35,33 @@ async function openDiscoverModal(pathStr, url) {
 
     bootstrap.Modal.getOrCreateInstance(document.getElementById('discoverModal')).show();
 
-    const data = await apiGet(url);
+    // Support POST-based discovery (e.g. modules that need their config as body).
+    // Schema signals this via __discovery_method__: "POST" on the collection.
+    const _colSch = ITEM_SCHEMAS[_schemaKeyOf(pathStr)] || null;
+    const _usePost = _colSch && _colSch['__discovery_method__'] === 'POST';
+    let data;
+    if (_usePost) {
+        const _parts = pathStr.split('|');
+        let postBody;
+        if (_parts.length >= 4) {
+            // Sub-collection: POST the parent item's config so discover() scans
+            // only that one server. Also include module-level scalar fields.
+            const _parentColKey  = _parts[1];
+            const _parentItemKey = _parts[2];
+            const _parentItem    = getPath(modulesData[modName] || {}, [_parentColKey, _parentItemKey]) || {};
+            const _modCfg        = modulesData[modName] || {};
+            const _modScalars    = Object.fromEntries(
+                Object.entries(_modCfg).filter(([, v]) => typeof v !== 'object' || v === null || Array.isArray(v))
+            );
+            postBody = { ..._modScalars, [_parentColKey]: { [_parentItemKey]: _parentItem } };
+        } else {
+            postBody = modulesData[modName] || {};
+        }
+        const res = await apiPost(url, postBody);
+        data = res && Array.isArray(res.data) ? res.data : null;
+    } else {
+        data = await apiGet(url);
+    }
     if (!Array.isArray(data)) {
         if (body) body.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${esc(_modUiStr(modName, 'discover_error', t('error') || '?'))}</div>`;
         return;
@@ -43,7 +72,8 @@ async function openDiscoverModal(pathStr, url) {
 
 async function openDiscoverModalForField(fieldPathStr, url) {
     _discoverFieldPathStr = fieldPathStr;
-    _discoverPathStr = fieldPathStr.split('|').slice(0, 2).join('|');
+    // Collection path = all parts except field key and item key (last two segments).
+    _discoverPathStr = fieldPathStr.split('|').slice(0, -2).join('|');
     _discoverServices = null;
     const modName = fieldPathStr.split('|')[0];
     const titleEl = document.getElementById('discoverModalTitle');
@@ -68,11 +98,15 @@ function _renderDiscoverList() {
 
     const filter = (document.getElementById('discoverFilter')?.value || '').toLowerCase();
 
+    // Read collection schema (reused for configured-set, render hints, and operators).
+    const _colSch = _discoverPathStr
+        ? (ITEM_SCHEMAS[_schemaKeyOf(_discoverPathStr)] || null)
+        : null;
+
     // Build set of names already configured (lowercase for case-insensitive match).
     // Uses __discovery_field__ from the collection schema to find the operative field.
     const configured = new Set();
     if (_discoverPathStr) {
-        const _colSch = ITEM_SCHEMAS[_discoverPathStr] || null;
         const _discField = _colSch && _colSch['__discovery_field__'];
         const collection = getPath(modulesData, _discoverPathStr.split('|')) || {};
         for (const [key, val] of Object.entries(collection)) {
@@ -80,6 +114,12 @@ function _renderDiscoverList() {
             configured.add((fieldVal || key).toLowerCase());
         }
     }
+
+    // Schema-driven render hints — all module-specific knowledge lives in schema.json.
+    const _catDefs     = (_colSch && _colSch['__discovery_categories__'])        || {};
+    const _subtitleTpl = (_colSch && _colSch['__discovery_subtitle__'])           || '';
+    const _typeField   = (_colSch && _colSch['__discovery_type_field__'])         || 'status';
+    const _catField    = (_colSch && _colSch['__discovery_category_field__'])     || '';
 
     const filtered = _discoverServices.filter(s =>
         !filter ||
@@ -107,23 +147,57 @@ function _renderDiscoverList() {
             ? (configured.has(_svcLower) && _svcLower !== _currentFieldVal)
             : configured.has(_svcLower);
         const _isCurrent = _fieldMode && _svcLower === _currentFieldVal;
+
+        // Status icon/colour (running / stopped / unknown — generic service concept)
         const statusColor = svc.status === 'running' ? '#22c55e' : (svc.status === 'stopped' ? '#ef4444' : 'var(--bs-secondary-color)');
         const statusIcon  = svc.status === 'running' ? 'bi-check-circle-fill' : (svc.status === 'stopped' ? 'bi-stop-circle-fill' : 'bi-circle');
+
+        // Category and its display definition (read from schema, not hardcoded)
+        const _cat    = _catField ? (svc[_catField] || '') : '';
+        const _catDef = _catDefs[_cat] || {};
+
+        // Type badge — text from schema-declared field, style from category definition
+        const _typeText  = svc[_typeField] || svc.status || '?';
+        const _typeColor = _catDef.color || 'var(--bs-secondary-color)';
+        const _typeIcon  = _catDef.icon
+            ? `<i class="bi ${_catDef.icon} me-1" style="color:${_typeColor}"></i>`
+            : '';
+        const _typeBadge = `<span class="badge rounded-pill flex-shrink-0"
+            style="font-size:.62rem;background:var(--bs-secondary-bg);color:${_typeColor}"
+            title="${escAttr(_typeText)}">${_typeIcon}${esc(_typeText)}</span>`;
+
+        // Subtitle line — built from a template string declared in schema.
+        // e.g. "__discovery_subtitle__": "{mib_module}::{mib_name}"
+        let _subtitle = '';
+        if (_subtitleTpl) {
+            _subtitle = _subtitleTpl.replace(/\{(\w+)\}/g, (_, k) => String(svc[k] || ''));
+            // Collapse separators left dangling by empty field values
+            _subtitle = _subtitle.replace(/^[:.\s]+|[:.\s]+$/g, '').replace(/:{2,}/g, '::');
+            if (!_subtitle.replace(/[:.]/g, '').trim()) _subtitle = '';
+        }
+        const _subtitleBadge = _subtitle
+            ? `<span class="text-truncate" style="font-size:.7rem;color:var(--bs-info-text-emphasis);max-width:160px" title="${escAttr(_subtitle)}">${esc(_subtitle)}</span>`
+            : '';
+
         const _clickAttr  = isAdded ? '' : (_fieldMode
             ? `onclick="_selectDiscoveredServiceForField(${jsStr(_svcName)})"`
-            : `onclick="_addDiscoveredService(${jsStr(_svcName)})"`);
+            : `onclick="_addDiscoveredService(${jsStr(_svcName)},${jsStr(_cat)},${jsStr(svc[_typeField]||'')})"`);
         const _trailIcon  = isAdded
             ? `<span class="badge bg-secondary flex-shrink-0" style="font-size:.65rem">${esc(t('already_added'))}</span>`
             : _isCurrent
                 ? `<i class="bi bi-check-circle-fill text-success flex-shrink-0"></i>`
                 : `<i class="bi ${_fieldMode ? 'bi-circle text-muted opacity-50' : 'bi-plus-circle text-success'} flex-shrink-0"></i>`;
+
         h += `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border${isAdded ? ' opacity-50' : ''}"
                    style="background:var(--bs-body-bg)${isAdded ? '' : ';cursor:pointer'}"
                    ${_clickAttr}>
             <i class="bi ${statusIcon} flex-shrink-0" style="color:${statusColor};font-size:.9rem"></i>
-            <code class="flex-grow-1 text-truncate" style="font-size:.82rem" title="${escAttr(svc.display_name || svc.name)}">${esc(svc.name)}</code>
-            ${svc.display_name ? `<span class="text-muted text-truncate" style="font-size:.78rem;max-width:200px">${esc(svc.display_name)}</span>` : ''}
-            <span class="badge rounded-pill flex-shrink-0" style="font-size:.65rem;background:var(--bs-secondary-bg);color:var(--bs-secondary-color)">${esc(svc.status || '?')}</span>
+            <div class="flex-grow-1 min-w-0">
+                ${_subtitleBadge ? `<div class="text-truncate">${_subtitleBadge}</div>` : ''}
+                <code class="text-truncate d-block" style="font-size:.78rem" title="${escAttr(svc.name)}">${esc(svc.name)}</code>
+            </div>
+            ${svc.display_name ? `<span class="text-muted text-truncate" style="font-size:.75rem;max-width:160px">${esc(svc.display_name)}</span>` : ''}
+            ${_typeBadge}
             ${_trailIcon}
         </div>`;
     }
@@ -131,7 +205,7 @@ function _renderDiscoverList() {
     body.innerHTML = h;
 }
 
-function _addDiscoveredService(serviceName) {
+function _addDiscoveredService(serviceName, category, typeInfo) {
     if (!_discoverPathStr) return;
     const parts = _discoverPathStr.split('|');
     const collection = getPath(modulesData, parts);
@@ -142,15 +216,31 @@ function _addDiscoveredService(serviceName) {
     let key = serviceName, n = 2;
     while (_existingLower.has(key.toLowerCase())) key = serviceName + '_' + n++;
 
-    // Build item from schema defaults, leave 'service' empty (key encodes service name)
-    const defaults = schemaDefaults(ITEM_SCHEMAS[_discoverPathStr] || null) || {};
+    // Build item from schema defaults
+    const _schKey = _schemaKeyOf(_discoverPathStr);
+    const defaults = schemaDefaults(ITEM_SCHEMAS[_schKey] || null) || {};
     const item = {};
     for (const [k, v] of Object.entries(defaults)) {
         item[k] = Array.isArray(v) ? [...v] : v;
     }
-    const _colSch = ITEM_SCHEMAS[_discoverPathStr] || null;
+    const _colSch = ITEM_SCHEMAS[_schKey] || null;
     const _discField = _colSch && _colSch['__discovery_field__'];
     if (_discField && _discField in item) item[_discField] = serviceName;
+
+    // Auto-set operator from schema's __discovery_default_operators__ if available.
+    // The mapping is declared entirely in the module's schema.json — no hardcoding here.
+    if (category && 'operator' in item) {
+        const _defOps = (_colSch && _colSch['__discovery_default_operators__']) || {};
+        const _op = _defOps[category];
+        if (_op) item.operator = _op;
+    }
+
+    // Store the discovered type in the schema-declared field (e.g. snmp_type).
+    // __discovery_type_store_field__ tells us which field to use — no module-specific logic here.
+    const _typeStoreField = _colSch && _colSch['__discovery_type_store_field__'];
+    if (_typeStoreField && typeInfo && _typeStoreField in item) {
+        item[_typeStoreField] = String(typeInfo);
+    }
 
     collection[key] = item;
     _autoExpandItemPath = _discoverPathStr + '|' + key;
@@ -166,9 +256,10 @@ function _selectDiscoveredServiceForField(serviceName) {
     const parts = _discoverFieldPathStr.split('|');
     const target = parts[0] in modulesData ? 'modules' : 'config';
 
-    // If __key_mirrors_field__ matches this field, rename the item key too
-    const _colPathStr = parts.slice(0, 2).join('|');
-    const _colSch = ITEM_SCHEMAS[_colPathStr] || null;
+    // If __key_mirrors_field__ matches this field, rename the item key too.
+    // Collection path = all segments except item key and field key.
+    const _colPathStr = parts.slice(0, -2).join('|');
+    const _colSch = ITEM_SCHEMAS[_schemaKeyOf(_colPathStr)] || null;
     const _mirrorField = _colSch && _colSch['__key_mirrors_field__'];
     const _fieldKey = parts[parts.length - 1];
 

@@ -104,7 +104,8 @@ async function saveUserModal() {
                     if (!groupsData[g].members.includes(_editingUser)) groupsData[g].members.push(_editingUser);
                 }
             }
-            usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email, dark_mode };
+            const _nowU = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+            usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email, dark_mode, updated_at: _nowU, updated_by: currentUser.username || '' };
             if (_editingUser === currentUser.username) {
                 currentUser.role = role;
                 currentUser.display_name = display_name || _editingUser;
@@ -121,7 +122,8 @@ async function saveUserModal() {
         const r = await apiPost('/api/v1/users', { username, password, role, display_name, lang, groups, email, enabled });
         if (r && r.status === 201) {
             showToast(t('user_created'));
-            usersData[username] = { role, display_name: display_name || username, lang, groups, email, enabled };
+            const _nowC = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+            usersData[username] = { role, display_name: display_name || username, lang, groups, email, enabled, created_at: _nowC, updated_at: _nowC, updated_by: currentUser.username || '' };
             for (const g of groups) {
                 if (groupsData[g]) {
                     if (!groupsData[g].members) groupsData[g].members = [];

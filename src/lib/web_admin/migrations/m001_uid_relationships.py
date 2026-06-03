@@ -47,12 +47,16 @@ def run(wa):
             new_groups = []
             changed = False
             for g in old_groups:
-                if not wa._is_uid(g):
+                if g in wa._groups:
+                    # already a valid uid (dict is now keyed by uid)
+                    new_groups.append(g)
+                elif not wa._is_uid(g):
+                    # legacy name — search by label
                     uid = wa._group_name_to_uid(g)
                     if uid:
                         new_groups.append(uid)
                         changed = True
-                    # unknown group names are silently dropped
+                    # unknown names are silently dropped
                 else:
                     new_groups.append(g)
             if changed:

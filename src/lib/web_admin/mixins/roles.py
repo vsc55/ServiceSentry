@@ -2,63 +2,38 @@
 # -*- coding: utf-8 -*-
 """Custom roles mixin for WebAdmin."""
 
-import json
-import os
-import tempfile
-import uuid
+from ..constants import BUILTIN_ROLE_UIDS
 
 
 class _RolesMixin:
-    """Persistence and lookup for custom roles (``roles.json``)."""
-
-    @property
-    def _roles_path(self) -> str:
-        return os.path.join(self._config_dir, self._ROLES_FILE)
+    """Persistence and lookup for custom roles (DB table ``roles``)."""
 
     def _load_roles(self) -> None:
-        """Load custom roles from ``roles.json``."""
-        path = self._roles_path
-        if os.path.isfile(path):
-            try:
-                with open(path, encoding='utf-8') as fh:
-                    data = json.load(fh)
-                self._builtin_role_labels = data.pop('__builtin_labels__', {})
-                self._custom_roles = data
-            except (json.JSONDecodeError, OSError):
-                self._custom_roles = {}
-                self._builtin_role_labels = {}
-        else:
-            self._custom_roles = {}
-            self._builtin_role_labels = {}
-        # Ensure every custom role has a stable uid
-        dirty = False
-        for rdata in self._custom_roles.values():
-            if not rdata.get('uid'):
-                rdata['uid'] = str(uuid.uuid4())
-                dirty = True
-        if dirty:
-            self._persist_roles()
+        """Load roles from the columnar roles table.
+
+        ``_custom_roles`` — keyed by UID — holds only **custom** roles:
+        ``{uid: {uid, name, description, permissions, enabled, created_at,
+        updated_at, updated_by}}``.
+
+        ``_builtin_role_overrides`` — keyed by built-in UID — stores optional
+        name/description overrides for the four built-in roles.  Permissions
+        for built-ins are always taken from code (``BUILTIN_ROLE_PERMISSIONS``).
+        """
+        all_stored = self._roles_store.load_roles()
+        builtin_uids = set(BUILTIN_ROLE_UIDS.values())
+        self._custom_roles          = {uid: d for uid, d in all_stored.items()
+                                        if uid not in builtin_uids}
+        self._builtin_role_overrides = {uid: d for uid, d in all_stored.items()
+                                         if uid in builtin_uids}
+        # Convenience: {key → display name} for routes that need it
+        self._builtin_role_names = {
+            key: self._builtin_role_overrides[uid]['name']
+            for key, uid in BUILTIN_ROLE_UIDS.items()
+            if uid in self._builtin_role_overrides and self._builtin_role_overrides[uid].get('name')
+        }
 
     def _persist_roles(self) -> bool:
-        """Write custom roles to ``roles.json`` atomically."""
-        tmp_path = None
-        try:
-            os.makedirs(self._config_dir, exist_ok=True)
-            data = dict(self._custom_roles)
-            if self._builtin_role_labels:
-                data['__builtin_labels__'] = self._builtin_role_labels
-            with tempfile.NamedTemporaryFile(
-                'w', encoding='utf-8', dir=self._config_dir,
-                suffix='.tmp', delete=False,
-            ) as tmp:
-                json.dump(data, tmp, indent=4, ensure_ascii=False)
-                tmp_path = tmp.name
-            os.replace(tmp_path, self._roles_path)
-            return True
-        except OSError:
-            if tmp_path:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-            return False
+        """Write all custom roles + built-in overrides to the roles table."""
+        to_save = dict(self._custom_roles)
+        to_save.update(self._builtin_role_overrides)
+        return self._roles_store.save_all(to_save)

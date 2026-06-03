@@ -3,13 +3,32 @@
 """Module routes: /api/v1/modules (GET, PUT), /api/v1/modules/status, /api/v1/modules/overview."""
 
 import os
+import uuid
 
 from flask import jsonify
 
 from lib import secret_manager
 
 from lib.config import ConfigControl
-from ...constants import BUILTIN_ROLE_PERMISSIONS
+from ...constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS
+
+
+def _ensure_item_uids(data: dict) -> None:
+    """Add a stable UUID to every module item that lacks one.
+
+    Items live inside dict-valued sections of each module config (typically
+    called ``list`` or ``servers``).  A UUID is generated only when absent so
+    existing UIDs are never overwritten.
+    """
+    for module_cfg in data.values():
+        if not isinstance(module_cfg, dict):
+            continue
+        for section_val in module_cfg.values():
+            if not isinstance(section_val, dict):
+                continue
+            for item in section_val.values():
+                if isinstance(item, dict) and 'uid' not in item:
+                    item['uid'] = str(uuid.uuid4())
 
 
 def register(app, wa):
@@ -75,6 +94,7 @@ def register(app, wa):
                     if 'modules_delete' not in perms:
                         return jsonify({'error': wa._t('access_denied')}), 403
         secret_manager.restore_sensitive(data, old_data)
+        _ensure_item_uids(data)   # generate stable UIDs for new items
         if wa._save_config_file(wa._MODULES_FILE, data):
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._SENSITIVE_FIELDS,
@@ -143,18 +163,20 @@ def register(app, wa):
 
         # Sessions summary
         active_sessions = len(wa._sessions)
-        session_users = list({
-            s.get('username', '')
+        _uid_to_name    = {d.get('uid', ''): u for u, d in wa._users.items()}
+        session_users   = list({
+            _uid_to_name.get(s.get('user_uid', ''), s.get('user_uid', ''))
             for s in wa._sessions.values()
         })
 
         # Users summary
         total_users = len(wa._users)
         users_by_role: dict[str, int] = {}
+        _viewer_uid = BUILTIN_ROLE_UIDS.get('viewer', '')
         for u in wa._users.values():
-            r = u.get('role', 'viewer')
-            r_name = wa._uid_to_role_name(r) if wa._is_uid(r) else r
-            users_by_role[r_name] = users_by_role.get(r_name, 0) + 1
+            r = u.get('role', '')
+            r_uid = (wa._role_name_to_uid(r) if not wa._is_uid(r) else r) or _viewer_uid
+            users_by_role[r_uid] = users_by_role.get(r_uid, 0) + 1
 
         # Groups summary
         total_groups = len(wa._groups)

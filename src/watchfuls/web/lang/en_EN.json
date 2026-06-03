@@ -1,23 +1,48 @@
 {
     "pretty_name": "Websites",
-    "module_description": "Monitors web URL availability and expected HTTP response codes. Alerts when a URL is unreachable or returns an unexpected status code.",
+    "module_description": "Monitors HTTP/HTTPS endpoints. Checks status codes, optional response content, and basic authentication. Supports GET, HEAD and POST methods.",
     "labels": {
-        "enabled":    "Enabled",
-        "scheme":     "Scheme",
-        "threads":    "Threads",
-        "url":        "URL",
-        "code":       "HTTP Code",
-        "timeout":    "Timeout (s)",
-        "verify_ssl": "Verify SSL"
+        "enabled":          "Enabled",
+        "threads":          "Threads",
+        "code":             "HTTP Code",
+        "timeout":          "Timeout (s)",
+        "url":              "URL",
+        "scheme":           "Scheme",
+        "method":           "Method",
+        "verify_ssl":       "Verify SSL",
+        "check_content":    "Check Content",
+        "content_contains": "Content Contains",
+        "auth_enabled":     "Enable authentication",
+        "auth_user":        "Username",
+        "auth_password":    "Password",
+        "alert":            "Alert threshold"
     },
     "hints": {
-        "enabled":    "Enable or disable monitoring for this URL.",
-        "scheme":     "Protocol to use when the URL does not include a scheme (http:// or https://).",
-        "threads":    "Number of URLs to check in parallel.",
-        "url":        "Host or full URL to check. If empty, the item key is used.",
-        "code":       "Expected HTTP response code. An alert is triggered when the actual code differs from this value.",
-        "timeout":    "Request timeout in seconds. The check fails if the server does not respond within this time.",
-        "verify_ssl": "Verify the server's SSL certificate. Disable only for self-signed certificates."
+        "enabled":          "Enable or disable monitoring for this URL.",
+        "threads":          "Number of URLs to check in parallel.",
+        "code":             "Default expected HTTP response code for all URLs.",
+        "timeout":          "Default request timeout in seconds.",
+        "url":              "Host or full URL to check. If empty, the item key is used as URL.",
+        "scheme":           "Protocol to use when the URL does not include a scheme (http:// or https://).",
+        "method":           "HTTP method. HEAD is fastest (no body). POST sends an empty body.",
+        "verify_ssl":       "Verify the server's SSL certificate. Disable only for self-signed certificates in trusted networks.",
+        "check_content":    "Also verify that the response body contains a specific string.",
+        "content_contains": "String that must appear in the response body. Case-sensitive. Ignored for HEAD requests.",
+        "auth_enabled":     "Enable HTTP Basic Authentication for this endpoint.",
+        "auth_user":        "Username for HTTP Basic Authentication.",
+        "auth_password":    "Password for HTTP Basic Authentication.",
+        "alert":            "Consecutive failures before triggering an alert. Use >1 to suppress transient errors."
+    },
+    "option_labels": {
+        "scheme": {"http": "HTTP", "https": "HTTPS"},
+        "method": {"GET": "GET", "HEAD": "HEAD (no body)", "POST": "POST"}
+    },
+    "group_labels": {
+        "content": "Content check",
+        "auth":    "Basic Authentication"
+    },
+    "action_labels": {
+        "test_connection": "Test endpoint"
     },
     "new_item_key_label": "URL or hostname:",
     "rename_item_prompt": "Enter new URL or hostname:",

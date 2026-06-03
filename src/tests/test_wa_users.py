@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests for user management API, role permissions and change-own-password."""
 
-import json
-import os
-
 import pytest
 
 try:
@@ -37,7 +34,8 @@ class TestApiUsers:
         assert "admin" in data
         # Must NOT expose password_hash
         assert "password_hash" not in data["admin"]
-        assert data["admin"]["role"] == "admin"
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        assert data["admin"]["role"] == BUILTIN_ROLE_UIDS['admin']
 
     def test_create_user(self, client):
         _login(client)
@@ -51,7 +49,8 @@ class TestApiUsers:
         # Verify it appears in the list
         users = client.get("/api/v1/users").get_json()
         assert "newuser" in users
-        assert users["newuser"]["role"] == "editor"
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        assert users["newuser"]["role"] == BUILTIN_ROLE_UIDS['editor']
         assert users["newuser"]["display_name"] == "New User"
 
     def test_create_user_missing_username(self, client):
@@ -102,7 +101,8 @@ class TestApiUsers:
         })
         assert resp.status_code == 200
         users = client.get("/api/v1/users").get_json()
-        assert users["testuser"]["role"] == "editor"
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        assert users["testuser"]["role"] == BUILTIN_ROLE_UIDS['editor']
         assert users["testuser"]["display_name"] == "Test Edited"
 
     def test_update_user_password(self, admin, client):
@@ -150,18 +150,16 @@ class TestApiUsers:
         assert resp.status_code == 400
         assert "admin must exist" in resp.get_json()["error"]
 
-    def test_users_persisted_to_file(self, admin, config_dir):
-        """users.json on disk reflects API changes."""
+    def test_users_persisted_to_db(self, admin):
+        """DB table reflects API changes after creating a user."""
         admin.app.config["TESTING"] = True
         c = admin.app.test_client()
         c.post("/login", data={"username": "admin", "password": "secret"})
         c.post("/api/v1/users", json={
             "username": "persisted", "password": "testpass", "role": "viewer",
         })
-        path = os.path.join(config_dir, "users.json")
-        with open(path, encoding="utf-8") as f:
-            on_disk = json.load(f)
-        assert "persisted" in on_disk
+        db_users = admin._users_store.load()
+        assert "persisted" in db_users
 
 
 # ──────────────────────────── Input validation ─────────────────────
@@ -222,12 +220,12 @@ class TestUserInputValidation:
 
     def test_create_user_known_group_accepted(self, admin, client):
         _login(client)
+        grp_uid = '00000000-0000-4000-8000-000000000010'  # administrators uid
         resp = client.post("/api/v1/users", json={
             "username": "u6", "password": "testpass", "role": "viewer",
-            "groups": ["administrators"],
+            "groups": [grp_uid],
         })
         assert resp.status_code == 201
-        grp_uid = admin._group_name_to_uid("administrators")
         assert grp_uid in admin._users["u6"].get("groups", [])
 
     # --- update user: lang ---
@@ -308,12 +306,12 @@ class TestUserInputValidation:
 
     def test_update_user_known_group_accepted(self, admin, client):
         _login(client)
+        grp_uid = '00000000-0000-4000-8000-000000000010'  # administrators uid
         client.post("/api/v1/users", json={
             "username": "grp3", "password": "testpass", "role": "viewer",
         })
-        resp = client.put("/api/v1/users/grp3", json={"groups": ["administrators"]})
+        resp = client.put("/api/v1/users/grp3", json={"groups": [grp_uid]})
         assert resp.status_code == 200
-        grp_uid = admin._group_name_to_uid("administrators")
         assert grp_uid in admin._users["grp3"]["groups"]
 
     # --- preferences endpoint ---
@@ -352,28 +350,23 @@ class TestRolePermissions:
 
     @staticmethod
     def _make_multiuser_admin(config_dir, var_dir):
-        """Create a WebAdmin with admin + editor + viewer users."""
-        users = {
-            "boss": {
-                "password_hash": generate_password_hash("bosspass"),
-                "role": "admin",
-                "display_name": "Boss",
-            },
-            "dev": {
-                "password_hash": generate_password_hash("devpass"),
-                "role": "editor",
-                "display_name": "Developer",
-            },
-            "guest": {
-                "password_hash": generate_password_hash("guestpass"),
-                "role": "viewer",
-                "display_name": "Guest",
-            },
-        }
-        with open(os.path.join(config_dir, "users.json"), "w", encoding="utf-8") as f:
-            json.dump(users, f)
-        wa = WebAdmin(config_dir, var_dir=var_dir)
+        """Create a WebAdmin with admin 'boss', editor 'dev', viewer 'guest'."""
+        import uuid as _uuid
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        wa = WebAdmin(config_dir, "boss", "bosspass", var_dir=var_dir,
+                      pw_require_upper=False, pw_require_digit=False)
         wa.app.config["TESTING"] = True
+        for uname, role_key, pw, dn in [
+            ("dev",   "editor", "devpass",   "Developer"),
+            ("guest", "viewer", "guestpass", "Guest"),
+        ]:
+            wa._users[uname] = {
+                'uid':           str(_uuid.uuid4()),
+                'password_hash': generate_password_hash(pw),
+                'role':          BUILTIN_ROLE_UIDS[role_key],
+                'display_name':  dn,
+            }
+        wa._persist_users()
         return wa
 
     def test_viewer_can_read_modules(self, config_dir, var_dir):
@@ -475,3 +468,90 @@ class TestChangeOwnPassword:
             "new_password": "y",
         })
         assert resp.status_code == 401
+
+
+# ──────────────────────────── Password reset privilege checks ──────────
+
+class TestPasswordResetPrivileges:
+    """Only admins can reset another user's password via the admin API.
+
+    Security invariants verified here:
+    - Non-admin with users_edit CANNOT reset a different user's password.
+    - Non-admin with users_edit CAN change their OWN password via /me/password.
+    - Non-admin with users_edit CANNOT grant admin role to any user.
+    - Admin CAN reset any user's password via PUT /api/v1/users/<username>.
+    """
+
+    @staticmethod
+    def _make_wa(config_dir, var_dir):
+        """WebAdmin with admin 'boss', editor 'dev', and viewer 'guest'."""
+        import uuid as _uuid
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        wa = WebAdmin(config_dir, "boss", "bosspass", var_dir=var_dir,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa.app.config["TESTING"] = True
+        for uname, role_key, pw, dn in [
+            ("dev",   "editor", "devpass",   "Developer"),
+            ("guest", "viewer", "guestpass", "Guest"),
+        ]:
+            wa._users[uname] = {
+                'uid':           str(_uuid.uuid4()),
+                'password_hash': generate_password_hash(pw),
+                'role':          BUILTIN_ROLE_UIDS[role_key],
+                'display_name':  dn,
+            }
+        wa._persist_users()
+        return wa
+
+    def test_non_admin_cannot_reset_another_users_password(self, config_dir, var_dir):
+        """A user with users_edit (editor role) MUST NOT be able to reset
+        another user's password via PUT /api/v1/users/<username>."""
+        wa = self._make_wa(config_dir, var_dir)
+        c = wa.app.test_client()
+        c.post("/login", data={"username": "dev", "password": "devpass"})
+        resp = c.put("/api/v1/users/guest", json={"password": "Hacked123"})
+        assert resp.status_code == 403
+        # Verify original password still works — was NOT changed
+        assert check_password_hash(wa._users["guest"]["password_hash"], "guestpass")
+        assert not check_password_hash(wa._users["guest"]["password_hash"], "Hacked123")
+
+    def test_non_admin_cannot_reset_admin_password(self, config_dir, var_dir):
+        """A non-admin MUST NOT be able to reset an admin's password."""
+        wa = self._make_wa(config_dir, var_dir)
+        c = wa.app.test_client()
+        c.post("/login", data={"username": "dev", "password": "devpass"})
+        resp = c.put("/api/v1/users/boss", json={"password": "Hacked123"})
+        assert resp.status_code == 403
+        assert check_password_hash(wa._users["boss"]["password_hash"], "bosspass")
+
+    def test_admin_can_reset_any_password(self, config_dir, var_dir):
+        """An admin CAN reset any user's password via the admin API."""
+        wa = self._make_wa(config_dir, var_dir)
+        c = wa.app.test_client()
+        c.post("/login", data={"username": "boss", "password": "bosspass"})
+        resp = c.put("/api/v1/users/guest", json={"password": "Newguest1"})
+        assert resp.status_code == 200
+        assert check_password_hash(wa._users["guest"]["password_hash"], "Newguest1")
+
+    def test_non_admin_cannot_grant_admin_role(self, config_dir, var_dir):
+        """A non-admin with users_edit MUST NOT be able to assign the admin role."""
+        wa = self._make_wa(config_dir, var_dir)
+        admin_uid = wa._role_name_to_uid('admin')
+        c = wa.app.test_client()
+        c.post("/login", data={"username": "dev", "password": "devpass"})
+        resp = c.put("/api/v1/users/guest", json={"role": "admin"})
+        assert resp.status_code == 403
+        # Role must NOT have changed to admin (roles are stored as UIDs internally)
+        assert wa._users["guest"]["role"] != admin_uid
+
+    def test_non_admin_can_change_own_password_via_me_endpoint(self, config_dir, var_dir):
+        """A non-admin CAN change their OWN password via PUT /api/v1/users/me/password."""
+        wa = self._make_wa(config_dir, var_dir)
+        c = wa.app.test_client()
+        c.post("/login", data={"username": "dev", "password": "devpass"})
+        resp = c.put("/api/v1/users/me/password", json={
+            "current_password": "devpass",
+            "new_password": "Newdevpass1",
+        })
+        assert resp.status_code == 200
+        assert check_password_hash(wa._users["dev"]["password_hash"], "Newdevpass1")

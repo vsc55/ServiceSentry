@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Watchful-module utility routes: /api/watchfuls/<module_name>/<action>."""
 
@@ -47,14 +47,29 @@ def register(app, wa):
         try:
             if request.method == 'POST':
                 config = request.get_json(silent=True) or {}
+                # Strip any __dunder__ keys the client may have sent — these are
+                # internal control fields and must never be client-controllable.
+                for _k in [k for k in config if k.startswith('__') and k.endswith('__')]:
+                    del config[_k]
+                # Inject server-side context after stripping client values so the
+                # server value always wins regardless of what the client sent.
+                config['__var_dir__'] = wa._var_dir or ''
                 result = method(config)
             else:
                 result = method()
-            wa._audit('watchful_action', detail={
-                'module': module_name,
-                'action': action,
-                'ok': result.get('ok', True) if isinstance(result, dict) else True,
-            })
+            # Build audit entry via module hooks (keeps route handler generic).
+            _res = result if isinstance(result, dict) else {}
+            _read_only = action in getattr(cls, 'READ_ONLY_ACTIONS', set())
+            if not _read_only:
+                _audit_fn = getattr(cls, 'audit_detail', None)
+                if callable(_audit_fn):
+                    _extra = _audit_fn(action, _res)
+                else:
+                    _extra = {'ok': _res.get('ok', True), 'name': f'{module_name} / {action}'}
+                if _extra is not None:
+                    wa._audit('watchful_action', detail={
+                        'module': module_name, 'action': action, **_extra,
+                    })
             return jsonify(result)
         except Exception as exc:
             wa._audit('watchful_action', detail={

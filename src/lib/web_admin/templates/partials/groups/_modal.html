@@ -34,7 +34,7 @@ function _gmPopulateRoles(searchVal) {
     const dis = _gmIsBuiltin ? 'disabled' : '';
     let h = '';
     for (const [rname, rd] of Object.entries(rolesData).sort((a, b) => a[0].localeCompare(b[0]))) {
-        const label = rd.label || rname;
+        const label = rd.name || rname;
         const desc  = rd.description || '';
         if (q && !rname.toLowerCase().includes(q) && !label.toLowerCase().includes(q) && !desc.toLowerCase().includes(q)) continue;
         const id = 'grole_' + rname;
@@ -74,10 +74,10 @@ function openNewGroupModal() {
     _editingGroup = null;
     _gmIsBuiltin  = false;
     document.getElementById('groupModalTitle').textContent = t('new_group');
-    document.getElementById('gmName').value = '';
-    document.getElementById('gmName').disabled = false;
-    document.getElementById('gmLabel').value = '';
-    document.getElementById('gmLabel').disabled = false;
+    const _lbl = document.getElementById('gmLabel');
+    _lbl.value = ''; _lbl.disabled = false; _lbl.classList.remove('is-invalid');
+    const _err = document.getElementById('gmLabelError');
+    if (_err) _err.textContent = '';
     document.getElementById('gmDescription').value = '';
     document.getElementById('gmDescription').disabled = false;
     document.getElementById('gmUidRow').classList.add('d-none');
@@ -100,13 +100,14 @@ function openEditGroupModal(name) {
     _editingGroup = name;
     const gd = groupsData[name] || {};
     _gmIsBuiltin  = !!gd.builtin;
-    document.getElementById('groupModalTitle').textContent = t('edit_group_title') + ': ' + name;
-    document.getElementById('gmName').value = name;
-    document.getElementById('gmName').disabled = true;
-    document.getElementById('gmLabel').value = gd.label || '';
-    document.getElementById('gmLabel').disabled = _gmIsBuiltin;
+    // Show the human-readable label in the title, not the UID
+    document.getElementById('groupModalTitle').textContent = t('edit_group_title') + ': ' + (gd.name || name);
+    const _lbl2 = document.getElementById('gmLabel');
+    _lbl2.value = gd.name || ''; _lbl2.disabled = _gmIsBuiltin; _lbl2.classList.remove('is-invalid');
+    const _err2 = document.getElementById('gmLabelError');
+    if (_err2) _err2.textContent = '';
     document.getElementById('gmDescription').value = gd.description || '';
-    document.getElementById('gmDescription').disabled = _gmIsBuiltin;
+    document.getElementById('gmDescription').disabled = false;  // description editable for all groups
     document.getElementById('gmUidRow').classList.remove('d-none');
     document.getElementById('gmUid').value = gd.uid || '';
     const gmEnabledGroup = document.getElementById('gmEnabledGroup');
@@ -123,20 +124,36 @@ function openEditGroupModal(name) {
 }
 
 async function saveGroupModal() {
-    const name        = document.getElementById('gmName').value.trim();
     const label       = document.getElementById('gmLabel').value.trim();
     const description = document.getElementById('gmDescription').value.trim();
     const roles   = [..._gmSelectedRoles];
     const members = [..._gmSelectedMembers];
-    if (!name) { showToast(t('group_name_required'), 'warning'); return; }
-    if (!_editingGroup && Object.keys(groupsData).some(k => k.toLowerCase() === name.toLowerCase())) {
-        showToast(tf('group_already_exists', name), 'warning'); return;
+    const _gmLabelEl  = document.getElementById('gmLabel');
+    const _gmLabelErr = document.getElementById('gmLabelError');
+    function _gmLabelInvalid(msg) {
+        _gmLabelEl.classList.add('is-invalid');
+        if (_gmLabelErr) _gmLabelErr.textContent = msg;
+        _gmLabelEl.focus();
+        _gmLabelEl.select();
     }
-    const isBuiltin = !!(groupsData[name] || {}).builtin;
+    if (!label) {
+        _gmLabelInvalid(t('group_name_required'));
+        return;
+    }
+    // Uniqueness check — case-insensitive (matches backend validation)
+    const labelLower = label.toLowerCase();
+    const duplicate = Object.entries(groupsData).find(([uid, gd]) =>
+        uid !== _editingGroup && (gd.name || '').toLowerCase() === labelLower
+    );
+    if (duplicate) {
+        _gmLabelInvalid(tf('group_already_exists', label));
+        return;
+    }
+    const isBuiltin = !!(_editingGroup ? groupsData[_editingGroup] : {})?.builtin;
     if (_editingGroup) {
         const enabled = document.getElementById('gmEnabled').checked;
-        const payload = { roles, members, enabled };
-        if (!isBuiltin) { payload.label = label; payload.description = description; }
+        const payload = { roles, members, enabled, description };  // description editable for all groups
+        if (!isBuiltin) { payload.name = label; }
         const r = await apiPut('/api/v1/groups/' + encodeURIComponent(_editingGroup), payload);
         if (r && r.ok) {
             const wasEnabled = groupsData[_editingGroup]?.enabled !== false;
@@ -156,21 +173,35 @@ async function saveGroupModal() {
                     if (!usersData[u].groups.includes(_editingGroup)) usersData[u].groups.push(_editingGroup);
                 }
             }
-            groupsData[_editingGroup] = { ...groupsData[_editingGroup], roles, members, enabled };
-            if (!isBuiltin) { groupsData[_editingGroup].label = label || _editingGroup; groupsData[_editingGroup].description = description; }
+            const _nowIso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+            groupsData[_editingGroup] = {
+                ...groupsData[_editingGroup], roles, members, enabled,
+                updated_at: _nowIso,
+                updated_by: currentUser.username || '',
+            };
+            groupsData[_editingGroup].description = description;  // description updated for all groups
+            if (!isBuiltin) { groupsData[_editingGroup].name = label || _editingGroup; }
         } else {
             showToast(r?.error || t('update_error'), 'danger'); return;
         }
     } else {
         const enabled = document.getElementById('gmEnabled').checked;
-        const r = await apiPost('/api/v1/groups', { name, label, description, roles, members, enabled });
+        const r = await apiPost('/api/v1/groups', { name: label, description, roles, members, enabled });
         if (r && r.status === 201) {
+            const uid = r.data?.uid;
             showToast(t('group_created'));
-            groupsData[name] = { builtin: false, label: label || name, description, roles, members, enabled };
-            for (const u of members) {
-                if (usersData[u]) {
-                    if (!usersData[u].groups) usersData[u].groups = [];
-                    if (!usersData[u].groups.includes(name)) usersData[u].groups.push(name);
+            if (uid) {
+                const _nowIso2 = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+                groupsData[uid] = {
+                    uid, builtin: false, name: label, description, roles, members, enabled,
+                    created_at: _nowIso2, updated_at: _nowIso2,
+                    updated_by: currentUser.username || '',
+                };
+                for (const u of members) {
+                    if (usersData[u]) {
+                        if (!usersData[u].groups) usersData[u].groups = [];
+                        if (!usersData[u].groups.includes(uid)) usersData[u].groups.push(uid);
+                    }
                 }
             }
         } else {

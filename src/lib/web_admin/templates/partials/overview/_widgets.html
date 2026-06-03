@@ -219,7 +219,7 @@ function _dwContent(id, data) {
         case 'users': {
             const byRole = users.by_role || {};
             const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)}" style="font-size:.72rem">${n} ${esc((rolesData[r]?.label) || ROLE_LABELS[r] || r)}</span>`)
+                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)}" style="font-size:.72rem">${n} ${esc((rolesData[r]?.name) || ROLE_LABELS[rolesData[r]?.key || r] || r)}</span>`)
                 .join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#f59e0b,#f97316)', 'rgba(245,158,11,.12)', '#f59e0b',
                 'bi-person-fill', users.total || 0, 'overview_users', sub);

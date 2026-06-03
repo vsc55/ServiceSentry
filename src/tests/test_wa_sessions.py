@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests for server-side session registry and management."""
 
-import json
-import os
-
 import pytest
 
 try:
@@ -40,11 +37,13 @@ class TestSessionRegistry:
             assert 'session_id' in s
             assert len(s['session_id']) == 16     # hex(8)
 
-    def test_session_records_username(self, admin, client):
-        """Session entry contains the logged-in username."""
+    def test_session_records_user_uid(self, admin, client):
+        """Session entry contains the logged-in user's UID (not username)."""
         _login(client)
-        entry = list(admin._sessions.values())[0]
-        assert entry['username'] == 'admin'
+        entry    = list(admin._sessions.values())[0]
+        expected = admin._users['admin'].get('uid', '')
+        assert entry['user_uid'] == expected
+        assert 'username' not in entry
 
     def test_session_removed_on_logout(self, admin, client):
         """Logout removes the session from the registry."""
@@ -63,25 +62,29 @@ class TestSessionRegistry:
 
     def test_revoke_user_sessions(self, admin, client):
         """_revoke_user_sessions removes only the target user's sessions."""
+        import uuid as _uuid
         _login(client)
-        # Add a fake session for another user
+        # Add a real user + fake session for them
+        other_uid = str(_uuid.uuid4())
+        admin._users['other'] = {'uid': other_uid, 'role': '', 'display_name': 'Other',
+                                  'password_hash': '', 'enabled': True}
         admin._sessions['fake'] = {
-            'username': 'other', 'created': '', 'last_seen': '',
-            'ip': '', 'user_agent': '',
+            'sid': 'fakesid', 'user_uid': other_uid,
+            'created': '', 'last_seen': '', 'ip': '', 'user_agent': '',
         }
         assert len(admin._sessions) == 2
         removed = admin._revoke_user_sessions('other')
         assert removed == 1
         assert len(admin._sessions) == 1
 
-    def test_sessions_persisted_to_file(self, admin, client, config_dir):
-        """Sessions are written to sessions.json on disk."""
+    def test_sessions_persisted_to_db(self, admin, client):
+        """Sessions are stored in the columnar sessions table after login."""
         _login(client)
-        path = os.path.join(config_dir, 'sessions.json')
-        assert os.path.isfile(path)
-        with open(path, encoding='utf-8') as fh:
-            data = json.load(fh)
-        assert len(data) == 1
+        assert admin._sessions_store.count() == 1
+        rows     = admin._sessions_store.load()
+        token    = next(iter(rows))
+        expected = admin._users['admin'].get('uid', '')
+        assert rows[token]['user_uid'] == expected
 
     def test_api_get_sessions(self, client):
         """GET /api/sessions returns sessions keyed by sid with is_current flag."""
@@ -121,10 +124,14 @@ class TestSessionRegistry:
 
     def test_api_revoke_user_sessions(self, admin, client):
         """POST /api/sessions/revoke-user/<user> removes user sessions."""
+        import uuid as _uuid
         _login(client)
+        victim_uid = str(_uuid.uuid4())
+        admin._users['victim'] = {'uid': victim_uid, 'role': '', 'display_name': 'Victim',
+                                   'password_hash': '', 'enabled': True}
         admin._sessions['fake'] = {
-            'username': 'victim', 'created': '', 'last_seen': '',
-            'ip': '', 'user_agent': '',
+            'sid': 'fakesid2', 'user_uid': victim_uid,
+            'created': '', 'last_seen': '', 'ip': '', 'user_agent': '',
         }
         resp = client.post("/api/v1/sessions/revoke-user/victim",
                            content_type="application/json", data="{}")

@@ -399,6 +399,69 @@ class Watchful(ModuleBase):
 
 Solo los métodos listados en `WATCHFUL_ACTIONS` son accesibles desde la UI. Cualquier petición a un nombre de acción no incluido recibe un `404`. La base `ModuleBase` define por defecto `WATCHFUL_ACTIONS = frozenset()` (ninguna acción expuesta).
 
+### `READ_ONLY_ACTIONS`
+
+Subconjunto de `WATCHFUL_ACTIONS` para acciones que no producen efectos secundarios. Las acciones aquí listadas no generan entrada en el **log de auditoría**, lo que evita ruido en el registro por consultas frecuentes.
+
+```python
+class Watchful(ModuleBase):
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset({
+        'discover', 'list_items', 'get_details', 'test_connection',
+    })
+    READ_ONLY_ACTIONS: frozenset[str] = frozenset({
+        'discover', 'list_items', 'get_details',
+    })
+```
+
+### `audit_detail(cls, action, result) → dict | None`
+
+Classmethod hook para personalizar las entradas del log de auditoría. Si está definido, el route handler lo llama después de cada acción no incluida en `READ_ONLY_ACTIONS`.
+
+- Devolver un `dict` con campos extra que se fusionan en la entrada de auditoría.
+- Devolver `None` para suprimir la entrada completamente (útil para polls intermedios).
+
+```python
+@classmethod
+def audit_detail(cls, action: str, result: dict) -> dict | None:
+    # Suprimir polls intermedios de un job en curso
+    if action == 'compile_status' and result.get('done') is False:
+        return None
+    # Para la acción final, enriquecer la entrada
+    if result.get('done'):
+        return {
+            'ok':      result.get('result_ok', True),
+            'compiled': result.get('compiled', 0),
+            'name':    f"{result.get('total', 0)} items processed",
+        }
+    return {'ok': result.get('ok', True), 'name': action}
+```
+
+Si el módulo no define `audit_detail`, el route handler genera una entrada genérica con `{module, action, ok}`.
+
+### `WATCHFUL_TOOLBAR`
+
+Tupla de definiciones de botones para la barra de herramientas del card del módulo en la UI. Cada botón llama a una función JS al pulsarlo, pasando el nombre del módulo como argumento.
+
+```python
+class Watchful(ModuleBase):
+    WATCHFUL_TOOLBAR: tuple[dict, ...] = (
+        {
+            'icon':      'bi-database-gear',
+            'label_key': 'file_manager',      # clave en lang/*.json → ui.file_manager
+            'onclick':   'openFileManagerModal',  # función JS global
+        },
+        {
+            'icon':      'bi-diagram-3',
+            'label_key': 'mib_browser',
+            'onclick':   'openMibBrowserModal',
+        },
+    )
+```
+
+`module_base.py` propaga esta tupla al schema como `__toolbar__`. La UI itera el array genéricamente — no hay lógica específica de módulo en el código del dashboard. La función JS especificada en `onclick` debe ser global y aceptar el nombre del módulo como primer argumento.
+
+> Seguridad: el route handler valida que `onclick` sea un identificador JS válido (`^[a-zA-Z_$][a-zA-Z0-9_$]*$`) antes de renderizarlo.
+
 | Módulo | `WATCHFUL_ACTIONS` |
 |--------|-------------------|
 | `datastore` | `{'test_connection', 'list_databases'}` |

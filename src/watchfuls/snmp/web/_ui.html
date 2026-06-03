@@ -1,0 +1,1279 @@
+{# ================================================================
+   SNMP MIB Manager — upload, list and compile MIB files.
+   Injected into the dashboard's <script> block by the generic
+   module-web-UI include mechanism in _js_modules.html.
+   All user-visible strings are read from this module's own ui
+   i18n block via _modUiStr() — no SNMP strings in web_admin.
+   ================================================================ #}
+
+// ──────────────────────────── MIB Manager ─────────────────────────
+let _mibManagerModuleName = null;
+let _mibData = null;    // last loaded data — kept for live filtering
+let _mibCompileAbort = false;       // set to true to cancel the polling loop
+let _mibCompileInterceptor = null;  // hide.bs.modal handler active during compilation
+let _mibSelection = {raw: new Set(), compiled: new Set()};
+let _mibRefreshingCompiled = false; // guard: prevents concurrent list_mibs during polling
+let _mibDetailsData = null;         // {type:'compiled'|'raw', rows:[...]} for sortable viewer
+let _mibDetailsSort = {col: null, asc: true};
+
+// ── MIB details viewer: shared badge + sort helpers ───────────────
+function _mibStatusBadge(s) {
+    if (!s) return '';
+    const cls = s === 'current' ? 'bg-success' : s === 'deprecated' ? 'bg-warning text-dark' : 'bg-secondary';
+    return `<span class="badge ${cls} ms-1" style="font-size:.60rem">${esc(s)}</span>`;
+}
+function _mibAccessBadge(a) {
+    if (!a) return '';
+    const cls = a.includes('write') || a.includes('create') ? 'bg-primary' : 'bg-secondary';
+    return `<span class="badge ${cls}" style="font-size:.60rem">${esc(a)}</span>`;
+}
+function _mibKindBadge(k) {
+    const cls = k === 'OBJECT-TYPE' ? 'bg-primary'
+              : k === 'NOTIFICATION-TYPE' ? 'bg-warning text-dark'
+              : k === 'TEXTUAL-CONVENTION' ? 'bg-info text-dark' : 'bg-secondary';
+    return `<span class="badge ${cls}" style="font-size:.60rem">${esc(k)}</span>`;
+}
+function _mibOidCmp(a, b) {
+    const pa = (a || '').split('.').map(Number);
+    const pb = (b || '').split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] ?? -1) - (pb[i] ?? -1);
+        if (d !== 0) return d;
+    }
+    return 0;
+}
+function _mibSortDetails(col) {
+    if (_mibDetailsSort.col === col) {
+        _mibDetailsSort.asc = !_mibDetailsSort.asc;
+    } else {
+        _mibDetailsSort.col = col;
+        _mibDetailsSort.asc = true;
+    }
+    _mibRenderDetailsTbody();
+}
+function _mibRenderDetailsTbody() {
+    const tbody = document.getElementById('mibDetailsTbody');
+    const thead = document.getElementById('mibDetailsThead');
+    if (!tbody || !_mibDetailsData) return;
+    const {type, rows} = _mibDetailsData;
+    const {col, asc}   = _mibDetailsSort;
+    let sorted = [...rows];
+    if (col !== null) {
+        sorted.sort((a, b) => {
+            let cmp;
+            if (type === 'compiled') {
+                if (col === 1) {
+                    cmp = _mibOidCmp(a.oid, b.oid);
+                } else {
+                    const vA = ([a.name, a.oid, a.type, a.units||'', a.access||''][col] || '');
+                    const vB = ([b.name, b.oid, b.type, b.units||'', b.access||''][col] || '');
+                    cmp = vA.localeCompare(vB, undefined, {sensitivity: 'base', numeric: true});
+                }
+            } else {
+                const vA = ([a.name, a.syntax||'', a.units||'', a.access||''][col] || '');
+                const vB = ([b.name, b.syntax||'', b.units||'', b.access||''][col] || '');
+                cmp = vA.localeCompare(vB, undefined, {sensitivity: 'base', numeric: true});
+            }
+            return asc ? cmp : -cmp;
+        });
+    }
+    if (type === 'compiled') {
+        tbody.innerHTML = sorted.map(s => `<tr>
+            <td style="min-width:10rem">
+                <div class="fw-semibold text-nowrap">${esc(s.name)}${_mibStatusBadge(s.status)}</div>
+                ${s.desc ? `<div class="text-muted" style="font-size:.70rem;white-space:normal;max-width:26rem">${esc(s.desc)}</div>` : ''}
+            </td>
+            <td class="font-monospace text-muted text-nowrap" style="font-size:.70rem">${esc(s.oid)}</td>
+            <td class="text-nowrap text-secondary">${esc(s.type)}</td>
+            <td class="text-nowrap text-muted" style="font-size:.72rem">${s.units ? esc(s.units) : ''}</td>
+            <td class="text-nowrap">${_mibAccessBadge(s.access)}</td>
+        </tr>`).join('');
+    } else {
+        tbody.innerHTML = sorted.map(o => `<tr>
+            <td style="min-width:11rem">
+                <div class="fw-semibold text-nowrap">${esc(o.name)}${_mibStatusBadge(o.status||'')}</div>
+                <div>${_mibKindBadge(o.kind)}</div>
+                ${o.desc ? `<div class="text-muted mt-1" style="font-size:.70rem;white-space:pre-wrap;max-width:28rem">${esc(o.desc)}</div>` : ''}
+            </td>
+            <td class="font-monospace text-secondary" style="font-size:.72rem;white-space:pre-wrap">${esc(o.syntax || '')}</td>
+            <td class="text-nowrap text-muted" style="font-size:.72rem">${o.units ? esc(o.units) : ''}</td>
+            <td class="text-nowrap text-secondary" style="font-size:.72rem">${esc(o.access || '')}</td>
+        </tr>`).join('');
+    }
+    if (thead) {
+        thead.querySelectorAll('th').forEach((th, i) => {
+            const icon = th.querySelector('.mib-sort-icon');
+            if (!icon) return;
+            icon.className = `mib-sort-icon bi ms-1 ${col === i
+                ? (asc ? 'bi-sort-up' : 'bi-sort-down')
+                : 'bi-sort opacity-25'}`;
+        });
+    }
+}
+
+// Shorthand: read a ui string from the active module's own lang file.
+function _ms(key, fallback) {
+    return _modUiStr(_mibManagerModuleName, key, fallback);
+}
+
+// Build a watchful action URL using the API version declared in the
+// module's own __module__ schema entry (api_ver), defaulting to 'v1'.
+function _mibApiUrl(modName, action) {
+    const ver = (ITEM_SCHEMAS[`${modName}|__module__`] || {})['api_ver'] || 'v1';
+    return `/api/${ver}/watchfuls/${modName}/${action}`;
+}
+
+// ── Module-level rendering helpers ────────────────────────────────
+function _mibSz(n) {
+    return n < 1024 ? n + ' B'
+         : n < 1048576 ? (n / 1024).toFixed(1) + ' KB'
+         : (n / 1048576).toFixed(1) + ' MB';
+}
+
+function _mibFileRow(f, kind) {
+    const icon    = kind === 'raw' ? 'bi-file-earmark-text text-primary' : 'bi-file-earmark-code text-success';
+    const checked = _mibSelection[kind].has(f.name) ? ' checked' : '';
+    return `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border"
+                 style="background:var(--bs-body-bg)">
+        <input type="checkbox" class="form-check-input flex-shrink-0"${checked}
+               onchange="_mibToggleSelect(${jsStr(f.name)},${jsStr(kind)})">
+        <i class="bi ${icon} flex-shrink-0" style="font-size:.9rem"></i>
+        <span class="flex-grow-1 text-truncate" style="font-size:.8rem"
+              title="${escAttr(f.name)}">${esc(f.name)}</span>
+        <span class="text-muted flex-shrink-0" style="font-size:.72rem">${_mibSz(f.size)}</span>
+        <button class="btn btn-sm btn-secondary py-0 px-1 flex-shrink-0"
+                title="${escAttr(_ms('mib_details_view', 'View details'))}"
+                onclick="${kind === 'compiled'
+                    ? `_mibShowDetails(${jsStr(f.name)})`
+                    : `_mibShowRawDetails(${jsStr(f.name)})`}">
+            <i class="bi bi-eye" style="font-size:.75rem"></i>
+        </button>
+        ${kind === 'raw' ? `
+        <button class="btn btn-sm btn-secondary py-0 px-1 flex-shrink-0"
+                title="${escAttr(_ms('mib_compile_one', 'Compile'))}"
+                ${_mibData && !_mibData.pysmi_available ? 'disabled' : ''}
+                onclick="_compileMibs([${jsStr(f.name)}])">
+            <i class="bi bi-gear" style="font-size:.75rem"></i>
+        </button>` : ''}
+        <button class="btn btn-sm btn-danger py-0 px-1 flex-shrink-0"
+                title="${escAttr(t('delete') || 'Delete')}"
+                onclick="_mibDelete(${jsStr(f.name)},${jsStr(kind)})">
+            <i class="bi bi-trash3" style="font-size:.75rem"></i>
+        </button>
+    </div>`;
+}
+
+function _mibColHeader(icon, label, totalCount, searchId, kind) {
+    const delTitle = escAttr(_ms('mib_delete_selected', 'Delete selected'));
+    return `<div class="d-flex align-items-center gap-1 mb-1"
+          style="font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--bs-secondary-color)">
+        <i class="bi ${icon}"></i>${esc(label)}
+        <span class="badge bg-secondary rounded-pill ms-1" id="${searchId}-badge"
+              style="font-size:.68rem">${totalCount}</span>
+    </div>
+    <div class="mb-1">
+        <input type="search" id="${searchId}" class="form-control form-control-sm"
+               placeholder="${escAttr(_ms('mib_search', 'Search…'))}"
+               autocomplete="off" oninput="_mibFilterLists()">
+    </div>
+    <div class="d-flex align-items-center gap-1 mb-2">
+        <button class="btn btn-sm btn-secondary py-0 px-1"
+                onclick="_mibSelectAll(${jsStr(kind)})">
+            <i class="bi bi-check2-all me-1"></i>${esc(_ms('mib_select_all', 'All'))}
+        </button>
+        <button class="btn btn-sm btn-secondary py-0 px-1"
+                onclick="_mibDeselectAll(${jsStr(kind)})">
+            <i class="bi bi-square me-1"></i>${esc(_ms('mib_deselect_all', 'None'))}
+        </button>
+        ${kind === 'raw' ? `
+        <button class="btn btn-sm btn-secondary py-0 px-1"
+                title="${escAttr(_ms('mib_select_uncompiled', 'Select uncompiled'))}"
+                onclick="_mibSelectUncompiled()">
+            <i class="bi bi-exclamation-circle"></i>
+        </button>
+        <button class="btn btn-sm btn-secondary py-0 px-1"
+                id="mibCompileSelBtn" style="display:none"
+                title="${escAttr(_ms('mib_compile_selected', 'Compile selected'))}"
+                onclick="_compileSelected()">
+            <i class="bi bi-gear me-1"></i><span id="mibCompileSelCount">0</span>
+        </button>` : ''}
+        <button class="btn btn-sm btn-danger py-0 px-1 ms-auto flex-shrink-0"
+                id="mibDeleteSelBtn-${kind}" style="display:none"
+                title="${delTitle}"
+                onclick="_mibDeleteSelected(${jsStr(kind)})">
+            <i class="bi bi-trash3 me-1"></i><span id="mibDeleteSelCount-${kind}">0</span>
+        </button>
+    </div>`;
+}
+
+function _mibEmptyBox(msg) {
+    return `<div class="text-muted text-center py-4 rounded"
+          style="font-size:.82rem;border:1px dashed var(--bs-border-color)">
+        <i class="bi bi-folder2-open d-block mb-1" style="font-size:1.6rem;opacity:.35"></i>
+        ${esc(msg)}
+    </div>`;
+}
+
+function _mibNoMatch() {
+    return `<div class="text-muted text-center py-3"
+          style="font-size:.82rem">
+        <i class="bi bi-search d-block mb-1" style="font-size:1.4rem;opacity:.35"></i>
+        ${esc(_ms('mib_no_match', 'No results'))}
+    </div>`;
+}
+
+// Generic entry point called by the dashboard's file_manager button.
+// The function name is fixed so the web_admin generic code can call it
+// without any module-specific knowledge.
+async function openFileManagerModal(modName) {
+    _mibManagerModuleName = modName;
+    _mibData = null;
+    _mibCompileAbort = false;
+    _mibProgressHide();
+
+    const _set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    _set('mibManagerTitle',    _ms('file_manager', 'MIB Manager') + ' — ' + modulePrettyName(modName, modulesData[modName] || {}));
+    _set('mibUploadTextLabel', _ms('mib_upload',  'Upload .mib'));
+    _set('mibCompileBtnLabel', _ms('mib_compile_all', 'Compile all'));
+    _set('mibImportUrlBtnLabel', _ms('mib_import_url_btn', 'Import'));
+    _set('mibStopBtnLabel', _ms('mib_stop_compile', 'Stop'));
+    const _refBtn = document.getElementById('mibRefreshBtn');
+    if (_refBtn) _refBtn.title = _ms('mib_refresh', 'Refresh');
+    const _urlInput = document.getElementById('mibImportUrlInput');
+    if (_urlInput) { _urlInput.placeholder = _ms('mib_import_url_placeholder', 'GitHub or raw URL…'); _urlInput.value = ''; }
+
+    const body = document.getElementById('mibManagerBody');
+    if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    const fi = document.getElementById('mibFileInput');
+    if (fi) fi.value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mibManagerModal')).show();
+    await _mibLoad();
+}
+
+async function _mibLoad() {
+    const modName = _mibManagerModuleName;
+    if (!modName) return;
+    _mibSelection = {raw: new Set(), compiled: new Set()};
+    const modCfg = modulesData[modName] || {};
+    const res = await apiPost(_mibApiUrl(modName, 'list_mibs'), modCfg);
+    _mibRender(res && res.data);
+}
+
+function _mibRender(data) {
+    const body = document.getElementById('mibManagerBody');
+    if (!body) return;
+
+    if (!data || !data.ok) {
+        _mibData = null;
+        body.innerHTML = `<div class="text-danger text-center py-3 small">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc((data && data.message) || t('error') || 'Error')}
+        </div>`;
+        return;
+    }
+
+    _mibData = data;
+
+    // pysmi availability badge — only visible when pysmi is MISSING
+    const pysmiBadge = document.getElementById('mibPysmiStatus');
+    if (pysmiBadge) {
+        if (data.pysmi_available) {
+            pysmiBadge.style.display = 'none';
+        } else {
+            pysmiBadge.style.display = '';
+            pysmiBadge.className = 'badge rounded-pill flex-shrink-0 bg-warning text-dark';
+            pysmiBadge.textContent = _ms('mib_pysmi_missing', 'pysmi not installed');
+            pysmiBadge.title = _ms('mib_pysmi_hint', 'pip install pysmi');
+        }
+    }
+
+    // Raw directory path
+    const dirInfo = document.getElementById('mibDirInfo');
+    if (dirInfo) {
+        dirInfo.textContent = (_ms('mib_raw_dir', 'Raw:') + ' ' + (data.raw_dir || '')).trim();
+        dirInfo.title = data.raw_dir || '';
+    }
+
+    // Disable compile button when no raw files or pysmi missing
+    const compileBtn = document.getElementById('mibCompileBtn');
+    if (compileBtn) compileBtn.disabled = !data.pysmi_available || !data.raw.length;
+
+    // Preserve search queries across reloads (upload / delete / compile)
+    const _sq_raw = document.getElementById('mibSearchRaw')?.value || '';
+    const _sq_cmp = document.getElementById('mibSearchCompiled')?.value || '';
+
+    // Build skeleton: column headers with search inputs + empty list containers
+    let h = '<div class="row g-3">';
+
+    h += '<div class="col-md-6">';
+    h += _mibColHeader('bi-file-earmark-text', _ms('mib_manager_raw', 'Raw (.mib)'), data.raw.length, 'mibSearchRaw', 'raw');
+    h += `<div id="mibRawList" class="d-flex flex-column gap-1"
+               style="max-height:35vh;overflow-y:auto"></div>`;
+    h += '</div>';
+
+    h += '<div class="col-md-6">';
+    h += _mibColHeader('bi-file-earmark-code', _ms('mib_manager_compiled', 'Compiled (.py)'), data.compiled.length, 'mibSearchCompiled', 'compiled');
+    h += `<div id="mibCompiledList" class="d-flex flex-column gap-1"
+               style="max-height:35vh;overflow-y:auto"></div>`;
+    h += '</div>';
+
+    h += '</div>';
+    body.innerHTML = h;
+
+    // Restore search values, then populate lists
+    const rawIn = document.getElementById('mibSearchRaw');
+    if (rawIn && _sq_raw) rawIn.value = _sq_raw;
+    const cmpIn = document.getElementById('mibSearchCompiled');
+    if (cmpIn && _sq_cmp) cmpIn.value = _sq_cmp;
+
+    _mibFilterLists();
+}
+
+// Apply search filters and re-render both file lists.
+// Called on every keystroke and after each data reload.
+function _mibFilterLists() {
+    if (!_mibData) return;
+    const rawQ = (document.getElementById('mibSearchRaw')?.value  || '').toLowerCase();
+    const cmpQ = (document.getElementById('mibSearchCompiled')?.value || '').toLowerCase();
+
+    const _filter = (files, q) => q ? files.filter(f => f.name.toLowerCase().includes(q)) : files;
+    const rawF = _filter(_mibData.raw,      rawQ);
+    const cmpF = _filter(_mibData.compiled, cmpQ);
+
+    const rawList = document.getElementById('mibRawList');
+    if (rawList) {
+        if (!rawF.length && !rawQ) rawList.innerHTML = _mibEmptyBox(_ms('mib_no_raw', 'No .mib files yet — upload one to get started'));
+        else if (!rawF.length)     rawList.innerHTML = _mibNoMatch();
+        else                       rawList.innerHTML = rawF.map(f => _mibFileRow(f, 'raw')).join('');
+    }
+
+    const cmpList = document.getElementById('mibCompiledList');
+    if (cmpList) {
+        if (!cmpF.length && !cmpQ) cmpList.innerHTML = _mibEmptyBox(_ms('mib_no_compiled', 'No compiled MIBs'));
+        else if (!cmpF.length)     cmpList.innerHTML = _mibNoMatch();
+        else                       cmpList.innerHTML = cmpF.map(f => _mibFileRow(f, 'compiled')).join('');
+    }
+
+    // Update count badges: show "filtered/total" when a query is active
+    const rawBadge = document.getElementById('mibSearchRaw-badge');
+    if (rawBadge) rawBadge.textContent = rawQ
+        ? `${rawF.length} / ${_mibData.raw.length}`
+        : String(_mibData.raw.length);
+
+    const cmpBadge = document.getElementById('mibSearchCompiled-badge');
+    if (cmpBadge) cmpBadge.textContent = cmpQ
+        ? `${cmpF.length} / ${_mibData.compiled.length}`
+        : String(_mibData.compiled.length);
+}
+
+// ── MIB Browser modal — full OID tree ────────────────────────────
+let _mibBrowserSymbols    = null;   // flat symbol list from get_all_symbols
+let _mibBrowserTreeRoot   = null;   // prefix tree built from symbols
+let _mibBrowserExpanded   = new Set();
+let _mibBrowserFilter     = '';
+let _mibBrowserSearchTimer = null;  // debounce handle
+
+async function openMibBrowserModal(modName) {
+    _mibManagerModuleName = modName;
+    _mibBrowserSymbols    = null;
+    _mibBrowserTreeRoot   = null;
+    _mibBrowserExpanded   = new Set();
+    _mibBrowserFilter     = '';
+
+    const titleEl  = document.getElementById('mibBrowserTitle');
+    const countEl  = document.getElementById('mibBrowserCount');
+    const searchEl = document.getElementById('mibBrowserSearch');
+    const treeEl   = document.getElementById('mibBrowserTree');
+    const exAllEl  = document.getElementById('mibBrowserExpandAllLabel');
+    if (titleEl)  titleEl.textContent = _ms('mib_browser', 'MIB Browser');
+    if (countEl)  { countEl.textContent = ''; countEl.style.display = 'none'; }
+    if (searchEl) { searchEl.value = ''; searchEl.placeholder = _ms('mib_browser_search', 'Search…'); }
+    if (exAllEl)  exAllEl.textContent = _ms('mib_browser_expand_all', 'Expand all');
+    if (treeEl)   treeEl.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mibBrowserModal')).show();
+
+    const cfg = modulesData[modName] || {};
+    const res = await apiPost(_mibApiUrl(modName, 'get_all_symbols'), {...cfg});
+    const d   = res && res.data;
+
+    if (!d || !d.ok) {
+        if (treeEl) treeEl.innerHTML = `<div class="text-danger text-center py-4 small">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc((d && d.message) || 'Error')}
+        </div>`;
+        return;
+    }
+
+    _mibBrowserSymbols  = d.symbols || [];
+    _mibBrowserTreeRoot = _mibBuildOidTree(_mibBrowserSymbols);
+    _snmpRebuildOidMap();
+    const countEl2 = document.getElementById('mibBrowserCount');
+    if (countEl2) { countEl2.textContent = _mibBrowserSymbols.length; countEl2.style.display = ''; }
+    _mibBrowserRenderTree();
+}
+
+// Build an OID prefix tree from a flat symbol list.
+// Parent of each symbol = the symbol with the longest OID that is a strict prefix.
+function _mibBuildOidTree(symbols) {
+    const sorted = symbols
+        .filter(s => s.oid && /^\d[\d.]*\d$/.test(s.oid))
+        .sort((a, b) => _mibOidCmp(a.oid, b.oid));
+
+    const map  = new Map();
+    const root = {oid: null, sym: null, children: []};
+
+    for (const sym of sorted) {
+        const node  = {oid: sym.oid, sym, children: []};
+        map.set(sym.oid, node);
+        const parts = sym.oid.split('.');
+        let parent  = root;
+        for (let len = parts.length - 1; len >= 1; len--) {
+            const prefix = parts.slice(0, len).join('.');
+            if (map.has(prefix)) { parent = map.get(prefix); break; }
+        }
+        parent.children.push(node);
+    }
+    return root;
+}
+
+// Return flat array of visible rows for current expand / filter state.
+const _MIB_BROWSER_MAX_RESULTS = 300;
+
+function _mibBrowserGetVisible() {
+    const q = _mibBrowserFilter.toLowerCase();
+    if (q) {
+        const all = (_mibBrowserSymbols || [])
+            .filter(s =>
+                s.name.toLowerCase().includes(q) ||
+                s.oid.includes(q)                ||
+                (s.module || '').toLowerCase().includes(q) ||
+                (s.desc   || '').toLowerCase().includes(q)
+            )
+            .sort((a, b) => _mibOidCmp(a.oid, b.oid));
+        const rows = all.slice(0, _MIB_BROWSER_MAX_RESULTS)
+            .map(s => ({sym: s, depth: 0, hasChildren: false, expanded: false, oid: s.oid}));
+        if (all.length > _MIB_BROWSER_MAX_RESULTS)
+            rows.push({_overflow: all.length});
+        return rows;
+    }
+    if (!_mibBrowserTreeRoot) return [];
+    const rows = [];
+    function visit(node, depth) {
+        for (const child of node.children) {
+            const exp = _mibBrowserExpanded.has(child.oid);
+            rows.push({sym: child.sym, depth, hasChildren: child.children.length > 0, expanded: exp, oid: child.oid});
+            if (exp) visit(child, depth + 1);
+        }
+    }
+    visit(_mibBrowserTreeRoot, 0);
+    return rows;
+}
+
+function _mibBrowserToggle(oid) {
+    if (_mibBrowserExpanded.has(oid)) _mibBrowserExpanded.delete(oid);
+    else _mibBrowserExpanded.add(oid);
+    _mibBrowserRenderTree();
+}
+
+function _mibBrowserFilterChange(val) {
+    _mibBrowserFilter = val.trim();
+    clearTimeout(_mibBrowserSearchTimer);
+    _mibBrowserSearchTimer = setTimeout(_mibBrowserRenderTree, 250);
+}
+
+function _mibBrowserExpandAll() {
+    if (!_mibBrowserSymbols) return;
+    const allOids    = _mibBrowserSymbols.map(s => s.oid);
+    const allExpanded = allOids.length && allOids.every(o => _mibBrowserExpanded.has(o));
+    if (allExpanded) _mibBrowserExpanded.clear();
+    else allOids.forEach(o => _mibBrowserExpanded.add(o));
+    const lbl = document.getElementById('mibBrowserExpandAllLabel');
+    if (lbl) lbl.textContent = _ms(
+        _mibBrowserExpanded.size ? 'mib_browser_collapse_all' : 'mib_browser_expand_all',
+        _mibBrowserExpanded.size ? 'Collapse all' : 'Expand all'
+    );
+    _mibBrowserRenderTree();
+}
+
+function _mibBrowserRenderTree() {
+    const treeEl = document.getElementById('mibBrowserTree');
+    if (!treeEl) return;
+
+    if (!_mibBrowserSymbols) {
+        treeEl.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
+        return;
+    }
+
+    const rows = _mibBrowserGetVisible();
+    if (!rows.length) {
+        const q = _mibBrowserFilter;
+        treeEl.innerHTML = `<div class="text-center text-muted py-5" style="font-size:.84rem">
+            <i class="bi bi-${q ? 'search' : 'inbox'} d-block mb-2" style="font-size:1.4rem"></i>
+            ${esc(q ? _ms('mib_no_match','No results') : _ms('mib_browser_empty','No compiled MIBs'))}
+        </div>`;
+        return;
+    }
+
+    const copyTitle = escAttr(_ms('mib_browser_copy_oid', 'Copy OID'));
+    let h = '';
+    for (const row of rows) {
+        if (row._overflow) {
+            h += `<div class="text-center text-muted py-2" style="font-size:.76rem;border-top:1px solid var(--bs-border-color)">
+                <i class="bi bi-three-dots me-1"></i>${row._overflow} more results — refine your search
+            </div>`;
+            continue;
+        }
+        const s   = row.sym;
+        const pad = `calc(.5rem + ${row.depth * 1.1}rem)`;
+        const stCls = s.status === 'current'    ? 'bg-success'
+                    : s.status === 'deprecated' ? 'bg-warning text-dark'
+                    : s.status                  ? 'bg-secondary' : '';
+        h += `<div class="d-flex align-items-start gap-1 py-1 pe-2"
+                   style="border-bottom:1px solid var(--bs-border-color);padding-left:${pad}">
+            <span class="flex-shrink-0 text-muted"
+                  style="width:1rem;font-size:.72rem;padding-top:.18rem;
+                         cursor:${row.hasChildren ? 'pointer' : 'default'}"
+                  ${row.hasChildren ? `onclick="_mibBrowserToggle(${jsStr(row.oid)})"` : ''}>
+                <i class="bi ${row.hasChildren
+                    ? (row.expanded ? 'bi-chevron-down' : 'bi-chevron-right')
+                    : 'bi-dot'}"></i>
+            </span>
+            <div class="flex-grow-1 min-w-0 ${row.hasChildren ? 'fw-semibold' : ''}"
+                 style="${row.hasChildren ? 'cursor:pointer' : ''}"
+                 ${row.hasChildren ? `onclick="_mibBrowserToggle(${jsStr(row.oid)})"` : ''}>
+                <div class="d-flex align-items-center gap-1 flex-wrap">
+                    <span style="font-size:.78rem">${esc(s.name)}</span>
+                    ${stCls ? `<span class="badge ${stCls}" style="font-size:.58rem">${esc(s.status)}</span>` : ''}
+                    ${s.type ? `<span class="text-secondary fw-normal" style="font-size:.66rem">${esc(s.type)}</span>` : ''}
+                    ${s.units ? `<span class="text-muted fw-normal" style="font-size:.64rem">[${esc(s.units)}]</span>` : ''}
+                    <span class="badge bg-secondary fw-normal ms-1"
+                          style="font-size:.56rem;opacity:.6">${esc(s.module)}</span>
+                </div>
+                <div class="font-monospace text-muted fw-normal" style="font-size:.66rem">${esc(s.oid)}</div>
+                ${!row.hasChildren && s.desc
+                    ? `<div class="text-muted fw-normal" style="font-size:.66rem;white-space:normal">
+                           ${esc(s.desc.length > 120 ? s.desc.slice(0,120)+'…' : s.desc)}
+                       </div>`
+                    : ''}
+            </div>
+            <button class="btn btn-sm btn-secondary py-0 px-1 flex-shrink-0"
+                    style="margin-top:.1rem" title="${copyTitle}"
+                    onclick="event.stopPropagation();_mibBrowserCopyOid(${jsStr(s.oid)})">
+                <i class="bi bi-clipboard" style="font-size:.68rem"></i>
+            </button>
+        </div>`;
+    }
+    treeEl.innerHTML = h;
+}
+
+function _mibBrowserCopyOid(oid) {
+    navigator.clipboard.writeText(oid).catch(() => {});
+    showToast(oid);
+}
+
+// ── OID-aware check form enhancement ─────────────────────────────
+// After _mibBrowserSymbols is loaded, build oid→symbol map so check
+// forms can adapt value/operator controls to the OID's actual type.
+let _snmpSymsByOid         = null;   // Map<oid, symbol> built from browser data
+let _snmpOrigValueHtml     = {};     // itemPath → original input-group innerHTML (for restore)
+let _snmpOidEnhanceTimers  = {};     // fieldPath → debounce handle
+
+// Build/rebuild the oid→symbol lookup map.  Called after symbols load.
+function _snmpRebuildOidMap() {
+    if (!_mibBrowserSymbols) return;
+    _snmpSymsByOid = new Map(_mibBrowserSymbols.map(s => [s.oid, s]));
+}
+
+// Safe deep-get from modulesData: 'snmp|servers|s1|checks|c1|oid' → value
+function _snmpGetVal(dotPath) {
+    try {
+        return dotPath.split('|').reduce((o, k) => (o != null ? o[k] : undefined), modulesData) ?? '';
+    } catch { return ''; }
+}
+
+// Event delegation: watch for changes on any [data-field-path$="|oid"] input
+document.addEventListener('change', function(ev) {
+    const inp = ev.target;
+    if (!inp || !inp.dataset) return;
+    const fp = inp.dataset.fieldPath || '';
+    if (!fp.endsWith('|oid')) return;
+    if (!_mibManagerModuleName || !fp.startsWith(_mibManagerModuleName + '|')) return;
+    clearTimeout(_snmpOidEnhanceTimers[fp]);
+    _snmpOidEnhanceTimers[fp] = setTimeout(() => _snmpHandleOidChange(inp, fp), 150);
+});
+
+// Map pysnmp type name → operator category (no MIB browser needed)
+function _snmpCatFromTypeName(typeName) {
+    if (!typeName) return null;
+    const t = typeName.toLowerCase();
+    if (t === 'truthvalue' || t === 'integer' && typeName !== 'Integer') return 'boolean';
+    if (/integer|gauge|counter|ticks|unsigned/.test(t)) return 'integer';
+    if (t === 'ipaddress') return 'ip';
+    if (/string|display|text|octet/.test(t)) return 'string';
+    return null;
+}
+
+// Apply operator filtering + value enhancement using only the stored snmp_type
+// (no MIB browser required — works from data persisted at discover time)
+function _snmpApplyTypeToForm(itemPath, typeName) {
+    const cat = _snmpCatFromTypeName(typeName);
+    if (!cat) return;
+    // Reuse the existing operator enhance logic via a minimal sym-like object
+    _snmpEnhanceOperatorControl(itemPath, {base_category: cat});
+}
+
+// Re-apply enhancements when an already-configured check panel opens
+document.addEventListener('shown.bs.collapse', function(ev) {
+    const itemPath = ev.target && ev.target.dataset.swItemPath;
+    if (!itemPath || !itemPath.includes('|checks|')) return;
+    if (!_mibManagerModuleName || !itemPath.startsWith(_mibManagerModuleName + '|')) return;
+
+    // Prefer stored snmp_type (no MIB browser needed) then fall back to live lookup
+    const snmpType = String(_snmpGetVal(itemPath + '|snmp_type') || '').trim();
+    if (snmpType) {
+        _snmpApplyTypeToForm(itemPath, snmpType);
+        return;
+    }
+    const oidVal = String(_snmpGetVal(itemPath + '|oid') || '').trim();
+    if (!oidVal || !_snmpSymsByOid) return;
+    const sym = _snmpSymsByOid.get(oidVal);
+    if (sym) _snmpApplyOidInfo(itemPath, sym);
+});
+
+function _snmpHandleOidChange(inputEl, fieldPath) {
+    const oid      = (inputEl.value || '').trim();
+    const itemPath = fieldPath.replace(/\|oid$/, '');
+
+    if (!oid) {
+        _snmpRestoreValueControl(itemPath);
+        _snmpRestoreOperatorControl(itemPath);
+        return;
+    }
+
+    // Enhance only if symbols are already loaded via the MIB Browser.
+    // Never trigger get_all_symbols here — that's a blocking operation that
+    // would queue behind Flask's single-threaded request handler and delay
+    // other requests (e.g., Discover OIDs).
+    if (!_snmpSymsByOid) return;
+    const sym = _snmpSymsByOid.get(oid);
+    if (sym) _snmpApplyOidInfo(itemPath, sym);
+}
+
+function _snmpApplyOidInfo(itemPath, sym) {
+    _snmpEnhanceValueControl(itemPath, sym);
+    _snmpEnhanceOperatorControl(itemPath, sym);
+}
+
+function _snmpEnhanceValueControl(itemPath, sym) {
+    const wrapper = document.querySelector(
+        `[data-cfg-path="${CSS.escape(itemPath + '|value')}"]`
+    );
+    if (!wrapper) return;
+    const ig = wrapper.querySelector('.input-group');
+    if (!ig) return;
+
+    // Save original HTML once so we can restore it
+    if (!_snmpOrigValueHtml[itemPath]) _snmpOrigValueHtml[itemPath] = ig.innerHTML;
+
+    const curVal = String(_snmpGetVal(itemPath + '|value') || '');
+    const sp     = jsStr(itemPath + '|value');
+
+    if (sym.base_category === 'enum' || sym.base_category === 'boolean') {
+        const opts = (sym.enum_values || []).map(ev => {
+            const sel = (String(ev.value) === curVal || ev.name === curVal) ? ' selected' : '';
+            return `<option value="${ev.value}"${sel}>${esc(ev.name)} (${ev.value})</option>`;
+        }).join('');
+        ig.innerHTML =
+            `<select class="form-select form-select-sm"
+                     onchange="updateField('modules',${sp},this.value);markDirty('modules')">
+                 <option value="">—</option>${opts}
+             </select>`;
+
+    } else if (sym.base_category === 'integer' || sym.base_category === 'unsigned') {
+        const minA  = sym.range_min != null ? ` min="${sym.range_min}"` : '';
+        const maxA  = sym.range_max != null ? ` max="${sym.range_max}"` : '';
+        const hint  = (sym.range_min != null && sym.range_max != null)
+            ? `<span class="input-group-text" style="font-size:.72rem">${sym.range_min}..${sym.range_max}</span>`
+            : '';
+        const uspan = sym.units
+            ? `<span class="input-group-text" style="font-size:.72rem">${esc(sym.units)}</span>` : '';
+        ig.innerHTML =
+            `<input type="number" class="form-control form-control-sm"
+                    data-field-path="${escAttr(itemPath + '|value')}"
+                    value="${escAttr(curVal)}"${minA}${maxA}
+                    oninput="markDirty('modules')"
+                    onchange="updateField('modules',${sp},this.value)">${hint}${uspan}`;
+
+    } else {
+        _snmpRestoreValueControl(itemPath);
+    }
+}
+
+function _snmpEnhanceOperatorControl(itemPath, sym) {
+    const wrapper = document.querySelector(
+        `[data-cfg-path="${CSS.escape(itemPath + '|operator')}"]`
+    );
+    if (!wrapper) return;
+    const sel = wrapper.querySelector('select');
+    if (!sel) return;
+
+    const allowed =
+        (sym.base_category === 'enum' || sym.base_category === 'boolean')
+            ? new Set(['any', 'eq', 'ne'])
+        : (sym.base_category === 'integer' || sym.base_category === 'unsigned')
+            ? new Set(['any', 'eq', 'ne', 'gt', 'lt', 'gte', 'lte'])
+        : (sym.base_category === 'string')
+            ? new Set(['any', 'eq', 'ne', 'contains', 'regex'])
+        : null;   // null = all allowed
+
+    sel.querySelectorAll('option').forEach(opt => {
+        const hide = allowed ? !allowed.has(opt.value) : false;
+        opt.disabled      = hide;
+        opt.style.display = hide ? 'none' : '';
+        if (hide && opt.selected) {
+            const first = [...sel.options].find(o => !o.disabled);
+            if (first) {
+                first.selected = true;
+                updateField('modules', itemPath + '|operator', first.value);
+            }
+        }
+    });
+}
+
+function _snmpRestoreValueControl(itemPath) {
+    const orig = _snmpOrigValueHtml[itemPath];
+    if (!orig) return;
+    const wrapper = document.querySelector(
+        `[data-cfg-path="${CSS.escape(itemPath + '|value')}"]`
+    );
+    if (wrapper) {
+        const ig = wrapper.querySelector('.input-group');
+        if (ig) ig.innerHTML = orig;
+    }
+    delete _snmpOrigValueHtml[itemPath];
+}
+
+function _snmpRestoreOperatorControl(itemPath) {
+    const wrapper = document.querySelector(
+        `[data-cfg-path="${CSS.escape(itemPath + '|operator')}"]`
+    );
+    if (!wrapper) return;
+    const sel = wrapper.querySelector('select');
+    if (!sel) return;
+    sel.querySelectorAll('option').forEach(opt => {
+        opt.disabled = false; opt.style.display = '';
+    });
+}
+
+// ── MIB Details modal ─────────────────────────────────────────────
+async function _mibShowDetails(name) {
+    const titleEl = document.getElementById('mibDetailsTitle');
+    const bodyEl  = document.getElementById('mibDetailsBody');
+    if (titleEl) titleEl.textContent = name;
+    if (bodyEl)  bodyEl.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mibDetailsModal')).show();
+
+    const modName = _mibManagerModuleName;
+    const cfg     = modulesData[modName] || {};
+    const res = await apiPost(_mibApiUrl(modName, 'get_mib_details'), { ...cfg, name });
+    const d   = res && res.data;
+
+    if (!d || !d.ok) {
+        if (bodyEl) bodyEl.innerHTML = `<div class="text-danger small">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc((d && d.message) || (t('error') || 'Error'))}
+        </div>`;
+        return;
+    }
+
+    const symLabel = _ms('mib_details_symbols', 'symbols');
+    const noSyms   = _ms('mib_details_no_symbols', 'No symbols loaded — pysnmp unavailable or module failed to load');
+    const srcLabel = _ms('mib_details_source', 'Source code');
+    const thStyle  = 'cursor:pointer;user-select:none;white-space:nowrap';
+    const sortIcon = '<i class="mib-sort-icon bi bi-sort ms-1 opacity-25" style="font-size:.75em"></i>';
+
+    let h = '';
+
+    // ── Symbol table ──────────────────────────────────────────────
+    if (d.symbols && d.symbols.length) {
+        _mibDetailsData = {type: 'compiled', rows: d.symbols};
+        _mibDetailsSort = {col: 0, asc: true};
+        h += `<div class="mb-3">
+            <div class="text-muted mb-1" style="font-size:.78rem">
+                <i class="bi bi-list-ul me-1"></i>${d.symbols.length} ${esc(symLabel)}
+            </div>
+            <div style="max-height:45vh;overflow-y:auto">
+            <table class="table table-sm table-bordered mb-0" style="font-size:.76rem">
+                <thead id="mibDetailsThead" class="sticky-top"
+                       style="background:var(--bs-tertiary-bg);color:var(--bs-emphasis-color)">
+                    <tr>
+                        <th style="${thStyle}" onclick="_mibSortDetails(0)">${esc(_ms('mib_details_th_name','Name'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(1)">${esc(_ms('mib_details_th_oid','OID'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(2)">${esc(_ms('mib_details_th_type','Type'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(3)">${esc(_ms('mib_details_th_units','Units'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(4)">${esc(_ms('mib_details_th_access','Access'))}${sortIcon}</th>
+                    </tr>
+                </thead>
+                <tbody id="mibDetailsTbody"></tbody>
+            </table>
+            </div>
+        </div>`;
+    } else {
+        _mibDetailsData = null;
+        h += `<div class="text-muted mb-3 small"><i class="bi bi-info-circle me-1"></i>${esc(noSyms)}</div>`;
+    }
+
+    // ── Source code ───────────────────────────────────────────────
+    h += `<details>
+        <summary class="fw-semibold mb-2" style="font-size:.82rem;cursor:pointer;user-select:none">
+            <i class="bi bi-code-slash me-1"></i>${esc(srcLabel)}
+        </summary>
+        <pre class="rounded p-2 mt-2" style="font-size:.70rem;max-height:45vh;overflow:auto;background:var(--bs-body-secondary-bg,var(--bs-secondary-bg))">${esc(d.source)}</pre>
+    </details>`;
+
+    if (bodyEl) {
+        bodyEl.innerHTML = h;
+        if (_mibDetailsData) _mibRenderDetailsTbody();
+    }
+}
+
+async function _mibShowRawDetails(name) {
+    const titleEl = document.getElementById('mibDetailsTitle');
+    const bodyEl  = document.getElementById('mibDetailsBody');
+    if (titleEl) titleEl.textContent = name;
+    if (bodyEl)  bodyEl.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mibDetailsModal')).show();
+
+    const modName = _mibManagerModuleName;
+    const cfg     = modulesData[modName] || {};
+    const res = await apiPost(_mibApiUrl(modName, 'get_raw_mib_details'), { ...cfg, name });
+    const d   = res && res.data;
+
+    if (!d || !d.ok) {
+        if (bodyEl) bodyEl.innerHTML = `<div class="text-danger small">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc((d && d.message) || (t('error') || 'Error'))}
+        </div>`;
+        return;
+    }
+
+    const srcLabel = _ms('mib_details_source', 'Source code');
+    const thStyle  = 'cursor:pointer;user-select:none;white-space:nowrap';
+    const sortIcon = '<i class="mib-sort-icon bi bi-sort ms-1 opacity-25" style="font-size:.75em"></i>';
+
+    let h = '';
+
+    // ── Module header ─────────────────────────────────────────────
+    if (d.module) {
+        h += `<div class="d-flex align-items-center gap-2 mb-3 p-2 rounded"
+                   style="background:var(--bs-secondary-bg);font-size:.82rem">
+            <i class="bi bi-diagram-3 text-primary flex-shrink-0"></i>
+            <span class="fw-semibold">${esc(d.module)}</span>
+            <span class="text-muted ms-auto">${d.objects.length} ${esc(_ms('mib_details_objects', 'objects'))}</span>
+        </div>`;
+    }
+
+    // ── Imports (collapsible) ─────────────────────────────────────
+    if (d.imports && d.imports.length) {
+        h += `<details class="mb-3">
+            <summary class="fw-semibold" style="font-size:.82rem;cursor:pointer;user-select:none">
+                <i class="bi bi-box-arrow-in-down me-1"></i>${esc(_ms('mib_details_imports', 'Imports'))}
+                <span class="badge bg-secondary ms-1" style="font-size:.65rem">${d.imports.length}</span>
+            </summary>
+            <div class="mt-2" style="max-height:18vh;overflow-y:auto">`;
+        for (const imp of d.imports) {
+            h += `<div class="mb-1">
+                <span class="badge bg-secondary me-1" style="font-size:.68rem">${esc(imp.module)}</span>
+                <span class="text-muted" style="font-size:.72rem">${imp.symbols.map(s => esc(s)).join(', ')}</span>
+            </div>`;
+        }
+        h += `</div></details>`;
+    }
+
+    // ── Objects table ─────────────────────────────────────────────
+    const dets = d.objects_detail || [];
+    if (dets.length) {
+        _mibDetailsData = {type: 'raw', rows: dets};
+        _mibDetailsSort = {col: 0, asc: true};
+        h += `<div class="mb-3">
+            <div class="text-muted mb-1" style="font-size:.78rem">
+                <i class="bi bi-list-ul me-1"></i>${dets.length} ${esc(_ms('mib_details_objects', 'objects'))}
+            </div>
+            <div style="max-height:45vh;overflow-y:auto">
+            <table class="table table-sm table-bordered mb-0" style="font-size:.76rem">
+                <thead id="mibDetailsThead" class="sticky-top"
+                       style="background:var(--bs-tertiary-bg);color:var(--bs-emphasis-color)">
+                    <tr>
+                        <th style="${thStyle}" onclick="_mibSortDetails(0)">${esc(_ms('mib_details_th_name','Name'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(1)">${esc(_ms('mib_details_th_syntax','Syntax'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(2)">${esc(_ms('mib_details_th_units','Units'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(3)">${esc(_ms('mib_details_th_access','Access'))}${sortIcon}</th>
+                    </tr>
+                </thead>
+                <tbody id="mibDetailsTbody"></tbody>
+            </table>
+            </div>
+        </div>`;
+    } else {
+        _mibDetailsData = null;
+    }
+
+    // ── Source code ───────────────────────────────────────────────
+    h += `<details>
+        <summary class="fw-semibold mb-2" style="font-size:.82rem;cursor:pointer;user-select:none">
+            <i class="bi bi-file-earmark-text me-1"></i>${esc(srcLabel)}
+        </summary>
+        <pre class="rounded p-2 mt-2" style="font-size:.70rem;max-height:45vh;overflow:auto;background:var(--bs-body-secondary-bg,var(--bs-secondary-bg))">${esc(d.source)}</pre>
+    </details>`;
+
+    if (bodyEl) {
+        bodyEl.innerHTML = h;
+        if (_mibDetailsData) _mibRenderDetailsTbody();
+    }
+}
+
+// ── Live compiled-list refresh during compilation ─────────────────
+// Updates only the compiled column without touching the raw column or
+// resetting selection state.  Called (without await) from the poll loop.
+async function _mibRefreshCompiled() {
+    if (_mibRefreshingCompiled || !_mibData || !_mibManagerModuleName) return;
+    _mibRefreshingCompiled = true;
+    try {
+        const modName = _mibManagerModuleName;
+        const res = await apiPost(_mibApiUrl(modName, 'list_mibs'), modulesData[modName] || {});
+        const d   = res && res.data;
+        if (!d || !d.ok || !_mibData) return;
+        _mibData.compiled = d.compiled;
+        const cmpQ = (document.getElementById('mibSearchCompiled')?.value || '').toLowerCase();
+        const cmpF = cmpQ ? d.compiled.filter(f => f.name.toLowerCase().includes(cmpQ)) : d.compiled;
+        const cmpList = document.getElementById('mibCompiledList');
+        if (cmpList) {
+            if (!cmpF.length && !cmpQ) cmpList.innerHTML = _mibEmptyBox(_ms('mib_no_compiled', 'No compiled MIBs'));
+            else if (!cmpF.length)     cmpList.innerHTML = _mibNoMatch();
+            else                       cmpList.innerHTML = cmpF.map(f => _mibFileRow(f, 'compiled')).join('');
+        }
+        const cmpBadge = document.getElementById('mibSearchCompiled-badge');
+        if (cmpBadge) cmpBadge.textContent = cmpQ
+            ? `${cmpF.length} / ${d.compiled.length}`
+            : String(d.compiled.length);
+    } finally {
+        _mibRefreshingCompiled = false;
+    }
+}
+
+// ── Multi-select helpers ──────────────────────────────────────────
+function _mibToggleSelect(name, kind) {
+    if (_mibSelection[kind].has(name)) _mibSelection[kind].delete(name);
+    else                               _mibSelection[kind].add(name);
+    _mibUpdateDeleteBtn(kind);
+}
+
+function _mibUpdateDeleteBtn(kind) {
+    const n   = _mibSelection[kind].size;
+    const btn = document.getElementById('mibDeleteSelBtn-' + kind);
+    const cnt = document.getElementById('mibDeleteSelCount-' + kind);
+    if (btn) btn.style.display = n > 0 ? '' : 'none';
+    if (cnt) cnt.textContent = String(n);
+    if (kind === 'raw') _mibUpdateCompileSelBtn();
+}
+
+function _mibUpdateCompileSelBtn() {
+    const n   = _mibSelection.raw.size;
+    const btn = document.getElementById('mibCompileSelBtn');
+    const cnt = document.getElementById('mibCompileSelCount');
+    if (btn) btn.style.display = n > 0 ? '' : 'none';
+    if (cnt) cnt.textContent = String(n);
+}
+
+function _mibSelectUncompiled() {
+    if (!_mibData) return;
+    const compiledStems = new Set(_mibData.compiled.map(f => f.name.replace(/\.py$/i, '')));
+    _mibData.raw.forEach(f => {
+        const stem = f.name.replace(/\.[^.]+$/, '');
+        if (!compiledStems.has(stem)) _mibSelection.raw.add(f.name);
+    });
+    _mibFilterLists();
+    _mibUpdateDeleteBtn('raw');
+}
+
+function _mibSelectAll(kind) {
+    if (!_mibData) return;
+    const searchId = kind === 'raw' ? 'mibSearchRaw' : 'mibSearchCompiled';
+    const q        = (document.getElementById(searchId)?.value || '').toLowerCase();
+    const files    = kind === 'raw' ? _mibData.raw : _mibData.compiled;
+    const filtered = q ? files.filter(f => f.name.toLowerCase().includes(q)) : files;
+    filtered.forEach(f => _mibSelection[kind].add(f.name));
+    _mibFilterLists();
+    _mibUpdateDeleteBtn(kind);
+}
+
+function _mibDeselectAll(kind) {
+    _mibSelection[kind].clear();
+    _mibFilterLists();
+    _mibUpdateDeleteBtn(kind);
+}
+
+function _mibDeleteSelected(kind) {
+    const names = [..._mibSelection[kind]];
+    if (!names.length) return;
+    const confirmMsg = _ms('mib_delete_selected_confirm', 'Delete {n} file(s)?')
+        .replace('{n}', names.length);
+    showConfirmModal(confirmMsg, () => _mibDeleteSelectedConfirmed(kind, names));
+}
+
+async function _mibDeleteSelectedConfirmed(kind, names) {
+    const modName = _mibManagerModuleName;
+    const cfg     = modulesData[modName] || {};
+    const total   = names.length;
+    let deleted   = 0;
+    const errors  = [];
+
+    _mibProgressShow(total);
+    for (let i = 0; i < names.length; i++) {
+        const name = names[i];
+        _mibProgressUpdate(i, total, name);
+        const res = await apiPost(_mibApiUrl(modName, 'delete_mib'), { ...cfg, name, kind });
+        const d   = res && res.data;
+        if (d && d.ok) { deleted++; }
+        else { errors.push(name + ': ' + ((d && d.message) || 'Error')); }
+    }
+    _mibProgressUpdate(total, total, null);
+    await new Promise(r => setTimeout(r, 300));
+    _mibProgressHide();
+
+    if (deleted) showToast(
+        _ms('mib_n_deleted', '{n} file(s) deleted').replace('{n}', deleted)
+    );
+    for (const e of errors) showToast(e, 'error');
+    await _mibLoad();
+}
+
+function _compileSelected() {
+    const names = [..._mibSelection.raw];
+    if (names.length) _compileMibs(names);
+}
+
+async function _mibDelete(name, kind) {
+    const modName = _mibManagerModuleName;
+    const cfg = modulesData[modName] || {};
+    const res = await apiPost(_mibApiUrl(modName, 'delete_mib'), { ...cfg, name, kind });
+    const d = res && res.data;
+    if (d && d.ok) {
+        showToast(_ms('mib_deleted', name + ' deleted'));
+        await _mibLoad();
+    } else {
+        showToast((d && d.message) || (t('error') || 'Error'), 'error');
+    }
+}
+
+// ── Compilation progress helpers ──────────────────────────────────
+function _mibProgressShow(total) {
+    const sec = document.getElementById('mibProgressSection');
+    if (sec) sec.style.display = '';
+    _mibProgressUpdate(0, total, null);
+}
+
+function _mibProgressUpdate(completed, total, current) {
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const bar = document.getElementById('mibProgressBar');
+    if (bar) { bar.style.width = `${pct}%`; bar.setAttribute('aria-valuenow', pct); }
+    const lbl = document.getElementById('mibProgressLabel');
+    if (lbl) lbl.textContent = current
+        ? `${completed} / ${total} — ${current}`
+        : `${completed} / ${total}`;
+    const pctEl = document.getElementById('mibProgressPct');
+    if (pctEl) pctEl.textContent = `${pct}%`;
+}
+
+function _mibProgressHide() {
+    const sec = document.getElementById('mibProgressSection');
+    if (sec) sec.style.display = 'none';
+}
+
+function _mibHandleCompileResult(d) {
+    if (d.result_ok === false) {
+        showToast(d.message || (t('error') || 'Error'), 'error');
+    } else if (d.partial) {
+        const nFailed = (d.failed || []).length;
+        const nOk     = (d.total || 0) - nFailed;
+        showToast(
+            _ms('mib_compiled_partial', '{compiled} compiled, {failed} failed')
+                .replace('{compiled}', nOk)
+                .replace('{failed}', nFailed),
+            'warning',
+        );
+    } else if (d.compiled) {
+        showToast(_ms('mib_compiled_ok', 'MIBs compiled successfully'));
+    } else {
+        showToast(_ms('mib_already_uptodate', 'MIBs already up-to-date'));
+    }
+}
+
+// Prevent the MIB Manager modal from closing while compilation is running.
+// Installs a hide.bs.modal listener that intercepts the event and asks
+// the user to confirm before aborting.
+function _startCompileInterceptor() {
+    const modal = document.getElementById('mibManagerModal');
+    if (!modal || _mibCompileInterceptor) return;
+    _mibCompileInterceptor = function(e) {
+        e.preventDefault();
+        showConfirmModal(
+            _ms('mib_cancel_confirm', 'Cancel the ongoing compilation and close?'),
+            () => {
+                _stopCompileInterceptor();
+                _mibCompileAbort = true;
+                bootstrap.Modal.getOrCreateInstance(modal).hide();
+            },
+        );
+    };
+    modal.addEventListener('hide.bs.modal', _mibCompileInterceptor);
+}
+
+function _stopCompileInterceptor() {
+    const modal = document.getElementById('mibManagerModal');
+    if (_mibCompileInterceptor && modal)
+        modal.removeEventListener('hide.bs.modal', _mibCompileInterceptor);
+    _mibCompileInterceptor = null;
+}
+
+function _mibStopCompile() {
+    _mibCompileAbort = true;
+}
+
+async function _compileMibs(mibs) {
+    // mibs: optional array of raw filenames to compile; omit/undefined = compile all
+    _mibCompileAbort = false;
+    const btn        = document.getElementById('mibCompileBtn');
+    const label      = document.getElementById('mibCompileBtnLabel');
+    const stopBtn    = document.getElementById('mibStopBtn');
+    const compSelBtn = document.getElementById('mibCompileSelBtn');
+    if (btn)        btn.disabled = true;
+    if (label)      label.textContent = _ms('mib_compiling', 'Compiling…');
+    if (stopBtn)    stopBtn.style.display = '';
+    if (compSelBtn) compSelBtn.disabled = true;
+
+    _startCompileInterceptor();
+    try {
+        const modName = _mibManagerModuleName;
+        const cfg     = modulesData[modName] || {};
+
+        // Start the background compilation job
+        const payload   = mibs && mibs.length ? { ...cfg, mibs } : cfg;
+        const startRes  = await apiPost(_mibApiUrl(modName, 'compile_mibs_start'), payload);
+        const startData = startRes && startRes.data;
+
+        if (!startData || !startData.ok) {
+            showToast((startData && startData.message) || (t('error') || 'Error'), 'error');
+            return;
+        }
+
+        // Immediate completion (empty raw dir)
+        if (startData.done) {
+            _mibHandleCompileResult(startData);
+            await _mibLoad();
+            return;
+        }
+
+        const jobId = startData.job_id;
+        _mibProgressShow(startData.total);
+
+        // Poll until the job is done or aborted
+        let _lastCompleted = -1;
+        while (!_mibCompileAbort) {
+            await new Promise(r => setTimeout(r, 350));
+            if (_mibCompileAbort) break;
+            const sRes  = await apiPost(_mibApiUrl(modName, 'compile_mibs_status'), { ...cfg, job_id: jobId });
+            const sData = sRes && sRes.data;
+            if (_mibCompileAbort) break;  // modal closed while request was in flight
+            if (!sData || !sData.ok) {
+                showToast((sData && sData.message) || 'Polling error', 'error');
+                break;
+            }
+            const nowCompleted = sData.completed || 0;
+            _mibProgressUpdate(nowCompleted, sData.total || startData.total, sData.current);
+            if (nowCompleted > _lastCompleted) {
+                _lastCompleted = nowCompleted;
+                _mibRefreshCompiled();  // intentionally not awaited — runs in background
+            }
+            if (sData.done) {
+                _mibProgressHide();
+                _mibHandleCompileResult(sData);
+                await _mibLoad();
+                break;
+            }
+        }
+    } finally {
+        _stopCompileInterceptor();
+        _mibProgressHide();
+        if (btn)        btn.disabled = false;
+        if (label)      label.textContent = _ms('mib_compile_all', 'Compile All');
+        if (stopBtn)    stopBtn.style.display = 'none';
+        if (compSelBtn) compSelBtn.disabled = false;
+    }
+}
+
+async function _importMibFromUrl() {
+    const input   = document.getElementById('mibImportUrlInput');
+    const btn     = document.getElementById('mibImportUrlBtn');
+    const url     = (input?.value || '').trim();
+    if (!url) {
+        showToast(_ms('mib_import_error_empty', 'Enter a URL to import'), 'error');
+        input?.focus();
+        return;
+    }
+    const modName = _mibManagerModuleName;
+    const cfg     = modulesData[modName] || {};
+    if (btn) btn.disabled = true;
+    const res = await apiPost(_mibApiUrl(modName, 'import_mib_from_url'), { ...cfg, url });
+    if (btn) btn.disabled = false;
+    const d = res && res.data;
+    if (d && d.ok) {
+        showToast(_ms('mib_import_ok', 'Imported {filename}').replace('{filename}', d.filename));
+        if (input) input.value = '';
+        await _mibLoad();
+    } else {
+        showToast((d && d.message) || (t('error') || 'Error'), 'error');
+    }
+}
+
+async function _uploadMibFiles(files) {
+    if (!files || !files.length) return;
+    const modName = _mibManagerModuleName;
+    const label = document.getElementById('mibUploadLabel');
+    if (label) label.style.opacity = '.6';
+
+    // MIB files are plain ASCII/UTF-8 text — send content via standard JSON action.
+    const modCfg = modulesData[modName] || {};
+    let uploaded = 0;
+    const errors = [];
+    for (const file of Array.from(files)) {
+        try {
+            const content = await file.text();
+            const res = await apiPost(_mibApiUrl(modName, 'upload_mib'), {
+                ...modCfg,
+                filename: file.name,
+                content,
+            });
+            const d = res && res.data;
+            if (d && d.ok) { uploaded++; }
+            else { errors.push(file.name + ': ' + ((d && d.message) || 'Error')); }
+        } catch (e) {
+            errors.push(file.name + ': ' + e.message);
+        }
+    }
+    if (label) label.style.opacity = '';
+    const fi = document.getElementById('mibFileInput');
+    if (fi) fi.value = '';
+
+    if (uploaded) showToast(_ms('mib_uploaded', '{n} file(s) uploaded').replace('{n}', uploaded));
+    for (const e of errors) showToast(e, 'error');
+    await _mibLoad();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('mibManagerModal')?.addEventListener('hidden.bs.modal', () => {
+        _stopCompileInterceptor();
+        _mibCompileAbort = true;   // stop any running poll loop
+        _mibProgressHide();
+        _mibManagerModuleName = null;
+        _mibData = null;
+        _mibSelection = {raw: new Set(), compiled: new Set()};
+    });
+});

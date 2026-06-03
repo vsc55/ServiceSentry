@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from flask import Flask, jsonify, redirect, request, session, url_for
+from jinja2 import ChoiceLoader, FileSystemLoader
 
 # Maps Docker environment variable names to (config_path, expected_type).
 # Env vars are runtime-only overrides — they are never written to config.json.
@@ -50,14 +51,14 @@ from .auth import saml_auth as _saml_auth
 from .migrations import run_all as _run_migrations
 from .mixins import (
     _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-    _SessionsMixin, _AuditMixin, _ChecksMixin,
+    _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin,
 )
 
 __all__ = ['WebAdmin']
 
 
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-               _SessionsMixin, _AuditMixin, _ChecksMixin):
+               _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin):
     """Web administration server for ServiceSentry configuration.
 
     Provides a browser-based UI for editing ``modules.json`` and
@@ -110,6 +111,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _ACCESS_POLL_SECS = 30
     # OIDC client lazy-init state
     _oidc_config_hash: str | None = None
+    # Module web UI includes (populated by _create_app)
+    _module_web_ui: list[str] = []
+    _module_web_modals: list[str] = []
 
     def __init__(
         self,
@@ -175,25 +179,38 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._env_override_values: dict[str, object] = {}
         self._check_lock = threading.Lock()
         self._data_lock = threading.RLock()
+        self._history = self._init_history()
         self._default_lang = (
             default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
         )
         self._default_dark_mode = bool(default_dark_mode)
         self._users: dict[str, dict] = {}
         self._sessions: dict[str, dict] = {}
-        self._audit_log: list[dict] = []
         self._custom_roles: dict[str, dict] = {}
-        self._builtin_role_labels: dict[str, str] = {}
+        self._builtin_role_names: dict[str, str] = {}
+        self._builtin_role_overrides: dict[str, dict] = {}
         self._groups: dict[str, dict] = {}
+        self._init_entity_store()  # DB-backed entities (migrates JSON files if present)
         self._load_or_create_users(username, password)
         self._load_sessions()
-        self._load_audit()
         self._load_roles()
         self._load_groups()
         _run_migrations(self)
         self._apply_saved_config()
+        self._init_audit_store()   # after apply_saved_config so _AUDIT_MAX_ENTRIES is final
         self._apply_env_overrides()
         self._app = self._create_app()
+
+        # Forward file-write errors (e.g. status.json race on Windows) to the
+        # audit log so operators see them in the web UI, not only in the terminal.
+        try:
+            from lib.config.config_store import set_error_callback as _set_cb
+            _set_cb(lambda event, detail: self._audit_system(event, detail=detail))
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+        # Start the background scheduler if auto-start is configured.
+        self._daemon_init()
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -356,6 +373,32 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _init_entity_store(self) -> None:
+        """Initialise the SQLite entity store shared by users/sessions/roles/groups."""
+        from lib.users_store    import UsersStore     # noqa: PLC0415
+        from lib.groups_store   import GroupsStore    # noqa: PLC0415
+        from lib.sessions_store import SessionsStore  # noqa: PLC0415
+        from lib.roles_store    import RolesStore     # noqa: PLC0415
+        db_path = os.path.join(self._var_dir or self._config_dir, 'data.db')
+        self._users_store    = UsersStore(db_path)
+        self._groups_store   = GroupsStore(db_path)
+        self._sessions_store = SessionsStore(db_path)
+        self._roles_store    = RolesStore(db_path)
+
+    def _init_history(self):
+        """Create a HistoryStore using the configured database connector."""
+        if not self._var_dir:
+            return None
+        try:
+            from lib.history import create as _create_history  # noqa: PLC0415
+            db_cfg = (self._read_config_file(self._CONFIG_FILE) or {}).get('database')
+            return _create_history(
+                db_cfg or None,
+                sqlite_path=os.path.join(self._var_dir, 'data.db'),
+            )
+        except Exception:  # pylint: disable=broad-except
+            return None
 
     def _apply_saved_config(self) -> None:
         """Read config.json and apply persisted settings to runtime attributes.
@@ -520,6 +563,42 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             static_folder=static_dir,
             static_url_path='/static',
         )
+
+        # Discover watchful modules that ship their own web UI partials.
+        # Convention (all files are optional per module):
+        #   watchfuls/<mod>/web/_styles.html — CSS injected inside <head>
+        #   watchfuls/<mod>/web/_ui.html     — JS injected inside <script> block
+        #   watchfuls/<mod>/web/_modals.html — HTML modals injected before </body>
+        # The watchfuls root is added to the Jinja2 loader so includes resolve as
+        # e.g. "snmp/web/_ui.html" and Jinja2 variables ({{ i18n.* }}) still work.
+        _watchfuls_root = os.path.normpath(
+            os.path.join(base_dir, '..', '..', 'watchfuls')
+        )
+        _module_web_styles: list[str] = []
+        _module_web_ui: list[str] = []
+        _module_web_modals: list[str] = []
+        if os.path.isdir(_watchfuls_root):
+            for _mod in sorted(os.listdir(_watchfuls_root)):
+                _web_dir = os.path.join(_watchfuls_root, _mod, 'web')
+                if not os.path.isdir(_web_dir):
+                    continue
+                for _f in sorted(f for f in os.listdir(_web_dir) if f.endswith('.html')):
+                    _tpl = f'{_mod}/web/{_f}'
+                    if _f.endswith('_modals.html'):
+                        _module_web_modals.append(_tpl)
+                    elif _f.endswith('_ui.html'):
+                        _module_web_ui.append(_tpl)
+                    elif _f.endswith('_styles.html'):
+                        _module_web_styles.append(_tpl)
+            if _module_web_styles or _module_web_ui or _module_web_modals:
+                app.jinja_loader = ChoiceLoader([
+                    app.jinja_loader,
+                    FileSystemLoader(_watchfuls_root),
+                ])
+        self._module_web_styles = _module_web_styles
+        self._module_web_ui = _module_web_ui
+        self._module_web_modals = _module_web_modals
+
         app.secret_key = self._load_or_create_secret_key()
         app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(
             days=self._REMEMBER_ME_DAYS,
@@ -568,7 +647,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'current_session_token': session.get('session_id', ''),
                 'permissions_list': list(PERMISSIONS),
                 'permissions_groups': PERMISSION_GROUPS,
-                'wa_builtin_roles': list(ROLES),
+                'wa_builtin_roles': [BUILTIN_ROLE_UIDS[r] for r in ROLES if r in BUILTIN_ROLE_UIDS],
                 'wa_sensitive_fields': sorted(self._SENSITIVE_FIELDS),
                 'wa_remember_me_days': self._REMEMBER_ME_DAYS,
                 'wa_audit_max_entries': self._AUDIT_MAX_ENTRIES,
@@ -611,6 +690,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'ldap_available':  _ldap_auth.is_available(),
                 'oidc_available':  _oidc_auth.is_available(),
                 'saml2_available': _saml_auth.is_available(),
+                'module_web_styles': self._module_web_styles,
+                'module_web_ui':     self._module_web_ui,
+                'module_web_modals': self._module_web_modals,
             }
 
         self._register_routes(app)

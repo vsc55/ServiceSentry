@@ -3,34 +3,85 @@
    render entry point.
    ================================================================ #}
 
-function renderFlatAudit(entries, hideCol = null) {
-    const canDelete = new Set(currentUser.permissions || []).has('audit_delete');
-    const _sTh = (field, label) => {
-        if (hideCol === field) return '';
-        const active = _auditSort === field;
-        const iCls   = active ? (_auditSortDir === 'asc' ? 'bi-sort-up' : 'bi-sort-down') : 'bi-chevron-expand';
-        const iOp    = active ? '.75' : '.2';
-        return `<th class="ss-th ss-th-sort" onclick="_sortAuditByCol('${field}')">`
-             + `${label} <i class="bi ${iCls}" style="font-size:.85em;opacity:${iOp}"></i></th>`;
-    };
-    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table">
+// ── Column definitions ─────────────────────────────────────────────
+const _AUDIT_COLS = [
+    { id: 'time',   label: () => t('col_time'),   sortKey: 'time',  always: true  },
+    { id: 'event',  label: () => t('col_event'),  sortKey: 'event', always: false },
+    { id: 'user',   label: () => t('col_user'),   sortKey: 'user',  always: false },
+    { id: 'ip',     label: () => t('col_ip'),     sortKey: 'ip',    always: false },
+    { id: 'detail', label: () => t('col_detail'), sortKey: null,    always: true  },
+];
+const _AUDIT_DEFAULT_COLS = new Set(['event', 'user']);
+
+let _auditVisibleCols = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_audit_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){}
+    return new Set(_AUDIT_DEFAULT_COLS);
+})();
+let _auditColOrder = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_audit_col_order')||'null'); if (Array.isArray(s)) return s; } catch(_){}
+    return _AUDIT_COLS.map(c => c.id);
+})();
+function _resetAuditCols() {
+    _auditVisibleCols = new Set(_AUDIT_DEFAULT_COLS);
+    _auditColOrder    = _AUDIT_COLS.map(c => c.id);
+    localStorage.setItem('ss_audit_cols',       JSON.stringify([..._auditVisibleCols]));
+    localStorage.setItem('ss_audit_col_order',  JSON.stringify(_auditColOrder));
+    localStorage.removeItem('ss_audit_col_w');
+    _persistTableConfig();
+    renderAuditTable();
+}
+function _auditToggleCol(col) {
+    _auditVisibleCols.has(col) ? _auditVisibleCols.delete(col) : _auditVisibleCols.add(col);
+    localStorage.setItem('ss_audit_cols', JSON.stringify([..._auditVisibleCols]));
+    _persistTableConfig();
+    renderAuditTable();
+}
+function _audSaveColOrder() { localStorage.setItem('ss_audit_col_order', JSON.stringify(_auditColOrder)); _persistTableConfig(); }
+
+// Returns the ordered+visible columns for audit, optionally excluding hideCol.
+function _auditOrderedCols(hideCol) {
+    const knownIds = new Set(_AUDIT_COLS.map(c => c.id));
+    _AUDIT_COLS.forEach(c => { if (!_auditColOrder.includes(c.id)) _auditColOrder.push(c.id); });
+    _auditColOrder = _auditColOrder.filter(id => knownIds.has(id));
+    return _auditColOrder
+        .map(id => _AUDIT_COLS.find(c => c.id === id))
+        .filter(c => c && (c.always || _auditVisibleCols.has(c.id)) && c.id !== hideCol);
+}
+
+function renderFlatAudit(entries, hideCol = null, tableId = null) {
+    const canDelete   = new Set(currentUser.permissions || []).has('audit_delete');
+    const orderedCols = _auditOrderedCols(hideCol);
+
+    // ── Column widths ──────────────────────────────────────────────
+    const _cw = (() => { try { return JSON.parse(localStorage.getItem('ss_audit_col_w')||'{}'); } catch(_){ return {}; } })();
+    const _thW = id => _cw[id] ? ` style="width:${_cw[id]}"` : '';
+
+    const idAttr = tableId ? ` id="${tableId}"` : '';
+    const thRow  = orderedCols.map(col => {
+        const inner = col.sortKey
+            ? _thSortInner(col.label(), col.sortKey, _auditSort, _auditSortDir, '_sortAuditByCol')
+            : `<span class="small">${esc(col.label())}</span>`;
+        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${_thW(col.id)}>${inner}</th>`;
+    }).join('');
+
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table"${idAttr}>
     <thead class="ss-thead-sticky"><tr>
-        ${_sTh('time',  t('col_time'))}
-        ${_sTh('event', t('col_event'))}
-        ${_sTh('user',  t('col_user'))}
-        ${_sTh('ip',    t('col_ip'))}
-        <th class="ss-th">${t('col_detail')}</th>
-        ${canDelete ? '<th style="width:1%"></th>' : ''}
+        ${thRow}
+        ${canDelete ? '<th class="ss-th" style="width:1%"></th>' : ''}
     </tr></thead><tbody>`;
+
     for (const e of entries) {
-        h += `<tr>
-            ${hideCol !== 'time'  ? `<td class="text-nowrap text-muted" style="font-size:.8rem">${esc(new Date(e.ts).toLocaleString())}</td>` : ''}
-            ${hideCol !== 'event' ? `<td>${_auditEventBadge(e.event)}</td>` : ''}
-            ${hideCol !== 'user'  ? `<td><code style="font-size:.82rem">${esc(e.user)}</code></td>` : ''}
-            ${hideCol !== 'ip'    ? `<td class="text-muted" style="font-size:.8rem">${esc(e.ip)}</td>` : ''}
-            <td style="font-size:.82rem">${auditSummaryHtml(e._idx, e.detail)}</td>
-            ${canDelete ? `<td><button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteAuditEntry(${e._origIdx})" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button></td>` : ''}
-        </tr>`;
+        const cells = orderedCols.map(col => {
+            switch (col.id) {
+                case 'time':   return `<td class="text-nowrap text-muted" style="font-size:.8rem">${esc(new Date(e.ts).toLocaleString())}</td>`;
+                case 'event':  return `<td>${_auditEventBadge(e.event)}</td>`;
+                case 'user':   return `<td><code style="font-size:.82rem">${esc(e.user)}</code></td>`;
+                case 'ip':     return `<td class="text-muted" style="font-size:.8rem">${esc(e.ip)}</td>`;
+                case 'detail': return `<td style="font-size:.82rem">${auditSummaryHtml(e._idx, e.detail)}</td>`;
+                default:       return '<td></td>';
+            }
+        }).join('');
+        h += `<tr>${cells}${canDelete ? `<td><button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteAuditEntry(${e._origIdx})" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button></td>` : ''}</tr>`;
     }
     h += `</tbody></table>`;
     return h;
@@ -76,10 +127,10 @@ function renderAuditTable() {
     _initAuditPageSize();
 
     // Filter
-    const userRx     = _auditFilterRegex(_auditFilters.user);
-    const ipRx       = _auditFilterRegex(_auditFilters.ip);
-    const detailLow  = _auditFilters.detail ? _auditFilters.detail.toLowerCase() : '';
-    const filtered = _auditEntries.filter(e => {
+    const userRx    = _auditFilterRegex(_auditFilters.user);
+    const ipRx      = _auditFilterRegex(_auditFilters.ip);
+    const detailLow = _auditFilters.detail ? _auditFilters.detail.toLowerCase() : '';
+    const filtered  = _auditEntries.filter(e => {
         if (_auditFilters.event && e.event !== _auditFilters.event) return false;
         if (userRx && !userRx.test(e.user || '')) return false;
         if (ipRx   && !ipRx.test(e.ip   || '')) return false;
@@ -105,30 +156,69 @@ function renderAuditTable() {
     if (!filtered.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
             <i class="bi bi-funnel" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
-            <span>${t('no_audit_entries')}</span>
-        </div>`;
+            <span>${t('no_audit_entries')}</span></div>`;
         return;
     }
 
     // Paginate
-    const total    = filtered.length;
-    const pageSize = _auditPageSize || total;
-    _auditPage     = Math.max(1, Math.min(_auditPage, Math.ceil(total / pageSize)));
-    const sliceStart = (_auditPage - 1) * pageSize;
-    const pageEntries = filtered.slice(sliceStart, sliceStart + pageSize);
+    const total      = filtered.length;
+    const pageSize   = _auditPageSize || total;
+    _auditPage       = Math.max(1, Math.min(_auditPage, Math.ceil(total / pageSize)));
+    const pageEntries = filtered.slice((_auditPage - 1) * pageSize, _auditPage * pageSize);
 
-    const paginationTop    = _renderAuditPagination(total);
-    const paginationBottom = _renderAuditPagination(total);
-    const tableHtml = _auditGroup !== 'none' ? renderGroupedAudit(pageEntries) : renderFlatAudit(pageEntries);
+    const isFlat         = _auditGroup === 'none';
+    const paginationTop  = _renderAuditPagination(total);
+    const paginationBot  = _renderAuditPagination(total);
+    const tableHtml      = isFlat
+        ? renderFlatAudit(pageEntries, null, 'audit-table')
+        : renderGroupedAudit(pageEntries);
+
+    // Column chooser
+    const colChooser = `<div class="dropdown">
+      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
+        <i class="bi bi-layout-three-columns"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:150px">
+        ${_AUDIT_COLS.map(col => `<li>
+          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
+            <input type="checkbox" class="form-check-input m-0"
+                   ${col.always || _auditVisibleCols.has(col.id) ? 'checked' : ''}
+                   ${col.always ? 'disabled' : `onchange="_auditToggleCol('${col.id}')"`}>
+            <span class="small">${esc(col.label())}</span>
+            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
+          </label></li>`).join('')}
+        <li><hr class="dropdown-divider my-1"></li>
+        <li><button class="dropdown-item small py-1 text-muted" onclick="_resetAuditCols()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>${t('col_reset_defaults')||'Reset defaults'}
+        </button></li>
+      </ul>
+    </div>`;
+
     c.innerHTML = `
     <div class="ss-card">
         <div class="ss-accent ss-accent-slate"></div>
-        <div class="ss-card-band ss-card-band-top">
+        <div class="ss-card-band ss-card-band-top d-flex align-items-center justify-content-between">
             ${paginationTop}
+            ${colChooser}
         </div>
         <div>${tableHtml}</div>
-        <div class="ss-card-band ss-card-band-bottom">${paginationBottom}</div>
+        <div class="ss-card-band ss-card-band-bottom">${paginationBot}</div>
     </div>`;
+
+    if (isFlat) setTimeout(_initAuditTableFeatures, 0);
+}
+
+function _initAuditTableFeatures() {
+    _attachColFeatures('audit-table',
+        () => _auditColOrder,
+        order => { _auditColOrder = order; },
+        _audSaveColOrder,
+        renderAuditTable,
+        (col, w) => {
+            const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_audit_col_w')||'{}'); } catch(_){ return {}; } })();
+            cw[col] = w; localStorage.setItem('ss_audit_col_w', JSON.stringify(cw));
+        }
+    );
 }
 
 async function renderAudit() {
@@ -136,8 +226,7 @@ async function renderAudit() {
     if (!c) return;
     c.innerHTML = `<div class="text-center py-5 text-muted">
         <div class="spinner-border spinner-border-sm me-2"></div>
-        <span>${t('loading')}</span>
-    </div>`;
+        <span>${t('loading')}</span></div>`;
     const entries = await apiGet('/api/v1/audit');
     // _origIdx = real index in the backend array (0=oldest, reversed from API)
     const raw = entries || [];
@@ -145,8 +234,7 @@ async function renderAudit() {
     if (!_auditEntries.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
             <i class="bi bi-journal-x" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
-            <span>${t('no_audit_entries')}</span>
-        </div>`;
+            <span>${t('no_audit_entries')}</span></div>`;
         return;
     }
     initAuditControls();

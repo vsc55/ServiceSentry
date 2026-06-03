@@ -159,3 +159,5 @@ cython_debug/
 /data/.flask_secret
 /data/*.json
 /.vscode
+/data/snmp_mibs/*
+/data/data.*

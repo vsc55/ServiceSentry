@@ -189,6 +189,12 @@
                 <i class="bi bi-activity me-1"></i>{{ i18n.tab_status }}
             </button>
         </li>
+        <li class="nav-item" role="presentation" id="tab-history-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-history" type="button"
+                id="btn-tab-history">
+                <i class="bi bi-graph-up me-1"></i>{{ i18n.tab_history }}
+            </button>
+        </li>
         <li class="nav-item" role="presentation" id="tab-access-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-access" type="button" id="btn-tab-access">
                 <i class="bi bi-person-lock me-1"></i>{{ i18n.tab_users }}
@@ -225,7 +231,7 @@
                 <button class="btn btn-sm btn-secondary d-none" id="btnUndoModules" onclick="revertModules()" title="{{ i18n.undo_modules }}">
                     <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo_modules }}
                 </button>
-                <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()" title="{{ i18n.save_modules_tt }}">
+                <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()" title="{{ i18n.save_modules_tt }}" disabled>
                     <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
                     <span class="badge text-bg-warning ms-1 d-none" id="badgeModulesDirty"
                         title="{{ i18n.unsaved_changes }}">●</span>
@@ -244,7 +250,7 @@
                         title="{{ i18n.reload_config_title }}">
                         <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_config }}
                     </button>
-                    <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()" title="{{ i18n.save_config_tt }}">
+                    <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()" title="{{ i18n.save_config_tt }}" disabled>
                         <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
                         <span class="badge text-bg-warning ms-1 d-none" id="badgeConfigDirty"
                             title="{{ i18n.unsaved_changes }}">●</span>
@@ -273,6 +279,15 @@
         <div class="tab-pane fade" id="tab-status">
             <div id="status-container">
                 <p class="text-muted">{{ i18n.status_placeholder }}</p>
+            </div>
+        </div>
+
+        <!-- ==================== History Tab ==================== -->
+        <div class="tab-pane fade" id="tab-history">
+            <div id="history-container">
+                <div class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm"></div>
+                </div>
             </div>
         </div>
 
@@ -310,8 +325,8 @@
                             <h6 class="mb-0 me-auto"><i class="bi bi-plug me-2"></i><span id="sessions-title">{{ i18n.active_sessions }}</span></h6>
                             <div id="sessionsBulkBar" class="d-flex align-items-center gap-1 border-start ps-2 me-1" style="display:none!important">
                                 <span id="sessionsBulkCount" class="badge bg-secondary rounded-pill">0</span>
-                                <button class="btn btn-sm btn-danger py-0 px-2" onclick="_bulkRevokeSessions()" title="{{ i18n.revoke_session_tt }}"><i class="bi bi-x-lg me-1"></i>{{ i18n.revoke_session }}</button>
-                                <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedSessions.clear();renderSessions()" title="{{ i18n.clear_filters }}"><i class="bi bi-x-lg"></i></button>
+                                <button class="btn btn-sm btn-danger" onclick="_bulkRevokeSessions()" title="{{ i18n.revoke_session_tt }}"><i class="bi bi-x-lg me-1"></i>{{ i18n.revoke_session }}</button>
+                                <button class="btn btn-sm btn-secondary" onclick="_selectedSessions.clear();renderSessions()" title="{{ i18n.clear_filters }}"><i class="bi bi-x-lg"></i></button>
                             </div>
                             <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
                                 <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}
@@ -467,6 +482,7 @@
 {% include "partials/_js_roles.html" %}
 {% include "partials/_js_groups.html" %}
 {% include "partials/_js_audit.html" %}
+{% include "partials/_js_history.html" %}
 {% include "partials/_js_init.html" %}
 </script>
 {% endblock %}

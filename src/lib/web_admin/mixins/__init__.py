@@ -6,6 +6,7 @@ from .permissions import _PermissionsMixin
 from .sessions import _SessionsMixin
 from .audit import _AuditMixin
 from .checks import _ChecksMixin
+from .daemon import _DaemonMixin
 
 __all__ = [
     '_UsersMixin',
@@ -15,4 +16,5 @@ __all__ = [
     '_SessionsMixin',
     '_AuditMixin',
     '_ChecksMixin',
+    '_DaemonMixin',
 ]

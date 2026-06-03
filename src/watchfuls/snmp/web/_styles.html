@@ -1,0 +1,62 @@
+{# ================================================================
+   SNMP module — component styles.
+   Injected into <head> by the generic module_web_styles mechanism
+   in base.html.  Contains all CSS for the MIB Manager and MIB
+   Browser modals; nothing here belongs in the global web_admin.css.
+   ================================================================ #}
+<style>
+/* ── SNMP MIB Manager modals ──────────────────────────────────────── */
+
+/* MIB Browser — symbol count badge (hidden until symbols are loaded) */
+#mibBrowserCount { font-size: .65rem; display: none; }
+
+/* MIB Browser — search bar bottom border */
+.mib-search-bar { border-bottom: 1px solid var(--bs-border-color); }
+
+/* MIB Browser — scrollable OID tree */
+#mibBrowserTree { overflow-y: auto; max-height: 65vh; }
+
+/* MIB Manager — modal content minimum height */
+#mibManagerModal .modal-content { min-height: 60vh; }
+
+/* MIB Manager — modal body fills remaining height */
+#mibManagerModal .modal-body { flex: 1 1 auto; overflow-y: auto; }
+
+/* MIB Manager — file upload label */
+#mibUploadLabel { cursor: pointer; }
+
+/* MIB Manager — hidden native file input (button is the label) */
+#mibFileInput { display: none; }
+
+/* MIB Manager — stop compile button (shown only during compilation) */
+#mibStopBtn { display: none; }
+
+/* MIB Manager — pysmi availability status badge */
+#mibPysmiStatus { font-size: .72rem; }
+
+/* MIB Manager — directory info (truncated with RTL ellipsis) */
+#mibDirInfo {
+    font-size: .7rem;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+}
+
+/* MIB Manager — URL import input (fills remaining flex space) */
+#mibImportUrlInput { min-width: 0; flex: 1; }
+
+/* MIB Manager — compilation progress section (shown during compile jobs) */
+#mibProgressSection { display: none; }
+
+/* MIB Manager — progress label and percentage text */
+#mibProgressLabel,
+#mibProgressPct { font-size: .78rem; }
+
+/* MIB Manager — progress bar track dimensions */
+#mibProgressSection .progress { height: 5px; border-radius: 3px; }
+
+/* MIB Manager — progress bar initial width (JS updates style.width at runtime) */
+#mibProgressBar { width: 0%; }
+</style>

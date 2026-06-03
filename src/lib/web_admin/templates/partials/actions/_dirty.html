@@ -14,13 +14,17 @@ function markDirty(target) {
     const saved   = target === 'modules' ? _savedModulesData : _serverConfigData;
     const current = target === 'modules' ? modulesData       : configData;
     if (JSON.stringify(current) === JSON.stringify(saved)) { clearDirty(target); return; }
-    const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
-    document.getElementById(id)?.classList.remove('d-none');
+    const badgeId = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
+    const btnId   = target === 'modules' ? 'btnSaveModules'    : 'btnSaveConfig';
+    document.getElementById(badgeId)?.classList.remove('d-none');
+    document.getElementById(btnId)?.removeAttribute('disabled');
     if (target === 'modules') document.getElementById('btnUndoModules')?.classList.remove('d-none');
 }
 function clearDirty(target) {
-    const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
-    document.getElementById(id)?.classList.add('d-none');
+    const badgeId = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
+    const btnId   = target === 'modules' ? 'btnSaveModules'    : 'btnSaveConfig';
+    document.getElementById(badgeId)?.classList.add('d-none');
+    document.getElementById(btnId)?.setAttribute('disabled', '');
     if (target === 'modules') document.getElementById('btnUndoModules')?.classList.add('d-none');
     if (target === 'config') {
         _dirtyFields.clear();

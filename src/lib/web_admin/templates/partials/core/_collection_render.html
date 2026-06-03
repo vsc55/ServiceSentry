@@ -9,10 +9,13 @@
  * and show the result as a toast. Used by the header test button and inline toast actions.
  */
 async function testItemConnection(pathStr, url, btn, extra) {
-    const parts = pathStr.split('|');
+    const parts    = pathStr.split('|');
+    const _itemKey = parts.length > 0 ? parts[parts.length - 1] : '';
     const itemData = Object.assign(
         {}, getPath(modulesData, parts) || getPath(configData, parts) || {},
         extra || {});
+    // Inject item key so classmethods can use it as fallback for __key__ placeholder fields.
+    if (_itemKey) itemData['_item_key'] = _itemKey;
     const origHtml = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`;
@@ -39,8 +42,12 @@ async function itemAction(btn) {
     const resultId  = btn.dataset.actionResultId;
     const resultFld = btn.dataset.actionResultField || '';
 
-    const parts = pathStr.split('|');
+    const parts    = pathStr.split('|');
+    const _itemKey = parts.length > 0 ? parts[parts.length - 1] : '';
     const itemData = Object.assign({}, getPath(modulesData, parts) || getPath(configData, parts) || {}, extra);
+    // Inject item key so classmethods can use it as fallback for fields
+    // whose placeholder is __key__ (e.g. web module's URL field).
+    if (_itemKey) itemData['_item_key'] = _itemKey;
 
     // List result: toggle off if already showing
     if (result === 'list') {
@@ -199,8 +206,14 @@ function renderCollection(title, data, pathStr, target) {
         ? esc(_colLd.collections[title])
         : esc(fieldLabel(title));
     const itemCount = Object.keys(data).length;
-    const _colSchema = ITEM_SCHEMAS[pathStr] || null;
-    const _discoverUrl = _colSchema && _colSchema['__discovery__'] ? _colSchema['__discovery__'] : null;
+    // Use _schemaKeyOf to support sub-collection paths like 'snmp|servers|router_1|checks'.
+    const _colSchema = ITEM_SCHEMAS[_schemaKeyOf(pathStr)] || null;
+    // __discovery__ is the action name; api_ver (from __module__ schema) is the API
+    // version the module was built against (defaults to "v1"). The system builds the
+    // full URL so each module only needs to declare what it supports, not the full path.
+    const _discoverAction = _colSchema && _colSchema['__discovery__'] ? _colSchema['__discovery__'] : null;
+    const _discoverVer    = (ITEM_SCHEMAS[`${_modNameCol}|__module__`] || {})['api_ver'] || 'v1';
+    const _discoverUrl = _discoverAction ? `/api/${_discoverVer}/watchfuls/${_modNameCol}/${_discoverAction}` : null;
     const _unsupported = _colSchema && _colSchema['__unsupported__'] === true;
     const canAddItem = target !== 'modules' || hasModulePerm(_modNameCol, 'add');
     let h = `<div class="mt-3 mb-1">
@@ -248,12 +261,20 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         : '';
 
     // Rename (key edit) button — hidden when schema uses __key_mirrors_field__
-    const _renameSch = ITEM_SCHEMAS[parentPathStr] || null;
+    const _renameSch = ITEM_SCHEMAS[_schemaKeyOf(parentPathStr)] || null;
     const renameBtn = (canEditItem && !(_renameSch && _renameSch['__key_mirrors_field__']))
         ? `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1" data-no-collapse="1"
         onclick="event.stopPropagation();renameItem(${tg},${pp},${nameEsc})"
         title="${escAttr(t('rename_item'))}">
         <i class="bi bi-pencil-square"></i></button>`
+        : '';
+
+    // Clone button — duplicates the item with a unique key suffix
+    const cloneBtn = canEditItem
+        ? `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1" data-no-collapse="1"
+        onclick="event.stopPropagation();cloneItem(${tg},${pp},${nameEsc})"
+        title="${escAttr(t('clone_item') || 'Clone')}">
+        <i class="bi bi-copy"></i></button>`
         : '';
 
     // --- promote boolean/number → dict when a schema exists ---
@@ -326,7 +347,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         const keyBadge = (displayName !== itemName)
             ? `<span class="badge bg-secondary bg-opacity-25 ms-2 fw-normal" style="font-size:.68rem">${esc(itemName)}</span>`
             : '';
-        const _colSchema    = ITEM_SCHEMAS[parentPathStr] || null;
+        const _colSchema    = ITEM_SCHEMAS[_schemaKeyOf(parentPathStr)] || null;
         const _testUrl      = _colSchema && _colSchema['__test__'] ? _colSchema['__test__'] : null;
 
         // Split __actions__ into grouped (injected inside their group) and bottom (action strip)
@@ -353,7 +374,25 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                 title="${escAttr(t('test_connection'))}">
                 <i class="bi bi-plug"></i></button>`
             : '';
-        const body = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : [], _postGroupHtml);
+        const _scalarBody = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : [], _postGroupHtml);
+
+        // Render sub-collections: fields of type 'sub_collection' in the parent schema.
+        // These are nested item collections stored inside this item (e.g. SNMP checks inside a server).
+        let _subColBody = '';
+        if (_colSchema) {
+            for (const [_scFk, _scFm] of Object.entries(_colSchema)) {
+                if (_scFk.startsWith('__') || !_scFm || typeof _scFm !== 'object' || _scFm.type !== 'sub_collection') continue;
+                // Ensure the sub-collection exists in the live data (init if missing).
+                if (!(typeof itemValue === 'object' && itemValue !== null)) continue;
+                if (!(_scFk in itemValue)) {
+                    const _liveItem = getPath(target === 'modules' ? modulesData : configData, pathStr.split('|'));
+                    if (_liveItem && typeof _liveItem === 'object') _liveItem[_scFk] = {};
+                    itemValue[_scFk] = {};
+                }
+                _subColBody += renderCollection(_scFk, itemValue[_scFk] || {}, pathStr + '|' + _scFk, target);
+            }
+        }
+
         const itemOpacity = itemOn ? '' : ';opacity:.6';
         const isAutoExpand = (_autoExpandItemPath === pathStr);
         if (isAutoExpand) _autoExpandItemPath = null;
@@ -362,7 +401,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                  style="background:var(--bs-tertiary-bg);cursor:pointer"
                  role="button" onclick="toggleCollapseFromHeader(event,'${id}')">
                 <code class="flex-grow-1 min-w-0" style="font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}${keyBadge}</code>
-                ${sw}${testBtn}${renameBtn}${delBtn}
+                ${sw}${testBtn}${renameBtn}${cloneBtn}${delBtn}
                 <button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     style="background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"
@@ -371,7 +410,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                 </button>
             </div>
             <div class="collapse${isAutoExpand ? ' show' : ''}" id="${id}" data-sw-item-path="${escAttr(pathStr)}">
-                <div class="px-3 py-2" style="background:var(--bs-body-bg);border-top:1px solid var(--bs-border-color)">${body}${_inlineActions}</div>
+                <div class="px-3 py-2" style="background:var(--bs-body-bg);border-top:1px solid var(--bs-border-color)">${_scalarBody}${_inlineActions}${_subColBody}</div>
             </div>
         </div>`;
     }

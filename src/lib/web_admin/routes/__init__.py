@@ -19,6 +19,8 @@ from .sessions import register as _sessions
 from .sessions.audit import register as _audit
 from .config import register as _config
 from .watchfuls import register as _watchfuls
+from .daemon import register as _daemon
+from .history import register as _history
 from .ui import register as _ui
 from .status import register as _status
 from .errors import register as _errors
@@ -45,3 +47,5 @@ def register_all(app, wa):
     _groups(app, wa)
     _checks(app, wa)
     _watchfuls(app, wa)
+    _daemon(app, wa)
+    _history(app, wa)

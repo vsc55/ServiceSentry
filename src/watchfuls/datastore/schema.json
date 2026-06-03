@@ -3,6 +3,7 @@
         "enabled": {"type": "bool", "default": true},
         "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
     },
+    "__history__": {"field": null, "unit": null, "label": "Connection"},
     "list": {
         "__test__": "/api/watchfuls/datastore/test_connection",
         "__new_item_fields__": ["db_type"],
@@ -40,8 +41,18 @@
         "enabled":      {"type": "bool", "default": true},
         "db_type":      {"type": "str",  "default": "mysql",
                          "options": ["mysql","postgres","mssql","mongodb","redis","elasticsearch","influxdb","memcached"],
+                         "options_deps": {
+                             "postgres":  "psycopg2-binary",
+                             "mssql":     "pymssql",
+                             "mongodb":   "pymongo",
+                             "redis":     "redis",
+                             "memcached": "pymemcache"
+                         },
                          "group": "connection"},
-        "conn_type":    {"type": "str",  "default": "tcp",  "options": ["tcp","socket","ssh"], "group": "connection"},
+        "conn_type":    {"type": "str",  "default": "tcp",
+                         "options": ["tcp","socket","ssh"],
+                         "options_deps": {"ssh": "paramiko"},
+                         "group": "connection"},
         "ssh_host":     {"type": "str",  "default": "", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
         "ssh_port":     {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 22, "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
         "ssh_user":     {"type": "str",  "default": "", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},

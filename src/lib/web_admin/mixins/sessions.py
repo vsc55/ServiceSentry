@@ -2,10 +2,8 @@
 # -*- coding: utf-8 -*-
 """Session registry mixin for WebAdmin."""
 
-import json
 import os
 import secrets
-import tempfile
 from datetime import datetime, timedelta, timezone
 
 from flask import request, session
@@ -50,19 +48,11 @@ class _SessionsMixin:
     # Session registry                                                     #
     # ------------------------------------------------------------------ #
 
-    @property
-    def _sessions_path(self) -> str:
-        return os.path.join(self._config_dir, self._SESSIONS_FILE)
-
     def _load_sessions(self) -> None:
-        """Load active sessions from disk and discard expired ones."""
-        path = self._sessions_path
-        if os.path.isfile(path):
-            try:
-                with open(path, encoding='utf-8') as fh:
-                    self._sessions = json.load(fh)
-            except (json.JSONDecodeError, OSError):
-                self._sessions = {}
+        """Load active sessions from the DB and discard expired ones."""
+        data = self._sessions_store.load()
+        if data:
+            self._sessions = data
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=self._REMEMBER_ME_DAYS)
         ).isoformat()
@@ -84,39 +74,23 @@ class _SessionsMixin:
             self._persist_sessions()
 
     def _persist_sessions(self) -> bool:
-        """Write sessions registry to disk atomically."""
-        tmp_path = None
-        try:
-            os.makedirs(self._config_dir, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                'w', encoding='utf-8', dir=self._config_dir,
-                suffix='.tmp', delete=False,
-            ) as tmp:
-                json.dump(self._sessions, tmp, indent=4, ensure_ascii=False)
-                tmp_path = tmp.name
-            os.replace(tmp_path, self._sessions_path)
-            return True
-        except OSError:
-            if tmp_path:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-            return False
+        """Write sessions registry to the database (columnar sessions table)."""
+        return self._sessions_store.save_all(self._sessions)
 
     def _create_session(
         self, username: str, ip: str, user_agent: str,
     ) -> tuple[str, str]:
         """Register a new session and return (token, sid)."""
-        token = secrets.token_hex(32)
-        sid = secrets.token_hex(8)
-        now = datetime.now(timezone.utc).isoformat()
+        token    = secrets.token_hex(32)
+        sid      = secrets.token_hex(8)
+        now      = datetime.now(timezone.utc).isoformat()
+        user_uid = (self._users.get(username) or {}).get('uid', username)
         self._sessions[token] = {
-            'sid': sid,
-            'username': username,
-            'created': now,
-            'last_seen': now,
-            'ip': ip,
+            'sid':        sid,
+            'user_uid':   user_uid,
+            'created':    now,
+            'last_seen':  now,
+            'ip':         ip,
             'user_agent': user_agent,
         }
         self._persist_sessions()
@@ -130,10 +104,13 @@ class _SessionsMixin:
         if not token or token not in self._sessions:
             session.clear()
             return False
-        entry = self._sessions[token]
-        # Kick deleted or disabled users immediately
-        uname = entry.get('username', session.get('username', ''))
-        user_rec = self._users.get(uname)
+        entry     = self._sessions[token]
+        user_uid  = entry.get('user_uid', '')
+        # Resolve uid → (username, user_record)
+        uname, user_rec = self._uid_to_username(user_uid)
+        if uname is None:
+            uname = session.get('username', '')
+            user_rec = self._users.get(uname)
         if user_rec is None or not user_rec.get('enabled', True):
             del self._sessions[token]
             self._persist_sessions()
@@ -145,7 +122,7 @@ class _SessionsMixin:
         if entry.get('ip') and entry['ip'] != current_ip:
             self._audit(
                 'session_ip_changed',
-                username=entry.get('username', ''),
+                username=uname,
                 ip=current_ip,
                 detail={
                     'sid': entry.get('sid', token[:8]),
@@ -165,11 +142,19 @@ class _SessionsMixin:
             return True
         return False
 
+    def _uid_to_username(self, uid: str) -> tuple[str | None, dict | None]:
+        """Return (username, user_dict) for a user UID, or (None, None)."""
+        for uname, d in self._users.items():
+            if d.get('uid') == uid:
+                return uname, d
+        return None, None
+
     def _revoke_user_sessions(self, username: str) -> int:
         """Remove all sessions belonging to *username*. Returns count."""
+        user_uid = (self._users.get(username) or {}).get('uid', '')
         tokens = [
             t for t, s in self._sessions.items()
-            if s.get('username') == username
+            if s.get('user_uid') == user_uid
         ]
         for t in tokens:
             del self._sessions[t]

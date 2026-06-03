@@ -45,10 +45,11 @@ def register(app, wa):
         uname_me = session.get('username', '')
         user_data = wa._users.get(uname_me, {})
         raw_groups = user_data.get('groups', [])
+        # _groups is now keyed by uid; return labels as display names
         group_names = [
-            wa._uid_to_group_name(g) if wa._is_uid(g) else g
+            wa._uid_to_group_label(g) or g
             for g in raw_groups
-            if not wa._is_uid(g) or wa._uid_to_group_name(g)
+            if g in wa._groups
         ]
         return jsonify({
             'username': uname_me,
@@ -60,6 +61,7 @@ def register(app, wa):
             'groups': group_names,
             'pref_lang': user_data.get('lang', ''),
             'pref_dark_mode': user_data.get('dark_mode'),
+            'table_config': user_data.get('table_config', {}),
             'restart_pending': wa._restart_pending,
             'startup_id':      wa._startup_id,
         })

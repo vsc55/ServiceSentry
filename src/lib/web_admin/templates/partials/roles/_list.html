@@ -3,6 +3,57 @@
    ================================================================ #}
 
 // ──────────────────────────── Role management ─────────────────────
+
+// ── Column definitions ─────────────────────────────────────────────
+const _ROL_COLS = [
+    { id: 'uid',         label: () => 'UID',                            sortKey: 'uid',         always: false },
+    { id: 'name',        label: () => t('col_role_name'),               sortKey: 'name',       always: true  },
+    { id: 'description', label: () => t('role_description'),            sortKey: null,          always: false },
+    { id: 'created_at',  label: () => t('col_created_at')||'Created',   sortKey: 'created_at',  always: false },
+    { id: 'updated_at',  label: () => t('col_updated_at')||'Last Updated', sortKey: 'updated_at', always: false },
+    { id: 'updated_by',  label: () => t('col_updated_by')||'Updated By',sortKey: 'updated_by',  always: false },
+];
+const _ROLES_DEFAULT_COLS = new Set(['description']);
+
+let _rolesVisibleCols = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_roles_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){}
+    return new Set(_ROLES_DEFAULT_COLS);
+})();
+let _rolesColOrder = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_roles_col_order')||'null'); if (Array.isArray(s)) return s; } catch(_){}
+    return _ROL_COLS.map(c => c.id);
+})();
+function _resetRolesCols() {
+    _rolesVisibleCols = new Set(_ROLES_DEFAULT_COLS);
+    _rolesColOrder    = _ROL_COLS.map(c => c.id);
+    localStorage.setItem('ss_roles_cols',       JSON.stringify([..._rolesVisibleCols]));
+    localStorage.setItem('ss_roles_col_order',  JSON.stringify(_rolesColOrder));
+    localStorage.removeItem('ss_roles_col_w');
+    _persistTableConfig();
+    renderRoles();
+}
+function _rolesToggleCol(col) {
+    const adding = !_rolesVisibleCols.has(col);
+    _rolesVisibleCols.has(col) ? _rolesVisibleCols.delete(col) : _rolesVisibleCols.add(col);
+    if (adding && col === 'uid') {
+        _rolesColOrder = ['uid', ..._rolesColOrder.filter(c => c !== 'uid')];
+        localStorage.setItem('ss_roles_col_order', JSON.stringify(_rolesColOrder));
+    }
+    localStorage.setItem('ss_roles_cols', JSON.stringify([..._rolesVisibleCols]));
+    _persistTableConfig();
+    renderRoles();
+}
+function _rolSaveColOrder() { localStorage.setItem('ss_roles_col_order', JSON.stringify(_rolesColOrder)); _persistTableConfig(); }
+
+function _fmtRoleDt(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(iso), pad = n => String(n).padStart(2,'0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch(_) { return iso; }
+}
+
+// ── Sort / page state ──────────────────────────────────────────────
 let _rolesPage = 1;
 let _rolesPageSize = null;
 let _rolesSort = 'name';
@@ -20,68 +71,94 @@ function _sortRoles(col) {
 function renderRoles() {
     const c = document.getElementById('roles-container');
     if (!c) return;
-    const rolePerms = new Set(currentUser.permissions || []);
+    const rolePerms     = new Set(currentUser.permissions || []);
     const canEditRole   = rolePerms.has('roles_edit');
     const canDeleteRole = rolePerms.has('roles_delete');
     const showActions   = canEditRole || canDeleteRole;
     if (_rolesPageSize === null) _rolesPageSize = _defaultPageSize;
+
     const allEntries = Object.entries(rolesData).sort((a, b) => {
-        const [na, rda] = a, [nb, rdb] = b;
-        let va, vb;
-        if (_rolesSort === 'label') {
-            va = (rda.label || na).toLowerCase(); vb = (rdb.label || nb).toLowerCase();
-        } else {
-            va = na.toLowerCase(); vb = nb.toLowerCase();
+        const [ua, rda] = a, [ub, rdb] = b;
+        const mul = _rolesSortDir === 'asc' ? 1 : -1;
+        switch (_rolesSort) {
+            case 'uid':        return mul * ua.localeCompare(ub);
+            case 'created_at':
+            case 'updated_at': return mul * (rda[_rolesSort]||'').localeCompare(rdb[_rolesSort]||'');
+            case 'updated_by': return mul * (rda.updated_by||'').toLowerCase().localeCompare((rdb.updated_by||'').toLowerCase());
+            default:           return mul * (rda.name||'').toLowerCase().localeCompare((rdb.name||'').toLowerCase());
         }
-        return _rolesSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
     });
     if (!allEntries.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
             <i class="bi bi-shield" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
-            <span>${t('no_roles')}</span>
-        </div>`;
+            <span>${t('no_roles')}</span></div>`;
         return;
     }
     const total = allEntries.length;
-    const ps = _rolesPageSize || total;
-    _rolesPage = Math.max(1, Math.min(_rolesPage, Math.ceil(total / ps)));
-    const entries = allEntries.slice((_rolesPage - 1) * ps, _rolesPage * ps);
-    _rolesCurrentPage = entries.map(([name]) => name);
+    const ps    = _rolesPageSize || total;
+    _rolesPage  = Math.max(1, Math.min(_rolesPage, Math.ceil(total / ps)));
+    const entries          = allEntries.slice((_rolesPage - 1) * ps, _rolesPage * ps);
+    _rolesCurrentPage      = entries.map(([name]) => name);
     const _allPageSelected = _rolesCurrentPage.length > 0 && _rolesCurrentPage.every(n => _selectedRoles.has(n));
 
-    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table">
+    // ── Ordered visible columns ────────────────────────────────────
+    const knownIds = new Set(_ROL_COLS.map(c => c.id));
+    _ROL_COLS.forEach(c => { if (!_rolesColOrder.includes(c.id)) _rolesColOrder.push(c.id); });
+    _rolesColOrder = _rolesColOrder.filter(id => knownIds.has(id));
+    const orderedCols = _rolesColOrder
+        .map(id => _ROL_COLS.find(c => c.id === id))
+        .filter(c => c && (c.always || _rolesVisibleCols.has(c.id)));
+
+    // ── Column widths ──────────────────────────────────────────────
+    const _cw = (() => { try { return JSON.parse(localStorage.getItem('ss_roles_col_w')||'{}'); } catch(_){ return {}; } })();
+    const _thW = id => _cw[id] ? ` style="width:${_cw[id]}"` : '';
+
+    // ── TH row ─────────────────────────────────────────────────────
+    const thRow = orderedCols.map(col => {
+        const inner = col.sortKey
+            ? _thSortInner(col.label(), col.sortKey, _rolesSort, _rolesSortDir, '_sortRoles')
+            : `<span class="small">${esc(col.label())}</span>`;
+        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${_thW(col.id)}>${inner}</th>`;
+    }).join('');
+
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table" id="roles-table">
     <thead class="ss-thead"><tr>
-        ${showActions ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected ? 'checked' : ''} onchange="_rolesSelectAll(this.checked)"></th>` : ''}
-        ${_thSort(t('col_role_name'),  'name',  _rolesSort, _rolesSortDir, '_sortRoles')}
-        ${_thSort(t('col_role_label'), 'label', _rolesSort, _rolesSortDir, '_sortRoles')}
-        <th class="ss-th">${t('role_description')}</th>
+        ${showActions ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected?'checked':''} onchange="_rolesSelectAll(this.checked)"></th>` : ''}
+        ${thRow}
         ${showActions ? `<th class="ss-th ss-th-actions">${t('col_actions')}</th>` : ''}
     </tr></thead><tbody>`;
 
     for (const [name, rd] of entries) {
-        const isEnabled = rd.builtin || rd.enabled !== false;
-        const rowStyle = isEnabled ? '' : ' style="opacity:.55"';
-        const builtinBadge = rd.builtin
+        const isEnabled     = rd.builtin || rd.enabled !== false;
+        const rowStyle      = isEnabled ? '' : ' style="opacity:.55"';
+        const builtinBadge  = rd.builtin
             ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.6em;padding:.15em .35em">${t('role_builtin_badge')}</span>` : '';
         const disabledBadge = (!rd.builtin && !isEnabled)
             ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>` : '';
 
+        const cells = orderedCols.map(col => {
+            switch (col.id) {
+                case 'name':        return `<td class="text-nowrap"><span class="fw-semibold">${esc(rd.name || name)}</span>${builtinBadge}${disabledBadge}</td>`;
+                case 'uid':         return `<td><code class="text-muted" style="font-size:.7rem">${esc(name)}</code></td>`;
+                case 'description': return `<td class="text-muted small">${esc(rd.description || '')}</td>`;
+                case 'created_at':  return `<td class="text-nowrap small text-muted">${esc(_fmtRoleDt(rd.created_at))}</td>`;
+                case 'updated_at':  return `<td class="text-nowrap small text-muted">${esc(_fmtRoleDt(rd.updated_at))}</td>`;
+                case 'updated_by':  return `<td class="small text-muted">${esc(rd.updated_by||'—')}</td>`;
+                default:            return '<td></td>';
+            }
+        }).join('');
+
         h += `<tr${rowStyle}>
-            ${showActions ? `<td><input type="checkbox" class="form-check-input" ${_selectedRoles.has(name) ? 'checked' : ''} onchange="_rolesToggleOne(${jsStr(name)}, this.checked)" ${rd.builtin ? 'disabled' : ''}></td>` : ''}
-            <td class="text-nowrap"><code>${esc(name)}</code>${builtinBadge}${disabledBadge}</td>
-            <td class="text-muted small text-nowrap">${esc(rd.label || name)}</td>
-            <td class="text-muted small">${esc(rd.description || '')}</td>
+            ${showActions ? `<td><input type="checkbox" class="form-check-input" ${_selectedRoles.has(name)?'checked':''} onchange="_rolesToggleOne(${jsStr(name)}, this.checked)" ${rd.builtin?'disabled':''}></td>` : ''}
+            ${cells}
             ${showActions ? `<td class="ss-td-actions">
-                ${canEditRole ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1"
-                    onclick="openEditRoleModal(${jsStr(name)})" title="${escAttr(t('edit'))}">
-                    <i class="bi bi-pencil"></i></button>` : ''}
-                ${canDeleteRole ? `<button class="btn btn-sm btn-danger py-0 px-1"
-                    ${rd.builtin ? 'disabled' : `onclick="deleteRole(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}">
-                    <i class="bi bi-trash3"></i></button>` : ''}
+                ${canEditRole ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditRoleModal(${jsStr(name)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : ''}
+                ${canDeleteRole ? `<button class="btn btn-sm btn-danger py-0 px-1" ${rd.builtin?'disabled':`onclick="deleteRole(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
             </td>` : ''}
         </tr>`;
     }
     h += `</tbody></table>`;
+
     const pagination = _renderPagination(total, _rolesPage, _rolesPageSize, '_goRolesPage', '_changeRolesPageSize');
     const _addBtn = rolePerms.has('roles_add')
         ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewRoleModal()" title="${escAttr(t('new_role_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_role')}</button>` : '';
@@ -94,11 +171,33 @@ function renderRoles() {
             ${canDeleteRole && _nonBuiltinSelected > 0 ? `<button class="btn btn-sm btn-danger py-0 px-2" onclick="_bulkDeleteRoles()" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
             <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedRoles.clear();renderRoles()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
         </div>` : '';
+
+    const colChooser = `<div class="dropdown">
+      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
+        <i class="bi bi-layout-three-columns"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:160px">
+        ${_ROL_COLS.map(col => `<li>
+          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
+            <input type="checkbox" class="form-check-input m-0"
+                   ${col.always || _rolesVisibleCols.has(col.id) ? 'checked' : ''}
+                   ${col.always ? 'disabled' : `onchange="_rolesToggleCol('${col.id}')"`}>
+            <span class="small">${esc(col.label())}</span>
+            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
+          </label></li>`).join('')}
+        <li><hr class="dropdown-divider my-1"></li>
+        <li><button class="dropdown-item small py-1 text-muted" onclick="_resetRolesCols()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>${t('col_reset_defaults')||'Reset defaults'}
+        </button></li>
+      </ul>
+    </div>`;
+
     c.innerHTML = `<div class="ss-card">
         <div class="ss-accent ss-accent-purple"></div>
         <div class="ss-card-header">
             <h6 class="mb-0 me-auto"><i class="bi bi-shield-lock me-2"></i>${t('role_management')}</h6>
             ${_bulkBar}
+            ${colChooser}
             <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>
             ${_addBtn}
         </div>
@@ -106,6 +205,20 @@ function renderRoles() {
         <div>${h}</div>
         <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
     </div>`;
+    setTimeout(_initRolesTableFeatures, 0);
+}
+
+function _initRolesTableFeatures() {
+    _attachColFeatures('roles-table',
+        () => _rolesColOrder,
+        order => { _rolesColOrder = order; },
+        _rolSaveColOrder,
+        renderRoles,
+        (col, w) => {
+            const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_roles_col_w')||'{}'); } catch(_){ return {}; } })();
+            cw[col] = w; localStorage.setItem('ss_roles_col_w', JSON.stringify(cw));
+        }
+    );
 }
 
 function _rolesSelectAll(checked) {
@@ -123,7 +236,7 @@ async function _bulkEnableRoles(enabled) {
     showConfirmModal(`${t(enabled ? 'enable' : 'disable')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
         for (const name of names) {
             const rd = rolesData[name]; if (!rd) continue;
-            const body = { label: rd.label || '', description: rd.description || '',
+            const body = { name: rd.name || '', description: rd.description || '',
                            permissions: rd.permissions || [], enabled };
             const r = await apiPut('/api/v1/roles/' + encodeURIComponent(name), body);
             if (r?.status === 200 && r.data?.ok) rolesData[name] = { ...rolesData[name], enabled };

@@ -186,10 +186,13 @@ class TestApiOverview:
 
     def test_users_total(self, client):
         """Default fixture has a single admin user."""
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
         _login(client)
         users = client.get("/api/v1/modules/overview").get_json()["users"]
         assert users["total"] == 1
-        assert users["by_role"].get("admin", 0) == 1
+        # by_role is now keyed by UID
+        admin_uid = BUILTIN_ROLE_UIDS['admin']
+        assert users["by_role"].get(admin_uid, 0) == 1
 
     def test_last_events_list(self, admin, client):
         """last_events returns most-recent-first audit entries."""

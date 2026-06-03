@@ -1,0 +1,54 @@
+{
+    "__module__": {
+        "api_ver": "v1",
+        "enabled":  {"type": "bool", "default": true},
+        "threads":  {"type": "int",  "default": 5, "min": 1, "max": 50},
+        "mib_dirs": {"type": "str",  "default": ""}
+    },
+    "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
+    "servers": {
+        "__new_item_fields__": ["host", "community"],
+        "enabled":              {"type": "bool", "default": true},
+        "host":                 {"type": "str",  "default": "", "placeholder": "192.168.1.1"},
+        "port":                 {"type": "int",  "default": 161,   "min": 1,  "max": 65535},
+        "version":              {"type": "str",  "default": "2c",  "options": ["1", "2c", "3"]},
+        "community":            {"type": "str",  "default": "public"},
+        "timeout":              {"type": "int",  "default": 5,     "min": 1,  "max": 60},
+        "retries":              {"type": "int",  "default": 1,     "min": 0,  "max": 10},
+        "snmpv3_username":      {"type": "str",  "default": "",    "show_when": {"version": ["3"]}},
+        "snmpv3_auth_key":      {"type": "str",  "default": "",    "secret": true, "show_when": {"version": ["3"]}},
+        "snmpv3_priv_key":      {"type": "str",  "default": "",    "secret": true, "show_when": {"version": ["3"]}},
+        "snmpv3_auth_protocol": {"type": "str",  "default": "MD5", "options": ["MD5", "SHA", "SHA-224", "SHA-256", "SHA-384", "SHA-512", "none"], "show_when": {"version": ["3"]}},
+        "snmpv3_priv_protocol": {"type": "str",  "default": "DES", "options": ["DES", "3DES", "AES-128", "AES-192", "AES-256", "none"],          "show_when": {"version": ["3"]}},
+        "checks": {
+            "type":                 "sub_collection",
+            "__discovery__":        "discover",
+            "__discovery_method__": "POST",
+            "__discovery_field__":  "oid",
+            "__key_mirrors_field__": "oid",
+            "__new_item_fields__":  ["oid"],
+            "__discovery_subtitle__":         "{mib_module}::{mib_name}",
+            "__discovery_type_field__":       "mib_type",
+            "__discovery_category_field__":   "mib_category",
+            "__discovery_type_store_field__": "snmp_type",
+            "__discovery_categories__": {
+                "numeric": {"icon": "bi-hash",      "color": "#38bdf8"},
+                "string":  {"icon": "bi-fonts",     "color": "#4ade80"},
+                "ip":      {"icon": "bi-globe2",    "color": "#818cf8"},
+                "oid":     {"icon": "bi-diagram-2", "color": "var(--bs-secondary-color)"}
+            },
+            "__discovery_default_operators__": {
+                "numeric": "any",
+                "string":  "contains",
+                "ip":      "eq",
+                "oid":     "eq"
+            },
+            "enabled":   {"type": "bool", "default": true},
+            "oid":       {"type": "str",  "default": "1.3.6.1.2.1.1.1.0", "readonly": true},
+            "snmp_type": {"type": "str",  "default": "", "hidden": true},
+            "operator":  {"type": "str",  "default": "any", "options": ["any", "eq", "ne", "gt", "lt", "gte", "lte", "contains", "regex"]},
+            "value":     {"type": "str",  "default": ""},
+            "alert":     {"type": "int",  "default": 1, "min": 1, "max": 100}
+        }
+    }
+}

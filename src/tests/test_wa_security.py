@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 """Security, injection and abuse-resistance tests for the web API."""
 
-import json
-import os
-
 import pytest
 
 try:
@@ -53,26 +50,23 @@ class TestSecurityInjection:
 
     @staticmethod
     def _make_multiuser(config_dir, var_dir):
-        """Admin + viewer for privilege-escalation tests."""
-        users = {
-            "secadmin": {
-                "password_hash": generate_password_hash("secpass"),
-                "role": "admin", "display_name": "Admin",
-            },
-            "viewer": {
-                "password_hash": generate_password_hash("vpass"),
-                "role": "viewer", "display_name": "V",
-            },
-            "editor": {
-                "password_hash": generate_password_hash("epass"),
-                "role": "editor", "display_name": "E",
-            },
-        }
-        users_path = os.path.join(config_dir, "users.json")
-        with open(users_path, "w", encoding="utf-8") as f:
-            json.dump(users, f)
-        wa = WebAdmin(config_dir, var_dir=var_dir)
+        """Admin 'secadmin' + viewer + editor for privilege-escalation tests."""
+        import uuid as _uuid
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        wa = WebAdmin(config_dir, "secadmin", "secpass", var_dir=var_dir,
+                      pw_require_upper=False, pw_require_digit=False)
         wa.app.config["TESTING"] = True
+        for uname, role_key, pw, dn in [
+            ("viewer", "viewer", "vpass", "V"),
+            ("editor", "editor", "epass", "E"),
+        ]:
+            wa._users[uname] = {
+                'uid':           str(_uuid.uuid4()),
+                'password_hash': generate_password_hash(pw),
+                'role':          BUILTIN_ROLE_UIDS[role_key],
+                'display_name':  dn,
+            }
+        wa._persist_users()
         return wa
 
     # ── XSS in user fields ───────────────────────────────────────

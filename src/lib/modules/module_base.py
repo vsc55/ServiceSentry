@@ -53,6 +53,17 @@ class ModuleBase(ObjectBase):
     # Override in subclasses to whitelist callable classmethods.
     WATCHFUL_ACTIONS: frozenset[str] = frozenset()
 
+    # Optional Python packages required by this watchful.
+    # Override in subclasses to a non-empty list when an import fails so that
+    # discover_schemas() can mark the module as unavailable in the UI and
+    # display a "pip install <pkg>" hint instead of the normal controls.
+    MISSING_DEPS: list[str] = []
+
+    # Optional packages whose absence degrades (but does not break) this watchful.
+    # The module remains functional without them but the UI shows a warning badge
+    # so users know that some features or backends may be unavailable.
+    PARTIAL_DEPS: list[str] = []
+
     @staticmethod
     def _schema_defaults(collection: dict) -> dict:
         """Extract default values from an enriched ``ITEM_SCHEMA`` collection.
@@ -142,15 +153,21 @@ class ModuleBase(ObjectBase):
                 isinstance(supported_platforms, (list, tuple)) and
                 sys.platform not in supported_platforms
             )
+            missing_deps  = list(getattr(watchful_cls, 'MISSING_DEPS',  None) or [])
+            partial_deps  = list(getattr(watchful_cls, 'PARTIAL_DEPS',  None) or [])
 
             for collection, fields in item_schema.items():
                 if collection == '__i18n__':
                     continue  # handled separately below
                 col_fields = dict(fields)
                 # Merge label_i18n from lang files.
+                # Sub-collection fields (type='sub_collection') are rendered as
+                # nested collections, not as scalar form fields, so they do not
+                # receive label_i18n here (their title comes from lang.collections).
                 if lang_data:
                     for field_key, field_meta in list(col_fields.items()):
-                        if isinstance(field_meta, dict) and 'type' in field_meta:
+                        if (isinstance(field_meta, dict) and 'type' in field_meta
+                                and field_meta.get('type') != 'sub_collection'):
                             label_i18n = {
                                 lc: ld['labels'][field_key]
                                 for lc, ld in lang_data.items()
@@ -168,7 +185,80 @@ class ModuleBase(ObjectBase):
                             col_fields[_fk] = {**_fm, '__unsupported__': True}
                 if platform_unsupported:
                     col_fields['__unsupported__'] = True
+                # Missing optional dependencies — mark module as unavailable and
+                # carry the package list so the UI can show an install hint.
+                if missing_deps:
+                    col_fields['__unsupported__'] = True
+                    col_fields['__missing_deps__'] = missing_deps
+                # Partial dependencies — module still works but some features/backends
+                # are degraded. Only set when not already fully disabled.
+                elif partial_deps:
+                    col_fields['__partial_deps__'] = partial_deps
+                # Per-option dependency check: cross-reference each field's
+                # options_deps dict with the set of unavailable packages so the
+                # UI can disable specific select options instead of the whole module.
+                _unavail = set(missing_deps + partial_deps)
+                if _unavail:
+                    for _fk, _fm in list(col_fields.items()):
+                        if _fk.startswith('__'):
+                            continue
+                        if not (isinstance(_fm, dict) and 'options_deps' in _fm):
+                            continue
+                        _disabled = {
+                            opt: pkg
+                            for opt, pkg in _fm['options_deps'].items()
+                            if pkg in _unavail
+                        }
+                        if _disabled:
+                            col_fields[_fk] = {**_fm, 'options_disabled': _disabled}
                 schemas[f'{mod_name}|{collection}'] = col_fields
+
+                # Register sub-collection schemas.
+                # Any field with type='sub_collection' in a collection is itself a
+                # nested item collection.  Its item schema is registered under
+                # 'mod|collection|sub_key' so the JS _schemaKeyOf() helper can find
+                # it at paths like 'snmp|servers|router_1|checks'.
+                for _sc_key, _sc_val in list(col_fields.items()):
+                    if _sc_key.startswith('__') or not isinstance(_sc_val, dict):
+                        continue
+                    if _sc_val.get('type') != 'sub_collection':
+                        continue
+                    _sub_fields = dict(_sc_val)
+                    # Apply label_i18n to the sub-collection's own item fields.
+                    if lang_data:
+                        for _sf_key, _sf_meta in list(_sub_fields.items()):
+                            if (isinstance(_sf_meta, dict) and 'type' in _sf_meta
+                                    and _sf_meta.get('type') != 'sub_collection'):
+                                _lbl_i18n = {
+                                    lc: ld['labels'][_sf_key]
+                                    for lc, ld in lang_data.items()
+                                    if _sf_key in ld.get('labels', {})
+                                }
+                                if _lbl_i18n:
+                                    _sub_fields[_sf_key] = {**_sf_meta, 'label_i18n': _lbl_i18n}
+                    if missing_deps:
+                        _sub_fields['__unsupported__'] = True
+                        _sub_fields['__missing_deps__'] = missing_deps
+                    schemas[f'{mod_name}|{collection}|{_sc_key}'] = _sub_fields
+
+            _module_key = f'{mod_name}|__module__'
+
+            # Propagate declared UI capabilities (legacy — kept for compatibility).
+            #   WATCHFUL_UI: frozenset[str] = frozenset({'file_manager', ...})
+            _ui_caps = getattr(watchful_cls, 'WATCHFUL_UI', None)
+            if _ui_caps and _module_key in schemas:
+                schemas[_module_key]['__ui__'] = sorted(_ui_caps)
+
+            # Propagate toolbar button declarations so the dashboard renders them
+            # generically without any module-specific logic.  A module opts in by:
+            #   WATCHFUL_TOOLBAR: tuple[dict, ...] = (
+            #       {'icon': 'bi-...', 'label_key': '...', 'onclick': 'jsFnName'},
+            #   )
+            _toolbar = getattr(watchful_cls, 'WATCHFUL_TOOLBAR', None)
+            if _toolbar and _module_key in schemas:
+                schemas[_module_key]['__toolbar__'] = [
+                    {k: str(v) for k, v in btn.items()} for btn in _toolbar
+                ]
 
             # Build __i18n__ entry.
             if info or lang_data:

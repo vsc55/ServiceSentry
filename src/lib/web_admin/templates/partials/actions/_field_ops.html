@@ -68,6 +68,36 @@ function _doDeleteItem() {
     _deleteItemCtx = null;
 }
 
+function cloneItem(target, parentPathStr, key) {
+    const parts = parentPathStr.split('|');
+    const data   = target === 'modules' ? modulesData : configData;
+    const parent = getPath(data, parts);
+    if (!parent || !(key in parent)) return;
+
+    // Deep-copy the original item
+    const copy = JSON.parse(JSON.stringify(parent[key]));
+
+    // Generate a unique key: try "<key>_copy", then "<key>_copy_2", etc.
+    const existingLower = new Set(Object.keys(parent).map(k => k.toLowerCase()));
+    let newKey = key + '_copy', n = 2;
+    while (existingLower.has(newKey.toLowerCase())) newKey = key + '_copy_' + n++;
+
+    // Insert the clone immediately after the original, preserving order
+    const entries = Object.entries(parent);
+    const idx     = entries.findIndex(([k]) => k === key);
+    for (const k of Object.keys(parent)) delete parent[k];
+    for (let i = 0; i < entries.length; i++) {
+        parent[entries[i][0]] = entries[i][1];
+        if (i === idx) parent[newKey] = copy;
+    }
+
+    markDirty(target);
+    _autoExpandItemPath = parentPathStr + '|' + newKey;
+    _pendingExpandMods.add(parts[0]);
+    target === 'modules' ? renderModules() : renderConfig();
+    showToast((t('item_cloned') || 'Cloned as') + ': ' + newKey);
+}
+
 function renameItem(target, parentPathStr, oldKey) {
     _renameItemCtx = { target, parentPathStr, oldKey };
     const input = document.getElementById('renameItemInput');
@@ -164,9 +194,21 @@ function openAddModal(target, pathStr) {
             let inputHtml = '';
             if (meta.options && Array.isArray(meta.options)) {
                 const fOptLbls = optLabels && optLabels[fieldKey];
+                const _fOptDis = (meta.options_disabled && typeof meta.options_disabled === 'object')
+                    ? meta.options_disabled : null;
+                // If the schema default is unavailable, fall back to the first enabled option
+                let _effectiveDefault = meta.default;
+                if (_fOptDis && _fOptDis[_effectiveDefault]) {
+                    const _first = meta.options.find(o => !(_fOptDis && _fOptDis[o]));
+                    if (_first != null) _effectiveDefault = _first;
+                }
                 const opts = meta.options.map(opt => {
                     const lbl = fOptLbls ? (fOptLbls[opt] || opt) : opt;
-                    return `<option value="${opt}"${opt === meta.default ? ' selected' : ''}>${lbl}</option>`;
+                    if (_fOptDis && _fOptDis[opt]) {
+                        const pkg = _fOptDis[opt];
+                        return `<option value="${opt}" disabled title="${escAttr(tf('missing_dep_install', pkg))}">${lbl} — ${esc(t('missing_dep'))}</option>`;
+                    }
+                    return `<option value="${opt}"${opt === _effectiveDefault ? ' selected' : ''}>${lbl}</option>`;
                 }).join('');
                 inputHtml = `<select class="form-select form-select-sm" id="newItemField_${fieldKey}">${opts}</select>`;
             } else if (meta.type === 'int') {

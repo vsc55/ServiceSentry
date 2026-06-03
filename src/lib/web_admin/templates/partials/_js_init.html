@@ -2,6 +2,134 @@
 Initialisation — role restrictions, event listeners, data load.
 ================================================================ #}
 
+// ── Per-user table config (server-side persistence) ───────────────
+let _tcSaveTimer = null;
+
+function _persistTableConfig() {
+    clearTimeout(_tcSaveTimer);
+    _tcSaveTimer = setTimeout(() => {
+        const _cw = tbl => { try { return JSON.parse(localStorage.getItem(`ss_${tbl}_col_w`) || '{}'); } catch(_){ return {}; } };
+        const tc = {
+            groups: { cols: [...(_groupsVisibleCols || [])], order: _groupsColOrder || [], w: _cw('groups') },
+            users:  { cols: [...(_usersVisibleCols  || [])], order: _usersColOrder  || [], w: _cw('users')  },
+            roles:  { cols: [...(_rolesVisibleCols  || [])], order: _rolesColOrder  || [], w: _cw('roles')  },
+            audit:  { cols: [...(_auditVisibleCols  || [])], order: _auditColOrder  || [], w: _cw('audit')  },
+        };
+        apiPut('/api/v1/users/me/preferences', { table_config: tc });
+    }, 1500);
+}
+
+function _applyUserTableConfig(tc) {
+    if (!tc || typeof tc !== 'object') return;
+    const apply = (tbl, visRef, ordRef, lsVis, lsOrd, lsW) => {
+        const cfg = tc[tbl];
+        if (!cfg) return;
+        if (Array.isArray(cfg.cols))  {
+            const s = new Set(cfg.cols);
+            if (visRef) { visRef.clear(); cfg.cols.forEach(c => visRef.add(c)); }
+            localStorage.setItem(lsVis, JSON.stringify(cfg.cols));
+        }
+        if (Array.isArray(cfg.order)) {
+            if (ordRef !== null) { ordRef.splice(0, ordRef.length, ...cfg.order); }
+            localStorage.setItem(lsOrd, JSON.stringify(cfg.order));
+        }
+        if (cfg.w && typeof cfg.w === 'object') {
+            localStorage.setItem(lsW, JSON.stringify(cfg.w));
+        }
+    };
+    // Pass null for ordRef — arrays can't be replaced by reference, store via localStorage only
+    apply('groups', _groupsVisibleCols, null, 'ss_groups_cols', 'ss_groups_col_order', 'ss_groups_col_w');
+    apply('users',  _usersVisibleCols,  null, 'ss_users_cols',  'ss_users_col_order',  'ss_users_col_w');
+    apply('roles',  _rolesVisibleCols,  null, 'ss_roles_cols',  'ss_roles_col_order',  'ss_roles_col_w');
+    apply('audit',  _auditVisibleCols,  null, 'ss_audit_cols',  'ss_audit_col_order',  'ss_audit_col_w');
+    // Re-read order arrays from localStorage (arrays are passed by reference but reassignment breaks it)
+    try { const s = JSON.parse(localStorage.getItem('ss_groups_col_order')||'null'); if(Array.isArray(s)) { _groupsColOrder.length=0; s.forEach(c=>_groupsColOrder.push(c)); } } catch(_){}
+    try { const s = JSON.parse(localStorage.getItem('ss_users_col_order') ||'null'); if(Array.isArray(s)) { _usersColOrder.length=0;  s.forEach(c=>_usersColOrder.push(c));  } } catch(_){}
+    try { const s = JSON.parse(localStorage.getItem('ss_roles_col_order') ||'null'); if(Array.isArray(s)) { _rolesColOrder.length=0;  s.forEach(c=>_rolesColOrder.push(c));  } } catch(_){}
+    try { const s = JSON.parse(localStorage.getItem('ss_audit_col_order') ||'null'); if(Array.isArray(s)) { _auditColOrder.length=0;  s.forEach(c=>_auditColOrder.push(c));  } } catch(_){}
+}
+
+// ── Shared table column helpers ────────────────────────────────────
+// Inner sort-link for a resizable TH (returns content, not the <th> itself)
+function _thSortInner(label, col, currentSort, dir, fn) {
+    const icon = currentSort === col
+        ? (dir === 'asc' ? '<i class="bi bi-sort-up ms-1"></i>' : '<i class="bi bi-sort-down ms-1"></i>')
+        : '<i class="bi bi-arrow-down-up ms-1 opacity-25"></i>';
+    return `<span class="ss-sort-link" style="cursor:pointer;user-select:none" onclick="${fn}('${col}')">${esc(label)}${icon}</span>`;
+}
+
+// Generic column features: resize + dblclick auto-fit + drag-and-drop reorder.
+// tableId      — id of the <table> element
+// getOrder()   — returns the current col-order array (by reference OK)
+// setOrder(o)  — stores the new order array
+// saveOrder()  — persists to localStorage
+// render()     — re-renders the table
+// saveWidth(col, w) — persists a column width string to localStorage
+function _attachColFeatures(tableId, getOrder, setOrder, saveOrder, render, saveWidth) {
+    const tbl = document.getElementById(tableId);
+    if (!tbl) return;
+    let _dragSrc = null;
+    tbl.querySelectorAll('th.ss-th-resizable').forEach(th => {
+        th.querySelector('.ss-resize-handle')?.remove();
+        th.style.position = 'relative'; th.style.overflow = 'hidden';
+
+        const handle = document.createElement('div');
+        handle.className = 'ss-resize-handle';
+        handle.style.cssText = 'position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:2;background:transparent';
+
+        handle.addEventListener('mousedown', e => {
+            e.preventDefault(); e.stopPropagation();
+            const startX = e.clientX, startW = th.offsetWidth, col = th.dataset.col;
+            const onMove = ev => { th.style.width = Math.max(40, startW + ev.clientX - startX) + 'px'; };
+            const onUp   = ev => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                saveWidth(col, Math.max(40, startW + ev.clientX - startX) + 'px');
+                _persistTableConfig();
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+
+        handle.addEventListener('dblclick', e => {
+            e.preventDefault(); e.stopPropagation();
+            const col    = th.dataset.col;
+            const colIdx = Array.from(th.closest('tr').querySelectorAll('th')).indexOf(th);
+            const tmp    = document.createElement('div');
+            tmp.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden';
+            document.body.appendChild(tmp);
+            let maxW = 0;
+            const measure = cell => {
+                const clone = cell.cloneNode(true);
+                clone.querySelector?.('.ss-resize-handle')?.remove();
+                clone.style.cssText = 'display:inline-block;white-space:nowrap;width:auto;padding:2px 11px';
+                tmp.appendChild(clone); maxW = Math.max(maxW, clone.scrollWidth); tmp.removeChild(clone);
+            };
+            measure(th);
+            tbl.querySelectorAll('tbody tr').forEach(tr => { const td = tr.cells[colIdx]; if (td) measure(td); });
+            document.body.removeChild(tmp);
+            const newW = Math.max(40, maxW + 8) + 'px';
+            th.style.width = newW; saveWidth(col, newW); _persistTableConfig();
+        });
+
+        th.appendChild(handle);
+
+        th.addEventListener('dragstart', e => { _dragSrc = th.dataset.col; e.dataTransfer.effectAllowed = 'move'; th.style.opacity = '0.4'; });
+        th.addEventListener('dragend',   () => { th.style.opacity = ''; _dragSrc = null; });
+        th.addEventListener('dragover',  e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.classList.add('ss-th-drag-over'); });
+        th.addEventListener('dragleave', () => th.classList.remove('ss-th-drag-over'));
+        th.addEventListener('drop',      e => {
+            e.preventDefault(); th.classList.remove('ss-th-drag-over');
+            const src = _dragSrc, dst = th.dataset.col;
+            if (!src || src === dst) return;
+            const order = getOrder(), si = order.indexOf(src), di = order.indexOf(dst);
+            if (si < 0 || di < 0) return;
+            order.splice(si, 1); order.splice(di, 0, src);
+            setOrder(order); saveOrder(); render();
+        });
+    });
+}
+
 // ────────────────────────────── Permission-based UI ──────────────────
  function applyRoleRestrictions() {
 const perms = new Set(currentUser.permissions || []);
@@ -51,6 +179,9 @@ if (configLi) configLi.style.display = (hasConfigEdit || hasConfigView) ? '' : '
 const statusLi = document.getElementById('tab-status-li');
 const hasChecks = perms.has('checks_view') || perms.has('checks_run');
 if (statusLi) statusLi.style.display = hasChecks ? '' : 'none';
+// History tab
+const historyLi = document.getElementById('tab-history-li');
+if (historyLi) historyLi.style.display = perms.has('history_view') ? '' : 'none';
 // Audit tab
 const auditLi = document.getElementById('tab-audit-li');
 if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
@@ -77,6 +208,28 @@ const btnClearAudit = document.getElementById('btnClearAudit');
 if (btnClearAudit) btnClearAudit.style.display = perms.has('audit_delete') ? '' : 'none';
 }
 
+// ─── Stacked-modal z-index support ────────────────────────────────────────
+// Bootstrap 5 keeps all modals at the same z-index (1055), so a second modal
+// opened while another is showing ends up hidden behind it.  These two
+// listeners auto-bump the new modal above the existing ones and move the
+// freshest backdrop to sit between the two modals.
+document.addEventListener('show.bs.modal', function(e) {
+    const open = document.querySelectorAll('.modal.show');
+    if (!open.length) return;
+    const topZ = Math.max(1055, ...[...open].map(m => parseInt(m.style.zIndex) || 1055));
+    e.target.style.zIndex = topZ + 20;
+});
+document.addEventListener('shown.bs.modal', function() {
+    const backdrops  = document.querySelectorAll('.modal-backdrop');
+    const openModals = [...document.querySelectorAll('.modal.show')];
+    if (backdrops.length < 1 || openModals.length < 2) return;
+    const topZ = Math.max(...openModals.map(m => parseInt(m.style.zIndex) || 1055));
+    backdrops[backdrops.length - 1].style.zIndex = topZ - 10;
+});
+document.addEventListener('hidden.bs.modal', function(e) {
+    e.target.style.zIndex = '';   // clean up inline override when modal closes
+});
+
 // ──────────────────────────── Init ────────────────────────────────
 document.getElementById('btnAddItemOk').addEventListener('click', confirmAddItem);
 document.getElementById('addItemModal').addEventListener('keydown', e => {
@@ -93,7 +246,11 @@ document.getElementById('btnRenameItemOk').addEventListener('click', _doRenameIt
 document.getElementById('renameItemInput').addEventListener('keydown', e => {
 if (e.key === 'Enter') { e.preventDefault(); _doRenameItem(); }
 });
-document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', renderStatus);
+document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', async () => {
+    await renderStatus();   // wait for DOM so daemon widget exists before first poll
+    _daemonStartPoll();
+});
+document.getElementById('btn-tab-status').addEventListener('hide.bs.tab', _daemonStopPoll);
 let _accessPollTimer = null;
 document.getElementById('btn-tab-access')?.addEventListener('shown.bs.tab', () => {
     refreshAccessData();
@@ -116,6 +273,7 @@ renderRoles();
 renderGroups();
 }
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
+document.getElementById('btn-tab-history')?.addEventListener('shown.bs.tab', renderHistory);
 document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
 document.getElementById('btnResetPasswordOk').addEventListener('click', resetUserPassword);
 document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
@@ -160,11 +318,13 @@ window.addEventListener('beforeunload', e => {
 (async function init() {
 try {
     currentUser = await apiGet('/api/v1/me') || {};
+    _applyUserTableConfig(currentUser.table_config || {});
     rolesData = await apiGet('/api/v1/roles') || {};
     groupsData = await apiGet('/api/v1/groups') || {};
     modulesData = await apiGet('/api/v1/modules') || {};
     applyModuleDefaults();
     _savedModulesData = deepClone(modulesData);
+    clearDirty('modules'); // applyModuleDefaults may call markDirty for migrations; reset here
     configData = await loadConfig() || {};
     _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
     const _rawPS = configData?.web_admin?.page_sizes;
@@ -184,6 +344,7 @@ try {
         configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
     }
     _serverConfigData = deepClone(configData);
+    clearDirty('config'); // ensure config starts clean regardless of loadConfig side-effects
     if (currentUser.restart_pending) _showRestartBanner();
     _startVersionPoll();
     renderModules();

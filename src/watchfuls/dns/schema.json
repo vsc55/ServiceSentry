@@ -4,6 +4,7 @@
         "threads": {"type": "int",  "default": 5, "min": 1, "max": 100},
         "timeout": {"type": "int",  "default": 5, "min": 1, "max": 30}
     },
+    "__history__": {"field": null, "unit": null, "label": "DNS Resolution"},
     "list": {
         "enabled":     {"type": "bool", "default": true},
         "host":        {"type": "str",  "default": "", "placeholder": "__key__"},

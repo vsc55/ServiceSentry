@@ -52,7 +52,10 @@ class Main(ObjectBase):
         self._daemon_mode = getattr(args, 'daemon_mode', False)
         self._timer_check = 0
 
-        self._sys_path_append([self._modules_dir])
+        # Add src/ (parent of watchfuls/) so modules can be imported as
+        # 'watchfuls.dns', 'watchfuls.ping', etc.  This avoids name collisions
+        # with third-party packages that share a short name (e.g. dnspython→'dns').
+        self._sys_path_insert([self._dir, self._modules_dir])
         self._init_config()
         self._init_monitor()
 
@@ -151,19 +154,24 @@ class Main(ObjectBase):
 
     @staticmethod
     def _sys_path_append(list_dir):
-        """
-        Appends directories to the system path if they are not already present.
-
-        Args:
-            list_dir (list): A list of directory paths to be added to the system path.
-
-        Returns:
-            None
-        """
+        """Appends directories to sys.path (kept for compatibility)."""
         for f in list_dir:
-            if os.path.isdir(f):
-                if f not in sys.path:
-                    sys.path.append(f)
+            if os.path.isdir(f) and f not in sys.path:
+                sys.path.append(f)
+
+    @staticmethod
+    def _sys_path_insert(list_dir):
+        """Insert directories at the front of sys.path.
+
+        Inserting at position 0 ensures these directories are searched
+        before site-packages, preventing short module names from being
+        shadowed by installed packages with the same name
+        (e.g. 'watchfuls/dns/' vs the 'dnspython' package which is also
+        importable as 'dns').
+        """
+        for f in reversed(list_dir):   # reversed so first item ends up at index 0
+            if os.path.isdir(f) and f not in sys.path:
+                sys.path.insert(0, f)
 
     def _init_monitor(self):
         """

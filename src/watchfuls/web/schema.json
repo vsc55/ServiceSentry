@@ -1,16 +1,50 @@
 {
     "__module__": {
+        "api_ver": "v1",
         "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int", "default": 5,   "min": 1, "max": 100},
-        "code":    {"type": "int", "default": 200,  "min": 1, "max": 9999},
-        "timeout": {"type": "int", "default": 15,   "min": 1, "max": 300}
+        "threads": {"type": "int",  "default": 5,   "min": 1, "max": 100},
+        "code":    {"type": "int",  "default": 200,  "min": 1, "max": 9999},
+        "timeout": {"type": "int",  "default": 15,   "min": 1, "max": 300}
     },
+    "__history__": {"field": null, "unit": null, "label": "HTTP Check"},
     "list": {
-        "enabled":    {"type": "bool", "default": true},
-        "scheme":     {"type": "str",  "default": "https", "options": ["http", "https"]},
-        "url":        {"type": "str",  "default": "", "placeholder": "__key__"},
-        "code":       {"type": "int",  "default": 0, "min": 0, "max": 9999, "placeholder_module": "code"},
-        "timeout":    {"type": "int",  "default": 0, "min": 0, "max": 300,  "placeholder_module": "timeout"},
-        "verify_ssl": {"type": "bool", "default": true, "show_when": {"scheme": ["https"]}}
+        "__field_order__": [
+            "enabled", "url", "scheme", "method",
+            "code", "timeout", "verify_ssl",
+            "check_content", "content_contains",
+            "alert",
+            "auth_enabled", "auth_user", "auth_password"
+        ],
+        "__group_when__": {
+            "content": {"check_content": [true]},
+            "auth":    {"auth_enabled": [true]}
+        },
+        "__test__": "/api/v1/watchfuls/web/test_connection",
+
+        "enabled":          {"type": "bool", "default": true},
+        "url":              {"type": "str",  "default": "", "placeholder": "__key__"},
+        "scheme":           {"type": "str",  "default": "https", "options": ["http", "https"]},
+        "method":           {"type": "str",  "default": "GET",   "options": ["GET", "HEAD", "POST"]},
+        "code":             {"type": "int",  "default": 0, "min": 0, "max": 9999,
+                             "zero_as_blank": true, "placeholder_module": "code"},
+        "timeout":          {"type": "int",  "default": 0, "min": 0, "max": 300,
+                             "zero_as_blank": true, "placeholder_module": "timeout"},
+        "verify_ssl":       {"type": "bool", "default": true,
+                             "show_when": {"scheme": ["https"]}},
+
+        "check_content":    {"type": "bool", "default": false},
+        "content_contains": {"type": "str",  "default": "",
+                             "show_when": {"check_content": [true]},
+                             "group": "content"},
+
+        "auth_enabled":     {"type": "bool", "default": false},
+        "auth_user":        {"type": "str",  "default": "",
+                             "show_when": {"auth_enabled": [true]},
+                             "group": "auth"},
+        "auth_password":    {"type": "str",  "default": "", "sensitive": true,
+                             "show_when": {"auth_enabled": [true]},
+                             "group": "auth"},
+
+        "alert":            {"type": "int",  "default": 1,  "min": 1, "max": 10}
     }
 }

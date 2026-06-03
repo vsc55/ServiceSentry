@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 """Authentication routes: /login, /logout."""
 
-import math
-from datetime import datetime, timezone
-
 from flask import flash, redirect, render_template, request, session, url_for
 
 from ...auth import ldap_auth
@@ -112,17 +109,14 @@ def register(app, wa):
                 return redirect(url_for('dashboard'))
 
             if reason == 'account_locked':
-                raw          = wa._users.get(username, {})
-                locked_str   = raw.get('_locked_until', '')
-                try:
-                    secs_left = (datetime.fromisoformat(locked_str)
-                                 - datetime.now(timezone.utc)).total_seconds()
-                    mins_left = math.ceil(max(secs_left, 0) / 60)
-                except (ValueError, TypeError):
-                    mins_left = 1
-                error = wa._t('account_locked', str(mins_left))
+                # Use a generic message that doesn't confirm the account exists
+                # or reveal the exact remaining lockout time to avoid account
+                # enumeration.  The real reason is recorded in the audit log.
+                error = wa._t('invalid_credentials')
             elif reason == 'account_disabled':
-                error = wa._t('account_disabled')
+                # Same generic message — don't reveal that the account exists
+                # and is explicitly disabled.
+                error = wa._t('invalid_credentials')
             elif _ldap_conn_error:
                 # Local auth also failed for a user unknown locally — surface the LDAP error
                 error = wa._t('ldap_connection_error')

@@ -5,6 +5,7 @@
    ================================================================ #}
 
 // ──────────────────────── Shared role constants ────────────────────
+// Badge classes keyed by built-in role internal key
 const BUILTIN_ROLE_BADGES = {
     admin:  'bg-danger',
     editor: 'bg-primary',
@@ -14,35 +15,38 @@ const BUILTIN_ROLE_BADGES = {
 const ROLE_LABELS = I18N.role_labels || {};
 const PERM_LABELS = I18N.permission_labels || {};
 
-function roleBadgeClass(role) {
-    return BUILTIN_ROLE_BADGES[role] || 'text-bg-info';
+// rolesData is keyed by UID; rd.key holds the internal key for built-ins
+function roleBadgeClass(uid) {
+    const rd = rolesData[uid] || {};
+    return BUILTIN_ROLE_BADGES[rd.key || uid] || 'text-bg-info';
 }
 
-// Populate a role <select> from rolesData
+// Populate a role <select> from rolesData (keyed by UID)
 function populateRoleDropdown(selectId, selected) {
     const sel = document.getElementById(selectId);
     if (!sel) return;
     sel.innerHTML = '';
-    const builtins = {{ wa_builtin_roles | tojson }};
-    for (const r of builtins) {
-        const rd = rolesData[r] || {};
+    const builtinUids = {{ wa_builtin_roles | tojson }};
+    const builtinSet  = new Set(builtinUids);
+    for (const uid of builtinUids) {
+        const rd  = rolesData[uid] || {};
         const opt = document.createElement('option');
-        opt.value = r;
-        opt.textContent = rd.label || r;
-        if (r === selected) opt.selected = true;
+        opt.value       = uid;
+        opt.textContent = rd.name || uid;
+        if (uid === selected) opt.selected = true;
         sel.appendChild(opt);
     }
     const customs = Object.entries(rolesData)
-        .filter(([n]) => !builtins.includes(n))
-        .sort((a, b) => a[0].localeCompare(b[0]));
+        .filter(([uid]) => !builtinSet.has(uid))
+        .sort((a, b) => (a[1].name || '').localeCompare(b[1].name || ''));
     if (customs.length) {
-        const grp = document.createElement('optgroup');
-        grp.label = t('role_management');
-        for (const [n, rd] of customs) {
+        const grp  = document.createElement('optgroup');
+        grp.label  = t('role_management');
+        for (const [uid, rd] of customs) {
             const opt = document.createElement('option');
-            opt.value = n;
-            opt.textContent = rd.label || n;
-            if (n === selected) opt.selected = true;
+            opt.value       = uid;
+            opt.textContent = rd.name || uid;
+            if (uid === selected) opt.selected = true;
             grp.appendChild(opt);
         }
         sel.appendChild(grp);
@@ -54,29 +58,30 @@ function populateRoleDropdown(selectId, selected) {
 function _umPopulateRoles(searchVal) {
     const container = document.getElementById('umRoleContainer');
     if (!container) return;
-    const builtins = {{ wa_builtin_roles | tojson }};
+    const builtinUids = {{ wa_builtin_roles | tojson }};
+    const builtinSet  = new Set(builtinUids);
     const q = (searchVal || '').toLowerCase();
     const customs = Object.entries(rolesData)
-        .filter(([n]) => !builtins.includes(n))
-        .sort((a, b) => a[0].localeCompare(b[0]));
-    const renderItem = (r) => {
-        const rd = rolesData[r] || {};
-        const label = rd.label || r;
+        .filter(([uid]) => !builtinSet.has(uid))
+        .sort((a, b) => (a[1].name || '').localeCompare(b[1].name || ''));
+    const renderItem = (uid) => {
+        const rd    = rolesData[uid] || {};
+        const label = rd.name || uid;
         const desc  = rd.description || '';
-        if (q && !r.toLowerCase().includes(q) && !label.toLowerCase().includes(q) && !desc.toLowerCase().includes(q)) return '';
-        const id = 'umrole_' + r;
+        if (q && !uid.toLowerCase().includes(q) && !label.toLowerCase().includes(q) && !desc.toLowerCase().includes(q)) return '';
+        const id = 'umrole_' + uid;
         const isDisabled = !rd.builtin && rd.enabled === false;
         const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
         return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
-            <input class="form-check-input" type="radio" name="umRoleRadio" id="${escAttr(id)}" value="${escAttr(r)}" ${r === _umSelectedRole ? 'checked' : ''}>
+            <input class="form-check-input" type="radio" name="umRoleRadio" id="${escAttr(id)}" value="${escAttr(uid)}" ${uid === _umSelectedRole ? 'checked' : ''}>
             <label class="form-check-label small" for="${escAttr(id)}">
-                <span class="badge ${roleBadgeClass(r)} fw-normal">${esc(label)}</span>
+                <span class="badge ${roleBadgeClass(uid)} fw-normal">${esc(label)}</span>
                 ${desc ? `<span class="text-muted ms-1">${esc(desc)}</span>` : ''}${badge}
             </label>
         </div>`;
     };
-    const builtinHtml = builtins.map(renderItem).join('');
-    const customHtml  = customs.map(([n]) => renderItem(n)).join('');
+    const builtinHtml = builtinUids.map(renderItem).join('');
+    const customHtml  = customs.map(([uid]) => renderItem(uid)).join('');
     let h = builtinHtml;
     if (customHtml) h += '<hr class="my-1">' + customHtml;
     container.innerHTML = h || '<span class="text-muted small">' + t('no_roles') + '</span>';

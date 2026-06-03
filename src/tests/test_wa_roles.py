@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_26_flags(self):
+    def test_permissions_tuple_has_28_flags(self):
         from lib.web_admin.app import PERMISSIONS
-        assert len(PERMISSIONS) == 26
+        assert len(PERMISSIONS) == 28
 
     def test_permissions_are_unique(self):
         from lib.web_admin.app import PERMISSIONS
@@ -45,6 +45,7 @@ class TestPermissionsConstants:
             'config_view', 'config_edit', 'overview_view', 'overview_edit',
             'sessions_view', 'sessions_revoke',
             'checks_view', 'checks_run',
+            'history_view', 'history_delete',
         }
         assert set(PERMISSIONS) == expected
 
@@ -147,24 +148,28 @@ class TestPermissionsConstants:
         assert 'audit_view' in perms
 
     def test_get_role_permissions_unknown_role(self, admin):
-        perms = admin._get_role_permissions('nonexistent_role')
+        import uuid as _uuid
+        perms = admin._get_role_permissions('nonexistent-uid-xxx')
         assert perms == frozenset()
-        admin._custom_roles['tester'] = {
-            'label': 'Tester',
+        tuid = str(_uuid.uuid4())
+        admin._custom_roles[tuid] = {
+            'uid': tuid, 'name': 'Tester', 'enabled': True,
             'permissions': ['modules_edit', 'audit_view'],
         }
-        perms = admin._get_role_permissions('tester')
+        perms = admin._get_role_permissions(tuid)
         assert 'modules_edit' in perms
         assert 'audit_view' in perms
         assert 'users_delete' not in perms
 
     def test_get_role_permissions_custom_role_filters_invalid(self, admin):
         """Unknown permission names in custom role data are silently dropped."""
-        admin._custom_roles['badperms'] = {
-            'label': 'Bad',
+        import uuid as _uuid
+        buid = str(_uuid.uuid4())
+        admin._custom_roles[buid] = {
+            'uid': buid, 'name': 'Bad', 'enabled': True,
             'permissions': ['modules_edit', 'manage_users_OLD', 'fake_perm'],
         }
-        perms = admin._get_role_permissions('badperms')
+        perms = admin._get_role_permissions(buid)
         assert 'modules_edit' in perms
         assert 'manage_users_OLD' not in perms
         assert 'fake_perm' not in perms
@@ -218,6 +223,23 @@ class TestPermissionsConstants:
         assert 'perm_group_audit' in html
 
 
+# ─────────────────────── Helpers for UID-based role API ───────────────
+
+def _role_uid_in(roles_data: dict, key_or_name: str) -> str | None:
+    """Return the UID for a role identified by builtin key or display name."""
+    for uid, rd in roles_data.items():
+        if rd.get('key') == key_or_name or rd.get('name') == key_or_name:
+            return uid
+    return None
+
+def _create_role_uid(client, name: str, permissions=None, **kwargs) -> str | None:
+    """POST a new role and return its UID (or None on failure)."""
+    resp = client.post("/api/v1/roles", json={"name": name, "permissions": permissions or [], **kwargs})
+    if resp.status_code == 201:
+        return resp.get_json().get("uid")
+    return None
+
+
 # ──────────────────────────── Custom roles ─────────────────────────
 
 class TestCustomRoles:
@@ -228,203 +250,198 @@ class TestCustomRoles:
         assert resp.status_code == 401
 
     def test_get_roles_returns_builtin_roles(self, client):
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
         _login(client)
         resp = client.get("/api/v1/roles")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert 'admin' in data
-        assert 'editor' in data
-        assert 'viewer' in data
+        # Response is keyed by UID
+        for key in ('admin', 'editor', 'viewer'):
+            assert BUILTIN_ROLE_UIDS[key] in data
 
     def test_builtin_roles_are_marked(self, client):
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
         _login(client)
         roles = client.get("/api/v1/roles").get_json()
-        for name in ('admin', 'editor', 'viewer'):
-            assert roles[name]['builtin'] is True
+        for key in ('admin', 'editor', 'viewer'):
+            assert roles[BUILTIN_ROLE_UIDS[key]]['builtin'] is True
 
     def test_builtin_roles_have_permissions(self, client):
         from lib.web_admin.app import PERMISSIONS, BUILTIN_ROLE_PERMISSIONS
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
         _login(client)
         roles = client.get("/api/v1/roles").get_json()
-        assert set(roles['admin']['permissions']) == set(PERMISSIONS)
-        assert set(roles['viewer']['permissions']) == set(BUILTIN_ROLE_PERMISSIONS['viewer'])
+        assert set(roles[BUILTIN_ROLE_UIDS['admin']]['permissions']) == set(PERMISSIONS)
+        assert set(roles[BUILTIN_ROLE_UIDS['viewer']]['permissions']) == set(BUILTIN_ROLE_PERMISSIONS['viewer'])
 
     def test_create_custom_role(self, client):
         _login(client)
         resp = client.post("/api/v1/roles", json={
-            "name": "auditor",
-            "label": "Auditor",
+            "name": "Auditor",
             "permissions": ["audit_view", "sessions_view"],
         })
         assert resp.status_code == 201
-        assert resp.get_json()["ok"] is True
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert "uid" in data
 
     def test_create_role_appears_in_list(self, client):
         _login(client)
-        client.post("/api/v1/roles", json={
-            "name": "reporter",
-            "label": "Reporter",
-            "permissions": ["audit_view"],
-        })
+        uid = _create_role_uid(client, "Reporter", permissions=["audit_view"])
+        assert uid is not None
         roles = client.get("/api/v1/roles").get_json()
-        assert "reporter" in roles
-        assert roles["reporter"]["builtin"] is False
-        assert roles["reporter"]["label"] == "Reporter"
-        assert "audit_view" in roles["reporter"]["permissions"]
+        assert uid in roles
+        assert roles[uid]['builtin'] is False
+        assert roles[uid]['name'] == "Reporter"
+        assert "audit_view" in roles[uid]['permissions']
 
     def test_create_role_invalid_permissions_filtered(self, client):
         """Permissions not in PERMISSIONS are silently dropped."""
         _login(client)
-        client.post("/api/v1/roles", json={
-            "name": "filtered",
-            "label": "Filtered",
-            "permissions": ["audit_view", "manage_users_OLD", "fake_perm"],
-        })
+        uid = _create_role_uid(client, "Filtered",
+                               permissions=["audit_view", "manage_users_OLD", "fake_perm"])
+        assert uid is not None
         roles = client.get("/api/v1/roles").get_json()
-        assert "filtered" in roles
-        assert roles["filtered"]["permissions"] == ["audit_view"]
+        assert uid in roles
+        assert roles[uid]['permissions'] == ["audit_view"]
 
     def test_create_role_missing_name(self, client):
         _login(client)
-        resp = client.post("/api/v1/roles", json={
-            "name": "",
-            "label": "Empty name",
-            "permissions": [],
-        })
+        resp = client.post("/api/v1/roles", json={"name": "", "permissions": []})
         assert resp.status_code == 400
 
     def test_create_role_duplicate_name(self, client):
         _login(client)
-        client.post("/api/v1/roles", json={"name": "dup", "label": "D", "permissions": []})
-        resp = client.post("/api/v1/roles", json={"name": "dup", "label": "D2", "permissions": []})
+        _create_role_uid(client, "Dup")
+        resp = client.post("/api/v1/roles", json={"name": "Dup", "permissions": []})
         assert resp.status_code == 409
 
     def test_create_role_name_clashes_with_builtin(self, client):
         _login(client)
-        resp = client.post("/api/v1/roles", json={"name": "admin", "label": "x", "permissions": []})
+        # Builtin display name is "Admin" (title-cased), so "Admin" must clash
+        resp = client.post("/api/v1/roles", json={"name": "Admin", "permissions": []})
         assert resp.status_code == 409
 
-    def test_create_role_name_normalised(self, admin, client):
-        """Name is lowercased and spaces become underscores."""
+    def test_create_role_name_stored_as_display(self, admin, client):
+        """Name is stored as the display name without normalization."""
         _login(client)
-        client.post("/api/v1/roles", json={"name": "My Role", "label": "My Role", "permissions": []})
-        assert "my_role" in admin._custom_roles
+        uid = _create_role_uid(client, "My Custom Role")
+        assert uid is not None
+        assert uid in admin._custom_roles
+        assert admin._custom_roles[uid]['name'] == "My Custom Role"
 
-    def test_update_custom_role_label(self, client):
+    def test_update_custom_role_name(self, client):
         _login(client)
-        client.post("/api/v1/roles", json={"name": "myrole", "label": "Old", "permissions": []})
-        resp = client.put("/api/v1/roles/myrole", json={"label": "New Label"})
+        uid = _create_role_uid(client, "OldName")
+        resp = client.put(f"/api/v1/roles/{uid}", json={"name": "New Name"})
         assert resp.status_code == 200
         roles = client.get("/api/v1/roles").get_json()
-        assert roles["myrole"]["label"] == "New Label"
+        assert roles[uid]['name'] == "New Name"
 
     def test_update_custom_role_permissions(self, client):
         _login(client)
-        client.post("/api/v1/roles", json={
-            "name": "flexrole", "label": "Flex",
-            "permissions": ["audit_view"],
-        })
-        resp = client.put("/api/v1/roles/flexrole", json={
+        uid = _create_role_uid(client, "FlexRole", permissions=["audit_view"])
+        resp = client.put(f"/api/v1/roles/{uid}", json={
             "permissions": ["audit_view", "modules_edit"],
         })
         assert resp.status_code == 200
         roles = client.get("/api/v1/roles").get_json()
-        assert set(roles["flexrole"]["permissions"]) == {"audit_view", "modules_edit"}
+        assert set(roles[uid]['permissions']) == {"audit_view", "modules_edit"}
 
-    def test_update_builtin_role_label(self, client, admin):
-        """Built-in roles can have their label updated, but not permissions."""
+    def test_update_builtin_role_name(self, client):
+        """Built-in roles can have their display name updated, but not permissions."""
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
         _login(client)
-        resp = client.put("/api/v1/roles/admin", json={"label": "Super Admin"})
+        admin_uid = BUILTIN_ROLE_UIDS['admin']
+        resp = client.put(f"/api/v1/roles/{admin_uid}", json={"name": "Super Admin"})
         assert resp.status_code == 200
         data = client.get("/api/v1/roles").get_json()
-        assert data["admin"]["label"] == "Super Admin"
-        # Permissions must not change
-        assert set(data["admin"]["permissions"]) == set(BUILTIN_ROLE_PERMISSIONS["admin"])
+        assert data[admin_uid]['name'] == "Super Admin"
+        assert set(data[admin_uid]['permissions']) == set(BUILTIN_ROLE_PERMISSIONS["admin"])
 
-    def test_update_builtin_role_permissions_ignored(self, client, admin):
-        """Built-in role PUT ignores permission changes (only label is accepted)."""
+    def test_update_builtin_role_permissions_ignored(self, client):
+        """Built-in role PUT ignores permission changes (only name is accepted)."""
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
         _login(client)
+        editor_uid = BUILTIN_ROLE_UIDS['editor']
         original_perms = set(BUILTIN_ROLE_PERMISSIONS["editor"])
-        resp = client.put("/api/v1/roles/editor", json={"label": "Ed", "permissions": []})
+        resp = client.put(f"/api/v1/roles/{editor_uid}", json={"name": "Ed", "permissions": []})
         assert resp.status_code == 200
         data = client.get("/api/v1/roles").get_json()
-        assert set(data["editor"]["permissions"]) == original_perms
+        assert set(data[editor_uid]['permissions']) == original_perms
 
     def test_update_nonexistent_role(self, client):
         _login(client)
-        resp = client.put("/api/v1/roles/ghost", json={"label": "x"})
+        resp = client.put("/api/v1/roles/00000000-dead-beef-0000-000000000000", json={"name": "x"})
         assert resp.status_code == 404
 
     def test_delete_custom_role(self, admin, client):
         _login(client)
-        client.post("/api/v1/roles", json={"name": "delrole", "label": "D", "permissions": []})
-        resp = client.delete("/api/v1/roles/delrole")
+        uid = _create_role_uid(client, "DelRole")
+        resp = client.delete(f"/api/v1/roles/{uid}")
         assert resp.status_code == 200
-        assert "delrole" not in admin._custom_roles
+        assert uid not in admin._custom_roles
 
     def test_cannot_delete_builtin_role(self, client):
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
         _login(client)
-        resp = client.delete("/api/v1/roles/editor")
+        resp = client.delete(f"/api/v1/roles/{BUILTIN_ROLE_UIDS['editor']}")
         assert resp.status_code == 400
 
-    def test_cannot_delete_role_in_use(self, admin, client):
+    def test_cannot_delete_role_in_use(self, client):
         """Deleting a role that has users assigned is rejected."""
         _login(client)
-        client.post("/api/v1/roles", json={"name": "inuse", "label": "I", "permissions": []})
+        uid = _create_role_uid(client, "InUse")
         client.post("/api/v1/users", json={
-            "username": "roleuser", "password": "testpass", "role": "inuse",
+            "username": "roleuser", "password": "testpass", "role": uid,
         })
-        resp = client.delete("/api/v1/roles/inuse")
+        resp = client.delete(f"/api/v1/roles/{uid}")
         assert resp.status_code == 409
 
     def test_delete_nonexistent_role(self, client):
         _login(client)
-        resp = client.delete("/api/v1/roles/ghost")
+        resp = client.delete("/api/v1/roles/00000000-dead-beef-0000-000000000001")
         assert resp.status_code == 404
 
-    def test_roles_persisted_to_file(self, admin, config_dir, client):
+    def test_roles_persisted_to_db(self, admin, client):
         _login(client)
-        client.post("/api/v1/roles", json={
-            "name": "persist_role", "label": "P", "permissions": ["audit_view"],
-        })
-        path = os.path.join(config_dir, "roles.json")
-        assert os.path.isfile(path)
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        assert "persist_role" in data
+        uid = _create_role_uid(client, "PersistRole", permissions=["audit_view"])
+        assert uid is not None
+        db_roles = admin._roles_store.load_roles()
+        assert uid in db_roles
+        assert db_roles[uid]['name'] == "PersistRole"
 
     def test_custom_role_accepted_for_user_creation(self, client):
         """A custom role can be assigned when creating a user."""
         _login(client)
-        client.post("/api/v1/roles", json={
-            "name": "customrole", "label": "C", "permissions": ["modules_edit"],
-        })
+        uid = _create_role_uid(client, "customrole", permissions=["modules_edit"])
         resp = client.post("/api/v1/users", json={
-            "username": "customuser", "password": "testpass", "role": "customrole",
+            "username": "customuser", "password": "testpass", "role": uid,
         })
         assert resp.status_code == 201
         users = client.get("/api/v1/users").get_json()
-        assert users["customuser"]["role"] == "customrole"
+        # GET /api/v1/users now returns the role UID
+        assert users["customuser"]["role"] == uid
 
     def test_custom_role_audited_on_create(self, admin, client):
         _login(client)
-        client.post("/api/v1/roles", json={"name": "auditrole", "label": "A", "permissions": []})
+        _create_role_uid(client, "AuditRole")
         events = [e['event'] for e in admin._audit_log]
         assert 'role_created' in events
 
     def test_custom_role_audited_on_update(self, admin, client):
         _login(client)
-        client.post("/api/v1/roles", json={"name": "updrole", "label": "U", "permissions": []})
-        client.put("/api/v1/roles/updrole", json={"label": "Updated"})
+        uid = _create_role_uid(client, "UpdRole")
+        client.put(f"/api/v1/roles/{uid}", json={"name": "Updated"})
         events = [e['event'] for e in admin._audit_log]
         assert 'role_updated' in events
 
     def test_custom_role_audited_on_delete(self, admin, client):
         _login(client)
-        client.post("/api/v1/roles", json={"name": "drole", "label": "D", "permissions": []})
-        client.delete("/api/v1/roles/drole")
+        uid = _create_role_uid(client, "DelRole2")
+        client.delete(f"/api/v1/roles/{uid}")
         events = [e['event'] for e in admin._audit_log]
         assert 'role_deleted' in events
 
@@ -615,9 +632,25 @@ class TestGranularPermissions:
 
     # ── sessions_revoke ───────────────────────────────────────────
 
-    def test_sessions_revoke_allows_invalidate(self, admin):
+    def test_sessions_revoke_invalidate_requires_admin(self, admin):
+        """Invalidating ALL sessions is admin-only (prevents non-admin DoS on all admins).
+        A non-admin user with sessions_revoke is blocked with 403."""
         self._make_user_with_perms(admin, "s_rev", ["sessions_revoke"])
         c = self._client_as(admin, "s_rev")
+        resp = c.post("/api/v1/sessions/invalidate",
+                      content_type="application/json", data="{}")
+        assert resp.status_code == 403
+
+    def test_sessions_invalidate_allowed_for_admin(self, admin):
+        """Admin can invalidate all sessions."""
+        from werkzeug.security import generate_password_hash as _gph
+        admin_uid = admin._role_name_to_uid('admin')
+        admin._users["_test_admin_inv"] = {
+            "password_hash": _gph("pass"),
+            "role": admin_uid,
+            "display_name": "Test Admin",
+        }
+        c = self._client_as(admin, "_test_admin_inv")
         resp = c.post("/api/v1/sessions/invalidate",
                       content_type="application/json", data="{}")
         assert resp.status_code == 200
@@ -629,10 +662,20 @@ class TestGranularPermissions:
                       content_type="application/json", data="{}")
         assert resp.status_code == 403
 
-    def test_sessions_revoke_allows_revoke_user(self, admin):
+    def test_sessions_revoke_user_other_requires_admin(self, admin):
+        """Non-admin with sessions_revoke can only revoke their OWN sessions,
+        not other users'. Revoking another user returns 403."""
         self._make_user_with_perms(admin, "s_rev2", ["sessions_revoke"])
         c = self._client_as(admin, "s_rev2")
         resp = c.post("/api/v1/sessions/revoke-user/nobody",
+                      content_type="application/json", data="{}")
+        assert resp.status_code == 403
+
+    def test_sessions_revoke_user_self_allowed(self, admin):
+        """Non-admin with sessions_revoke CAN revoke their own sessions."""
+        self._make_user_with_perms(admin, "s_rev3", ["sessions_revoke"])
+        c = self._client_as(admin, "s_rev3")
+        resp = c.post("/api/v1/sessions/revoke-user/s_rev3",
                       content_type="application/json", data="{}")
         assert resp.status_code == 200
 

@@ -431,17 +431,12 @@
                 </ul>
                 <div class="tab-content px-3 py-3 gm-tab-content" id="groupModalTabContent">
                     <div class="tab-pane fade show active" id="gmTabGeneral">
-                        <div class="row g-3 mb-2 flex-shrink-0">
-                            <div class="col-sm-5">
-                                <label class="form-label small fw-semibold">{{ i18n.group_name }}</label>
-                                <input type="text" class="form-control form-control-sm" id="gmName" autocomplete="off"
-                                    placeholder="e.g. ops_team">
-                            </div>
-                            <div class="col-sm-7">
-                                <label class="form-label small fw-semibold">{{ i18n.group_label }}</label>
-                                <input type="text" class="form-control form-control-sm" id="gmLabel" autocomplete="off"
-                                    placeholder="e.g. Operations Team">
-                            </div>
+                        <div class="mb-2 flex-shrink-0">
+                            <label class="form-label small fw-semibold">{{ i18n.group_name }}</label>
+                            <input type="text" class="form-control form-control-sm" id="gmLabel" autocomplete="off"
+                                placeholder="e.g. Operations Team"
+                                oninput="this.classList.remove('is-invalid')">
+                            <div class="invalid-feedback" id="gmLabelError"></div>
                         </div>
                         <div class="mb-2 flex-shrink-0 d-none" id="gmUidRow">
                             <label class="form-label small text-muted mb-0">UID</label>
@@ -520,17 +515,10 @@
                 <div class="tab-content px-3 py-3 gm-tab-content" id="roleModalTabContent">
                     {# General tab #}
                     <div class="tab-pane fade show active" id="rmTabGeneral">
-                        <div class="row g-3 mb-2 flex-shrink-0">
-                            <div class="col-sm-5">
-                                <label class="form-label small fw-semibold">{{ i18n.role_name }}</label>
-                                <input type="text" class="form-control form-control-sm" id="rmName" autocomplete="off"
-                                    placeholder="e.g. ops_viewer">
-                            </div>
-                            <div class="col-sm-7">
-                                <label class="form-label small fw-semibold">{{ i18n.role_label }}</label>
-                                <input type="text" class="form-control form-control-sm" id="rmLabel" autocomplete="off"
-                                    placeholder="e.g. Operations Viewer">
-                            </div>
+                        <div class="mb-2 flex-shrink-0">
+                            <label class="form-label small fw-semibold">{{ i18n.role_name }}</label>
+                            <input type="text" class="form-control form-control-sm" id="rmLabel" autocomplete="off"
+                                placeholder="e.g. Operations Viewer">
                         </div>
                         <div class="mb-2 flex-shrink-0 d-none" id="rmUidRow">
                             <label class="form-label small text-muted mb-0">UID</label>
@@ -668,3 +656,79 @@
         </div>
     </div>
 </div>
+
+{# ── Module expand modal ─────────────────────────────────────────────── #}
+<div class="modal fade" id="moduleExpandModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl" style="height:90vh">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <span id="moduleExpandIcon"></span>
+                    <span id="moduleExpandTitle" class="fw-semibold"></span>
+                    <code id="moduleExpandCode" class="text-muted fw-normal" style="font-size:.75rem"></code>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="moduleExpandBody"></div>
+            <div class="modal-footer py-1">
+                <button type="button" class="btn btn-sm btn-secondary"
+                    data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Missing / partial dependency install modal ──────────────────────── #}
+<div class="modal fade" id="depInstallModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:680px">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-box-seam text-warning"></i>
+                    <span id="depInstallModalTitle">{{ i18n.missing_dep }}</span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body pb-2">
+                <p class="small text-muted mb-3" id="depInstallModalDesc" style="display:none"></p>
+                <p class="small mb-2 text-muted">{{ i18n.dep_install_cmd_label }}</p>
+                {# Terminal-style block #}
+                <div class="rounded-3 overflow-hidden" style="border:1px solid #313244">
+                    {# title bar #}
+                    <div class="d-flex align-items-center gap-2 px-3 py-2"
+                         style="background:#1e1e2e;border-bottom:1px solid #313244">
+                        <span style="width:11px;height:11px;border-radius:50%;background:#ff5f57;display:inline-block"></span>
+                        <span style="width:11px;height:11px;border-radius:50%;background:#febc2e;display:inline-block"></span>
+                        <span style="width:11px;height:11px;border-radius:50%;background:#28c840;display:inline-block"></span>
+                        <span class="ms-1" style="font-size:.7rem;color:#6272a4;font-family:monospace">terminal</span>
+                    </div>
+                    {# command line #}
+                    <div class="px-3 py-3 d-flex align-items-center gap-3"
+                         style="background:#1e1e2e">
+                        <span style="color:#6272a4;font-family:monospace;font-size:.9rem;user-select:none">$</span>
+                        <code id="depInstallCmd"
+                              class="flex-grow-1 user-select-all"
+                              style="font-size:.95rem;color:#a6e3a1;background:transparent;word-break:break-all;font-family:'Cascadia Code','Fira Code','Consolas',monospace"></code>
+                        <button type="button" class="btn btn-sm flex-shrink-0"
+                                style="background:#313244;border:1px solid #45475a;color:#cdd6f4"
+                                onclick="_copyDepInstallCmd(this)">
+                            <i class="bi bi-clipboard me-1"></i>
+                            <span>{{ i18n.dep_install_copy }}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary"
+                    data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Module-specific modals — each watchful module may provide its own
+   modal HTML under watchfuls/<mod>/web/_modals.html.  The list is
+   built at startup by _create_app() with no module-specific knowledge. #}
+{% for _inc in module_web_modals %}{% include _inc %}{% endfor %}

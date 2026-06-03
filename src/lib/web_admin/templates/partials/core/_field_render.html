@@ -50,16 +50,22 @@ function renderField(key, value, pathStr, target = 'modules') {
     return `<div class="cfg-field-wrap${_wrapCls}" data-cfg-path="${escAttr(pathStr)}">${_conflictBanner}${_fhtml}</div>`;
 }
 function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = '', _hintHtml = '') {
-    const lbl = esc(fieldLabel(key));
-    const lblHtml = lbl + _infoIcon;
     const sp = jsStr(pathStr), tg = jsStr(target);
 
-    // Get field metadata from schema
-    const schema = schemaFor(pathStr.split('|').slice(0, 2).join('|') + '|_');
-    // schemaFor needs "module|collection|..." — but we can also look it up directly
-    const parentKey = pathStr.split('|').slice(0, 2).join('|');
-    const sch = ITEM_SCHEMAS[parentKey] || ITEM_SCHEMAS[pathStr.split('|')[0] + '|__module__'] || null;
+    // Get field metadata from schema — must come before fieldLabel() so label_i18n is available.
+    // parentKey: strip field name from path, then collapse item-key segments for sub-collections.
+    const _parentRaw = pathStr.split('|').slice(0, -1).join('|');
+    const parentKey  = _schemaKeyOf(_parentRaw) || pathStr.split('|').slice(0, 2).join('|');
+    const sch  = ITEM_SCHEMAS[parentKey] || ITEM_SCHEMAS[pathStr.split('|')[0] + '|__module__'] || null;
     const meta = fieldMeta(sch, key) || (configSchema[pathStr] || null);
+
+    // fieldLabel receives meta so it can use label_i18n (avoids inheriting global labels
+    // from unrelated config sections, e.g. LDAP's "server" leaking into SNMP fields).
+    const lbl = esc(fieldLabel(key, meta));
+    const lblHtml = lbl + _infoIcon;
+
+    // Hidden fields are stored in data but never rendered to the user.
+    if (meta && meta.hidden) return '';
 
     if (meta && meta.__unsupported__) {
         return `<div class="row mb-2 align-items-center opacity-50">
@@ -85,7 +91,8 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             data-bs-toggle="tooltip" data-bs-placement="top"
             title="${escAttr(t('env_locked_tooltip'))}"><i class="bi bi-lock-fill" style="font-size:.75rem"></i></span>`
         : '';
-    const _actionBtn = _isEnvLocked ? _lockBtn : _resetBtn;
+    const _actionBtn  = _isEnvLocked ? _lockBtn : _resetBtn;
+    const _isReadOnly = !!(meta && meta.readonly);
 
     // Sensitive field masked by the server (null = value is set but never transmitted)
     if (value === null && (SENSITIVE.has(key) || (meta && meta.sensitive))) {
@@ -101,6 +108,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
     }
 
     if (typeof value === 'boolean') {
+        const _boolItemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
         return `<div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
         <div class="col-sm-8">
@@ -108,7 +116,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 <div class="form-check form-switch mb-0">
                     <input class="form-check-input" type="checkbox" role="switch"
                         ${value ? 'checked' : ''}
-                        onchange="updateField(${tg},${sp},this.checked)">
+                        onchange="updateField(${tg},${sp},this.checked);_refreshConditionalFields(${_boolItemPath})">
                 </div>${_actionBtn}
             </div>${_hintHtml}</div></div>`;
     }
@@ -228,8 +236,17 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _modI18n = ITEM_SCHEMAS[_modName + '|__i18n__'];
             const _modLd = _modI18n && (_modI18n[CURRENT_LANG] || _modI18n[SYSTEM_DEFAULT_LANG]);
             const _optLbls = _modLd && _modLd.option_labels && _modLd.option_labels[key];
+            // options_disabled: {optionValue: 'packageName'} — injected by discover_schemas()
+            const _optDis = (meta.options_disabled && typeof meta.options_disabled === 'object')
+                ? meta.options_disabled : null;
             const opts = meta.options.map(o => {
                 const label = (_optLbls && _optLbls[o]) ? esc(_optLbls[o]) : esc(o);
+                if (_optDis && _optDis[o]) {
+                    const pkg = _optDis[o];
+                    // Keep 'selected' so the current value stays visible even if disabled
+                    return `<option value="${escAttr(o)}"${value === o ? ' selected' : ''} disabled
+                        title="${escAttr(tf('missing_dep_install', pkg))}">${label} — ${esc(t('missing_dep'))}</option>`;
+                }
                 return `<option value="${escAttr(o)}"${value === o ? ' selected' : ''}>${label}</option>`;
             }).join('');
             const _itemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
@@ -261,10 +278,17 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             }
         }
         const _strPhCls = _strPh ? ' item-key-ph' : '';
-        // Inline discover button for __discovery_field__ string fields
-        const _discoverFieldUrl = (sch && sch['__discovery_field__'] === key && sch['__discovery__'])
-            ? sch['__discovery__'] : null;
-        if (_discoverFieldUrl) {
+        // Inline collection picker for fields with __pick_from_collection__
+        const _pickCollection = meta && meta['__pick_from_collection__']
+            ? String(meta['__pick_from_collection__']) : null;
+        if (_pickCollection && !isSensitive) {
+            const _pickModName  = pathStr.split('|')[0];
+            const _pickColData  = (modulesData[_pickModName] || {})[_pickCollection] || {};
+            const _pickKeys     = Object.keys(_pickColData);
+            const _pickLabel    = esc(fieldLabel(key));
+            const _pickTitle    = escAttr(t('pick_from_collection') || _pickLabel);
+            // Inline onclick that builds the list at click-time (picks up newly-added items)
+            const _pickClick    = `openFieldPickerModal(${sp},Object.keys((modulesData[${jsStr(_pickModName)}]||{})[${jsStr(_pickCollection)}]||{}),${jsStr(lbl)})`;
             return `<div class="row mb-2 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
             <div class="col-sm-8">
@@ -274,6 +298,39 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                         value="${escAttr(value)}"${_numKbd}${_strPh}
                         oninput="markDirty(${tg})"
                         onchange="updateField(${tg},${sp},this.value.trim())">
+                    <button class="btn btn-secondary" type="button"
+                        title="${_pickTitle}"
+                        onclick="${_pickClick}">
+                        <i class="bi bi-chevron-expand"></i>
+                    </button>${_actionBtn}
+                </div>${_hintHtml}
+            </div></div>`;
+        }
+        // Inline discover button for __discovery_field__ string fields.
+        // URL is built from the action name (__discovery__) and the API version
+        // declared in the module's __module__ schema (api_ver, defaults to "v1").
+        const _discoverFieldAction = (sch && sch['__discovery_field__'] === key && sch['__discovery__'])
+            ? sch['__discovery__'] : null;
+        const _discoverFieldMod = pathStr.split('|')[0];
+        const _discoverFieldVer = (ITEM_SCHEMAS[`${_discoverFieldMod}|__module__`] || {})['api_ver'] || 'v1';
+        const _discoverFieldUrl = _discoverFieldAction
+            ? `/api/${_discoverFieldVer}/watchfuls/${_discoverFieldMod}/${_discoverFieldAction}`
+            : null;
+        if (_discoverFieldUrl) {
+            const _rdAttr = _isReadOnly
+                ? ' readonly style="background:var(--bs-tertiary-bg);color:var(--bs-secondary-color);cursor:default"'
+                : '';
+            const _rdHandlers = _isReadOnly
+                ? ''
+                : `oninput="markDirty(${tg})" onchange="updateField(${tg},${sp},this.value.trim())"`;
+            return `<div class="row mb-2 align-items-center">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8">
+                <div class="input-group input-group-sm">
+                    <input type="${tp}" class="form-control${_strPhCls}"
+                        data-field-path="${escAttr(pathStr)}"
+                        value="${escAttr(value)}"${_numKbd}${_strPh}${_rdAttr}
+                        ${_rdHandlers}>
                     <button class="btn btn-secondary" type="button"
                         title="${escAttr(t('discover') || 'Discover')}"
                         onclick="openDiscoverModalForField(${sp},${jsStr(_discoverFieldUrl)})">
@@ -409,7 +466,8 @@ function resetConfigField(pathStr) {
  *  the last field of that group (used to embed action buttons inside a group). */
 function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtml = {}) {
     let h = '';
-    const _sch = ITEM_SCHEMAS[pathPrefix.split('|').slice(0, 2).join('|')]
+    // _schemaKeyOf handles both flat ("snmp|servers") and nested ("snmp|servers|router|checks") paths.
+    const _sch = ITEM_SCHEMAS[_schemaKeyOf(pathPrefix)]
         || ITEM_SCHEMAS[pathPrefix.split('|')[0] + '|__module__'] || null;
 
     // Module i18n for group labels
@@ -510,43 +568,46 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
  * when the item's collapse panel opens.
  */
 function _refreshConditionalFields(itemPathStr) {
-    const container = document.querySelector(`[data-sw-item-path="${CSS.escape(itemPathStr)}"]`);
-    if (!container) return;
-    const parts = itemPathStr.split('|');
+    // Use querySelectorAll so both the regular card AND the fullscreen modal
+    // (which render the same item path) are updated simultaneously.
+    const containers = document.querySelectorAll(`[data-sw-item-path="${CSS.escape(itemPathStr)}"]`);
+    if (!containers.length) return;
+    const parts    = itemPathStr.split('|');
     const itemData = getPath(modulesData, parts) || getPath(configData, parts) || {};
-    container.querySelectorAll('.sw-field[data-sw-when]').forEach(el => {
-        try {
-            const cond = JSON.parse(el.dataset.swWhen);
-            let visible = true;
-            for (const [ctrl, allowed] of Object.entries(cond)) {
-                if (!Array.isArray(allowed) || !allowed.includes(itemData[ctrl])) {
-                    visible = false; break;
+    containers.forEach(container => {
+        container.querySelectorAll('.sw-field[data-sw-when]').forEach(el => {
+            try {
+                const cond = JSON.parse(el.dataset.swWhen);
+                let visible = true;
+                for (const [ctrl, allowed] of Object.entries(cond)) {
+                    if (!Array.isArray(allowed) || !allowed.includes(itemData[ctrl])) {
+                        visible = false; break;
+                    }
                 }
-            }
-            // Use removeProperty / setProperty to avoid clobbering other inline styles
-            if (visible) {
-                el.style.removeProperty('display');
-            } else {
-                el.style.setProperty('display', 'none');
-            }
-        } catch {}
-    });
-    // Update placeholder for inputs with a placeholder_map (e.g. port depends on db_type).
-    container.querySelectorAll('input[data-placeholder-map]').forEach(el => {
-        try {
-            const map = JSON.parse(el.dataset.placeholderMap);
-            const ph = map[itemData['db_type'] || ''];
-            el.placeholder = ph != null ? String(ph) : '';
-        } catch {}
-    });
-    // Update placeholder for inputs that inherit a module-level field value.
-    container.querySelectorAll('input[data-placeholder-module]').forEach(el => {
-        try {
-            const modField = el.dataset.placeholderModule;
-            const modName = (container.dataset.swItemPath || '').split('|')[0];
-            const ph = modName ? (modulesData[modName] || {})[modField] : null;
-            el.placeholder = (ph != null && ph !== 0) ? String(ph) : '';
-        } catch {}
+                if (visible) {
+                    el.style.removeProperty('display');
+                } else {
+                    el.style.setProperty('display', 'none');
+                }
+            } catch {}
+        });
+        // Update placeholder for inputs with a placeholder_map (e.g. port depends on db_type).
+        container.querySelectorAll('input[data-placeholder-map]').forEach(el => {
+            try {
+                const map = JSON.parse(el.dataset.placeholderMap);
+                const ph = map[itemData['db_type'] || ''];
+                el.placeholder = ph != null ? String(ph) : '';
+            } catch {}
+        });
+        // Update placeholder for inputs that inherit a module-level field value.
+        container.querySelectorAll('input[data-placeholder-module]').forEach(el => {
+            try {
+                const modField = el.dataset.placeholderModule;
+                const modName  = (container.dataset.swItemPath || '').split('|')[0];
+                const ph = modName ? (modulesData[modName] || {})[modField] : null;
+                el.placeholder = (ph != null && ph !== 0) ? String(ph) : '';
+            } catch {}
+        });
     });
 }
 

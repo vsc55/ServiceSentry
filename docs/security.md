@@ -13,7 +13,7 @@ Referencia completa de los mecanismos de seguridad implementados en la interfaz 
    - `auth_source: "ldap"` o usuario desconocido → autenticación contra LDAP primero.
    - `auth_source: "local"` → siempre autenticación local, LDAP ignorado.
    - Si LDAP falla por error de red y `fallback_to_local = true` → intenta autenticación local.
-3. Se busca el usuario en `users.json`; si no existe o la contraseña es incorrecta → el **formulario muestra siempre "Invalid credentials"** (mensaje genérico — evita enumeración de usuarios). Si la cuenta existe pero está desactivada → mensaje específico "account disabled". Si la cuenta está bloqueada → mensaje con los minutos restantes.
+3. Se busca el usuario en `users.json`; si no existe o la contraseña es incorrecta → el **formulario muestra siempre "Invalid credentials"** (mensaje genérico — evita enumeración de usuarios). Si la cuenta existe pero está desactivada o bloqueada → **mismo mensaje genérico** (anti-enumeración). El motivo real se registra en el log de auditoría como `detail.reason`.
 4. La contraseña se verifica con `werkzeug.security.check_password_hash` (PBKDF2-SHA256).
 5. Si es correcta → se crea una entrada en el **registro de sesiones** del servidor (`_sessions`) con un token de 32 bytes aleatorios (64 hex) y se guarda en la cookie de sesión Flask.
 6. El evento `login_ok` o `login_failed` se escribe en el **registro de auditoría**. En caso de fallo, el campo `detail.reason` almacena la clave i18n que describe la causa real (`user_not_found`, `account_disabled`, `account_locked`, `invalid_credentials`, `ldap_invalid_credentials`, `ldap_user_not_found` o `ldap_connection_error`). Los logins LDAP/OIDC exitosos incluyen `detail.auth_source`.
@@ -56,7 +56,7 @@ La migración `m002_add_auth_source` añade `auth_source: "local"` a los usuario
 
 ### Bloqueo de cuenta por intentos fallidos
 
-Tras `_LOCKOUT_MAX_ATTEMPTS` (por defecto **5**) intentos de login fallidos con la contraseña incorrecta, la cuenta queda bloqueada durante `_LOCKOUT_DURATION_SECS` (por defecto **900 s = 15 min**). Mientras está bloqueada, incluso la contraseña correcta es rechazada. El mensaje de error indica los minutos restantes.
+Tras `_LOCKOUT_MAX_ATTEMPTS` (por defecto **5**) intentos de login fallidos con la contraseña incorrecta, la cuenta queda bloqueada durante `_LOCKOUT_DURATION_SECS` (por defecto **900 s = 15 min**). Mientras está bloqueada, incluso la contraseña correcta es rechazada. El mensaje mostrado al usuario es siempre el genérico "Invalid credentials" para no revelar que la cuenta existe y está bloqueada (anti-enumeración). El log de auditoría sí registra `reason: 'account_locked'`.
 
 Configuración en `config.json → web_admin`:
 
@@ -158,12 +158,14 @@ Las sesiones se persisten en `sessions.json` y se cargan al iniciar.
 
 ### Revocación
 
-| Endpoint | Permiso | Acción |
-|----------|---------|--------|
-| `GET /api/v1/sessions` | `sessions_view` | Lista sesiones activas |
-| `POST /api/v1/sessions/revoke/<sid>` | `sessions_revoke` | Revoca una sesión concreta |
-| `POST /api/v1/sessions/revoke-user/<user>` | `sessions_revoke` | Revoca todas las sesiones de un usuario |
-| `POST /api/v1/sessions/invalidate` | `sessions_revoke` | Revoca **todas** las sesiones |
+| Endpoint | Permiso | Quién puede | Acción |
+| -------- | ------- | ----------- | ------ |
+| `GET /api/v1/sessions` | `sessions_view` | Cualquier autenticado con el permiso | Lista sesiones activas |
+| `POST /api/v1/sessions/revoke/<sid>` | `sessions_revoke` | Admin: cualquier sesión · No-admin: solo las propias | Revoca una sesión concreta |
+| `POST /api/v1/sessions/revoke-user/<user>` | `sessions_revoke` | Admin: cualquier usuario · No-admin: solo `username == self` | Revoca todas las sesiones de un usuario |
+| `POST /api/v1/sessions/invalidate` | `sessions_revoke` | **Solo admin** | Revoca **todas** las sesiones activas |
+
+> **Scope de revocación:** los endpoints de revocación comprueban que el requester sea admin antes de permitirle actuar sobre sesiones ajenas. Un no-admin con `sessions_revoke` solo puede cerrar sus propias sesiones, lo que evita ataques de DoS mediante cierre de sesión de administradores.
 
 Una petición con un token revocado (incluso si la cookie Flask sigue siendo válida) recibe **401** en rutas `/api/v1/` o redirección a `/login` en rutas HTML.
 
@@ -236,6 +238,7 @@ Los roles integrados **no pueden eliminarse** ni cambiar sus permisos. Sí se pu
 - Se persisten en `roles.json`.
 - Los roles integrados no pueden eliminar ni cambiar permisos; solo permiten actualizar la etiqueta.
 - No se puede eliminar un rol que tenga usuarios asignados (409).
+- **Escalada de privilegios bloqueada:** un usuario solo puede asignar a un rol personalizado los permisos que él mismo posee. No es posible crear un rol con más privilegios de los que tiene el creador.
 
 ### Sistema de Grupos
 
@@ -283,7 +286,42 @@ Los permisos son **aditivos**: el usuario obtiene sus permisos de rol propios m�
 - El **último administrador no puede ser degradado** → 400 `"admin must exist"`.
 - Los roles válidos están en una lista cerrada (`admin`, `editor`, `viewer`); cualquier otro valor → 400.
 
+### `_role_is_admin()` — comparación robusta de rol admin
+
+Los roles pueden almacenarse en `users.json` como nombre de cadena (`"admin"`) o como UUID (`"00000000-..."`), dependiendo de cuándo fue creado el usuario. La función `_role_is_admin(role_val)` en `routes/users/__init__.py` normaliza ambas formas para que los guards de seguridad no sean eludidos por usuarios cuyo campo `role` no fue migrado al formato UID.
+
+```python
+def _role_is_admin(role_val: str) -> bool:
+    admin_uid = wa._role_name_to_uid('admin')
+    return role_val == admin_uid or wa._uid_to_role_name(role_val) == 'admin'
+```
+
+Usar `_role_is_admin()` **en lugar de** `== admin_uid` en todos los guards que comprueban si el usuario objetivo es administrador.
+
+### Jerarquía de roles (protecciones IDOR)
+
+Protecciones adicionales para evitar escalada de privilegios mediante manipulación de objetos:
+
+| Operación | Requiere admin |
+| --------- | -------------- |
+| Modificar o eliminar una cuenta con rol `admin` | ✅ |
+| Resetear la contraseña de otro usuario | ✅ |
+| Asignar el rol `admin` a cualquier usuario | ✅ |
+| Crear/editar roles con permisos que el requester no posee | ✅ |
+| Crear grupo con rol `admin` | ✅ |
+| Modificar un grupo que tiene el rol `admin` | ✅ |
+| Asignar el rol `admin` a un grupo | ✅ |
+| Editar secciones de config con credenciales externas (`ldap`, `oidc`, `saml2`, `email`, `telegram`) | ✅ |
+| Invalidar **todas** las sesiones del sistema | ✅ |
+| Revocar sesiones de otro usuario | ✅ |
+
+Un no-admin con los permisos `users_edit`, `roles_edit`, `groups_edit`, `config_edit` o `sessions_revoke` solo puede operar dentro de los límites de su propio nivel de privilegio.
+
 ### Tests de RBAC y escalada de privilegios
+
+Los tests de regresión de seguridad están centralizados en `src/tests/test_security_regression.py`. Cada clase cubre un fix específico — si un refactor futuro rompe alguno, la propiedad de seguridad correspondiente está comprometida.
+
+**Tests generales de RBAC** (`test_wa_roles.py`, `test_wa_users.py`):
 
 | Test | Qué verifica |
 |------|-------------|
@@ -292,15 +330,38 @@ Los permisos son **aditivos**: el usuario obtiene sus permisos de rol propios m�
 | `test_viewer_cannot_manage_users` | Viewer → 403 en `POST /api/v1/users` |
 | `test_editor_can_write_modules` | Editor → 200 en `PUT /api/v1/modules` |
 | `test_editor_can_write_config` | Editor → 200 en `PUT /api/v1/config` |
-| `test_editor_cannot_create_or_delete_users` | Editor → 403 en `POST`/`DELETE /api/v1/users`, 200 en `GET /api/v1/users` |
-| `test_editor_cannot_access_sessions` | Editor → 403 en `GET /api/v1/sessions` |
-| `test_viewer_cannot_access_audit` | Viewer → 403 en `GET /api/v1/audit` |
-| `test_self_promotion_via_update` | Viewer intentando `PUT /api/v1/users/viewer` con `role: admin` → 403 |
-| `test_viewer_cannot_create_user` | Viewer intentando crear usuario con rol admin → 403 |
-| `test_cannot_delete_self` | Admin intentando eliminar su propia cuenta → 400 |
+| `test_editor_cannot_create_or_delete_users` | Editor → 403 en `POST`/`DELETE /api/v1/users` |
+| `test_cannot_delete_self` | Admin → 400 al intentar eliminar su propia cuenta |
 | `test_cannot_remove_last_admin` | Degradar al único admin → 400 |
-| `test_invalid_role_rejected` | Rol `superadmin` → 400 |
-| `test_update_to_invalid_role_rejected` | Actualizar a rol inválido → 400 |
+
+**Tests de regresión de seguridad** (`test_security_regression.py`):
+
+| Clase | Fix que protege | Qué verifica |
+|-------|----------------|-------------|
+| `TestPathTraversalSnmpMib` | #1 — path traversal MIB | `_safe_mib_filename` rechaza `../`, `./`, metacaracteres shell, extensiones incorrectas; `_confined_path` bloquea traversal vía symlinks |
+| `TestNonAdminCannotDeleteAdmin` | #2 — jerarquía roles DELETE | No-admin con `users_delete` → 403 al eliminar cuenta admin |
+| `TestRoleEscalation` | #3 — escalada via roles | No-admin no puede crear/editar un rol con permisos que él no posee |
+| `TestGroupAdminRoleProtection` | #4 — grupos con rol admin | No-admin no puede crear/modificar grupos con rol `admin` |
+| `TestConfigSensitiveSections` | #5 — config sensible | No-admin con `config_edit` → 403 en secciones `ldap`, `oidc`, `saml2`, `email`, `telegram` |
+
+**Tests de jerarquía de roles en usuarios** (`test_wa_users.py::TestPasswordResetPrivileges`):
+
+| Test | Qué verifica |
+|------|-------------|
+| `test_non_admin_cannot_reset_another_users_password` | No-admin → 403 al resetear contraseña ajena; contraseña original intacta |
+| `test_non_admin_cannot_reset_admin_password` | No-admin → 403 al resetear contraseña de admin |
+| `test_admin_can_reset_any_password` | Admin puede resetear cualquier contraseña |
+| `test_non_admin_cannot_grant_admin_role` | No-admin → 403 al asignar rol `admin` a otro usuario |
+| `test_non_admin_can_change_own_password_via_me_endpoint` | Cualquier usuario puede cambiar su propia contraseña vía `/me/password` |
+
+**Tests de scope de revocación de sesiones** (`test_wa_roles.py`):
+
+| Test | Qué verifica |
+|------|-------------|
+| `test_sessions_revoke_invalidate_requires_admin` | No-admin con `sessions_revoke` → 403 en invalidate-all |
+| `test_sessions_invalidate_allowed_for_admin` | Admin puede invalidar todas las sesiones |
+| `test_sessions_revoke_user_other_requires_admin` | No-admin → 403 al revocar sesiones de otro usuario |
+| `test_sessions_revoke_user_self_allowed` | No-admin puede revocar sus propias sesiones |
 
 ---
 
@@ -444,6 +505,15 @@ ServiceSentry no usa SQL — los datos se guardan en JSON. Sin embargo los tests
 ## Protección contra Path Traversal
 
 Los endpoints que aceptan parámetros de ruta (`/lang/<code>`, `/theme/<mode>`, `/api/v1/sessions/revoke/<sid>`) validan los valores contra listas blancas o los tratan como claves opacas, evitando acceso a ficheros del sistema.
+
+### Operaciones de fichero en módulos watchful
+
+Los módulos que gestionan ficheros en disco (p.ej. el gestor de MIBs del módulo SNMP) aplican dos capas de validación:
+
+1. **Allowlist de nombre de fichero** — solo se aceptan caracteres `[A-Za-z0-9_.-]`, sin separadores de directorio ni metacaracteres de shell.
+2. **Confinamiento de path** — tras construir la ruta con `os.path.join`, se resuelve con `pathlib.resolve()` y se verifica que el resultado esté estrictamente dentro del directorio objetivo. Esto bloquea ataques mediante symlinks o edge cases específicos de plataforma.
+
+Las funciones afectadas son `upload_mib`, `delete_mib`, `get_mib_details`, `get_raw_mib_details` e `import_mib_from_url`.
 
 | Test | Endpoint | Payloads |
 |------|----------|---------|

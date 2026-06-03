@@ -3,6 +3,35 @@
    add/delete module, and module body renderer.
    ================================================================ #}
 
+// ──────────────────────── Dep install modal ───────────────────────
+function openDepInstallModal(packages, desc) {
+    const pkgList = Array.isArray(packages) ? packages : [String(packages)];
+    const cmd = 'pip install ' + pkgList.join(' ');
+    document.getElementById('depInstallCmd').textContent = cmd;
+    const descEl = document.getElementById('depInstallModalDesc');
+    if (desc) { descEl.textContent = desc; descEl.style.display = ''; }
+    else { descEl.style.display = 'none'; }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('depInstallModal')).show();
+}
+
+function _copyDepInstallCmd(btn) {
+    const cmd = document.getElementById('depInstallCmd').textContent.trim();
+    _copyToClipboard(cmd);
+    // Visual feedback on the button itself
+    const span = btn.querySelector('span');
+    const icon = btn.querySelector('i');
+    if (span) {
+        const origText = span.textContent;
+        const origIcon = icon ? icon.className : '';
+        span.textContent = t('dep_install_copied') || '✓';
+        if (icon) icon.className = 'bi bi-check2 me-1';
+        setTimeout(() => {
+            span.textContent = origText;
+            if (icon) icon.className = origIcon;
+        }, 2000);
+    }
+}
+
 // ──────────────────────────── Modules tab ─────────────────────────
 function _moduleHue(name) {
     let h = 0;
@@ -13,6 +42,7 @@ function _moduleHue(name) {
 function renderModules() {
     const c = document.getElementById('modules-container');
     const moduleKeys = Object.keys(modulesData).sort();
+    const _savedAutoExpand = _autoExpandItemPath; // capture before HTML generation consumes it
     if (!moduleKeys.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
             <i class="bi bi-puzzle" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
@@ -36,8 +66,11 @@ function renderModules() {
     for (const name of moduleKeys) {
         const cfg = modulesData[name];
         const _modSch = ITEM_SCHEMAS[name + '|__module__'] || null;
-        const platformUnsupported = _modSch && _modSch['__unsupported__'] === true;
-        const on = !platformUnsupported && cfg.enabled !== false;
+        const missingDeps         = (_modSch && _modSch['__missing_deps__']) || null;
+        const partialDeps         = (_modSch && _modSch['__partial_deps__'])  || null;
+        const platformUnsupported = !missingDeps && _modSch && _modSch['__unsupported__'] === true;
+        const moduleUnavailable   = platformUnsupported || !!missingDeps;
+        const on = !moduleUnavailable && cfg.enabled !== false;
         const icon = moduleIcon(name, cfg);
         const id = uid();
         const pname = modulePrettyName(name, cfg);
@@ -63,8 +96,8 @@ function renderModules() {
             <div style="height:3px;background:${accentGrad}"></div>
 
             <div class="module-header d-flex align-items-center gap-2 px-3 py-2"
-                 ${!platformUnsupported ? `role="button" onclick="toggleCollapseFromHeader(event,'${id}')"` : ''}
-                 style="cursor:${platformUnsupported ? 'default' : 'pointer'}">
+                 ${!moduleUnavailable ? `role="button" onclick="toggleCollapseFromHeader(event,'${id}')"` : ''}
+                 style="cursor:${moduleUnavailable ? 'default' : 'pointer'}">
                 <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
                       style="width:40px;height:40px;background:${avBg};color:${avColor};font-size:1.15rem">${icon}</span>
                 <div class="flex-grow-1 min-w-0">
@@ -76,11 +109,24 @@ function renderModules() {
                       style="font-size:.7rem;background:var(--bs-secondary-bg);color:${activeItems < totalItems ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)'};border:1px solid var(--bs-border-color)">
                     <i class="bi bi-list-ul me-1" style="opacity:.6"></i>${activeItems}/${totalItems}
                 </span>` : ''}
-                ${platformUnsupported
-                    ? `<span class="badge bg-secondary bg-opacity-50 flex-shrink-0" style="font-size:.68rem"
-                           title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
-                           <i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}
-                       </span>`
+                ${partialDeps && !moduleUnavailable
+                    ? `<button type="button" class="badge bg-warning bg-opacity-75 text-dark flex-shrink-0 border-0"
+                           style="font-size:.68rem;cursor:pointer"
+                           onclick="event.stopPropagation();openDepInstallModal(${JSON.stringify(partialDeps).replace(/"/g, '&quot;')})">
+                           <i class="bi bi-box-seam me-1"></i>${esc(t('missing_dep'))}
+                       </button>`
+                    : ''}
+                ${moduleUnavailable
+                    ? (missingDeps
+                        ? `<button type="button" class="badge bg-warning bg-opacity-75 text-dark flex-shrink-0 border-0"
+                               style="font-size:.68rem;cursor:pointer"
+                               onclick="event.stopPropagation();openDepInstallModal(${JSON.stringify(missingDeps).replace(/"/g, '&quot;')})">
+                               <i class="bi bi-box-seam me-1"></i>${esc(t('missing_dep'))}
+                           </button>`
+                        : `<span class="badge bg-secondary bg-opacity-50 flex-shrink-0" style="font-size:.68rem"
+                               title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
+                               <i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}
+                           </span>`)
                     : (hasModulePerm(name, 'edit')
                         ? `<div class="form-check form-switch mb-0 flex-shrink-0" data-no-collapse="1" onclick="event.stopPropagation()">
                                <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1"
@@ -97,7 +143,13 @@ function renderModules() {
                     onclick="event.stopPropagation();deleteModule(${jsStr(name)})" title="${escAttr(t('delete_tt'))}">
                     <i class="bi bi-trash3"></i>
                 </button>` : ''}
-                ${!platformUnsupported ? `<button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                ${!moduleUnavailable ? `<button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                    style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
+                    onclick="event.stopPropagation();openModuleExpandModal(${jsStr(name)})"
+                    title="${escAttr(t('module_expand') || 'Expand')}">
+                    <i class="bi bi-fullscreen" style="font-size:.8rem"></i>
+                </button>` : ''}
+                ${!moduleUnavailable ? `<button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
                     aria-label="${escAttr(t('module_details'))}" title="${escAttr(t('module_details'))}" onclick="event.stopPropagation()">
@@ -105,7 +157,7 @@ function renderModules() {
                 </button>` : ''}
             </div>
 
-            ${!platformUnsupported ? `<div class="collapse" id="${id}" data-module="${esc(name)}">
+            ${!moduleUnavailable ? `<div class="collapse" id="${id}" data-module="${esc(name)}">
                 <div class="px-3 py-3" style="border-top:1px solid var(--bs-border-color)">
                     ${renderModuleBody(name, cfg)}
                 </div>
@@ -130,6 +182,37 @@ function renderModules() {
         if (!hasModulePerm(name, 'edit')) {
             const panel = c.querySelector(`[data-module="${CSS.escape(name)}"]`);
             if (panel) _applyReadonly(panel);
+        }
+    }
+    // Sync the expand modal body if it is currently open
+    if (_moduleExpandName && document.getElementById('moduleExpandModal')?.classList.contains('show')) {
+        const _expandBody = document.getElementById('moduleExpandBody');
+        if (_expandBody) {
+            // Save which item collapse panels are currently open so we can restore them
+            const _expandedItems = new Set();
+            _expandBody.querySelectorAll('[data-item-path]').forEach(el => {
+                const col = el.querySelector(':scope > .collapse');
+                if (col && col.classList.contains('show')) _expandedItems.add(el.dataset.itemPath);
+            });
+            // Restore _autoExpandItemPath so renderModuleBody can apply the auto-expand
+            _autoExpandItemPath = _savedAutoExpand;
+            _expandBody.innerHTML = renderModuleBody(_moduleExpandName, modulesData[_moduleExpandName] || {});
+            _autoExpandItemPath = null;
+            if (!hasModulePerm(_moduleExpandName, 'edit')) _applyReadonly(_expandBody);
+            // Re-open previously expanded items
+            _expandBody.querySelectorAll('[data-item-path]').forEach(el => {
+                if (_expandedItems.has(el.dataset.itemPath)) {
+                    const col = el.querySelector(':scope > .collapse');
+                    if (col) col.classList.add('show');
+                }
+            });
+            // Scroll to newly added item if applicable
+            if (_savedAutoExpand?.startsWith(_moduleExpandName + '|')) {
+                setTimeout(() => {
+                    const el = _expandBody.querySelector(`[data-item-path="${CSS.escape(_savedAutoExpand)}"]`);
+                    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }, 50);
+            }
         }
     }
 }
@@ -177,7 +260,10 @@ function openNewModuleModal() {
             const avColor = `hsl(${hue},60%,42%)`;
             const accentColor = `hsl(${hue},65%,55%)`;
             const _modSch = ITEM_SCHEMAS[name + '|__module__'] || null;
-            const _pickerUnsupported = _modSch && _modSch['__unsupported__'] === true;
+            const _pickerMissingDeps    = (_modSch && _modSch['__missing_deps__']) || null;
+            const _pickerPartialDeps    = (_modSch && _modSch['__partial_deps__'])  || null;
+            const _pickerUnsupported    = !_pickerMissingDeps && _modSch && _modSch['__unsupported__'] === true;
+            const _pickerUnavailable    = _pickerUnsupported || !!_pickerMissingDeps;
             h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
                        style="cursor:pointer;background:var(--ss-surface-bg,var(--bs-body-bg));transition:box-shadow .15s,border-color .15s"
                        onclick="addModuleFromPicker(${jsStr(name)})"
@@ -187,10 +273,22 @@ function openNewModuleModal() {
                       style="width:46px;height:46px;background:${avBg};color:${avColor};font-size:1.35rem">${icon}</span>
                 <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${esc(pname)}</div>
                 <code class="text-muted" style="font-size:.7rem">${esc(name)}</code>
-                ${_pickerUnsupported ? `<span class="badge bg-secondary bg-opacity-50" style="font-size:.65rem"
-                    title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
-                    <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
-                </span>` : ''}
+                ${_pickerMissingDeps
+                    ? `<button type="button" class="badge bg-warning bg-opacity-75 text-dark border-0" style="font-size:.65rem;cursor:pointer"
+                           onclick="event.stopPropagation();openDepInstallModal(${JSON.stringify(_pickerMissingDeps).replace(/"/g, '&quot;')})">
+                           <i class="bi bi-box-seam me-1"></i>${esc(t('missing_dep'))}
+                       </button>`
+                    : (_pickerUnsupported
+                        ? `<span class="badge bg-secondary bg-opacity-50" style="font-size:.65rem"
+                               title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
+                               <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
+                           </span>`
+                        : (_pickerPartialDeps
+                            ? `<button type="button" class="badge bg-warning bg-opacity-75 text-dark border-0" style="font-size:.65rem;cursor:pointer"
+                                   onclick="event.stopPropagation();openDepInstallModal(${JSON.stringify(_pickerPartialDeps).replace(/"/g, '&quot;')})">
+                                   <i class="bi bi-box-seam me-1"></i>${esc(t('missing_dep'))}
+                               </button>`
+                            : ''))}
             </div>`;
         }
         h += `</div>`;
@@ -251,18 +349,71 @@ function deleteModule(name) {
     });
 }
 
+// ───────────────────────── Module expand modal ────────────────────────
+let _moduleExpandName = null;
+
+function openModuleExpandModal(name) {
+    _moduleExpandName = name;
+    const cfg   = modulesData[name] || {};
+    const hue   = _moduleHue(name);
+    const on    = cfg.enabled !== false;
+    const icon  = moduleIcon(name, cfg);
+    const pname = modulePrettyName(name, cfg);
+    const avBg    = on ? `hsla(${hue},65%,55%,.14)` : 'var(--bs-secondary-bg)';
+    const avColor = on ? `hsl(${hue},60%,42%)`       : 'var(--bs-secondary-color)';
+
+    const iconEl  = document.getElementById('moduleExpandIcon');
+    const titleEl = document.getElementById('moduleExpandTitle');
+    const codeEl  = document.getElementById('moduleExpandCode');
+    const body    = document.getElementById('moduleExpandBody');
+    if (iconEl)  iconEl.innerHTML = `<span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+        style="width:34px;height:34px;background:${avBg};color:${avColor};font-size:1rem">${icon}</span>`;
+    if (titleEl) titleEl.textContent = pname;
+    if (codeEl)  codeEl.textContent  = name;
+    if (body)    body.innerHTML = renderModuleBody(name, cfg);
+    if (body && !hasModulePerm(name, 'edit')) _applyReadonly(body);
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('moduleExpandModal')).show();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('moduleExpandModal')?.addEventListener('hidden.bs.modal', () => {
+        if (_moduleExpandName) { renderModules(); _moduleExpandName = null; }
+    });
+});
+
 function renderModuleBody(name, cfg) {
+// Toolbar buttons declared by the module in its __toolbar__ schema entry.
+// Rendered generically — no module-specific logic here.
+const _modSch  = ITEM_SCHEMAS[name + '|__module__'] || null;
+const _toolbar = (_modSch && Array.isArray(_modSch['__toolbar__'])) ? _modSch['__toolbar__'] : [];
+let h = '';
+if (_toolbar.length) {
+    h += `<div class="d-flex align-items-center gap-2 mb-3 px-2 py-1 rounded"
+               style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color)">`;
+    for (const btn of _toolbar) {
+        const fn = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(btn.onclick || '') ? btn.onclick : null;
+        if (!fn) continue;
+        h += `<button class="btn btn-sm btn-secondary" type="button"
+                      onclick="${escAttr(fn)}(${jsStr(name)})">
+                  <i class="bi ${escAttr(btn.icon || '')} me-1"></i>
+                  ${esc(_modUiStr(name, btn.label_key || '', btn.label_key || ''))}
+              </button>`;
+    }
+    h += `</div>`;
+}
+
 // pretty_name field (always first, with placeholder)
 const pn = cfg.pretty_name || '';
 const placeholder = modulePrettyName(name, cfg);
-let h = `<div class="row mb-2 align-items-center">
+h += `<div class="row mb-2 align-items-center">
     <label class="col-sm-4 col-form-label col-form-label-sm">${esc(fieldLabel('pretty_name'))}</label>
-    <div class="col-sm-8">
-        <input type="text" class="form-control form-control-sm" value="${escAttr(pn)}"
+    <div class="col-sm-8"><div class="input-group input-group-sm">
+        <input type="text" class="form-control" value="${escAttr(pn)}"
             placeholder="${escAttr(placeholder)}"
             oninput="markDirty('modules')"
             onchange="updatePrettyName(${jsStr(name)},this.value)">
-    </div>
+    </div></div>
 </div>`;
 
 // Identify collection keys (dicts that aren't list items)

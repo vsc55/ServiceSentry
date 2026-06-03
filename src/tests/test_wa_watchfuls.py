@@ -175,7 +175,8 @@ class TestApiWatchfulActionDispatch:
         assert "boom" in data["message"]
 
     def test_post_empty_body_passes_empty_dict(self, client_with_modules):
-        """POST with no JSON body must call the action with an empty dict."""
+        """POST with no JSON body must call the action with a dict that only
+        contains the injected __var_dir__ key (no user-supplied data)."""
         _login(client_with_modules)
         captured = {}
 
@@ -189,7 +190,10 @@ class TestApiWatchfulActionDispatch:
         ):
             client_with_modules.post("/api/v1/watchfuls/datastore/test_connection")
 
-        assert captured.get("config") == {}
+        cfg = captured.get("config", {})
+        # The route always injects __var_dir__; no other keys should be present.
+        assert "__var_dir__" in cfg
+        assert {k for k in cfg if k != "__var_dir__"} == set()
 
     def test_get_discover_service_status(self, client_with_modules):
         """GET discover works on service_status module."""

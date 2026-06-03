@@ -1,73 +1,66 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Groups mixin for WebAdmin."""
+"""Groups mixin for WebAdmin.
 
-import json
-import os
-import tempfile
-import uuid
+After the Propuesta-A refactor the ``_groups`` dict is keyed by **uid**
+(not by name).  The ``label`` field carries the human-readable group name.
+"""
 
-from ..constants import BUILTIN_GROUP_UIDS
+from datetime import datetime, timezone
+
+from ..constants import BUILTIN_GROUP_UIDS, BUILTIN_ROLE_UIDS, SYSTEM_USER
+
+# Default roles for built-in groups (keyed by uid) — used to recover after a
+# migration that lost the groups_roles table contents.
+_BUILTIN_DEFAULT_ROLES: dict[str, list] = {
+    BUILTIN_GROUP_UIDS['administrators']: [BUILTIN_ROLE_UIDS['admin']],
+}
 
 
 class _GroupsMixin:
-    """Persistence and lookup for user groups (``groups.json``)."""
-
-    @property
-    def _groups_path(self) -> str:
-        return os.path.join(self._config_dir, self._GROUPS_FILE)
+    """Persistence and lookup for user groups (DB table ``groups``)."""
 
     def _load_groups(self) -> None:
-        """Load groups from ``groups.json``. Creates a default group on first run."""
-        path = self._groups_path
-        if os.path.isfile(path):
-            try:
-                with open(path, encoding='utf-8') as fh:
-                    self._groups = json.load(fh)
-            except (json.JSONDecodeError, OSError):
-                self._groups = {}
-        else:
+        """Load groups from the DB.  Creates the default Administrators group on first run."""
+        data = self._groups_store.load()
+        if not data:
+            admin_uid = BUILTIN_GROUP_UIDS['administrators']
+            _now = datetime.now(timezone.utc).isoformat()
             self._groups = {
-                'administrators': {
-                    'uid': BUILTIN_GROUP_UIDS['administrators'],
-                    'label': 'Administrators',
-                    'description': 'Default administrators group',
-                    'roles': ['admin'],
+                admin_uid: {
+                    'uid':         admin_uid,
+                    'name':        'Administrators',
+                    'description': 'Default administrators group.',
+                    'roles':       [BUILTIN_ROLE_UIDS['admin']],
+                    'enabled':     True,
+                    'created_at':  _now,
+                    'updated_at':  _now,
+                    'updated_by':  SYSTEM_USER,
                 },
             }
             self._persist_groups()
             return
-        # Ensure every group has a stable uid
+
+        self._groups = data
         dirty = False
-        for gname, gdata in self._groups.items():
-            builtin_uid = BUILTIN_GROUP_UIDS.get(gname)
-            if builtin_uid:
-                if gdata.get('uid') != builtin_uid:
-                    gdata['uid'] = builtin_uid
+
+        # Recovery: if groups_roles is empty (lost during a migration),
+        # restore the known default roles for built-in groups.
+        if self._groups_store.count_roles() == 0 and self._groups:
+            for gid, gdata in self._groups.items():
+                if gid in _BUILTIN_DEFAULT_ROLES and not gdata.get('roles'):
+                    gdata['roles'] = list(_BUILTIN_DEFAULT_ROLES[gid])
                     dirty = True
-            elif not gdata.get('uid'):
-                gdata['uid'] = str(uuid.uuid4())
+
+        # Ensure every group has its uid embedded in the dict value.
+        for gid, gdata in self._groups.items():
+            if not gdata.get('uid'):
+                gdata['uid'] = gid
                 dirty = True
+
         if dirty:
             self._persist_groups()
 
     def _persist_groups(self) -> bool:
-        """Write groups to ``groups.json`` atomically."""
-        tmp_path = None
-        try:
-            os.makedirs(self._config_dir, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                'w', encoding='utf-8', dir=self._config_dir,
-                suffix='.tmp', delete=False,
-            ) as tmp:
-                json.dump(self._groups, tmp, indent=4, ensure_ascii=False)
-                tmp_path = tmp.name
-            os.replace(tmp_path, self._groups_path)
-            return True
-        except OSError:
-            if tmp_path:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-            return False
+        """Write groups to the DB."""
+        return self._groups_store.save_all(self._groups)

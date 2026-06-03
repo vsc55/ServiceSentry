@@ -14,8 +14,12 @@ import urllib.error
 import base64
 from enum import IntEnum
 
-import pymysql
-import pymysql.cursors
+try:
+    import pymysql
+    import pymysql.cursors
+    _PYMYSQL = True
+except ImportError:
+    _PYMYSQL = False
 
 try:
     import paramiko
@@ -189,6 +193,23 @@ class ConfigOptions(IntEnum):
     ssh_key      = 204
 
 
+# ── Dependency availability ───────────────────────────────────────────────────
+
+# pymysql is the only hard requirement for this module (MySQL/MariaDB).
+# All other backends are optional: their absence only disables that specific engine.
+_ALL_BACKENDS: list[tuple[str, bool]] = [
+    ('PyMySQL',         _PYMYSQL),
+    ('paramiko',        _PARAMIKO),
+    ('psycopg2-binary', _PSYCOPG2),
+    ('pymssql',         _PYMSSQL),
+    ('pymongo',         _PYMONGO),
+    ('redis',           _REDIS),
+    ('pymemcache',      _PYMEMCACHE),
+]
+# Packages that are absent — used to populate MISSING_DEPS / PARTIAL_DEPS.
+_MISSING_BACKENDS: list[str] = [pkg for pkg, ok in _ALL_BACKENDS if not ok]
+
+
 # ── Watchful ──────────────────────────────────────────────────────────────────
 
 class Watchful(ModuleBase):
@@ -197,6 +218,11 @@ class Watchful(ModuleBase):
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'test_connection', 'list_databases'})
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
                  if isinstance(v, dict) and 'default' in v}
+
+    # If pymysql itself is missing the module cannot function at all → full disable.
+    # If only optional backends are missing → warning badge, module stays usable.
+    MISSING_DEPS: list[str] = _MISSING_BACKENDS if not _PYMYSQL else []
+    PARTIAL_DEPS: list[str] = _MISSING_BACKENDS if _PYMYSQL else []
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -321,6 +347,8 @@ class Watchful(ModuleBase):
 
     @staticmethod
     def _pymysql_ping(host='', port=3306, user='', password='', db='', unix_socket='') -> tuple[bool, str]:
+        if not _PYMYSQL:
+            return False, 'PyMySQL is not installed (pip install PyMySQL)'
         try:
             kw = {'user': user, 'password': password, 'db': db,
                   'charset': 'utf8mb4', 'connect_timeout': 10,
@@ -653,6 +681,8 @@ class Watchful(ModuleBase):
 
     @classmethod
     def _list_mysql(cls, cfg) -> dict:
+        if not _PYMYSQL:
+            return {'ok': False, 'message': 'PyMySQL is not installed (pip install PyMySQL)', 'items': []}
         conn_type = cfg.get('conn_type', 'tcp')
         try:
             kw = {'user': cfg['user'], 'password': cfg['password'],

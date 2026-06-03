@@ -6,7 +6,7 @@ import copy
 import uuid
 from datetime import timedelta
 
-from flask import jsonify
+from flask import jsonify, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from ..constants import SUPPORTED_LANGS
@@ -21,7 +21,7 @@ INT_RULES = {
         'min': 1,  'max': 365,   'attr': '_REMEMBER_ME_DAYS',
         'flask_cfg': ('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v)),
     },
-    'web_admin|audit_max_entries': {'min': 10, 'max': 10000, 'attr': '_AUDIT_MAX_ENTRIES'},
+    'web_admin|audit_max_entries': {'min': 0, 'max': 10000, 'attr': '_AUDIT_MAX_ENTRIES'},
     'web_admin|pw_min_len':        {'min': 1,  'max': 128,   'attr': '_PW_MIN_LEN'},
     'web_admin|pw_max_len':        {'min': 8,  'max': 256,   'attr': '_PW_MAX_LEN'},
     'web_admin|status_refresh_secs': {'min': 10, 'max': 3600, 'attr': '_STATUS_REFRESH_SECS'},
@@ -35,6 +35,9 @@ INT_RULES = {
     'web_admin|session_check_secs':       {'min': 5,  'max': 300,  'attr': '_SESSION_CHECK_SECS'},
     'web_admin|session_revoke_redirect_secs': {'min': 0, 'max': 30,'attr': '_SESSION_REVOKE_REDIRECT_SECS'},
     'web_admin|access_poll_secs':             {'min': 5, 'max': 300,'attr': '_ACCESS_POLL_SECS'},
+    # Daemon scheduler — min 10 s to allow frequent checks in dev/test;
+    # the web scheduler enforces max(10, value) at runtime.
+    'daemon|timer_check': {'min': 10, 'max': 86400, 'attr': None},
     # LDAP
     'ldap|port':    {'min': 1,  'max': 65535, 'attr': None},
     'ldap|timeout': {'min': 1,  'max': 60,    'attr': None},
@@ -60,6 +63,8 @@ BOOL_RULES = {
     # OIDC
     'oidc|enabled':           None,
     'oidc|auto_create_users': None,
+    # Daemon scheduler
+    'daemon|web_autostart': None,
     # SAML2
     'saml2|enabled':           None,
     'saml2|auto_create_users': None,
@@ -104,6 +109,15 @@ def register(app, wa):
 
     config_view_req = wa._perm_required('config_view', 'config_edit')
     config_edit_req = wa._perm_required('config_edit')
+
+    # Sections that contain external-service credentials (LDAP bind password,
+    # OIDC client secret, SMTP password, etc.).  Only admins may modify them.
+    _ADMIN_ONLY_SECTIONS = frozenset({'ldap', 'oidc', 'saml2', 'email', 'telegram'})
+
+    def _requester_is_admin() -> bool:
+        admin_uid = wa._role_name_to_uid('admin')
+        user = wa._users.get(session.get('username', '')) or {}
+        return user.get('role', '') == admin_uid
 
     # --- API: config.json -----------------------------------------
 
@@ -187,6 +201,19 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
+
+        # Sensitive-section guard: only admins may modify LDAP/OIDC/email/etc.
+        # Extract the set of section prefixes from both legacy and versioned formats.
+        _incoming_sections: set[str] = set()
+        _raw_fields = data.get('fields')
+        if isinstance(_raw_fields, dict):
+            for _path in _raw_fields:
+                _incoming_sections.add(_path.split('|')[0])
+        else:
+            for _key in data:
+                _incoming_sections.add(_key.split('|')[0])
+        if _incoming_sections & _ADMIN_ONLY_SECTIONS and not _requester_is_admin():
+            return jsonify({'error': wa._t('insufficient_permissions')}), 403
 
         old_data = wa._read_config_file(wa._CONFIG_FILE) or {}
 

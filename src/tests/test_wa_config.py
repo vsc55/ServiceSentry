@@ -309,8 +309,8 @@ class TestApiConfigPutAuditMaxEntries:
 
     def test_boundary_min(self, client, admin):
         _login(client)
-        self._put(client, 10)
-        assert admin._AUDIT_MAX_ENTRIES == 10
+        self._put(client, 0)
+        assert admin._AUDIT_MAX_ENTRIES == 0
 
     def test_boundary_max(self, client, admin):
         _login(client)
@@ -320,7 +320,7 @@ class TestApiConfigPutAuditMaxEntries:
     def test_below_min_rejected(self, client, admin):
         _login(client)
         admin._AUDIT_MAX_ENTRIES = 500
-        assert self._put(client, 9).status_code == 400
+        assert self._put(client, -1).status_code == 400
         assert admin._AUDIT_MAX_ENTRIES == 500
 
     def test_above_max_rejected(self, client, admin):
@@ -329,11 +329,10 @@ class TestApiConfigPutAuditMaxEntries:
         assert self._put(client, 10001).status_code == 400
         assert admin._AUDIT_MAX_ENTRIES == 500
 
-    def test_zero_rejected(self, client, admin):
+    def test_zero_accepted_unlimited(self, client, admin):
         _login(client)
-        admin._AUDIT_MAX_ENTRIES = 500
-        assert self._put(client, 0).status_code == 400
-        assert admin._AUDIT_MAX_ENTRIES == 500
+        assert self._put(client, 0).status_code == 200
+        assert admin._AUDIT_MAX_ENTRIES == 0
 
     def test_negative_rejected(self, client, admin):
         _login(client)
@@ -405,10 +404,10 @@ class TestApiConfigPutAuditMaxEntries:
             assert json.load(f)["web_admin"]["audit_max_entries"] == 500
 
     def test_below_min_does_not_corrupt_disk(self, client, config_dir):
-        """Valor fuera de rango (< 10) devuelve 400 y no corrompe config.json."""
+        """Valor fuera de rango (< 0) devuelve 400 y no corrompe config.json."""
         _login(client)
         self._put(client, 500)
-        resp = self._put(client, 9)
+        resp = self._put(client, -1)
         assert resp.status_code == 400
         with open(f"{config_dir}/config.json", encoding="utf-8") as f:
             assert json.load(f)["web_admin"]["audit_max_entries"] == 500

@@ -1,0 +1,7 @@
+{
+    "name": "snmp",
+    "version": "1.0.0",
+    "description": "Polls OIDs on SNMP-enabled network devices and checks values against configurable thresholds. Supports SNMP v1, v2c and v3.",
+    "icon": "📡",
+    "dependencies": ["pysnmp"]
+}

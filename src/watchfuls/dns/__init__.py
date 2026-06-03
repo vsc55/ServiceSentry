@@ -25,6 +25,7 @@ import concurrent.futures
 import json
 import os
 import socket
+import sys
 
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
@@ -33,11 +34,61 @@ _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'),
 
 SUPPORTED_PLATFORMS = ('linux', 'darwin', 'win32')
 
-try:
-    import dns.resolver
-    _HAS_DNSPYTHON = True
-except ImportError:
-    _HAS_DNSPYTHON = False
+# Detect dnspython by looking for its resolver.py in sys.path, explicitly
+# skipping our own directory.  A plain `import dns.resolver` would fail here
+# because monitor.py registers *this* file as sys.modules['dns'] before running
+# __init__.py, so 'dns.resolver' would resolve to watchfuls/dns/resolver.py
+# (which doesn't exist) instead of the installed dnspython package.
+def _find_dnspython_dir() -> str | None:
+    """Return the path to the installed dnspython package dir, or None."""
+    _self_dir = os.path.normcase(os.path.abspath(os.path.dirname(__file__)))
+    for _p in sys.path:
+        _candidate = os.path.join(_p, 'dns')
+        if os.path.normcase(os.path.abspath(_candidate)) == _self_dir:
+            continue
+        if os.path.isfile(os.path.join(_candidate, 'resolver.py')):
+            return _candidate
+    return None
+
+_DNSPYTHON_DIR = _find_dnspython_dir()
+_HAS_DNSPYTHON: bool = _DNSPYTHON_DIR is not None
+
+# Lazily loaded reference to the real dns.resolver module (populated on first use).
+_dns_resolver = None
+
+def _load_dns_resolver():
+    """Import the real dnspython resolver, bypassing the watchful name collision.
+
+    At call time, __init__.py has finished executing so the import lock for
+    'dns' is free.  We temporarily evict ourselves from sys.modules and remove
+    watchfuls/ from sys.path so that 'import dns.resolver' finds dnspython.
+    """
+    global _dns_resolver
+    if _dns_resolver is not None:
+        return _dns_resolver
+    if not _HAS_DNSPYTHON:
+        return None
+    _watchfuls_dir = os.path.dirname(os.path.dirname(__file__))
+    _saved_dns = sys.modules.pop('dns', None)
+    sys.modules.pop('dns.resolver', None)
+    _had_path = _watchfuls_dir in sys.path
+    if _had_path:
+        sys.path.remove(_watchfuls_dir)
+    try:
+        import dns.resolver as _r  # noqa: PLC0415
+        _dns_resolver = _r
+    except ImportError:
+        pass
+    finally:
+        if _had_path and _watchfuls_dir not in sys.path:
+            sys.path.insert(0, _watchfuls_dir)
+        # Restore the watchful as sys.modules['dns'] so future calls to
+        # importlib.import_module('dns') still return the correct watchful.
+        if _saved_dns is not None:
+            sys.modules['dns'] = _saved_dns
+        elif 'dns' in sys.modules and sys.modules['dns'] is not _dns_resolver:
+            pass  # dnspython replaced us — leave it; monitor will evict if needed
+    return _dns_resolver
 
 _SOCKET_TYPES = frozenset({'A', 'AAAA'})
 
@@ -56,16 +107,17 @@ def _resolve_socket(host: str, record_type: str, timeout: float) -> list:
 
 def _resolve_dns(host: str, record_type: str, timeout: float) -> list:
     """Resolve any DNS record type using dnspython. Returns list of string representations."""
-    if not _HAS_DNSPYTHON:
+    _r = _load_dns_resolver()
+    if _r is None:
         raise ImportError(
             f"dnspython not installed — cannot query {record_type} records. "
             "Install it with: pip install dnspython"
         )
-    resolver = dns.resolver.Resolver()
+    resolver = _r.Resolver()
     resolver.lifetime = float(timeout)
     try:
         answers = resolver.resolve(host, record_type)
-    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+    except (_r.NXDOMAIN, _r.NoAnswer):
         return []
 
     result = []
@@ -92,6 +144,10 @@ class Watchful(ModuleBase):
     """Watchful module to check DNS resolution for any record type."""
 
     ITEM_SCHEMA = _SCHEMA
+
+    # Without dnspython only A/AAAA records can be resolved (via stdlib socket).
+    # All other record types (MX, CNAME, TXT, NS, PTR, …) require dnspython.
+    MISSING_DEPS: list[str] = [] if _HAS_DNSPYTHON else ['dnspython']
 
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
                  if isinstance(v, dict) and 'default' in v}

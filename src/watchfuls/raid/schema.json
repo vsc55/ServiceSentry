@@ -5,6 +5,7 @@
         "threads": {"type": "int",  "default": 5,  "min": 1, "max": 100},
         "timeout": {"type": "int",  "default": 30, "min": 1, "max": 600}
     },
+    "__history__": {"field": null, "unit": null, "label": "RAID Status"},
     "list": {
         "__field_order__": ["enabled", "host", "port", "user", "password", "key_file"],
         "enabled":  {"type": "bool", "default": true},

@@ -202,27 +202,100 @@ function moduleSchema(moduleName) {
 
 /**
  * Apply module-level defaults from schema for missing keys.
+ * Also ensures all schema-defined collections exist in the config (adds empty {}
+ * for any collection key present in ITEM_SCHEMAS but absent from the saved config).
+ * This makes existing modules forward-compatible when their schema gains new collections.
+ *
+ * Orphan migration: collection keys present in the config but absent from the schema
+ * are migrated into the schema-defined collection annotated with __migrates_from__.
+ * This handles e.g. the SNMP "list" → "checks" rename transparently.
  */
 function applyModuleDefaults() {
     for (const [name, cfg] of Object.entries(modulesData)) {
         if (typeof cfg !== 'object' || cfg === null || Array.isArray(cfg)) continue;
         const defaults = schemaDefaults(moduleSchema(name));
-        if (!defaults) continue;
-        for (const [k, v] of Object.entries(defaults)) {
-            if (!(k in cfg)) cfg[k] = Array.isArray(v) ? [...v] : v;
+        if (defaults) {
+            for (const [k, v] of Object.entries(defaults)) {
+                if (!(k in cfg)) cfg[k] = Array.isArray(v) ? [...v] : v;
+            }
+        }
+        // Ensure all schema-defined collections are present (forward-compat for schema upgrades).
+        // Also build a map of __migrates_from__ → target collection name.
+        const _migrationMap = {};   // { 'old_col': 'new_col' }
+        for (const schKey of Object.keys(ITEM_SCHEMAS)) {
+            if (!schKey.startsWith(name + '|')) continue;
+            const col = schKey.slice(name.length + 1);
+            if (col === '__i18n__' || col === '__module__') continue;
+            if (col.includes('|')) continue;  // sub-collection schema — not a top-level config key
+            const _colSch = ITEM_SCHEMAS[schKey];
+            if (_colSch && _colSch['__migrates_from__']) {
+                const _from = String(_colSch['__migrates_from__']);
+                _migrationMap[_from] = col;
+            }
+            if (!(col in cfg)) cfg[col] = {};
+        }
+        // Migrate orphan collections (e.g. old "list" → new "checks").
+        for (const [oldCol, newCol] of Object.entries(_migrationMap)) {
+            if (oldCol in cfg && typeof cfg[oldCol] === 'object' && cfg[oldCol] !== null && !Array.isArray(cfg[oldCol])) {
+                const target = cfg[newCol];
+                if (target && typeof target === 'object' && !Array.isArray(target)) {
+                    // Merge items that don't already exist in the target collection.
+                    for (const [itemKey, itemVal] of Object.entries(cfg[oldCol])) {
+                        if (!(itemKey in target)) target[itemKey] = itemVal;
+                    }
+                }
+                delete cfg[oldCol];
+                markDirty('modules');
+            }
+        }
+        // Remove object-type keys that are no longer top-level collections in the schema.
+        // This handles schema refactors where a collection is moved into a sub-collection
+        // inside another item (e.g. snmp "checks" moved into each "servers" item).
+        const _validCols = new Set(
+            Object.keys(ITEM_SCHEMAS)
+                .filter(k => k.startsWith(name + '|'))
+                .map(k => k.slice(name.length + 1))
+                .filter(c => !c.includes('|') && c !== '__i18n__' && c !== '__module__')
+        );
+        for (const _ck of Object.keys(cfg)) {
+            if (typeof cfg[_ck] !== 'object' || cfg[_ck] === null || Array.isArray(cfg[_ck])) continue;
+            if (_validCols.has(_ck)) continue;
+            delete cfg[_ck];
+            markDirty('modules');
         }
     }
 }
 
 /**
- * Return the schema key for a path like "web|list|www.example.com".
- * Checks "module|collection" (first two segments).
+ * Convert any item or collection path to its ITEM_SCHEMAS lookup key by removing
+ * item-key segments (positions 2, 4, 6, … counting from 0).
+ *
+ * Examples:
+ *   "snmp|servers"                          → "snmp|servers"        (flat collection)
+ *   "snmp|servers|router_1"                 → "snmp|servers"        (flat item)
+ *   "snmp|servers|router_1|checks"          → "snmp|servers|checks" (sub-collection)
+ *   "snmp|servers|router_1|checks|uptime"   → "snmp|servers|checks" (sub-collection item)
+ */
+function _schemaKeyOf(pathStr) {
+    if (!pathStr) return pathStr;
+    const parts = pathStr.split('|');
+    // Keep: index 0 (module), index 1 (first collection), index 3 (sub-collection), …
+    // Skip: index 2, 4, 6, … (item keys)
+    return parts.filter((_, i) => i < 2 || i % 2 === 1).join('|');
+}
+
+/**
+ * Return the schema for a path like "web|list|www.example.com".
+ * Handles both flat (module|col) and nested (module|col|key|sub) paths.
  */
 function schemaFor(pathStr) {
+    const key = _schemaKeyOf(pathStr);
+    if (key && ITEM_SCHEMAS[key]) return ITEM_SCHEMAS[key];
+    // Fallback: 2-level only (backward compat)
     const parts = pathStr.split('|');
     if (parts.length >= 2) {
-        const key = parts[0] + '|' + parts[1];
-        if (ITEM_SCHEMAS[key]) return ITEM_SCHEMAS[key];
+        const key2 = parts[0] + '|' + parts[1];
+        if (ITEM_SCHEMAS[key2]) return ITEM_SCHEMAS[key2];
     }
     return null;
 }
@@ -230,13 +303,19 @@ function schemaFor(pathStr) {
 /**
  * Extract plain default values from a rich schema.
  * Handles both simple ({field: value}) and rich ({field: {default, type, ...}}) formats.
+ * Fields with type 'sub_collection' always default to an empty dict {}.
  */
 function schemaDefaults(schema) {
     if (!schema) return null;
     const d = {};
     for (const [k, v] of Object.entries(schema)) {
         if (k.startsWith('__')) continue;
-        d[k] = (v && typeof v === 'object' && !Array.isArray(v) && 'default' in v) ? v['default'] : v;
+        if (v && typeof v === 'object' && !Array.isArray(v) && v.type === 'sub_collection') {
+            d[k] = {};  // sub-collection fields default to empty dict
+        } else if (v && typeof v === 'object' && !Array.isArray(v) && 'default' in v) {
+            d[k] = v['default'];
+        }
+        // else: skip plain primitive schema-meta values (e.g. "type": "sub_collection")
     }
     return d;
 }

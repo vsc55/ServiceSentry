@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests for WebAdmin initialisation and construction."""
 
-import json
-import os
-
 import pytest
 
 try:
@@ -37,30 +34,28 @@ class TestWebAdminInit:
         wa = WebAdmin(config_dir, "u", "p", var_dir=None)
         assert wa.app is not None
 
-    def test_creates_users_json_on_first_run(self, config_dir):
-        """users.json is created automatically with the default admin."""
+    def test_creates_default_admin_on_first_run(self, config_dir):
+        """Default admin is created in the DB on first run (no JSON file needed)."""
         wa = WebAdmin(config_dir, "myadmin", "mypass")
-        path = os.path.join(config_dir, "users.json")
-        assert os.path.isfile(path)
-        with open(path, encoding="utf-8") as f:
-            users = json.load(f)
+        users = wa._users_store.load()
         assert "myadmin" in users
         assert wa._uid_to_role_name(users["myadmin"]["role"]) == "admin"
         assert "password_hash" in users["myadmin"]
 
-    def test_loads_existing_users_json(self, config_dir):
-        """If users.json already exists, it is loaded instead of recreated."""
-        users = {
-            "existinguser": {
-                "password_hash": generate_password_hash("existingpass"),
-                "role": "editor",
-                "display_name": "Existing",
-            }
+    def test_existing_db_users_are_preserved(self, config_dir):
+        """Users already in the DB are loaded on subsequent starts (no overwrite)."""
+        import uuid as _uuid
+        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        # First start: creates default admin
+        wa1 = WebAdmin(config_dir, "myadmin", "mypass")
+        wa1._users["existinguser"] = {
+            'uid':           str(_uuid.uuid4()),
+            'password_hash': generate_password_hash("existingpass"),
+            'role':          BUILTIN_ROLE_UIDS['editor'],
+            'display_name':  "Existing",
         }
-        path = os.path.join(config_dir, "users.json")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(users, f)
-        wa = WebAdmin(config_dir, "ignored", "ignored")
-        # The constructor should NOT overwrite with the default user
-        assert "existinguser" in wa._users
-        assert "ignored" not in wa._users
+        wa1._persist_users()
+        # Second start: must load existing users, not overwrite
+        wa2 = WebAdmin(config_dir, "ignored", "ignored")
+        assert "existinguser" in wa2._users
+        assert "ignored" not in wa2._users

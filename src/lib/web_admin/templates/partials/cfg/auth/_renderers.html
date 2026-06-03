@@ -189,20 +189,20 @@ function _renderDefaultRoleField(sec, current) {
     const _hintPanel = _hint
         ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_hint)}</div></div>`
         : '';
-    const allRoleNames = ['none', 'viewer', 'editor', 'admin',
-        ...Object.keys(rolesData).filter(r => !['admin','editor','viewer','none'].includes(r))];
-    const items = allRoleNames
-        .map(r => {
-            const rd = rolesData[r] || {};
-            return {
-                r,
-                uid: rd.uid || r,
-                lbl: rd.label || (I18N.role_labels && I18N.role_labels[r]) || r,
-                desc: rd.description || '',
-            };
-        })
-        .sort((a, b) => a.lbl.localeCompare(b.lbl));
-    const selectedItem = items.find(x => x.uid === current || x.r === current) || items[0] || { lbl: current };
+    // rolesData is keyed by UID; sort builtins first then customs
+    const items = Object.entries(rolesData)
+        .map(([uid, rd]) => ({
+            r:    uid,
+            uid:  uid,
+            lbl:  rd.name || uid,
+            desc: rd.description || '',
+            builtin: !!rd.builtin,
+        }))
+        .sort((a, b) => {
+            if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
+            return a.lbl.localeCompare(b.lbl);
+        });
+    const selectedItem = items.find(x => x.uid === current) || items[0] || { lbl: current, uid: current };
     const liItems = items.map(({ r, uid, lbl, desc }, idx) => {
         const isActive = (current === uid || current === r);
         const sep = idx > 0 ? '<li><hr class="dropdown-divider my-0"></li>' : '';
