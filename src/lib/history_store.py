@@ -2,9 +2,8 @@
 # -*- coding: utf-8 -*-
 """Time-series history store for ServiceSentry check results.
 
-Uses SQLite directly (stdlib ``sqlite3``) so there are no extra dependencies.
-WAL journal mode allows concurrent reads from the web admin while the daemon
-writes check results.
+Backed by a pluggable :class:`lib.db.BaseConnector` (SQLite by default;
+PostgreSQL/MySQL supported through the same interface).
 
 Schema
 ------
@@ -22,91 +21,49 @@ Table ``history`` — one row per monitored item per check cycle:
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
-import threading
+import re
 import time
 
+from lib.db import BaseConnector, get_connector
+from lib.db.schema import Column, Index, TableSpec
 
 _PREFERRED_FIELDS = (
     'temp', 'used', 'count', 'code', 'response_time',
     'latency_ms', 'latency', 'value', 'rate', 'level',
 )
 
+# Whitelist for JSON field names used in get_stats (prevents SQL/JSON-path injection).
+_FIELD_RE = re.compile(r'^[A-Za-z0-9_]+$')
+
+_SCHEMA = TableSpec(
+    name='history',
+    columns=(
+        Column('id',       'AUTOINCREMENT', primary_key=True),
+        Column('ts',       'REAL', nullable=False),
+        Column('module',   'TEXT', nullable=False),
+        Column('item_uid', 'TEXT'),
+        Column('key',      'TEXT', nullable=False),
+        Column('status',   'INTEGER', nullable=False),
+        Column('data',     'TEXT'),
+    ),
+    indexes=(
+        Index('idx_history_uid_ts', ('item_uid', 'ts')),
+        Index('idx_history_mkts',   ('module', 'key', 'ts')),
+    ),
+)
+
 
 class HistoryStore:
-    """Thread-safe SQLite-backed time-series store.
+    """Backend-agnostic time-series store."""
 
-    Each thread maintains its own connection via ``threading.local`` so
-    concurrent daemon workers and Flask request handlers never share a
-    connection object.
-    """
-
-    def __init__(self, db_path: str) -> None:
-        self._path  = db_path
-        self._local = threading.local()
-        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    def __init__(self, db: BaseConnector) -> None:
+        self._db = db
         self._bootstrap()
-
-    # ── Internal connection ───────────────────────────────────────────────────
-
-    def _conn(self) -> sqlite3.Connection:
-        conn = getattr(self._local, 'conn', None)
-        if conn is None:
-            conn = sqlite3.connect(self._path, check_same_thread=False, timeout=30, isolation_level=None)
-            conn.execute('PRAGMA journal_mode=WAL')
-            conn.execute('PRAGMA busy_timeout=30000')
-            conn.execute('PRAGMA synchronous=NORMAL')
-            conn.execute('PRAGMA cache_size=-4096')
-            self._local.conn = conn
-        return conn
-
-    def _reset_conn(self) -> None:
-        """Close the current thread's connection and discard it."""
-        conn = getattr(self._local, 'conn', None)
-        if conn:
-            try:
-                conn.close()
-            except Exception:  # pylint: disable=broad-except
-                pass
-            self._local.conn = None
 
     # ── Schema bootstrap ──────────────────────────────────────────────────────
 
     def _bootstrap(self) -> None:
-        """Create table + indices; add item_uid column to legacy databases."""
-        conn = self._conn()
-
-        # 1. Create table if missing
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS history (
-                id       INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts       REAL    NOT NULL,
-                module   TEXT    NOT NULL,
-                item_uid TEXT,
-                key      TEXT    NOT NULL,
-                status   INTEGER NOT NULL,
-                data     TEXT
-            )
-        ''')
-        conn.commit()
-
-        # 2. Add item_uid column to databases created before UIDs were added
-        existing = {r[1] for r in conn.execute('PRAGMA table_info(history)').fetchall()}
-        if 'item_uid' not in existing:
-            conn.execute('ALTER TABLE history ADD COLUMN item_uid TEXT')
-            conn.commit()
-
-        # 3. Create indices AFTER the column migration so the uid index is safe
-        conn.execute(
-            'CREATE INDEX IF NOT EXISTS idx_history_uid_ts '
-            'ON history(item_uid, ts)'
-        )
-        conn.execute(
-            'CREATE INDEX IF NOT EXISTS idx_history_mkts '
-            'ON history(module, key, ts)'
-        )
-        conn.commit()
+        self._db.reconcile_table(_SCHEMA)
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
@@ -121,7 +78,7 @@ class HistoryStore:
     ) -> None:
         """Insert one sample."""
         try:
-            self._conn().execute(
+            self._db.execute(
                 'INSERT INTO history(ts, module, item_uid, key, status, data) '
                 'VALUES(?, ?, ?, ?, ?, ?)',
                 (
@@ -133,7 +90,7 @@ class HistoryStore:
                     json.dumps(data or {}, ensure_ascii=False),
                 ),
             )
-            self._conn().commit()
+            self._db.commit()
         except Exception as exc:  # pylint: disable=broad-except
             import sys  # noqa: PLC0415
             print(
@@ -147,17 +104,16 @@ class HistoryStore:
     ) -> int:
         """Delete all records for one series (by UID when available)."""
         try:
-            if item_uid:
-                cur = self._conn().execute(
-                    'DELETE FROM history WHERE item_uid = ?', (item_uid,)
-                )
-            else:
-                cur = self._conn().execute(
-                    'DELETE FROM history WHERE module = ? AND key = ?',
-                    (module, key),
-                )
-            deleted = cur.rowcount
-            self._conn().commit()
+            with self._db.transaction():
+                if item_uid:
+                    deleted = self._db.execute(
+                        'DELETE FROM history WHERE item_uid = ?', (item_uid,)
+                    )
+                else:
+                    deleted = self._db.execute(
+                        'DELETE FROM history WHERE module = ? AND key = ?',
+                        (module, key),
+                    )
             return deleted
         except Exception:  # pylint: disable=broad-except
             return 0
@@ -165,12 +121,9 @@ class HistoryStore:
     def delete_all(self) -> int:
         """Delete all rows and reclaim disk space."""
         try:
-            cur = self._conn().execute('DELETE FROM history')
-            deleted = cur.rowcount
-            self._conn().commit()
-            # VACUUM must run outside a transaction; reset connection after.
-            self._conn().execute('VACUUM')
-            self._reset_conn()
+            deleted = self._db.execute('DELETE FROM history')
+            self._db.commit()
+            self._db.vacuum()
             return deleted
         except Exception:  # pylint: disable=broad-except
             return 0
@@ -181,12 +134,9 @@ class HistoryStore:
             return 0
         cutoff = time.time() - retention_days * 86400
         try:
-            cur = self._conn().execute(
-                'DELETE FROM history WHERE ts < ?', (cutoff,)
-            )
-            deleted = cur.rowcount
-            self._conn().execute('PRAGMA wal_checkpoint(PASSIVE)')
-            self._conn().commit()
+            deleted = self._db.execute('DELETE FROM history WHERE ts < ?', (cutoff,))
+            self._db.commit()
+            self._db.checkpoint()
             return deleted
         except Exception:  # pylint: disable=broad-except
             return 0
@@ -196,7 +146,7 @@ class HistoryStore:
     def get_index(self) -> list[dict]:
         """Return metadata for every recorded series."""
         try:
-            rows = self._conn().execute('''
+            rows = self._db.fetchall('''
                 SELECT
                     h.module,
                     h.item_uid,
@@ -214,7 +164,7 @@ class HistoryStore:
                 FROM history h
                 GROUP BY COALESCE(h.item_uid, h.module || ':' || h.key)
                 ORDER BY h.module, h.key
-            ''').fetchall()
+            ''')
         except Exception:  # pylint: disable=broad-except
             return []
         return [
@@ -225,7 +175,7 @@ class HistoryStore:
                 'count':     r[3],
                 'last_ts':   r[4],
                 'first_ts':  r[5],
-                'uptime':    round(r[6] * 100, 1),
+                'uptime':    round((r[6] or 0) * 100, 1),
                 'last_data': _load_json(r[7]),
             }
             for r in rows
@@ -249,22 +199,22 @@ class HistoryStore:
             where  = 'module = ? AND key = ? AND ts >= ? AND ts <= ?'
             w_args = (module, key, from_ts, to_ts)
         try:
-            count = self._conn().execute(
+            row = self._db.fetchone(
                 f'SELECT COUNT(*) FROM history WHERE {where}', w_args
-            ).fetchone()[0]
-
+            )
+            count = row[0] if row else 0
             if count == 0:
                 return []
 
-            if count <= max_points:
-                rows = self._conn().execute(
+            bucket = (to_ts - from_ts) / max_points if max_points > 0 else 0
+            if count <= max_points or bucket <= 0:
+                rows = self._db.fetchall(
                     f'SELECT ts, status, data FROM history '
                     f'WHERE {where} ORDER BY ts',
                     w_args,
-                ).fetchall()
+                )
             else:
-                bucket = (to_ts - from_ts) / max_points
-                rows = self._conn().execute(
+                rows = self._db.fetchall(
                     f'''SELECT
                         CAST((ts - ?) / ? AS INTEGER) * ? + ? AS bts,
                         CAST(ROUND(AVG(status)) AS INTEGER),
@@ -272,9 +222,8 @@ class HistoryStore:
                     FROM history WHERE {where}
                     GROUP BY CAST((ts - ?) / ? AS INTEGER)
                     ORDER BY bts''',
-                    (from_ts, bucket, bucket, from_ts)
-                    + w_args + (from_ts, bucket),
-                ).fetchall()
+                    (from_ts, bucket, bucket, from_ts) + w_args + (from_ts, bucket),
+                )
 
             return [
                 {'ts': r[0], 'status': r[1], 'data': _load_json(r[2])}
@@ -301,11 +250,11 @@ class HistoryStore:
             where  = 'module = ? AND key = ? AND ts >= ? AND ts <= ?'
             w_args = (module, key, from_ts, to_ts)
         try:
-            row = self._conn().execute(
+            row = self._db.fetchone(
                 f'SELECT COUNT(*), AVG(status), MIN(ts), MAX(ts) '
                 f'FROM history WHERE {where}',
                 w_args,
-            ).fetchone()
+            )
             if not row or not row[0]:
                 return {}
             result: dict = {
@@ -314,15 +263,17 @@ class HistoryStore:
                 'first_ts': row[2],
                 'last_ts':  row[3],
             }
-            if field:
-                num = self._conn().execute(
-                    f"SELECT MIN(CAST(json_extract(data,'$.{field}') AS REAL)),"
-                    f"       MAX(CAST(json_extract(data,'$.{field}') AS REAL)),"
-                    f"       AVG(CAST(json_extract(data,'$.{field}') AS REAL)) "
+            # Only chart fields matching a strict whitelist (no SQL/JSON-path injection).
+            if field and _FIELD_RE.match(field):
+                path = f'$.{field}'
+                num = self._db.fetchone(
+                    "SELECT MIN(CAST(json_extract(data, ?) AS REAL)),"
+                    "       MAX(CAST(json_extract(data, ?) AS REAL)),"
+                    "       AVG(CAST(json_extract(data, ?) AS REAL)) "
                     f"FROM history WHERE {where} "
-                    f"AND json_extract(data,'$.{field}') IS NOT NULL",
-                    w_args,
-                ).fetchone()
+                    "AND json_extract(data, ?) IS NOT NULL",
+                    (path, path, path) + w_args + (path,),
+                )
                 if num and num[0] is not None:
                     result['min'] = num[0]
                     result['max'] = num[1]
@@ -346,24 +297,23 @@ class HistoryStore:
         return None
 
     def close(self) -> None:
-        """Close the current thread's connection."""
-        self._reset_conn()
+        """No-op: the connector owns the connection lifecycle."""
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
 def create(
-    _db_config: dict | None = None,
+    db_config: dict | None = None,
     *,
     sqlite_path: str,
 ) -> 'HistoryStore':
-    """Factory kept for API compatibility.
+    """Build a HistoryStore backed by a connector from *db_config*.
 
-    *_db_config* is reserved for future multi-backend support.
-    Currently always creates a SQLite-backed store at *sqlite_path*.
+    When *db_config* is None or has no ``driver``, a SQLite connector is used
+    at *sqlite_path*.
     """
-    del _db_config  # reserved — not used yet
-    return HistoryStore(sqlite_path)
+    connector = get_connector(db_config or None, default_sqlite_path=sqlite_path)
+    return HistoryStore(connector)
 
 
 def _load_json(raw: str | None) -> dict:

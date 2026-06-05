@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 
 from flask import jsonify, session
 
-from ...constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, ROLES, is_module_perm
+from ...constants import (
+    BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, ROLES,
+    SYSTEM_USER, is_module_perm,
+)
 
 
 def register(app, wa):
@@ -21,6 +24,26 @@ def register(app, wa):
         user = wa._users.get(session.get('username', '')) or {}
         role = user.get('role', '')
         return role == admin_uid or wa._uid_to_role_name(role) == 'admin'
+
+    def _role_name_taken(name: str, *, exclude_uid: str | None = None) -> bool:
+        """Return True if *name* (case-insensitive) is already used by another role.
+
+        Checks built-in display names and custom role names, skipping the role
+        identified by *exclude_uid* (so a role can keep its own name on edit).
+        """
+        name_lc = name.lower()
+        for key in ROLES:
+            buid = BUILTIN_ROLE_UIDS.get(key, '')
+            if buid == exclude_uid:
+                continue
+            if wa._builtin_role_names.get(key, key.title()).lower() == name_lc:
+                return True
+        for ruid, rdata in wa._custom_roles.items():
+            if ruid == exclude_uid:
+                continue
+            if (rdata.get('name') or '').lower() == name_lc:
+                return True
+        return False
 
     def _check_perms_escalation(requested_perms: list) -> bool:
         if _is_admin_requester():
@@ -83,18 +106,13 @@ def register(app, wa):
         if len(name) > wa._MAX_ROLE_LABEL_LEN:
             return jsonify({'error': wa._t('label_too_long', wa._MAX_ROLE_LABEL_LEN)}), 400
         if len(description) > wa._MAX_GROUP_DESC_LEN:
-            return jsonify({'error': wa._t('description_too_long', wa._MAX_ROLE_DESC_LEN)}), 400
-        name_lc = name.lower()
-        for key in ROLES:
-            builtin_name = wa._builtin_role_names.get(key, key.title())
-            if builtin_name.lower() == name_lc:
-                return jsonify({'error': wa._t('role_already_exists', name)}), 409
-        if any(rd.get('name', '').lower() == name_lc for rd in wa._custom_roles.values()):
+            return jsonify({'error': wa._t('description_too_long', wa._MAX_GROUP_DESC_LEN)}), 400
+        if _role_name_taken(name):
             return jsonify({'error': wa._t('role_already_exists', name)}), 409
         enabled  = bool(data.get('enabled', True))
         role_uid = str(uuid.uuid4())
         now      = datetime.now(timezone.utc).isoformat()
-        username = session.get('username', 'system')
+        username = session.get('username', SYSTEM_USER)
         wa._custom_roles[role_uid] = {
             'uid':         role_uid,
             'name':        name,
@@ -105,7 +123,9 @@ def register(app, wa):
             'updated_at':  now,
             'updated_by':  username,
         }
-        wa._persist_roles()
+        if not wa._persist_roles():
+            del wa._custom_roles[role_uid]
+            return jsonify({'error': wa._t('save_error')}), 500
         wa._audit('role_created', detail={'uid': role_uid, 'name': name, 'permissions': perms})
         return jsonify({'ok': True, 'uid': role_uid}), 201
 
@@ -124,17 +144,25 @@ def register(app, wa):
             return err
         changes: list[dict] = []
         if is_builtin:
+            # Override always carries a non-empty name (the current display name),
+            # so the UNIQUE(name) constraint never collides between built-in rows.
+            _cur_name = wa._builtin_role_names.get(builtin_key, builtin_key.title())
             override = wa._builtin_role_overrides.setdefault(uid, {
-                'uid': uid, 'name': '', 'description': '',
+                'uid': uid, 'name': _cur_name, 'description': '',
                 'permissions': [], 'enabled': True,
                 'created_at': '', 'updated_at': '', 'updated_by': '',
             })
+            if not override.get('name'):
+                override['name'] = _cur_name
             changed = False
             if 'name' in data:
                 new_name = data['name'].strip() or builtin_key.title()
                 if len(new_name) > wa._MAX_ROLE_LABEL_LEN:
                     return jsonify({'error': wa._t('label_too_long', wa._MAX_ROLE_LABEL_LEN)}), 400
-                old_name = override.get('name') or wa._builtin_role_names.get(builtin_key, builtin_key.title())
+                # Reject names that collide with another role (built-in or custom)
+                if _role_name_taken(new_name, exclude_uid=uid):
+                    return jsonify({'error': wa._t('role_already_exists', new_name)}), 409
+                old_name = override.get('name') or _cur_name
                 if old_name != new_name:
                     changes.append({'field': 'name', 'old': old_name, 'new': new_name})
                 override['name'] = new_name
@@ -147,8 +175,8 @@ def register(app, wa):
                     changes.append({'field': 'description', 'old': old_desc, 'new': new_desc})
                 override['description'] = new_desc
                 changed = True
-            if changed:
-                wa._persist_roles()
+            if changed and not wa._persist_roles():
+                return jsonify({'error': wa._t('save_error')}), 500
         else:
             role = wa._custom_roles[uid]
             if 'name' in data:
@@ -157,6 +185,9 @@ def register(app, wa):
                     return jsonify({'error': wa._t('role_name_required')}), 400
                 if len(new_name) > wa._MAX_ROLE_LABEL_LEN:
                     return jsonify({'error': wa._t('label_too_long', wa._MAX_ROLE_LABEL_LEN)}), 400
+                # Reject rename that collides with another role (built-in or custom)
+                if _role_name_taken(new_name, exclude_uid=uid):
+                    return jsonify({'error': wa._t('role_already_exists', new_name)}), 409
                 old_name = role.get('name', uid)
                 if old_name != new_name:
                     changes.append({'field': 'name', 'old': old_name, 'new': new_name})

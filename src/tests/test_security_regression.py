@@ -320,3 +320,56 @@ class TestConfigSensitiveSections:
             "fields": {"ldap|enabled": {"value": True, "version": None}}
         })
         assert resp.status_code == 403
+
+
+# ── Fix #6 · Security-relevant web_admin fields require admin ────────────────
+
+class TestConfigSensitiveWebAdminFields:
+    """Fix: _ADMIN_ONLY_FIELDS in config.py.
+
+    A user with config_edit must not be able to weaken security-relevant
+    web_admin fields (account lockout, secure cookies, password policy,
+    trusted-proxy count, public exposure).  Only admins may change them.
+    """
+
+    def test_non_admin_cannot_disable_lockout(self, admin):
+        c = _user_with_perm(admin, "cfg_lockout", ["config_edit"])
+        resp = c.put("/api/v1/config", json={"web_admin": {"lockout_max_attempts": 0}})
+        assert resp.status_code == 403
+
+    def test_non_admin_cannot_disable_secure_cookies(self, admin):
+        c = _user_with_perm(admin, "cfg_cookies", ["config_edit"])
+        resp = c.put("/api/v1/config", json={"web_admin": {"secure_cookies": False}})
+        assert resp.status_code == 403
+
+    def test_non_admin_cannot_weaken_password_policy(self, admin):
+        c = _user_with_perm(admin, "cfg_pw", ["config_edit"])
+        resp = c.put("/api/v1/config", json={"web_admin": {"pw_min_len": 1}})
+        assert resp.status_code == 403
+
+    def test_non_admin_cannot_change_proxy_count(self, admin):
+        c = _user_with_perm(admin, "cfg_proxy", ["config_edit"])
+        resp = c.put("/api/v1/config", json={"web_admin": {"proxy_count": 5}})
+        assert resp.status_code == 403
+
+    def test_admin_can_modify_web_admin_security_fields(self, admin):
+        c = _login_as(admin, "admin", "secret")
+        resp = c.put("/api/v1/config", json={"web_admin": {"lockout_max_attempts": 10}})
+        assert resp.status_code == 200
+
+
+# ── Fix #7 · LDAP empty-password unauthenticated bind ────────────────────────
+
+class TestLdapEmptyPasswordRejected:
+    """Fix: ldap_auth.authenticate rejects empty passwords before binding.
+
+    Many LDAP/AD servers treat a bind with a valid DN and empty password as an
+    unauthenticated bind that succeeds — an auth bypass.  The empty password
+    must be rejected before any bind is attempted.
+    """
+
+    def test_empty_password_rejected(self, admin):
+        from lib.web_admin.auth import ldap_auth
+        attrs, reason = ldap_auth.authenticate(admin, "someuser", "")
+        assert attrs is None
+        assert reason == 'ldap_invalid_credentials'

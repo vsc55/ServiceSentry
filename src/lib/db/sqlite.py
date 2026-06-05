@@ -13,6 +13,7 @@ import sqlite3
 import threading
 
 from .base import BaseConnector
+from .schema import ColumnInfo, IndexInfo, TableSpec
 
 
 class SQLiteConnector(BaseConnector):
@@ -67,6 +68,54 @@ class SQLiteConnector(BaseConnector):
             )
             conn.commit()
 
+    def list_columns(self, table: str) -> set[str]:
+        return {
+            row[1]
+            for row in self._conn().execute(
+                f'PRAGMA table_info({table})'
+            ).fetchall()
+        }
+
+    def describe_table(self, table: str) -> list[ColumnInfo]:
+        # PRAGMA table_info: (cid, name, type, notnull, dflt_value, pk)
+        rows = self._conn().execute(f'PRAGMA table_info({table})').fetchall()
+        return [
+            ColumnInfo(
+                name=r[1], type=r[2] or '', nullable=(r[3] == 0),
+                default=r[4], pk=r[5],
+            )
+            for r in rows
+        ]
+
+    def list_indexes(self, table: str) -> list[IndexInfo]:
+        conn = self._conn()
+        out: list[IndexInfo] = []
+        # PRAGMA index_list: (seq, name, unique, origin, partial)
+        for row in conn.execute(f'PRAGMA index_list({table})').fetchall():
+            name, unique, origin = row[1], row[2], row[3]
+            if origin != 'c':           # skip PK / UNIQUE-constraint autoindexes
+                continue
+            cols = [
+                ci[2]                   # (seqno, cid, name)
+                for ci in conn.execute(f'PRAGMA index_info({name})').fetchall()
+                if ci[2] is not None    # skip expression columns
+            ]
+            out.append(IndexInfo(name=name, columns=tuple(cols), unique=bool(unique)))
+        return out
+
+    def _apply_rebuild(self, spec: TableSpec, actual_cols, actual_indexes) -> None:
+        # The official SQLite table-rebuild procedure requires foreign-key
+        # enforcement to be OFF, and the PRAGMA is a no-op inside a transaction —
+        # so toggle it around the (transaction-wrapped) generic rebuild.
+        conn = self._conn()
+        if conn.in_transaction:
+            conn.commit()
+        conn.execute('PRAGMA foreign_keys=OFF')
+        try:
+            super()._apply_rebuild(spec, actual_cols, actual_indexes)
+        finally:
+            conn.execute('PRAGMA foreign_keys=ON')
+
     # ── Read ──────────────────────────────────────────────────────────────────
 
     def fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:
@@ -84,6 +133,13 @@ class SQLiteConnector(BaseConnector):
     def executemany(self, sql: str, params_list: list[tuple]) -> int:
         cur = self._conn().executemany(sql, params_list)
         return cur.rowcount
+
+    def begin(self) -> None:
+        # Autocommit mode (isolation_level=None) means no implicit transaction
+        # is open, so an explicit BEGIN is needed to batch statements atomically.
+        conn = self._conn()
+        if not conn.in_transaction:
+            conn.execute('BEGIN')
 
     def commit(self) -> None:
         self._conn().commit()

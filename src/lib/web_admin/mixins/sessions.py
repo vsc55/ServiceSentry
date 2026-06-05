@@ -64,11 +64,11 @@ class _SessionsMixin:
             del self._sessions[t]
         if stale:
             self._persist_sessions()
-        # Migrate sessions created before sid was introduced
+        # Migrate sessions created before the public uid was introduced
         migrated = False
         for entry in self._sessions.values():
-            if 'sid' not in entry:
-                entry['sid'] = secrets.token_hex(8)
+            if not entry.get('uid'):
+                entry['uid'] = secrets.token_hex(8)
                 migrated = True
         if migrated:
             self._persist_sessions()
@@ -80,21 +80,23 @@ class _SessionsMixin:
     def _create_session(
         self, username: str, ip: str, user_agent: str,
     ) -> tuple[str, str]:
-        """Register a new session and return (token, sid)."""
+        """Register a new session and return (token, uid)."""
         token    = secrets.token_hex(32)
-        sid      = secrets.token_hex(8)
+        uid      = secrets.token_hex(8)
         now      = datetime.now(timezone.utc).isoformat()
         user_uid = (self._users.get(username) or {}).get('uid', username)
-        self._sessions[token] = {
-            'sid':        sid,
+        entry = {
+            'uid':        uid,
             'user_uid':   user_uid,
             'created':    now,
             'last_seen':  now,
             'ip':         ip,
             'user_agent': user_agent,
         }
-        self._persist_sessions()
-        return token, sid
+        self._sessions[token] = entry
+        # Single-row insert instead of rewriting the whole sessions table.
+        self._sessions_store.upsert(token, entry)
+        return token, uid
 
     def _check_session(self) -> bool:
         """Validate the current request's session against the registry."""
@@ -113,11 +115,11 @@ class _SessionsMixin:
             user_rec = self._users.get(uname)
         if user_rec is None or not user_rec.get('enabled', True):
             del self._sessions[token]
-            self._persist_sessions()
+            self._sessions_store.delete(token)
             session.clear()
             return False
         if 'session_id' not in session:
-            session['session_id'] = entry.get('sid', token[:16])
+            session['session_id'] = entry.get('uid', token[:16])
         current_ip = request.remote_addr
         if entry.get('ip') and entry['ip'] != current_ip:
             self._audit(
@@ -125,7 +127,7 @@ class _SessionsMixin:
                 username=uname,
                 ip=current_ip,
                 detail={
-                    'sid': entry.get('sid', token[:8]),
+                    'uid': entry.get('uid', token[:8]),
                     'previous_ip': entry['ip'],
                     'current_ip': current_ip,
                 },
@@ -138,7 +140,7 @@ class _SessionsMixin:
         """Remove a single session from the registry."""
         if token in self._sessions:
             del self._sessions[token]
-            self._persist_sessions()
+            self._sessions_store.delete(token)
             return True
         return False
 
@@ -159,7 +161,8 @@ class _SessionsMixin:
         for t in tokens:
             del self._sessions[t]
         if tokens:
-            self._persist_sessions()
+            # Single targeted DELETE instead of rewriting the whole table.
+            self._sessions_store.delete_by_user_uid(user_uid)
         return len(tokens)
 
     def _revoke_all_sessions(self) -> int:

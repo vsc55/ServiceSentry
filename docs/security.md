@@ -161,7 +161,7 @@ Las sesiones se persisten en `sessions.json` y se cargan al iniciar.
 | Endpoint | Permiso | Quién puede | Acción |
 | -------- | ------- | ----------- | ------ |
 | `GET /api/v1/sessions` | `sessions_view` | Cualquier autenticado con el permiso | Lista sesiones activas |
-| `POST /api/v1/sessions/revoke/<sid>` | `sessions_revoke` | Admin: cualquier sesión · No-admin: solo las propias | Revoca una sesión concreta |
+| `POST /api/v1/sessions/revoke/<uid>` | `sessions_revoke` | Admin: cualquier sesión · No-admin: solo las propias | Revoca una sesión concreta |
 | `POST /api/v1/sessions/revoke-user/<user>` | `sessions_revoke` | Admin: cualquier usuario · No-admin: solo `username == self` | Revoca todas las sesiones de un usuario |
 | `POST /api/v1/sessions/invalidate` | `sessions_revoke` | **Solo admin** | Revoca **todas** las sesiones activas |
 
@@ -193,7 +193,7 @@ El cliente JS detecta el 401 mediante un poll de `/api/v1/me` cada 20 segundos y
 
 ### Sistema de permisos granulares
 
-El sistema usa **23 flags de permiso por acción** en lugar de roles monolíticos.
+El sistema usa **28 flags de permiso por acción** en lugar de roles monolíticos.
 Cada endpoint está protegido por el permiso exacto que necesita:
 
 | Recurso | Permiso |
@@ -215,18 +215,26 @@ Cada endpoint está protegido por el permiso exacto que necesita:
 | Ver módulos | `modules_view` |
 | Crear entradas de módulo | `modules_add` |
 | Editar módulos | `modules_edit` |
+| Eliminar entradas de módulo | `modules_delete` |
 | Leer configuración (solo lectura) | `config_view` |
 | Editar configuración | `config_edit` |
+| Ver dashboard de resumen | `overview_view` |
+| Editar layout del dashboard | `overview_edit` |
 | Ver sesiones | `sessions_view` |
 | Revocar sesiones | `sessions_revoke` |
 | Ver resultados de checks / pestaña Status | `checks_view` |
 | Lanzar checks | `checks_run` |
+| Ver historial (gráficas) | `history_view` |
+| Borrar historial | `history_delete` |
+
+> Además, cada módulo expone permisos dinámicos a nivel de módulo
+> (`module.<nombre>.view`, `.add`, `.edit`, `.delete`).
 
 ### Roles integrados
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos (23 flags) |
+| `admin` | Todos (28 flags) |
 | `editor` | `modules_view`, `modules_add`, `modules_edit`, `config_edit`, `checks_view`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
 | `viewer` | `modules_view`, `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view`, `checks_view` |
 
@@ -382,7 +390,23 @@ Los campos sensibles almacenados en `modules.json` y `config.json` se cifran en 
 | `gmail_refresh_token` | Refresh token de OAuth2 para Gmail (`config.json → email`) |
 | `ms365_client_secret` | Client Secret de Microsoft 365 para email (`config.json → email`) |
 | `gmail_client_secret` | Client Secret de Gmail para email (`config.json → email`) |
+| `sp_key` | Clave privada del Service Provider SAML2 (`config.json → saml2`) |
 | `secret` | Secreto HMAC de cada webhook (`webhooks.json`) |
+
+Estos nombres del core viven en `secret_manager.ENCRYPT_KEYS`.
+
+#### Descubrimiento de secretos de módulos (schema-driven)
+
+El **core no codifica** los nombres de campos secretos de los módulos. Cada
+módulo declara sus campos sensibles en su `schema.json` con `"secret": true` o
+`"sensitive": true`, y el core los descubre dinámicamente con
+`ModuleBase.discover_secret_fields()` (recorre los schemas, incluido un nivel de
+`sub_collection`). El conjunto resultante se combina con `ENCRYPT_KEYS` y se
+aplica de forma uniforme: cifrado en reposo, enmascarado en las respuestas de la
+API (`mask_sensitive`) y restauración al guardar (`restore_sensitive`). Así los
+módulos permanecen **100 % independientes del core** y pueden añadir o renombrar
+campos secretos sin tocar el núcleo (p. ej. `snmpv3_auth_key`,
+`snmpv3_priv_key`, `ssh_key`…).
 
 ### Derivación de clave
 
@@ -504,7 +528,7 @@ ServiceSentry no usa SQL — los datos se guardan en JSON. Sin embargo los tests
 
 ## Protección contra Path Traversal
 
-Los endpoints que aceptan parámetros de ruta (`/lang/<code>`, `/theme/<mode>`, `/api/v1/sessions/revoke/<sid>`) validan los valores contra listas blancas o los tratan como claves opacas, evitando acceso a ficheros del sistema.
+Los endpoints que aceptan parámetros de ruta (`/lang/<code>`, `/theme/<mode>`, `/api/v1/sessions/revoke/<uid>`) validan los valores contra listas blancas o los tratan como claves opacas, evitando acceso a ficheros del sistema.
 
 ### Operaciones de fichero en módulos watchful
 
@@ -519,8 +543,32 @@ Las funciones afectadas son `upload_mib`, `delete_mib`, `get_mib_details`, `get_
 |------|----------|---------|
 | `test_path_traversal_lang_endpoint` | `/lang/<code>` | `../../../etc/passwd`, `%2e%2e%2f…`, etc. → 200/302/404, idioma sin cambiar |
 | `test_path_traversal_theme_endpoint` | `/theme/<mode>` | `../../etc/shadow` → 200/302/404, tema sin cambiar |
-| `test_path_traversal_session_revoke` | `/api/v1/sessions/revoke/<sid>` | `../../../etc/passwd`, URL-encoded → 404 o 400 |
+| `test_path_traversal_session_revoke` | `/api/v1/sessions/revoke/<uid>` | `../../../etc/passwd`, URL-encoded → 404 o 400 |
 | `test_sql_injection_in_user_lookup` | `/api/v1/users/<name>` | `../../../etc/passwd` → 404 o 400 |
+
+---
+
+## Protección contra SSRF
+
+Las URLs proporcionadas por el usuario que el servidor descarga (p. ej.
+`import_mib_from_url` del módulo SNMP, o cualquier integración futura que haga
+peticiones salientes) se validan con `lib.net_guard.validate_external_url()`
+antes de la petición.
+
+**Bloquea:**
+- Esquemas distintos de `http`/`https` (`file://`, `ftp://`, `data://`,
+  `gopher://`…) — evita lectura de ficheros locales.
+- Direcciones **link-local / de metadatos**: `169.254.0.0/16` y `fe80::/10`
+  (incluye el endpoint de metadatos de instancia cloud `169.254.169.254`, usado
+  para robar credenciales IAM). Se resuelven **todas** las IPs del hostname con
+  `socket.getaddrinfo()` y se comprueba cada una.
+
+**Permite:** direcciones privadas RFC1918 (`10/8`, `172.16/12`, `192.168/16`),
+ya que la monitorización de servicios internos es un caso de uso legítimo.
+
+La función devuelve `None` si la URL es aceptable, o un motivo legible si la
+rechaza. Las URLs de GitHub (`/blob/`) se convierten automáticamente a
+`raw.githubusercontent.com` antes de validar.
 
 ---
 

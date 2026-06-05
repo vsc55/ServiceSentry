@@ -17,6 +17,9 @@ from flask import request, session
 class _AuditMixin:
     """Audit log persistence and helpers."""
 
+    # Core secret field names redacted from audit detail.  Module-declared
+    # secret fields are added dynamically at init via _module_secret_fields
+    # (see _sensitive_fields()), keeping the core free of module specifics.
     _SENSITIVE_FIELDS = frozenset({
         'password', 'password_hash', 'token', 'secret', 'key_file',
         'bind_password', 'client_secret', 'sp_key',
@@ -27,10 +30,15 @@ class _AuditMixin:
     # ── Initialisation ────────────────────────────────────────────────────────
 
     def _init_audit_store(self) -> None:
-        """Create the AuditStore and migrate audit.json if it exists."""
+        """Create the AuditStore on the shared connector and migrate audit.json."""
         from lib.audit_store import AuditStore  # noqa: PLC0415
-        db_path = os.path.join(self._var_dir or self._config_dir, 'data.db')
-        self._audit_store = AuditStore(db_path)
+        from lib.db import get_connector        # noqa: PLC0415
+        connector = getattr(self, '_db_connector', None)
+        if connector is None:
+            db_path = os.path.join(self._var_dir or self._config_dir, 'data.db')
+            connector = get_connector(None, default_sqlite_path=db_path)
+            self._db_connector = connector
+        self._audit_store = AuditStore(connector)
         self._migrate_audit_json()
 
     def _migrate_audit_json(self) -> None:

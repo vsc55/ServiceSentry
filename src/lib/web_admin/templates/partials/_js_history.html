@@ -83,7 +83,7 @@ async function _historyLoadChart() {
 function _historyRenderLayout() {
     const cont = document.getElementById('history-container');
     if (!cont) return;
-    cont.innerHTML = `<div class="d-flex flex-column" style="height:calc(100vh - var(--ss-top-offset, 56px) - 40px)">
+    cont.innerHTML = `<div class="d-flex flex-column" style="flex:1 1 auto;height:100%;min-height:0">
 <!-- Tab-level header: search + Clear All (always visible, scope is obvious) -->
 <div class="d-flex align-items-center gap-2 mb-2" style="flex-shrink:0" id="history-tab-header">
   <span class="fw-semibold me-1"><i class="bi bi-graph-up me-1"></i>${esc(t('tab_history'))}</span>

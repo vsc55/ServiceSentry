@@ -1144,6 +1144,10 @@ LANG = {
     'col_updated_by':         'Updated By',
     'col_chooser_tt':         'Show / hide columns',
     'col_reset_defaults':     'Reset defaults',
+    'col_user_agent':         'User Agent',
+    'view_mode':              'View',
+    'view_cards':             'Card view',
+    'view_table':             'Table view',
     # Input validation
     'telegram_invalid_token': 'Invalid Telegram bot token format',
     'telegram_invalid_chat_id': 'Chat ID must be a valid number',

@@ -86,6 +86,12 @@ def authenticate(wa, username: str, password: str) -> tuple:
     if not _HAS_LDAP3:
         return None, 'ldap_unavailable'
 
+    # Reject empty password up front: many LDAP/AD servers treat a bind with a
+    # valid DN and an empty password as an *unauthenticated bind* that succeeds
+    # (RFC 4513), which would be an authentication bypass.
+    if not password:
+        return None, 'ldap_invalid_credentials'
+
     cfg = _get_config(wa)
     if not cfg.get('enabled'):
         return None, 'ldap_disabled'

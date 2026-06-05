@@ -69,7 +69,7 @@ class TestSessionRegistry:
         admin._users['other'] = {'uid': other_uid, 'role': '', 'display_name': 'Other',
                                   'password_hash': '', 'enabled': True}
         admin._sessions['fake'] = {
-            'sid': 'fakesid', 'user_uid': other_uid,
+            'uid': 'fakeuid', 'user_uid': other_uid,
             'created': '', 'last_seen': '', 'ip': '', 'user_agent': '',
         }
         assert len(admin._sessions) == 2
@@ -87,7 +87,7 @@ class TestSessionRegistry:
         assert rows[token]['user_uid'] == expected
 
     def test_api_get_sessions(self, client):
-        """GET /api/sessions returns sessions keyed by sid with is_current flag."""
+        """GET /api/sessions returns sessions keyed by uid with is_current flag."""
         _login(client)
         resp = client.get("/api/v1/sessions")
         assert resp.status_code == 200
@@ -104,12 +104,12 @@ class TestSessionRegistry:
             assert token not in str(v)
 
     def test_api_revoke_session(self, admin, client):
-        """POST /api/sessions/revoke/<sid> removes that session."""
+        """POST /api/sessions/revoke/<uid> removes that session."""
         _login(client)
-        # sid comes from the entry's 'sid' field, not the token key
+        # uid comes from the entry's 'uid' field, not the token key
         token = list(admin._sessions.keys())[0]
-        sid = admin._sessions[token]['sid']
-        resp = client.post(f"/api/v1/sessions/revoke/{sid}",
+        uid = admin._sessions[token]['uid']
+        resp = client.post(f"/api/v1/sessions/revoke/{uid}",
                            content_type="application/json", data="{}")
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
@@ -130,7 +130,7 @@ class TestSessionRegistry:
         admin._users['victim'] = {'uid': victim_uid, 'role': '', 'display_name': 'Victim',
                                    'password_hash': '', 'enabled': True}
         admin._sessions['fake'] = {
-            'sid': 'fakesid2', 'user_uid': victim_uid,
+            'uid': 'fakeuid2', 'user_uid': victim_uid,
             'created': '', 'last_seen': '', 'ip': '', 'user_agent': '',
         }
         resp = client.post("/api/v1/sessions/revoke-user/victim",

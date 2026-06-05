@@ -931,6 +931,12 @@ class Watchful(ModuleBase):
             url,
         )
 
+        # SSRF guard: block non-HTTP(S) schemes and link-local/metadata targets.
+        from lib.net_guard import validate_external_url  # noqa: PLC0415
+        _reason = validate_external_url(url)
+        if _reason:
+            return {'ok': False, 'message': f'Blocked: {_reason}'}
+
         # Derive filename from the final path segment (strip query/fragment)
         filename = os.path.basename(url.split('?')[0].split('#')[0])
         if not filename:
@@ -1167,18 +1173,25 @@ class Watchful(ModuleBase):
             transport = await UdpTransportTarget.create(
                 (host, port), timeout=timeout, retries=retries
             )
-            error_indication, error_status, error_index, var_binds = await get_cmd(
-                SnmpEngine(), auth_data, transport, ContextData(),
-                ObjectType(ObjectIdentity(oid)),
-            )
-            if error_indication:
-                return None, str(error_indication)
-            if error_status:
-                idx = int(error_index) - 1
-                return None, f'{error_status.prettyPrint()} at index {idx}'
-            for _, val in var_binds:
-                return str(val), None
-            return None, 'no OID data returned'
+            engine = SnmpEngine()
+            try:
+                error_indication, error_status, error_index, var_binds = await get_cmd(
+                    engine, auth_data, transport, ContextData(),
+                    ObjectType(ObjectIdentity(oid)),
+                )
+                if error_indication:
+                    return None, str(error_indication)
+                if error_status:
+                    idx = int(error_index) - 1
+                    return None, f'{error_status.prettyPrint()} at index {idx}'
+                for _, val in var_binds:
+                    return str(val), None
+                return None, 'no OID data returned'
+            finally:
+                try:
+                    engine.close_dispatcher()
+                except Exception:  # pylint: disable=broad-except
+                    pass
 
         try:
             return asyncio.run(_run())
@@ -1250,6 +1263,11 @@ class Watchful(ModuleBase):
                         break
             except Exception:  # pylint: disable=broad-except
                 pass
+            finally:
+                try:
+                    engine.close_dispatcher()
+                except Exception:  # pylint: disable=broad-except
+                    pass
             return items
 
         per_subtree = max(1, max_oids // 2)

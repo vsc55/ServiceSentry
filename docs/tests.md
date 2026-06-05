@@ -16,6 +16,7 @@
 6. [Core — Sensores térmicos](#6-core--sensores-térmicos)
 7. [Core — Helpers de parseo](#7-core--helpers-de-parseo)
 8. [Core — Herramientas generales](#8-core--herramientas-generales)
+8b. [Core — Reconciliación de esquema de BD](#8b-core--reconciliación-de-esquema-de-bd)
 9. [Monitor — Descubrimiento y ejecución de módulos](#9-monitor--descubrimiento-y-ejecución-de-módulos)
 10. [Integridad de módulos Watchful](#10-integridad-de-módulos-watchful)
 11. [Panel Web — Inicialización y autenticación](#11-panel-web--inicialización-y-autenticación)
@@ -337,6 +338,33 @@
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
 | Conversión de bytes a unidades legibles | `bytes2human(1024)` → `"1.0 KiB"`, etc. | String con unidad correcta | Si la unidad o valor es incorrecto |
+
+---
+
+## 8b. Core — Reconciliación de esquema de BD
+
+**Archivo:** `tests/test_db_schema.py`
+
+Tests del motor de reconciliación declarativa de esquema (`lib/db/schema.py` +
+`BaseConnector.reconcile_table`). Se ejecutan sobre SQLite (motor por defecto);
+MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_creates_table_from_spec` | Crea la tabla desde el `TableSpec` si no existe | Columnas y orden e índices correctos | Si difiere |
+| `test_idempotent_no_changes` | Segunda reconciliación no detecta cambios | `is_empty`, sin rebuild | Si hay falsos positivos |
+| `test_add_trailing_column_keeps_data` | Añadir columna al final | `ADD COLUMN` sin rebuild, datos intactos | Si reconstruye o pierde datos |
+| `test_add_middle_column_triggers_rebuild_and_keeps_data` | Columna nueva en medio del orden | Rebuild, orden correcto, datos intactos | Si el orden o los datos fallan |
+| `test_reorder_columns_keeps_data` | Reordenar (`col2,col1`→`col1,col2`) | Rebuild, orden correcto, datos intactos | Si no reordena o pierde datos |
+| `test_type_change_rebuilds` | Cambio de tipo de columna | Rebuild, valores convertidos | Si no aplica el tipo |
+| `test_nullable_and_default_change` | Pasar a NOT NULL + default (con `COALESCE` de NULLs) | Rebuild sin violar la restricción | Si falla la copia |
+| `test_create_missing_index_without_rebuild` | Crear índice que falta | `CREATE INDEX` sin rebuild | Si reconstruye |
+| `test_changed_index_recreated` | Índice con columnas distintas | Drop + recreate | Si conserva el antiguo |
+| `test_extra_column_kept_and_reported` | Columna extra en BD (no en spec) | Se conserva y se reporta, nunca se borra | Si la elimina |
+| `test_rename_column_preserves_data` | Rename vía `renames` (`sid`→`uid`) | Datos preservados | Si pierde datos |
+| `test_canonical_type` (param.) | Normalización de tipos cross-engine | INTEGER/TEXT/REAL canónicos | Si difiere |
+| `test_canonical_default` (param.) | Normalización de defaults (comillas, `NULL`, cast PG) | Valor canónico correcto | Si difiere |
+| `test_diff_table_pure_function` | `diff_table()` sobre tabla recién creada | `is_empty` | Si reporta diferencias |
 
 ---
 

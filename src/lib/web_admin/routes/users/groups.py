@@ -41,12 +41,14 @@ def register(app, wa):
     @groups_view_req
     def api_get_groups():
         """Return all groups keyed by uid.  Roles are returned as UIDs."""
+        # Build a {group_uid: [usernames]} map in ONE pass over users, instead
+        # of scanning every user for every group (was O(groups × users)).
+        members_by_group: dict[str, list] = {}
+        for uname, udata in wa._users.items():
+            for g in udata.get('groups', []):
+                members_by_group.setdefault(g, []).append(uname)
         result: dict[str, dict] = {}
         for group_uid, gdata in wa._groups.items():
-            members = [
-                u for u, d in wa._users.items()
-                if group_uid in d.get('groups', [])
-            ]
             # Normalize stored role refs to UIDs; skip invalid/unknown entries
             role_uids = [
                 uid for r in gdata.get('roles', [])
@@ -57,7 +59,7 @@ def register(app, wa):
                 'name':        gdata.get('name', group_uid),
                 'description': gdata.get('description', ''),
                 'roles':       role_uids,
-                'members':     members,
+                'members':     members_by_group.get(group_uid, []),
                 'builtin':     group_uid in _BUILTIN_GROUPS,
                 'enabled':     gdata.get('enabled', True),
                 'created_at':  gdata.get('created_at', ''),

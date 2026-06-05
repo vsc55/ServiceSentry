@@ -44,6 +44,13 @@ def register(app, wa):
         if method is None:
             return jsonify({'error': 'Action not found'}), 404
 
+        # Access control: read-only actions need only modules_view (already
+        # enforced by the decorator); any state-changing action (upload/delete
+        # MIB, import-from-URL, compile, build index, …) requires edit rights.
+        _read_only = action in getattr(cls, 'READ_ONLY_ACTIONS', set())
+        if not _read_only and not wa._has_module_permission(module_name, 'edit'):
+            return jsonify({'error': wa._t('insufficient_permissions')}), 403
+
         try:
             if request.method == 'POST':
                 config = request.get_json(silent=True) or {}
@@ -59,7 +66,6 @@ def register(app, wa):
                 result = method()
             # Build audit entry via module hooks (keeps route handler generic).
             _res = result if isinstance(result, dict) else {}
-            _read_only = action in getattr(cls, 'READ_ONLY_ACTIONS', set())
             if not _read_only:
                 _audit_fn = getattr(cls, 'audit_detail', None)
                 if callable(_audit_fn):

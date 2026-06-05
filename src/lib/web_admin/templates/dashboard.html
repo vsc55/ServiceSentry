@@ -328,6 +328,7 @@
                                 <button class="btn btn-sm btn-danger" onclick="_bulkRevokeSessions()" title="{{ i18n.revoke_session_tt }}"><i class="bi bi-x-lg me-1"></i>{{ i18n.revoke_session }}</button>
                                 <button class="btn btn-sm btn-secondary" onclick="_selectedSessions.clear();renderSessions()" title="{{ i18n.clear_filters }}"><i class="bi bi-x-lg"></i></button>
                             </div>
+                            <span id="sessionsViewControls" class="d-flex align-items-center gap-1"></span>
                             <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
                                 <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}
                             </button>

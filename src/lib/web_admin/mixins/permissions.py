@@ -13,6 +13,18 @@ _UUID_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Precomputed reverse maps for built-in roles (built once at import) so the
+# per-request permission resolution does O(1) dict lookups instead of scanning
+# BUILTIN_ROLE_UIDS on every call.
+_BUILTIN_UID_TO_KEY: dict[str, str] = {
+    uid: key for key, uid in BUILTIN_ROLE_UIDS.items()
+}
+_BUILTIN_UID_TO_PERMS: dict[str, frozenset] = {
+    uid: BUILTIN_ROLE_PERMISSIONS[key]
+    for key, uid in BUILTIN_ROLE_UIDS.items()
+    if key in BUILTIN_ROLE_PERMISSIONS
+}
+
 
 class _PermissionsMixin:
     """Resolve effective permissions for roles, groups and the active session."""
@@ -30,9 +42,9 @@ class _PermissionsMixin:
         ('admin', 'editor', …).  For custom roles it returns the display name
         stored in _custom_roles.
         """
-        for name, builtin_uid in BUILTIN_ROLE_UIDS.items():
-            if builtin_uid == uid:
-                return name
+        name = _BUILTIN_UID_TO_KEY.get(uid)
+        if name is not None:
+            return name
         custom = self._custom_roles.get(uid)
         return custom.get('name') if custom else None
 
@@ -78,10 +90,10 @@ class _PermissionsMixin:
 
         Disabled custom roles grant no permissions.
         """
-        # Built-in by UID
-        for bname, buid in BUILTIN_ROLE_UIDS.items():
-            if buid == role_ref:
-                return BUILTIN_ROLE_PERMISSIONS.get(bname, frozenset())
+        # Built-in by UID (O(1) lookup)
+        builtin = _BUILTIN_UID_TO_PERMS.get(role_ref)
+        if builtin is not None:
+            return builtin
         # Built-in by internal key (backward compat)
         if role_ref in BUILTIN_ROLE_PERMISSIONS:
             return BUILTIN_ROLE_PERMISSIONS[role_ref]

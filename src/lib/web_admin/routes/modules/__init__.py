@@ -49,11 +49,11 @@ def register(app, wa):
         perms = wa._get_session_permissions()
         all_data = wa._read_config_file(wa._MODULES_FILE)
         if 'modules_view' in perms:
-            return jsonify(secret_manager.mask_sensitive(all_data))
+            return jsonify(secret_manager.mask_sensitive(all_data, wa._secret_keys))
         visible = {n: c for n, c in all_data.items() if f'module.{n}.view' in perms}
         if not visible:
             return jsonify({'error': wa._t('access_denied')}), 403
-        return jsonify(secret_manager.mask_sensitive(visible))
+        return jsonify(secret_manager.mask_sensitive(visible, wa._secret_keys))
 
     @app.route('/api/v1/modules', methods=['PUT'])
     @login_required
@@ -93,11 +93,11 @@ def register(app, wa):
                     # whole-module removal requires global edit or delete
                     if 'modules_delete' not in perms:
                         return jsonify({'error': wa._t('access_denied')}), 403
-        secret_manager.restore_sensitive(data, old_data)
+        secret_manager.restore_sensitive(data, old_data, keys=wa._secret_keys)
         _ensure_item_uids(data)   # generate stable UIDs for new items
         if wa._save_config_file(wa._MODULES_FILE, data):
             changes = wa._diff_dicts(
-                old_data, data, sensitive=wa._SENSITIVE_FIELDS,
+                old_data, data, sensitive=wa._sensitive_fields,
             )
             wa._audit('modules_saved', detail=changes or '')
             return jsonify({'ok': True})

@@ -93,8 +93,8 @@ variables de entorno en texto plano.
 
 ```yaml
 volumes:
-  config:    # → /etc/ServiSesentry      (config.json, modules.json, usuarios, roles…)
-  vardata:   # → /var/lib/ServiSesentry  (status.json, sesiones, log de auditoría)
+  config:    # → /etc/ServiSesentry      (config.json, modules.json)
+  vardata:   # → /var/lib/ServiSesentry  (data.db: usuarios, roles, grupos, sesiones, auditoría, historial; status.json)
 ```
 
 Ambos volúmenes son volúmenes con nombre gestionados por Docker. Para inspeccionar

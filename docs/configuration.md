@@ -74,6 +74,39 @@ Configuración global de la aplicación.
 |-------|------|-------------|-------------|
 | `global.debug` | bool | false | Habilitar salida de debug |
 
+### Sección `database`
+
+Selecciona el motor de base de datos donde se persisten usuarios, roles, grupos,
+sesiones, auditoría e historial. Si se omite, se usa **SQLite** sobre el fichero
+`data.db` del directorio var. El esquema de cada tabla se valida y reconcilia
+automáticamente en cada arranque (ver [architecture.md](architecture.md) →
+*Capa de Persistencia y Esquema de BD*).
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `database.driver` | string | `"sqlite"` | Motor: `sqlite`, `postgresql`, `mysql` o `mariadb` |
+| `database.path` | string | `data.db` (var) | **SQLite** — ruta al fichero `.db`. Solo se usa con `driver=sqlite`. |
+| `database.host` | string | `"localhost"` | **PostgreSQL/MySQL** — host del servidor |
+| `database.port` | int | `5432` / `3306` | **PostgreSQL/MySQL** — puerto (5432 PG, 3306 MySQL) |
+| `database.name` | string | `"servicesentry"` | **PostgreSQL/MySQL** — nombre de la base de datos |
+| `database.user` | string | `""` | **PostgreSQL/MySQL** — usuario |
+| `database.password` | string | `""` | **PostgreSQL/MySQL** — contraseña (cifrada en disco) |
+
+```json
+"database": { "driver": "sqlite" }
+"database": { "driver": "postgresql", "host": "db", "port": 5432,
+              "name": "servicesentry", "user": "ss", "password": "secret" }
+"database": { "driver": "mysql", "host": "db", "port": 3306,
+              "name": "servicesentry", "user": "ss", "password": "secret" }
+```
+
+> PostgreSQL requiere `psycopg2-binary`; MySQL/MariaDB requiere `PyMySQL`. Ambos
+> son dependencias opcionales — sin ellas, solo está disponible SQLite.
+>
+> **Convención de fechas:** las columnas de fecha/hora se almacenan como `TEXT`
+> ISO 8601 UTC en los tres motores (SQLite no tiene tipo de fecha nativo). Ver
+> la nota *TODO* en [architecture.md](architecture.md).
+
 ### Sección `telegram`
 
 | Clave | Tipo | Por defecto | Descripción |
@@ -165,12 +198,35 @@ Requiere el paquete opcional `authlib` (`pip install authlib`).
 
 Cuando está habilitado, aparece el botón **Login with SSO** en la pantalla de login. El wizard integrado en la pestaña de configuración puede registrar la aplicación en Microsoft Entra ID automáticamente mediante Device Code Flow.
 
+### Sección `saml2`
+
+Requiere el paquete opcional `python3-saml` (`pip install python3-saml`). **[alpha]**
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `saml2.enabled` | bool | `false` | Activar SSO SAML2 |
+| `saml2.sp_entity_id` | string | `""` | Entity ID del Service Provider (esta aplicación) |
+| `saml2.sp_acs_url` | string | `""` | URL del Assertion Consumer Service (`…/auth/saml2/acs`) |
+| `saml2.sp_cert` | string | `""` | Certificado del SP en PEM |
+| `saml2.sp_key` | string | `""` | Clave privada del SP en PEM (cifrada en disco) |
+| `saml2.idp_entity_id` | string | `""` | Entity ID del Identity Provider |
+| `saml2.idp_sso_url` | string | `""` | URL de Single Sign-On del IdP |
+| `saml2.idp_cert` | string | `""` | Certificado del IdP (base64) |
+| `saml2.username_attr` | string | `""` | Atributo SAML del que se lee el username |
+| `saml2.email_attr` | string | `"email"` | Atributo SAML del que se lee el email |
+| `saml2.name_attr` | string | `"displayName"` | Atributo SAML del que se lee el nombre visible |
+| `saml2.groups_attr` | string | `"groups"` | Atributo SAML del que se leen los grupos |
+| `saml2.group_role_map` | string (JSON) | `"{}"` | Mapeo `{grupo SAML: rol}` |
+| `saml2.auto_create_users` | bool | `true` | Crear el usuario en el primer login |
+
+Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/metadata` (metadatos SP para registrar en el IdP). Los usuarios se sincronizan con `auth_source: "saml2"`.
+
 ### Sección `email`
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
 | `email.enabled` | bool | `false` | Activar notificaciones por email |
-| `email.provider` | string | `"smtp"` | Proveedor de envío: `smtp`, `ms365` o `gmail` |
+| `email.provider` | string | `"smtp"` | Proveedor de envío: `smtp`, `microsoft365` o `gmail` |
 | `email.recipients` | string | `""` | Direcciones de destino separadas por comas |
 | `email.subject_prefix` | string | `""` | Prefijo opcional para el asunto del mensaje |
 | `email.notify_on_down` | bool | `true` | Enviar alerta cuando un check falla *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
@@ -185,9 +241,9 @@ Cuando está habilitado, aparece el botón **Login with SSO** en la pantalla de 
 | `email.smtp_use_ssl` | bool | `false` | Usar SSL/TLS directo (habitual en el puerto 465) |
 | `email.smtp_username` | string | `""` | Usuario para autenticación SMTP |
 | `email.smtp_password` | string | `""` | Contraseña SMTP (cifrada en disco) |
-| `email.ms365_tenant_id` | string | `""` | ID del tenant de Microsoft 365 (solo `provider=ms365`) |
-| `email.ms365_client_id` | string | `""` | Client ID de la app Microsoft 365 (solo `provider=ms365`) |
-| `email.ms365_client_secret` | string | `""` | Client Secret de Microsoft 365 (cifrado en disco; solo `provider=ms365`) |
+| `email.ms365_tenant_id` | string | `""` | ID del tenant de Microsoft 365 (solo `provider=microsoft365`) |
+| `email.ms365_client_id` | string | `""` | Client ID de la app Microsoft 365 (solo `provider=microsoft365`) |
+| `email.ms365_client_secret` | string | `""` | Client Secret de Microsoft 365 (cifrado en disco; solo `provider=microsoft365`) |
 | `email.gmail_client_id` | string | `""` | Client ID de la app Gmail OAuth2 (solo `provider=gmail`) |
 | `email.gmail_client_secret` | string | `""` | Client Secret de Gmail (cifrado en disco; solo `provider=gmail`) |
 | `email.gmail_refresh_token` | string | `""` | Refresh token de OAuth2 para Gmail (cifrado en disco; solo `provider=gmail`) |

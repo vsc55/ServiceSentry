@@ -185,6 +185,80 @@
 .ss-card-band-top    { border-bottom: 1px solid var(--bs-border-color); }
 .ss-card-band-bottom { border-top:    1px solid var(--bs-border-color); }
 
+/* ── Full-height content layout ───────────────────────────────────────────
+   The active tab fills the viewport below the tabs so short sections don't
+   leave a large empty band of page background underneath.  A single anchor on
+   the main .tab-content sets the available height (viewport minus the sticky
+   navbar via --ss-top-offset, minus the main tab row + padding); everything
+   below fills via flexbox — no per-section magic numbers. */
+.container-fluid > .tab-content {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - var(--ss-top-offset, 56px) - 5.5rem);
+}
+.container-fluid > .tab-content > .tab-pane.active {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+/* Nested Access sub-tabs (Sessions/Users/Groups/Roles) fill their parent pane;
+   the sub-tab nav keeps its height and the sub-pane fills the rest. */
+#tab-access > .tab-content {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+#tab-access > .tab-content > .tab-pane.active {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+/* Each section's primary container grows to fill its pane.  Toolbars/headers
+   rendered before the container keep their natural height (flexbox handles it). */
+#overview-container, #modules-container, #config-container, #status-container,
+#history-container, #users-container, #groups-container, #roles-container,
+#audit-container, #sessions-panel {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+/* List/panel cards fill their container; the table/body area grows and scrolls
+   while the pagination bands stay pinned top/bottom. */
+#users-container  > .ss-card,
+#groups-container > .ss-card,
+#roles-container  > .ss-card,
+#audit-container  > .ss-card {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+#users-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
+#groups-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
+#roles-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
+#audit-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band) {
+    flex: 1 1 auto;
+    overflow: auto;
+    min-height: 0;
+}
+/* Sessions panel: the body is a flex column so the bottom pagination stays
+   pinned; only the middle card-grid scrolls. */
+#sessions-panel > #sessions-container {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+#sessions-panel > #sessions-container > .ss-sessions-scroll {
+    flex: 1 1 auto;
+    overflow: auto;
+    min-height: 0;
+}
+
 /* ================================================================
    SS Table
    ================================================================ */

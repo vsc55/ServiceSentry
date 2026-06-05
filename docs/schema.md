@@ -61,13 +61,23 @@ Valor mínimo y máximo permitido para campos numéricos (`int` o `float`). Apli
 
 ---
 
-### `sensitive`
+### `sensitive` / `secret`
 
-Si es `true`, el campo se renderiza como `<input type="password">` (contenido oculto). Usado para contraseñas, tokens y claves privadas.
+Si `sensitive` es `true`, el campo se renderiza como `<input type="password">`
+(contenido oculto) y se **enmascara** en las respuestas de la API. Si `secret`
+es `true`, además se **cifra en reposo** con Fernet (prefijo `enc:`). Usados para
+contraseñas, tokens y claves privadas.
 
 ```json
-"password": {"type": "str", "default": "", "sensitive": true}
+"password":       {"type": "str", "default": "", "sensitive": true},
+"snmpv3_auth_key": {"type": "str", "default": "", "secret": true}
 ```
+
+> El core **descubre automáticamente** estos campos en los `schema.json` de los
+> módulos mediante `ModuleBase.discover_secret_fields()` y los protege de forma
+> uniforme (cifrado, enmascarado, restauración al guardar) sin codificar sus
+> nombres. Así los módulos permanecen independientes del core. Ver
+> [security.md](security.md) → *Descubrimiento de secretos de módulos*.
 
 ---
 

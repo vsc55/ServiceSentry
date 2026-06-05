@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Columnar SQLite store for WebAdmin user accounts.
+"""Relational store for WebAdmin user accounts.
 
-The user→group membership is stored in a dedicated ``users_groups`` table
-using the user's stable UID and the group's stable UID, so renaming either
-side never breaks the relationship.
+Backed by a pluggable :class:`lib.db.BaseConnector` (SQLite by default, but
+PostgreSQL/MySQL are supported through the same interface), so this store
+never talks to a specific database driver directly.
 
-Core fields have dedicated columns for efficient queries.  Variable or
-optional fields (``_failed_attempts``, ``_locked_until``, LDAP/OIDC sync
-fields, etc.) are stored in a JSON ``extra`` column so the schema remains
-stable when new auth providers add fields.
+The user→group membership lives in a dedicated ``users_groups`` table keyed
+by the user's stable UID and the group's stable UID, so renaming either side
+never breaks the relationship.
+
+Core fields have dedicated columns; variable/optional fields (LDAP/OIDC sync
+data, lockout counters, …) go into a JSON ``extra`` column.
 
 Schema::
 
-    users(username PK, uid UNIQUE, password_hash, role, display_name,
-          email, lang, dark_mode, enabled, auth_source, extra TEXT/JSON)
+    users(uid UNIQUE, username PK, password_hash, role, display_name,
+          email, lang, dark_mode, enabled, auth_source, extra,
+          created_at, updated_at, updated_by)
     users_groups(user_uid, group_uid, PRIMARY KEY(user_uid, group_uid))
-
-Thread-safe: per-thread connections via ``threading.local``.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
-import threading
 
+from lib.db import BaseConnector
+from lib.db.schema import Column, Index, TableSpec
 
 # Fields stored as individual columns; everything else goes into ``extra``.
 _CORE = frozenset({
@@ -36,116 +36,76 @@ _CORE = frozenset({
     # 'groups' is intentionally excluded — stored in users_groups table
 })
 
+_USERS_SCHEMA = TableSpec(
+    name='users',
+    columns=(
+        Column('uid',           'TEXT', nullable=False, default="''", unique=True),
+        Column('username',      'TEXT', primary_key=True),
+        Column('password_hash', 'TEXT', nullable=False, default="''"),
+        Column('role',          'TEXT', nullable=False, default="''"),
+        Column('display_name',  'TEXT', nullable=False, default="''"),
+        Column('email',         'TEXT', nullable=False, default="''"),
+        Column('lang',          'TEXT', nullable=False, default="''"),
+        Column('dark_mode',     'INTEGER'),
+        Column('enabled',       'INTEGER', nullable=False, default='1'),
+        Column('auth_source',   'TEXT', nullable=False, default="'local'"),
+        Column('extra',         'TEXT', nullable=False, default="'{}'"),
+        Column('created_at',    'TEXT', nullable=False, default="''"),
+        Column('updated_at',    'TEXT', nullable=False, default="''"),
+        Column('updated_by',    'TEXT', nullable=False, default="''"),
+    ),
+    indexes=(Index('idx_users_role', ('role',)),),
+)
+
+_USERS_GROUPS_SCHEMA = TableSpec(
+    name='users_groups',
+    columns=(
+        Column('user_uid',  'TEXT', nullable=False),
+        Column('group_uid', 'TEXT', nullable=False),
+    ),
+    composite_pk=('user_uid', 'group_uid'),
+    indexes=(
+        Index('idx_users_groups_user',  ('user_uid',)),
+        Index('idx_users_groups_group', ('group_uid',)),
+    ),
+)
+
 
 class UsersStore:
-    """Relational SQLite store for WebAdmin user accounts."""
+    """Relational store for WebAdmin user accounts (backend-agnostic)."""
 
-    def __init__(self, db_path: str) -> None:
-        self._path  = db_path
-        self._local = threading.local()
-        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    def __init__(self, db: BaseConnector) -> None:
+        self._db = db
         self._bootstrap()
-
-    # ── Connection ────────────────────────────────────────────────────────────
-
-    def _conn(self) -> sqlite3.Connection:
-        conn = getattr(self._local, 'conn', None)
-        if conn is None:
-            conn = sqlite3.connect(self._path, check_same_thread=False, timeout=30, isolation_level=None)
-            conn.execute('PRAGMA journal_mode=WAL')
-            conn.execute('PRAGMA busy_timeout=30000')
-            conn.execute('PRAGMA synchronous=NORMAL')
-            self._local.conn = conn
-        return conn
 
     # ── Schema ────────────────────────────────────────────────────────────────
 
     def _bootstrap(self) -> None:
-        """Create tables if they don't exist yet."""
-        conn = self._conn()
-        cols = {r[1] for r in conn.execute('PRAGMA table_info(users)').fetchall()}
-        if not cols:
-            self._create_tables(conn)
-        else:
-            # Forward-migration: add audit columns if missing
-            for col in ('created_at', 'updated_at', 'updated_by'):
-                if col not in cols:
-                    conn.execute(f'ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ""')
-            conn.commit()
-        # Backfill empty audit columns for existing rows
-        import time as _t
+        """Reconcile tables to the declarative schema; backfill audit columns."""
+        db = self._db
+        db.reconcile_table(_USERS_SCHEMA)
+        db.reconcile_table(_USERS_GROUPS_SCHEMA)
+        # Backfill empty audit columns for existing rows.
+        import time as _t  # noqa: PLC0415
         _now = _t.strftime('%Y-%m-%dT%H:%M:%SZ', _t.gmtime())
-        conn.execute(
-            'UPDATE users SET created_at=?, updated_at=?, updated_by=? WHERE created_at=""',
+        db.execute(
+            "UPDATE users SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
             (_now, _now, 'system'),
         )
-        conn.commit()
-
-        # Always ensure users_groups exists (no FK — managed by app)
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS users_groups (
-                user_uid  TEXT NOT NULL,
-                group_uid TEXT NOT NULL,
-                PRIMARY KEY (user_uid, group_uid)
-            )
-        ''')
-        conn.execute(
-            'CREATE INDEX IF NOT EXISTS idx_users_groups_user '
-            'ON users_groups(user_uid)'
-        )
-        conn.execute(
-            'CREATE INDEX IF NOT EXISTS idx_users_groups_group '
-            'ON users_groups(group_uid)'
-        )
-        conn.commit()
-
-    def _create_tables(self, conn: sqlite3.Connection) -> None:
-        conn.execute('''
-            CREATE TABLE users (
-                username      TEXT PRIMARY KEY,
-                uid           TEXT UNIQUE NOT NULL DEFAULT '',
-                password_hash TEXT NOT NULL DEFAULT '',
-                role          TEXT NOT NULL DEFAULT '',
-                display_name  TEXT NOT NULL DEFAULT '',
-                email         TEXT NOT NULL DEFAULT '',
-                lang          TEXT NOT NULL DEFAULT '',
-                dark_mode     INTEGER,
-                enabled       INTEGER NOT NULL DEFAULT 1,
-                auth_source   TEXT NOT NULL DEFAULT 'local',
-                extra         TEXT NOT NULL DEFAULT '{}',
-                created_at    TEXT NOT NULL DEFAULT '',
-                updated_at    TEXT NOT NULL DEFAULT '',
-                updated_by    TEXT NOT NULL DEFAULT ''
-            )
-        ''')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_users_uid  ON users(uid)')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)')
-        conn.execute('''
-            CREATE TABLE users_groups (
-                user_uid  TEXT NOT NULL,
-                group_uid TEXT NOT NULL,
-                PRIMARY KEY (user_uid, group_uid)
-            )
-        ''')
-        conn.execute(
-            'CREATE INDEX IF NOT EXISTS idx_users_groups_user  ON users_groups(user_uid)'
-        )
-        conn.execute(
-            'CREATE INDEX IF NOT EXISTS idx_users_groups_group ON users_groups(group_uid)'
-        )
-        conn.commit()
+        db.commit()
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _insert_user_row(self, conn: sqlite3.Connection, username: str, data: dict,
-                         *, replace: bool = False) -> str:
-        """Insert/replace the user row.  Returns the uid used."""
-        uid  = data.get('uid') or username
-        dm   = data.get('dark_mode')
+    def _insert_user_row(self, username: str, data: dict) -> str:
+        """Insert the user row (callers DELETE first to avoid conflicts).
+
+        Returns the uid used.
+        """
+        uid   = data.get('uid') or username
+        dm    = data.get('dark_mode')
         extra = {k: v for k, v in data.items() if k not in _CORE and k != 'groups'}
-        verb = 'INSERT OR REPLACE' if replace else 'INSERT OR IGNORE'
-        conn.execute(
-            f'{verb} INTO users'
+        self._db.execute(
+            'INSERT INTO users'
             '(username, uid, password_hash, role, display_name, email,'
             ' lang, dark_mode, enabled, auth_source, extra,'
             ' created_at, updated_at, updated_by)'
@@ -168,15 +128,14 @@ class UsersStore:
 
     def load(self) -> dict:
         """Return all users as ``{username: {uid, role, groups: […], …}}``."""
-        conn = self._conn()
         users: dict = {}
         uid_to_name: dict = {}
 
-        for row in conn.execute(
+        for row in self._db.fetchall(
             'SELECT username, uid, password_hash, role, display_name, email,'
             ' lang, dark_mode, enabled, auth_source, extra,'
             ' created_at, updated_at, updated_by FROM users'
-        ).fetchall():
+        ):
             (username, uid, pw_hash, role, display_name, email,
              lang, dark_mode, enabled, auth_source, extra_raw,
              created_at, updated_at, updated_by) = row
@@ -204,9 +163,9 @@ class UsersStore:
             uid_to_name[uid] = username
 
         # Populate groups from the relationship table
-        for user_uid, group_uid in conn.execute(
+        for user_uid, group_uid in self._db.fetchall(
             'SELECT user_uid, group_uid FROM users_groups ORDER BY user_uid, group_uid'
-        ).fetchall():
+        ):
             name = uid_to_name.get(user_uid)
             if name and name in users:
                 users[name]['groups'].append(group_uid)
@@ -215,12 +174,12 @@ class UsersStore:
 
     def count(self) -> int:
         """Return the number of stored users."""
-        row = self._conn().execute('SELECT COUNT(*) FROM users').fetchone()
+        row = self._db.fetchone('SELECT COUNT(*) FROM users')
         return row[0] if row else 0
 
     def count_groups(self) -> int:
         """Return the total number of user-group memberships."""
-        row = self._conn().execute('SELECT COUNT(*) FROM users_groups').fetchone()
+        row = self._db.fetchone('SELECT COUNT(*) FROM users_groups')
         return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
@@ -228,18 +187,17 @@ class UsersStore:
     def save_all(self, users: dict) -> bool:
         """Replace all users and their group memberships atomically."""
         try:
-            conn = self._conn()
-            conn.execute('DELETE FROM users_groups')
-            conn.execute('DELETE FROM users')
-            for username, data in users.items():
-                uid = self._insert_user_row(conn, username, data)
-                for grp_uid in data.get('groups', []):
-                    if grp_uid:
-                        conn.execute(
-                            'INSERT INTO users_groups(user_uid, group_uid) VALUES(?,?)',
-                            (uid, str(grp_uid)),
-                        )
-            conn.commit()
+            with self._db.transaction():
+                self._db.execute('DELETE FROM users_groups')
+                self._db.execute('DELETE FROM users')
+                for username, data in users.items():
+                    uid = self._insert_user_row(username, data)
+                    for grp_uid in dict.fromkeys(data.get('groups', [])):  # dedupe, keep order
+                        if grp_uid:
+                            self._db.execute(
+                                'INSERT INTO users_groups(user_uid, group_uid) VALUES(?,?)',
+                                (uid, str(grp_uid)),
+                            )
             return True
         except Exception:  # pylint: disable=broad-except
             return False
@@ -247,16 +205,17 @@ class UsersStore:
     def upsert(self, username: str, data: dict) -> bool:
         """Insert or replace a single user and their group memberships."""
         try:
-            conn = self._conn()
-            uid = self._insert_user_row(conn, username, data, replace=True)
-            conn.execute('DELETE FROM users_groups WHERE user_uid = ?', (uid,))
-            for grp_uid in data.get('groups', []):
-                if grp_uid:
-                    conn.execute(
-                        'INSERT INTO users_groups(user_uid, group_uid) VALUES(?,?)',
-                        (uid, str(grp_uid)),
-                    )
-            conn.commit()
+            with self._db.transaction():
+                uid = data.get('uid') or username
+                self._db.execute('DELETE FROM users WHERE username = ?', (username,))
+                self._db.execute('DELETE FROM users_groups WHERE user_uid = ?', (uid,))
+                uid = self._insert_user_row(username, data)
+                for grp_uid in dict.fromkeys(data.get('groups', [])):
+                    if grp_uid:
+                        self._db.execute(
+                            'INSERT INTO users_groups(user_uid, group_uid) VALUES(?,?)',
+                            (uid, str(grp_uid)),
+                        )
             return True
         except Exception:  # pylint: disable=broad-except
             return False
@@ -264,14 +223,13 @@ class UsersStore:
     def delete(self, username: str) -> bool:
         """Delete a user and their group memberships."""
         try:
-            conn = self._conn()
-            row = conn.execute('SELECT uid FROM users WHERE username = ?', (username,)).fetchone()
+            row = self._db.fetchone('SELECT uid FROM users WHERE username = ?', (username,))
             if not row:
                 return False
             uid = row[0]
-            conn.execute('DELETE FROM users_groups WHERE user_uid = ?', (uid,))
-            conn.execute('DELETE FROM users WHERE username = ?', (username,))
-            conn.commit()
+            with self._db.transaction():
+                self._db.execute('DELETE FROM users_groups WHERE user_uid = ?', (uid,))
+                self._db.execute('DELETE FROM users WHERE username = ?', (username,))
             return True
         except Exception:  # pylint: disable=broad-except
             return False
@@ -279,8 +237,4 @@ class UsersStore:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def close(self) -> None:
-        """Close the current thread's connection."""
-        conn = getattr(self._local, 'conn', None)
-        if conn:
-            conn.close()
-            self._local.conn = None
+        """No-op: the connector owns the connection lifecycle."""

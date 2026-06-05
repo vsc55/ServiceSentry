@@ -13,10 +13,10 @@
 | [deployment.md](deployment.md) | Resumen de métodos de despliegue: install.sh, systemd y OpenRC |
 | [docker.md](docker.md) | Despliegue con Docker: variables de entorno, volúmenes, actualización y proxy inverso |
 | [architecture.md](architecture.md) | Diagrama de componentes, jerarquía de clases, estructura de directorios, flujo de ejecución, modelo de concurrencia |
-| [configuration.md](configuration.md) | config.json, monitor.json, modules.json, status.json, opciones CLI, Telegram, sistema de debug |
-| [modules.md](modules.md) | Los 15 módulos integrados: referencia de configuración, campos y flujo de cada uno |
-| [web_admin.md](web_admin.md) | Interfaz web Flask: características, roles, seguridad, endpoints REST, i18n, formularios por schema |
-| [security.md](security.md) | Autenticación, RBAC, sesiones, XSS, path traversal, auditoría y tests de seguridad del panel web |
+| [configuration.md](configuration.md) | config.json (database, ldap, oidc, saml2, email, notifications, webhooks…), monitor.json, modules.json, status.json, opciones CLI, sistema de debug |
+| [modules.md](modules.md) | Los 16 módulos integrados: referencia de configuración, campos y flujo de cada uno |
+| [web_admin.md](web_admin.md) | Interfaz web Flask: características, roles (28 permisos), notificaciones, seguridad, endpoints REST, i18n, formularios por schema |
+| [security.md](security.md) | Autenticación (local/LDAP/OIDC/SAML2), RBAC, sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |
 | [development.md](development.md) | Setup local, tests, pytest, depuración en VS Code, convenciones de código, dependencias |
 | [watchful_guide.md](watchful_guide.md) | Guía paso a paso para crear un nuevo módulo de monitorización |
 | [schema.md](schema.md) | Referencia completa de `schema.json`: todas las propiedades de campo, meta-claves, archivos de idioma y pipeline de `discover_schemas` |
@@ -29,15 +29,17 @@
 
 ServiceSentry es una herramienta de monitorización para sistemas que:
 
-- Ejecuta comprobaciones periódicas sobre servicios, discos, RAID, RAM, temperaturas, webs, bases de datos, ping, etc.
+- Ejecuta comprobaciones periódicas sobre servicios, discos, RAID, RAM, temperaturas, webs, bases de datos, ping, SNMP, etc.
 - Detecta **cambios de estado** — no envía notificación si el estado no ha cambiado (sin spam).
-- Envía alertas por **Telegram** cuando algo cambia.
-- Incluye **interfaz web de administración** (Flask) con roles, modo oscuro e i18n.
+- Envía alertas por **Telegram**, **Email** (SMTP / Microsoft 365 / Gmail) y **Webhooks** (con firma HMAC), con matriz de routing por evento.
+- Incluye **interfaz web de administración** (Flask) con RBAC (28 permisos), grupos, modo oscuro, historial con gráficas e i18n.
+- **Autenticación externa** opcional: LDAP/AD, SSO OIDC/OAuth2 y SAML2, con sincronización de usuarios y mapeo de grupos a roles.
+- **Persistencia pluggable**: SQLite por defecto, o PostgreSQL/MySQL; el esquema se valida y reconcilia automáticamente en cada arranque.
 - Soporta ejecución **local** y **remota** (SSH vía paramiko).
 - Ejecuta los módulos en **paralelo** usando `ThreadPoolExecutor`.
 - Arquitectura de **plugins**: cada módulo es un package independiente en `watchfuls/`.
 - Usa `match/case` nativo de Python 3.10+.
-- 12 de los 15 módulos son **multiplataforma** 🌐 (Linux / Windows / macOS).
+- 13 de los 16 módulos son **multiplataforma** 🌐 (Linux / Windows / macOS).
 
 ---
 
@@ -56,6 +58,7 @@ ServiceSentry es una herramienta de monitorización para sistemas que:
 | `raid` | Linux | Estado RAID mdstat (local + SSH remoto) |
 | `ram_swap` 🌐 | Linux / Win / macOS | Uso de RAM y SWAP (psutil) |
 | `service_status` 🌐 | Linux / Windows | Estado de servicios (systemd / OpenRC / SysV / Windows SCM) |
+| `snmp` 🌐 | Linux / Win / macOS | Monitorización SNMP (v1/v2c/v3) de OIDs con gestión y compilación de MIBs |
 | `ssl_cert` 🌐 | Linux / Win / macOS | Expiración de certificados SSL/TLS |
 | `temperature` | Linux / macOS | Sensores térmicos (psutil) |
 | `ups` 🌐 | Linux / Win / macOS | Estado de SAI/UPS vía NUT TCP |

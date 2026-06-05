@@ -9,7 +9,7 @@
         "__new_item_fields__": ["db_type"],
         "__field_order__": [
             "enabled", "db_type", "conn_type",
-            "ssh_host", "ssh_port", "ssh_user", "ssh_password", "ssh_key",
+            "ssh_host", "ssh_port", "ssh_user", "ssh_password", "ssh_key", "ssh_verify_host",
             "scheme", "host", "port", "socket",
             "user", "password", "token", "db", "auth_db", "db_index", "tls"
         ],
@@ -58,6 +58,7 @@
         "ssh_user":     {"type": "str",  "default": "", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
         "ssh_password": {"type": "str",  "default": "", "sensitive": true, "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
         "ssh_key":      {"type": "str",  "default": "", "placeholder": "/path/to/id_rsa", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_verify_host": {"type": "bool", "default": false, "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
         "scheme":       {"type": "str",  "default": "http", "options": ["http","https"],
                          "show_when": {"db_type": ["elasticsearch","opensearch","influxdb"]}, "group": "server"},
         "host":         {"type": "str",  "default": "", "show_when": {"conn_type": ["tcp","ssh"]}, "group": "server"},

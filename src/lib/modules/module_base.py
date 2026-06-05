@@ -83,6 +83,35 @@ class ModuleBase(ObjectBase):
         return defaults
 
     @classmethod
+    def discover_secret_fields(cls, watchfuls_dir: str | None = None) -> set[str]:
+        """Return the set of field names every module flags as secret/sensitive.
+
+        Lets the core protect module credentials (encrypt at rest, mask in API
+        responses, redact in audit) without hardcoding any module-specific
+        field names — modules declare ``"secret": true`` / ``"sensitive": true``
+        in their schema.json and the core discovers them here.  One level of
+        ``sub_collection`` nesting is inspected too.
+        """
+        secret_fields: set[str] = set()
+
+        def _scan(fields: dict) -> None:
+            for fkey, meta in fields.items():
+                if not isinstance(meta, dict):
+                    continue
+                if meta.get('secret') or meta.get('sensitive'):
+                    secret_fields.add(fkey)
+                if meta.get('type') == 'sub_collection' and isinstance(meta.get('fields'), dict):
+                    _scan(meta['fields'])
+
+        try:
+            for coll_fields in cls.discover_schemas(watchfuls_dir).values():
+                if isinstance(coll_fields, dict):
+                    _scan(coll_fields)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        return secret_fields
+
+    @classmethod
     def discover_schemas(cls, watchfuls_dir: str | None = None) -> dict[str, dict]:
         """Scan the *watchfuls* package and return the aggregated schemas.
 

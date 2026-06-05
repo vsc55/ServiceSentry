@@ -114,10 +114,34 @@ def register(app, wa):
     # OIDC client secret, SMTP password, etc.).  Only admins may modify them.
     _ADMIN_ONLY_SECTIONS = frozenset({'ldap', 'oidc', 'saml2', 'email', 'telegram'})
 
+    # Individual security-relevant web_admin fields that, like the sensitive
+    # sections above, must be admin-only — they govern account lockout, cookie
+    # security, password policy, trusted-proxy handling and public exposure.
+    # A non-admin with config_edit must not be able to weaken these.
+    _ADMIN_ONLY_FIELDS = frozenset({
+        'web_admin|lockout_max_attempts', 'web_admin|lockout_duration_secs',
+        'web_admin|secure_cookies', 'web_admin|force_https', 'web_admin|force_fqdn',
+        'web_admin|proxy_count', 'web_admin|remember_me_days',
+        'web_admin|pw_min_len', 'web_admin|pw_max_len',
+        'web_admin|pw_require_upper', 'web_admin|pw_require_digit',
+        'web_admin|pw_require_symbol',
+        'web_admin|public_status', 'web_admin|public_url',
+    })
+
     def _requester_is_admin() -> bool:
+        """True if the requester is an admin — directly or via group membership."""
+        user      = wa._users.get(session.get('username', '')) or {}
+        role      = user.get('role', '')
         admin_uid = wa._role_name_to_uid('admin')
-        user = wa._users.get(session.get('username', '')) or {}
-        return user.get('role', '') == admin_uid
+        # Direct admin (role stored as UID or legacy name).
+        if role == admin_uid or wa._uid_to_role_name(role) == 'admin':
+            return True
+        # Group-derived admin: any enabled group mapped to the admin role.
+        for g_ref in user.get('groups', []):
+            g = wa._groups.get(g_ref)
+            if g and g.get('enabled', True) and admin_uid in (g.get('roles') or []):
+                return True
+        return False
 
     # --- API: config.json -----------------------------------------
 
@@ -131,7 +155,7 @@ def register(app, wa):
             section, field = path.split('|')
             raw.setdefault(section, {})[field] = value
         resp = jsonify({
-            'config': secret_manager.mask_sensitive(raw),
+            'config': secret_manager.mask_sensitive(raw, wa._secret_keys),
             'versions': dict(wa._field_versions),
         })
         resp.headers['ETag'] = f'"{wa._config_version}"'
@@ -202,17 +226,30 @@ def register(app, wa):
         if err:
             return err
 
-        # Sensitive-section guard: only admins may modify LDAP/OIDC/email/etc.
-        # Extract the set of section prefixes from both legacy and versioned formats.
+        # Sensitive-section / sensitive-field guard: only admins may modify
+        # external-service credentials or security-relevant web_admin fields.
+        # Build the set of incoming section prefixes AND full field paths from
+        # both the legacy nested format and the versioned format.
         _incoming_sections: set[str] = set()
+        _incoming_fields:   set[str] = set()
         _raw_fields = data.get('fields')
         if isinstance(_raw_fields, dict):
             for _path in _raw_fields:
                 _incoming_sections.add(_path.split('|')[0])
+                _incoming_fields.add(_path)
         else:
-            for _key in data:
+            for _key, _val in data.items():
                 _incoming_sections.add(_key.split('|')[0])
-        if _incoming_sections & _ADMIN_ONLY_SECTIONS and not _requester_is_admin():
+                if isinstance(_val, dict):
+                    for _fname in _val:
+                        _incoming_fields.add(f'{_key}|{_fname}')
+                else:
+                    _incoming_fields.add(_key)
+        _touches_admin_only = (
+            bool(_incoming_sections & _ADMIN_ONLY_SECTIONS)
+            or bool(_incoming_fields & _ADMIN_ONLY_FIELDS)
+        )
+        if _touches_admin_only and not _requester_is_admin():
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
 
         old_data = wa._read_config_file(wa._CONFIG_FILE) or {}
@@ -344,7 +381,7 @@ def register(app, wa):
                 return jsonify({'error': wa._t('invalid_public_url')}), 400
             web_data['public_url'] = v
 
-        secret_manager.restore_sensitive(new_data, old_data)
+        secret_manager.restore_sensitive(new_data, old_data, keys=wa._secret_keys)
 
         if wa._save_config_file(wa._CONFIG_FILE, new_data):
             # Apply web_admin.lang at runtime if changed
@@ -398,7 +435,7 @@ def register(app, wa):
                     x_host=wa._proxy_count,
                     x_prefix=wa._proxy_count,
                 )
-            changes = wa._diff_dicts(old_data, new_data, sensitive=wa._SENSITIVE_FIELDS)
+            changes = wa._diff_dicts(old_data, new_data, sensitive=wa._sensitive_fields)
             wa._audit('config_saved', detail=changes or '')
             wa._config_version = str(uuid.uuid4())
 

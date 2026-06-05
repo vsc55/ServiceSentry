@@ -11,11 +11,11 @@ from ...constants import SUPPORTED_LANGS
 def _establish_session(wa, username: str, user: dict, remember: bool = False) -> None:
     """Populate the Flask session after a successful authentication."""
     session.permanent = remember
-    token, sid = wa._create_session(
+    token, uid = wa._create_session(
         username, request.remote_addr, request.user_agent.string,
     )
     session['session_token'] = token
-    session['session_id']    = sid
+    session['session_id']    = uid
     session['logged_in']     = True
     session['username']      = username
     role_ref  = user.get('role', 'viewer')

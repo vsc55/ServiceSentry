@@ -10,10 +10,12 @@ function _persistTableConfig() {
     _tcSaveTimer = setTimeout(() => {
         const _cw = tbl => { try { return JSON.parse(localStorage.getItem(`ss_${tbl}_col_w`) || '{}'); } catch(_){ return {}; } };
         const tc = {
-            groups: { cols: [...(_groupsVisibleCols || [])], order: _groupsColOrder || [], w: _cw('groups') },
-            users:  { cols: [...(_usersVisibleCols  || [])], order: _usersColOrder  || [], w: _cw('users')  },
-            roles:  { cols: [...(_rolesVisibleCols  || [])], order: _rolesColOrder  || [], w: _cw('roles')  },
-            audit:  { cols: [...(_auditVisibleCols  || [])], order: _auditColOrder  || [], w: _cw('audit')  },
+            groups:   { cols: [...(_groupsVisibleCols   || [])], order: _groupsColOrder   || [], w: _cw('groups') },
+            users:    { cols: [...(_usersVisibleCols    || [])], order: _usersColOrder    || [], w: _cw('users')  },
+            roles:    { cols: [...(_rolesVisibleCols    || [])], order: _rolesColOrder    || [], w: _cw('roles')  },
+            audit:    { cols: [...(_auditVisibleCols    || [])], order: _auditColOrder    || [], w: _cw('audit')  },
+            sessions: { cols: [...(_sessionsVisibleCols || [])], order: _sessionsColOrder || [], w: _cw('sessions'),
+                        view: (typeof _sessionsViewMode !== 'undefined' ? _sessionsViewMode : 'card') },
         };
         apiPut('/api/v1/users/me/preferences', { table_config: tc });
     }, 1500);
@@ -38,15 +40,23 @@ function _applyUserTableConfig(tc) {
         }
     };
     // Pass null for ordRef — arrays can't be replaced by reference, store via localStorage only
-    apply('groups', _groupsVisibleCols, null, 'ss_groups_cols', 'ss_groups_col_order', 'ss_groups_col_w');
-    apply('users',  _usersVisibleCols,  null, 'ss_users_cols',  'ss_users_col_order',  'ss_users_col_w');
-    apply('roles',  _rolesVisibleCols,  null, 'ss_roles_cols',  'ss_roles_col_order',  'ss_roles_col_w');
-    apply('audit',  _auditVisibleCols,  null, 'ss_audit_cols',  'ss_audit_col_order',  'ss_audit_col_w');
+    apply('groups',   _groupsVisibleCols,   null, 'ss_groups_cols',   'ss_groups_col_order',   'ss_groups_col_w');
+    apply('users',    _usersVisibleCols,    null, 'ss_users_cols',    'ss_users_col_order',    'ss_users_col_w');
+    apply('roles',    _rolesVisibleCols,    null, 'ss_roles_cols',    'ss_roles_col_order',    'ss_roles_col_w');
+    apply('audit',    _auditVisibleCols,    null, 'ss_audit_cols',    'ss_audit_col_order',    'ss_audit_col_w');
+    apply('sessions', _sessionsVisibleCols, null, 'ss_sessions_cols', 'ss_sessions_col_order', 'ss_sessions_col_w');
+    // Sessions view mode (card/table) is persisted alongside the column config.
+    const _sesCfg = tc.sessions;
+    if (_sesCfg && (_sesCfg.view === 'card' || _sesCfg.view === 'table')) {
+        _sessionsViewMode = _sesCfg.view;
+        localStorage.setItem('ss_sessions_view', _sesCfg.view);
+    }
     // Re-read order arrays from localStorage (arrays are passed by reference but reassignment breaks it)
     try { const s = JSON.parse(localStorage.getItem('ss_groups_col_order')||'null'); if(Array.isArray(s)) { _groupsColOrder.length=0; s.forEach(c=>_groupsColOrder.push(c)); } } catch(_){}
     try { const s = JSON.parse(localStorage.getItem('ss_users_col_order') ||'null'); if(Array.isArray(s)) { _usersColOrder.length=0;  s.forEach(c=>_usersColOrder.push(c));  } } catch(_){}
     try { const s = JSON.parse(localStorage.getItem('ss_roles_col_order') ||'null'); if(Array.isArray(s)) { _rolesColOrder.length=0;  s.forEach(c=>_rolesColOrder.push(c));  } } catch(_){}
     try { const s = JSON.parse(localStorage.getItem('ss_audit_col_order') ||'null'); if(Array.isArray(s)) { _auditColOrder.length=0;  s.forEach(c=>_auditColOrder.push(c));  } } catch(_){}
+    try { const s = JSON.parse(localStorage.getItem('ss_sessions_col_order')||'null'); if(Array.isArray(s)) { _sessionsColOrder.length=0; s.forEach(c=>_sessionsColOrder.push(c)); } } catch(_){}
 }
 
 // ── Shared table column helpers ────────────────────────────────────

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Session management routes: /api/v1/sessions, /api/v1/sessions/invalidate,
-/api/v1/sessions/revoke/<sid>, /api/v1/sessions/revoke-user/<username>."""
+/api/v1/sessions/revoke/<uid>, /api/v1/sessions/revoke-user/<username>."""
 
 from flask import jsonify, session
 
@@ -20,16 +20,16 @@ def register(app, wa):
     @app.route('/api/v1/sessions', methods=['GET'])
     @sessions_view_req
     def api_get_sessions():
-        """Return all active sessions (keyed by sid, token never exposed)."""
+        """Return all active sessions (keyed by uid, token never exposed)."""
         current_token = session.get('session_token')
         # Build uid→username reverse map once
         uid_to_name = {d.get('uid', ''): u for u, d in wa._users.items()}
         result = {}
         for token, entry in wa._sessions.items():
-            sid      = entry.get('sid') or token[:16]
+            uid      = entry.get('uid') or token[:16]
             user_uid = entry.get('user_uid', '')
             uname    = uid_to_name.get(user_uid, user_uid)
-            result[sid] = {
+            result[uid] = {
                 'username':   uname,
                 'user_uid':   user_uid,
                 'ip':         entry.get('ip', ''),
@@ -51,29 +51,26 @@ def register(app, wa):
         session.clear()
         return jsonify({'ok': True, 'count': count})
 
-    @app.route('/api/v1/sessions/revoke/<sid>', methods=['POST'])
+    @app.route('/api/v1/sessions/revoke/<uid>', methods=['POST'])
     @sessions_revoke_req
-    def api_revoke_session_route(sid):
-        """Revoke a specific session by its sid.
+    def api_revoke_session_route(uid):
+        """Revoke a specific session by its uid.
 
         Non-admins may only revoke their own sessions.
         """
-        entry = next(
-            (e for e in wa._sessions.values() if e.get('sid') == sid),
+        token = next(
+            (t for t, e in wa._sessions.items() if e.get('uid') == uid),
             None,
         )
+        entry = wa._sessions.get(token) if token else None
         if not entry:
             return jsonify({'error': wa._t('session_not_found')}), 404
         # Non-admins can only revoke their own sessions.
         current_uid = (wa._users.get(session.get('username', '')) or {}).get('uid', '')
         if not _is_admin_requester() and entry.get('user_uid') != current_uid:
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
-        token = next(
-            (t for t, e in wa._sessions.items() if e.get('sid') == sid),
-            None,
-        )
-        if token and wa._revoke_session(token):
-            wa._audit('session_revoked', detail=sid)
+        if wa._revoke_session(token):
+            wa._audit('session_revoked', detail=uid)
             return jsonify({'ok': True})
         return jsonify({'error': wa._t('session_not_found')}), 404
 

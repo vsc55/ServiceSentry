@@ -58,7 +58,15 @@ arranca por primera vez, se crean automáticamente con valores predeterminados:
 | ------- | ---------- | --------- |
 | `config.json` | Daemon de monitorización en el primer arranque | Configuración mínima (debug desactivado, intervalo 300 s) |
 | `modules.json` | Daemon de monitorización en el primer arranque | `{}` vacío — todos los módulos habilitados pero sin objetivos |
-| `users.json` | Panel web en el primer inicio | Cuenta `admin` con contraseña predeterminada |
+| `data.db` | Panel web en el primer inicio | Base de datos (SQLite) con la cuenta `admin` y contraseña predeterminada |
+
+> **Persistencia:** usuarios, roles, grupos, sesiones, auditoría e historial se
+> almacenan en **`data.db`** (SQLite) dentro del directorio var
+> (`/var/lib/ServiSesentry/` en Linux). El esquema se crea y reconcilia
+> automáticamente. Opcionalmente puede usarse PostgreSQL o MySQL configurando la
+> sección `database` de `config.json` (ver [configuration.md](configuration.md)).
+> Si existen ficheros legacy `users.json` / `roles.json` / `groups.json` /
+> `audit.json`, se **migran automáticamente** a `data.db` en el primer arranque.
 
 Tras el primer arranque puedes abrir el panel web para configurar las alertas de
 Telegram, añadir objetivos de monitorización y cambiar la contraseña de administrador.

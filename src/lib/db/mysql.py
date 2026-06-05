@@ -12,6 +12,7 @@ from __future__ import annotations
 import threading
 
 from .base import BaseConnector
+from .schema import ColumnInfo, IndexInfo
 
 try:
     import pymysql
@@ -94,6 +95,61 @@ class MySQLConnector(BaseConnector):
                     f'ALTER TABLE `{table}` ADD COLUMN `{column}` {col_type}'
                 )
         conn.commit()
+
+    def list_columns(self, table: str) -> set[str]:
+        conn = self._conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT column_name FROM information_schema.columns '
+                'WHERE table_schema=DATABASE() AND table_name=%s',
+                (table,),
+            )
+            return {row[0] for row in cur.fetchall()}
+
+    def describe_table(self, table: str) -> list[ColumnInfo]:
+        conn = self._conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT column_name, data_type, is_nullable, column_default, '
+                'column_key FROM information_schema.columns '
+                'WHERE table_schema=DATABASE() AND table_name=%s '
+                'ORDER BY ordinal_position',
+                (table,),
+            )
+            return [
+                ColumnInfo(
+                    name=r[0], type=r[1] or '',
+                    nullable=(str(r[2]).upper() == 'YES'),
+                    default=r[3], pk=(1 if r[4] == 'PRI' else 0),
+                )
+                for r in cur.fetchall()
+            ]
+
+    def list_indexes(self, table: str) -> list[IndexInfo]:
+        conn = self._conn()
+        grouped: dict[str, list] = {}
+        unique_flag: dict[str, bool] = {}
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT index_name, seq_in_index, column_name, non_unique '
+                'FROM information_schema.statistics '
+                "WHERE table_schema=DATABASE() AND table_name=%s "
+                "AND index_name <> 'PRIMARY' ORDER BY index_name, seq_in_index",
+                (table,),
+            )
+            for name, _seq, col, non_unique in cur.fetchall():
+                grouped.setdefault(name, []).append(col)
+                unique_flag[name] = (non_unique == 0)
+        return [
+            IndexInfo(name=n, columns=tuple(cols), unique=unique_flag[n])
+            for n, cols in grouped.items()
+        ]
+
+    def quote_ident(self, name: str) -> str:
+        return f'`{name}`'
+
+    def _drop_index(self, name: str, table: str) -> None:
+        self.execute_ddl(f'DROP INDEX `{name}` ON `{table}`')
 
     # ── Read ──────────────────────────────────────────────────────────────────
 

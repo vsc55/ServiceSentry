@@ -35,7 +35,7 @@ _ENV_FIELD_SPECS: dict[str, tuple[str, type]] = {
     'CHECK_INTERVAL':         ('daemon|timer_check',           int),
 }
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib.config import ConfigControl
 from lib import secret_manager
@@ -156,6 +156,17 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._config_dir = config_dir
         self._var_dir = var_dir
         self._modules_dir = modules_dir
+        # Discover which fields the watchful MODULES declare as secret/sensitive
+        # so the core can protect them (encrypt/mask/redact) without hardcoding
+        # any module-specific field names.  Modules stay independent of core.
+        try:
+            from lib.modules import ModuleBase  # noqa: PLC0415
+            self._module_secret_fields = ModuleBase.discover_secret_fields(modules_dir)
+        except Exception:  # pylint: disable=broad-except
+            self._module_secret_fields = set()
+        # Combined key sets: core secrets + module-declared secret fields.
+        self._secret_keys = secret_manager.ENCRYPT_KEYS | self._module_secret_fields
+        self._sensitive_fields = self._SENSITIVE_FIELDS | self._module_secret_fields
         self._secure_cookies = bool(secure_cookies)
         self._REMEMBER_ME_DAYS = int(remember_me_days)
         self._AUDIT_MAX_ENTRIES = int(audit_max_entries)
@@ -286,6 +297,12 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         """
         user = self._users.get(username)
         if not user:
+            # Equalise timing with the real-user path so a missing username
+            # cannot be distinguished from a wrong password by response time.
+            decoy = getattr(self, '_decoy_pw_hash', None)
+            if decoy is None:
+                decoy = self._decoy_pw_hash = generate_password_hash('decoy-not-a-real-password')
+            check_password_hash(decoy, password)
             return None, 'user_not_found'
         if not user.get('enabled', True):
             return None, 'account_disabled'
@@ -375,23 +392,35 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     # ------------------------------------------------------------------
 
     def _init_entity_store(self) -> None:
-        """Initialise the SQLite entity store shared by users/sessions/roles/groups."""
-        from lib.users_store    import UsersStore     # noqa: PLC0415
-        from lib.groups_store   import GroupsStore    # noqa: PLC0415
-        from lib.sessions_store import SessionsStore  # noqa: PLC0415
-        from lib.roles_store    import RolesStore     # noqa: PLC0415
+        """Create the shared DB connector and the entity stores on top of it.
+
+        A single :class:`lib.db.BaseConnector` (SQLite by default; PostgreSQL/
+        MySQL via the ``database`` config section) is shared by the users,
+        groups, sessions and roles stores so they never open the database
+        directly nor fight over separate connections.
+        """
+        from lib.db             import get_connector  # noqa: PLC0415
+        from lib.users_store    import UsersStore      # noqa: PLC0415
+        from lib.groups_store   import GroupsStore     # noqa: PLC0415
+        from lib.sessions_store import SessionsStore   # noqa: PLC0415
+        from lib.roles_store    import RolesStore      # noqa: PLC0415
         db_path = os.path.join(self._var_dir or self._config_dir, 'data.db')
-        self._users_store    = UsersStore(db_path)
-        self._groups_store   = GroupsStore(db_path)
-        self._sessions_store = SessionsStore(db_path)
-        self._roles_store    = RolesStore(db_path)
+        db_cfg  = (self._read_config_file(self._CONFIG_FILE) or {}).get('database')
+        self._db_connector   = get_connector(db_cfg or None, default_sqlite_path=db_path)
+        self._users_store    = UsersStore(self._db_connector)
+        self._groups_store   = GroupsStore(self._db_connector)
+        self._sessions_store = SessionsStore(self._db_connector)
+        self._roles_store    = RolesStore(self._db_connector)
 
     def _init_history(self):
-        """Create a HistoryStore using the configured database connector."""
+        """Create a HistoryStore on the shared connector (or its own if absent)."""
         if not self._var_dir:
             return None
         try:
-            from lib.history import create as _create_history  # noqa: PLC0415
+            from lib.history_store import HistoryStore, create as _create_history  # noqa: PLC0415
+            connector = getattr(self, '_db_connector', None)
+            if connector is not None:
+                return HistoryStore(connector)
             db_cfg = (self._read_config_file(self._CONFIG_FILE) or {}).get('database')
             return _create_history(
                 db_cfg or None,
@@ -648,7 +677,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'permissions_list': list(PERMISSIONS),
                 'permissions_groups': PERMISSION_GROUPS,
                 'wa_builtin_roles': [BUILTIN_ROLE_UIDS[r] for r in ROLES if r in BUILTIN_ROLE_UIDS],
-                'wa_sensitive_fields': sorted(self._SENSITIVE_FIELDS),
+                'wa_sensitive_fields': sorted(self._sensitive_fields),
                 'wa_remember_me_days': self._REMEMBER_ME_DAYS,
                 'wa_audit_max_entries': self._AUDIT_MAX_ENTRIES,
                 'wa_secure_cookies': self._secure_cookies,
@@ -730,20 +759,45 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         return self._fernet
 
     def _read_config_file(self, filename: str) -> dict:
-        """Read a JSON configuration file, decrypting sensitive values."""
-        cfg = ConfigControl(os.path.join(self._config_dir, filename))
+        """Read a JSON config file, decrypting sensitive values.
+
+        Cached by file mtime so the disk read + recursive Fernet decryption
+        (which runs on every rendered page and every status poll) is skipped
+        when the file is unchanged.  A deep copy is returned so callers can
+        mutate the result without corrupting the cache.
+        """
+        import copy as _copy  # noqa: PLC0415
+        path = os.path.join(self._config_dir, filename)
+        cache = getattr(self, '_cfg_read_cache', None)
+        if cache is None:
+            cache = self._cfg_read_cache = {}
+            self._cfg_read_lock = threading.Lock()
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = None
+        if mtime is not None:
+            entry = cache.get(filename)
+            if entry is not None and entry[0] == mtime:
+                return _copy.deepcopy(entry[1])
+        # Cache miss / file changed / stat failed → read fresh.
+        cfg  = ConfigControl(path)
         data = cfg.read()
         if data:
             fernet = self._get_fernet()
             if fernet:
                 secret_manager.decrypt_all(data, fernet)
-        return data if data else {}
+        data = data if data else {}
+        if mtime is not None:
+            with self._cfg_read_lock:
+                cache[filename] = (mtime, _copy.deepcopy(data))
+        return data
 
     def _save_config_file(self, filename: str, data: dict) -> bool:
         """Encrypt sensitive values in *data* and save to the config file."""
         fernet = self._get_fernet()
         if fernet:
-            data = secret_manager.encrypt_sensitive(data, fernet)
+            data = secret_manager.encrypt_sensitive(data, fernet, keys=self._secret_keys)
         cfg = ConfigControl(os.path.join(self._config_dir, filename))
         return cfg.save(data)
 

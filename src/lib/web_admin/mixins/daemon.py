@@ -29,9 +29,10 @@ class _DaemonMixin:
         self._daemon_thread: threading.Thread | None = None
         self._daemon_stop_event: threading.Event = threading.Event()
         self._daemon_next_run_ts: float = 0.0   # time.monotonic() target
-        self._daemon_last_run_ts: float | None = None
+        self._daemon_last_run_ts: float | None = None  # epoch (wall-clock) of last run
         self._daemon_monitor = None             # persistent Monitor instance
         self._daemon_last_prune_ts: float = 0.0  # epoch of last history prune
+        self._daemon_lifecycle_lock = threading.Lock()  # guards start/stop races
 
         cfg = self._read_config_file(self._CONFIG_FILE) or {}
         if cfg.get('daemon', {}).get('web_autostart', False):
@@ -72,18 +73,23 @@ class _DaemonMixin:
     # ── Control ───────────────────────────────────────────────────────────────
 
     def _daemon_start(self, run_now: bool = False) -> bool:
-        """Start the scheduler.  Returns False if it is already running."""
-        if self._daemon_running:
-            return False
-        self._daemon_stop_event.clear()
-        self._daemon_monitor = None   # reset so loop creates a fresh monitor
-        self._daemon_thread = threading.Thread(
-            target=self._daemon_loop,
-            args=(run_now,),
-            daemon=True,
-            name='ss-scheduler',
-        )
-        self._daemon_thread.start()
+        """Start the scheduler.  Returns False if it is already running.
+
+        Guarded by a lifecycle lock so two concurrent start requests can't
+        both pass the running-check and spawn duplicate scheduler threads.
+        """
+        with self._daemon_lifecycle_lock:
+            if self._daemon_running:
+                return False
+            self._daemon_stop_event.clear()
+            self._daemon_monitor = None   # reset so loop creates a fresh monitor
+            self._daemon_thread = threading.Thread(
+                target=self._daemon_loop,
+                args=(run_now,),
+                daemon=True,
+                name='ss-scheduler',
+            )
+            self._daemon_thread.start()
         self._audit_system('daemon_started', {
             'interval': self._daemon_interval,
             'run_now':  run_now,
@@ -92,11 +98,12 @@ class _DaemonMixin:
 
     def _daemon_stop(self) -> bool:
         """Signal the scheduler to stop.  Returns False if not running."""
-        if not self._daemon_running:
-            return False
-        self._daemon_stop_event.set()
-        self._daemon_next_run_ts = 0.0
-        self._daemon_monitor = None
+        with self._daemon_lifecycle_lock:
+            if not self._daemon_running:
+                return False
+            self._daemon_stop_event.set()
+            self._daemon_next_run_ts = 0.0
+            self._daemon_monitor = None
         self._audit_system('daemon_stopped', {})
         return True
 
@@ -238,7 +245,7 @@ class _DaemonMixin:
 
         while not self._daemon_stop_event.is_set():
             self._daemon_next_run_ts = 0.0
-            self._daemon_last_run_ts = time.monotonic()
+            self._daemon_last_run_ts = time.time()  # wall-clock epoch for the UI
             try:
                 # Skip cycle if an on-demand check is already running
                 if self._check_lock.acquire(blocking=False):

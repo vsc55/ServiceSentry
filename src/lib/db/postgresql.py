@@ -13,6 +13,7 @@ from __future__ import annotations
 import threading
 
 from .base import BaseConnector
+from .schema import ColumnInfo, IndexInfo
 
 try:
     import psycopg2
@@ -88,6 +89,68 @@ class PostgreSQLConnector(BaseConnector):
                     f'ALTER TABLE {table} ADD COLUMN {column} {col_type}'
                 )
         conn.commit()
+
+    def list_columns(self, table: str) -> set[str]:
+        conn = self._conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT column_name FROM information_schema.columns '
+                'WHERE table_name=%s',
+                (table,),
+            )
+            return {row[0] for row in cur.fetchall()}
+
+    def describe_table(self, table: str) -> list[ColumnInfo]:
+        conn = self._conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT a.attname FROM pg_index i "
+                'JOIN pg_attribute a '
+                '  ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) '
+                'WHERE i.indrelid = %s::regclass AND i.indisprimary',
+                (table,),
+            )
+            pk_cols = {r[0] for r in cur.fetchall()}
+            cur.execute(
+                'SELECT column_name, data_type, is_nullable, column_default '
+                'FROM information_schema.columns '
+                'WHERE table_name=%s ORDER BY ordinal_position',
+                (table,),
+            )
+            return [
+                ColumnInfo(
+                    name=r[0], type=r[1] or '',
+                    nullable=(str(r[2]).upper() == 'YES'),
+                    default=r[3], pk=(1 if r[0] in pk_cols else 0),
+                )
+                for r in cur.fetchall()
+            ]
+
+    def list_indexes(self, table: str) -> list[IndexInfo]:
+        conn = self._conn()
+        grouped: dict[str, list] = {}
+        unique_flag: dict[str, bool] = {}
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT ic.relname, a.attname, ix.indisunique, k.ord '
+                'FROM pg_index ix '
+                'JOIN pg_class ic ON ic.oid = ix.indexrelid '
+                'JOIN pg_class tc ON tc.oid = ix.indrelid '
+                'JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)'
+                '  ON true '
+                'JOIN pg_attribute a '
+                '  ON a.attrelid = tc.oid AND a.attnum = k.attnum '
+                'WHERE tc.relname = %s AND NOT ix.indisprimary '
+                'ORDER BY ic.relname, k.ord',
+                (table,),
+            )
+            for name, col, is_unique, _ord in cur.fetchall():
+                grouped.setdefault(name, []).append(col)
+                unique_flag[name] = bool(is_unique)
+        return [
+            IndexInfo(name=n, columns=tuple(cols), unique=unique_flag[n])
+            for n, cols in grouped.items()
+        ]
 
     # ── Read ──────────────────────────────────────────────────────────────────
 

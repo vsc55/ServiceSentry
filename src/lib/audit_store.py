@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""SQLite-backed audit log store.
+"""Relational audit-log store.
 
-Stores audit entries in the ``audit`` table inside ``data.db`` (shared with
-the history store).  Thread-safe: each thread maintains its own connection
-via ``threading.local``.
+Backed by a pluggable :class:`lib.db.BaseConnector` (SQLite by default;
+PostgreSQL/MySQL supported through the same interface).
 
 Schema
 ------
@@ -19,53 +18,38 @@ Schema
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
-import threading
+
+from lib.db import BaseConnector
+from lib.db.schema import Column, Index, TableSpec
+
+_SCHEMA = TableSpec(
+    name='audit',
+    columns=(
+        Column('id',     'AUTOINCREMENT', primary_key=True),
+        Column('ts',     'TEXT', nullable=False, default="''"),
+        Column('event',  'TEXT', nullable=False, default="''"),
+        Column('user',   'TEXT', nullable=False, default="''"),
+        Column('ip',     'TEXT', nullable=False, default="''"),
+        Column('detail', 'TEXT', nullable=False, default="''"),
+    ),
+    indexes=(
+        Index('idx_audit_id',    ('id DESC',)),
+        Index('idx_audit_event', ('event',)),
+    ),
+)
 
 
 class AuditStore:
-    """Thread-safe SQLite audit log."""
+    """Relational audit log (backend-agnostic)."""
 
-    def __init__(self, db_path: str) -> None:
-        self._path  = db_path
-        self._local = threading.local()
-        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    def __init__(self, db: BaseConnector) -> None:
+        self._db = db
         self._bootstrap()
-
-    # ── Connection ────────────────────────────────────────────────────────────
-
-    def _conn(self) -> sqlite3.Connection:
-        conn = getattr(self._local, 'conn', None)
-        if conn is None:
-            conn = sqlite3.connect(self._path, check_same_thread=False, timeout=30, isolation_level=None)
-            conn.execute('PRAGMA journal_mode=WAL')
-            conn.execute('PRAGMA busy_timeout=30000')
-            conn.execute('PRAGMA synchronous=NORMAL')
-            self._local.conn = conn
-        return conn
 
     # ── Schema ────────────────────────────────────────────────────────────────
 
     def _bootstrap(self) -> None:
-        conn = self._conn()
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS audit (
-                id      INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts      TEXT    NOT NULL DEFAULT '',
-                event   TEXT    NOT NULL DEFAULT '',
-                user    TEXT    NOT NULL DEFAULT '',
-                ip      TEXT    NOT NULL DEFAULT '',
-                detail  TEXT    NOT NULL DEFAULT ''
-            )
-        ''')
-        conn.execute(
-            'CREATE INDEX IF NOT EXISTS idx_audit_id ON audit(id DESC)'
-        )
-        conn.execute(
-            'CREATE INDEX IF NOT EXISTS idx_audit_event ON audit(event)'
-        )
-        conn.commit()
+        self._db.reconcile_table(_SCHEMA)
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
@@ -83,36 +67,30 @@ class AuditStore:
 
         When *max_entries* > 0 the table is kept within that bound using a
         **sliding-window** strategy: only the single oldest entry is removed
-        after each insert, so historical data migrated from audit.json is
-        never wiped out all at once.
+        after each insert, so historical data is never wiped out all at once.
         """
         raw_detail = (
             json.dumps(detail, ensure_ascii=False)
             if not isinstance(detail, str) else detail
         )
-        conn = self._conn()
-        conn.execute(
+        self._db.execute(
             'INSERT INTO audit(ts, event, user, ip, detail) VALUES(?,?,?,?,?)',
             (ts, event, user, ip, raw_detail),
         )
-        conn.commit()
+        self._db.commit()
         if max_entries > 0:
             self._prune_one(max_entries)
 
     def delete_all(self) -> int:
         """Delete every entry.  Returns the number deleted."""
-        conn = self._conn()
-        conn.execute('DELETE FROM audit')
-        deleted = conn.execute('SELECT changes()').fetchone()[0]
-        conn.commit()
+        with self._db.transaction():
+            deleted = self._db.execute('DELETE FROM audit')
         return deleted
 
     def delete_by_id(self, entry_id: int) -> bool:
         """Delete one entry by its primary key.  Returns True if found."""
-        conn = self._conn()
-        conn.execute('DELETE FROM audit WHERE id = ?', (entry_id,))
-        deleted = conn.execute('SELECT changes()').fetchone()[0]
-        conn.commit()
+        with self._db.transaction():
+            deleted = self._db.execute('DELETE FROM audit WHERE id = ?', (entry_id,))
         return deleted > 0
 
     # ── Read ──────────────────────────────────────────────────────────────────
@@ -120,13 +98,13 @@ class AuditStore:
     def get_all(self, *, newest_first: bool = True) -> list[dict]:
         """Return all entries as a list of dicts."""
         order = 'DESC' if newest_first else 'ASC'
-        rows = self._conn().execute(
+        rows = self._db.fetchall(
             f'SELECT id, ts, event, user, ip, detail FROM audit ORDER BY id {order}'
-        ).fetchall()
+        )
         return [_row_to_dict(r) for r in rows]
 
     def count(self) -> int:
-        row = self._conn().execute('SELECT COUNT(*) FROM audit').fetchone()
+        row = self._db.fetchone('SELECT COUNT(*) FROM audit')
         return row[0] if row else 0
 
     # ── Migration ─────────────────────────────────────────────────────────────
@@ -134,55 +112,38 @@ class AuditStore:
     def migrate_from_list(self, entries: list[dict]) -> int:
         """Bulk-insert entries from audit.json format.
 
-        Skips the operation if the audit table already has rows (migration
-        already done).  Returns the number of rows inserted.
+        Skips the operation if the audit table already has rows.  Returns the
+        number of rows inserted.
         """
-        if self.count() > 0:
+        if self.count() > 0 or not entries:
             return 0
-        if not entries:
-            return 0
-        conn = self._conn()
         rows = []
         for e in entries:
             detail = e.get('detail', '')
             if not isinstance(detail, str):
                 detail = json.dumps(detail, ensure_ascii=False)
             rows.append((
-                e.get('ts', ''),
-                e.get('event', ''),
-                e.get('user', ''),
-                e.get('ip', ''),
-                detail,
+                e.get('ts', ''), e.get('event', ''),
+                e.get('user', ''), e.get('ip', ''), detail,
             ))
-        conn.executemany(
-            'INSERT INTO audit(ts, event, user, ip, detail) VALUES(?,?,?,?,?)',
-            rows,
-        )
-        conn.commit()
+        with self._db.transaction():
+            self._db.executemany(
+                'INSERT INTO audit(ts, event, user, ip, detail) VALUES(?,?,?,?,?)',
+                rows,
+            )
         return len(rows)
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _prune_one(self, max_entries: int) -> None:
-        """Delete the single oldest entry if the table exceeds *max_entries*.
-
-        Sliding-window strategy: removes at most one row per insert so
-        migrated historical data is preserved for as long as possible and
-        is gradually displaced by new entries rather than wiped all at once.
-        """
-        conn = self._conn()
-        row = conn.execute('SELECT COUNT(*) FROM audit').fetchone()
+        """Delete the single oldest entry if the table exceeds *max_entries*."""
+        row = self._db.fetchone('SELECT COUNT(*) FROM audit')
         if row and row[0] > max_entries:
-            conn.execute(
-                'DELETE FROM audit WHERE id = (SELECT MIN(id) FROM audit)'
-            )
-            conn.commit()
+            self._db.execute('DELETE FROM audit WHERE id = (SELECT MIN(id) FROM audit)')
+            self._db.commit()
 
     def close(self) -> None:
-        conn = getattr(self._local, 'conn', None)
-        if conn:
-            conn.close()
-            self._local.conn = None
+        """No-op: the connector owns the connection lifecycle."""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

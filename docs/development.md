@@ -233,6 +233,24 @@ Solo se necesitan si el módulo correspondiente está activo en `modules.json`:
 
 > En `datastore`, los conectores de BD son opcionales entre sí: solo hace falta instalar el paquete del motor que uses. Elasticsearch/OpenSearch e InfluxDB no requieren paquete extra (usan `urllib` de stdlib).
 
+### Dependencias opcionales del panel web
+
+Solo se necesitan si activas la funcionalidad correspondiente:
+
+| Paquete | Funcionalidad | Propósito |
+| ------- | ------------- | --------- |
+| `ldap3` | `config.json → ldap` | Autenticación LDAP / Active Directory |
+| `authlib` | `config.json → oidc` | SSO OIDC / OAuth2 (Entra ID, Google, Keycloak…) |
+| `python3-saml` | `config.json → saml2` | SSO SAML2 (ADFS, Okta…) **[alpha]** |
+| `psycopg2-binary` | `config.json → database` (driver `postgresql`) | Persistencia del core en PostgreSQL |
+| `PyMySQL` | `config.json → database` (driver `mysql`/`mariadb`) | Persistencia del core en MySQL/MariaDB |
+
+> La **capa de persistencia del core** (usuarios, roles, grupos, sesiones,
+> auditoría, historial) usa SQLite por defecto sin dependencias extra. Para
+> usar PostgreSQL o MySQL basta con instalar su driver (los mismos paquetes que
+> el módulo `datastore`) y configurar la sección `database`. Ver
+> [architecture.md](architecture.md) → *Capa de Persistencia y Esquema de BD*.
+
 ```bash
 pip install -r requirements.txt
 ```

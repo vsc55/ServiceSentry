@@ -16,7 +16,12 @@ __all__ = ['ENCRYPT_KEYS', 'fernet_from_secret_file', 'decrypt_all', 'encrypt_se
 
 ENC_PREFIX = 'enc:'
 
-# Field names whose values are encrypted when written to disk.
+# Core secret field names — values encrypted when written to disk.
+# These belong to *core* features (auth providers, notifications).  Secret
+# fields declared by watchful MODULES are NOT listed here: the core discovers
+# them dynamically from each module's schema (``"secret"``/``"sensitive"``
+# flags) so modules stay 100% independent of core.  Callers pass an augmented
+# key set via the ``keys=`` parameter of the functions below.
 ENCRYPT_KEYS: frozenset[str] = frozenset({
     'password', 'ssh_password', 'token', 'secret',
     'bind_password',        # LDAP service-account password

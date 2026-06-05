@@ -79,7 +79,7 @@ class Monitor(ObjectBase):
         if not self.dir_var:
             return None
         try:
-            from lib.history import create as _create_history  # noqa: PLC0415
+            from lib.history_store import create as _create_history  # noqa: PLC0415
             db_cfg = self.cfg_general.get_conf(['database']) or {}
             return _create_history(db_cfg or None,
                                    sqlite_path=os.path.join(self.dir_var, 'data.db'))
@@ -112,6 +112,7 @@ class Monitor(ObjectBase):
         if not self.dir_config:
             return
         audit_path = os.path.join(self.dir_config, 'audit.json')
+        tmp_path = None
         try:
             # Read existing log
             try:
@@ -132,7 +133,6 @@ class Monitor(ObjectBase):
             log = log[-self._AUDIT_MAX_ENTRIES:]
 
             # Atomic write
-            tmp_path = None
             with tempfile.NamedTemporaryFile(
                 'w', dir=self.dir_config, suffix='.tmp',
                 delete=False, encoding='utf-8',

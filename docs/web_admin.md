@@ -25,9 +25,10 @@ lib/web_admin/
 │   ├── roles.py              # _RolesMixin
 │   ├── groups.py             # _GroupsMixin
 │   ├── permissions.py        # _PermissionsMixin
-│   ├── sessions.py           # _SessionsMixin
+│   ├── sessions.py           # _SessionsMixin (sesiones + clave secreta Flask)
 │   ├── audit.py              # _AuditMixin
-│   └── checks.py             # _ChecksMixin
+│   ├── checks.py             # _ChecksMixin
+│   └── daemon.py             # _DaemonMixin (planificador en segundo plano)
 └── routes/
     ├── __init__.py           # register_all(app, wa)
     ├── auth/
@@ -50,12 +51,14 @@ lib/web_admin/
     │   ├── email.py          # /api/v1/notify/email/test
     │   ├── webhook.py        # /api/v1/notify/webhook/test
     │   └── templates.py      # /api/v1/notify/templates, /api/v1/notify/html-templates
-    ├── config.py             # /api/v1/config, /api/v1/config/schema
+    ├── config.py             # /api/v1/config, /api/v1/config/versions, /api/v1/config/schema
     ├── webhooks.py           # /api/v1/webhooks (CRUD de webhooks)
     ├── watchfuls.py          # /api/v1/watchfuls/<module>/<action>
+    ├── history.py            # /api/v1/history (índice, consulta, borrado, diagnóstico)
+    ├── daemon.py             # /api/v1/daemon (estado, start, stop, config del planificador)
     ├── status.py             # /status (página pública de estado)
     ├── errors.py             # handlers 400, 403, 404, 405, 500
-    └── ui.py                 # /, /lang, /theme
+    └── ui.py                 # /, /api/v1/me, /api/v1/health, /lang, /theme
 ```
 
 ---
@@ -82,7 +85,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 23 flags granulares; activar/desactivar desde el modal |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 28 flags granulares; activar/desactivar desde el modal |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
@@ -109,7 +112,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos (23 flags) |
+| `admin` | Todos los permisos (28 flags) |
 | `editor` | `modules_view`, `modules_add`, `modules_edit`, `config_edit`, `checks_view`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
 | `viewer` | `modules_view`, `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view`, `checks_view` |
 
@@ -118,7 +121,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 ### Roles personalizados
 
 Se pueden crear roles adicionales desde la pestaña **Acceso → Roles** asignando
-cualquier combinación de los 23 permisos disponibles. Los roles personalizados se
+cualquier combinación de los 28 permisos disponibles. Los roles personalizados se
 persisten en `roles.json`.
 
 ```
@@ -158,7 +161,7 @@ Cada grupo tiene:
 
 ## Sistema de Permisos
 
-El sistema de control de acceso usa **23 flags granulares** por acción y recurso.
+El sistema de control de acceso usa **28 flags granulares** por acción y recurso.
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -179,16 +182,23 @@ El sistema de control de acceso usa **23 flags granulares** por acción y recurs
 | **Módulos** | `modules_view` | Ver la lista de módulos |
 | | `modules_add` | Crear nuevas entradas de módulo |
 | | `modules_edit` | Guardar cambios en módulos |
+| | `modules_delete` | Eliminar entradas de módulo |
 | **Config** | `config_view` | Leer `config.json` sin poder editarlo |
 | | `config_edit` | Guardar cambios en configuración |
+| **Overview** | `overview_view` | Ver el dashboard de resumen |
+| | `overview_edit` | Editar el layout del dashboard |
 | **Sesiones** | `sessions_view` | Ver sesiones activas |
 | | `sessions_revoke` | Revocar sesiones |
 | **Checks** | `checks_view` | Ver resultados de checks y la pestaña Status |
 | | `checks_run` | Lanzar comprobaciones bajo demanda |
+| **Historial** | `history_view` | Ver gráficas y series temporales del historial |
+| | `history_delete` | Borrar datos del historial |
+
+> Además de los 28 flags globales, cada módulo expone **permisos a nivel de módulo** dinámicos (`module.<nombre>.view`, `.add`, `.edit`, `.delete`) que permiten restringir el acceso a un módulo concreto.
 
 ### Implementación interna
 
-- `PERMISSIONS` — tupla con los 23 flags.
+- `PERMISSIONS` — tupla con los 28 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` para los roles integrados.
 - `_perm_required(*perms)` — factoría de decoradores: acepta si el usuario tiene **alguno** de los permisos indicados.
@@ -263,8 +273,9 @@ El permiso requerido se indica entre paréntesis.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/config` | `config_view` o `config_edit` | Obtener el `config.json` actual |
-| `PUT` | `/api/v1/config` | `config_edit` | Guardar `config.json` |
+| `GET` | `/api/v1/config` | `config_view` o `config_edit` | Obtener el `config.json` actual (con tokens de versión por campo) |
+| `GET` | `/api/v1/config/versions` | `config_view` o `config_edit` | Poll ligero: devuelve solo los tokens de versión (detección de conflictos) |
+| `PUT` | `/api/v1/config` | `config_edit` | Guardar `config.json` (guardado parcial versionado con detección de conflictos) |
 | `GET` | `/api/v1/config/schema` | `config_view` o `config_edit` | Obtener el schema de validación de los campos de configuración del web admin |
 
 Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `routes/config.py`):
@@ -363,8 +374,16 @@ Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `tim
 | `POST` | `/api/v1/users` | `users_add` | Crear un nuevo usuario |
 | `PUT` | `/api/v1/users/<username>` | `users_edit` | Editar un usuario |
 | `DELETE` | `/api/v1/users/<username>` | `users_delete` | Eliminar un usuario |
-| `GET` | `/api/v1/me` | auth | Obtener información del usuario actual |
+| `GET` | `/api/v1/me` | auth | Obtener información del usuario actual (permisos, preferencias, `table_config`) |
 | `PUT` | `/api/v1/users/me/password` | auth | Cambiar la contraseña propia |
+| `PUT` | `/api/v1/users/me/preferences` | auth | Guardar preferencias propias: `lang`, `dark_mode` y `table_config` (sin permiso especial) |
+
+**Configuración de tablas por usuario (`table_config`):** cada usuario guarda
+su propia configuración de columnas de las tablas del panel (columnas visibles,
+orden, ancho y ordenación) en el campo JSON `table_config` dentro de
+`users.extra`. Se persiste server-side vía `PUT /api/v1/users/me/preferences` y
+se devuelve en `GET /api/v1/me`, de modo que la disposición de columnas se
+mantiene entre dispositivos y sesiones.
 
 ### Grupos
 
@@ -390,7 +409,7 @@ Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `tim
 |--------|------|---------|-------------|
 | `GET` | `/api/v1/sessions` | `sessions_view` | Listar sesiones activas |
 | `POST` | `/api/v1/sessions/invalidate` | `sessions_revoke` | Revocar todas las sesiones |
-| `POST` | `/api/v1/sessions/revoke/<sid>` | `sessions_revoke` | Revocar una sesión concreta |
+| `POST` | `/api/v1/sessions/revoke/<uid>` | `sessions_revoke` | Revocar una sesión concreta |
 | `POST` | `/api/v1/sessions/revoke-user/<user>` | `sessions_revoke` | Revocar sesiones de un usuario |
 
 ### Auditoría
@@ -406,6 +425,36 @@ Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `tim
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
 | `POST` | `/api/v1/modules/checks/run` | `checks_run` | Lanzar comprobaciones bajo demanda |
+
+### Historial
+
+Series temporales de resultados de checks (almacenadas por `HistoryStore`, ver [architecture.md](architecture.md)).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/history/index` | `history_view` | Metadatos de todas las series registradas |
+| `GET` | `/api/v1/history` | `history_view` | Consultar datos de serie (`module`, `key`, `hours`, `points`, `field`) |
+| `DELETE` | `/api/v1/history` | `history_delete` | Borrar el historial de un par `(module, key)` |
+| `DELETE` | `/api/v1/history/all` | `history_delete` | Vaciar todo el historial |
+| `POST` | `/api/v1/history/test-write` | `history_delete` | Escribir datos de prueba para verificar el almacenamiento |
+| `GET` | `/api/v1/history/diag` | `history_delete` | Diagnóstico del almacenamiento de historial |
+
+### Daemon / Planificador
+
+Controla el planificador en segundo plano que ejecuta los checks periódicamente (`_DaemonMixin`).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/daemon/status` | `checks_run` | Estado actual del planificador |
+| `POST` | `/api/v1/daemon/start` | `checks_run` | Arrancar el planificador (opcionalmente ejecuta ya) |
+| `POST` | `/api/v1/daemon/stop` | `checks_run` | Detener el planificador |
+| `PUT` | `/api/v1/daemon/config` | `checks_run` | Actualizar intervalo (`timer_check`) y autoarranque |
+
+### Salud
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/health` | público | Endpoint ligero para comprobación de versión/arranque (devuelve `startup_id`) |
 
 ### LDAP
 
@@ -571,7 +620,7 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 23 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 28 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |

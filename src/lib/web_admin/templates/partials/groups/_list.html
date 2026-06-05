@@ -262,6 +262,7 @@ function _initGroupsTableFeatures() {
                 const nw = Math.max(40, startW + ev.clientX - startX) + 'px';
                 const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_groups_col_w')||'{}'); } catch(_){ return {}; } })();
                 cw[col] = nw; localStorage.setItem('ss_groups_col_w', JSON.stringify(cw));
+                _persistTableConfig();
             }
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
@@ -291,6 +292,7 @@ function _initGroupsTableFeatures() {
             th.style.width = newW;
             const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_groups_col_w')||'{}'); } catch(_){ return {}; } })();
             cw[col] = newW; localStorage.setItem('ss_groups_col_w', JSON.stringify(cw));
+            _persistTableConfig();
         });
         th.appendChild(handle);
 

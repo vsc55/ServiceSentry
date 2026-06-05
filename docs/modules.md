@@ -544,6 +544,7 @@ Verifica que los servidores de bases de datos son accesibles y responden correct
 | `ssh_user` | string | `""` | Usuario SSH |
 | `ssh_password` | string | `""` | Contraseña SSH (**cifrada en disco** con `enc:`). Ignorada si se especifica `ssh_key` |
 | `ssh_key` | string | `""` | Ruta a la clave privada SSH. Tiene prioridad sobre `ssh_password` |
+| `ssh_verify_host` | bool | `false` | Si `true`, verifica la clave de host SSH contra `known_hosts` (`RejectPolicy`); si `false`, la acepta automáticamente (`AutoAddPolicy`). Configurable por seguridad. |
 
 ### Acciones de la UI
 
@@ -780,6 +781,65 @@ Por cada servicio habilitado:
 | systemd | `systemctl start <n>` | `systemctl stop <n>` |
 | OpenRC | `rc-service <n> start` | `rc-service <n> stop` |
 | SysV | `service <n> start` | `service <n> stop` |
+
+---
+
+## 📡 snmp — Monitorización SNMP
+
+Consulta OIDs vía **SNMP v1 / v2c / v3** sobre uno o varios servidores, con
+gestión y compilación de MIBs integrada. Requiere `pysnmp` (y `pysmi` para
+compilar MIBs); ambos opcionales.
+
+### Estructura de configuración
+
+La config se organiza por **servidores**, y cada servidor tiene su propia
+sub-colección de **checks** (OIDs a comprobar):
+
+| Sección | Campo | Tipo | Descripción |
+|---------|-------|------|-------------|
+| `__module__` | `enabled` | bool | Activar el módulo |
+| | `threads` | int | Hilos para checks en paralelo |
+| | `mib_dirs` | str | Directorios adicionales de MIBs |
+| `servers.*` | `enabled` | bool | Activar el servidor |
+| | `host` | str | Host/IP del agente SNMP |
+| | `port` | int | Puerto (161 por defecto) |
+| | `version` | str | `v1`, `v2c` o `v3` |
+| | `community` | str | Community string (v1/v2c) |
+| | `timeout` / `retries` | int | Timeout y reintentos |
+| | `snmpv3_username` | str | Usuario SNMPv3 |
+| | `snmpv3_auth_key` | str | Clave de autenticación SNMPv3 *(secreto, cifrado)* |
+| | `snmpv3_priv_key` | str | Clave de privacidad SNMPv3 *(secreto, cifrado)* |
+| | `snmpv3_auth_protocol` | str | Protocolo auth (MD5/SHA…) |
+| | `snmpv3_priv_protocol` | str | Protocolo priv (DES/AES…) |
+| `servers.*.checks.*` | `enabled` | bool | Activar el check |
+| | `oid` | str | OID a consultar (numérico o nombre MIB) |
+| | `snmp_type` | str | Tipo del valor |
+| | `operator` | str | Comparador: `any`, `contains`, `regex`, `eq`, `ne`, `gt`, `lt`, `gte`, `lte` |
+| | `value` | str | Valor esperado para la comparación |
+| | `alert` | bool | Si el check dispara alerta |
+
+> Los campos `snmpv3_auth_key` y `snmpv3_priv_key` se declaran como secretos en
+> el `schema.json` del módulo y el core los cifra automáticamente (descubrimiento
+> schema-driven, ver [security.md](security.md)). El módulo es 100 % independiente
+> del core.
+
+### Gestión de MIBs
+
+El módulo expone acciones de UI (vía `/api/v1/watchfuls/snmp/<action>`) para
+gestionar MIBs en `{var_dir}/snmp_mibs/`:
+
+- **Descubrimiento** (`discover`) de OIDs disponibles caminando los subárboles
+  mib-2 y enterprises (GETBULK en v2c/v3).
+- **Compilación** de MIBs ASN.1 (`raw/`) a módulos Python (`compiled/`) con
+  `pysmi`, en segundo plano con polling de progreso.
+- **Índice de OIDs** persistido (`oid_index.json`) para descubrimiento rápido.
+- **Subida** (`upload_mib`), **borrado** (`delete_mib`) e **importación desde
+  URL** (`import_mib_from_url`).
+
+**Seguridad:** los nombres de fichero MIB se validan con una allowlist
+(`[A-Za-z0-9_.-]`) + confinamiento de path (`pathlib.resolve()`); las
+importaciones por URL pasan por el guard SSRF `validate_external_url()`. Ver
+[security.md](security.md) → *Path Traversal* y *SSRF*.
 
 ---
 

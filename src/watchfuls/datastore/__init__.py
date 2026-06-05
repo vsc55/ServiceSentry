@@ -91,9 +91,20 @@ class _SSHTunnel:
     """One-shot SSH TCP port-forward tunnel."""
 
     def __init__(self, ssh_host, ssh_port, ssh_user, ssh_password, ssh_key,
-                 remote_host, remote_port, timeout=10):
+                 remote_host, remote_port, timeout=10, verify_host=False):
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if verify_host:
+            # Strict mode: only hosts present in the system/user known_hosts are
+            # accepted; an unknown or changed key aborts the connection (MITM-safe).
+            client.load_system_host_keys()
+            try:
+                client.load_host_keys(os.path.expanduser('~/.ssh/known_hosts'))
+            except (OSError, IOError):
+                pass
+            client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        else:
+            # Convenience mode (default): accept any host key on first contact.
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         kw = {
             'hostname': str(ssh_host), 'port': int(ssh_port),
             'username': str(ssh_user),
@@ -186,11 +197,12 @@ class ConfigOptions(IntEnum):
     db_index     = 108
     tls          = 109
     token        = 110
-    ssh_host     = 200
-    ssh_port     = 201
-    ssh_user     = 202
-    ssh_password = 203
-    ssh_key      = 204
+    ssh_host        = 200
+    ssh_port        = 201
+    ssh_user        = 202
+    ssh_password    = 203
+    ssh_key         = 204
+    ssh_verify_host = 205
 
 
 # ── Dependency availability ───────────────────────────────────────────────────
@@ -271,6 +283,7 @@ class Watchful(ModuleBase):
         ssh_port = self._get_conf(ConfigOptions.ssh_port, key) or 22
         return {
             'db_type':      db_type,
+            'conn_type':    self._get_conf(ConfigOptions.conn_type,    key),
             'host':         self._get_conf(ConfigOptions.host,         key),
             'port':         port,
             'socket':       self._get_conf(ConfigOptions.socket,       key),
@@ -287,6 +300,7 @@ class Watchful(ModuleBase):
             'ssh_user':     self._get_conf(ConfigOptions.ssh_user,     key),
             'ssh_password': self._get_conf(ConfigOptions.ssh_password, key),
             'ssh_key':      self._get_conf(ConfigOptions.ssh_key,      key),
+            'ssh_verify_host': self._get_conf(ConfigOptions.ssh_verify_host, key),
         }
 
     # ── Backend dispatcher ────────────────────────────────────────────
@@ -301,7 +315,8 @@ class Watchful(ModuleBase):
                 tunnel = _SSHTunnel(
                     cfg['ssh_host'], cfg['ssh_port'], cfg['ssh_user'],
                     cfg['ssh_password'], cfg['ssh_key'],
-                    cfg['host'], cfg['port'])
+                    cfg['host'], cfg['port'],
+                    verify_host=bool(cfg.get('ssh_verify_host', False)))
             except Exception as exc:
                 return False, f'SSH error: {exc}'
             try:
@@ -654,7 +669,8 @@ class Watchful(ModuleBase):
                 tunnel = _SSHTunnel(
                     cfg['ssh_host'], cfg['ssh_port'], cfg['ssh_user'],
                     cfg['ssh_password'], cfg['ssh_key'],
-                    cfg['host'], port)
+                    cfg['host'], port,
+                    verify_host=bool(cfg.get('ssh_verify_host', False)))
             except Exception as exc:
                 return {'ok': False, 'message': f'SSH error: {exc}', 'items': []}
             try:

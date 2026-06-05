@@ -52,7 +52,19 @@ ObjectBase (lib/object_base.py)
 │   ├── _PermissionsMixin(lib/web_admin/mixins/permissions.py)
 │   ├── _SessionsMixin   (lib/web_admin/mixins/sessions.py)
 │   ├── _AuditMixin      (lib/web_admin/mixins/audit.py)
-│   └── _ChecksMixin     (lib/web_admin/mixins/checks.py)
+│   ├── _ChecksMixin     (lib/web_admin/mixins/checks.py)
+│   └── _DaemonMixin     (lib/web_admin/mixins/daemon.py)
+├── BaseConnector (lib/db/base.py)              ← capa de BD pluggable
+│   ├── SQLiteConnector       (lib/db/sqlite.py)      [por defecto]
+│   ├── MySQLConnector        (lib/db/mysql.py)
+│   └── PostgreSQLConnector   (lib/db/postgresql.py)
+├── Stores (reciben un BaseConnector inyectado)
+│   ├── UsersStore     (lib/users_store.py)     → tablas users, users_groups
+│   ├── GroupsStore    (lib/groups_store.py)    → tablas groups, groups_roles
+│   ├── RolesStore     (lib/roles_store.py)     → tabla roles
+│   ├── SessionsStore  (lib/sessions_store.py)  → tabla sessions
+│   ├── AuditStore     (lib/audit_store.py)     → tabla audit
+│   └── HistoryStore   (lib/history_store.py)   → tabla history (series temporales)
 └── ModuleBase (lib/modules/module_base.py)
     ├── watchfuls.datastore::Watchful         🌐 (multiplataforma)
     ├── watchfuls.filesystemusage::Watchful  🌐 (multiplataforma)
@@ -61,6 +73,7 @@ ObjectBase (lib/object_base.py)
     ├── watchfuls.raid::Watchful
     ├── watchfuls.ram_swap::Watchful          🌐 (multiplataforma)
     ├── watchfuls.service_status::Watchful   🌐 (multiplataforma)
+    ├── watchfuls.snmp::Watchful             🌐 (multiplataforma; SNMPv1/v2c/v3 + gestión de MIBs)
     ├── watchfuls.temperature::Watchful
     └── watchfuls.web::Watchful              🌐 (multiplataforma)
 ```
@@ -88,7 +101,21 @@ ServiceSentry/
 │   │   ├── mem_info.py                  # Dataclass MemInfo (total, free, used, percent)
 │   │   ├── dict_files_path.py           # Diccionario de rutas de archivos
 │   │   ├── secret_manager.py            # Cifrado Fernet de valores sensibles (enc: prefix)
+│   │   ├── net_guard.py                 # validate_external_url(): protección SSRF para URLs de usuario
 │   │   ├── tools.py                     # Utilidades (bytes2human)
+│   │   ├── users_store.py               # UsersStore     → tablas users, users_groups
+│   │   ├── groups_store.py              # GroupsStore    → tablas groups, groups_roles
+│   │   ├── roles_store.py               # RolesStore     → tabla roles
+│   │   ├── sessions_store.py            # SessionsStore  → tabla sessions
+│   │   ├── audit_store.py               # AuditStore     → tabla audit
+│   │   ├── history_store.py             # HistoryStore   → tabla history (series temporales)
+│   │   ├── db/                          # Capa de BD pluggable (SQLite/MySQL/PostgreSQL)
+│   │   │   ├── __init__.py              # get_connector(config, default_sqlite_path)
+│   │   │   ├── base.py                  # BaseConnector + reconcile_table() (reconciliación de esquema)
+│   │   │   ├── schema.py                # TableSpec/Column/Index, diff_table(), generador de DDL
+│   │   │   ├── sqlite.py                # SQLiteConnector (WAL, por defecto)
+│   │   │   ├── mysql.py                 # MySQLConnector (PyMySQL)
+│   │   │   └── postgresql.py            # PostgreSQLConnector (psycopg2)
 │   │   ├── config/
 │   │   │   ├── config_store.py          # I/O JSON (lectura/escritura)
 │   │   │   ├── config_control.py        # Operaciones sobre config (get/set/exist)
@@ -106,34 +133,33 @@ ServiceSentry/
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck
 │   │   │   └── enum_config_options.py   # Enum opciones de config comunes
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
-│   │       ├── app.py                   # Clase WebAdmin (hereda de los 7 mixins)
+│   │       ├── app.py                   # Clase WebAdmin (hereda de los 8 mixins)
+│   │       ├── constants.py             # PERMISSIONS (28), BUILTIN_ROLE_UIDS/GROUP_UIDS, SYSTEM_USER
 │   │       ├── i18n.py                  # Cargador de traducciones
+│   │       ├── email_notify.py          # Envío de email (SMTP / Microsoft 365 / Gmail)
+│   │       ├── email_templates.py       # Motor de plantillas HTML de email
+│   │       ├── notification_dispatcher.py  # Enruta eventos a Telegram/Email/Webhook
+│   │       ├── webhook_notify.py        # Envío de webhooks (HMAC opcional)
 │   │       ├── lang/                    # Ficheros de idioma globales (en_EN.py, es_ES.py)
-│   │       ├── templates/               # Plantillas Jinja2
-│   │       ├── mixins/                  # Lógica de negocio por dominio
-│   │       │   ├── users.py             # _UsersMixin: CRUD usuarios
-│   │       │   ├── roles.py             # _RolesMixin: CRUD roles
-│   │       │   ├── groups.py            # _GroupsMixin: CRUD grupos
-│   │       │   ├── permissions.py       # _PermissionsMixin: permisos efectivos
-│   │       │   ├── sessions.py          # _SessionsMixin: gestión de sesiones
-│   │       │   ├── audit.py             # _AuditMixin: registro de auditoría
-│   │       │   └── checks.py            # _ChecksMixin: ejecución de checks
-│   │       └── routes/                  # Blueprints / registradores de rutas Flask
+│   │       ├── templates/               # Plantillas Jinja2 (+ partials JS por feature)
+│   │       ├── auth/                    # Autenticación externa (opcional)
+│   │       │   ├── ldap_auth.py         # LDAP/AD (ldap3)
+│   │       │   ├── oidc_auth.py         # OIDC/OAuth2 SSO (authlib)
+│   │       │   └── saml_auth.py         # SAML2 SSO (python3-saml) [alpha]
+│   │       ├── mixins/                  # Lógica de negocio por dominio (8 mixins)
+│   │       │   ├── users.py roles.py groups.py permissions.py
+│   │       │   ├── sessions.py audit.py checks.py
+│   │       │   └── daemon.py            # _DaemonMixin: planificador en segundo plano
+│   │       └── routes/                  # Registradores de rutas Flask (ver web_admin.md)
 │   │           ├── __init__.py          # register_all(app, wa)
-│   │           ├── auth.py              # /login, /logout
-│   │           ├── users.py             # /api/users, /api/me
-│   │           ├── roles.py             # /api/roles
-│   │           ├── groups.py            # /api/groups
-│   │           ├── modules.py           # /api/modules, /api/overview
-│   │           ├── watchfuls.py         # /api/watchfuls/<module_name>/<action> (GET|POST)
-│   │           ├── config.py            # /api/config, /api/config/schema
-│   │           ├── sessions.py          # /api/sessions
-│   │           ├── status.py            # /status (página de estado pública)
-│   │           ├── telegram.py          # /api/telegram/test
-│   │           ├── audit.py             # /api/audit
-│   │           ├── checks.py            # /api/checks/run
-│   │           ├── errors.py            # Manejadores de errores HTTP (404, 500…)
-│   │           └── ui.py                # /, /lang, /theme
+│   │           ├── auth/                # /login, /logout, /api/v1/auth/ldap|entra/*
+│   │           ├── users/               # /api/v1/users, /me, roles, groups
+│   │           ├── sessions/            # /api/v1/sessions, /api/v1/audit
+│   │           ├── modules/             # /api/v1/modules, status, overview, checks/run
+│   │           ├── notify/              # /api/v1/notify/* (telegram, email, webhook, templates)
+│   │           ├── config.py webhooks.py watchfuls.py history.py daemon.py
+│   │           ├── status.py ui.py errors.py
+│   │           └── …                    # (inventario completo de endpoints en web_admin.md)
 │   ├── watchfuls/                       # Módulos de monitorización (packages)
 │   │   ├── filesystemusage/             # 🌐 Multiplataforma (psutil)
 │   │   │   ├── __init__.py              # Implementación del módulo
@@ -149,6 +175,7 @@ ServiceSentry/
 │   │   ├── raid/
 │   │   ├── ram_swap/                    # 🌐 Multiplataforma (psutil)
 │   │   ├── service_status/              # 🌐 Multiplataforma (systemd/OpenRC/SysV/Windows)
+│   │   ├── snmp/                        # 🌐 SNMPv1/v2c/v3 + gestión/compilación de MIBs
 │   │   ├── temperature/
 │   │   └── web/
 │   └── tests/                           # Tests de core y web admin
@@ -260,6 +287,46 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 | Monitor → módulos | `ThreadPoolExecutor` (un hilo por módulo) |
 | Dentro de cada módulo | `ThreadPoolExecutor` (un hilo por ítem: ping, datastore, hddtemp…) |
 | Envío Telegram | Hilo daemon separado con cola de mensajes |
+
+---
+
+## Capa de Persistencia y Esquema de BD
+
+La capa de datos del core (`lib/db/`) abstrae el motor mediante `BaseConnector`,
+con implementaciones para **SQLite** (por defecto), **MySQL/MariaDB** y
+**PostgreSQL**. Todos los stores (`users_store`, `groups_store`, `roles_store`,
+`sessions_store`, `audit_store`, `history_store`) reciben un conector inyectado y
+no hablan nunca con un driver concreto.
+
+### Reconciliación declarativa de esquema
+
+Cada tabla se define una sola vez como `TableSpec` (`lib/db/schema.py`:
+columnas, orden, tipos, nullable, defaults, PK, índices, renombrados). En el
+arranque, `connector.reconcile_table(spec)` compara la tabla real con la
+definición y la **actualiza automáticamente** (añade columnas, corrige orden,
+tipos, nullable, defaults e índices; reconstruye la tabla preservando los datos
+cuando un `ALTER` no basta). Las columnas presentes en la BD pero ausentes del
+spec **se conservan y se reportan en log, nunca se borran**.
+
+### Convención de tipos de fecha/hora
+
+Las fechas (`created_at`, `updated_at`, `sessions.created`/`last_seen`…) se
+almacenan como **`TEXT` en formato ISO 8601 UTC** (`2026-06-05T12:00:00Z`).
+Motivo: **SQLite no tiene tipo nativo de fecha** (solo `NULL/INTEGER/REAL/TEXT/
+BLOB`), y el texto ISO ordena cronológicamente con orden lexicográfico, es
+legible, no ambiguo y portable e idéntico entre los tres motores. Las series
+temporales de alto volumen (`history.ts`) usan **`REAL` (epoch Unix)** para
+aritmética/agregación baratas.
+
+> **TODO (revisar en futuras actualizaciones):** actualmente el token `TEXT` se
+> mapea a `TEXT` también en MySQL y PostgreSQL. Estos motores **sí** tienen tipos
+> temporales nativos (`DATETIME(6)` / `TIMESTAMPTZ`) que serían más eficientes y
+> correctos a gran volumen. Evaluar añadir un token simbólico `DATETIME` que
+> mapee a `TEXT` (SQLite) / `DATETIME(6)` (MySQL) / `TIMESTAMPTZ` (PostgreSQL).
+> Requeriría: normalizar el formato de escritura por motor (MySQL no acepta la
+> `T`/`Z` de ISO directamente), manejar el tipo devuelto al leer, y añadir
+> `DATETIME` a `canonical_type()` en el motor de diff. **No prioritario** mientras
+> el volumen de las tablas de entidad sea bajo.
 
 ---
 

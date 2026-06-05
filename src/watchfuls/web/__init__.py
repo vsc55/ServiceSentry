@@ -155,6 +155,12 @@ class Watchful(ModuleBase):
         Returns code 0 on connection error (URLError / OSError).
         """
         target = url if '://' in url else f'{scheme}://{url}'
+        # SSRF guard: block non-HTTP(S) schemes and link-local/metadata targets.
+        # Private/internal hosts are intentionally allowed (legitimate monitoring).
+        from lib.net_guard import validate_external_url  # noqa: PLC0415
+        _reason = validate_external_url(target)
+        if _reason:
+            return 0, f'Blocked: {_reason}'
         try:
             req = urllib.request.Request(target, method=method.upper())
             req.add_header('User-Agent', 'ServiceSentry/1.0')
