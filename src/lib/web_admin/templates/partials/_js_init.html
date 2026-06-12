@@ -180,6 +180,13 @@ if (overviewLi) overviewLi.style.display = perms.has('overview_view') ? '' : 'no
 // Modules tab
 const modulesLi = document.getElementById('tab-modules-li');
 if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
+// Servers (host registry) tab — gated by the modules permissions
+const serversLi = document.getElementById('tab-servers-li');
+if (serversLi) serversLi.style.display = perms.has('modules_view') ? '' : 'none';
+const btnNewHost = document.getElementById('btnNewHost');
+if (btnNewHost) btnNewHost.style.display = perms.has('modules_edit') ? '' : 'none';
+const btnMigrateHosts = document.getElementById('btnMigrateHosts');
+if (btnMigrateHosts) btnMigrateHosts.style.display = perms.has('modules_edit') ? '' : 'none';
 // Config tab
 const configLi = document.getElementById('tab-config-li');
 const hasConfigEdit = perms.has('config_edit');
@@ -335,6 +342,7 @@ try {
     applyModuleDefaults();
     _savedModulesData = deepClone(modulesData);
     clearDirty('modules'); // applyModuleDefaults may call markDirty for migrations; reset here
+    if ((currentUser.permissions || []).includes('modules_view')) { await loadHosts(); }
     configData = await loadConfig() || {};
     _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
     const _rawPS = configData?.web_admin?.page_sizes;
@@ -359,6 +367,7 @@ try {
     _startVersionPoll();
     renderModules();
     renderConfig();
+    renderServers();
     applyRoleRestrictions();
     const _savedTab = localStorage.getItem('ss_active_tab');
     if (_savedTab) {

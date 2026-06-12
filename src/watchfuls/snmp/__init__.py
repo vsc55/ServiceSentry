@@ -1327,6 +1327,9 @@ class Watchful(ModuleBase):
         """
         if server is None:
             server = {}
+        # Host-centric: if the server references a host, merge its address +
+        # SNMP credential profile (no-op for classic inline servers).
+        server = self.resolve_host(server)
 
         host      = str(server.get('host',      '') or '').strip()
         port      = int(server.get('port',      _SERVER_DEFAULTS['port'])      or _SERVER_DEFAULTS['port'])

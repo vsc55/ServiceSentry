@@ -6,6 +6,7 @@
         "timeout":      {"type": "int",  "default": 10, "min": 1, "max": 60}
     },
     "__history__": {"field": "days_left", "unit": " days", "label": "Days Until Expiry"},
+    "__host_profile__": {"key": "tls", "address_field": "host", "fields": ["host", "port"]},
     "list": {
         "enabled":      {"type": "bool", "default": true},
         "host":         {"type": "str",  "default": ""},

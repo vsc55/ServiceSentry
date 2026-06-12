@@ -494,9 +494,25 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         return a.localeCompare(b);
     });
 
+    // ── Host binding (host-centric config) ──────────────────────────────────
+    // A module whose connection fields are declared in __host_profile__ (exposed
+    // as MODULE_HOST_FIELDS) lets an item reference a host instead of inline
+    // connection.  Show a host picker and, when one is bound, hide those fields.
+    const _modBase = _modName.replace(/^watchfuls\./, '');
+    const _hostFields = (target !== 'config')
+        ? (MODULE_HOST_FIELDS[_modBase] || MODULE_HOST_FIELDS[_modName] || null) : null;
+    // Only the collection that actually holds the connection fields is host-capable
+    // (e.g. snmp 'servers', not its 'checks' sub-collection nor '__module__').
+    const _hostCapable = !!(_hostFields && _sch && _hostFields.some(f => f in _sch));
+    const _hostBound = _hostCapable && obj && obj.host_uid;
+    if (_hostCapable) {
+        h += _renderHostPicker(pathPrefix, obj.host_uid || '', target);
+    }
+
     let _curGroup = null;
     for (const k of keys) {
         if (exclude.includes(k)) continue;
+        if (k === 'host_uid') continue;   // rendered by the host picker above
         const v = obj[k];
         if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
         const _meta = fieldMeta(_sch, k);
@@ -549,17 +565,52 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         }
         const _disp = _visible ? '' : ' style="display:none"';
 
-        if (_showWhen) {
-            h += `<div class="sw-field" data-sw-when="${escAttr(JSON.stringify(_showWhen))}"${_disp}>${_fhtml}</div>`;
-        } else {
-            h += _fhtml;
+        let _inner = _showWhen
+            ? `<div class="sw-field" data-sw-when="${escAttr(JSON.stringify(_showWhen))}"${_disp}>${_fhtml}</div>`
+            : _fhtml;
+        // Connection field of a host-capable module: wrap so it can be hidden
+        // when a host is bound (its value comes from the host then).
+        if (_hostCapable && _hostFields.includes(k)) {
+            const _hpDisp = _hostBound ? ' style="display:none"' : '';
+            _inner = `<div class="hostprof-field" data-hp-item="${escAttr(pathPrefix)}"${_hpDisp}>${_inner}</div>`;
         }
+        h += _inner;
     }
     // Inject post-group HTML for the final group
     if (_curGroup !== null && _postGroupHtml[_curGroup]) {
         h += _postGroupHtml[_curGroup];
     }
     return h;
+}
+
+/**
+ * Render the "bind to a host" picker for a host-capable item.  Selecting a host
+ * makes the check inherit that host's address + credential profile; the inline
+ * connection fields are hidden.  The empty option keeps the classic inline mode.
+ */
+function _renderHostPicker(itemPath, curUid, target) {
+    const opts = ['<option value="">' + esc(t('host_inline')) + '</option>'].concat(
+        hostsList().map(hh =>
+            `<option value="${escAttr(hh.uid)}"${hh.uid === curUid ? ' selected' : ''}>` +
+            `${esc(hh.name)}${hh.address ? ' (' + esc(hh.address) + ')' : ''}</option>`));
+    return `<div class="cfg-field-wrap mb-2">
+        <label class="form-label small fw-semibold">
+            <i class="bi bi-hdd-network me-1"></i>${esc(t('host_bind_label'))}</label>
+        <select class="form-select form-select-sm"
+                onchange="_onHostPick(${jsStr(itemPath)},this.value,${jsStr(target)})">${opts.join('')}</select>
+    </div>`;
+}
+
+/**
+ * Apply a host selection: store host_uid and show/hide the inline connection
+ * fields without a full re-render (preserves expand/scroll state).
+ */
+function _onHostPick(itemPath, uid, target) {
+    updateField(target, itemPath + '|host_uid', uid || '');
+    document.querySelectorAll(`.hostprof-field[data-hp-item="${CSS.escape(itemPath)}"]`)
+        .forEach(el => { el.style.display = uid ? 'none' : ''; });
+    // When unbinding, restore each field's own show_when visibility.
+    if (!uid) _refreshConditionalFields(itemPath);
 }
 
 /**

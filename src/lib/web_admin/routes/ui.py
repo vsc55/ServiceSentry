@@ -5,6 +5,11 @@
 from flask import jsonify, redirect, render_template, session
 
 from lib.modules import ModuleBase
+from lib.host_profiles import (
+    host_profiles_catalog,
+    module_host_fields,
+    module_host_multiple,
+)
 
 from ..constants import SUPPORTED_LANGS
 
@@ -36,6 +41,9 @@ def register(app, wa):
             display_name=session.get('display_name', ''),
             role=session.get('role', 'viewer'),
             item_schemas=ModuleBase.discover_schemas(wa._modules_dir),
+            host_profiles=host_profiles_catalog(wa._modules_dir),
+            module_host_fields=module_host_fields(wa._modules_dir),
+            module_host_multiple=module_host_multiple(wa._modules_dir),
         )
 
     @app.route('/api/v1/me', methods=['GET'])

@@ -6,6 +6,7 @@
         "timeout":    {"type": "int",   "default": 5,   "min": 1,   "max": 30}
     },
     "__history__": {"field": "offset_seconds", "unit": "s", "label": "NTP Offset"},
+    "__host_profile__": {"key": "ntp", "address_field": "server", "fields": ["server", "port"]},
     "list": {
         "enabled":    {"type": "bool",  "default": true},
         "server":     {"type": "str",   "default": "pool.ntp.org"},

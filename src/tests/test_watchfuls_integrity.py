@@ -108,7 +108,9 @@ class TestRealModuleImport:
         mod = importlib.import_module(f"watchfuls.{mod_name}")
         schema = mod.Watchful.ITEM_SCHEMA
         for collection, fields in schema.items():
-            if collection == "__i18n__":
+            if collection in ("__i18n__", "__host_profile__", "__host_multiple__"):
+                # host-binding metadata (dict/list/bool), not a renderable
+                # collection of field defs.
                 continue
             assert isinstance(fields, dict), (
                 f"{mod_name}.ITEM_SCHEMA['{collection}'] is not a dict"

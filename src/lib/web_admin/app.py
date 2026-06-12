@@ -411,6 +411,13 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._groups_store   = GroupsStore(self._db_connector)
         self._sessions_store = SessionsStore(self._db_connector)
         self._roles_store    = RolesStore(self._db_connector)
+        # Host registry — connection profiles defined once, reused by modules.
+        from lib.hosts_store import HostsStore  # noqa: PLC0415
+        self._hosts_store = HostsStore(
+            self._db_connector,
+            fernet=self._get_fernet(),
+            secret_keys=getattr(self, '_secret_keys', None),
+        )
         # Let watchful modules create their own tables on the shared connector.
         try:
             reconcile_module_tables(self._db_connector)

@@ -73,6 +73,7 @@ class Monitor(ObjectBase):
         self._init_telegram()
         self._db = self._init_db()
         self._history = self._init_history()
+        self._hosts_store = self._init_hosts_store()
         self._reconcile_module_tables()
         self.debug.print("> Monitor >> Monitor Init OK")
 
@@ -96,6 +97,20 @@ class Monitor(ObjectBase):
     def db(self):
         """The shared DB connector (or None when no var dir / init failed)."""
         return getattr(self, '_db', None)
+
+    def _init_hosts_store(self):
+        """Create the host registry store so modules can resolve host_uid → connection."""
+        if self._db is None:
+            return None
+        try:
+            from lib.hosts_store import HostsStore  # noqa: PLC0415
+            from lib import secret_manager          # noqa: PLC0415
+            from lib.modules import ModuleBase       # noqa: PLC0415
+            secret_keys = secret_manager.ENCRYPT_KEYS | ModuleBase.discover_secret_fields(self.dir_modules)
+            return HostsStore(self._db, fernet=getattr(self, '_fernet', None),
+                              secret_keys=secret_keys)
+        except Exception:  # pylint: disable=broad-except
+            return None
 
     def _init_history(self):
         """Create a HistoryStore on the shared connector."""
@@ -192,6 +207,7 @@ class Monitor(ObjectBase):
         if self.dir_config:
             _secret_file = os.path.join(self.dir_config, '.flask_secret')
             _fernet = secret_manager.fernet_from_secret_file(_secret_file)
+            self._fernet = _fernet   # kept for the host registry (decrypts profiles)
 
             self.config = ConfigControl(os.path.join(self.dir_config, 'config.json'))
             self.config.read()

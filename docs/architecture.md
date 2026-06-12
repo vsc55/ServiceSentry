@@ -64,7 +64,8 @@ ObjectBase (lib/object_base.py)
 │   ├── RolesStore     (lib/roles_store.py)     → tabla roles
 │   ├── SessionsStore  (lib/sessions_store.py)  → tabla sessions
 │   ├── AuditStore     (lib/audit_store.py)     → tabla audit
-│   └── HistoryStore   (lib/history_store.py)   → tabla history (series temporales)
+│   ├── HistoryStore   (lib/history_store.py)   → tabla history (series temporales)
+│   └── HostsStore     (lib/hosts_store.py)     → tabla hosts (servidores + perfiles de conexión)
 └── ModuleBase (lib/modules/module_base.py)
     ├── watchfuls.datastore::Watchful         🌐 (multiplataforma)
     ├── watchfuls.filesystemusage::Watchful  🌐 (multiplataforma)
@@ -109,6 +110,9 @@ ServiceSentry/
 │   │   ├── sessions_store.py            # SessionsStore  → tabla sessions
 │   │   ├── audit_store.py               # AuditStore     → tabla audit
 │   │   ├── history_store.py             # HistoryStore   → tabla history (series temporales)
+│   │   ├── hosts_store.py               # HostsStore     → tabla hosts (servidores + perfiles)
+│   │   ├── host_profiles.py             # Catálogo protocolo→campos (de __host_profile__)
+│   │   ├── host_migrate.py              # Asistente: agrupar conexiones inline en hosts
 │   │   ├── db/                          # Capa de BD pluggable (SQLite/MySQL/PostgreSQL)
 │   │   │   ├── __init__.py              # get_connector(config, default_sqlite_path)
 │   │   │   ├── base.py                  # BaseConnector + reconcile_table() (reconciliación de esquema)
@@ -253,6 +257,9 @@ Monitor.check():
 │       ├── importlib.import_module(nombre)
 │       ├── Watchful(self) ← le pasa el Monitor
 │       ├── module.check() → ReturnModuleCheck
+│       │   └── (opcional) self.resolve_host(item): si el ítem tiene host_uid,
+│       │       fusiona dirección + perfil del host (Monitor._hosts_store) sobre
+│       │       la conexión antes de comprobar. Ver guía de módulos §4d.
 │       │
 │       └── Para CADA resultado en ReturnModuleCheck:
 │           ├── Guarda other_data en status.json

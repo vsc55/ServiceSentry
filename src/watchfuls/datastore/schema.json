@@ -4,6 +4,13 @@
         "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
     },
     "__history__": {"field": null, "unit": null, "label": "Connection"},
+    "__host_profile__": [
+        {"key": "db", "address_field": "host", "fields": ["host"]},
+        {"key": "ssh",
+         "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
+                    "ssh_key", "ssh_verify_host"]}
+    ],
+    "__host_multiple__": true,
     "list": {
         "__test__": "/api/watchfuls/datastore/test_connection",
         "__new_item_fields__": ["db_type"],

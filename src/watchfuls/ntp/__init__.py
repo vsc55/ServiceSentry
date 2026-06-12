@@ -86,6 +86,8 @@ class Watchful(ModuleBase):
         for (key, value) in self.get_conf('list', {}).items():
             if not isinstance(value, dict):
                 continue
+            # Host-centric: merge a referenced host's address/port (no-op inline).
+            value = self.resolve_host(value)
             enabled = str(value.get('enabled', True)).lower() in ('true', '1', 'yes', True, 'on', 'enable')
             if not enabled:
                 continue

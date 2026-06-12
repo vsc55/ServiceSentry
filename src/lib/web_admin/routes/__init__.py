@@ -18,6 +18,7 @@ from .users.groups import register as _groups
 from .sessions import register as _sessions
 from .sessions.audit import register as _audit
 from .config import register as _config
+from .hosts import register as _hosts
 from .watchfuls import register as _watchfuls
 from .daemon import register as _daemon
 from .history import register as _history
@@ -33,6 +34,7 @@ def register_all(app, wa):
     _errors(app, wa)
     _modules(app, wa)
     _config(app, wa)
+    _hosts(app, wa)
     _telegram(app, wa)
     _ldap(app, wa)
     _email(app, wa)

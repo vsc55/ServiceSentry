@@ -178,6 +178,12 @@
                 <i class="bi bi-puzzle me-1"></i>{{ i18n.tab_modules }}
             </button>
         </li>
+        <li class="nav-item" role="presentation" id="tab-servers-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-servers" type="button"
+                id="btn-tab-servers">
+                <i class="bi bi-hdd-network me-1"></i>{{ i18n.tab_servers }}
+            </button>
+        </li>
         <li class="nav-item" role="presentation" id="tab-config-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-config" type="button">
                 <i class="bi bi-gear me-1"></i>{{ i18n.tab_config }}
@@ -238,6 +244,27 @@
                 </button>
             </div>
             <div id="modules-container"></div>
+        </div>
+
+        <!-- ==================== Servers Tab ==================== -->
+        <div class="tab-pane fade" id="tab-servers">
+            <div class="d-flex align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border"
+                 style="background:var(--bs-secondary-bg);position:sticky;top:calc(var(--ss-top-offset,0px) + 8px);z-index:10">
+                <h6 class="mb-0"><i class="bi bi-hdd-network me-2"></i>{{ i18n.tab_servers }}</h6>
+                <button class="btn btn-sm btn-secondary ms-auto" id="btnReloadHosts" onclick="reloadHosts()"
+                    title="{{ i18n.hosts_reload_tt }}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload }}
+                </button>
+                <button class="btn btn-sm btn-info" id="btnMigrateHosts" onclick="openMigrateModal()"
+                    title="{{ i18n.host_migrate_tt }}">
+                    <i class="bi bi-magic me-1"></i>{{ i18n.host_migrate }}
+                </button>
+                <button class="btn btn-sm btn-success" id="btnNewHost" onclick="openNewHostModal()"
+                    title="{{ i18n.host_new_tt }}">
+                    <i class="bi bi-plus-lg me-1"></i>{{ i18n.host_new }}
+                </button>
+            </div>
+            <div id="servers-container"></div>
         </div>
 
         <!-- ==================== Config Tab ===================== -->
@@ -479,6 +506,7 @@
 {% include "partials/_js_overview.html" %}
 {% include "partials/_js_account.html" %}
 {% include "partials/_js_users.html" %}
+{% include "partials/_js_servers.html" %}
 {% include "partials/_js_sessions.html" %}
 {% include "partials/_js_roles.html" %}
 {% include "partials/_js_groups.html" %}

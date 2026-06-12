@@ -7,9 +7,13 @@
         "timeout": {"type": "int",  "default": 15,   "min": 1, "max": 300}
     },
     "__history__": {"field": null, "unit": null, "label": "HTTP Check"},
+    "__host_profile__": {"key": "http", "address_field": "url",
+        "fields": ["url", "scheme", "verify_ssl",
+                   "auth_enabled", "auth_user", "auth_password"]},
+    "__host_multiple__": true,
     "list": {
         "__field_order__": [
-            "enabled", "url", "scheme", "method",
+            "enabled", "url", "path", "scheme", "method",
             "code", "timeout", "verify_ssl",
             "check_content", "content_contains",
             "alert",
@@ -23,6 +27,7 @@
 
         "enabled":          {"type": "bool", "default": true},
         "url":              {"type": "str",  "default": "", "placeholder": "__key__"},
+        "path":             {"type": "str",  "default": "", "placeholder": "/health"},
         "scheme":           {"type": "str",  "default": "https", "options": ["http", "https"]},
         "method":           {"type": "str",  "default": "GET",   "options": ["GET", "HEAD", "POST"]},
         "code":             {"type": "int",  "default": 0, "min": 0, "max": 9999,

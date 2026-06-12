@@ -7,6 +7,10 @@
         "mib_repos": {"type": "str", "default": "", "hidden": true}
     },
     "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
+    "__host_profile__": {"key": "snmp", "address_field": "host",
+        "fields": ["host", "port", "version", "community",
+                   "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key",
+                   "snmpv3_auth_protocol", "snmpv3_priv_protocol", "timeout", "retries"]},
     "servers": {
         "__new_item_fields__": ["host", "community"],
         "enabled":              {"type": "bool", "default": true},

@@ -186,8 +186,11 @@ class ModuleBase(ObjectBase):
             partial_deps  = list(getattr(watchful_cls, 'PARTIAL_DEPS',  None) or [])
 
             for collection, fields in item_schema.items():
-                if collection == '__i18n__':
-                    continue  # handled separately below
+                if collection in ('__i18n__', '__host_profile__', '__host_multiple__'):
+                    # __i18n__ handled separately; __host_profile__/__host_multiple__
+                    # are host-binding metadata (read from ITEM_SCHEMA), not
+                    # renderable collections.
+                    continue
                 col_fields = dict(fields)
                 # Merge label_i18n from lang files.
                 # Sub-collection fields (type='sub_collection') are rendered as
@@ -369,6 +372,64 @@ class ModuleBase(ObjectBase):
         module-level ``discover_db_tables()`` — see ``lib.db.module_tables``.
         """
         return getattr(self._monitor, 'db', None)
+
+    def resolve_host(self, item: dict) -> dict:
+        """Merge a referenced host's connection over a check item.
+
+        Host-centric config: an item (or, for SNMP, a server) may carry a
+        ``host_uid`` instead of inline connection fields.  When it does, this
+        looks the host up in the monitor's host registry and returns a NEW dict
+        = the item with the host's address + the relevant per-protocol
+        credential profile(s) merged in (host values win, since the UI hides the
+        inline connection fields when a host is bound).  Items without a
+        ``host_uid`` — the classic inline config — are returned unchanged, so
+        the two styles coexist.
+
+        Which fields come from the host is declared by the module's
+        ``__host_profile__`` in schema.json::
+
+            "__host_profile__": {"key": "snmp", "address_field": "host",
+                                 "fields": ["host","port","community", ...]}
+
+        ``__host_profile__`` may also be a LIST of such specs for modules that
+        need several protocols (e.g. datastore: an ``ssh`` tunnel + a ``db``
+        profile).  Only specs with an ``address_field`` receive the host
+        address; the rest contribute their profile fields only.
+        """
+        if not isinstance(item, dict):
+            return item
+        host_uid = str(item.get('host_uid') or '').strip()
+        if not host_uid:
+            return item
+        store = getattr(self._monitor, '_hosts_store', None)
+        if store is None:
+            return item
+        try:
+            host = store.get(host_uid)
+        except Exception:  # pylint: disable=broad-except
+            return item
+        if not host:
+            return item
+
+        specs = (getattr(self, 'ITEM_SCHEMA', None) or {}).get('__host_profile__')
+        if isinstance(specs, dict):
+            specs = [specs]
+        if not isinstance(specs, list):
+            return item
+
+        profiles = host.get('profiles') or {}
+        conn: dict = {}
+        for spec in specs:
+            if not isinstance(spec, dict):
+                continue
+            addr_field = spec.get('address_field')
+            if addr_field and host.get('address'):
+                conn[addr_field] = host['address']
+            prof = profiles.get(spec.get('key')) or {}
+            if isinstance(prof, dict):
+                # Only non-empty profile values override the item.
+                conn.update({k: v for k, v in prof.items() if v not in (None, '')})
+        return {**item, **conn}
 
     @property
     def _default_threads(self) -> int:

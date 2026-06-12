@@ -838,6 +838,20 @@ class Watchful(ModuleBase):
 
     # ── Config helpers ─────────────────────────────────────────────────
 
+    def _resolved_item(self, key: str) -> dict:
+        """Return the item config for *key* with any referenced host merged in.
+
+        Host-centric: when the item carries a ``host_uid`` its address + db/ssh
+        credential profiles are merged over it (resolve_host is a no-op for
+        classic inline items).  Cached per key for the duration of this check
+        cycle (the monitor builds a fresh instance each cycle, so it never
+        goes stale)."""
+        cache = self.__dict__.setdefault('_resolved_items', {})
+        if key not in cache:
+            raw = self.get_conf(['list', key], {})
+            cache[key] = self.resolve_host(raw) if isinstance(raw, dict) else {}
+        return cache[key]
+
     def _get_conf(self, opt: ConfigOptions, key: str, default=None):
         if default is None:
             match opt:
@@ -853,7 +867,10 @@ class Watchful(ModuleBase):
                     default = self.get_conf('enabled', self._DEFAULTS['enabled'])
                 case _:
                     default = self.get_conf(opt.name, self._DEFAULTS.get(opt.name, ''))
-        val = self.get_conf_in_list(opt, key, default)
+        # Read from the host-resolved item so host_uid-bound checks inherit the
+        # host's connection; falls back to the default when the field is absent.
+        item = self._resolved_item(key)
+        val = item.get(opt.name, default) if isinstance(item, dict) else default
         match opt:
             case ConfigOptions.port | ConfigOptions.ssh_port | ConfigOptions.db_index:
                 return self._parse_conf_int(val, default)

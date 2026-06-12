@@ -50,39 +50,20 @@ class Watchful(ModuleBase):
             self._debug('Web: Module disabled, skipping check.', DebugLevel.info)
             return self.dict_return
 
-        items = []
+        names = []
         for key, value in self.get_conf('list', {}).items():
-            is_enabled = self._DEFAULTS['enabled']
-            match value:
-                case bool():
-                    is_enabled = value
-                    url, scheme, verify_ssl = key, 'https', True
-                    self._debug(
-                        f'[Deprecate] Check: {url} — Enabled: {is_enabled}. Update format.',
-                        DebugLevel.warning,
-                    )
-                case dict():
-                    is_enabled = value.get('enabled', is_enabled)
-                    url        = (value.get('url', '') or '').strip() or key
-                    scheme     = (value.get('scheme', '') or 'https').strip()
-                    verify_ssl = bool(value.get('verify_ssl', True))
-                    self._debug(f'Check: {url} — Enabled: {is_enabled}', DebugLevel.info)
-                case _:
-                    url, scheme, verify_ssl = key, 'https', True
-                    self._debug(
-                        f'Check: {url} — Unknown format, using defaults.', DebugLevel.warning
-                    )
-
-            if is_enabled:
-                items.append((key, url, verify_ssl, scheme))
+            if isinstance(value, bool):
+                if value:
+                    names.append(key)   # legacy: key is the url, bool = enabled
+                continue
+            it = self._resolved_item(key)
+            if it.get('enabled', self._DEFAULTS['enabled']):
+                names.append(key)
 
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.get_conf('threads', self._default_threads)
         ) as executor:
-            futures = {
-                executor.submit(self._web_check, name, url, verify_ssl, scheme): name
-                for name, url, verify_ssl, scheme in items
-            }
+            futures = {executor.submit(self._web_check, name): name for name in names}
             for future in concurrent.futures.as_completed(futures):
                 name = futures[future]
                 try:
@@ -96,22 +77,35 @@ class Watchful(ModuleBase):
 
     # ── Per-item check ────────────────────────────────────────────────────
 
-    def _web_check(self, name: str, url: str, verify_ssl: bool = True, scheme: str = 'https') -> None:
-        code_exp  = (
-            self.get_conf_in_list('code', name, 0)
-            or self.get_conf('code', self._MODULE_DEFAULTS['code'])
-        )
-        timeout = (
-            self.get_conf_in_list('timeout', name, 0)
-            or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
-        )
-        method           = str(self.get_conf_in_list('method', name, 'GET') or 'GET').upper()
-        check_content    = bool(self.get_conf_in_list('check_content', name, False))
-        content_contains = str(self.get_conf_in_list('content_contains', name, '') or '')
-        auth_enabled     = bool(self.get_conf_in_list('auth_enabled', name, False))
-        auth_user        = str(self.get_conf_in_list('auth_user', name, '') or '') if auth_enabled else ''
-        auth_password    = str(self.get_conf_in_list('auth_password', name, '') or '') if auth_enabled else ''
-        alert            = int(self.get_conf_in_list('alert', name, 1) or 1)
+    def _resolved_item(self, key: str) -> dict:
+        """Item config for *key* with any referenced host merged in (no-op when
+        inline).  Cached per check cycle (the monitor builds a fresh instance
+        each cycle)."""
+        cache = self.__dict__.setdefault('_resolved_items', {})
+        if key not in cache:
+            raw = self.get_conf(['list', key], {})
+            cache[key] = self.resolve_host(raw) if isinstance(raw, dict) else {}
+        return cache[key]
+
+    def _web_check(self, name: str) -> None:
+        it = self._resolved_item(name)
+        # Host-centric: a host's address fills 'url'; the per-check 'path' is
+        # appended to it (inline checks keep the full url in 'url' with empty path).
+        url  = (it.get('url', '') or '').strip() or name
+        path = (it.get('path', '') or '').strip()
+        if path:
+            url = url.rstrip('/') + '/' + path.lstrip('/')
+        scheme       = (it.get('scheme', '') or 'https').strip()
+        verify_ssl   = bool(it.get('verify_ssl', True))
+        code_exp     = it.get('code', 0) or self.get_conf('code', self._MODULE_DEFAULTS['code'])
+        timeout      = it.get('timeout', 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+        method           = str(it.get('method', 'GET') or 'GET').upper()
+        check_content    = bool(it.get('check_content', False))
+        content_contains = str(it.get('content_contains', '') or '')
+        auth_enabled     = bool(it.get('auth_enabled', False))
+        auth_user        = str(it.get('auth_user', '') or '') if auth_enabled else ''
+        auth_password    = str(it.get('auth_password', '') or '') if auth_enabled else ''
+        alert            = int(it.get('alert', 1) or 1)
 
         code, detail = self._web_request(
             url, timeout, verify_ssl, scheme,

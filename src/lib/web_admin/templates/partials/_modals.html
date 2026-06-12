@@ -729,6 +729,46 @@
     </div>
 </div>
 
+{# New/Edit host (server) modal — body is built dynamically by saveHostModal/openEditHostModal. #}
+<div class="modal fade" id="hostModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-hdd-network me-1"></i><span id="hostModalTitle">{{ i18n.host_new }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="hostModalBody"></div>
+            <div class="modal-footer py-2">
+                <span class="text-danger small me-auto" id="hostModalError"></span>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnHostModalOk" onclick="saveHostModal()">
+                    <i class="bi bi-save me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Assisted host migration modal — proposal of candidate hosts. #}
+<div class="modal fade" id="hostMigrateModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-magic me-1"></i>{{ i18n.host_migrate_title }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="hostMigrateBody"></div>
+            <div class="modal-footer py-2">
+                <span class="text-muted small me-auto" id="hostMigrateInfo"></span>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnMigrateApply" onclick="applyMigration()">
+                    <i class="bi bi-check2-circle me-1"></i>{{ i18n.host_migrate_apply }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# Module-specific modals — each watchful module may provide its own
    modal HTML under watchfuls/<mod>/web/_modals.html.  The list is
    built at startup by _create_app() with no module-specific knowledge. #}

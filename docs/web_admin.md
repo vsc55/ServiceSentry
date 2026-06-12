@@ -78,6 +78,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | Característica | Descripción |
 |---------------|-------------|
 | **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas; barra de herramientas con **Añadir**, **Recargar** (descarta cambios y recarga desde el servidor) y **Deshacer** (revierte cambios no guardados al último estado guardado) |
+| **Servers (hosts)** | Define un servidor una vez (dirección + perfiles de conexión por protocolo: ssh/snmp/db/http/tls…) y vincúlalo desde los checks de cualquier módulo, que heredan dirección + credenciales. Asistente "Detectar duplicados" que agrupa conexiones inline repetidas en hosts compartidos. Secretos cifrados en la BD general. Ver §[Servers (registro de hosts)](#servers-registro-de-hosts) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en `localStorage`; modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | 6 tarjetas de resumen (Modules, Checks, Sessions, Users, Groups, Roles) + 2 widgets de tabla (lista de módulos con estado por check, actividad reciente); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables |
 | **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador; paneles colapsables por sección |
@@ -268,6 +269,39 @@ El permiso requerido se indica entre paréntesis.
 | `PUT` | `/api/v1/modules` | `modules_edit` | Guardar todas las configuraciones de módulos |
 | `GET` | `/api/v1/modules/status` | `checks_view` o `checks_run` | Obtener el contenido de `status.json` (solo lectura) |
 | `GET` | `/api/v1/modules/overview` | auth | Obtener resumen del dashboard (módulos, checks, sesiones, usuarios, grupos, roles, últimos eventos) |
+
+### Servers (registro de hosts)
+
+Define un servidor una vez (dirección + perfiles de conexión por protocolo) y
+reutilízalo desde los checks de cualquier módulo. Los secretos de los perfiles
+se enmascaran en lectura y se restauran al guardar (igual que `modules.json`).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/hosts` | `modules_view` | Listar hosts (secretos enmascarados) |
+| `POST` | `/api/v1/hosts` | `modules_edit` | Crear un host `{name, address, tags, description, profiles}` |
+| `PUT` | `/api/v1/hosts/<uid>` | `modules_edit` | Actualizar un host (secretos omitidos se conservan) |
+| `DELETE` | `/api/v1/hosts/<uid>` | `modules_edit` | Eliminar un host |
+| `GET` | `/api/v1/hosts/migrate/preview` | `modules_edit` | Propuesta de migración: agrupa conexiones inline repetidas (secretos enmascarados) |
+| `POST` | `/api/v1/hosts/migrate/apply` | `modules_edit` | Crear hosts para los candidatos aceptados `{accept:[{id,name}]}` y vincular los checks |
+
+Un host se guarda en la BD general (tabla `hosts`); `profiles` es un JSON
+`{protocolo: {campo: valor}}` (ssh/snmp/db/http/tls…). Los protocolos y sus
+campos los aporta cada módulo vía `__host_profile__` (ver guía de módulos §4d).
+
+**Vincular un check a un host.** En la config de un módulo host-capaz, cada ítem
+muestra un selector **Host**: al elegir uno, los campos de conexión se ocultan y
+el check hereda dirección + credenciales del host (`resolve_host` en el monitor).
+Módulos host-capaces: snmp, ping, datastore, ssl_cert, ntp, web. `dns` se queda
+inline (su target es un dominio, no un servidor con credenciales).
+
+**Asistente de migración** (botón "Detectar duplicados" en *Servers*). Escanea
+`modules.json`, agrupa ítems por dirección uniéndolos solo si son compatibles
+(sin conflicto de credenciales en protocolos compartidos) y agregando perfiles
+entre módulos; propone N hosts. Tras confirmar, crea los hosts (credenciales
+cifradas) y reescribe los checks con `host_uid`, quitando los campos de conexión
+ya poseídos por el host. Es opt-in y reversible por revisión (coexistencia con
+los checks inline existentes).
 
 ### Configuración
 

@@ -44,6 +44,7 @@ let usersData = {};
 let sessionsData = {};
 let rolesData = {};
 let groupsData = {};
+let hostsData = {};   // {uid: {name, address, tags, profiles, …}} — host registry
 let currentUser = {};
 let _uid = 0;
 let _defaultPageSize = 25;
@@ -99,6 +100,12 @@ const ITEM_SCHEMAS = Object.fromEntries([
     ...Object.entries(_rawItemSchemas),
     ...Object.entries(_rawItemSchemas).map(([k, v]) => [`watchfuls.${k}`, v])
 ]);
+// Host registry: per-protocol connection-profile catalog + the connection
+// fields each module contributes (hidden on a check once it is bound to a host).
+const HOST_PROFILES = {{ host_profiles | default({}) | tojson }};
+const MODULE_HOST_FIELDS = {{ module_host_fields | default({}) | tojson }};
+// Whether each module allows several checks bound to one host (schema __host_multiple__).
+const MODULE_HOST_MULTIPLE = {{ module_host_multiple | default({}) | tojson }};
 const HINTS = I18N.hints || {};
 const ENV_LOCKED = new Set({{ wa_env_locked_fields | tojson }});
 const LDAP_AVAILABLE  = {{ ldap_available  | tojson }};

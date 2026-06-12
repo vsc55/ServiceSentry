@@ -580,6 +580,63 @@ backends.
 
 ---
 
+## 4d. Config host-céntrica (vincular checks a un host)
+
+Por defecto cada módulo define la conexión **dentro de cada ítem** (host, puerto,
+credenciales…). Para no repetir el mismo servidor en varios módulos, un módulo
+puede declararse **host-capaz**: sus campos de conexión pasan a un **Host**
+(definido una vez en la sección *Servers*) y los checks lo referencian por
+`host_uid`, heredando dirección + credenciales en tiempo de ejecución.
+
+**1. Declarar `__host_profile__` en `schema.json`** (a nivel raíz, hermano de
+`__module__`). Indica el protocolo, qué campo recibe la dirección del host
+(`address_field`) y qué campos son de conexión (van al perfil del host):
+
+```json
+"__host_profile__": {"key": "snmp", "address_field": "host",
+    "fields": ["host", "port", "version", "community",
+               "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key",
+               "snmpv3_auth_protocol", "snmpv3_priv_protocol", "timeout", "retries"]},
+```
+
+Puede ser una **lista** de specs para módulos con varios protocolos (p. ej.
+`datastore` declara `db` + `ssh`). Solo los specs con `address_field` reciben la
+dirección del host; el resto aportan sus campos de perfil. `__host_profile__` es
+metadata (no una colección): `discover_schemas` y la UI lo ignoran como tal.
+
+**2. Resolver en el `check()`** con `self.resolve_host(item)`: si el ítem (o, en
+SNMP, el *server*) tiene `host_uid`, devuelve una copia con `address` + el perfil
+del protocolo fusionados (gana el host); si no, devuelve el ítem igual (los
+checks *inline* clásicos siguen funcionando — coexistencia):
+
+```python
+def check(self):
+    for key, value in self.get_conf('list', {}).items():
+        item = self.resolve_host(value)          # no-op si es inline
+        host = item.get('host')                  # viene del host si está vinculado
+        ...
+```
+
+Para módulos que leen campo-a-campo (`get_conf_in_list`), cachea el ítem resuelto
+por cycle y lee de él (patrón `_resolved_item` en `datastore`/`web`).
+
+**Qué cubre el host y qué el check.** El host posee *cómo conectar* (dirección +
+credenciales); el ítem conserva *qué comprobar* (SNMP→OIDs, web→`path`/método,
+ping→intentos). Cuando un check se vincula a un host, la UI **oculta** los campos
+de conexión (los de `__host_profile__`) porque vienen del host.
+
+**Almacenamiento.** Los hosts viven en la BD general (`HostsStore`, tabla
+`hosts`); los secretos de los perfiles se cifran con `secret_manager` igual que
+en `modules.json`. El monitor expone el registro como `self._monitor._hosts_store`
+y `resolve_host` lo usa de forma transparente.
+
+**Cuándo NO declararlo.** Si el "target" del módulo no es un servidor con
+conexión/credenciales sino un sujeto de la comprobación (p. ej. **dns**, cuyo
+target es un dominio a resolver), **no** declares `__host_profile__`: el módulo
+se queda inline-only.
+
+---
+
 ## 5. Referencia de la API de ModuleBase
 
 ### Configuración
