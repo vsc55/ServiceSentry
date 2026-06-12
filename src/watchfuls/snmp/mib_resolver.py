@@ -371,14 +371,45 @@ except ImportError:
         _SMI_DIALECT = None
 
 
+# Hard timeout (seconds) for fetching dependency MIBs over HTTP, so a slow or
+# unreachable mirror can never freeze a compilation.
+_HTTP_FETCH_TIMEOUT = 15
+
+
+def _http_reader_with_timeout(url: str, timeout: int):
+    """Build a pysmi ``HttpReader`` whose requests honour a hard timeout.
+
+    pysmi's ``HttpReader.get_data()`` calls ``session.get(url)`` with no timeout,
+    so an unresponsive mirror (or a MIB it does not host) blocks the whole
+    compile indefinitely.  We wrap the underlying requests session so every
+    request gets a default timeout when none is supplied.
+    """
+    from pysmi.reader import HttpReader  # noqa: PLC0415
+    reader = HttpReader(url)
+    sess = getattr(reader, 'session', None)
+    if sess is not None and hasattr(sess, 'request'):
+        _orig_request = sess.request
+
+        def _request(method, req_url, **kw):
+            kw.setdefault('timeout', timeout)
+            return _orig_request(method, req_url, **kw)
+
+        sess.request = _request
+    return reader
+
+
 def compile_raw_mibs(raw_dir: str, compiled_dir: str,
-                     mibs_filter: list | None = None) -> dict:
+                     mibs_filter: list | None = None,
+                     http_templates: list | None = None,
+                     should_cancel=None) -> dict:
     """Convenience wrapper — compiles all (or selected) raw MIBs without progress reporting.
 
     See :func:`compile_raw_mibs_progressive` for return-value documentation.
     """
     return compile_raw_mibs_progressive(raw_dir, compiled_dir,
-                                        mibs_filter=mibs_filter)
+                                        mibs_filter=mibs_filter,
+                                        http_templates=http_templates,
+                                        should_cancel=should_cancel)
 
 
 def compile_raw_mibs_progressive(
@@ -386,6 +417,8 @@ def compile_raw_mibs_progressive(
     compiled_dir: str,
     progress_cb=None,
     mibs_filter: list | None = None,
+    http_templates: list | None = None,
+    should_cancel=None,
 ) -> dict:
     """Compile raw ASN.1 MIB files from *raw_dir* into *compiled_dir*.
 
@@ -462,9 +495,21 @@ def compile_raw_mibs_progressive(
         _add_src = getattr(compiler, 'add_sources',   None) or compiler.addSources
         _add_srh = getattr(compiler, 'add_searchers', None) or compiler.addSearchers
 
-        # Local raw MIBs first; HTTP fallback for standard/dependency MIBs
+        # Local raw MIBs first; HTTP fallback for standard/dependency MIBs.
+        # The HTTP reader is given a hard timeout: pysmi's HttpReader issues
+        # `session.get(url)` with NO timeout, so a slow/unreachable mirror (or a
+        # MIB the mirror doesn't host) would hang the whole compile forever
+        # (the classic "stuck at MIB N/M" freeze).
         _add_src(FileReader(raw_dir))
-        _add_src(HttpReader('https://mibs.pysnmp.com/asn1/@mib@'))
+        # User-configured GitHub raw templates (each must carry the @mib@ magic),
+        # tried before the default mirror so dependency MIBs can come from repos
+        # that publish them.
+        for _tpl in (http_templates or []):
+            _tpl = str(_tpl).strip()
+            if _tpl:
+                _add_src(_http_reader_with_timeout(_tpl, _HTTP_FETCH_TIMEOUT))
+        _add_src(_http_reader_with_timeout('https://mibs.pysnmp.com/asn1/@mib@',
+                                           _HTTP_FETCH_TIMEOUT))
         _add_srh(PyFileSearcher(compiled_dir))
         # RFC-1212/RFC-1215 are macro-only MIBs that pysmi cannot compile from
         # their HTTP source (the downloaded stub is incomplete ASN.1).  Always
@@ -485,7 +530,16 @@ def compile_raw_mibs_progressive(
     total       = len(raw_mibs)
     all_results: dict = {}
 
+    # Compile one MIB per call so progress advances smoothly and a cancel request
+    # is honoured between every MIB.  (Batching pysmi by feeding many MIBs per
+    # compile() call does not speed up the CPU-bound parsing — the dominant cost —
+    # it only makes progress lurch in big steps, so it isn't worth it here.)
+    completed = 0
+    cancelled = False
     for i, mib in enumerate(raw_mibs):
+        if should_cancel is not None and should_cancel():
+            cancelled = True
+            break
         if progress_cb:
             progress_cb(mib, i, total)
         try:
@@ -497,15 +551,36 @@ def compile_raw_mibs_progressive(
             all_results.update(dict(compiler.compile(mib, ignoreErrors=True) or {}))
         except Exception:
             all_results[mib] = 'unprocessed'
+        completed = i + 1
 
     if progress_cb:
-        progress_cb(None, total, total)
+        progress_cb(None, completed if cancelled else total, total)
 
-    compiled_any = any(v == 'compiled' for v in all_results.values())
-    failed       = [m for m in raw_mibs if all_results.get(m) in ('unprocessed', 'missing')]
-
-    if compiled_any:
+    if any(v == 'compiled' for v in all_results.values()):
         invalidate_cache()
+
+    result = _classify_compile_results(raw_mibs, all_results)
+    if cancelled:
+        result['cancelled'] = True
+        _done = sum(1 for v in all_results.values() if v in ('compiled', 'untouched'))
+        result['message'] = f'Cancelled — {_done} of {total} processed'
+    return result
+
+
+# pysmi MibStatus values that mean the requested MIB was NOT produced.
+_FAILED_STATUSES: frozenset = frozenset({'unprocessed', 'missing', 'failed'})
+
+
+def _classify_compile_results(raw_mibs: list, all_results: dict) -> dict:
+    """Turn pysmi's per-MIB status map into the module's result envelope.
+
+    Statuses: 'compiled' (ok), 'untouched'/'borrowed' (ok, not rebuilt),
+    'failed'/'missing'/'unprocessed' (failure).  Only *raw_mibs* (the ones the
+    user asked to compile) count toward failure — dependency MIBs fetched over
+    HTTP are not the user's concern.
+    """
+    compiled_any = any(v == 'compiled' for v in all_results.values())
+    failed       = [m for m in raw_mibs if all_results.get(m) in _FAILED_STATUSES]
 
     if failed and compiled_any:
         n = sum(1 for v in all_results.values() if v == 'compiled')

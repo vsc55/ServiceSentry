@@ -108,7 +108,7 @@
                     <span class="ms-auto text-muted" id="mibDirInfo"></span>
                 </div>
                 <!-- Toolbar row 2 — URL import -->
-                <div class="d-flex gap-2 mb-3">
+                <div class="d-flex gap-2 mb-2">
                     <input type="url" id="mibImportUrlInput" class="form-control form-control-sm"
                            onkeydown="if(event.key==='Enter'){event.preventDefault();_importMibFromUrl();}">
                     <button class="btn btn-sm btn-secondary flex-shrink-0" id="mibImportUrlBtn"
@@ -116,6 +116,30 @@
                         <i class="bi bi-cloud-download me-1"></i><span id="mibImportUrlBtnLabel"></span>
                     </button>
                 </div>
+                <!-- Toolbar row 3 — GitHub folder import (single line) -->
+                <div class="d-flex gap-2 mb-2 align-items-center">
+                    <select id="mibGithubRepoSel" class="form-select form-select-sm flex-shrink-0"
+                            style="width:150px" onchange="_mibGithubRepoPick()"></select>
+                    <input type="url" id="mibGithubUrlInput" class="form-control form-control-sm flex-grow-1"
+                           style="min-width:80px"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();_importMibFromGithub();}">
+                    <div class="form-check form-switch flex-shrink-0 m-0">
+                        <input class="form-check-input" type="checkbox" id="mibGithubRecursive" checked>
+                        <label class="form-check-label small text-nowrap" for="mibGithubRecursive"
+                               id="mibGithubRecursiveLabel"></label>
+                    </div>
+                    <button class="btn btn-sm btn-secondary flex-shrink-0 text-nowrap" id="mibGithubImportBtn"
+                            onclick="_importMibFromGithub()">
+                        <i class="bi bi-github me-1" id="mibGithubImportIcon"></i><span id="mibGithubImportBtnLabel"></span>
+                    </button>
+                </div>
+                <!-- Compile dependency sources (resolve IMPORTS during compilation) -->
+                <details class="mb-3">
+                    <summary class="small text-muted" id="mibDepSrcSummary"
+                             style="cursor:pointer"></summary>
+                    <div class="small text-muted mt-1" id="mibDepSrcHint"></div>
+                    <div id="mibDepSrcList" class="d-flex flex-column gap-1 mt-2 ps-1"></div>
+                </details>
                 <!-- Compilation progress (shown while a compile job is running) -->
                 <div id="mibProgressSection" class="mb-3">
                     <div class="d-flex justify-content-between align-items-center mb-1">

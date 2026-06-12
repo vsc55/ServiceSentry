@@ -169,6 +169,7 @@
 .ss-accent-teal     { background: linear-gradient(90deg, #10b981, #14b8a6); }
 .ss-accent-purple   { background: linear-gradient(90deg, #8b5cf6, #ec4899); }
 .ss-accent-slate    { background: linear-gradient(90deg, #64748b, #475569); }
+.ss-accent-blue     { background: linear-gradient(90deg, #3b82f6, #6366f1); }
 
 /* Card header zone — title + action buttons */
 .ss-card-header {
@@ -231,12 +232,38 @@
 #users-container  > .ss-card,
 #groups-container > .ss-card,
 #roles-container  > .ss-card,
-#audit-container  > .ss-card {
+#audit-container  > .ss-card,
+#history-container > .ss-card {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
 }
+
+/* ── History tab: two-pane layout inside the section card ──────────────────
+   Left sidebar (series list) reads as a distinct panel; the right side is the
+   chart drawing zone. */
+.ss-history-body { min-height: 0; }
+.ss-history-sidebar {
+    width: 230px;
+    flex-shrink: 0;
+    background: var(--ss-pagination-bg);
+    border-right: 1px solid var(--bs-border-color);
+}
+.ss-history-sidebar-title {
+    padding: .4rem .6rem;
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+.ss-history-main { min-width: 0; }
+/* Utility relied on by several flex layouts (sessions/status/modules/discovery)
+   to let a flex child shrink below its content size so text-truncate works.
+   Bootstrap 5 has no min-width utility, so it is defined here. */
+.min-w-0 { min-width: 0 !important; }
+/* The chart toolbar sits as a band above the drawing zone (distinct bg). */
+#history-toolbar.ss-card-band { flex-shrink: 0; }
 #users-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
 #groups-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
 #roles-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),

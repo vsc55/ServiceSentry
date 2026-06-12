@@ -12,7 +12,9 @@
 
 import asyncio
 import concurrent.futures
+import glob
 import json
+import logging
 import os
 import re
 import threading
@@ -21,6 +23,7 @@ import uuid
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 from . import mib_resolver as _mib_resolver
+from . import mib_catalog as _mib_catalog
 
 # ── Optional dependency: pysmi (compile-time MIB support) ────────────────────
 import importlib.util as _importlib_util
@@ -100,6 +103,252 @@ def _confined_path(base_dir: str, *parts: str) -> str | None:
     return str(target)
 
 
+# ── GitHub MIB repositories ───────────────────────────────────────────────────
+# Curated repos that publish MIBs.  `folder` is a GitHub tree URL imported via
+# the Contents API; `dep_template` is a raw URL with the @mib@ placeholder used
+# as an HTTP source for resolving missing dependency MIBs while compiling.
+_LOG = logging.getLogger(__name__)
+
+# Directory holding one JSON file per known public MIB repository.  Drop a new
+# file there to add a source — see mib_sources/README.md.
+_MIB_SOURCES_DIR = os.path.join(os.path.dirname(__file__), 'mib_sources')
+
+
+def _load_mib_sources(directory: str = _MIB_SOURCES_DIR) -> list[dict]:
+    """Discover and validate the known MIB repositories declared as JSON files.
+
+    Each ``*.json`` declares ``{name, folder, dep_templates[, order]}``.
+    ``dep_templates`` is the list of pysmi HTTP source templates (``@mib@`` is
+    replaced with the imported MIB module name) used to resolve dependencies
+    during compilation — a repo lists one template per file extension it uses,
+    because a single repo mixes extensions (e.g. Net-SNMP stores MIBs as .txt,
+    .mib AND extension-less) and pysmi must try every variant to resolve an
+    imported module by name.
+
+    Malformed files are skipped with a warning so a bad source can never break
+    module import.  Returns the repos sorted by ``order`` then ``name``.
+    """
+    repos: list[dict] = []
+    for path in sorted(glob.glob(os.path.join(directory, '*.json'))):
+        try:
+            with open(path, encoding='utf-8') as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            _LOG.warning('Skipping MIB source %s: %s', os.path.basename(path), exc)
+            continue
+        name    = str(data.get('name') or '').strip()
+        folder  = str(data.get('folder') or '').strip()
+        tpls    = data.get('dep_templates')
+        if not isinstance(tpls, list):
+            tpls = [tpls] if tpls else []
+        tpls = [str(t).strip() for t in tpls if str(t).strip()]
+        if not (name and folder and tpls) or _parse_github_folder(folder) is None:
+            _LOG.warning('Skipping invalid MIB source %s (name/folder/dep_templates)',
+                         os.path.basename(path))
+            continue
+        repos.append({'name': name, 'folder': folder, 'dep_templates': tpls,
+                      'order': data.get('order', 1_000_000)})
+    repos.sort(key=lambda r: (r.get('order', 1_000_000), r['name']))
+    for r in repos:
+        r.pop('order', None)
+    return repos
+
+
+# GitHub folder-URL parsers.
+_GH_TREE_RE = re.compile(r'^https?://github\.com/([^/]+)/([^/]+)/tree/([^/]+)(?:/(.+?))?/?$')
+_GH_ROOT_RE = re.compile(r'^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$')
+
+# Filenames that are never MIBs (matched case-insensitively, extension-less only).
+_GH_SKIP_NAMES = frozenset({
+    'readme', 'license', 'licence', 'copying', 'makefile', 'changelog',
+    'authors', 'contributors', 'notice', 'todo', 'index', 'manifest',
+})
+
+
+def _parse_github_folder(url: str):
+    """Parse a GitHub folder URL → (owner, repo, branch, path) or None.
+
+    Accepts ``.../tree/<branch>/<path>``, ``.../tree/<branch>`` and bare
+    ``github.com/<owner>/<repo>`` (root of the default branch).
+    """
+    m = _GH_TREE_RE.match(url.strip())
+    if m:
+        return m.group(1), m.group(2), m.group(3), (m.group(4) or '')
+    m = _GH_ROOT_RE.match(url.strip())
+    if m:
+        return m.group(1), m.group(2), '', ''
+    return None
+
+
+def _looks_like_mib_file(name: str) -> bool:
+    """Heuristic: is *name* a MIB file we should import?"""
+    ext = os.path.splitext(name)[1].lower()
+    if ext in ('.mib', '.txt', '.my'):
+        return True
+    if ext == '':   # extension-less repos (e.g. LibreNMS) name files as the MIB
+        stem = name.lower()
+        return stem not in _GH_SKIP_NAMES and bool(_SAFE_FILENAME_RE.match(name))
+    return False
+
+
+def _truthy_import(value) -> bool:
+    """Coerce a config value (str/bool) to bool, defaulting truthy."""
+    return str(value).strip().lower() not in ('false', '0', 'no', 'off', 'none', '')
+
+
+# Known public MIB repositories, loaded from mib_sources/*.json at import
+# (defined after _parse_github_folder, which the loader uses for validation).
+_KNOWN_MIB_REPOS: list[dict] = _load_mib_sources()
+
+
+def _run_github_import(var_dir: str, url: str, recursive: bool, progress_cb=None) -> dict:
+    """Import every MIB file from a GitHub repository folder into raw/.
+
+    *url* is a GitHub folder URL (``.../tree/<branch>/<path>`` or a bare repo
+    URL).  Runs in two phases so progress can report a real ``X / total``:
+
+    1. **Discover** — BFS the folder tree via the GitHub Contents API
+       (recursing into sub-folders when *recursive* is set) to enumerate every
+       file that looks like a MIB (.mib/.txt/.my, or an extension-less
+       MIB-named file).  No downloads happen yet; this yields the *total*.
+    2. **Download** — fetch each discovered file, invoking
+       *progress_cb(completed, total, failed, current)* after each so callers
+       can render a determinate progress bar.
+
+    API calls and file count are capped (unauthenticated GitHub allows
+    60 req/h); a ``truncated`` flag signals when a cap was hit.
+    """
+    import urllib.request  # noqa: PLC0415
+    from lib.net_guard import validate_external_url  # noqa: PLC0415
+
+    parsed = _parse_github_folder(url)
+    if not parsed:
+        return {'ok': False, 'message': 'Not a recognised GitHub folder URL'}
+    owner, repo, branch, path = parsed
+
+    raw_dir = os.path.join(var_dir, 'snmp_mibs', 'raw')
+    os.makedirs(raw_dir, exist_ok=True)
+
+    _MAX_API_CALLS, _MAX_FILES, _MAX_DEPTH = 40, 1000, 5
+    imported: list = []
+    failed:   list = []
+    truncated = False
+
+    def _get_json(p):
+        ref = f'?ref={branch}' if branch else ''
+        u = f'https://api.github.com/repos/{owner}/{repo}/contents/{p}{ref}'
+        if validate_external_url(u):
+            return None
+        req = urllib.request.Request(u, headers={
+            'User-Agent': 'ServiceSentry',
+            'Accept': 'application/vnd.github+json',
+        })
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.load(r)
+
+    def _save(dl_url, name):
+        if not _safe_mib_filename(name, 'raw') or validate_external_url(dl_url):
+            return False
+        dest = _confined_path(raw_dir, name)
+        if not dest:
+            return False
+        req = urllib.request.Request(dl_url, headers={'User-Agent': 'ServiceSentry'})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            content = r.read().decode('utf-8', errors='replace')
+        with open(dest, 'w', encoding='utf-8') as fh:
+            fh.write(content)
+        return True
+
+    _progress_lock = threading.Lock()
+
+    def _report(total, name=None):
+        if progress_cb is not None:
+            try:
+                with _progress_lock:
+                    progress_cb(len(imported), total, len(failed), name)
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+    # ── Phase 1: discover every MIB file (folder traversal only, no downloads) ──
+    to_download: list = []   # (name, download_url)
+    api_calls = 0
+    queue = [(path, 0)]
+    while queue:
+        cur, depth = queue.pop(0)
+        if api_calls >= _MAX_API_CALLS or len(to_download) >= _MAX_FILES:
+            truncated = True
+            break
+        api_calls += 1
+        try:
+            entries = _get_json(cur)
+        except Exception as exc:  # pylint: disable=broad-except
+            failed.append({'name': cur or '(root)', 'error': str(exc)})
+            continue
+        if not isinstance(entries, list):
+            failed.append({'name': cur or '(root)', 'error': 'not a folder'})
+            continue
+        for e in entries:
+            if len(to_download) >= _MAX_FILES:
+                truncated = True
+                break
+            etype, name = e.get('type'), e.get('name', '')
+            if etype == 'dir':
+                if recursive and depth < _MAX_DEPTH:
+                    queue.append((e.get('path', ''), depth + 1))
+                continue
+            if etype != 'file' or not _looks_like_mib_file(name):
+                continue
+            dl = e.get('download_url')
+            if dl:
+                to_download.append((name, dl))
+
+    total = len(to_download)
+    _report(total, None)   # announce the total before downloading
+
+    # ── Phase 2: download the discovered files concurrently ──
+    # Sequential downloads (one fresh TLS connection per file) are painfully slow
+    # for repos with hundreds of small MIBs.  A thread pool overlaps the network
+    # latency; list.append + the progress lock keep the shared state consistent.
+    _io_lock = threading.Lock()
+
+    def _fetch(item):
+        name, dl = item
+        try:
+            ok = _save(dl, name)
+            with _io_lock:
+                if ok:
+                    imported.append(name)
+                else:
+                    failed.append({'name': name, 'error': 'rejected'})
+        except Exception as exc:  # pylint: disable=broad-except
+            with _io_lock:
+                failed.append({'name': name, 'error': str(exc)})
+        _report(total, name)
+
+    if to_download:
+        workers = max(1, min(16, len(to_download)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(_fetch, to_download))
+
+    if imported:
+        _mib_resolver.invalidate_cache()
+
+    msg = f'{len(imported)} MIB file(s) imported'
+    if truncated:
+        msg += ' (truncated — import a sub-folder for the rest)'
+    elif not imported and not failed:
+        msg = 'No MIB files found in that folder'
+    return {
+        'ok':        bool(imported) or (not failed and not truncated),
+        'imported':  sorted(imported),
+        'failed':    failed,
+        'count':     len(imported),
+        'total':     total,
+        'truncated': truncated,
+        'message':   msg,
+    }
+
+
 # ── Schema ────────────────────────────────────────────────────────────────────
 _SCHEMA: dict = json.load(
     open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8')
@@ -141,6 +390,18 @@ _CHECK_DEFAULTS: dict  = {k: v['default'] for k, v in _SCHEMA['servers']['checks
 # compile_mibs_status.  CPython dict updates are GIL-safe for simple values.
 _compile_jobs: dict = {}
 
+# Maps job_id → progress/result dict for async GitHub folder imports.  Same
+# GIL-safe write/poll pattern as _compile_jobs.
+_github_jobs: dict = {}
+
+# ── Consecutive-failure counters (must survive across check cycles) ──────────
+# The monitor builds a fresh Watchful instance every cycle, so the "alert"
+# threshold (N consecutive failures before going DOWN) cannot live on the
+# instance — it would reset each cycle and any threshold > 1 would never fire.
+# Keyed by the per-check composite key ("server.check"); pruned each cycle to
+# the currently-enabled checks.  Concurrent writes hit distinct keys (GIL-safe).
+_FAIL_COUNTS: dict[str, int] = {}
+
 # ── Watchful class ────────────────────────────────────────────────────────────
 
 class Watchful(ModuleBase):
@@ -157,9 +418,13 @@ class Watchful(ModuleBase):
         'compile_mibs',
         'compile_mibs_start',
         'compile_mibs_status',
+        'compile_mibs_cancel',
         'delete_mib',
         'upload_mib',
         'import_mib_from_url',
+        'import_mib_from_github',
+        'import_mib_from_github_start',
+        'import_mib_from_github_status',
         'get_mib_details',
         'get_raw_mib_details',
         'get_all_symbols',
@@ -184,14 +449,36 @@ class Watchful(ModuleBase):
         """
         _done = result.get('done')  # None = regular action; bool = compile job
 
-        # Suppress intermediate compile-status polls (job still running).
-        if action == 'compile_mibs_status' and _done is False:
+        # Suppress intermediate compile/import-status polls (job still running).
+        if action in ('compile_mibs_status', 'import_mib_from_github_status') and _done is False:
+            return None
+        # Suppress the GitHub import kickoff — the meaningful audit (ok/failed
+        # counts + which files failed) is recorded on the final status read.
+        if action == 'import_mib_from_github_start':
             return None
 
         detail: dict = {'ok': result.get('ok', True)}
 
         if action == 'compile_mibs_start' and not _done:
             detail['name'] = f'compile started ({result.get("total", 0)} MIBs)'
+        elif action == 'import_mib_from_github_status' and _done:
+            _imp   = int(result.get('imported', 0) or 0)
+            _nfail = int(result.get('failed', 0) or 0)
+            _names = list(result.get('failed_names') or [])
+            detail['imported'] = _imp
+            detail['failed']   = _nfail
+            if _names:
+                detail['failed_names'] = _names
+            _name = f'GitHub import: {_imp} ok, {_nfail} failed'
+            if result.get('truncated'):
+                _name += ' (truncated)'
+            if _names:
+                _shown = ', '.join(_names[:10])
+                _more  = len(_names) - 10
+                if _more > 0:
+                    _shown += f', +{_more} more'
+                _name += f' — failed: {_shown}'
+            detail['name'] = _name
         elif _done:
             for _f in ('compiled', 'partial', 'failed', 'result_ok', 'message', 'total'):
                 if _f in result:
@@ -224,7 +511,6 @@ class Watchful(ModuleBase):
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
-        self._fail_count: dict[str, int] = {}
         self._startup_compile_mibs()
 
     # ── Startup MIB compilation ────────────────────────────────────────────────
@@ -408,6 +694,8 @@ class Watchful(ModuleBase):
             'pysmi_available': _HAS_PYSMI,
             'raw_dir':         raw_dir,
             'compiled_dir':    compiled_dir,
+            'known_repos':     _KNOWN_MIB_REPOS,
+            'mib_repos':       cls._repo_templates(cfg),
         }
 
     @classmethod
@@ -422,7 +710,8 @@ class Watchful(ModuleBase):
         os.makedirs(raw_dir, exist_ok=True)
         # Invalidate cache so any newly compiled MIBs are picked up immediately
         _mib_resolver.invalidate_cache()
-        return _mib_resolver.compile_raw_mibs(raw_dir, compiled_dir)
+        return _mib_resolver.compile_raw_mibs(
+            raw_dir, compiled_dir, http_templates=cls._repo_templates(cfg))
 
     @classmethod
     def compile_mibs_start(cls, config: dict | None = None) -> dict:
@@ -458,21 +747,44 @@ class Watchful(ModuleBase):
                     'results': {}, 'failed': [], 'total': 0, 'completed': 0}
 
         job_id = uuid.uuid4().hex[:12]
+        _cancel = threading.Event()
         _compile_jobs[job_id] = {
-            'done': False, 'total': len(raw_mibs), 'completed': 0,
+            'done': False, 'phase': 'compiling', 'total': len(raw_mibs), 'completed': 0,
             'current': None, 'result_ok': None, 'compiled': False,
-            'partial': False, 'failed': [], 'message': '',
+            'partial': False, 'failed': [], 'message': '', 'cancelled': False,
+            '_cancel': _cancel,
         }
 
         def _progress_cb(current, completed, _total):
             _compile_jobs[job_id]['current']   = current
             _compile_jobs[job_id]['completed'] = completed
 
+        _idx_extra = [d.strip() for d in str(cfg.get('mib_dirs') or '').split(',') if d.strip()]
+        _repo_tpls = cls._repo_templates(cfg)
+
         def _run():
             _mib_resolver.invalidate_cache()
             result = _mib_resolver.compile_raw_mibs_progressive(
                 raw_dir, compiled_dir, _progress_cb, mibs_filter=mibs_filter,
+                http_templates=_repo_tpls, should_cancel=_cancel.is_set,
             )
+            # Rebuild the OID index so newly compiled symbols resolve immediately
+            # (otherwise names only appear after the next discover()), and the
+            # browser symbol catalog so the first MIB Browser open is instant.
+            # This is the "indexing" phase — reported so the progress bar can
+            # show it instead of looking like the compile is still running.
+            # Skip indexing when cancelled (the user wants it to stop now).
+            if result.get('compiled') and not _cancel.is_set():
+                _compile_jobs[job_id]['phase'] = 'indexing'
+                _compile_jobs[job_id]['current'] = None
+                try:
+                    _mib_resolver.build_oid_index(var_dir, _idx_extra)
+                except Exception:  # pylint: disable=broad-except
+                    pass
+                try:
+                    _mib_catalog.build_catalog(var_dir, _idx_extra)
+                except Exception:  # pylint: disable=broad-except
+                    pass
             _compile_jobs[job_id].update({
                 'done':      True,
                 'result_ok': result.get('ok', False),
@@ -480,12 +792,29 @@ class Watchful(ModuleBase):
                 'partial':   result.get('partial', False),
                 'failed':    result.get('failed', []),
                 'message':   result.get('message', ''),
+                'cancelled': result.get('cancelled', False),
                 'current':   None,
-                'completed': len(raw_mibs),
+                'completed': _compile_jobs[job_id].get('completed', 0),
             })
 
         threading.Thread(target=_run, daemon=True).start()
         return {'ok': True, 'job_id': job_id, 'total': len(raw_mibs), 'done': False}
+
+    @classmethod
+    def compile_mibs_cancel(cls, config: dict | None = None) -> dict:
+        """Request cancellation of a running compile job.
+
+        Sets the job's cancel flag; the background thread stops between batches
+        (a single pysmi compile() call can't be interrupted), so a few more MIBs
+        may finish before it halts.  Returns ok even if the job already ended.
+        """
+        cfg    = config or {}
+        job_id = str(cfg.get('job_id') or '').strip()
+        job    = _compile_jobs.get(job_id)
+        if job and isinstance(job.get('_cancel'), threading.Event):
+            job['_cancel'].set()
+            return {'ok': True, 'cancelling': True}
+        return {'ok': True, 'cancelling': False}
 
     @classmethod
     def compile_mibs_status(cls, config: dict | None = None) -> dict:
@@ -495,6 +824,7 @@ class Watchful(ModuleBase):
         if job_id not in _compile_jobs:
             return {'ok': False, 'message': 'Job not found or already collected'}
         job = dict(_compile_jobs[job_id])   # snapshot
+        job.pop('_cancel', None)            # threading.Event — not JSON-serialisable
         if job.get('done'):
             del _compile_jobs[job_id]       # cleanup on first done-read
         else:
@@ -518,6 +848,13 @@ class Watchful(ModuleBase):
             return {'ok': False, 'message': 'File not found'}
         os.remove(path)
         _mib_resolver.invalidate_cache()
+        # Deleting a compiled MIB leaves the symbol catalog stale (removal does
+        # not make the remaining files newer, so mtime-based staleness won't
+        # catch it).  DISCARD it (one file unlink) rather than rebuilding here —
+        # rebuilding on every deletion makes bulk-delete extremely slow.  The
+        # next MIB Browser open rebuilds the catalog once, lazily.
+        if kind == 'compiled':
+            _mib_catalog.discard(var_dir)
         return {'ok': True}
 
     @classmethod
@@ -599,154 +936,35 @@ class Watchful(ModuleBase):
         var_dir  = str(cfg.get('__var_dir__') or '').strip()
         extra    = [d.strip() for d in cfg.get('mib_dirs', '').split(',') if d.strip()]
         count    = _mib_resolver.build_oid_index(var_dir, extra)
+        try:
+            _mib_catalog.build_catalog(var_dir, extra)
+        except Exception:  # pylint: disable=broad-except
+            pass
         return {'ok': True, 'count': count}
 
     @classmethod
     def get_all_symbols(cls, config: dict | None = None) -> dict:
-        """Load every compiled MIB and return a flat list of all OID symbols."""
+        """Return a flat list of all OID symbols from every compiled MIB.
+
+        Served from the persisted SQLite catalog (``snmp_mibs/mib_catalog.db``),
+        which is (re)built only when stale.  This avoids re-loading every pysnmp
+        module with ``loadTexts=True`` on every browser open — the old behaviour
+        that scaled poorly with the number of compiled MIBs.  See mib_catalog.py.
+        """
         cfg = config or {}
         if not _HAS_PYSNMP:
             return {'ok': False, 'message': 'pysnmp not available'}
 
-        var_dir      = cfg.get('__var_dir__', '')
-        compiled_dir = (
-            os.path.join(var_dir, 'snmp_mibs', 'compiled') if var_dir else ''
-        )
-        extra_dirs = [
-            d.strip() for d in cfg.get('mib_dirs', '').split(',') if d.strip()
-        ]
-
-        stems: list[str] = []
-        if compiled_dir and os.path.isdir(compiled_dir):
-            stems = [
-                fn[:-3] for fn in os.listdir(compiled_dir)
-                if fn.endswith('.py') and not fn.startswith('__')
-            ]
-        if not stems:
+        var_dir = cfg.get('__var_dir__', '')
+        if not var_dir:
             return {'ok': True, 'symbols': []}
-
-        from pysnmp.smi import builder  # pylint: disable=import-outside-toplevel
-        mb = builder.MibBuilder()
-        mb.loadTexts = True
-        if compiled_dir and os.path.isdir(compiled_dir):
-            mb.addMibSources(builder.DirMibSource(compiled_dir))
-        for _d in extra_dirs:
-            if os.path.isdir(_d):
-                mb.addMibSources(builder.DirMibSource(_d))
-
-        for stem in stems:
-            try:
-                mb.loadModules(stem)
-            except Exception:  # pylint: disable=broad-except
-                pass
-
-        def _sa(obj, *attrs):
-            for a in attrs:
-                v = getattr(obj, a, None)
-                if v is None:
-                    continue
-                s = str(v).strip()
-                if s and s not in ('None', '""', "''"):
-                    return s
-            return ''
-
-        def _sym_type_info(sym_obj):
-            """Extract enum values, integer range, and base category from a pysnmp object."""
-            # Named values (enums / booleans)
-            _nv = (getattr(sym_obj, 'namedValues', None) or
-                   getattr(type(sym_obj), 'namedValues', None))
-            enum_vals: list[dict] = []
-            if _nv and hasattr(_nv, 'items'):
-                try:
-                    enum_vals = sorted(
-                        [{'name': str(n), 'value': int(v)} for n, v in _nv.items()],
-                        key=lambda x: x['value'],
-                    )
-                except Exception:  # pylint: disable=broad-except
-                    pass
-
-            # Integer range (ValueRangeConstraint in subtypeSpec)
-            rmin = rmax = None
-            try:
-                _spec = (getattr(sym_obj, 'subtypeSpec', None) or
-                         getattr(type(sym_obj), 'subtypeSpec', None))
-                if _spec:
-                    _stack = [_spec]
-                    while _stack:
-                        _c = _stack.pop()
-                        if hasattr(_c, 'components'):
-                            _stack.extend(list(_c.components))
-                        elif hasattr(_c, 'start') and hasattr(_c, 'stop'):
-                            rmin, rmax = int(_c.start), int(_c.stop)
-                            break
-            except Exception:  # pylint: disable=broad-except
-                pass
-
-            # Base category
-            _tn = type(sym_obj).__name__
-            _is_bool = (
-                len(enum_vals) == 2 and {ev['value'] for ev in enum_vals} == {1, 2}
-                and any(
-                    ev['name'].lower() in ('true', 'enabled', 'yes', 'up')
-                    for ev in enum_vals
-                )
-            ) if enum_vals else False
-            if _is_bool:
-                cat = 'boolean'
-            elif enum_vals:
-                cat = 'enum'
-            elif _tn == 'IpAddress':
-                cat = 'ip'
-            elif _tn == 'ObjectIdentifier':
-                cat = 'oid'
-            elif any(x in _tn for x in ('String', 'Display', 'Text', 'Octet')):
-                cat = 'string'
-            elif any(x in _tn for x in ('Counter', 'Gauge', 'Ticks', 'Unsigned')):
-                cat = 'unsigned'
-            elif 'Integer' in _tn:
-                cat = 'integer'
-            else:
-                cat = 'other'
-
-            return enum_vals, rmin, rmax, cat
-
-        symbols: list[dict] = []
-        raw_syms = getattr(mb, 'mibSymbols', {})
-        for mod_name, mod_syms in (
-            raw_syms.items() if hasattr(raw_syms, 'items') else []
-        ):
-            if not isinstance(mod_syms, dict):
-                continue
-            for sym_name, sym_obj in mod_syms.items():
-                try:
-                    oid_obj = getattr(sym_obj, 'name', None)
-                    if oid_obj is None:
-                        continue
-                    oid_str = (
-                        '.'.join(str(x) for x in oid_obj)
-                        if hasattr(oid_obj, '__iter__') else str(oid_obj)
-                    )
-                    if not oid_str or not re.match(r'^\d[\d.]*\d$', oid_str):
-                        continue
-                    _enum, _rmin, _rmax, _cat = _sym_type_info(sym_obj)
-                    symbols.append({
-                        'name':          sym_name,
-                        'oid':           oid_str,
-                        'module':        mod_name,
-                        'type':          type(sym_obj).__name__,
-                        'base_category': _cat,
-                        'enum_values':   _enum,
-                        'range_min':     _rmin,
-                        'range_max':     _rmax,
-                        'status': _sa(sym_obj, 'status',      '_status'),
-                        'access': _sa(sym_obj, 'maxAccess',   '_maxAccess'),
-                        'units':  _sa(sym_obj, 'units',       '_units'),
-                        'desc':   _sa(sym_obj, 'description', '_description'),
-                    })
-                except Exception:  # pylint: disable=broad-except
-                    continue
-
-        return {'ok': True, 'symbols': symbols}
+        extra_dirs = [
+            d.strip() for d in str(cfg.get('mib_dirs', '') or '').split(',') if d.strip()
+        ]
+        compiled_dir = os.path.join(var_dir, 'snmp_mibs', 'compiled')
+        if _mib_catalog.catalog_needs_rebuild(var_dir, compiled_dir):
+            _mib_catalog.build_catalog(var_dir, extra_dirs)
+        return {'ok': True, 'symbols': _mib_catalog.read_catalog(var_dir)}
 
     @classmethod
     def get_raw_mib_details(cls, config: dict | None = None) -> dict:
@@ -969,6 +1187,86 @@ class Watchful(ModuleBase):
 
         return {'ok': True, 'filename': filename}
 
+    @staticmethod
+    def _repo_templates(cfg: dict) -> list:
+        """Parse the ``mib_repos`` config (newline/comma separated raw templates)."""
+        raw = str((cfg or {}).get('mib_repos') or '').strip()
+        return [t.strip() for t in re.split(r'[\n,]+', raw) if t.strip()]
+
+    @classmethod
+    def import_mib_from_github(cls, config: dict | None = None) -> dict:
+        """Import every MIB file from a GitHub repository folder into raw/
+        (synchronous).  See :func:`_run_github_import` for the BFS details."""
+        cfg     = config or {}
+        var_dir = str(cfg.get('__var_dir__') or '').strip()
+        url     = str(cfg.get('url') or '').strip()
+        recursive = _truthy_import(cfg.get('recursive', True))
+        if not var_dir:
+            return {'ok': False, 'message': 'var_dir not available'}
+        return _run_github_import(var_dir, url, recursive)
+
+    @classmethod
+    def import_mib_from_github_start(cls, config: dict | None = None) -> dict:
+        """Start an async GitHub folder import and return a job_id for polling.
+
+        Mirrors compile_mibs_start: a background thread runs the BFS while the
+        front-end polls import_mib_from_github_status for the running file count.
+        """
+        cfg     = config or {}
+        var_dir = str(cfg.get('__var_dir__') or '').strip()
+        url     = str(cfg.get('url') or '').strip()
+        recursive = _truthy_import(cfg.get('recursive', True))
+        if not var_dir:
+            return {'ok': False, 'message': 'var_dir not available'}
+        if not _parse_github_folder(url):
+            return {'ok': False, 'message': 'Not a recognised GitHub folder URL'}
+
+        job_id = uuid.uuid4().hex[:12]
+        _github_jobs[job_id] = {
+            'done': False, 'phase': 'downloading', 'imported': 0, 'total': 0, 'failed': 0,
+            'current': None, 'truncated': False, 'message': '',
+        }
+
+        def _progress_cb(completed, total, failed, current):
+            job = _github_jobs.get(job_id)
+            if job is not None:
+                job['imported'], job['total'] = completed, total
+                job['failed'], job['current'] = failed, current
+
+        def _run():
+            result = _run_github_import(var_dir, url, recursive, _progress_cb)
+            _failed = result.get('failed', [])
+            _github_jobs[job_id].update({
+                'done':         True,
+                'result_ok':    result.get('ok', False),
+                'imported':     result.get('count', 0),
+                'total':        result.get('total', result.get('count', 0)),
+                'failed':       len(_failed),
+                # Keep the failed file names (capped) so the UI and the audit log
+                # can report *which* files failed, not just how many.
+                'failed_names': [str(f.get('name', '')) for f in _failed][:50],
+                'truncated':    result.get('truncated', False),
+                'message':      result.get('message', ''),
+                'current':      None,
+            })
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {'ok': True, 'job_id': job_id, 'done': False}
+
+    @classmethod
+    def import_mib_from_github_status(cls, config: dict | None = None) -> dict:
+        """Poll the status of an async GitHub import started by *_start."""
+        cfg    = config or {}
+        job_id = str(cfg.get('job_id') or '').strip()
+        if job_id not in _github_jobs:
+            return {'ok': False, 'message': 'Job not found or already collected'}
+        job = dict(_github_jobs[job_id])   # snapshot
+        if job.get('done'):
+            del _github_jobs[job_id]       # cleanup on first done-read
+        else:
+            job.pop('result_ok', None)
+        return {'ok': True, **job}
+
     # ── Public API ─────────────────────────────────────────────────────────────
 
     def check(self):
@@ -995,6 +1293,12 @@ class Watchful(ModuleBase):
                     continue
                 if chk_cfg.get('enabled', _CHECK_DEFAULTS['enabled']):
                     items.append((f'{srv_key}.{chk_key}', chk_cfg, srv))
+
+        # Drop failure counters for checks that no longer exist / are disabled,
+        # so removing a check resets its debounce and the dict can't grow forever.
+        _current = {key for key, _, _ in items}
+        for _stale in [k for k in _FAIL_COUNTS if k not in _current]:
+            del _FAIL_COUNTS[_stale]
 
         max_workers = self.get_conf('threads', self._DEFAULT_THREADS)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -1064,17 +1368,19 @@ class Watchful(ModuleBase):
         )
 
         if err:
-            self._fail_count[key] = self._fail_count.get(key, 0) + 1
-            status = self._fail_count[key] < t_alert
+            _FAIL_COUNTS[key] = _FAIL_COUNTS.get(key, 0) + 1
+            # status True while still within the grace window; once the failure
+            # count reaches the threshold the check is reported DOWN.
+            status = _FAIL_COUNTS[key] < max(1, t_alert)
             icon   = '🔼' if status else '🔽'
             msg    = f'SNMP: {label} {icon} [{err}]'
-            self._debug(f'SNMP: {key} — error: {err}', DebugLevel.warning)
+            self._debug(f'SNMP: {key} — error: {err} (fails={_FAIL_COUNTS[key]}/{t_alert})', DebugLevel.warning)
             self.dict_return.set(key, status, msg, False, {'oid': oid, 'error': err})
             if self.check_status(status, self.name_module, key):
                 self.send_message(msg, status)
             return
 
-        self._fail_count[key] = 0
+        _FAIL_COUNTS[key] = 0
         status = self._evaluate(raw_value, operator, expected)
         icon   = '🔼' if status else '🔽'
         msg    = f'SNMP: {label} {icon} [{raw_value}]'

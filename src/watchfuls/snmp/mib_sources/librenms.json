@@ -1,0 +1,9 @@
+{
+    "order": 3,
+    "name": "LibreNMS",
+    "folder": "https://github.com/librenms/librenms/tree/master/mibs",
+    "dep_templates": [
+        "https://raw.githubusercontent.com/librenms/librenms/master/mibs/@mib@",
+        "https://raw.githubusercontent.com/librenms/librenms/master/mibs/@mib@.mib"
+    ]
+}

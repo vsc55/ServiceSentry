@@ -390,3 +390,39 @@ class TestHtmlPreviewAPI:
         assert 'CUSTOM_DOWN_BADGE' in r.get_json()['html']
         # Clean up
         client.delete('/api/v1/notify/templates/en_EN')
+
+
+# ──────────────── Test email applies saved customisations ───────────────────
+
+class TestTestEmailUsesOverrides:
+    """Regression: the test email must reflect the saved 'test' HTML template
+    and string overrides — not the built-in (was a bug: the test send ignored
+    customisations while the preview applied them)."""
+
+    def test_test_email_applies_html_and_string_overrides(self, client, monkeypatch):
+        _login(client)
+        marker = 'CUSTOM_TEST_MARKER_42'
+        client.put('/api/v1/notify/html-templates/test/en_EN',
+                   json={'html': f'<html><body>{marker} {{test_title}}</body></html>'})
+        client.put('/api/v1/notify/templates/en_EN',
+                   json={'test_title': 'My Custom Title'})
+
+        captured = {}
+        from lib.web_admin import email_notify
+
+        def _fake_dispatch(cfg, subject, body_html, recipients=None):
+            captured['subject'] = subject
+            captured['body'] = body_html
+            return True, 'ok'
+
+        monkeypatch.setattr(email_notify, '_dispatch', _fake_dispatch)
+
+        r = client.post('/api/v1/notify/email/test',
+                        json={'test_to': 'x@example.com'})
+        assert r.status_code == 200
+        body = captured.get('body', '')
+        assert marker in body            # custom HTML body was used
+        assert 'My Custom Title' in body  # string override applied
+        # Clean up
+        client.delete('/api/v1/notify/html-templates/test/en_EN')
+        client.delete('/api/v1/notify/templates/en_EN')

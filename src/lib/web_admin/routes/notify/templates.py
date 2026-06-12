@@ -54,11 +54,12 @@ _SAMPLE_ITEMS = [
 
 def register(app, wa):
     config_edit_req = wa._perm_required('config_edit')
+    config_view_req = wa._perm_required('config_view', 'config_edit')
 
     # ── String overrides ─────────────────────────────────────────────────────
 
     @app.route('/api/v1/notify/templates', methods=['GET'])
-    @config_edit_req
+    @config_view_req
     def api_get_notif_templates():
         """Return default strings and stored per-language overrides."""
         from lib.web_admin import email_templates
@@ -135,7 +136,7 @@ def register(app, wa):
     # ── HTML body overrides ──────────────────────────────────────────────────
 
     @app.route('/api/v1/notify/html-templates', methods=['GET'])
-    @config_edit_req
+    @config_view_req
     def api_get_html_templates():
         """Return all stored custom HTML bodies."""
         from lib.web_admin import email_templates
@@ -148,7 +149,7 @@ def register(app, wa):
         }), 200
 
     @app.route('/api/v1/notify/html-templates/<tpl_type>/built-in', methods=['GET'])
-    @config_edit_req
+    @config_view_req
     def api_get_html_template_builtin(tpl_type):
         """Return the built-in rendered HTML for *tpl_type* with current strings.
 
@@ -196,7 +197,7 @@ def register(app, wa):
         return jsonify({'html': html_out, 'strings': strings}), 200
 
     @app.route('/api/v1/notify/html-templates/<tpl_type>/preview', methods=['POST'])
-    @config_edit_req
+    @config_view_req
     def api_preview_html_template(tpl_type):
         """Render a live preview of *tpl_type* with the posted HTML and sample data.
 

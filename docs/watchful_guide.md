@@ -519,6 +519,67 @@ La UI solo consume los campos `key` y `label` de cada dict. Cualquier campo adic
 
 ---
 
+## 4c. Tablas propias en la base de datos general
+
+Un módulo puede declarar tablas propias (cachés, índices derivados, estado) en
+la **base de datos general** de la aplicación (SQLite por defecto; MySQL/PG vía
+la sección `database` de `config.json`) en lugar de inventar su propio
+almacenamiento. El gestor de BD (`lib.db.module_tables`) las crea/migra en el
+arranque mediante el mismo motor declarativo (`reconcile_table` + `TableSpec`)
+que las tablas core.
+
+**1. Declarar las tablas** con una función a nivel de módulo `discover_db_tables()`
+(espejo de `discover_schemas`). Construye cada `TableSpec` con `module_table(...)`,
+que las nombra como `mod_<modulo>_<nombre>` (anti-colisión con tablas core y
+entre módulos):
+
+```python
+# watchfuls/mi_modulo/__init__.py
+from lib.db.module_tables import module_table
+from lib.db.schema import Column, Index
+
+def discover_db_tables():
+    return [module_table('mi_modulo', 'cache', (
+        Column('clave', 'TEXT', nullable=False, unique=True),
+        Column('valor', 'TEXT'),
+    ), indexes=(Index('por_clave', ('clave',)),))]
+```
+
+El gestor valida que cada `TableSpec` esté namespaced para el módulo (si no, la
+omite con un warning) y reconcilia las válidas en el arranque de **web** y de
+**monitor**. Un fallo en una tabla se registra y nunca aborta el arranque.
+
+**2. Usar el conector en runtime** — hay dos contextos:
+
+- **Monitor** (en `check()`, arranque del módulo…): `self.db` devuelve el
+  conector compartido (`lib.db.BaseConnector`), o `None` si no está disponible.
+- **Web** (classmethods de acción): el route inyecta el conector en
+  `config['__connector__']`.
+
+```python
+# contexto monitor
+self.db.execute("INSERT INTO mod_mi_modulo_cache (clave, valor) VALUES (?, ?)", (k, v))
+self.db.commit()
+
+# contexto web (classmethod de acción)
+@classmethod
+def mi_accion(cls, config):
+    db = config.get('__connector__')
+    rows = db.fetchall("SELECT clave, valor FROM mod_mi_modulo_cache")
+    ...
+```
+
+Usa siempre `?` como placeholder (los conectores lo traducen al estilo nativo) y
+`with db.transaction():` para escrituras multi-sentencia portables entre
+backends.
+
+> Nota: la BD general es ideal para datos del despliegue. Para **caché derivada
+> de ficheros locales** por instancia (p. ej. dependiente de `var_dir`), ten en
+> cuenta que una BD remota compartida entre varias instancias mezclaría filas;
+> en ese caso añade una columna de instancia o mantén la caché local.
+
+---
+
 ## 5. Referencia de la API de ModuleBase
 
 ### Configuración

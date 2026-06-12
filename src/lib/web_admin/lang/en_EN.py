@@ -308,6 +308,7 @@ LANG = {
     'current_session': 'current',
     # History
     'tab_history':         'History',
+    'history_series':      'Series',
     'history_search':      'Search…',
     'history_h':           'h',
     'history_d':           'd',
@@ -928,8 +929,10 @@ LANG = {
     'notif_html_tpl_load_builtin':   'Load built-in',
     'notif_html_tpl_load_builtin_tt':'Load the built-in template as a starting point',
     'notif_html_tpl_reset':          'Reset to built-in',
+    'notif_html_tpl_reset_confirm':  'Reset this HTML template to the built-in version? Your custom HTML for this type and language will be lost.',
     'notif_html_tpl_saved':          'HTML template saved.',
     'notif_html_tpl_reset_ok':       'HTML template reset to built-in.',
+    'notif_html_tpl_summary_note':   'Preview only: ServiceSentry does not send grouped summary emails yet, so this template is not delivered.',
     'notif_html_tpl_vars_label':     'Available variables',
     'notif_html_tpl_string_keys':      'String keys',
     'notif_html_tpl_preview':          'Preview',

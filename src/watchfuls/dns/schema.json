@@ -4,8 +4,33 @@
         "threads": {"type": "int",  "default": 5, "min": 1, "max": 100},
         "timeout": {"type": "int",  "default": 5, "min": 1, "max": 30}
     },
-    "__history__": {"field": null, "unit": null, "label": "DNS Resolution"},
+    "__history__": {"field": "response_time", "unit": "ms", "label": "DNS Resolution Time"},
     "list": {
+        "__discovery__": "discover",
+        "__discovery_method__": "POST",
+        "__discovery_field__": "host",
+        "__discovery_type_field__": "record_type",
+        "__discovery_type_store_field__": "record_type",
+        "__discovery_value_field__": "expected",
+        "__discovery_subtitle__": "{value}",
+        "__discovery_dedup_with_type__": true,
+        "__discovery_probe_types__": ["A", "AAAA", "MX", "TXT", "NS", "SOA", "CNAME", "CAA", "SRV"],
+        "__discovery_categories__": {
+            "address": {"icon": "bi-globe2",     "color": "#38bdf8"},
+            "mail":    {"icon": "bi-envelope",   "color": "#f59e0b"},
+            "ns":      {"icon": "bi-diagram-3",  "color": "#8b5cf6"},
+            "alias":   {"icon": "bi-signpost-2", "color": "#10b981"},
+            "text":    {"icon": "bi-fonts",      "color": "#4ade80"},
+            "srv":     {"icon": "bi-hdd-stack",  "color": "#64748b"},
+            "other":   {"icon": "bi-question-circle", "color": "var(--bs-secondary-color)"}
+        },
+        "__discovery_inputs__": [
+            {"key": "domain", "type": "str", "ui": "discover_domain",
+             "placeholder": "example.com", "required": true},
+            {"key": "axfr", "type": "bool", "ui": "discover_axfr"},
+            {"key": "axfr_server", "type": "str", "ui": "discover_axfr_server",
+             "placeholder": "ns1.example.com / IP", "depends_on": "axfr"}
+        ],
         "enabled":     {"type": "bool", "default": true},
         "host":        {"type": "str",  "default": "", "placeholder": "__key__"},
         "record_type": {"type": "str",  "default": "A",

@@ -31,5 +31,15 @@
     },
     "new_item_key_label": "Nombre de host o identificador:",
     "rename_item_prompt": "Introduce el nuevo nombre de host o identificador:",
-    "collections": {"list": "Hosts"}
+    "collections": {"list": "Hosts"},
+    "ui": {
+        "discover_title":        "Descubrir registros DNS",
+        "discover_prompt":       "Introduce un dominio y pulsa Descubrir para listar sus registros DNS.",
+        "discover_run":          "Descubrir",
+        "discover_error":        "El descubrimiento ha fallado.",
+        "discover_domain":       "Dominio / zona",
+        "discover_axfr":         "Usar AXFR (transferencia de zona)",
+        "discover_axfr_server":  "Servidor de nombres AXFR (opcional)",
+        "item_added":            "Añadido {}"
+    }
 }

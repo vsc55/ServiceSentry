@@ -31,5 +31,15 @@
     },
     "new_item_key_label": "Host name or identifier:",
     "rename_item_prompt": "Enter new host name or identifier:",
-    "collections": {"list": "Hosts"}
+    "collections": {"list": "Hosts"},
+    "ui": {
+        "discover_title":        "Discover DNS records",
+        "discover_prompt":       "Enter a domain and run discovery to list its DNS records.",
+        "discover_run":          "Discover",
+        "discover_error":        "Discovery failed.",
+        "discover_domain":       "Domain / zone",
+        "discover_axfr":         "Use AXFR (zone transfer)",
+        "discover_axfr_server":  "AXFR nameserver (optional)",
+        "item_added":            "Added {}"
+    }
 }

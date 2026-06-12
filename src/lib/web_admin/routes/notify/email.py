@@ -18,7 +18,8 @@ def register(app, wa):
         """
         from lib.web_admin import email_notify, email_templates
         data = wa._optional_json() or {}
-        stored = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('email') or {}
+        full_cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        stored = full_cfg.get('email') or {}
         # Merge: stored values (already decrypted) + UI overrides.
         # null in the request means a masked sensitive field — keep stored value.
         cfg = dict(stored)
@@ -30,11 +31,20 @@ def register(app, wa):
                 cfg[k] = v
         sender_name = cfg.get('from_name') or 'ServiceSentry'
         lang = cfg.get('lang') or ''
-        strings = email_templates.get_strings(lang)
+        lang_key = lang or 'en_EN'
+        # Apply the admin's saved customisations so the test email matches what
+        # the live notifications (and the editor preview) actually produce.
+        str_overrides = (full_cfg.get('notif_templates') or {}).get(lang_key) or None
+        strings = email_templates.get_strings(lang, overrides=str_overrides)
+        html_override = (
+            (full_cfg.get('notif_html_templates') or {}).get('test', {}).get(lang_key)
+        ) or None
         ok, msg = email_notify._dispatch(
             cfg,
             subject=strings['test_subject'],
-            body_html=email_templates.render_test(sender_name=sender_name, lang=lang),
+            body_html=email_templates.render_test(
+                sender_name=sender_name, lang=lang, strings=strings,
+                html_override=html_override),
             recipients=test_to,
         )
         if ok:

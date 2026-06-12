@@ -71,20 +71,51 @@ class Monitor(ObjectBase):
         self._read_config()
         self._read_status()
         self._init_telegram()
+        self._db = self._init_db()
         self._history = self._init_history()
+        self._reconcile_module_tables()
         self.debug.print("> Monitor >> Monitor Init OK")
 
-    def _init_history(self):
-        """Create a HistoryStore using the configured database connector."""
+    def _init_db(self):
+        """Create the shared DB connector from the ``database`` config section.
+
+        Shared by the HistoryStore and exposed to watchful modules via the
+        ``db`` property so they can use their own module-declared tables.
+        """
         if not self.dir_var:
             return None
         try:
-            from lib.history_store import create as _create_history  # noqa: PLC0415
+            from lib.db import get_connector  # noqa: PLC0415
             db_cfg = self.cfg_general.get_conf(['database']) or {}
-            return _create_history(db_cfg or None,
-                                   sqlite_path=os.path.join(self.dir_var, 'data.db'))
+            return get_connector(db_cfg or None,
+                                 default_sqlite_path=os.path.join(self.dir_var, 'data.db'))
         except Exception:  # pylint: disable=broad-except
             return None
+
+    @property
+    def db(self):
+        """The shared DB connector (or None when no var dir / init failed)."""
+        return getattr(self, '_db', None)
+
+    def _init_history(self):
+        """Create a HistoryStore on the shared connector."""
+        if self._db is None:
+            return None
+        try:
+            from lib.history_store import HistoryStore  # noqa: PLC0415
+            return HistoryStore(self._db)
+        except Exception:  # pylint: disable=broad-except
+            return None
+
+    def _reconcile_module_tables(self):
+        """Let watchful modules create their own tables on the shared connector."""
+        if self._db is None:
+            return
+        try:
+            from lib.db import reconcile_module_tables  # noqa: PLC0415
+            reconcile_module_tables(self._db)
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     def _get_item_uid(self, module_name: str, key: str) -> str | None:
         """Return the stable UID for *key* within *module_name*, or None."""

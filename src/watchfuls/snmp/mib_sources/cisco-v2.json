@@ -1,0 +1,10 @@
+{
+    "order": 2,
+    "name": "Cisco (v2)",
+    "folder": "https://github.com/cisco/cisco-mibs/tree/main/v2",
+    "dep_templates": [
+        "https://raw.githubusercontent.com/cisco/cisco-mibs/main/v2/@mib@.my",
+        "https://raw.githubusercontent.com/cisco/cisco-mibs/main/v2/@mib@.mib",
+        "https://raw.githubusercontent.com/cisco/cisco-mibs/main/v2/@mib@"
+    ]
+}

@@ -380,7 +380,15 @@ function _notifHtmlRefresh() {
     ).join('');
 
     const isFs = document.getElementById('notifHtmlEditorWrap')?.classList.contains('notif-html-fs');
-    bar.innerHTML = `
+    // The "summary" type can be edited and previewed, but ServiceSentry does not
+    // (yet) send grouped summary emails — flag it so users aren't misled.
+    const summaryNote = _notifHtmlState.type === 'summary'
+        ? `<div class="alert alert-warning py-1 px-2 small mb-2 d-flex align-items-center gap-2" role="alert">
+               <i class="bi bi-info-circle flex-shrink-0"></i>
+               <span>${esc(t('notif_html_tpl_summary_note'))}</span>
+           </div>`
+        : '';
+    bar.innerHTML = summaryNote + `
         <div class="d-flex align-items-center gap-2 flex-wrap p-2 rounded border cfg-toolbar-bg">
             <span class="fw-semibold small text-muted text-nowrap">
                 <i class="bi bi-braces me-1"></i>${esc(t('notif_html_tpl_vars_label'))}:
@@ -638,18 +646,19 @@ async function _notifHtmlSave() {
     }
 }
 
-async function _notifHtmlReset() {
-    if (!confirm(t('notif_tpl_reset_lang_confirm'))) return;
-    const r = await apiDelete(
-        `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/${encodeURIComponent(_notifHtmlState.lang)}`
-    );
-    if (r && r.status === 200) {
-        if (_notifHtmlState.stored[_notifHtmlState.type]) {
-            delete _notifHtmlState.stored[_notifHtmlState.type][_notifHtmlState.lang];
+function _notifHtmlReset() {
+    showConfirmModal(t('notif_html_tpl_reset_confirm'), async () => {
+        const r = await apiDelete(
+            `/api/v1/notify/html-templates/${encodeURIComponent(_notifHtmlState.type)}/${encodeURIComponent(_notifHtmlState.lang)}`
+        );
+        if (r && r.status === 200) {
+            if (_notifHtmlState.stored[_notifHtmlState.type]) {
+                delete _notifHtmlState.stored[_notifHtmlState.type][_notifHtmlState.lang];
+            }
+            _notifHtmlRefresh();
+            showToast(t('notif_html_tpl_reset_ok'), 'success');
+        } else {
+            showToast((r?.data?.error) || t('connection_error'), 'danger');
         }
-        _notifHtmlRefresh();
-        showToast(t('notif_html_tpl_reset_ok'), 'success');
-    } else {
-        showToast((r?.data?.error) || t('connection_error'), 'danger');
-    }
+    });
 }

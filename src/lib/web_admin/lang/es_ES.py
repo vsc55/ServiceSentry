@@ -313,6 +313,7 @@ LANG = {
     'current_session': 'actual',
     # Historial
     'tab_history':         'Historial',
+    'history_series':      'Series',
     'history_search':      'Buscar…',
     'history_h':           'h',
     'history_d':           'd',
@@ -929,8 +930,10 @@ LANG = {
     'notif_html_tpl_load_builtin':   'Cargar plantilla base',
     'notif_html_tpl_load_builtin_tt':'Carga la plantilla integrada como punto de partida',
     'notif_html_tpl_reset':          'Restablecer plantilla',
+    'notif_html_tpl_reset_confirm':  '¿Restablecer esta plantilla HTML a la versión integrada? Se perderá tu HTML personalizado para este tipo e idioma.',
     'notif_html_tpl_saved':          'Plantilla HTML guardada.',
     'notif_html_tpl_reset_ok':       'Plantilla HTML restablecida.',
+    'notif_html_tpl_summary_note':   'Solo vista previa: ServiceSentry aún no envía emails de resumen agrupado, por lo que esta plantilla no se entrega.',
     'notif_html_tpl_vars_label':     'Variables disponibles',
     'notif_html_tpl_string_keys':      'Claves de texto',
     'notif_html_tpl_preview':          'Vista previa',

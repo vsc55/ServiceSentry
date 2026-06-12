@@ -399,7 +399,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         groups, sessions and roles stores so they never open the database
         directly nor fight over separate connections.
         """
-        from lib.db             import get_connector  # noqa: PLC0415
+        from lib.db             import get_connector, reconcile_module_tables  # noqa: PLC0415
         from lib.users_store    import UsersStore      # noqa: PLC0415
         from lib.groups_store   import GroupsStore     # noqa: PLC0415
         from lib.sessions_store import SessionsStore   # noqa: PLC0415
@@ -411,6 +411,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._groups_store   = GroupsStore(self._db_connector)
         self._sessions_store = SessionsStore(self._db_connector)
         self._roles_store    = RolesStore(self._db_connector)
+        # Let watchful modules create their own tables on the shared connector.
+        try:
+            reconcile_module_tables(self._db_connector)
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     def _init_history(self):
         """Create a HistoryStore on the shared connector (or its own if absent)."""

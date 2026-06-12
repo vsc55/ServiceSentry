@@ -614,10 +614,11 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body pb-2">
+                <div id="discoverInputs" class="mb-3"></div>
                 <input type="search" class="form-control form-control-sm mb-3"
                     id="discoverFilter"
                     placeholder="{{ i18n.discover }}…">
-                <div id="discoverModalBody" style="max-height:55vh;overflow-y:auto"></div>
+                <div id="discoverModalBody" style="max-height:55vh;overflow-y:auto;overflow-x:hidden"></div>
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>

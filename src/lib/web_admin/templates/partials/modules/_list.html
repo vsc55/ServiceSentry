@@ -224,7 +224,7 @@ function _discoveredModuleNames() {
         const sep = key.indexOf('|');
         if (sep < 0) continue;
         const col = key.slice(sep + 1);
-        if (col !== '__i18n__' && col !== '__module__') names.add(key.slice(0, sep));
+        if (col !== '__i18n__' && col !== '__module__' && col !== '__history__') names.add(key.slice(0, sep));
     }
     return [...names].sort();
 }
@@ -320,7 +320,7 @@ function addModuleFromPicker(name) {
     for (const key of Object.keys(ITEM_SCHEMAS)) {
         if (!key.startsWith(name + '|')) continue;
         const col = key.slice(name.length + 1);
-        if (col === '__i18n__' || col === '__module__') continue;
+        if (col === '__i18n__' || col === '__module__' || col === '__history__') continue;
         cfg[col] = {};
     }
     const modDefaults = schemaDefaults(moduleSchema(name));

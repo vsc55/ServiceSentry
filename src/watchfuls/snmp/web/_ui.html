@@ -10,7 +10,14 @@
 let _mibManagerModuleName = null;
 let _mibData = null;    // last loaded data — kept for live filtering
 let _mibCompileAbort = false;       // set to true to cancel the polling loop
+let _mibCompileInProgress = false;  // true while a compile job is running (a Refresh
+                                    // mid-compile must not re-enable the Compile button)
 let _mibCompileInterceptor = null;  // hide.bs.modal handler active during compilation
+let _mibGithubAbort = false;        // set to true to cancel the GitHub import poll loop
+let _mibGithubInProgress = false;   // true while a GitHub import job is running
+let _mibCompileJobId = null;        // active compile job id (for server-side cancel)
+let _mibCompileCancelling = false;  // true after Stop is pressed, until the job ends
+let _mibRawStems = new Set();       // raw MIB stems — to tag compiled deps vs requested
 let _mibSelection = {raw: new Set(), compiled: new Set()};
 let _mibRefreshingCompiled = false; // guard: prevents concurrent list_mibs during polling
 let _mibDetailsData = null;         // {type:'compiled'|'raw', rows:[...]} for sortable viewer
@@ -130,9 +137,27 @@ function _mibSz(n) {
          : (n / 1048576).toFixed(1) + ' MB';
 }
 
+// A compiled .py is a *dependency* (auto-pulled by pysmi) when its stem isn't
+// among the raw MIBs the user actually has/requested.
+function _mibIsDependency(name) {
+    return _mibRawStems.size > 0 && !_mibRawStems.has(name.replace(/\.py$/, ''));
+}
+
+// Break the compiled set into {requested, deps, total} for the post-compile toast.
+function _mibCompiledBreakdown() {
+    const compiled = (_mibData && _mibData.compiled) || [];
+    let deps = 0;
+    for (const f of compiled) if (_mibIsDependency(f.name)) deps++;
+    return { total: compiled.length, deps, requested: compiled.length - deps };
+}
+
 function _mibFileRow(f, kind) {
     const icon    = kind === 'raw' ? 'bi-file-earmark-text text-primary' : 'bi-file-earmark-code text-success';
     const checked = _mibSelection[kind].has(f.name) ? ' checked' : '';
+    const depBadge = (kind === 'compiled' && _mibIsDependency(f.name))
+        ? `<span class="badge bg-secondary flex-shrink-0" style="font-size:.6rem"
+                 title="${escAttr(_ms('mib_dep_tooltip', 'Dependency pulled in automatically'))}">${esc(_ms('mib_dep_badge', 'dep'))}</span>`
+        : '';
     return `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border"
                  style="background:var(--bs-body-bg)">
         <input type="checkbox" class="form-check-input flex-shrink-0"${checked}
@@ -140,6 +165,7 @@ function _mibFileRow(f, kind) {
         <i class="bi ${icon} flex-shrink-0" style="font-size:.9rem"></i>
         <span class="flex-grow-1 text-truncate" style="font-size:.8rem"
               title="${escAttr(f.name)}">${esc(f.name)}</span>
+        ${depBadge}
         <span class="text-muted flex-shrink-0" style="font-size:.72rem">${_mibSz(f.size)}</span>
         <button class="btn btn-sm btn-secondary py-0 px-1 flex-shrink-0"
                 title="${escAttr(_ms('mib_details_view', 'View details'))}"
@@ -237,10 +263,18 @@ async function openFileManagerModal(modName) {
     _set('mibCompileBtnLabel', _ms('mib_compile_all', 'Compile all'));
     _set('mibImportUrlBtnLabel', _ms('mib_import_url_btn', 'Import'));
     _set('mibStopBtnLabel', _ms('mib_stop_compile', 'Stop'));
+    _set('mibGithubImportBtnLabel', _ms('mib_github_import_btn', 'Import folder'));
+    _set('mibGithubRecursiveLabel', _ms('mib_github_recursive', 'Recursive'));
+    _set('mibDepSrcHint', _ms('mib_dep_src_hint',
+        'Checked repositories are queried over HTTP to resolve imported MIBs that are not present locally during compilation.'));
     const _refBtn = document.getElementById('mibRefreshBtn');
     if (_refBtn) _refBtn.title = _ms('mib_refresh', 'Refresh');
     const _urlInput = document.getElementById('mibImportUrlInput');
     if (_urlInput) { _urlInput.placeholder = _ms('mib_import_url_placeholder', 'GitHub or raw URL…'); _urlInput.value = ''; }
+    const _ghInput = document.getElementById('mibGithubUrlInput');
+    if (_ghInput) { _ghInput.placeholder = _ms('mib_github_url_placeholder', 'github.com/owner/repo/tree/branch/mibs'); _ghInput.value = ''; }
+    const _ghRec = document.getElementById('mibGithubRecursive');
+    if (_ghRec) _ghRec.checked = true;
 
     const body = document.getElementById('mibManagerBody');
     if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
@@ -273,6 +307,14 @@ function _mibRender(data) {
 
     _mibData = data;
 
+    // Stems of the raw MIBs (name minus extension) — a compiled .py whose stem
+    // is NOT here was pulled in by pysmi as a dependency, not requested by the
+    // user.  Used to tag those rows and break down the post-compile count.
+    _mibRawStems = new Set((data.raw || []).map(f => f.name.replace(/\.[^.]*$/, '')));
+
+    // GitHub import dropdown + compile dependency-source toggles
+    _mibPopulateGithub(data);
+
     // pysmi availability badge — only visible when pysmi is MISSING
     const pysmiBadge = document.getElementById('mibPysmiStatus');
     if (pysmiBadge) {
@@ -293,9 +335,21 @@ function _mibRender(data) {
         dirInfo.title = data.raw_dir || '';
     }
 
-    // Disable compile button when no raw files or pysmi missing
+    // Disable compile button when no raw files or pysmi missing.  A reload that
+    // happens mid-compile (e.g. user clicks Refresh) must NOT re-enable it; keep
+    // the running-state buttons in sync with the active compile job.
     const compileBtn = document.getElementById('mibCompileBtn');
-    if (compileBtn) compileBtn.disabled = !data.pysmi_available || !data.raw.length;
+    if (compileBtn) compileBtn.disabled =
+        _mibCompileInProgress || !data.pysmi_available || !data.raw.length;
+    // The Stop button must survive a manual Refresh while any cancellable job
+    // (compile or GitHub import) is running.
+    const stopBtnR = document.getElementById('mibStopBtn');
+    if (stopBtnR) stopBtnR.style.display =
+        (_mibCompileInProgress || _mibGithubInProgress) ? 'inline-block' : 'none';
+    const compLblR = document.getElementById('mibCompileBtnLabel');
+    if (compLblR && _mibCompileInProgress) compLblR.textContent = _ms('mib_compiling', 'Compiling…');
+    const compSelBtnR = document.getElementById('mibCompileSelBtn');
+    if (compSelBtnR && _mibCompileInProgress) compSelBtnR.disabled = true;
 
     // Preserve search queries across reloads (upload / delete / compile)
     const _sq_raw = document.getElementById('mibSearchRaw')?.value || '';
@@ -407,7 +461,8 @@ async function openMibBrowserModal(modName) {
     _mibBrowserTreeRoot = _mibBuildOidTree(_mibBrowserSymbols);
     _snmpRebuildOidMap();
     const countEl2 = document.getElementById('mibBrowserCount');
-    if (countEl2) { countEl2.textContent = _mibBrowserSymbols.length; countEl2.style.display = ''; }
+    // Explicit value: CSS hides #mibBrowserCount by default ('' wouldn't show it).
+    if (countEl2) { countEl2.textContent = _mibBrowserSymbols.length; countEl2.style.display = 'inline-block'; }
     _mibBrowserRenderTree();
 }
 
@@ -1025,16 +1080,17 @@ async function _mibDeleteSelectedConfirmed(kind, names) {
     let deleted   = 0;
     const errors  = [];
 
-    _mibProgressShow(total);
+    _mibProgressBegin(false);   // delete is not cancellable → no Stop button
+    _mibProgressRender('deleting', 0, total, null, 0);
     for (let i = 0; i < names.length; i++) {
         const name = names[i];
-        _mibProgressUpdate(i, total, name);
+        _mibProgressRender('deleting', i, total, name, 0);
         const res = await apiPost(_mibApiUrl(modName, 'delete_mib'), { ...cfg, name, kind });
         const d   = res && res.data;
         if (d && d.ok) { deleted++; }
         else { errors.push(name + ': ' + ((d && d.message) || 'Error')); }
     }
-    _mibProgressUpdate(total, total, null);
+    _mibProgressRender('deleting', total, total, null, 0);
     await new Promise(r => setTimeout(r, 300));
     _mibProgressHide();
 
@@ -1063,31 +1119,79 @@ async function _mibDelete(name, kind) {
     }
 }
 
-// ── Compilation progress helpers ──────────────────────────────────
-function _mibProgressShow(total) {
+// ── Progress helpers (shared by download / compile / index phases) ────────────
+// The progress bar carries a phase label so the user always knows what the job
+// is doing; the Stop button is visible for the whole job (any phase).
+function _mibPhaseLabel(phase) {
+    return {
+        downloading: _ms('mib_phase_downloading', 'Downloading'),
+        discovering: _ms('mib_github_discovering', 'Discovering files…'),
+        compiling:   _ms('mib_phase_compiling',   'Compiling'),
+        indexing:    _ms('mib_phase_indexing',    'Indexing…'),
+        deleting:    _ms('mib_phase_deleting',    'Deleting'),
+        cancelling:  _ms('mib_phase_cancelling',  'Cancelling…'),
+    }[phase] || '';
+}
+
+// Show the progress section.  *withStop* shows the Stop button for cancellable
+// jobs (download / compile / index); pass false for non-cancellable ones (delete).
+function _mibProgressBegin(withStop = true) {
     const sec = document.getElementById('mibProgressSection');
-    if (sec) sec.style.display = '';
-    _mibProgressUpdate(0, total, null);
+    // Must be an explicit value: the stylesheet sets `#mibProgressSection
+    // { display:none }`, so clearing the inline style ('') would keep it hidden.
+    if (sec) sec.style.display = 'block';
+    const stop = document.getElementById('mibStopBtn');
+    if (stop) stop.style.display = withStop ? 'inline-block' : 'none';
 }
 
-function _mibProgressUpdate(completed, total, current) {
-    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-    const bar = document.getElementById('mibProgressBar');
-    if (bar) { bar.style.width = `${pct}%`; bar.setAttribute('aria-valuenow', pct); }
-    const lbl = document.getElementById('mibProgressLabel');
-    if (lbl) lbl.textContent = current
-        ? `${completed} / ${total} — ${current}`
-        : `${completed} / ${total}`;
+// Render one progress tick.  Determinate (X / total) when *total* > 0; otherwise
+// an indeterminate full striped bar (discovery / indexing — no known total).
+function _mibProgressRender(phase, completed, total, current, failed) {
+    const name  = _mibPhaseLabel(phase);
+    const bar   = document.getElementById('mibProgressBar');
+    const lbl   = document.getElementById('mibProgressLabel');
     const pctEl = document.getElementById('mibProgressPct');
-    if (pctEl) pctEl.textContent = `${pct}%`;
+    if (total > 0) {
+        const pct = Math.round((completed / total) * 100);
+        if (bar) { bar.style.width = `${pct}%`; bar.setAttribute('aria-valuenow', pct); }
+        if (lbl) lbl.textContent = current ? `${name} ${completed} / ${total} — ${current}`
+                                           : `${name} ${completed} / ${total}`;
+        if (pctEl) pctEl.textContent = failed
+            ? _ms('mib_github_progress_failed', '{f} failed').replace('{f}', failed)
+            : `${pct}%`;
+    } else {
+        if (bar) bar.style.width = '100%';
+        if (lbl) lbl.textContent = current ? `${name} — ${current}` : name;
+        if (pctEl) pctEl.textContent = '';
+    }
 }
 
+// Hide the progress section and the Stop button.
 function _mibProgressHide() {
     const sec = document.getElementById('mibProgressSection');
     if (sec) sec.style.display = 'none';
+    const bar = document.getElementById('mibProgressBar');
+    if (bar) bar.style.width = '0%';
+    const stop = document.getElementById('mibStopBtn');
+    if (stop) stop.style.display = 'none';
+}
+
+// " — 97 requested, 23 dependencies, 120 total", or '' if nothing extra to say.
+// pysmi auto-compiles dependency MIBs, so compiled/ holds more files than were
+// requested; this explains the larger count to the user.
+function _mibBreakdownSuffix() {
+    const b = _mibCompiledBreakdown();
+    if (!b.deps) return '';
+    return ' — ' + _ms('mib_compiled_breakdown',
+        '{req} requested, {dep} dependencies, {total} total')
+        .replace('{req}', b.requested).replace('{dep}', b.deps).replace('{total}', b.total);
 }
 
 function _mibHandleCompileResult(d) {
+    if (d.cancelled) {
+        showToast(d.message || _ms('mib_compile_cancelled', 'Compilation cancelled'), 'warning');
+        return;
+    }
     if (d.result_ok === false) {
         showToast(d.message || (t('error') || 'Error'), 'error');
     } else if (d.partial) {
@@ -1096,11 +1200,11 @@ function _mibHandleCompileResult(d) {
         showToast(
             _ms('mib_compiled_partial', '{compiled} compiled, {failed} failed')
                 .replace('{compiled}', nOk)
-                .replace('{failed}', nFailed),
+                .replace('{failed}', nFailed) + _mibBreakdownSuffix(),
             'warning',
         );
     } else if (d.compiled) {
-        showToast(_ms('mib_compiled_ok', 'MIBs compiled successfully'));
+        showToast(_ms('mib_compiled_ok', 'MIBs compiled successfully') + _mibBreakdownSuffix());
     } else {
         showToast(_ms('mib_already_uptodate', 'MIBs already up-to-date'));
     }
@@ -1119,6 +1223,13 @@ function _startCompileInterceptor() {
             () => {
                 _stopCompileInterceptor();
                 _mibCompileAbort = true;
+                // Also cancel the job server-side so it stops compiling in the
+                // background after the modal closes.
+                if (_mibCompileJobId) {
+                    const modName = _mibManagerModuleName;
+                    apiPost(_mibApiUrl(modName, 'compile_mibs_cancel'),
+                            { ...(modulesData[modName] || {}), job_id: _mibCompileJobId });
+                }
                 bootstrap.Modal.getOrCreateInstance(modal).hide();
             },
         );
@@ -1133,20 +1244,39 @@ function _stopCompileInterceptor() {
     _mibCompileInterceptor = null;
 }
 
-function _mibStopCompile() {
-    _mibCompileAbort = true;
+async function _mibStopCompile() {
+    // Stop the active job.  A compile is cancelled SERVER-SIDE (just stopping the
+    // poll loop would leave the background thread compiling — files would keep
+    // appearing); the loop keeps polling and shows "Cancelling…" until the
+    // server confirms it stopped.  A GitHub import poll is aborted client-side.
+    _mibGithubAbort = true;
+    if (_mibCompileJobId && !_mibCompileCancelling) {
+        _mibCompileCancelling = true;
+        const stopBtn = document.getElementById('mibStopBtn');
+        if (stopBtn) stopBtn.disabled = true;
+        const modName = _mibManagerModuleName;
+        try {
+            await apiPost(_mibApiUrl(modName, 'compile_mibs_cancel'),
+                          { ...(modulesData[modName] || {}), job_id: _mibCompileJobId });
+        } catch (e) { /* best effort */ }
+    } else if (!_mibCompileJobId) {
+        _mibCompileAbort = true;   // no compile job → just stop polling
+    }
 }
 
 async function _compileMibs(mibs) {
     // mibs: optional array of raw filenames to compile; omit/undefined = compile all
     _mibCompileAbort = false;
+    _mibCompileCancelling = false;
+    _mibCompileInProgress = true;
     const btn        = document.getElementById('mibCompileBtn');
     const label      = document.getElementById('mibCompileBtnLabel');
     const stopBtn    = document.getElementById('mibStopBtn');
     const compSelBtn = document.getElementById('mibCompileSelBtn');
     if (btn)        btn.disabled = true;
     if (label)      label.textContent = _ms('mib_compiling', 'Compiling…');
-    if (stopBtn)    stopBtn.style.display = '';
+    // Explicit value: CSS hides #mibStopBtn by default, so '' would not show it.
+    if (stopBtn)    { stopBtn.style.display = 'inline-block'; stopBtn.disabled = false; }
     if (compSelBtn) compSelBtn.disabled = true;
 
     _startCompileInterceptor();
@@ -1166,15 +1296,17 @@ async function _compileMibs(mibs) {
 
         // Immediate completion (empty raw dir)
         if (startData.done) {
-            _mibHandleCompileResult(startData);
             await _mibLoad();
+            _mibHandleCompileResult(startData);
             return;
         }
 
         const jobId = startData.job_id;
-        _mibProgressShow(startData.total);
+        _mibCompileJobId = jobId;
+        _mibProgressBegin();
+        _mibProgressRender('compiling', 0, startData.total, null, 0);
 
-        // Poll until the job is done or aborted
+        // Poll until the job is done.  _mibCompileAbort only fires on modal close.
         let _lastCompleted = -1;
         while (!_mibCompileAbort) {
             await new Promise(r => setTimeout(r, 350));
@@ -1186,25 +1318,34 @@ async function _compileMibs(mibs) {
                 showToast((sData && sData.message) || 'Polling error', 'error');
                 break;
             }
+            // While cancelling, label the bar "Cancelling…" until the job ends.
+            const phase = _mibCompileCancelling ? 'cancelling' : (sData.phase || 'compiling');
             const nowCompleted = sData.completed || 0;
-            _mibProgressUpdate(nowCompleted, sData.total || startData.total, sData.current);
+            _mibProgressRender(
+                phase, nowCompleted,
+                // indexing / cancelling have no live count → indeterminate bar.
+                (phase === 'indexing' || phase === 'cancelling') ? 0 : (sData.total || startData.total),
+                sData.current, 0);
             if (nowCompleted > _lastCompleted) {
                 _lastCompleted = nowCompleted;
                 _mibRefreshCompiled();  // intentionally not awaited — runs in background
             }
             if (sData.done) {
                 _mibProgressHide();
+                await _mibLoad();   // refresh first so the breakdown is accurate
                 _mibHandleCompileResult(sData);
-                await _mibLoad();
                 break;
             }
         }
     } finally {
+        _mibCompileInProgress = false;
+        _mibCompileCancelling = false;
+        _mibCompileJobId = null;
         _stopCompileInterceptor();
         _mibProgressHide();
         if (btn)        btn.disabled = false;
         if (label)      label.textContent = _ms('mib_compile_all', 'Compile All');
-        if (stopBtn)    stopBtn.style.display = 'none';
+        if (stopBtn)    { stopBtn.style.display = 'none'; stopBtn.disabled = false; }
         if (compSelBtn) compSelBtn.disabled = false;
     }
 }
@@ -1230,6 +1371,193 @@ async function _importMibFromUrl() {
         await _mibLoad();
     } else {
         showToast((d && d.message) || (t('error') || 'Error'), 'error');
+    }
+}
+
+// ---- GitHub MIB repositories ------------------------------------------------
+// Split a config string (newline/comma separated) into a list of dep templates.
+function _mibReposList(cfg) {
+    return String((cfg && cfg.mib_repos) || '')
+        .split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+}
+
+// A repo's dependency templates (a repo lists one template per file extension
+// it uses, since repos mix .txt/.my/.mib/extension-less storage).
+function _mibRepoTemplates(r) {
+    if (Array.isArray(r.dep_templates)) return r.dep_templates.filter(Boolean);
+    return r.dep_template ? [r.dep_template] : [];
+}
+
+// Recompute the summary badge: number of enabled sources (a fully-active known
+// repo counts as one, plus each custom template).
+function _mibDepSrcRefreshSummary() {
+    const sumEl = document.getElementById('mibDepSrcSummary');
+    if (!sumEl) return;
+    const known  = (_mibData && _mibData.known_repos) || [];
+    const active = new Set(_mibReposList(modulesData[_mibManagerModuleName] || {}));
+    const knownTpls = new Set();
+    let count = 0;
+    for (const r of known) {
+        const tpls = _mibRepoTemplates(r);
+        tpls.forEach(t => knownTpls.add(t));
+        if (tpls.length && tpls.every(t => active.has(t))) count++;
+    }
+    for (const t of active) if (!knownTpls.has(t)) count++;   // custom sources
+    sumEl.innerHTML = `<i class="bi bi-link-45deg me-1"></i>`
+        + esc(_ms('mib_dep_src_title', 'Compile dependency sources'))
+        + (count ? ` <span class="badge bg-secondary">${count}</span>` : '');
+}
+
+// Populate the known-repo dropdown and the compile dependency-source toggles
+// from the list_mibs payload.  Called on every _mibRender.
+function _mibPopulateGithub(data) {
+    const sel = document.getElementById('mibGithubRepoSel');
+    const known = (data && data.known_repos) || [];
+    if (sel) {
+        const cur = sel.value;
+        let opts = `<option value="">${esc(_ms('mib_github_custom', 'Custom URL…'))}</option>`;
+        for (const r of known) {
+            opts += `<option value="${esc(r.folder)}">${esc(r.name || r.folder)}</option>`;
+        }
+        sel.innerHTML = opts;
+        // Keep the previous selection if it still exists.
+        if (cur && Array.from(sel.options).some(o => o.value === cur)) sel.value = cur;
+    }
+
+    // Dependency-source toggles: one checkbox per known repo (toggles ALL of
+    // its templates at once), plus any custom templates already in the config.
+    const list = document.getElementById('mibDepSrcList');
+    _mibDepSrcRefreshSummary();
+    if (!list) return;
+
+    const active = new Set(_mibReposList(modulesData[_mibManagerModuleName] || {}));
+    const knownTpls = new Set();
+    let rows = '';
+    for (const r of known) {
+        const tpls = _mibRepoTemplates(r);
+        if (!tpls.length) continue;
+        tpls.forEach(t => knownTpls.add(t));
+        const on = tpls.every(t => active.has(t));
+        const id = 'mibDep_' + (r.name || '').replace(/[^a-zA-Z0-9]/g, '_');
+        const payload = encodeURIComponent(JSON.stringify(tpls));
+        rows += `<div class="form-check">
+            <input class="form-check-input" type="checkbox" id="${id}" ${on ? 'checked' : ''}
+                   onchange="_mibDepSrcToggle('${payload}', this.checked)">
+            <label class="form-check-label small" for="${id}">${esc(r.name || '')}
+                <span class="text-muted d-block" style="font-size:.72rem">${esc(tpls[0])}${tpls.length > 1 ? ` (+${tpls.length - 1})` : ''}</span></label>
+        </div>`;
+    }
+    // Custom (non-known) templates already saved — keep them toggleable.
+    for (const tpl of active) {
+        if (knownTpls.has(tpl)) continue;
+        const id = 'mibDep_' + tpl.replace(/[^a-zA-Z0-9]/g, '_');
+        const payload = encodeURIComponent(JSON.stringify([tpl]));
+        rows += `<div class="form-check">
+            <input class="form-check-input" type="checkbox" id="${id}" checked
+                   onchange="_mibDepSrcToggle('${payload}', this.checked)">
+            <label class="form-check-label small" for="${id}">
+                <span class="text-muted">${esc(tpl)}</span></label>
+        </div>`;
+    }
+    list.innerHTML = rows || `<span class="small text-muted">${esc(_ms('mib_dep_src_none', 'No repositories available.'))}</span>`;
+}
+
+// When a known repo is picked, prefill the folder URL field.
+function _mibGithubRepoPick() {
+    const sel = document.getElementById('mibGithubRepoSel');
+    const inp = document.getElementById('mibGithubUrlInput');
+    if (sel && inp && sel.value) inp.value = sel.value;
+}
+
+// Add/remove a group of dependency-source templates in the module config
+// (persisted on save).  tplsEnc = encodeURIComponent(JSON.stringify([...])).
+function _mibDepSrcToggle(tplsEnc, on) {
+    let tpls;
+    try { tpls = JSON.parse(decodeURIComponent(tplsEnc)); } catch { return; }
+    if (!Array.isArray(tpls)) return;
+    const modName = _mibManagerModuleName;
+    if (!modName) return;
+    const cfg = modulesData[modName] || (modulesData[modName] = {});
+    const set = new Set(_mibReposList(cfg));
+    for (const t of tpls) { if (on) set.add(t); else set.delete(t); }
+    cfg.mib_repos = Array.from(set).join('\n');
+    markDirty('modules');
+    _mibDepSrcRefreshSummary();
+}
+
+// Import every MIB file from a GitHub folder URL into the raw directory.
+async function _importMibFromGithub() {
+    const input = document.getElementById('mibGithubUrlInput');
+    const btn   = document.getElementById('mibGithubImportBtn');
+    const rec   = document.getElementById('mibGithubRecursive');
+    const url   = (input?.value || '').trim();
+    if (!url) {
+        showToast(_ms('mib_github_error_empty', 'Pick a repository or enter a GitHub folder URL'), 'error');
+        input?.focus();
+        return;
+    }
+    const modName = _mibManagerModuleName;
+    const cfg     = modulesData[modName] || {};
+    const icon  = document.getElementById('mibGithubImportIcon');
+    const label = document.getElementById('mibGithubImportBtnLabel');
+    const _prevLabel = label ? label.textContent : '';
+    _mibGithubAbort = false;
+    _mibGithubInProgress = true;
+    if (btn) btn.disabled = true;
+    if (icon) icon.className = 'spinner-border spinner-border-sm me-1';
+    if (label) label.textContent = _ms('mib_github_importing', 'Importing…');
+
+    try {
+        // Start the background import job.
+        const startRes  = await apiPost(_mibApiUrl(modName, 'import_mib_from_github_start'),
+                                        { ...cfg, url, recursive: !!(rec && rec.checked) });
+        const startData = startRes && startRes.data;
+        if (!startData || !startData.ok) {
+            showToast((startData && startData.message) || (t('error') || 'Error'), 'error');
+            return;
+        }
+        const jobId = startData.job_id;
+
+        // Phase-labelled progress + Stop button.  Total is unknown until the
+        // server finishes discovery, so the bar is indeterminate until then.
+        _mibProgressBegin();
+        _mibProgressRender('discovering', 0, 0, null, 0);
+        let sData = null;
+        while (!_mibGithubAbort) {
+            await new Promise(r => setTimeout(r, 350));
+            if (_mibGithubAbort) break;
+            const sRes = await apiPost(_mibApiUrl(modName, 'import_mib_from_github_status'),
+                                       { ...cfg, job_id: jobId });
+            sData = sRes && sRes.data;
+            if (_mibGithubAbort) break;
+            if (!sData || !sData.ok) {
+                showToast((sData && sData.message) || 'Polling error', 'error');
+                break;
+            }
+            const total = sData.total || 0;
+            _mibProgressRender(total ? 'downloading' : 'discovering',
+                               sData.imported || 0, total, sData.current, sData.failed || 0);
+            if (sData.done) break;
+        }
+        if (sData && sData.done) {
+            let msg = (sData.message || _ms('mib_github_import_ok', 'Imported {n} file(s)'))
+                      .replace('{n}', sData.imported || 0);
+            if (sData.failed) {
+                const names = sData.failed_names || [];
+                const shown = names.slice(0, 8).join(', ');
+                const more  = names.length - 8;
+                msg += ' — ' + _ms('mib_github_n_failed', '{f} failed').replace('{f}', sData.failed)
+                     + (shown ? ': ' + shown + (more > 0 ? `, +${more}` : '') : '');
+            }
+            showToast(msg, sData.failed ? 'warning' : undefined);
+            await _mibLoad();
+        }
+    } finally {
+        _mibGithubInProgress = false;
+        _mibProgressHide();
+        if (btn) btn.disabled = false;
+        if (icon) icon.className = 'bi bi-github me-1';
+        if (label) label.textContent = _prevLabel || _ms('mib_github_import_btn', 'Import folder');
     }
 }
 
@@ -1271,6 +1599,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('mibManagerModal')?.addEventListener('hidden.bs.modal', () => {
         _stopCompileInterceptor();
         _mibCompileAbort = true;   // stop any running poll loop
+        _mibGithubAbort  = true;   // stop any running GitHub import poll loop
         _mibProgressHide();
         _mibManagerModuleName = null;
         _mibData = null;

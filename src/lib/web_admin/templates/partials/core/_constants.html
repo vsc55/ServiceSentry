@@ -225,7 +225,7 @@ function applyModuleDefaults() {
         for (const schKey of Object.keys(ITEM_SCHEMAS)) {
             if (!schKey.startsWith(name + '|')) continue;
             const col = schKey.slice(name.length + 1);
-            if (col === '__i18n__' || col === '__module__') continue;
+            if (col === '__i18n__' || col === '__module__' || col === '__history__') continue;
             if (col.includes('|')) continue;  // sub-collection schema — not a top-level config key
             const _colSch = ITEM_SCHEMAS[schKey];
             if (_colSch && _colSch['__migrates_from__']) {
@@ -255,7 +255,7 @@ function applyModuleDefaults() {
             Object.keys(ITEM_SCHEMAS)
                 .filter(k => k.startsWith(name + '|'))
                 .map(k => k.slice(name.length + 1))
-                .filter(c => !c.includes('|') && c !== '__i18n__' && c !== '__module__')
+                .filter(c => !c.includes('|') && c !== '__i18n__' && c !== '__module__' && c !== '__history__')
         );
         for (const _ck of Object.keys(cfg)) {
             if (typeof cfg[_ck] !== 'object' || cfg[_ck] === null || Array.isArray(cfg[_ck])) continue;

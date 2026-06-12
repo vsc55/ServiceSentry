@@ -83,11 +83,13 @@ async function _historyLoadChart() {
 function _historyRenderLayout() {
     const cont = document.getElementById('history-container');
     if (!cont) return;
-    cont.innerHTML = `<div class="d-flex flex-column" style="flex:1 1 auto;height:100%;min-height:0">
-<!-- Tab-level header: search + Clear All (always visible, scope is obvious) -->
-<div class="d-flex align-items-center gap-2 mb-2" style="flex-shrink:0" id="history-tab-header">
-  <span class="fw-semibold me-1"><i class="bi bi-graph-up me-1"></i>${esc(t('tab_history'))}</span>
-  <div class="input-group input-group-sm" style="max-width:200px">
+    cont.innerHTML = `<div class="ss-card">
+<div class="ss-accent ss-accent-blue"></div>
+
+<!-- Header: title + search + Clear All (matches the other sections' toolbar) -->
+<div class="ss-card-header" id="history-tab-header">
+  <h6 class="mb-0 me-2"><i class="bi bi-graph-up me-2"></i>${esc(t('tab_history'))}</h6>
+  <div class="input-group input-group-sm" style="max-width:220px">
     <span class="input-group-text"><i class="bi bi-search"></i></span>
     <input type="text" class="form-control" id="history-search"
            placeholder="${esc(t('history_search'))}" oninput="_historyOnSearch(this.value)">
@@ -99,17 +101,21 @@ function _historyRenderLayout() {
   </div>
 </div>
 
-<div class="d-flex gap-3 flex-grow-1 overflow-hidden">
-  <!-- Series list -->
-  <div class="d-flex flex-column" style="width:220px;flex-shrink:0">
-    <div id="history-series-list" class="flex-grow-1 overflow-y-auto"></div>
+<!-- Body: series sidebar (left) + chart drawing zone (right) -->
+<div class="ss-history-body d-flex flex-grow-1 overflow-hidden">
+
+  <!-- Series sidebar — distinct panel -->
+  <div class="ss-history-sidebar d-flex flex-column">
+    <div class="ss-history-sidebar-title text-muted">${esc(t('history_series'))}</div>
+    <div id="history-series-list" class="flex-grow-1 overflow-y-auto p-1"></div>
   </div>
 
   <!-- Chart panel -->
-  <div class="flex-grow-1 d-flex flex-column gap-2 overflow-hidden">
+  <div class="ss-history-main flex-grow-1 d-flex flex-column overflow-hidden">
 
-    <!-- Toolbar -->
-    <div class="d-flex flex-wrap align-items-center gap-2" id="history-toolbar" style="display:none!important;flex-shrink:0">
+    <!-- Toolbar band — sits above the drawing zone, visually separated -->
+    <div class="ss-card-band ss-card-band-top d-flex flex-wrap align-items-center gap-2"
+         id="history-toolbar" style="display:none!important">
       <span class="fw-semibold text-truncate me-auto" id="history-title" style="max-width:320px"></span>
 
       <!-- Field selector -->
@@ -131,12 +137,12 @@ function _historyRenderLayout() {
       </button>
     </div>
 
-    <!-- Chart area fills remaining height -->
-    <div id="history-chart-area" class="flex-grow-1 position-relative" style="min-height:150px;overflow:hidden">
-    </div>
-
-    <!-- Stats row (fixed size) -->
-    <div id="history-stats-row" class="d-flex gap-3 flex-wrap" style="font-size:.85rem;flex-shrink:0">
+    <!-- Padded drawing zone + stats -->
+    <div class="flex-grow-1 d-flex flex-column gap-2 p-2 overflow-hidden" style="min-height:0">
+      <div id="history-chart-area" class="flex-grow-1 position-relative" style="min-height:150px;overflow:hidden">
+      </div>
+      <div id="history-stats-row" class="d-flex gap-3 flex-wrap" style="font-size:.85rem;flex-shrink:0">
+      </div>
     </div>
   </div>
 </div>

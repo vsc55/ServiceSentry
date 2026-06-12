@@ -3,7 +3,8 @@
         "api_ver": "v1",
         "enabled":  {"type": "bool", "default": true},
         "threads":  {"type": "int",  "default": 5, "min": 1, "max": 50},
-        "mib_dirs": {"type": "str",  "default": ""}
+        "mib_dirs": {"type": "str",  "default": ""},
+        "mib_repos": {"type": "str", "default": "", "hidden": true}
     },
     "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
     "servers": {

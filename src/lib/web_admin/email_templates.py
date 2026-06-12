@@ -11,6 +11,7 @@ falling back to English when the language is not available.
 from __future__ import annotations
 
 import html
+import re
 
 # ── Brand colours (Bootstrap 5 palette) ─────────────────────────────────────
 _COLORS = {
@@ -194,10 +195,20 @@ def _status_cell(status: str) -> str:
 
 # ── Custom HTML body helper ──────────────────────────────────────────────────
 
-class _SafeDict(dict):
-    """dict subclass that leaves unknown {keys} intact instead of raising KeyError."""
-    def __missing__(self, key: str) -> str:
-        return '{' + key + '}'
+# Matches ONLY simple ``{name}`` placeholders (letters/digits/underscore).
+# Anything else — ``{a.b}``, ``{a[0]}``, CSS ``{ ... }`` blocks, ``{{``/``}}`` —
+# is left untouched.  Restricting to bare names prevents format-string
+# traversal of object internals (e.g. ``{x.__class__}``) and avoids crashing on
+# the curly braces of inline ``<style>`` rules.
+_PLACEHOLDER_RE = re.compile(r'\{([A-Za-z_][A-Za-z0-9_]*)\}')
+
+
+def _subst(text: str, mapping: dict) -> str:
+    """Replace ``{name}`` with ``mapping[name]``; leave unknown names intact."""
+    return _PLACEHOLDER_RE.sub(
+        lambda m: mapping[m.group(1)] if m.group(1) in mapping else m.group(0),
+        text,
+    )
 
 
 def apply_html_override(
@@ -217,22 +228,22 @@ def apply_html_override(
     This means a template can use either ``{alert_down}`` (expands to the
     full localised string) or ``{item}`` (expands to the raw runtime value),
     or both.  Unknown placeholders are left unchanged.
+
+    Only bare ``{name}`` placeholders are substituted — attribute/index access
+    is never evaluated, so a custom template cannot reach object internals.
     """
-    runtime = _SafeDict(**kwargs)
+    runtime = {k: str(v) for k, v in kwargs.items()}
 
     # Pass 1: pre-interpolate each string value with runtime kwargs
     expanded: dict[str, str] = {}
     if strings:
         for k, v in strings.items():
-            try:
-                expanded[k] = v.format_map(runtime)
-            except Exception:
-                expanded[k] = v
+            expanded[k] = _subst(v, runtime) if isinstance(v, str) else str(v)
 
     # Pass 2: runtime kwargs always override to allow {item} etc. directly
-    expanded.update(kwargs)
+    expanded.update(runtime)
 
-    return html_tpl.format_map(_SafeDict(**expanded))
+    return _subst(html_tpl, expanded)
 
 
 # Runtime variables available per email type (beyond all string keys).

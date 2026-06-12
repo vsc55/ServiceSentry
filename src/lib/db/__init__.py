@@ -20,6 +20,11 @@ Supported drivers:
 from __future__ import annotations
 
 from .base import BaseConnector
+from .module_tables import (
+    collect_module_tables,
+    module_table,
+    reconcile_module_tables,
+)
 
 
 def get_connector(
@@ -60,4 +65,7 @@ def get_connector(
     )
 
 
-__all__ = ['get_connector', 'BaseConnector']
+__all__ = [
+    'get_connector', 'BaseConnector',
+    'module_table', 'collect_module_tables', 'reconcile_module_tables',
+]

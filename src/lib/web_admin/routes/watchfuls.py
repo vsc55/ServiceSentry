@@ -61,6 +61,9 @@ def register(app, wa):
                 # Inject server-side context after stripping client values so the
                 # server value always wins regardless of what the client sent.
                 config['__var_dir__'] = wa._var_dir or ''
+                # Shared DB connector, for modules that use their own tables
+                # (lib.db.module_tables).  Never client-controllable.
+                config['__connector__'] = getattr(wa, '_db_connector', None)
                 result = method(config)
             else:
                 result = method()

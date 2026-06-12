@@ -1,0 +1,10 @@
+{
+    "order": 1,
+    "name": "Net-SNMP",
+    "folder": "https://github.com/net-snmp/net-snmp/tree/master/mibs",
+    "dep_templates": [
+        "https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/@mib@.txt",
+        "https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/@mib@.mib",
+        "https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/@mib@"
+    ]
+}

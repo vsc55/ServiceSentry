@@ -361,6 +361,16 @@ class ModuleBase(ObjectBase):
         return self._name_module
 
     @property
+    def db(self):
+        """Shared DB connector, for modules that declare their own tables.
+
+        Returns the monitor's :class:`lib.db.BaseConnector` (the same one the
+        core stores use), or ``None`` when unavailable.  Declare tables with a
+        module-level ``discover_db_tables()`` — see ``lib.db.module_tables``.
+        """
+        return getattr(self._monitor, 'db', None)
+
+    @property
     def _default_threads(self) -> int:
         """ Default number of threads for parallel processing. """
         return self._DEFAULT_THREADS

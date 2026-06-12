@@ -18,26 +18,55 @@ function _modUiStr(modName, key, fallback) {
 let _discoverServices    = null;
 let _discoverPathStr     = null;
 let _discoverFieldPathStr = null;
+let _discoverUrl         = null;   // current discover endpoint
+let _discoverInputSpec   = null;   // __discovery_inputs__ spec when present
+
+function _discoverSetFilterVisible(show) {
+    document.getElementById('discoverFilter')?.classList.toggle('d-none', !show);
+}
 
 async function openDiscoverModal(pathStr, url) {
     _discoverFieldPathStr = null;
     _discoverPathStr = pathStr;
     _discoverServices = null;
+    _discoverUrl = url;
 
     const modName = pathStr.split('|')[0];
     const titleEl = document.getElementById('discoverModalTitle');
     if (titleEl) titleEl.textContent = _modUiStr(modName, 'discover_title', t('discover')) + ' — ' + modulePrettyName(modName, modulesData[modName] || {});
 
+    const inputsEl = document.getElementById('discoverInputs');
     const body = document.getElementById('discoverModalBody');
-    if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
     const filterEl = document.getElementById('discoverFilter');
     if (filterEl) filterEl.value = '';
 
+    const _colSch = ITEM_SCHEMAS[_schemaKeyOf(pathStr)] || null;
+    _discoverInputSpec = (_colSch && Array.isArray(_colSch['__discovery_inputs__']))
+        ? _colSch['__discovery_inputs__'] : null;
+
     bootstrap.Modal.getOrCreateInstance(document.getElementById('discoverModal')).show();
 
-    // Support POST-based discovery (e.g. modules that need their config as body).
-    // Schema signals this via __discovery_method__: "POST" on the collection.
-    const _colSch = ITEM_SCHEMAS[_schemaKeyOf(pathStr)] || null;
+    // Input-driven discovery: render the form and wait for the user to run it.
+    if (_discoverInputSpec) {
+        if (inputsEl) inputsEl.innerHTML = _discoverRenderInputs(modName, _discoverInputSpec);
+        _discoverInputDeps();
+        _discoverSetFilterVisible(false);
+        if (body) body.innerHTML = `<div class="text-center py-4 text-muted">${esc(_modUiStr(modName, 'discover_prompt', t('discover')))}</div>`;
+        const _first = _discoverInputSpec[0];
+        if (_first) setTimeout(() => document.getElementById('discInput_' + _first.key)?.focus(), 150);
+        return;
+    }
+
+    if (inputsEl) inputsEl.innerHTML = '';
+    _discoverSetFilterVisible(true);
+    if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    await _discoverFetchAndRender(pathStr, url, _colSch, null);
+}
+
+/** Fetch discovery results (GET, or POST with module config + optional input). */
+async function _discoverFetchAndRender(pathStr, url, _colSch, extraInput) {
+    const modName = pathStr.split('|')[0];
+    const body = document.getElementById('discoverModalBody');
     const _usePost = _colSch && _colSch['__discovery_method__'] === 'POST';
     let data;
     if (_usePost) {
@@ -55,8 +84,10 @@ async function openDiscoverModal(pathStr, url) {
             );
             postBody = { ..._modScalars, [_parentColKey]: { [_parentItemKey]: _parentItem } };
         } else {
-            postBody = modulesData[modName] || {};
+            postBody = { ...(modulesData[modName] || {}) };
         }
+        // Single-underscore key: survives the route's __dunder__ stripping.
+        if (extraInput) postBody._discovery_input = extraInput;
         const res = await apiPost(url, postBody);
         data = res && Array.isArray(res.data) ? res.data : null;
     } else {
@@ -67,7 +98,69 @@ async function openDiscoverModal(pathStr, url) {
         return;
     }
     _discoverServices = data;
+    _discoverSetFilterVisible(true);
     _renderDiscoverList();
+}
+
+/** Render the declared __discovery_inputs__ form fields. */
+function _discoverRenderInputs(modName, spec) {
+    let h = '<div class="d-flex flex-column gap-2">';
+    for (const f of spec) {
+        const label = _modUiStr(modName, f.ui, f.key);
+        const id = 'discInput_' + f.key;
+        if (f.type === 'bool') {
+            h += `<div class="form-check">
+                <input class="form-check-input" type="checkbox" id="${escAttr(id)}" onchange="_discoverInputDeps()">
+                <label class="form-check-label small" for="${escAttr(id)}">${esc(label)}</label>
+            </div>`;
+        } else {
+            h += `<div>
+                <label class="form-label small mb-1" for="${escAttr(id)}">${esc(label)}${f.required ? ' *' : ''}</label>
+                <input type="text" class="form-control form-control-sm" id="${escAttr(id)}"
+                       placeholder="${escAttr(f.placeholder || '')}" data-depends="${escAttr(f.depends_on || '')}"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();_runDiscovery();}">
+            </div>`;
+        }
+    }
+    h += `<div><button class="btn btn-sm btn-primary" onclick="_runDiscovery()">
+            <i class="bi bi-search me-1"></i>${esc(_modUiStr(modName, 'discover_run', t('discover')))}
+          </button></div></div>`;
+    return h;
+}
+
+/** Enable/disable inputs that declare depends_on a (checkbox) field. */
+function _discoverInputDeps() {
+    if (!_discoverInputSpec) return;
+    for (const f of _discoverInputSpec) {
+        if (!f.depends_on) continue;
+        const dep = document.getElementById('discInput_' + f.depends_on);
+        const el  = document.getElementById('discInput_' + f.key);
+        if (dep && el) {
+            el.disabled = !dep.checked;
+            el.classList.toggle('opacity-50', !dep.checked);
+        }
+    }
+}
+
+/** Collect input values and run input-driven discovery. */
+async function _runDiscovery() {
+    if (!_discoverInputSpec || !_discoverPathStr) return;
+    const inp = {};
+    for (const spec of _discoverInputSpec) {
+        const el = document.getElementById('discInput_' + spec.key);
+        if (!el) continue;
+        inp[spec.key] = spec.type === 'bool' ? el.checked : el.value.trim();
+    }
+    for (const spec of _discoverInputSpec) {
+        if (spec.required && !inp[spec.key]) {
+            document.getElementById('discInput_' + spec.key)?.focus();
+            return;
+        }
+    }
+    const body = document.getElementById('discoverModalBody');
+    if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    const _colSch = ITEM_SCHEMAS[_schemaKeyOf(_discoverPathStr)] || null;
+    await _discoverFetchAndRender(_discoverPathStr, _discoverUrl, _colSch, inp);
 }
 
 async function openDiscoverModalForField(fieldPathStr, url) {
@@ -75,6 +168,10 @@ async function openDiscoverModalForField(fieldPathStr, url) {
     // Collection path = all parts except field key and item key (last two segments).
     _discoverPathStr = fieldPathStr.split('|').slice(0, -2).join('|');
     _discoverServices = null;
+    _discoverInputSpec = null;
+    const _inEl = document.getElementById('discoverInputs');
+    if (_inEl) _inEl.innerHTML = '';
+    _discoverSetFilterVisible(true);
     const modName = fieldPathStr.split('|')[0];
     const titleEl = document.getElementById('discoverModalTitle');
     if (titleEl) titleEl.textContent = _modUiStr(modName, 'discover_title', t('discover') || 'Discover');
@@ -103,23 +200,33 @@ function _renderDiscoverList() {
         ? (ITEM_SCHEMAS[_schemaKeyOf(_discoverPathStr)] || null)
         : null;
 
-    // Build set of names already configured (lowercase for case-insensitive match).
+    // Schema-driven render hints — all module-specific knowledge lives in schema.json.
+    const _catDefs     = (_colSch && _colSch['__discovery_categories__'])        || {};
+    const _subtitleTpl = (_colSch && _colSch['__discovery_subtitle__'])           || '';
+    const _typeField   = (_colSch && _colSch['__discovery_type_field__'])         || 'status';
+    const _catField    = (_colSch && _colSch['__discovery_category_field__'])     || '';
+    // Composite-dedup support: when set, an item is identified by (field, type)
+    // instead of field alone, so e.g. the same domain can be added once per
+    // record type.  The second component comes from the stored type field.
+    const _typeStoreField = (_colSch && _colSch['__discovery_type_store_field__']) || '';
+    const _dedupWithType  = !!(_colSch && _colSch['__discovery_dedup_with_type__']);
+    const _dedupKey = (base, typeVal) =>
+        _dedupWithType ? `${base} ${typeVal || ''}`.toLowerCase()
+                       : String(base).toLowerCase();
+
+    // Build set of identifiers already configured (case-insensitive).
     // Uses __discovery_field__ from the collection schema to find the operative field.
     const configured = new Set();
     if (_discoverPathStr) {
         const _discField = _colSch && _colSch['__discovery_field__'];
         const collection = getPath(modulesData, _discoverPathStr.split('|')) || {};
         for (const [key, val] of Object.entries(collection)) {
-            const fieldVal = (typeof val === 'object' && val !== null && _discField ? (val[_discField] || '') : '').trim();
-            configured.add((fieldVal || key).toLowerCase());
+            const _isObj   = typeof val === 'object' && val !== null;
+            const fieldVal = (_isObj && _discField ? (val[_discField] || '') : '').trim();
+            const typeVal  = (_isObj && _typeStoreField ? (val[_typeStoreField] || '') : '');
+            configured.add(_dedupKey(fieldVal || key, typeVal));
         }
     }
-
-    // Schema-driven render hints — all module-specific knowledge lives in schema.json.
-    const _catDefs     = (_colSch && _colSch['__discovery_categories__'])        || {};
-    const _subtitleTpl = (_colSch && _colSch['__discovery_subtitle__'])           || '';
-    const _typeField   = (_colSch && _colSch['__discovery_type_field__'])         || 'status';
-    const _catField    = (_colSch && _colSch['__discovery_category_field__'])     || '';
 
     const filtered = _discoverServices.filter(s =>
         !filter ||
@@ -143,9 +250,10 @@ function _renderDiscoverList() {
     for (const svc of filtered) {
         const _svcName   = svc.name || '';
         const _svcLower  = _svcName.toLowerCase();
+        const _svcDedup  = _dedupKey(_svcName, svc[_typeField]);
         const isAdded    = _fieldMode
             ? (configured.has(_svcLower) && _svcLower !== _currentFieldVal)
-            : configured.has(_svcLower);
+            : configured.has(_svcDedup);
         const _isCurrent = _fieldMode && _svcLower === _currentFieldVal;
 
         // Status icon/colour (running / stopped / unknown — generic service concept)
@@ -175,13 +283,16 @@ function _renderDiscoverList() {
             _subtitle = _subtitle.replace(/^[:.\s]+|[:.\s]+$/g, '').replace(/:{2,}/g, '::');
             if (!_subtitle.replace(/[:.]/g, '').trim()) _subtitle = '';
         }
+        // d-block so text-truncate + the parent's min-w-0 actually clip the line;
+        // an inline span ignores width and long values (e.g. TXT records) would
+        // overflow and break the row layout. Full value shown on hover (title).
         const _subtitleBadge = _subtitle
-            ? `<span class="text-truncate" style="font-size:.7rem;color:var(--bs-info-text-emphasis);max-width:160px" title="${escAttr(_subtitle)}">${esc(_subtitle)}</span>`
+            ? `<span class="d-block text-truncate" style="font-size:.7rem;color:var(--bs-info-text-emphasis)" title="${escAttr(_subtitle)}">${esc(_subtitle)}</span>`
             : '';
 
         const _clickAttr  = isAdded ? '' : (_fieldMode
             ? `onclick="_selectDiscoveredServiceForField(${jsStr(_svcName)})"`
-            : `onclick="_addDiscoveredService(${jsStr(_svcName)},${jsStr(_cat)},${jsStr(svc[_typeField]||'')})"`);
+            : `onclick="_addDiscoveredService(${jsStr(_svcName)},${jsStr(_cat)},${jsStr(svc[_typeField]||'')},${jsStr(svc.fill_value||'')})"`);
         const _trailIcon  = isAdded
             ? `<span class="badge bg-secondary flex-shrink-0" style="font-size:.65rem">${esc(t('already_added'))}</span>`
             : _isCurrent
@@ -196,7 +307,7 @@ function _renderDiscoverList() {
                 ${_subtitleBadge ? `<div class="text-truncate">${_subtitleBadge}</div>` : ''}
                 <code class="text-truncate d-block" style="font-size:.78rem" title="${escAttr(svc.name)}">${esc(svc.name)}</code>
             </div>
-            ${svc.display_name ? `<span class="text-muted text-truncate" style="font-size:.75rem;max-width:160px">${esc(svc.display_name)}</span>` : ''}
+            ${svc.display_name ? `<span class="text-muted text-truncate d-inline-block flex-shrink-0" style="font-size:.75rem;max-width:160px">${esc(svc.display_name)}</span>` : ''}
             ${_typeBadge}
             ${_trailIcon}
         </div>`;
@@ -205,7 +316,7 @@ function _renderDiscoverList() {
     body.innerHTML = h;
 }
 
-function _addDiscoveredService(serviceName, category, typeInfo) {
+function _addDiscoveredService(serviceName, category, typeInfo, valueInfo) {
     if (!_discoverPathStr) return;
     const parts = _discoverPathStr.split('|');
     const collection = getPath(modulesData, parts);
@@ -240,6 +351,13 @@ function _addDiscoveredService(serviceName, category, typeInfo) {
     const _typeStoreField = _colSch && _colSch['__discovery_type_store_field__'];
     if (_typeStoreField && typeInfo && _typeStoreField in item) {
         item[_typeStoreField] = String(typeInfo);
+    }
+
+    // Pre-fill the discovered value into the schema-declared field (e.g. DNS
+    // pre-fills "expected" with the resolved record). Declared via schema.
+    const _valueField = _colSch && _colSch['__discovery_value_field__'];
+    if (_valueField && valueInfo != null && valueInfo !== '' && _valueField in item) {
+        item[_valueField] = String(valueInfo);
     }
 
     collection[key] = item;

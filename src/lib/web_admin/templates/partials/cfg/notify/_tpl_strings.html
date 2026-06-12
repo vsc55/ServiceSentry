@@ -188,16 +188,17 @@ async function _notifTplSave() {
     }
 }
 
-async function _notifTplResetLang() {
-    if (!confirm(t('notif_tpl_reset_lang_confirm'))) return;
-    const r = await apiDelete(`/api/v1/notify/templates/${encodeURIComponent(_notifTplState.lang)}`);
-    if (r && r.status === 200) {
-        if (_notifTplState.data) {
-            delete _notifTplState.data.overrides[_notifTplState.lang];
+function _notifTplResetLang() {
+    showConfirmModal(t('notif_tpl_reset_lang_confirm'), async () => {
+        const r = await apiDelete(`/api/v1/notify/templates/${encodeURIComponent(_notifTplState.lang)}`);
+        if (r && r.status === 200) {
+            if (_notifTplState.data) {
+                delete _notifTplState.data.overrides[_notifTplState.lang];
+            }
+            _notifTplRender();
+            showToast(t('notif_tpl_reset_ok'), 'success');
+        } else {
+            showToast((r?.data?.error) || t('connection_error'), 'danger');
         }
-        _notifTplRender();
-        showToast(t('notif_tpl_reset_ok'), 'success');
-    } else {
-        showToast((r?.data?.error) || t('connection_error'), 'danger');
-    }
+    });
 }

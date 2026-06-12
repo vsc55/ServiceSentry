@@ -26,6 +26,8 @@ import json
 import os
 import socket
 import sys
+import threading
+import time
 
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
@@ -53,32 +55,55 @@ def _find_dnspython_dir() -> str | None:
 _DNSPYTHON_DIR = _find_dnspython_dir()
 _HAS_DNSPYTHON: bool = _DNSPYTHON_DIR is not None
 
-# Lazily loaded reference to the real dns.resolver module (populated on first use).
-_dns_resolver = None
+# Lazily loaded dnspython submodules (populated on first use): a dict with keys
+# 'resolver', 'zone', 'query', 'rdatatype', 'exception' — or None if unavailable.
+_dnspython = None
+# Guards the sys.modules / sys.path juggling below: check() resolves items in
+# parallel threads, so the first non-A queries can race into this loader at once.
+_dns_load_lock = threading.Lock()
 
-def _load_dns_resolver():
-    """Import the real dnspython resolver, bypassing the watchful name collision.
+# Submodules to import; resolver covers normal queries, zone/query/rdatatype AXFR.
+_DNSPY_SUBMODULES = ('resolver', 'zone', 'query', 'rdatatype', 'exception')
+
+
+def _load_dnspython():
+    """Import dnspython submodules, bypassing the watchful name collision.
 
     At call time, __init__.py has finished executing so the import lock for
     'dns' is free.  We temporarily evict ourselves from sys.modules and remove
-    watchfuls/ from sys.path so that 'import dns.resolver' finds dnspython.
+    watchfuls/ from sys.path so that 'import dns.*' finds dnspython.
+
+    Thread-safe: the global sys.modules/sys.path mutation runs under a lock so
+    concurrent first-time callers can't corrupt the 'dns' module mapping.
+    Returns the cached submodule dict, or None when dnspython is not installed.
     """
-    global _dns_resolver
-    if _dns_resolver is not None:
-        return _dns_resolver
+    global _dnspython
+    if _dnspython is not None:
+        return _dnspython
     if not _HAS_DNSPYTHON:
         return None
+    with _dns_load_lock:
+        if _dnspython is not None:   # another thread loaded it while we waited
+            return _dnspython
+        _dnspython = _load_dnspython_locked()
+        return _dnspython
+
+
+def _load_dnspython_locked():
+    """Body of :func:`_load_dnspython`, executed while holding the load lock."""
     _watchfuls_dir = os.path.dirname(os.path.dirname(__file__))
     _saved_dns = sys.modules.pop('dns', None)
-    sys.modules.pop('dns.resolver', None)
+    for _sub in _DNSPY_SUBMODULES:
+        sys.modules.pop(f'dns.{_sub}', None)
     _had_path = _watchfuls_dir in sys.path
     if _had_path:
         sys.path.remove(_watchfuls_dir)
+    mods = None
     try:
-        import dns.resolver as _r  # noqa: PLC0415
-        _dns_resolver = _r
+        import importlib as _il  # noqa: PLC0415
+        mods = {name: _il.import_module(f'dns.{name}') for name in _DNSPY_SUBMODULES}
     except ImportError:
-        pass
+        mods = None
     finally:
         if _had_path and _watchfuls_dir not in sys.path:
             sys.path.insert(0, _watchfuls_dir)
@@ -86,22 +111,68 @@ def _load_dns_resolver():
         # importlib.import_module('dns') still return the correct watchful.
         if _saved_dns is not None:
             sys.modules['dns'] = _saved_dns
-        elif 'dns' in sys.modules and sys.modules['dns'] is not _dns_resolver:
-            pass  # dnspython replaced us — leave it; monitor will evict if needed
-    return _dns_resolver
+    return mods
+
+
+def _load_dns_resolver():
+    """Return the dnspython ``resolver`` submodule, or None if unavailable."""
+    mods = _load_dnspython()
+    return mods['resolver'] if mods else None
 
 _SOCKET_TYPES = frozenset({'A', 'AAAA'})
 
+# Record types probed at the domain apex during discovery (overridable in the
+# schema via the "list" collection's __discovery_probe_types__).
+_DEFAULT_PROBE_TYPES = ('A', 'AAAA', 'MX', 'TXT', 'NS', 'SOA', 'CNAME', 'CAA', 'SRV')
+
+# Maps a record type to a UI category (icon/colour + default operator) — the
+# category definitions themselves live in schema.json (__discovery_categories__).
+_TYPE_CATEGORY = {
+    'A': 'address', 'AAAA': 'address', 'CNAME': 'alias',
+    'MX': 'mail', 'NS': 'ns', 'SOA': 'ns', 'PTR': 'ns', 'SRV': 'srv',
+    'TXT': 'text', 'CAA': 'text',
+}
+
+
+def _coerce_int(value, default: int = 0) -> int:
+    """Best-effort int conversion; returns *default* on bad/empty input."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _truthy(value) -> bool:
+    """Interpret JSON/string booleans (True, "true", "1", "yes", "on")."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on', 'enable')
+
 
 def _resolve_socket(host: str, record_type: str, timeout: float) -> list:
-    """Resolve A or AAAA records using stdlib socket (no extra deps)."""
+    """Resolve A or AAAA records using stdlib socket (no extra deps).
+
+    ``socket.getaddrinfo`` has no native timeout, so it runs in a worker thread
+    bounded by ``future.result(timeout=…)``.  On timeout we deliberately call
+    ``shutdown(wait=False)`` — using the executor as a context manager would join
+    the (still-blocked) worker on exit, defeating the timeout entirely.
+
+    Raises ``TimeoutError`` on timeout and lets non-name-resolution ``OSError``s
+    propagate so the caller can report them; a name that simply does not resolve
+    (``gaierror``) returns an empty list ("no results").
+    """
     family = socket.AF_INET if record_type == 'A' else socket.AF_INET6
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        future = ex.submit(socket.getaddrinfo, host, None, family)
-        try:
-            results = future.result(timeout=timeout)
-        except (concurrent.futures.TimeoutError, OSError, socket.gaierror):
-            return []
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = ex.submit(socket.getaddrinfo, host, None, family)
+    try:
+        results = future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        raise TimeoutError(f'resolution timed out after {timeout}s') from None
+    except socket.gaierror:
+        return []
+    finally:
+        # Never wait: a hung getaddrinfo would otherwise block past the timeout.
+        ex.shutdown(wait=False)
     return list(dict.fromkeys(r[4][0] for r in results))
 
 
@@ -155,8 +226,115 @@ class Watchful(ModuleBase):
     _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
                         if isinstance(v, dict) and 'default' in v}
 
+    # Discovery action exposed at /api/v1/watchfuls/dns/discover (read-only).
+    WATCHFUL_ACTIONS: frozenset = frozenset({'discover'})
+    READ_ONLY_ACTIONS: frozenset = frozenset({'discover'})
+
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
+
+    # ── Discovery ───────────────────────────────────────────────────────────
+    @classmethod
+    def discover(cls, config=None) -> list:
+        """Discover DNS records for a domain.
+
+        Input arrives in ``config['_discovery_input']`` (the route strips
+        ``__dunder__`` keys, so a single-underscore key is used):
+            {domain, axfr (bool), axfr_server}
+
+        Default mode probes a configurable set of record types at the domain
+        apex and returns those that exist.  With ``axfr`` enabled it attempts a
+        full zone transfer (only works when the authoritative server allows it).
+        Returns ``[{name, record_type, value, category, status}]``.
+        """
+        config = config or {}
+        inp = config.get('_discovery_input') or {}
+        domain = str(inp.get('domain') or '').strip().rstrip('.')
+        if not domain:
+            return []
+        timeout = _coerce_int(config.get('timeout'), 5) or 5
+        if _truthy(inp.get('axfr')):
+            try:
+                return cls._discover_axfr(domain, str(inp.get('axfr_server') or '').strip(), timeout)
+            except Exception:  # pylint: disable=broad-except
+                # AXFR is best-effort (usually refused on public zones) — never
+                # 500; an empty result reads as "no records transferable".
+                return []
+        return cls._discover_probe(domain, timeout)
+
+    @classmethod
+    def _probe_types(cls) -> list:
+        types = _SCHEMA.get('list', {}).get('__discovery_probe_types__')
+        if isinstance(types, list) and types:
+            return [str(t).strip().upper() for t in types if str(t).strip()]
+        return list(_DEFAULT_PROBE_TYPES)
+
+    @classmethod
+    def _discover_probe(cls, domain: str, timeout: int) -> list:
+        """Probe each candidate record type at the apex (in parallel)."""
+        types = cls._probe_types()
+
+        def _probe(rt: str):
+            try:
+                if rt in _SOCKET_TYPES and not _HAS_DNSPYTHON:
+                    resolved = _resolve_socket(domain, rt, timeout)
+                else:
+                    resolved = _resolve_dns(domain, rt, timeout)
+            except Exception:  # pylint: disable=broad-except
+                return None
+            if not resolved:
+                return None
+            value = ', '.join(resolved[:3]) + ('…' if len(resolved) > 3 else '')
+            return {
+                'name': domain, 'record_type': rt, 'value': value,
+                'fill_value': resolved[0],   # pre-fills the "expected" field
+                'category': _TYPE_CATEGORY.get(rt, 'other'), 'status': 'found',
+            }
+
+        out = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(types))) as ex:
+            for res in ex.map(_probe, types):
+                if res:
+                    out.append(res)
+        return out
+
+    @classmethod
+    def _discover_axfr(cls, domain: str, server: str, timeout: int) -> list:
+        """Attempt a full zone transfer (AXFR) and list every record."""
+        mods = _load_dnspython()
+        if not mods:
+            raise ImportError('dnspython is required for AXFR (pip install dnspython)')
+        ns_ip = cls._axfr_server_ip(domain, server, timeout, mods)
+        zone = mods['zone'].from_xfr(
+            mods['query'].xfr(ns_ip, domain, lifetime=float(timeout)))
+        to_text = mods['rdatatype'].to_text
+        out = []
+        for name, node in zone.nodes.items():
+            rel = str(name)
+            fqdn = domain if rel in ('@', '') else f'{rel}.{domain}'
+            for rdataset in node.rdatasets:
+                rtype = to_text(rdataset.rdtype)
+                values = [rd.to_text() for rd in rdataset]
+                value = ', '.join(values[:3]) + ('…' if len(values) > 3 else '')
+                out.append({
+                    'name': fqdn, 'record_type': rtype, 'value': value,
+                    'fill_value': values[0] if values else '',
+                    'category': _TYPE_CATEGORY.get(rtype, 'other'), 'status': 'found',
+                })
+        return out
+
+    @staticmethod
+    def _axfr_server_ip(domain: str, server: str, timeout: int, mods) -> str:
+        """Resolve the nameserver IP to transfer from (explicit, or the zone's NS)."""
+        target = server
+        if not target:
+            resolver = mods['resolver'].Resolver()
+            resolver.lifetime = float(timeout)
+            target = str(resolver.resolve(domain, 'NS')[0].target).rstrip('.')
+        try:
+            return socket.getaddrinfo(target, None)[0][4][0]
+        except OSError:
+            return target  # already an IP, or let xfr() surface the error
 
     def check(self):
         if not self.is_enabled:
@@ -173,7 +351,12 @@ class Watchful(ModuleBase):
             host = (value.get('host', '') or '').strip() or key
             record_type = (value.get('record_type', '') or '').strip().upper() or 'A'
             expected = (value.get('expected', '') or '').strip()
-            timeout = int(value.get('timeout', 0) or 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+            # Robust parse: a hand-edited / migrated non-numeric value must not
+            # raise here (the loop runs in the main thread — it would abort the
+            # whole module check instead of failing just this item).
+            timeout = (_coerce_int(value.get('timeout'))
+                       or _coerce_int(self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']))
+                       or self._MODULE_DEFAULTS['timeout'])
             self._debug(f"DNS: {key} - host={host} type={record_type} expected={expected!r}", DebugLevel.info)
             list_items.append({
                 'key': key,
@@ -209,21 +392,28 @@ class Watchful(ModuleBase):
         timeout = item['timeout']
 
         error = None
-        if record_type in _SOCKET_TYPES:
-            resolved = _resolve_socket(host, record_type, timeout)
-        else:
-            try:
+        _t0 = time.monotonic()
+        try:
+            if record_type in _SOCKET_TYPES:
+                resolved = _resolve_socket(host, record_type, timeout)
+            else:
                 resolved = _resolve_dns(host, record_type, timeout)
-            except ImportError as exc:
-                resolved = []
-                error = str(exc)
-            except Exception as exc:  # pylint: disable=broad-except
-                resolved = []
-                error = str(exc)
+        except ImportError as exc:
+            resolved = []
+            error = str(exc)
+        except Exception as exc:  # pylint: disable=broad-except
+            resolved = []
+            error = str(exc)
+        response_time = round((time.monotonic() - _t0) * 1000.0, 1)
 
         ok = bool(resolved)
         if ok and expected:
-            ok = any(expected.lower() in r.lower() for r in resolved)
+            if record_type in _SOCKET_TYPES:
+                # A/AAAA resolve to discrete IPs — require an exact match so
+                # e.g. "1.2.3.4" doesn't match "11.2.3.40" by substring.
+                ok = any(expected.lower() == r.lower() for r in resolved)
+            else:
+                ok = any(expected.lower() in r.lower() for r in resolved)
 
         short = ', '.join(resolved[:3]) + ('…' if len(resolved) > 3 else '')
 
@@ -231,7 +421,7 @@ class Watchful(ModuleBase):
             message = f'DNS: *{key}* - {record_type} {host}: {error} ⚠️'
             ok = False
         elif ok:
-            message = f'DNS: *{key}* - {record_type} {host} → {short} ✅'
+            message = f'DNS: *{key}* - {record_type} {host} → {short} ({response_time} ms) ✅'
         elif not resolved:
             message = f'DNS: *{key}* - {record_type} {host}: no results ⚠️'
         else:
@@ -242,6 +432,7 @@ class Watchful(ModuleBase):
             'record_type': record_type,
             'resolved': resolved,
             'expected': expected,
+            'response_time': response_time,
         }
         self.dict_return.set(key, ok, message, False, other_data)
 
