@@ -149,12 +149,15 @@ def register(app, wa):
     def api_delete_webhook(wh_id):
         webhooks = _load()
         before = len(webhooks)
+        deleted = next((w for w in webhooks if w.get('id') == wh_id), None)
         webhooks = [w for w in webhooks if w.get('id') != wh_id]
         if len(webhooks) == before:
             return jsonify({'error': 'Not found'}), 404
         if _save(webhooks):
             wa._field_versions['webhooks|_version'] = str(uuid.uuid4())
-            wa._audit('webhook_deleted', detail={'id': wh_id})
+            wa._audit('webhook_deleted', detail={
+                'id': wh_id, 'name': (deleted or {}).get('name', ''),
+            })
             return jsonify({'ok': True})
         return jsonify({'error': wa._t('save_file_error')}), 500
 

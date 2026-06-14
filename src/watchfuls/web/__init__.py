@@ -41,7 +41,6 @@ class Watchful(ModuleBase):
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
-        self._fail_count: dict[str, int] = {}
 
     # ── Monitoring loop ───────────────────────────────────────────────────
 
@@ -70,7 +69,8 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f'Check: {name} — Exception: {exc}', DebugLevel.error)
-                    self.dict_return.set(name, False, f'Web: {name} — Error: {exc} 💥')
+                    _lbl = self.get_conf(['list', name, 'label'], '') or name
+                    self.dict_return.set(name, False, f'Web: {_lbl} — Error: {exc} 💥')
 
         super().check()
         return self.dict_return
@@ -92,6 +92,8 @@ class Watchful(ModuleBase):
         # Host-centric: a host's address fills 'url'; the per-check 'path' is
         # appended to it (inline checks keep the full url in 'url' with empty path).
         url  = (it.get('url', '') or '').strip() or name
+        # Display name: the editable label (e.g. "NS1 - https://api…"); key is a UID.
+        label = (it.get('label', '') or '').strip() or url
         path = (it.get('path', '') or '').strip()
         if path:
             url = url.rstrip('/') + '/' + path.lstrip('/')
@@ -113,15 +115,13 @@ class Watchful(ModuleBase):
         )
         status = (code == code_exp)
 
-        # Consecutive-failure threshold: suppress alert until 'alert' failures accumulate
-        if not status:
-            self._fail_count[name] = self._fail_count.get(name, 0) + 1
-        else:
-            self._fail_count[name] = 0
-        effective = status or (self._fail_count.get(name, 0) < alert)
+        # Consecutive-failure threshold: suppress alert until 'alert' failures
+        # accumulate.  Persisted via fail_streak (survives cycles/processes).
+        streak = self.fail_streak(name, not status)
+        effective = status or streak < alert
 
         icon      = '🔼' if effective else '🔽'
-        s_message = f'Web: {name} {icon}'
+        s_message = f'Web: {label} {icon}'
         if not status:
             s_message += f' [{detail}]'
 

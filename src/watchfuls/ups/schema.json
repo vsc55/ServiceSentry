@@ -5,14 +5,24 @@
         "timeout": {"type": "int",  "default": 10, "min": 1, "max": 60}
     },
     "__history__": {"field": "battery_charge", "unit": "%", "label": "Battery Charge"},
+    "__host_profile__": {"key": "nut", "address_field": "host", "fields": ["host"]},
+    "__host_multiple__": true,
     "list": {
-        "__field_order__": ["enabled", "host", "port", "user", "password", "ups_name", "timeout"],
+        "__field_order__": ["enabled", "host", "port", "user", "password", "ups_name",
+                            "alert_on_battery", "alert_battery", "alert_runtime", "alert_load", "timeout"],
+        "__check_title_field__": "ups_name",
+        "__new_item_fields__": ["ups_name"],
+        "__test__": "/api/v1/watchfuls/ups/test_connection",
         "enabled":  {"type": "bool", "default": true},
         "host":     {"type": "str",  "default": ""},
         "port":     {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 3493},
         "user":     {"type": "str",  "default": ""},
         "password": {"type": "str",  "default": "", "sensitive": true},
         "ups_name": {"type": "str",  "default": "ups"},
+        "alert_on_battery": {"type": "bool", "default": true},
+        "alert_battery":    {"type": "int",  "default": 20, "min": 0, "max": 100},
+        "alert_runtime":    {"type": "int",  "default": 10, "min": 0, "max": 1440},
+        "alert_load":       {"type": "int",  "default": 0,  "min": 0, "max": 100},
         "timeout":  {"type": "int",  "default": 0, "min": 0, "max": 60, "placeholder_module": "timeout"}
     }
 }

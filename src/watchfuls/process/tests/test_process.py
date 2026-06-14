@@ -1,244 +1,149 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/process."""
+"""Tests for watchfuls/process — host-centric process monitoring.
 
-import pytest
+Each check binds to a host; the process list is read via ``host_exec`` (mocked
+here, so no real command/SSH runs) and matched against ``min_count``.  The
+per-OS match parser runs for real against canned ``ps``/``tasklist`` output.
+"""
+
 from unittest.mock import patch, MagicMock
+
 from conftest import create_mock_monitor
 
 
-def _make_proc(name):
-    """Create a mock psutil process with a given name."""
-    p = MagicMock()
-    p.info = {'name': name}
-    return p
+class _FakeStore:
+    def __init__(self, hosts):
+        self._h = hosts
+    def get(self, uid, **_kw):
+        return self._h.get(uid)
 
 
-class TestProcessInit:
+def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+    return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
+            'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
-    def test_init(self):
+
+def _watchful(items, hosts=None):
+    from watchfuls.process import Watchful
+    mm = create_mock_monitor({'watchfuls.process': {'list': items}})
+    mm._hosts_store = _FakeStore(hosts or {'h1': _host()})
+    return Watchful(mm)
+
+
+_PS_OUT = "systemd\nsshd\nnginx\nnginx\npython3\n"
+_TASKLIST_OUT = (
+    '"nginx.exe","1234","Services","0","12,000 K"\r\n'
+    '"nginx.exe","1235","Services","0","12,000 K"\r\n'
+    '"explorer.exe","999","Console","1","40,000 K"\r\n'
+)
+
+
+class TestCountMatches:
+
+    def test_unix_counts_by_comm(self):
         from watchfuls.process import Watchful
-        mock_monitor = create_mock_monitor({'watchfuls.process': {}})
-        w = Watchful(mock_monitor)
-        assert w.name_module == 'watchfuls.process'
+        assert Watchful._count_matches(_PS_OUT, 'linux', 'nginx') == 2
+        assert Watchful._count_matches(_PS_OUT, 'linux', 'sshd') == 1
+        assert Watchful._count_matches(_PS_OUT, 'linux', 'absent') == 0
+
+    def test_windows_counts_with_or_without_exe(self):
+        from watchfuls.process import Watchful
+        assert Watchful._count_matches(_TASKLIST_OUT, 'windows', 'nginx') == 2
+        assert Watchful._count_matches(_TASKLIST_OUT, 'windows', 'nginx.exe') == 2
+        assert Watchful._count_matches(_TASKLIST_OUT, 'windows', 'explorer') == 1
 
 
 class TestProcessCheck:
 
-    def setup_method(self):
+    def test_disabled_module_empty(self):
         from watchfuls.process import Watchful
-        self.Watchful = Watchful
+        mm = create_mock_monitor({'watchfuls.process': {'enabled': False,
+                                  'list': {'a': {'enabled': True, 'process': 'nginx', 'host_uid': 'h1'}}}})
+        mm._hosts_store = _FakeStore({'h1': _host()})
+        w = Watchful(mm)
+        with patch.object(w, 'host_exec') as he:
+            assert len(w.check().items()) == 0
+        he.assert_not_called()
 
-    def test_check_disabled_returns_empty(self):
-        """Disabled module returns empty dict_return."""
-        config = {'watchfuls.process': {'enabled': False}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        assert len(result.items()) == 0
+    def test_disabled_item_skipped(self):
+        w = _watchful({'a': {'enabled': False, 'process': 'nginx', 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec') as he:
+            assert len(w.check().items()) == 0
+        he.assert_not_called()
 
-    def test_check_empty_list_returns_empty(self):
-        """Empty list returns empty dict_return."""
-        config = {'watchfuls.process': {'list': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        assert len(result.items()) == 0
+    def test_running_ok(self):
+        w = _watchful({'web': {'enabled': True, 'process': 'nginx', 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_PS_OUT, '', 0)):
+            items = w.check().list
+        assert items['web']['status'] is True
+        assert items['web']['other_data']['count'] == 2
 
-    def test_check_disabled_item_skipped(self):
-        """Disabled list item is skipped."""
-        config = {'watchfuls.process': {
-            'list': {
-                'nginx': {'enabled': False, 'process': 'nginx', 'min_count': 1},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        assert len(result.items()) == 0
+    def test_min_count_not_met(self):
+        w = _watchful({'web': {'enabled': True, 'process': 'nginx',
+                               'min_count': 3, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_PS_OUT, '', 0)):
+            items = w.check().list
+        assert items['web']['status'] is False
+        assert '2/3' in items['web']['message']
 
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_check_process_running_ok(self, mock_iter):
-        """Process found at or above min_count → status True."""
-        mock_iter.return_value = [_make_proc('nginx'), _make_proc('nginx')]
-        config = {'watchfuls.process': {
-            'list': {
-                'nginx': {'enabled': True, 'process': 'nginx', 'min_count': 1},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert 'nginx' in items
+    def test_windows_host_uses_tasklist(self):
+        w = _watchful({'web': {'enabled': True, 'process': 'nginx', 'host_uid': 'h1'}},
+                      hosts={'h1': _host(os='windows')})
+        with patch.object(w, 'host_exec', return_value=(_TASKLIST_OUT, '', 0)) as he:
+            items = w.check().list
+        assert 'tasklist' in he.call_args.args[1]
+        assert items['web']['status'] is True and items['web']['other_data']['count'] == 2
+
+    def test_empty_process_uses_key(self):
+        w = _watchful({'nginx': {'enabled': True, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_PS_OUT, '', 0)):
+            items = w.check().list
         assert items['nginx']['status'] is True
 
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_check_process_not_running(self, mock_iter):
-        """Process not found → status False."""
-        mock_iter.return_value = [_make_proc('apache2'), _make_proc('sshd')]
-        config = {'watchfuls.process': {
-            'list': {
-                'nginx': {'enabled': True, 'process': 'nginx', 'min_count': 1},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert items['nginx']['status'] is False
+    def test_command_failure_is_error(self):
+        w = _watchful({'web': {'enabled': True, 'process': 'nginx', 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=('', 'connection refused', 255)):
+            items = w.check().list
+        assert items['web']['status'] is False
+        assert 'Error' in items['web']['message']
 
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_check_min_count_not_met(self, mock_iter):
-        """Found count below min_count → status False."""
-        mock_iter.return_value = [_make_proc('worker')]
-        config = {'watchfuls.process': {
-            'list': {
-                'worker': {'enabled': True, 'process': 'worker', 'min_count': 3},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert items['worker']['status'] is False
-
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_check_min_count_exactly_met(self, mock_iter):
-        """Count exactly at min_count → status True."""
-        mock_iter.return_value = [_make_proc('worker'), _make_proc('worker')]
-        config = {'watchfuls.process': {
-            'list': {
-                'worker': {'enabled': True, 'process': 'worker', 'min_count': 2},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert items['worker']['status'] is True
-
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_check_case_insensitive(self, mock_iter):
-        """Process name matching is case-insensitive."""
-        mock_iter.return_value = [_make_proc('NGINX')]
-        config = {'watchfuls.process': {
-            'list': {
-                'nginx': {'enabled': True, 'process': 'nginx', 'min_count': 1},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert items['nginx']['status'] is True
-
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_check_empty_process_uses_key(self, mock_iter):
-        """Empty process field falls back to item key."""
-        mock_iter.return_value = [_make_proc('nginx')]
-        config = {'watchfuls.process': {
-            'list': {
-                'nginx': {'enabled': True, 'process': '', 'min_count': 1},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert items['nginx']['status'] is True
-
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_check_other_data_populated(self, mock_iter):
-        """other_data contains process, count, min_count."""
-        mock_iter.return_value = [_make_proc('nginx'), _make_proc('nginx')]
-        config = {'watchfuls.process': {
-            'list': {
-                'nginx': {'enabled': True, 'process': 'nginx', 'min_count': 1},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        od = result.list['nginx']['other_data']
-        assert od['process'] == 'nginx'
-        assert od['count'] == 2
-        assert od['min_count'] == 1
-
-    @patch('watchfuls.process.psutil.process_iter', side_effect=Exception('psutil error'))
-    def test_check_exception_handled(self, mock_iter):
-        """Exception during process_iter is caught and sets status False."""
-        config = {'watchfuls.process': {
-            'list': {
-                'nginx': {'enabled': True, 'process': 'nginx', 'min_count': 1},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert 'nginx' in items
-        assert items['nginx']['status'] is False
-        assert 'Error' in items['nginx']['message']
-
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_check_item_zero_uses_module_min_count(self, mock_iter):
-        """Item min_count=0 falls back to the module-level min_count."""
-        mock_iter.return_value = [_make_proc('nginx'), _make_proc('nginx')]
-        config = {'watchfuls.process': {
-            'min_count': 3,
-            'list': {
-                'nginx': {'enabled': True, 'process': 'nginx', 'min_count': 0},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        # 2 instances found, module min_count=3 → not enough → False
-        assert result.list['nginx']['status'] is False
-        assert result.list['nginx']['other_data']['min_count'] == 3
-
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_check_module_min_count_default(self, mock_iter):
-        """When item and module both omit min_count, default of 1 is used."""
-        mock_iter.return_value = [_make_proc('nginx')]
-        config = {'watchfuls.process': {
-            'list': {
-                'nginx': {'enabled': True, 'process': 'nginx'},
-            }
-        }}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        assert result.list['nginx']['status'] is True
-        assert result.list['nginx']['other_data']['min_count'] == 1
+    def test_maintenance_host_skipped(self):
+        w = _watchful({'web': {'enabled': True, 'process': 'nginx', 'host_uid': 'h1'}},
+                      hosts={'h1': _host(maintenance=True)})
+        with patch.object(w, 'host_exec') as he:
+            assert len(w.check().items()) == 0
+        he.assert_not_called()
 
 
 class TestProcessDiscover:
 
-    def setup_method(self):
-        from watchfuls.process import Watchful
-        self.Watchful = Watchful
-
     @patch('watchfuls.process.psutil.process_iter')
-    def test_discover_returns_list(self, mock_iter):
-        """discover() returns a list of dicts with name, display_name, status."""
-        mock_iter.return_value = [_make_proc('nginx'), _make_proc('sshd')]
-        result = self.Watchful.discover()
-        assert isinstance(result, list)
-        assert all('name' in r and 'display_name' in r and 'status' in r for r in result)
-
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_discover_counts_instances(self, mock_iter):
-        """discover() counts multiple instances of the same process name."""
-        mock_iter.return_value = [_make_proc('nginx'), _make_proc('nginx'), _make_proc('sshd')]
-        result = self.Watchful.discover()
-        nginx = next(r for r in result if r['name'] == 'nginx')
-        assert nginx['status'] == '×2'
-
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_discover_sorted_by_name(self, mock_iter):
-        """discover() returns processes sorted alphabetically (case-insensitive)."""
-        mock_iter.return_value = [_make_proc('zsh'), _make_proc('bash'), _make_proc('nginx')]
-        result = self.Watchful.discover()
-        names = [r['name'] for r in result]
-        assert names == sorted(names, key=str.lower)
+    def test_discover_counts_and_sorts(self, mock_iter):
+        def _p(name):
+            m = MagicMock(); m.info = {'name': name}; return m
+        mock_iter.return_value = [_p('bash'), _p('bash'), _p('aaa')]
+        out = _watchful({}).discover()
+        assert out[0]['name'] == 'aaa'
+        bash = next(x for x in out if x['name'] == 'bash')
+        assert bash['status'] == '×2'
 
     @patch('watchfuls.process.psutil.process_iter', side_effect=Exception('boom'))
     def test_discover_exception_returns_empty(self, _):
-        """discover() returns [] on any exception."""
-        assert self.Watchful.discover() == []
+        assert _watchful({}).discover() == []
 
-    @patch('watchfuls.process.psutil.process_iter')
-    def test_discover_skips_empty_names(self, mock_iter):
-        """Processes with empty name are excluded from discover results."""
-        mock_iter.return_value = [_make_proc(''), _make_proc('nginx')]
-        result = self.Watchful.discover()
-        assert all(r['name'] for r in result)
+    def test_discover_remote_over_ssh(self):
+        from watchfuls.process import Watchful
+        host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
+        with patch('lib.host_runner.run', return_value=(_PS_OUT, '', 0)) as run:
+            res = {s['name']: s['status'] for s in Watchful.discover({'__host__': host})}
+        assert run.call_args.args[1] == 'ps -A -o comm='
+        assert res['nginx'] == '×2' and res['sshd'] == '×1'
+
+    def test_discover_remote_windows_tasklist(self):
+        from watchfuls.process import Watchful
+        host = {'kind': 'remote', 'os': 'windows', 'address': '10.0.0.9', 'ssh': {}}
+        with patch('lib.host_runner.run', return_value=(_TASKLIST_OUT, '', 0)) as run:
+            res = {s['name']: s['status'] for s in Watchful.discover({'__host__': host})}
+        assert 'tasklist' in run.call_args.args[1]
+        assert res['nginx.exe'] == '×2'

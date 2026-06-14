@@ -1,14 +1,23 @@
 {
     "pretty_name": "Uso de CPU",
-    "module_description": "Monitoriza el porcentaje de uso de CPU y genera alertas cuando supera el umbral configurado.",
+    "module_description": "Monitoriza el uso de CPU en el host vinculado (en local o por SSH) y genera alertas cuando supera el umbral configurado.",
     "labels": {
         "enabled":  "Habilitado",
-        "alert":    "Umbral de alerta (%)",
-        "interval": "Intervalo de muestreo (s)"
+        "threads":  "Hilos",
+        "timeout":  "Timeout (s)",
+        "interval": "Intervalo de muestreo (s)",
+        "label":    "Etiqueta",
+        "alert":    "Umbral de alerta (%)"
     },
     "hints": {
-        "enabled":  "Habilitar o deshabilitar la monitorización del uso de CPU.",
-        "alert":    "Umbral de uso de CPU (%). Se genera una alerta cuando el uso supera este valor.",
-        "interval": "Intervalo de muestreo en segundos pasado a psutil.cpu_percent(). Valores más altos dan lecturas más precisas."
-    }
+        "enabled":  "Activa o desactiva esta comprobación de CPU.",
+        "threads":  "Número de hosts a comprobar en paralelo.",
+        "timeout":  "Tiempo de espera del comando/SSH en segundos.",
+        "interval": "Ventana de muestreo en segundos para medir el uso de CPU en el host.",
+        "label":    "Nombre para mostrar en la interfaz. Si está vacío se usa la clave del ítem.",
+        "alert":    "Umbral de uso de CPU (%). Se genera una alerta cuando el uso supera este valor."
+    },
+    "new_item_key_label": "Nombre de la comprobación o identificador:",
+    "rename_item_prompt": "Introduce el nuevo nombre de la comprobación o identificador:",
+    "collections": {"list": "Comprobaciones de CPU"}
 }

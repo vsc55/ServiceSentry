@@ -1,512 +1,184 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests para watchfuls/raid.py."""
+"""Tests for watchfuls/raid — host-centric RAID (mdstat) monitoring.
 
-import sys
-from unittest.mock import MagicMock, patch
+Each check binds to a host (``host_uid``); ``/proc/mdstat`` is read on that host
+via ``host_exec`` (local or over SSH) and parsed by ``RaidMdstat.parse_lines``.
+``host_exec`` is mocked here so no real command/SSH runs; the parser runs for
+real against canned mdstat text.
+"""
 
-import pytest
+from unittest.mock import patch
 
 from lib.linux.raid_mdstat import RaidMdstat
 from conftest import create_mock_monitor
 
 
-class TestRaidInit:
-
-    def test_init(self):
-        from watchfuls.raid import Watchful
-        mock_monitor = create_mock_monitor({'watchfuls.raid': {}})
-        w = Watchful(mock_monitor)
-        assert w.name_module == 'watchfuls.raid'
-        assert w.paths.find('mdstat') == '/proc/mdstat'
+class _FakeStore:
+    def __init__(self, hosts):
+        self._h = hosts
+    def get(self, uid, **_kw):
+        return self._h.get(uid)
 
 
-class TestRaidConfigOptions:
+def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+    return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
+            'maintenance': maintenance,
+            'profiles': {'ssh': {'ssh_user': 'root'}}}
 
-    def test_config_options_enum(self):
-        from watchfuls.raid import ConfigOptions
-        assert hasattr(ConfigOptions, 'enabled')
-        assert hasattr(ConfigOptions, 'host')
-        assert hasattr(ConfigOptions, 'port')
-        assert hasattr(ConfigOptions, 'user')
-        assert hasattr(ConfigOptions, 'password')
-        assert hasattr(ConfigOptions, 'key_file')
+
+def _watchful(items, hosts=None):
+    from watchfuls.raid import Watchful
+    mm = create_mock_monitor({'watchfuls.raid': {'list': items}})
+    mm._hosts_store = _FakeStore(hosts or {'h1': _host()})
+    return Watchful(mm)
+
+
+_MDSTAT_OK = """Personalities : [raid1]
+md0 : active raid1 sda1[0] sdb1[1]
+      976630336 blocks super 1.2 [2/2] [UU]
+
+unused devices: <none>
+"""
+
+_MDSTAT_DEGRADED = """Personalities : [raid1]
+md0 : active raid1 sda1[0]
+      976630336 blocks super 1.2 [2/1] [U_]
+
+unused devices: <none>
+"""
+
+_MDSTAT_RECOVERY = """Personalities : [raid1]
+md0 : active raid1 sda1[0] sdb1[2]
+      976630336 blocks super 1.2 [2/1] [U_]
+      [==>..................]  recovery = 12.6% (123/456) finish=127.5min speed=33440K/sec
+
+unused devices: <none>
+"""
+
+_MDSTAT_EMPTY = "Personalities : [raid1]\nunused devices: <none>\n"
+
+
+class TestParseLines:
+    """The reusable parser used by the module (and read_status)."""
+
+    def test_ok(self):
+        md = RaidMdstat.parse_lines(_MDSTAT_OK)
+        assert md['md0']['update'] == RaidMdstat.UpdateStatus.ok
+
+    def test_degraded(self):
+        md = RaidMdstat.parse_lines(_MDSTAT_DEGRADED)
+        assert md['md0']['update'] == RaidMdstat.UpdateStatus.error
+
+    def test_recovery(self):
+        md = RaidMdstat.parse_lines(_MDSTAT_RECOVERY)
+        assert md['md0']['update'] == RaidMdstat.UpdateStatus.recovery
+        assert md['md0']['recovery']['percent'] == 12.6
+
+    def test_empty(self):
+        assert RaidMdstat.parse_lines(_MDSTAT_EMPTY) == {}
+
+    def test_accepts_list_of_lines(self):
+        md = RaidMdstat.parse_lines(_MDSTAT_OK.splitlines())
+        assert 'md0' in md
 
 
 class TestRaidDefaults:
 
-    def test_defaults_from_list_schema(self):
-        from watchfuls.raid import Watchful
-        d = Watchful._DEFAULTS
-        assert d['enabled'] is True
-        assert d['port'] == 0  # 0 = use default SSH port (22); see placeholder in schema
-        assert d['host'] == ''
-
     def test_module_defaults(self):
         from watchfuls.raid import Watchful
         md = Watchful._MODULE_DEFAULTS
-        assert md['threads'] == 5
-        assert md['timeout'] == 30
-        assert md['local'] is True
+        assert md['threads'] == 5 and md['timeout'] == 30
+        assert md['mdstat_path'] == '/proc/mdstat'
 
-    def test_schema_key_is_list(self):
+    def test_schema_is_host_centric(self):
         from watchfuls.raid import Watchful
-        assert 'list' in Watchful.ITEM_SCHEMA
-        assert 'remote' not in Watchful.ITEM_SCHEMA
+        sch = Watchful.ITEM_SCHEMA
+        assert '__host_profile__' in sch and sch['__host_profile__']['key'] == 'ssh'
+        assert 'local' not in sch['__module__']        # dropped: use a local host
+        assert 'host' not in sch['list']               # no inline SSH on the check
 
 
-@pytest.mark.skipif(sys.platform != 'linux', reason="local RAID checks only run on Linux")
-class TestRaidCheckLocal:
+class TestRaidCheck:
 
-    def setup_method(self):
-        from watchfuls.raid import Watchful
-        self.Watchful = Watchful
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_local_no_raids(self, mock_mdstat_cls):
-        """Sin RAIDs locales, reporta 'No RAID's'."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': True,
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {}
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        items = result.list
-        assert len(items) > 0
-        for val in items.values():
-            assert val['status'] is True
-            assert "No RAID" in val['message']
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_local_raid_ok(self, mock_mdstat_cls):
-        """RAID local en buen estado."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': True,
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {
-            'md0': {
-                'status': 'active',
-                'type': 'raid1',
-                'disk': ['sda1[0]', 'sdb1[1]'],
-                'update': RaidMdstat.UpdateStatus.ok,
-            }
-        }
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        items = result.list
-        assert 'L_md0' in items
-        assert items['L_md0']['status'] is True
-        assert 'good status' in items['L_md0']['message']
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_local_raid_degraded(self, mock_mdstat_cls):
-        """RAID local degradado."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': True,
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {
-            'md0': {
-                'status': 'active',
-                'type': 'raid1',
-                'disk': ['sda1[0]'],
-                'update': RaidMdstat.UpdateStatus.error,
-            }
-        }
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        items = result.list
-        assert 'L_md0' in items
-        assert items['L_md0']['status'] is False
-        assert 'degraded' in items['L_md0']['message']
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_local_raid_recovery(self, mock_mdstat_cls):
-        """RAID local en recuperación."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': True,
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {
-            'md0': {
-                'status': 'active',
-                'type': 'raid1',
-                'disk': ['sda1[0]', 'sdb1[2]'],
-                'update': RaidMdstat.UpdateStatus.recovery,
-                'recovery': {
-                    'percent': 5.2,
-                    'finish': '200.5min',
-                    'speed': '150000K/sec',
-                }
-            }
-        }
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        items = result.list
-        assert 'L_md0' in items
-        assert items['L_md0']['status'] is False
-        assert 'recovery' in items['L_md0']['message']
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_local_disabled(self, mock_mdstat_cls):
-        """Chequeo local deshabilitado no ejecuta RaidMdstat."""
-        config = {
-            'watchfuls.raid': {
-                'local': False,
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-        w = self.Watchful(mock_monitor)
-        w.check()
-        mock_mdstat_cls.assert_not_called()
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_md_analyze_unknown_status(self, mock_mdstat_cls):
-        """UpdateStatus desconocido produce 'Unknown Error'."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': True,
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {
-            'md0': {
-                'status': 'active',
-                'type': 'raid1',
-                'disk': ['sda1[0]'],
-                'update': 'unexpected_value',
-            }
-        }
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        items = result.list
-        assert 'L_md0' in items
-        assert items['L_md0']['status'] is False
-        assert 'Unknown Error' in items['L_md0']['message']
-
-
-class TestRaidCheckRemote:
-
-    def setup_method(self):
-        from watchfuls.raid import Watchful
-        self.Watchful = Watchful
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_remote_ok(self, mock_mdstat_cls):
-        """RAID remoto en buen estado."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': False,
-                'list': {
-                    '1': {
-                        'enabled': True,
-                        'label': 'Server1',
-                        'host': '192.168.1.10',
-                        'port': 22,
-                        'user': 'root',
-                        'password': 'pass',
-                    }
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {
-            'md0': {
-                'status': 'active',
-                'type': 'raid1',
-                'disk': ['sda1[0]', 'sdb1[1]'],
-                'update': RaidMdstat.UpdateStatus.ok,
-            }
-        }
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        items = result.list
-        assert 'R_1_md0' in items
+    def test_raid_ok(self):
+        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_MDSTAT_OK, '', 0)):
+            items = w.check().list
         assert items['R_1_md0']['status'] is True
+        assert 'good status' in items['R_1_md0']['message']
 
-    def test_check_remote_disabled(self):
-        """Remote deshabilitado no se procesa."""
-        config = {
-            'watchfuls.raid': {
-                'local': False,
-                'list': {
-                    '1': {
-                        'enabled': False,
-                        'host': '192.168.1.10',
-                    }
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-        w = self.Watchful(mock_monitor)
-        result = w.check()
+    def test_raid_degraded(self):
+        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_MDSTAT_DEGRADED, '', 0)):
+            items = w.check().list
+        assert items['R_1_md0']['status'] is False
+        assert 'degraded' in items['R_1_md0']['message']
+
+    def test_raid_recovery(self):
+        w = _watchful({'1': {'enabled': True, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_MDSTAT_RECOVERY, '', 0)):
+            items = w.check().list
+        assert items['R_1_md0']['status'] is False
+        assert 'recovery' in items['R_1_md0']['message']
+        assert items['R_1_md0']['other_data']['percent'] == 12.6
+
+    def test_no_raids(self):
+        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_MDSTAT_EMPTY, '', 0)):
+            items = w.check().list
+        assert items['R_1']['status'] is True
+        assert 'No RAID' in items['R_1']['message']
+
+    def test_disabled_item_skipped(self):
+        w = _watchful({'1': {'enabled': False, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec') as he:
+            result = w.check()
+        he.assert_not_called()
         assert len(result.items()) == 0
 
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_remote_no_raids(self, mock_mdstat_cls):
-        """Remoto sin RAIDs."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': False,
-                'list': {
-                    '1': {
-                        'enabled': True,
-                        'label': 'NAS',
-                        'host': '192.168.1.10',
-                    }
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
+    def test_non_linux_host_reports_unsupported(self):
+        w = _watchful({'1': {'enabled': True, 'label': 'WinBox', 'host_uid': 'h1'}},
+                      hosts={'h1': _host(os='windows')})
+        with patch.object(w, 'host_exec') as he:
+            items = w.check().list
+        he.assert_not_called()                     # no mdstat attempt off-Linux
+        assert items['R_1']['status'] is False
+        assert 'Linux' in items['R_1']['message']
 
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {}
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        items = result.list
-        assert len(items) > 0
-        for val in items.values():
-            assert val['status'] is True
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_remote_bool_enabled(self, mock_mdstat_cls):
-        """Remote habilitado con booleano True."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': False,
-                'list': {
-                    '192.168.1.10': True,
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {}
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        assert len(result.items()) > 0
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_remote_bool_disabled(self, mock_mdstat_cls):
-        """Remote deshabilitado con booleano False."""
-        config = {
-            'watchfuls.raid': {
-                'local': False,
-                'list': {
-                    '192.168.1.10': False,
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        mock_mdstat_cls.assert_not_called()
+    def test_maintenance_host_skipped(self):
+        w = _watchful({'1': {'enabled': True, 'host_uid': 'h1'}},
+                      hosts={'h1': _host(maintenance=True)})
+        with patch.object(w, 'host_exec') as he:
+            result = w.check()
+        he.assert_not_called()
         assert len(result.items()) == 0
 
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_remote_key_used_as_host_when_host_empty(self, mock_mdstat_cls):
-        """Si host no está definido, el key se usa como host."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': False,
-                'list': {
-                    '192.168.1.10': {
-                        'enabled': True,
-                        'user': 'root',
-                    }
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
+    def test_command_failure_is_error(self):
+        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=('', 'No such file', 1)):
+            items = w.check().list
+        assert items['R_1']['status'] is False
+        assert 'Error' in items['R_1']['message']
 
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {}
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        w.check()
-
-        call_kwargs = mock_mdstat_cls.call_args
-        assert call_kwargs.kwargs.get('host') == '192.168.1.10'
-
-
-class TestRaidGetLabelById:
-
-    def setup_method(self):
+    def test_module_disabled(self):
         from watchfuls.raid import Watchful
-        self.Watchful = Watchful
-
-    def test_label_local(self):
-        config = {'watchfuls.raid': {}}
-        mock_monitor = create_mock_monitor(config)
-        w = self.Watchful(mock_monitor)
-        assert w.get_label_by_id(None) == "Local"
-
-    def test_label_remote_with_label(self):
-        config = {
-            'watchfuls.raid': {
-                'list': {
-                    '1': {
-                        'label': 'MyServer',
-                    }
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-        w = self.Watchful(mock_monitor)
-        assert w.get_label_by_id('1') == 'MyServer'
-
-    def test_label_remote_without_label_uses_key(self):
-        """Sin label definido, get_label_by_id retorna el key."""
-        config = {
-            'watchfuls.raid': {
-                'list': {
-                    'nas-server': {
-                        'host': '192.168.1.10',
-                    }
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-        w = self.Watchful(mock_monitor)
-        assert w.get_label_by_id('nas-server') == 'nas-server'
-
-    def test_label_remote_arbitrary_key(self):
-        """Keys arbitrarios (no numéricos) funcionan correctamente."""
-        config = {
-            'watchfuls.raid': {
-                'list': {
-                    'my-nas': {
-                        'label': 'Home NAS',
-                    }
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-        w = self.Watchful(mock_monitor)
-        assert w.get_label_by_id('my-nas') == 'Home NAS'
+        mm = create_mock_monitor({'watchfuls.raid': {'enabled': False,
+                                                      'list': {'1': {'enabled': True, 'host_uid': 'h1'}}}})
+        mm._hosts_store = _FakeStore({'h1': _host()})
+        w = Watchful(mm)
+        with patch.object(w, 'host_exec') as he:
+            result = w.check()
+        he.assert_not_called()
+        assert len(result.items()) == 0
 
 
-class TestRaidCheckRemoteKeyFile:
+class TestRaidLabel:
 
-    def setup_method(self):
-        from watchfuls.raid import Watchful
-        self.Watchful = Watchful
+    def test_label_from_item(self):
+        w = _watchful({'1': {'label': 'MyServer', 'host_uid': 'h1'}})
+        assert w._label('1') == 'MyServer'
 
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_remote_with_key_file(self, mock_mdstat_cls):
-        """Remote with key_file passes it to RaidMdstat."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': False,
-                'list': {
-                    '1': {
-                        'enabled': True,
-                        'label': 'NAS',
-                        'host': '192.168.1.10',
-                        'port': 22,
-                        'user': 'root',
-                        'key_file': '/home/user/.ssh/id_rsa',
-                    }
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {
-            'md0': {
-                'status': 'active',
-                'type': 'raid1',
-                'disk': ['sda1[0]', 'sdb1[1]'],
-                'update': RaidMdstat.UpdateStatus.ok,
-            }
-        }
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        result = w.check()
-        items = result.list
-        assert 'R_1_md0' in items
-        assert items['R_1_md0']['status'] is True
-
-        call_kwargs = mock_mdstat_cls.call_args
-        assert call_kwargs.kwargs.get('key_file') == '/home/user/.ssh/id_rsa'
-
-    @patch('watchfuls.raid.RaidMdstat')
-    def test_check_remote_without_key_file(self, mock_mdstat_cls):
-        """Remote without key_file passes empty string."""
-        mock_mdstat_cls.UpdateStatus = RaidMdstat.UpdateStatus
-        config = {
-            'watchfuls.raid': {
-                'local': False,
-                'list': {
-                    '1': {
-                        'enabled': True,
-                        'host': '192.168.1.10',
-                        'user': 'root',
-                        'password': 'pass',
-                    }
-                }
-            }
-        }
-        mock_monitor = create_mock_monitor(config)
-
-        mock_mdstat = MagicMock()
-        mock_mdstat.read_status.return_value = {}
-        mock_mdstat_cls.return_value = mock_mdstat
-
-        w = self.Watchful(mock_monitor)
-        w.check()
-
-        call_kwargs = mock_mdstat_cls.call_args
-        assert call_kwargs.kwargs.get('key_file') == ''
+    def test_label_falls_back_to_key(self):
+        w = _watchful({'nas-server': {'host_uid': 'h1'}})
+        assert w._label('nas-server') == 'nas-server'

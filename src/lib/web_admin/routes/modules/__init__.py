@@ -13,6 +13,88 @@ from lib.config import ConfigControl
 from ...constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS
 
 
+def _is_item_collection(v) -> bool:
+    """A module section holding items (``list``/``servers``/…) is dict-valued;
+    module-level fields (enabled, threads, timeout, …) are scalars (bool/int),
+    never dicts.  Items inside may be dicts or a bool shorthand
+    (``"1.2.3.4": false`` = disabled), so the value *type* of items is not used
+    to classify the section — only the section being a dict matters."""
+    return isinstance(v, dict)
+
+
+def _item_host_uid(o, n) -> str:
+    """Host UID of an item from its new or old value (items can be non-dict
+    bool shorthands, which carry no host binding)."""
+    for it in (n, o):
+        if isinstance(it, dict):
+            hu = str(it.get('host_uid') or '').strip()
+            if hu:
+                return hu
+    return ''
+
+
+def _server_authorized(perms, action: str, host_uid: str) -> bool:
+    """True if *perms* authorize *action* on server *host_uid* — via the global
+    ``servers_*`` flag or a per-server ``server.{uid}.{action}`` override."""
+    _g = {'view': 'servers_view', 'add': 'servers_add',
+          'edit': 'servers_edit', 'delete': 'servers_delete'}
+    if _g.get(action) in perms:
+        return True
+    return bool(host_uid) and f'server.{host_uid}.{action}' in perms
+
+
+def _authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
+    """Authorize a change to module *name* for a user lacking global module-write.
+
+    Host-bound item changes (items carrying ``host_uid``) may be authorized by
+    per-server / global server permissions: adding an item needs server ``add``,
+    modifying or removing one needs server ``edit``.  Module-level scalar changes
+    and non-host-bound items still require the module permissions.
+    """
+    if old_mod == new_mod:
+        return True
+    if f'module.{name}.edit' in perms:
+        return True
+    is_new = old_mod is None
+    is_removed = new_mod is None
+    if is_new and 'modules_add' in perms:
+        return True
+    if is_removed and 'modules_delete' in perms:
+        return True
+
+    old_mod = old_mod if isinstance(old_mod, dict) else {}
+    new_mod = new_mod if isinstance(new_mod, dict) else {}
+
+    # Module-level (non-collection) scalar changes require module edit — except on
+    # a brand-new module being scaffolded purely to hold host-bound items.
+    if not is_new:
+        old_s = {k: v for k, v in old_mod.items() if not _is_item_collection(v)}
+        new_s = {k: v for k, v in new_mod.items() if not _is_item_collection(v)}
+        for k in set(old_s) | set(new_s):
+            if old_s.get(k) != new_s.get(k):
+                return False
+
+    # Authorize each added/removed/modified item by its host binding.
+    coll_names = {k for k, v in old_mod.items() if _is_item_collection(v)} \
+               | {k for k, v in new_mod.items() if _is_item_collection(v)}
+    saw_change = False
+    for coll in coll_names:
+        old_items = old_mod.get(coll) if _is_item_collection(old_mod.get(coll)) else {}
+        new_items = new_mod.get(coll) if _is_item_collection(new_mod.get(coll)) else {}
+        for ik in set(old_items) | set(new_items):
+            o, n = old_items.get(ik), new_items.get(ik)
+            if o == n:
+                continue
+            saw_change = True
+            hu = _item_host_uid(o, n)
+            action = 'add' if o is None else 'edit'        # add new / modify|remove
+            if not _server_authorized(perms, action, hu):
+                return False
+    # A change with no authorizable host-bound item diff (whole-module add/remove
+    # with no host-bound items, or only scalar churn) is not server-authorizable.
+    return saw_change
+
+
 def _ensure_item_uids(data: dict) -> None:
     """Add a stable UUID to every module item that lacks one.
 
@@ -61,15 +143,23 @@ def register(app, wa):
         """Overwrite ``modules.json`` with the request body.
 
         Users with ``modules_edit`` may save any change.  Without it, each
-        modified module is checked for a ``module.{name}.edit`` permission;
-        adding whole new modules still requires the global ``modules_add``.
+        modified module is authorized individually: a ``module.{name}.edit``
+        grants the whole module, while host-bound item changes can be authorized
+        by per-server / global server permissions (server ``add`` to add a check,
+        ``edit`` to modify/remove one).  New whole modules still need
+        ``modules_add``; whole-module removal needs ``modules_delete``.
         """
         perms = wa._get_session_permissions()
         has_global_edit = 'modules_edit' in perms
-        # Reject immediately when the user has no write permission of any kind.
+        # Reject immediately when the user has no write permission of any kind
+        # (module-level, per-module, or any server permission that can authorize
+        # host-bound check changes).
         has_any_write = (
             'modules_edit' in perms or 'modules_add' in perms or 'modules_delete' in perms or
+            'servers_add' in perms or 'servers_edit' in perms or
             any(p.startswith('module.') and (p.endswith('.edit') or p.endswith('.add') or p.endswith('.delete'))
+                for p in perms) or
+            any(p.startswith('server.') and (p.endswith('.add') or p.endswith('.edit'))
                 for p in perms)
         )
         if not has_any_write:
@@ -80,20 +170,13 @@ def register(app, wa):
         if not all(isinstance(v, dict) for v in data.values()):
             return jsonify({'error': wa._t('invalid_modules_data')}), 400
         old_data = wa._read_config_file(wa._MODULES_FILE)
+        # Restore masked secrets BEFORE authorization so an unchanged item with a
+        # masked secret is not seen as "modified" (which would over-require edit).
+        secret_manager.restore_sensitive(data, old_data, keys=wa._secret_keys)
         if not has_global_edit:
             for name in set(old_data) | set(data):
-                in_old, in_new = name in old_data, name in data
-                if in_old and in_new:
-                    if old_data[name] != data[name] and f'module.{name}.edit' not in perms:
-                        return jsonify({'error': wa._t('access_denied')}), 403
-                elif in_new and not in_old:
-                    if 'modules_add' not in perms:
-                        return jsonify({'error': wa._t('access_denied')}), 403
-                else:
-                    # whole-module removal requires global edit or delete
-                    if 'modules_delete' not in perms:
-                        return jsonify({'error': wa._t('access_denied')}), 403
-        secret_manager.restore_sensitive(data, old_data, keys=wa._secret_keys)
+                if not _authorize_module_write(name, old_data.get(name), data.get(name), perms):
+                    return jsonify({'error': wa._t('access_denied')}), 403
         _ensure_item_uids(data)   # generate stable UIDs for new items
         if wa._save_config_file(wa._MODULES_FILE, data):
             changes = wa._diff_dicts(

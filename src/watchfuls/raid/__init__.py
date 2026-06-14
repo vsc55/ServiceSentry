@@ -18,13 +18,19 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""Watchful to monitor RAID health (local mdstat and remote via SSH)."""
+"""Watchful to monitor RAID health on a host (local or remote over SSH).
+
+Host-centric: each ``list`` item binds to a host (``host_uid``).  The Linux
+``/proc/mdstat`` is read on that host via :meth:`ModuleBase.host_exec` — locally
+for a *local* host, or over the host's SSH connection for a *remote* host — and
+parsed with :meth:`lib.linux.RaidMdstat.parse_lines`.  To watch the monitor's
+own machine, add a host of kind *local*.
+"""
 
 import concurrent.futures
 import json
 import os
-import sys
-from enum import IntEnum
+import shlex
 
 from lib.debug import DebugLevel
 from lib.linux import RaidMdstat
@@ -33,17 +39,8 @@ from lib.modules import ModuleBase
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
 
-class ConfigOptions(IntEnum):
-    enabled  = 1
-    host     = 100
-    port     = 101
-    user     = 102
-    password = 103
-    key_file = 104
-
-
 class Watchful(ModuleBase):
-    """Watchful module to monitor RAID health locally and on remote hosts via SSH."""
+    """Monitor RAID (mdstat) health per host, locally or over SSH."""
 
     ITEM_SCHEMA = _SCHEMA
 
@@ -55,115 +52,77 @@ class Watchful(ModuleBase):
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
-        self.paths.set('mdstat', '/proc/mdstat')
 
     def check(self):
-        self._check_local()
-        self._check_remote()
-        super().check()
-        return self.dict_return
+        if not self.is_enabled:
+            self._debug('RAID: module disabled, skipping.', DebugLevel.info)
+            return self.dict_return
 
-    def _check_local(self):
-        if sys.platform != 'linux':
-            return
-        is_enable = self.get_conf("local", self._MODULE_DEFAULTS['local'])
-        self._debug(f"Local - Enabled: {is_enable}", DebugLevel.info)
-        if is_enable:
-            list_md = RaidMdstat(self.paths.find('mdstat')).read_status()
-            self._md_analyze(list_md)
-
-    def _check_remote(self):
-        list_remote = self._get_list_remote_enabled()
-        if list_remote:
-            self._check_remotes_run(list_remote)
-
-    def _check_remotes_run(self, list_remote):
+        items = [(k, v) for k, v in self.get_conf('list', {}).items()
+                 if isinstance(v, dict) and v.get('enabled', self._DEFAULTS['enabled'])]
         threads = self.get_conf('threads', self._MODULE_DEFAULTS['threads'])
         with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            future_to_key = {
-                executor.submit(self._check_remotes_process, key): key
-                for key in list_remote
-            }
+            future_to_key = {executor.submit(self._check_item, k, v): k for k, v in items}
             for future in concurrent.futures.as_completed(future_to_key):
                 key = future_to_key[future]
                 try:
                     future.result()
-                except Exception as exc: # pylint: disable=broad-except
-                    label = self.get_label_by_id(key)
-                    message = f'RAID: {label} - *Error: {exc}* 💥'
-                    self.dict_return.set(key, False, message)
+                except Exception as exc:  # pylint: disable=broad-except
+                    label = self._label(key)
+                    self.dict_return.set(f'R_{key}', False, f'RAID: {label} - *Error: {exc}* 💥')
                     self._debug(f"{key}/{label} - Exception: {exc}", DebugLevel.error)
+        super().check()
+        return self.dict_return
 
-    def _check_remotes_process(self, key):
-        host     = (self.get_conf_in_list("host",     key, '') or '').strip() or key
-        port     = int(self.get_conf_in_list("port",     key, 0) or 22)
-        user     = (self.get_conf_in_list("user",     key, '') or '').strip()
-        password = (self.get_conf_in_list("password", key, '') or '').strip()
-        key_file = (self.get_conf_in_list("key_file", key, '') or '').strip()
-        timeout  = self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+    def _check_item(self, key, raw):
+        item = self.resolve_host(raw)
+        # Bound host in maintenance → skip (resolve_host disables it).
+        if item.get('_host_maintenance') or not item.get('enabled', True):
+            return
+        label = (item.get('label') or '').strip() or key
+        os_ = self.host_os(item)
+        if os_ != 'linux':
+            self.dict_return.set(
+                f'R_{key}', False,
+                f'RAID: {label} - *mdstat only available on Linux (host OS: {os_})* ⚠️')
+            return
+        path = self.get_conf('mdstat_path', self._MODULE_DEFAULTS['mdstat_path']) or '/proc/mdstat'
+        timeout = self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+        out, err, code = self.host_exec(item, f"cat {shlex.quote(path)}", timeout=timeout)
+        if code != 0:
+            raise OSError((err or '').strip() or f'cat {path} exited {code}')
+        self._md_analyze(RaidMdstat.parse_lines(out), key, label)
 
-        list_md = RaidMdstat(host=host, port=port, user=user, password=password,
-                             key_file=key_file, timeout=timeout).read_status()
-        self._md_analyze(list_md, key)
+    def _md_analyze(self, list_md, key, label):
+        if not list_md:
+            self.dict_return.set(f'R_{key}', True, f"[{label}] *No RAID's* in the system. ✅")
+            return
+        for (md, value) in list_md.items():
+            other_data = {}
+            is_warning = True
+            match value.get("update", ''):
+                case RaidMdstat.UpdateStatus.ok:
+                    is_warning = False
+                    message = f"RAID *{label}/{md}* in good status. ✅"
 
-    def _md_analyze(self, list_md, remote_id=None):
-        label = self.get_label_by_id(remote_id)
+                case RaidMdstat.UpdateStatus.error:
+                    message = f"*RAID {label}/{md} is degraded.* ⚠️"
 
-        if len(list_md) == 0:
-            message = f"[{label}] *No RAID's* in the system. ✅"
-            key_id = f"R_{remote_id}" if remote_id else "L"
-            self.dict_return.set(key_id, True, message)
+                case RaidMdstat.UpdateStatus.recovery:
+                    other_data['percent'] = value.get("recovery", {}).get('percent', -1)
+                    other_data['finish']  = value.get("recovery", {}).get('finish',  -1)
+                    other_data['speed']   = value.get("recovery", {}).get('speed',   -1)
+                    message = (
+                        f"*RAID {label}/{md} is degraded, recovery status "
+                        f"{other_data['percent']}%, estimate time to finish "
+                        f"{other_data['finish']}.* ⚠️"
+                    )
 
-        else:
-            for (key, value) in list_md.items():
-                other_data = {}
-                is_warning = True
-                match value.get("update", ''):
-                    case RaidMdstat.UpdateStatus.ok:
-                        is_warning = False
-                        message = f"RAID *{label}/{key}* in good status. ✅"
-
-                    case RaidMdstat.UpdateStatus.error:
-                        message = f"*RAID {label}/{key} is degraded.* ⚠️"
-
-                    case RaidMdstat.UpdateStatus.recovery:
-                        other_data['percent'] = value.get("recovery", {}).get('percent', -1)
-                        other_data['finish']  = value.get("recovery", {}).get('finish',  -1)
-                        other_data['speed']   = value.get("recovery", {}).get('speed',   -1)
-                        message = (
-                            f"*RAID {label}/{key} is degraded, recovery status "
-                            f"{other_data['percent']}%, estimate time to finish "
-                            f"{other_data['finish']}.* ⚠️"
-                        )
-
-                    case _:
-                        message = f"*RAID {label}/{key} Unknown Error*. ⚠️"
-
-                key_id = f"R_{remote_id}_{key}" if remote_id else f"L_{key}"
-                self.dict_return.set(key_id, not is_warning, message, other_data=other_data)
-
-    def _get_list_remote_enabled(self):
-        result = []
-        # Support old 'remote' key as fallback for existing configs
-        items = self.get_conf('list', None)
-        if items is None:
-            items = self.get_conf('remote', {})
-        for key, value in items.items():
-            is_enabled = self._DEFAULTS['enabled']
-            match value:
-                case bool():
-                    is_enabled = value
-                case dict():
-                    is_enabled = value.get('enabled', is_enabled)
                 case _:
-                    is_enabled = False
-            self._debug(f"Remote/{key} - Enabled: {is_enabled}", DebugLevel.info)
-            if is_enabled:
-                result.append(key)
-        return result
+                    message = f"*RAID {label}/{md} Unknown Error*. ⚠️"
 
-    def get_label_by_id(self, key) -> str:
-        if key is None:
-            return "Local"
+            self.dict_return.set(f'R_{key}_{md}', not is_warning, message, other_data=other_data)
+
+    def _label(self, key) -> str:
         label = (self.get_conf_in_list("label", key, '') or '').strip()
         return label or key

@@ -7,13 +7,16 @@
         "timeout": {"type": "int",  "default": 15,   "min": 1, "max": 300}
     },
     "__history__": {"field": null, "unit": null, "label": "HTTP Check"},
-    "__host_profile__": {"key": "http", "address_field": "url",
-        "fields": ["url", "scheme", "verify_ssl",
-                   "auth_enabled", "auth_user", "auth_password"]},
+    "__host_profile__": {"key": "http", "address_field": "url", "fields": []},
     "__host_multiple__": true,
     "list": {
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__discovery_uid_key__": true,
+        "__discovery_label_template__": "{host} - {url}",
+        "__new_item_fields__": ["label", "url"],
         "__field_order__": [
-            "enabled", "url", "path", "scheme", "method",
+            "enabled", "label", "url", "path", "scheme", "method",
             "code", "timeout", "verify_ssl",
             "check_content", "content_contains",
             "alert",
@@ -26,7 +29,8 @@
         "__test__": "/api/v1/watchfuls/web/test_connection",
 
         "enabled":          {"type": "bool", "default": true},
-        "url":              {"type": "str",  "default": "", "placeholder": "__key__"},
+        "label":            {"type": "str",  "default": ""},
+        "url":              {"type": "str",  "default": "", "placeholder": "__address__"},
         "path":             {"type": "str",  "default": "", "placeholder": "/health"},
         "scheme":           {"type": "str",  "default": "https", "options": ["http", "https"]},
         "method":           {"type": "str",  "default": "GET",   "options": ["GET", "HEAD", "POST"]},

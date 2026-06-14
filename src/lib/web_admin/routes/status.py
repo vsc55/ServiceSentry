@@ -36,6 +36,23 @@ def _module_pretty_name(modules_dir: str | None, mod_name: str, lang: str) -> st
     return None
 
 
+def _check_labels(mod_cfg) -> dict:
+    """Map ``{item_key: label}`` for a module's checks, so the status page can
+    show a friendly label even when the key is an opaque UID."""
+    out: dict = {}
+    if not isinstance(mod_cfg, dict):
+        return out
+    for coll, items in mod_cfg.items():
+        if coll.startswith('__') or not isinstance(items, dict):
+            continue
+        for key, item in items.items():
+            if isinstance(item, dict):
+                lbl = str(item.get('label') or '').strip()
+                if lbl:
+                    out[key] = lbl
+    return out
+
+
 def register(app, wa):
 
     @app.route('/status')
@@ -66,11 +83,17 @@ def register(app, wa):
             if not isinstance(checks, dict):
                 continue
             # Pretty name priority: watchful lang file > modules.json label > title-cased fallback
+            mod_cfg = (modules_cfg.get(mod_name)
+                       or modules_cfg.get(f'watchfuls.{mod_name}')
+                       or modules_cfg.get(mod_name.split('.')[-1]) or {})
             label = (
                 _module_pretty_name(wa._modules_dir, mod_name, lang)
-                or (modules_cfg.get(mod_name) or {}).get('label')
+                or mod_cfg.get('label')
                 or mod_name.replace('_', ' ').title()
             )
+            # A check's display name uses its item 'label' when set (the stored
+            # key may be an opaque UID), falling back to the raw status key.
+            check_labels = _check_labels(mod_cfg)
             items = []
             mod_ok = 0
             for check_name, info in checks.items():
@@ -78,11 +101,12 @@ def register(app, wa):
                 ok = st is True
                 if ok:
                     mod_ok += 1
-                items.append({
-                    'name': check_name,
-                    'ok': ok,
-                    'extra': info.get('other_data', {}) if isinstance(info, dict) else {},
-                })
+                extra = info.get('other_data', {}) if isinstance(info, dict) else {}
+                # Display name priority: a name the module emitted (for derived
+                # result keys, e.g. "NS1 - RAM") > the item 'label' > the raw key.
+                disp = (extra.get('name') if isinstance(extra, dict) else None) \
+                    or check_labels.get(check_name) or check_name
+                items.append({'name': disp, 'ok': ok, 'extra': extra})
             n = len(items)
             total_ok += mod_ok
             total_all += n

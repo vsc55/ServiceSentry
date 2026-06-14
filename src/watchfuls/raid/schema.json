@@ -1,18 +1,18 @@
 {
     "__module__": {
         "enabled": {"type": "bool", "default": true},
-        "local":   {"type": "bool", "default": true, "supported_platforms": ["linux"]},
         "threads": {"type": "int",  "default": 5,  "min": 1, "max": 100},
-        "timeout": {"type": "int",  "default": 30, "min": 1, "max": 600}
+        "timeout": {"type": "int",  "default": 30, "min": 1, "max": 600},
+        "mdstat_path": {"type": "str", "default": "/proc/mdstat"}
     },
     "__history__": {"field": null, "unit": null, "label": "RAID Status"},
+    "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
+        "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
+                   "ssh_key", "ssh_key_string", "ssh_verify_host"]},
     "list": {
-        "__field_order__": ["enabled", "host", "port", "user", "password", "key_file"],
-        "enabled":  {"type": "bool", "default": true},
-        "host":     {"type": "str",  "default": "", "placeholder": "__key__"},
-        "port":     {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 22},
-        "user":     {"type": "str",  "default": ""},
-        "password": {"type": "str",  "default": "", "sensitive": true},
-        "key_file": {"type": "str",  "default": "", "placeholder": "/path/to/id_rsa"}
+        "__check_title_field__": "label",
+        "__new_item_fields__": ["label"],
+        "enabled": {"type": "bool", "default": true},
+        "label":   {"type": "str",  "default": ""}
     }
 }

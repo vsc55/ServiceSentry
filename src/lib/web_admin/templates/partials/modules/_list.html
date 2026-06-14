@@ -39,6 +39,21 @@ function _moduleHue(name) {
     return h % 360;
 }
 
+// Refresh a module card's "active/total items" badge in place (e.g. after an
+// item's enabled switch is toggled, without re-rendering the whole list).
+function _refreshModuleCount(name) {
+    const cfg = modulesData[name];
+    const el = document.getElementById('modcount-' + name);
+    if (!cfg || typeof cfg !== 'object' || !el) return;
+    const colKeys = Object.keys(cfg).filter(
+        k => typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
+    const total = colKeys.reduce((s, k) => s + Object.keys(cfg[k]).length, 0);
+    const active = colKeys.reduce((s, k) => s + Object.values(cfg[k]).filter(
+        v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
+    el.style.color = active < total ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)';
+    el.innerHTML = `<i class="bi bi-list-ul me-1" style="opacity:.6"></i>${active}/${total}`;
+}
+
 function renderModules() {
     const c = document.getElementById('modules-container');
     const moduleKeys = Object.keys(modulesData).sort();
@@ -105,7 +120,7 @@ function renderModules() {
                     <code class="text-muted" style="font-size:.73rem">${esc(name)}</code>
                 </div>
                 ${totalItems > 0 ? `
-                <span class="badge rounded-pill flex-shrink-0"
+                <span class="badge rounded-pill flex-shrink-0" id="modcount-${esc(name)}"
                       style="font-size:.7rem;background:var(--bs-secondary-bg);color:${activeItems < totalItems ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)'};border:1px solid var(--bs-border-color)">
                     <i class="bi bi-list-ul me-1" style="opacity:.6"></i>${activeItems}/${totalItems}
                 </span>` : ''}

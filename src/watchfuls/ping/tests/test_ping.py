@@ -96,12 +96,13 @@ class TestPingCheck:
             assert items['192.168.1.99']['status'] is False
 
     def test_check_host_with_host_field(self):
-        """Key es nombre descriptivo, host field contiene la IP."""
+        """Key is an opaque id; the editable 'label' is what the message shows."""
         config = {
             'watchfuls.ping': {
                 'list': {
-                    'Router': {
+                    'uid-router': {
                         'enabled': True,
+                        'label': 'Router',
                         'host': '192.168.1.1',
                     }
                 }
@@ -113,9 +114,9 @@ class TestPingCheck:
         with patch.object(w, '_icmp_ping', return_value=1.5):
             result = w.check()
             items = result.list
-            assert 'Router' in items
-            # El mensaje debe contener "Router" (el nombre del key)
-            assert 'Router' in items['Router']['message']
+            assert 'uid-router' in items
+            # The message shows the label, not the (opaque) key.
+            assert 'Router' in items['uid-router']['message']
 
     def test_check_backward_compat_key_as_host(self):
         """Sin campo host, el key se usa como IP (retrocompat)."""
@@ -394,20 +395,25 @@ class TestDefaults:
     def test_defaults_extracted_from_schema(self):
         from watchfuls.ping import Watchful
 
-        # Rich schema: _DEFAULTS extracts 'default' values
+        # Rich schema: _DEFAULTS extracts 'default' values (skip __meta__ keys)
         for key, meta in Watchful.ITEM_SCHEMA['list'].items():
+            if key.startswith('__'):
+                continue
             assert key in Watchful._DEFAULTS
             assert Watchful._DEFAULTS[key] == meta['default']
 
     def test_schema_has_all_fields(self):
         from watchfuls.ping import Watchful
-        expected = {'enabled', 'host', 'timeout', 'attempt', 'alert'}
-        assert set(Watchful.ITEM_SCHEMA['list'].keys()) == expected
+        expected = {'enabled', 'label', 'host', 'timeout', 'attempt', 'alert'}
+        fields = {k for k in Watchful.ITEM_SCHEMA['list'] if not k.startswith('__')}
+        assert fields == expected
 
     def test_schema_has_type_metadata(self):
         """Every field in the schema has a 'type' key."""
         from watchfuls.ping import Watchful
         for key, meta in Watchful.ITEM_SCHEMA['list'].items():
+            if key.startswith('__'):
+                continue
             assert 'type' in meta, f'{key} missing type'
             assert 'default' in meta, f'{key} missing default'
 
@@ -503,19 +509,20 @@ class TestAlertThreshold:
             }
         }
         w = self._make(config)
+        path = ['watchfuls.ping', '10.0.0.1', 'fail_count']
         with patch('time.sleep'):
-            # Two failures
+            # Two failures — the streak is persisted in the monitor status store.
             with patch.object(w, '_icmp_ping', return_value=None):
                 w.check()
                 w.dict_return._dict_return.clear()
                 w.check()
-            assert w._fail_count['10.0.0.1'] == 2
+            assert w._monitor.status.get_conf(path, 0) == 2
 
             # One success — counter resets
             w.dict_return._dict_return.clear()
             with patch.object(w, '_icmp_ping', return_value=1.5):
                 r = w.check()
-            assert w._fail_count['10.0.0.1'] == 0
+            assert w._monitor.status.get_conf(path, 0) == 0
             assert r.list['10.0.0.1']['status'] is True
 
     def test_alert_per_host(self):

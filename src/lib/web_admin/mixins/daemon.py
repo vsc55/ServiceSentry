@@ -199,6 +199,15 @@ class _DaemonMixin:
                     return mod_name, {}, None
                 return mod_name, None, f'{mod_name}: {type(exc).__name__}: {exc}'
 
+        # Warm imports sequentially first so the dns module's dnspython load (which
+        # transiently removes watchfuls/ from sys.path) can't race with concurrent
+        # bare-name imports of the other modules.
+        for _m in module_names:
+            try:
+                monitor._import_watchful(_m)
+            except Exception:  # pylint: disable=broad-except
+                pass
+
         workers = min(len(module_names), 16)
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
         try:

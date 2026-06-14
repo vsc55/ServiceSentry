@@ -4,12 +4,14 @@
     "labels": {
         "enabled":   "Enabled",
         "threads":   "Threads",
+        "timeout":   "Timeout (s)",
         "process":   "Process name",
         "min_count": "Minimum instances"
     },
     "hints": {
         "enabled":   "Enable or disable process monitoring for this entry.",
         "threads":   "Number of entries to check in parallel.",
+        "timeout":   "Command/SSH timeout in seconds.",
         "process":   "Process name to search for (case-insensitive). If empty, the item key is used.",
         "min_count": "Minimum number of running instances required to report OK. Module-level value is the global default; per-item value of 0 means use the global default."
     },

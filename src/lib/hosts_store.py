@@ -39,9 +39,20 @@ _HOSTS_SCHEMA = TableSpec(
         Column('uid',         'TEXT', primary_key=True),
         Column('name',        'TEXT', nullable=False, default="''", unique=True),
         Column('address',     'TEXT', nullable=False, default="''"),
+        # 'local' (monitored directly, no SSH) or 'remote' (reachable via the
+        # SSH connection stored in profiles['ssh']).
+        Column('kind',        'TEXT', nullable=False, default="'local'"),
+        # Operating system: 'auto' (local→this host's platform; remote→detected
+        # over SSH) or a fixed token (linux/windows/darwin/freebsd/other).
+        Column('os',          'TEXT', nullable=False, default="'auto'"),
+        # When 1 the host is in maintenance: every check bound to it is skipped.
+        Column('maintenance', 'INTEGER', nullable=False, default="0"),
         Column('tags',        'TEXT', nullable=False, default="'[]'"),
         Column('description', 'TEXT', nullable=False, default="''"),
         Column('profiles',    'TEXT', nullable=False, default="'{}'"),
+        # Modules this server is monitored by (so a module added with no checks
+        # yet still persists).  JSON list of bare module names.
+        Column('modules',     'TEXT', nullable=False, default="'[]'"),
         Column('created_at',  'TEXT', nullable=False, default="''"),
         Column('updated_at',  'TEXT', nullable=False, default="''"),
         Column('updated_by',  'TEXT', nullable=False, default="''"),
@@ -49,8 +60,8 @@ _HOSTS_SCHEMA = TableSpec(
     indexes=(Index('idx_hosts_name', ('name',)),),
 )
 
-_COLS = ('uid', 'name', 'address', 'tags', 'description', 'profiles',
-         'created_at', 'updated_at', 'updated_by')
+_COLS = ('uid', 'name', 'address', 'kind', 'os', 'maintenance', 'tags', 'description',
+         'profiles', 'modules', 'created_at', 'updated_at', 'updated_by')
 _SELECT = ', '.join(_COLS)
 
 
@@ -84,11 +95,15 @@ class HostsStore:
 
     # ── Row mapping ───────────────────────────────────────────────────────────
     def _row_to_host(self, row, decrypt: bool) -> dict:
-        uid, name, address, tags, desc, profiles, c_at, u_at, u_by = row
+        uid, name, address, kind, os_, maintenance, tags, desc, profiles, modules, c_at, u_at, u_by = row
         try:
             tags_l = json.loads(tags) if tags else []
         except (ValueError, TypeError):
             tags_l = []
+        try:
+            mods_l = json.loads(modules) if modules else []
+        except (ValueError, TypeError):
+            mods_l = []
         try:
             prof = json.loads(profiles) if profiles else {}
         except (ValueError, TypeError):
@@ -99,13 +114,27 @@ class HostsStore:
             'uid':         uid,
             'name':        name,
             'address':     address,
+            'kind':        kind or 'local',
+            'os':          os_ or 'auto',
+            'maintenance': bool(maintenance),
             'tags':        tags_l if isinstance(tags_l, list) else [],
             'description': desc or '',
             'profiles':    prof if isinstance(prof, dict) else {},
+            'modules':     mods_l if isinstance(mods_l, list) else [],
             'created_at':  c_at or '',
             'updated_at':  u_at or '',
             'updated_by':  u_by or '',
         }
+
+    @staticmethod
+    def _norm_kind(value) -> str:
+        return 'remote' if str(value or '').strip().lower() == 'remote' else 'local'
+
+    @staticmethod
+    def _norm_os(value) -> str:
+        from lib.os_detect import OPTIONS  # noqa: PLC0415
+        v = str(value or 'auto').strip().lower()
+        return v if v in OPTIONS else 'auto'
 
     # ── Read ──────────────────────────────────────────────────────────────────
     def list(self, *, decrypt: bool = True) -> list[dict]:
@@ -138,11 +167,15 @@ class HostsStore:
         try:
             with self._db.transaction():
                 self._db.execute(
-                    f'INSERT INTO hosts ({_SELECT}) VALUES (?,?,?,?,?,?,?,?,?)',
+                    f'INSERT INTO hosts ({_SELECT}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (uid, name, str(data.get('address') or ''),
+                     self._norm_kind(data.get('kind')),
+                     self._norm_os(data.get('os')),
+                     1 if data.get('maintenance') else 0,
                      json.dumps(data.get('tags') or [], ensure_ascii=False),
                      str(data.get('description') or ''),
                      json.dumps(self._encrypt(data.get('profiles') or {}), ensure_ascii=False),
+                     json.dumps(data.get('modules') or [], ensure_ascii=False),
                      now, now, actor or ''),
                 )
             return uid
@@ -164,12 +197,16 @@ class HostsStore:
         try:
             with self._db.transaction():
                 self._db.execute(
-                    'UPDATE hosts SET name=?, address=?, tags=?, description=?, '
-                    'profiles=?, updated_at=?, updated_by=? WHERE uid=?',
+                    'UPDATE hosts SET name=?, address=?, kind=?, os=?, maintenance=?, '
+                    'tags=?, description=?, profiles=?, modules=?, updated_at=?, updated_by=? WHERE uid=?',
                     (name, str(data.get('address') or ''),
+                     self._norm_kind(data.get('kind')),
+                     self._norm_os(data.get('os')),
+                     1 if data.get('maintenance') else 0,
                      json.dumps(data.get('tags') or [], ensure_ascii=False),
                      str(data.get('description') or ''),
                      json.dumps(self._encrypt(data.get('profiles') or {}), ensure_ascii=False),
+                     json.dumps(data.get('modules') or [], ensure_ascii=False),
                      _now(), actor or '', uid),
                 )
             return True

@@ -4,6 +4,8 @@
     "labels": {
         "enabled":     "Habilitado",
         "threads":     "Hilos",
+        "timeout":     "Timeout (s)",
+        "label":       "Etiqueta",
         "service":     "Nombre del servicio",
         "expected":    "Estado esperado",
         "remediation": "Auto-remediaci\u00f3n"
@@ -20,7 +22,10 @@
         "list": "Servicios"
     },
     "hints": {
-        "service":     "Nombre del servicio en el sistema. Si está vacío, se usa el identificador del elemento.",
+        "threads":     "Número de servicios a comprobar en paralelo.",
+        "timeout":     "Tiempo de espera del comando/SSH en segundos.",
+        "label":       "Nombre mostrado en Módulos y notificaciones (p. ej. \"host - servicio\"). Editable; se rellena desde el descubrimiento.",
+        "service":     "Nombre del servicio/unidad del sistema usado para consultar el estado (p. ej. systemctl). Lo rellena el descubrimiento.",
         "expected":    "Estado esperado del servicio. Se genera una alerta cuando el estado real no coincide.",
         "remediation": "Inicia o detiene automáticamente el servicio para restaurar el estado esperado."
     },

@@ -7,14 +7,18 @@
         "timeout":     "Timeout (s)",
         "host":        "Host",
         "record_type": "Tipo de registro",
+        "nameserver":  "Servidor DNS",
+        "label":       "Etiqueta",
         "expected":    "Valor esperado"
     },
     "hints": {
+        "label":       "Nombre mostrado en Módulos, la página de estado y las notificaciones (p. ej. \"MX cerebelum.lan\"). Editable; se rellena desde el descubrimiento.",
         "enabled":     "Habilitar o deshabilitar la monitorización DNS para esta entrada.",
         "threads":     "Número de entradas a comprobar en paralelo.",
         "timeout":     "Timeout de resolución en segundos. El valor por ítem anula el valor global del módulo.",
         "host":        "Nombre de host a resolver. Si está vacío, se usa la clave del ítem.",
         "record_type": "Tipo de registro DNS a consultar: A (IPv4), AAAA (IPv6), CNAME, MX, TXT, NS, PTR o SOA. Los tipos distintos de A/AAAA requieren dnspython.",
+        "nameserver":  "Servidor DNS a consultar (IP o host), p. ej. 192.168.1.1. Vacío = resolver del sistema del daemon. Requiere dnspython.",
         "expected":    "Valor opcional que debe aparecer (coincidencia de subcadena, sin distinción de mayúsculas) en al menos un registro resuelto. Dejar vacío para comprobar solo que la consulta devuelve resultados."
     },
     "option_labels": {

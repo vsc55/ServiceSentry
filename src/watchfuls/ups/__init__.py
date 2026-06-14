@@ -35,6 +35,16 @@ _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'),
 SUPPORTED_PLATFORMS = ('linux', 'darwin', 'win32')
 
 
+def _to_float(value):
+    """Parse a NUT variable (string) to float, or None if not numeric."""
+    if value is None:
+        return None
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _nut_query(host, port, ups_name, user, password, timeout):
     """Connect to NUT UPSD, authenticate if credentials given, query LIST VAR."""
     sock = socket.create_connection((host, port), timeout=timeout)
@@ -95,6 +105,7 @@ class Watchful(ModuleBase):
     """Watchful module to check UPS status via NUT UPSD TCP protocol."""
 
     ITEM_SCHEMA = _SCHEMA
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset({'test_connection'})
 
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
                  if isinstance(v, dict) and 'default' in v}
@@ -111,8 +122,12 @@ class Watchful(ModuleBase):
             return self.dict_return
 
         list_items = []
-        for (key, value) in self.get_conf('list', {}).items():
-            if not isinstance(value, dict):
+        for (key, raw) in self.get_conf('list', {}).items():
+            if not isinstance(raw, dict):
+                continue
+            # Host-centric: merge the bound host's address + NUT credentials.
+            value = self.resolve_host(raw)
+            if value.get('_host_maintenance'):
                 continue
             enabled = str(value.get('enabled', True)).lower() in ('true', '1', 'yes', True, 'on', 'enable')
             if not enabled:
@@ -127,6 +142,13 @@ class Watchful(ModuleBase):
             password = (value.get('password', '') or '').strip()
             timeout = int(value.get('timeout', 0) or 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
             self._debug(f"UPS: {key} - host={host}:{port} ups_name={ups_name}", DebugLevel.info)
+
+            def _alert(field):
+                try:
+                    return int(value.get(field, self._DEFAULTS[field]) or 0)
+                except (TypeError, ValueError):
+                    return int(self._DEFAULTS[field])
+
             list_items.append({
                 'key': key,
                 'host': host,
@@ -135,6 +157,12 @@ class Watchful(ModuleBase):
                 'user': user,
                 'password': password,
                 'timeout': timeout,
+                'alert_on_battery': str(value.get('alert_on_battery',
+                                        self._DEFAULTS['alert_on_battery'])).lower()
+                                    in ('true', '1', 'yes', 'on', 'enable'),
+                'alert_battery':  _alert('alert_battery'),
+                'alert_runtime':  _alert('alert_runtime'),
+                'alert_load':     _alert('alert_load'),
             })
 
         with concurrent.futures.ThreadPoolExecutor(
@@ -169,28 +197,90 @@ class Watchful(ModuleBase):
             timeout=item['timeout'],
         )
 
-        status = variables.get('ups.status', '')
+        status = variables.get('ups.status', '') or ''
+        tokens = status.split()
         # "OL" = on-line, "OB" = on battery, "LB" = low battery
-        ok = 'OL' in status and 'LB' not in status
+        online     = 'OL' in tokens
+        on_battery = 'OB' in tokens
+        low_batt   = 'LB' in tokens
 
+        charge      = _to_float(variables.get('battery.charge'))     # %
+        runtime_s   = _to_float(variables.get('battery.runtime'))    # seconds
+        runtime_min = round(runtime_s / 60.0, 1) if runtime_s is not None else None
+        load        = _to_float(variables.get('ups.load'))           # %
+
+        # Evaluate the configured thresholds; collect every reason that trips.
+        reasons = []
+        if low_batt:
+            reasons.append('LOW BATTERY')
+        if on_battery and item['alert_on_battery']:
+            reasons.append('on battery')
+        if charge is not None and item['alert_battery'] > 0 and charge < item['alert_battery']:
+            reasons.append(f'battery {charge:.0f}% < {item["alert_battery"]}%')
+        if runtime_min is not None and item['alert_runtime'] > 0 and runtime_min < item['alert_runtime']:
+            reasons.append(f'runtime {runtime_min:.0f}m < {item["alert_runtime"]}m')
+        if load is not None and item['alert_load'] > 0 and load > item['alert_load']:
+            reasons.append(f'load {load:.0f}% > {item["alert_load"]}%')
+        if not online and not on_battery:
+            reasons.append(f'status {status or "unknown"}')
+
+        ok = not reasons
         if ok:
-            message = f'UPS: *{key}* - Online ({status}) ✅'
-        elif 'LB' in status:
-            message = f'UPS: *{key}* - LOW BATTERY ({status}) ⚠️'
-        elif 'OB' in status:
-            message = f'UPS: *{key}* - On battery ({status}) ⚠️'
+            extra = []
+            if charge is not None:
+                extra.append(f'{charge:.0f}%')
+            if runtime_min is not None:
+                extra.append(f'{runtime_min:.0f}m')
+            detail = ' · '.join(extra)
+            message = f'UPS: *{key}* - Online ({status}){f" — {detail}" if detail else ""} ✅'
         else:
-            message = f'UPS: *{key}* - Status: {status or "unknown"} ⚠️'
+            icon = '🔋' if (low_batt or on_battery) else '⚠️'
+            message = f'UPS: *{key}* - {", ".join(reasons)} ({status}) {icon}'
 
         other_data = {
             'host': host,
             'ups_name': ups_name,
             'status': status,
-            'battery_charge': variables.get('battery.charge'),
-            'runtime': variables.get('battery.runtime'),
-            'load': variables.get('ups.load'),
+            'on_battery': on_battery,
+            'low_battery': low_batt,
+            # Numeric metrics for the history charts (battery %, autonomy, load).
+            'battery_charge': charge,
+            'runtime': runtime_min,           # minutes
+            'load': load,
         }
         self.dict_return.set(key, ok, message, False, other_data)
 
         if self.check_status(ok, self.name_module, key):
             self.send_message(message, ok)
+
+    # ── Web UI — test_connection ──────────────────────────────────────
+    @classmethod
+    def test_connection(cls, config: dict) -> dict:
+        """Probe the NUT UPSD connection for one UPS item (web UI button).
+
+        Host-centric: use the item's ``host`` field, falling back to the bound
+        host's address injected as ``__host__`` by the route.  NUT is queried
+        directly over TCP, so the test connects to ``host:port`` regardless of
+        whether the host is reached locally or over SSH for other modules.
+        """
+        host = str(config.get('host') or '').strip()
+        if not host:
+            host = str((config.get('__host__') or {}).get('address') or '').strip()
+        if not host:
+            return {'ok': False, 'message': 'No host configured'}
+        port     = int(config.get('port') or 0) or 3493
+        ups_name = str(config.get('ups_name') or '').strip() or cls._DEFAULTS['ups_name']
+        user     = str(config.get('user') or '').strip()
+        password = str(config.get('password') or '')
+        timeout  = int(config.get('timeout') or 0) or cls._MODULE_DEFAULTS['timeout']
+        try:
+            variables = _nut_query(host=host, port=port, ups_name=ups_name,
+                                   user=user, password=password, timeout=timeout)
+        except Exception as exc:  # pylint: disable=broad-except
+            return {'ok': False, 'message': f'{host}:{port} - {exc}'}
+        status = variables.get('ups.status', '') or 'unknown'
+        # On success return EVERY NUT variable so the UI can show them in a modal.
+        info = {k: variables[k] for k in sorted(variables)}
+        return {'ok': True,
+                'message': f'{host}:{port} - {ups_name} OK (status: {status})',
+                'info': info}

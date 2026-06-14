@@ -88,32 +88,51 @@ class _AuditMixin:
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
+    def _audit_write(self, event: str, user: str, ip: str,
+                     detail: str | list | dict) -> None:
+        """Insert one audit entry, resiliently.
+
+        A write failure (DB locked, disk full, a broken transaction left by some
+        other operation…) must NEVER break the caller's request nor — worse —
+        silently stop ALL future auditing.  On error we roll the shared
+        connection back (so it isn't left in an aborted state that would fail
+        every subsequent write) and log the reason to stderr so the operator can
+        see exactly why auditing stopped, instead of it failing invisibly.
+        """
+        store = getattr(self, '_audit_store', None)
+        if store is None:
+            return
+        try:
+            store.insert(
+                ts=datetime.now(timezone.utc).isoformat(),
+                event=event, user=user, ip=ip, detail=detail,
+                max_entries=self._AUDIT_MAX_ENTRIES,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            conn = getattr(self, '_db_connector', None)
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+            import sys, traceback  # noqa: PLC0415
+            print(f'> WebAdmin >> audit write failed for {event!r}: '
+                  f'{type(exc).__name__}: {exc}', file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+
     def _audit(self, event: str, username: str = '', ip: str = '',
                detail: str | list | dict = '') -> None:
         """Append an audit entry (requires Flask request context)."""
-        if not hasattr(self, '_audit_store'):
-            return
-        self._audit_store.insert(
-            ts=datetime.now(timezone.utc).isoformat(),
-            event=event,
-            user=username or session.get('username', ''),
-            ip=ip or request.remote_addr,
-            detail=detail,
-            max_entries=self._AUDIT_MAX_ENTRIES,
+        self._audit_write(
+            event,
+            username or session.get('username', ''),
+            ip or request.remote_addr,
+            detail,
         )
 
     def _audit_system(self, event: str, detail: str | list | dict = '') -> None:
         """Append a system-generated audit entry (no Flask context needed)."""
-        if not hasattr(self, '_audit_store'):
-            return
-        self._audit_store.insert(
-            ts=datetime.now(timezone.utc).isoformat(),
-            event=event,
-            user='system',
-            ip='internal',
-            detail=detail,
-            max_entries=self._AUDIT_MAX_ENTRIES,
-        )
+        self._audit_write(event, 'system', 'internal', detail)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -137,9 +156,23 @@ class _AuditMixin:
                 )
             else:
                 hide = key in sensitive
+                # Mask secrets even when a whole dict/list is added or removed
+                # (only one side is a dict here, so the recursion above is
+                # skipped) — otherwise nested secrets such as
+                # profiles.ssh.ssh_password would be logged in plaintext.
                 changes.append({
                     'field': path,
-                    'old': '***' if hide else ov,
-                    'new': '***' if hide else nv,
+                    'old': '***' if hide else _AuditMixin._mask_secrets(ov, sensitive),
+                    'new': '***' if hide else _AuditMixin._mask_secrets(nv, sensitive),
                 })
         return changes
+
+    @staticmethod
+    def _mask_secrets(value, sensitive: frozenset[str]):
+        """Recursively replace the values of *sensitive*-named keys with ``'***'``."""
+        if isinstance(value, dict):
+            return {k: ('***' if k in sensitive else _AuditMixin._mask_secrets(v, sensitive))
+                    for k, v in value.items()}
+        if isinstance(value, list):
+            return [_AuditMixin._mask_secrets(v, sensitive) for v in value]
+        return value

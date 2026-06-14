@@ -6,11 +6,13 @@
         "threads": "Threads",
         "alert":   "Alert (°C)",
         "timeout": "Timeout (s)",
+        "label":   "Label",
         "host":    "Host",
         "port":    "Port",
         "exclude": "Excluded devices"
     },
     "hints": {
+        "label":   "Display name shown in the UI. Falls back to the item key if empty.",
         "threads": "Number of hosts to query in parallel.",
         "alert":   "Maximum temperature (°C) before triggering an alert. Applied to all disks on hosts that do not have a per-disk threshold.",
         "timeout": "TCP connection timeout in seconds for each hddtemp daemon.",

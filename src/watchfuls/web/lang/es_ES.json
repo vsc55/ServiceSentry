@@ -3,6 +3,7 @@
     "module_description": "Monitoriza endpoints HTTP/HTTPS. Verifica códigos de estado, contenido de respuesta opcional y autenticación básica. Soporta métodos GET, HEAD y POST.",
     "labels": {
         "enabled":          "Habilitado",
+        "label":            "Etiqueta",
         "threads":          "Hilos",
         "code":             "Código HTTP",
         "timeout":          "Timeout (s)",
@@ -23,7 +24,7 @@
         "threads":          "Número de URLs a comprobar en paralelo.",
         "code":             "Código de respuesta HTTP esperado por defecto para todas las URLs.",
         "timeout":          "Timeout de petición en segundos por defecto.",
-        "url":              "Host o URL completa a comprobar. Si está vacío, se usa la clave del ítem como URL.",
+        "url":              "Host o URL completa a comprobar. Déjalo vacío para usar la dirección del host vinculado; indica un FQDN concreto cuando un mismo host (p. ej. un proxy inverso) sirve varios.",
         "path":             "Ruta añadida a la URL/host (p. ej. /health). Útil cuando la URL viene de un host vinculado.",
         "scheme":           "Protocolo a usar cuando la URL no incluye esquema (http:// o https://).",
         "method":           "Método HTTP. HEAD es el más rápido (sin cuerpo). POST envía cuerpo vacío.",

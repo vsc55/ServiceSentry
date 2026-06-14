@@ -61,9 +61,9 @@ function _showAuditConfirm(msg, callback) {
     showConfirmModal(msg, callback);
 }
 
-async function deleteAuditEntry(origIdx) {
+async function deleteAuditEntry(entryId) {
     _showAuditConfirm(t('audit_confirm_delete'), async () => {
-        const r = await apiDelete(`/api/audit/${origIdx}`);
+        const r = await apiDelete(`/api/v1/audit/${entryId}`);
         if (r && r.status === 200) renderAudit();
         else showToast(r?.data?.error || t('save_error'), 'danger');
     });

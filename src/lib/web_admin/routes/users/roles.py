@@ -9,7 +9,7 @@ from flask import jsonify, session
 
 from ...constants import (
     BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, ROLES,
-    SYSTEM_USER, is_module_perm,
+    SYSTEM_USER, is_module_perm, is_server_perm,
 )
 
 
@@ -98,7 +98,8 @@ def register(app, wa):
             return err
         name        = data.get('name', '').strip()
         description = data.get('description', '').strip()
-        perms       = [p for p in data.get('permissions', []) if p in PERMISSIONS or is_module_perm(p)]
+        perms       = [p for p in data.get('permissions', [])
+                       if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p)]
         if not _check_perms_escalation(perms):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         if not name:
@@ -200,7 +201,8 @@ def register(app, wa):
                 role['description'] = new_desc
             if 'permissions' in data:
                 new_perms = sorted(
-                    p for p in data['permissions'] if p in PERMISSIONS or is_module_perm(p)
+                    p for p in data['permissions']
+                    if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p)
                 )
                 if not _check_perms_escalation(new_perms):
                     return jsonify({'error': wa._t('insufficient_permissions')}), 403
@@ -239,15 +241,19 @@ def register(app, wa):
         if users_with_role:
             return jsonify({'error': wa._t('role_in_use', ', '.join(users_with_role))}), 409
         groups_dirty = False
-        for gdata in wa._groups.values():
+        groups_affected = []
+        for gname, gdata in wa._groups.items():
             old_roles = gdata.get('roles', [])
             new_roles = [r for r in old_roles if r != uid]
             if len(new_roles) != len(old_roles):
                 gdata['roles'] = new_roles
                 groups_dirty   = True
+                groups_affected.append(gdata.get('name', gname))
         if groups_dirty:
             wa._persist_groups()
         del wa._custom_roles[uid]
         wa._persist_roles()
-        wa._audit('role_deleted', detail={'uid': uid, 'name': role_name})
+        wa._audit('role_deleted', detail={
+            'uid': uid, 'name': role_name, 'removed_from_groups': groups_affected,
+        })
         return jsonify({'ok': True})

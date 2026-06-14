@@ -7,14 +7,18 @@
         "timeout":     "Timeout (s)",
         "host":        "Host",
         "record_type": "Record type",
+        "nameserver":  "Nameserver",
+        "label":       "Label",
         "expected":    "Expected value"
     },
     "hints": {
+        "label":       "Display name shown in Modules, the status page and notifications (e.g. \"MX cerebelum.lan\"). Editable; defaults from discovery.",
         "enabled":     "Enable or disable DNS monitoring for this entry.",
         "threads":     "Number of entries to check in parallel.",
         "timeout":     "Resolution timeout in seconds. Per-item value overrides the module-level default.",
         "host":        "Hostname to resolve. If empty, the item key is used.",
         "record_type": "DNS record type to query: A (IPv4), AAAA (IPv6), CNAME, MX, TXT, NS, PTR or SOA. Types other than A/AAAA require dnspython.",
+        "nameserver":  "DNS server to query (IP or hostname), e.g. 192.168.1.1. Leave empty to use the daemon's system resolver. Requires dnspython.",
         "expected":    "Optional value that must appear (case-insensitive substring match) in at least one resolved record. Leave empty to only check that the query returns results."
     },
     "option_labels": {

@@ -62,6 +62,11 @@ class Monitor(ObjectBase):
 
     _AUDIT_MAX_ENTRIES = 500
 
+    # Set by ModuleBase.fail_streak when a consecutive-failure counter changes:
+    # status.json must then be saved even if no item status flipped this cycle
+    # (otherwise the counters would be lost in systemd one-shot mode).
+    _status_counts_dirty = False
+
     def __init__(self, dir_base: str, dir_config: str, dir_modules: str, dir_var: str):
         self.dir_base = dir_base
         self.dir_config = dir_config
@@ -74,6 +79,7 @@ class Monitor(ObjectBase):
         self._db = self._init_db()
         self._history = self._init_history()
         self._hosts_store = self._init_hosts_store()
+        self._audit_store = self._init_audit_store()
         self._reconcile_module_tables()
         self.debug.print("> Monitor >> Monitor Init OK")
 
@@ -87,7 +93,7 @@ class Monitor(ObjectBase):
             return None
         try:
             from lib.db import get_connector  # noqa: PLC0415
-            db_cfg = self.cfg_general.get_conf(['database']) or {}
+            db_cfg = self.config.get_conf(['database']) or {}
             return get_connector(db_cfg or None,
                                  default_sqlite_path=os.path.join(self.dir_var, 'data.db'))
         except Exception:  # pylint: disable=broad-except
@@ -132,6 +138,18 @@ class Monitor(ObjectBase):
         except Exception:  # pylint: disable=broad-except
             pass
 
+    def _init_audit_store(self):
+        """Audit store on the shared connector — same ``audit`` table the web
+        admin uses, so daemon/systemd events land in one audit trail instead of
+        a separate audit.json file."""
+        if self._db is None:
+            return None
+        try:
+            from lib.audit_store import AuditStore  # noqa: PLC0415
+            return AuditStore(self._db)
+        except Exception:  # pylint: disable=broad-except
+            return None
+
     def _get_item_uid(self, module_name: str, key: str) -> str | None:
         """Return the stable UID for *key* within *module_name*, or None."""
         module_cfg = self.config_modules.get_conf([module_name])
@@ -149,12 +167,29 @@ class Monitor(ObjectBase):
     # ── Audit helpers ─────────────────────────────────────────────────────────
 
     def _audit_system(self, event: str, detail: str | dict = '') -> None:
-        """Append a system-generated entry to audit.json without Flask context.
+        """Append a system-generated audit entry without Flask context.
 
         Safe to call from background threads and the systemd monitoring process.
-        Writes directly to the audit file; concurrent access is serialised by
-        the same atomic-replace logic used everywhere else.
+        Writes to the shared audit table in the database (the same trail the
+        web admin uses) when available; falls back to audit.json otherwise so
+        events are never silently dropped.
         """
+        store = getattr(self, '_audit_store', None)
+        if store is not None:
+            try:
+                store.insert(
+                    ts=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    event=event, user='system', ip='internal', detail=detail,
+                    max_entries=self._AUDIT_MAX_ENTRIES,
+                )
+                return
+            except Exception as exc:  # pylint: disable=broad-except
+                self.debug.print(
+                    f'> Monitor >> _audit_system DB insert failed, '
+                    f'falling back to file: {exc}',
+                    DebugLevel.warning,
+                )
+
         if not self.dir_config:
             return
         audit_path = os.path.join(self.dir_config, 'audit.json')
@@ -369,6 +404,26 @@ class Monitor(ObjectBase):
 
         return changed
 
+    def _import_watchful(self, module_name: str):
+        """Import a watchful module by name (returns the imported module).
+
+        Ensures ``watchfuls/`` is on ``sys.path`` so local packages take
+        precedence over same-named third-party ones (e.g. our ``dns`` watchful vs
+        dnspython), and evicts a stale same-named cache entry left by such a
+        third-party import.  Pre-warming all modules with this before the
+        concurrent check phase makes later imports cache hits, so a module that
+        temporarily mutates ``sys.path`` during its check (dns loading dnspython)
+        can't make concurrent bare-name imports of other modules fail.
+        """
+        if self.dir_modules and self.dir_modules not in sys.path:
+            sys.path.insert(0, self.dir_modules)
+        cached = sys.modules.get(module_name)
+        if cached is not None and not hasattr(cached, 'Watchful'):
+            del sys.modules[module_name]
+            for _k in [k for k in sys.modules if k.startswith(module_name + '.')]:
+                del sys.modules[_k]
+        return importlib.import_module(module_name)
+
     def check_module(self, module_name: str) -> tuple[bool, str, ReturnModuleCheck | None]:
         """
         Execute module check and return raw result.
@@ -379,24 +434,7 @@ class Monitor(ObjectBase):
         """
         try:
             self.debug.print(f"> Monitor > check_module >> Module: {module_name}", DebugLevel.info)
-            # Ensure watchfuls/ is at the front of sys.path so local packages
-            # (e.g. watchfuls/dns/) take precedence over same-named third-party
-            # packages (e.g. dnspython, also importable as 'dns').
-            if self.dir_modules and self.dir_modules not in sys.path:
-                sys.path.insert(0, self.dir_modules)
-
-            # Python caches imports in sys.modules.  If a third-party package
-            # with the same short name was imported first (e.g. dnspython→'dns'),
-            # importlib.import_module() would return the wrong cached module.
-            # Detect that case and evict the stale entry so a clean re-import
-            # picks up the correct watchful from sys.path.
-            cached = sys.modules.get(module_name)
-            if cached is not None and not hasattr(cached, 'Watchful'):
-                del sys.modules[module_name]
-                for _k in [k for k in sys.modules if k.startswith(module_name + '.')]:
-                    del sys.modules[_k]
-
-            module_import = importlib.import_module(module_name)
+            module_import = self._import_watchful(module_name)
             module = module_import.Watchful(self)
             result_data = module.check()
 
@@ -444,6 +482,18 @@ class Monitor(ObjectBase):
 
         self.status.read()
         list_modules = self._get_enabled_modules()
+
+        # Warm module imports sequentially before the concurrent phase below: a
+        # module whose check mutates the global sys.path (dns loads dnspython,
+        # whose package shadows our 'dns' watchful) must not race with bare-name
+        # imports of the other modules.  After warming, every check_module import
+        # is a cache hit, immune to that transient sys.path window.
+        for _m in list_modules:
+            try:
+                self._import_watchful(_m)
+            except Exception as _e:  # pylint: disable=broad-except
+                self.debug.print(
+                    f"> Monitor > check >> preload {_m} failed: {_e}", DebugLevel.warning)
 
         changed = False
         max_threads = self.get_conf('threads', self._DEFAULT_THREADS)
@@ -508,8 +558,9 @@ class Monitor(ObjectBase):
 
         self.debug.debug_obj(__name__, self.status.data, "Debug Status Save")
 
-        if changed:
+        if changed or self._status_counts_dirty:
             self.status.save()
+            self._status_counts_dirty = False
 
         self.send_message_end()
         self.debug.print(f"> Monitor > check >> Check End: {time.strftime('%c')}", DebugLevel.info)

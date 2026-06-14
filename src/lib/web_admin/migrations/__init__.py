@@ -10,6 +10,13 @@ import os
 _MIGRATIONS = [
     'm001_uid_relationships',
     'm002_add_auth_source',
+    'm003_service_status_uid_label',
+    'm004_filesystemusage_uid_label',
+    'm005_dns_uid_label',
+    'm006_more_uid_labels',
+    'm007_restore_inline_identity',
+    'm008_dns_host_label_prefix',
+    'm009_temperature_uid_label',
 ]
 
 _STATE_FILE = '_migrations.json'

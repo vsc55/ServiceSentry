@@ -21,6 +21,7 @@ function openNewRoleModal() {
     rmEnabledNew.disabled = false;
     _buildPermsAccordion(new Set(), false);
     _buildModulePermsGrid(new Set(), false);
+    _buildServerPermsGrid(new Set(), false);
     _populateRoleUsersGrid(null, []);
     _populateRoleGroupsGrid(null, []);
     bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#rmTabGeneral"]')).show();
@@ -94,6 +95,7 @@ function openEditRoleModal(uid) {
     const activePerms = new Set(rd.permissions || []);
     _buildPermsAccordion(activePerms, isBuiltin);
     _buildModulePermsGrid(activePerms, isBuiltin);
+    _buildServerPermsGrid(activePerms, isBuiltin);
     ['rmUserSearch', 'rmGroupSearch'].forEach(id => {
         const el = document.getElementById(id);
         if (el) { el.value = ''; delete el.dataset.bound; }

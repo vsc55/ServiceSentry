@@ -155,6 +155,21 @@ function _renderWaitingCard(mod) {
     </div>`;
 }
 
+// A check's display name: its item 'label' (the stored key may be an opaque
+// UID), looked up in the live modules config, falling back to the raw key.
+function _statusCheckLabel(mod, ck) {
+    for (const mk of [mod, 'watchfuls.' + mod, mod.split('.').pop()]) {
+        const mc = modulesData[mk];
+        if (!mc || typeof mc !== 'object') continue;
+        for (const [coll, items] of Object.entries(mc)) {
+            if (coll.startsWith('__') || !items || typeof items !== 'object') continue;
+            const it = items[ck];
+            if (it && typeof it === 'object' && String(it.label || '').trim()) return String(it.label);
+        }
+    }
+    return ck;
+}
+
 function _renderOneStatusCard(mod, checks) {
         const pname = modulePrettyName(mod, modulesData[mod] || {});
         const icon  = moduleIcon(mod, modulesData[mod] || {});
@@ -245,7 +260,7 @@ function _renderOneStatusCard(mod, checks) {
 
             h += `<div class="d-flex align-items-center gap-2 px-3 py-2" style="border-top:1px solid var(--bs-border-color);font-size:.865rem">
                 ${rowIcon}
-                <span class="flex-grow-1 text-truncate" style="min-width:0" title="${escAttr(ck)}">${esc(ck)}</span>
+                <span class="flex-grow-1 text-truncate" style="min-width:0" title="${escAttr(extra.name || _statusCheckLabel(mod, ck))}">${esc(extra.name || _statusCheckLabel(mod, ck))}</span>
                 ${extraHtml}
                 <span class="rounded-pill px-2 py-0 fw-bold flex-shrink-0"
                       style="font-size:.68rem;background:${cbBg};color:${cbColor}">${cbTxt}</span>

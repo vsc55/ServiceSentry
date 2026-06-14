@@ -6,11 +6,20 @@
         "timeout":      {"type": "int",  "default": 10, "min": 1, "max": 60}
     },
     "__history__": {"field": "days_left", "unit": " days", "label": "Days Until Expiry"},
-    "__host_profile__": {"key": "tls", "address_field": "host", "fields": ["host", "port"]},
+    "__host_profile__": {"key": "tls", "address_field": "host", "fields": ["host"]},
+    "__host_multiple__": true,
     "list": {
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__discovery_uid_key__": true,
+        "__discovery_label_template__": "{host} - {server_name}",
+        "__new_item_fields__": ["label", "server_name"],
         "enabled":      {"type": "bool", "default": true},
+        "label":        {"type": "str",  "default": ""},
         "host":         {"type": "str",  "default": ""},
+        "server_name":  {"type": "str",  "default": "", "placeholder": "__address__"},
         "port":         {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 443},
+        "verify":       {"type": "bool", "default": true},
         "warning_days": {"type": "int",  "default": 0,   "min": 0, "max": 365, "placeholder_module": "warning_days"},
         "timeout":      {"type": "int",  "default": 0,   "min": 0, "max": 60,  "placeholder_module": "timeout"}
     }

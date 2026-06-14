@@ -6,7 +6,10 @@ import re
 
 from flask import session
 
-from ..constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, is_module_perm
+from ..constants import (
+    BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS,
+    is_module_perm, is_server_perm,
+)
 
 _UUID_RE = re.compile(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -102,7 +105,7 @@ class _PermissionsMixin:
         if custom and custom.get('enabled', True):
             return frozenset(
                 p for p in custom.get('permissions', [])
-                if p in PERMISSIONS or is_module_perm(p)
+                if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p)
             )
         return frozenset()
 
@@ -127,9 +130,21 @@ class _PermissionsMixin:
     def _has_module_permission(self, module_name: str, action: str) -> bool:
         """Return True if the current user may perform *action* on *module_name*."""
         perms = self._get_session_permissions()
-        _global = {'view': 'modules_view', 'add': 'modules_edit',
-                   'edit': 'modules_edit', 'delete': 'modules_edit'}
+        _global = {'view': 'modules_view', 'add': 'modules_add',
+                   'edit': 'modules_edit', 'delete': 'modules_delete'}
         global_perm = _global.get(action)
         if global_perm and global_perm in perms:
             return True
         return f'module.{module_name}.{action}' in perms
+
+    def _has_server_permission(self, host_uid: str, action: str) -> bool:
+        """Return True if the current user may perform *action* (view/edit/delete)
+        on server *host_uid* — via the global ``servers_*`` permission or a
+        per-server ``server.{uid}.{action}`` override."""
+        perms = self._get_session_permissions()
+        _global = {'view': 'servers_view', 'add': 'servers_add',
+                   'edit': 'servers_edit', 'delete': 'servers_delete'}
+        global_perm = _global.get(action)
+        if global_perm and global_perm in perms:
+            return True
+        return bool(host_uid) and f'server.{host_uid}.{action}' in perms

@@ -92,12 +92,14 @@ class Watchful(ModuleBase):
             if not enabled:
                 continue
             server = (value.get('server', '') or '').strip() or self._DEFAULTS['server']
+            label = (value.get('label', '') or '').strip() or server or key
             port = int(value.get('port', 0) or 0) or 123
             max_offset = float(value.get('max_offset', 0) or 0) or self.get_conf('max_offset', self._MODULE_DEFAULTS['max_offset'])
             timeout = int(value.get('timeout', 0) or 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
             self._debug(f"NTP: {key} - server={server}:{port} max_offset={max_offset}", DebugLevel.info)
             list_items.append({
                 'key': key,
+                'label': label,
                 'server': server,
                 'port': port,
                 'max_offset': max_offset,
@@ -116,7 +118,7 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"NTP: {item['key']} - Exception: {exc}", DebugLevel.error)
-                    message = f'NTP: {item["key"]} - *Error: {exc}* 💥'
+                    message = f'NTP: {item.get("label") or item["key"]} - *Error: {exc}* 💥'
                     self.dict_return.set(item['key'], False, message)
 
         super().check()
@@ -124,6 +126,7 @@ class Watchful(ModuleBase):
 
     def _ntp_check(self, item):
         key = item['key']
+        label = item.get('label') or item['server'] or key
         server = item['server']
         max_offset = item['max_offset']
         timeout = item['timeout']
@@ -132,9 +135,9 @@ class Watchful(ModuleBase):
         ok = offset < max_offset
 
         if ok:
-            message = f'NTP: *{key}* - offset {offset:.3f}s (max {max_offset}s) ✅'
+            message = f'NTP: *{label}* - offset {offset:.3f}s (max {max_offset}s) ✅'
         else:
-            message = f'NTP: *{key}* - offset {offset:.3f}s exceeds {max_offset}s ⚠️'
+            message = f'NTP: *{label}* - offset {offset:.3f}s exceeds {max_offset}s ⚠️'
 
         other_data = {
             'server': server,

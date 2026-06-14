@@ -19,22 +19,47 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+"""Watchful module to monitor system services, on the bound host.
+
+Host-centric: each check binds to a host (``host_uid``).  The service state is
+read on that host via :meth:`ModuleBase.host_exec` — locally or over SSH — using
+an OS-appropriate command (``systemctl`` on Linux, ``sc`` on Windows,
+``launchctl`` on macOS, ``service`` on FreeBSD).  Optional auto-remediation
+starts/stops the service to restore the expected state.  ``discover`` lists the
+services of the machine running the web admin (autocomplete helper).
+"""
+
 import concurrent.futures
 import json
 import os
 import platform
-import shutil
+import shlex
 import subprocess
 
 import psutil
 
-from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
+# Per-OS command to read a service's state ({svc} substituted, shell-quoted).
+_STATUS_CMDS = {
+    'linux':   'systemctl is-active {svc}',
+    'windows': 'sc query {svc}',
+    'darwin':  'launchctl list {svc}',
+    'freebsd': 'service {svc} status',
+}
+# Per-OS start/stop command ({action} = start|stop).
+_ACTION_CMDS = {
+    'linux':   'systemctl {action} {svc}',
+    'windows': 'sc {action} {svc}',
+    'darwin':  'launchctl {action} {svc}',
+    'freebsd': 'service {svc} {action}',
+}
+
 
 def _detect_linux_init() -> str:
+    import shutil  # noqa: PLC0415
     if os.path.exists('/run/systemd/system'):
         return 'systemd'
     if shutil.which('rc-service'):
@@ -43,208 +68,253 @@ def _detect_linux_init() -> str:
 
 
 class Watchful(ModuleBase):
+    """Monitor service state per host (running/stopped), with optional remediation."""
 
     ITEM_SCHEMA = _SCHEMA
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
     _PLATFORM: str = platform.system().lower()
     _INIT_SYSTEM: str = _detect_linux_init() if platform.system().lower() == 'linux' else 'systemd'
 
+    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
+                 if isinstance(v, dict) and 'default' in v}
+
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
-        if self._PLATFORM == 'windows':
-            self.paths.set('sc', 'sc')
-        elif self._INIT_SYSTEM == 'openrc':
-            self.paths.set('rc-service', shutil.which('rc-service') or 'rc-service')
-        elif self._INIT_SYSTEM == 'sysv':
-            self.paths.set('service', shutil.which('service') or 'service')
-        else:  # systemd
-            self.paths.set('systemctl', '/bin/systemctl')
 
     def check(self):
-        list_service = []
-        for (key, value) in self.get_conf('list', {}).items():
-            enabled = str(value.get('enabled', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
-            remediation = str(value.get('remediation', '')).lower() in ('true', '1', 'yes', True, 'on', 'enable')
-            service_name = (value.get('service', '') or '').strip() or key
-            expected = (value.get('expected', '') or 'running').strip().lower()
-            if expected not in ('running', 'stopped'):
-                expected = 'running'
-            self._debug(f"Service: {key} - Enabled: {enabled} - Expected: {expected} - Remediation: {remediation}", DebugLevel.info)
-            if enabled:
-                list_service.append({"key": key, "service": service_name, "remediation": remediation, "expected": expected})
-
+        if not self.is_enabled:
+            return self.dict_return
+        items = []
+        for key, value in self.get_conf('list', {}).items():
+            if not isinstance(value, dict):
+                continue
+            if not value.get('enabled', self._DEFAULTS.get('enabled', True)):
+                continue
+            items.append((key, value))
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            future_to_service = {executor.submit(self._service_check, service): service for service in list_service}
-            for future in concurrent.futures.as_completed(future_to_service):
-                service = future_to_service[future]
+            futures = {executor.submit(self._service_check, k, v): k for k, v in items}
+            for future in concurrent.futures.as_completed(futures):
+                key = futures[future]
                 try:
                     future.result()
-                except Exception as exc:
-                    message = f'Service: {service["key"]} - *Error: {exc}* 💥'
-                    self.dict_return.set(service['key'], False, message)
-
+                except Exception as exc:  # pylint: disable=broad-except
+                    raw = futures[future] and self.get_conf('list', {}).get(key, {})
+                    lbl = (raw.get('label') or raw.get('service') or key) if isinstance(raw, dict) else key
+                    self.dict_return.set(key, False, f'Service: {lbl} - *Error: {exc}* 💥')
         super().check()
         return self.dict_return
 
-    def _service_check(self, service):
-        remediation_use = None
-        display_name = service['key']
-        service_name = service['service']
-        expected = service.get('expected', 'running')
-        status, error, message = self._service_return(service_name)
+    def _service_check(self, key, raw):
+        item = self.resolve_host(raw)
+        if item.get('_host_maintenance') or not item.get('enabled', True):
+            return
+        # The item key is a stable UID; the message uses the editable 'label'
+        # (e.g. "host - service"), falling back to the service/unit name.  The
+        # status is always tracked under the key so it stays stable across edits.
+        service_name = (item.get('service', '') or '').strip() or key
+        label = (item.get('label', '') or '').strip() or service_name
+        expected = (item.get('expected', '') or 'running').strip().lower()
+        if expected not in ('running', 'stopped'):
+            expected = 'running'
+        remediation = bool(item.get('remediation', False))
+        os_ = self.host_os(item)
+        if os_ not in _STATUS_CMDS:
+            self.dict_return.set(key, False,
+                                 f'Service: {label} - *unsupported host OS: {os_}* ⚠️')
+            return
 
+        status, error, detail = self._service_state(item, os_, service_name)
         ok = status if expected == 'running' else not status
+        s_message = self._fmt(label, ok, status, error, detail)
 
-        s_message = f'Service: {display_name} '
-        if ok:
-            state_word = 'Running' if status else 'Stopped'
-            s_message += f' - *{state_word}* ✅'
-        else:
-            if error and message:
-                s_message += f'- *Error: {message}* '
-            elif status:
-                s_message += '- *Running (expected: Stopped)* '
-            else:
-                s_message += '- *Stop* '
-            s_message += '⚠️'
-
-        if self.check_status(ok, self.name_module, display_name):
+        remediation_use = None
+        if self.check_status(ok, self.name_module, key):
             self.send_message(s_message, ok)
-            if not ok and service['remediation']:
-                self._service_remediation(service_name, expected)
-                status, error, message = self._service_return(service_name)
+            if not ok and remediation:
+                self._service_remediation(item, os_, service_name, expected)
+                status, error, detail = self._service_state(item, os_, service_name)
                 ok = status if expected == 'running' else not status
-
-                s_message = f'*Recovery* Service: {display_name} '
-                if ok:
-                    remediation_use = True
-                    s_message += ' - *OK* ✅'
-                else:
-                    remediation_use = False
-                    if error and message:
-                        s_message += f'- *Error: {message}* '
-                    elif status:
-                        s_message += '- *Running (expected: Stopped)* '
-                    else:
-                        s_message += '- *UNSUCCESSFUL* '
-                    s_message += '⚠️'
-
+                remediation_use = ok
+                s_message = '*Recovery* ' + self._fmt(label, ok, status, error, detail,
+                                                      unsuccessful=True)
                 self.send_message(s_message, ok)
 
-        other_data = {'error': error, 'status_detail': message, 'remediation': remediation_use}
-        self.dict_return.set(display_name, ok, s_message, False, other_data)
+        other_data = {'error': error, 'status_detail': detail, 'remediation': remediation_use}
+        self.dict_return.set(key, ok, s_message, False, other_data)
 
-    def _service_return(self, service_name):
-        if self._PLATFORM == 'windows':
-            return self._service_return_windows(service_name)
-        return self._service_return_linux(service_name)
+    @staticmethod
+    def _fmt(display_name, ok, status, error, detail, unsuccessful=False):
+        msg = f'Service: {display_name} '
+        if ok:
+            msg += ' - *OK* ✅' if unsuccessful else \
+                f' - *{"Running" if status else "Stopped"}* ✅'
+        else:
+            if error and detail:
+                msg += f'- *Error: {detail}* '
+            elif status:
+                msg += '- *Running (expected: Stopped)* '
+            else:
+                msg += '- *UNSUCCESSFUL* ' if unsuccessful else '- *Stop* '
+            msg += '⚠️'
+        return msg
 
-    def _service_return_linux(self, service_name):
-        if self._INIT_SYSTEM == 'openrc':
-            return self._service_return_openrc(service_name)
-        if self._INIT_SYSTEM == 'sysv':
-            return self._service_return_sysv(service_name)
-        return self._service_return_systemd(service_name)
-
-    def _service_return_systemd(self, service_name):
-        cmd = f'{self.paths.find("systemctl")} status {service_name}'
-        stdout, stderr = self._run_cmd(cmd, True)
-        if not stdout:
-            return False, True, (stderr[:-1] if stderr else '')
-
-        for line in stdout.split('\n'):
-            s_line = line.split()
-            if not s_line:
-                continue
-            if str(s_line[0]) == 'Active:':
-                if str(s_line[1]) == "active":
-                    if str(s_line[2]) == "(running)":
-                        return True, False, self._clear_str(s_line[2])
-                    else:
-                        return False, False, self._clear_str(s_line[2])
-                elif str(s_line[1]) == "inactive":
-                    if str(s_line[2]) == "(dead)":
-                        return False, False, ''
-                    else:
-                        return False, False, self._clear_str(s_line[2])
-                else:
-                    return False, True, line
-
-        return False, False, 'Not detect status in the data!!!'
-
-    def _service_return_openrc(self, service_name):
-        cmd = f'{self.paths.find("rc-service")} {service_name} status'
-        stdout, stderr, exit_code = self._run_cmd(cmd, return_str_err=True, return_exit_code=True)
-        if exit_code == 0:
-            return True, False, 'running'
-        combined = (stdout + stderr).strip()
-        error = 'does not exist' in combined.lower()
-        return False, error, combined if error else 'stopped'
-
-    def _service_return_sysv(self, service_name):
-        cmd = f'{self.paths.find("service")} {service_name} status'
-        stdout, stderr, exit_code = self._run_cmd(cmd, return_str_err=True, return_exit_code=True)
-        if exit_code == 0:
-            return True, False, 'running'
-        combined = (stdout + stderr).strip()
-        error = not combined
-        return False, error, combined if combined else f'{service_name}: service not found'
-
-    def _service_return_windows(self, service_name):
-        try:
-            svc = psutil.win_service_get(service_name)
-            st = svc.status()
-            return st == 'running', False, st
-        except Exception as exc:
-            return False, True, str(exc)
-
-    def _service_remediation(self, service_name, expected='running'):
-        action = 'stop' if expected == 'stopped' else 'start'
-        if self._PLATFORM == 'windows':
-            cmd = f'{self.paths.find("sc")} {action} {service_name}'
-        elif self._INIT_SYSTEM == 'openrc':
-            cmd = f'{self.paths.find("rc-service")} {service_name} {action}'
-        elif self._INIT_SYSTEM == 'sysv':
-            cmd = f'{self.paths.find("service")} {service_name} {action}'
-        else:  # systemd
-            cmd = f'{self.paths.find("systemctl")} {action} {service_name}'
-        self._run_cmd(cmd)
+    def _service_state(self, item, os_, service_name):
+        """Return (running, error, detail) by running the per-OS status command."""
+        svc = service_name if os_ == 'windows' else shlex.quote(service_name)
+        cmd = _STATUS_CMDS[os_].format(svc=svc)
+        out, err, code = self.host_exec(
+            item, cmd, timeout=self.get_conf('timeout', 15))
+        return self._parse_state(os_, out, err, code)
 
     @classmethod
-    def discover(cls) -> list:
-        """Return [{name, display_name, status}] for all system services."""
+    def _parse_state(cls, os_, out, err, code):
+        out = out or ''
+        err = err or ''
+        if os_ == 'linux':
+            state = (out.strip().splitlines() or [''])[-1].strip()
+            if state == 'active':
+                return True, False, 'running'
+            if state in ('inactive', 'failed', 'activating', 'deactivating', 'reloading'):
+                return False, False, state
+            # No recognisable state and the command itself failed → detection error.
+            return False, (not state and code != 0), (state or err.strip() or 'unknown')
+        if os_ == 'windows':
+            up = out.upper()
+            if '1060' in out or 'does not exist' in out.lower():
+                return False, True, 'service does not exist'
+            if 'RUNNING' in up:
+                return True, False, 'running'
+            if 'STOPPED' in up:
+                return False, False, 'stopped'
+            return False, code != 0, (cls._clear_str(out) or err.strip() or 'unknown')
+        if os_ == 'darwin':
+            if code == 0 and '"PID"' in out and '"PID" = 0;' not in out:
+                return True, False, 'running'
+            if code != 0:
+                return False, True, (err.strip() or 'could not find service')
+            return False, False, 'stopped'
+        # freebsd: `service <svc> status` → exit 0 when running.
+        if code == 0:
+            return True, False, 'running'
+        combined = (out + err).strip()
+        return False, ('unknown' in combined.lower() or not combined), (combined or 'stopped')
+
+    def _service_remediation(self, item, os_, service_name, expected):
+        action = 'stop' if expected == 'stopped' else 'start'
+        svc = service_name if os_ == 'windows' else shlex.quote(service_name)
+        cmd = _ACTION_CMDS[os_].format(action=action, svc=svc)
+        self.host_exec(item, cmd, timeout=self.get_conf('timeout', 15))
+
+    # ── Discover (local autocomplete, or over SSH for a remote host) ──────────
+    @classmethod
+    def discover(cls, config=None) -> list:
+        """Return [{name, display_name, status}] for the host's services.
+
+        With a remote host context (``config['__host__']``, injected by the route
+        for the Servers modal) the list is read over SSH; otherwise from THIS
+        machine.
+        """
+        from lib import host_runner  # noqa: PLC0415
+        host = (config or {}).get('__host__') if isinstance(config, dict) else None
+        if host_runner.is_remote(host):
+            return cls._discover_remote(host, str(host.get('os') or 'linux'))
         if cls._PLATFORM == 'windows':
             return cls._discover_windows()
         if cls._INIT_SYSTEM == 'openrc':
             return cls._discover_openrc()
         if cls._INIT_SYSTEM == 'sysv':
             return cls._discover_sysv()
-        return cls._discover_systemd()
-
-    @staticmethod
-    def _discover_systemd() -> list:
         try:
             result = subprocess.run(
                 ['systemctl', 'list-units', '--type=service', '--all',
                  '--no-pager', '--no-legend', '--plain'],
                 capture_output=True, text=True, timeout=10,
             )
-            services = []
-            for line in result.stdout.split('\n'):
-                cols = line.split()
-                if len(cols) < 4:
-                    continue
-                raw_name = cols[0]
-                if not raw_name.endswith('.service'):
-                    continue
-                name = raw_name[:-len('.service')]
-                status = cols[3]
-                display = ' '.join(cols[4:]) if len(cols) > 4 else ''
-                services.append({'name': name, 'display_name': display, 'status': status})
-            return sorted(services, key=lambda x: x['name'].lower())
+            return cls._parse_systemd_list(result.stdout)
         except Exception:
             return []
+
+    # ── Remote discovery (over SSH) ──────────────────────────────────────────
+    _DISCOVER_CMDS = {
+        'linux':   'systemctl list-units --type=service --all --no-pager --no-legend --plain',
+        'windows': 'sc query state= all',
+        'darwin':  'launchctl list',
+        'freebsd': 'service -e',
+    }
+
+    @classmethod
+    def _discover_remote(cls, host, os_: str) -> list:
+        from lib import host_runner  # noqa: PLC0415
+        cmd = cls._DISCOVER_CMDS.get(os_) or cls._DISCOVER_CMDS['linux']
+        out, _err, code = host_runner.run(host, cmd, timeout=15)
+        if code != 0 and not out:
+            return []
+        if os_ == 'windows':
+            return cls._parse_sc_query(out)
+        if os_ == 'darwin':
+            return cls._parse_launchctl(out)
+        if os_ == 'freebsd':
+            return cls._parse_service_e(out)
+        return cls._parse_systemd_list(out)
+
+    @staticmethod
+    def _parse_systemd_list(stdout: str) -> list:
+        services = []
+        for line in (stdout or '').split('\n'):
+            cols = line.split()
+            if len(cols) < 4:
+                continue
+            raw_name = cols[0]
+            if not raw_name.endswith('.service'):
+                continue
+            name = raw_name[:-len('.service')]
+            status = cols[3]
+            display = ' '.join(cols[4:]) if len(cols) > 4 else ''
+            services.append({'name': name, 'display_name': display, 'status': status})
+        return sorted(services, key=lambda x: x['name'].lower())
+
+    @staticmethod
+    def _parse_sc_query(stdout: str) -> list:
+        """Parse `sc query state= all` blocks (SERVICE_NAME / STATE …RUNNING)."""
+        services, name = [], None
+        for line in (stdout or '').splitlines():
+            s = line.strip()
+            if s.upper().startswith('SERVICE_NAME:'):
+                name = s.split(':', 1)[1].strip()
+            elif 'STATE' in s.upper() and name:
+                up = s.upper()
+                status = 'running' if 'RUNNING' in up else ('stopped' if 'STOPPED' in up else 'unknown')
+                services.append({'name': name, 'display_name': name, 'status': status})
+                name = None
+        return sorted(services, key=lambda x: x['name'].lower())
+
+    @staticmethod
+    def _parse_launchctl(stdout: str) -> list:
+        """Parse `launchctl list` lines: <PID>\t<status>\t<label>."""
+        services = []
+        for line in (stdout or '').splitlines()[1:]:   # skip header
+            cols = line.split('\t') if '\t' in line else line.split()
+            if len(cols) < 3:
+                continue
+            pid, label = cols[0].strip(), cols[-1].strip()
+            if not label:
+                continue
+            status = 'running' if pid not in ('-', '') and pid.lstrip('-').isdigit() else 'stopped'
+            services.append({'name': label, 'display_name': label, 'status': status})
+        return sorted(services, key=lambda x: x['name'].lower())
+
+    @staticmethod
+    def _parse_service_e(stdout: str) -> list:
+        """Parse FreeBSD `service -e` (paths to enabled rc scripts)."""
+        services = []
+        for line in (stdout or '').splitlines():
+            path = line.strip()
+            if not path:
+                continue
+            name = path.rsplit('/', 1)[-1]
+            services.append({'name': name, 'display_name': name, 'status': 'unknown'})
+        return sorted(services, key=lambda x: x['name'].lower())
 
     @staticmethod
     def _discover_openrc() -> list:

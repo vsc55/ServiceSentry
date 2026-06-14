@@ -164,9 +164,16 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             self._module_secret_fields = ModuleBase.discover_secret_fields(modules_dir)
         except Exception:  # pylint: disable=broad-except
             self._module_secret_fields = set()
-        # Combined key sets: core secrets + module-declared secret fields.
-        self._secret_keys = secret_manager.ENCRYPT_KEYS | self._module_secret_fields
-        self._sensitive_fields = self._SENSITIVE_FIELDS | self._module_secret_fields
+        # Combined key sets: core secrets + the host's built-in SSH secrets +
+        # module-declared secret fields.
+        try:
+            from lib.host_profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
+        except Exception:  # pylint: disable=broad-except
+            CORE_SSH_SECRET_FIELDS = frozenset()
+        self._secret_keys = (secret_manager.ENCRYPT_KEYS | CORE_SSH_SECRET_FIELDS
+                             | self._module_secret_fields)
+        self._sensitive_fields = (self._SENSITIVE_FIELDS | CORE_SSH_SECRET_FIELDS
+                                  | self._module_secret_fields)
         self._secure_cookies = bool(secure_cookies)
         self._REMEMBER_ME_DAYS = int(remember_me_days)
         self._AUDIT_MAX_ENTRIES = int(audit_max_entries)

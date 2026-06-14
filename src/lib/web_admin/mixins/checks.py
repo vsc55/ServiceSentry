@@ -104,6 +104,16 @@ class _ChecksMixin:
                     return mod_name, {}, None
                 return mod_name, None, f'{mod_name}: {type(exc).__name__}: {exc}'
 
+        # Warm module imports sequentially before the concurrent phase: a module
+        # that mutates the global sys.path during its check (dns loads dnspython,
+        # whose package shadows our 'dns' watchful) must not race with bare-name
+        # imports of the others.  After warming, every import is a cache hit.
+        for _m in module_names:
+            try:
+                monitor._import_watchful(_m)
+            except Exception:  # pylint: disable=broad-except
+                pass  # _run_one reports the real per-module error
+
         # Use shutdown(wait=False) so blocking threads do NOT delay the response.
         # concurrent.futures.wait() returns after the deadline; then we shut down
         # the executor without waiting for still-running threads.

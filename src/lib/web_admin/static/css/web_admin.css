@@ -186,6 +186,11 @@
 .ss-card-band-top    { border-bottom: 1px solid var(--bs-border-color); }
 .ss-card-band-bottom { border-top:    1px solid var(--bs-border-color); }
 
+/* ── Collapsible card header (host modal, etc.) ───────────────────────────── */
+.ss-collapse-head { cursor: pointer; user-select: none; }
+.ss-collapse-caret { transition: transform .2s ease; }
+.ss-collapse-head.collapsed .ss-collapse-caret { transform: rotate(-90deg); }
+
 /* ── Full-height content layout ───────────────────────────────────────────
    The active tab fills the viewport below the tabs so short sections don't
    leave a large empty band of page background underneath.  A single anchor on
@@ -243,6 +248,10 @@
 /* ── History tab: two-pane layout inside the section card ──────────────────
    Left sidebar (series list) reads as a distinct panel; the right side is the
    chart drawing zone. */
+/* Cap the History section to the working area so a long SERIES list scrolls
+   inside its own pane (not the whole page) and the chart never grows past the
+   viewport.  Same anchor calc as .tab-content above. */
+#history-container { max-height: calc(100vh - var(--ss-top-offset, 56px) - 5.5rem); }
 .ss-history-body { min-height: 0; }
 .ss-history-sidebar {
     width: 230px;
@@ -258,6 +267,13 @@
     border-bottom: 1px solid var(--bs-border-color);
 }
 .ss-history-main { min-width: 0; }
+/* Thin, rounded scrollbar for the SERIES list — the default chunky square
+   scrollbar clashes with the rounded panel design. */
+#history-series-list { scrollbar-width: thin; scrollbar-color: var(--bs-border-color) transparent; }
+#history-series-list::-webkit-scrollbar             { width: 6px; height: 6px; }
+#history-series-list::-webkit-scrollbar-track       { background: transparent; }
+#history-series-list::-webkit-scrollbar-thumb       { background: var(--bs-border-color); border-radius: 6px; }
+#history-series-list::-webkit-scrollbar-thumb:hover { background: var(--bs-secondary-color); }
 /* Utility relied on by several flex layouts (sessions/status/modules/discovery)
    to let a flex child shrink below its content size so text-truncate works.
    Bootstrap 5 has no min-width utility, so it is defined here. */

@@ -70,8 +70,6 @@ class Watchful(ModuleBase):
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
-        # Consecutive failure counter per host (not persisted).
-        self._fail_count: dict[str, int] = {}
 
     def check(self):
         if not self.is_enabled:
@@ -129,7 +127,8 @@ class Watchful(ModuleBase):
 
                 except Exception as exc: # pylint: disable=broad-except
                     self._debug(f"Check: {name} - Exception: {exc}", DebugLevel.error)
-                    message = f'Check: {name} - *Error: {exc}* 💥'
+                    _lbl = self.get_conf_in_list("label", name, "") or host or name
+                    message = f'Check: {_lbl} - *Error: {exc}* 💥'
                     self.dict_return.set(name, False, message)
 
         super().check()
@@ -144,16 +143,14 @@ class Watchful(ModuleBase):
         other_data = {'latency_ms': round(rtt_ms, 2)} if rtt_ms is not None else {}
 
         # ── Alert threshold: only declare KO after *alert* consecutive
-        #    full-check failures. ──
-        if ping_ok:
-            self._fail_count[name] = 0
-            status = True
-        else:
-            self._fail_count[name] = self._fail_count.get(name, 0) + 1
-            status = self._fail_count[name] < t_alert
+        #    full-check failures.  The counter is persisted in the status store
+        #    (fail_streak) so it survives across cycles and processes. ──
+        streak = self.fail_streak(name, not ping_ok)
+        status = ping_ok or streak < t_alert
 
+        label = self.get_conf_in_list("label", name, "") or host or name
         icon = '🔼' if status else '🔽'
-        s_message = f'Ping: *{name}* {icon}'
+        s_message = f'Ping: *{label}* {icon}'
 
         self.dict_return.set(name, status, s_message, False, other_data=other_data)
 

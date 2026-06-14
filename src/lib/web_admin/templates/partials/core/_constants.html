@@ -104,8 +104,15 @@ const ITEM_SCHEMAS = Object.fromEntries([
 // fields each module contributes (hidden on a check once it is bound to a host).
 const HOST_PROFILES = {{ host_profiles | default({}) | tojson }};
 const MODULE_HOST_FIELDS = {{ module_host_fields | default({}) | tojson }};
+// Which collection(s) of each host-centric module may bind to a host (show the
+// host picker).  SSH-only/address-only modules expose their item collection even
+// though no connection field is inline; nested sub-collections never bind.
+const MODULE_HOST_COLLECTIONS = {{ module_host_collections | default({}) | tojson }};
 // Whether each module allows several checks bound to one host (schema __host_multiple__).
 const MODULE_HOST_MULTIPLE = {{ module_host_multiple | default({}) | tojson }};
+// Host OS selector: selectable values (auto first) + this server's detected OS.
+const HOST_OS_OPTIONS = {{ host_os_options | default([]) | tojson }};
+const LOCAL_OS = {{ local_os | default('other') | tojson }};
 const HINTS = I18N.hints || {};
 const ENV_LOCKED = new Set({{ wa_env_locked_fields | tojson }});
 const LDAP_AVAILABLE  = {{ ldap_available  | tojson }};

@@ -70,7 +70,13 @@ def register(app, wa):
         if not _is_admin_requester() and entry.get('user_uid') != current_uid:
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         if wa._revoke_session(token):
-            wa._audit('session_revoked', detail=uid)
+            # Resolve the session owner's username for the audit trail.
+            _owner = next((u for u, d in wa._users.items()
+                           if d.get('uid') == entry.get('user_uid')), '')
+            wa._audit('session_revoked', detail={
+                'session_uid': uid, 'username': _owner,
+                'ip': entry.get('ip', ''),
+            })
             return jsonify({'ok': True})
         return jsonify({'error': wa._t('session_not_found')}), 404
 
@@ -85,7 +91,7 @@ def register(app, wa):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         count = wa._revoke_user_sessions(username)
         wa._audit('user_sessions_revoked',
-                  detail=f'{username} ({count})')
+                  detail={'username': username, 'count': count})
         if username == session.get('username'):
             session.clear()
         return jsonify({'ok': True, 'count': count})

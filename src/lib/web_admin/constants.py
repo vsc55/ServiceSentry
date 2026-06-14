@@ -11,15 +11,23 @@ __all__ = [
     'ROLES', 'PERMISSIONS', 'PERMISSION_GROUPS',
     '_BUILTIN_GROUPS', 'BUILTIN_ROLE_PERMISSIONS',
     'BUILTIN_ROLE_UIDS', 'BUILTIN_GROUP_UIDS',
-    'SYSTEM_USER', 'is_module_perm',
+    'SYSTEM_USER', 'is_module_perm', 'is_server_perm',
 ]
 
 _MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
+# Per-server (host) permission key.  'add' authorizes adding modules/checks to
+# the server; 'edit'/'delete' act on existing host-bound checks and the host.
+_SERVER_PERM_RE = re.compile(r'^server\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
 
 
 def is_module_perm(p: str) -> bool:
     """Return True if *p* is a valid per-module permission key (module.{name}.{action})."""
     return bool(_MODULE_PERM_RE.match(p))
+
+
+def is_server_perm(p: str) -> bool:
+    """Return True if *p* is a valid per-server permission key (server.{uid}.{action})."""
+    return bool(_SERVER_PERM_RE.match(p))
 
 # Valid user roles ordered by privilege (highest first).
 # 'none' is a built-in role with zero permissions — user gets access only through groups.
@@ -45,6 +53,10 @@ PERMISSIONS = (
     'modules_add',     # create new module entries
     'modules_edit',    # edit module settings and items
     'modules_delete',  # delete items from modules / remove whole modules
+    'servers_view',    # view the servers (host registry) tab
+    'servers_add',     # add modules/checks to a server
+    'servers_edit',    # edit servers, host-bound checks and run host tests/migration
+    'servers_delete',  # delete servers from the host registry
     'config_view',     # read config.json (without editing)
     'config_edit',     # write config.json
     'overview_view',   # view the overview dashboard
@@ -64,6 +76,7 @@ PERMISSION_GROUPS = [
     ('perm_group_groups',   ['groups_view', 'groups_add', 'groups_edit', 'groups_delete']),
     ('perm_group_audit',    ['audit_view', 'audit_delete']),
     ('perm_group_modules',  ['modules_view', 'modules_add', 'modules_edit', 'modules_delete']),
+    ('perm_group_servers',  ['servers_view', 'servers_add', 'servers_edit', 'servers_delete']),
     ('perm_group_config',   ['config_view', 'config_edit']),
     ('perm_group_overview', ['overview_view', 'overview_edit']),
     ('perm_group_sessions', ['sessions_view', 'sessions_revoke']),
@@ -92,17 +105,27 @@ SYSTEM_USER: str = 'system'
 # Built-in role → permission mapping (immutable).
 BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
     'admin':  frozenset(PERMISSIONS),
+    # Editor: edit existing monitoring config and manage identity, but never add
+    # or delete wholesale — no module/server add, no whole-module/server/check
+    # deletion, no history/audit purge, no session revoke, and no
+    # creating/removing users/roles/groups (edit only).
     'editor': frozenset({
         'modules_view', 'modules_edit',
-        'config_edit', 'overview_view', 'overview_edit', 'checks_view', 'checks_run', 'audit_view',
+        'servers_view', 'servers_edit',
+        'config_view', 'config_edit',
+        'overview_view', 'overview_edit',
+        'checks_view', 'checks_run',
+        'audit_view',
+        'sessions_view',
         'users_view', 'users_edit',
         'roles_view', 'roles_edit',
         'groups_view', 'groups_edit',
-        'history_view', 'history_delete',
+        'history_view',
     }),
     'viewer': frozenset({
         'users_view', 'roles_view', 'groups_view',
         'audit_view', 'sessions_view', 'modules_view', 'checks_view', 'overview_view',
+        'servers_view',
         'history_view',
     }),
     'none': frozenset(),

@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_28_flags(self):
+    def test_permissions_tuple_has_32_flags(self):
         from lib.web_admin.app import PERMISSIONS
-        assert len(PERMISSIONS) == 28
+        assert len(PERMISSIONS) == 32
 
     def test_permissions_are_unique(self):
         from lib.web_admin.app import PERMISSIONS
@@ -42,6 +42,7 @@ class TestPermissionsConstants:
             'groups_view', 'groups_add', 'groups_edit', 'groups_delete',
             'audit_view', 'audit_delete',
             'modules_view', 'modules_add', 'modules_edit', 'modules_delete',
+            'servers_view', 'servers_add', 'servers_edit', 'servers_delete',
             'config_view', 'config_edit', 'overview_view', 'overview_edit',
             'sessions_view', 'sessions_revoke',
             'checks_view', 'checks_run',
@@ -113,6 +114,16 @@ class TestPermissionsConstants:
         assert 'groups_add' not in ep
         assert 'groups_delete' not in ep
         assert 'sessions_revoke' not in ep
+        # Servers: edit existing only — no add (new checks) and no whole-server delete
+        assert 'servers_view' in ep
+        assert 'servers_edit' in ep
+        assert 'servers_add' not in ep
+        assert 'servers_delete' not in ep
+        # Editor never performs destructive purges
+        assert 'history_delete' not in ep
+        assert 'audit_delete' not in ep
+        assert 'config_view' in ep
+        assert 'sessions_view' in ep
 
     def test_viewer_has_view_permissions(self):
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
@@ -123,12 +134,17 @@ class TestPermissionsConstants:
         assert 'audit_view' in vp
         assert 'sessions_view' in vp
         assert 'modules_view' in vp
+        assert 'servers_view' in vp
+        assert 'history_view' in vp
         # no write permissions
         assert 'users_add' not in vp
         assert 'users_delete' not in vp
         assert 'modules_add' not in vp
         assert 'modules_edit' not in vp
         assert 'config_edit' not in vp
+        # Viewer is strictly read-only: every permission is a *_view flag.
+        assert all(p.endswith('_view') for p in vp), \
+            f"viewer holds non-view permissions: {sorted(p for p in vp if not p.endswith('_view'))}"
 
     def test_builtin_roles_are_frozensets(self):
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS

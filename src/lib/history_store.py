@@ -160,7 +160,13 @@ class HistoryStore:
                         WHERE COALESCE(h2.item_uid, h2.module || ':' || h2.key)
                             = COALESCE(h.item_uid, h.module || ':' || h.key)
                         ORDER BY h2.ts DESC LIMIT 1
-                    ) AS last_data
+                    ) AS last_data,
+                    (
+                        SELECT h3.status FROM history h3
+                        WHERE COALESCE(h3.item_uid, h3.module || ':' || h3.key)
+                            = COALESCE(h.item_uid, h.module || ':' || h.key)
+                        ORDER BY h3.ts DESC LIMIT 1
+                    ) AS last_status
                 FROM history h
                 GROUP BY COALESCE(h.item_uid, h.module || ':' || h.key)
                 ORDER BY h.module, h.key
@@ -169,14 +175,15 @@ class HistoryStore:
             return []
         return [
             {
-                'module':    r[0],
-                'item_uid':  r[1],
-                'key':       r[2],
-                'count':     r[3],
-                'last_ts':   r[4],
-                'first_ts':  r[5],
-                'uptime':    round((r[6] or 0) * 100, 1),
-                'last_data': _load_json(r[7]),
+                'module':      r[0],
+                'item_uid':    r[1],
+                'key':         r[2],
+                'count':       r[3],
+                'last_ts':     r[4],
+                'first_ts':    r[5],
+                'uptime':      round((r[6] or 0) * 100, 1),
+                'last_data':   _load_json(r[7]),
+                'last_status': None if r[8] is None else bool(r[8]),
             }
             for r in rows
         ]

@@ -372,3 +372,62 @@ class TestListDatabases:
         result = Watchful.list_databases({'db_type': 'memcached', 'conn_type': 'tcp',
                                           'host': 'h', 'port': 11211})
         assert result['ok'] is False
+
+
+class TestSshKeyString:
+    """Inline private key (PEM/OpenSSH text) support for the SSH tunnel."""
+
+    def test_pkey_from_string_invalid_raises(self):
+        import watchfuls.datastore as mod
+        if not mod._PARAMIKO:
+            pytest.skip('paramiko not installed')
+        with pytest.raises(ValueError):
+            mod._pkey_from_string('not a key')
+
+    def test_pkey_from_string_parses_generated_key(self):
+        import watchfuls.datastore as mod
+        if not mod._PARAMIKO:
+            pytest.skip('paramiko not installed')
+        import io
+        import paramiko
+        key = paramiko.RSAKey.generate(1024)
+        buf = io.StringIO()
+        key.write_private_key(buf)
+        parsed = mod._pkey_from_string(buf.getvalue())
+        assert parsed.get_fingerprint() == key.get_fingerprint()
+
+    def test_build_cfg_includes_key_string(self):
+        from watchfuls.datastore import Watchful
+        cfg = {'watchfuls.datastore': {'list': {'d1': {
+            'db_type': 'postgres', 'conn_type': 'ssh', 'host': 'db.local',
+            'ssh_host': 'jump', 'ssh_user': 'j',
+            'ssh_key_string': '-----BEGIN OPENSSH PRIVATE KEY-----'}}}}
+        w = Watchful(create_mock_monitor(cfg))
+        out = w._build_cfg('d1', 'postgres')
+        assert out['ssh_key_string'].startswith('-----BEGIN')
+
+
+class TestSshVerifyHostBool:
+    """ssh_verify_host is a bool: a False/absent value must NOT enable strict
+    host-key checking (regression: it was parsed as the string 'False' = truthy)."""
+
+    def _cfg(self, **over):
+        base = {'db_type': 'mariadb', 'conn_type': 'ssh', 'host': 'db.local',
+                'ssh_host': 'jump', 'ssh_user': 'j'}
+        base.update(over)
+        return {'watchfuls.datastore': {'list': {'d1': {'enabled': True, **base}}}}
+
+    def test_absent_is_false(self):
+        from watchfuls.datastore import Watchful
+        w = Watchful(create_mock_monitor(self._cfg()))
+        assert w._build_cfg('d1', 'mariadb')['ssh_verify_host'] is False
+
+    def test_explicit_false_stays_false(self):
+        from watchfuls.datastore import Watchful
+        w = Watchful(create_mock_monitor(self._cfg(ssh_verify_host=False)))
+        assert w._build_cfg('d1', 'mariadb')['ssh_verify_host'] is False
+
+    def test_explicit_true_stays_true(self):
+        from watchfuls.datastore import Watchful
+        w = Watchful(create_mock_monitor(self._cfg(ssh_verify_host=True)))
+        assert w._build_cfg('d1', 'mariadb')['ssh_verify_host'] is True

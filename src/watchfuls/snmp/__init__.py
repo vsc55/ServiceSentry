@@ -394,13 +394,9 @@ _compile_jobs: dict = {}
 # GIL-safe write/poll pattern as _compile_jobs.
 _github_jobs: dict = {}
 
-# ── Consecutive-failure counters (must survive across check cycles) ──────────
-# The monitor builds a fresh Watchful instance every cycle, so the "alert"
-# threshold (N consecutive failures before going DOWN) cannot live on the
-# instance — it would reset each cycle and any threshold > 1 would never fire.
-# Keyed by the per-check composite key ("server.check"); pruned each cycle to
-# the currently-enabled checks.  Concurrent writes hit distinct keys (GIL-safe).
-_FAIL_COUNTS: dict[str, int] = {}
+# NOTE: consecutive-failure counters for the "alert" threshold are persisted in
+# the monitor's status store via ModuleBase.fail_streak — instance state resets
+# every cycle and even module-level state dies between systemd one-shot runs.
 
 # ── Watchful class ────────────────────────────────────────────────────────────
 
@@ -1294,12 +1290,6 @@ class Watchful(ModuleBase):
                 if chk_cfg.get('enabled', _CHECK_DEFAULTS['enabled']):
                     items.append((f'{srv_key}.{chk_key}', chk_cfg, srv))
 
-        # Drop failure counters for checks that no longer exist / are disabled,
-        # so removing a check resets its debounce and the dict can't grow forever.
-        _current = {key for key, _, _ in items}
-        for _stale in [k for k in _FAIL_COUNTS if k not in _current]:
-            del _FAIL_COUNTS[_stale]
-
         max_workers = self.get_conf('threads', self._DEFAULT_THREADS)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
@@ -1330,6 +1320,9 @@ class Watchful(ModuleBase):
         # Host-centric: if the server references a host, merge its address +
         # SNMP credential profile (no-op for classic inline servers).
         server = self.resolve_host(server)
+        # Bound host in maintenance → resolve_host disables it: skip the check.
+        if server.get('_host_maintenance') or not server.get('enabled', True):
+            return
 
         host      = str(server.get('host',      '') or '').strip()
         port      = int(server.get('port',      _SERVER_DEFAULTS['port'])      or _SERVER_DEFAULTS['port'])
@@ -1371,19 +1364,21 @@ class Watchful(ModuleBase):
         )
 
         if err:
-            _FAIL_COUNTS[key] = _FAIL_COUNTS.get(key, 0) + 1
-            # status True while still within the grace window; once the failure
-            # count reaches the threshold the check is reported DOWN.
-            status = _FAIL_COUNTS[key] < max(1, t_alert)
+            # Consecutive-failure debounce, persisted via fail_streak (status
+            # store) so it survives fresh instances per cycle AND fresh
+            # processes in systemd one-shot mode.  status stays True while
+            # within the grace window; at the threshold the check goes DOWN.
+            streak = self.fail_streak(key, True)
+            status = streak < max(1, t_alert)
             icon   = '🔼' if status else '🔽'
             msg    = f'SNMP: {label} {icon} [{err}]'
-            self._debug(f'SNMP: {key} — error: {err} (fails={_FAIL_COUNTS[key]}/{t_alert})', DebugLevel.warning)
+            self._debug(f'SNMP: {key} — error: {err} (fails={streak}/{t_alert})', DebugLevel.warning)
             self.dict_return.set(key, status, msg, False, {'oid': oid, 'error': err})
             if self.check_status(status, self.name_module, key):
                 self.send_message(msg, status)
             return
 
-        _FAIL_COUNTS[key] = 0
+        self.fail_streak(key, False)
         status = self._evaluate(raw_value, operator, expected)
         icon   = '🔼' if status else '🔽'
         msg    = f'SNMP: {label} {icon} [{raw_value}]'

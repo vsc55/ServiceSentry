@@ -193,9 +193,11 @@ class TestUpsCheck:
         assert od['host'] == '192.168.1.10'
         assert od['ups_name'] == 'ups'
         assert od['status'] == 'OL'
-        assert od['battery_charge'] == '95'
-        assert od['runtime'] == '1800'
-        assert od['load'] == '30'
+        # Numeric metrics for history: charge %, runtime in MINUTES, load %.
+        assert od['battery_charge'] == 95.0
+        assert od['runtime'] == 30.0           # 1800s / 60
+        assert od['load'] == 30.0
+        assert od['on_battery'] is False and od['low_battery'] is False
 
     @patch('watchfuls.ups._nut_query', return_value=_make_vars('OL'))
     def test_check_ol_lb_combination_is_not_ok(self, mock_query):
@@ -211,3 +213,81 @@ class TestUpsCheck:
         result = w.check()
         items = result.list
         assert items['myups']['status'] is False
+
+
+class TestUpsThresholds:
+    """Configurable alert thresholds (battery %, runtime min, load %, on-battery)."""
+
+    Watchful = ups_module.Watchful
+
+    def _run(self, vars_, item):
+        config = {'watchfuls.ups': {'list': {'u': {
+            'enabled': True, 'host': '10.0.0.1', 'ups_name': 'ups', **item}}}}
+        with patch('watchfuls.ups._nut_query', return_value=vars_):
+            return ups_module.Watchful(create_mock_monitor(config)).check().list['u']
+
+    def test_low_battery_charge_triggers(self):
+        r = self._run(_make_vars('OL', charge='15'), {'alert_battery': 20})
+        assert r['status'] is False and 'battery' in r['message'].lower()
+
+    def test_charge_above_threshold_ok(self):
+        r = self._run(_make_vars('OL', charge='80'), {'alert_battery': 20})
+        assert r['status'] is True
+
+    def test_low_runtime_triggers(self):
+        # 300s = 5 min, below the 10-min threshold.
+        r = self._run(_make_vars('OL', runtime='300'), {'alert_runtime': 10})
+        assert r['status'] is False and 'runtime' in r['message'].lower()
+
+    def test_on_battery_alerts_by_default(self):
+        r = self._run(_make_vars('OB'), {})
+        assert r['status'] is False
+
+    def test_on_battery_alert_can_be_disabled(self):
+        # OB but alert_on_battery off and charge/runtime healthy → OK.
+        r = self._run(_make_vars('OB', charge='100', runtime='3600'),
+                      {'alert_on_battery': False})
+        assert r['status'] is True
+
+    def test_load_threshold_triggers(self):
+        r = self._run(_make_vars('OL', load='95'), {'alert_load': 80})
+        assert r['status'] is False and 'load' in r['message'].lower()
+
+    def test_load_threshold_disabled_by_default(self):
+        # Default alert_load=0 → high load alone does not alert.
+        r = self._run(_make_vars('OL', load='99'), {})
+        assert r['status'] is True
+
+
+class TestTestConnection:
+    """Web-UI test_connection action."""
+
+    @patch('watchfuls.ups._nut_query', return_value=_make_vars('OL'))
+    def test_ok(self, mock_query):
+        res = ups_module.Watchful.test_connection(
+            {'host': '192.168.1.10', 'port': 3493, 'ups_name': 'ups'})
+        assert res['ok'] is True
+        assert '192.168.1.10:3493' in res['message']
+        assert 'OL' in res['message']
+        # On success it returns ALL NUT variables for the info modal.
+        assert res['info']['ups.status'] == 'OL'
+        assert 'battery.charge' in res['info'] and 'ups.load' in res['info']
+
+    @patch('watchfuls.ups._nut_query', side_effect=ConnectionRefusedError('refused'))
+    def test_failure_returns_message(self, mock_query):
+        res = ups_module.Watchful.test_connection({'host': '10.0.0.9'})
+        assert res['ok'] is False
+        assert 'refused' in res['message']
+
+    def test_no_host(self):
+        res = ups_module.Watchful.test_connection({'host': '', 'port': 3493})
+        assert res['ok'] is False
+
+    @patch('watchfuls.ups._nut_query', return_value=_make_vars('OB'))
+    def test_host_from_bound_host_ctx(self, mock_query):
+        """Empty host falls back to the bound host's address (__host__)."""
+        res = ups_module.Watchful.test_connection(
+            {'host': '', '__host__': {'address': '172.16.0.5'}})
+        assert res['ok'] is True
+        assert '172.16.0.5' in res['message']
+        assert mock_query.call_args.kwargs['host'] == '172.16.0.5'

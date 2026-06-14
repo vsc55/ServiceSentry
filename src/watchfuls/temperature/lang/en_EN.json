@@ -3,12 +3,18 @@
     "module_description": "Monitors CPU and hardware sensor temperatures via psutil. Alerts when any sensor reading exceeds the configured threshold.",
     "labels": {
         "enabled": "Enabled",
+        "threads": "Threads",
+        "timeout": "Timeout (s)",
+        "sensor":  "Sensor",
         "label":   "Label",
         "alert":   "Alert (\u00b0C)"
     },
     "hints": {
         "enabled": "Enable or disable monitoring for this sensor.",
-        "label":   "Display name shown in notifications. Falls back to the psutil sensor label or chip name if empty.",
+        "threads": "Number of sensors to check in parallel.",
+        "timeout": "Command/SSH timeout in seconds.",
+        "sensor":  "Sensor name (Linux thermal zone type) to read on the host. If empty, the item key is used.",
+        "label":   "Display name shown in notifications. Falls back to the sensor name if empty.",
         "alert":   "Temperature threshold (\u00b0C). An alert is triggered when the sensor exceeds this value. Overrides the module-level threshold."
     },
     "new_item_key_label": "Sensor name:",

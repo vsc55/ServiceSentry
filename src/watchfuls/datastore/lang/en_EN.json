@@ -19,6 +19,7 @@
         "ssh_user":     "SSH user",
         "ssh_password": "SSH password",
         "ssh_key":      "SSH private key",
+        "ssh_key_string": "SSH private key (text)",
         "ssh_verify_host": "Verify SSH host key",
         "scheme":       "Scheme",
         "auth_db":      "Auth database",
@@ -42,6 +43,7 @@
         "ssh_user":     "Username for the SSH connection.",
         "ssh_password": "Password for the SSH connection. Leave empty when using a key file.",
         "ssh_key":      "Path to the SSH private key file. Takes precedence over the SSH password when both are set.",
+        "ssh_key_string": "Private key content in PEM/OpenSSH format (alternative to the key file path). Takes precedence over the key file. The SSH password, if set, is used as the key passphrase.",
         "ssh_verify_host": "When enabled, the SSH host key must already be in ~/.ssh/known_hosts — an unknown or changed key aborts the connection (protects against MITM). When disabled, any host key is accepted on first contact.",
         "scheme":       "HTTP or HTTPS for Elasticsearch / OpenSearch / InfluxDB.",
         "auth_db":      "MongoDB authentication database (default: admin).",
@@ -81,6 +83,18 @@
         "test_connection_tt":  "Test the full database connection",
         "list_databases":      "List databases / buckets / indices",
         "list_databases_tt":   "Fetch the list of available databases from the server"
+    },
+    "field_terms": {
+        "db": {
+            "mysql":         {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
+            "mariadb":       {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
+            "postgres":      {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
+            "mssql":         {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
+            "mongodb":       {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
+            "elasticsearch": {"label": "Index",    "hint": "Index to monitor.",        "action": "List indices",   "pick": "Select index"},
+            "opensearch":    {"label": "Index",    "hint": "Index to monitor.",        "action": "List indices",   "pick": "Select index"},
+            "influxdb":      {"label": "Bucket",   "hint": "Bucket to monitor.",       "action": "List buckets",   "pick": "Select bucket"}
+        }
     },
     "new_item_title": "New Datastore",
     "new_item_key_label": "Connection name:",

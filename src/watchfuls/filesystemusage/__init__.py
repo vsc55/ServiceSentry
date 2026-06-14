@@ -21,8 +21,14 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-""" Watchful to check filesystem usage (cross-platform via psutil). """
+"""Watchful to check filesystem usage on the bound host (local or over SSH).
 
+Host-centric: each check binds to a host (``host_uid``) and a mount point.  Disk
+usage is read on that host via :meth:`ModuleBase.host_exec` (``df`` on Unix,
+``wmic logicaldisk`` on Windows) and compared with a per-check threshold.
+"""
+
+import concurrent.futures
 import json
 import os
 
@@ -33,128 +39,179 @@ from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
+_DF_CMDS = {
+    'linux':   'df -P -k',
+    'darwin':  'df -P -k',
+    'freebsd': 'df -P -k',
+    'other':   'df -P -k',
+    'windows': 'wmic logicaldisk get DeviceID,FreeSpace,Size /format:value',
+}
+
+# Pseudo/virtual filesystems hidden in local discovery.
+_IGNORED_FSTYPES = frozenset({
+    'squashfs', 'tmpfs', 'devtmpfs', 'overlay', 'proc', 'sysfs',
+    'devfs', 'cgroup', 'cgroup2', 'autofs', 'binfmt_misc',
+})
+
 
 class Watchful(ModuleBase):
-    """ Watchful to check filesystem usage (cross-platform via psutil). """
-
-    # Filesystem types to ignore (virtual / pseudo filesystems).
-    _IGNORED_FSTYPES = frozenset({
-        'squashfs', 'tmpfs', 'devtmpfs', 'overlay', 'proc', 'sysfs',
-        'devfs', 'cgroup', 'cgroup2', 'autofs', 'binfmt_misc',
-    })
+    """Check filesystem usage per host + mount point against a threshold."""
 
     ITEM_SCHEMA = _SCHEMA
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
 
-    # Default values are derived from schema.json so there is a single
-    # source of truth that the web UI can also consume.
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
                  if isinstance(v, dict) and 'default' in v}
+    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
+                        if isinstance(v, dict) and 'default' in v}
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
 
     def check(self):
         if not self.is_enabled:
-            self._debug("FilesystemUsage: Module disabled, skipping check.", DebugLevel.info)
+            self._debug("FilesystemUsage: module disabled, skipping.", DebugLevel.info)
             return self.dict_return
-
-        # Build per-partition config from the list section.
-        # Maps mountpoint → per-partition config dict (may include 'alert').
-        partition_configs: dict = {}
-        raw_list = self.get_conf('list', {})
-        has_explicit_list = bool(raw_list)
-
-        for (key, value) in raw_list.items():
-            match value:
-                case int():
-                    # Legacy format: int value is the alert threshold for this partition.
-                    partition_configs[key] = {'alert': value}
-                    self._debug(
-                        f"[Deprecate] Check: {key} - Alert: {value}. Please update format.",
-                        DebugLevel.warning
-                    )
-
-                case dict():
-                    is_enabled = value.get("enabled", self._DEFAULTS['enabled'])
-                    if is_enabled:
-                        part = (value.get('partition', '') or '').strip() or key
-                        partition_configs[part] = value
-                        self._debug(f"Check: {part} - Enabled: True", DebugLevel.info)
-
-                case _:
-                    self._debug(
-                        f"Check: {key} - Invalid configuration format. Treating as disabled.",
-                        DebugLevel.warning
-                    )
-
-        # Module-level alert threshold (fallback when partition has no specific config).
-        module_alert = self.get_conf('alert', self._DEFAULTS['alert'])
-
-        for part in psutil.disk_partitions():
-            if part.fstype in self._IGNORED_FSTYPES:
-                continue
-
-            mount_point = part.mountpoint
-
-            # When an explicit list is provided, only check configured partitions.
-            if has_explicit_list and mount_point not in partition_configs:
-                continue
-
-            try:
-                usage = psutil.disk_usage(mount_point)
-            except (PermissionError, OSError):
-                self._debug(
-                    f"FilesystemUsage: Permission denied for {mount_point}, skipping.",
-                    DebugLevel.warning
-                )
-                continue
-
-            used_percent = usage.percent
-            cfg = partition_configs.get(mount_point, {})
-            for_usage_alert = cfg.get('alert') or module_alert
-
-            if used_percent > float(for_usage_alert):
-                status = False
-                s_msg = "Warning"
-                icon = '⚠️'
-            else:
-                status = True
-                s_msg = "Normal"
-                icon = '✅'
-
-            s_msg = f'{s_msg} partition {part.device} used {used_percent}% {icon}'
-
-            other_data = {
-                'used': used_percent,
-                'mount': mount_point,
-                'alert': for_usage_alert
-            }
-            self.dict_return.set(mount_point, status, s_msg, other_data=other_data)
-
+        items = [(k, v) for k, v in self.get_conf('list', {}).items()
+                 if isinstance(v, dict) and v.get('enabled', self._DEFAULTS['enabled'])]
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.get_conf('threads', self._MODULE_DEFAULTS['threads'])) as executor:
+            futures = {executor.submit(self._fs_check, k, v): k for k, v in items}
+            for future in concurrent.futures.as_completed(futures):
+                key = futures[future]
+                try:
+                    future.result()
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._debug(f"FilesystemUsage: {key} - Exception: {exc}", DebugLevel.error)
+                    raw = self.get_conf('list', {}).get(key, {})
+                    lbl = (raw.get('label') or raw.get('partition') or key) if isinstance(raw, dict) else key
+                    self.dict_return.set(key, False, f'Disk: {lbl} - *Error: {exc}* 💥')
         super().check()
         return self.dict_return
 
+    def _fs_check(self, key, raw):
+        item = self.resolve_host(raw)
+        if item.get('_host_maintenance') or not item.get('enabled', True):
+            return
+        part = (item.get('partition', '') or '').strip() or key
+        # Editable display name (e.g. "host - /"); falls back to the partition.
+        label = (item.get('label', '') or '').strip() or part
+        os_ = self.host_os(item)
+        cmd = self.host_cmd_for(item, _DF_CMDS, default_os='linux')
+        out, err, code = self.host_exec(
+            item, cmd, timeout=self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']))
+        if code != 0 and not out:
+            raise OSError((err or '').strip() or f'df exited {code}')
+        used = self._parse(os_, out, part)
+        if used is None:
+            raise ValueError(f'mount point "{part}" not found')
+
+        alert = float(item.get('alert', 0) or self.get_conf('alert', self._MODULE_DEFAULTS['alert']))
+        ok = used <= alert
+        msg = f'{label} ({part}) used {used}%' if label != part else f'partition {part} used {used}%'
+        msg = f'Normal {msg} ✅' if ok else f'Warning {msg} ⚠️'
+        # Key the result by the item key (unique per check) — not by the mount
+        # point, or two checks on the same partition would collide into one.
+        self.dict_return.set(key, ok, msg, other_data={'used': used, 'mount': part, 'alert': alert})
+
+    # ── Parsers (pure) ────────────────────────────────────────────────────────
     @classmethod
-    def discover(cls) -> list:
-        """Return [{name, display_name, device, fstype, status}] for all mounted partitions."""
+    def _parse(cls, os_, out, part):
+        return cls._parse_wmic(out, part) if os_ == 'windows' else cls._parse_df(out, part)
+
+    @staticmethod
+    def _parse_df(out, part):
+        """`df -P -k` → use% for the row matching *part* (mount point or device)."""
+        for line in out.splitlines()[1:]:
+            f = line.split()
+            if len(f) < 6:
+                continue
+            cap = f[4].rstrip('%')
+            mount = ' '.join(f[5:])
+            if (mount == part or f[0] == part) and cap.lstrip('-').isdigit():
+                return int(cap)
+        return None
+
+    @staticmethod
+    def _parse_wmic(out, part):
+        """`wmic logicaldisk … /format:value` → used% for the matching DeviceID."""
+        disks, cur = [], {}
+        for line in out.splitlines():
+            line = line.strip()
+            if not line:
+                if cur:
+                    disks.append(cur); cur = {}
+                continue
+            if '=' in line:
+                k, _, v = line.partition('=')
+                cur[k.strip()] = v.strip()
+        if cur:
+            disks.append(cur)
+        want = part.rstrip('\\').upper()
+        for d in disks:
+            if d.get('DeviceID', '').rstrip('\\').upper() == want:
+                size = int(d.get('Size') or 0)
+                free = int(d.get('FreeSpace') or 0)
+                return round((size - free) / size * 100) if size > 0 else None
+        return None
+
+    # ── Discover (local autocomplete, or over SSH for a remote host) ──────────
+    @classmethod
+    def discover(cls, config=None) -> list:
+        from lib import host_runner  # noqa: PLC0415
+        host = (config or {}).get('__host__') if isinstance(config, dict) else None
+        if host_runner.is_remote(host):
+            os_ = str(host.get('os') or 'linux')
+            cmd = _DF_CMDS.get(os_) or _DF_CMDS['linux']
+            out, _err, code = host_runner.run(host, cmd, timeout=15)
+            if code != 0 and not out:
+                return []
+            return cls._discover_parse(os_, out)
         try:
-            partitions = []
+            parts = []
             for p in psutil.disk_partitions():
-                if p.fstype in cls._IGNORED_FSTYPES:
+                if p.fstype in _IGNORED_FSTYPES:
                     continue
                 try:
                     pct = f'{psutil.disk_usage(p.mountpoint).percent:.0f}%'
                 except (PermissionError, OSError):
                     pct = '?'
-                display = p.device + (f' ({p.fstype})' if p.fstype else '')
-                partitions.append({
-                    'name': p.mountpoint,
-                    'display_name': display,
-                    'device': p.device,
-                    'fstype': p.fstype,
-                    'status': pct,
-                })
-            return sorted(partitions, key=lambda x: x['name'].lower())
-        except Exception:
+                parts.append({'name': p.mountpoint,
+                              'display_name': p.device + (f' ({p.fstype})' if p.fstype else ''),
+                              'status': pct})
+            return sorted(parts, key=lambda x: x['name'].lower())
+        except Exception:  # pylint: disable=broad-except
             return []
+
+    @staticmethod
+    def _discover_parse(os_, out):
+        items = []
+        if os_ == 'windows':
+            disks, cur = [], {}
+            for line in out.splitlines():
+                line = line.strip()
+                if not line:
+                    if cur:
+                        disks.append(cur); cur = {}
+                    continue
+                if '=' in line:
+                    k, _, v = line.partition('=')
+                    cur[k.strip()] = v.strip()
+            if cur:
+                disks.append(cur)
+            for d in disks:
+                dev = d.get('DeviceID', '')
+                if not dev:
+                    continue
+                size = int(d.get('Size') or 0)
+                free = int(d.get('FreeSpace') or 0)
+                pct = f'{round((size - free) / size * 100)}%' if size > 0 else '?'
+                items.append({'name': dev, 'display_name': dev, 'status': pct})
+            return sorted(items, key=lambda x: x['name'].lower())
+        for line in out.splitlines()[1:]:
+            f = line.split()
+            if len(f) < 6:
+                continue
+            mount = ' '.join(f[5:])
+            items.append({'name': mount, 'display_name': f[0], 'status': f[4]})
+        return sorted(items, key=lambda x: x['name'].lower())

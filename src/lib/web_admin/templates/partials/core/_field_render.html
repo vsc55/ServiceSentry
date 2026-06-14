@@ -5,8 +5,26 @@
    ================================================================ #}
 
 // ──────────────────────────── Field render ─────────────────────────
+// Resolve a field's value-dependent term (label/hint/action/pick) from the
+// module i18n `field_terms`, driven by a sibling field (meta.term_field) — e.g.
+// datastore's 'db' → Database/Index/Bucket by db_type.  Returns null if none.
+function _fieldTermFor(key, meta, pathStr, target) {
+    const tf = meta && meta.term_field;
+    if (!tf) return null;
+    const modName = pathStr.split('|')[0];
+    const data = (target === 'config') ? configData : modulesData;
+    const item = getPath(data, pathStr.split('|').slice(0, -1)) || {};
+    const i18n = ITEM_SCHEMAS[modName + '|__i18n__'];
+    const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
+    const terms = ld && ld.field_terms && ld.field_terms[key];
+    return (terms && terms[item[tf]]) || null;
+}
+
 function renderField(key, value, pathStr, target = 'modules') {
-    const _hint = fieldHint(pathStr);
+    const _parentRaw0 = pathStr.split('|').slice(0, -1).join('|');
+    const _meta0 = fieldMeta(ITEM_SCHEMAS[_schemaKeyOf(_parentRaw0) || pathStr.split('|').slice(0, 2).join('|')] || null, key);
+    const _term0 = _fieldTermFor(key, _meta0, pathStr, target);
+    const _hint = (_term0 && _term0.hint) || fieldHint(pathStr);
     const _hintId = _hint ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
     const _infoIcon = _hint
         ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
@@ -61,7 +79,9 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
 
     // fieldLabel receives meta so it can use label_i18n (avoids inheriting global labels
     // from unrelated config sections, e.g. LDAP's "server" leaking into SNMP fields).
-    const lbl = esc(fieldLabel(key, meta));
+    // A value-dependent term (e.g. datastore 'db' → Database/Index/Bucket) wins.
+    const _term = _fieldTermFor(key, meta, pathStr, target);
+    const lbl = esc((_term && _term.label) || fieldLabel(key, meta));
     const lblHtml = lbl + _infoIcon;
 
     // Hidden fields are stored in data but never rendered to the user.
@@ -150,10 +170,14 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         if (meta && meta.placeholder_map) {
             const _itemParts = pathStr.split('|').slice(0, -1);
             const _itemData = getPath(modulesData, _itemParts) || getPath(configData, _itemParts) || {};
-            const _sibVal = _itemData['db_type'] || '';
+            // The sibling field that keys the map is declared by the module's
+            // schema (placeholder_map_field) — never hardcoded in core.
+            const _sibField = meta.placeholder_map_field || '';
+            const _sibVal = _sibField ? (_itemData[_sibField] || '') : '';
             const _ph = meta.placeholder_map[_sibVal];
             if (_ph != null) extraAttrs += ` placeholder="${escAttr(String(_ph))}"`;
             extraAttrs += ` data-placeholder-map="${escAttr(JSON.stringify(meta.placeholder_map))}"`;
+            extraAttrs += ` data-placeholder-map-field="${escAttr(_sibField)}"`;
             extraAttrs += ` data-zero-as-blank="1"`;
             if (value === 0) displayValue = '';
         } else if (meta && meta.placeholder != null) {
@@ -274,7 +298,20 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 _strPh = ` placeholder="${escAttr(_itemKey)}"`;
             } else if (meta && meta.placeholder != null) {
                 const _phRaw = String(meta.placeholder);
-                _strPh = ` placeholder="${escAttr(_phRaw === '__key__' && _itemKey ? _itemKey : _phRaw)}"`;
+                let _phVal = _phRaw;
+                if (_phRaw === '__key__') {
+                    _phVal = _itemKey;
+                } else if (_phRaw === '__address__') {
+                    // Resolve to the item's address field (host/url/address), or —
+                    // when bound to a host — to that host's address.
+                    const _it = getPath(modulesData, pathStr.split('|').slice(0, -1)) || {};
+                    _phVal = _it.host || _it.url || _it.address || '';
+                    if (!_phVal && _it.host_uid && typeof hostsList === 'function') {
+                        const _h = hostsList().find(h => h.uid === _it.host_uid);
+                        _phVal = (_h && _h.address) || '';
+                    }
+                }
+                _strPh = _phVal ? ` placeholder="${escAttr(_phVal)}"` : '';
             }
         }
         const _strPhCls = _strPh ? ' item-key-ph' : '';
@@ -347,7 +384,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _modI18n2 = ITEM_SCHEMAS[_modName2 + '|__i18n__'];
             const _modLd2   = _modI18n2 && (_modI18n2[CURRENT_LANG] || _modI18n2[SYSTEM_DEFAULT_LANG]);
             const _al2      = (_modLd2 && _modLd2.action_labels) || {};
-            const _iaLabel  = escAttr(_al2[_ia.id] || t(_ia.id) || _ia.id);
+            const _iaLabel  = escAttr((_term && _term.action) || _al2[_ia.id] || t(_ia.id) || _ia.id);
             const _itemPath = escAttr(pathStr.split('|').slice(0, -1).join('|'));
             return `<div class="row mb-2 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
@@ -500,10 +537,17 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     // connection.  Show a host picker and, when one is bound, hide those fields.
     const _modBase = _modName.replace(/^watchfuls\./, '');
     const _hostFields = (target !== 'config')
-        ? (MODULE_HOST_FIELDS[_modBase] || MODULE_HOST_FIELDS[_modName] || null) : null;
-    // Only the collection that actually holds the connection fields is host-capable
-    // (e.g. snmp 'servers', not its 'checks' sub-collection nor '__module__').
-    const _hostCapable = !!(_hostFields && _sch && _hostFields.some(f => f in _sch));
+        ? (MODULE_HOST_FIELDS[_modBase] || MODULE_HOST_FIELDS[_modName] || []) : [];
+    // A collection is host-capable when MODULE_HOST_COLLECTIONS lists it — this
+    // covers SSH-only/address-only modules (cpu, dns, ram_swap, web…) whose
+    // connection fields are never inline, while still excluding nested
+    // sub-collections (e.g. snmp 'servers|checks').  The suffix matches
+    // _schemaKeyOf (the schema key without the leading "module|").
+    const _collKey = (target !== 'config') ? (_schemaKeyOf(pathPrefix) || '') : '';
+    const _collSuffix = _collKey.includes('|') ? _collKey.slice(_collKey.indexOf('|') + 1) : '';
+    const _hostColls = (target !== 'config')
+        ? (MODULE_HOST_COLLECTIONS[_modBase] || MODULE_HOST_COLLECTIONS[_modName] || null) : null;
+    const _hostCapable = !!(_hostColls && _collSuffix && _hostColls.includes(_collSuffix));
     const _hostBound = _hostCapable && obj && obj.host_uid;
     if (_hostCapable) {
         h += _renderHostPicker(pathPrefix, obj.host_uid || '', target);
@@ -642,11 +686,13 @@ function _refreshConditionalFields(itemPathStr) {
                 }
             } catch {}
         });
-        // Update placeholder for inputs with a placeholder_map (e.g. port depends on db_type).
+        // Update placeholder for inputs with a placeholder_map (keyed by the
+        // sibling field the module's schema declares via placeholder_map_field).
         container.querySelectorAll('input[data-placeholder-map]').forEach(el => {
             try {
                 const map = JSON.parse(el.dataset.placeholderMap);
-                const ph = map[itemData['db_type'] || ''];
+                const keyField = el.dataset.placeholderMapField || '';
+                const ph = keyField ? map[itemData[keyField] || ''] : undefined;
                 el.placeholder = ph != null ? String(ph) : '';
             } catch {}
         });

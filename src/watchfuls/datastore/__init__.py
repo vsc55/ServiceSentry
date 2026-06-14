@@ -87,11 +87,28 @@ _PRETTY = {
 
 # ── SSH tunnel ────────────────────────────────────────────────────────────────
 
+def _pkey_from_string(key_string: str, password: str = ''):
+    """Load a paramiko private key from PEM/OpenSSH text (any supported type)."""
+    import io  # noqa: PLC0415
+    last_exc = None
+    for cls_name in ('Ed25519Key', 'ECDSAKey', 'RSAKey', 'DSSKey'):
+        cls = getattr(paramiko, cls_name, None)
+        if cls is None:
+            continue
+        try:
+            return cls.from_private_key(io.StringIO(key_string),
+                                        password=password or None)
+        except Exception as exc:  # pylint: disable=broad-except
+            last_exc = exc
+    raise ValueError(f'Unsupported or invalid private key: {last_exc}')
+
+
 class _SSHTunnel:
     """One-shot SSH TCP port-forward tunnel."""
 
     def __init__(self, ssh_host, ssh_port, ssh_user, ssh_password, ssh_key,
-                 remote_host, remote_port, timeout=10, verify_host=False):
+                 remote_host, remote_port, timeout=10, verify_host=False,
+                 ssh_key_string=''):
         client = paramiko.SSHClient()
         if verify_host:
             # Strict mode: only hosts present in the system/user known_hosts are
@@ -110,7 +127,11 @@ class _SSHTunnel:
             'username': str(ssh_user),
             'timeout': timeout, 'banner_timeout': timeout, 'auth_timeout': timeout,
         }
-        if ssh_key:
+        if ssh_key_string:
+            # Inline private key (PEM/OpenSSH text) — stored encrypted on the
+            # host profile / item; ssh_password doubles as its passphrase.
+            kw['pkey'] = _pkey_from_string(str(ssh_key_string), str(ssh_password or ''))
+        elif ssh_key:
             kw['key_filename'] = str(ssh_key)
         elif ssh_password:
             kw['password'] = str(ssh_password)
@@ -203,6 +224,7 @@ class ConfigOptions(IntEnum):
     ssh_password    = 203
     ssh_key         = 204
     ssh_verify_host = 205
+    ssh_key_string  = 206
 
 
 # ── Dependency availability ───────────────────────────────────────────────────
@@ -254,22 +276,25 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    self.dict_return.set(key, False, f'Datastore: {key} - *Error: {exc}* 💥')
+                    _lbl = self.get_conf(['list', key, 'label'], '') or key
+                    self.dict_return.set(key, False, f'Datastore: {_lbl} - *Error: {exc}* 💥')
         super().check()
         return self.dict_return
 
     def _ds_check(self, key):
         db_type   = self._get_conf(ConfigOptions.db_type, key)
         conn_type = self._get_conf(ConfigOptions.conn_type, key)
-        label     = _PRETTY.get(db_type, db_type)
+        # Display name: the editable item label (e.g. "NS1 - mysql") if set, else
+        # the DB type's pretty name.  The key itself is an opaque UID.
+        disp = (self.get_conf(['list', key, 'label'], '') or '').strip() or _PRETTY.get(db_type, db_type)
 
         cfg = self._build_cfg(key, db_type)
         ok, msg = self._backend_check(db_type, conn_type, cfg)
 
         if ok:
-            s_msg = f'{label}: *{key}* ✅'
+            s_msg = f'*{disp}* ✅'
         else:
-            s_msg = f'{label}: {key} - *Error: {msg}* ⚠️'
+            s_msg = f'*{disp}* - *Error: {msg}* ⚠️'
 
         self.dict_return.set(key, ok, s_msg, False, {'message': msg})
         if self.check_status_custom(ok, key, msg):
@@ -300,6 +325,7 @@ class Watchful(ModuleBase):
             'ssh_user':     self._get_conf(ConfigOptions.ssh_user,     key),
             'ssh_password': self._get_conf(ConfigOptions.ssh_password, key),
             'ssh_key':      self._get_conf(ConfigOptions.ssh_key,      key),
+            'ssh_key_string': self._get_conf(ConfigOptions.ssh_key_string, key),
             'ssh_verify_host': self._get_conf(ConfigOptions.ssh_verify_host, key),
         }
 
@@ -316,7 +342,8 @@ class Watchful(ModuleBase):
                     cfg['ssh_host'], cfg['ssh_port'], cfg['ssh_user'],
                     cfg['ssh_password'], cfg['ssh_key'],
                     cfg['host'], cfg['port'],
-                    verify_host=bool(cfg.get('ssh_verify_host', False)))
+                    verify_host=bool(cfg.get('ssh_verify_host', False)),
+                    ssh_key_string=cfg.get('ssh_key_string', ''))
             except Exception as exc:
                 return False, f'SSH error: {exc}'
             try:
@@ -642,7 +669,10 @@ class Watchful(ModuleBase):
                 'username': str(config.get('ssh_user', '')),
                 'timeout': 10, 'banner_timeout': 10, 'auth_timeout': 10,
             }
-            if config.get('ssh_key'):
+            if config.get('ssh_key_string'):
+                kw['pkey'] = _pkey_from_string(str(config['ssh_key_string']),
+                                               str(config.get('ssh_password', '') or ''))
+            elif config.get('ssh_key'):
                 kw['key_filename'] = config['ssh_key']
             elif config.get('ssh_password'):
                 kw['password'] = config['ssh_password']
@@ -874,7 +904,10 @@ class Watchful(ModuleBase):
         match opt:
             case ConfigOptions.port | ConfigOptions.ssh_port | ConfigOptions.db_index:
                 return self._parse_conf_int(val, default)
-            case ConfigOptions.enabled | ConfigOptions.tls:
+            case ConfigOptions.enabled | ConfigOptions.tls | ConfigOptions.ssh_verify_host:
+                # Bool fields: a string parse would turn False into "False"
+                # (truthy) — e.g. ssh_verify_host=False would wrongly enable strict
+                # host-key checking.  Coerce to a real bool.
                 return bool(val)
             case _:
                 return self._parse_conf_str(val, default)

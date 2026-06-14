@@ -6,9 +6,15 @@
         "timeout":    {"type": "int",   "default": 5,   "min": 1,   "max": 30}
     },
     "__history__": {"field": "offset_seconds", "unit": "s", "label": "NTP Offset"},
-    "__host_profile__": {"key": "ntp", "address_field": "server", "fields": ["server", "port"]},
+    "__host_profile__": {"key": "ntp", "address_field": "server", "fields": ["server"]},
     "list": {
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__discovery_uid_key__": true,
+        "__discovery_label_template__": "{host}",
+        "__new_item_fields__": ["label"],
         "enabled":    {"type": "bool",  "default": true},
+        "label":      {"type": "str",   "default": ""},
         "server":     {"type": "str",   "default": "pool.ntp.org"},
         "port":       {"type": "int",   "default": 0, "min": 0, "max": 65535, "placeholder": 123},
         "max_offset": {"type": "float", "default": 0.0, "min": 0.0, "max": 3600.0, "placeholder_module": "max_offset"},

@@ -301,6 +301,29 @@
     </div>
 </div>
 
+{# Edit check name (label) modal — used by the Servers modal's title pencil #}
+<div class="modal fade" id="hostLabelModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnHostLabelOk').click();}">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-pencil-square me-1"></i>{{ i18n.host_edit_name }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small" for="hostLabelInput">{{ i18n.host_edit_name_prompt }}</label>
+                <input type="text" class="form-control form-control-sm" id="hostLabelInput">
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnHostLabelOk" title="{{ i18n.save }}">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# Add module picker modal #}
 <div class="modal fade" id="addModuleModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-lg">
@@ -374,6 +397,23 @@
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
                 <button class="btn btn-sm btn-danger" id="btnConfirmModalOk" title="{{ i18n.delete_tt }}">{{ i18n.confirm }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Generic info modal — shows a title + a key/value table (e.g. all the data an
+   action endpoint returns, like the UPS "Test Connection" NUT variables). #}
+<div class="modal fade" id="infoModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-info-circle me-1"></i><span id="infoModalTitle"></span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body" id="infoModalBody"></div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
             </div>
         </div>
     </div>
@@ -739,11 +779,38 @@
             </div>
             <div class="modal-body p-3" id="hostModalBody"></div>
             <div class="modal-footer py-2">
-                <span class="text-danger small me-auto" id="hostModalError"></span>
-                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
-                <button type="button" class="btn btn-sm btn-primary" id="btnHostModalOk" onclick="saveHostModal()">
+                <div class="d-flex align-items-center gap-2 me-auto">
+                    <button type="button" class="btn btn-sm btn-primary" onclick="testHostServer()">
+                        <i class="bi bi-play-circle me-1"></i>{{ i18n.host_test }}</button>
+                    <span class="text-danger small" id="hostModalError"></span>
+                </div>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="_undoHostModal()" title="{{ i18n.host_undo_tt }}">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo }}
+                </button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="saveHostModal(false)" title="{{ i18n.host_save_tt }}">
                     <i class="bi bi-save me-1"></i>{{ i18n.save }}
                 </button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnHostModalOk" onclick="saveHostModal(true)">
+                    <i class="bi bi-save2 me-1"></i>{{ i18n.save_and_close }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Host test results modal (shown over the edit-host modal). #}
+<div class="modal fade" id="hostTestModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-play-circle me-1"></i><span id="hostTestModalTitle">{{ i18n.host_test }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="hostTestModalBody"></div>
+            <div class="modal-footer py-2">
+                <span class="small me-auto" id="hostTestModalSummary"></span>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
             </div>
         </div>
     </div>

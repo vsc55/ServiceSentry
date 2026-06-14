@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import hashlib
 
-from lib.host_profiles import host_profiles_catalog, module_host_fields
+from lib.host_profiles import module_host_fields, module_host_specs
 
 _EMPTY = (None, '', False)
 
@@ -39,13 +39,9 @@ def _bare(module_key: str) -> str:
 
 
 def _specs_by_module(watchfuls_dir):
-    """{bare_module: [(protocol, address_field, [field names])]} from the catalog."""
-    catalog = host_profiles_catalog(watchfuls_dir)
-    by_mod: dict = {}
-    for proto, spec in catalog.items():
-        by_mod.setdefault(spec['module'], []).append(
-            (proto, spec.get('address_field'), [f['name'] for f in spec['fields']]))
-    return by_mod
+    """{bare_module: [(protocol, address_field, [field names])]} from each
+    module's own ``__host_profile__`` (so datastore's ssh tunnel is preserved)."""
+    return module_host_specs(watchfuls_dir)
 
 
 def _connection_collection(mod_cfg: dict, conn_fields: set) -> str | None:

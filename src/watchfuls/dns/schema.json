@@ -5,6 +5,10 @@
         "timeout": {"type": "int",  "default": 5, "min": 1, "max": 30}
     },
     "__history__": {"field": "response_time", "unit": "ms", "label": "DNS Resolution Time"},
+    "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
+        "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
+                   "ssh_key", "ssh_key_string", "ssh_verify_host"]},
+    "__host_multiple__": true,
     "list": {
         "__discovery__": "discover",
         "__discovery_method__": "POST",
@@ -12,6 +16,11 @@
         "__discovery_type_field__": "record_type",
         "__discovery_type_store_field__": "record_type",
         "__discovery_value_field__": "expected",
+        "__discovery_uid_key__": true,
+        "__discovery_label_template__": "{host} - {type} {name}",
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__new_item_fields__": ["label", "host", "record_type"],
         "__discovery_subtitle__": "{value}",
         "__discovery_dedup_with_type__": true,
         "__discovery_probe_types__": ["A", "AAAA", "MX", "TXT", "NS", "SOA", "CNAME", "CAA", "SRV"],
@@ -32,9 +41,11 @@
              "placeholder": "ns1.example.com / IP", "depends_on": "axfr"}
         ],
         "enabled":     {"type": "bool", "default": true},
-        "host":        {"type": "str",  "default": "", "placeholder": "__key__"},
+        "label":       {"type": "str",  "default": ""},
+        "host":        {"type": "str",  "default": ""},
         "record_type": {"type": "str",  "default": "A",
                         "options": ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SOA"]},
+        "nameserver":  {"type": "str",  "default": "", "placeholder": "system resolver"},
         "expected":    {"type": "str",  "default": ""},
         "timeout":     {"type": "int",  "default": 0, "min": 0, "max": 30, "placeholder_module": "timeout"}
     }

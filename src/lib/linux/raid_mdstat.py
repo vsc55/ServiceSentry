@@ -139,13 +139,21 @@ class RaidMdstat:
 
     def read_status(self):
         """ Read the mdstat information and return a dictionary with the status of each RAID. """
+        if not self.is_exist:
+            return {}
+        return self.parse_lines(self._read_lines())
+
+    @classmethod
+    def parse_lines(cls, f_buffer):
+        """Parse mdstat lines (list or text) into the per-array status dict.
+
+        Exposed so callers that obtained ``/proc/mdstat`` by other means (e.g.
+        over an SSH connection managed elsewhere) can reuse the same parser.
+        """
+        if isinstance(f_buffer, str):
+            f_buffer = f_buffer.splitlines()
         md_list = {}
         md_actual = None
-
-        if not self.is_exist:
-            return md_list
-
-        f_buffer = self._read_lines()
 
         for line in f_buffer:
             line = line.strip()
@@ -175,7 +183,7 @@ class RaidMdstat:
                 continue
 
             if "recovery" in line:
-                md_list[md_actual]['update'] = self.UpdateStatus.recovery
+                md_list[md_actual]['update'] = cls.UpdateStatus.recovery
                 try:
                     parts = line.split("]")[-1].strip().split()
                     md_list[md_actual]['recovery'] = {
@@ -192,11 +200,15 @@ class RaidMdstat:
                 parts = line.split()
                 if len(parts) >= 3:
                     md_list[md_actual]['blocks'] = parts[0]
-                    disks = parts[2][1:-1].split("/")
+                    # Locate the [active/total] token (e.g. "[2/2]") wherever it
+                    # sits — modern mdstat inserts "super 1.2" before it.
+                    token = next((p for p in parts
+                                  if p.startswith('[') and p.endswith(']') and '/' in p), None)
+                    disks = token[1:-1].split("/") if token else []
                     if len(disks) == 2:
                         md_list[md_actual]['update'] = (
-                            self.UpdateStatus.ok if disks[0] == disks[1]
-                            else self.UpdateStatus.error
+                            cls.UpdateStatus.ok if disks[0] == disks[1]
+                            else cls.UpdateStatus.error
                         )
                 continue
 

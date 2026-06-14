@@ -5,18 +5,22 @@
     },
     "__history__": {"field": null, "unit": null, "label": "Connection"},
     "__host_profile__": [
-        {"key": "db", "address_field": "host", "fields": ["host"]},
-        {"key": "ssh",
+        {"key": "db", "address_field": "host", "fields": []},
+        {"key": "ssh", "address_field": "ssh_host",
          "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
-                    "ssh_key", "ssh_verify_host"]}
+                    "ssh_key", "ssh_key_string", "ssh_verify_host"]}
     ],
     "__host_multiple__": true,
     "list": {
-        "__test__": "/api/watchfuls/datastore/test_connection",
-        "__new_item_fields__": ["db_type"],
+        "__test__": "/api/v1/watchfuls/datastore/test_connection",
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__discovery_uid_key__": true,
+        "__discovery_label_template__": "{host} - {db_type}",
+        "__new_item_fields__": ["label", "db_type"],
         "__field_order__": [
-            "enabled", "db_type", "conn_type",
-            "ssh_host", "ssh_port", "ssh_user", "ssh_password", "ssh_key", "ssh_verify_host",
+            "enabled", "label", "conn_type", "db_type",
+            "ssh_host", "ssh_port", "ssh_user", "ssh_password", "ssh_key", "ssh_key_string", "ssh_verify_host",
             "scheme", "host", "port", "socket",
             "user", "password", "token", "db", "auth_db", "db_index", "tls"
         ],
@@ -26,7 +30,7 @@
         "__actions__": [
             {
                 "id":         "test_ssh",
-                "url":        "/api/watchfuls/datastore/test_connection",
+                "url":        "/api/v1/watchfuls/datastore/test_connection",
                 "extra":      {"_test_mode": "ssh"},
                 "show_when":  {"conn_type": ["ssh"]},
                 "group":      "ssh",
@@ -37,7 +41,7 @@
             },
             {
                 "id":         "test_connection",
-                "url":        "/api/watchfuls/datastore/test_connection",
+                "url":        "/api/v1/watchfuls/datastore/test_connection",
                 "extra":      {},
                 "icon":       "bi-plug",
                 "variant":    "info",
@@ -46,6 +50,7 @@
             }
         ],
         "enabled":      {"type": "bool", "default": true},
+        "label":        {"type": "str",  "default": ""},
         "db_type":      {"type": "str",  "default": "mysql",
                          "options": ["mysql","postgres","mssql","mongodb","redis","elasticsearch","influxdb","memcached"],
                          "options_deps": {
@@ -65,12 +70,17 @@
         "ssh_user":     {"type": "str",  "default": "", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
         "ssh_password": {"type": "str",  "default": "", "sensitive": true, "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
         "ssh_key":      {"type": "str",  "default": "", "placeholder": "/path/to/id_rsa", "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
+        "ssh_key_string": {"type": "str", "default": "", "sensitive": true,
+                           "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----…",
+                           "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
         "ssh_verify_host": {"type": "bool", "default": false, "show_when": {"conn_type": ["ssh"]}, "group": "ssh"},
         "scheme":       {"type": "str",  "default": "http", "options": ["http","https"],
                          "show_when": {"db_type": ["elasticsearch","opensearch","influxdb"]}, "group": "server"},
-        "host":         {"type": "str",  "default": "", "show_when": {"conn_type": ["tcp","ssh"]}, "group": "server"},
+        "host":         {"type": "str",  "default": "", "placeholder": "__address__",
+                         "show_when": {"conn_type": ["tcp","ssh"]}, "group": "server"},
         "port":         {"type": "int",  "default": 0, "min": 0, "max": 65535,
                          "placeholder_map": {"mysql":3306,"mariadb":3306,"postgres":5432,"mssql":1433,"mongodb":27017,"redis":6379,"valkey":6379,"elasticsearch":9200,"opensearch":9200,"influxdb":8086,"memcached":11211},
+                         "placeholder_map_field": "db_type",
                          "show_when": {"conn_type": ["tcp","ssh"]}, "group": "server"},
         "socket":       {"type": "str",  "default": "",
                          "show_when": {"conn_type": ["socket"], "db_type": ["mysql","mariadb","postgres","redis","valkey"]},
@@ -84,9 +94,10 @@
         "db":           {"type": "str",  "default": "",
                          "show_when": {"db_type": ["mysql","mariadb","postgres","mssql","mongodb","elasticsearch","opensearch","influxdb"]},
                          "group": "server",
+                         "term_field": "db_type",
                          "input_action": {
                              "id":           "list_databases",
-                             "url":          "/api/watchfuls/datastore/list_databases",
+                             "url":          "/api/v1/watchfuls/datastore/list_databases",
                              "extra":        {},
                              "icon":         "bi-database",
                              "result":       "field_picker",

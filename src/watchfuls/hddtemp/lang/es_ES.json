@@ -6,11 +6,13 @@
         "threads": "Hilos",
         "alert":   "Alerta (°C)",
         "timeout": "Timeout (s)",
+        "label":   "Etiqueta",
         "host":    "Host",
         "port":    "Puerto",
         "exclude": "Dispositivos excluidos"
     },
     "hints": {
+        "label":   "Nombre para mostrar en la interfaz. Si está vacío se usa la clave del ítem.",
         "threads": "Número de hosts a consultar en paralelo.",
         "alert":   "Temperatura máxima (°C) antes de generar una alerta. Se aplica a todos los discos de los hosts que no tienen un umbral propio.",
         "timeout": "Timeout de conexión TCP en segundos para cada demonio hddtemp.",

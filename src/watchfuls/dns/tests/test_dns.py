@@ -3,8 +3,18 @@
 """Tests for watchfuls/dns."""
 
 import socket
+import pytest
 from unittest.mock import patch, MagicMock
 from conftest import create_mock_monitor
+
+
+@pytest.fixture(autouse=True)
+def _force_non_windows(monkeypatch):
+    """Most tests exercise the cross-platform dnspython/socket resolution; force
+    the non-Windows path so they don't dispatch to Resolve-DnsName on a Windows
+    CI/dev box (the Windows path has its own dedicated tests)."""
+    import watchfuls.dns as _d
+    monkeypatch.setattr(_d, '_IS_WINDOWS', False)
 
 
 # Minimal getaddrinfo result format: (family, type, proto, canonname, (addr, port))
@@ -142,7 +152,40 @@ class TestDnsCheck:
         item = self.Watchful(create_mock_monitor(config)).check().list['example.com']
         assert item['status'] is True
         assert item['other_data']['record_type'] == 'MX'
-        mock_resolve.assert_called_once_with('example.com', 'MX', 5)
+        mock_resolve.assert_called_once_with('example.com', 'MX', 5, '')
+
+    @patch('watchfuls.dns._resolve_socket')
+    @patch('watchfuls.dns._resolve_dns', return_value=['1.2.3.4'])
+    def test_check_a_with_nameserver_uses_dnspython(self, mock_dns, mock_sock):
+        """An A check with an explicit nameserver queries that server via dnspython,
+        not the stdlib socket (which can't target a server)."""
+        config = {'watchfuls.dns': {'timeout': 5, 'list': {
+            'example.com': {'enabled': True, 'host': 'example.com', 'record_type': 'A',
+                            'nameserver': '192.168.1.1'},
+        }}}
+        item = self.Watchful(create_mock_monitor(config)).check().list['example.com']
+        assert item['status'] is True
+        mock_dns.assert_called_once_with('example.com', 'A', 5, '192.168.1.1')
+        mock_sock.assert_not_called()
+
+    def test_nameserver_ips_passes_through_ip(self):
+        from watchfuls.dns import _nameserver_ips
+        assert _nameserver_ips('192.168.1.1') == ['192.168.1.1']
+        assert _nameserver_ips('') == []
+
+    def test_resolve_dns_targets_specified_nameserver(self):
+        """When a nameserver is given, the query is sent to that server only."""
+        from watchfuls import dns as dns_mod
+        fake_resolver = MagicMock()
+        fake_resolver.resolve.return_value = ['1.2.3.4']
+        fake_mod = MagicMock()
+        fake_mod.Resolver.return_value = fake_resolver
+        fake_mod.NXDOMAIN = type('NXDOMAIN', (Exception,), {})
+        fake_mod.NoAnswer = type('NoAnswer', (Exception,), {})
+        with patch('watchfuls.dns._load_dns_resolver', return_value=fake_mod):
+            out = dns_mod._resolve_dns('cerebelum.lan', 'A', 5, '192.168.110.253')
+        assert fake_resolver.nameservers == ['192.168.110.253']
+        assert out == ['1.2.3.4']
 
     @patch('watchfuls.dns._resolve_dns', return_value=['v=spf1 include:example.com ~all'])
     def test_check_txt_expected_match(self, _):
@@ -281,3 +324,122 @@ class TestDnsDiscovery:
         """AXFR is best-effort: a refused/timed-out transfer yields [] (no 500)."""
         assert self.Watchful.discover(
             {'_discovery_input': {'domain': 'example.com', 'axfr': True}}) == []
+
+
+class _FakeStore:
+    def __init__(self, hosts):
+        self._h = hosts
+    def get(self, uid, **_kw):
+        return self._h.get(uid)
+
+
+def _remote_host(os='linux'):
+    return {'uid': 'h1', 'address': '10.0.0.9', 'kind': 'remote', 'os': os,
+            'maintenance': False, 'profiles': {'ssh': {'ssh_user': 'root'}}}
+
+
+def _local_host(os='linux'):
+    return {'uid': 'h1', 'address': '127.0.0.1', 'kind': 'local', 'os': os,
+            'maintenance': False, 'profiles': {}}
+
+
+class TestDnsRemote:
+    """Host-aware DNS: the query runs ON the bound host via SSH (dig/nslookup)."""
+
+    def _w(self, items, host=None):
+        from watchfuls.dns import Watchful
+        mm = create_mock_monitor({'watchfuls.dns': {'list': items}})
+        mm._hosts_store = _FakeStore({'h1': host or _remote_host()})
+        return Watchful(mm)
+
+    def test_remote_a_via_dig_targets_nameserver(self):
+        w = self._w({'c': {'enabled': True, 'host': 'cerebelum.lan', 'record_type': 'A',
+                           'host_uid': 'h1', 'nameserver': '192.168.110.253'}})
+        with patch.object(w, 'host_exec', return_value=('192.168.110.10\n', '', 0)) as he:
+            items = w.check().list
+        cmd = he.call_args.args[1]
+        assert 'dig' in cmd and '@192.168.110.253' in cmd
+        assert items['c']['status'] is True
+        assert items['c']['other_data']['resolved'] == ['192.168.110.10']
+
+    def test_local_host_also_uses_dig(self):
+        from watchfuls.dns import Watchful
+        mm = create_mock_monitor({'watchfuls.dns': {'list': {
+            'c': {'enabled': True, 'host': 'x.lan', 'record_type': 'A', 'host_uid': 'h1'}}}})
+        mm._hosts_store = _FakeStore({'h1': _local_host()})
+        w = Watchful(mm)
+        with patch.object(w, 'host_exec', return_value=('1.2.3.4\n', '', 0)) as he:
+            items = w.check().list
+        assert 'dig' in he.call_args.args[1]   # local host runs dig too (not dnspython)
+        assert items['c']['status'] is True
+
+    def test_remote_failure_reports_error(self):
+        w = self._w({'c': {'enabled': True, 'host': 'x.lan', 'record_type': 'NS',
+                           'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=('', ';; connection timed out', 9)):
+            items = w.check().list
+        assert items['c']['status'] is False
+        assert 'timed out' in items['c']['message'].lower()
+
+    def test_parse_dig_short(self):
+        from watchfuls.dns import _parse_dig_short
+        assert _parse_dig_short('A', '1.2.3.4\n5.6.7.8\n') == ['1.2.3.4', '5.6.7.8']
+        assert _parse_dig_short('MX', '10 mail.example.com.\n') == ['10 mail.example.com']
+        assert _parse_dig_short('TXT', '"v=spf1 ~all"\n') == ['v=spf1 ~all']
+        assert _parse_dig_short('NS', 'ns1.example.com.\n') == ['ns1.example.com']
+
+    def test_discover_probe_remote_parses_combined(self):
+        from watchfuls.dns import Watchful
+        out = "##A##\n1.2.3.4\n##AAAA##\n##MX##\n10 mail.x.\n"
+        with patch('lib.host_runner.run', return_value=(out, '', 0)):
+            recs = Watchful._discover_probe_remote(_remote_host(), 'x.lan', 5)
+        types = {r['record_type'] for r in recs}
+        assert 'A' in types and 'MX' in types and 'AAAA' not in types
+        assert next(r for r in recs if r['record_type'] == 'A')['fill_value'] == '1.2.3.4'
+
+    def test_discover_uses_host_via_ssh_when_remote(self):
+        from watchfuls.dns import Watchful
+        with patch('lib.host_runner.run', return_value=('##A##\n9.9.9.9\n', '', 0)):
+            recs = Watchful.discover({'_discovery_input': {'domain': 'x.lan'},
+                                      '__host__': _remote_host()})
+        assert any(r['record_type'] == 'A' and r['fill_value'] == '9.9.9.9' for r in recs)
+
+
+class TestDnsWindowsResolver:
+    """Windows daemon resolves via the OS DNS Client (Resolve-DnsName), since
+    python.exe's direct dnspython queries are commonly firewall-blocked."""
+
+    def test_parse_resolve_dnsname(self):
+        from watchfuls.dns import _parse_resolve_dnsname
+        recs = [
+            {"Type": 15, "NameExchange": "mx1.x.lan", "Preference": 10},
+            {"Type": 1, "IPAddress": "1.2.3.4"},   # additional A — filtered out for MX
+        ]
+        assert _parse_resolve_dnsname('MX', recs) == ['10 mx1.x.lan']
+        assert _parse_resolve_dnsname('A', [{"Type": 1, "IPAddress": "1.2.3.4"}]) == ['1.2.3.4']
+        assert _parse_resolve_dnsname('TXT', [{"Type": 16, "Strings": ["v=spf1"]}]) == ['v=spf1']
+        assert _parse_resolve_dnsname('NS', [{"Type": 2, "NameHost": "ns1.x.lan"}]) == ['ns1.x.lan']
+        assert _parse_resolve_dnsname('SOA', [{"Type": 6, "PrimaryServer": "ns1.x.lan",
+                                               "SerialNumber": 7}]) == ['ns1.x.lan serial=7']
+
+    def test_resolve_win_invokes_resolve_dnsname(self):
+        from watchfuls import dns as d
+        out = '[{"Type":15,"NameExchange":"mx1.x.lan","Preference":10}]'
+        with patch('watchfuls.dns.subprocess.run',
+                   return_value=MagicMock(stdout=out, stderr='', returncode=0)) as run:
+            res = d._resolve_win('x.lan', 'MX', '192.168.1.1', 5)
+        assert res == ['10 mx1.x.lan']
+        cmd = ' '.join(run.call_args.args[0])
+        assert 'Resolve-DnsName' in cmd and "-Server '192.168.1.1'" in cmd
+
+    def test_check_on_windows_uses_resolve_dnsname(self, monkeypatch):
+        import watchfuls.dns as d
+        monkeypatch.setattr(d, '_IS_WINDOWS', True)   # override the autouse fixture
+        config = {'watchfuls.dns': {'list': {
+            'c': {'enabled': True, 'host': 'x.lan', 'record_type': 'MX'}}}}
+        w = d.Watchful(create_mock_monitor(config))
+        with patch('watchfuls.dns._resolve_win', return_value=['10 mx1.x.lan']) as rw:
+            items = w.check().list
+        rw.assert_called_once()
+        assert items['c']['status'] is True
+        assert items['c']['other_data']['resolved'] == ['10 mx1.x.lan']

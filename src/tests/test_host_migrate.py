@@ -27,20 +27,21 @@ class TestPlan:
         c = _by_addr(plan)['10.0.0.1']
         assert c['is_duplicate'] is True
         assert {m['key'] for m in c['members']} == {'r1', 'r1b', 'p1'}
-        assert c['protocols'] == ['snmp']          # icmp has no creds → no profile
-        assert c['profiles']['snmp'] == {'community': 'public', 'version': '2c'}
+        # Host profiles are address-only now (snmp community/version are
+        # per-check), so the candidate carries no protocol creds.
+        assert c['profiles'] == {}
         assert set(c['modules']) == {'snmp', 'ping'}
 
-    def test_credential_conflict_splits(self):
+    def test_same_address_merges_regardless_of_settings(self):
+        # community is per-check now, so two SNMP servers at the same address
+        # merge into one host (each check keeps its own community).
         mods = {'watchfuls.snmp': {'servers': {
             'a': {'host': '1.1.1.1', 'community': 'public', 'uid': 'a'},
             'b': {'host': '1.1.1.1', 'community': 'private', 'uid': 'b'},
         }}}
         plan = build_migration_plan(mods)
-        # Same address but conflicting community → two separate candidates.
         cands = [c for c in plan['candidates'] if c['address'] == '1.1.1.1']
-        assert len(cands) == 2
-        assert all(len(c['members']) == 1 for c in cands)
+        assert len(cands) == 1 and len(cands[0]['members']) == 2
 
     def test_different_address_separate(self):
         mods = {'watchfuls.ping': {'list': {
@@ -68,11 +69,14 @@ class TestPlan:
                     'conn_type': 'ssh', 'uid': 'd1'},
         }}}
         plan = build_migration_plan(mods)
-        c = _by_addr(plan)['db.local']
-        # Only ssh is a shared credential profile; the per-DB connection
-        # (user/password) stays on the check so a host can run several DBs.
+        # The host is the SSH server ('jump'): datastore's DB endpoint ('host')
+        # is now an editable per-check field (like web's 'url'), not a host
+        # profile — so only the ssh tunnel is shared.  The per-DB connection
+        # (host/user/password) stays on the check, letting one host run several
+        # DBs, possibly tunnelled to different boxes (docker/internal).
+        c = _by_addr(plan)['jump']
         assert c['protocols'] == ['ssh']
-        assert c['profiles']['ssh']['ssh_host'] == 'jump'
+        assert c['profiles']['ssh'] == {'ssh_user': 'j'}
         assert 'db' not in c['profiles']
 
 
@@ -92,8 +96,9 @@ class TestApply:
 
         r1 = mods['watchfuls.snmp']['servers']['r1']
         assert r1['host_uid'] == 'HOST-A'
-        assert 'host' not in r1 and 'community' not in r1 and 'version' not in r1
-        # check-specific data is preserved
+        # Only the host-owned address is stripped; per-check settings stay.
+        assert 'host' not in r1
+        assert r1['community'] == 'public' and r1['version'] == '2c'
         assert r1['checks'] == {'c': {'oid': 'x'}}
         assert r1['enabled'] is True and r1['uid'] == 's1'
 

@@ -50,7 +50,12 @@ function updatePrettyName(name, value) {
 
 function removeItem(target, parentPathStr, key) {
     _deleteItemCtx = { target, parentPathStr, key };
-    document.getElementById('confirmDeleteItemMsg').textContent = tf('confirm_delete_item', key);
+    // Show the item's display name (label) rather than the raw key, which may be
+    // an opaque UID.
+    const _data = target === 'config' ? configData : modulesData;
+    const _item = getPath(_data, parentPathStr.split('|').concat(key));
+    const _disp = (_item && typeof _item === 'object' && (_item.label || '').trim()) || key;
+    document.getElementById('confirmDeleteItemMsg').textContent = tf('confirm_delete_item', _disp);
     bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmDeleteItemModal')).show();
 }
 
@@ -147,6 +152,28 @@ function _doRenameItem() {
     if (_colEl && _colEl.classList.contains('show')) _autoExpandItemPath = parentPathStr + '|' + nk;
     markDirty(target);
     target === 'modules' ? renderModules() : renderConfig();
+}
+
+// Edit the editable title field (e.g. service 'label') of a dict item via the
+// shared name modal — used when the item key is an opaque UID, so the friendly
+// display name is changed here rather than by renaming the key.
+function editItemLabel(target, pathStr, parentPathStr) {
+    const data = target === 'modules' ? modulesData : configData;
+    const item = getPath(data, pathStr.split('|'));
+    if (!item || typeof item !== 'object') return;
+    const sch = ITEM_SCHEMAS[_schemaKeyOf(parentPathStr)] || {};
+    const titleField = sch['__check_title_field__'];
+    if (!titleField) return;
+    const input = document.getElementById('hostLabelInput');
+    input.value = String(item[titleField] || '');
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('hostLabelModal'));
+    document.getElementById('btnHostLabelOk').onclick = () => {
+        updateField(target, pathStr + '|' + titleField, input.value.trim());
+        modal.hide();
+        target === 'modules' ? renderModules() : renderConfig();
+    };
+    modal.show();
+    setTimeout(() => input.focus(), 200);
 }
 
 // --- Add-item modal ---

@@ -5,10 +5,18 @@
 // ──────────────────────────── Field value picker ───────────────────
 let _fpFieldPathStr = null;
 let _fpItems        = null;
+let _fpOnPick       = null;   // optional callback(value) — used by the server modal
+let _fpCurrent      = '';     // currently-selected value (to highlight it)
 
-function openFieldPickerModal(fieldPathStr, items, title) {
+function openFieldPickerModal(fieldPathStr, items, title, onPick, currentVal) {
     _fpFieldPathStr = fieldPathStr;
     _fpItems = items;
+    _fpOnPick = (typeof onPick === 'function') ? onPick : null;
+    // The current value to highlight: explicit (server modal) or read from the
+    // path in modulesData (Modules tab).
+    _fpCurrent = (currentVal != null && currentVal !== '')
+        ? String(currentVal)
+        : (fieldPathStr ? (getPath(modulesData, fieldPathStr.split('|')) || '') : '');
     const titleEl = document.getElementById('fieldPickerModalTitle');
     if (titleEl) titleEl.textContent = title || '';
     const filterEl = document.getElementById('fieldPickerFilter');
@@ -26,9 +34,7 @@ function _renderFieldPickerList() {
         body.innerHTML = `<div class="text-center py-4 text-muted">${esc(t('no_items'))}</div>`;
         return;
     }
-    const currentVal = (_fpFieldPathStr
-        ? (getPath(modulesData, _fpFieldPathStr.split('|')) || '')
-        : '').trim().toLowerCase();
+    const currentVal = String(_fpCurrent || '').trim().toLowerCase();
     let h = '<div class="d-flex flex-column gap-1">';
     for (const item of filtered) {
         const isSelected = currentVal && item.toLowerCase() === currentVal;
@@ -47,10 +53,13 @@ function _renderFieldPickerList() {
 }
 
 function _pickFieldValue(value) {
-    if (!_fpFieldPathStr) return;
-    updateField('modules', _fpFieldPathStr, value);
-    const inp = document.querySelector(`input[data-field-path="${CSS.escape(_fpFieldPathStr)}"]`);
-    if (inp) inp.value = value;
+    if (_fpOnPick) {
+        _fpOnPick(value);
+    } else if (_fpFieldPathStr) {
+        updateField('modules', _fpFieldPathStr, value);
+        const inp = document.querySelector(`input[data-field-path="${CSS.escape(_fpFieldPathStr)}"]`);
+        if (inp) inp.value = value;
+    }
     bootstrap.Modal.getInstance(document.getElementById('fieldPickerModal'))?.hide();
 }
 

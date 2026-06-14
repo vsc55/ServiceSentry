@@ -5,11 +5,15 @@
         "enabled":  "Enabled",
         "threads":  "Threads",
         "timeout":  "Timeout (s)",
-        "host":     "UPSD host",
-        "port":     "UPSD port",
+        "host":     "Host",
+        "port":     "Port",
         "ups_name": "UPS name",
         "user":     "Username",
-        "password": "Password"
+        "password": "Password",
+        "alert_on_battery": "Alert on battery",
+        "alert_battery":    "Battery alert (%)",
+        "alert_runtime":    "Runtime alert (min)",
+        "alert_load":       "Load alert (%)"
     },
     "hints": {
         "enabled":  "Enable or disable UPS monitoring for this entry.",
@@ -18,8 +22,12 @@
         "host":     "Hostname or IP of the NUT UPSD server.",
         "port":     "NUT UPSD TCP port. Leave empty (0) to use the standard port 3493.",
         "ups_name": "UPS name as configured in NUT (default: ups).",
-        "user":     "Username for NUT authentication. Leave empty for unauthenticated access.",
-        "password": "Password for NUT authentication."
+        "user":     "Username for NUT authentication. Leave empty for unauthenticated access (status reads need no auth).",
+        "password": "Password for NUT authentication.",
+        "alert_on_battery": "Raise an alert when the UPS switches to battery power (status OB).",
+        "alert_battery":    "Alert when the battery charge drops below this percentage (0 = disabled).",
+        "alert_runtime":    "Alert when the estimated runtime drops below this many minutes (0 = disabled).",
+        "alert_load":       "Alert when the UPS load rises above this percentage (0 = disabled)."
     },
     "new_item_key_label": "UPS name or identifier:",
     "rename_item_prompt": "Enter new UPS name or identifier:",

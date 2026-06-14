@@ -2,15 +2,25 @@
     "__module__": {
         "api_ver": "v1",
         "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
+        "threads": {"type": "int",  "default": 5, "min": 1, "max": 100},
+        "timeout": {"type": "int",  "default": 15, "min": 1, "max": 600}
     },
     "__history__": {"field": null, "unit": null, "label": "Service Status"},
+    "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
+        "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
+                   "ssh_key", "ssh_key_string", "ssh_verify_host"]},
+    "__host_multiple__": true,
     "list": {
         "__discovery__": "discover",
         "__discovery_field__": "service",
-        "__key_mirrors_field__": "service",
+        "__discovery_uid_key__": true,
+        "__discovery_label_template__": "{host} - {name}",
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__new_item_fields__": ["label", "service"],
         "enabled":     {"type": "bool",   "default": true},
-        "service":     {"type": "str",   "default": "", "placeholder": "__key__"},
+        "label":       {"type": "str",   "default": ""},
+        "service":     {"type": "str",   "default": ""},
         "expected":    {"type": "str",   "default": "running", "options": ["running", "stopped"]},
         "remediation": {"type": "bool",  "default": false}
     }

@@ -4,15 +4,17 @@
     "labels": {
         "enabled":   "Enabled",
         "threads":   "Threads",
+        "timeout":   "Timeout (s)",
         "alert":     "Alert (%)",
         "partition": "Partition",
         "label":     "Label"
     },
     "hints": {
         "threads":   "Number of partitions to check in parallel.",
+        "timeout":   "Command/SSH timeout in seconds.",
         "alert":     "Usage threshold (%). An alert is triggered when disk usage exceeds this value. Overrides the module-level threshold for this partition.",
-        "partition": "Mountpoint or drive letter to monitor (e.g. / or C:\\). If empty, the item key is used as the mountpoint.",
-        "label":     "Display name shown in notifications. Falls back to the item key if empty.",
+        "partition": "Mountpoint or drive letter to monitor (e.g. / or C:\\). Filled by discovery.",
+        "label":     "Display name shown in Modules, the status page and notifications (e.g. \"host - /\"). Editable; defaults from discovery.",
         "enabled":   "Enable or disable monitoring for this partition."
     },
     "new_item_key_label": "Partition path (e.g. / or C:\\):",

@@ -300,12 +300,35 @@ class TestSecurityInjection:
         }).status_code == 403
         assert c.delete("/api/v1/users/viewer").status_code == 403
 
-    def test_editor_cannot_access_sessions(self, config_dir, var_dir):
-        """Editor cannot access session management."""
+    def test_editor_can_view_but_not_revoke_sessions(self, config_dir, var_dir):
+        """Editor may view sessions (sessions_view) but not revoke them
+        (no sessions_revoke)."""
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c, "editor", "epass")
-        assert c.get("/api/v1/sessions").status_code == 403
+        assert c.get("/api/v1/sessions").status_code == 200
+        assert c.post("/api/v1/sessions/invalidate").status_code == 403
+
+    def test_get_modules_never_leaks_secret_to_browser(self, config_dir, var_dir):
+        """GET /api/v1/modules must mask every secret field (password, token, …):
+        the plaintext must NEVER be sent to the browser."""
+        wa = self._make_multiuser(config_dir, var_dir)
+        c = wa.app.test_client()
+        self._login(c)
+        mods = wa._read_config_file(wa._MODULES_FILE) or {}
+        mods.setdefault('datastore', {}).setdefault('list', {})['x'] = {
+            'db_type': 'mysql', 'user': 'u', 'password': 'SUPERSECRET123',
+            'token': 'TOKSECRET', 'ssh_password': 'SSHSECRET', 'host_uid': 'h'}
+        assert wa._save_config_file(wa._MODULES_FILE, mods)
+        resp = c.get("/api/v1/modules")
+        assert resp.status_code == 200
+        item = resp.get_json()['datastore']['list']['x']
+        assert item['password'] is None and item['token'] is None
+        assert item['ssh_password'] is None
+        # No secret plaintext anywhere in the serialized response.
+        body = resp.get_data(as_text=True)
+        for secret in ('SUPERSECRET123', 'TOKSECRET', 'SSHSECRET'):
+            assert secret not in body
 
     def test_viewer_cannot_write_modules(self, config_dir, var_dir):
         """Viewer cannot PUT modules."""

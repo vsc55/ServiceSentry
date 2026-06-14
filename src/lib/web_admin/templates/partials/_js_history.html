@@ -17,11 +17,44 @@ let _historyStats    = {};
 let _historyTooltip  = null;
 let _historyResizeOb = null;
 let _historyFilter   = '';
+let _historyCollapsed = new Set();  // module names whose series group is collapsed
 
 // ── localStorage keys ─────────────────────────────────────────────────────────
-const _HLS_HOURS = 'ss_history_hours';
-const _HLS_MOD   = 'ss_history_mod';
-const _HLS_KEY   = 'ss_history_key';
+const _HLS_HOURS     = 'ss_history_hours';
+const _HLS_MOD       = 'ss_history_mod';
+const _HLS_KEY       = 'ss_history_key';
+const _HLS_COLLAPSED = 'ss_history_collapsed';
+
+function _historyLoadCollapsed() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(_HLS_COLLAPSED) || '[]');
+        _historyCollapsed = new Set(Array.isArray(raw) ? raw : []);
+    } catch (e) { _historyCollapsed = new Set(); }
+}
+
+function _historySaveCollapsed() {
+    try { localStorage.setItem(_HLS_COLLAPSED, JSON.stringify([..._historyCollapsed])); } catch (e) {}
+}
+
+function _historyToggleGroup(mod) {
+    if (_historyCollapsed.has(mod)) _historyCollapsed.delete(mod);
+    else _historyCollapsed.add(mod);
+    _historySaveCollapsed();
+    _historyRenderSeriesList();
+}
+
+function _historyExpandAll() {
+    _historyCollapsed.clear();
+    _historySaveCollapsed();
+    _historyRenderSeriesList();
+}
+
+function _historyCollapseAll() {
+    // Collapse every module currently present in the index.
+    for (const s of _historyIndex) _historyCollapsed.add(s.module);
+    _historySaveCollapsed();
+    _historyRenderSeriesList();
+}
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 async function renderHistory() {
@@ -33,6 +66,7 @@ async function renderHistory() {
     const savedMod = localStorage.getItem(_HLS_MOD);
     const savedKey = localStorage.getItem(_HLS_KEY);
 
+    _historyLoadCollapsed();
     cont.innerHTML = _historySkeletonHTML();
     await _historyLoadIndex();
     _historyRenderLayout();
@@ -43,12 +77,25 @@ async function renderHistory() {
         _historyMod = savedMod;
         _historyKey = savedKey;
         _historyUid = _historyIndex.find(s => s.module === savedMod && s.key === savedKey)?.item_uid || null;
+        // Make the selected series visible: expand its (possibly collapsed) group
+        // and scroll it into view so the highlighted entry is obvious.
+        _historyCollapsed.delete(savedMod);
+        _historySaveCollapsed();
         _historyRenderSeriesList();
+        _historyScrollToActive();
         _historyShowToolbar();
         await _historyLoadChart();
     } else {
         _historyShowPlaceholder();
     }
+}
+
+// Scroll the currently-selected series button into view within the SERIES list.
+function _historyScrollToActive() {
+    setTimeout(() => {
+        const el = document.querySelector('#history-series-list .btn-primary[data-hmod]');
+        if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 60);
 }
 
 // ── API calls ─────────────────────────────────────────────────────────────────
@@ -107,6 +154,16 @@ function _historyRenderLayout() {
   <!-- Series sidebar — distinct panel -->
   <div class="ss-history-sidebar d-flex flex-column">
     <div class="ss-history-sidebar-title text-muted">${esc(t('history_series'))}</div>
+    <div class="px-1 pt-1">
+      <div class="input-group input-group-sm w-100">
+        <button class="btn btn-secondary flex-fill text-truncate" onclick="_historyExpandAll()" title="${esc(t('history_expand_all'))}">
+          <i class="bi bi-arrows-expand me-1"></i>${esc(t('history_expand_all'))}
+        </button>
+        <button class="btn btn-secondary flex-fill text-truncate" onclick="_historyCollapseAll()" title="${esc(t('history_collapse_all'))}">
+          <i class="bi bi-arrows-collapse me-1"></i>${esc(t('history_collapse_all'))}
+        </button>
+      </div>
+    </div>
     <div id="history-series-list" class="flex-grow-1 overflow-y-auto p-1"></div>
   </div>
 
@@ -190,7 +247,7 @@ function _historyRenderSeriesList() {
     const prettyNames = {};   // module → pretty_name
 
     for (const s of _historyIndex) {
-        const label = ((s.pretty_name || s.module) + ' ' + s.key).toLowerCase();
+        const label = ((s.pretty_name || s.module) + ' ' + (s.label || '') + ' ' + s.key).toLowerCase();
         if (filter && !label.includes(filter)) continue;
         if (!grouped[s.module]) grouped[s.module] = [];
         grouped[s.module].push(s);
@@ -202,22 +259,38 @@ function _historyRenderSeriesList() {
         return;
     }
 
+    // While filtering, keep every group open so matches are never hidden.
+    const filtering = !!filter;
     let html = '';
     for (const [mod, series] of Object.entries(grouped)) {
-        html += `<div class="text-muted small px-1 py-1 fw-semibold text-truncate">${esc(prettyNames[mod])}</div>`;
+        const collapsed = !filtering && _historyCollapsed.has(mod);
+        const chevron   = collapsed ? 'bi-chevron-right' : 'bi-chevron-down';
+        html += `
+<div class="d-flex align-items-center gap-1 px-1 py-1 text-muted small fw-semibold"
+     style="cursor:pointer;user-select:none" data-hgroup="${esc(mod)}"
+     onclick="_historyToggleGroup(this.dataset.hgroup)">
+  <i class="bi ${chevron}" style="font-size:.7rem;flex-shrink:0"></i>
+  <span class="text-truncate flex-grow-1">${esc(prettyNames[mod])}</span>
+  <span class="badge bg-secondary" style="font-size:.65rem;flex-shrink:0">${series.length}</span>
+</div>`;
+        if (collapsed) continue;
         for (const s of series) {
             const active  = s.module === _historyMod && s.key === _historyKey;
-            const dotCls  = s.uptime >= 95 ? 'text-success' : s.uptime >= 80 ? 'text-warning' : 'text-danger';
+            // Dot reflects the last recorded status (OK / error); when the
+            // series has no status yet, fall back to the uptime health band.
+            const dotCls  = s.last_status === true  ? 'text-success'
+                          : s.last_status === false ? 'text-danger'
+                          : s.uptime >= 95 ? 'text-success' : s.uptime >= 80 ? 'text-warning' : 'text-danger';
             const lastVal = _historyLastVal(s);
             // Use data-* attributes to avoid JS string escaping issues with keys
             // that contain backslashes (e.g. Windows paths like "C:\").
             html += `
 <button class="btn btn-sm w-100 text-start d-flex align-items-center gap-1 mb-1 ${active ? 'btn-primary' : 'btn-outline-secondary'}"
-        style="padding:.25rem .5rem;font-size:.8rem"
+        style="padding:.25rem .5rem .25rem 1.25rem;font-size:.8rem"
         data-hmod="${esc(s.module)}" data-hkey="${esc(s.key)}"
         onclick="_historySelectSeries(this.dataset.hmod, this.dataset.hkey)">
   <i class="bi bi-circle-fill ${dotCls}" style="font-size:.45rem;flex-shrink:0"></i>
-  <span class="text-truncate flex-grow-1">${esc(s.key)}</span>
+  <span class="text-truncate flex-grow-1">${esc(s.label || s.key)}</span>
   ${lastVal !== null ? `<span class="text-muted" style="font-size:.75rem;flex-shrink:0">${lastVal}</span>` : ''}
 </button>`;
         }
@@ -273,7 +346,7 @@ function _historyShowToolbar() {
     if (title) {
         const entry = _historyIndex.find(s => s.module === _historyMod && s.key === _historyKey);
         const prettyMod = (entry?.pretty_name) || _historyMod;
-        title.textContent = `${prettyMod} / ${_historyKey}`;
+        title.textContent = `${prettyMod} / ${(entry?.label) || _historyKey}`;
     }
     // Populate range selector from config and restore saved value
     const rangeSel = document.getElementById('history-range-sel');
@@ -321,7 +394,7 @@ function _historyClearSeries() {
     if (!_historyMod || !_historyKey) return;
     const entry = _historyIndex.find(s => s.module === _historyMod && s.key === _historyKey);
     const prettyMod = entry?.pretty_name || _historyMod;
-    const msg = `${t('history_clear_confirm')} "${prettyMod} / ${_historyKey}"?`;
+    const msg = `${t('history_clear_confirm')} "${prettyMod} / ${(entry?.label) || _historyKey}"?`;
     showConfirmModal(msg, async () => {
         // Pass params as query string — DELETE body is unreliable across proxies.
         const url = `/api/v1/history?module=${encodeURIComponent(_historyMod)}&key=${encodeURIComponent(_historyKey)}` +

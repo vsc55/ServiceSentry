@@ -180,13 +180,13 @@ if (overviewLi) overviewLi.style.display = perms.has('overview_view') ? '' : 'no
 // Modules tab
 const modulesLi = document.getElementById('tab-modules-li');
 if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
-// Servers (host registry) tab — gated by the modules permissions
+// Servers (host registry) tab — global servers perms or any per-server override
+const hasAnyServer = ['servers_view','servers_edit','servers_delete'].some(p => perms.has(p))
+    || [...perms].some(p => p.startsWith('server.'));
 const serversLi = document.getElementById('tab-servers-li');
-if (serversLi) serversLi.style.display = perms.has('modules_view') ? '' : 'none';
-const btnNewHost = document.getElementById('btnNewHost');
-if (btnNewHost) btnNewHost.style.display = perms.has('modules_edit') ? '' : 'none';
-const btnMigrateHosts = document.getElementById('btnMigrateHosts');
-if (btnMigrateHosts) btnMigrateHosts.style.display = perms.has('modules_edit') ? '' : 'none';
+if (serversLi) serversLi.style.display = hasAnyServer ? '' : 'none';
+// (New host / Migrate buttons now live inside the JS-rendered Servers card,
+//  gated there by servers_edit — see renderServers.)
 // Config tab
 const configLi = document.getElementById('tab-config-li');
 const hasConfigEdit = perms.has('config_edit');
@@ -342,7 +342,10 @@ try {
     applyModuleDefaults();
     _savedModulesData = deepClone(modulesData);
     clearDirty('modules'); // applyModuleDefaults may call markDirty for migrations; reset here
-    if ((currentUser.permissions || []).includes('modules_view')) { await loadHosts(); }
+    if ((currentUser.permissions || []).some(p =>
+        p === 'servers_view' || p === 'servers_edit' || p === 'servers_delete' || p.startsWith('server.'))) {
+        await loadHosts();
+    }
     configData = await loadConfig() || {};
     _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
     const _rawPS = configData?.web_admin?.page_sizes;

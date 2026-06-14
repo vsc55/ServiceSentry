@@ -25,6 +25,11 @@ function formatAuditDetailFull(detail) {
     }
 
     if (typeof detail === 'object') {
+        // Host test result (host_tested / host_test_check): show the server +
+        // every check launched with its pass/fail and error message.
+        if (Array.isArray(detail.results)) {
+            return formatHostTestDetail(detail);
+        }
         let html = '';
         if (detail.reason)   html += `<p class="mb-1">${esc(t(detail.reason) || detail.reason)}</p>`;
         if (detail.name)     html += `<p class="mb-1"><strong>${t('col_group_name') || 'Group'}:</strong> <code>${esc(detail.name)}</code></p>`;
@@ -37,6 +42,38 @@ function formatAuditDetailFull(detail) {
         return html || renderReadable(detail);
     }
     return '<p class="mb-0">' + esc(String(detail)) + '</p>';
+}
+
+// Host test result detail: server + each launched check (pass/fail + message).
+function formatHostTestDetail(d) {
+    let html = '';
+    if (d.name) {
+        html += `<p class="mb-1"><strong>${esc(t('col_server') || 'Server')}:</strong> <code>${esc(d.name)}</code></p>`;
+    }
+    const parts = [];
+    if (typeof d.passed === 'number' && typeof d.total === 'number') parts.push(`${d.passed}/${d.total} OK`);
+    if (d.ssh !== undefined && d.ssh !== null) parts.push('SSH: ' + (d.ssh ? '✅' : '⚠️'));
+    if (parts.length) {
+        html += `<p class="mb-2"><span class="badge text-bg-${d.ok ? 'success' : 'warning'}">${esc(parts.join(' · '))}</span></p>`;
+    }
+    const results = d.results || [];
+    if (results.length) {
+        const rows = results.map(r => {
+            const mod = r.module || d.module || '';
+            const modName = (typeof modulePrettyName === 'function' ? modulePrettyName(mod, {}) : mod) || mod;
+            const label = r.name ? `${modName} — ${r.name}` : (modName || r.key || '');
+            const icon = r.ok ? '<span class="text-success">✅</span>' : '<span class="text-warning">⚠️</span>';
+            const sub = (r.key && r.key !== r.name)
+                ? `<div class="text-muted font-monospace" style="font-size:.68rem">${esc(r.key)}</div>` : '';
+            return `<tr>
+                <td class="text-nowrap pe-2 align-top">${icon}</td>
+                <td class="pe-3 align-top"><strong>${esc(label)}</strong>${sub}</td>
+                <td class="text-muted small align-top">${esc(r.message || '')}</td>
+            </tr>`;
+        }).join('');
+        html += `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
+    }
+    return html || renderReadable(d);
 }
 
 // Recursive pretty renderer for any value
@@ -83,7 +120,12 @@ function auditSummaryHtml(idx, detail) {
     } else if (Array.isArray(detail)) {
         label = tf('audit_n_changes', detail.length);
     } else if (typeof detail === 'object') {
-        if (detail.reason) {
+        if (Array.isArray(detail.results)) {
+            const total  = (typeof detail.total  === 'number') ? detail.total  : detail.results.length;
+            const passed = (typeof detail.passed === 'number') ? detail.passed : detail.results.filter(r => r.ok).length;
+            label = (detail.name ? esc(detail.name) + ' · ' : '') + tf('host_test_summary', passed, total);
+            // falls through to the clickable badge below → opens the full modal
+        } else if (detail.reason) {
             return `<span class="text-muted small">${esc(t(detail.reason) || detail.reason)}</span>`;
         } else if (detail.username) {
             const n = Array.isArray(detail.changes) ? detail.changes.length : 0;

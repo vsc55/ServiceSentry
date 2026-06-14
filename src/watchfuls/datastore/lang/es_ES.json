@@ -19,6 +19,7 @@
         "ssh_user":     "Usuario SSH",
         "ssh_password": "Contraseña SSH",
         "ssh_key":      "Clave privada SSH",
+        "ssh_key_string": "Clave privada SSH (texto)",
         "ssh_verify_host": "Verificar clave del host SSH",
         "scheme":       "Esquema",
         "auth_db":      "Base de datos de autenticación",
@@ -42,6 +43,7 @@
         "ssh_user":     "Nombre de usuario para la conexión SSH.",
         "ssh_password": "Contraseña para la conexión SSH. Dejar vacío si se usa un archivo de clave.",
         "ssh_key":      "Ruta al archivo de clave privada SSH. Tiene prioridad sobre la contraseña SSH si ambos están definidos.",
+        "ssh_key_string": "Contenido de la clave privada en formato PEM/OpenSSH (alternativa a la ruta de archivo). Tiene prioridad sobre el archivo de clave. La contraseña SSH, si está definida, se usa como passphrase de la clave.",
         "ssh_verify_host": "Si se activa, la clave del host SSH debe estar ya en ~/.ssh/known_hosts — una clave desconocida o cambiada aborta la conexión (protege frente a MITM). Si se desactiva, se acepta cualquier clave de host en el primer contacto.",
         "scheme":       "HTTP o HTTPS para Elasticsearch / OpenSearch / InfluxDB.",
         "auth_db":      "Base de datos de autenticación de MongoDB (por defecto: admin).",
@@ -81,6 +83,18 @@
         "test_connection_tt":  "Probar la conexión completa a la base de datos",
         "list_databases":      "Listar bases de datos / buckets / índices",
         "list_databases_tt":   "Obtener la lista de bases de datos disponibles del servidor"
+    },
+    "field_terms": {
+        "db": {
+            "mysql":         {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
+            "mariadb":       {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
+            "postgres":      {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
+            "mssql":         {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
+            "mongodb":       {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
+            "elasticsearch": {"label": "Índice", "hint": "Índice a monitorizar.", "action": "Listar índices", "pick": "Seleccionar índice"},
+            "opensearch":    {"label": "Índice", "hint": "Índice a monitorizar.", "action": "Listar índices", "pick": "Seleccionar índice"},
+            "influxdb":      {"label": "Bucket", "hint": "Bucket a monitorizar.", "action": "Listar buckets", "pick": "Seleccionar bucket"}
+        }
     },
     "new_item_title": "Nuevo almacén de datos",
     "new_item_key_label": "Nombre de conexión:",

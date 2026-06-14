@@ -1,31 +1,21 @@
 {
     "pretty_name": "RAID",
-    "module_description": "Monitoriza la salud de arrays RAID a través de /proc/mdstat localmente o por SSH en servidores remotos. Genera alertas ante arrays degradados o con fallos.",
+    "module_description": "Monitoriza la salud de arrays RAID vía /proc/mdstat en cada host vinculado — en local o por la conexión SSH del host. Genera alertas ante arrays degradados o en recuperación.",
     "labels": {
-        "enabled":  "Habilitado",
-        "local":    "Monitor local",
-        "threads":  "Hilos",
-        "timeout":  "Timeout (s)",
-        "label":    "Etiqueta",
-        "host":     "Host",
-        "port":     "Puerto",
-        "user":     "Usuario",
-        "password": "Contraseña",
-        "key_file": "Archivo clave SSH"
+        "enabled":     "Habilitado",
+        "threads":     "Hilos",
+        "timeout":     "Timeout (s)",
+        "mdstat_path": "Ruta de mdstat",
+        "label":       "Etiqueta"
     },
     "hints": {
-        "enabled":  "Activa o desactiva la monitorización de este servidor remoto.",
-        "local":    "Activa la monitorización RAID local mediante /proc/mdstat.",
-        "threads":  "Número de servidores remotos a comprobar en paralelo.",
-        "timeout":  "Tiempo de espera para la conexión SSH en segundos.",
-        "label":    "Nombre para mostrar en la interfaz. Si está vacío se usa la clave del ítem.",
-        "host":     "Dirección IP o nombre del servidor remoto. Si está vacío se usa la clave del ítem.",
-        "port":     "Puerto SSH del servidor remoto. Dejar en blanco para usar el puerto por defecto (22).",
-        "user":     "Nombre de usuario SSH para la autenticación.",
-        "password": "Contraseña SSH. Dejar en blanco si se usa un archivo de clave.",
-        "key_file": "Ruta al archivo de clave privada SSH para la autenticación."
+        "enabled":     "Activa o desactiva esta comprobación de RAID.",
+        "threads":     "Número de hosts a comprobar en paralelo.",
+        "timeout":     "Tiempo de espera del comando/SSH en segundos.",
+        "mdstat_path": "Ruta del fichero mdstat leído en el host (por defecto /proc/mdstat).",
+        "label":       "Nombre para mostrar en la interfaz. Si está vacío se usa la clave del ítem."
     },
-    "new_item_key_label": "Nombre del servidor o identificador:",
-    "rename_item_prompt": "Introduce el nuevo nombre del servidor o identificador:",
-    "collections": {"list": "Servidores remotos"}
+    "new_item_key_label": "Nombre de la comprobación o identificador:",
+    "rename_item_prompt": "Introduce el nuevo nombre de la comprobación o identificador:",
+    "collections": {"list": "Comprobaciones RAID"}
 }

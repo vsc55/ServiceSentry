@@ -54,6 +54,24 @@ def register(app, wa):
             return jsonify([])
         lang  = session.get('lang') or wa._default_lang or DEFAULT_LANG
         index = wa._history.get_index()
+        modules_cfg = wa._read_config_file(wa._MODULES_FILE) or {}
+
+        def _check_label(mod: str, key: str, item_uid: str) -> str:
+            """The item's display 'label' from modules.json — the series key may
+            be an opaque UID, so show the friendly name instead."""
+            for mk in (mod, f'watchfuls.{mod}', mod.split('.')[-1]):
+                mc = modules_cfg.get(mk)
+                if not isinstance(mc, dict):
+                    continue
+                for coll, items in mc.items():
+                    if coll.startswith('__') or not isinstance(items, dict):
+                        continue
+                    for cand in (key, item_uid):
+                        it = items.get(cand) if cand else None
+                        if isinstance(it, dict) and str(it.get('label') or '').strip():
+                            return str(it['label'])
+            return ''
+
         # Cache per-module data to avoid repeated file reads
         _name_cache:    dict[str, str]  = {}
         _history_cache: dict[str, dict] = {}
@@ -64,6 +82,17 @@ def register(app, wa):
                 _history_cache[mod] = _history_config(wa._modules_dir, mod)
             entry['pretty_name']  = _name_cache[mod]
             entry['history_cfg']  = _history_cache[mod]  # {field, unit, label}
+            # Friendly label priority:
+            #  1. the item's editable 'label' in modules.json (matched by key/uid)
+            #  2. the display 'name' the module stored in the record's other_data
+            #     (covers derived result keys like "<uid>_ram"/"_swap" that are not
+            #     a real item key, so step 1 can't find them)
+            label = _check_label(mod, entry.get('key', ''), entry.get('item_uid', ''))
+            if not label:
+                last_data = entry.get('last_data')
+                if isinstance(last_data, dict):
+                    label = str(last_data.get('name') or '').strip()
+            entry['label'] = label
         return jsonify(index)
 
     @app.route('/api/v1/history', methods=['GET'])
@@ -141,6 +170,9 @@ def register(app, wa):
             return jsonify({'error': 'module and key are required'}), 400
 
         deleted = wa._history.delete_series(module, key, item_uid=item_uid)
+        wa._audit('history_deleted', detail={
+            'module': module, 'key': key, 'item_uid': item_uid or '', 'deleted': deleted,
+        })
         return jsonify({'ok': True, 'deleted': deleted})
 
     @app.route('/api/v1/history/all', methods=['DELETE'])
@@ -150,6 +182,7 @@ def register(app, wa):
         if not wa._history:
             return jsonify({'ok': True, 'deleted': 0})
         deleted = wa._history.delete_all()
+        wa._audit('history_all_deleted', detail={'deleted': deleted})
         return jsonify({'ok': True, 'deleted': deleted})
 
     @app.route('/api/v1/history/test-write', methods=['POST'])

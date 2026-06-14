@@ -21,6 +21,8 @@ def register(app, wa):
         data   = wa._optional_json()
         run_now = bool(data.get('run_now', False))
         started = wa._daemon_start(run_now=run_now)
+        if started:
+            wa._audit('daemon_started', detail={'run_now': run_now})
         return jsonify({'ok': True, 'started': started,
                         'status': wa._daemon_status_dict()})
 
@@ -29,6 +31,8 @@ def register(app, wa):
     def api_daemon_stop():
         """Stop the background scheduler."""
         stopped = wa._daemon_stop()
+        if stopped:
+            wa._audit('daemon_stopped')
         return jsonify({'ok': True, 'stopped': stopped,
                         'status': wa._daemon_status_dict()})
 
@@ -61,6 +65,9 @@ def register(app, wa):
         if changed:
             raw['daemon'] = daemon_cfg
             wa._save_config_file(wa._CONFIG_FILE, raw)
+            wa._audit('daemon_config_changed', detail={
+                k: daemon_cfg.get(k) for k in ('timer_check', 'web_autostart') if k in data
+            })
 
         return jsonify({'ok': True, 'daemon': daemon_cfg,
                         'status': wa._daemon_status_dict()})

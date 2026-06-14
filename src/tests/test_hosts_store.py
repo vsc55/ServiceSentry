@@ -112,6 +112,64 @@ class TestCrud:
         assert s.delete(uid) is False
 
 
+class TestKindAndMaintenance:
+    """Local/remote kind and maintenance flag are first-class host columns."""
+
+    def test_kind_defaults_to_local(self):
+        s, _ = _store()
+        uid = s.create(_host('k1'))
+        h = s.get(uid)
+        assert h['kind'] == 'local'
+        assert h['maintenance'] is False
+
+    def test_create_remote_and_maintenance(self):
+        s, _ = _store()
+        uid = s.create({**_host('k2'), 'kind': 'remote', 'maintenance': True})
+        h = s.get(uid)
+        assert h['kind'] == 'remote'
+        assert h['maintenance'] is True
+
+    def test_invalid_kind_normalised_to_local(self):
+        s, _ = _store()
+        uid = s.create({**_host('k3'), 'kind': 'banana'})
+        assert s.get(uid)['kind'] == 'local'
+
+    def test_os_defaults_to_auto_and_persists(self):
+        s, _ = _store()
+        uid = s.create(_host('k3a'))
+        assert s.get(uid)['os'] == 'auto'
+        uid2 = s.create({**_host('k3b'), 'os': 'linux'})
+        assert s.get(uid2)['os'] == 'linux'
+
+    def test_invalid_os_normalised_to_auto(self):
+        s, _ = _store()
+        uid = s.create({**_host('k3c'), 'os': 'plan9'})
+        assert s.get(uid)['os'] == 'auto'
+
+    def test_modules_list_persists(self):
+        s, _ = _store()
+        uid = s.create({**_host('m1'), 'modules': ['web', 'ping']})
+        assert s.get(uid)['modules'] == ['web', 'ping']
+        # Defaults to empty when not provided.
+        uid2 = s.create(_host('m2'))
+        assert s.get(uid2)['modules'] == []
+        # Updatable.
+        h = s.get(uid)
+        h['modules'] = ['cpu']
+        assert s.update(uid, h)
+        assert s.get(uid)['modules'] == ['cpu']
+
+    def test_update_toggles_kind_and_maintenance(self):
+        s, _ = _store()
+        uid = s.create(_host('k4'))
+        h = s.get(uid)
+        h['kind'] = 'remote'
+        h['maintenance'] = True
+        assert s.update(uid, h)
+        out = s.get(uid)
+        assert out['kind'] == 'remote' and out['maintenance'] is True
+
+
 class TestSecretEncryption:
 
     def test_secrets_encrypted_at_rest(self):

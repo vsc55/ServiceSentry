@@ -1,31 +1,21 @@
 {
     "pretty_name": "RAID",
-    "module_description": "Monitors RAID array health via /proc/mdstat locally or over SSH on remote servers. Alerts on degraded or failed arrays.",
+    "module_description": "Monitors RAID array health via /proc/mdstat on each bound host — locally or over the host's SSH connection. Alerts on degraded or recovering arrays.",
     "labels": {
-        "enabled":  "Enabled",
-        "local":    "Local monitor",
-        "threads":  "Threads",
-        "timeout":  "Timeout (s)",
-        "label":    "Label",
-        "host":     "Host",
-        "port":     "Port",
-        "user":     "User",
-        "password": "Password",
-        "key_file": "SSH Key file"
+        "enabled":     "Enabled",
+        "threads":     "Threads",
+        "timeout":     "Timeout (s)",
+        "mdstat_path": "mdstat path",
+        "label":       "Label"
     },
     "hints": {
-        "enabled":  "Enable or disable monitoring for this remote server.",
-        "local":    "Enable local RAID monitoring via /proc/mdstat.",
-        "threads":  "Number of remote servers to check in parallel.",
-        "timeout":  "SSH connection timeout in seconds.",
-        "label":    "Display name shown in the UI. Falls back to the item key if empty.",
-        "host":     "IP address or hostname of the remote server. If empty, the item key is used as the host.",
-        "port":     "SSH port of the remote server. Leave blank to use the default port (22).",
-        "user":     "SSH username for authentication.",
-        "password": "SSH password. Leave blank if authenticating with a key file.",
-        "key_file": "Path to the SSH private key file for authentication."
+        "enabled":     "Enable or disable this RAID check.",
+        "threads":     "Number of hosts to check in parallel.",
+        "timeout":     "Command/SSH timeout in seconds.",
+        "mdstat_path": "Path to the mdstat file read on the host (default /proc/mdstat).",
+        "label":       "Display name shown in the UI. Falls back to the item key if empty."
     },
-    "new_item_key_label": "Server name or identifier:",
-    "rename_item_prompt": "Enter new server name or identifier:",
-    "collections": {"list": "Remote servers"}
+    "new_item_key_label": "Check name or identifier:",
+    "rename_item_prompt": "Enter new check name or identifier:",
+    "collections": {"list": "RAID checks"}
 }

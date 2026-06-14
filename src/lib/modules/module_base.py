@@ -27,6 +27,7 @@ import sys
 from enum import Enum
 
 import lib.tools
+from lib import os_detect
 from lib.config import ConfigTypeReturn
 from lib.debug import DebugLevel
 from lib.dict_files_path import DictFilesPath
@@ -418,18 +419,111 @@ class ModuleBase(ObjectBase):
             return item
 
         profiles = host.get('profiles') or {}
+        is_remote = str(host.get('kind') or 'local').strip().lower() == 'remote'
         conn: dict = {}
         for spec in specs:
             if not isinstance(spec, dict):
                 continue
+            # The SSH connection only applies to a remote host; a local host is
+            # reached directly, so its (stale) ssh profile must not activate a
+            # tunnel / command-bridge.
+            if spec.get('key') == 'ssh' and not is_remote:
+                continue
             addr_field = spec.get('address_field')
-            if addr_field and host.get('address'):
+            # The host address fills the address_field ONLY when the check does
+            # not already carry its own value.  A visible address_field (e.g.
+            # web's 'url') can thus be overridden per check — needed when one
+            # host (a reverse proxy) serves several FQDNs — while hidden ones
+            # (snmp 'host', ssh 'ssh_host') stay blank and always take the host.
+            if (addr_field and host.get('address')
+                    and not str(item.get(addr_field) or '').strip()):
                 conn[addr_field] = host['address']
             prof = profiles.get(spec.get('key')) or {}
             if isinstance(prof, dict):
-                # Only non-empty profile values override the item.
-                conn.update({k: v for k, v in prof.items() if v not in (None, '')})
-        return {**item, **conn}
+                # Only non-empty values of fields the schema DECLARES as
+                # host-owned override the item.  Stale profile keys (left over
+                # after a schema evolution moved a field back to the check —
+                # e.g. ssl_cert's port) must not clobber per-check values.
+                declared = set(spec.get('fields') or [])
+                conn.update({k: v for k, v in prof.items()
+                             if k in declared and k != addr_field and v not in (None, '')})
+        resolved = {**item, **conn}
+        # Expose the host's OS so modules that run OS-specific commands can
+        # branch on it.  'auto' on a LOCAL host resolves to this process's
+        # platform; on a remote host it stays 'auto' (resolved over SSH by the
+        # consumer when needed).
+        host_os = str(host.get('os') or 'auto').strip().lower()
+        if host_os == 'auto' and not is_remote:
+            host_os = os_detect.local_os()
+        resolved['host_os'] = host_os
+        resolved['host_kind'] = 'remote' if is_remote else 'local'
+        # A host in maintenance: skip every check bound to it this cycle.  We
+        # mark it disabled (modules already skip disabled items) and leave a
+        # marker for any caller that wants to report the maintenance state.
+        if host.get('maintenance'):
+            resolved['enabled'] = False
+            resolved['_host_maintenance'] = True
+        return resolved
+
+    # ── Host-aware command execution ─────────────────────────────────────────
+    def host_os(self, item: dict) -> str:
+        """Canonical OS for an item: the bound host's OS, else this machine's."""
+        if isinstance(item, dict) and item.get('host_os'):
+            return str(item['host_os']).strip().lower()
+        return os_detect.local_os()
+
+    @staticmethod
+    def host_cmd_for(item: dict, cmds: dict, default_os: str = 'linux') -> str:
+        """Pick the command for the item's OS from ``{os: cmd}`` (falls back to
+        the *default_os* entry, then any).  Returns '' when *cmds* is empty."""
+        os_ = str((item or {}).get('host_os') or os_detect.local_os()).lower()
+        return cmds.get(os_) or cmds.get(default_os) or next(iter(cmds.values()), '')
+
+    def host_exec(self, item: dict, cmd: str, *, timeout: int = 15) -> tuple:
+        """Run *cmd* for a check item and return ``(stdout, stderr, exit_code)``.
+
+        Where it runs depends on the item's bound host (set by
+        :meth:`resolve_host`):
+
+          * ``host_kind == 'remote'`` → over SSH on the host, reusing the host's
+            stored SSH connection (``ssh_*`` fields merged into the item);
+          * otherwise (a local host or a classic inline item) → locally.
+
+        Never raises; transport/exec failures come back as
+        ``('', <error>, -1)``.
+        """
+        if not isinstance(item, dict) or not cmd:
+            return '', 'invalid item or command', -1
+        if str(item.get('host_kind') or '').strip().lower() == 'remote':
+            from lib import ssh_client  # noqa: PLC0415
+            if not ssh_client.HAS_PARAMIKO:
+                return '', 'paramiko is not installed', -1
+            address = str(item.get('ssh_host') or '').strip()
+            if not address:
+                return '', 'remote host has no address', -1
+            client = None
+            try:
+                client = ssh_client.connect_host(item, address, timeout=timeout)
+                return ssh_client.run_command(client, cmd, timeout=timeout)
+            except Exception as exc:  # pylint: disable=broad-except
+                return '', f'SSH error: {exc}', -1
+            finally:
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+        # Local / inline — run through the shell so pipes, globs and ';' behave
+        # the same as on the remote SSH path (the local Exec helper uses
+        # shlex.split, which would not interpret them).  The command is built
+        # from module code/schema (never raw user input), so shell=True is safe.
+        import subprocess  # noqa: PLC0415
+        try:
+            res = subprocess.run(cmd, shell=True, capture_output=True,  # noqa: S602
+                                 text=True, timeout=timeout)
+            return (res.stdout or ''), (res.stderr or ''), res.returncode
+        except Exception as exc:  # pylint: disable=broad-except
+            return '', str(exc), -1
 
     @property
     def _default_threads(self) -> int:
@@ -582,6 +676,34 @@ class ModuleBase(ObjectBase):
             return return_status
         msg_old = self.get_status_find(key, self.name_module).get("other_data", {}).get("message", '')
         return True if str(status_msg) != str(msg_old) else return_status
+
+    def fail_streak(self, key: str, failed: bool) -> int:
+        """Update and return the consecutive-failure count for *key*.
+
+        The counter backs ``alert``-style thresholds (declare DOWN only after N
+        consecutive failed cycles).  It is persisted in the monitor's status
+        store — NOT on the instance and NOT in a module-level dict — because:
+        the monitor builds a fresh Watchful every cycle (instance state resets),
+        and the systemd one-shot mode runs each cycle in a fresh process
+        (module-level state resets too).  status.json survives both.
+
+        Stored under ``[module][key]['fail_count']``, next to the item's
+        ``status``.  Setting a changed value flags the monitor so status.json
+        is saved even when no status flipped this cycle.
+        """
+        cur = 1 if failed else 0
+        if not self.is_monitor_exist:
+            return cur
+        try:
+            path = [self.name_module, key, 'fail_count']
+            prev = int(self._monitor.status.get_conf(path, 0) or 0)
+            cur = prev + 1 if failed else 0
+            if cur != prev:
+                self._monitor.status.set_conf(path, cur)
+                self._monitor._status_counts_dirty = True  # noqa: SLF001 — monitor-owned flag
+            return cur
+        except Exception:  # pylint: disable=broad-except
+            return cur
 
     def _debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
         """ Helper de debug para plugins. """

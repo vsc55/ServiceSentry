@@ -3,12 +3,18 @@
     "module_description": "Monitoriza la temperatura de la CPU y sensores de hardware vía psutil. Genera alertas cuando la lectura de algún sensor supera el umbral configurado.",
     "labels": {
         "enabled": "Habilitado",
+        "threads": "Hilos",
+        "timeout": "Timeout (s)",
+        "sensor":  "Sensor",
         "label":   "Etiqueta",
         "alert":   "Alerta (\u00b0C)"
     },
     "hints": {
         "enabled": "Habilitar o deshabilitar la monitorizaci\u00f3n de este sensor.",
-        "label":   "Nombre mostrado en notificaciones. Si est\u00e1 vac\u00edo se usa la etiqueta de psutil o el nombre del chip.",
+        "threads": "N\u00famero de sensores a comprobar en paralelo.",
+        "timeout": "Tiempo de espera del comando/SSH en segundos.",
+        "sensor":  "Nombre del sensor (tipo de thermal zone de Linux) a leer en el host. Si est\u00e1 vac\u00edo se usa la clave del \u00edtem.",
+        "label":   "Nombre mostrado en notificaciones. Si est\u00e1 vac\u00edo se usa el nombre del sensor.",
         "alert":   "Umbral de temperatura (\u00b0C). Se genera una alerta cuando el sensor supera este valor. Anula el umbral global del m\u00f3dulo."
     },
     "new_item_key_label": "Nombre del sensor:",

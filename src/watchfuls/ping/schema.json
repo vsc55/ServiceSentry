@@ -9,8 +9,14 @@
     "__history__": {"field": "latency_ms", "unit": "ms", "label": "Latency"},
     "__host_profile__": {"key": "icmp", "address_field": "host", "fields": ["host"]},
     "list": {
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__discovery_uid_key__": true,
+        "__discovery_label_template__": "{host}",
+        "__new_item_fields__": ["label"],
         "enabled": {"type": "bool", "default": true},
-        "host":    {"type": "str",  "default": "", "placeholder": "__key__"},
+        "label":   {"type": "str",  "default": ""},
+        "host":    {"type": "str",  "default": ""},
         "timeout": {"type": "int",  "default": 0, "min": 0, "max": 300, "placeholder_module": "timeout"},
         "attempt": {"type": "int",  "default": 0, "min": 0, "max": 50,  "placeholder_module": "attempt"},
         "alert":   {"type": "int",  "default": 0, "min": 0, "max": 100, "placeholder_module": "alert"}

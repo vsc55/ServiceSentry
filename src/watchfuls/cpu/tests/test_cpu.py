@@ -1,96 +1,127 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/cpu."""
+"""Tests for watchfuls/cpu — host-centric CPU usage monitoring.
 
-import pytest
-from unittest.mock import patch, MagicMock
+CPU is sampled via ``host_exec`` (mocked here); the per-OS parsers run for real
+against canned command output.
+"""
+
+from unittest.mock import patch
+
 from conftest import create_mock_monitor
 
 
-class TestCpuInit:
+class _FakeStore:
+    def __init__(self, hosts):
+        self._h = hosts
+    def get(self, uid, **_kw):
+        return self._h.get(uid)
 
-    def test_init(self):
+
+def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+    return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
+            'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
+
+
+def _watchful(items, hosts=None):
+    from watchfuls.cpu import Watchful
+    mm = create_mock_monitor({'watchfuls.cpu': {'list': items}})
+    mm._hosts_store = _FakeStore(hosts or {'h1': _host()})
+    return Watchful(mm)
+
+
+# /proc/stat: total +1000, idle (idle+iowait) +250 → 75% busy.
+_PROC_STAT = ("cpu  1000 0 0 8000 1000 0 0 0 0 0\n"
+              "cpu  1750 0 0 8250 1000 0 0 0 0 0\n")
+_WMIC = "\r\nLoadPercentage=42\r\n\r\n"
+_DARWIN = ("Processes: 400 total\n"
+           "CPU usage: 5.00% user, 3.00% sys, 92.00% idle\n"
+           "CPU usage: 60.00% user, 15.00% sys, 25.00% idle\n")
+# kern.cp_time (user nice sys intr idle): total +1000, idle (last) +250 → 75% busy.
+_CP_TIME = "1000 0 0 0 8000\n1750 0 0 0 8250\n"
+
+
+class TestParsers:
+
+    def test_proc_stat(self):
         from watchfuls.cpu import Watchful
-        mock_monitor = create_mock_monitor({'watchfuls.cpu': {}})
-        w = Watchful(mock_monitor)
-        assert w.name_module == 'watchfuls.cpu'
+        assert round(Watchful._parse_proc_stat(_PROC_STAT), 1) == 75.0
 
-
-class TestCpuCheck:
-
-    def setup_method(self):
+    def test_cp_time(self):
         from watchfuls.cpu import Watchful
-        self.Watchful = Watchful
+        assert round(Watchful._parse_cp_time(_CP_TIME), 1) == 75.0
 
-    def test_check_disabled_returns_empty(self):
-        """Disabled module returns empty dict_return."""
-        config = {'watchfuls.cpu': {'enabled': False}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        assert len(result.items()) == 0
+    def test_windows(self):
+        from watchfuls.cpu import Watchful
+        assert Watchful._parse_windows(_WMIC) == 42
 
-    @patch('watchfuls.cpu.psutil.cpu_percent', return_value=40.0)
-    def test_check_ok_below_threshold(self, mock_cpu):
-        """CPU usage below alert threshold → status True."""
-        config = {'watchfuls.cpu': {'alert': 85, 'interval': 1.0}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert 'cpu' in items
-        assert items['cpu']['status'] is True
-        assert 'Normal' in items['cpu']['message']
-        mock_cpu.assert_called_once_with(interval=1.0)
+    def test_darwin_uses_last_sample(self):
+        from watchfuls.cpu import Watchful
+        assert round(Watchful._parse_darwin(_DARWIN), 1) == 75.0   # 100 - 25 idle
 
-    @patch('watchfuls.cpu.psutil.cpu_percent', return_value=90.0)
-    def test_check_alert_above_threshold(self, mock_cpu):
-        """CPU usage above alert threshold → status False."""
-        config = {'watchfuls.cpu': {'alert': 85, 'interval': 1.0}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert items['cpu']['status'] is False
-        assert 'Excessive' in items['cpu']['message']
+    def test_single_sample_is_none(self):
+        from watchfuls.cpu import Watchful
+        assert Watchful._parse_proc_stat("cpu 1 0 0 1 0\n") is None
 
-    @patch('watchfuls.cpu.psutil.cpu_percent', return_value=85.0)
-    def test_check_exact_threshold_is_not_ok(self, mock_cpu):
-        """Usage exactly at threshold (not strictly below) → status False."""
-        config = {'watchfuls.cpu': {'alert': 85, 'interval': 1.0}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert items['cpu']['status'] is False
 
-    @patch('watchfuls.cpu.psutil.cpu_percent', return_value=55.0)
-    def test_check_other_data_populated(self, mock_cpu):
-        """other_data contains used and alert fields."""
-        config = {'watchfuls.cpu': {'alert': 80, 'interval': 1.0}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert items['cpu']['other_data']['used'] == 55.0
-        assert items['cpu']['other_data']['alert'] == 80.0
+class TestCheck:
 
-    @patch('watchfuls.cpu.psutil.cpu_percent', return_value=30.0)
-    def test_check_uses_default_alert(self, mock_cpu):
-        """Without explicit config, default alert (85) is used."""
-        config = {'watchfuls.cpu': {}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-        assert items['cpu']['status'] is True
+    def test_below_threshold_ok(self):
+        w = _watchful({'c': {'enabled': True, 'label': 'srv', 'alert': 85, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_PROC_STAT, '', 0)):
+            items = w.check().list
+        assert items['c']['status'] is True
+        assert items['c']['other_data']['used'] == 75.0
 
-    @patch('watchfuls.cpu.psutil.cpu_percent', return_value=50.0)
-    def test_check_custom_interval(self, mock_cpu):
-        """Custom interval is forwarded to psutil.cpu_percent."""
-        config = {'watchfuls.cpu': {'alert': 85, 'interval': 2.0}}
-        w = self.Watchful(create_mock_monitor(config))
-        w.check()
-        mock_cpu.assert_called_once_with(interval=2.0)
+    def test_above_threshold_alert(self):
+        w = _watchful({'c': {'enabled': True, 'alert': 60, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_PROC_STAT, '', 0)):
+            items = w.check().list
+        assert items['c']['status'] is False        # 75% >= 60%
+        assert 'Excessive' in items['c']['message']
 
-    @patch('watchfuls.cpu.psutil.cpu_percent', side_effect=Exception('psutil error'))
-    def test_check_exception_handled(self, mock_cpu):
-        """Exception during psutil call propagates (module does not silently swallow it)."""
-        config = {'watchfuls.cpu': {'alert': 85, 'interval': 1.0}}
-        w = self.Watchful(create_mock_monitor(config))
-        with pytest.raises(Exception, match='psutil error'):
-            w.check()
+    def test_windows_host_uses_wmic(self):
+        w = _watchful({'c': {'enabled': True, 'alert': 85, 'host_uid': 'h1'}},
+                      hosts={'h1': _host(os='windows')})
+        with patch.object(w, 'host_exec', return_value=(_WMIC, '', 0)) as he:
+            items = w.check().list
+        assert 'wmic' in he.call_args.args[1]
+        assert items['c']['status'] is True and items['c']['other_data']['used'] == 42.0
+
+    def test_disabled_item_skipped(self):
+        w = _watchful({'c': {'enabled': False, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec') as he:
+            assert len(w.check().items()) == 0
+        he.assert_not_called()
+
+    def test_maintenance_host_skipped(self):
+        w = _watchful({'c': {'enabled': True, 'host_uid': 'h1'}},
+                      hosts={'h1': _host(maintenance=True)})
+        with patch.object(w, 'host_exec') as he:
+            assert len(w.check().items()) == 0
+        he.assert_not_called()
+
+    def test_command_failure_is_error(self):
+        w = _watchful({'c': {'enabled': True, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=('', 'refused', 255)):
+            items = w.check().list
+        assert items['c']['status'] is False and 'Error' in items['c']['message']
+
+    def test_module_disabled(self):
+        from watchfuls.cpu import Watchful
+        mm = create_mock_monitor({'watchfuls.cpu': {'enabled': False,
+                                  'list': {'c': {'enabled': True, 'host_uid': 'h1'}}}})
+        mm._hosts_store = _FakeStore({'h1': _host()})
+        w = Watchful(mm)
+        with patch.object(w, 'host_exec') as he:
+            assert len(w.check().items()) == 0
+        he.assert_not_called()
+
+
+class TestSchema:
+
+    def test_host_centric(self):
+        from watchfuls.cpu import Watchful
+        sch = Watchful.ITEM_SCHEMA
+        assert sch['__host_profile__']['key'] == 'ssh'
+        assert 'alert' in sch['list'] and 'label' in sch['list']

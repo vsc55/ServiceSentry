@@ -367,7 +367,7 @@ class TestModuleItemSchemas:
         """ping|list schema has enabled, label, host, timeout, attempt, alert."""
         schema = self.schemas['ping|list']
         user_keys = {k for k in schema.keys() if not k.startswith('__')}
-        assert user_keys == {'enabled', 'host', 'timeout', 'attempt', 'alert'}
+        assert user_keys == {'enabled', 'label', 'host', 'timeout', 'attempt', 'alert'}
         assert schema['port']['min'] == 1 if 'port' in schema else True
         # Verify rich format — 0 means "inherit from module-level setting"
         assert schema['timeout']['default'] == 0
@@ -394,52 +394,66 @@ class TestModuleItemSchemas:
             assert f in schema
 
     def test_service_status_schema_fields(self):
-        """service_status|list schema has enabled, service, expected and remediation."""
+        """service_status|list: enabled, label, service, expected, remediation.
+
+        The key is an opaque UID; 'label' carries the editable display name."""
         schema = self.schemas['service_status|list']
         user_keys = {k for k in schema.keys() if not k.startswith('__')}
-        assert user_keys == {'enabled', 'service', 'expected', 'remediation'}
+        assert user_keys == {'enabled', 'label', 'service', 'expected', 'remediation'}
         assert schema['enabled']['type'] == 'bool'
         assert schema['service']['type'] == 'str'
+        assert schema['label']['type'] == 'str'
+        assert schema['__check_title_field__'] == 'label'
+        assert schema['__discovery_uid_key__'] is True
 
     def test_temperature_list_schema_fields(self):
-        """temperature|list schema has enabled, alert."""
+        """temperature is host-centric: a sensor + alert per check, bound to a host."""
         schema = self.schemas['temperature|list']
         user_keys = {k for k in schema.keys() if not k.startswith('__')}
-        assert user_keys == {'enabled', 'alert'}
+        assert user_keys == {'enabled', 'sensor', 'label', 'alert'}
         assert schema['alert']['type'] == 'float'
+        import watchfuls.temperature as _t
+        assert _t.Watchful.ITEM_SCHEMA['__host_profile__']['key'] == 'ssh'
 
     def test_hddtemp_list_schema_fields(self):
-        """hddtemp|list schema has enabled, host, port, exclude."""
+        """hddtemp is host-centric: the daemon address comes from the bound host."""
         schema = self.schemas['hddtemp|list']
         user_keys = {k for k in schema.keys() if not k.startswith('__')}
-        assert user_keys == {'enabled', 'host', 'port', 'exclude'}
+        assert user_keys == {'enabled', 'label', 'port', 'exclude'}
         assert schema['exclude']['type'] == 'list'
+        import watchfuls.hddtemp as _h
+        assert _h.Watchful.ITEM_SCHEMA['__host_profile__']['address_field'] == 'host'
 
     def test_raid_list_schema_fields(self):
-        """raid|list schema has SSH connection fields."""
+        """raid is host-centric: the check holds only enabled/label; the SSH
+        connection now comes from the bound host (__host_profile__)."""
         schema = self.schemas['raid|list']
-        for field in ('enabled', 'host', 'port', 'user', 'password', 'key_file'):
-            assert field in schema
-        # 0 means "use default SSH port"; placeholder shows 22 in the UI
-        assert schema['port']['default'] == 0
-        assert schema['port']['placeholder'] == 22
+        assert 'enabled' in schema and 'label' in schema
+        for gone in ('host', 'port', 'user', 'password', 'key_file'):
+            assert gone not in schema
+        import watchfuls.raid as _raid
+        assert _raid.Watchful.ITEM_SCHEMA['__host_profile__']['key'] == 'ssh'
 
     # ---- modules with __module__-level scalar fields ----
     def test_ram_swap_module_schema(self):
-        """ram_swap|__module__ schema has alert_ram and alert_swap."""
-        schema = self.schemas.get('ram_swap|__module__')
+        """ram_swap is host-centric: thresholds live per-check in |list, and the
+        check binds to a host (__host_profile__ ssh)."""
+        schema = self.schemas.get('ram_swap|list')
         assert schema is not None
-        assert 'alert_ram' in schema
-        assert 'alert_swap' in schema
+        assert 'alert_ram' in schema and 'alert_swap' in schema
         assert schema['alert_ram']['default'] == 60
-        assert schema['alert_ram']['min'] == 0
-        assert schema['alert_ram']['max'] == 100
+        assert schema['alert_ram']['min'] == 0 and schema['alert_ram']['max'] == 100
+        import watchfuls.ram_swap as _rs
+        assert _rs.Watchful.ITEM_SCHEMA['__host_profile__']['key'] == 'ssh'
 
     def test_filesystemusage_list_schema_fields(self):
-        """filesystemusage|list schema has the expected fields."""
+        """filesystemusage|list: key is an opaque UID; 'label' is the editable
+        display name (host - partition)."""
         schema = self.schemas['filesystemusage|list']
         user_keys = {k for k in schema.keys() if not k.startswith('__')}
-        assert user_keys == {'enabled', 'alert', 'partition'}
+        assert user_keys == {'enabled', 'alert', 'partition', 'label'}
+        assert schema['__check_title_field__'] == 'label'
+        assert schema['__discovery_uid_key__'] is True
 
     # ---- ITEM_SCHEMA on the Watchful class directly ----
     def test_watchful_class_declares_schema(self):

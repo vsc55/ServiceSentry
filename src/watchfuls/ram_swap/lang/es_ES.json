@@ -1,14 +1,23 @@
 {
     "pretty_name": "RAM y Swap",
-    "module_description": "Monitoriza el uso de memoria RAM y SWAP. Genera alertas cuando el uso supera los umbrales de porcentaje configurados.",
+    "module_description": "Monitoriza el uso de RAM y SWAP en el host vinculado (local o por SSH). Genera alertas cuando el uso supera los umbrales configurados.",
     "labels": {
         "enabled":    "Habilitado",
+        "threads":    "Hilos",
+        "timeout":    "Timeout (s)",
+        "label":      "Etiqueta",
         "alert_ram":  "Alerta RAM (%)",
         "alert_swap": "Alerta SWAP (%)"
     },
     "hints": {
-        "enabled":    "Habilitar o deshabilitar la monitorización de RAM y SWAP.",
+        "enabled":    "Habilitar o deshabilitar esta comprobación de RAM y SWAP.",
+        "threads":    "Número de hosts a comprobar en paralelo.",
+        "timeout":    "Tiempo de espera del comando/SSH en segundos.",
+        "label":      "Nombre para mostrar en la interfaz. Si está vacío se usa la clave del ítem.",
         "alert_ram":  "Umbral de uso de RAM (%). Se genera una alerta cuando el uso de RAM supera este valor.",
         "alert_swap": "Umbral de uso de SWAP (%). Se genera una alerta cuando el uso de SWAP supera este valor."
-    }
+    },
+    "new_item_key_label": "Nombre de la comprobación o identificador:",
+    "rename_item_prompt": "Introduce el nuevo nombre de la comprobación o identificador:",
+    "collections": {"list": "Comprobaciones de memoria"}
 }

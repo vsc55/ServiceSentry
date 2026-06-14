@@ -28,6 +28,17 @@ class TestAuditLog:
         events = [e['event'] for e in admin._audit_log]
         assert 'login_ok' in events
 
+    def test_audit_write_failure_is_resilient(self, admin):
+        """A failed audit insert must not raise nor permanently stop auditing —
+        the next write still records (regression: audits silently stopping)."""
+        from unittest.mock import patch
+        with patch.object(admin._audit_store, 'insert',
+                          side_effect=RuntimeError('database is locked')):
+            admin._audit_system('host_tested', detail={'ok': False})  # must NOT raise
+        # Auditing recovers on the next write.
+        admin._audit_system('host_tested', detail={'ok': True})
+        assert any(e['event'] == 'host_tested' for e in admin._audit_log)
+
     def test_failed_login_audited(self, admin, client):
         """Failed login creates an audit entry."""
         client.post("/login", data={"username": "admin", "password": "wrong"},

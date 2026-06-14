@@ -1,303 +1,134 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests para watchfuls/filesystemusage.py."""
+"""Tests for watchfuls/filesystemusage — host-centric disk usage monitoring.
 
-from types import SimpleNamespace
-from unittest.mock import patch
+Usage is read via ``host_exec`` (mocked); the per-OS parsers run for real
+against canned ``df``/``wmic`` output.
+"""
 
-import pytest
+from unittest.mock import patch, MagicMock
 
 from conftest import create_mock_monitor
 
 
-def _part(device, mountpoint, fstype='ext4'):
-    """Helper: crea un objeto similar a psutil partition."""
-    return SimpleNamespace(device=device, mountpoint=mountpoint, fstype=fstype, opts='rw')
+class _FakeStore:
+    def __init__(self, hosts):
+        self._h = hosts
+    def get(self, uid, **_kw):
+        return self._h.get(uid)
 
 
-def _usage(percent):
-    """Helper: crea un objeto similar a psutil disk_usage."""
-    return SimpleNamespace(total=100_000_000, used=int(percent * 1_000_000), free=0, percent=percent)
+def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+    return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
+            'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
 
-class TestFilesystemUsageInit:
+def _watchful(items, hosts=None):
+    from watchfuls.filesystemusage import Watchful
+    mm = create_mock_monitor({'watchfuls.filesystemusage': {'list': items}})
+    mm._hosts_store = _FakeStore(hosts or {'h1': _host()})
+    return Watchful(mm)
 
-    def test_init(self):
+
+_DF = ("Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+       "/dev/sda1 100000 75000 25000 75% /\n"
+       "/dev/sdb1 200000 180000 20000 90% /data\n")
+_WMIC = ("\r\nDeviceID=C:\r\nFreeSpace=25000000\r\nSize=100000000\r\n\r\n"
+         "DeviceID=D:\r\nFreeSpace=10000000\r\nSize=100000000\r\n\r\n")
+
+
+class TestParsers:
+
+    def test_df_by_mount(self):
         from watchfuls.filesystemusage import Watchful
-        mock_monitor = create_mock_monitor({'watchfuls.filesystemusage': {}})
-        w = Watchful(mock_monitor)
-        assert w.name_module == 'watchfuls.filesystemusage'
+        assert Watchful._parse_df(_DF, '/') == 75
+        assert Watchful._parse_df(_DF, '/data') == 90
+        assert Watchful._parse_df(_DF, '/dev/sda1') == 75   # match by device too
+        assert Watchful._parse_df(_DF, '/nope') is None
 
-
-class TestFilesystemUsageCheck:
-
-    def setup_method(self):
+    def test_wmic(self):
         from watchfuls.filesystemusage import Watchful
-        self.Watchful = Watchful
+        assert Watchful._parse_wmic(_WMIC, 'C:') == 75       # (100-25)/100
+        assert Watchful._parse_wmic(_WMIC, 'D:') == 90
 
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_check_normal_usage(self, mock_psutil):
-        """Particiones por debajo del umbral = OK."""
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sda1', '/'),
-            _part('/dev/sda2', '/home'),
-            _part('/dev/mmcblk0p6', '/boot'),
-        ]
-        mock_psutil.disk_usage.side_effect = lambda mp: {
-            '/': _usage(17.0),
-            '/home': _usage(6.0),
-            '/boot': _usage(32.0),
-        }[mp]
 
-        config = {'watchfuls.filesystemusage': {'alert': 85, 'list': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
+class TestCheck:
 
-        for val in items.values():
-            assert val['status'] is True
-            assert 'partition' in val['message']
+    def test_ok_below_threshold(self):
+        # Result is keyed by the item key (not the mount), so checks stay distinct.
+        w = _watchful({'root': {'enabled': True, 'partition': '/', 'alert': 85, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+            items = w.check().list
+        assert items['root']['status'] is True
+        assert items['root']['other_data']['used'] == 75
+        assert items['root']['other_data']['mount'] == '/'
 
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_check_high_usage(self, mock_psutil):
-        """Partición por encima del umbral = warning."""
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sda1', '/'),
-            _part('/dev/sda2', '/home'),
-        ]
-        mock_psutil.disk_usage.side_effect = lambda mp: {
-            '/': _usage(90.0),
-            '/home': _usage(6.0),
-        }[mp]
+    def test_alert_above_threshold(self):
+        w = _watchful({'data': {'enabled': True, 'partition': '/data', 'alert': 85, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+            items = w.check().list
+        assert items['data']['status'] is False        # 90 > 85
+        assert 'Warning' in items['data']['message']
 
-        config = {'watchfuls.filesystemusage': {'alert': 85, 'list': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
+    def test_windows_host_uses_wmic(self):
+        w = _watchful({'c': {'enabled': True, 'partition': 'C:', 'alert': 85, 'host_uid': 'h1'}},
+                      hosts={'h1': _host(os='windows')})
+        with patch.object(w, 'host_exec', return_value=(_WMIC, '', 0)) as he:
+            items = w.check().list
+        assert 'wmic' in he.call_args.args[1]
+        assert items['c']['status'] is True and items['c']['other_data']['used'] == 75
 
-        assert items['/']['status'] is False
-        assert 'Warning' in items['/']['message']
-        assert items['/home']['status'] is True
+    def test_message_uses_label_to_identify_server(self):
+        # The label (e.g. "NS1 - /") identifies the server in the notification.
+        w = _watchful({'uid-a': {'enabled': True, 'partition': '/', 'label': 'NS1 - /',
+                                 'alert': 85, 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+            items = w.check().list
+        assert 'NS1 - /' in items['uid-a']['message']
 
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_check_custom_alert_per_partition(self, mock_psutil):
-        """Umbral personalizado por partición."""
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sda1', '/'),
-        ]
-        mock_psutil.disk_usage.side_effect = lambda mp: {
-            '/': _usage(17.0),
-        }[mp]
+    def test_same_mount_distinct_items_do_not_collide(self):
+        # Two checks on the same mount (e.g. on different hosts) must produce two
+        # results, keyed by their item keys — not collapse into one.
+        w = _watchful({
+            'uid-a': {'enabled': True, 'partition': '/', 'alert': 85, 'host_uid': 'h1'},
+            'uid-b': {'enabled': True, 'partition': '/', 'alert': 85, 'host_uid': 'h1'},
+        })
+        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+            items = w.check().list
+        assert set(items.keys()) == {'uid-a', 'uid-b'}
 
-        config = {'watchfuls.filesystemusage': {'alert': 85, 'list': {'/': 10}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
+    def test_partition_not_found_is_error(self):
+        w = _watchful({'x': {'enabled': True, 'partition': '/nope', 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+            items = w.check().list
+        assert items['x']['status'] is False and 'Error' in items['x']['message']
 
-        # 17% > 10% → warning
-        assert items['/']['status'] is False
+    def test_disabled_and_maintenance_skipped(self):
+        w = _watchful({'a': {'enabled': False, 'partition': '/', 'host_uid': 'h1'}})
+        with patch.object(w, 'host_exec') as he:
+            assert len(w.check().items()) == 0
+        he.assert_not_called()
+        w2 = _watchful({'a': {'enabled': True, 'partition': '/', 'host_uid': 'h1'}},
+                       hosts={'h1': _host(maintenance=True)})
+        with patch.object(w2, 'host_exec') as he2:
+            assert len(w2.check().items()) == 0
+        he2.assert_not_called()
 
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_check_other_data(self, mock_psutil):
-        """other_data contiene used, mount y alert."""
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sda1', '/'),
-        ]
-        mock_psutil.disk_usage.side_effect = lambda mp: {
-            '/': _usage(17.0),
-        }[mp]
 
-        config = {'watchfuls.filesystemusage': {'alert': 85, 'list': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
+class TestDiscover:
 
-        other = items['/']['other_data']
-        assert 'used' in other
-        assert 'mount' in other
-        assert 'alert' in other
-        assert other['mount'] == '/'
-        assert other['used'] == 17.0
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_check_no_partitions(self, mock_psutil):
-        """Sin particiones, no hay resultados."""
-        mock_psutil.disk_partitions.return_value = []
-
-        config = {'watchfuls.filesystemusage': {'alert': 85, 'list': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        assert len(result.items()) == 0
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_check_exact_threshold(self, mock_psutil):
-        """Uso exactamente en el umbral, no supera (float comparison)."""
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sda1', '/'),
-        ]
-        mock_psutil.disk_usage.side_effect = lambda mp: {
-            '/': _usage(85.0),
-        }[mp]
-
-        config = {'watchfuls.filesystemusage': {'alert': 85, 'list': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-
-        # 85% no es > 85% → OK
-        assert items['/']['status'] is True
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_ignored_fstypes(self, mock_psutil):
-        """Pseudo-filesystems como tmpfs y squashfs se ignoran."""
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sda1', '/', 'ext4'),
-            _part('tmpfs', '/run', 'tmpfs'),
-            _part('squashfs', '/snap/core', 'squashfs'),
-        ]
-        mock_psutil.disk_usage.side_effect = lambda mp: _usage(50.0)
-
-        config = {'watchfuls.filesystemusage': {'alert': 85, 'list': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-
-        assert '/' in items
-        assert '/run' not in items
-        assert '/snap/core' not in items
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_permission_error_skipped(self, mock_psutil):
-        """Particiones con PermissionError se saltan sin error."""
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sda1', '/'),
-            _part('/dev/sda2', '/restricted'),
-        ]
-        def fake_usage(mp):
-            if mp == '/restricted':
-                raise PermissionError("access denied")
-            return _usage(50.0)
-        mock_psutil.disk_usage.side_effect = fake_usage
-
-        config = {'watchfuls.filesystemusage': {'alert': 85, 'list': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-
-        assert '/' in items
-        assert '/restricted' not in items
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_discover_basic(self, mock_psutil):
-        """discover() returns mounted partitions with usage."""
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sda1', '/',     'ext4'),
-            _part('/dev/sda2', '/home', 'ext4'),
-        ]
-        mock_psutil.disk_usage.side_effect = lambda mp: {
-            '/':     _usage(45.0),
-            '/home': _usage(72.0),
-        }[mp]
-
+    def test_discover_remote_df(self):
         from watchfuls.filesystemusage import Watchful
-        result = Watchful.discover()
-        names = [r['name'] for r in result]
-        assert '/' in names
-        assert '/home' in names
+        host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
+        with patch('lib.host_runner.run', return_value=(_DF, '', 0)) as run:
+            names = {s['name'] for s in Watchful.discover({'__host__': host})}
+        assert run.call_args.args[1] == 'df -P -k'
+        assert '/' in names and '/data' in names
 
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_discover_filters_ignored_fstypes(self, mock_psutil):
-        """discover() excludes virtual filesystems."""
-        from watchfuls.filesystemusage import Watchful
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sda1', '/',    'ext4'),
-            _part('tmpfs',     '/run', 'tmpfs'),
-            _part('squashfs',  '/snap/core', 'squashfs'),
-        ]
-        mock_psutil.disk_usage.return_value = _usage(50.0)
-
-        result = Watchful.discover()
-        names = [r['name'] for r in result]
-        assert '/' in names
-        assert '/run' not in names
-        assert '/snap/core' not in names
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_discover_status_is_percentage(self, mock_psutil):
-        """discover() status field contains usage percentage string."""
-        from watchfuls.filesystemusage import Watchful
-        mock_psutil.disk_partitions.return_value = [_part('/dev/sda1', '/', 'ext4')]
-        mock_psutil.disk_usage.return_value = _usage(45.0)
-
-        result = Watchful.discover()
-        assert result[0]['status'] == '45%'
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_discover_permission_error_shows_unknown(self, mock_psutil):
-        """discover() marks unreadable partitions with '?' instead of crashing."""
-        from watchfuls.filesystemusage import Watchful
-        mock_psutil.disk_partitions.return_value = [_part('/dev/sda1', '/', 'ext4')]
-        mock_psutil.disk_usage.side_effect = PermissionError('denied')
-
-        result = Watchful.discover()
-        assert result[0]['status'] == '?'
-        assert result[0]['name'] == '/'
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_discover_sorted(self, mock_psutil):
-        """discover() returns partitions sorted by mountpoint (case-insensitive)."""
-        from watchfuls.filesystemusage import Watchful
-        mock_psutil.disk_partitions.return_value = [
-            _part('/dev/sdc1', '/var',  'ext4'),
-            _part('/dev/sda1', '/',     'ext4'),
-            _part('/dev/sdb1', '/home', 'ext4'),
-        ]
-        mock_psutil.disk_usage.return_value = _usage(50.0)
-
-        result = Watchful.discover()
-        assert [r['name'] for r in result] == ['/', '/home', '/var']
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_discover_display_name_includes_device_and_fstype(self, mock_psutil):
-        """discover() display_name combines device and fstype."""
-        from watchfuls.filesystemusage import Watchful
-        mock_psutil.disk_partitions.return_value = [_part('/dev/sda1', '/', 'ext4')]
-        mock_psutil.disk_usage.return_value = _usage(50.0)
-
-        result = Watchful.discover()
-        assert '/dev/sda1' in result[0]['display_name']
-        assert 'ext4' in result[0]['display_name']
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_discover_empty(self, mock_psutil):
-        """discover() returns empty list when no partitions found."""
-        from watchfuls.filesystemusage import Watchful
-        mock_psutil.disk_partitions.return_value = []
-        assert Watchful.discover() == []
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_discover_exception(self, mock_psutil):
-        """discover() returns empty list on unexpected error."""
-        from watchfuls.filesystemusage import Watchful
-        mock_psutil.disk_partitions.side_effect = Exception('disk error')
-        assert Watchful.discover() == []
-
-    @patch('watchfuls.filesystemusage.psutil')
-    def test_windows_style_partitions(self, mock_psutil):
-        """Particiones estilo Windows (C:\\, D:\\)."""
-        mock_psutil.disk_partitions.return_value = [
-            _part('C:\\', 'C:\\', 'NTFS'),
-            _part('D:\\', 'D:\\', 'NTFS'),
-        ]
-        mock_psutil.disk_usage.side_effect = lambda mp: {
-            'C:\\': _usage(88.0),
-            'D:\\': _usage(45.0),
-        }[mp]
-
-        config = {'watchfuls.filesystemusage': {'alert': 85, 'list': {}}}
-        w = self.Watchful(create_mock_monitor(config))
-        result = w.check()
-        items = result.list
-
-        assert items['C:\\']['status'] is False
-        assert items['D:\\']['status'] is True
+    @patch('watchfuls.filesystemusage.psutil.disk_partitions',
+           return_value=[MagicMock(mountpoint='/', device='/dev/sda1', fstype='ext4')])
+    @patch('watchfuls.filesystemusage.psutil.disk_usage',
+           return_value=MagicMock(percent=42.0))
+    def test_discover_local(self, _u, _p):
+        out = _watchful({}).discover()
+        assert out and out[0]['name'] == '/'

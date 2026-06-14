@@ -21,26 +21,39 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+"""Watchful to check temperature sensors on the bound host (local or over SSH).
 
+Host-centric: each check binds to a host (``host_uid``) and a sensor.  Sensor
+temperatures are read on that host from Linux ``/sys/class/thermal`` via
+:meth:`ModuleBase.host_exec` and compared with a per-check threshold.
+"""
+
+import concurrent.futures
 import json
 import os
 
-import psutil
-
-from lib.modules import EnumConfigOptions as ConfigOptions
+from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
+# Reads every thermal zone: prints "<type>|<millidegrees>" per zone.
+_THERMAL_CMD = (
+    'for z in /sys/class/thermal/thermal_zone*; do '
+    'printf "%s|%s\\n" "$(cat "$z/type" 2>/dev/null)" "$(cat "$z/temp" 2>/dev/null)"; done'
+)
+
 
 class Watchful(ModuleBase):
+    """Check temperature sensors per host against a threshold (Linux)."""
 
     ITEM_SCHEMA = _SCHEMA
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
-    SUPPORTED_PLATFORMS = ('linux', 'darwin')
 
     _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
                  if isinstance(v, dict) and 'default' in v}
+    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
+                        if isinstance(v, dict) and 'default' in v}
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -48,82 +61,73 @@ class Watchful(ModuleBase):
     def check(self):
         if not self.is_enabled:
             return self.dict_return
-
-        for chip, readings in self._read_sensors().items():
-            for idx, reading in enumerate(readings):
-                dev_name = f"{chip}_{idx}"
-
-                if not self._get_conf(ConfigOptions.enabled, dev_name):
-                    continue
-
-                default_label = reading.label.strip() if reading.label and reading.label.strip() else chip
-                type_label = self._get_conf(ConfigOptions.label, dev_name, default_label)
-                temp = reading.current
-                temp_alert = self._get_conf(ConfigOptions.alert, dev_name)
-
-                is_warning = temp > temp_alert
-
-                message = f"Sensor *{type_label}*, "
-                if is_warning:
-                    message += f'*over temperature Warning {temp:.1f} ºC* 🔥'
-                else:
-                    message += f'temperature Ok *{temp:.1f} ºC* ✅'
-
-                other_data = {'type': chip, 'temp': temp, 'alert': temp_alert}
-                self.dict_return.set(dev_name, not is_warning, message, other_data=other_data)
-
+        items = [(k, v) for k, v in self.get_conf('list', {}).items()
+                 if isinstance(v, dict) and v.get('enabled', self._DEFAULTS['enabled'])]
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.get_conf('threads', self._MODULE_DEFAULTS['threads'])) as executor:
+            futures = {executor.submit(self._temp_check, k, v): k for k, v in items}
+            for future in concurrent.futures.as_completed(futures):
+                key = futures[future]
+                try:
+                    future.result()
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._debug(f"temperature: {key} - Exception: {exc}", DebugLevel.error)
+                    self.dict_return.set(key, False, f'Temp: {key} - *Error: {exc}* 💥')
         super().check()
         return self.dict_return
 
-    @classmethod
-    def discover(cls) -> list:
-        """Return [{name, display_name, status}] for all available temperature sensors."""
-        result = []
-        for chip, readings in cls._read_sensors().items():
-            for idx, reading in enumerate(readings):
-                label = reading.label.strip() if reading.label and reading.label.strip() else ''
-                display = chip + (f' — {label}' if label else f' [{idx}]')
-                try:
-                    status = f'{reading.current:.1f}°C'
-                except Exception:
-                    status = '?'
-                result.append({
-                    'name': f'{chip}_{idx}',
-                    'display_name': display,
-                    'status': status,
-                })
+    def _temp_check(self, key, raw):
+        item = self.resolve_host(raw)
+        if item.get('_host_maintenance') or not item.get('enabled', True):
+            return
+        os_ = self.host_os(item)
+        if os_ != 'linux':
+            self.dict_return.set(key, False,
+                                 f'Temp: {key} - *only available on Linux (host OS: {os_})* ⚠️')
+            return
+        sensor = (item.get('sensor', '') or '').strip() or key
+        label = (item.get('label', '') or '').strip() or sensor
+        out, err, code = self.host_exec(
+            item, _THERMAL_CMD, timeout=self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']))
+        if code != 0 and not out:
+            raise OSError((err or '').strip() or f'sensor read exited {code}')
+        temps = dict(self._parse_thermal(out))
+        if sensor not in temps:
+            raise ValueError(f'sensor "{sensor}" not found')
+
+        temp = temps[sensor]
+        alert = float(item.get('alert', 0) or self._DEFAULTS['alert'])
+        warning = temp > alert
+        msg = f'Sensor *{label}*, '
+        msg += (f'*over temperature Warning {temp:.1f} ºC* 🔥' if warning
+                else f'temperature Ok *{temp:.1f} ºC* ✅')
+        self.dict_return.set(key, not warning, msg,
+                             other_data={'type': sensor, 'temp': temp, 'alert': alert})
+
+    @staticmethod
+    def _parse_thermal(out):
+        """Lines "<type>|<millidegrees>" → [(name, celsius)] (dedup type → type_N)."""
+        seen, result = {}, []
+        for line in (out or '').splitlines():
+            if '|' not in line:
+                continue
+            typ, _, val = line.partition('|')
+            typ, val = typ.strip(), val.strip()
+            if not typ or not val.lstrip('-').isdigit():
+                continue
+            n = seen.get(typ, 0)
+            seen[typ] = n + 1
+            name = typ if n == 0 else f'{typ}_{n}'
+            result.append((name, int(val) / 1000.0))
         return result
 
     @classmethod
-    def _read_sensors(cls) -> dict:
-        """Return {chip: [readings]} via psutil (Linux / macOS only)."""
-        if not hasattr(psutil, 'sensors_temperatures'):
-            return {}
-        try:
-            return psutil.sensors_temperatures() or {}
-        except Exception:
-            return {}
-
-    def _get_conf(self, opt_find, dev_name: str, default_val=None):
-        if default_val is None:
-            match opt_find:
-                case ConfigOptions.alert:
-                    val_def = self.get_conf(opt_find.name, self._DEFAULTS['alert'])
-                case ConfigOptions.enabled:
-                    val_def = self.get_conf(opt_find.name, self._DEFAULTS['enabled'])
-                case None:
-                    raise ValueError("opt_find it can not be None!")
-                case _:
-                    raise TypeError(f"{opt_find.name} is not valid option!")
-        else:
-            val_def = default_val
-
-        value = self.get_conf_in_list(opt_find, dev_name, val_def)
-
-        match opt_find:
-            case ConfigOptions.alert:
-                return self._parse_conf_float(value, val_def)
-            case ConfigOptions.enabled:
-                return bool(value)
-            case _:
-                return self._parse_conf_str(value, val_def)
+    def discover(cls, config=None) -> list:
+        """Temperature sensors on the host (Linux thermal zones)."""
+        from lib import host_runner  # noqa: PLC0415
+        host = (config or {}).get('__host__') if isinstance(config, dict) else None
+        out, _err, code = host_runner.run(host, _THERMAL_CMD, timeout=15)
+        if code != 0 and not out:
+            return []
+        return [{'name': name, 'display_name': name, 'status': f'{c:.1f}°C'}
+                for name, c in cls._parse_thermal(out)]

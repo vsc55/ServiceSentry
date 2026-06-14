@@ -6,9 +6,12 @@
         "timeout": {"type": "int", "default": 5,    "min": 1, "max": 300}
     },
     "__history__": {"field": "TEMP", "unit": "°C", "label": "Disk Temperature"},
+    "__host_profile__": {"key": "hddtemp", "address_field": "host", "fields": ["host"]},
     "list": {
+        "__check_title_field__": "label",
+        "__new_item_fields__": ["label"],
         "enabled": {"type": "bool", "default": true},
-        "host":    {"type": "str",  "default": ""},
+        "label":   {"type": "str",  "default": ""},
         "port":    {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 7634},
         "exclude": {"type": "list", "default": []}
     }

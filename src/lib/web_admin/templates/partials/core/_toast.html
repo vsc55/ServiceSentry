@@ -19,3 +19,23 @@ function showToast(msg, type = 'success', delay = 3000) {
     b.textContent = msg;
     bootstrap.Toast.getOrCreateInstance(t, { delay }).show();
 }
+
+// ──────────────────────────── Generic info modal ──────────────────
+// Show a title + an optional lead message + a key/value table.  `data` may be a
+// plain object ({key: value}) or an array of [key, value] pairs (preserves order).
+function showInfoModal(title, data, lead) {
+    document.getElementById('infoModalTitle').textContent = title || '';
+    const pairs = Array.isArray(data)
+        ? data
+        : Object.entries(data || {});
+    const rows = pairs.map(([k, v]) =>
+        `<tr><td class="text-muted" style="white-space:nowrap;width:1%">${esc(String(k))}</td>` +
+        `<td class="font-monospace" style="word-break:break-all">${esc(v === null || v === undefined ? '' : String(v))}</td></tr>`
+    ).join('');
+    const body = (lead ? `<p class="small text-success mb-2"><i class="bi bi-check-circle me-1"></i>${esc(lead)}</p>` : '')
+        + (pairs.length
+            ? `<table class="table table-sm table-striped align-middle mb-0" style="font-size:.82rem"><tbody>${rows}</tbody></table>`
+            : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
+    document.getElementById('infoModalBody').innerHTML = body;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+}

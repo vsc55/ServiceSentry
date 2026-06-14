@@ -108,14 +108,40 @@ class TestPublicStatusPage:
         assert b"Ping" in html or b"ping" in html
 
     def test_status_shows_check_name(self, config_dir, var_dir):
-        """The status page renders individual check names."""
+        """The status page renders individual checks by their display name —
+        the item 'label' when set."""
+        import json
+        import os
         wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                       public_status=True,
                       pw_require_upper=False, pw_require_digit=False)
+        # modules.json and status.json keyed consistently (by the item key).
+        wa._save_config_file(wa._MODULES_FILE, {"ping": {"enabled": True, "list": {
+            "u-router": {"enabled": True, "label": "Router", "host": "192.168.1.1"}}}})
+        with open(os.path.join(var_dir, wa._STATUS_FILE), "w", encoding="utf-8") as fh:
+            json.dump({"ping": {"u-router": {"status": True}}}, fh)
         wa.app.config["TESTING"] = True
-        c = wa.app.test_client()
-        html = c.get("/status").data
-        assert b"192.168.1.1" in html
+        html = wa.app.test_client().get("/status").data
+        assert b"Router" in html
+
+    def test_status_uses_item_label_over_uid_key(self, config_dir, var_dir):
+        """When a check's key is an opaque UID, the page shows its 'label'."""
+        import json
+        import os
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        uid = "abc-123-uid"
+        wa._save_config_file(wa._MODULES_FILE, {"service_status": {
+            "enabled": True,
+            "list": {uid: {"enabled": True, "service": "named", "label": "NS1 - named"}},
+        }})
+        with open(os.path.join(var_dir, wa._STATUS_FILE), "w", encoding="utf-8") as fh:
+            json.dump({"service_status": {uid: {"status": True}}}, fh)
+        wa.app.config["TESTING"] = True
+        html = wa.app.test_client().get("/status").data
+        assert b"NS1 - named" in html
+        assert uid.encode() not in html
 
     def test_status_overall_pct_100_when_all_ok(self, config_dir, var_dir):
         """Overall percentage is 100% when all checks pass."""

@@ -324,9 +324,18 @@ def register(app, wa):
                                     app_name=flow.get('app_name', 'ServiceSentry'))
         except Exception as exc:
             wa._entra_flows.pop(flow_token, None)
+            wa._audit('entra_app_provision_failed', detail={
+                'app_name': flow.get('app_name', ''), 'tenant_id': tenant_id,
+                'error': str(exc),
+            })
             return jsonify({'status': 'error', 'message': str(exc)})
 
         wa._entra_flows.pop(flow_token, None)
+        wa._audit('entra_app_provisioned', detail={
+            'app_name':  flow.get('app_name', ''),
+            'tenant_id': tenant_id,
+            'client_id': result.get('client_id', ''),
+        })
         return jsonify({'status': 'complete', **result})
 
     @app.route('/api/v1/auth/entra/saml2/device-code', methods=['POST'])
@@ -416,9 +425,18 @@ def register(app, wa):
                 app_name=flow.get('app_name', 'ServiceSentry'))
         except Exception as exc:
             wa._entra_flows.pop(flow_token, None)
+            wa._audit('entra_saml2_app_provision_failed', detail={
+                'app_name': flow.get('app_name', ''), 'tenant_id': tenant_id,
+                'error': str(exc),
+            })
             return jsonify({'status': 'error', 'message': str(exc)})
 
         wa._entra_flows.pop(flow_token, None)
+        wa._audit('entra_saml2_app_provisioned', detail={
+            'app_name':  flow.get('app_name', ''),
+            'tenant_id': tenant_id,
+            'client_id': result.get('client_id', ''),
+        })
         return jsonify({'status': 'complete', **result})
 
 

@@ -3,6 +3,7 @@
     "module_description": "Monitors NTP server time synchronization. Alerts when the time offset between the system clock and the NTP server exceeds the configured threshold.",
     "labels": {
         "enabled":    "Enabled",
+        "label":      "Label",
         "threads":    "Threads",
         "max_offset": "Max offset (s)",
         "timeout":    "Timeout (s)",

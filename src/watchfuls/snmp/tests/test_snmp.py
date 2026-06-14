@@ -28,15 +28,15 @@ def _cfg(checks, server_extra=None, **server):
 
 
 class _Base:
-    def setup_method(self):
-        # Module-level failure counters persist across instances — clear them so
-        # tests don't leak debounce state into each other.
-        snmp._FAIL_COUNTS.clear()
-
-    def _make(self, module_config):
+    def _make(self, module_config, monitor=None):
         # Skip startup MIB compilation (filesystem side effects) during tests.
+        # Pass *monitor* to simulate consecutive cycles: the real monitor builds
+        # a fresh Watchful each cycle but keeps ONE status store (where the
+        # fail_streak debounce counters live).
+        if monitor is None:
+            monitor = create_mock_monitor({'watchfuls.snmp': module_config})
         with patch.object(Watchful, '_startup_compile_mibs', return_value=None):
-            return Watchful(create_mock_monitor({'watchfuls.snmp': module_config}))
+            return Watchful(monitor)
 
 
 class TestEvaluate:
@@ -98,22 +98,25 @@ class TestCheckFlow(_Base):
         cfg = _cfg({'c': {'enabled': True, 'oid': 'x', 'operator': 'gt', 'value': '10'}})
         with patch.object(Watchful, '_snmp_get', return_value=('42', None)):
             assert self._make(cfg).check().list['s.c']['status'] is True
-        snmp._FAIL_COUNTS.clear()
         with patch.object(Watchful, '_snmp_get', return_value=('5', None)):
             assert self._make(cfg).check().list['s.c']['status'] is False
 
 
 class TestAlertDebounce(_Base):
-    """The alert threshold must require N consecutive *cycles* of failure."""
+    """The alert threshold must require N consecutive *cycles* of failure.
+
+    Counters are persisted in the monitor's status store (fail_streak), so the
+    tests share ONE monitor across cycles while building a fresh Watchful each
+    time — exactly what the real monitor does."""
 
     def test_threshold_requires_consecutive_failures(self):
         cfg = _cfg({'c': {'enabled': True, 'oid': 'x', 'operator': 'any', 'alert': 3}})
-        # Each cycle uses a fresh instance, like the real monitor.
+        mon = create_mock_monitor({'watchfuls.snmp': cfg})
         with patch.object(Watchful, '_snmp_get', return_value=(None, 'timeout')):
-            assert self._make(cfg).check().list['s.c']['status'] is True   # fail 1/3
-            assert self._make(cfg).check().list['s.c']['status'] is True   # fail 2/3
-            assert self._make(cfg).check().list['s.c']['status'] is False  # fail 3/3 → DOWN
-            assert self._make(cfg).check().list['s.c']['status'] is False  # stays DOWN
+            assert self._make(cfg, mon).check().list['s.c']['status'] is True   # fail 1/3
+            assert self._make(cfg, mon).check().list['s.c']['status'] is True   # fail 2/3
+            assert self._make(cfg, mon).check().list['s.c']['status'] is False  # fail 3/3 → DOWN
+            assert self._make(cfg, mon).check().list['s.c']['status'] is False  # stays DOWN
 
     def test_alert_one_fails_immediately(self):
         cfg = _cfg({'c': {'enabled': True, 'oid': 'x', 'operator': 'any', 'alert': 1}})
@@ -122,24 +125,37 @@ class TestAlertDebounce(_Base):
 
     def test_success_resets_counter(self):
         cfg = _cfg({'c': {'enabled': True, 'oid': 'x', 'operator': 'any', 'alert': 3}})
+        mon = create_mock_monitor({'watchfuls.snmp': cfg})
+        path = ['watchfuls.snmp', 's.c', 'fail_count']
         with patch.object(Watchful, '_snmp_get', return_value=(None, 'timeout')):
-            self._make(cfg).check()
-            self._make(cfg).check()
-        assert snmp._FAIL_COUNTS.get('s.c') == 2
+            self._make(cfg, mon).check()
+            self._make(cfg, mon).check()
+        assert mon.status.get_conf(path, 0) == 2
         with patch.object(Watchful, '_snmp_get', return_value=('1', None)):
-            self._make(cfg).check()
-        assert snmp._FAIL_COUNTS.get('s.c') == 0   # recovered → counter reset
+            self._make(cfg, mon).check()
+        assert mon.status.get_conf(path, 0) == 0   # recovered → counter reset
 
-    def test_stale_counters_pruned(self):
+    def test_streak_survives_new_process(self):
+        # systemd one-shot mode: a FRESH process (fresh monitor) each cycle, but
+        # the same status.json data → the streak must continue, not reset.
+        cfg = _cfg({'c': {'enabled': True, 'oid': 'x', 'operator': 'any', 'alert': 2}})
+        mon1 = create_mock_monitor({'watchfuls.snmp': cfg})
+        with patch.object(Watchful, '_snmp_get', return_value=(None, 'timeout')):
+            assert self._make(cfg, mon1).check().list['s.c']['status'] is True  # fail 1/2
+            # "New process": new monitor whose status store loads the saved data.
+            mon2 = create_mock_monitor({'watchfuls.snmp': cfg})
+            mon2.status.data = mon1.status.data
+            assert self._make(cfg, mon2).check().list['s.c']['status'] is False  # fail 2/2
+
+    def test_counter_change_marks_status_dirty(self):
+        # The monitor only saves status.json when something changed; a streak
+        # increment without a status flip must still trigger the save.
         cfg = _cfg({'c': {'enabled': True, 'oid': 'x', 'operator': 'any', 'alert': 3}})
+        mon = create_mock_monitor({'watchfuls.snmp': cfg})
+        mon._status_counts_dirty = False
         with patch.object(Watchful, '_snmp_get', return_value=(None, 'timeout')):
-            self._make(cfg).check()
-        assert 's.c' in snmp._FAIL_COUNTS
-        # Remove the check; next cycle must drop its stale counter.
-        empty = _cfg({})
-        with patch.object(Watchful, '_snmp_get', return_value=(None, 'timeout')):
-            self._make(empty).check()
-        assert 's.c' not in snmp._FAIL_COUNTS
+            self._make(cfg, mon).check()   # fail 1/3 → status still True
+        assert mon._status_counts_dirty is True
 
 
 class TestCompileResultClassification:

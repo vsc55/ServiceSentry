@@ -4,6 +4,8 @@
     "labels": {
         "enabled":     "Enabled",
         "threads":     "Threads",
+        "timeout":     "Timeout (s)",
+        "label":       "Label",
         "service":     "Service name",
         "expected":    "Expected state",
         "remediation": "Auto-remediation"
@@ -20,7 +22,10 @@
         "list": "Services"
     },
     "hints": {
-        "service":     "System service name. If empty, the item key is used as the service identifier.",
+        "threads":     "Number of services to check in parallel.",
+        "timeout":     "Command/SSH timeout in seconds.",
+        "label":       "Display name shown in Modules and notifications (e.g. \"host - service\"). Editable; defaults from discovery.",
+        "service":     "System service / unit name used to query the state (e.g. systemctl). Filled by discovery.",
         "expected":    "Expected state. An alert is triggered when the actual state differs.",
         "remediation": "Automatically starts or stops the service to restore the expected state."
     },

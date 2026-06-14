@@ -52,26 +52,25 @@ class Watchful(ModuleBase):
 
     def _check_get_list_hosts(self):
         return_list = []
-        for (key, value) in self.get_conf('list', {}).items():
-            is_enabled = self._DEFAULTS['enabled']
-            match value:
-                case bool():
-                    is_enabled = value
-                case dict():
-                    is_enabled = value.get("enabled", is_enabled)
-
-            self._debug(f"{key} - Enabled: {is_enabled}", DebugLevel.info)
-            if is_enabled:
-                if not isinstance(value, dict) or not value.get("host", None):
-                    self._debug(f"{key} - Host is not defined!", DebugLevel.warning)
-                else:
-                    new_hddtemp = self.Hddtemp_Info(key)
-                    new_hddtemp.host = value.get("host")
-                    new_hddtemp.port = value.get("port") or self._DEFAULTS['port']
-                    new_hddtemp.alert = self.get_conf('alert', self._DEFAULT_ALERT)
-                    new_hddtemp.exclude = value.get("exclude", [])
-                    return_list.append(new_hddtemp)
-
+        for (key, raw) in self.get_conf('list', {}).items():
+            if isinstance(raw, bool):           # legacy "key: true" form
+                raw = {'enabled': raw, 'host': key}
+            if not isinstance(raw, dict):
+                continue
+            # Host-centric: merge the bound host's address (no-op when inline).
+            value = self.resolve_host(raw)
+            if value.get('_host_maintenance') or not value.get('enabled', self._DEFAULTS['enabled']):
+                continue
+            host = (value.get('host') or '').strip()
+            if not host:
+                self._debug(f"{key} - Host is not defined!", DebugLevel.warning)
+                continue
+            new_hddtemp = self.Hddtemp_Info((value.get('label') or '').strip() or key)
+            new_hddtemp.host = host
+            new_hddtemp.port = value.get("port") or 7634     # standard hddtemp daemon port
+            new_hddtemp.alert = self.get_conf('alert', self._DEFAULT_ALERT)
+            new_hddtemp.exclude = value.get("exclude", [])
+            return_list.append(new_hddtemp)
         return return_list
 
     def _check_run(self, list_hosts):

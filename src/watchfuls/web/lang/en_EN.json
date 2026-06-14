@@ -3,6 +3,7 @@
     "module_description": "Monitors HTTP/HTTPS endpoints. Checks status codes, optional response content, and basic authentication. Supports GET, HEAD and POST methods.",
     "labels": {
         "enabled":          "Enabled",
+        "label":            "Label",
         "threads":          "Threads",
         "code":             "HTTP Code",
         "timeout":          "Timeout (s)",
@@ -23,7 +24,7 @@
         "threads":          "Number of URLs to check in parallel.",
         "code":             "Default expected HTTP response code for all URLs.",
         "timeout":          "Default request timeout in seconds.",
-        "url":              "Host or full URL to check. If empty, the item key is used as URL.",
+        "url":              "Host or full URL to check. Leave empty to use the bound host's address; set a specific FQDN when one host (e.g. a reverse proxy) serves several.",
         "path":             "Path appended to the URL/host (e.g. /health). Useful when the URL comes from a bound host.",
         "scheme":           "Protocol to use when the URL does not include a scheme (http:// or https://).",
         "method":           "HTTP method. HEAD is fastest (no body). POST sends an empty body.",

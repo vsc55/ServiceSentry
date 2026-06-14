@@ -25,7 +25,13 @@ async function testItemConnection(pathStr, url, btn, extra) {
     if (!result) return;
     const ok = result.data && result.data.ok;
     const msg = (result.data && result.data.message) || (ok ? t('connection_ok') : t('connection_error'));
-    showToast(msg, ok ? 'success' : 'danger');
+    // When the endpoint returns extra data on success (e.g. all the UPS/NUT
+    // variables), show it in a modal; otherwise a toast is enough.
+    if (ok && result.data.info && Object.keys(result.data.info).length) {
+        showInfoModal(t('test_connection') || 'Test', result.data.info, msg);
+    } else {
+        showToast(msg, ok ? 'success' : 'danger');
+    }
 }
 
 /**
@@ -92,7 +98,22 @@ async function itemAction(btn) {
         if (!ok) { showToast(msg, 'danger'); return; }
         const items = (res.data.items || []).map(d => String(d));
         if (!items.length) { showToast(t('no_items') || 'No items', 'secondary'); return; }
-        openFieldPickerModal(pathStr + '|' + resultFld, items, btn.textContent.trim());
+        // The action button is icon-only, so textContent is empty — title the
+        // picker from the field's value-dependent term (pick), the button's
+        // tooltip (the action label), or the field name as a last resort.
+        let _pkTitle = btn.textContent.trim();
+        if (!_pkTitle && typeof _fieldTermFor === 'function') {
+            const _m = (typeof fieldMeta === 'function')
+                ? fieldMeta(ITEM_SCHEMAS[_schemaKeyOf(pathStr)] || null, resultFld) : null;
+            const _tm = _fieldTermFor(resultFld, _m, pathStr + '|' + resultFld, 'modules');
+            _pkTitle = (_tm && _tm.pick) || btn.title || resultFld;
+        }
+        openFieldPickerModal(pathStr + '|' + resultFld, items, _pkTitle);
+    } else if (result === 'modal') {
+        // On success show a modal with everything the endpoint returned
+        // (res.data.info: object or [[k,v],…]); on failure fall back to a toast.
+        if (!ok) { showToast(msg, 'danger'); return; }
+        showInfoModal(btn.textContent.trim() || msg, res.data.info || {}, msg);
     } else {
         showToast(msg, ok ? 'success' : 'danger');
     }
@@ -260,13 +281,26 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     <i class="bi bi-trash3"></i></button>`
         : '';
 
-    // Rename (key edit) button — hidden when schema uses __key_mirrors_field__
+    // Rename (key edit) button — hidden when the key mirrors a field or is an
+    // opaque UID whose display name is edited via the title pencil instead.
     const _renameSch = ITEM_SCHEMAS[_schemaKeyOf(parentPathStr)] || null;
-    const renameBtn = (canEditItem && !(_renameSch && _renameSch['__key_mirrors_field__']))
+    const _titleEditable = !!(_renameSch && _renameSch['__title_editable__']);
+    const _titleField    = _renameSch && _renameSch['__check_title_field__'];
+    const renameBtn = (canEditItem && !_titleEditable
+                       && !(_renameSch && _renameSch['__key_mirrors_field__']))
         ? `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1" data-no-collapse="1"
         onclick="event.stopPropagation();renameItem(${tg},${pp},${nameEsc})"
         title="${escAttr(t('rename_item'))}">
         <i class="bi bi-pencil-square"></i></button>`
+        : '';
+
+    // Edit-name button — edits the editable title field (e.g. service 'label')
+    // through a small modal, since the key itself is an opaque UID.
+    const editLabelBtn = (canEditItem && _titleEditable && _titleField)
+        ? `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1" data-no-collapse="1"
+        onclick="event.stopPropagation();editItemLabel(${tg},${sp},${pp})"
+        title="${escAttr(t('host_edit_name') || 'Edit name')}">
+        <i class="bi bi-pencil"></i></button>`
         : '';
 
     // Clone button — duplicates the item with a unique key suffix
@@ -341,10 +375,12 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                 <input class="form-check-input" type="checkbox" data-no-collapse="1"
                     ${itemValue.enabled ? 'checked' : ''}
                     onclick="event.stopPropagation()"
-                    onchange="event.stopPropagation();updateField(${tg},${spEnabled},this.checked);this.closest('[data-item-path]').style.opacity=this.checked?'':'0.6'">
+                    onchange="event.stopPropagation();updateField(${tg},${spEnabled},this.checked);this.closest('[data-item-path]').style.opacity=this.checked?'':'0.6';_refreshModuleCount(${jsStr(_modNameItem)})">
             </div>`;
         }
-        const keyBadge = (displayName !== itemName)
+        // Show the raw key as a badge only when it is meaningful — not for opaque
+        // UID keys whose display name is the editable title.
+        const keyBadge = (displayName !== itemName && !_titleEditable)
             ? `<span class="badge bg-secondary bg-opacity-25 ms-2 fw-normal" style="font-size:.68rem">${esc(itemName)}</span>`
             : '';
         const _colSchema    = ITEM_SCHEMAS[_schemaKeyOf(parentPathStr)] || null;
@@ -374,7 +410,9 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                 title="${escAttr(t('test_connection'))}">
                 <i class="bi bi-plug"></i></button>`
             : '';
-        const _scalarBody = renderScalarFields(itemValue, pathStr, target, hasEnabled ? ['enabled'] : [], _postGroupHtml);
+        const _excludeFields = hasEnabled ? ['enabled'] : [];
+        if (_titleEditable && _titleField) _excludeFields.push(_titleField);   // edited via title pencil
+        const _scalarBody = renderScalarFields(itemValue, pathStr, target, _excludeFields, _postGroupHtml);
 
         // Render sub-collections: fields of type 'sub_collection' in the parent schema.
         // These are nested item collections stored inside this item (e.g. SNMP checks inside a server).
@@ -401,7 +439,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                  style="background:var(--bs-tertiary-bg);cursor:pointer"
                  role="button" onclick="toggleCollapseFromHeader(event,'${id}')">
                 <code class="flex-grow-1 min-w-0" style="font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}${keyBadge}</code>
-                ${sw}${testBtn}${renameBtn}${cloneBtn}${delBtn}
+                ${sw}${testBtn}${editLabelBtn}${renameBtn}${cloneBtn}${delBtn}
                 <button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     style="background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"

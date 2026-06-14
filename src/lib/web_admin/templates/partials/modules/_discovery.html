@@ -20,12 +20,14 @@ let _discoverPathStr     = null;
 let _discoverFieldPathStr = null;
 let _discoverUrl         = null;   // current discover endpoint
 let _discoverInputSpec   = null;   // __discovery_inputs__ spec when present
+let _discoverHostMod     = null;   // module name when the Servers modal drives discovery
 
 function _discoverSetFilterVisible(show) {
     document.getElementById('discoverFilter')?.classList.toggle('d-none', !show);
 }
 
 async function openDiscoverModal(pathStr, url) {
+    _discoverHostMod = null;   // Modules section, not the Servers (host) modal
     _discoverFieldPathStr = null;
     _discoverPathStr = pathStr;
     _discoverServices = null;
@@ -102,8 +104,10 @@ async function _discoverFetchAndRender(pathStr, url, _colSch, extraInput) {
     _renderDiscoverList();
 }
 
-/** Render the declared __discovery_inputs__ form fields. */
-function _discoverRenderInputs(modName, spec) {
+/** Render the declared __discovery_inputs__ form fields.  *runFn* is the global
+ *  function name invoked to run discovery (Modules vs Servers/host mode). */
+function _discoverRenderInputs(modName, spec, runFn) {
+    runFn = runFn || '_runDiscovery';
     let h = '<div class="d-flex flex-column gap-2">';
     for (const f of spec) {
         const label = _modUiStr(modName, f.ui, f.key);
@@ -118,11 +122,11 @@ function _discoverRenderInputs(modName, spec) {
                 <label class="form-label small mb-1" for="${escAttr(id)}">${esc(label)}${f.required ? ' *' : ''}</label>
                 <input type="text" class="form-control form-control-sm" id="${escAttr(id)}"
                        placeholder="${escAttr(f.placeholder || '')}" data-depends="${escAttr(f.depends_on || '')}"
-                       onkeydown="if(event.key==='Enter'){event.preventDefault();_runDiscovery();}">
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();${runFn}();}">
             </div>`;
         }
     }
-    h += `<div><button class="btn btn-sm btn-primary" onclick="_runDiscovery()">
+    h += `<div><button class="btn btn-sm btn-primary" onclick="${runFn}()">
             <i class="bi bi-search me-1"></i>${esc(_modUiStr(modName, 'discover_run', t('discover')))}
           </button></div></div>`;
     return h;
@@ -142,9 +146,9 @@ function _discoverInputDeps() {
     }
 }
 
-/** Collect input values and run input-driven discovery. */
-async function _runDiscovery() {
-    if (!_discoverInputSpec || !_discoverPathStr) return;
+/** Collect & validate the __discovery_inputs__ form values (null if invalid). */
+function _collectDiscoverInputs() {
+    if (!_discoverInputSpec) return null;
     const inp = {};
     for (const spec of _discoverInputSpec) {
         const el = document.getElementById('discInput_' + spec.key);
@@ -154,9 +158,17 @@ async function _runDiscovery() {
     for (const spec of _discoverInputSpec) {
         if (spec.required && !inp[spec.key]) {
             document.getElementById('discInput_' + spec.key)?.focus();
-            return;
+            return null;
         }
     }
+    return inp;
+}
+
+/** Collect input values and run input-driven discovery (Modules section). */
+async function _runDiscovery() {
+    if (!_discoverPathStr) return;
+    const inp = _collectDiscoverInputs();
+    if (inp === null) return;
     const body = document.getElementById('discoverModalBody');
     if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
     const _colSch = ITEM_SCHEMAS[_schemaKeyOf(_discoverPathStr)] || null;
@@ -164,6 +176,7 @@ async function _runDiscovery() {
 }
 
 async function openDiscoverModalForField(fieldPathStr, url) {
+    _discoverHostMod = null;   // Modules section, not the Servers (host) modal
     _discoverFieldPathStr = fieldPathStr;
     // Collection path = all parts except field key and item key (last two segments).
     _discoverPathStr = fieldPathStr.split('|').slice(0, -2).join('|');
@@ -196,9 +209,13 @@ function _renderDiscoverList() {
     const filter = (document.getElementById('discoverFilter')?.value || '').toLowerCase();
 
     // Read collection schema (reused for configured-set, render hints, and operators).
-    const _colSch = _discoverPathStr
-        ? (ITEM_SCHEMAS[_schemaKeyOf(_discoverPathStr)] || null)
-        : null;
+    // In the Servers (host) modal there is no path; resolve it from the module +
+    // its collection so schema-driven hints (record type, subtitle, …) still apply.
+    const _hostColl = (_hostChecks[_discoverHostMod] || {}).collection || 'list';
+    const _colSch = _discoverHostMod
+        ? (ITEM_SCHEMAS[_discoverHostMod + '|' + _hostColl]
+           || ITEM_SCHEMAS['watchfuls.' + _discoverHostMod + '|' + _hostColl] || null)
+        : (_discoverPathStr ? (ITEM_SCHEMAS[_schemaKeyOf(_discoverPathStr)] || null) : null);
 
     // Schema-driven render hints — all module-specific knowledge lives in schema.json.
     const _catDefs     = (_colSch && _colSch['__discovery_categories__'])        || {};
@@ -217,11 +234,26 @@ function _renderDiscoverList() {
     // Build set of identifiers already configured (case-insensitive).
     // Uses __discovery_field__ from the collection schema to find the operative field.
     const configured = new Set();
-    if (_discoverPathStr) {
+    if (_discoverHostMod) {
+        // Host mode: "already added" comes from the host's pending checks
+        // (keyed by field + type when the module dedups per record type).
+        const _st = _hostChecks[_discoverHostMod] || { items: [], collection: 'list' };
+        const _df = _colSch && _colSch['__discovery_field__'];
+        for (const it of _st.items) {
+            const v = (_df ? (it.fields[_df] || '') : '').trim();
+            if (!v) continue;
+            const tv = _typeStoreField ? (it.fields[_typeStoreField] || '') : '';
+            configured.add(_dedupKey(v, tv));
+        }
+    } else if (_discoverPathStr) {
         const _discField = _colSch && _colSch['__discovery_field__'];
         const collection = getPath(modulesData, _discoverPathStr.split('|')) || {};
         for (const [key, val] of Object.entries(collection)) {
             const _isObj   = typeof val === 'object' && val !== null;
+            // Host-bound checks belong to their server (managed from the Servers
+            // modal); the Modules section configures the inline/global set, so they
+            // must NOT block adding the same record here.
+            if (_isObj && val.host_uid) continue;
             const fieldVal = (_isObj && _discField ? (val[_discField] || '') : '').trim();
             const typeVal  = (_isObj && _typeStoreField ? (val[_typeStoreField] || '') : '');
             configured.add(_dedupKey(fieldVal || key, typeVal));
@@ -292,7 +324,7 @@ function _renderDiscoverList() {
 
         const _clickAttr  = isAdded ? '' : (_fieldMode
             ? `onclick="_selectDiscoveredServiceForField(${jsStr(_svcName)})"`
-            : `onclick="_addDiscoveredService(${jsStr(_svcName)},${jsStr(_cat)},${jsStr(svc[_typeField]||'')},${jsStr(svc.fill_value||'')})"`);
+            : `onclick="_addDiscoveredService(${jsStr(_svcName)},${jsStr(_cat)},${jsStr(svc[_typeField]||'')},${jsStr(svc.fill_value||'')},${jsStr(svc.display_name||'')})"`);
         const _trailIcon  = isAdded
             ? `<span class="badge bg-secondary flex-shrink-0" style="font-size:.65rem">${esc(t('already_added'))}</span>`
             : _isCurrent
@@ -316,27 +348,75 @@ function _renderDiscoverList() {
     body.innerHTML = h;
 }
 
-function _addDiscoveredService(serviceName, category, typeInfo, valueInfo) {
+// A random UUID for item keys (browsers expose crypto.randomUUID on secure
+// origins incl. localhost; fall back to a v4 generator otherwise).
+function _genUuid() {
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {}
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+}
+
+// The item key for a discovered entry: a UUID when the schema asks for it
+// (__discovery_uid_key__ — the display name lives in a label field), else the
+// __discovery_key_template__ ({name}/{display_name}), else the bare name.
+function _discoveryItemKey(colSch, name, displayName) {
+    if (colSch && colSch['__discovery_uid_key__']) return _genUuid();
+    const tpl = colSch && colSch['__discovery_key_template__'];
+    if (!tpl) return name;
+    let k = tpl.replace(/\{name\}/g, name || '').replace(/\{display_name\}/g, displayName || '');
+    k = k.replace(/\s*-\s*$/, '').replace(/^\s*-\s*/, '').trim();
+    return k || name;
+}
+
+// Build a display label from __discovery_label_template__.  Tokens: {host},
+// {name}, {display_name}, {type}, plus any {field} resolved from the item's
+// fields (e.g. {db_type}, {server_name}, {url}).  A dangling " - " left by an
+// empty token is collapsed.
+function _discoveryLabel(colSch, host, name, displayName, typeInfo, fields) {
+    const tpl = colSch && colSch['__discovery_label_template__'];
+    if (!tpl) return '';
+    const f = fields || {};
+    const base = { host: host || '', name: name || '', display_name: displayName || '', type: typeInfo || '' };
+    let s = tpl.replace(/\{(\w+)\}/g, (_, k) =>
+        (k in base) ? base[k] : (f[k] != null ? String(f[k]) : ''));
+    return s.replace(/\s*-\s*$/, '').replace(/^\s*-\s*/, '').trim();
+}
+
+function _addDiscoveredService(serviceName, category, typeInfo, valueInfo, displayName) {
+    // Servers modal (host mode): add the discovered item as a host check.
+    if (_discoverHostMod) {
+        _addDiscoveredHostCheck(serviceName, displayName, typeInfo, valueInfo);
+        return;
+    }
     if (!_discoverPathStr) return;
     const parts = _discoverPathStr.split('|');
     const collection = getPath(modulesData, parts);
     if (!collection || typeof collection !== 'object') return;
 
-    // Use serviceName as key; suffix if already taken (case-insensitive check)
+    // Key: a UUID or a templated label per schema, suffixed if taken.
+    const _schKey = _schemaKeyOf(_discoverPathStr);
+    const _colSch = ITEM_SCHEMAS[_schKey] || null;
+    const _baseKey = _discoveryItemKey(_colSch, serviceName, displayName);
     const _existingLower = new Set(Object.keys(collection).map(k => k.toLowerCase()));
-    let key = serviceName, n = 2;
-    while (_existingLower.has(key.toLowerCase())) key = serviceName + '_' + n++;
+    let key = _baseKey, n = 2;
+    while (_existingLower.has(key.toLowerCase())) key = _baseKey + '_' + n++;
 
     // Build item from schema defaults
-    const _schKey = _schemaKeyOf(_discoverPathStr);
     const defaults = schemaDefaults(ITEM_SCHEMAS[_schKey] || null) || {};
     const item = {};
     for (const [k, v] of Object.entries(defaults)) {
         item[k] = Array.isArray(v) ? [...v] : v;
     }
-    const _colSch = ITEM_SCHEMAS[_schKey] || null;
     const _discField = _colSch && _colSch['__discovery_field__'];
+    // The operative field keeps the raw discovered name (e.g. the unit name used
+    // by systemctl) even when the key is a UUID.
     if (_discField && _discField in item) item[_discField] = serviceName;
+    // Friendly, editable display label (the key itself is a UUID). No host in the
+    // Modules section → the template collapses to just the service name.
+    const _labelField = _colSch && _colSch['__check_title_field__'];
+    const _label = _discoveryLabel(_colSch, '', serviceName, displayName, typeInfo, item);
+    if (_labelField && _label && _labelField in item) item[_labelField] = _label;
 
     // Auto-set operator from schema's __discovery_default_operators__ if available.
     // The mapping is declared entirely in the module's schema.json — no hardcoding here.

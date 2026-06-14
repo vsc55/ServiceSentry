@@ -61,6 +61,33 @@ def client_with_modules(tmp_path):
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 
+class TestMergeHostConn:
+    """_merge_host_conn fills a module's connection fields from the bound host."""
+
+    def test_fills_address_and_ssh(self):
+        from lib.web_admin.routes.watchfuls import _merge_host_conn
+
+        class _WA:
+            _modules_dir = None
+        cfg = {'db_type': 'mysql', 'conn_type': 'ssh',
+               'host': '', 'ssh_host': '', 'ssh_user': '', 'ssh_password': ''}
+        ctx = {'address': '10.0.0.5',
+               'ssh': {'ssh_user': 'root', 'ssh_port': 22, 'ssh_password': 'p'}}
+        _merge_host_conn(_WA(), 'datastore', cfg, ctx)
+        assert cfg['host'] == '10.0.0.5'          # db address_field ← host address
+        assert cfg['ssh_host'] == '10.0.0.5'      # ssh address_field ← host address
+        assert cfg['ssh_user'] == 'root' and cfg['ssh_password'] == 'p'
+
+    def test_explicit_check_value_wins(self):
+        from lib.web_admin.routes.watchfuls import _merge_host_conn
+
+        class _WA:
+            _modules_dir = None
+        cfg = {'db_type': 'mysql', 'host': 'explicit.db'}
+        _merge_host_conn(_WA(), 'datastore', cfg, {'address': '10.0.0.5', 'ssh': {}})
+        assert cfg['host'] == 'explicit.db'       # the check's own value is kept
+
+
 class TestApiWatchfulActionAuth:
     """Unauthenticated requests are redirected to /login."""
 
@@ -399,3 +426,37 @@ class TestSsrfGuard:
         from lib.net_guard import validate_external_url
         # Internal monitoring is the tool's purpose — RFC1918 is NOT blocked.
         assert validate_external_url('http://192.168.1.10/status') is None
+
+
+# ── Host-aware discovery (Servers modal: run discover on the bound host) ──────
+
+
+class TestHostAwareDiscovery:
+    """POST discover with a host context runs the listing on that host (here a
+    remote host, with the SSH command runner mocked)."""
+
+    def test_process_discover_remote_draft(self, client_with_modules):
+        c = client_with_modules
+        _login(c)
+        with patch('lib.host_runner.run', return_value=('nginx\nnginx\nsshd\n', '', 0)) as run:
+            r = c.post('/api/v1/watchfuls/process/discover', json={
+                '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                          'profiles': {'ssh': {'ssh_user': 'root'}}},
+            })
+        assert r.status_code == 200
+        names = {s['name'] for s in r.get_json()}
+        assert 'nginx' in names and 'sshd' in names
+        # The command ran against the remote host context.
+        assert run.call_args.args[1] == 'ps -A -o comm='
+
+    def test_service_discover_remote_draft(self, client_with_modules):
+        c = client_with_modules
+        _login(c)
+        out = "  nginx.service   loaded active running  Web server\n"
+        with patch('lib.host_runner.run', return_value=(out, '', 0)):
+            r = c.post('/api/v1/watchfuls/service_status/discover', json={
+                '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                          'profiles': {'ssh': {'ssh_user': 'root'}}},
+            })
+        assert r.status_code == 200
+        assert any(s['name'] == 'nginx' for s in r.get_json())

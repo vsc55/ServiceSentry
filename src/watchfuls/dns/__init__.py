@@ -24,10 +24,16 @@
 import concurrent.futures
 import json
 import os
+import platform
+import re
+import shlex
 import socket
+import subprocess
 import sys
 import threading
 import time
+
+_IS_WINDOWS = platform.system().lower().startswith('win')
 
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
@@ -176,8 +182,30 @@ def _resolve_socket(host: str, record_type: str, timeout: float) -> list:
     return list(dict.fromkeys(r[4][0] for r in results))
 
 
-def _resolve_dns(host: str, record_type: str, timeout: float) -> list:
-    """Resolve any DNS record type using dnspython. Returns list of string representations."""
+def _nameserver_ips(nameserver: str) -> list:
+    """Resolve a nameserver spec (IP or hostname) to a list of IPs to query."""
+    import ipaddress  # noqa: PLC0415
+    ns = (nameserver or '').strip()
+    if not ns:
+        return []
+    try:
+        ipaddress.ip_address(ns)
+        return [ns]                      # already an IP
+    except ValueError:
+        pass
+    try:                                  # resolve the hostname via the system resolver
+        infos = socket.getaddrinfo(ns, 53, proto=socket.IPPROTO_UDP)
+        return list(dict.fromkeys(i[4][0] for i in infos))
+    except OSError:
+        return []
+
+
+def _resolve_dns(host: str, record_type: str, timeout: float, nameserver: str = '') -> list:
+    """Resolve any DNS record type using dnspython. Returns list of string representations.
+
+    When *nameserver* is given (IP or hostname), the query is sent to that server
+    instead of the daemon's system resolver — so a specific DNS server can be
+    verified."""
     _r = _load_dns_resolver()
     if _r is None:
         raise ImportError(
@@ -186,6 +214,11 @@ def _resolve_dns(host: str, record_type: str, timeout: float) -> list:
         )
     resolver = _r.Resolver()
     resolver.lifetime = float(timeout)
+    if nameserver:
+        ips = _nameserver_ips(nameserver)
+        if not ips:
+            raise ValueError(f'could not resolve nameserver "{nameserver}"')
+        resolver.nameservers = ips
     try:
         answers = resolver.resolve(host, record_type)
     except (_r.NXDOMAIN, _r.NoAnswer):
@@ -209,6 +242,141 @@ def _resolve_dns(host: str, record_type: str, timeout: float) -> list:
         else:
             result.append(str(rdata))
     return result
+
+
+# ── Windows daemon resolution (Resolve-DnsName) ───────────────────────────────
+# On Windows, python.exe's direct DNS queries (dnspython) are often blocked by
+# the firewall even though the OS DNS Client resolves fine.  Use Resolve-DnsName
+# (structured JSON) for daemon-side resolution there.
+_DNS_TYPE_NUM = {'A': 1, 'AAAA': 28, 'NS': 2, 'CNAME': 5, 'SOA': 6,
+                 'PTR': 12, 'MX': 15, 'TXT': 16, 'SRV': 33}
+
+
+def _psq(s: str) -> str:
+    """Quote a value for a PowerShell single-quoted string."""
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def _parse_resolve_dnsname(record_type: str, records: list) -> list:
+    """Map Resolve-DnsName JSON records to the same strings as _resolve_dns,
+    keeping only the queried type (the cmdlet also returns additional records)."""
+    rt = record_type.upper()
+    want = _DNS_TYPE_NUM.get(rt)
+    out = []
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        if want is not None and rec.get('Type') != want:
+            continue
+        if rt in ('A', 'AAAA'):
+            v = rec.get('IPAddress')
+            if v:
+                out.append(str(v))
+        elif rt == 'MX':
+            ex = rec.get('NameExchange')
+            if ex:
+                out.append(f"{rec.get('Preference')} {ex}")
+        elif rt in ('NS', 'CNAME', 'PTR'):
+            v = rec.get('NameHost')
+            if v:
+                out.append(str(v))
+        elif rt == 'TXT':
+            s = rec.get('Strings')
+            out.append(''.join(s) if isinstance(s, list) else str(s or ''))
+        elif rt == 'SOA':
+            ps = rec.get('PrimaryServer')
+            if ps:
+                out.append(f"{ps} serial={rec.get('SerialNumber')}")
+        else:
+            for k in ('IPAddress', 'NameHost', 'NameExchange'):
+                if rec.get(k):
+                    out.append(str(rec[k]))
+                    break
+    return out
+
+
+def _resolve_win(host: str, record_type: str, nameserver: str, timeout: float) -> list:
+    """Resolve via the Windows DNS Client (Resolve-DnsName) — works where direct
+    dnspython queries from python.exe are firewall-blocked."""
+    ns = f' -Server {_psq(nameserver)}' if nameserver else ''
+    ps = (f"Resolve-DnsName -Name {_psq(host)} -Type {record_type.upper()}{ns} -DnsOnly -ErrorAction Stop "
+          "| Select-Object Name,Type,NameExchange,Preference,NameHost,IPAddress,Strings,PrimaryServer,SerialNumber "
+          "| ConvertTo-Json -Compress -Depth 4")
+    try:
+        r = subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive', '-Command', ps],
+            capture_output=True, text=True, timeout=float(timeout) + 5)
+    except subprocess.TimeoutExpired:
+        raise TimeoutError(f'Resolve-DnsName timed out after {timeout}s') from None
+    out = (r.stdout or '').strip()
+    if not out:
+        return []   # NXDOMAIN / NoAnswer (cmdlet errors → empty stdout)
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return []
+    if isinstance(data, dict):
+        data = [data]
+    return _parse_resolve_dnsname(record_type, data)
+
+
+# ── Remote resolution (run on a bound host via SSH) ───────────────────────────
+def _remote_dns_cmd(os_: str, host: str, record_type: str, nameserver: str, timeout: int) -> str:
+    """Build the DNS query command to run ON the bound host.
+
+    Unix uses ``dig`` (clean, parseable); Windows uses ``nslookup``.  The
+    nameserver, when given, directs the query at that server."""
+    if os_ == 'windows':
+        ns = f' {nameserver}' if nameserver else ''
+        return f'nslookup -type={record_type} {host}{ns}'
+    t = max(1, int(timeout))
+    ns = (' @' + shlex.quote(nameserver)) if nameserver else ''
+    return f'dig +short +time={t} +tries=1 {shlex.quote(record_type)} {shlex.quote(host)}{ns}'
+
+
+def _parse_dig_short(record_type: str, out: str) -> list:
+    """Parse ``dig +short`` output into the same string form as _resolve_dns."""
+    rt = record_type.upper()
+    results = []
+    for line in (out or '').splitlines():
+        line = line.strip()
+        if not line or line.startswith(';'):
+            continue
+        if rt == 'TXT':
+            line = line.strip('"')
+        elif rt == 'SOA':
+            toks = line.split()
+            line = f'{toks[0].rstrip(".")} serial={toks[2]}' if len(toks) >= 3 else line.rstrip('.')
+        else:
+            line = line.rstrip('.')
+        results.append(line)
+    return results
+
+
+def _parse_nslookup(record_type: str, out: str) -> list:
+    """Best-effort parse of Windows ``nslookup`` output (the first Address is the
+    queried server itself, so it is skipped)."""
+    rt = record_type.upper()
+    results = []
+    lines = (out or '').splitlines()
+    # Drop the server header block (up to the first blank line after "Server:").
+    started = False
+    for line in lines:
+        s = line.strip()
+        if s.lower().startswith('name:') or 'non-authoritative' in s.lower():
+            started = True
+        if not started:
+            continue
+        low = s.lower()
+        if rt in ('A', 'AAAA') and (low.startswith('address:') or low.startswith('addresses:')):
+            results.append(s.split(':', 1)[1].strip())
+        elif rt == 'MX' and 'mail exchanger' in low:
+            results.append(s.split('=', 1)[1].strip().rstrip('.'))
+        elif rt in ('CNAME', 'NS', 'PTR') and '=' in s and ('canonical' in low or 'nameserver' in low or 'name =' in low):
+            results.append(s.split('=', 1)[1].strip().rstrip('.'))
+        elif rt == 'TXT' and 'text =' in low:
+            results.append(s.split('=', 1)[1].strip().strip('"'))
+    return results
 
 
 class Watchful(ModuleBase):
@@ -253,6 +421,10 @@ class Watchful(ModuleBase):
         if not domain:
             return []
         timeout = _coerce_int(config.get('timeout'), 5) or 5
+        # Host-aware: the Servers modal injects the bound host; when it is remote,
+        # probe from THERE (over SSH) so a host that reaches the DNS discovers.
+        from lib import host_runner  # noqa: PLC0415
+        host = config.get('__host__') if isinstance(config, dict) else None
         if _truthy(inp.get('axfr')):
             try:
                 return cls._discover_axfr(domain, str(inp.get('axfr_server') or '').strip(), timeout)
@@ -260,6 +432,8 @@ class Watchful(ModuleBase):
                 # AXFR is best-effort (usually refused on public zones) — never
                 # 500; an empty result reads as "no records transferable".
                 return []
+        if host_runner.is_remote(host):
+            return cls._discover_probe_remote(host, domain, timeout)
         return cls._discover_probe(domain, timeout)
 
     @classmethod
@@ -276,7 +450,11 @@ class Watchful(ModuleBase):
 
         def _probe(rt: str):
             try:
-                if rt in _SOCKET_TYPES and not _HAS_DNSPYTHON:
+                if _IS_WINDOWS:
+                    # Daemon on Windows: use the OS DNS Client (Resolve-DnsName);
+                    # python.exe's direct dnspython queries are often firewalled.
+                    resolved = _resolve_win(domain, rt, '', timeout)
+                elif rt in _SOCKET_TYPES and not _HAS_DNSPYTHON:
                     resolved = _resolve_socket(domain, rt, timeout)
                 else:
                     resolved = _resolve_dns(domain, rt, timeout)
@@ -284,12 +462,7 @@ class Watchful(ModuleBase):
                 return None
             if not resolved:
                 return None
-            value = ', '.join(resolved[:3]) + ('…' if len(resolved) > 3 else '')
-            return {
-                'name': domain, 'record_type': rt, 'value': value,
-                'fill_value': resolved[0],   # pre-fills the "expected" field
-                'category': _TYPE_CATEGORY.get(rt, 'other'), 'status': 'found',
-            }
+            return cls._probe_record(domain, rt, resolved)
 
         out = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(types))) as ex:
@@ -297,6 +470,61 @@ class Watchful(ModuleBase):
                 if res:
                     out.append(res)
         return out
+
+    @staticmethod
+    def _probe_record(domain: str, rt: str, resolved: list) -> dict:
+        value = ', '.join(resolved[:3]) + ('…' if len(resolved) > 3 else '')
+        return {
+            'name': domain, 'record_type': rt, 'value': value,
+            'fill_value': resolved[0],   # pre-fills the "expected" field
+            'category': _TYPE_CATEGORY.get(rt, 'other'), 'status': 'found',
+        }
+
+    @classmethod
+    def _discover_probe_remote(cls, host: dict, domain: str, timeout: int) -> list:
+        """Probe record types by running dig/nslookup ON the bound host (SSH), so
+        a host that can reach the (internal) DNS does the discovery."""
+        from lib import host_runner  # noqa: PLC0415
+        os_ = str((host or {}).get('os') or 'linux').strip().lower()
+        types = cls._probe_types()
+        if os_ == 'windows':
+            out = []
+            for rt in types:
+                res, _e, _c = host_runner.run(
+                    host, _remote_dns_cmd('windows', domain, rt, '', timeout), timeout=timeout + 3)
+                resolved = _parse_nslookup(rt, res)
+                if resolved:
+                    out.append(cls._probe_record(domain, rt, resolved))
+            return out
+        # One SSH call running a dig per type, separated by markers — avoids a
+        # connection per record type.
+        t = max(1, int(timeout))
+        script = '; '.join(
+            f'echo "##{rt}##"; dig +short +time={t} +tries=1 {shlex.quote(rt)} {shlex.quote(domain)}'
+            for rt in types)
+        res, _e, _c = host_runner.run(host, script, timeout=t * len(types) + 5)
+        return cls._parse_combined_dig(domain, res)
+
+    @classmethod
+    def _parse_combined_dig(cls, domain: str, out: str) -> list:
+        """Parse the marker-separated combined dig output into found records."""
+        records, cur_rt, buf = [], None, []
+
+        def _flush():
+            if cur_rt and buf:
+                resolved = _parse_dig_short(cur_rt, '\n'.join(buf))
+                if resolved:
+                    records.append(cls._probe_record(domain, cur_rt, resolved))
+
+        for line in (out or '').splitlines():
+            m = re.match(r'^##(\w+)##$', line.strip())
+            if m:
+                _flush()
+                cur_rt, buf = m.group(1), []
+            else:
+                buf.append(line)
+        _flush()
+        return records
 
     @classmethod
     def _discover_axfr(cls, domain: str, server: str, timeout: int) -> list:
@@ -342,14 +570,21 @@ class Watchful(ModuleBase):
             return self.dict_return
 
         list_items = []
-        for (key, value) in self.get_conf('list', {}).items():
-            if not isinstance(value, dict):
+        for (key, raw) in self.get_conf('list', {}).items():
+            if not isinstance(raw, dict):
+                continue
+            # Host-centric: when bound to a host, inject its SSH connection / OS /
+            # kind so the query can run ON that host (no-op for inline checks).
+            value = self.resolve_host(raw)
+            if value.get('_host_maintenance'):
                 continue
             enabled = str(value.get('enabled', True)).lower() in ('true', '1', 'yes', True, 'on', 'enable')
             if not enabled:
                 continue
             host = (value.get('host', '') or '').strip() or key
             record_type = (value.get('record_type', '') or '').strip().upper() or 'A'
+            nameserver = (value.get('nameserver', '') or '').strip()
+            label = (value.get('label', '') or '').strip()
             expected = (value.get('expected', '') or '').strip()
             # Robust parse: a hand-edited / migrated non-numeric value must not
             # raise here (the loop runs in the main thread — it would abort the
@@ -358,13 +593,19 @@ class Watchful(ModuleBase):
                        or _coerce_int(self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']))
                        or self._MODULE_DEFAULTS['timeout'])
             self._debug(f"DNS: {key} - host={host} type={record_type} expected={expected!r}", DebugLevel.info)
-            list_items.append({
+            # Carry the resolved value (ssh_*, host_os, host_kind) plus the
+            # cleaned check fields so _dns_check can run locally or over SSH.
+            item = dict(value)
+            item.update({
                 'key': key,
                 'host': host,
                 'record_type': record_type,
+                'nameserver': nameserver,
+                'label': label,
                 'expected': expected,
                 'timeout': timeout,
             })
+            list_items.append(item)
 
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)) as executor:
@@ -378,26 +619,57 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"DNS: {item['key']} - Exception: {exc}", DebugLevel.error)
-                    message = f'DNS: {item["key"]} - *Error: {exc}* 💥'
+                    lbl = item.get('label') or f'{item["record_type"]} {item["host"]}'
+                    message = f'DNS: {lbl} - *Error: {exc}* 💥'
                     self.dict_return.set(item['key'], False, message)
 
         super().check()
         return self.dict_return
 
+    def _resolve_on_host(self, item, host, record_type, nameserver, timeout):
+        """Resolve by running dig/nslookup ON the bound host (host_exec: SSH for a
+        remote host, a local subprocess for a local one)."""
+        os_ = self.host_os(item)
+        cmd = _remote_dns_cmd(os_, host, record_type, nameserver, timeout)
+        out, err, code = self.host_exec(item, cmd, timeout=int(timeout) + 5)
+        if os_ == 'windows':
+            return _parse_nslookup(record_type, out)
+        parsed = _parse_dig_short(record_type, out)
+        # dig: empty output with a non-zero exit means the query failed (e.g. the
+        # server timed out / is unreachable from the host) — surface it.
+        if not parsed and code != 0:
+            raise OSError((err or out or f'dig exited {code}').strip())
+        return parsed
+
     def _dns_check(self, item):
         key = item['key']
         host = item['host']
         record_type = item['record_type']
+        nameserver = item.get('nameserver', '')
+        # Editable display name (e.g. "MX cerebelum.lan"); the key is an opaque UID.
+        label = (item.get('label', '') or '').strip() or f'{record_type} {host}'
         expected = item['expected']
         timeout = item['timeout']
 
         error = None
         _t0 = time.monotonic()
         try:
-            if record_type in _SOCKET_TYPES:
+            if item.get('host_kind'):
+                # Bound to a host: run the query THERE via dig/nslookup — over SSH
+                # for a remote host, or as a local subprocess for a local host.
+                # host_exec picks the transport; only INLINE checks (no host) use
+                # the daemon's in-process resolver below.
+                resolved = self._resolve_on_host(item, host, record_type, nameserver, timeout)
+            elif _IS_WINDOWS:
+                # Inline check on a Windows daemon: use the OS DNS Client, since
+                # python.exe's direct dnspython queries are commonly firewalled.
+                resolved = _resolve_win(host, record_type, nameserver, timeout)
+            # A/AAAA use stdlib sockets (system resolver); with an explicit
+            # nameserver they go through dnspython so the query targets that server.
+            elif record_type in _SOCKET_TYPES and not nameserver:
                 resolved = _resolve_socket(host, record_type, timeout)
             else:
-                resolved = _resolve_dns(host, record_type, timeout)
+                resolved = _resolve_dns(host, record_type, timeout, nameserver)
         except ImportError as exc:
             resolved = []
             error = str(exc)
@@ -418,14 +690,14 @@ class Watchful(ModuleBase):
         short = ', '.join(resolved[:3]) + ('…' if len(resolved) > 3 else '')
 
         if error:
-            message = f'DNS: *{key}* - {record_type} {host}: {error} ⚠️'
+            message = f'DNS: *{label}*: {error} ⚠️'
             ok = False
         elif ok:
-            message = f'DNS: *{key}* - {record_type} {host} → {short} ({response_time} ms) ✅'
+            message = f'DNS: *{label}* → {short} ({response_time} ms) ✅'
         elif not resolved:
-            message = f'DNS: *{key}* - {record_type} {host}: no results ⚠️'
+            message = f'DNS: *{label}*: no results ⚠️'
         else:
-            message = f'DNS: *{key}* - {record_type} {host}: expected "{expected}" not in [{short}] ⚠️'
+            message = f'DNS: *{label}*: expected "{expected}" not in [{short}] ⚠️'
 
         other_data = {
             'host': host,
@@ -433,6 +705,7 @@ class Watchful(ModuleBase):
             'resolved': resolved,
             'expected': expected,
             'response_time': response_time,
+            'name': label,   # display name for the status views (key is a UID)
         }
         self.dict_return.set(key, ok, message, False, other_data)
 

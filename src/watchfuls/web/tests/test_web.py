@@ -234,13 +234,13 @@ class TestWebUrl:
             assert 'example.com' in result.list
             assert mock_ret.call_args[0][0] == 'example.com'
 
-    def test_key_used_in_message(self):
-        """El mensaje usa el key (nombre descriptivo), no la url."""
+    def test_label_used_in_message(self):
+        """The message shows the editable label (the key is an opaque id)."""
         config = {'watchfuls.web': {'list': {
-            'Blog': {'enabled': True, 'url': 'blog.example.com'}}}}
+            'uid-blog': {'enabled': True, 'label': 'Blog', 'url': 'blog.example.com'}}}}
         w = self.Watchful(create_mock_monitor(config))
         with patch.object(w, '_web_request', return_value=(200, 'HTTP 200')):
-            assert 'Blog' in w.check().list['Blog']['message']
+            assert 'Blog' in w.check().list['uid-blog']['message']
 
 
 class TestWebScheme:

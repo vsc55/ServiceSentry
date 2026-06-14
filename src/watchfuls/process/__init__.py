@@ -19,9 +19,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Watchful module to check if processes are running by name."""
+"""Watchful module to check that processes are running, on the bound host.
+
+Host-centric: each check binds to a host (``host_uid``).  The process list is
+read on that host via :meth:`ModuleBase.host_exec` — locally for a *local* host
+or over SSH for a *remote* one — using an OS-appropriate command (``ps`` on
+Unix, ``tasklist`` on Windows) and the matches are counted against ``min_count``.
+"""
 
 import concurrent.futures
+import csv
+import io
 import json
 import os
 
@@ -32,13 +40,20 @@ from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
-SUPPORTED_PLATFORMS = ('linux', 'darwin', 'win32')
+# Command that lists process (command) names, one per line, per OS.
+_LIST_CMDS = {
+    'linux':   'ps -A -o comm=',
+    'darwin':  'ps -A -o comm=',
+    'freebsd': 'ps -A -o comm=',
+    'other':   'ps -A -o comm=',
+    'windows': 'tasklist /FO CSV /NH',
+}
 
 
 class Watchful(ModuleBase):
+    """Check that named processes are running (>= min_count) on each host."""
 
     WATCHFUL_ACTIONS: frozenset = frozenset({'discover'})
-    """Watchful module to check if processes are running by name via psutil."""
 
     ITEM_SCHEMA = _SCHEMA
 
@@ -53,82 +68,122 @@ class Watchful(ModuleBase):
 
     def check(self):
         if not self.is_enabled:
-            self._debug("Process: Module disabled, skipping check.", DebugLevel.info)
+            self._debug("Process: module disabled, skipping.", DebugLevel.info)
             return self.dict_return
 
-        list_items = []
-        for (key, value) in self.get_conf('list', {}).items():
-            if not isinstance(value, dict):
-                continue
-            enabled = str(value.get('enabled', True)).lower() in ('true', '1', 'yes', True, 'on', 'enable')
-            if not enabled:
-                continue
-            process = (value.get('process', '') or '').strip() or key
-            module_min_count = int(self.get_conf('min_count', self._MODULE_DEFAULTS.get('min_count', 1)) or 1)
-            min_count = int(value.get('min_count', 0) or 0) or module_min_count
-            self._debug(f"Process: {key} - process={process} min_count={min_count}", DebugLevel.info)
-            list_items.append({
-                'key': key,
-                'process': process,
-                'min_count': min_count,
-            })
-
+        items = [(k, v) for k, v in self.get_conf('list', {}).items()
+                 if isinstance(v, dict) and v.get('enabled', self._DEFAULTS['enabled'])]
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            future_to_item = {
-                executor.submit(self._process_check, item): item
-                for item in list_items
-            }
-            for future in concurrent.futures.as_completed(future_to_item):
-                item = future_to_item[future]
+            futures = {executor.submit(self._process_check, k, v): k for k, v in items}
+            for future in concurrent.futures.as_completed(futures):
+                key = futures[future]
                 try:
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
-                    self._debug(f"Process: {item['key']} - Exception: {exc}", DebugLevel.error)
-                    message = f'Process: {item["key"]} - *Error: {exc}* 💥'
-                    self.dict_return.set(item['key'], False, message)
+                    self._debug(f"Process: {key} - Exception: {exc}", DebugLevel.error)
+                    self.dict_return.set(key, False, f'Process: {key} - *Error: {exc}* 💥')
 
         super().check()
         return self.dict_return
 
-    @classmethod
-    def discover(cls) -> list:
-        """Return running processes sorted by name with instance counts."""
-        try:
-            counts: dict[str, int] = {}
-            for p in psutil.process_iter(['name']):
-                name = (p.info.get('name') or '').strip()
-                if name:
-                    counts[name] = counts.get(name, 0) + 1
-            return sorted(
-                [{'name': n, 'display_name': n, 'status': f'×{c}'} for n, c in counts.items()],
-                key=lambda x: x['name'].lower()
-            )
-        except Exception:  # pylint: disable=broad-except
-            return []
+    def _process_check(self, key, raw):
+        item = self.resolve_host(raw)
+        # Bound host in maintenance → skip (resolve_host disables it).
+        if item.get('_host_maintenance') or not item.get('enabled', True):
+            return
+        name = (item.get('process', '') or '').strip() or key
+        module_min = int(self.get_conf('min_count', self._MODULE_DEFAULTS.get('min_count', 1)) or 1)
+        min_count = int(item.get('min_count', 0) or 0) or module_min
+        os_ = self.host_os(item)
+        timeout = self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
 
-    def _process_check(self, item):
-        key = item['key']
-        process_name = item['process']
-        min_count = item['min_count']
+        cmd = self.host_cmd_for(item, _LIST_CMDS, default_os='linux')
+        out, err, code = self.host_exec(item, cmd, timeout=timeout)
+        if code != 0 and not out:
+            raise OSError((err or '').strip() or f'process listing exited {code}')
 
-        count = sum(
-            1 for p in psutil.process_iter(['name'])
-            if (p.info.get('name') or '').lower() == process_name.lower()
-        )
+        count = self._count_matches(out, os_, name)
         ok = count >= min_count
-
         if ok:
             message = f'Process: *{key}* - {count} instance(s) running ✅'
         else:
             message = f'Process: *{key}* - found {count}/{min_count} instance(s) ⚠️'
 
-        other_data = {
-            'process': process_name,
-            'count': count,
-            'min_count': min_count,
-        }
+        other_data = {'process': name, 'count': count, 'min_count': min_count}
         self.dict_return.set(key, ok, message, False, other_data)
-
         if self.check_status(ok, self.name_module, key):
             self.send_message(message, ok)
+
+    @staticmethod
+    def _count_matches(out: str, os_: str, name: str) -> int:
+        """Count processes matching *name* (case-insensitive) in *out*."""
+        name_l = name.lower()
+        count = 0
+        if os_ == 'windows':
+            for row in csv.reader(io.StringIO(out)):
+                if not row:
+                    continue
+                img = row[0].strip().lower()
+                if img == name_l or img == f'{name_l}.exe':
+                    count += 1
+            return count
+        # Unix: one command name per line (comm is the basename; Linux truncates
+        # to 15 chars, so match the truncation too).
+        for line in out.splitlines():
+            comm = line.strip()
+            if not comm:
+                continue
+            base = comm.rsplit('/', 1)[-1].lower()
+            if base == name_l or base == name_l[:15] or comm.lower() == name_l:
+                count += 1
+        return count
+
+    @classmethod
+    def discover(cls, config=None) -> list:
+        """List running processes (with instance counts) for the autocomplete.
+
+        When called with a host context (``config['__host__']``, injected by the
+        route for the Servers modal) and that host is remote, the list is read
+        over SSH on the host; otherwise it is read from THIS machine (psutil).
+        """
+        from lib import host_runner  # noqa: PLC0415
+        host = (config or {}).get('__host__') if isinstance(config, dict) else None
+        if host_runner.is_remote(host):
+            os_ = str(host.get('os') or 'linux')
+            cmd = _LIST_CMDS.get(os_) or _LIST_CMDS['linux']
+            out, _err, code = host_runner.run(host, cmd, timeout=15)
+            if code != 0 and not out:
+                return []
+            return cls._discover_from_listing(out, os_)
+        try:
+            counts: dict[str, int] = {}
+            for p in psutil.process_iter(['name']):
+                pname = (p.info.get('name') or '').strip()
+                if pname:
+                    counts[pname] = counts.get(pname, 0) + 1
+            return sorted(
+                [{'name': n, 'display_name': n, 'status': f'×{c}'} for n, c in counts.items()],
+                key=lambda x: x['name'].lower(),
+            )
+        except Exception:  # pylint: disable=broad-except
+            return []
+
+    @staticmethod
+    def _discover_from_listing(out: str, os_: str) -> list:
+        """Aggregate a ps/tasklist listing into [{name, display_name, status}]."""
+        counts: dict[str, int] = {}
+        if os_ == 'windows':
+            for row in csv.reader(io.StringIO(out)):
+                if row and row[0].strip():
+                    img = row[0].strip()
+                    counts[img] = counts.get(img, 0) + 1
+        else:
+            for line in out.splitlines():
+                comm = line.strip().rsplit('/', 1)[-1]
+                if comm:
+                    counts[comm] = counts.get(comm, 0) + 1
+        return sorted(
+            [{'name': n, 'display_name': n, 'status': f'×{c}'} for n, c in counts.items()],
+            key=lambda x: x['name'].lower(),
+        )

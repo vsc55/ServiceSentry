@@ -1,14 +1,23 @@
 {
     "pretty_name": "CPU Usage",
-    "module_description": "Monitors CPU usage percentage and triggers alerts when it exceeds the configured threshold.",
+    "module_description": "Monitors CPU usage on the bound host (locally or over SSH) and alerts when it exceeds the configured threshold.",
     "labels": {
         "enabled":  "Enabled",
-        "alert":    "Alert threshold (%)",
-        "interval": "Sampling interval (s)"
+        "threads":  "Threads",
+        "timeout":  "Timeout (s)",
+        "interval": "Sampling interval (s)",
+        "label":    "Label",
+        "alert":    "Alert threshold (%)"
     },
     "hints": {
-        "enabled":  "Enable or disable CPU usage monitoring.",
-        "alert":    "CPU usage threshold (%). An alert is triggered when usage exceeds this value.",
-        "interval": "Sampling interval in seconds passed to psutil.cpu_percent(). Higher values give more accurate readings."
-    }
+        "enabled":  "Enable or disable this CPU check.",
+        "threads":  "Number of hosts to check in parallel.",
+        "timeout":  "Command/SSH timeout in seconds.",
+        "interval": "Sampling window in seconds used to measure CPU usage on the host.",
+        "label":    "Display name shown in the UI. Falls back to the item key if empty.",
+        "alert":    "CPU usage threshold (%). An alert is triggered when usage exceeds this value."
+    },
+    "new_item_key_label": "Check name or identifier:",
+    "rename_item_prompt": "Enter new check name or identifier:",
+    "collections": {"list": "CPU checks"}
 }

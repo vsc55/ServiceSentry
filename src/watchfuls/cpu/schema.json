@@ -1,8 +1,22 @@
 {
     "__module__": {
         "enabled":  {"type": "bool",  "default": true},
-        "alert":    {"type": "int",   "default": 85,  "min": 1,   "max": 100},
+        "threads":  {"type": "int",   "default": 5,   "min": 1,   "max": 100},
+        "timeout":  {"type": "int",   "default": 15,  "min": 1,   "max": 600},
         "interval": {"type": "float", "default": 1.0, "min": 0.1, "max": 10.0}
     },
-    "__history__": {"field": "used", "unit": "%", "label": "CPU Usage"}
+    "__history__": {"field": "used", "unit": "%", "label": "CPU Usage"},
+    "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
+        "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
+                   "ssh_key", "ssh_key_string", "ssh_verify_host"]},
+    "list": {
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__discovery_uid_key__": true,
+        "__discovery_label_template__": "{host}",
+        "__new_item_fields__": ["label"],
+        "enabled": {"type": "bool", "default": true},
+        "label":   {"type": "str",  "default": ""},
+        "alert":   {"type": "int",  "default": 85, "min": 1, "max": 100}
+    }
 }

@@ -135,3 +135,48 @@ class TestCheckModule:
         assert success is False
         assert name == "nonexistent_xyz_module"
         assert data is None
+
+
+class TestMonitorAudit:
+    """Monitor system events must land in the SAME audit table the web admin
+    uses (shared DB), not in a separate audit.json file."""
+
+    def test_audit_system_writes_to_db(self, monitor):
+        assert monitor._audit_store is not None
+        monitor._audit_system('module_check_timeout', {'module': 'x', 'timeout': 120})
+        rows = monitor._db.fetchall(
+            "SELECT event, user, ip FROM audit WHERE event = 'module_check_timeout'")
+        assert rows and rows[-1] == ('module_check_timeout', 'system', 'internal')
+        # No audit.json was created (DB path succeeded).
+        assert not os.path.isfile(os.path.join(monitor.dir_config, 'audit.json'))
+
+    def test_audit_system_falls_back_to_file(self, monitor):
+        # Simulate a DB failure → the event must still be recorded somewhere.
+        monitor._audit_store = None
+        monitor._audit_system('module_check_error', {'module': 'y'})
+        assert os.path.isfile(os.path.join(monitor.dir_config, 'audit.json'))
+
+
+class TestFailStreak:
+    """ModuleBase.fail_streak persists in the monitor status store and flags
+    the monitor so status.json is saved even without a status flip."""
+
+    def test_streak_persists_and_marks_dirty(self, monitor):
+        _make_package_module(monitor.dir_modules, "streaky")
+        import sys
+        if monitor.dir_modules not in sys.path:
+            sys.path.insert(0, monitor.dir_modules)
+        try:
+            import importlib
+            mod = importlib.import_module("streaky")
+            monitor._status_counts_dirty = False
+            w1 = mod.Watchful(monitor)
+            assert w1.fail_streak('k', True) == 1
+            assert monitor._status_counts_dirty is True
+            # Fresh instance, same monitor (next cycle) → streak continues.
+            w2 = mod.Watchful(monitor)
+            assert w2.fail_streak('k', True) == 2
+            assert w2.fail_streak('k', False) == 0   # recovery resets
+        finally:
+            sys.path = [p for p in sys.path if p != monitor.dir_modules]
+            sys.modules.pop("streaky", None)
