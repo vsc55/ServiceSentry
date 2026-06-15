@@ -12,13 +12,11 @@ the stored value when the client omits them on write — the same scheme as
 modules.json.
 """
 
-import os
 import re
 
 from flask import jsonify, request, session
 
 from lib import host_probe, secret_manager, ssh_client
-from lib.config import ConfigControl
 from lib.host_migrate import apply_to_modules, build_migration_plan
 
 SYSTEM_USER = 'system'
@@ -123,10 +121,7 @@ def _host_statuses(wa):
     Hosts with no enabled checks are absent (the column shows a neutral dash).
     Maintenance is NOT folded in here — the UI shows it as an override.
     """
-    status_raw = {}
-    if getattr(wa, '_var_dir', None):
-        path = os.path.join(wa._var_dir, wa._STATUS_FILE)
-        status_raw = ConfigControl(path).read() or {}
+    status_raw = wa._read_check_status()
 
     def _check_state(mod_key, check_key):
         """The recorded status for a check, trying full and bare module keys."""
@@ -275,33 +270,67 @@ def register(app, wa):
         for (bare, _coll), items in _checks_for_host(wa, uid).items():
             for k, item in items.items():
                 bound.setdefault(bare, {})[k] = str((item or {}).get('label') or '').strip()
-        # Read status.json.
-        status_raw = {}
-        if getattr(wa, '_var_dir', None):
-            status_raw = ConfigControl(os.path.join(wa._var_dir, wa._STATUS_FILE)).read() or {}
+        # Current live state (from the check_state DB table).
+        status_raw = wa._read_check_status()
+        # Index the history once, grouped by bare module, for the fallback when a
+        # check has no live status (e.g. the host is in maintenance, so its live
+        # records were purged).
+        hist_by_mod: dict = {}
+        hist_store = getattr(wa, '_history', None)
+        if hist_store is not None:
+            try:
+                for s in hist_store.get_index():
+                    hist_by_mod.setdefault(s.get('module'), []).append(s)
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+        def _matches(skey, keys):
+            """Map a (possibly derived) result key to its bound base item key."""
+            base = skey if skey in keys else skey.rsplit('_', 1)[0]
+            return base if base in keys else None
+
         results = []
         for bare, keys in bound.items():
+            covered = set()
+            # 1) Live values from status.json.
             mod_status = status_raw.get(bare)
             if not isinstance(mod_status, dict):
                 mod_status = status_raw.get(f'watchfuls.{bare}')
-            if not isinstance(mod_status, dict):
-                continue
-            for skey, info in mod_status.items():
-                if not isinstance(info, dict):
+            if isinstance(mod_status, dict):
+                for skey, info in mod_status.items():
+                    if not isinstance(info, dict):
+                        continue
+                    base = _matches(skey, keys)
+                    if base is None:
+                        continue
+                    data = info.get('other_data') if isinstance(info.get('other_data'), dict) else {}
+                    name = str(data.get('name') or '').strip() or keys.get(base) or skey
+                    results.append({
+                        'module': bare, 'key': skey, 'name': name,
+                        'ok': info.get('status') is True,
+                        'message': info.get('message', ''),
+                        'data': data, 'ts': info.get('ts', ''),
+                        'source': 'live',
+                    })
+                    covered.add(skey)
+            # 2) History fallback for series with no live value.
+            for s in hist_by_mod.get(bare, []):
+                skey = s.get('key')
+                if skey in covered:
                     continue
-                # Match the status key to a bound item: exact, or a derived
-                # "<base>_suffix" key (ram_swap RAM/SWAP).
-                base = skey if skey in keys else skey.rsplit('_', 1)[0]
-                if base not in keys:
+                base = _matches(skey, keys)
+                if base is None:
                     continue
-                data = info.get('other_data') if isinstance(info.get('other_data'), dict) else {}
+                data = s.get('last_data') if isinstance(s.get('last_data'), dict) else {}
                 name = str(data.get('name') or '').strip() or keys.get(base) or skey
                 results.append({
                     'module': bare, 'key': skey, 'name': name,
-                    'ok': info.get('status') is True,
-                    'message': info.get('message', ''),
-                    'data': data, 'ts': info.get('ts', ''),
+                    'ok': s.get('last_status') is True,
+                    'message': data.get('message', '') if isinstance(data, dict) else '',
+                    'data': data, 'ts': s.get('last_ts', ''),
+                    'source': 'history',
                 })
+                covered.add(skey)
         results.sort(key=lambda r: (r['module'], r['name']))
         return jsonify({'results': results})
 

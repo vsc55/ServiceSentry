@@ -157,6 +157,97 @@ class TestMonitorAudit:
         assert os.path.isfile(os.path.join(monitor.dir_config, 'audit.json'))
 
 
+class TestCheckStatePersistence:
+    """The persistent check_state table is the authoritative baseline for
+    change detection, so restarts don't re-fire notifications, and the very
+    first sight of a check is recorded silently."""
+
+    @staticmethod
+    def _result(key, status, msg='m'):
+        from lib.modules import ReturnModuleCheck
+        r = ReturnModuleCheck()
+        r.set(key, status, msg)
+        return r
+
+    def test_first_record_notifies_and_persists(self, monitor, monkeypatch):
+        sent = []
+        monkeypatch.setattr(monitor, 'send_message', lambda m, s=None: sent.append((m, s)))
+        # With no prior records, the first change announces the current state.
+        monitor._process_module_result('mod', self._result('k', False, 'down'))
+        assert sent == [('down', False)]
+        # ... and saving persists it to the check_state table.
+        monitor.status.save()
+        assert monitor._check_state_store.get_all()[('mod', 'k', '')]['status'] is False
+
+    def test_unchanged_state_is_silent(self, monitor, monkeypatch):
+        sent = []
+        monkeypatch.setattr(monitor, 'send_message', lambda m, s=None: sent.append((m, s)))
+        monitor._process_module_result('mod', self._result('k', True, 'ok'))   # first → notifies
+        monitor._process_module_result('mod', self._result('k', True, 'ok'))   # unchanged → silent
+        monitor._process_module_result('mod', self._result('k', False, 'dn'))  # transition → notifies
+        assert sent == [('ok', True), ('dn', False)]
+
+    def test_state_survives_restart(self, monitor, monkeypatch):
+        # Record an OK state and persist it to the DB.
+        monitor._process_module_result('mod', self._result('k', True, 'ok'))
+        monitor.status.save()
+        assert monitor._check_state_store.get_all()[('mod', 'k', '')]['status'] is True
+
+        # A fresh Monitor on the same var dir (same DB) loads the baseline.
+        m2 = Monitor(monitor.dir_base, monitor.dir_config, monitor.dir_modules, monitor.dir_var)
+        assert m2.status.get_conf(['mod', 'k', 'status'], None) is True
+        # The same OK result must NOT re-announce after the restart.
+        sent = []
+        monkeypatch.setattr(m2, 'send_message', lambda msg, s=None: sent.append(msg))
+        m2._process_module_result('mod', self._result('k', True, 'ok'))
+        assert sent == []
+
+    def test_clear_status_also_clears_state(self, monitor):
+        monitor._process_module_result('mod', self._result('k', True, 'ok'))
+        monitor.status.save()
+        assert monitor._check_state_store.get_all()
+        monitor.clear_status()
+        assert monitor._check_state_store.get_all() == {}
+
+    def test_maintenance_purges_live_state(self, monitor):
+        # An item bound to host H1, with a recorded live status.
+        monitor.config_modules.data = {'mod': {'list': {'item1': {'host_uid': 'H1'}}}}
+        monitor._process_module_result('mod', self._result('item1', True, 'ok'))
+        monitor.status.save()
+        assert ('mod', 'item1', '') in monitor._check_state_store.get_all()
+
+        # H1 enters maintenance → its live state must be purged (history kept).
+        class _FakeHosts:
+            def list(self, decrypt=False):   # noqa: D401, ARG002
+                return [{'uid': 'H1', 'maintenance': True}]
+        monitor._hosts_store = _FakeHosts()
+        monitor.purge_maintenance_states()
+
+        assert ('mod', 'item1', '') not in monitor._check_state_store.get_all()
+        assert not isinstance(monitor.status.get_conf(['mod', 'item1', 'status'], None), bool)
+
+    def test_derived_key_split_into_metric(self, monitor):
+        # ram_swap-style: one item (keyed by its uid), two derived result keys.
+        # Each is stored as key=<uid> + metric=ram/swap, not "<uid>_ram".
+        monitor.config_modules.data = {'ram_swap': {'list': {'U-1': {'uid': 'U-1'}}}}
+        monitor._process_module_result('ram_swap', self._result('U-1_ram', True, 'ok'))
+        monitor._process_module_result('ram_swap', self._result('U-1_swap', False, 'hi'))
+        monitor.status.save()
+        states = monitor._check_state_store.get_all()
+        assert states[('ram_swap', 'U-1', 'ram')]['item_uid'] == 'U-1'
+        assert states[('ram_swap', 'U-1', 'swap')]['item_uid'] == 'U-1'
+        # The monitor still sees the full result keys (reconstructed).
+        assert isinstance(monitor.status.get_conf(['ram_swap', 'U-1_ram', 'status'], None), bool)
+
+    def test_item_key_with_underscore_is_not_split(self, monitor):
+        # An item key containing '_' must NOT be split into a bogus metric.
+        monitor.config_modules.data = {'mod': {'list': {'item_1': {'uid': 'item_1'}}}}
+        monitor._process_module_result('mod', self._result('item_1', True, 'ok'))
+        monitor.status.save()
+        row = monitor._check_state_store.get_all()[('mod', 'item_1', '')]
+        assert row['item_uid'] == 'item_1' and row['metric'] == ''
+
+
 class TestFailStreak:
     """ModuleBase.fail_streak persists in the monitor status store and flags
     the monitor so status.json is saved even without a status flip."""

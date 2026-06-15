@@ -660,6 +660,20 @@ class ModuleBase(ObjectBase):
             return def_val
         return self.get_status(key_name_module).get(opt_find, def_val)
 
+    def item_label(self, key: str) -> str:
+        """Friendly display label for a ``list`` item key (the stored key is an
+        opaque UID after the key→uid unification), falling back to the key.
+        Use it in debug/log messages so they show the human name, not the UID."""
+        try:
+            item = (self.get_conf('list', {}) or {}).get(key)
+            if isinstance(item, dict):
+                lbl = str(item.get('label') or '').strip()
+                if lbl:
+                    return lbl
+        except Exception:  # pylint: disable=broad-except
+            pass
+        return key
+
     def check_status(self, status, module, module_sub_key):
         """ Comprobamos el status del modulo y sub modulo. """
         if self.is_monitor_exist:
@@ -682,14 +696,15 @@ class ModuleBase(ObjectBase):
 
         The counter backs ``alert``-style thresholds (declare DOWN only after N
         consecutive failed cycles).  It is persisted in the monitor's status
-        store — NOT on the instance and NOT in a module-level dict — because:
-        the monitor builds a fresh Watchful every cycle (instance state resets),
-        and the systemd one-shot mode runs each cycle in a fresh process
-        (module-level state resets too).  status.json survives both.
+        store (the ``check_state`` DB table) — NOT on the instance and NOT in a
+        module-level dict — because: the monitor builds a fresh Watchful every
+        cycle (instance state resets), and the systemd one-shot mode runs each
+        cycle in a fresh process (module-level state resets too).  The DB
+        survives both.
 
         Stored under ``[module][key]['fail_count']``, next to the item's
-        ``status``.  Setting a changed value flags the monitor so status.json
-        is saved even when no status flipped this cycle.
+        ``status``.  Setting a changed value flags the monitor so the state is
+        persisted even when no status flipped this cycle.
         """
         cur = 1 if failed else 0
         if not self.is_monitor_exist:

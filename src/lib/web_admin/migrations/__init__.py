@@ -17,6 +17,8 @@ _MIGRATIONS = [
     'm007_restore_inline_identity',
     'm008_dns_host_label_prefix',
     'm009_temperature_uid_label',
+    'm010_rekey_items_by_uid',
+    'm011_drop_status_file',
 ]
 
 _STATE_FILE = '_migrations.json'

@@ -98,10 +98,12 @@ class TestPublicStatusPage:
         assert resp.status_code == 200
 
     def test_status_shows_module_name(self, config_dir, var_dir):
-        """The status page renders the module name from status.json."""
+        """The status page renders the module name from the check state."""
         wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                       public_status=True,
                       pw_require_upper=False, pw_require_digit=False)
+        wa._check_state_store.persist_status(
+            {"ping": {"192.168.1.1": {"status": True, "other_data": {}}}})
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         html = c.get("/status").data
@@ -110,34 +112,54 @@ class TestPublicStatusPage:
     def test_status_shows_check_name(self, config_dir, var_dir):
         """The status page renders individual checks by their display name —
         the item 'label' when set."""
-        import json
-        import os
         wa = WebAdmin(config_dir, "admin", "secret", var_dir,
-                      public_status=True,
+                      public_status=True, public_status_detail=True,
                       pw_require_upper=False, pw_require_digit=False)
-        # modules.json and status.json keyed consistently (by the item key).
+        # modules config and check state keyed consistently (by the item key).
         wa._save_config_file(wa._MODULES_FILE, {"ping": {"enabled": True, "list": {
             "u-router": {"enabled": True, "label": "Router", "host": "192.168.1.1"}}}})
-        with open(os.path.join(var_dir, wa._STATUS_FILE), "w", encoding="utf-8") as fh:
-            json.dump({"ping": {"u-router": {"status": True}}}, fh)
+        wa._check_state_store.persist_status({"ping": {"u-router": {"status": True}}})
+        wa.app.config["TESTING"] = True
+        html = wa.app.test_client().get("/status").data
+        assert b"Router" in html
+
+    def test_guest_detail_hidden_when_disabled(self, config_dir, var_dir):
+        """With public_status_detail=False, a guest sees the module status but
+        NOT the per-item detail (the item label is absent)."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True, public_status_detail=False,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa._save_config_file(wa._MODULES_FILE, {"ping": {"enabled": True, "list": {
+            "u-router": {"enabled": True, "label": "Router", "host": "192.168.1.1"}}}})
+        wa._check_state_store.persist_status({"ping": {"u-router": {"status": True}}})
+        wa.app.config["TESTING"] = True
+        html = wa.app.test_client().get("/status").data
+        assert b"Ping" in html or b"ping" in html   # module-level status shown
+        assert b"Router" not in html                # per-item detail hidden
+
+    def test_guest_detail_shown_when_enabled(self, config_dir, var_dir):
+        """With public_status_detail=True (default), a guest sees item detail."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True, public_status_detail=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa._save_config_file(wa._MODULES_FILE, {"ping": {"enabled": True, "list": {
+            "u-router": {"enabled": True, "label": "Router", "host": "192.168.1.1"}}}})
+        wa._check_state_store.persist_status({"ping": {"u-router": {"status": True}}})
         wa.app.config["TESTING"] = True
         html = wa.app.test_client().get("/status").data
         assert b"Router" in html
 
     def test_status_uses_item_label_over_uid_key(self, config_dir, var_dir):
         """When a check's key is an opaque UID, the page shows its 'label'."""
-        import json
-        import os
         wa = WebAdmin(config_dir, "admin", "secret", var_dir,
-                      public_status=True,
+                      public_status=True, public_status_detail=True,
                       pw_require_upper=False, pw_require_digit=False)
         uid = "abc-123-uid"
         wa._save_config_file(wa._MODULES_FILE, {"service_status": {
             "enabled": True,
             "list": {uid: {"enabled": True, "service": "named", "label": "NS1 - named"}},
         }})
-        with open(os.path.join(var_dir, wa._STATUS_FILE), "w", encoding="utf-8") as fh:
-            json.dump({"service_status": {uid: {"status": True}}}, fh)
+        wa._check_state_store.persist_status({"service_status": {uid: {"status": True}}})
         wa.app.config["TESTING"] = True
         html = wa.app.test_client().get("/status").data
         assert b"NS1 - named" in html
@@ -148,6 +170,8 @@ class TestPublicStatusPage:
         wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                       public_status=True,
                       pw_require_upper=False, pw_require_digit=False)
+        wa._check_state_store.persist_status(
+            {"ping": {"192.168.1.1": {"status": True, "other_data": {}}}})
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         html = c.get("/status").data.decode()
@@ -158,6 +182,8 @@ class TestPublicStatusPage:
         wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                       public_status=True,
                       pw_require_upper=False, pw_require_digit=False)
+        wa._check_state_store.persist_status(
+            {"ping": {"192.168.1.1": {"status": True, "other_data": {}}}})
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         html = c.get("/status").data
@@ -167,11 +193,11 @@ class TestPublicStatusPage:
         """Banner shows degraded message when a check fails."""
         d = tmp_path / "var"
         d.mkdir()
-        status = {"api": {"endpoint": {"status": False, "other_data": {}}}}
-        (d / "status.json").write_text(json.dumps(status), encoding="utf-8")
         wa = WebAdmin(config_dir, "admin", "secret", str(d),
                       public_status=True,
                       pw_require_upper=False, pw_require_digit=False)
+        wa._check_state_store.persist_status(
+            {"api": {"endpoint": {"status": False, "other_data": {}}}})
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         html = c.get("/status").data
@@ -372,6 +398,8 @@ class TestStatusPageLanguage:
         """Module label comes from pretty_name in watchfuls lang JSON."""
         wa = _make_wa(config_dir, var_dir,
                       modules_dir=os.path.normpath(_WATCHFULS_DIR))
+        wa._check_state_store.persist_status(
+            {"ping": {"192.168.1.1": {"status": True, "other_data": {}}}})
         c = wa.app.test_client()
         html = c.get("/status").data
         # The ping module should show "Ping" (from watchfuls/ping/lang/en_EN.json)
@@ -382,9 +410,9 @@ class TestStatusPageLanguage:
         """Without a modules_dir, raw name is title-cased as fallback."""
         d = tmp_path / "var"
         d.mkdir()
-        status = {"my_service": {"check_one": {"status": True, "other_data": {}}}}
-        (d / "status.json").write_text(json.dumps(status), encoding="utf-8")
         wa = _make_wa(config_dir, str(d), modules_dir=None)
+        wa._check_state_store.persist_status(
+            {"my_service": {"check_one": {"status": True, "other_data": {}}}})
         c = wa.app.test_client()
         html = c.get("/status").data
         # "my_service" → "My Service"
@@ -395,10 +423,10 @@ class TestStatusPageLanguage:
         """Module not present in watchfuls dir falls back to title-cased name."""
         d = tmp_path / "var"
         d.mkdir()
-        status = {"unknown_module": {"chk": {"status": True, "other_data": {}}}}
-        (d / "status.json").write_text(json.dumps(status), encoding="utf-8")
         wa = _make_wa(config_dir, str(d),
                       modules_dir=os.path.normpath(_WATCHFULS_DIR))
+        wa._check_state_store.persist_status(
+            {"unknown_module": {"chk": {"status": True, "other_data": {}}}})
         c = wa.app.test_client()
         html = c.get("/status").data
         assert b"Unknown Module" in html

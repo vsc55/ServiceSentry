@@ -63,9 +63,9 @@ class Watchful(ModuleBase):
                 continue
             host = (value.get('host') or '').strip()
             if not host:
-                self._debug(f"{key} - Host is not defined!", DebugLevel.warning)
+                self._debug(f"{self.item_label(key)} - Host is not defined!", DebugLevel.warning)
                 continue
-            new_hddtemp = self.Hddtemp_Info((value.get('label') or '').strip() or key)
+            new_hddtemp = self.Hddtemp_Info((value.get('label') or '').strip() or key, key)
             new_hddtemp.host = host
             new_hddtemp.port = value.get("port") or 7634     # standard hddtemp daemon port
             new_hddtemp.alert = self.get_conf('alert', self._DEFAULT_ALERT)
@@ -83,13 +83,14 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:
                     message = f'HDD: {hddtemp.label} - *Error: {exc}* 💥'
-                    self.dict_return.set(hddtemp.label, False, message)
+                    self.dict_return.set(hddtemp.item_key, False, message,
+                                         other_data={'name': hddtemp.label})
 
     def _hddtemp_check(self, hddtemp):
         if self._hddtemp_return(hddtemp):
             for (key, value) in hddtemp.list_hdd.items():
                 if key not in hddtemp.exclude:
-                    hdd_name = hddtemp.label + '_' + key
+                    hdd_name = hddtemp.item_key + '_' + key
                     hdd_dev = key
                     hdd_alert = value['ALERT']
                     hdd_temp = value['TEMP']
@@ -106,7 +107,10 @@ class Watchful(ModuleBase):
                         status = False
                         s_message = f'({hddtemp.label}): *{hdd_dev}* *({hdd_temp})* 🔥🔥'
 
-                    other_data = value
+                    # Result key is the opaque "<item_uid>_<disk>"; carry a
+                    # friendly display name for status/latest views.
+                    other_data = dict(value)
+                    other_data['name'] = f'{hddtemp.label} - {hdd_dev}'
                     self.dict_return.set(hdd_name, status, s_message, False, other_data)
 
                     if self.check_status(status, self.name_module, hdd_name):
@@ -117,10 +121,10 @@ class Watchful(ModuleBase):
             s_message = f'HddTemp: {hddtemp.label} - *Error:* *{hddtemp.error}*'
             s_message += '🔽'
 
-            other_data = {'message': str(hddtemp.error)}
-            self.dict_return.set(hddtemp.label, False, s_message, False, other_data)
+            other_data = {'message': str(hddtemp.error), 'name': hddtemp.label}
+            self.dict_return.set(hddtemp.item_key, False, s_message, False, other_data)
 
-            if self.check_status_custom(False, hddtemp.label, hddtemp.error):
+            if self.check_status_custom(False, hddtemp.item_key, hddtemp.error):
                 self.send_message(s_message, False)
 
     def _hddtemp_return(self, hddtemp):
@@ -162,8 +166,11 @@ class Watchful(ModuleBase):
 
     class Hddtemp_Info:
 
-        def __init__(self, label):
+        def __init__(self, label, item_key=''):
             self.label = label
+            # Stable item key (the config dict key == item UID) used as the
+            # result-key base, so status tracking keys off the UID not the label.
+            self.item_key = item_key or label
             self.host = ""
             self.port = 0
             self.alert = 0

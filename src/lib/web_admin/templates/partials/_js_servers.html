@@ -721,6 +721,17 @@ async function _loadHostLatestData() {
             .filter(([k, v]) => k !== 'name' && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean'))
             .map(([k, v]) => `<span class="badge bg-secondary bg-opacity-25 text-body border me-1 mb-1" style="font-weight:normal">${esc(k)}: ${esc(String(v))}</span>`)
             .join('');
+        // Live (from status.json) vs Historic (last value from the history DB —
+        // e.g. when the host is in maintenance and its live records were purged).
+        const isHist = r.source === 'history';
+        let when = '';
+        if (r.ts) {
+            const d = isHist ? new Date(r.ts * 1000) : new Date(r.ts);
+            if (!isNaN(d.getTime())) when = d.toLocaleString();
+        }
+        const srcBadge = isHist
+            ? `<span class="badge text-bg-secondary" style="font-size:.65rem"><i class="bi bi-clock-history me-1"></i>${esc(t('host_latest_historic'))}</span>`
+            : `<span class="badge text-bg-success" style="font-size:.65rem"><i class="bi bi-broadcast-pin me-1"></i>${esc(t('host_latest_live'))}</span>`;
         const clickable = canHistory
             ? ` role="button" style="background:var(--bs-body-bg);cursor:pointer"
                 onclick="_goToHistory(${jsStr(r.module)},${jsStr(r.key)})"
@@ -731,7 +742,9 @@ async function _loadHostLatestData() {
         return `<div class="d-flex align-items-start gap-2 px-2 py-2 border rounded mb-1"${clickable}>
             <i class="bi ${icon} flex-shrink-0 mt-1"></i>
             <div class="flex-grow-1 min-w-0">
-                <div class="small fw-semibold">${esc(modName)} — ${esc(r.name)}</div>
+                <div class="small fw-semibold d-flex align-items-center gap-2 flex-wrap">
+                    <span>${esc(modName)} — ${esc(r.name)}</span>${srcBadge}</div>
+                ${isHist && when ? `<div class="small text-muted">${esc(when)}</div>` : ''}
                 ${r.message ? `<div class="small text-muted text-break">${esc(r.message)}</div>` : ''}
                 ${metrics ? `<div class="mt-1">${metrics}</div>` : ''}
             </div>${histIcon}</div>`;

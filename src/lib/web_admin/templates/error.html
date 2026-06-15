@@ -2,33 +2,7 @@
 
 {% block title %}{{ code }} — ServiceSentry{% endblock %}
 
-{% block extra_head %}
-<style>
-    .error-wrap {
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 2rem 1rem;
-    }
-    .error-card {
-        max-width: 480px;
-        width: 100%;
-        text-align: center;
-    }
-    .error-code {
-        font-size: 5rem;
-        font-weight: 800;
-        line-height: 1;
-        letter-spacing: -.04em;
-        color: var(--bs-secondary-color, #6c757d);
-    }
-    .error-icon {
-        font-size: 3rem;
-        margin-bottom: .5rem;
-    }
-</style>
-{% endblock %}
+{# Page styles live in static/css/web_admin.css (loaded by base.html). #}
 
 {% block body %}
 <div class="error-wrap">

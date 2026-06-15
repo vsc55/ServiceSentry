@@ -1290,6 +1290,9 @@ class Watchful(ModuleBase):
                 if chk_cfg.get('enabled', _CHECK_DEFAULTS['enabled']):
                     items.append((f'{srv_key}.{chk_key}', chk_cfg, srv))
 
+        # Friendly label per result key (keys are opaque "<srv_uid>.<chk_uid>").
+        labels = {k: (str(c.get('label') or '').strip() or k) for k, c, _ in items}
+
         max_workers = self.get_conf('threads', self._DEFAULT_THREADS)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
@@ -1301,8 +1304,8 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
-                    self._debug(f'SNMP: {key} — unhandled exception: {exc}', DebugLevel.error)
-                    self.dict_return.set(key, False, f'SNMP: {key} 💥 {exc}')
+                    self._debug(f'SNMP: {labels.get(key, key)} — unhandled exception: {exc}', DebugLevel.error)
+                    self.dict_return.set(key, False, f'SNMP: {labels.get(key, key)} 💥 {exc}')
 
         super().check()
         return self.dict_return
@@ -1347,7 +1350,7 @@ class Watchful(ModuleBase):
         label    = str(cfg.get('label', '') or key).strip() or key
 
         if not host:
-            self._debug(f'SNMP: {key} — no server host configured, skipping.', DebugLevel.warning)
+            self._debug(f'SNMP: {label} — no server host configured, skipping.', DebugLevel.warning)
             self.dict_return.set(key, False, f'SNMP: {label} ⚠ server not configured')
             return
 
@@ -1372,7 +1375,7 @@ class Watchful(ModuleBase):
             status = streak < max(1, t_alert)
             icon   = '🔼' if status else '🔽'
             msg    = f'SNMP: {label} {icon} [{err}]'
-            self._debug(f'SNMP: {key} — error: {err} (fails={streak}/{t_alert})', DebugLevel.warning)
+            self._debug(f'SNMP: {label} — error: {err} (fails={streak}/{t_alert})', DebugLevel.warning)
             self.dict_return.set(key, status, msg, False, {'oid': oid, 'error': err})
             if self.check_status(status, self.name_module, key):
                 self.send_message(msg, status)

@@ -81,7 +81,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
-                    self._debug(f"Process: {key} - Exception: {exc}", DebugLevel.error)
+                    self._debug(f"Process: {self.item_label(key)} - Exception: {exc}", DebugLevel.error)
                     self.dict_return.set(key, False, f'Process: {key} - *Error: {exc}* 💥')
 
         super().check()

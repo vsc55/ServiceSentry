@@ -69,8 +69,8 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     label = self._label(key)
-                    self.dict_return.set(f'R_{key}', False, f'RAID: {label} - *Error: {exc}* 💥')
-                    self._debug(f"{key}/{label} - Exception: {exc}", DebugLevel.error)
+                    self.dict_return.set(f'{key}', False, f'RAID: {label} - *Error: {exc}* 💥')
+                    self._debug(f"{label} - Exception: {exc}", DebugLevel.error)
         super().check()
         return self.dict_return
 
@@ -83,7 +83,7 @@ class Watchful(ModuleBase):
         os_ = self.host_os(item)
         if os_ != 'linux':
             self.dict_return.set(
-                f'R_{key}', False,
+                f'{key}', False,
                 f'RAID: {label} - *mdstat only available on Linux (host OS: {os_})* ⚠️')
             return
         path = self.get_conf('mdstat_path', self._MODULE_DEFAULTS['mdstat_path']) or '/proc/mdstat'
@@ -95,7 +95,7 @@ class Watchful(ModuleBase):
 
     def _md_analyze(self, list_md, key, label):
         if not list_md:
-            self.dict_return.set(f'R_{key}', True, f"[{label}] *No RAID's* in the system. ✅")
+            self.dict_return.set(f'{key}', True, f"[{label}] *No RAID's* in the system. ✅")
             return
         for (md, value) in list_md.items():
             other_data = {}
@@ -121,7 +121,7 @@ class Watchful(ModuleBase):
                 case _:
                     message = f"*RAID {label}/{md} Unknown Error*. ⚠️"
 
-            self.dict_return.set(f'R_{key}_{md}', not is_warning, message, other_data=other_data)
+            self.dict_return.set(f'{key}_{md}', not is_warning, message, other_data=other_data)
 
     def _label(self, key) -> str:
         label = (self.get_conf_in_list("label", key, '') or '').strip()

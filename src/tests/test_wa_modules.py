@@ -294,16 +294,15 @@ class TestApiOverview:
 
     def test_module_checks_with_error(self, config_dir, tmp_path):
         """A failing check increments the error counter."""
-        status = {
+        var = tmp_path / "var2"
+        var.mkdir()
+        wa = WebAdmin(config_dir, "admin", "pass", var_dir=str(var))
+        wa._check_state_store.persist_status({
             "ping": {
                 "192.168.1.1": {"status": False},
                 "192.168.1.2": {"status": True},
             }
-        }
-        var = tmp_path / "var2"
-        var.mkdir()
-        (var / "status.json").write_text(json.dumps(status), encoding="utf-8")
-        wa = WebAdmin(config_dir, "admin", "pass", var_dir=str(var))
+        })
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
@@ -507,3 +506,36 @@ class TestConfigEdgeCases:
         resp = c.put("/api/v1/modules", json={"test": {"enabled": True}})
         assert resp.status_code == 200
         assert (tmp_path / "modules.json").exists()
+
+
+class TestRekeyItemsByUid:
+    """_rekey_items_by_uid makes every item's dict key equal its uid, across
+    flat ``list`` collections and snmp's nested ``servers``/``checks``."""
+
+    def test_rekey_flat_and_nested(self):
+        from lib.web_admin.routes.modules import _rekey_items_by_uid
+        data = {
+            "ping": {"list": {
+                "host1": {"uid": "U1", "label": "A"},
+                "host2": {"label": "B"},            # missing uid → generated
+            }},
+            "snmp": {"enabled": True, "threads": 5, "servers": {
+                "srvA": {"uid": "SV", "checks": {
+                    "chk1": {"uid": "C1"},
+                    "chk2": {},                      # missing uid → generated
+                }},
+            }},
+        }
+        _rekey_items_by_uid(data)
+
+        # Flat: existing uid kept as key; generated uid used as key for host2.
+        lst = data["ping"]["list"]
+        assert "U1" in lst and lst["U1"]["label"] == "A"
+        assert all(k == v["uid"] for k, v in lst.items())
+
+        # Nested: server keyed by uid; checks keyed by uid; scalars untouched.
+        assert data["snmp"]["enabled"] is True and data["snmp"]["threads"] == 5
+        assert "SV" in data["snmp"]["servers"]
+        checks = data["snmp"]["servers"]["SV"]["checks"]
+        assert "C1" in checks
+        assert all(k == v["uid"] for k, v in checks.items())

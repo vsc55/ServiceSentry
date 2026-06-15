@@ -53,6 +53,7 @@ BOOL_RULES = {
     'web_admin|pw_require_digit':  '_PW_REQUIRE_DIGIT',
     'web_admin|pw_require_symbol': '_PW_REQUIRE_SYMBOL',
     'web_admin|public_status':     '_public_status',
+    'web_admin|public_status_detail': '_public_status_detail',
     'web_admin|force_https':       '_force_https',
     'web_admin|force_fqdn':        '_force_fqdn',
     # LDAP
@@ -125,7 +126,7 @@ def register(app, wa):
         'web_admin|pw_min_len', 'web_admin|pw_max_len',
         'web_admin|pw_require_upper', 'web_admin|pw_require_digit',
         'web_admin|pw_require_symbol',
-        'web_admin|public_status', 'web_admin|public_url',
+        'web_admin|public_status', 'web_admin|public_status_detail', 'web_admin|public_url',
     })
 
     def _requester_is_admin() -> bool:

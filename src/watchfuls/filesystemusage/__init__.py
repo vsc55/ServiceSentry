@@ -82,7 +82,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
-                    self._debug(f"FilesystemUsage: {key} - Exception: {exc}", DebugLevel.error)
+                    self._debug(f"FilesystemUsage: {self.item_label(key)} - Exception: {exc}", DebugLevel.error)
                     raw = self.get_conf('list', {}).get(key, {})
                     lbl = (raw.get('label') or raw.get('partition') or key) if isinstance(raw, dict) else key
                     self.dict_return.set(key, False, f'Disk: {lbl} - *Error: {exc}* 💥')

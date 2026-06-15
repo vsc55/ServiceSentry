@@ -152,6 +152,9 @@ class _DaemonMixin:
         results: dict = {}
         errors: list[str] = []
 
+        # Drop stale live status for hosts now in maintenance before running.
+        monitor.purge_maintenance_states()
+
         module_names = monitor._get_enabled_modules()
         if not module_names:
             return results, errors

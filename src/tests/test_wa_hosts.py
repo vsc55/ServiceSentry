@@ -80,14 +80,12 @@ class TestApiHosts:
             'c_off':   {'host_uid': uids['none'],  'enabled': False},  # disabled → ignored
         }}}
         assert admin._save_config_file(admin._MODULES_FILE, modules)
-        status = {'web': {
+        admin._check_state_store.persist_status({'web': {
             'c_ok':    {'status': True},
             'c_err':   {'status': False},
             'c_maint': {'status': True},
             # c_pend has no entry → pending/no data
-        }}
-        with open(os.path.join(admin._var_dir, admin._STATUS_FILE), 'w', encoding='utf-8') as fh:
-            json.dump(status, fh)
+        }})
 
         hosts = {h['uid']: h for h in client.get('/api/v1/hosts').get_json()['hosts']}
         assert hosts[uids['ok']]['status'] == 'ok'
@@ -224,10 +222,11 @@ class TestApiMigrate:
         assert 'snmp' not in (host.get('profiles') or {})
 
         newmods = client.get('/api/v1/modules').get_json()
-        r1 = newmods['snmp']['servers']['r1']
+        # Items are now keyed by their uid, so look them up by value.
+        r1 = next(iter(newmods['snmp']['servers'].values()))
         assert r1.get('host_uid') and 'host' not in r1
         assert r1['community'] == 'public'         # per-check setting preserved
-        p1 = newmods['ping']['list']['p1']
+        p1 = next(iter(newmods['ping']['list'].values()))
         assert p1.get('host_uid') == r1['host_uid'] and 'host' not in p1
 
     def test_preview_masks_secrets(self, client):
@@ -309,7 +308,9 @@ class TestHostAudits:
         detail = self._last(admin, 'hosts_migrated')['detail']
         assert detail['hosts'] == 1 and detail['checks'] == 2
         assert detail['created'][0]['name'] == 'mig-host'
-        assert sorted(detail['created'][0]['checks']) == ['ping/p1', 'ping/p2']
+        # Checks are identified by their uid key now; just assert count + module.
+        checks = detail['created'][0]['checks']
+        assert len(checks) == 2 and all(c.startswith('ping/') for c in checks)
 
 
 class TestStateChangeAudits:
@@ -338,8 +339,6 @@ class TestHostStatus:
     """/api/v1/hosts/<uid>/status — latest recorded data for the modal tab."""
 
     def test_returns_bound_check_status(self, client, admin):
-        import json as _json
-        import os as _os
         _login(client)
         uid = client.post('/api/v1/hosts', json=_HOST).get_json()['uid']
         # Bind a ping check to this host.
@@ -348,11 +347,9 @@ class TestHostStatus:
             'host_uid': uid, 'enabled': True, 'host': '10.0.0.5',
             'label': 'My Ping', 'uid': 'u1'}
         assert admin._save_config_file(admin._MODULES_FILE, mods)
-        # Daemon recorded a result for it.
-        status = {'ping': {'chk1': {'status': True, 'message': 'pong',
-                                    'other_data': {'latency_ms': 1.2}}}}
-        with open(_os.path.join(admin._var_dir, admin._STATUS_FILE), 'w', encoding='utf-8') as f:
-            _json.dump(status, f)
+        # Daemon recorded a result for it (in the check_state DB).
+        admin._check_state_store.persist_status({'ping': {'chk1': {
+            'status': True, 'message': 'pong', 'other_data': {'latency_ms': 1.2}}}})
 
         r = client.get(f'/api/v1/hosts/{uid}/status')
         assert r.status_code == 200
@@ -362,18 +359,14 @@ class TestHostStatus:
 
     def test_matches_derived_keys(self, client, admin):
         """ram_swap derived keys (<uid>_ram) match their base bound item."""
-        import json as _json
-        import os as _os
         _login(client)
         uid = client.post('/api/v1/hosts', json=_HOST).get_json()['uid']
         mods = admin._read_config_file(admin._MODULES_FILE) or {}
         mods.setdefault('ram_swap', {}).setdefault('list', {})['base1'] = {
             'host_uid': uid, 'enabled': True, 'label': 'NS1', 'uid': 'rs1'}
         assert admin._save_config_file(admin._MODULES_FILE, mods)
-        status = {'ram_swap': {'base1_ram': {'status': True,
-                  'other_data': {'name': 'NS1 - RAM', 'used': 42.0}}}}
-        with open(_os.path.join(admin._var_dir, admin._STATUS_FILE), 'w', encoding='utf-8') as f:
-            _json.dump(status, f)
+        admin._check_state_store.persist_status({'ram_swap': {'base1_ram': {
+            'status': True, 'other_data': {'name': 'NS1 - RAM', 'used': 42.0}}}})
         r = client.get(f'/api/v1/hosts/{uid}/status')
         e = next(x for x in r.get_json()['results'] if x['key'] == 'base1_ram')
         assert e['name'] == 'NS1 - RAM' and e['data']['used'] == 42.0

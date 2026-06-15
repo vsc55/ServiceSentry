@@ -90,6 +90,7 @@ function renderConfig() {
     if (!('pw_require_digit'  in wa)) wa.pw_require_digit  = WA_PW_REQUIRE_DIGIT;
     if (!('pw_require_symbol' in wa)) wa.pw_require_symbol = WA_PW_REQUIRE_SYMBOL;
     if (!('public_status'     in wa)) wa.public_status     = WA_PUBLIC_STATUS;
+    if (!('public_status_detail' in wa)) wa.public_status_detail = WA_PUBLIC_STATUS_DETAIL;
     if (!('status_refresh_secs' in wa)) wa.status_refresh_secs = WA_STATUS_REFRESH_SECS;
     if (!('status_lang'       in wa)) wa.status_lang       = WA_STATUS_LANG;
     if (!('port'              in wa)) wa.port              = WA_WEB_PORT;
@@ -146,7 +147,7 @@ function renderConfig() {
 
     const WA_EXCLUDE = [
         'pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol',
-        'public_status', 'status_refresh_secs', 'status_lang',
+        'public_status', 'public_status_detail', 'status_refresh_secs', 'status_lang',
         'port', 'proxy_count', 'public_url', 'force_https', 'force_fqdn', 'audit_sort', 'audit_sort_dir', 'default_page_size', 'page_sizes',
         'config_poll_secs', 'config_update_banner_secs',
         'lockout_max_attempts', 'lockout_duration_secs',
@@ -348,7 +349,7 @@ function renderConfig() {
 
     // ── Interface tab: pub_status + proxy + audit + tables + live_update
     // Public status card
-    const psFields = ['public_status', 'status_refresh_secs', 'status_lang'];
+    const psFields = ['public_status', 'public_status_detail', 'status_refresh_secs', 'status_lang'];
     const _statusBase = wa.public_url
         ? (wa.force_https ? 'https://' : 'http://') + wa.public_url
         : window.location.origin;

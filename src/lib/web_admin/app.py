@@ -22,6 +22,7 @@ _ENV_FIELD_SPECS: dict[str, tuple[str, type]] = {
     'WA_REMEMBER_ME_DAYS':    ('web_admin|remember_me_days',   int),
     'WA_AUDIT_MAX_ENTRIES':   ('web_admin|audit_max_entries',  int),
     'WA_PUBLIC_STATUS':       ('web_admin|public_status',      bool),
+    'WA_PUBLIC_STATUS_DETAIL': ('web_admin|public_status_detail', bool),
     'WA_STATUS_REFRESH_SECS': ('web_admin|status_refresh_secs', int),
     'WA_STATUS_LANG':         ('web_admin|status_lang',        str),
     'WA_PROXY_COUNT':         ('web_admin|proxy_count',        int),
@@ -83,6 +84,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _DEFAULT_PAGE_SIZE = 25
     _SECURE_COOKIES_DEFAULT = False
     _PUBLIC_STATUS = False
+    _public_status_detail = False   # guests see per-item detail on /status (off by default)
     _STATUS_REFRESH_SECS = 60
     _STATUS_LANG = ''
     _PUBLIC_URL = ''
@@ -133,6 +135,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         pw_require_digit: bool = True,
         pw_require_symbol: bool = False,
         public_status: bool = False,
+        public_status_detail: bool = False,
         status_refresh_secs: int = 60,
         status_lang: str = '',
         proxy_count: int = 0,
@@ -183,6 +186,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._PW_REQUIRE_DIGIT = bool(pw_require_digit)
         self._PW_REQUIRE_SYMBOL = bool(pw_require_symbol)
         self._public_status = bool(public_status)
+        self._public_status_detail = bool(public_status_detail)
         self._STATUS_REFRESH_SECS = max(10, int(status_refresh_secs))
         self._STATUS_LANG = status_lang if status_lang in SUPPORTED_LANGS else ''
         self._proxy_count = max(0, int(proxy_count))
@@ -198,6 +202,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._check_lock = threading.Lock()
         self._data_lock = threading.RLock()
         self._history = self._init_history()
+        self._check_state_store = self._init_check_state()
         self._default_lang = (
             default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
         )
@@ -447,6 +452,34 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             )
         except Exception:  # pylint: disable=broad-except
             return None
+
+    def _init_check_state(self):
+        """Create the CheckStateStore (the DB-backed replacement for status.json)."""
+        if not self._var_dir:
+            return None
+        try:
+            from lib.check_state_store import CheckStateStore, create as _create_cs  # noqa: PLC0415
+            connector = getattr(self, '_db_connector', None)
+            if connector is not None:
+                return CheckStateStore(connector)
+            db_cfg = (self._read_config_file(self._CONFIG_FILE) or {}).get('database')
+            return _create_cs(
+                db_cfg or None,
+                sqlite_path=os.path.join(self._var_dir, 'data.db'),
+            )
+        except Exception:  # pylint: disable=broad-except
+            return None
+
+    def _read_check_status(self) -> dict:
+        """Return the current check state as the nested ``{module: {key: {...}}}``
+        dict that ``status.json`` used to hold — the read model for the UI."""
+        store = getattr(self, '_check_state_store', None)
+        if store is None:
+            return {}
+        try:
+            return store.as_status_dict()
+        except Exception:  # pylint: disable=broad-except
+            return {}
 
     def _apply_saved_config(self) -> None:
         """Read config.json and apply persisted settings to runtime attributes.
@@ -709,6 +742,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_pw_require_digit': self._PW_REQUIRE_DIGIT,
                 'wa_pw_require_symbol': self._PW_REQUIRE_SYMBOL,
                 'wa_public_status': self._public_status,
+                'wa_public_status_detail': self._public_status_detail,
                 'wa_status_refresh_secs': self._STATUS_REFRESH_SECS,
                 'wa_status_lang': self._STATUS_LANG,
                 'wa_web_port': self._WEB_PORT,

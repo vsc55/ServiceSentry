@@ -7,20 +7,18 @@ let _overviewTimer = null;
 let _ovCountId = null;
 
 // Visual countdown to the next auto-refresh — purely cosmetic; the actual
-// refresh is driven by the _overviewTimer interval. Reset on every render.
+// refresh is driven by the _overviewTimer interval. Updates BOTH the inline
+// pill (normal mode) and the centered bar (kiosk mode) via shared classes.
 function _startOverviewCountdown(total) {
     if (_ovCountId) { clearInterval(_ovCountId); _ovCountId = null; }
     if (!total) return;
     let rem = total;
-    const cEl = document.getElementById('ov-refresh-count');
-    const fEl = document.getElementById('ov-refresh-fill');
-    if (cEl) cEl.textContent = rem;
-    if (fEl) fEl.style.width = '100%';
-    _ovCountId = setInterval(() => {
-        rem = rem > 0 ? rem - 1 : total;
-        if (cEl) cEl.textContent = rem;
-        if (fEl) fEl.style.width = (rem / total * 100) + '%';
-    }, 1000);
+    const apply = () => {
+        document.querySelectorAll('.ov-rc-count').forEach(el => { el.textContent = rem; });
+        document.querySelectorAll('.ov-rc-fill').forEach(el => { el.style.width = (rem / total * 100) + '%'; });
+    };
+    apply();
+    _ovCountId = setInterval(() => { rem = rem > 0 ? rem - 1 : total; apply(); }, 1000);
 }
 
 // Soft refresh: fetch new data and update only widget *content* (table bodies
@@ -143,7 +141,15 @@ async function renderOverview() {
     const kioskBtn = `
         <button class="btn btn-sm btn-secondary${_canEditLayout ? '' : ' ms-auto'}" onclick="_dwToggleKiosk()" title="${escAttr(t('dashboard_fullscreen_tt'))}">
             <i class="bi bi-arrows-fullscreen me-1"></i>${t('dashboard_fullscreen')}</button>`;
-    const ctrlBtns = editBtns + kioskBtn;
+    // Inline countdown pill (same amber chip as the Status tab), shown in the
+    // toolbar in normal mode. In kiosk the toolbar is hidden, so the centered
+    // #ov-refresh-bar (below) takes over instead.
+    const _ovInt = _overviewTimer?._interval || 0;
+    const ovPill = _ovInt > 0 ? `<span class="st-rc-pill ms-3" title="${escAttr(t('status_refreshing_in'))} ${_ovInt}${t('status_seconds_abbr')}">
+        <span class="st-rc-fill ov-rc-fill" style="width:100%"></span>
+        <span class="st-rc-txt"><i class="bi bi-arrow-clockwise me-1"></i><span class="ov-rc-count">${_ovInt}</span>${t('status_seconds_abbr')}</span>
+    </span>` : '';
+    const ctrlBtns = ovPill + editBtns + kioskBtn;
 
     // Controls bar (hidden in kiosk mode) wraps the refresh/edit/fullscreen buttons.
     let h = `<div id="overview-controls">`;
@@ -154,14 +160,12 @@ async function renderOverview() {
     // Add-widget bar (shown only in edit mode)
     h += `<div id="dwAddBar" class="d-none d-flex flex-wrap align-items-center gap-2 mb-3 px-3 py-2 rounded-3 border" style="background:var(--bs-secondary-bg)"></div>`;
 
-    // Auto-refresh countdown (mirrors the /status footer). Rendered outside
-    // #overview-controls so it stays visible in kiosk mode. Only shown while
-    // auto-refresh is active.
-    const _ovInt = _overviewTimer?._interval || 0;
+    // Centered countdown bar — rendered outside #overview-controls and shown
+    // ONLY in kiosk mode (CSS), where the toolbar pill is hidden.
     if (_ovInt > 0) {
         h += `<div id="ov-refresh-bar">
-            <div class="ov-refresh-track"><div class="ov-refresh-fill" id="ov-refresh-fill" style="width:100%"></div></div>
-            <div class="small text-muted mt-1"><i class="bi bi-arrow-clockwise me-1"></i>${t('status_refreshing_in')} <span id="ov-refresh-count">${_ovInt}</span>${t('status_seconds_abbr')}</div>
+            <div class="ov-refresh-track"><div class="ov-refresh-fill ov-rc-fill" style="width:100%"></div></div>
+            <div class="small text-muted mt-1"><i class="bi bi-arrow-clockwise me-1"></i>${t('status_refreshing_in')} <span class="ov-rc-count">${_ovInt}</span>${t('status_seconds_abbr')}</div>
         </div>`;
     }
 

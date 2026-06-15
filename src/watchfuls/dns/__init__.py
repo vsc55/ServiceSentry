@@ -592,7 +592,7 @@ class Watchful(ModuleBase):
             timeout = (_coerce_int(value.get('timeout'))
                        or _coerce_int(self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']))
                        or self._MODULE_DEFAULTS['timeout'])
-            self._debug(f"DNS: {key} - host={host} type={record_type} expected={expected!r}", DebugLevel.info)
+            self._debug(f"DNS: {self.item_label(key)} - host={host} type={record_type} expected={expected!r}", DebugLevel.info)
             # Carry the resolved value (ssh_*, host_os, host_kind) plus the
             # cleaned check fields so _dns_check can run locally or over SSH.
             item = dict(value)

@@ -5,17 +5,53 @@
 // ──────────────────────────── Status tab ──────────────────────────
 let _checkSelection = new Set();
 let _statusTimer = null;
+let _stCountId = null;
+
+// Visual countdown to the next auto-refresh — shown inline to the right of the
+// interval buttons. Purely cosmetic; the _statusTimer drives the real refresh.
+function _startStatusCountdown(total) {
+    if (_stCountId) { clearInterval(_stCountId); _stCountId = null; }
+    if (!total) return;   // bar isn't rendered when auto-refresh is OFF
+    const cEl = document.getElementById('st-refresh-count');
+    const fEl = document.getElementById('st-refresh-fill');
+    let rem = total;
+    if (cEl) cEl.textContent = rem;
+    if (fEl) fEl.style.width = '100%';
+    _stCountId = setInterval(() => {
+        rem = rem > 0 ? rem - 1 : total;
+        if (cEl) cEl.textContent = rem;
+        if (fEl) fEl.style.width = (rem / total * 100) + '%';
+    }, 1000);
+}
 
 function setStatusAutoRefresh(seconds) {
     if (_statusTimer) { clearInterval(_statusTimer._id); _statusTimer = null; }
     if (seconds > 0) {
         const id = setInterval(() => {
             const pane = document.getElementById('tab-status');
-            if (pane && pane.classList.contains('active')) renderStatus();
+            // Auto-tick uses the soft (results-only) refresh to avoid flicker.
+            if (pane && pane.classList.contains('active')) _softRefreshStatus();
         }, seconds * 1000);
         _statusTimer = { _id: id, _interval: seconds };
     }
     renderStatus();
+}
+
+// Soft refresh: fetch new data and update only the results area — no spinner,
+// no toolbar/selection rebuild, no flicker. Falls back to a full render if the
+// page isn't drawn yet.
+async function _softRefreshStatus() {
+    const area = document.getElementById('checksResultArea');
+    if (!area) return renderStatus();
+    const data = await apiGet('/api/v1/modules/status');
+    if (!data) return;                 // transient error → keep current view
+    area.innerHTML = Object.keys(data).length
+        ? _renderStatusCards(data)
+        : `<div class="text-center py-5 text-muted">
+            <i class="bi bi-inbox" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <span>${t('status_empty')}</span>
+          </div>`;
+    _startStatusCountdown(_statusTimer?._interval || 0);
 }
 
 async function renderStatus() {
@@ -35,14 +71,10 @@ async function renderStatus() {
     const canRun = new Set(currentUser.permissions || []).has('checks_run');
     let h = '';
 
-    // ── Refresh bar ───────────────────────────────────────────
-    h += _renderRefreshBar('status-container', 'renderStatus',
-        () => _statusTimer, 'setStatusAutoRefresh');
-
-    if (canRun) {
-        // ── Action toolbar ────────────────────────────────────
-        h += `<div class="d-flex flex-wrap align-items-center gap-2 mb-3 px-3 py-2 rounded-3 border" style="background:var(--bs-secondary-bg)">
-          <button class="btn btn-sm btn-primary" id="btnRunAll" onclick="runAllChecks()" title="${escAttr(t('run_all_checks_tt'))}">
+    // ── Unified toolbar: refresh/auto-refresh on the left, run/select
+    //    actions pushed to the right (ms-auto on the first action button). ──
+    const actionBtns = canRun ? `
+          <button class="btn btn-sm btn-primary ms-auto" id="btnRunAll" onclick="runAllChecks()" title="${escAttr(t('run_all_checks_tt'))}">
             <i class="bi bi-play-fill me-1"></i>${t('run_all_checks')}
           </button>
           <button class="btn btn-sm btn-primary" id="btnRunSelected" onclick="runSelectedChecks()" title="${escAttr(t('run_selected_checks_tt'))}">
@@ -55,11 +87,23 @@ async function renderStatus() {
           <button class="btn btn-sm btn-secondary" onclick="toggleCheckSelection(false)" title="${escAttr(t('checks_select_none_tt'))}">
             ${t('checks_select_none')}
           </button>
-          <span id="checksSpinner" class="d-none ms-auto text-muted small">
+          <span id="checksSpinner" class="d-none text-muted small">
             <span class="spinner-border spinner-border-sm me-1"></span>${t('checks_running')}
-          </span>
-        </div>`;
+          </span>` : '';
 
+    // Countdown to the next auto-refresh, inline right after the interval
+    // buttons. Only rendered while auto-refresh is ON (rendering it hidden
+    // wouldn't work: Bootstrap's .d-flex uses display:flex !important).
+    const _stInt = _statusTimer?._interval || 0;
+    const countdownHtml = _stInt > 0 ? `<span class="st-rc-pill ms-3" title="${escAttr(t('status_refreshing_in'))} ${_stInt}${t('status_seconds_abbr')}">
+        <span class="st-rc-fill" id="st-refresh-fill" style="width:100%"></span>
+        <span class="st-rc-txt"><i class="bi bi-arrow-clockwise me-1"></i><span id="st-refresh-count">${_stInt}</span>${t('status_seconds_abbr')}</span>
+    </span>` : '';
+
+    h += _renderRefreshBar('status-container', 'renderStatus',
+        () => _statusTimer, 'setStatusAutoRefresh', countdownHtml + actionBtns);
+
+    if (canRun) {
         // ── Background scheduler widget ───────────────────────
         h += `<div id="daemonWidget" class="d-flex flex-wrap align-items-center gap-2 mb-3 px-3 py-2 rounded-3 border"
                    style="background:var(--bs-tertiary-bg)">
@@ -128,6 +172,9 @@ async function renderStatus() {
     h += `</div>`;
 
     c.innerHTML = h;
+
+    // (Re)start the countdown ticker for the freshly-rendered refresh bar.
+    _startStatusCountdown(_statusTimer?._interval || 0);
 }
 
 function _renderWaitingCard(mod) {
@@ -412,6 +459,46 @@ async function _doRunChecks(modules) {
 // ──────────────────────── Background scheduler UI ─────────────────────────
 let _daemonPollTimer = null;
 let _daemonLastModuleStatus = {};   // snapshot of last known module statuses
+let _schedCountId = null;
+let _schedSeenTick = false;   // have we counted down at least once this run?
+let _daemonStopping = false;  // a Stop was requested; thread still finishing
+let _daemonStopWaitId = null; // fast-poll timer while waiting for the stop
+
+// Set the pill text to a transient state (spinner + label), bar full.
+function _schedShowState(label) {
+    const txt = document.getElementById('daemon-rc-txt');
+    if (txt) txt.innerHTML = `<span class="spinner-border spinner-border-sm me-1" style="width:.6rem;height:.6rem;border-width:1.5px"></span>${label}`;
+    const fEl = document.getElementById('daemon-rc-fill');
+    if (fEl) fEl.style.width = '100%';
+}
+
+// Per-second countdown to the scheduler's next run (cyan pill). Re-seeded from
+// the server's next_in on every 5s poll, so it stays accurate; ticks locally
+// in between. When it elapses, a run is firing → show "Running…".
+function _startSchedulerCountdown(rem, total) {
+    if (_schedCountId) { clearInterval(_schedCountId); _schedCountId = null; }
+    if (rem == null) return;
+    _schedSeenTick = true;
+    const fEl = document.getElementById('daemon-rc-fill');
+    let r = rem;
+    const draw = () => {
+        const cEl = document.getElementById('daemon-rc-count');
+        if (cEl) cEl.textContent = Math.max(0, r);
+        if (fEl && total) fEl.style.width = (Math.max(0, Math.min(r, total)) / total * 100) + '%';
+    };
+    draw();
+    _schedCountId = setInterval(() => {
+        r -= 1;
+        if (r <= 0) {
+            // Elapsed → the scheduled run is firing. Stop ticking and show
+            // "Running…"; the next poll re-seeds when the next run is scheduled.
+            clearInterval(_schedCountId); _schedCountId = null;
+            _schedShowState(t('daemon_executing'));
+            return;
+        }
+        draw();
+    }, 1000);
+}
 
 async function _daemonRefresh() {
     const res = await apiGet('/api/v1/daemon/status');
@@ -463,18 +550,51 @@ function _daemonApply(st) {
     if (interval && document.activeElement !== interval)
         interval.value = st.interval ?? 300;
 
+    // The thread keeps running until its current cycle finishes, so a Stop
+    // request stays "running" for a while. Show "Stopping…" (disabled) until
+    // the scheduler thread has actually exited.
+    if (_daemonStopping && !running) _daemonStopping = false;
+    const stopping = _daemonStopping && running;
+
     if (toggleBtn) {
-        toggleBtn.textContent = t(running ? 'daemon_stop' : 'daemon_start');
+        toggleBtn.disabled    = stopping;
+        toggleBtn.textContent = stopping ? t('daemon_stopping')
+                                         : t(running ? 'daemon_stop' : 'daemon_start');
         toggleBtn.title       = t(running ? 'daemon_stop_tt' : 'daemon_start_tt');
-        toggleBtn.className   = `btn btn-sm ${running ? 'btn-warning' : 'btn-secondary'}`;
+        toggleBtn.className    = `btn btn-sm ${running ? 'btn-warning' : 'btn-secondary'}`;
     }
-    if (reloadBtn) reloadBtn.style.display = running ? '' : 'none';
+    if (reloadBtn) reloadBtn.style.display = (running && !stopping) ? '' : 'none';
 
     if (nextLbl) {
         const n = st.next_in;
-        nextLbl.textContent = (running && n != null)
-            ? `${t('daemon_next_in')} ${n}${t('daemon_interval_s')}`
-            : '';
+        if (running) {
+            // Build the countdown pill once; keep it for the whole running session.
+            if (!document.getElementById('daemon-rc-txt')) {
+                nextLbl.textContent = '';
+                nextLbl.innerHTML = `<span class="st-rc-pill st-rc-sm" title="${escAttr(t('daemon_next_in'))}">
+                    <span class="st-rc-fill" id="daemon-rc-fill" style="width:100%"></span>
+                    <span class="st-rc-txt" id="daemon-rc-txt"></span>
+                </span>`;
+            }
+            const txt = document.getElementById('daemon-rc-txt');
+            const fEl = document.getElementById('daemon-rc-fill');
+            if (n != null) {
+                // Ready: show the ticking countdown and count down each second.
+                if (!document.getElementById('daemon-rc-count') && txt) {
+                    txt.innerHTML = `<i class="bi bi-clock-history me-1"></i><span id="daemon-rc-count">${n}</span>${t('daemon_interval_s')}`;
+                }
+                _startSchedulerCountdown(n, st.interval || n);
+            } else {
+                // No time-to-next yet: "Initializing…" before the very first run,
+                // "Running…" once we've already counted down (a run is firing).
+                if (_schedCountId) { clearInterval(_schedCountId); _schedCountId = null; }
+                _schedShowState(_schedSeenTick ? t('daemon_executing') : t('daemon_initializing'));
+            }
+        } else {
+            _schedSeenTick = false;
+            nextLbl.textContent = '';
+            _startSchedulerCountdown(null);
+        }
     }
 
     // Autostart: always sync from server so Config tab changes are reflected here.
@@ -504,10 +624,32 @@ async function _daemonReload(saveFirst = true) {
 async function _daemonToggle() {
     const badge = document.getElementById('daemonBadge');
     const running = badge && badge.classList.contains('bg-success');
-    // run_now: true — start triggers an immediate check instead of waiting
-    // the full interval first
-    const res = await apiPost(`/api/v1/daemon/${running ? 'stop' : 'start'}`, {run_now: true});
-    if (res && res.data) _daemonApply(res.data.status ?? res.data);
+    if (running) {
+        // The scheduler finishes its current cycle before exiting, so reflect a
+        // "Stopping…" state and poll quickly until the thread is really gone.
+        _daemonStopping = true;
+        _daemonApply({ running: true, interval: parseInt(
+            document.getElementById('daemonIntervalInput')?.value, 10) || undefined });
+        const res = await apiPost('/api/v1/daemon/stop', {});
+        if (res && res.data) _daemonApply(res.data.status ?? res.data);
+        _daemonWaitStop();
+    } else {
+        _daemonStopping = false;
+        // run_now: true — start triggers an immediate check instead of waiting.
+        const res = await apiPost('/api/v1/daemon/start', {run_now: true});
+        if (res && res.data) _daemonApply(res.data.status ?? res.data);
+    }
+}
+
+// While a stop is pending, poll fast (1s) so the UI flips to "Stopped" as soon
+// as the scheduler thread actually exits — without waiting for the 5s poll.
+function _daemonWaitStop() {
+    if (_daemonStopWaitId) return;
+    _daemonStopWaitId = setInterval(async () => {
+        if (!_daemonStopping) { clearInterval(_daemonStopWaitId); _daemonStopWaitId = null; return; }
+        const res = await apiGet('/api/v1/daemon/status');
+        if (res) _daemonApply(res);
+    }, 1000);
 }
 
 async function _daemonPersistInterval(secs) {

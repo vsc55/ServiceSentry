@@ -105,8 +105,15 @@ def admin(config_dir, var_dir):
     (pathlib.Path(config_dir) / "users.json").write_text(
         json.dumps(users, indent=4), encoding="utf-8"
     )
-    return WebAdmin(config_dir, "admin", "secret", var_dir,
-                    pw_require_upper=False, pw_require_digit=False)
+    wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                  pw_require_upper=False, pw_require_digit=False)
+    # The working check state lives in the DB now (no status.json). Seed the
+    # sample state the tests expect (ping/192.168.1.1 OK) into check_state.
+    if getattr(wa, "_check_state_store", None):
+        wa._check_state_store.persist_status(
+            {"ping": {"192.168.1.1": {"status": True, "other_data": {}}}}
+        )
+    return wa
 
 
 @pytest.fixture()

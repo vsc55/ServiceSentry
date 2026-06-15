@@ -74,7 +74,7 @@ class Watchful(ModuleBase):
             warning_days = int(value.get('warning_days', 0) or 0) or self.get_conf('warning_days', self._MODULE_DEFAULTS['warning_days'])
             timeout = int(value.get('timeout', 0) or 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
             label = (value.get('label', '') or '').strip() or server_name or host or key
-            self._debug(f"SSL Cert: {key} - host={host}:{port} sni={server_name} verify={verify} warning_days={warning_days}", DebugLevel.info)
+            self._debug(f"SSL Cert: {self.item_label(key)} - host={host}:{port} sni={server_name} verify={verify} warning_days={warning_days}", DebugLevel.info)
             list_items.append({
                 'key': key,
                 'label': label,

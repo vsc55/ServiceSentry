@@ -377,6 +377,7 @@ def start_web(args):
     remember_me_days = cfg.get_conf(['web_admin', 'remember_me_days'], 30)
     audit_max_entries = cfg.get_conf(['web_admin', 'audit_max_entries'], 500)
     public_status = cfg.get_conf(['web_admin', 'public_status'], False)
+    public_status_detail = cfg.get_conf(['web_admin', 'public_status_detail'], False)
     status_refresh_secs = cfg.get_conf(['web_admin', 'status_refresh_secs'], 60)
     status_lang = cfg.get_conf(['web_admin', 'status_lang'], '')
     proxy_count = cfg.get_conf(['web_admin', 'proxy_count'], 0)
@@ -398,6 +399,7 @@ def start_web(args):
                      remember_me_days=int(remember_me_days),
                      audit_max_entries=int(audit_max_entries),
                      public_status=bool(public_status),
+                     public_status_detail=bool(public_status_detail),
                      status_refresh_secs=int(status_refresh_secs),
                      status_lang=str(status_lang),
                      proxy_count=int(proxy_count),

@@ -7,7 +7,6 @@ import os
 
 from flask import abort, render_template, session
 
-from lib.config import ConfigControl
 from lib.web_admin.constants import DEFAULT_LANG, TRANSLATIONS
 
 # Fallback language for watchful pretty-name lookup.
@@ -58,8 +57,14 @@ def register(app, wa):
     @app.route('/status')
     def public_status():
         """Public status page — always visible to logged-in users; only to guests when public_status=True."""
-        if not wa._public_status and not wa._check_session():
+        logged_in = wa._check_session()
+        if not wa._public_status and not logged_in:
             abort(404)
+
+        # Per-item detail: always for logged-in users; for guests only when the
+        # "detail for guests" option is enabled. Otherwise show module-level
+        # status only (no per-item breakdown).
+        show_detail = logged_in or bool(getattr(wa, '_public_status_detail', False))
 
         # ── Language priority ──────────────────────────────────────────
         # 1. User preference (set in their session)
@@ -68,11 +73,7 @@ def register(app, wa):
         lang = session.get('lang') or wa._STATUS_LANG or wa._default_lang
         i18n = TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG])
 
-        status_raw: dict = {}
-        if wa._var_dir:
-            path = os.path.join(wa._var_dir, wa._STATUS_FILE)
-            cfg = ConfigControl(path)
-            status_raw = cfg.read() or {}
+        status_raw: dict = wa._read_check_status()
 
         modules_cfg = wa._read_config_file(wa._MODULES_FILE)
 
@@ -131,6 +132,7 @@ def register(app, wa):
             total_ok=total_ok,
             total_all=total_all,
             refresh_secs=wa._STATUS_REFRESH_SECS,
+            show_detail=show_detail,
             lang=lang,
             i18n=i18n,
         )

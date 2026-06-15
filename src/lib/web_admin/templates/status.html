@@ -166,6 +166,9 @@
             transition: background .12s;
         }
         .mod-header:hover { background: var(--row-hover); }
+        /* No per-item detail (guest, detail disabled): header isn't expandable. */
+        .mod-header-static { cursor: default; }
+        .mod-header-static:hover { background: transparent; }
 
         /* Avatar */
         .mod-avatar {
@@ -389,8 +392,8 @@
     <div class="mod-accent {% if mod.all_ok %}accent-ok{% else %}accent-err{% endif %}"></div>
 
     <!-- Header -->
-    <div class="mod-header {% if mod.all_ok %}collapsed{% endif %}"
-         onclick="toggleMod('{{ mod.name }}')">
+    <div class="mod-header {% if mod.all_ok %}collapsed{% endif %}{% if not show_detail %} mod-header-static{% endif %}"
+         {% if show_detail %}onclick="toggleMod('{{ mod.name }}')"{% endif %}>
 
       <div class="mod-avatar {% if mod.all_ok %}av-ok{% else %}av-err{% endif %}">
         <i class="bi {{ mod_icons.get(mod.name, 'bi-puzzle-fill') }}"></i>
@@ -417,7 +420,7 @@
         {% endif %}
       </span>
 
-      <i class="bi bi-chevron-down mod-chevron"></i>
+      {% if show_detail %}<i class="bi bi-chevron-down mod-chevron"></i>{% endif %}
     </div>
 
     <!-- Progress strip -->
@@ -426,7 +429,8 @@
            style="width:{{ mod.pct }}%"></div>
     </div>
 
-    <!-- Check list -->
+    <!-- Check list (per-item detail; hidden for guests when detail is off) -->
+    {% if show_detail %}
     <div class="mod-body" id="body-{{ mod.name }}"
          style="{% if mod.all_ok %}display:none{% endif %}">
       {% for item in mod.checks %}
@@ -459,6 +463,7 @@
       {% endfor %}
       <div class="body-pad"></div>
     </div>
+    {% endif %}
 
   </div>
   {% endfor %}

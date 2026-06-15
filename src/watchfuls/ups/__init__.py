@@ -134,14 +134,14 @@ class Watchful(ModuleBase):
                 continue
             host = (value.get('host', '') or '').strip()
             if not host:
-                self._debug(f"UPS: {key} - host is empty, skipping.", DebugLevel.warning)
+                self._debug(f"UPS: {self.item_label(key)} - host is empty, skipping.", DebugLevel.warning)
                 continue
             port = int(value.get('port', 0) or 0) or 3493
             ups_name = (value.get('ups_name', '') or '').strip() or self._DEFAULTS['ups_name']
             user = (value.get('user', '') or '').strip()
             password = (value.get('password', '') or '').strip()
             timeout = int(value.get('timeout', 0) or 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
-            self._debug(f"UPS: {key} - host={host}:{port} ups_name={ups_name}", DebugLevel.info)
+            self._debug(f"UPS: {self.item_label(key)} - host={host}:{port} ups_name={ups_name}", DebugLevel.info)
 
             def _alert(field):
                 try:
@@ -151,6 +151,7 @@ class Watchful(ModuleBase):
 
             list_items.append({
                 'key': key,
+                'label': (value.get('label', '') or '').strip(),
                 'host': host,
                 'port': port,
                 'ups_name': ups_name,
@@ -177,8 +178,10 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"UPS: {item['key']} - Exception: {exc}", DebugLevel.error)
-                    message = f'UPS: {item["key"]} - *Error: {exc}* 💥'
-                    self.dict_return.set(item['key'], False, message)
+                    _nm = item.get('label') or item.get('ups_name') or item['key']
+                    message = f'UPS: {_nm} - *Error: {exc}* 💥'
+                    self.dict_return.set(item['key'], False, message,
+                                         other_data={'name': _nm})
 
         super().check()
         return self.dict_return
@@ -196,6 +199,14 @@ class Watchful(ModuleBase):
             password=item['password'],
             timeout=item['timeout'],
         )
+
+        # Friendly display name: the item label if set, else the device
+        # make/model reported by NUT (e.g. "APC Back-UPS Pro 1600"), else the
+        # NUT ups_name. The result key is an opaque UID, so this name is what
+        # the messages, history, status page and "Latest data" show.
+        _model = (variables.get('device.model') or variables.get('ups.model') or '').strip()
+        _mfr   = (variables.get('device.mfr') or variables.get('ups.mfr') or '').strip()
+        name = item.get('label') or (f'{_mfr} {_model}'.strip()) or ups_name or key
 
         status = variables.get('ups.status', '') or ''
         tokens = status.split()
@@ -232,12 +243,13 @@ class Watchful(ModuleBase):
             if runtime_min is not None:
                 extra.append(f'{runtime_min:.0f}m')
             detail = ' · '.join(extra)
-            message = f'UPS: *{key}* - Online ({status}){f" — {detail}" if detail else ""} ✅'
+            message = f'UPS: *{name}* - Online ({status}){f" — {detail}" if detail else ""} ✅'
         else:
             icon = '🔋' if (low_batt or on_battery) else '⚠️'
-            message = f'UPS: *{key}* - {", ".join(reasons)} ({status}) {icon}'
+            message = f'UPS: *{name}* - {", ".join(reasons)} ({status}) {icon}'
 
         other_data = {
+            'name': name,
             'host': host,
             'ups_name': ups_name,
             'status': status,

@@ -75,7 +75,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
-                    self._debug(f"cpu: {key} - Exception: {exc}", DebugLevel.error)
+                    self._debug(f"cpu: {self.item_label(key)} - Exception: {exc}", DebugLevel.error)
                     _raw = self.get_conf('list', {}).get(key, {})
                     _lbl = (_raw.get('label') or key) if isinstance(_raw, dict) else key
                     self.dict_return.set(key, False, f'CPU: {_lbl} - *Error: {exc}* 💥')

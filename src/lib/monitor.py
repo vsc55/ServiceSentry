@@ -74,10 +74,12 @@ class Monitor(ObjectBase):
         self.dir_var = dir_var
 
         self._read_config()
-        self._read_status()
         self._init_telegram()
         self._db = self._init_db()
         self._history = self._init_history()
+        self._check_state_store = self._init_check_state()
+        # The working state lives in the DB (check_state) — no status.json.
+        self._read_status()
         self._hosts_store = self._init_hosts_store()
         self._audit_store = self._init_audit_store()
         self._reconcile_module_tables()
@@ -128,6 +130,65 @@ class Monitor(ObjectBase):
         except Exception:  # pylint: disable=broad-except
             return None
 
+    def _init_check_state(self):
+        """Create the persistent current-state store on the shared connector."""
+        if self._db is None:
+            return None
+        try:
+            from lib.check_state_store import CheckStateStore  # noqa: PLC0415
+            return CheckStateStore(self._db)
+        except Exception:  # pylint: disable=broad-except
+            return None
+
+    def purge_maintenance_states(self):
+        """Drop the live status of checks bound to a host in maintenance.
+
+        A host in maintenance has its checks skipped (``resolve_host`` disables
+        them), so their last status would otherwise linger stale.  We remove
+        those entries from the working state (persisted to ``check_state`` on
+        the next save) — the history is kept, so the host modal can still show
+        the last recorded value as *historic*.  When the host leaves
+        maintenance, the next check has no baseline and re-announces its current
+        state.  Called once per cycle.
+        """
+        hstore = getattr(self, '_hosts_store', None)
+        if hstore is None:
+            return
+        try:
+            maint = {h.get('uid') for h in (hstore.list(decrypt=False) or [])
+                     if isinstance(h, dict) and h.get('maintenance')}
+        except Exception:  # pylint: disable=broad-except
+            return
+        if not maint:
+            return
+        # {module: {item_key}} for items bound to a maintenance host.
+        maint_items: dict = {}
+        cfg = self.config_modules.data or {}
+        for mod_name, mod_cfg in cfg.items():
+            if not isinstance(mod_cfg, dict):
+                continue
+            for coll, items in mod_cfg.items():
+                if coll.startswith('__') or not isinstance(items, dict):
+                    continue
+                for ikey, item in items.items():
+                    if isinstance(item, dict) and item.get('host_uid') in maint:
+                        maint_items.setdefault(mod_name, set()).add(ikey)
+        if not maint_items:
+            return
+        dirty = False
+        for mod_name, item_keys in maint_items.items():
+            mod_status = self.status.data.get(mod_name)
+            if not isinstance(mod_status, dict):
+                continue
+            for skey in list(mod_status.keys()):
+                # Match exact item keys and derived "<base>_suffix" result keys.
+                base = skey if skey in item_keys else skey.rsplit('_', 1)[0]
+                if base in item_keys:
+                    del mod_status[skey]
+                    dirty = True
+        if dirty:
+            self.status.save()
+
     def _reconcile_module_tables(self):
         """Let watchful modules create their own tables on the shared connector."""
         if self._db is None:
@@ -151,17 +212,29 @@ class Monitor(ObjectBase):
             return None
 
     def _get_item_uid(self, module_name: str, key: str) -> str | None:
-        """Return the stable UID for *key* within *module_name*, or None."""
+        """Return the stable item UID for a result *key* within *module_name*.
+
+        Result keys may be *derived* from the item key — e.g. ram_swap emits
+        ``"<item>_ram"`` / ``"<item>_swap"`` for a single item — so when the
+        exact key isn't a configured item we fall back to its base key (the
+        part before the last ``_``). The exact key is always tried first, so an
+        item whose own key contains an underscore is matched correctly.
+        """
         module_cfg = self.config_modules.get_conf([module_name])
         if not isinstance(module_cfg, dict):
             return None
-        for section_val in module_cfg.values():
-            if isinstance(section_val, dict):
-                item = section_val.get(key)
-                if isinstance(item, dict):
-                    uid = item.get('uid')
-                    if uid:
-                        return str(uid)
+        candidates = [key]
+        base = key.rsplit('_', 1)[0]
+        if base and base != key:
+            candidates.append(base)
+        for cand in candidates:
+            for section_val in module_cfg.values():
+                if isinstance(section_val, dict):
+                    item = section_val.get(cand)
+                    if isinstance(item, dict):
+                        uid = item.get('uid')
+                        if uid:
+                            return str(uid)
         return None
 
     # ── Audit helpers ─────────────────────────────────────────────────────────
@@ -274,18 +347,21 @@ class Monitor(ObjectBase):
             self._public_url = ''
 
     def _read_status(self):
-        """ Read the status file. If the file does not exist, it will be created. """
-        if self.dir_var:
-            self._check_dir(self.dir_var)
-            self.status = ConfigControl(os.path.join(self.dir_var, 'status.json'), {})
-            if not self.status.is_exist_file:
-                self.status.save()
+        """Load the working state from the ``check_state`` DB table.
+
+        The state lives entirely in the database now (no ``status.json``); when
+        no DB store is available (e.g. no var dir) an in-memory store is used.
+        """
+        store = getattr(self, '_check_state_store', None)
+        if store is not None:
+            from lib.check_state_store import DbBackedStatus  # noqa: PLC0415
+            self.status = DbBackedStatus(store, self._get_item_uid)
+            self.status.read()
         else:
             self.status = ConfigControl(None, {})
 
     def clear_status(self):
-        """ Clear the status file. """
-        # TODO: Pendiente crear funcion clear en el objeto config # pylint: disable=fixme
+        """Clear all current check state (the ``check_state`` table)."""
         self.debug.print("> Monitor >> Clear Status", DebugLevel.info)
         self.status.data = {}
         self.status.save()
@@ -389,12 +465,18 @@ class Monitor(ObjectBase):
             tmp_send = result_data.get_send(key)
             tmp_other_data = result_data.get_other_data(key)
 
+            # Working state lives in self.status (DB-backed); other_data and the
+            # message are refreshed every cycle so the UI/latest-data stay current.
             self.status.set_conf([module_name, key, 'other_data'], tmp_other_data)
+            self.status.set_conf([module_name, key, 'message'], tmp_message)
 
             if self.check_status(tmp_status, module_name, key):
                 self.status.set_conf([module_name, key, 'status'], tmp_status)
                 changed = True
 
+                # The persisted check_state row is the durable baseline: a
+                # restart with an unchanged state stays quiet, while the very
+                # first record of a check still notifies its current state.
                 if tmp_send:
                     self.send_message(tmp_message, tmp_status)
 
@@ -481,6 +563,7 @@ class Monitor(ObjectBase):
         self.debug.print(f"> Monitor > check >> Check Init: {time.strftime('%c')}", DebugLevel.info)
 
         self.status.read()
+        self.purge_maintenance_states()
         list_modules = self._get_enabled_modules()
 
         # Warm module imports sequentially before the concurrent phase below: a

@@ -2,15 +2,19 @@
 # -*- coding: utf-8 -*-
 """Module routes: /api/v1/modules (GET, PUT), /api/v1/modules/status, /api/v1/modules/overview."""
 
-import os
+import re
 import uuid
 
 from flask import jsonify
 
 from lib import secret_manager
 
-from lib.config import ConfigControl
 from ...constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS
+
+# Canonical UUID form, used to tell an opaque item key from a human-given one.
+_UUID_RE = re.compile(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+    r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
 
 
 def _is_item_collection(v) -> bool:
@@ -113,6 +117,51 @@ def _ensure_item_uids(data: dict) -> None:
                     item['uid'] = str(uuid.uuid4())
 
 
+# Collections that hold check items, keyed by the item UID. Nested collections
+# (e.g. snmp's per-server ``checks``) are re-keyed recursively.
+_ITEM_COLLECTIONS = ('list', 'servers')
+_NESTED_ITEM_COLLECTIONS = ('checks',)
+
+
+def _rekey_collection(coll: dict) -> dict:
+    """Return *coll* re-keyed so each item's dict key equals its ``uid``
+    (generated when absent); recurses into nested item collections."""
+    out: dict = {}
+    for old_key, item in coll.items():
+        if not isinstance(item, dict):
+            out[old_key] = item
+            continue
+        uid = str(item.get('uid') or '').strip() or str(uuid.uuid4())
+        item['uid'] = uid
+        # Preserve a human-readable old key as the editable label, so re-keying
+        # to an opaque UID never loses the name (e.g. ups items keyed by name).
+        if (not str(item.get('label') or '').strip()
+                and old_key != uid and not _UUID_RE.match(str(old_key))):
+            item['label'] = old_key
+        for sub in _NESTED_ITEM_COLLECTIONS:
+            sub_val = item.get(sub)
+            if isinstance(sub_val, dict) and sub_val:
+                item[sub] = _rekey_collection(sub_val)
+        out[uid] = item
+    return out
+
+
+def _rekey_items_by_uid(data: dict) -> None:
+    """Re-key every check item (and nested check) by its ``uid`` in place.
+
+    Makes the item's dict key equal its UID so each watchful's result key (the
+    dict key it iterates) is the stable UID — the canonical relation used by
+    status.json / check_state / history.
+    """
+    for module_cfg in data.values():
+        if not isinstance(module_cfg, dict):
+            continue
+        for coll_name in _ITEM_COLLECTIONS:
+            coll = module_cfg.get(coll_name)
+            if isinstance(coll, dict) and coll:
+                module_cfg[coll_name] = _rekey_collection(coll)
+
+
 def register(app, wa):
     login_required = wa._login_required
 
@@ -177,7 +226,8 @@ def register(app, wa):
             for name in set(old_data) | set(data):
                 if not _authorize_module_write(name, old_data.get(name), data.get(name), perms):
                     return jsonify({'error': wa._t('access_denied')}), 403
-        _ensure_item_uids(data)   # generate stable UIDs for new items
+        _ensure_item_uids(data)     # generate stable UIDs for new items
+        _rekey_items_by_uid(data)   # keep each item's dict key == its UID
         if wa._save_config_file(wa._MODULES_FILE, data):
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._sensitive_fields,
@@ -186,20 +236,15 @@ def register(app, wa):
             return jsonify({'ok': True})
         return jsonify({'error': wa._t('save_file_error')}), 500
 
-    # --- API: status.json (read-only) -----------------------------
+    # --- API: check state (read-only) -----------------------------
 
     checks_view_req = wa._perm_required('checks_view', 'checks_run')
 
     @app.route('/api/v1/modules/status', methods=['GET'])
     @checks_view_req
     def api_get_status():
-        """Return the contents of ``status.json`` (read-only)."""
-        if not wa._var_dir:
-            return jsonify({})
-        path = os.path.join(wa._var_dir, wa._STATUS_FILE)
-        cfg = ConfigControl(path)
-        data = cfg.read()
-        return jsonify(data if data else {})
+        """Return the current check state (from the check_state DB table)."""
+        return jsonify(wa._read_check_status())
 
     # --- API: overview (dashboard summary) -----------------------
 
@@ -207,12 +252,8 @@ def register(app, wa):
     @login_required
     def api_get_overview():
         """Return a summary snapshot for the overview dashboard."""
-        # Status file (read first so modules can reference per-module check counts)
-        status_raw: dict = {}
-        if wa._var_dir:
-            path = os.path.join(wa._var_dir, wa._STATUS_FILE)
-            cfg_ctrl = ConfigControl(path)
-            status_raw = cfg_ctrl.read() or {}
+        # Current check state (read first so modules can reference per-module counts)
+        status_raw: dict = wa._read_check_status()
 
         def _mod_checks(name: str) -> dict:
             mc = status_raw.get(name, {})
