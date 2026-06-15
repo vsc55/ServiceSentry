@@ -4,6 +4,84 @@
 
 // ──────────────────────── Auto-refresh bar ────────────────────────
 let _overviewTimer = null;
+let _ovCountId = null;
+
+// Visual countdown to the next auto-refresh — purely cosmetic; the actual
+// refresh is driven by the _overviewTimer interval. Reset on every render.
+function _startOverviewCountdown(total) {
+    if (_ovCountId) { clearInterval(_ovCountId); _ovCountId = null; }
+    if (!total) return;
+    let rem = total;
+    const cEl = document.getElementById('ov-refresh-count');
+    const fEl = document.getElementById('ov-refresh-fill');
+    if (cEl) cEl.textContent = rem;
+    if (fEl) fEl.style.width = '100%';
+    _ovCountId = setInterval(() => {
+        rem = rem > 0 ? rem - 1 : total;
+        if (cEl) cEl.textContent = rem;
+        if (fEl) fEl.style.width = (rem / total * 100) + '%';
+    }, 1000);
+}
+
+// Soft refresh: fetch new data and update only widget *content* (table bodies
+// and stat cards) in place — no spinner, no DOM rebuild, no flicker. Used by
+// the auto-refresh timer. Falls back to a full render if nothing is drawn yet.
+async function _softRefreshOverview() {
+    const grid = document.getElementById('dashboardGrid');
+    if (!grid) return renderOverview();
+    const data = await apiGet('/api/v1/modules/overview');
+    if (!data) return;                 // transient error → keep current content
+    _lastOverviewData = data;
+    const perms   = new Set(currentUser.permissions || []);
+    const isAdmin = currentUser.role === 'admin';
+    grid.querySelectorAll('.dw[data-wid]').forEach(dw => {
+        const id = dw.dataset.wid;
+        const content = dw.querySelector('.dw-content');
+        if (!content) return;
+        const tbody = content.querySelector('tbody');
+        const rows  = _dwTbodyHtml(id);
+        if (tbody && rows != null) {
+            // Tables: swap only the rows, preserving header, sort & scroll.
+            tbody.innerHTML = rows;
+        } else if (!_dwIsSpacer(id)) {
+            // Stat cards: replace the small content block (no scroll to lose).
+            content.innerHTML = _dwContent(id, data);
+        }
+    });
+    _startOverviewCountdown(_overviewTimer?._interval || 0);
+}
+
+// ──────────────────────── Kiosk / 24/7 fullscreen ─────────────────
+// Strips all chrome (navbar, tabs, controls) leaving only the widget
+// grid, and requests browser fullscreen — for a wall status display.
+function _dwToggleKiosk() {
+    const entering = !document.body.classList.contains('ss-kiosk');
+    if (entering) {
+        document.body.classList.add('ss-kiosk');
+        // Keep a 24/7 screen fresh even if the user hadn't enabled auto-refresh.
+        if (!_overviewTimer) setOverviewAutoRefresh(30);
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+        if (req) { try { req.call(el); } catch (_) {} }
+    } else {
+        document.body.classList.remove('ss-kiosk');
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+            const ex = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+            if (ex) { try { ex.call(document); } catch (_) {} }
+        }
+    }
+}
+
+// Leaving fullscreen (e.g. pressing Esc) must also drop kiosk styling.
+if (!window._kioskFsHooked) {
+    window._kioskFsHooked = true;
+    const _onFsChange = () => {
+        if (!document.fullscreenElement && !document.webkitFullscreenElement)
+            document.body.classList.remove('ss-kiosk');
+    };
+    document.addEventListener('fullscreenchange', _onFsChange);
+    document.addEventListener('webkitfullscreenchange', _onFsChange);
+}
 
 function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '') {
     const intervals = [0, 10, 30, 60];
@@ -31,7 +109,8 @@ function setOverviewAutoRefresh(seconds) {
     if (seconds > 0) {
         const id = setInterval(() => {
             const pane = document.getElementById('tab-overview');
-            if (pane && pane.classList.contains('active')) renderOverview();
+            // Auto-tick uses the soft (content-only) refresh to avoid flicker.
+            if (pane && pane.classList.contains('active')) _softRefreshOverview();
         }, seconds * 1000);
         _overviewTimer = { _id: id, _interval: seconds };
     }
@@ -55,35 +134,60 @@ async function renderOverview() {
     const layout  = _dwLoad();
 
     const _canEditLayout = perms.has('overview_edit');
-    const ctrlBtns = _canEditLayout ? `
+    const editBtns = _canEditLayout ? `
         <button class="btn btn-sm btn-secondary ms-auto" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
             <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
         <button class="btn btn-sm btn-secondary" onclick="_dwReset()" title="${escAttr(t('dashboard_reset_tt'))}">
             <i class="bi bi-arrow-counterclockwise me-1"></i>${t('dashboard_reset')}</button>` : '';
+    // Fullscreen / 24/7 kiosk toggle — available to everyone who can see the overview.
+    const kioskBtn = `
+        <button class="btn btn-sm btn-secondary${_canEditLayout ? '' : ' ms-auto'}" onclick="_dwToggleKiosk()" title="${escAttr(t('dashboard_fullscreen_tt'))}">
+            <i class="bi bi-arrows-fullscreen me-1"></i>${t('dashboard_fullscreen')}</button>`;
+    const ctrlBtns = editBtns + kioskBtn;
 
-    let h = _renderRefreshBar('overview-container', 'renderOverview',
+    // Controls bar (hidden in kiosk mode) wraps the refresh/edit/fullscreen buttons.
+    let h = `<div id="overview-controls">`;
+    h += _renderRefreshBar('overview-container', 'renderOverview',
         () => _overviewTimer, 'setOverviewAutoRefresh', ctrlBtns);
+    h += `</div>`;
 
     // Add-widget bar (shown only in edit mode)
     h += `<div id="dwAddBar" class="d-none d-flex flex-wrap align-items-center gap-2 mb-3 px-3 py-2 rounded-3 border" style="background:var(--bs-secondary-bg)"></div>`;
+
+    // Auto-refresh countdown (mirrors the /status footer). Rendered outside
+    // #overview-controls so it stays visible in kiosk mode. Only shown while
+    // auto-refresh is active.
+    const _ovInt = _overviewTimer?._interval || 0;
+    if (_ovInt > 0) {
+        h += `<div id="ov-refresh-bar">
+            <div class="ov-refresh-track"><div class="ov-refresh-fill" id="ov-refresh-fill" style="width:100%"></div></div>
+            <div class="small text-muted mt-1"><i class="bi bi-arrow-clockwise me-1"></i>${t('status_refreshing_in')} <span id="ov-refresh-count">${_ovInt}</span>${t('status_seconds_abbr')}</div>
+        </div>`;
+    }
 
     // Dashboard grid
     const gridEdit = _dwEditing ? ' dashboard-edit' : '';
     h += `<div class="dashboard-grid${gridEdit}" id="dashboardGrid">`;
     for (const item of layout) {
-        const def = _DW_DEFS[item.id];
+        const def = _dwDef(item.id);
         if (!def || !def.canShow(perms, isAdmin)) continue;
-        const hClass  = item.h && item.h !== 'auto' ? ` dw-h-${item.h}` : '';
+        const spClass = def.spacer ? ' dw-spacer' : '';
         const display = item.hidden ? ' style="display:none"' : '';
-        h += `<div class="dw dw-c${item.cols}${hClass}" data-wid="${escAttr(item.id)}"
-               data-cols="${item.cols}" data-h="${item.h || 'auto'}"${display}>`;
+        const hpx     = def.hasH ? _dwHpx(item.h) : null;
+        const cStyle  = hpx ? ` style="flex:none;height:${hpx}px;overflow-y:auto"` : '';
+        h += `<div class="dw dw-c${item.cols}${spClass}" data-wid="${escAttr(item.id)}"
+               data-cols="${item.cols}" data-h="${escAttr(String(item.h || 'auto'))}"${display}>`;
         h += _dwToolbar(item.id, item.cols, item.h || 'auto');
-        h += `<div class="dw-content">${_dwContent(item.id, data)}</div>`;
+        h += `<div class="dw-content"${cStyle}>${_dwContent(item.id, data)}</div>`;
+        if (def.hasH) h += `<div class="dw-resize" title="${escAttr(t('widget_resize_h') || 'Drag to resize height')}"></div>`;
         h += `</div>`;
     }
     h += `</div>`;
 
     c.innerHTML = h;
+
+    // (Re)start the countdown ticker for the freshly-rendered bar.
+    _startOverviewCountdown(_ovInt);
 
     // Re-apply edit mode after DOM rebuild
     if (_dwEditing) {

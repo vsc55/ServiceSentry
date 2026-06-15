@@ -80,6 +80,59 @@ function _dwBuildModuleRows(modules) {
     }).join('');
 }
 
+function _dwSrvStatusBadge(h) {
+    if (h.maintenance)
+        return `<span class="badge rounded-pill" style="background:#fd7e14;color:#fff;font-size:.72rem"><i class="bi bi-cone-striped me-1"></i>${esc(t('host_status_maintenance'))}</span>`;
+    const map = {
+        ok:      ['rgba(34,197,94,.15)',  'var(--ss-ok-text,#16a34a)',  'bi-check-circle',    'host_status_ok'],
+        error:   ['rgba(239,68,68,.15)',  'var(--ss-err-text,#dc2626)', 'bi-x-circle',        'host_status_error'],
+        warning: ['rgba(245,158,11,.18)', '#d97706',                    'bi-hourglass-split', 'host_status_warning'],
+    };
+    const m = map[h.status];
+    if (!m) return '<span class="text-muted small">—</span>';
+    return `<span class="badge rounded-pill" style="background:${m[0]};color:${m[1]};font-size:.72rem"><i class="bi ${m[2]} me-1"></i>${esc(t(m[3]))}</span>`;
+}
+
+function _dwSrvStatusRank(h) {
+    if (h.maintenance) return 1;
+    return { error: 4, warning: 3, ok: 2 }[h.status] || 0;
+}
+
+function _dwModulesBadge(active, total) {
+    if (!total) return '<span class="text-muted small">—</span>';
+    const full = active >= total;
+    const bg  = full ? 'var(--bs-body-bg)' : 'var(--bs-secondary-bg)';
+    const clr = full ? 'var(--bs-body-color)' : 'var(--bs-secondary-color)';
+    const icl = full ? '#6366f1' : 'var(--bs-secondary-color)';
+    return `<span class="badge rounded-pill" style="background:${bg};color:${clr};border:1px solid var(--bs-border-color);font-size:.72rem;font-weight:600">
+        <i class="bi bi-puzzle me-1" style="color:${icl}"></i>${active}/${total}</span>`;
+}
+
+function _dwBuildServerRows(servers) {
+    const s = _dwSort['servers_list'];
+    let rows = [...servers];
+    if (s?.col) {
+        rows.sort((a, b) => {
+            let va, vb;
+            if (s.col === 'name')         { va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); }
+            else if (s.col === 'status')  { va = _dwSrvStatusRank(a);          vb = _dwSrvStatusRank(b); }
+            else if (s.col === 'checks')  { va = (a.checks?.error ?? 0);       vb = (b.checks?.error ?? 0); }
+            else                          { va = a.modules_active || 0;        vb = b.modules_active || 0; }
+            return va < vb ? -s.dir : va > vb ? s.dir : 0;
+        });
+    }
+    if (!rows.length)
+        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('host_monitor_none')}</td></tr>`;
+    return rows.map(h => {
+        const nameCell = `<span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+            style="width:26px;height:26px;background:rgba(14,165,233,.14);color:#0ea5e9;font-size:.85rem;vertical-align:middle"><i class="bi bi-hdd-network"></i></span>${esc(h.name || '')}`;
+        const statusCell = _dwSrvStatusBadge(h);
+        const checksCell = _dwChecksBadge(h.checks);
+        const modCell    = _dwModulesBadge(h.modules_active, h.modules_total);
+        return `<tr><td>${nameCell}</td><td>${statusCell}</td><td>${checksCell}</td><td>${modCell}</td></tr>`;
+    }).join('');
+}
+
 function _dwBuildActivityRows(events) {
     const AE = I18N.audit_events || {};
     const s  = _dwSort['activity'];
@@ -113,6 +166,117 @@ function _dwBuildActivityRows(events) {
     }).join('');
 }
 
+function _dwFmtDate(v) {
+    if (!v) return '—';
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? esc(String(v)) : esc(d.toLocaleString());
+}
+
+// Best-effort short browser/OS label from a user-agent string.
+function _dwBrowser(ua) {
+    if (!ua) return '—';
+    let b = 'Other';
+    if (/Edg/i.test(ua))         b = 'Edge';
+    else if (/OPR|Opera/i.test(ua)) b = 'Opera';
+    else if (/Chrome/i.test(ua)) b = 'Chrome';
+    else if (/Firefox/i.test(ua)) b = 'Firefox';
+    else if (/Safari/i.test(ua)) b = 'Safari';
+    else if (/curl|wget|python|Postman/i.test(ua)) b = ua.split('/')[0];
+    let os = '';
+    if (/Windows/i.test(ua))      os = 'Windows';
+    else if (/Android/i.test(ua)) os = 'Android';
+    else if (/iPhone|iPad|iOS/i.test(ua)) os = 'iOS';
+    else if (/Mac OS/i.test(ua))  os = 'macOS';
+    else if (/Linux/i.test(ua))   os = 'Linux';
+    return os ? `${b} · ${os}` : b;
+}
+
+function _dwBuildSessionRows(sessions) {
+    const s = _dwSort['sessions_list'];
+    let rows = [...sessions];
+    if (s?.col) {
+        rows.sort((a, b) => {
+            let va, vb;
+            if (s.col === 'user')        { va = (a.user || '').toLowerCase(); vb = (b.user || '').toLowerCase(); }
+            else if (s.col === 'ip')     { va = (a.ip || '');                 vb = (b.ip || ''); }
+            else if (s.col === 'browser'){ va = _dwBrowser(a.agent);          vb = _dwBrowser(b.agent); }
+            else                         { va = (a.last_seen || '');          vb = (b.last_seen || ''); }
+            return va < vb ? -s.dir : va > vb ? s.dir : 0;
+        });
+    }
+    if (!rows.length)
+        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('status_empty')}</td></tr>`;
+    return rows.map(s => {
+        const userCell = `<span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+            style="width:26px;height:26px;background:rgba(6,182,212,.14);color:#06b6d4;font-size:.85rem;vertical-align:middle"><i class="bi bi-person"></i></span>${esc(s.user || '')}`;
+        return `<tr>
+          <td>${userCell}</td>
+          <td><code style="font-size:.8rem">${esc(s.ip || '—')}</code></td>
+          <td class="small text-muted text-nowrap" title="${escAttr(s.agent || '')}">${esc(_dwBrowser(s.agent))}</td>
+          <td class="small text-nowrap text-muted">${_dwFmtDate(s.last_seen)}</td></tr>`;
+    }).join('');
+}
+
+function _dwBuildIncidentRows(items) {
+    const s = _dwSort['incidents'];
+    let rows = [...items];
+    if (s?.col) {
+        rows.sort((a, b) => {
+            let va, vb;
+            if (s.col === 'module')     { va = modulePrettyName(a.module, modulesData[a.module] || {}).toLowerCase();
+                                          vb = modulePrettyName(b.module, modulesData[b.module] || {}).toLowerCase(); }
+            else if (s.col === 'host')  { va = (a.host || '').toLowerCase(); vb = (b.host || '').toLowerCase(); }
+            else                        { va = (a.check || '').toLowerCase(); vb = (b.check || '').toLowerCase(); }
+            return va < vb ? -s.dir : va > vb ? s.dir : 0;
+        });
+    }
+    if (!rows.length)
+        return `<tr><td colspan="3" class="text-center text-success py-3"><i class="bi bi-check-circle me-1"></i>${t('overview_no_issues')}</td></tr>`;
+    return rows.map(it => {
+        const pname = modulePrettyName(it.module, modulesData[it.module] || {});
+        const icon  = moduleIcon(it.module, modulesData[it.module] || {});
+        const hue   = _moduleHue(it.module);
+        const modCell = `<span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+            style="width:26px;height:26px;background:hsla(${hue},65%,55%,.14);color:hsl(${hue},60%,42%);font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
+        const chkCell = `<span class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc(it.check || '')}</span>`;
+        const hostCell = it.host ? `<code style="font-size:.8rem">${esc(it.host)}</code>` : '<span class="text-muted small">—</span>';
+        return `<tr><td>${modCell}</td><td>${chkCell}</td><td>${hostCell}</td></tr>`;
+    }).join('');
+}
+
+function _dwBuildFailedLoginRows(items) {
+    const s = _dwSort['failed_logins'];
+    let rows = [...items];
+    if (s?.col) {
+        rows.sort((a, b) => {
+            let va, vb;
+            if (s.col === 'user')      { va = (a.user || '').toLowerCase(); vb = (b.user || '').toLowerCase(); }
+            else if (s.col === 'ip')   { va = (a.ip || '');                 vb = (b.ip || ''); }
+            else if (s.col === 'detail'){ va = (a.detail || '');            vb = (b.detail || ''); }
+            else                       { va = (a.ts || '');                 vb = (b.ts || ''); }
+            return va < vb ? -s.dir : va > vb ? s.dir : 0;
+        });
+    }
+    if (!rows.length)
+        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('status_empty')}</td></tr>`;
+    return rows.map(e => {
+        // The audit detail carries an i18n key (e.g. {reason:'ldap_user_not_found'});
+        // translate it the same way the audit log UI does (t(key) || key).
+        let detail = e.detail;
+        if (detail && typeof detail === 'object') {
+            const key = detail.reason || detail.error;
+            detail = key ? (t(key) || key) : JSON.stringify(detail);
+        } else if (detail) {
+            detail = t(detail) || detail;
+        }
+        return `<tr>
+          <td class="small text-nowrap text-muted">${_dwFmtDate(e.ts)}</td>
+          <td><code style="font-size:.8rem">${esc(e.user || '—')}</code></td>
+          <td><code style="font-size:.8rem">${esc(e.ip || '—')}</code></td>
+          <td class="small text-muted text-truncate" style="max-width:16em" title="${escAttr(String(detail || ''))}">${esc(String(detail || '—'))}</td></tr>`;
+    }).join('');
+}
+
 function _dwSortTable(wid, col) {
     const cur = _dwSort[wid];
     _dwSort[wid] = (cur?.col === col) ? { col, dir: -cur.dir } : { col, dir: 1 };
@@ -128,11 +292,24 @@ function _dwSortTable(wid, col) {
     });
     // Rebuild tbody
     const tbody = container.querySelector('tbody');
-    if (!tbody || !_lastOverviewData) return;
-    if (wid === 'modules_list')
-        tbody.innerHTML = _dwBuildModuleRows(_lastOverviewData.modules || []);
-    else if (wid === 'activity')
-        tbody.innerHTML = _dwBuildActivityRows(_lastOverviewData.last_events || []);
+    const html = _dwTbodyHtml(wid);
+    if (tbody && html != null) tbody.innerHTML = html;
+}
+
+// Returns the <tbody> HTML for a table widget (or null if not a table).
+// Shared by sorting and the soft (content-only) refresh.
+function _dwTbodyHtml(wid) {
+    const d = _lastOverviewData;
+    if (!d) return null;
+    switch (wid) {
+        case 'modules_list':  return _dwBuildModuleRows(d.modules || []);
+        case 'servers_list':  return _dwBuildServerRows((d.servers || {}).list || []);
+        case 'sessions_list': return _dwBuildSessionRows((d.sessions || {}).list || []);
+        case 'incidents':     return _dwBuildIncidentRows(d.failing_checks || []);
+        case 'failed_logins': return _dwBuildFailedLoginRows(d.failed_logins || []);
+        case 'activity':      return _dwBuildActivityRows(d.last_events || []);
+        default:              return null;
+    }
 }
 
 // ──────────────────────── Widget content ──────────────────────────
@@ -174,6 +351,7 @@ function _dwTheadRow(...ths) {
 }
 
 function _dwContent(id, data) {
+    if (_dwIsSpacer(id)) return '<div class="dw-spacer-box"></div>';
     const perms   = new Set(currentUser.permissions || []);
     const isAdmin = currentUser.role === 'admin';
 
@@ -212,9 +390,14 @@ function _dwContent(id, data) {
             return _dwStatCard(accent, avBg, avColor, icon, status.total, 'overview_status', sub);
         }
 
-        case 'sessions':
+        case 'sessions': {
+            const byRole = sessions.by_role || {};
+            const sub = Object.entries(byRole)
+                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)}" style="font-size:.72rem">${n} ${esc((rolesData[r]?.name) || ROLE_LABELS[rolesData[r]?.key || r] || r)}</span>`)
+                .join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#06b6d4,#3b82f6)', 'rgba(6,182,212,.12)', '#06b6d4',
-                'bi-plug-fill', sessions.active || 0, 'overview_sessions', '');
+                'bi-plug-fill', sessions.active || 0, 'overview_sessions', sub);
+        }
 
         case 'users': {
             const byRole = users.by_role || {};
@@ -226,7 +409,11 @@ function _dwContent(id, data) {
         }
 
         case 'groups': {
-            const sub = groups.members ? `<span class="text-muted small">${tf('overview_members', groups.members)}</span>` : '';
+            const byRole = groups.by_role || {};
+            const sub = Object.entries(byRole)
+                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)}" style="font-size:.72rem">${n} ${esc((rolesData[r]?.name) || ROLE_LABELS[rolesData[r]?.key || r] || r)}</span>`)
+                .join('')
+                || (groups.members ? `<span class="text-muted small">${tf('overview_members', groups.members)}</span>` : '<span class="text-muted small">—</span>');
             return _dwStatCard('linear-gradient(90deg,#10b981,#14b8a6)', 'rgba(16,185,129,.12)', '#10b981',
                 'bi-people-fill', groups.total || 0, 'overview_groups', sub);
         }
@@ -235,6 +422,48 @@ function _dwContent(id, data) {
             const sub = roles.custom ? `<span class="text-muted small">${tf('overview_custom_roles', roles.custom)}</span>` : '';
             return _dwStatCard('linear-gradient(90deg,#8b5cf6,#ec4899)', 'rgba(139,92,246,.12)', '#8b5cf6',
                 'bi-shield-fill-check', roles.total || 0, 'overview_roles', sub);
+        }
+
+        case 'servers': {
+            const servers = data.servers || {};
+            const ss = servers.status || {};
+            const err = (ss.error || 0) > 0;
+            const accent  = err ? 'linear-gradient(90deg,#ef4444,#f97316)' : 'linear-gradient(90deg,#0ea5e9,#6366f1)';
+            const avBg    = err ? 'rgba(239,68,68,.12)' : 'rgba(14,165,233,.12)';
+            const avColor = err ? '#ef4444' : '#0ea5e9';
+            // Status breakdown badges (only the non-zero states).
+            const badge = (n, cls, ic, lbl, sty) => n
+                ? `<span class="badge ${cls}" style="font-size:.72rem;${sty || ''}"><i class="bi ${ic} me-1"></i>${n} ${esc(t(lbl))}</span>`
+                : '';
+            const sub = [
+                badge(ss.ok,          'text-bg-success', 'bi-check-circle',    'host_status_ok'),
+                badge(ss.error,       'text-bg-danger',  'bi-x-circle',        'host_status_error'),
+                badge(ss.warning,     'text-bg-warning', 'bi-hourglass-split', 'host_status_warning'),
+                badge(ss.maintenance, '',                'bi-cone-striped',    'host_status_maintenance', 'background-color:#fd7e14;color:#fff'),
+            ].filter(Boolean).join('') || '<span class="text-muted small">—</span>';
+            return _dwStatCard(accent, avBg, avColor, 'bi-hdd-network-fill',
+                servers.total || 0, 'overview_servers', sub);
+        }
+
+        case 'coverage': {
+            const cov = data.coverage || {};
+            const pct = cov.pct || 0;
+            const good = pct >= 90, mid = pct >= 50;
+            const accent  = good ? 'linear-gradient(90deg,#22c55e,#10b981)' : mid ? 'linear-gradient(90deg,#f59e0b,#f97316)' : 'linear-gradient(90deg,#ef4444,#f97316)';
+            const avBg    = good ? 'rgba(34,197,94,.12)' : mid ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)';
+            const avColor = good ? '#22c55e' : mid ? '#f59e0b' : '#ef4444';
+            const sub = `<span class="text-muted small">${tf('overview_of_hosts', cov.hosts_monitored || 0, cov.hosts_total || 0)}</span>`;
+            return _dwStatCard(accent, avBg, avColor, 'bi-pie-chart-fill',
+                pct + '%', 'overview_coverage', sub);
+        }
+
+        case 'webhooks': {
+            const wh = data.webhooks || {};
+            const sub = wh.total
+                ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${wh.enabled || 0} ${esc(t('overview_enabled'))}</span>`
+                : '<span class="text-muted small">—</span>';
+            return _dwStatCard('linear-gradient(90deg,#a855f7,#ec4899)', 'rgba(168,85,247,.12)', '#a855f7',
+                'bi-broadcast', wh.total || 0, 'overview_webhooks', sub);
         }
 
         case 'modules_list': {
@@ -251,6 +480,73 @@ function _dwContent(id, data) {
             </table>`;
             return _dwTableCard('linear-gradient(90deg,#6366f1,#8b5cf6)', 'rgba(99,102,241,.12)', '#6366f1',
                 'bi-puzzle', t('overview_modules'), table);
+        }
+
+        case 'servers_list': {
+            if (!perms.has('servers_view') && ![...perms].some(x => x.startsWith('server.')))
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            const slist = (data.servers || {}).list || [];
+            const table = `<table class="table table-sm table-hover align-middle mb-0">
+                ${_dwTheadRow(
+                    _dwTh('servers_list','name',t('col_server')),
+                    _dwTh('servers_list','status',t('col_host_status')),
+                    _dwTh('servers_list','checks',t('col_checks')),
+                    _dwTh('servers_list','modules',t('col_host_modules'))
+                )}
+                <tbody>${_dwBuildServerRows(slist)}</tbody>
+            </table>`;
+            return _dwTableCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
+                'bi-hdd-network', t('overview_servers'), table);
+        }
+
+        case 'sessions_list': {
+            if (!isAdmin)
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            const slist = (data.sessions || {}).list || [];
+            const table = `<table class="table table-sm table-hover align-middle mb-0">
+                ${_dwTheadRow(
+                    _dwTh('sessions_list','user',t('col_user')),
+                    _dwTh('sessions_list','ip',t('col_ip')),
+                    _dwTh('sessions_list','browser',t('col_browser')),
+                    _dwTh('sessions_list','last_seen',t('col_last_seen'))
+                )}
+                <tbody>${_dwBuildSessionRows(slist)}</tbody>
+            </table>`;
+            return _dwTableCard('linear-gradient(90deg,#06b6d4,#3b82f6)', 'rgba(6,182,212,.12)', '#06b6d4',
+                'bi-plug', t('overview_sessions'), table);
+        }
+
+        case 'incidents': {
+            if (!perms.has('modules_view'))
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            const ilist = data.failing_checks || [];
+            const table = `<table class="table table-sm table-hover align-middle mb-0">
+                ${_dwTheadRow(
+                    _dwTh('incidents','module',t('col_module')),
+                    _dwTh('incidents','check',t('col_check')),
+                    _dwTh('incidents','host',t('col_host'))
+                )}
+                <tbody>${_dwBuildIncidentRows(ilist)}</tbody>
+            </table>`;
+            return _dwTableCard('linear-gradient(90deg,#ef4444,#f97316)', 'rgba(239,68,68,.12)', '#ef4444',
+                'bi-exclamation-triangle', t('overview_incidents'), table);
+        }
+
+        case 'failed_logins': {
+            if (!isAdmin)
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            const flist = data.failed_logins || [];
+            const table = `<table class="table table-sm table-hover align-middle mb-0">
+                ${_dwTheadRow(
+                    _dwTh('failed_logins','ts',t('col_time')),
+                    _dwTh('failed_logins','user',t('col_user')),
+                    _dwTh('failed_logins','ip',t('col_ip')),
+                    _dwTh('failed_logins','detail',t('col_detail'))
+                )}
+                <tbody>${_dwBuildFailedLoginRows(flist)}</tbody>
+            </table>`;
+            return _dwTableCard('linear-gradient(90deg,#f43f5e,#f97316)', 'rgba(244,63,94,.12)', '#f43f5e',
+                'bi-shield-lock', t('overview_failed_logins'), table);
         }
 
         case 'activity': {

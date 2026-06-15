@@ -251,6 +251,34 @@ def register(app, wa):
             _uid_to_name.get(s.get('user_uid', ''), s.get('user_uid', ''))
             for s in wa._sessions.values()
         })
+        # Per-session detail for the table widget (admin-only on the frontend).
+        sessions_list = []
+        for _s in wa._sessions.values():
+            if not isinstance(_s, dict):
+                continue
+            sessions_list.append({
+                'user':      _uid_to_name.get(_s.get('user_uid', ''), _s.get('user_uid', '')),
+                'ip':        _s.get('ip', ''),
+                'agent':     _s.get('user_agent', ''),
+                'created':   _s.get('created', ''),
+                'last_seen': _s.get('last_seen', ''),
+            })
+        sessions_list.sort(key=lambda x: str(x.get('last_seen') or ''), reverse=True)
+        # Breakdown of active sessions by the role of their user (one count per
+        # session, so it tallies with the active-sessions total).
+        sessions_by_role: dict[str, int] = {}
+        for _s in wa._sessions.values():
+            if not isinstance(_s, dict):
+                continue
+            _uname = _uid_to_name.get(_s.get('user_uid', ''))
+            _u = wa._users.get(_uname) if _uname else None
+            if not isinstance(_u, dict):
+                continue
+            _r = _u.get('role', '')
+            _r_uid = (wa._role_name_to_uid(_r) if not wa._is_uid(_r) else _r) \
+                or BUILTIN_ROLE_UIDS.get('viewer', '')
+            if _r_uid:
+                sessions_by_role[_r_uid] = sessions_by_role.get(_r_uid, 0) + 1
 
         # Users summary
         total_users = len(wa._users)
@@ -261,11 +289,21 @@ def register(app, wa):
             r_uid = (wa._role_name_to_uid(r) if not wa._is_uid(r) else r) or _viewer_uid
             users_by_role[r_uid] = users_by_role.get(r_uid, 0) + 1
 
-        # Groups summary
+        # Groups summary — total, members, and a breakdown of how many groups
+        # carry each role (mirrors the users-by-role breakdown). A group may
+        # hold several roles, so it counts toward each one it has.
         total_groups = len(wa._groups)
         total_group_members = sum(
             len(g.get('members', [])) for g in wa._groups.values() if isinstance(g, dict)
         )
+        groups_by_role: dict[str, int] = {}
+        for g in wa._groups.values():
+            if not isinstance(g, dict):
+                continue
+            for r in g.get('roles', []) or []:
+                r_uid = (wa._role_name_to_uid(r) if not wa._is_uid(r) else r) or r
+                if r_uid:
+                    groups_by_role[r_uid] = groups_by_role.get(r_uid, 0) + 1
 
         # Roles summary
         builtin_roles = len(BUILTIN_ROLE_PERMISSIONS)
@@ -274,6 +312,132 @@ def register(app, wa):
         # Last audit events
         last_events = list(reversed(wa._audit_log))[:10]
 
+        # Servers (host registry): total + status breakdown + a per-server list
+        # (name, status, bound-check count, modules active/total) for the table.
+        servers_total = 0
+        servers_status = {'ok': 0, 'error': 0, 'warning': 0, 'maintenance': 0}
+        servers_list = []
+        _host_name: dict = {}     # uid -> display name (reused below)
+        _hstore = getattr(wa, '_hosts_store', None)
+        if _hstore is not None:
+            try:
+                from ..hosts import _host_statuses, _host_bound_modules  # noqa: PLC0415
+                _hosts = _hstore.list(decrypt=False) or []
+                _hstatuses = _host_statuses(wa)
+                _hbound = _host_bound_modules(wa)
+                # Enabled bound-check tally per host (from modules.json), with
+                # OK/error breakdown pulled from the status file — same shape as
+                # the per-module ``checks`` object so the table can reuse it.
+                _hchecks: dict = {}
+                for _mn, _mc in modules_raw.items():
+                    if not isinstance(_mc, dict):
+                        continue
+                    _mstatus = status_raw.get(_mn, {})
+                    if not isinstance(_mstatus, dict):
+                        _mstatus = {}
+                    for _coll, _items in _mc.items():
+                        if _coll.startswith('__') or not isinstance(_items, dict):
+                            continue
+                        for _ikey, _it in _items.items():
+                            if not (isinstance(_it, dict) and _it.get('host_uid')
+                                    and _it.get('enabled') is not False):
+                                continue
+                            _c = _hchecks.setdefault(
+                                _it['host_uid'], {'total': 0, 'ok': 0, 'error': 0})
+                            _c['total'] += 1
+                            _sv = _mstatus.get(_ikey)
+                            if isinstance(_sv, dict):
+                                if _sv.get('status') is True:
+                                    _c['ok'] += 1
+                                elif _sv.get('status') is False:
+                                    _c['error'] += 1
+                servers_total = len(_hosts)
+                for _h in _hosts:
+                    _uid = _h.get('uid')
+                    _host_name[_uid] = _h.get('name', '')
+                    if _h.get('maintenance'):
+                        servers_status['maintenance'] += 1
+                    else:
+                        _st = _hstatuses.get(_uid, '')
+                        if _st in servers_status:
+                            servers_status[_st] += 1
+                    _mods = _hbound.get(_uid, {})
+                    _all_m = set(_h.get('modules') or []) | set(_mods)
+                    servers_list.append({
+                        'uid': _uid, 'name': _h.get('name', ''),
+                        'maintenance': bool(_h.get('maintenance')),
+                        'status': _hstatuses.get(_uid, ''),
+                        'checks': _hchecks.get(_uid, {'total': 0, 'ok': 0, 'error': 0}),
+                        'modules_total': len(_all_m),
+                        'modules_active': sum(1 for _m in _all_m if _mods.get(_m)),
+                    })
+                servers_list.sort(key=lambda s: str(s.get('name') or '').lower())
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+        # Active issues: every check currently reporting status False. Display
+        # name mirrors the public status page (other_data.name > item label >
+        # raw key); host resolved from the bound item's host_uid.
+        failing_checks = []
+        try:
+            for _mn, _mstatus in status_raw.items():
+                if not isinstance(_mstatus, dict):
+                    continue
+                _mcfg = modules_raw.get(_mn)
+                _mcfg = _mcfg if isinstance(_mcfg, dict) else {}
+                _labels, _hosts_of = {}, {}
+                for _coll, _items in _mcfg.items():
+                    if _coll.startswith('__') or not isinstance(_items, dict):
+                        continue
+                    for _k, _it in _items.items():
+                        if not isinstance(_it, dict):
+                            continue
+                        _lbl = str(_it.get('label') or '').strip()
+                        if _lbl:
+                            _labels[_k] = _lbl
+                        if _it.get('host_uid'):
+                            _hosts_of[_k] = _it['host_uid']
+                for _ck, _info in _mstatus.items():
+                    if not (isinstance(_info, dict) and _info.get('status') is False):
+                        continue
+                    _extra = _info.get('other_data')
+                    _extra = _extra if isinstance(_extra, dict) else {}
+                    _disp = _extra.get('name') or _labels.get(_ck) or _ck
+                    _huid = _hosts_of.get(_ck, '')
+                    failing_checks.append({
+                        'module': _mn,
+                        'check':  _disp,
+                        'host':   _host_name.get(_huid, '') if _huid else '',
+                    })
+            failing_checks.sort(
+                key=lambda x: (str(x['module']).lower(), str(x['check']).lower()))
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+        # Recent failed logins (security): last entries from the audit log.
+        failed_logins = [
+            {'ts': e.get('ts', ''), 'user': e.get('user', ''),
+             'ip': e.get('ip', ''), 'detail': e.get('detail', '')}
+            for e in reversed(wa._audit_log)
+            if isinstance(e, dict) and e.get('event') == 'login_failed'
+        ][:15]
+
+        # Webhooks: how many are configured / enabled.
+        webhooks_total = webhooks_enabled = 0
+        try:
+            _wh = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('webhooks')
+            if isinstance(_wh, list):
+                webhooks_total = len(_wh)
+                webhooks_enabled = sum(
+                    1 for w in _wh if isinstance(w, dict) and w.get('enabled', True))
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+        # Monitoring coverage: share of servers with at least one active check.
+        hosts_monitored = sum(
+            1 for s in servers_list if (s.get('checks') or {}).get('total', 0) > 0)
+        coverage_pct = round(100 * hosts_monitored / servers_total) if servers_total else 0
+
         return jsonify({
             'modules': modules_list,
             'status': {
@@ -281,9 +445,16 @@ def register(app, wa):
                 'ok': checks_ok,
                 'error': checks_err,
             },
+            'servers': {
+                'total': servers_total,
+                'status': servers_status,
+                'list': servers_list,
+            },
             'sessions': {
                 'active': active_sessions,
                 'users': session_users,
+                'list': sessions_list,
+                'by_role': sessions_by_role,
             },
             'users': {
                 'total': total_users,
@@ -292,11 +463,23 @@ def register(app, wa):
             'groups': {
                 'total': total_groups,
                 'members': total_group_members,
+                'by_role': groups_by_role,
             },
             'roles': {
                 'total': builtin_roles + custom_roles,
                 'builtin': builtin_roles,
                 'custom': custom_roles,
             },
+            'webhooks': {
+                'total': webhooks_total,
+                'enabled': webhooks_enabled,
+            },
+            'coverage': {
+                'hosts_total': servers_total,
+                'hosts_monitored': hosts_monitored,
+                'pct': coverage_pct,
+            },
+            'failing_checks': failing_checks,
+            'failed_logins': failed_logins,
             'last_events': last_events,
         })

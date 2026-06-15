@@ -69,20 +69,57 @@
     }
     .dw { display: flex; flex-direction: column; }
     .dw-content { flex: 1; min-height: 0; overflow: hidden; }
+
+    /* Thin, rounded scrollbars for the widget listings (and any scroll area
+       nested inside them) — the default chunky bars clash with the cards. */
+    .dw-content, .dw-content * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--bs-border-color) transparent;
+    }
+    .dw-content::-webkit-scrollbar,
+    .dw-content *::-webkit-scrollbar             { width: 6px; height: 6px; }
+    .dw-content::-webkit-scrollbar-track,
+    .dw-content *::-webkit-scrollbar-track       { background: transparent; }
+    .dw-content::-webkit-scrollbar-thumb,
+    .dw-content *::-webkit-scrollbar-thumb       { background: var(--bs-border-color); border-radius: 6px; }
+    .dw-content::-webkit-scrollbar-thumb:hover,
+    .dw-content *::-webkit-scrollbar-thumb:hover { background: var(--bs-secondary-color); }
     .dw-c1  { grid-column: span 1; }
     .dw-c2  { grid-column: span 2; }
     .dw-c3  { grid-column: span 3; }
     .dw-c4  { grid-column: span 4; }
+    .dw-c5  { grid-column: span 5; }
     .dw-c6  { grid-column: span 6; }
+    .dw-c7  { grid-column: span 7; }
     .dw-c8  { grid-column: span 8; }
     .dw-c9  { grid-column: span 9; }
+    .dw-c10 { grid-column: span 10; }
+    .dw-c11 { grid-column: span 11; }
     .dw-c12 { grid-column: span 12; }
 
-    /* Height variants — applied to .dw, clips .dw-content */
-    .dw-h-sm .dw-content { height: 150px; overflow-y: auto; }
-    .dw-h-md .dw-content { height: 280px; overflow-y: auto; }
-    .dw-h-lg .dw-content { height: 420px; overflow-y: auto; }
-    .dw-h-xl .dw-content { height: 560px; overflow-y: auto; }
+    /* Height is set inline (px) via the drag-resize handle below. */
+    .dw.dw-resizing { user-select: none; }
+    .dw-resize {
+        display: none;
+        height: 10px;
+        margin-top: 2px;
+        cursor: ns-resize;
+        border-radius: var(--bs-border-radius-sm);
+        background: var(--bs-secondary-bg);
+        border: 1px solid var(--bs-border-color);
+        position: relative;
+        touch-action: none;
+    }
+    .dw-resize::after {
+        content: "";
+        position: absolute;
+        left: 50%; top: 50%;
+        width: 28px; height: 0;
+        transform: translate(-50%, -50%);
+        border-top: 2px dotted var(--bs-secondary-color);
+    }
+    .dashboard-edit .dw-resize { display: block; }
+    .dw-resize:hover { background: var(--bs-tertiary-bg); }
 
     /* Edit-mode toolbar */
     .dw-toolbar {
@@ -96,7 +133,8 @@
         border-radius: var(--bs-border-radius-sm);
         font-size: .75rem;
     }
-    .dashboard-edit .dw-toolbar { display: flex; }
+    .dashboard-edit .dw-toolbar { display: flex; cursor: grab; touch-action: none; }
+    .dashboard-edit .dw-toolbar:active { cursor: grabbing; }
     .dw-drag-handle {
         cursor: grab;
         padding: 0 6px;
@@ -106,6 +144,50 @@
     .dw.dw-dragging { opacity: .4; }
     .dw.dw-over { outline: 2px dashed var(--bs-primary); border-radius: var(--bs-border-radius); }
     .btn-dw { padding: .1rem .35rem; font-size: .7rem; line-height: 1.4; }
+
+    /* Auto-refresh countdown bar (mirrors the public /status footer) */
+    #ov-refresh-bar { max-width: 260px; margin: 0 auto 1rem; text-align: center; }
+    .ov-refresh-track {
+        height: 4px; border-radius: 2px; overflow: hidden;
+        background: var(--bs-secondary-bg);
+    }
+    .ov-refresh-fill {
+        height: 100%; border-radius: 2px;
+        background: linear-gradient(90deg, #6366f1, #8b5cf6);
+        transition: width 1s linear;
+    }
+
+    /* Kiosk / 24/7 fullscreen mode — hide all chrome, show only the grid */
+    body.ss-kiosk #ss-sticky-top,
+    body.ss-kiosk #mainTabs,
+    body.ss-kiosk #overview-controls,
+    body.ss-kiosk #dwAddBar      { display: none !important; }
+    body.ss-kiosk .container-fluid { padding: .6rem !important; max-width: none; }
+    body.ss-kiosk .tab-content     { padding-top: 0 !important; }
+    body.ss-kiosk #footer, body.ss-kiosk footer { display: none !important; }
+    #kioskExit { display: none; }
+    body.ss-kiosk #kioskExit {
+        display: inline-flex;
+        position: fixed;
+        top: 12px; right: 12px;
+        z-index: 3000;
+        opacity: .12;
+        transition: opacity .2s ease;
+    }
+    body.ss-kiosk #kioskExit:hover { opacity: 1; }
+
+    /* Spacer widget — invisible filler; only its toolbar shows in edit mode */
+    .dw-spacer .dw-toolbar { display: none; }
+    .dashboard-edit .dw-spacer .dw-toolbar { display: flex; }
+    .dw-spacer-box { height: 100%; }
+    .dashboard-edit .dw-spacer-box {
+        min-height: 40px;
+        border: 2px dashed var(--bs-border-color);
+        border-radius: var(--bs-border-radius);
+        background: repeating-linear-gradient(45deg,
+            var(--bs-tertiary-bg), var(--bs-tertiary-bg) 8px,
+            transparent 8px, transparent 16px);
+    }
 </style>
 {% endblock %}
 
@@ -116,6 +198,12 @@
         <span class="visually-hidden">{{ i18n.loading }}</span>
     </div>
 </div>
+
+<!-- Kiosk-mode exit button (shown only in fullscreen 24/7 mode) -->
+<button id="kioskExit" class="btn btn-sm btn-secondary" onclick="_dwToggleKiosk()"
+        title="{{ i18n.dashboard_exit_fullscreen }}">
+    <i class="bi bi-fullscreen-exit"></i>
+</button>
 
 <!-- Navbar + sticky banners wrapper -->
 <div class="sticky-top" id="ss-sticky-top" style="z-index:1020">

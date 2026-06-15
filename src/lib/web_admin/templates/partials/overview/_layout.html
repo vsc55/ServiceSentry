@@ -6,28 +6,60 @@
 
 // ──────────────────────── Widget definitions ──────────────────────
 // cols: default column span (out of 12); hasH: allow height control
-const _DW_COLS_CYCLE  = [2, 3, 4, 6, 8, 9, 12];
-const _DW_H_CYCLE     = ['auto', 'sm', 'md', 'lg', 'xl'];
-const _DW_H_LABELS    = { auto: 'Auto', sm: 'S', md: 'M', lg: 'L', xl: 'XL' };
+const _DW_COLS_CYCLE  = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const _DW_COLS_CYCLE_SP = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];   // spacers can go down to 1
+// Legacy preset tokens kept only so previously-saved layouts still resolve
+// to a sensible pixel height; new resizes store a raw px number.
+const _DW_H_PRESET    = { sm: 150, md: 280, lg: 420, xl: 560 };
 
+// Order + default size here defines the DEFAULT dashboard layout (new users
+// and "Reset Layout"). Rows flow left-to-right filling 12 columns:
+//   row 1: checks·modules·servers·users·groups·roles  (6 × 2)
+//   row 2: sessions·webhooks·coverage (3 × 2) + sessions_list (6)
+//   row 3: incidents (6) + failed_logins (6)
+//   row 4: modules_list·servers_list·activity (3 × 4)
 const _DW_DEFS = {
-    modules:      { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => true },
     checks:       { icon: 'bi-activity',      lkey: 'overview_status',           dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => true },
-    sessions:     { icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 2,  dH: 'auto', hasH: false,
+    modules:      { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => true },
+    servers:      { icon: 'bi-hdd-network',   lkey: 'overview_servers',          dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
     users:        { icon: 'bi-person',         lkey: 'overview_users',            dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => true },
     groups:       { icon: 'bi-people',        lkey: 'overview_groups',           dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => true },
     roles:        { icon: 'bi-shield-shaded',   lkey: 'overview_roles',            dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => true },
-    modules_list: { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 6,  dH: 'md',   hasH: true,
+    sessions:     { icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => true },
+    webhooks:     { icon: 'bi-broadcast',     lkey: 'overview_webhooks',         dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p, admin)  => admin },
+    coverage:     { icon: 'bi-pie-chart',     lkey: 'overview_coverage',         dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
+    sessions_list:{ icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 6,  dH: 140,    hasH: true,
+                    canShow: (p, admin)  => admin },
+    incidents:    { icon: 'bi-exclamation-triangle', lkey: 'overview_incidents',  dCols: 6,  dH: 200,    hasH: true,
                     canShow: (p)         => p.has('modules_view') },
-    activity:     { icon: 'bi-clock-history', lkey: 'overview_recent_activity',  dCols: 6,  dH: 'md',   hasH: true,
+    failed_logins:{ icon: 'bi-shield-lock',   lkey: 'overview_failed_logins',    dCols: 6,  dH: 200,    hasH: true,
+                    canShow: (p, admin)  => admin },
+    modules_list: { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 4,  dH: 340,    hasH: true,
+                    canShow: (p)         => p.has('modules_view') },
+    servers_list: { icon: 'bi-hdd-network',   lkey: 'overview_servers',          dCols: 4,  dH: 340,    hasH: true,
+                    canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
+    activity:     { icon: 'bi-clock-history', lkey: 'overview_recent_activity',  dCols: 4,  dH: 340,    hasH: true,
                     canShow: (p, admin)  => admin },
 };
+
+// Spacers are dynamic (multiple instances, ids "spacer:N"); they have no
+// catalog entry, so resolve their definition synthetically.
+function _dwIsSpacer(id) { return String(id).startsWith('spacer:'); }
+function _dwDef(id) {
+    if (_dwIsSpacer(id))
+        return { icon: 'bi-distribute-horizontal', lkey: 'overview_spacer',
+                 dCols: 2, dH: 'auto', hasH: false, spacer: true, canShow: () => true };
+    return _DW_DEFS[id];
+}
 
 // ──────────────────────── Layout persistence ──────────────────────
 function _dwKey() { return 'ss_layout2_' + (currentUser.username || '_'); }
@@ -38,7 +70,8 @@ function _dwLoad() {
         if (raw) {
             const saved = JSON.parse(raw);
             const known = new Set(Object.keys(_DW_DEFS));
-            const layout = (Array.isArray(saved) ? saved : []).filter(w => known.has(w.id));
+            const layout = (Array.isArray(saved) ? saved : [])
+                .filter(w => known.has(w.id) || _dwIsSpacer(w.id));
             for (const [id, d] of Object.entries(_DW_DEFS)) {
                 if (!layout.find(w => w.id === id))
                     layout.push({ id, cols: d.dCols, h: d.dH, hidden: false });
@@ -63,7 +96,7 @@ function _dwSave() {
 
 // ──────────────────────── Edit mode ───────────────────────────────
 let _dwEditing = false;
-let _dwDragSrc = null;
+let _dwDragState = null;
 
 function _dwToggleEdit() {
     _dwEditing = !_dwEditing;
@@ -93,68 +126,141 @@ function _dwToggleEdit() {
     }
 }
 
-// ──────────────────────── Drag & drop ─────────────────────────────
+// ──────────────────────── Drag & drop (pointer-based) ─────────────
+// Native HTML5 DnD proved unreliable here, so reorder is driven by
+// pointer events: grab a widget by its toolbar (anywhere but a button)
+// and the dragged widget is re-inserted live as the cursor moves.
 function _dwInitDnd(grid) {
     grid.querySelectorAll('.dw[data-wid]').forEach(el => {
-        el.setAttribute('draggable', 'true');
-        el.ondragstart = e => {
-            if (!e.target.closest('.dw-toolbar')) { e.preventDefault(); return; }
-            _dwDragSrc = el;
-            e.dataTransfer.effectAllowed = 'move';
-            setTimeout(() => el.classList.add('dw-dragging'), 0);
+        el.removeAttribute('draggable');
+        const tb = el.querySelector('.dw-toolbar');
+        if (tb) tb.onpointerdown = e => {
+            if (e.button !== 0 || e.target.closest('button')) return;
+            _dwBeginDrag(e, grid, el);
         };
-        el.ondragend = () => {
-            el.classList.remove('dw-dragging');
-            grid.querySelectorAll('.dw').forEach(w => w.classList.remove('dw-over'));
-            _dwDragSrc = null;
-        };
-        el.ondragover = e => {
-            e.preventDefault();
-            if (_dwDragSrc && el !== _dwDragSrc) {
-                grid.querySelectorAll('.dw').forEach(w => w.classList.remove('dw-over'));
-                el.classList.add('dw-over');
-            }
-        };
-        el.ondragleave = () => el.classList.remove('dw-over');
-        el.ondrop = e => {
-            e.preventDefault();
-            el.classList.remove('dw-over');
-            if (!_dwDragSrc || _dwDragSrc === el) return;
-            const mid = el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2;
-            if (e.clientX < mid) grid.insertBefore(_dwDragSrc, el);
-            else el.after(_dwDragSrc);
-            _dwSave();
+        const rh = el.querySelector('.dw-resize');
+        if (rh) rh.onpointerdown = e => {
+            if (e.button !== 0) return;
+            _dwBeginResize(e, el);
         };
     });
 }
 
+function _dwBeginDrag(e, grid, el) {
+    e.preventDefault();
+    el.classList.add('dw-dragging');
+    _dwDragState = { grid, el };
+
+    const onMove = ev => {
+        if (!_dwDragState) return;
+        const items = [...grid.querySelectorAll('.dw[data-wid]')]
+            .filter(w => w !== el && w.style.display !== 'none');
+        grid.querySelectorAll('.dw').forEach(w => w.classList.remove('dw-over'));
+        const target = items.find(w => {
+            const r = w.getBoundingClientRect();
+            return ev.clientX >= r.left && ev.clientX <= r.right
+                && ev.clientY >= r.top  && ev.clientY <= r.bottom;
+        });
+        if (!target) return;
+        target.classList.add('dw-over');
+        const r = target.getBoundingClientRect();
+        if (ev.clientX < r.left + r.width / 2) grid.insertBefore(el, target);
+        else target.after(el);
+    };
+
+    const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        el.classList.remove('dw-dragging');
+        grid.querySelectorAll('.dw').forEach(w => w.classList.remove('dw-over'));
+        _dwDragState = null;
+        _dwSave();
+    };
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+}
+
 // ──────────────────────── Toolbar actions ─────────────────────────
 function _dwCycleW(btn, dir) {
-    const dw   = btn.closest('.dw');
-    const cur  = parseInt(dw.dataset.cols) || 3;
-    const idx  = _DW_COLS_CYCLE.indexOf(cur);
-    const next = _DW_COLS_CYCLE[(idx + dir + _DW_COLS_CYCLE.length) % _DW_COLS_CYCLE.length];
+    const dw    = btn.closest('.dw');
+    const cycle = _dwIsSpacer(dw.dataset.wid) ? _DW_COLS_CYCLE_SP : _DW_COLS_CYCLE;
+    const cur   = parseInt(dw.dataset.cols) || 3;
+    const idx   = cycle.indexOf(cur);
+    const next  = cycle[(idx + dir + cycle.length) % cycle.length];
     dw.dataset.cols = next;
-    _DW_COLS_CYCLE.forEach(c => dw.classList.remove('dw-c' + c));
+    cycle.forEach(c => dw.classList.remove('dw-c' + c));
     dw.classList.add('dw-c' + next);
     dw.querySelector('.dw-w-lbl').textContent = next;
     _dwSave();
 }
 
-function _dwCycleH(btn, dir) {
-    const dw   = btn.closest('.dw');
-    const cur  = dw.dataset.h || 'auto';
-    const idx  = _DW_H_CYCLE.indexOf(cur);
-    const next = _DW_H_CYCLE[(idx + dir + _DW_H_CYCLE.length) % _DW_H_CYCLE.length];
-    dw.dataset.h = next;
-    _DW_H_CYCLE.forEach(h => dw.classList.remove('dw-h-' + h));
-    if (next !== 'auto') dw.classList.add('dw-h-' + next);
-    dw.querySelector('.dw-h-lbl').textContent = _DW_H_LABELS[next] || next;
-    _dwSave();
+// Resolve a stored height value to pixels. Accepts 'auto' (→ null, natural
+// height), a legacy preset token (sm/md/lg/xl) or a raw pixel number.
+function _dwHpx(h) {
+    if (!h || h === 'auto') return null;
+    const n = parseInt(h, 10);
+    return Number.isNaN(n) ? (_DW_H_PRESET[h] ?? null) : n;
+}
+
+// Free-form vertical resize: drag the bottom handle to set an arbitrary
+// pixel height; persisted as a number in dataset.h.
+function _dwBeginResize(e, dw) {
+    e.preventDefault();
+    e.stopPropagation();
+    const content = dw.querySelector('.dw-content');
+    if (!content) return;
+    const startY = e.clientY;
+    const startH = content.getBoundingClientRect().height;
+    dw.classList.add('dw-resizing');
+    const onMove = ev => {
+        const newH = Math.max(80, Math.round(startH + (ev.clientY - startY)));
+        // flex:none is required — with the default flex:1 (flex-basis:0) the
+        // height property is ignored by the flexbox layout.
+        content.style.flex = 'none';
+        content.style.height = newH + 'px';
+        content.style.overflowY = 'auto';
+        dw.dataset.h = String(newH);
+    };
+    const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        dw.classList.remove('dw-resizing');
+        _dwSave();
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
 }
 
 function _dwRemove(btn) {
-    btn.closest('.dw').style.display = 'none';
+    const dw = btn.closest('.dw');
+    // Spacers are unlimited and disposable → delete them outright; real
+    // widgets are only hidden so they can be re-added from the bar.
+    if (_dwIsSpacer(dw.dataset.wid)) dw.remove();
+    else dw.style.display = 'none';
+    _dwSave();
+    _dwRefreshAddBar();
+}
+
+function _dwAddSpacer() {
+    const grid = document.getElementById('dashboardGrid');
+    if (!grid) return;
+    let n = 0;
+    grid.querySelectorAll('.dw[data-wid^="spacer:"]').forEach(el => {
+        const i = parseInt(String(el.dataset.wid).split(':')[1]) || 0;
+        if (i >= n) n = i + 1;
+    });
+    const id = 'spacer:' + n;
+    const def = _dwDef(id);
+    const el = document.createElement('div');
+    el.className = `dw dw-c${def.dCols} dw-spacer`;
+    el.dataset.wid = id;
+    el.dataset.cols = def.dCols;
+    el.dataset.h = 'auto';
+    el.innerHTML = _dwToolbar(id, def.dCols, 'auto')
+        + `<div class="dw-content">${_dwContent(id, _lastOverviewData || {})}</div>`;
+    grid.appendChild(el);
+    _dwInitDnd(grid);
     _dwSave();
     _dwRefreshAddBar();
 }
@@ -175,13 +281,12 @@ function _dwRefreshAddBar() {
     if (!bar || !grid) return;
     const hidden = [...grid.querySelectorAll('.dw[data-wid]')]
         .filter(el => el.style.display === 'none');
-    if (!hidden.length) {
-        bar.innerHTML = `<span class="text-muted small">${t('dashboard_all_visible')}</span>`;
-        return;
-    }
     let h = `<span class="text-muted small me-2">${t('dashboard_add_widget')}:</span>`;
+    // Spacer can always be added (multiple instances allowed).
+    h += `<button class="btn btn-sm btn-primary" onclick="_dwAddSpacer()">
+        <i class="bi bi-distribute-horizontal me-1"></i>${esc(t('overview_spacer'))}</button>`;
     for (const el of hidden) {
-        const def = _DW_DEFS[el.dataset.wid];
+        const def = _dwDef(el.dataset.wid);
         if (!def) continue;
         h += `<button class="btn btn-sm btn-primary" onclick="_dwAdd(${jsStr(el.dataset.wid)})">
             <i class="bi ${def.icon} me-1"></i>${esc(t(def.lkey))}</button>`;
@@ -197,7 +302,7 @@ function _dwReset() {
 
 // ──────────────────────── Widget toolbar HTML ─────────────────────
 function _dwToolbar(id, cols, h) {
-    const def  = _DW_DEFS[id];
+    const def  = _dwDef(id);
     const hasH = def?.hasH;
     let tb = `<div class="dw-toolbar" title="${escAttr(t('dashboard_drag'))}">`;
     tb += `<span class="dw-drag-handle"><i class="bi bi-grip-horizontal"></i></span>`;
@@ -207,13 +312,7 @@ function _dwToolbar(id, cols, h) {
     tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;
     tb += `<span class="dw-w-lbl small fw-semibold" style="min-width:1.4em;text-align:center">${cols}</span>`;
     tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,1)" title="${escAttr(t('widget_grow_w'))}"><i class="bi bi-chevron-right"></i></button>`;
-    // Height (tables only)
-    if (hasH) {
-        tb += `<span class="vr mx-1"></span>`;
-        tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleH(this,-1)" title="${escAttr(t('widget_shrink_h'))}"><i class="bi bi-chevron-up"></i></button>`;
-        tb += `<span class="dw-h-lbl small fw-semibold" style="min-width:2em;text-align:center">${_DW_H_LABELS[h] || h}</span>`;
-        tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleH(this,1)" title="${escAttr(t('widget_grow_h'))}"><i class="bi bi-chevron-down"></i></button>`;
-    }
+    // Height is resized by dragging the bottom handle (tables only).
     tb += `<span class="vr mx-1"></span>`;
     tb += `<button class="btn btn-dw btn-danger" onclick="_dwRemove(this)" title="${escAttr(t('widget_hide'))}"><i class="bi bi-eye-slash"></i></button>`;
     tb += `</span></div>`;
