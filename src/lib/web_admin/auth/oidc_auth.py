@@ -12,6 +12,8 @@ import json
 import os
 import uuid
 
+from lib.config.spec import cfg_default
+
 _HAS_AUTHLIB = False
 try:
     from authlib.integrations.flask_client import OAuth
@@ -31,12 +33,11 @@ def is_available() -> bool:
 # ── Config helpers ──────────────────────────────────────────────────────────
 
 def _get_config(wa) -> dict:
-    raw = wa._read_config_file(wa._CONFIG_FILE) or {}
-    return raw.get('oidc') or {}
+    return wa._config_section('oidc')
 
 
 def _get_group_role_map(cfg: dict) -> dict:
-    raw = cfg.get('group_role_map') or '{}'
+    raw = cfg.get('group_role_map') or cfg_default('oidc|group_role_map')
     try:
         return json.loads(raw) if isinstance(raw, str) else raw
     except (json.JSONDecodeError, TypeError):
@@ -103,7 +104,7 @@ def get_client(wa):
         client_id=cfg.get('client_id', ''),
         client_secret=cfg.get('client_secret', ''),
         server_metadata_url=provider_url + '/.well-known/openid-configuration',
-        client_kwargs={'scope': cfg.get('scopes', 'openid email profile')},
+        client_kwargs={'scope': cfg.get('scopes', cfg_default('oidc|scopes'))},
     )
 
     _oauth_instance       = oauth
@@ -117,13 +118,13 @@ def get_client(wa):
 def sync_user(wa, userinfo: dict) -> dict | None:
     """Create or update user from OIDC userinfo. Returns user dict or None if not allowed."""
     cfg             = _get_config(wa)
-    auto_create     = cfg.get('auto_create_users', True)
+    auto_create     = cfg.get('auto_create_users', cfg_default('oidc|auto_create_users'))
     group_role_map  = _get_group_role_map(cfg)
 
-    username_claim  = cfg.get('username_claim', 'preferred_username') or 'preferred_username'
-    email_claim     = cfg.get('email_claim',    'email')              or 'email'
-    name_claim      = cfg.get('name_claim',     'name')               or 'name'
-    groups_claim    = cfg.get('groups_claim',   'groups')             or 'groups'
+    username_claim  = cfg.get('username_claim', cfg_default('oidc|username_claim')) or cfg_default('oidc|username_claim')
+    email_claim     = cfg.get('email_claim',    cfg_default('oidc|email_claim'))    or cfg_default('oidc|email_claim')
+    name_claim      = cfg.get('name_claim',     cfg_default('oidc|name_claim'))     or cfg_default('oidc|name_claim')
+    groups_claim    = cfg.get('groups_claim',   cfg_default('oidc|groups_claim'))   or cfg_default('oidc|groups_claim')
 
     username     = userinfo.get(username_claim) or userinfo.get('sub', '')
     email        = userinfo.get(email_claim, '')
@@ -204,8 +205,8 @@ def register_routes(app, wa):
             return redirect(url_for('login'))
 
         cfg            = _get_config(wa)
-        username_claim = cfg.get('username_claim', 'preferred_username') or 'preferred_username'
-        groups_claim   = cfg.get('groups_claim', 'groups') or 'groups'
+        username_claim = cfg.get('username_claim', cfg_default('oidc|username_claim')) or cfg_default('oidc|username_claim')
+        groups_claim   = cfg.get('groups_claim', cfg_default('oidc|groups_claim')) or cfg_default('oidc|groups_claim')
         username       = userinfo.get(username_claim) or userinfo.get('sub', '')
         received_groups = userinfo.get(groups_claim, [])
         if not isinstance(received_groups, list):

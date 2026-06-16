@@ -180,6 +180,7 @@ function renderModules() {
         </div>`;
     }
     h += '</div>';
+    disposeTooltips(c);   // avoid stuck tooltips when the DOM is replaced
     c.innerHTML = h;
 
     // Restore expanded state after re-render

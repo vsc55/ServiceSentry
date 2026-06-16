@@ -15,7 +15,7 @@ import pkgutil
 
 from lib.web_admin import lang as _lang_pkg
 
-__all__ = ['SUPPORTED_LANGS', 'DEFAULT_LANG', 'TRANSLATIONS']
+__all__ = ['SUPPORTED_LANGS', 'DEFAULT_LANG', 'TRANSLATIONS', 'coerce_lang']
 
 DEFAULT_LANG = 'en_EN'
 
@@ -29,3 +29,15 @@ for _finder, _name, _ispkg in pkgutil.iter_modules(_lang_pkg.__path__):
         TRANSLATIONS[_name] = _data
 
 SUPPORTED_LANGS: tuple[str, ...] = tuple(sorted(TRANSLATIONS))
+
+
+def coerce_lang(value, default: str = '') -> str:
+    """Return *value* if it is a supported language code, else *default*.
+
+    Single home for the ``x if x in SUPPORTED_LANGS else fallback`` pattern.
+    The chosen *default* selects the semantics:
+      * ``coerce_lang(x, DEFAULT_LANG)`` — fall back to the default language
+      * ``coerce_lang(x, '')``          — empty means "use the default" (status_lang)
+      * ``coerce_lang(x, current)``     — keep the current value if x is invalid
+    """
+    return value if value in SUPPORTED_LANGS else default

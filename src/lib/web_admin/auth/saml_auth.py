@@ -11,6 +11,8 @@ import json
 import uuid
 from urllib.parse import urlparse
 
+from lib.config.spec import cfg_default
+
 _HAS_SAML2 = False
 try:
     from onelogin.saml2.auth import OneLogin_Saml2_Auth
@@ -26,12 +28,11 @@ def is_available() -> bool:
 # ── Config helpers ────────────────────────────────────────────────────────────
 
 def _get_config(wa) -> dict:
-    raw = wa._read_config_file(wa._CONFIG_FILE) or {}
-    return raw.get('saml2') or {}
+    return wa._config_section('saml2')
 
 
 def _get_group_role_map(cfg: dict) -> dict:
-    raw = cfg.get('group_role_map') or '{}'
+    raw = cfg.get('group_role_map') or cfg_default('saml2|group_role_map')
     try:
         return json.loads(raw) if isinstance(raw, str) else raw
     except (json.JSONDecodeError, TypeError):
@@ -123,13 +124,13 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
     user does not already exist.
     """
     cfg            = _get_config(wa)
-    auto_create    = cfg.get('auto_create_users', True)
+    auto_create    = cfg.get('auto_create_users', cfg_default('saml2|auto_create_users'))
     group_role_map = _get_group_role_map(cfg)
 
     username_attr = cfg.get('username_attr', '') or ''
-    email_attr    = cfg.get('email_attr',    'email')       or 'email'
-    name_attr     = cfg.get('name_attr',     'displayName') or 'displayName'
-    groups_attr   = cfg.get('groups_attr',   'groups')      or 'groups'
+    email_attr    = cfg.get('email_attr',    cfg_default('saml2|email_attr')) or cfg_default('saml2|email_attr')
+    name_attr     = cfg.get('name_attr',     cfg_default('saml2|name_attr')) or cfg_default('saml2|name_attr')
+    groups_attr   = cfg.get('groups_attr',   cfg_default('saml2|groups_attr')) or cfg_default('saml2|groups_attr')
 
     def _first(attr_name: str) -> str:
         vals = saml_attrs.get(attr_name, [])

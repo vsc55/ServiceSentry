@@ -4,99 +4,27 @@
 
 import copy
 import uuid
-from datetime import timedelta
 
 from flask import jsonify, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from ..constants import SUPPORTED_LANGS
+from ..constants import SUPPORTED_LANGS, coerce_lang
+from lib.config.spec import (
+    CFG_BY_PATH, int_rules, bool_rules, json_dict_fields, admin_only_fields,
+    normalize_url, cfg_default, frontend_schema,
+)
 from lib import secret_manager
 
-# Public schema for validated integer config fields.
-# Any route or module can import this to validate or inspect config constraints.
-# 'attr'      – wa instance attribute holding the current runtime value.
-# 'flask_cfg' – optional (key, transform) to sync a Flask app.config entry.
-INT_RULES = {
-    'web_admin|remember_me_days':  {
-        'min': 1,  'max': 365,   'attr': '_REMEMBER_ME_DAYS',
-        'flask_cfg': ('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v)),
-    },
-    'web_admin|audit_max_entries': {'min': 0, 'max': 10000, 'attr': '_AUDIT_MAX_ENTRIES'},
-    'web_admin|pw_min_len':        {'min': 1,  'max': 128,   'attr': '_PW_MIN_LEN'},
-    'web_admin|pw_max_len':        {'min': 8,  'max': 256,   'attr': '_PW_MAX_LEN'},
-    'web_admin|status_refresh_secs': {'min': 10, 'max': 3600, 'attr': '_STATUS_REFRESH_SECS'},
-    'web_admin|proxy_count':          {'min': 0,  'max': 10,   'attr': '_proxy_count'},
-    'web_admin|port':                 {'min': 1,  'max': 65535, 'attr': '_WEB_PORT'},
-    'web_admin|default_page_size':       {'min': 0,  'max': 200,  'attr': '_DEFAULT_PAGE_SIZE'},
-    'web_admin|config_poll_secs':         {'min': 10, 'max': 300,  'attr': '_CONFIG_POLL_SECS'},
-    'web_admin|config_update_banner_secs':{'min': 0,  'max': 60,   'attr': '_CONFIG_BANNER_SECS'},
-    'web_admin|lockout_max_attempts':     {'min': 0,  'max': 100,  'attr': '_LOCKOUT_MAX_ATTEMPTS'},
-    'web_admin|lockout_duration_secs':    {'min': 60, 'max': 86400,'attr': '_LOCKOUT_DURATION_SECS'},
-    'web_admin|session_check_secs':       {'min': 5,  'max': 300,  'attr': '_SESSION_CHECK_SECS'},
-    'web_admin|session_revoke_redirect_secs': {'min': 0, 'max': 30,'attr': '_SESSION_REVOKE_REDIRECT_SECS'},
-    'web_admin|access_poll_secs':             {'min': 5, 'max': 300,'attr': '_ACCESS_POLL_SECS'},
-    # Daemon scheduler — min 10 s to allow frequent checks in dev/test;
-    # the web scheduler enforces max(10, value) at runtime.
-    'daemon|timer_check': {'min': 10, 'max': 86400, 'attr': None},
-    # LDAP
-    'ldap|port':    {'min': 1,  'max': 65535, 'attr': None},
-    'ldap|timeout': {'min': 1,  'max': 60,    'attr': None},
-    # Email
-    'email|smtp_port': {'min': 1, 'max': 65535, 'attr': None},
-    # OIDC (no runtime int attrs yet)
-    # SAML2 (no runtime int attrs yet)
-}
-
-# Boolean config fields in web_admin that are synced to wa instance attributes.
-BOOL_RULES = {
-    'web_admin|pw_require_upper':  '_PW_REQUIRE_UPPER',
-    'web_admin|pw_require_digit':  '_PW_REQUIRE_DIGIT',
-    'web_admin|pw_require_symbol': '_PW_REQUIRE_SYMBOL',
-    'web_admin|public_status':     '_public_status',
-    'web_admin|public_status_detail': '_public_status_detail',
-    'web_admin|force_https':       '_force_https',
-    'web_admin|force_fqdn':        '_force_fqdn',
-    # LDAP
-    'ldap|enabled':           None,
-    'ldap|use_ssl':           None,
-    'ldap|fallback_to_local': None,
-    'ldap|allow_email_login': None,
-    # OIDC
-    'oidc|enabled':           None,
-    'oidc|auto_create_users': None,
-    # Daemon scheduler
-    'daemon|web_autostart': None,
-    # SAML2
-    'saml2|enabled':           None,
-    'saml2|auto_create_users': None,
-    # Email
-    'email|enabled':            None,
-    'email|smtp_use_tls':       None,
-    'email|smtp_use_ssl':       None,
-    'email|notify_on_down':     None,
-    'email|notify_on_recovery': None,
-    'email|notify_on_warn':     None,
-    # Notification routing matrix
-    'notifications|telegram_on_down':     None,
-    'notifications|telegram_on_recovery': None,
-    'notifications|telegram_on_warn':     None,
-    'notifications|email_on_down':        None,
-    'notifications|email_on_recovery':    None,
-    'notifications|email_on_warn':        None,
-    'notifications|webhook_on_down':      None,
-    'notifications|webhook_on_recovery':  None,
-    'notifications|webhook_on_warn':      None,
-}
-
-# JSON-object config fields that must parse as valid JSON dicts when set.
-JSON_DICT_FIELDS = {
-    'ldap|group_role_map',
-    'oidc|group_role_map',
-    'saml2|group_role_map',
-    'ldap|group_display_names',
-    'oidc|group_display_names',
-    'saml2|group_display_names',
-}
+# Public schema for validated config fields, derived from the central registry
+# (``lib.config.spec``).  Any route or module can import these to validate or
+# inspect config constraints.
+#   INT_RULES        {path: {min, max, attr[, flask_cfg]}}
+#   BOOL_RULES       {path: attr}  (attr may be None when not mirrored on wa)
+#   JSON_DICT_FIELDS {path}        fields that must parse as a JSON object
+# To add or change an option, edit spec.CONFIG_FIELDS — not this file.
+INT_RULES = int_rules()
+BOOL_RULES = bool_rules()
+JSON_DICT_FIELDS = json_dict_fields()
 
 
 def register(app, wa):
@@ -104,9 +32,9 @@ def register(app, wa):
     if not hasattr(wa, '_field_versions'):
         wa._field_versions = {}
     if not hasattr(wa, '_CONFIG_POLL_SECS'):
-        wa._CONFIG_POLL_SECS = 30
+        wa._CONFIG_POLL_SECS = CFG_BY_PATH['web_admin|config_poll_secs'].default
     if not hasattr(wa, '_CONFIG_BANNER_SECS'):
-        wa._CONFIG_BANNER_SECS = 8
+        wa._CONFIG_BANNER_SECS = CFG_BY_PATH['web_admin|config_update_banner_secs'].default
 
     config_view_req = wa._perm_required('config_view', 'config_edit')
     config_edit_req = wa._perm_required('config_edit')
@@ -119,15 +47,8 @@ def register(app, wa):
     # sections above, must be admin-only — they govern account lockout, cookie
     # security, password policy, trusted-proxy handling and public exposure.
     # A non-admin with config_edit must not be able to weaken these.
-    _ADMIN_ONLY_FIELDS = frozenset({
-        'web_admin|lockout_max_attempts', 'web_admin|lockout_duration_secs',
-        'web_admin|secure_cookies', 'web_admin|force_https', 'web_admin|force_fqdn',
-        'web_admin|proxy_count', 'web_admin|remember_me_days',
-        'web_admin|pw_min_len', 'web_admin|pw_max_len',
-        'web_admin|pw_require_upper', 'web_admin|pw_require_digit',
-        'web_admin|pw_require_symbol',
-        'web_admin|public_status', 'web_admin|public_status_detail', 'web_admin|public_url',
-    })
+    # Derived from the central registry (fields flagged admin_only=True).
+    _ADMIN_ONLY_FIELDS = frozenset(admin_only_fields())
 
     def _requester_is_admin() -> bool:
         """True if the requester is an admin — directly or via group membership."""
@@ -171,23 +92,16 @@ def register(app, wa):
     @app.route('/api/v1/config/schema', methods=['GET'])
     @config_view_req
     def api_get_config_schema():
-        """Return field-level metadata (min, max, default) for config fields."""
-        schema = {}
-        for path, rule in INT_RULES.items():
-            if rule['attr'] is None:
-                continue
-            schema[path] = {
-                'min': rule['min'],
-                'max': rule['max'],
-                'default': getattr(wa, rule['attr']),
-            }
-        for path, attr in BOOL_RULES.items():
-            if attr is None:
-                continue
-            schema[path] = {'type': 'bool', 'default': getattr(wa, attr)}
+        """Return field-level metadata (min, max, default) for config fields.
+
+        The per-field type/range/default come from the central registry
+        (``frontend_schema()``); only UI-specific extras — option lists, the
+        numeric-string flag and pure frontend prefs — are added here.
+        """
+        schema = frontend_schema()
         schema['web_admin|default_page_size'] = {
             'options_int': [25, 50, 100, 200, 0],
-            'default': getattr(wa, '_DEFAULT_PAGE_SIZE'),
+            'default': cfg_default('web_admin|default_page_size'),
         }
         schema['web_admin|audit_sort'] = {
             'options': ['time', 'event', 'user', 'ip'],
@@ -375,9 +289,7 @@ def register(app, wa):
             v = web_data.get('public_url', '')
             if not isinstance(v, str):
                 return jsonify({'error': wa._t('invalid_public_url')}), 400
-            v = v.strip().rstrip('/')
-            if '://' in v:
-                v = v.split('://', 1)[1]
+            v = normalize_url(v)
             if v and (' ' in v or '\n' in v or '\t' in v):
                 return jsonify({'error': wa._t('invalid_public_url')}), 400
             web_data['public_url'] = v
@@ -387,11 +299,10 @@ def register(app, wa):
         if wa._save_config_file(wa._CONFIG_FILE, new_data):
             # Apply web_admin.lang at runtime if changed
             new_lang = (new_data.get('web_admin') or {}).get('lang', '')
-            if new_lang and new_lang in SUPPORTED_LANGS:
-                wa._default_lang = new_lang
+            wa._default_lang = coerce_lang(new_lang, wa._default_lang)
             new_status_lang = (new_data.get('web_admin') or {}).get('status_lang', '')
             if isinstance(new_status_lang, str):
-                wa._STATUS_LANG = new_status_lang if new_status_lang in SUPPORTED_LANGS else ''
+                wa._STATUS_LANG = coerce_lang(new_status_lang, '')
             new_dm = (new_data.get('web_admin') or {}).get('dark_mode')
             if isinstance(new_dm, bool):
                 wa._default_dark_mode = new_dm
@@ -425,7 +336,7 @@ def register(app, wa):
                 wa._PW_MAX_LEN = wa._PW_MIN_LEN
             new_public_url = (new_data.get('web_admin') or {}).get('public_url')
             if new_public_url is not None and isinstance(new_public_url, str):
-                wa._public_url = new_public_url.strip().rstrip('/')
+                wa._public_url = normalize_url(new_public_url)
             if isinstance(wa._app.wsgi_app, ProxyFix):
                 wa._app.wsgi_app = wa._app.wsgi_app.app
             if wa._proxy_count > 0:

@@ -502,6 +502,9 @@ function renderConfig() {
     tabNav += `</ul>`;
     tabContent += `</div>`;
 
+    // Dispose tooltips before swapping the DOM so none stay stuck on screen
+    // (e.g. the field "Restore Default" tips during a config poll re-render).
+    disposeTooltips(c);
     c.innerHTML = tabNav + tabContent;
     c.querySelectorAll('[data-env-locked]').forEach(row => {
         row.querySelectorAll('input, select, textarea').forEach(el => {

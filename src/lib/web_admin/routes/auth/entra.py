@@ -18,6 +18,8 @@ import time
 import requests as _req
 from flask import jsonify
 
+from lib.config.spec import normalize_url
+
 # Azure PowerShell — cliente público conocido, válido para Device Code Flow
 _DCF_CLIENT_ID = '1950a258-227b-4e31-a9cf-717495945fc2'
 _GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
@@ -74,11 +76,11 @@ def _der_to_pem(b64_der: str) -> str:
 
 
 def _saml_acs_uri(wa) -> str:
-    cfg = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('saml2') or {}
+    cfg = wa._config_section('saml2')
     acs = cfg.get('sp_acs_url', '').strip()
     if acs:
         return acs
-    base = (getattr(wa, '_public_url', '') or '').strip().rstrip('/')
+    base = normalize_url(getattr(wa, '_public_url', ''))
     if not base:
         return f'http://localhost:{wa._WEB_PORT}/auth/saml2/acs'
     if '://' not in base:
@@ -87,11 +89,11 @@ def _saml_acs_uri(wa) -> str:
 
 
 def _saml_entity_id(wa) -> str:
-    cfg = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('saml2') or {}
+    cfg = wa._config_section('saml2')
     eid = cfg.get('sp_entity_id', '').strip()
     if eid:
         return eid
-    base = (getattr(wa, '_public_url', '') or '').strip().rstrip('/')
+    base = normalize_url(getattr(wa, '_public_url', ''))
     if not base:
         return f'http://localhost:{wa._WEB_PORT}'
     if '://' not in base:
@@ -106,7 +108,7 @@ def register(app, wa):
     config_edit_req = wa._perm_required('config_edit')
 
     def _callback_uri():
-        base = (getattr(wa, '_public_url', '') or '').strip().rstrip('/')
+        base = normalize_url(getattr(wa, '_public_url', ''))
         if not base:
             return f'http://localhost:{wa._WEB_PORT}/auth/oidc/callback'
         # public_url is stored without scheme (config.py strips it) — restore it.
@@ -121,7 +123,7 @@ def register(app, wa):
         """Fetch all groups from Microsoft Graph API using the saved OIDC credentials."""
         from flask import request, session
         data = wa._optional_json()
-        oidc_cfg = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('oidc') or {}
+        oidc_cfg = wa._config_section('oidc')
 
         client_id     = (data.get('client_id')     or oidc_cfg.get('client_id',     '')).strip()
         client_secret = (data.get('client_secret') or oidc_cfg.get('client_secret', '')).strip()
@@ -186,7 +188,7 @@ def register(app, wa):
     def api_entra_group_lookup():
         """Look up a single group by ID from Microsoft Graph API."""
         data = wa._optional_json()
-        oidc_cfg = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('oidc') or {}
+        oidc_cfg = wa._config_section('oidc')
 
         group_id      = (data.get('group_id') or '').strip()
         client_id     = oidc_cfg.get('client_id', '').strip()

@@ -10,6 +10,8 @@ raise ``LdapUnavailableError``.
 import json
 import uuid
 
+from lib.config.spec import cfg_default
+
 _HAS_LDAP3 = False
 try:
     from ldap3 import NONE, SUBTREE, Connection, Server
@@ -31,12 +33,11 @@ def is_available() -> bool:
 # ── Config helpers ──────────────────────────────────────────────────────────
 
 def _get_config(wa) -> dict:
-    raw = wa._read_config_file(wa._CONFIG_FILE) or {}
-    return raw.get('ldap') or {}
+    return wa._config_section('ldap')
 
 
 def _get_group_role_map(cfg: dict) -> dict:
-    raw = cfg.get('group_role_map') or '{}'
+    raw = cfg.get('group_role_map') or cfg_default('ldap|group_role_map')
     try:
         return json.loads(raw) if isinstance(raw, str) else raw
     except (json.JSONDecodeError, TypeError):
@@ -97,18 +98,18 @@ def authenticate(wa, username: str, password: str) -> tuple:
         return None, 'ldap_disabled'
 
     server_host = cfg.get('server', '')
-    port        = int(cfg.get('port', 389))
-    use_ssl     = bool(cfg.get('use_ssl', False))
-    timeout     = int(cfg.get('timeout', 5))
+    port        = int(cfg.get('port', cfg_default('ldap|port')))
+    use_ssl     = bool(cfg.get('use_ssl', cfg_default('ldap|use_ssl')))
+    timeout     = int(cfg.get('timeout', cfg_default('ldap|timeout')))
     bind_dn     = cfg.get('bind_dn', '')
     bind_pass   = cfg.get('bind_password', '')
     base_dn     = cfg.get('base_dn', '')
-    user_filter   = cfg.get('user_filter', '(sAMAccountName={username})')
-    email_attr    = cfg.get('email_attr', 'mail') or 'mail'
-    name_attr     = cfg.get('name_attr', 'displayName') or 'displayName'
+    user_filter   = cfg.get('user_filter', cfg_default('ldap|user_filter'))
+    email_attr    = cfg.get('email_attr', cfg_default('ldap|email_attr')) or cfg_default('ldap|email_attr')
+    name_attr     = cfg.get('name_attr', cfg_default('ldap|name_attr')) or cfg_default('ldap|name_attr')
     username_attr = cfg.get('username_attr', '') or ''
-    group_attr    = cfg.get('group_attr', 'memberOf') or 'memberOf'
-    allow_email   = bool(cfg.get('allow_email_login', False))
+    group_attr    = cfg.get('group_attr', cfg_default('ldap|group_attr')) or cfg_default('ldap|group_attr')
+    allow_email   = bool(cfg.get('allow_email_login', cfg_default('ldap|allow_email_login')))
 
     search_filter = user_filter.replace('{username}', _ldap_escape(username))
     # If email login is enabled and username looks like an email, also try email attribute

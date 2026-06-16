@@ -36,6 +36,7 @@ import tempfile
 import time
 
 from lib.config import ConfigControl
+from lib.config.spec import cfg_default, normalize_url
 from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
 from lib.object_base import ObjectBase
@@ -333,9 +334,9 @@ class Monitor(ObjectBase):
                 self.config_modules.data = {}
                 self.config_modules.save()
 
-            _raw_url = self.config.get_conf(['web_admin', 'public_url'], '').strip().rstrip('/')
+            _raw_url = normalize_url(self.config.get_conf(['web_admin', 'public_url'], ''))
             if _raw_url:
-                _force_https = self.config.get_conf(['web_admin', 'force_https'], False)
+                _force_https = self.config.get_conf(['web_admin', 'force_https'], cfg_default('web_admin|force_https'))
                 _scheme = 'https://' if _force_https else 'http://'
                 self._public_url = _scheme + _raw_url
             else:
@@ -373,7 +374,7 @@ class Monitor(ObjectBase):
                 self.config.get_conf(['telegram', 'token'], ''),
                 self.config.get_conf(['telegram', 'chat_id'], '')
             )
-            self.tg.group_messages = self.config.get_conf(['telegram', 'group_messages'], False)
+            self.tg.group_messages = self.config.get_conf(['telegram', 'group_messages'], cfg_default('telegram|group_messages'))
         else:
             self.tg = None
 

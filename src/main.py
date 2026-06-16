@@ -29,6 +29,7 @@ import time
 
 from lib import Monitor, ObjectBase
 from lib.config import ConfigControl
+from lib.config.spec import cfg_default
 from lib.debug import DebugLevel
 
 
@@ -107,10 +108,10 @@ class Main(ObjectBase):
         """
         if self._check_config():
             if not self.cfg_general.is_exist_conf(['daemon', 'timer_check']):
-                self.cfg_general.set_conf(['daemon', 'timer_check'], 300)
+                self.cfg_general.set_conf(['daemon', 'timer_check'], cfg_default('daemon|timer_check'))
 
             if not self.cfg_general.is_exist_conf(['global', 'debug']):
-                self.cfg_general.set_conf(['global', 'debug'], False)
+                self.cfg_general.set_conf(['global', 'debug'], cfg_default('global|debug'))
 
             return True
         return False
@@ -371,19 +372,10 @@ def start_web(args):
     # Env vars take precedence for first-run credential setup (never written to disk)
     username = os.environ.get('WA_USERNAME') or cfg.get_conf(['web_admin', 'username'], 'admin')
     password = os.environ.get('WA_PASSWORD') or cfg.get_conf(['web_admin', 'password'], 'admin')
-    lang = cfg.get_conf(['web_admin', 'lang'], 'en_EN')
-    dark_mode = cfg.get_conf(['web_admin', 'dark_mode'], False)
-    secure_cookies = cfg.get_conf(['web_admin', 'secure_cookies'], False)
-    remember_me_days = cfg.get_conf(['web_admin', 'remember_me_days'], 30)
-    audit_max_entries = cfg.get_conf(['web_admin', 'audit_max_entries'], 500)
-    public_status = cfg.get_conf(['web_admin', 'public_status'], False)
-    public_status_detail = cfg.get_conf(['web_admin', 'public_status_detail'], False)
-    status_refresh_secs = cfg.get_conf(['web_admin', 'status_refresh_secs'], 60)
-    status_lang = cfg.get_conf(['web_admin', 'status_lang'], '')
-    proxy_count = cfg.get_conf(['web_admin', 'proxy_count'], 0)
-    public_url = cfg.get_conf(['web_admin', 'public_url'], '')
-    force_https = cfg.get_conf(['web_admin', 'force_https'], False)
-    force_fqdn  = cfg.get_conf(['web_admin', 'force_fqdn'],  False)
+    # All web_admin runtime options are loaded from config.json by WebAdmin
+    # itself (via _apply_saved_config / the central registry config_spec), so
+    # they need not be read or forwarded here — only the first-run credentials
+    # and the bind host/port (which also accept CLI overrides) are handled here.
     host = getattr(args, 'web_host', None) or cfg.get_conf(
         ['web_admin', 'host'], WebAdmin.DEFAULT_HOST
     )
@@ -392,20 +384,7 @@ def start_web(args):
     )
 
     admin = WebAdmin(config_dir, str(username), str(password), var_dir,
-                     default_lang=str(lang),
-                     default_dark_mode=bool(dark_mode),
-                     modules_dir=os.path.join(dir_base, 'watchfuls'),
-                     secure_cookies=bool(secure_cookies),
-                     remember_me_days=int(remember_me_days),
-                     audit_max_entries=int(audit_max_entries),
-                     public_status=bool(public_status),
-                     public_status_detail=bool(public_status_detail),
-                     status_refresh_secs=int(status_refresh_secs),
-                     status_lang=str(status_lang),
-                     proxy_count=int(proxy_count),
-                     public_url=str(public_url),
-                     force_https=bool(force_https),
-                     force_fqdn=bool(force_fqdn))
+                     modules_dir=os.path.join(dir_base, 'watchfuls'))
 
     print("ServiceSentry Web Admin")
     print(f"  URL:    http://{host}:{port}")

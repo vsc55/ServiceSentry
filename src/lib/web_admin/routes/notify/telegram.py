@@ -22,7 +22,7 @@ def register(app, wa):
         raw_token = data.get('token')
         # null means "use stored token" (sensitive field masked in UI)
         if raw_token is None:
-            stored = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('telegram') or {}
+            stored = wa._config_section('telegram')
             token = (stored.get('token') or '').strip()
         else:
             token = (raw_token or '').strip()

@@ -12,44 +12,38 @@ from urllib.parse import urlparse
 from flask import Flask, jsonify, redirect, request, session, url_for
 from jinja2 import ChoiceLoader, FileSystemLoader
 
-# Maps Docker environment variable names to (config_path, expected_type).
-# Env vars are runtime-only overrides — they are never written to config.json.
-# Fields with valid env vars appear locked in the UI.
-_ENV_FIELD_SPECS: dict[str, tuple[str, type]] = {
-    'WA_LANG':                ('web_admin|lang',               str),
-    'WA_DARK_MODE':           ('web_admin|dark_mode',          bool),
-    'WA_SECURE_COOKIES':      ('web_admin|secure_cookies',     bool),
-    'WA_REMEMBER_ME_DAYS':    ('web_admin|remember_me_days',   int),
-    'WA_AUDIT_MAX_ENTRIES':   ('web_admin|audit_max_entries',  int),
-    'WA_PUBLIC_STATUS':       ('web_admin|public_status',      bool),
-    'WA_PUBLIC_STATUS_DETAIL': ('web_admin|public_status_detail', bool),
-    'WA_STATUS_REFRESH_SECS': ('web_admin|status_refresh_secs', int),
-    'WA_STATUS_LANG':         ('web_admin|status_lang',        str),
-    'WA_PROXY_COUNT':         ('web_admin|proxy_count',        int),
-    'WA_PORT':                ('web_admin|port',               int),
-    'WA_PUBLIC_URL':          ('web_admin|public_url',         str),
-    'WA_FORCE_HTTPS':         ('web_admin|force_https',        bool),
-    'WA_FORCE_FQDN':          ('web_admin|force_fqdn',         bool),
-    'TELEGRAM_TOKEN':         ('telegram|token',               str),
-    'TELEGRAM_CHAT_ID':       ('telegram|chat_id',             str),
-    'TELEGRAM_GROUP_MESSAGES': ('telegram|group_messages',     bool),
-    'CHECK_INTERVAL':         ('daemon|timer_check',           int),
-}
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib.config import ConfigControl
 from lib import secret_manager
 from .constants import (
-    DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS,
+    DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang,
     PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
     BUILTIN_ROLE_UIDS,
     ROLES,
 )
+from lib.config.spec import CFG_BY_PATH, env_field_specs, normalize_url
 from .auth import ldap_auth as _ldap_auth
 from .auth import oidc_auth as _oidc_auth
 from .auth import saml_auth as _saml_auth
 from .migrations import run_all as _run_migrations
+
+# Maps environment variable names to (config_path, expected_type), derived from
+# the central registry (lib.config.spec).  Env vars are runtime-only
+# overrides — never written to config.json; fields with a valid env var appear
+# locked in the UI.
+_ENV_FIELD_SPECS: dict[str, tuple[str, type]] = env_field_specs()
+
+
+def _cfg_default(path: str):
+    """Default value of a config field, from the central registry.
+
+    Single source of truth for every option's default — class attributes and
+    constructor parameter defaults below all read from here, so changing a
+    default means editing only ``config_spec.CONFIG_FIELDS``.
+    """
+    return CFG_BY_PATH[path].default
 from .mixins import (
     _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin,
@@ -78,24 +72,25 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _CONFIG_FILE = 'config.json'
     _MODULES_FILE = 'modules.json'
     _STATUS_FILE = 'status.json'
+    # Defaults below come from the central registry (config_spec.CONFIG_FIELDS)
+    # via _cfg_default(); editing a default means editing only that registry.
     _WEB_PORT = DEFAULT_PORT
-    _AUDIT_MAX_ENTRIES = 500
-    _REMEMBER_ME_DAYS = 30
-    _DEFAULT_PAGE_SIZE = 25
-    _SECURE_COOKIES_DEFAULT = False
+    _AUDIT_MAX_ENTRIES = _cfg_default('web_admin|audit_max_entries')
+    _REMEMBER_ME_DAYS = _cfg_default('web_admin|remember_me_days')
+    _DEFAULT_PAGE_SIZE = _cfg_default('web_admin|default_page_size')
     _PUBLIC_STATUS = False
-    _public_status_detail = False   # guests see per-item detail on /status (off by default)
-    _STATUS_REFRESH_SECS = 60
-    _STATUS_LANG = ''
+    _public_status_detail = _cfg_default('web_admin|public_status_detail')  # guests see per-item detail on /status
+    _STATUS_REFRESH_SECS = _cfg_default('web_admin|status_refresh_secs')
+    _STATUS_LANG = _cfg_default('web_admin|status_lang')
     _PUBLIC_URL = ''
     _FORCE_HTTPS = False
     _FORCE_FQDN  = False
     # Password-strength policy (can be overridden via config.json web_admin section)
-    _PW_MIN_LEN = 8
-    _PW_MAX_LEN = 128
-    _PW_REQUIRE_UPPER = True
-    _PW_REQUIRE_DIGIT = True
-    _PW_REQUIRE_SYMBOL = False
+    _PW_MIN_LEN = _cfg_default('web_admin|pw_min_len')
+    _PW_MAX_LEN = _cfg_default('web_admin|pw_max_len')
+    _PW_REQUIRE_UPPER = _cfg_default('web_admin|pw_require_upper')
+    _PW_REQUIRE_DIGIT = _cfg_default('web_admin|pw_require_digit')
+    _PW_REQUIRE_SYMBOL = _cfg_default('web_admin|pw_require_symbol')
     # Validation length limits
     _MAX_USERNAME_LEN = 64
     _MAX_DISPLAY_NAME_LEN = 128
@@ -105,12 +100,12 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _MAX_GROUP_LABEL_LEN = 128
     _MAX_GROUP_DESC_LEN = 512
     # Account lockout (0 = disabled)
-    _LOCKOUT_MAX_ATTEMPTS = 5
-    _LOCKOUT_DURATION_SECS = 900  # 15 min
+    _LOCKOUT_MAX_ATTEMPTS = _cfg_default('web_admin|lockout_max_attempts')
+    _LOCKOUT_DURATION_SECS = _cfg_default('web_admin|lockout_duration_secs')  # 15 min
     # Session timers
-    _SESSION_CHECK_SECS = 20
-    _SESSION_REVOKE_REDIRECT_SECS = 3
-    _ACCESS_POLL_SECS = 30
+    _SESSION_CHECK_SECS = _cfg_default('web_admin|session_check_secs')
+    _SESSION_REVOKE_REDIRECT_SECS = _cfg_default('web_admin|session_revoke_redirect_secs')
+    _ACCESS_POLL_SECS = _cfg_default('web_admin|access_poll_secs')
     # OIDC client lazy-init state
     _oidc_config_hash: str | None = None
     # Module web UI includes (populated by _create_app)
@@ -123,25 +118,25 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         username: str = 'admin',
         password: str = 'admin',
         var_dir: str | None = None,
-        default_lang: str = DEFAULT_LANG,
-        default_dark_mode: bool = False,
+        default_lang: str = _cfg_default('web_admin|lang'),
+        default_dark_mode: bool = _cfg_default('web_admin|dark_mode'),
         modules_dir: str | None = None,
-        secure_cookies: bool = False,
-        remember_me_days: int = 30,
-        audit_max_entries: int = 500,
-        pw_min_len: int = 8,
-        pw_max_len: int = 128,
-        pw_require_upper: bool = True,
-        pw_require_digit: bool = True,
-        pw_require_symbol: bool = False,
-        public_status: bool = False,
-        public_status_detail: bool = False,
-        status_refresh_secs: int = 60,
-        status_lang: str = '',
-        proxy_count: int = 0,
-        public_url: str = '',
-        force_https: bool = False,
-        force_fqdn: bool = False,
+        secure_cookies: bool = _cfg_default('web_admin|secure_cookies'),
+        remember_me_days: int = _cfg_default('web_admin|remember_me_days'),
+        audit_max_entries: int = _cfg_default('web_admin|audit_max_entries'),
+        pw_min_len: int = _cfg_default('web_admin|pw_min_len'),
+        pw_max_len: int = _cfg_default('web_admin|pw_max_len'),
+        pw_require_upper: bool = _cfg_default('web_admin|pw_require_upper'),
+        pw_require_digit: bool = _cfg_default('web_admin|pw_require_digit'),
+        pw_require_symbol: bool = _cfg_default('web_admin|pw_require_symbol'),
+        public_status: bool = _cfg_default('web_admin|public_status'),
+        public_status_detail: bool = _cfg_default('web_admin|public_status_detail'),
+        status_refresh_secs: int = _cfg_default('web_admin|status_refresh_secs'),
+        status_lang: str = _cfg_default('web_admin|status_lang'),
+        proxy_count: int = _cfg_default('web_admin|proxy_count'),
+        public_url: str = _cfg_default('web_admin|public_url'),
+        force_https: bool = _cfg_default('web_admin|force_https'),
+        force_fqdn: bool = _cfg_default('web_admin|force_fqdn'),
     ):
         """Initialise the web administration server.
 
@@ -188,10 +183,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._public_status = bool(public_status)
         self._public_status_detail = bool(public_status_detail)
         self._STATUS_REFRESH_SECS = max(10, int(status_refresh_secs))
-        self._STATUS_LANG = status_lang if status_lang in SUPPORTED_LANGS else ''
+        self._STATUS_LANG = coerce_lang(status_lang, '')
         self._proxy_count = max(0, int(proxy_count))
-        _pu = str(public_url).strip().rstrip('/')
-        self._public_url = _pu.split('://', 1)[1] if '://' in _pu else _pu
+        self._public_url = normalize_url(public_url)
         self._force_https = bool(force_https)
         self._force_fqdn      = bool(force_fqdn)
         self._restart_pending = False
@@ -203,9 +197,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._data_lock = threading.RLock()
         self._history = self._init_history()
         self._check_state_store = self._init_check_state()
-        self._default_lang = (
-            default_lang if default_lang in SUPPORTED_LANGS else DEFAULT_LANG
-        )
+        self._default_lang = coerce_lang(default_lang, DEFAULT_LANG)
         self._default_dark_mode = bool(default_dark_mode)
         self._users: dict[str, dict] = {}
         self._sessions: dict[str, dict] = {}
@@ -514,15 +506,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Ensure pw_max_len >= pw_min_len after both are applied
         if self._PW_MAX_LEN < self._PW_MIN_LEN:
             self._PW_MAX_LEN = self._PW_MIN_LEN
-        # Language
-        new_lang = wa_cfg.get('lang', '')
-        if new_lang and new_lang in SUPPORTED_LANGS:
-            self._default_lang = new_lang
+        # Language (keep current value if the saved one is missing/invalid)
+        self._default_lang = coerce_lang(wa_cfg.get('lang', ''), self._default_lang)
         # Status-page language (empty string = use default)
-        if 'status_lang' in wa_cfg:
-            new_status_lang = wa_cfg['status_lang']
-            if isinstance(new_status_lang, str):
-                self._STATUS_LANG = new_status_lang if new_status_lang in SUPPORTED_LANGS else ''
+        if 'status_lang' in wa_cfg and isinstance(wa_cfg['status_lang'], str):
+            self._STATUS_LANG = coerce_lang(wa_cfg['status_lang'], '')
         # Dark mode default
         new_dm = wa_cfg.get('dark_mode')
         if isinstance(new_dm, bool):
@@ -532,13 +520,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         if isinstance(new_sec, bool):
             self._secure_cookies = new_sec
         # Public URL for external links and notifications (stored without scheme)
-        if 'public_url' in wa_cfg:
-            v = wa_cfg['public_url']
-            if isinstance(v, str):
-                v = v.strip().rstrip('/')
-                if '://' in v:
-                    v = v.split('://', 1)[1]
-                self._public_url = v
+        if 'public_url' in wa_cfg and isinstance(wa_cfg['public_url'], str):
+            self._public_url = normalize_url(wa_cfg['public_url'])
 
     @staticmethod
     def _parse_env_var(raw: str, cast: type) -> tuple:
@@ -621,14 +604,13 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             elif field == 'lang':
                 self._default_lang = value
             elif field == 'status_lang':
-                self._STATUS_LANG = value if value in SUPPORTED_LANGS else ''
+                self._STATUS_LANG = coerce_lang(value, '')
             elif field == 'dark_mode':
                 self._default_dark_mode = bool(value)
             elif field == 'secure_cookies':
                 self._secure_cookies = bool(value)
             elif field == 'public_url':
-                v = str(value).strip().rstrip('/')
-                self._public_url = v.split('://', 1)[1] if '://' in v else v
+                self._public_url = normalize_url(value)
 
         self._env_locked = frozenset(locked)
         self._env_override_values = overrides
@@ -733,9 +715,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_remember_me_days': self._REMEMBER_ME_DAYS,
                 'wa_audit_max_entries': self._AUDIT_MAX_ENTRIES,
                 'wa_secure_cookies': self._secure_cookies,
-                'wa_default_secure_cookies': type(self)._SECURE_COOKIES_DEFAULT,
-                'wa_default_remember_me_days': type(self)._REMEMBER_ME_DAYS,
-                'wa_default_audit_max_entries': type(self)._AUDIT_MAX_ENTRIES,
                 'wa_pw_min_len': self._PW_MIN_LEN,
                 'wa_pw_max_len': self._PW_MAX_LEN,
                 'wa_pw_require_upper': self._PW_REQUIRE_UPPER,
@@ -845,6 +824,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             with self._cfg_read_lock:
                 cache[filename] = (mtime, _copy.deepcopy(data))
         return data
+
+    def _config_section(self, name: str) -> dict:
+        """Return the *name* section of config.json as a dict (``{}`` if absent).
+
+        Single home for the ``(wa._read_config_file(...) or {}).get(name) or {}``
+        pattern repeated across auth/email/webhook/notify modules.
+        """
+        return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
 
     def _save_config_file(self, filename: str, data: dict) -> bool:
         """Encrypt sensitive values in *data* and save to the config file."""

@@ -4,6 +4,8 @@
 
 from flask import jsonify, request, session
 
+from lib.config.spec import cfg_default
+
 
 def register(app, wa):
     config_edit_req = wa._perm_required('config_edit')
@@ -17,12 +19,12 @@ def register(app, wa):
             return jsonify({'ok': False, 'message': wa._t('ldap_unavailable')}), 200
 
         data = wa._optional_json()
-        stored_cfg = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('ldap') or {}
+        stored_cfg = wa._config_section('ldap')
 
         server   = (data.get('server') or stored_cfg.get('server') or '').strip()
-        port     = int(data.get('port') or stored_cfg.get('port') or 389)
-        use_ssl  = bool(data.get('use_ssl', stored_cfg.get('use_ssl', False)))
-        timeout  = int(data.get('timeout') or stored_cfg.get('timeout') or 5)
+        port     = int(data.get('port') or stored_cfg.get('port') or cfg_default('ldap|port'))
+        use_ssl  = bool(data.get('use_ssl', stored_cfg.get('use_ssl', cfg_default('ldap|use_ssl'))))
+        timeout  = int(data.get('timeout') or stored_cfg.get('timeout') or cfg_default('ldap|timeout'))
         bind_dn  = (data.get('bind_dn') or stored_cfg.get('bind_dn') or '').strip()
 
         raw_pw = data.get('bind_password')
@@ -55,10 +57,10 @@ def register(app, wa):
         # _Srv, _Conn, _ALL, _SUBTREE already in scope from the import above
         base_dn     = (data.get('base_dn') or stored_cfg.get('base_dn') or '').strip()
         user_filter = (data.get('user_filter') or stored_cfg.get('user_filter')
-                       or '(sAMAccountName={username})')
-        email_attr  = (data.get('email_attr') or stored_cfg.get('email_attr') or 'mail')
-        name_attr   = (data.get('name_attr') or stored_cfg.get('name_attr') or 'displayName')
-        group_attr  = (data.get('group_attr') or stored_cfg.get('group_attr') or 'memberOf')
+                       or cfg_default('ldap|user_filter'))
+        email_attr  = (data.get('email_attr') or stored_cfg.get('email_attr') or cfg_default('ldap|email_attr'))
+        name_attr   = (data.get('name_attr') or stored_cfg.get('name_attr') or cfg_default('ldap|name_attr'))
+        group_attr  = (data.get('group_attr') or stored_cfg.get('group_attr') or cfg_default('ldap|group_attr'))
 
         search_filter = user_filter.replace('{username}', ldap_auth._ldap_escape(test_username))
 
@@ -142,13 +144,13 @@ def register(app, wa):
             return jsonify({'ok': False, 'message': wa._t('ldap_unavailable')}), 200
 
         data = wa._optional_json()
-        stored_cfg = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('ldap') or {}
+        stored_cfg = wa._config_section('ldap')
 
         dn      = (data.get('dn') or '').strip()
         server  = stored_cfg.get('server', '').strip()
-        port    = int(stored_cfg.get('port') or 389)
-        use_ssl = bool(stored_cfg.get('use_ssl', False))
-        timeout = int(stored_cfg.get('timeout') or 5)
+        port    = int(stored_cfg.get('port') or cfg_default('ldap|port'))
+        use_ssl = bool(stored_cfg.get('use_ssl', cfg_default('ldap|use_ssl')))
+        timeout = int(stored_cfg.get('timeout') or cfg_default('ldap|timeout'))
         bind_dn = stored_cfg.get('bind_dn', '').strip()
         bind_password = stored_cfg.get('bind_password') or ''
 
@@ -199,12 +201,12 @@ def register(app, wa):
             return jsonify({'ok': False, 'message': wa._t('ldap_unavailable')}), 200
 
         data = wa._optional_json()
-        stored_cfg = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('ldap') or {}
+        stored_cfg = wa._config_section('ldap')
 
         server  = (data.get('server') or stored_cfg.get('server') or '').strip()
-        port    = int(data.get('port') or stored_cfg.get('port') or 389)
-        use_ssl = bool(data.get('use_ssl', stored_cfg.get('use_ssl', False)))
-        timeout = int(data.get('timeout') or stored_cfg.get('timeout') or 5)
+        port    = int(data.get('port') or stored_cfg.get('port') or cfg_default('ldap|port'))
+        use_ssl = bool(data.get('use_ssl', stored_cfg.get('use_ssl', cfg_default('ldap|use_ssl'))))
+        timeout = int(data.get('timeout') or stored_cfg.get('timeout') or cfg_default('ldap|timeout'))
         bind_dn = (data.get('bind_dn') or stored_cfg.get('bind_dn') or '').strip()
         base_dn = (data.get('base_dn') or stored_cfg.get('base_dn') or '').strip()
 

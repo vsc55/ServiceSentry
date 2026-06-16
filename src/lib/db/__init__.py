@@ -19,6 +19,7 @@ Supported drivers:
 
 from __future__ import annotations
 
+from lib.config.spec import cfg_default
 from .base import BaseConnector
 from .module_tables import (
     collect_module_tables,
@@ -44,7 +45,7 @@ def get_connector(
                              ``path`` key is present in *config*.
     """
     cfg    = config or {}
-    driver = cfg.get('driver', 'sqlite').lower()
+    driver = cfg.get('driver', cfg_default('database|driver')).lower()
 
     if driver == 'sqlite':
         from .sqlite import SQLiteConnector  # noqa: PLC0415

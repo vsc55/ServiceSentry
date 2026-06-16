@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 
+from lib.config.spec import cfg_default
 from .base import BaseConnector
 from .schema import ColumnInfo, IndexInfo
 
@@ -43,9 +44,9 @@ class MySQLConnector(BaseConnector):
     def _connect_kwargs(self) -> dict:
         cfg = self._config
         return {
-            'host':    cfg.get('host', 'localhost'),
-            'port':    int(cfg.get('port', 3306)),
-            'db':      cfg.get('name', 'servicesentry'),
+            'host':    cfg.get('host', cfg_default('database|host')),
+            'port':    int(cfg.get('port', 3306)),  # driver-specific default
+            'db':      cfg.get('name', cfg_default('database|name')),
             'user':    cfg.get('user', ''),
             'password': cfg.get('password', ''),
             'charset': 'utf8mb4',
