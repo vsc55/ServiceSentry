@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 
-from lib.config.spec import cfg_default
+from lib.config.spec import cfg_get
 from .base import BaseConnector
 from .schema import ColumnInfo, IndexInfo
 
@@ -46,9 +46,9 @@ class PostgreSQLConnector(BaseConnector):
     def _dsn(self) -> dict:
         cfg = self._config
         return {
-            'host':     cfg.get('host', cfg_default('database|host')),
+            'host':     cfg_get(cfg, 'database|host'),
             'port':     int(cfg.get('port', 5432)),  # driver-specific default
-            'dbname':   cfg.get('name', cfg_default('database|name')),
+            'dbname':   cfg_get(cfg, 'database|name'),
             'user':     cfg.get('user', ''),
             'password': cfg.get('password', ''),
         }

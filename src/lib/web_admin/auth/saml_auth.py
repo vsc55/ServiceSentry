@@ -11,7 +11,7 @@ import json
 import uuid
 from urllib.parse import urlparse
 
-from lib.config.spec import cfg_default
+from lib.config.spec import cfg_default, cfg_get
 
 _HAS_SAML2 = False
 try:
@@ -124,13 +124,13 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
     user does not already exist.
     """
     cfg            = _get_config(wa)
-    auto_create    = cfg.get('auto_create_users', cfg_default('saml2|auto_create_users'))
+    auto_create    = cfg_get(cfg, 'saml2|auto_create_users')
     group_role_map = _get_group_role_map(cfg)
 
     username_attr = cfg.get('username_attr', '') or ''
-    email_attr    = cfg.get('email_attr',    cfg_default('saml2|email_attr')) or cfg_default('saml2|email_attr')
-    name_attr     = cfg.get('name_attr',     cfg_default('saml2|name_attr')) or cfg_default('saml2|name_attr')
-    groups_attr   = cfg.get('groups_attr',   cfg_default('saml2|groups_attr')) or cfg_default('saml2|groups_attr')
+    email_attr    = cfg_get(cfg, 'saml2|email_attr', falsy=True)
+    name_attr     = cfg_get(cfg, 'saml2|name_attr', falsy=True)
+    groups_attr   = cfg_get(cfg, 'saml2|groups_attr', falsy=True)
 
     def _first(attr_name: str) -> str:
         vals = saml_attrs.get(attr_name, [])

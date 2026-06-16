@@ -23,7 +23,7 @@ from .constants import (
     BUILTIN_ROLE_UIDS,
     ROLES,
 )
-from lib.config.spec import CFG_BY_PATH, env_field_specs, normalize_url
+from lib.config.spec import CFG_BY_PATH, cfg_validate, env_field_specs, normalize_url
 from .auth import ldap_auth as _ldap_auth
 from .auth import oidc_auth as _oidc_auth
 from .auth import saml_auth as _saml_auth
@@ -571,7 +571,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             # Range check for integer fields defined in INT_RULES
             if cast is int and path in INT_RULES:
                 rule = INT_RULES[path]
-                if not (rule['min'] <= value <= rule['max']):
+                ok, _err = cfg_validate(path, value)
+                if not ok:
                     print(
                         f'[ServiceSentry] WARNING: env var {env_key}={raw!r} value {value}'
                         f' is out of range [{rule["min"]}, {rule["max"]}]'

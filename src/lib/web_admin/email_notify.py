@@ -17,7 +17,7 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from lib.config.spec import cfg_default
+from lib.config.spec import cfg_get
 
 try:
     import requests as _req
@@ -37,7 +37,7 @@ def _dispatch(cfg: dict, subject: str, body_html: str,
               recipients: list[str] | None) -> tuple[bool, str]:
     if not cfg.get('enabled'):
         return False, 'Email notifications are not enabled'
-    provider = cfg.get('provider', cfg_default('email|provider'))
+    provider = cfg_get(cfg, 'email|provider')
     if isinstance(recipients, str):
         rcpts = _parse_recipients(recipients)
     else:
@@ -64,13 +64,13 @@ def _send_smtp(cfg: dict, subject: str, body_html: str,
     host = (cfg.get('smtp_host') or '').strip()
     if not host:
         return False, 'SMTP host is not configured'
-    port = int(cfg.get('smtp_port') or cfg_default('email|smtp_port'))
-    use_ssl = bool(cfg.get('smtp_use_ssl', cfg_default('email|smtp_use_ssl')))
-    use_tls = bool(cfg.get('smtp_use_tls', cfg_default('email|smtp_use_tls'))) and not use_ssl
+    port = cfg_get(cfg, 'email|smtp_port', falsy=True)
+    use_ssl = cfg_get(cfg, 'email|smtp_use_ssl')
+    use_tls = cfg_get(cfg, 'email|smtp_use_tls') and not use_ssl
     username  = (cfg.get('smtp_username') or '').strip()
     password  = cfg.get('smtp_password') or ''
     from_email = (cfg.get('from_email') or '').strip()
-    from_name  = (cfg.get('from_name') or cfg_default('email|from_name')).strip()
+    from_name  = cfg_get(cfg, 'email|from_name', falsy=True).strip()
 
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
@@ -151,7 +151,7 @@ def _send_gmail(cfg: dict, subject: str, body_html: str,
     client_secret = (cfg.get('gmail_client_secret') or '').strip()
     refresh_token = (cfg.get('gmail_refresh_token') or '').strip()
     from_email    = (cfg.get('from_email') or '').strip()
-    from_name     = (cfg.get('from_name') or cfg_default('email|from_name')).strip()
+    from_name     = cfg_get(cfg, 'email|from_name', falsy=True).strip()
     if not all([client_id, client_secret, refresh_token, from_email]):
         return False, 'Gmail requires client_id, client_secret, refresh_token and from_email'
     try:

@@ -10,6 +10,8 @@ from lib.config.spec import (
     CONFIG_FIELDS,
     CFG_BY_PATH,
     cfg_default,
+    cfg_get,
+    cfg_validate,
     normalize_url,
 )
 
@@ -21,5 +23,7 @@ __all__ = [
     'CONFIG_FIELDS',
     'CFG_BY_PATH',
     'cfg_default',
+    'cfg_get',
+    'cfg_validate',
     'normalize_url',
 ]

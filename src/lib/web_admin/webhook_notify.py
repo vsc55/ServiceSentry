@@ -13,7 +13,7 @@ import hashlib
 import hmac
 import json as _json
 
-from lib.config.spec import cfg_default
+from lib.config.spec import cfg_get
 
 try:
     import requests as _req
@@ -61,10 +61,10 @@ def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
     if not url:
         return False, 'Webhook URL is not configured'
 
-    method         = (cfg.get('method') or cfg_default('webhooks|method')).upper()
-    timeout        = int(cfg.get('timeout') or cfg_default('webhooks|timeout'))
+    method         = cfg_get(cfg, 'webhooks|method', falsy=True).upper()
+    timeout        = cfg_get(cfg, 'webhooks|timeout', falsy=True)
     secret         = (cfg.get('secret') or '').strip()
-    secret_header  = (cfg.get('secret_header') or cfg_default('webhooks|secret_header')).strip()
+    secret_header  = cfg_get(cfg, 'webhooks|secret_header', falsy=True).strip()
 
     vals = {
         'kind': kind, 'module': module, 'item': item,

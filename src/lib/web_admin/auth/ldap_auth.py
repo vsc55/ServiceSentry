@@ -10,7 +10,7 @@ raise ``LdapUnavailableError``.
 import json
 import uuid
 
-from lib.config.spec import cfg_default
+from lib.config.spec import cfg_default, cfg_get
 
 _HAS_LDAP3 = False
 try:
@@ -98,18 +98,18 @@ def authenticate(wa, username: str, password: str) -> tuple:
         return None, 'ldap_disabled'
 
     server_host = cfg.get('server', '')
-    port        = int(cfg.get('port', cfg_default('ldap|port')))
-    use_ssl     = bool(cfg.get('use_ssl', cfg_default('ldap|use_ssl')))
-    timeout     = int(cfg.get('timeout', cfg_default('ldap|timeout')))
+    port        = cfg_get(cfg, 'ldap|port')
+    use_ssl     = cfg_get(cfg, 'ldap|use_ssl')
+    timeout     = cfg_get(cfg, 'ldap|timeout')
     bind_dn     = cfg.get('bind_dn', '')
     bind_pass   = cfg.get('bind_password', '')
     base_dn     = cfg.get('base_dn', '')
-    user_filter   = cfg.get('user_filter', cfg_default('ldap|user_filter'))
-    email_attr    = cfg.get('email_attr', cfg_default('ldap|email_attr')) or cfg_default('ldap|email_attr')
-    name_attr     = cfg.get('name_attr', cfg_default('ldap|name_attr')) or cfg_default('ldap|name_attr')
+    user_filter   = cfg_get(cfg, 'ldap|user_filter')
+    email_attr    = cfg_get(cfg, 'ldap|email_attr', falsy=True)
+    name_attr     = cfg_get(cfg, 'ldap|name_attr', falsy=True)
     username_attr = cfg.get('username_attr', '') or ''
-    group_attr    = cfg.get('group_attr', cfg_default('ldap|group_attr')) or cfg_default('ldap|group_attr')
-    allow_email   = bool(cfg.get('allow_email_login', cfg_default('ldap|allow_email_login')))
+    group_attr    = cfg_get(cfg, 'ldap|group_attr', falsy=True)
+    allow_email   = cfg_get(cfg, 'ldap|allow_email_login')
 
     search_filter = user_filter.replace('{username}', _ldap_escape(username))
     # If email login is enabled and username looks like an email, also try email attribute

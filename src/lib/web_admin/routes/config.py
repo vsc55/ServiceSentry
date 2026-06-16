@@ -11,7 +11,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from ..constants import SUPPORTED_LANGS, coerce_lang
 from lib.config.spec import (
     CFG_BY_PATH, int_rules, bool_rules, json_dict_fields, admin_only_fields,
-    normalize_url, cfg_default, frontend_schema,
+    normalize_url, cfg_default, cfg_validate, frontend_schema,
 )
 from lib import secret_manager
 
@@ -230,37 +230,26 @@ def register(app, wa):
             elif field in sec_new:
                 del sec_new[field]
 
-        # Validate integer fields.
+        # Validate integer fields (type + [min, max] range) via the registry.
         for path, rule in INT_RULES.items():
             section, field = path.split('|')
             sec_data = new_data.get(section)
             if not isinstance(sec_data, dict) or field not in sec_data:
                 continue
-            v = sec_data[field]
-            if not (isinstance(v, int) and not isinstance(v, bool)
-                    and rule['min'] <= v <= rule['max']):
+            ok, _err = cfg_validate(path, sec_data[field])
+            if not ok:
                 return jsonify({'error': wa._t(
                     'invalid_config_int', field, rule['min'], rule['max'],
                 )}), 400
 
         # Validate JSON-dict fields (ldap|group_role_map, oidc|group_role_map).
-        import json as _json
         for path in JSON_DICT_FIELDS:
             section, field = path.split('|')
             sec_data = new_data.get(section)
             if not isinstance(sec_data, dict) or field not in sec_data:
                 continue
-            v = sec_data[field]
-            if v is None or v == '':
-                continue
-            if isinstance(v, str):
-                try:
-                    parsed = _json.loads(v)
-                except _json.JSONDecodeError:
-                    return jsonify({'error': wa._t('invalid_json_field', field)}), 400
-                if not isinstance(parsed, dict):
-                    return jsonify({'error': wa._t('invalid_json_field', field)}), 400
-            elif not isinstance(v, dict):
+            ok, _err = cfg_validate(path, sec_data[field])
+            if not ok:
                 return jsonify({'error': wa._t('invalid_json_field', field)}), 400
 
         # Validate page_sizes.

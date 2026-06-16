@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 
-from lib.config.spec import cfg_default
+from lib.config.spec import cfg_get
 
 
 class _DaemonMixin:
@@ -37,7 +37,7 @@ class _DaemonMixin:
         self._daemon_lifecycle_lock = threading.Lock()  # guards start/stop races
 
         cfg = self._read_config_file(self._CONFIG_FILE) or {}
-        if cfg.get('daemon', {}).get('web_autostart', cfg_default('daemon|web_autostart')):
+        if cfg_get(cfg.get('daemon', {}), 'daemon|web_autostart'):
             self._daemon_start(run_now=True)
 
     # ── Properties ────────────────────────────────────────────────────────────
@@ -50,9 +50,7 @@ class _DaemonMixin:
     def _daemon_interval(self) -> int:
         """Interval in seconds (re-read from config so live changes take effect)."""
         cfg = self._read_config_file(self._CONFIG_FILE) or {}
-        _dflt = cfg_default('daemon|timer_check')
-        raw = cfg.get('daemon', {}).get('timer_check', _dflt)
-        return max(10, int(raw or _dflt))
+        return max(10, cfg_get(cfg.get('daemon', {}), 'daemon|timer_check', falsy=True))
 
     @property
     def _daemon_seconds_until_next(self) -> int | None:
@@ -70,7 +68,7 @@ class _DaemonMixin:
             'interval':    self._daemon_interval,
             'next_in':     self._daemon_seconds_until_next,
             'last_run':    self._daemon_last_run_ts,
-            'web_autostart': bool(daemon_cfg.get('web_autostart', cfg_default('daemon|web_autostart'))),
+            'web_autostart': cfg_get(daemon_cfg, 'daemon|web_autostart'),
         }
 
     # ── Control ───────────────────────────────────────────────────────────────

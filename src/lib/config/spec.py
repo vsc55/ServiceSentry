@@ -44,6 +44,7 @@ Notes
 
 from __future__ import annotations
 
+import json as _json
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -270,6 +271,75 @@ def cfg_default(path: str):
     across the app pass this as their fallback instead of hardcoding a literal.
     """
     return CFG_BY_PATH[path].default
+
+
+def cfg_get(section_data: dict, path: str, *, falsy: bool = False):
+    """Read ``path``'s field from an already-loaded *section_data* dict, applying
+    the registry default and coercing to the field's type.
+
+    ``path`` is the full ``'section|field'`` registry key; the field name is read
+    from *section_data* (which is that section's sub-dict).  Collapses the
+    repeated ``int(cfg.get('x', cfg_default('sec|x')))`` / ``cfg.get('x') or
+    cfg_default(...)`` idioms into one schema-aware call.
+
+    falsy=False — fall back to the default only when the key is missing
+                  (the ``cfg.get(k, default)`` semantic).
+    falsy=True  — also fall back when present-but-empty/zero
+                  (the ``cfg.get(k) or default`` semantic).
+
+    int/bool/str fields are coerced to their type; dict/list values pass through.
+    """
+    spec = CFG_BY_PATH.get(path)
+    field = path.split('|', 1)[1] if '|' in path else path
+    raw = (section_data or {}).get(field)
+    if raw is None or (falsy and not raw):
+        raw = spec.default if spec else None
+    if spec is None or raw is None:
+        return raw
+    if spec.type is int:
+        return int(raw)
+    if spec.type is bool:
+        return bool(raw)
+    if spec.type is str:
+        return str(raw)
+    return raw  # dict / list: as-is
+
+
+def cfg_validate(path: str, value) -> tuple[bool, str | None]:
+    """Validate a raw config value against the registry rule for *path*.
+
+    Returns ``(ok, error)`` where *error* is ``None`` on success or a short kind
+    the caller turns into a message: ``'type'`` (wrong type), ``'range'`` (int
+    out of [min, max]) or ``'json'`` (not a JSON object). Fields the registry
+    does not constrain (and unknown paths) pass through as valid.
+
+    Shared by the config PUT route and the env-override path so the int-range /
+    json-object checks live in one place next to the schema.
+    """
+    spec = CFG_BY_PATH.get(path)
+    if spec is None:
+        return True, None
+    if spec.type is int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            return False, 'type'
+        if spec.min is not None and value < spec.min:
+            return False, 'range'
+        if spec.max is not None and value > spec.max:
+            return False, 'range'
+        return True, None
+    if spec.type is dict:
+        if value is None or value == '':
+            return True, None
+        if isinstance(value, dict):
+            return True, None
+        if isinstance(value, str):
+            try:
+                parsed = _json.loads(value)
+            except (ValueError, TypeError):
+                return False, 'json'
+            return (True, None) if isinstance(parsed, dict) else (False, 'json')
+        return False, 'json'
+    return True, None
 
 
 def normalize_url(value) -> str:
