@@ -29,51 +29,41 @@ function openNewRoleModal() {
 }
 
 function _populateRoleUsersGrid(roleUid, searchFilterUsers) {
-    const grid = document.getElementById('rmUsersGrid');
-    if (!grid) return;
-    const q = (document.getElementById('rmUserSearch')?.value || '').toLowerCase();
-    let h = '';
-    for (const [uname, ud] of Object.entries(usersData).sort((a, b) => a[0].localeCompare(b[0]))) {
-        if (q && !uname.toLowerCase().includes(q)) continue;
-        const id = 'rmuser_' + uname;
-        const checked = roleUid && ud.role === roleUid;
-        const isDisabled = ud.enabled === false;
-        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
-        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
+    _buildItemsGrid('rmUsersGrid', usersData, {
+        q: document.getElementById('rmUserSearch')?.value || '',
+        match: (uname, ud, q) => !q || uname.toLowerCase().includes(q),
+        render: (uname, ud) => {
+            const id = 'rmuser_' + uname;
+            const checked = roleUid && ud.role === roleUid;
+            const isDisabled = ud.enabled === false;
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(uname)}" ${checked ? 'checked' : ''}>
             <label class="form-check-label small" for="${id}">${esc(uname)}${badge}</label>
         </div>`;
-    }
-    grid.innerHTML = h || '<span class="text-muted small">' + t('no_users') + '</span>';
-    const srch = document.getElementById('rmUserSearch');
-    if (srch && !srch.dataset.bound) {
-        srch.dataset.bound = '1';
-        srch.addEventListener('input', () => _populateRoleUsersGrid(_editingRole, []));
-    }
+        },
+        empty: t('no_users'),
+    });
+    _bindSearch('rmUserSearch', () => _populateRoleUsersGrid(_editingRole, []), true);
 }
 
 function _populateRoleGroupsGrid(roleUid) {
-    const grid = document.getElementById('rmGroupsGrid');
-    if (!grid) return;
-    const q = (document.getElementById('rmGroupSearch')?.value || '').toLowerCase();
-    let h = '';
-    for (const [gname, gd] of Object.entries(groupsData).sort((a, b) => a[0].localeCompare(b[0]))) {
-        if (q && !gname.toLowerCase().includes(q) && !(gd.name || '').toLowerCase().includes(q)) continue;
-        const id = 'rmgroup_' + gname;
-        const checked = roleUid && (gd.roles || []).includes(roleUid);
-        const isDisabled = gd.enabled === false;
-        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
-        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
+    _buildItemsGrid('rmGroupsGrid', groupsData, {
+        q: document.getElementById('rmGroupSearch')?.value || '',
+        match: (gname, gd, q) => !q || gname.toLowerCase().includes(q) || (gd.name || '').toLowerCase().includes(q),
+        render: (gname, gd) => {
+            const id = 'rmgroup_' + gname;
+            const checked = roleUid && (gd.roles || []).includes(roleUid);
+            const isDisabled = gd.enabled === false;
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(gname)}" ${checked ? 'checked' : ''}>
             <label class="form-check-label small" for="${id}">${esc(gd.name || gname)}${badge}</label>
         </div>`;
-    }
-    grid.innerHTML = h || '<span class="text-muted small">' + t('no_groups') + '</span>';
-    const srch = document.getElementById('rmGroupSearch');
-    if (srch && !srch.dataset.bound) {
-        srch.dataset.bound = '1';
-        srch.addEventListener('input', () => _populateRoleGroupsGrid(_editingRole));
-    }
+        },
+        empty: t('no_groups'),
+    });
+    _bindSearch('rmGroupSearch', () => _populateRoleGroupsGrid(_editingRole), true);
 }
 
 function openEditRoleModal(uid) {

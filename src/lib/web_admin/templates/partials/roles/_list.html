@@ -45,13 +45,7 @@ function _rolesToggleCol(col) {
 }
 function _rolSaveColOrder() { localStorage.setItem('ss_roles_col_order', JSON.stringify(_rolesColOrder)); _persistTableConfig(); }
 
-function _fmtRoleDt(iso) {
-    if (!iso) return '—';
-    try {
-        const d = new Date(iso), pad = n => String(n).padStart(2,'0');
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    } catch(_) { return iso; }
-}
+// Date formatting uses the shared _fmtDateTime (core/_utils.html).
 
 // ── Sort / page state ──────────────────────────────────────────────
 let _rolesPage = 1;
@@ -141,8 +135,8 @@ function renderRoles() {
                 case 'name':        return `<td class="text-nowrap"><span class="fw-semibold">${esc(rd.name || name)}</span>${builtinBadge}${disabledBadge}</td>`;
                 case 'uid':         return `<td><code class="text-muted" style="font-size:.7rem">${esc(name)}</code></td>`;
                 case 'description': return `<td class="text-muted small">${esc(rd.description || '')}</td>`;
-                case 'created_at':  return `<td class="text-nowrap small text-muted">${esc(_fmtRoleDt(rd.created_at))}</td>`;
-                case 'updated_at':  return `<td class="text-nowrap small text-muted">${esc(_fmtRoleDt(rd.updated_at))}</td>`;
+                case 'created_at':  return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(rd.created_at))}</td>`;
+                case 'updated_at':  return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(rd.updated_at))}</td>`;
                 case 'updated_by':  return `<td class="small text-muted">${esc(rd.updated_by||'—')}</td>`;
                 default:            return '<td></td>';
             }
@@ -172,25 +166,7 @@ function renderRoles() {
             <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedRoles.clear();renderRoles()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
         </div>` : '';
 
-    const colChooser = `<div class="dropdown">
-      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
-        <i class="bi bi-layout-three-columns"></i>
-      </button>
-      <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:160px">
-        ${_ROL_COLS.map(col => `<li>
-          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
-            <input type="checkbox" class="form-check-input m-0"
-                   ${col.always || _rolesVisibleCols.has(col.id) ? 'checked' : ''}
-                   ${col.always ? 'disabled' : `onchange="_rolesToggleCol('${col.id}')"`}>
-            <span class="small">${esc(col.label())}</span>
-            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
-          </label></li>`).join('')}
-        <li><hr class="dropdown-divider my-1"></li>
-        <li><button class="dropdown-item small py-1 text-muted" onclick="_resetRolesCols()">
-          <i class="bi bi-arrow-counterclockwise me-1"></i>${t('col_reset_defaults')||'Reset defaults'}
-        </button></li>
-      </ul>
-    </div>`;
+    const colChooser = _buildColChooser(_ROL_COLS, _rolesVisibleCols, '_rolesToggleCol', '_resetRolesCols');
 
     c.innerHTML = `<div class="ss-card">
         <div class="ss-accent ss-accent-purple"></div>
@@ -231,29 +207,20 @@ function _rolesToggleOne(name, checked) {
     renderRoles();
 }
 async function _bulkEnableRoles(enabled) {
-    const names = [..._selectedRoles].filter(n => !rolesData[n]?.builtin);
-    if (!names.length) return;
-    showConfirmModal(`${t(enabled ? 'enable' : 'disable')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
-        for (const name of names) {
-            const rd = rolesData[name]; if (!rd) continue;
-            const body = { name: rd.name || '', description: rd.description || '',
-                           permissions: rd.permissions || [], enabled };
-            const r = await apiPut('/api/v1/roles/' + encodeURIComponent(name), body);
-            if (r?.status === 200 && r.data?.ok) rolesData[name] = { ...rolesData[name], enabled };
-        }
-        _selectedRoles.clear();
-        renderRoles();
+    await _bulkSetEnabled(_selectedRoles, enabled, {
+        data: rolesData,
+        filter: n => !rolesData[n]?.builtin,
+        path: name => '/api/v1/roles/' + encodeURIComponent(name),
+        buildBody: (rd, enabled) => ({ name: rd.name || '', description: rd.description || '',
+                                       permissions: rd.permissions || [], enabled }),
+        reRender: () => renderRoles(),
     });
 }
 async function _bulkDeleteRoles() {
-    const names = [..._selectedRoles].filter(n => !rolesData[n]?.builtin);
-    if (!names.length) return;
-    showConfirmModal(`${t('delete_tt')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
-        for (const name of names) {
-            const r = await apiDelete('/api/v1/roles/' + encodeURIComponent(name));
-            if (r?.status === 200 && r.data?.ok) delete rolesData[name];
-        }
-        _selectedRoles.clear();
-        renderRoles(); renderGroups(); renderUsers();
+    await _bulkDelete(_selectedRoles, {
+        filter: n => !rolesData[n]?.builtin,
+        path: name => '/api/v1/roles/' + encodeURIComponent(name),
+        onDeleted: name => delete rolesData[name],
+        reRender: () => { renderRoles(); renderGroups(); renderUsers(); },
     });
 }

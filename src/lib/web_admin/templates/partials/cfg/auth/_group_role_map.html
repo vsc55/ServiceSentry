@@ -386,21 +386,14 @@ async function _saveDisplayNames(sec) {
     if (!configData[sec] || !('group_display_names' in configData[sec])) return false;
     const value = configData[sec]['group_display_names'];
     const fields = { [pathStr]: { value, version: _fieldVersions[pathStr] ?? null } };
-    try {
-        const resp = await fetch('/api/v1/config', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields })
-        });
-        if (!resp.ok) return false;
-        const data = await resp.json();
-        if (data.saved?.includes(pathStr)) {
-            if (data.versions?.[pathStr]) _fieldVersions[pathStr] = data.versions[pathStr];
-            _dirtyFields.delete(pathStr);
-            return true;
-        }
-        return false;
-    } catch (_) { return false; }
+    const data = await apiPut('/api/v1/config', { fields });
+    if (!data) return false;
+    if (data.saved?.includes(pathStr)) {
+        if (data.versions?.[pathStr]) _fieldVersions[pathStr] = data.versions[pathStr];
+        _dirtyFields.delete(pathStr);
+        return true;
+    }
+    return false;
 }
 
 async function _ldapFetchGroups() {

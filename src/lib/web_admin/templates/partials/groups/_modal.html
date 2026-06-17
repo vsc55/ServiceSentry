@@ -11,63 +11,54 @@ let _gmSelectedMembers = new Set();
 
 // Bind search inputs and event delegation once (after DOM ready)
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('groupRolesGrid')?.addEventListener('change', e => {
-        if (e.target.type === 'checkbox') {
-            if (e.target.checked) _gmSelectedRoles.add(e.target.value);
-            else _gmSelectedRoles.delete(e.target.value);
-        }
-    });
-    document.getElementById('groupMembersGrid')?.addEventListener('change', e => {
-        if (e.target.type === 'checkbox') {
-            if (e.target.checked) _gmSelectedMembers.add(e.target.value);
-            else _gmSelectedMembers.delete(e.target.value);
-        }
-    });
-    document.getElementById('gmRoleSearch')?.addEventListener('input',   e => _gmPopulateRoles(e.target.value));
-    document.getElementById('gmMemberSearch')?.addEventListener('input', e => _gmPopulateMembers(e.target.value));
+    _bindSetSelection('groupRolesGrid', _gmSelectedRoles, 'checkbox');
+    _bindSetSelection('groupMembersGrid', _gmSelectedMembers, 'checkbox');
+    _bindSearch('gmRoleSearch', _gmPopulateRoles);
+    _bindSearch('gmMemberSearch', _gmPopulateMembers);
 });
 
 function _gmPopulateRoles(searchVal) {
-    const grid = document.getElementById('groupRolesGrid');
-    if (!grid) return;
-    const q   = (searchVal || '').toLowerCase();
     const dis = _gmIsBuiltin ? 'disabled' : '';
-    let h = '';
-    for (const [rname, rd] of Object.entries(rolesData).sort((a, b) => a[0].localeCompare(b[0]))) {
-        const label = rd.name || rname;
-        const desc  = rd.description || '';
-        if (q && !rname.toLowerCase().includes(q) && !label.toLowerCase().includes(q) && !desc.toLowerCase().includes(q)) continue;
-        const id = 'grole_' + rname;
-        const isDisabled = !rd.builtin && rd.enabled === false;
-        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
-        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
+    _buildItemsGrid('groupRolesGrid', rolesData, {
+        q: searchVal,
+        match: (rname, rd, q) => {
+            const label = rd.name || rname, desc = rd.description || '';
+            return !q || rname.toLowerCase().includes(q) || label.toLowerCase().includes(q) || desc.toLowerCase().includes(q);
+        },
+        render: (rname, rd) => {
+            const label = rd.name || rname;
+            const desc  = rd.description || '';
+            const id = 'grole_' + rname;
+            const isDisabled = !rd.builtin && rd.enabled === false;
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${escAttr(id)}" value="${escAttr(rname)}" ${_gmSelectedRoles.has(rname) ? 'checked' : ''} ${dis}>
             <label class="form-check-label small" for="${escAttr(id)}">
                 <span class="badge ${roleBadgeClass(rname)} fw-normal">${esc(label)}</span>
                 ${desc ? `<span class="text-muted ms-1">${esc(desc)}</span>` : ''}${badge}
             </label>
         </div>`;
-    }
-    grid.innerHTML = h || '<span class="text-muted small">' + t('no_roles') + '</span>';
+        },
+        empty: t('no_roles'),
+    });
 }
 
 function _gmPopulateMembers(searchVal) {
-    const grid = document.getElementById('groupMembersGrid');
-    if (!grid) return;
-    const q = (searchVal || '').toLowerCase();
-    let h = '';
-    for (const [uname, ud] of Object.entries(usersData).sort((a, b) => a[0].localeCompare(b[0]))) {
-        const display = ud.display_name || '';
-        if (q && !uname.toLowerCase().includes(q) && !display.toLowerCase().includes(q)) continue;
-        const id = 'gmember_' + uname;
-        const isDisabled = ud.enabled === false;
-        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
-        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
+    _buildItemsGrid('groupMembersGrid', usersData, {
+        q: searchVal,
+        match: (uname, ud, q) => !q || uname.toLowerCase().includes(q) || (ud.display_name || '').toLowerCase().includes(q),
+        render: (uname, ud) => {
+            const display = ud.display_name || '';
+            const id = 'gmember_' + uname;
+            const isDisabled = ud.enabled === false;
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${escAttr(id)}" value="${escAttr(uname)}" ${_gmSelectedMembers.has(uname) ? 'checked' : ''}>
             <label class="form-check-label small" for="${escAttr(id)}">${esc(uname)}${display ? ` <span class="text-muted">(${esc(display)})</span>` : ''}${badge}</label>
         </div>`;
-    }
-    grid.innerHTML = h || '<span class="text-muted small">' + t('no_users') + '</span>';
+        },
+        empty: t('no_users'),
+    });
 }
 
 function openNewGroupModal() {

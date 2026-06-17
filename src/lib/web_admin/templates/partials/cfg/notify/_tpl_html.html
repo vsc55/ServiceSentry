@@ -338,15 +338,11 @@ function _renderNotifHtmlSection() {
 }
 
 async function _notifHtmlLoad() {
-    try {
-        const r = await fetch('/api/v1/notify/html-templates');
-        if (r.status === 401) { _onSessionTerminated(); return; }
-        if (!r.ok) return;
-        const data = await r.json();
-        _notifHtmlState.stored = data.stored || {};
-        _notifHtmlState.vars   = data.vars   || {};
-        _notifHtmlRefresh();
-    } catch (_) { /* silent */ }
+    const data = await apiGet('/api/v1/notify/html-templates');
+    if (!data) return;
+    _notifHtmlState.stored = data.stored || {};
+    _notifHtmlState.vars   = data.vars   || {};
+    _notifHtmlRefresh();
 }
 
 function _notifHtmlRefresh() {

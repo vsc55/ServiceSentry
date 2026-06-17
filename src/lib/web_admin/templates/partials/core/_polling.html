@@ -18,14 +18,10 @@ function _showReloadBanner() {
 
 function _startVersionPoll(intervalMs = 60000) {
     setInterval(async () => {
-        try {
-            const r = await fetch('/api/v1/health');
-            if (!r.ok) return;
-            const data = await r.json();
-            if (data.startup_id && data.startup_id !== SERVER_STARTUP_ID) {
-                _showReloadBanner();
-            }
-        } catch (_) { /* ignore network errors */ }
+        const data = await apiGetSilent('/api/v1/health');
+        if (data?.startup_id && data.startup_id !== SERVER_STARTUP_ID) {
+            _showReloadBanner();
+        }
     }, intervalMs);
     // Session keepalive poll — detects revoked sessions for idle users.
     setInterval(async () => {
@@ -51,9 +47,9 @@ function _scheduleConfigPoll() {
 async function _doConfigFieldPoll() {
     if (!Object.keys(_fieldVersions).length && !Object.keys(configData).length) return;
     try {
-        const r = await fetch('/api/v1/config/versions');
-        if (!r.ok) return;
-        const { versions: serverVersions } = await r.json();
+        const vdata = await apiGetSilent('/api/v1/config/versions');
+        if (!vdata) return;
+        const { versions: serverVersions } = vdata;
         const changedDirty = new Set();
         const changedNonDirty = new Set();
         for (const [path, serverToken] of Object.entries(serverVersions || {})) {
@@ -65,9 +61,8 @@ async function _doConfigFieldPoll() {
         const _updateDetails = [];
         if (changedNonDirty.size) {
             // Fetch full config to apply updated non-dirty field values silently.
-            const cr = await fetch('/api/v1/config');
-            if (cr.ok) {
-                const payload = await cr.json();
+            const payload = await apiGetSilent('/api/v1/config');
+            if (payload) {
                 const newCfg = (payload && typeof payload.config === 'object') ? payload.config : payload;
                 const newVer = (payload && payload.versions) || {};
                 for (const path of changedNonDirty) {

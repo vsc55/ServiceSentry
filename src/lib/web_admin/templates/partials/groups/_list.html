@@ -66,19 +66,7 @@ function _grpSaveOrder() {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-function _thSortInner(label, col, currentSort, dir, fn) {
-    const icon = currentSort === col
-        ? (dir === 'asc' ? '<i class="bi bi-sort-up ms-1"></i>' : '<i class="bi bi-sort-down ms-1"></i>')
-        : '<i class="bi bi-arrow-down-up ms-1 opacity-25"></i>';
-    return `<span class="ss-sort-link" style="cursor:pointer;user-select:none" onclick="${fn}('${col}')">${esc(label)}${icon}</span>`;
-}
-function _fmtDt(iso) {
-    if (!iso) return '—';
-    try {
-        const d = new Date(iso), pad = n => String(n).padStart(2,'0');
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    } catch(_) { return iso; }
-}
+// _thSortInner is shared (defined in _js_init.html); _fmtDateTime in core/_utils.html.
 
 // ── Page / sort controls ───────────────────────────────────────────
 function _goGroupsPage(p) { _groupsPage = p; renderGroups(); }
@@ -173,8 +161,8 @@ function renderGroups() {
                 case 'description':return `<td class="text-muted small">${esc(gd.description||'—')}</td>`;
                 case 'roles':      return `<td style="line-height:1.9">${roleBadges||'<span class="text-muted">—</span>'}</td>`;
                 case 'members':    return `<td class="text-center text-nowrap">${memberHtml}</td>`;
-                case 'created_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDt(gd.created_at))}</td>`;
-                case 'updated_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDt(gd.updated_at))}</td>`;
+                case 'created_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(gd.created_at))}</td>`;
+                case 'updated_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(gd.updated_at))}</td>`;
                 case 'updated_by': return `<td class="small text-muted">${esc(gd.updated_by||'—')}</td>`;
                 default:           return '<td></td>';
             }
@@ -204,25 +192,7 @@ function renderGroups() {
         </div>` : '';
 
     // Column chooser dropdown
-    const colChooser = `<div class="dropdown">
-      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
-        <i class="bi bi-layout-three-columns"></i>
-      </button>
-      <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:170px">
-        ${_GRP_COLS.map(col => `<li>
-          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
-            <input type="checkbox" class="form-check-input m-0"
-                   ${col.always || _groupsVisibleCols.has(col.id) ? 'checked' : ''}
-                   ${col.always ? 'disabled' : `onchange="_groupsToggleCol('${col.id}')"`}>
-            <span class="small">${esc(col.label())}</span>
-            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
-          </label></li>`).join('')}
-        <li><hr class="dropdown-divider my-1"></li>
-        <li><button class="dropdown-item small py-1 text-muted" onclick="_resetGroupsCols()">
-          <i class="bi bi-arrow-counterclockwise me-1"></i>${t('col_reset_defaults')||'Reset defaults'}
-        </button></li>
-      </ul>
-    </div>`;
+    const colChooser = _buildColChooser(_GRP_COLS, _groupsVisibleCols, '_groupsToggleCol', '_resetGroupsCols', 170);
 
     c.innerHTML = `<div class="ss-card">
         <div class="ss-accent ss-accent-teal"></div>
@@ -327,35 +297,26 @@ function _groupsToggleOne(name, checked) {
     renderGroups();
 }
 async function _bulkEnableGroups(enabled) {
-    const names = [..._selectedGroups].filter(n => !groupsData[n]?.builtin);
-    if (!names.length) return;
-    showConfirmModal(`${t(enabled ? 'enable' : 'disable')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
-        for (const name of names) {
-            const g = groupsData[name]; if (!g) continue;
-            const body = { label: g.name || '', description: g.description || '',
-                           roles: g.roles || [], members: g.members || [], enabled };
-            const r = await apiPut('/api/v1/groups/' + encodeURIComponent(name), body);
-            if (r?.status === 200 && r.data?.ok) groupsData[name] = { ...groupsData[name], enabled };
-        }
-        _selectedGroups.clear();
-        renderGroups(); renderUsers();
+    await _bulkSetEnabled(_selectedGroups, enabled, {
+        data: groupsData,
+        filter: n => !groupsData[n]?.builtin,
+        path: name => '/api/v1/groups/' + encodeURIComponent(name),
+        buildBody: (g, enabled) => ({ label: g.name || '', description: g.description || '',
+                                      roles: g.roles || [], members: g.members || [], enabled }),
+        reRender: () => { renderGroups(); renderUsers(); },
     });
 }
 async function _bulkDeleteGroups() {
-    const names = [..._selectedGroups].filter(n => !groupsData[n]?.builtin);
-    if (!names.length) return;
-    showConfirmModal(`${t('delete_tt')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
-        for (const name of names) {
-            const r = await apiDelete('/api/v1/groups/' + encodeURIComponent(name));
-            if (r?.status === 200 && r.data?.ok) {
-                for (const ud of Object.values(usersData)) {
-                    if (ud.groups) ud.groups = ud.groups.filter(g => g !== name);
-                }
-                delete groupsData[name];
+    await _bulkDelete(_selectedGroups, {
+        filter: n => !groupsData[n]?.builtin,
+        path: name => '/api/v1/groups/' + encodeURIComponent(name),
+        onDeleted: name => {
+            for (const ud of Object.values(usersData)) {
+                if (ud.groups) ud.groups = ud.groups.filter(g => g !== name);
             }
-        }
-        _selectedGroups.clear();
-        renderGroups(); renderUsers();
+            delete groupsData[name];
+        },
+        reRender: () => { renderGroups(); renderUsers(); },
     });
 }
 
@@ -377,20 +338,19 @@ function populateGroupCheckboxes(activeGroups) {
 // Render group checkboxes in #umGroupsContainer, filtered by searchVal.
 // Selection state lives in _umSelectedGroups (defined in _js_users.html).
 function _umPopulateGroups(searchVal) {
-    const container = document.getElementById('umGroupsContainer');
-    if (!container) return;
-    const q = (searchVal || '').toLowerCase();
-    let h = '';
-    for (const [gname, gd] of Object.entries(groupsData).sort((a, b) => a[0].localeCompare(b[0]))) {
-        const label = gd.name || gname;
-        if (q && !gname.toLowerCase().includes(q) && !label.toLowerCase().includes(q)) continue;
-        const id = 'umgrp_' + gname;
-        const isDisabled = gd.enabled === false;
-        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
-        h += `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
+    _buildItemsGrid('umGroupsContainer', groupsData, {
+        q: searchVal,
+        match: (gname, gd, q) => !q || gname.toLowerCase().includes(q) || (gd.name || gname).toLowerCase().includes(q),
+        render: (gname, gd) => {
+            const label = gd.name || gname;
+            const id = 'umgrp_' + gname;
+            const isDisabled = gd.enabled === false;
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${escAttr(id)}" value="${escAttr(gname)}" ${_umSelectedGroups.has(gname) ? 'checked' : ''}>
             <label class="form-check-label small" for="${escAttr(id)}">${esc(label)}${badge}</label>
         </div>`;
-    }
-    container.innerHTML = h || '<span class="text-muted small">' + t('no_groups') + '</span>';
+        },
+        empty: t('no_groups'),
+    });
 }

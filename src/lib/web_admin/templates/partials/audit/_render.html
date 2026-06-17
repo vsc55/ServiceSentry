@@ -190,25 +190,7 @@ function renderAuditTable() {
         : renderGroupedAudit(pageEntries);
 
     // Column chooser
-    const colChooser = `<div class="dropdown">
-      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
-        <i class="bi bi-layout-three-columns"></i>
-      </button>
-      <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:150px">
-        ${_AUDIT_COLS.map(col => `<li>
-          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
-            <input type="checkbox" class="form-check-input m-0"
-                   ${col.always || _auditVisibleCols.has(col.id) ? 'checked' : ''}
-                   ${col.always ? 'disabled' : `onchange="_auditToggleCol('${col.id}')"`}>
-            <span class="small">${esc(col.label())}</span>
-            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
-          </label></li>`).join('')}
-        <li><hr class="dropdown-divider my-1"></li>
-        <li><button class="dropdown-item small py-1 text-muted" onclick="_resetAuditCols()">
-          <i class="bi bi-arrow-counterclockwise me-1"></i>${t('col_reset_defaults')||'Reset defaults'}
-        </button></li>
-      </ul>
-    </div>`;
+    const colChooser = _buildColChooser(_AUDIT_COLS, _auditVisibleCols, '_auditToggleCol', '_resetAuditCols', 150);
 
     c.innerHTML = filterBanner + `
     <div class="ss-card">

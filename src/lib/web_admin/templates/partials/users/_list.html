@@ -10,17 +10,10 @@ let _umSelectedGroups = new Set();
 
 // Bind search inputs and event delegation once (after DOM ready)
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('umRoleContainer')?.addEventListener('change', e => {
-        if (e.target.type === 'radio') _umSelectedRole = e.target.value;
-    });
-    document.getElementById('umGroupsContainer')?.addEventListener('change', e => {
-        if (e.target.type === 'checkbox') {
-            if (e.target.checked) _umSelectedGroups.add(e.target.value);
-            else _umSelectedGroups.delete(e.target.value);
-        }
-    });
-    document.getElementById('umRoleSearch')?.addEventListener('input', e => _umPopulateRoles(e.target.value));
-    document.getElementById('umGroupSearch')?.addEventListener('input', e => _umPopulateGroups(e.target.value));
+    _bindSetSelection('umRoleContainer', null, 'radio', v => _umSelectedRole = v);
+    _bindSetSelection('umGroupsContainer', _umSelectedGroups, 'checkbox');
+    _bindSearch('umRoleSearch', _umPopulateRoles);
+    _bindSearch('umGroupSearch', _umPopulateGroups);
 });
 
 // ── Column definitions ─────────────────────────────────────────────
@@ -65,10 +58,7 @@ function _usersToggleCol(col) {
     renderUsers();
 }
 function _usrSaveColOrder() { localStorage.setItem('ss_users_col_order', JSON.stringify(_usersColOrder)); _persistTableConfig(); }
-function _fmtUsrDt(iso) {
-    if (!iso) return '—';
-    try { const d = new Date(iso), p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; } catch(_) { return iso; }
-}
+// Date formatting uses the shared _fmtDateTime (core/_utils.html).
 
 // ── Sort / page state ──────────────────────────────────────────────
 let _usersPage = 1;
@@ -194,8 +184,8 @@ function renderUsers() {
                 case 'username':
                     return `<td class="text-nowrap"><code>${esc(uname)}</code>${isSelf?`<span class="badge text-bg-info fw-normal ms-1" style="font-size:.62rem">${t('you_badge')}</span>`:''}${authBadge}${disabledBadge}</td>`;
                 case 'uid':          return `<td><code class="text-muted" style="font-size:.7rem">${esc(u.uid||'')}</code></td>`;
-                case 'created_at':   return `<td class="text-nowrap small text-muted">${esc(_fmtUsrDt(u.created_at))}</td>`;
-                case 'updated_at':   return `<td class="text-nowrap small text-muted">${esc(_fmtUsrDt(u.updated_at))}</td>`;
+                case 'created_at':   return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(u.created_at))}</td>`;
+                case 'updated_at':   return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(u.updated_at))}</td>`;
                 case 'updated_by':   return `<td class="small text-muted">${esc(u.updated_by||'—')}</td>`;
                 case 'display_name': return `<td class="text-muted small">${esc(u.display_name || uname)}</td>`;
                 case 'role':         return `<td class="text-center"><span class="badge ${badge}">${esc(roleLabel)}</span></td>`;
@@ -224,25 +214,7 @@ function renderUsers() {
             <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedUsers.clear();renderUsers()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
         </div>` : '';
 
-    const colChooser = `<div class="dropdown">
-      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
-        <i class="bi bi-layout-three-columns"></i>
-      </button>
-      <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:160px">
-        ${_USR_COLS.map(col => `<li>
-          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
-            <input type="checkbox" class="form-check-input m-0"
-                   ${col.always || _usersVisibleCols.has(col.id) ? 'checked' : ''}
-                   ${col.always ? 'disabled' : `onchange="_usersToggleCol('${col.id}')"`}>
-            <span class="small">${esc(col.label())}</span>
-            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
-          </label></li>`).join('')}
-        <li><hr class="dropdown-divider my-1"></li>
-        <li><button class="dropdown-item small py-1 text-muted" onclick="_resetUsersCols()">
-          <i class="bi bi-arrow-counterclockwise me-1"></i>${t('col_reset_defaults')||'Reset defaults'}
-        </button></li>
-      </ul>
-    </div>`;
+    const colChooser = _buildColChooser(_USR_COLS, _usersVisibleCols, '_usersToggleCol', '_resetUsersCols');
 
     c.innerHTML = `<div class="ss-card">
         <div class="ss-accent ss-accent-amber"></div>
@@ -353,35 +325,25 @@ function _usersToggleOne(name, checked) {
     renderUsers();
 }
 async function _bulkEnableUsers(enabled) {
-    const names = [..._selectedUsers];
-    if (!names.length) return;
-    showConfirmModal(`${t(enabled ? 'enable' : 'disable')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
-        for (const uname of names) {
-            const u = usersData[uname]; if (!u) continue;
-            if (!enabled && uname === currentUser.username) continue;
-            const body = { role: u.role || 'none', display_name: u.display_name || '', lang: u.lang || '',
-                           groups: u.groups || [], enabled, email: u.email || '' };
-            const r = await apiPut('/api/v1/users/' + encodeURIComponent(uname), body);
-            if (r?.status === 200 && r.data?.ok) usersData[uname] = { ...usersData[uname], enabled };
-        }
-        _selectedUsers.clear();
-        renderUsers();
+    await _bulkSetEnabled(_selectedUsers, enabled, {
+        data: usersData,
+        path: uname => '/api/v1/users/' + encodeURIComponent(uname),
+        buildBody: (u, enabled, uname) => (!enabled && uname === currentUser.username) ? null
+            : { role: u.role || 'none', display_name: u.display_name || '', lang: u.lang || '',
+                groups: u.groups || [], enabled, email: u.email || '' },
+        reRender: () => renderUsers(),
     });
 }
 async function _bulkDeleteUsers() {
-    const names = [..._selectedUsers].filter(n => n !== currentUser.username);
-    if (!names.length) return;
-    showConfirmModal(`${t('delete_tt')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
-        for (const uname of names) {
-            const r = await apiDelete('/api/v1/users/' + encodeURIComponent(uname));
-            if (r?.status === 200 && r.data?.ok) {
-                for (const gd of Object.values(groupsData)) {
-                    if (gd.members) gd.members = gd.members.filter(m => m !== uname);
-                }
-                delete usersData[uname];
+    await _bulkDelete(_selectedUsers, {
+        filter: n => n !== currentUser.username,
+        path: uname => '/api/v1/users/' + encodeURIComponent(uname),
+        onDeleted: uname => {
+            for (const gd of Object.values(groupsData)) {
+                if (gd.members) gd.members = gd.members.filter(m => m !== uname);
             }
-        }
-        _selectedUsers.clear();
-        renderUsers(); renderGroups();
+            delete usersData[uname];
+        },
+        reRender: () => { renderUsers(); renderGroups(); },
     });
 }

@@ -10,6 +10,131 @@ function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 /** Current UTC time as a second-precision ISO-8601 string (e.g. 2026-06-16T10:20:30Z). */
 function _nowISO() { return new Date().toISOString().replace(/\.\d+Z$/, 'Z'); }
 
+/** Render a searchable checkbox/radio grid into #gridId from a data object.
+ *  Shared skeleton (sorted iteration + search filter + "empty" fallback) for
+ *  the role/group/user pickers; the per-row markup and filter stay per-caller:
+ *    match(key, item, q) -> bool   (q is already lower-cased; omit = no filter)
+ *    render(key, item)   -> html   (the <div class="form-check">…</div> row)
+ *    q                   -> raw search string
+ *    empty               -> message shown when nothing matches */
+function _buildItemsGrid(gridId, data, { q = '', match = null, render, empty = '' } = {}) {
+    const grid = document.getElementById(gridId);
+    if (!grid) return;
+    const ql = (q || '').toLowerCase();
+    let h = '';
+    for (const [key, item] of Object.entries(data).sort((a, b) => a[0].localeCompare(b[0]))) {
+        if (match && !match(key, item, ql)) continue;
+        h += render(key, item);
+    }
+    grid.innerHTML = h || `<span class="text-muted small">${empty}</span>`;
+}
+
+/** Format an ISO-8601 string as local `YYYY-MM-DD HH:MM` (minute precision).
+ *  Empty/missing → em dash; unparseable → the raw value. */
+function _fmtDateTime(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(iso), p = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    } catch (_) { return iso; }
+}
+
+/** Bind an <input>'s `input` event to *fn(value)*. When *checkBound* is true,
+ *  guards against double-binding via dataset.bound (for inputs inside modals
+ *  whose populate function may run more than once). No-op if the input is absent. */
+function _bindSearch(inputId, fn, checkBound = false) {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+    if (checkBound) {
+        if (el.dataset.bound) return;
+        el.dataset.bound = '1';
+    }
+    el.addEventListener('input', e => fn(e.target.value));
+}
+
+/** Delegate `change` on a checkbox/radio container to keep a Set (checkboxes)
+ *  or a scalar (radios) in sync with the user's selection.
+ *  - checkbox: toggles *set* membership by the input value.
+ *  - radio:    calls onRadio(value) so the caller can store the choice. */
+function _bindSetSelection(containerId, set, type, onRadio = null) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.addEventListener('change', e => {
+        if (e.target.type !== type) return;
+        if (type === 'checkbox') {
+            if (e.target.checked) set.add(e.target.value);
+            else set.delete(e.target.value);
+        } else if (type === 'radio' && onRadio) {
+            onRadio(e.target.value);
+        }
+    });
+}
+
+/** Build the "show/hide columns" dropdown shared by every sortable table.
+ *  cols      — array of {id, label() -> str, always?} column descriptors
+ *  visibleSet — Set of currently-visible column ids
+ *  toggleFn / resetFn — names (strings) of the global handlers wired into the
+ *                       inline onchange/onclick (e.g. '_usersToggleCol').
+ *  Returns the dropdown HTML string. */
+function _buildColChooser(cols, visibleSet, toggleFn, resetFn, minWidth = 160) {
+    return `<div class="dropdown">
+      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
+        <i class="bi bi-layout-three-columns"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:${minWidth}px">
+        ${cols.map(col => `<li>
+          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
+            <input type="checkbox" class="form-check-input m-0"
+                   ${col.always || visibleSet.has(col.id) ? 'checked' : ''}
+                   ${col.always ? 'disabled' : `onchange="${toggleFn}('${col.id}')"`}>
+            <span class="small">${esc(col.label())}</span>
+            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
+          </label></li>`).join('')}
+        <li><hr class="dropdown-divider my-1"></li>
+        <li><button class="dropdown-item small py-1 text-muted" onclick="${resetFn}()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>${t('col_reset_defaults')||'Reset defaults'}
+        </button></li>
+      </ul>
+    </div>`;
+}
+
+/** Bulk enable/disable over a selection of access-management entities.
+ *  Confirms, then PUTs each item and flips its cached `enabled` flag.
+ *  opts: { data, filter?(name)->bool, path(name)->url,
+ *          buildBody(item, enabled, name)->obj|null  (null skips the item),
+ *          reRender() }. */
+async function _bulkSetEnabled(selectedSet, enabled, opts) {
+    const names = [...selectedSet].filter(opts.filter || (() => true));
+    if (!names.length) return;
+    showConfirmModal(`${t(enabled ? 'enable' : 'disable')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
+        for (const name of names) {
+            const item = opts.data[name]; if (!item) continue;
+            const body = opts.buildBody(item, enabled, name);
+            if (!body) continue;
+            const r = await apiPut(opts.path(name), body);
+            if (r?.status === 200 && r.data?.ok) opts.data[name] = { ...opts.data[name], enabled };
+        }
+        selectedSet.clear();
+        opts.reRender();
+    });
+}
+
+/** Bulk delete over a selection. Confirms, then DELETEs each item and runs
+ *  onDeleted(name) for cache cleanup. opts: { filter?, path(name)->url,
+ *  onDeleted(name), reRender() }. */
+async function _bulkDelete(selectedSet, opts) {
+    const names = [...selectedSet].filter(opts.filter || (() => true));
+    if (!names.length) return;
+    showConfirmModal(`${t('delete_tt')} ${names.length} ${t('selected').toLowerCase()}?`, async () => {
+        for (const name of names) {
+            const r = await apiDelete(opts.path(name));
+            if (r?.status === 200 && r.data?.ok) opts.onDeleted(name);
+        }
+        selectedSet.clear();
+        opts.reRender();
+    });
+}
+
 /** True if *value* (case-insensitive) is not already used in *collection*.
  *  getName(key, item) -> the name to compare (e.g. item.name, or the key itself);
  *  excludeKey skips one entry (so an item keeps its own name on edit). */

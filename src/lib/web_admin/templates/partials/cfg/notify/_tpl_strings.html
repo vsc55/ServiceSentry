@@ -101,15 +101,10 @@ async function _notifTplLoad() {
 }
 
 async function _notifTplLoadStrings() {
-    try {
-        const r = await fetch('/api/v1/notify/templates');
-        if (r.status === 401) { _onSessionTerminated(); return; }
-        if (!r.ok) { showToast(t('connection_error'), 'danger'); return; }
-        _notifTplState.data = await r.json();
-        _notifTplRender();
-    } catch (e) {
-        showToast(t('connection_error'), 'danger');
-    }
+    const data = await apiGet('/api/v1/notify/templates');
+    if (!data) return;
+    _notifTplState.data = data;
+    _notifTplRender();
 }
 
 function _notifTplRender() {
