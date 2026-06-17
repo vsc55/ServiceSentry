@@ -112,7 +112,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.hosts_store import HostsStore  # noqa: PLC0415
+            from lib.stores.hosts import HostsStore  # noqa: PLC0415
             from lib import secret_manager          # noqa: PLC0415
             from lib.modules import ModuleBase       # noqa: PLC0415
             secret_keys = secret_manager.ENCRYPT_KEYS | ModuleBase.discover_secret_fields(self.dir_modules)
@@ -126,7 +126,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.history_store import HistoryStore  # noqa: PLC0415
+            from lib.stores.history import HistoryStore  # noqa: PLC0415
             return HistoryStore(self._db)
         except Exception:  # pylint: disable=broad-except
             return None
@@ -136,7 +136,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.check_state_store import CheckStateStore  # noqa: PLC0415
+            from lib.stores.check_state import CheckStateStore  # noqa: PLC0415
             return CheckStateStore(self._db)
         except Exception:  # pylint: disable=broad-except
             return None
@@ -207,7 +207,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.audit_store import AuditStore  # noqa: PLC0415
+            from lib.stores.audit import AuditStore  # noqa: PLC0415
             return AuditStore(self._db)
         except Exception:  # pylint: disable=broad-except
             return None
@@ -355,7 +355,7 @@ class Monitor(ObjectBase):
         """
         store = getattr(self, '_check_state_store', None)
         if store is not None:
-            from lib.check_state_store import DbBackedStatus  # noqa: PLC0415
+            from lib.stores.check_state import DbBackedStatus  # noqa: PLC0415
             self.status = DbBackedStatus(store, self._get_item_uid)
             self.status.read()
         else:

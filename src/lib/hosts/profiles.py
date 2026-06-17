@@ -84,7 +84,8 @@ _BUILTIN_SSH = {
 def _watchfuls_dir(watchfuls_dir: str | None) -> str:
     if watchfuls_dir:
         return watchfuls_dir
-    return os.path.normpath(os.path.join(os.path.dirname(__file__), os.pardir, 'watchfuls'))
+    # this file is lib/hosts/profiles.py → climb two levels to the src root.
+    return os.path.normpath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, 'watchfuls'))
 
 
 def host_profiles_catalog(watchfuls_dir: str | None = None) -> dict:

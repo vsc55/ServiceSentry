@@ -438,7 +438,7 @@ class TestHostAwareDiscovery:
     def test_process_discover_remote_draft(self, client_with_modules):
         c = client_with_modules
         _login(c)
-        with patch('lib.host_runner.run', return_value=('nginx\nnginx\nsshd\n', '', 0)) as run:
+        with patch('lib.hosts.runner.run', return_value=('nginx\nnginx\nsshd\n', '', 0)) as run:
             r = c.post('/api/v1/watchfuls/process/discover', json={
                 '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},
@@ -453,7 +453,7 @@ class TestHostAwareDiscovery:
         c = client_with_modules
         _login(c)
         out = "  nginx.service   loaded active running  Web server\n"
-        with patch('lib.host_runner.run', return_value=(out, '', 0)):
+        with patch('lib.hosts.runner.run', return_value=(out, '', 0)):
             r = c.post('/api/v1/watchfuls/service_status/discover', json={
                 '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},

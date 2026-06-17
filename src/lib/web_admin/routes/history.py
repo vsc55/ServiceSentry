@@ -137,7 +137,7 @@ def register(app, wa):
             if schema_field is not None:
                 field = schema_field
             else:
-                from lib.history_store import HistoryStore  # noqa: PLC0415
+                from lib.stores.history import HistoryStore  # noqa: PLC0415
                 field = HistoryStore.suggest_field(data)
 
         stats = wa._history.get_stats(

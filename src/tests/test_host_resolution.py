@@ -214,7 +214,7 @@ class TestDnsHostAware:
         assert isinstance(hp, dict) and hp.get('key') == 'ssh'
 
     def test_dns_in_module_host_fields(self):
-        from lib.host_profiles import module_host_fields
+        from lib.hosts.profiles import module_host_fields
         assert 'ssh_host' in module_host_fields().get('dns', [])
 
 

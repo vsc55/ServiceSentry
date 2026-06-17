@@ -111,7 +111,7 @@ class Watchful(ModuleBase):
     @classmethod
     def discover(cls, config=None) -> list:
         """Temperature sensors on the host (Linux thermal zones)."""
-        from lib import host_runner  # noqa: PLC0415
+        from lib.hosts import runner as host_runner  # noqa: PLC0415
         host = (config or {}).get('__host__') if isinstance(config, dict) else None
         out, _err, code = host_runner.run(host, _THERMAL_CMD, timeout=15)
         if code != 0 and not out:

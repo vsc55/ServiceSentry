@@ -16,8 +16,9 @@ import re
 
 from flask import jsonify, request, session
 
-from lib import host_probe, secret_manager, ssh_client
-from lib.host_migrate import apply_to_modules, build_migration_plan
+from lib import secret_manager, ssh_client
+from lib.hosts import probe as host_probe
+from lib.hosts.migrate import apply_to_modules, build_migration_plan
 
 SYSTEM_USER = 'system'
 

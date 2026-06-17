@@ -144,7 +144,7 @@ class Watchful(ModuleBase):
     # ── Discover (local autocomplete, or over SSH for a remote host) ──────────
     @classmethod
     def discover(cls, config=None) -> list:
-        from lib import host_runner  # noqa: PLC0415
+        from lib.hosts import runner as host_runner  # noqa: PLC0415
         host = (config or {}).get('__host__') if isinstance(config, dict) else None
         if host_runner.is_remote(host):
             os_ = str(host.get('os') or 'linux')

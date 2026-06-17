@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the host connection-profile catalog (lib/host_profiles.py)."""
+"""Tests for the host connection-profile catalog (lib/hosts/profiles.py)."""
 
-from lib.host_profiles import (
+from lib.hosts.profiles import (
     host_profiles_catalog,
     module_host_collections,
     module_host_fields,
@@ -61,7 +61,7 @@ class TestCatalog:
     def test_module_host_specs_preserves_datastore_ssh(self):
         # The migration relies on the module's own __host_profile__ (not the
         # catalog) so datastore's ssh tunnel fields are still recognised.
-        from lib.host_profiles import module_host_specs
+        from lib.hosts.profiles import module_host_specs
         specs = module_host_specs()
         protos = {p for p, _, _ in specs.get('datastore', [])}
         assert 'ssh' in protos   # the ssh tunnel is the host-owned profile

@@ -24,7 +24,7 @@ import os.path
 import shlex
 from enum import IntEnum
 
-from lib.dict_files_path import DictFilesPath
+from lib.modules.dict_files_path import DictFilesPath
 from lib.exe import Exec, ExecResult
 
 __all__ = ['RaidMdstat']

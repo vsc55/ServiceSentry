@@ -168,7 +168,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Combined key sets: core secrets + the host's built-in SSH secrets +
         # module-declared secret fields.
         try:
-            from lib.host_profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
+            from lib.hosts.profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
         except Exception:  # pylint: disable=broad-except
             CORE_SSH_SECRET_FIELDS = frozenset()
         self._secret_keys = (secret_manager.ENCRYPT_KEYS | CORE_SSH_SECRET_FIELDS
@@ -410,10 +410,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         directly nor fight over separate connections.
         """
         from lib.db             import get_connector, reconcile_module_tables  # noqa: PLC0415
-        from lib.users_store    import UsersStore      # noqa: PLC0415
-        from lib.groups_store   import GroupsStore     # noqa: PLC0415
-        from lib.sessions_store import SessionsStore   # noqa: PLC0415
-        from lib.roles_store    import RolesStore      # noqa: PLC0415
+        from lib.stores.users    import UsersStore      # noqa: PLC0415
+        from lib.stores.groups   import GroupsStore     # noqa: PLC0415
+        from lib.stores.sessions import SessionsStore   # noqa: PLC0415
+        from lib.stores.roles    import RolesStore      # noqa: PLC0415
         db_path = os.path.join(self._var_dir or self._config_dir, 'data.db')
         db_cfg  = (self._read_config_file(self._CONFIG_FILE) or {}).get('database')
         self._db_connector   = get_connector(db_cfg or None, default_sqlite_path=db_path)
@@ -422,7 +422,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._sessions_store = SessionsStore(self._db_connector)
         self._roles_store    = RolesStore(self._db_connector)
         # Host registry — connection profiles defined once, reused by modules.
-        from lib.hosts_store import HostsStore  # noqa: PLC0415
+        from lib.stores.hosts import HostsStore  # noqa: PLC0415
         self._hosts_store = HostsStore(
             self._db_connector,
             fernet=self._get_fernet(),
@@ -439,7 +439,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         if not self._var_dir:
             return None
         try:
-            from lib.history_store import HistoryStore, create as _create_history  # noqa: PLC0415
+            from lib.stores.history import HistoryStore, create as _create_history  # noqa: PLC0415
             connector = getattr(self, '_db_connector', None)
             if connector is not None:
                 return HistoryStore(connector)
@@ -456,7 +456,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         if not self._var_dir:
             return None
         try:
-            from lib.check_state_store import CheckStateStore, create as _create_cs  # noqa: PLC0415
+            from lib.stores.check_state import CheckStateStore, create as _create_cs  # noqa: PLC0415
             connector = getattr(self, '_db_connector', None)
             if connector is not None:
                 return CheckStateStore(connector)

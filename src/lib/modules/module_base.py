@@ -31,7 +31,7 @@ import lib.tools
 from lib import os_detect
 from lib.config import ConfigTypeReturn
 from lib.debug import DebugLevel
-from lib.dict_files_path import DictFilesPath
+from lib.modules.dict_files_path import DictFilesPath
 from lib.modules import ReturnModuleCheck
 from lib.object_base import ObjectBase
 

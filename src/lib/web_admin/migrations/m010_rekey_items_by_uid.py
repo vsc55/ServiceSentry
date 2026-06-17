@@ -35,7 +35,7 @@ def run(wa):
         pass
 
     try:
-        from lib.check_state_store import CheckStateStore  # noqa: PLC0415
+        from lib.stores.check_state import CheckStateStore  # noqa: PLC0415
         conn = getattr(wa, '_db_connector', None)
         if conn is not None:
             CheckStateStore(conn).clear()

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import hashlib
 
-from lib.host_profiles import module_host_fields, module_host_specs
+from lib.hosts.profiles import module_host_fields, module_host_specs
 
 _EMPTY = (None, '', False)
 

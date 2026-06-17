@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """ Lib package. """
 
-from lib.dict_files_path import DictFilesPath
+from lib.modules.dict_files_path import DictFilesPath
 from lib.exe import Exec, ExecResult
 from lib.mem import Mem
 from lib.mem_info import MemInfo

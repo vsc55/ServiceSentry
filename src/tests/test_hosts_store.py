@@ -9,7 +9,7 @@ secret values inside the profiles are encrypted at rest and decrypted on read.
 import pytest
 
 from lib.db import get_connector
-from lib.hosts_store import HostsStore
+from lib.stores.hosts import HostsStore
 
 _SECRET_KEYS = frozenset({'ssh_password', 'password', 'token', 'snmpv3_auth_key'})
 

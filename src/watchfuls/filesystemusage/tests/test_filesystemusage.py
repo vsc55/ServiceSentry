@@ -120,7 +120,7 @@ class TestDiscover:
     def test_discover_remote_df(self):
         from watchfuls.filesystemusage import Watchful
         host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
-        with patch('lib.host_runner.run', return_value=(_DF, '', 0)) as run:
+        with patch('lib.hosts.runner.run', return_value=(_DF, '', 0)) as run:
             names = {s['name'] for s in Watchful.discover({'__host__': host})}
         assert run.call_args.args[1] == 'df -P -k'
         assert '/' in names and '/data' in names

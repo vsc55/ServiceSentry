@@ -7,7 +7,7 @@ from flask import jsonify, redirect, render_template, session
 from lib.modules import ModuleBase
 from lib import os_detect
 from lib.debug import DebugLevel
-from lib.host_profiles import (
+from lib.hosts.profiles import (
     host_profiles_catalog,
     module_host_collections,
     module_host_fields,

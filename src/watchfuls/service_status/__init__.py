@@ -203,7 +203,7 @@ class Watchful(ModuleBase):
         for the Servers modal) the list is read over SSH; otherwise from THIS
         machine.
         """
-        from lib import host_runner  # noqa: PLC0415
+        from lib.hosts import runner as host_runner  # noqa: PLC0415
         host = (config or {}).get('__host__') if isinstance(config, dict) else None
         if host_runner.is_remote(host):
             return cls._discover_remote(host, str(host.get('os') or 'linux'))
@@ -233,7 +233,7 @@ class Watchful(ModuleBase):
 
     @classmethod
     def _discover_remote(cls, host, os_: str) -> list:
-        from lib import host_runner  # noqa: PLC0415
+        from lib.hosts import runner as host_runner  # noqa: PLC0415
         cmd = cls._DISCOVER_CMDS.get(os_) or cls._DISCOVER_CMDS['linux']
         out, _err, code = host_runner.run(host, cmd, timeout=15)
         if code != 0 and not out:

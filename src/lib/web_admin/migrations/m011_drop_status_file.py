@@ -3,7 +3,7 @@
 """Migration 011: remove the obsolete ``status.json`` file.
 
 The per-check working state now lives entirely in the ``check_state`` DB table
-(see :mod:`lib.check_state_store`).  After the m010 re-key the file's keys are
+(see :mod:`lib.stores.check_state`).  After the m010 re-key the file's keys are
 stale, so it is simply deleted; the monitor repopulates ``check_state`` on its
 next cycle.
 """

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the assisted host-migration planner (lib/host_migrate.py)."""
+"""Tests for the assisted host-migration planner (lib/hosts/migrate.py)."""
 
-from lib.host_migrate import build_migration_plan, apply_to_modules
+from lib.hosts.migrate import build_migration_plan, apply_to_modules
 
 
 def _by_addr(plan):

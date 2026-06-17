@@ -31,7 +31,7 @@ class _AuditMixin:
 
     def _init_audit_store(self) -> None:
         """Create the AuditStore on the shared connector and migrate audit.json."""
-        from lib.audit_store import AuditStore  # noqa: PLC0415
+        from lib.stores.audit import AuditStore  # noqa: PLC0415
         from lib.db import get_connector        # noqa: PLC0415
         connector = getattr(self, '_db_connector', None)
         if connector is None:
