@@ -155,11 +155,13 @@ class MySQLConnector(BaseConnector):
     # ── Read ──────────────────────────────────────────────────────────────────
 
     def fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:
+        self._trace_sql(sql)
         with self._conn().cursor() as cur:
             cur.execute(self._adapt_sql(sql), params)
             return cur.fetchall()
 
     def fetchone(self, sql: str, params: tuple = ()) -> tuple | None:
+        self._trace_sql(sql)
         with self._conn().cursor() as cur:
             cur.execute(self._adapt_sql(sql), params)
             return cur.fetchone()
@@ -167,12 +169,14 @@ class MySQLConnector(BaseConnector):
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def execute(self, sql: str, params: tuple = ()) -> int:
+        self._trace_sql(sql)
         conn = self._conn()
         with conn.cursor() as cur:
             cur.execute(self._adapt_sql(sql), params)
             return cur.rowcount
 
     def executemany(self, sql: str, params_list: list[tuple]) -> int:
+        self._trace_sql(sql)
         conn = self._conn()
         with conn.cursor() as cur:
             cur.executemany(self._adapt_sql(sql), params_list)

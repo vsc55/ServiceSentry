@@ -729,7 +729,8 @@ LANG = {
     'labels': {
         'enabled': 'Habilitado', 'threads': 'Hilos', 'timeout': 'Timeout (s)',
         'token': 'Token Bot', 'chat_id': 'Chat ID', 'group_messages': 'Agrupar mensajes',
-        'timer_check': 'Intervalo (s)', 'debug': 'Debug',
+        'timer_check': 'Intervalo (s)',
+        'log_level': 'Nivel de log',
         'list': 'Elementos', 'remote': 'Remotos', 'config': 'Configuración',
         'username': 'Usuario web', 'password': 'Contraseña',
         'pretty_name': 'Nombre para mostrar', 'lang': 'Idioma', 'dark_mode': 'Modo oscuro',
@@ -850,7 +851,7 @@ LANG = {
         'web_admin|force_https':         'Usar HTTPS al construir URLs públicas (enlaces de Telegram, enlace a la página de estado). Activar cuando la instancia se sirve por HTTPS a través de un proxy inverso. Independiente del ajuste Cookies seguras.',
         'web_admin|force_fqdn':          'Redirigir a la URL pública si se accede desde un hostname o IP diferente, conservando la ruta completa y los parámetros. Requiere que se haya configurado la URL pública.',
         'daemon|timer_check':           'Intervalo en segundos entre comprobaciones consecutivas de todos los módulos.',
-        'global|debug':                 'Activar el registro de depuración detallado. No recomendado en producción.',
+        'global|log_level':             'Nivel de detalle del log. "off" desactiva la depuración; si no, el nivel mínimo mostrado (debug < info < warning < error). No recomendado por encima de "off" en producción.',
         'telegram|token':               'Token de la API del Bot de Telegram. Crea un bot con @BotFather para obtenerlo.',
         'telegram|chat_id':             'ID numérico del chat de Telegram donde se enviarán las alertas.',
         'telegram|group_messages':      'Agrupar varias alertas consecutivas en un único mensaje de Telegram.',

@@ -250,8 +250,7 @@ class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'test_connection', 'list_databases'})
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
-                 if isinstance(v, dict) and 'default' in v}
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
 
     # If pymysql itself is missing the module cannot function at all → full disable.
     # If only optional backends are missing → warning badge, module stays usable.

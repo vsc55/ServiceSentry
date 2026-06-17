@@ -80,7 +80,7 @@ async function saveUserModal() {
     const lang = document.getElementById('umLang').value;
     const groups = [..._umSelectedGroups];
     if (!username) { showToast(t('username_required'), 'warning'); return; }
-    if (!_editingUser && Object.keys(usersData).some(k => k.toLowerCase() === username.toLowerCase())) {
+    if (!_editingUser && !_isUniqueName(username, usersData, k => k)) {
         showToast(tf('user_already_exists', username), 'warning'); return;
     }
     if (_editingUser) {
@@ -104,7 +104,7 @@ async function saveUserModal() {
                     if (!groupsData[g].members.includes(_editingUser)) groupsData[g].members.push(_editingUser);
                 }
             }
-            const _nowU = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+            const _nowU = _nowISO();
             usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email, dark_mode, updated_at: _nowU, updated_by: currentUser.username || '' };
             if (_editingUser === currentUser.username) {
                 currentUser.role = role;
@@ -122,7 +122,7 @@ async function saveUserModal() {
         const r = await apiPost('/api/v1/users', { username, password, role, display_name, lang, groups, email, enabled });
         if (r && r.status === 201) {
             showToast(t('user_created'));
-            const _nowC = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+            const _nowC = _nowISO();
             usersData[username] = { role, display_name: display_name || username, lang, groups, email, enabled, created_at: _nowC, updated_at: _nowC, updated_by: currentUser.username || '' };
             for (const g of groups) {
                 if (groupsData[g]) {

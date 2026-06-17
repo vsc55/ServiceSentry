@@ -25,7 +25,7 @@ Configuración global de la aplicación.
         "timer_check": 300
     },
     "global": {
-        "debug": false
+        "log_level": "off"
     },
     "telegram": {
         "token": "BOT_TOKEN_AQUÍ",
@@ -72,7 +72,7 @@ Configuración global de la aplicación.
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `global.debug` | bool | false | Habilitar salida de debug |
+| `global.log_level` | string | `"off"` | Verbosidad del log de depuración. `off` = sin debug; en otro caso el nivel mínimo mostrado: `debug` < `info` < `warning` < `error`. Seleccionable en **Configuración → Interfaz**. Sustituye al antiguo booleano `global.debug` (migrado automáticamente). |
 
 ### Sección `database`
 
@@ -325,22 +325,18 @@ Si `secret` no está vacío, el servidor añade la cabecera `<secret_header>: sh
 
 ---
 
-## status.json (auto-generado)
+## Estado de los checks (tabla `check_state`)
 
-Almacena el **último estado conocido** de cada comprobación. Se escribe en el directorio var automáticamente. No editar manualmente.
+El **último estado conocido** de cada comprobación se persiste en la tabla
+`check_state` de la base de datos (en `data.db` con SQLite), no en un fichero.
+Sobrevive a los reinicios, de modo que un cambio de estado no se vuelve a
+notificar al arrancar. Ver [check_state_store](architecture.md) para el detalle.
 
-```json
-{
-    "nombre_modulo": {
-        "clave_item": {
-            "status": true,
-            "other_data": { }
-        }
-    }
-}
-```
+> El antiguo fichero `status.json` quedó obsoleto y se elimina automáticamente
+> en una migración de arranque.
 
-Reinicia con `-c` / `--clear` para forzar re-notificación en el siguiente ciclo.
+Ejecuta con `-c` / `--clear` (`SS_CLEAR`) para vaciar el estado antes de empezar
+y forzar la re-notificación en el siguiente ciclo.
 
 ---
 
@@ -352,23 +348,35 @@ python3 main.py [opciones]
 
 ### Monitorización
 
-| Opción | Descripción |
-|--------|-------------|
-| `-d`, `--daemon` | Modo daemon (ejecución continua) |
-| `-t N`, `--timer N` | Intervalo entre comprobaciones en segundos (requiere `--daemon`) |
-| `-v`, `--verbose` | Modo verbose (nivel debug = null → muestra todo) |
-| `-p PATH`, `--path PATH` | Ruta personalizada al directorio de configuración |
-| `-c`, `--clear` | Limpia `status.json` antes de ejecutar |
+| Opción | Env var | Descripción |
+|--------|---------|-------------|
+| `-d`, `--daemon` | `SS_DAEMON` | Modo daemon (ejecución continua) |
+| `-t N`, `--timer N` | `SS_TIMER` | Intervalo entre comprobaciones en segundos (requiere `--daemon`) |
+| `-v`, `--verbose` | `SS_VERBOSE` | Modo verbose (debug ON, nivel `null` → muestra todo). Tiene prioridad sobre `global.log_level`. |
+| `--nocolor`, `--no-color` | `SS_NOCOLOR` / `NO_COLOR` | Desactiva los colores ANSI del debug (útil al redirigir a fichero). Los colores también se desactivan solos si la salida no es un terminal. |
+| `-p PATH`, `--path PATH` | `SS_CONFIG_DIR` | Ruta personalizada al directorio de configuración |
+| `-c`, `--clear` | `SS_CLEAR` | Limpia el estado de los checks antes de ejecutar |
 
 ### Panel web (`--web`)
 
-| Opción | Descripción |
-|--------|-------------|
-| `--web` | Arranca el panel de administración web en lugar del modo monitorización |
-| `--web-host HOST` | IP/hostname donde escucha Flask (por defecto `0.0.0.0`) |
-| `--web-port PORT` | Puerto TCP del panel web (por defecto `8080` o el valor de `config.json`) |
+| Opción | Env var | Descripción |
+|--------|---------|-------------|
+| `--web` | `SS_WEB` | Arranca el panel de administración web en lugar del modo monitorización |
+| `--web-host HOST` | `SS_WEB_HOST` | IP/hostname donde escucha Flask (por defecto `0.0.0.0`) |
+| `--web-port PORT` | `SS_WEB_PORT` | Puerto TCP del panel web (por defecto `8080` o el valor de `config.json`) |
 
 > Los valores `--web-host` y `--web-port` tienen prioridad sobre `web_admin.host` y `web_admin.port` de `config.json`.
+
+### Variables de entorno
+
+Cada argumento del CLI puede darse también por **variable de entorno** `SS_*` (práctico para Docker, donde los flags son incómodos). El flag explícito tiene prioridad sobre el env. Los booleanos se activan con `1`/`true`/`yes`/`on`.
+
+```bash
+# Equivalente a:  python3 main.py --web --web-port 9090 --verbose
+SS_WEB=true SS_WEB_PORT=9090 SS_VERBOSE=1 python3 main.py
+```
+
+Esto es independiente de las variables de entorno que sobreescriben **campos de `config.json`** (`WA_*`, `CHECK_INTERVAL`, `TELEGRAM_*`) — ver [docker.md](docker.md). Aquellas configuran valores en runtime; las `SS_*` controlan cómo se lanza el proceso.
 
 ### Ejemplos
 
@@ -494,3 +502,29 @@ El nivel configurado actúa como **filtro mínimo**. Con `level=info`, se muestr
 ### Instancia compartida
 
 `ObjectBase.debug` es un atributo de **clase** (no de instancia). Todos los objetos que heredan de `ObjectBase` comparten la misma instancia de `Debug`. Al cambiar el nivel en uno, cambia para todos.
+
+### Configuración del nivel
+
+El nivel mínimo a mostrar se controla con **`global.log_level`** (`off` / `debug` / `info` / `warning` / `error`), seleccionable en **Configuración → Interfaz**:
+
+- `off` → debug desactivado.
+- cualquier otro nombre → debug activado, usando ese nivel como filtro mínimo.
+
+El flag `--verbose` (`SS_VERBOSE`) fuerza debug ON con nivel `null` (todo) y tiene prioridad sobre `global.log_level`. El cambio en la UI se aplica **al guardar** (sin reinicio), y el scheduler lo re-aplica en cada ciclo.
+
+### Prefijo y colores
+
+Cada línea lleva el prefijo del nivel, alineado: `[DEBUG  ]`, `[INFO   ]`, `[WARNING]`, `[ERROR  ]`.
+
+Si la salida es un terminal (TTY), cada nivel se colorea (gris/cian/amarillo/rojo). Los colores se desactivan automáticamente al redirigir a fichero/pipe, o explícitamente con `--nocolor` (`SS_NOCOLOR` o el estándar `NO_COLOR`). En Windows se habilita el procesamiento ANSI de la consola automáticamente.
+
+### Qué se traza (con `log_level=debug`)
+
+Capas transversales que cubren todas las áreas:
+
+- **HTTP** — una línea por petición de **cualquier** endpoint: método, ruta, función handler, claves de entrada (query + body, **nunca valores** → sin secretos), estado, motivo del rechazo (4xx/5xx), tiempo y tamaño.
+- **SQL** — cada consulta a BD (statement, **nunca los params**).
+- **Config** — lecturas de `config.json` (cache miss) y guardado paso a paso.
+- **Dominio** — login/auth (LDAP/local/SSO), notificaciones (canales/SMTP/webhook), scheduler (ciclo/módulo/ítem), inicialización de DB y Telegram.
+
+Nada de esto registra contraseñas, tokens ni secretos.

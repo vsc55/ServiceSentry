@@ -670,11 +670,11 @@ self.dict_return.set(key, status, message, send_msg=False, other_data=None)
 
 | Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
-| `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en `status.json` |
+| `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en la tabla `check_state` |
 | `status` | bool | `True` = OK, `False` = Error |
 | `message` | str | Mensaje para Telegram. Soporta formato Markdown: `*negrita*`, `_cursiva_`, `` `código` ``, `[texto](url)` |
 | `send_msg` | bool | `False` (por defecto) — no enviar el mensaje automáticamente. Usa `send_message()` después de `check_status()` para controlar cuándo se envía |
-| `other_data` | dict | Datos extra que se almacenan en `status.json` junto al resultado. Accesibles en la página pública `/status` bajo la clave `extra` de cada ítem |
+| `other_data` | dict | Datos extra que se almacenan en `check_state` junto al resultado. Accesibles en la página pública `/status` bajo la clave `extra` de cada ítem |
 
 **`other_data` en la API de estado:** lo que pases en `other_data` aparece como `extra` en la respuesta de la página `/status`:
 
@@ -727,7 +727,7 @@ if self.check_status(ok, self.name_module, 'Mi Servidor'):
     self.send_message(s_message, ok)
 ```
 
-**Primera ejecución:** si el ítem no existe aún en `status.json`, se asume que el estado anterior era `None`. Como `None != cualquier_bool`, el primer ciclo **siempre** devuelve `True` y notifica — independientemente de si el estado es OK o Error. Esto garantiza que al arrancar el sistema se recibe un informe inicial del estado actual.
+**Primera ejecución:** si el ítem no existe aún en `check_state`, se asume que el estado anterior era `None`. Como `None != cualquier_bool`, el primer ciclo **siempre** devuelve `True` y notifica — independientemente de si el estado es OK o Error. Esto garantiza que al arrancar el sistema se recibe un informe inicial del estado actual.
 
 #### `check_status_custom(status, key, status_msg) -> bool`
 

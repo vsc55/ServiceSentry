@@ -502,8 +502,7 @@ class Watchful(ModuleBase):
 
     # Legacy compat alias so ModuleBase helpers that expect _DEFAULTS still work
     _DEFAULTS        = _CHECK_DEFAULTS
-    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
-                        if isinstance(v, dict) and 'default' in v}
+    _MODULE_DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['__module__'])
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)

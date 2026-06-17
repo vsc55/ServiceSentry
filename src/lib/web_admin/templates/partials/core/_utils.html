@@ -7,6 +7,18 @@
 function uid() { return 'u' + (++_uid); }
 function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
+/** Current UTC time as a second-precision ISO-8601 string (e.g. 2026-06-16T10:20:30Z). */
+function _nowISO() { return new Date().toISOString().replace(/\.\d+Z$/, 'Z'); }
+
+/** True if *value* (case-insensitive) is not already used in *collection*.
+ *  getName(key, item) -> the name to compare (e.g. item.name, or the key itself);
+ *  excludeKey skips one entry (so an item keeps its own name on edit). */
+function _isUniqueName(value, collection, getName, excludeKey = null) {
+    const v = String(value).toLowerCase();
+    return !Object.entries(collection).some(([k, item]) =>
+        k !== excludeKey && String(getName(k, item) || '').toLowerCase() === v);
+}
+
 function esc(s) {
     const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML;
 }

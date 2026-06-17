@@ -250,7 +250,7 @@ class TestCheckStatePersistence:
 
 class TestFailStreak:
     """ModuleBase.fail_streak persists in the monitor status store and flags
-    the monitor so status.json is saved even without a status flip."""
+    the monitor so the check state is persisted even without a status flip."""
 
     def test_streak_persists_and_marks_dirty(self, monitor):
         _make_package_module(monitor.dir_modules, "streaky")

@@ -267,7 +267,7 @@ El permiso requerido se indica entre paréntesis.
 |--------|------|---------|-------------|
 | `GET` | `/api/v1/modules` | `modules_view` | Obtener todas las configuraciones de módulos |
 | `PUT` | `/api/v1/modules` | `modules_edit` | Guardar todas las configuraciones de módulos |
-| `GET` | `/api/v1/modules/status` | `checks_view` o `checks_run` | Obtener el contenido de `status.json` (solo lectura) |
+| `GET` | `/api/v1/modules/status` | `checks_view` o `checks_run` | Obtener el estado actual de los checks (tabla `check_state`, solo lectura) |
 | `GET` | `/api/v1/modules/overview` | auth | Obtener resumen del dashboard (módulos, checks, sesiones, usuarios, grupos, roles, últimos eventos) |
 
 ### Servers (registro de hosts)

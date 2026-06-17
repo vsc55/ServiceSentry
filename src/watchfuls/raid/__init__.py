@@ -27,7 +27,6 @@ parsed with :meth:`lib.linux.RaidMdstat.parse_lines`.  To watch the monitor's
 own machine, add a host of kind *local*.
 """
 
-import concurrent.futures
 import json
 import os
 import shlex
@@ -44,11 +43,9 @@ class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
 
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
-                 if isinstance(v, dict) and 'default' in v}
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
 
-    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
-                        if isinstance(v, dict) and 'default' in v}
+    _MODULE_DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['__module__'])
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -60,17 +57,7 @@ class Watchful(ModuleBase):
 
         items = [(k, v) for k, v in self.get_conf('list', {}).items()
                  if isinstance(v, dict) and v.get('enabled', self._DEFAULTS['enabled'])]
-        threads = self.get_conf('threads', self._MODULE_DEFAULTS['threads'])
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            future_to_key = {executor.submit(self._check_item, k, v): k for k, v in items}
-            for future in concurrent.futures.as_completed(future_to_key):
-                key = future_to_key[future]
-                try:
-                    future.result()
-                except Exception as exc:  # pylint: disable=broad-except
-                    label = self._label(key)
-                    self.dict_return.set(f'{key}', False, f'RAID: {label} - *Error: {exc}* 💥')
-                    self._debug(f"{label} - Exception: {exc}", DebugLevel.error)
+        self.run_parallel(items, self._check_item, 'RAID')
         super().check()
         return self.dict_return
 

@@ -141,11 +141,7 @@ async function saveGroupModal() {
         return;
     }
     // Uniqueness check — case-insensitive (matches backend validation)
-    const labelLower = label.toLowerCase();
-    const duplicate = Object.entries(groupsData).find(([uid, gd]) =>
-        uid !== _editingGroup && (gd.name || '').toLowerCase() === labelLower
-    );
-    if (duplicate) {
+    if (!_isUniqueName(label, groupsData, (k, gd) => gd.name, _editingGroup)) {
         _gmLabelInvalid(tf('group_already_exists', label));
         return;
     }
@@ -173,7 +169,7 @@ async function saveGroupModal() {
                     if (!usersData[u].groups.includes(_editingGroup)) usersData[u].groups.push(_editingGroup);
                 }
             }
-            const _nowIso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+            const _nowIso = _nowISO();
             groupsData[_editingGroup] = {
                 ...groupsData[_editingGroup], roles, members, enabled,
                 updated_at: _nowIso,
@@ -191,7 +187,7 @@ async function saveGroupModal() {
             const uid = r.data?.uid;
             showToast(t('group_created'));
             if (uid) {
-                const _nowIso2 = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+                const _nowIso2 = _nowISO();
                 groupsData[uid] = {
                     uid, builtin: false, name: label, description, roles, members, enabled,
                     created_at: _nowIso2, updated_at: _nowIso2,

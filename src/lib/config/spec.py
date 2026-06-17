@@ -145,7 +145,9 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('daemon|web_autostart', bool, False),
 
     # ══ global ═══════════════════════════════════════════════════════════════
-    Cfg('global|debug', bool, False, no_rule=True),
+    # Log verbosity: 'off' disables debug output; otherwise a DebugLevel name
+    # ('debug'/'info'/'warning'/'error') used as the minimum level shown.
+    Cfg('global|log_level', str, 'off', no_rule=True),
 
     # ══ database (port is driver-specific → no single default) ═══════════════
     Cfg('database|driver', str, 'sqlite', no_rule=True),

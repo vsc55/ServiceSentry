@@ -13,6 +13,7 @@ import os
 import uuid
 
 from lib.config.spec import cfg_default, cfg_get
+from lib.debug import DebugLevel
 
 _HAS_AUTHLIB = False
 try:
@@ -135,6 +136,7 @@ def sync_user(wa, userinfo: dict) -> dict | None:
     sub = userinfo.get('sub', '')
 
     if not username:
+        wa._dbg("> Auth/OIDC >> no username claim resolved; rejecting", DebugLevel.warning)
         return None
 
     role_name = _map_role(groups, group_role_map)
@@ -145,6 +147,8 @@ def sync_user(wa, userinfo: dict) -> dict | None:
     existing = wa._users.get(username)
     if existing is None:
         if not auto_create:
+            wa._dbg(f"> Auth/OIDC >> user {username!r} unknown and auto-create off; rejecting",
+                    DebugLevel.info)
             return None
         user = {
             'uid':            str(uuid.uuid4()),
@@ -167,6 +171,8 @@ def sync_user(wa, userinfo: dict) -> dict | None:
         user['role']           = role_uid  # re-sync on every login
 
     wa._persist_users()
+    wa._dbg(f"> Auth/OIDC >> {'created' if existing is None else 'updated'} user={username!r} "
+            f"role={role_name} groups={len(groups)}", DebugLevel.info)
     return user
 
 

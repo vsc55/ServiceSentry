@@ -31,11 +31,9 @@ macOS, ``sysctl``/``swapinfo`` on FreeBSD) and compared with per-check
 thresholds.
 """
 
-import concurrent.futures
 import json
 import os
 
-from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
@@ -57,11 +55,9 @@ class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
 
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
-                 if isinstance(v, dict) and 'default' in v}
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
 
-    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
-                        if isinstance(v, dict) and 'default' in v}
+    _MODULE_DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['__module__'])
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -71,18 +67,7 @@ class Watchful(ModuleBase):
             return self.dict_return
         items = [(k, v) for k, v in self.get_conf('list', {}).items()
                  if isinstance(v, dict) and v.get('enabled', self._DEFAULTS['enabled'])]
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            futures = {executor.submit(self._mem_check, k, v): k for k, v in items}
-            for future in concurrent.futures.as_completed(futures):
-                key = futures[future]
-                try:
-                    future.result()
-                except Exception as exc:  # pylint: disable=broad-except
-                    self._debug(f"ram_swap: {self.item_label(key)} - Exception: {exc}", DebugLevel.error)
-                    _raw = self.get_conf('list', {}).get(key, {})
-                    _lbl = (_raw.get('label') or key) if isinstance(_raw, dict) else key
-                    self.dict_return.set(key, False, f'Memory: {_lbl} - *Error: {exc}* 💥')
+        self.run_parallel(items, self._mem_check, 'Memory')
         super().check()
         return self.dict_return
 

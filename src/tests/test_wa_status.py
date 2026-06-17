@@ -224,7 +224,7 @@ class TestPublicStatusPage:
         assert b"/login" in html
 
     def test_status_empty_when_no_status_file(self, config_dir, tmp_path):
-        """Page renders without error when no status.json exists."""
+        """Page renders without error when no check state exists."""
         d = tmp_path / "emptyvar"
         d.mkdir()
         wa = WebAdmin(config_dir, "admin", "secret", str(d),

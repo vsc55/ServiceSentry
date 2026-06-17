@@ -110,8 +110,8 @@ class Main(ObjectBase):
             if not self.cfg_general.is_exist_conf(['daemon', 'timer_check']):
                 self.cfg_general.set_conf(['daemon', 'timer_check'], cfg_default('daemon|timer_check'))
 
-            if not self.cfg_general.is_exist_conf(['global', 'debug']):
-                self.cfg_general.set_conf(['global', 'debug'], cfg_default('global|debug'))
+            if not self.cfg_general.is_exist_conf(['global', 'log_level']):
+                self.cfg_general.set_conf(['global', 'log_level'], cfg_default('global|log_level'))
 
             return True
         return False
@@ -137,13 +137,13 @@ class Main(ObjectBase):
         """
 
         if self._verbose:
+            # CLI --verbose forces debug on regardless of config.
             self.debug.enabled = True
             self.debug.level = DebugLevel.null
         else:
-            self.debug.level = DebugLevel.info
-            # TODO: Actualizar configuracin para que use level
-            self.debug.enabled = True
-            # self.debug.enabled = self.cfg_general.get_conf(['global', 'debug'], self.debug.enabled)
+            self.debug.set_from_config(self.cfg_general.get_conf(
+                ['global', 'log_level'], cfg_default('global|log_level')
+            ))
 
         if self._timer_check_force:
             self._timer_check = self._timer_check_force
@@ -437,9 +437,39 @@ def arg_check_timer(timer_check: str) -> int:
     raise argparse.ArgumentTypeError(f"{timer_check} is not a valid timer")
 
 
+def _env_str(name: str, default=None):
+    """Environment fallback for a string CLI argument."""
+    v = os.environ.get(name)
+    return v if v not in (None, '') else default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Environment fallback for a boolean (store_true) CLI argument."""
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _env_int(name: str, default=None):
+    """Environment fallback for an integer CLI argument."""
+    v = os.environ.get(name)
+    if v in (None, ''):
+        return default
+    try:
+        return int(v)
+    except ValueError:
+        return default
+
+
 def args_init() -> argparse.Namespace:
-    """
-    Initializes and parses command-line arguments.
+    """Initialize and parse command-line arguments.
+
+    Every argument falls back to an ``SS_*`` environment variable (handy for
+    Docker, where flags are awkward): e.g. ``SS_WEB=true``, ``SS_WEB_PORT=8080``,
+    ``SS_CONFIG_DIR=/config``, ``SS_VERBOSE=1``, ``SS_NOCOLOR=1``.  Config.json
+    fields keep their own env vars (``WA_*``, ``CHECK_INTERVAL``, ``TELEGRAM_*``).
+    The standard ``NO_COLOR`` env var is also honoured.
 
     Returns:
         argparse.Namespace: The parsed command-line arguments.
@@ -453,70 +483,80 @@ def args_init() -> argparse.Namespace:
 
     ap.add_argument(
         '-c', '--clear',
-        default=False,
+        default=_env_bool('SS_CLEAR', False),
         action="store_true",
         dest="clear_status",
-        help="clear the status file (status.json) before starting",
+        help="clear the status file (status.json) before starting (env: SS_CLEAR)",
     )
     ap.add_argument(
         '-d', '--daemon',
-        default=False,
+        default=_env_bool('SS_DAEMON', False),
         action="store_true",
         dest="daemon_mode",
-        help="run in daemon mode (continuous monitoring loop)",
+        help="run in daemon mode (continuous monitoring loop) (env: SS_DAEMON)",
     )
     ap.add_argument(
         '-t', '--timer',
-        default=None,
+        default=_env_int('SS_TIMER', None),
         type=arg_check_timer,
         metavar='SECONDS',
         dest="timer_check",
-        help="check interval in seconds for daemon mode (default: config file value)",
+        help="check interval in seconds for daemon mode (default: config file value) (env: SS_TIMER)",
     )
     ap.add_argument(
         '-v', '--verbose',
-        default=False,
+        default=_env_bool('SS_VERBOSE', False),
         action="store_true",
         dest="verbose",
-        help="enable verbose/debug output",
+        help="enable verbose/debug output (env: SS_VERBOSE)",
+    )
+    ap.add_argument(
+        '--nocolor', '--no-color',
+        default=_env_bool('SS_NOCOLOR', False) or bool(os.environ.get('NO_COLOR')),
+        action="store_true",
+        dest="nocolor",
+        help="disable ANSI colours in debug output (env: SS_NOCOLOR / NO_COLOR)",
     )
     ap.add_argument(
         '-p', '--path',
-        default=None,
+        default=_env_str('SS_CONFIG_DIR', None),
         type=arg_check_dir_path,
         metavar='DIR',
         dest="path",
-        help="path to the configuration files directory",
+        help="path to the configuration files directory (env: SS_CONFIG_DIR)",
     )
 
     # Web admin arguments
     web_group = ap.add_argument_group('web admin')
     web_group.add_argument(
         '--web',
-        default=False,
+        default=_env_bool('SS_WEB', False),
         action="store_true",
         dest="web_mode",
-        help="start the web administration panel instead of monitoring",
+        help="start the web administration panel instead of monitoring (env: SS_WEB)",
     )
     web_group.add_argument(
         '--web-port',
-        default=None,
+        default=_env_int('SS_WEB_PORT', None),
         type=int,
         metavar='PORT',
         dest="web_port",
-        help="port for the web admin panel (default: 8080 or config.json)",
+        help="port for the web admin panel (default: 8080 or config.json) (env: SS_WEB_PORT)",
     )
     web_group.add_argument(
         '--web-host',
-        default=None,
+        default=_env_str('SS_WEB_HOST', None),
         metavar='HOST',
         dest="web_host",
-        help="host/IP to bind the web admin panel (default: 0.0.0.0)",
+        help="host/IP to bind the web admin panel (default: 0.0.0.0) (env: SS_WEB_HOST)",
     )
     return ap.parse_args()
 
 if __name__ == "__main__":
     _args = args_init()
+    if getattr(_args, 'nocolor', False):
+        from lib.debug import Debug as _Debug
+        _Debug.set_color(False)
     if getattr(_args, 'web_mode', False):
         start_web(_args)
     else:

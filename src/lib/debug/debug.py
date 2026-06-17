@@ -21,15 +21,65 @@
 """ Debug class for debugging purposes. """
 
 import pprint
+import sys
 import traceback
 
 from lib.debug.debug_level import DebugLevel
 
 __all__ = ['Debug']
 
+# ANSI colour per level (applied only when stdout is a TTY).
+_ANSI = {
+    DebugLevel.debug:     '\033[90m',    # grey  — recedes (verbose noise)
+    DebugLevel.info:      '\033[36m',    # cyan
+    DebugLevel.warning:   '\033[33m',    # yellow
+    DebugLevel.error:     '\033[31m',    # red
+    DebugLevel.emergency: '\033[1;31m',  # bold red
+}
+_ANSI_RESET = '\033[0m'
+
+
+def _enable_windows_ansi() -> None:
+    """Best-effort: enable ANSI escape processing on legacy Windows consoles."""
+    if sys.platform != 'win32':
+        return
+    try:
+        import ctypes  # noqa: PLC0415
+        kernel32 = ctypes.windll.kernel32
+        # STD_OUTPUT_HANDLE = -11; ENABLE_PROCESSED_OUTPUT(1) |
+        # ENABLE_WRAP_AT_EOL_OUTPUT(2) | ENABLE_VIRTUAL_TERMINAL_PROCESSING(4) = 7
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
+_enable_windows_ansi()
+
 
 class Debug:
-    """ Debug class. """
+    """Leveled debug printer.
+
+    ``print(msg, msg_level)`` shows the message only when debug is enabled and
+    ``msg_level >= level`` (i.e. ``level`` is the *minimum* level shown).  The
+    configured ``level`` comes from ``global|log_level`` (see
+    :meth:`set_from_config`).
+
+    Level convention used across the codebase:
+      * ``debug``   — verbose per-item / per-command tracing (values, commands).
+      * ``info``    — normal operational milestones (cycle start/end, module run).
+      * ``warning`` — recoverable issues (item skipped, host unreachable, timeout).
+      * ``error``   — failures (check raised, command failed).
+      * ``emergency`` — critical, must always surface.
+    """
+
+    # Global colour switch.  Colours are emitted only when this is True AND the
+    # output is a TTY.  Disabled via the ``--nocolor`` CLI flag.
+    _color = True
+
+    @classmethod
+    def set_color(cls, enabled: bool) -> None:
+        """Enable/disable ANSI colour output globally (e.g. ``--nocolor``)."""
+        cls._color = bool(enabled)
 
     def __init__(self, enable: bool = True, level: DebugLevel = DebugLevel.info):
         self.enabled = enable
@@ -55,6 +105,23 @@ class Debug:
         """ Set the debug level. """
         self._level = value
 
+    # Names offered as the configurable log level ('off' disables output).
+    CONFIG_LEVELS = ('off', 'debug', 'info', 'warning', 'error')
+
+    def set_from_config(self, level_name) -> None:
+        """Configure ``enabled`` + ``level`` from a config string.
+
+        ``'off'`` (or empty/unknown-as-off) disables debug output; any other
+        :class:`DebugLevel` name (``'debug'``, ``'info'``, ``'warning'``,
+        ``'error'``) enables it and sets that as the minimum level shown.
+        """
+        name = str(level_name or 'off').strip().lower()
+        if name in ('off', 'null', '', 'false', 'none'):
+            self.enabled = False
+            return
+        self.enabled = True
+        self.level = DebugLevel[name] if name in DebugLevel.__members__ else DebugLevel.info
+
     def print(
             self,
             message,
@@ -68,22 +135,29 @@ class Debug:
         if not force and (not self.enabled or self.level > msg_level):
             return
 
+        prefix = f"[{msg_level.name.upper():<7}]"
+        color = _ANSI.get(msg_level, '') if (Debug._color and sys.stdout.isatty()) else ''
         if isinstance(message, str):
-            print(message)
+            line = f"{prefix} {message}"
+            print(f"{color}{line}{_ANSI_RESET}" if color else line)
         else:
+            print(f"{color}{prefix}{_ANSI_RESET}" if color else prefix)
             pprint.pprint(message)
 
     @staticmethod
     def exception(ex=None):
         """ Print the exception with traceback. """
-        msg_print = 'Exception in user code:\n'
+        msg_print = f"[{DebugLevel.error.name.upper():<7}] Exception in user code:\n"
         msg_print += f"{'-'*60}\n"
         if ex:
             msg_print += f'Exception: {ex}\n'
             msg_print += f"{'-'*60}\n"
         msg_print += f'{traceback.format_exc()}\n'
         msg_print += f"{'-'*60}\n"
-        print(msg_print)
+        if Debug._color and sys.stdout.isatty():
+            print(f"{_ANSI[DebugLevel.error]}{msg_print}{_ANSI_RESET}")
+        else:
+            print(msg_print)
 
     def debug_obj(self, name_module, obj_debug, obj_info="Data Object"):
         """ Print the debug information of an object. """

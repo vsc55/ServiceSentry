@@ -938,7 +938,7 @@ Verifica el comportamiento de la ruta `/status` (acceso público vs. autenticado
 | `test_status_has_auto_refresh_meta` | Contador de refresco visible | Elemento `countdown` en HTML | Si no aparece |
 | `test_status_custom_refresh_secs` | `status_refresh_secs=30` | El valor `30` aparece en el HTML | Si usa otro valor |
 | `test_status_config_updates_refresh_secs` | Cambio en runtime de `status_refresh_secs` | Nuevo valor reflejado en el HTML | Si sigue el anterior |
-| `test_status_empty_when_no_status_file` | Sin archivo `status.json` | `200` sin tarjetas de módulo | Si falla o muestra módulos |
+| `test_status_empty_when_no_status_file` | Sin estado previo (tabla `check_state` vacía) | `200` sin tarjetas de módulo | Si falla o muestra módulos |
 | `test_status_hidden_from_anonymous_when_disabled` | `public_status=False` + usuario anónimo | `404` | Si devuelve `200` |
 | `test_status_visible_to_logged_in_when_disabled` | `public_status=False` + usuario logueado | `200` | Si devuelve `404` |
 | `test_status_shows_check_names` | Nombres de checks visibles | Nombre del check en HTML | Si no aparece |

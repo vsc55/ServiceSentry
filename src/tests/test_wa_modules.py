@@ -105,7 +105,7 @@ class TestApiStatus:
         assert resp.get_json() == {}
 
     def test_get_empty_when_status_missing(self, config_dir, tmp_path):
-        """var_dir exists but status.json does not."""
+        """var_dir exists but no check state present."""
         empty_var = str(tmp_path / "empty_var")
         os.makedirs(empty_var, exist_ok=True)
         wa = WebAdmin(config_dir, "admin", "pass", var_dir=empty_var)
@@ -161,7 +161,7 @@ class TestApiOverview:
         assert modules["web"]["items"] == 1
 
     def test_status_counts(self, client):
-        """status.json has 1 check (ping/192.168.1.1 OK)."""
+        """check_state has 1 check (ping/192.168.1.1 OK)."""
         _login(client)
         status = client.get("/api/v1/modules/overview").get_json()["status"]
         assert status["total"] == 1

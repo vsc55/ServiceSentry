@@ -19,6 +19,7 @@ import threading
 import time
 
 from lib.config.spec import cfg_get
+from lib.debug import DebugLevel
 
 
 class _DaemonMixin:
@@ -144,6 +145,9 @@ class _DaemonMixin:
         reused so state-change detection works correctly across cycles.
         """
         monitor = self._daemon_get_monitor()
+        # Apply the global|log_level config to the shared debug each cycle so
+        # changing it in the UI takes effect without a restart.
+        monitor.debug.set_from_config(cfg_get(self._config_section('global'), 'global|log_level'))
         # _run_checks normally creates its own Monitor; bypass that by calling
         # the lower-level helpers directly on our persistent instance.
         import threading as _threading  # pylint: disable=import-outside-toplevel
@@ -158,7 +162,11 @@ class _DaemonMixin:
 
         module_names = monitor._get_enabled_modules()
         if not module_names:
+            monitor.debug.print("> Daemon >> Cycle skipped: no enabled modules",
+                                 DebugLevel.info)
             return results, errors
+        monitor.debug.print(
+            f"> Daemon >> Cycle start: {len(module_names)} module(s)", DebugLevel.info)
 
         import concurrent.futures  # pylint: disable=import-outside-toplevel
         _enabled_set = set(module_names)
@@ -194,13 +202,22 @@ class _DaemonMixin:
                         }
                         for key in result_data.list
                     }
+                    _failed = sum(1 for k in items if items[k]['status'] is not True)
+                    monitor.debug.print(
+                        f"> Daemon > {mod_name} >> {len(items)} item(s), {_failed} not OK",
+                        DebugLevel.debug)
                     return mod_name, items, None
                 if mod_name in _enabled_set and not _has_items(mod_name):
                     return mod_name, {}, None
+                monitor.debug.print(f"> Daemon > {mod_name} >> check failed",
+                                    DebugLevel.warning)
                 return mod_name, None, f'{mod_name}: check failed'
             except Exception as exc:  # pylint: disable=broad-except
                 if mod_name in _enabled_set and not _has_items(mod_name):
                     return mod_name, {}, None
+                monitor.debug.print(
+                    f"> Daemon > {mod_name} >> {type(exc).__name__}: {exc}",
+                    DebugLevel.error)
                 return mod_name, None, f'{mod_name}: {type(exc).__name__}: {exc}'
 
         # Warm imports sequentially first so the dns module's dnspython load (which
@@ -242,6 +259,13 @@ class _DaemonMixin:
             for _mod, _key, _status, _data in _hist_records:
                 self._history.record(_mod, _key, _status, _data)
 
+        if errors:
+            monitor.debug.print(
+                f"> Daemon >> Cycle end: {len(results)} ok, {len(errors)} error(s) — "
+                + '; '.join(errors), DebugLevel.warning)
+        else:
+            monitor.debug.print(
+                f"> Daemon >> Cycle end: {len(results)} ok", DebugLevel.info)
         return results, errors
 
     # ── Loop ──────────────────────────────────────────────────────────────────
@@ -274,6 +298,9 @@ class _DaemonMixin:
                     finally:
                         self._check_lock.release()
             except Exception as exc:  # pylint: disable=broad-except
+                _mon = self._daemon_monitor
+                if _mon is not None and _mon.debug.enabled:
+                    _mon.debug.exception(exc)
                 self._audit_system('daemon_error', {'error': str(exc)})
                 self._daemon_monitor = None   # reset on error so next cycle starts fresh
 

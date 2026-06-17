@@ -9,6 +9,7 @@ from flask import jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ...constants import BUILTIN_ROLE_UIDS, SUPPORTED_LANGS, SYSTEM_USER
+from .._helpers import touch_entity, track_change
 
 
 def register(app, wa):
@@ -185,10 +186,7 @@ def register(app, wa):
             new_dn = data['display_name'].strip() or username
             if len(new_dn) > wa._MAX_DISPLAY_NAME_LEN:
                 return jsonify({'error': wa._t('display_name_too_long', wa._MAX_DISPLAY_NAME_LEN)}), 400
-            old_dn = user.get('display_name', username)
-            if old_dn != new_dn:
-                changes.append({'field': 'display_name', 'old': old_dn, 'new': new_dn})
-            user['display_name'] = new_dn
+            track_change(changes, user, 'display_name', new_dn, old_default=username)
         has_password_reset = False
         if 'password' in data and data['password']:
             if _is_sso:
@@ -203,19 +201,12 @@ def register(app, wa):
             user['password_hash'] = generate_password_hash(data['password'])
             has_password_reset = True
         if 'email' in data and not _is_sso:
-            new_email = data['email'].strip()
-            old_email = user.get('email', '')
-            if old_email != new_email:
-                changes.append({'field': 'email', 'old': old_email, 'new': new_email})
-            user['email'] = new_email
+            track_change(changes, user, 'email', data['email'].strip())
         if 'lang' in data:
             lang = data['lang']
             if lang != '' and lang not in SUPPORTED_LANGS:
                 return jsonify({'error': wa._t('invalid_lang', lang)}), 400
-            old_lang = user.get('lang', '')
-            if old_lang != lang:
-                changes.append({'field': 'lang', 'old': old_lang, 'new': lang})
-            user['lang'] = lang
+            track_change(changes, user, 'lang', lang)
         if 'dark_mode' in data:
             dm = data['dark_mode']
             if dm is not None and not isinstance(dm, bool):
@@ -257,8 +248,7 @@ def register(app, wa):
                 user['enabled'] = new_enabled
                 if not new_enabled:
                     wa._revoke_user_sessions(username)
-        user['updated_at'] = datetime.now(timezone.utc).isoformat()
-        user['updated_by'] = session.get('username', SYSTEM_USER)
+        touch_entity(user)
         wa._persist_users()
         if changes:
             wa._audit('user_updated', detail={

@@ -5,10 +5,11 @@
 import copy
 import uuid
 
-from flask import jsonify, session
+from flask import jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from ..constants import SUPPORTED_LANGS, coerce_lang
+from lib.debug import DebugLevel
 from lib.config.spec import (
     CFG_BY_PATH, int_rules, bool_rules, json_dict_fields, admin_only_fields,
     normalize_url, cfg_default, cfg_validate, frontend_schema,
@@ -49,21 +50,6 @@ def register(app, wa):
     # A non-admin with config_edit must not be able to weaken these.
     # Derived from the central registry (fields flagged admin_only=True).
     _ADMIN_ONLY_FIELDS = frozenset(admin_only_fields())
-
-    def _requester_is_admin() -> bool:
-        """True if the requester is an admin — directly or via group membership."""
-        user      = wa._users.get(session.get('username', '')) or {}
-        role      = user.get('role', '')
-        admin_uid = wa._role_name_to_uid('admin')
-        # Direct admin (role stored as UID or legacy name).
-        if role == admin_uid or wa._uid_to_role_name(role) == 'admin':
-            return True
-        # Group-derived admin: any enabled group mapped to the admin role.
-        for g_ref in user.get('groups', []):
-            g = wa._groups.get(g_ref)
-            if g and g.get('enabled', True) and admin_uid in (g.get('roles') or []):
-                return True
-        return False
 
     # --- API: config.json -----------------------------------------
 
@@ -119,6 +105,10 @@ def register(app, wa):
             'options': [''] + list(SUPPORTED_LANGS),
             'default': '',
         }
+        schema['global|log_level'] = {
+            'options': ['off', 'debug', 'info', 'warning', 'error'],
+            'default': cfg_default('global|log_level'),
+        }
         schema['telegram|chat_id'] = {'numericString': True}
         schema['web_admin|role_modal_scrollable'] = {'type': 'bool', 'default': True}
         return jsonify(schema)
@@ -164,13 +154,17 @@ def register(app, wa):
             bool(_incoming_sections & _ADMIN_ONLY_SECTIONS)
             or bool(_incoming_fields & _ADMIN_ONLY_FIELDS)
         )
-        if _touches_admin_only and not _requester_is_admin():
+        wa._dbg(f"> Config PUT >> received {len(_incoming_fields)} field(s) in "
+                f"{sorted(_incoming_sections)}; admin_only={_touches_admin_only}", DebugLevel.debug)
+        if _touches_admin_only and not wa._is_admin_requester():
+            wa._dbg("> Config PUT >> rejected: non-admin touched admin-only field", DebugLevel.warning)
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
 
         old_data = wa._read_config_file(wa._CONFIG_FILE) or {}
 
         fields = data.get('fields')
         legacy_mode = not (isinstance(fields, dict) and fields)
+        wa._dbg(f"> Config PUT >> mode={'legacy' if legacy_mode else 'versioned'}", DebugLevel.debug)
 
         if legacy_mode:
             # Legacy format: nested dict {"section": {"field": value}}
@@ -204,8 +198,12 @@ def register(app, wa):
                         'server_version': current_version,
                     }
 
+            wa._dbg(f"> Config PUT >> version check: {len(to_apply)} to apply, "
+                    f"{len(conflicts)} conflict(s)" + (f" {sorted(conflicts)}" if conflicts else ""),
+                    DebugLevel.debug)
             if not to_apply:
                 # All fields conflicted — nothing to write.
+                wa._dbg("> Config PUT >> all fields conflicted; nothing written", DebugLevel.warning)
                 return jsonify({'ok': False, 'saved': [], 'conflicts': conflicts, 'versions': {}})
 
         # Build merged config: current saved + fields to apply.
@@ -217,6 +215,7 @@ def register(app, wa):
                 new_data.setdefault(section, {})[field] = value
             else:
                 new_data[section] = value
+        wa._dbg(f"> Config PUT >> merged config: applying {sorted(to_apply.keys())}", DebugLevel.debug)
 
         # Env-locked fields must not be persisted — restore original saved values.
         for path in wa._env_locked:
@@ -229,7 +228,10 @@ def register(app, wa):
                 sec_new[field] = sec_old[field]
             elif field in sec_new:
                 del sec_new[field]
+        if wa._env_locked:
+            wa._dbg(f"> Config PUT >> env-locked enforced: {sorted(wa._env_locked)}", DebugLevel.debug)
 
+        wa._dbg("> Config PUT >> validating fields", DebugLevel.debug)
         # Validate integer fields (type + [min, max] range) via the registry.
         for path, rule in INT_RULES.items():
             section, field = path.split('|')
@@ -238,6 +240,8 @@ def register(app, wa):
                 continue
             ok, _err = cfg_validate(path, sec_data[field])
             if not ok:
+                wa._dbg(f"> Config PUT >> reject {path}={sec_data[field]!r}: {_err} "
+                        f"(range [{rule['min']},{rule['max']}])", DebugLevel.warning)
                 return jsonify({'error': wa._t(
                     'invalid_config_int', field, rule['min'], rule['max'],
                 )}), 400
@@ -250,6 +254,7 @@ def register(app, wa):
                 continue
             ok, _err = cfg_validate(path, sec_data[field])
             if not ok:
+                wa._dbg(f"> Config PUT >> reject {path}: not a JSON object", DebugLevel.warning)
                 return jsonify({'error': wa._t('invalid_json_field', field)}), 400
 
         # Validate page_sizes.
@@ -283,9 +288,17 @@ def register(app, wa):
                 return jsonify({'error': wa._t('invalid_public_url')}), 400
             web_data['public_url'] = v
 
+        wa._dbg("> Config PUT >> validation passed; restoring masked secrets, "
+                "encrypting + writing to disk", DebugLevel.debug)
         secret_manager.restore_sensitive(new_data, old_data, keys=wa._secret_keys)
 
         if wa._save_config_file(wa._CONFIG_FILE, new_data):
+            wa._dbg(f"> Config >> saved {len(to_apply)} field(s): "
+                    f"{sorted(to_apply.keys())}", DebugLevel.info)
+            wa._dbg("> Config PUT >> file written; applying runtime values", DebugLevel.debug)
+            # Re-apply log level immediately so a verbosity change in the UI
+            # takes effect for request tracing without waiting for a restart.
+            wa._apply_log_level()
             # Apply web_admin.lang at runtime if changed
             new_lang = (new_data.get('web_admin') or {}).get('lang', '')
             wa._default_lang = coerce_lang(new_lang, wa._default_lang)
@@ -339,6 +352,8 @@ def register(app, wa):
             changes = wa._diff_dicts(old_data, new_data, sensitive=wa._sensitive_fields)
             wa._audit('config_saved', detail=changes or '')
             wa._config_version = str(uuid.uuid4())
+            if wa._restart_pending:
+                wa._dbg("> Config PUT >> restart_pending set (port/proxy changed)", DebugLevel.debug)
 
             # Update per-field version tokens for every saved field.
             new_token = str(uuid.uuid4())
@@ -346,6 +361,8 @@ def register(app, wa):
                 wa._field_versions[path] = new_token
             saved_versions = {p: new_token for p in to_apply}
 
+            wa._dbg(f"> Config PUT >> done: {len(to_apply)} saved, {len(conflicts)} conflict(s), "
+                    f"config_version={wa._config_version[:8]}", DebugLevel.debug)
             resp = jsonify({
                 'ok': len(conflicts) == 0,
                 'saved': list(to_apply.keys()),
@@ -355,4 +372,5 @@ def register(app, wa):
             resp.headers['ETag'] = f'"{wa._config_version}"'
             return resp
 
+        wa._dbg("> Config PUT >> save_file_error: write failed", DebugLevel.error)
         return jsonify({'error': wa._t('save_file_error')}), 500

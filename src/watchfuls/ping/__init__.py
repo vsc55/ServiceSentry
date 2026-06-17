@@ -61,12 +61,10 @@ class Watchful(ModuleBase):
 
     # Default values are derived from schema.json so there is a single
     # source of truth that the web UI can also consume.
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
-                 if isinstance(v, dict) and 'default' in v}
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
 
     # Module-level fallbacks: used when item value is 0 and module config is also absent.
-    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
-                        if isinstance(v, dict) and 'default' in v}
+    _MODULE_DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['__module__'])
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)

@@ -6,6 +6,7 @@ from flask import flash, redirect, render_template, request, session, url_for
 
 from ...auth import ldap_auth
 from ...constants import SUPPORTED_LANGS
+from lib.debug import DebugLevel
 
 
 def _establish_session(wa, username: str, user: dict, remember: bool = False) -> None:
@@ -22,6 +23,8 @@ def _establish_session(wa, username: str, user: dict, remember: bool = False) ->
     role_name = wa._uid_to_role_name(role_ref) if wa._is_uid(role_ref) else role_ref
     session['role']         = role_name or 'viewer'
     session['display_name'] = user.get('display_name', username)
+    wa._dbg(f"> Auth >> session established user={username!r} role={session['role']}",
+            DebugLevel.info)
     user_lang = user.get('lang')
     if user_lang and user_lang in SUPPORTED_LANGS:
         session['lang'] = user_lang
@@ -41,6 +44,8 @@ def register(app, wa):
             username = request.form.get('username', '').strip()
             password = request.form.get('password', '')
             remember = request.form.get('remember_me') == 'on'
+            wa._dbg(f"> Auth >> login attempt user={username!r} from {request.remote_addr}",
+                    DebugLevel.info)
 
             # ── LDAP authentication ───────────────────────────────────────
             cfg             = wa._read_config_file(wa._CONFIG_FILE) or {}
@@ -137,6 +142,7 @@ def register(app, wa):
         uname = session.get('username', '')
         if token:
             wa._revoke_session(token)
+        wa._dbg(f"> Auth >> logout user={uname!r}", DebugLevel.info)
         wa._audit('logout', uname, request.remote_addr)
         session.clear()
         return redirect(url_for('login'))

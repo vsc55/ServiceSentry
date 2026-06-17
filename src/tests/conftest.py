@@ -55,7 +55,7 @@ def config_dir(tmp_path):
     }
     config = {
         "daemon": {"timer_check": 300},
-        "global": {"debug": False},
+        "global": {"log_level": "off"},
         "telegram": {
             "token": "test-token-123",
             "chat_id": "12345",
@@ -73,17 +73,14 @@ def config_dir(tmp_path):
 
 @pytest.fixture()
 def var_dir(tmp_path):
-    """Temporary var directory with a sample status.json."""
-    status = {
-        "ping": {
-            "192.168.1.1": {"status": True, "other_data": {}},
-        },
-    }
+    """Temporary var directory.
+
+    The working check state lives in the ``check_state`` DB table now; the
+    sample state the tests expect (ping/192.168.1.1 OK) is seeded into that
+    table by the ``admin`` fixture below.
+    """
     d = tmp_path / "var"
     d.mkdir()
-    (d / "status.json").write_text(
-        json.dumps(status, indent=4), encoding="utf-8"
-    )
     return str(d)
 
 

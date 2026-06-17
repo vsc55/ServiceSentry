@@ -388,11 +388,9 @@ class Watchful(ModuleBase):
     # All other record types (MX, CNAME, TXT, NS, PTR, …) require dnspython.
     MISSING_DEPS: list[str] = [] if _HAS_DNSPYTHON else ['dnspython']
 
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
-                 if isinstance(v, dict) and 'default' in v}
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
 
-    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
-                        if isinstance(v, dict) and 'default' in v}
+    _MODULE_DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['__module__'])
 
     # Discovery action exposed at /api/v1/watchfuls/dns/discover (read-only).
     WATCHFUL_ACTIONS: frozenset = frozenset({'discover'})

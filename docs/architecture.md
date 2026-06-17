@@ -234,7 +234,7 @@ ServiceSentry/
    ├── _init_monitor() → crea Monitor(dir_base, dir_config, dir_modules, dir_var)
    │   └── Monitor.__init__():
    │       ├── Lee config.json, monitor.json, modules.json
-   │       ├── Lee/crea status.json en /var/lib/ServiSesentry/
+   │       ├── Inicializa el estado de checks (tabla check_state en data.db)
    │       └── Inicializa Telegram (token + chat_id)
    └── _args_cmd() → ejecuta comandos (ej: clear_status)
 3. Main.start():
@@ -249,7 +249,7 @@ Monitor.check():
 │
 ├── 1. Escanea watchfuls/ (packages con __init__.py y archivos *.py heredados)
 ├── 2. Filtra por módulos habilitados en modules.json
-├── 3. Lee status.json (estado anterior)
+├── 3. Lee el estado anterior (tabla check_state)
 ├── 4. Crea ThreadPoolExecutor(max_workers=threads)
 │
 ├── 5. Para CADA módulo (en paralelo):
@@ -262,13 +262,13 @@ Monitor.check():
 │       │       la conexión antes de comprobar. Ver guía de módulos §4d.
 │       │
 │       └── Para CADA resultado en ReturnModuleCheck:
-│           ├── Guarda other_data en status.json
+│           ├── Guarda other_data en check_state
 │           ├── ¿Ha CAMBIADO el status? (check_status)
 │           │   ├── SÍ → Actualiza status + envía Telegram (si send=True)
 │           │   └── NO → No hace nada (evita spam)
 │           └── return True (hubo cambios)
 │
-├── 6. Si hubo cambios → guarda status.json
+├── 6. Si hubo cambios → persiste en check_state
 ├── 7. send_message_end() → resumen Telegram
 └── 8. Fin del ciclo
 ```
@@ -278,7 +278,7 @@ Monitor.check():
 El sistema solo notifica cuando el estado **cambia**. Lógica en `Monitor.check_status()`:
 
 ```python
-# Busca en status.json: [modulo][sub_key][status]
+# Busca en check_state: [modulo][sub_key][status]
 # Si no existe, asume el opuesto (not status) → primer check siempre notifica
 # Si el valor almacenado ≠ status actual → ha cambiado → return True
 ```

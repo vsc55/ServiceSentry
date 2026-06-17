@@ -119,18 +119,22 @@ class SQLiteConnector(BaseConnector):
     # ── Read ──────────────────────────────────────────────────────────────────
 
     def fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:
+        self._trace_sql(sql)
         return self._conn().execute(sql, params).fetchall()
 
     def fetchone(self, sql: str, params: tuple = ()) -> tuple | None:
+        self._trace_sql(sql)
         return self._conn().execute(sql, params).fetchone()
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def execute(self, sql: str, params: tuple = ()) -> int:
+        self._trace_sql(sql)
         cur = self._conn().execute(sql, params)
         return cur.rowcount
 
     def executemany(self, sql: str, params_list: list[tuple]) -> int:
+        self._trace_sql(sql)
         cur = self._conn().executemany(sql, params_list)
         return cur.rowcount
 

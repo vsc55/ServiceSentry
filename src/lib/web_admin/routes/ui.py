@@ -6,6 +6,7 @@ from flask import jsonify, redirect, render_template, session
 
 from lib.modules import ModuleBase
 from lib import os_detect
+from lib.debug import DebugLevel
 from lib.host_profiles import (
     host_profiles_catalog,
     module_host_collections,
@@ -56,6 +57,8 @@ def register(app, wa):
     def api_me():
         """Return current logged-in user info."""
         uname_me = session.get('username', '')
+        wa._dbg(f"> Me >> user={uname_me!r} (from session + in-memory _users cache)",
+                DebugLevel.debug)
         user_data = wa._users.get(uname_me, {})
         raw_groups = user_data.get('groups', [])
         # _groups is now keyed by uid; return labels as display names

@@ -79,7 +79,16 @@ sobreviven a los reinicios del contenedor.
 | `TELEGRAM_CHAT_ID` | *(no definido)* | ID del chat o grupo de Telegram |
 | `TELEGRAM_GROUP_MESSAGES` | `false` | Agrupar varias alertas en un único mensaje |
 | **Varios** | | |
-| `VERBOSE` | `false` | Activar salida detallada / debug |
+| `VERBOSE` | `false` | Activar salida detallada / debug (fuerza el nivel máximo, equivale a `--verbose`). Para un nivel concreto usa `global.log_level` desde el panel (**Configuración → Interfaz**) |
+| `NO_COLOR` | *(no definido)* | Si se define (cualquier valor), desactiva los colores ANSI del debug. Los logs de Docker no son un TTY, así que el color ya se desactiva solo |
+
+> **Nota:** las variables `WEB_HOST`, `WEB_PORT` y `VERBOSE` las traduce el
+> `entrypoint.sh` a los flags `--web-host`/`--web-port`/`--verbose`.
+> Alternativamente, el CLI lee directamente variables `SS_*` (`SS_WEB`,
+> `SS_WEB_PORT`, `SS_WEB_HOST`, `SS_VERBOSE`, `SS_NOCOLOR`, `SS_CONFIG_DIR`…)
+> sin pasar por el entrypoint — ver [configuration.md](configuration.md#variables-de-entorno).
+> Los campos de `config.json` (`WA_*`, `CHECK_INTERVAL`, `TELEGRAM_*`) se aplican
+> en runtime por el proceso Python y nunca se escriben a disco.
 
 ### Variables sensibles
 
@@ -94,7 +103,7 @@ variables de entorno en texto plano.
 ```yaml
 volumes:
   config:    # → /etc/ServiSesentry      (config.json, modules.json)
-  vardata:   # → /var/lib/ServiSesentry  (data.db: usuarios, roles, grupos, sesiones, auditoría, historial; status.json)
+  vardata:   # → /var/lib/ServiSesentry  (data.db: usuarios, roles, grupos, sesiones, auditoría, historial y estado de checks)
 ```
 
 Ambos volúmenes son volúmenes con nombre gestionados por Docker. Para inspeccionar

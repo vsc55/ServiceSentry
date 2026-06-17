@@ -11,6 +11,7 @@ import json
 import uuid
 
 from lib.config.spec import cfg_default, cfg_get
+from lib.debug import DebugLevel
 
 _HAS_LDAP3 = False
 try:
@@ -84,6 +85,7 @@ def authenticate(wa, username: str, password: str) -> tuple:
             'ldap_unavailable', 'ldap_disabled', 'ldap_connection_error',
             'ldap_user_not_found', 'ldap_invalid_credentials'
     """
+    wa._dbg(f"> Auth/LDAP >> authenticate user={username!r}", DebugLevel.info)
     if not _HAS_LDAP3:
         return None, 'ldap_unavailable'
 
@@ -122,21 +124,26 @@ def authenticate(wa, username: str, password: str) -> tuple:
     if username_attr:
         attrs.append(username_attr)
 
+    wa._dbg(f"> Auth/LDAP >> bind+search server={server_host}:{port} ssl={use_ssl} base={base_dn!r}",
+            DebugLevel.debug)
     try:
         srv  = Server(server_host, port=port, use_ssl=use_ssl, get_info=NONE, connect_timeout=timeout)
         conn = Connection(srv, user=bind_dn or None, password=bind_pass or None,
                           auto_bind=True, receive_timeout=timeout)
-    except Exception:
+    except Exception as exc:
+        wa._dbg(f"> Auth/LDAP >> connection/bind failed: {exc}", DebugLevel.warning)
         return None, 'ldap_connection_error'
 
     try:
         conn.search(base_dn, search_filter, search_scope=SUBTREE, attributes=attrs)
-    except Exception:
+    except Exception as exc:
         conn.unbind()
+        wa._dbg(f"> Auth/LDAP >> search failed: {exc}", DebugLevel.warning)
         return None, 'ldap_connection_error'
 
     if not conn.entries:
         conn.unbind()
+        wa._dbg(f"> Auth/LDAP >> user {username!r} not found", DebugLevel.info)
         return None, 'ldap_user_not_found'
 
     entry    = conn.entries[0]
@@ -149,6 +156,7 @@ def authenticate(wa, username: str, password: str) -> tuple:
         user_conn.unbind()
     except Exception:
         conn.unbind()
+        wa._dbg(f"> Auth/LDAP >> invalid credentials for {username!r}", DebugLevel.info)
         return None, 'ldap_invalid_credentials'
 
     def _val(attr_name):
@@ -210,6 +218,7 @@ def authenticate(wa, username: str, password: str) -> tuple:
         result['username'] = _val(username_attr)
 
     conn.unbind()
+    wa._dbg(f"> Auth/LDAP >> success user={username!r} groups={len(all_groups)}", DebugLevel.info)
     return result, None
 
 

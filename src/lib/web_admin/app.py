@@ -5,17 +5,20 @@
 import functools
 import os
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from flask import Flask, jsonify, redirect, request, session, url_for
+from flask import Flask, g, jsonify, redirect, request, session, url_for
 from jinja2 import ChoiceLoader, FileSystemLoader
 
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib.config import ConfigControl
+from lib.debug import DebugLevel
+from lib.object_base import ObjectBase
 from lib import secret_manager
 from .constants import (
     DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang,
@@ -212,6 +215,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._load_groups()
         _run_migrations(self)
         self._apply_saved_config()
+        self._apply_log_level()    # honour global|log_level for web_admin debug output
         self._init_audit_store()   # after apply_saved_config so _AUDIT_MAX_ENTRIES is final
         self._apply_env_overrides()
         self._app = self._create_app()
@@ -332,6 +336,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                     locked_until = datetime.now(timezone.utc) + timedelta(seconds=self._LOCKOUT_DURATION_SECS)
                     user['_locked_until'] = locked_until.isoformat()
                     self._persist_users()
+                    self._dbg(f"> Auth/Local >> account {username!r} locked after "
+                              f"{attempts} failed attempts", DebugLevel.warning)
                     return None, 'account_locked'
                 self._persist_users()
             return None, 'invalid_credentials'
@@ -681,6 +687,53 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             )
 
         @app.before_request
+        def _trace_request_start():
+            g._req_start = time.perf_counter()
+
+        @app.after_request
+        def _trace_request_end(response):
+            # Generic per-endpoint trace, for EVERY API, gated by log_level:
+            # GET/static at debug, mutations at info, 4xx/5xx at warning. Logs the
+            # endpoint, input KEYS (query + json body — never values, so no
+            # secrets), status, timing, reason and payload size.
+            path = request.path
+            if path.startswith('/static/') or not ObjectBase.debug.enabled:
+                return response
+            start = getattr(g, '_req_start', None)
+            ms = f"{(time.perf_counter() - start) * 1000:.0f}ms" if start else '?'
+            status = response.status_code
+            # Input shape (keys only — values may carry passwords/tokens/secrets).
+            inp = []
+            if request.args:
+                inp.append('args=' + ','.join(request.args.keys()))
+            if request.is_json:
+                _b = request.get_json(silent=True)
+                if isinstance(_b, dict) and _b:
+                    inp.append('body=' + ','.join(list(_b.keys())[:15]))
+            in_s = (' ' + ' '.join(inp)) if inp else ''
+            reason = ''
+            if status >= 400:
+                level = DebugLevel.warning
+                # Surface the rejection reason (the JSON 'error' message) so the
+                # *why* of every 4xx/5xx is traced uniformly, for any endpoint.
+                if response.is_json:
+                    try:
+                        body = response.get_json(silent=True)
+                        if isinstance(body, dict) and body.get('error'):
+                            reason = f": {body['error']}"
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+            elif request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+                level = DebugLevel.info
+            else:
+                level = DebugLevel.debug
+            size = response.content_length
+            size_s = f" {size}B" if size is not None else ''
+            self._dbg(f"> HTTP >> {request.method} {path} [{request.endpoint}]{in_s} "
+                      f"-> {status}{reason} ({ms}){size_s}", level)
+            return response
+
+        @app.before_request
         def _enforce_fqdn():
             if not self._force_fqdn or not self._public_url:
                 return
@@ -814,6 +867,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             if entry is not None and entry[0] == mtime:
                 return _copy.deepcopy(entry[1])
         # Cache miss / file changed / stat failed → read fresh.
+        self._dbg(f"> File >> reading {filename} (cache miss/changed)", DebugLevel.debug)
         cfg  = ConfigControl(path)
         data = cfg.read()
         if data:
@@ -834,13 +888,28 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         """
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
 
+    def _apply_log_level(self) -> None:
+        """Apply ``global|log_level`` to the shared debug printer so web_admin
+        debug output honours the configured verbosity."""
+        ObjectBase.debug.set_from_config(
+            self._config_section('global').get('log_level', _cfg_default('global|log_level')))
+
+    def _dbg(self, msg: str, level: DebugLevel = DebugLevel.debug) -> None:
+        """Emit a leveled debug message for web_admin events via the shared
+        debug printer (gated by ``global|log_level``).  Never pass secrets."""
+        ObjectBase.debug.print(msg, level)
+
     def _save_config_file(self, filename: str, data: dict) -> bool:
         """Encrypt sensitive values in *data* and save to the config file."""
         fernet = self._get_fernet()
         if fernet:
             data = secret_manager.encrypt_sensitive(data, fernet, keys=self._secret_keys)
         cfg = ConfigControl(os.path.join(self._config_dir, filename))
-        return cfg.save(data)
+        ok = cfg.save(data)
+        self._dbg(f"> File >> {'wrote' if ok else 'FAILED to write'} {filename} "
+                  f"(encrypted={'yes' if fernet else 'no'})",
+                  DebugLevel.debug if ok else DebugLevel.error)
+        return ok
 
     # ------------------------------------------------------------------
     # Route registration

@@ -14,6 +14,8 @@ import hmac
 import json as _json
 
 from lib.config.spec import cfg_get
+from lib.debug import DebugLevel
+from lib.object_base import ObjectBase
 
 try:
     import requests as _req
@@ -63,6 +65,9 @@ def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
 
     method         = cfg_get(cfg, 'webhooks|method', falsy=True).upper()
     timeout        = cfg_get(cfg, 'webhooks|timeout', falsy=True)
+    ObjectBase.debug.print(
+        f"> Webhook >> sending {cfg.get('name') or cfg.get('id', '?')!r} {method} "
+        f"(timeout={timeout}s)", DebugLevel.debug)
     secret         = (cfg.get('secret') or '').strip()
     secret_header  = cfg_get(cfg, 'webhooks|secret_header', falsy=True).strip()
 

@@ -37,7 +37,7 @@ Estructura devuelta por el método `check()` de cada módulo:
         "status": True / False,    # True = OK, False = Error
         "message": "texto",         # Texto de notificación Telegram (soporta *negrita*)
         "send": True / False,       # Si se envía por Telegram
-        "other_data": { ... }       # Datos extra almacenados en status.json
+        "other_data": { ... }       # Datos extra almacenados en check_state
     }
 }
 ```

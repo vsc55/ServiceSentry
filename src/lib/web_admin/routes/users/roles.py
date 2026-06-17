@@ -11,6 +11,7 @@ from ...constants import (
     BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, ROLES,
     SYSTEM_USER, is_module_perm, is_server_perm,
 )
+from .._helpers import touch_entity, track_change
 
 
 def register(app, wa):
@@ -18,12 +19,6 @@ def register(app, wa):
     roles_add_req    = wa._perm_required('roles_add')
     roles_edit_req   = wa._perm_required('roles_edit')
     roles_delete_req = wa._perm_required('roles_delete')
-
-    def _is_admin_requester() -> bool:
-        admin_uid = BUILTIN_ROLE_UIDS['admin']
-        user = wa._users.get(session.get('username', '')) or {}
-        role = user.get('role', '')
-        return role == admin_uid or wa._uid_to_role_name(role) == 'admin'
 
     def _role_name_taken(name: str, *, exclude_uid: str | None = None) -> bool:
         """Return True if *name* (case-insensitive) is already used by another role.
@@ -46,7 +41,7 @@ def register(app, wa):
         return False
 
     def _check_perms_escalation(requested_perms: list) -> bool:
-        if _is_admin_requester():
+        if wa._is_admin_requester():
             return True
         requester_perms = wa._get_session_permissions()
         return all(p in requester_perms for p in requested_perms)
@@ -163,18 +158,11 @@ def register(app, wa):
                 # Reject names that collide with another role (built-in or custom)
                 if _role_name_taken(new_name, exclude_uid=uid):
                     return jsonify({'error': wa._t('role_already_exists', new_name)}), 409
-                old_name = override.get('name') or _cur_name
-                if old_name != new_name:
-                    changes.append({'field': 'name', 'old': old_name, 'new': new_name})
-                override['name'] = new_name
+                track_change(changes, override, 'name', new_name)
                 wa._builtin_role_names[builtin_key] = new_name
                 changed = True
             if 'description' in data:
-                new_desc = data['description'].strip()
-                old_desc = override.get('description', '')
-                if old_desc != new_desc:
-                    changes.append({'field': 'description', 'old': old_desc, 'new': new_desc})
-                override['description'] = new_desc
+                track_change(changes, override, 'description', data['description'].strip())
                 changed = True
             if changed and not wa._persist_roles():
                 return jsonify({'error': wa._t('save_error')}), 500
@@ -189,16 +177,9 @@ def register(app, wa):
                 # Reject rename that collides with another role (built-in or custom)
                 if _role_name_taken(new_name, exclude_uid=uid):
                     return jsonify({'error': wa._t('role_already_exists', new_name)}), 409
-                old_name = role.get('name', uid)
-                if old_name != new_name:
-                    changes.append({'field': 'name', 'old': old_name, 'new': new_name})
-                role['name'] = new_name
+                track_change(changes, role, 'name', new_name, old_default=uid)
             if 'description' in data:
-                new_desc = data['description'].strip()
-                old_desc = role.get('description', '')
-                if old_desc != new_desc:
-                    changes.append({'field': 'description', 'old': old_desc, 'new': new_desc})
-                role['description'] = new_desc
+                track_change(changes, role, 'description', data['description'].strip())
             if 'permissions' in data:
                 new_perms = sorted(
                     p for p in data['permissions']
@@ -211,14 +192,9 @@ def register(app, wa):
                     changes.append({'field': 'permissions', 'old': old_perms, 'new': new_perms})
                 role['permissions'] = new_perms
             if 'enabled' in data:
-                new_enabled = bool(data['enabled'])
-                old_enabled = role.get('enabled', True)
-                if old_enabled != new_enabled:
-                    changes.append({'field': 'enabled', 'old': old_enabled, 'new': new_enabled})
-                    role['enabled'] = new_enabled
+                track_change(changes, role, 'enabled', bool(data['enabled']), old_default=True)
             # Update audit timestamps on every save
-            role['updated_at'] = datetime.now(timezone.utc).isoformat()
-            role['updated_by'] = session.get('username', 'system')
+            touch_entity(role)
             wa._persist_roles()
         if changes:
             display = (wa._builtin_role_names.get(builtin_key, builtin_key.title())

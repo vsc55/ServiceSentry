@@ -19,6 +19,7 @@ _MIGRATIONS = [
     'm009_temperature_uid_label',
     'm010_rekey_items_by_uid',
     'm011_drop_status_file',
+    'm012_global_debug_to_log_level',
 ]
 
 _STATE_FILE = '_migrations.json'

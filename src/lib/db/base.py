@@ -106,6 +106,18 @@ class BaseConnector(ABC):
             f'ALTER TABLE {q(table)} RENAME COLUMN {q(old)} TO {q(new)}'
         )
 
+    def _trace_sql(self, sql: str) -> None:
+        """Trace a SQL statement at debug level (gated by global|log_level).
+
+        Logs the statement only — NEVER the params, which may carry secrets,
+        password hashes or other sensitive values.
+        """
+        from lib.object_base import ObjectBase  # noqa: PLC0415
+        if not ObjectBase.debug.enabled:
+            return
+        from lib.debug import DebugLevel  # noqa: PLC0415
+        ObjectBase.debug.print('> SQL >> ' + ' '.join(str(sql).split())[:200], DebugLevel.debug)
+
     # ── Read ─────────────────────────────────────────────────────────────────
 
     @abstractmethod

@@ -47,17 +47,27 @@ def get_connector(
     cfg    = config or {}
     driver = cfg_get(cfg, 'database|driver').lower()
 
+    from lib.object_base import ObjectBase  # noqa: PLC0415
+    from lib.debug import DebugLevel  # noqa: PLC0415
+
     if driver == 'sqlite':
         from .sqlite import SQLiteConnector  # noqa: PLC0415
         path = cfg.get('path') or default_sqlite_path
+        ObjectBase.debug.print(f"> DB >> driver=sqlite path={path}", DebugLevel.info)
         return SQLiteConnector(path)
 
     if driver == 'postgresql':
         from .postgresql import PostgreSQLConnector  # noqa: PLC0415
+        ObjectBase.debug.print(
+            f"> DB >> driver=postgresql host={cfg.get('host', 'localhost')} "
+            f"db={cfg.get('name', 'servicesentry')}", DebugLevel.info)
         return PostgreSQLConnector(cfg)
 
     if driver in ('mysql', 'mariadb'):
         from .mysql import MySQLConnector  # noqa: PLC0415
+        ObjectBase.debug.print(
+            f"> DB >> driver={driver} host={cfg.get('host', 'localhost')} "
+            f"db={cfg.get('name', 'servicesentry')}", DebugLevel.info)
         return MySQLConnector(cfg)
 
     raise ValueError(

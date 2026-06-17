@@ -62,6 +62,26 @@ class _PermissionsMixin:
                 return uid
         return None
 
+    def _is_admin_requester(self) -> bool:
+        """True if the logged-in user is an admin — directly (role stored as the
+        admin UID or the legacy 'admin' name) or via membership in an enabled
+        group mapped to the admin role.
+
+        Single source for the admin check; previously each route group defined
+        its own variant and they had diverged (some missed the group-derived or
+        legacy-name cases).
+        """
+        user = self._users.get(session.get('username', '')) or {}
+        role = user.get('role', '')
+        admin_uid = self._role_name_to_uid('admin')
+        if role == admin_uid or self._uid_to_role_name(role) == 'admin':
+            return True
+        for g_ref in user.get('groups', []):
+            g = self._groups.get(g_ref)
+            if g and g.get('enabled', True) and admin_uid in (g.get('roles') or []):
+                return True
+        return False
+
     def _uid_to_group_label(self, uid: str) -> str | None:
         """Return the display name for a group uid, or None."""
         gdata = self._groups.get(uid)

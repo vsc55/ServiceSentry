@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 
 from flask import jsonify, session
 
-from ...constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, _BUILTIN_GROUPS
+from ...constants import BUILTIN_ROLE_UIDS, _BUILTIN_GROUPS
+from .._helpers import touch_entity, track_change
 
 
 def register(app, wa):
@@ -28,12 +29,6 @@ def register(app, wa):
             return None
         valid = set(BUILTIN_ROLE_UIDS.values()) | set(wa._custom_roles.keys())
         return uid if uid in valid else None
-
-    def _requester_is_admin() -> bool:
-        admin_uid = wa._role_name_to_uid('admin')
-        requester = wa._users.get(session.get('username', '')) or {}
-        role = requester.get('role', '')
-        return role == admin_uid or wa._uid_to_role_name(role) == 'admin'
 
     # ── GET /api/v1/groups ─────────────────────────────────────────────────────
 
@@ -90,16 +85,11 @@ def register(app, wa):
             return jsonify({'error': wa._t('invalid_roles', '')}), 400
         # Accept builtin names/UIDs and custom role UIDs or display names
         admin_uid = wa._role_name_to_uid('admin')
-        def _resolve_role(r):
-            uid = wa._role_name_to_uid(r) if not wa._is_uid(r) else r
-            return uid if uid and (uid in BUILTIN_ROLE_PERMISSIONS or
-                                   wa._uid_to_role_name(uid) is not None or
-                                   uid in wa._custom_roles) else None
-        resolved = [(_resolve_role(r), r) for r in roles_raw]
+        resolved = [(_normalize_role_uid(r), r) for r in roles_raw]
         unknown_roles = [orig for uid, orig in resolved if uid is None]
         if unknown_roles:
             return jsonify({'error': wa._t('invalid_roles', ', '.join(unknown_roles))}), 400
-        if admin_uid in [uid for uid, _ in resolved] and not _requester_is_admin():
+        if admin_uid in [uid for uid, _ in resolved] and not wa._is_admin_requester():
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         # Check for duplicate label (case-insensitive)
         label_lc = label.lower()
@@ -135,7 +125,7 @@ def register(app, wa):
         if uid not in wa._groups:
             return jsonify({'error': wa._t('group_not_found')}), 404
         is_builtin   = uid in _BUILTIN_GROUPS
-        is_admin_req = _requester_is_admin()
+        is_admin_req = wa._is_admin_requester()
         data, err = wa._require_json()
         if err:
             return err
@@ -152,28 +142,17 @@ def register(app, wa):
             new_label = data['name'].strip()
             if len(new_label) > wa._MAX_GROUP_LABEL_LEN:
                 return jsonify({'error': wa._t('label_too_long', wa._MAX_GROUP_LABEL_LEN)}), 400
-            old_label = group.get('name', uid)
-            if old_label != new_label:
-                changes.append({'field': 'name', 'old': old_label, 'new': new_label})
-            group['name'] = new_label
+            track_change(changes, group, 'name', new_label, old_default=uid)
         # Description can be changed for any group (including built-in)
         if 'description' in data:
             new_desc = data['description'].strip()
             if len(new_desc) > wa._MAX_GROUP_DESC_LEN:
                 return jsonify({'error': wa._t('description_too_long', wa._MAX_GROUP_DESC_LEN)}), 400
-            old_desc = group.get('description', '')
-            if old_desc != new_desc:
-                changes.append({'field': 'description', 'old': old_desc, 'new': new_desc})
-            group['description'] = new_desc
+            track_change(changes, group, 'description', new_desc)
         if 'roles' in data:
             if not isinstance(data['roles'], list):
                 return jsonify({'error': wa._t('invalid_roles', '')}), 400
-            def _valid_role(r):
-                uid = wa._role_name_to_uid(r) if not wa._is_uid(r) else r
-                return uid and (uid in BUILTIN_ROLE_PERMISSIONS or
-                                wa._uid_to_role_name(uid) is not None or
-                                uid in wa._custom_roles)
-            unknown_roles = [r for r in data['roles'] if not _valid_role(r)]
+            unknown_roles = [r for r in data['roles'] if _normalize_role_uid(r) is None]
             if unknown_roles:
                 return jsonify({'error': wa._t('invalid_roles', ', '.join(unknown_roles))}), 400
             new_role_uids = sorted(wa._role_name_to_uid(r) or r for r in data['roles'])
@@ -203,14 +182,9 @@ def register(app, wa):
                 changes.append({'field': 'members',
                                  'old': sorted(old_members), 'new': sorted(new_members)})
         if 'enabled' in data:
-            new_enabled = bool(data['enabled'])
-            old_enabled = group.get('enabled', True)
-            if old_enabled != new_enabled:
-                changes.append({'field': 'enabled', 'old': old_enabled, 'new': new_enabled})
-                group['enabled'] = new_enabled
+            track_change(changes, group, 'enabled', bool(data['enabled']), old_default=True)
         # Update audit timestamps on every save (even if no visible changes)
-        group['updated_at'] = datetime.now(timezone.utc).isoformat()
-        group['updated_by'] = session.get('username', 'system')
+        touch_entity(group)
         wa._persist_groups()
         if changes:
             wa._audit('group_updated', detail={

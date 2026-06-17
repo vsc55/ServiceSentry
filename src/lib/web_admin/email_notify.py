@@ -18,6 +18,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from lib.config.spec import cfg_get
+from lib.debug import DebugLevel
+from lib.object_base import ObjectBase
 
 try:
     import requests as _req
@@ -71,6 +73,9 @@ def _send_smtp(cfg: dict, subject: str, body_html: str,
     password  = cfg.get('smtp_password') or ''
     from_email = (cfg.get('from_email') or '').strip()
     from_name  = cfg_get(cfg, 'email|from_name', falsy=True).strip()
+    ObjectBase.debug.print(
+        f"> Email/SMTP >> connecting {host}:{port} ssl={use_ssl} tls={use_tls} "
+        f"to {len(recipients)} recipient(s)", DebugLevel.debug)
 
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject

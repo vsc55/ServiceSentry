@@ -105,30 +105,30 @@ class TestRaidCheck:
         w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
         with patch.object(w, 'host_exec', return_value=(_MDSTAT_OK, '', 0)):
             items = w.check().list
-        assert items['R_1_md0']['status'] is True
-        assert 'good status' in items['R_1_md0']['message']
+        assert items['1_md0']['status'] is True
+        assert 'good status' in items['1_md0']['message']
 
     def test_raid_degraded(self):
         w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
         with patch.object(w, 'host_exec', return_value=(_MDSTAT_DEGRADED, '', 0)):
             items = w.check().list
-        assert items['R_1_md0']['status'] is False
-        assert 'degraded' in items['R_1_md0']['message']
+        assert items['1_md0']['status'] is False
+        assert 'degraded' in items['1_md0']['message']
 
     def test_raid_recovery(self):
         w = _watchful({'1': {'enabled': True, 'host_uid': 'h1'}})
         with patch.object(w, 'host_exec', return_value=(_MDSTAT_RECOVERY, '', 0)):
             items = w.check().list
-        assert items['R_1_md0']['status'] is False
-        assert 'recovery' in items['R_1_md0']['message']
-        assert items['R_1_md0']['other_data']['percent'] == 12.6
+        assert items['1_md0']['status'] is False
+        assert 'recovery' in items['1_md0']['message']
+        assert items['1_md0']['other_data']['percent'] == 12.6
 
     def test_no_raids(self):
         w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
         with patch.object(w, 'host_exec', return_value=(_MDSTAT_EMPTY, '', 0)):
             items = w.check().list
-        assert items['R_1']['status'] is True
-        assert 'No RAID' in items['R_1']['message']
+        assert items['1']['status'] is True
+        assert 'No RAID' in items['1']['message']
 
     def test_disabled_item_skipped(self):
         w = _watchful({'1': {'enabled': False, 'host_uid': 'h1'}})
@@ -143,8 +143,8 @@ class TestRaidCheck:
         with patch.object(w, 'host_exec') as he:
             items = w.check().list
         he.assert_not_called()                     # no mdstat attempt off-Linux
-        assert items['R_1']['status'] is False
-        assert 'Linux' in items['R_1']['message']
+        assert items['1']['status'] is False
+        assert 'Linux' in items['1']['message']
 
     def test_maintenance_host_skipped(self):
         w = _watchful({'1': {'enabled': True, 'host_uid': 'h1'}},
@@ -158,8 +158,8 @@ class TestRaidCheck:
         w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
         with patch.object(w, 'host_exec', return_value=('', 'No such file', 1)):
             items = w.check().list
-        assert items['R_1']['status'] is False
-        assert 'Error' in items['R_1']['message']
+        assert items['1']['status'] is False
+        assert 'Error' in items['1']['message']
 
     def test_module_disabled(self):
         from watchfuls.raid import Watchful

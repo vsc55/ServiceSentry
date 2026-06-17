@@ -28,11 +28,9 @@ temperatures are read on that host from Linux ``/sys/class/thermal`` via
 :meth:`ModuleBase.host_exec` and compared with a per-check threshold.
 """
 
-import concurrent.futures
 import json
 import os
 
-from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
@@ -50,10 +48,8 @@ class Watchful(ModuleBase):
     ITEM_SCHEMA = _SCHEMA
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
 
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
-                 if isinstance(v, dict) and 'default' in v}
-    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
-                        if isinstance(v, dict) and 'default' in v}
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
+    _MODULE_DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['__module__'])
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -63,16 +59,7 @@ class Watchful(ModuleBase):
             return self.dict_return
         items = [(k, v) for k, v in self.get_conf('list', {}).items()
                  if isinstance(v, dict) and v.get('enabled', self._DEFAULTS['enabled'])]
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._MODULE_DEFAULTS['threads'])) as executor:
-            futures = {executor.submit(self._temp_check, k, v): k for k, v in items}
-            for future in concurrent.futures.as_completed(futures):
-                key = futures[future]
-                try:
-                    future.result()
-                except Exception as exc:  # pylint: disable=broad-except
-                    self._debug(f"temperature: {self.item_label(key)} - Exception: {exc}", DebugLevel.error)
-                    self.dict_return.set(key, False, f'Temp: {key} - *Error: {exc}* 💥')
+        self.run_parallel(items, self._temp_check, 'Temp')
         super().check()
         return self.dict_return
 

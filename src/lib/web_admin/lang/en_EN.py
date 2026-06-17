@@ -728,7 +728,8 @@ LANG = {
     'labels': {
         'enabled': 'Enabled', 'threads': 'Threads', 'timeout': 'Timeout (s)',
         'token': 'Bot Token', 'chat_id': 'Chat ID', 'group_messages': 'Group messages',
-        'timer_check': 'Interval (s)', 'debug': 'Debug',
+        'timer_check': 'Interval (s)',
+        'log_level': 'Log level',
         'list': 'Items', 'remote': 'Remote', 'config': 'Configuration',
         'username': 'Web user', 'password': 'Password',
         'pretty_name': 'Display name', 'lang': 'Language', 'dark_mode': 'Dark mode',        'pw_min_len':        'Min. password length',
@@ -849,7 +850,7 @@ LANG = {
         'web_admin|force_https':         'Use HTTPS when building public URLs (Telegram links, status page link). Enable when the instance is served over HTTPS via a reverse proxy. Independent of the Secure cookies setting.',
         'web_admin|force_fqdn':          'Redirect to the public URL if accessed via a different hostname or IP, preserving the full path and query string. Requires public URL to be set.',
         'daemon|timer_check':           'Interval in seconds between consecutive checks across all modules.',
-        'global|debug':                 'Enable verbose debug logging. Not recommended in production.',
+        'global|log_level':             'Log verbosity. "off" disables debug output; otherwise the minimum level shown (debug < info < warning < error). Not recommended above "off" in production.',
         'telegram|token':               'Telegram Bot API token. Create a bot with @BotFather to obtain one.',
         'telegram|chat_id':             'Numeric Telegram Chat ID where alerts will be sent.',
         'telegram|group_messages':      'Bundle multiple consecutive alerts into a single Telegram message.',

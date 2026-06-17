@@ -20,6 +20,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """ Base class for modules. """
 
+import concurrent.futures
 import importlib
 import json
 import os
@@ -358,6 +359,27 @@ class ModuleBase(ObjectBase):
     def check(self):
         """ Check the module and return the result. """
         self.debug.debug_obj(self.name_module, self.dict_return.list, "Data Return")
+
+    def run_parallel(self, items, check_fn, error_prefix: str) -> None:
+        """Run ``check_fn(key, value)`` over ``items`` in a thread pool.
+
+        ``items`` is an iterable of ``(key, value)`` pairs; the per-item check
+        records its own result.  On an unhandled exception the item is logged
+        and marked failed with a standard message.  Worker count comes from the
+        module's ``threads`` setting.  Shared by the watchfuls whose check loop
+        follows the ``submit(fn, key, value)`` contract.
+        """
+        workers = self.get_conf('threads', self._default_threads)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(check_fn, k, v): k for k, v in items}
+            for future in concurrent.futures.as_completed(futures):
+                key = futures[future]
+                try:
+                    future.result()
+                except Exception as exc:  # pylint: disable=broad-except
+                    label = self.item_label(key)
+                    self._debug(f"{error_prefix}: {label} - Exception: {exc}", DebugLevel.error)
+                    self.dict_return.set(key, False, f'{error_prefix}: {label} - *Error: {exc}* 💥')
 
     @property
     def name_module(self) -> str:

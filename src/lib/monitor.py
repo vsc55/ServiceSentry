@@ -375,6 +375,9 @@ class Monitor(ObjectBase):
                 self.config.get_conf(['telegram', 'chat_id'], '')
             )
             self.tg.group_messages = self.config.get_conf(['telegram', 'group_messages'], cfg_default('telegram|group_messages'))
+            self.debug.print(
+                f"> Monitor >> Telegram {'configured' if self.config.get_conf(['telegram', 'token'], '') else 'not configured'}"
+                f" (group_messages={self.tg.group_messages})", DebugLevel.info)
         else:
             self.tg = None
 

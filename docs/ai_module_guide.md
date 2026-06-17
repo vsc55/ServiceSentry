@@ -728,11 +728,11 @@ v = self._parse_conf_str(raw, default='localhost')
 ```python
 # Write result
 self.dict_return.set(key, status, message, send_msg=False, other_data=None)
-# key:        str  — item identifier (used in status.json and as notification key)
+# key:        str  — item identifier (used in the check_state table and as notification key)
 # status:     bool — True=OK, False=Error
 # message:    str  — Telegram message (supports *bold*, _italic_, `code`, [url](link))
 # send_msg:   bool — False: manual send_message() call; True: auto-send immediately
-# other_data: dict — stored in status.json under "extra"; visible on /status page
+# other_data: dict — stored in check_state under "extra"; visible on /status page
 
 # Update a field of an existing result
 self.dict_return.update(key, 'message', 'New text')  # option: "status"|"message"|"send"|"other_data"

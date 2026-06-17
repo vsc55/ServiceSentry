@@ -117,7 +117,7 @@ async function saveRoleModal() {
     const selectedGroups = new Set(Array.from(document.querySelectorAll('#rmGroupsGrid input[type=checkbox]:checked')).map(cb => cb.value));
     if (!name) { showToast(t('role_name_required'), 'warning'); return; }
     // Duplicate name check for new roles
-    if (!_editingRole && Object.values(rolesData).some(rd => (rd.name || '').toLowerCase() === name.toLowerCase())) {
+    if (!_editingRole && !_isUniqueName(name, rolesData, (k, rd) => rd.name)) {
         showToast(tf('role_already_exists', name), 'warning'); return;
     }
     const rd        = rolesData[_editingRole] || {};
@@ -133,7 +133,7 @@ async function saveRoleModal() {
                 showToast(enabled ? t('role_enabled') : t('role_disabled'));
             else
                 showToast(t('role_updated'));
-            const _nowIso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+            const _nowIso = _nowISO();
             rolesData[_editingRole] = { ...rolesData[_editingRole], name, description,
                 updated_at: _nowIso, updated_by: currentUser.username || '' };
             if (!isBuiltin) {
@@ -176,7 +176,7 @@ async function saveRoleModal() {
             showToast(t('role_created'));
             const uid = r.data?.uid;
             if (uid) {
-                const _nowIso2 = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+                const _nowIso2 = _nowISO();
                 rolesData[uid] = { uid, key: '', builtin: false, name, description, permissions, enabled,
                     created_at: _nowIso2, updated_at: _nowIso2, updated_by: currentUser.username || '' };
             }

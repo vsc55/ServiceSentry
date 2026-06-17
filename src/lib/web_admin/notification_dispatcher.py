@@ -9,6 +9,8 @@ config in config.json. This is the single entry-point used by the daemon.
 
 from __future__ import annotations
 
+from lib.debug import DebugLevel
+
 
 def dispatch(wa, kind: str, module: str = '', item: str = '',
              status: str = '', message: str = '',
@@ -21,20 +23,28 @@ def dispatch(wa, kind: str, module: str = '', item: str = '',
     results: dict[str, tuple[bool, str]] = {}
     try:
         cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
-    except Exception:
+    except Exception as exc:
+        wa._dbg(f"> Notify >> config read failed: {exc}", DebugLevel.error)
         return results
 
     notif = cfg.get('notifications') or {}
     kwargs = dict(kind=kind, module=module, item=item,
                   status=status, message=message, timestamp=timestamp)
+    _channels = [c for c in ('telegram', 'email', 'webhook')
+                 if notif.get(f'{c}_on_{kind}', False)]
+    wa._dbg(f"> Notify >> {kind} {module}/{item}: channels={_channels or 'none'}",
+            DebugLevel.info)
 
     if notif.get(f'telegram_on_{kind}', False):
         try:
             from lib.web_admin import telegram_notify
             ok, msg = telegram_notify._dispatch(cfg.get('telegram') or {}, **kwargs)
             results['telegram'] = (ok, msg)
+            wa._dbg(f"> Notify > telegram >> ok={ok}: {msg}",
+                    DebugLevel.debug if ok else DebugLevel.warning)
         except Exception as exc:
             results['telegram'] = (False, str(exc))
+            wa._dbg(f"> Notify > telegram >> {type(exc).__name__}: {exc}", DebugLevel.error)
 
     if notif.get(f'email_on_{kind}', False):
         try:
@@ -64,15 +74,21 @@ def dispatch(wa, kind: str, module: str = '', item: str = '',
                 body_html=body_html,
             )
             results['email'] = (ok, msg)
+            wa._dbg(f"> Notify > email >> ok={ok}: {msg}",
+                    DebugLevel.debug if ok else DebugLevel.warning)
         except Exception as exc:
             results['email'] = (False, str(exc))
+            wa._dbg(f"> Notify > email >> {type(exc).__name__}: {exc}", DebugLevel.error)
 
     if notif.get(f'webhook_on_{kind}', False):
         try:
             from lib.web_admin import webhook_notify
             ok, msg = webhook_notify.send_all(wa, cfg=cfg, **kwargs)
             results['webhook'] = (ok, msg)
+            wa._dbg(f"> Notify > webhook >> ok={ok}: {msg}",
+                    DebugLevel.debug if ok else DebugLevel.warning)
         except Exception as exc:
             results['webhook'] = (False, str(exc))
+            wa._dbg(f"> Notify > webhook >> {type(exc).__name__}: {exc}", DebugLevel.error)
 
     return results

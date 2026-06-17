@@ -244,7 +244,7 @@ class TestAuditLog:
         _login(client)
         client.put("/api/v1/config", json={
             "daemon": {"timer_check": 300},
-            "global": {"debug": False},
+            "global": {"log_level": "off"},
             "telegram": {
                 "token": "CHANGED-TOKEN",
                 "chat_id": "12345",

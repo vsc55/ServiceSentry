@@ -1,3 +1,16 @@
+{# Read-only UID row with a copy button, shown in edit modals.
+   *p* is the field id prefix (um=user, gm=group, rm=role). #}
+{% macro uid_field(p) %}
+                        <div class="mb-2 flex-shrink-0 d-none" id="{{ p }}UidRow">
+                            <label class="form-label small text-muted mb-0">UID</label>
+                            <div class="input-group input-group-sm">
+                                <input type="text" class="form-control form-control-sm font-monospace text-muted" id="{{ p }}Uid" readonly>
+                                <button class="btn btn-sm btn-secondary" type="button"
+                                    onclick="_copyToClipboard(document.getElementById('{{ p }}Uid').value)"
+                                    title="{{ i18n.copy_uid }}"><i class="bi bi-copy"></i></button>
+                            </div>
+                        </div>
+{% endmacro %}
 {# New/Edit user modal #}
 <div class="modal fade" id="userModal" tabindex="-1"
      onkeydown="if(event.key==='Enter'&&document.activeElement?.type!=='search'){event.preventDefault();document.getElementById('btnUserModalOk').click();}">
@@ -69,15 +82,7 @@
                                 <div class="text-muted small mt-1" id="umPwStrengthLabel" style="min-height:1.1em"></div>
                             </div>
                         </div>
-                        <div class="mb-2 flex-shrink-0 d-none" id="umUidRow">
-                            <label class="form-label small text-muted mb-0">UID</label>
-                            <div class="input-group input-group-sm">
-                                <input type="text" class="form-control form-control-sm font-monospace text-muted" id="umUid" readonly>
-                                <button class="btn btn-sm btn-secondary" type="button"
-                                    onclick="_copyToClipboard(document.getElementById('umUid').value)"
-                                    title="{{ i18n.copy_uid }}"><i class="bi bi-copy"></i></button>
-                            </div>
-                        </div>
+{{ uid_field('um') }}
                         <div class="mb-2 flex-shrink-0" id="umEnabledGroup" style="display:none">
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" role="switch" id="umEnabled">
@@ -478,15 +483,7 @@
                                 oninput="this.classList.remove('is-invalid')">
                             <div class="invalid-feedback" id="gmLabelError"></div>
                         </div>
-                        <div class="mb-2 flex-shrink-0 d-none" id="gmUidRow">
-                            <label class="form-label small text-muted mb-0">UID</label>
-                            <div class="input-group input-group-sm">
-                                <input type="text" class="form-control form-control-sm font-monospace text-muted" id="gmUid" readonly>
-                                <button class="btn btn-sm btn-secondary" type="button"
-                                    onclick="_copyToClipboard(document.getElementById('gmUid').value)"
-                                    title="{{ i18n.copy_uid }}"><i class="bi bi-copy"></i></button>
-                            </div>
-                        </div>
+{{ uid_field('gm') }}
                         <div class="mb-2 flex-shrink-0" id="gmEnabledGroup" style="display:none">
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" role="switch" id="gmEnabled">
@@ -560,15 +557,7 @@
                             <input type="text" class="form-control form-control-sm" id="rmLabel" autocomplete="off"
                                 placeholder="e.g. Operations Viewer">
                         </div>
-                        <div class="mb-2 flex-shrink-0 d-none" id="rmUidRow">
-                            <label class="form-label small text-muted mb-0">UID</label>
-                            <div class="input-group input-group-sm">
-                                <input type="text" class="form-control form-control-sm font-monospace text-muted" id="rmUid" readonly>
-                                <button class="btn btn-sm btn-secondary" type="button"
-                                    onclick="_copyToClipboard(document.getElementById('rmUid').value)"
-                                    title="{{ i18n.copy_uid }}"><i class="bi bi-copy"></i></button>
-                            </div>
-                        </div>
+{{ uid_field('rm') }}
                         <div class="mb-2 flex-shrink-0" id="rmEnabledGroup" style="display:none">
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" role="switch" id="rmEnabled">

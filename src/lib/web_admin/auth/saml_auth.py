@@ -12,6 +12,7 @@ import uuid
 from urllib.parse import urlparse
 
 from lib.config.spec import cfg_default, cfg_get
+from lib.debug import DebugLevel
 
 _HAS_SAML2 = False
 try:
@@ -143,6 +144,7 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
     groups       = [str(v) for v in saml_attrs.get(groups_attr, [])]
 
     if not username:
+        wa._dbg("> Auth/SAML2 >> no username resolved; rejecting", DebugLevel.warning)
         return None
 
     role_name = _map_role(groups, group_role_map)
@@ -153,6 +155,8 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
     existing = wa._users.get(username)
     if existing is None:
         if not auto_create:
+            wa._dbg(f"> Auth/SAML2 >> user {username!r} unknown and auto-create off; rejecting",
+                    DebugLevel.info)
             return None
         user = {
             'uid':            str(uuid.uuid4()),
@@ -175,6 +179,8 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
         user['role']           = role_uid
 
     wa._persist_users()
+    wa._dbg(f"> Auth/SAML2 >> {'created' if existing is None else 'updated'} user={username!r} "
+            f"role={role_name} groups={len(groups)}", DebugLevel.info)
     return user
 
 

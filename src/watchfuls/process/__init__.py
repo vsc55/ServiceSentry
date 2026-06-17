@@ -27,7 +27,6 @@ or over SSH for a *remote* one — using an OS-appropriate command (``ps`` on
 Unix, ``tasklist`` on Windows) and the matches are counted against ``min_count``.
 """
 
-import concurrent.futures
 import csv
 import io
 import json
@@ -57,11 +56,9 @@ class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
 
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
-                 if isinstance(v, dict) and 'default' in v}
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
 
-    _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
-                        if isinstance(v, dict) and 'default' in v}
+    _MODULE_DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['__module__'])
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -73,16 +70,7 @@ class Watchful(ModuleBase):
 
         items = [(k, v) for k, v in self.get_conf('list', {}).items()
                  if isinstance(v, dict) and v.get('enabled', self._DEFAULTS['enabled'])]
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            futures = {executor.submit(self._process_check, k, v): k for k, v in items}
-            for future in concurrent.futures.as_completed(futures):
-                key = futures[future]
-                try:
-                    future.result()
-                except Exception as exc:  # pylint: disable=broad-except
-                    self._debug(f"Process: {self.item_label(key)} - Exception: {exc}", DebugLevel.error)
-                    self.dict_return.set(key, False, f'Process: {key} - *Error: {exc}* 💥')
+        self.run_parallel(items, self._process_check, 'Process')
 
         super().check()
         return self.dict_return

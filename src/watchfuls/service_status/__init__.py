@@ -29,7 +29,6 @@ starts/stops the service to restore the expected state.  ``discover`` lists the
 services of the machine running the web admin (autocomplete helper).
 """
 
-import concurrent.futures
 import json
 import os
 import platform
@@ -75,8 +74,7 @@ class Watchful(ModuleBase):
     _PLATFORM: str = platform.system().lower()
     _INIT_SYSTEM: str = _detect_linux_init() if platform.system().lower() == 'linux' else 'systemd'
 
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()
-                 if isinstance(v, dict) and 'default' in v}
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -91,17 +89,7 @@ class Watchful(ModuleBase):
             if not value.get('enabled', self._DEFAULTS.get('enabled', True)):
                 continue
             items.append((key, value))
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)) as executor:
-            futures = {executor.submit(self._service_check, k, v): k for k, v in items}
-            for future in concurrent.futures.as_completed(futures):
-                key = futures[future]
-                try:
-                    future.result()
-                except Exception as exc:  # pylint: disable=broad-except
-                    raw = futures[future] and self.get_conf('list', {}).get(key, {})
-                    lbl = (raw.get('label') or raw.get('service') or key) if isinstance(raw, dict) else key
-                    self.dict_return.set(key, False, f'Service: {lbl} - *Error: {exc}* 💥')
+        self.run_parallel(items, self._service_check, 'Service')
         super().check()
         return self.dict_return
 

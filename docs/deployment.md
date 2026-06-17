@@ -227,6 +227,11 @@ SS_WEB_HOST="127.0.0.1"   # solo localhost (detrás de un proxy inverso)
 SS_WEB_PORT="9090"
 ```
 
+> Estas variables `SS_*` las lee el CLI de forma nativa como valor por defecto de
+> los argumentos equivalentes (`--web-host`, `--web-port`, etc.), así que exportarlas
+> en el entorno funciona igual que pasarlas como flags. Lista completa en
+> [configuration.md](configuration.md#variables-de-entorno).
+
 Reinicia el servicio tras editar:
 
 ```bash
