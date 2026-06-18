@@ -488,18 +488,38 @@ function _renderSshConnection() {
 
 // Render the SSH profile's editable fields with the profile's own values as the
 // show_when context, so the key-source selector toggles the file/text field.
+// SSH identity fields supplied by a credential — hidden when one is selected.
+const _SSH_IDENTITY_FIELDS = new Set(['ssh_user', 'ssh_auth_method', 'ssh_password', 'ssh_key', 'ssh_key_string']);
+
 function _renderSshFields() {
     const spec = HOST_PROFILES['ssh'];
     if (!spec) return '';
     const prof = (_hostDraft.profiles && _hostDraft.profiles.ssh) || {};
+    const usingCred = !!prof.cred_uid;
     const eff = {};
     for (const f of (spec.fields || [])) {
         eff[f.name] = (prof[f.name] !== undefined && prof[f.name] !== null) ? prof[f.name] : f.default;
     }
     const ctx = { mod: '__host__', fields: eff };
-    return (spec.fields || []).filter(f => f.name !== spec.address_field)
-        .map(f => _hostFieldRow(f, prof[f.name] !== undefined ? prof[f.name] : f.default,
-            `_setProfileField('ssh',${jsStr(f.name)},`, ctx)).join('');
+    // Reusable-credential picker, placed right before the SSH user.  When a
+    // credential is chosen it supplies the identity, so the inline user/auth/
+    // secret fields are hidden (port and host-key policy stay).
+    const picker = `<div class="col-12">
+        <label class="form-label form-label-sm mb-1">${esc(t('cred_use'))}</label>
+        <select class="form-select form-select-sm" onchange="_setProfileField('ssh','cred_uid',this.value)">${credentialOptions(prof.cred_uid, 'ssh')}</select>
+        <div class="form-text small">${esc(t('cred_use_hint'))}</div>
+    </div>`;
+    let out = '';
+    let inserted = false;
+    for (const f of (spec.fields || [])) {
+        if (f.name === spec.address_field) continue;
+        if (f.name === 'ssh_user') { out += picker; inserted = true; }
+        if (usingCred && _SSH_IDENTITY_FIELDS.has(f.name)) continue;
+        out += _hostFieldRow(f, prof[f.name] !== undefined ? prof[f.name] : f.default,
+            `_setProfileField('ssh',${jsStr(f.name)},`, ctx);
+    }
+    if (!inserted) out = picker + out;
+    return out;
 }
 
 // ── Operating-system selector (auto / fixed) ────────────────────────
@@ -581,7 +601,7 @@ function _hostChecksPayload() {
         for (const it of st.items) {
             if (!it.enabled) continue;                 // test what would actually run
             checks.push({ module: mod, collection: st.collection,
-                          key: it._key || '', fields: { ...it.fields } });
+                          key: it._key || '', fields: { ...it.fields }, cred_uid: it.cred_uid || '' });
         }
     }
     return checks;
@@ -648,7 +668,7 @@ async function testHostCheck(mod, i) {
     showToast(t('host_test_running') || 'Testing…');
     const res = await apiPost('/api/v1/hosts/test_check', {
         ..._hostDraftPayload(), module: mod, collection: st.collection,
-        key: it._key || '', fields: { ...it.fields },
+        key: it._key || '', fields: { ...it.fields }, cred_uid: it.cred_uid || '',
     });
     const d = res && res.data;
     if (!d) { showToast(t('error') || 'Error', 'danger'); return; }
@@ -664,7 +684,7 @@ async function testHostModule(mod) {
     const checks = st.items
         .filter(it => it.enabled)
         .map(it => ({ module: mod, collection: st.collection, key: it._key || '',
-                      fields: { ...it.fields } }));
+                      fields: { ...it.fields }, cred_uid: it.cred_uid || '' }));
     if (!checks.length) { showToast(t('host_test_none') || '—'); return; }
     _openHostTestModal(_modPrettyName(mod));
     // no_ssh: a module-scoped test skips the host's SSH connection check.
@@ -961,6 +981,66 @@ function _renderMonitoringSection() {
     return h;
 }
 
+// Credential picker + fields for a host-bound check.  Mirrors the modules-tab
+// behaviour: a module that declares a credential type (e.g. web → web_auth) gets
+// a "Use credential" picker before its credential fields; selecting one hides
+// and clears them (the credential supplies them at runtime).
+function _hostCredPicker(mod, idx, curUid, ctype) {
+    if (typeof credentialOptions !== 'function') return '';
+    return `<div class="col-12">
+        <label class="form-label form-label-sm mb-1"><i class="bi bi-key me-1"></i>${esc(t('cred_use'))}</label>
+        <select class="form-select form-select-sm" onchange="_setHostCheckCred(${jsStr(mod)},${idx},this.value)">${credentialOptions(curUid, ctype)}</select>
+    </div>`;
+}
+
+function _setHostCheckCred(mod, idx, uid) {
+    const it = _hostChecks[mod] && _hostChecks[mod].items[idx];
+    if (!it) return;
+    it.cred_uid = uid || '';
+    const wraps = document.querySelectorAll(`.credprof-host[data-cp-host="${CSS.escape(mod + '|' + idx)}"]`);
+    if (uid) {
+        const spec = (typeof _credTypeForModule === 'function') ? _credTypeForModule(mod) : null;
+        if (spec) spec.fields.forEach(f => { it.fields[f.name] = ''; });
+        wraps.forEach(el => {
+            el.querySelectorAll('input, textarea, select').forEach(i => {
+                if (i.type === 'checkbox') i.checked = false; else i.value = '';
+            });
+            el.style.display = 'none';
+        });
+    } else {
+        wraps.forEach(el => { el.style.display = ''; });
+    }
+    markDirty('modules');
+}
+
+// Build a check's field rows, injecting the credential picker before the
+// credential fields and wrapping those so they hide when a credential is bound.
+function _hostCheckFieldsHtml(mod, idx, it, metas) {
+    const spec = (typeof _credTypeForModule === 'function') ? _credTypeForModule(mod) : null;
+    const credFields = spec ? spec.fields : [];
+    const bound = !!it.cred_uid;
+    const ctx = { mod, fields: it.fields, itemKey: it._key || _hostDraft.name, idx };
+    let html = '', pickerDone = false;
+    for (const f of metas) {
+        const isCred = credFields.includes(f.name);
+        // The picker shares the credential field's visibility (e.g. auth_enabled):
+        // only emit it once, before the first VISIBLE credential field.  The host
+        // modal re-renders this list when a controller (auth_enabled) changes, so
+        // the picker appears/disappears with the credential fields.
+        if (isCred && !pickerDone && _hostFieldVisible(f, ctx)) {
+            pickerDone = true;
+            html += _hostCredPicker(mod, idx, it.cred_uid || '', spec.type);
+        }
+        let row = _hostFieldRow(f, it.fields[f.name],
+            `_setHostCheckField(${jsStr(mod)},${idx},${jsStr(f.name)},`, ctx);
+        if (isCred && row) {
+            row = `<div class="credprof-host" data-cp-host="${escAttr(mod + '|' + idx)}"${bound ? ' style="display:none"' : ''}>${row}</div>`;
+        }
+        html += row;
+    }
+    return html;
+}
+
 // Single-check module: a master toggle (header) + the (one) check's fields in
 // the collapsible body.
 function _renderSingleCheck(mod) {
@@ -969,10 +1049,7 @@ function _renderSingleCheck(mod) {
     const slug = mod.replace(/\W/g, '_');
     const bodyId = 'hmChk1_' + slug;
     const fieldsHtml = st.fieldsMeta.length
-        ? st.fieldsMeta.map(f => _hostFieldRow(
-              f, it.fields[f.name],
-              `_setHostCheckField(${jsStr(mod)},0,${jsStr(f.name)},`,
-              { mod, fields: it.fields, itemKey: it._key || _hostDraft.name, idx: 0 })).join('')
+        ? _hostCheckFieldsHtml(mod, 0, it, st.fieldsMeta)
         : `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
     const title = `<span class="fw-semibold">${esc(_modPrettyName(mod))}</span>`;
     // Just an enable switch (no redundant "Monitor with X" text) + run-test.
@@ -1030,10 +1107,7 @@ function _renderHostCheckList(mod) {
         const colCls = loneLast ? 'col-12' : 'col-12 col-md-6';
         const metas = st.fieldsMeta.filter(f => !(titleEditable && f.name === titleField));
         const fieldsHtml = metas.length
-            ? metas.map(f => _hostFieldRow(
-                  f, it.fields[f.name],
-                  `_setHostCheckField(${jsStr(mod)},${i},${jsStr(f.name)},`,
-                  { mod, fields: it.fields, itemKey: it._key || _hostDraft.name, idx: i })).join('')
+            ? _hostCheckFieldsHtml(mod, i, it, metas)
             : `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
         const editBtn = titleEditable
             ? `<button class="btn btn-sm btn-secondary py-0 px-1" data-no-collapse="1" onclick="_editHostCheckLabel(${jsStr(mod)},${i})"
@@ -1301,10 +1375,7 @@ function _refreshHostCheckItemFields(mod, i) {
     const titleEditable = !!sch['__title_editable__'];
     const titleField = sch['__check_title_field__'];
     const metas = st.fieldsMeta.filter(f => !(titleEditable && f.name === titleField));
-    row.innerHTML = metas.map(f => _hostFieldRow(
-        f, it.fields[f.name],
-        `_setHostCheckField(${jsStr(mod)},${i},${jsStr(f.name)},`,
-        { mod, fields: it.fields, itemKey: it._key || _hostDraft.name, idx: i })).join('');
+    row.innerHTML = _hostCheckFieldsHtml(mod, i, it, metas);
     initTooltips(row);
 }
 
@@ -1313,10 +1384,7 @@ function _refreshSingleCheck(mod) {
     if (!body) return;
     const st = _hostChecks[mod];
     const it = st.items[0];
-    body.innerHTML = st.fieldsMeta.map(f => _hostFieldRow(
-        f, it.fields[f.name],
-        `_setHostCheckField(${jsStr(mod)},0,${jsStr(f.name)},`,
-        { mod, fields: it.fields, itemKey: it._key || _hostDraft.name, idx: 0 })).join('')
+    body.innerHTML = _hostCheckFieldsHtml(mod, 0, it, st.fieldsMeta)
         || `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
     initTooltips(body);
 }
@@ -1413,7 +1481,8 @@ function _buildHostChecks(uid) {
                     // e.g. the service name), surface it so the field/title shows it.
                     if (mirrorField && mirrorField in fields && !String(fields[mirrorField] || '').trim())
                         fields[mirrorField] = k;
-                    items.push({ _key: k, enabled: v.enabled !== false, fields });
+                    items.push({ _key: k, enabled: v.enabled !== false, fields,
+                                 cred_uid: v.cred_uid || '' });
                 }
             }
         }
@@ -1625,11 +1694,19 @@ function _setProfileField(proto, field, value) {
     if (!_hostDraft.profiles) _hostDraft.profiles = {};
     if (!_hostDraft.profiles[proto]) _hostDraft.profiles[proto] = {};
     _hostDraft.profiles[proto][field] = value;
+    // Picking a credential clears the inline SSH identity so stale values don't
+    // linger in the draft and reappear if the credential is later cleared.
+    if (proto === 'ssh' && field === 'cred_uid' && value) {
+        _SSH_IDENTITY_FIELDS.forEach(f => delete _hostDraft.profiles.ssh[f]);
+    }
     // Re-render the profile's fields when a controller changed (e.g. SNMP
     // version=3 reveals the v3 credential fields; SSH key-source toggles the
     // file/text field).
     const spec = HOST_PROFILES[proto];
-    if (spec && _hostFieldControls(spec.fields, field)) {
+    // cred_uid isn't a schema controller, but toggling it shows/hides the SSH
+    // identity fields, so re-render the SSH section too.
+    const credToggle = (proto === 'ssh' && field === 'cred_uid');
+    if (spec && (credToggle || _hostFieldControls(spec.fields, field))) {
         if (proto === 'ssh') {
             const el = document.getElementById('hmSshFields');
             if (el) { el.innerHTML = _renderSshFields(); initTooltips(el); }
@@ -1664,10 +1741,19 @@ async function saveHostModal(closeAfter = true) {
     // methods so a stale value (incl. a masked-secret marker that would be
     // restored server-side) can't win over the chosen one.
     if (profiles.ssh) {
-        const m = (d.profiles.ssh || {}).ssh_auth_method || 'password';
-        if (m !== 'password') delete profiles.ssh.ssh_password;
-        if (m !== 'file')     delete profiles.ssh.ssh_key;
-        if (m !== 'text')     delete profiles.ssh.ssh_key_string;
+        if (profiles.ssh.cred_uid) {
+            // A reusable credential supplies the identity — clear any previously
+            // stored inline user/auth/secret so they don't linger on the host.
+            _SSH_IDENTITY_FIELDS.forEach(f => delete profiles.ssh[f]);
+        } else {
+            // Honour the auth-method selector: drop the credentials of the other
+            // two methods so a stale value (incl. a masked-secret marker that
+            // would be restored server-side) can't win over the chosen one.
+            const m = (d.profiles.ssh || {}).ssh_auth_method || 'password';
+            if (m !== 'password') delete profiles.ssh.ssh_password;
+            if (m !== 'file')     delete profiles.ssh.ssh_key;
+            if (m !== 'text')     delete profiles.ssh.ssh_key_string;
+        }
     }
     const body = { name: d.name.trim(), address: d.address || '',
                    kind: d.kind === 'remote' ? 'remote' : 'local',
@@ -1784,6 +1870,9 @@ function _applyHostChecks(uid) {
             const item = (col[key] && typeof col[key] === 'object') ? col[key] : (col[key] = {});
             item.host_uid = uid;
             item.enabled = !!it.enabled;
+            // Referenced credential (e.g. web_auth); the server strips the inline
+            // credential fields for items that carry a cred_uid.
+            if (it.cred_uid) item.cred_uid = it.cred_uid; else delete item.cred_uid;
             // Sensitive fields: a null value means "a secret is stored, unchanged"
             // — keep it as null (not deleted) so the field keeps showing
             // "Defined — leave blank to keep" on reopen, and the server restores

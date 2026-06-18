@@ -74,6 +74,23 @@ def _restore_action_secrets(wa, module, config):
                 return
 
 
+def _apply_cred_to_config(wa, config):
+    """Overlay a referenced credential's fields onto an action's *config*, so a
+    web action (test_connection…) on a check that uses a named credential
+    authenticates with the credential — not the stored inline secret.  Mirrors
+    ModuleBase.resolve_host; runs last so the credential wins."""
+    uid = str(config.get('cred_uid') or '').strip()
+    if not uid:
+        return
+    cstore = getattr(wa, '_credentials_store', None)
+    cred = cstore.get(uid) if cstore is not None else None
+    if not cred or cred.get('enabled') is False:
+        return
+    for k, v in (cred.get('data') or {}).items():
+        if v not in (None, ''):
+            config[k] = v
+
+
 def _merge_host_conn(wa, module, config, host_ctx):
     """Populate *config*'s connection fields from the bound host (its address and
     SSH profile), mirroring ModuleBase.resolve_host — so a web action runs on a
@@ -178,6 +195,9 @@ def register(app, wa):
                     # a host-bound check (whose host/ssh fields are empty because
                     # the value comes from the host).
                     _merge_host_conn(wa, module_name, config, host_ctx)
+                # A referenced credential supplies the identity — overlay it last
+                # so it wins over the restored stored secret / host profile.
+                _apply_cred_to_config(wa, config)
                 result = method(config)
             else:
                 result = method()

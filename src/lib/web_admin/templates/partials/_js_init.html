@@ -147,9 +147,11 @@ const hasAnyUser    = ['users_view','users_add','users_edit','users_delete'].som
 const hasAnyRole    = ['roles_view','roles_add','roles_edit','roles_delete'].some(p => perms.has(p));
 const hasAnyGroup   = ['groups_view','groups_add','groups_edit','groups_delete'].some(p => perms.has(p));
 const hasAnySessions = ['sessions_view','sessions_revoke'].some(p => perms.has(p));
+const hasAnyCredential = ['credentials_view','credentials_add','credentials_edit','credentials_delete']
+    .some(p => perms.has(p));
 const hasAnyModule  = ['modules_view','modules_add','modules_edit'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('module.'));
-const hasAnyAccess  = hasAnyUser || hasAnyRole || hasAnyGroup || hasAnySessions;
+const hasAnyAccess  = hasAnyUser || hasAnyRole || hasAnyGroup || hasAnySessions || hasAnyCredential;
 // Main access tab
 const accessLi = document.getElementById('tab-access-li');
 if (accessLi) accessLi.style.display = hasAnyAccess ? '' : 'none';
@@ -162,6 +164,8 @@ const stGroups = document.getElementById('subtab-groups-li');
 if (stGroups) stGroups.style.display = hasAnyGroup ? '' : 'none';
 const stRoles = document.getElementById('subtab-roles-li');
 if (stRoles) stRoles.style.display = hasAnyRole ? '' : 'none';
+const stCredentials = document.getElementById('subtab-credentials-li');
+if (stCredentials) stCredentials.style.display = hasAnyCredential ? '' : 'none';
 // Activate saved sub-tab (or fall back to first visible)
 const _savedSubtabTarget = localStorage.getItem('ss_active_subtab_access');
 const _savedSubtabBtn = _savedSubtabTarget
@@ -169,7 +173,7 @@ const _savedSubtabBtn = _savedSubtabTarget
 const _activeSubtab = (
     _savedSubtabBtn && _savedSubtabBtn.closest('li')?.style.display !== 'none'
         ? _savedSubtabBtn
-        : ['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles']
+        : ['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-credentials']
             .map(id => document.getElementById(id))
             .find(btn => btn && btn.closest('li')?.style.display !== 'none')
 );
@@ -297,6 +301,7 @@ document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModa
 document.getElementById('btnGroupModalOk').addEventListener('click', saveGroupModal);
 
 document.getElementById('btn-tab-overview')?.addEventListener('shown.bs.tab', renderOverview);
+document.getElementById('btn-subtab-credentials')?.addEventListener('shown.bs.tab', renderCredentials);
 document.getElementById('mainTabs')?.addEventListener('shown.bs.tab', e => {
     localStorage.setItem('ss_active_tab', e.target.dataset.bsTarget);
 });
@@ -326,7 +331,7 @@ window.addEventListener('beforeunload', e => {
     }
 });
 // Persist the active Access sub-tab across reloads
-['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles'].forEach(id => {
+['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-credentials'].forEach(id => {
     document.getElementById(id)?.addEventListener('shown.bs.tab', e => {
         localStorage.setItem('ss_active_subtab_access', e.target.dataset.bsTarget);
     });
@@ -345,6 +350,14 @@ try {
     if ((currentUser.permissions || []).some(p =>
         p === 'servers_view' || p === 'servers_edit' || p === 'servers_delete' || p.startsWith('server.'))) {
         await loadHosts();
+    }
+    // Credentials are needed both for their own tab and for the host SSH picker,
+    // so load them for credential managers AND server editors.
+    if ((currentUser.permissions || []).some(p =>
+        p.startsWith('credentials_') || p === 'servers_view' || p === 'servers_edit'
+        || p === 'servers_delete' || p.startsWith('server.')
+        || p === 'modules_view' || p === 'modules_edit' || p.startsWith('module.'))) {
+        await loadCredentials();
     }
     configData = await loadConfig() || {};
     _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;

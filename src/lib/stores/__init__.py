@@ -6,6 +6,7 @@ Each submodule owns one table (schema declared via lib.db.schema) and exposes a
 Store class:
     audit        — AuditStore (the audit trail)
     check_state  — CheckStateStore / DbBackedStatus (per-check live state)
+    credentials  — CredentialsStore (reusable named SSH identities)
     groups       — GroupsStore
     history      — HistoryStore (time-series of check results)
     hosts        — HostsStore (host registry + per-protocol encrypted profiles)

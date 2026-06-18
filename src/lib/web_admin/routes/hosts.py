@@ -71,6 +71,17 @@ def _probe_host_record(wa, body):
     record.setdefault('profiles', {})
     record['uid'] = uid or '__probe__'
     record['maintenance'] = False
+    # Resolve a referenced credential into the ssh profile so the probe/test
+    # uses the credential's identity (not the stored inline secret) — the same
+    # overlay resolve_host applies at runtime.
+    ssh = record['profiles'].get('ssh') or {}
+    cred_uid = str(ssh.get('cred_uid') or '').strip()
+    if cred_uid:
+        from lib.stores.credentials import apply_credential, SSH_CRED_FIELDS  # noqa: PLC0415
+        cstore = getattr(wa, '_credentials_store', None)
+        cred = cstore.get(cred_uid) if cstore is not None else None
+        base = {k: v for k, v in ssh.items() if k not in SSH_CRED_FIELDS}
+        record['profiles']['ssh'] = apply_credential(base, cred)
     return record
 
 
@@ -88,6 +99,19 @@ def _restore_check_secrets(wa, bare_module, coll, key, fields):
         if isinstance(stored, dict):
             secret_manager.restore_sensitive(fields, stored, keys=wa._secret_keys)
             return
+
+
+def _apply_check_cred(wa, fields):
+    """Overlay a check's referenced credential (``cred_uid``) onto its *fields*
+    so a host-bound check test authenticates with the credential — not the
+    restored stored inline secret.  Returns *fields* (possibly a new dict)."""
+    uid = str((fields or {}).get('cred_uid') or '').strip()
+    if not uid:
+        return fields
+    cstore = getattr(wa, '_credentials_store', None)
+    cred = cstore.get(uid) if cstore is not None else None
+    from lib.stores.credentials import apply_credential  # noqa: PLC0415
+    return apply_credential(fields, cred)
 
 
 def _checks_for_host(wa, uid):
@@ -421,15 +445,28 @@ def register(app, wa):
         if err:
             return err
         ssh = dict((data.get('profiles') or {}).get('ssh') or {})
-        # Restore masked secrets from the stored host (edit flow).
-        store = _store()
         uid = str(data.get('uid') or '').strip()
-        if store is not None and uid:
-            stored = store.get(uid, decrypt=True) or {}
-            stored_ssh = (stored.get('profiles') or {}).get('ssh') or {}
-            for k in ('ssh_password', 'ssh_key_string'):
-                if ssh.get(k) in (None, '') and stored_ssh.get(k):
-                    ssh[k] = stored_ssh[k]
+        cred_uid = str(ssh.get('cred_uid') or '').strip()
+        if cred_uid:
+            # A reusable credential supplies the identity: drop any inline
+            # user/auth/secret (so a stale value can't win) and overlay the
+            # credential — exactly what resolve_host does at runtime.  The
+            # stored host's inline secret must NOT be restored here, or a wrong
+            # credential would be tested with the host's old correct password.
+            from lib.stores.credentials import apply_credential, SSH_CRED_FIELDS  # noqa: PLC0415
+            cstore = getattr(wa, '_credentials_store', None)
+            cred = cstore.get(cred_uid) if cstore is not None else None
+            ssh = apply_credential({k: v for k, v in ssh.items() if k not in SSH_CRED_FIELDS}, cred)
+        else:
+            # Inline edit flow: restore masked secrets from the stored host so
+            # the user need not re-type the password/key just to test.
+            store = _store()
+            if store is not None and uid:
+                stored = store.get(uid, decrypt=True) or {}
+                stored_ssh = (stored.get('profiles') or {}).get('ssh') or {}
+                for k in ('ssh_password', 'ssh_key_string'):
+                    if ssh.get(k) in (None, '') and stored_ssh.get(k):
+                        ssh[k] = stored_ssh[k]
         ok, msg, os_found = ssh_client.test_connection(
             address=data.get('address', ''),
             port=ssh.get('ssh_port') or 22,
@@ -502,6 +539,7 @@ def register(app, wa):
         record = _probe_host_record(wa, body)
         fields = dict(body.get('fields') or {})
         _restore_check_secrets(wa, module, coll, key, fields)
+        fields = _apply_check_cred(wa, fields)
         item = {**fields, 'host_uid': record['uid'], 'enabled': True}
         results = _run_checks(record, {(module, coll): {key: item}})
         ok = bool(results) and all(r['ok'] for r in results)
@@ -540,10 +578,14 @@ def register(app, wa):
                 key = str(c.get('key') or '') or f'check{len(grouped)}'
                 fields = dict(c.get('fields') or {})
                 _restore_check_secrets(wa, bare, coll, key, fields)
+                fields = _apply_check_cred(wa, fields)
                 grouped.setdefault((bare, coll), {})[key] = {
                     **fields, 'host_uid': record['uid'], 'enabled': True}
         else:
             grouped = _checks_for_host(wa, record['uid'])
+            for _items in grouped.values():
+                for _k in list(_items):
+                    _items[_k] = _apply_check_cred(wa, _items[_k])
 
         out['results'] = _run_checks(record, grouped)
         out['ok'] = ((out['ssh'] is None or out['ssh']['ok'])

@@ -553,10 +553,22 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         h += _renderHostPicker(pathPrefix, obj.host_uid || '', target);
     }
 
+    // ── Credential binding (module-declared credential type) ──────────────────
+    // A module that declares a __credential__ (e.g. web → web_auth) lets a check
+    // reference a reusable credential instead of inline auth fields.  Show a
+    // picker before those fields and hide them when a credential is bound.
+    const _credSpec = (target !== 'config' && typeof _credTypeForModule === 'function')
+        ? _credTypeForModule(_modBase) : null;
+    const _credFieldNames = _credSpec ? _credSpec.fields : [];
+    const _collHasCred = _credFieldNames.some(f => keys.includes(f));
+    const _credBound = _collHasCred && obj && obj.cred_uid;
+    let _credPickerDone = false;
+
     let _curGroup = null;
     for (const k of keys) {
         if (exclude.includes(k)) continue;
         if (k === 'host_uid') continue;   // rendered by the host picker above
+        if (k === 'cred_uid') continue;   // rendered by the credential picker
         const v = obj[k];
         if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
         const _meta = fieldMeta(_sch, k);
@@ -609,6 +621,16 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         }
         const _disp = _visible ? '' : ' style="display:none"';
 
+        // Credential picker: rendered once, right before the first credential
+        // field, sharing that field's show_when so it appears in the same context.
+        if (_collHasCred && !_credPickerDone && _credFieldNames.includes(k)) {
+            _credPickerDone = true;
+            const _cp = _renderCredPicker(pathPrefix, obj.cred_uid || '', _credSpec.type, target);
+            h += _showWhen
+                ? `<div class="sw-field" data-sw-when="${escAttr(JSON.stringify(_showWhen))}"${_disp}>${_cp}</div>`
+                : _cp;
+        }
+
         let _inner = _showWhen
             ? `<div class="sw-field" data-sw-when="${escAttr(JSON.stringify(_showWhen))}"${_disp}>${_fhtml}</div>`
             : _fhtml;
@@ -617,6 +639,12 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         if (_hostCapable && _hostFields.includes(k)) {
             const _hpDisp = _hostBound ? ' style="display:none"' : '';
             _inner = `<div class="hostprof-field" data-hp-item="${escAttr(pathPrefix)}"${_hpDisp}>${_inner}</div>`;
+        }
+        // Credential field of a credential-capable module: hide when a
+        // credential is bound (its value comes from the credential then).
+        if (_collHasCred && _credFieldNames.includes(k)) {
+            const _cpDisp = _credBound ? ' style="display:none"' : '';
+            _inner = `<div class="credprof-field" data-cp-item="${escAttr(pathPrefix)}"${_cpDisp}>${_inner}</div>`;
         }
         h += _inner;
     }

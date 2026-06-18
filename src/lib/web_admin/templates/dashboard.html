@@ -227,6 +227,11 @@
                         <i class="bi bi-shield-lock me-1"></i>{{ i18n.subtab_roles }}
                     </button>
                 </li>
+                <li class="nav-item" role="presentation" id="subtab-credentials-li" style="display:none">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-credentials" type="button" id="btn-subtab-credentials">
+                        <i class="bi bi-key me-1"></i>{{ i18n.tab_credentials }}
+                    </button>
+                </li>
             </ul>
             <div class="tab-content">
                 <!-- Sessions sub-tab -->
@@ -262,6 +267,10 @@
                 <!-- Roles sub-tab -->
                 <div class="tab-pane fade" id="subtab-roles">
                     <div id="roles-container"></div>
+                </div>
+                <!-- Credentials sub-tab -->
+                <div class="tab-pane fade" id="subtab-credentials">
+                    <div id="credentials-container"></div>
                 </div>
             </div>
         </div>
@@ -388,6 +397,7 @@
 {% include "partials/_js_account.html" %}
 {% include "partials/_js_users.html" %}
 {% include "partials/_js_servers.html" %}
+{% include "partials/_js_credentials.html" %}
 {% include "partials/_js_sessions.html" %}
 {% include "partials/_js_roles.html" %}
 {% include "partials/_js_groups.html" %}

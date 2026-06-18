@@ -13,6 +13,7 @@ from lib.hosts.profiles import (
     module_host_fields,
     module_host_multiple,
 )
+from lib.credential_schemas import credential_schemas
 
 from ..constants import SUPPORTED_LANGS
 
@@ -45,6 +46,7 @@ def register(app, wa):
             role=session.get('role', 'viewer'),
             item_schemas=ModuleBase.discover_schemas(wa._modules_dir),
             host_profiles=host_profiles_catalog(wa._modules_dir),
+            credential_types=credential_schemas(wa._modules_dir),
             module_host_fields=module_host_fields(wa._modules_dir),
             module_host_collections=module_host_collections(wa._modules_dir),
             module_host_multiple=module_host_multiple(wa._modules_dir),

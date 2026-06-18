@@ -19,6 +19,7 @@ from .sessions import register as _sessions
 from .sessions.audit import register as _audit
 from .config import register as _config
 from .hosts import register as _hosts
+from .credentials import register as _credentials
 from .watchfuls import register as _watchfuls
 from .daemon import register as _daemon
 from .history import register as _history
@@ -35,6 +36,7 @@ def register_all(app, wa):
     _modules(app, wa)
     _config(app, wa)
     _hosts(app, wa)
+    _credentials(app, wa)
     _telegram(app, wa)
     _ldap(app, wa)
     _email(app, wa)

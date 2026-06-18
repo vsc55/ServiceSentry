@@ -57,6 +57,10 @@ PERMISSIONS = (
     'servers_add',     # add modules/checks to a server
     'servers_edit',    # edit servers, host-bound checks and run host tests/migration
     'servers_delete',  # delete servers from the host registry
+    'credentials_view',   # view the reusable credentials tab
+    'credentials_add',    # create reusable credentials
+    'credentials_edit',   # edit reusable credentials
+    'credentials_delete', # delete reusable credentials
     'config_view',     # read config.json (without editing)
     'config_edit',     # write config.json
     'overview_view',   # view the overview dashboard
@@ -77,6 +81,7 @@ PERMISSION_GROUPS = [
     ('perm_group_audit',    ['audit_view', 'audit_delete']),
     ('perm_group_modules',  ['modules_view', 'modules_add', 'modules_edit', 'modules_delete']),
     ('perm_group_servers',  ['servers_view', 'servers_add', 'servers_edit', 'servers_delete']),
+    ('perm_group_credentials', ['credentials_view', 'credentials_add', 'credentials_edit', 'credentials_delete']),
     ('perm_group_config',   ['config_view', 'config_edit']),
     ('perm_group_overview', ['overview_view', 'overview_edit']),
     ('perm_group_sessions', ['sessions_view', 'sessions_revoke']),

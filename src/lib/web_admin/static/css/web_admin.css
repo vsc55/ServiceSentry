@@ -226,7 +226,7 @@
    rendered before the container keep their natural height (flexbox handles it). */
 #overview-container, #modules-container, #config-container, #status-container,
 #history-container, #users-container, #groups-container, #roles-container,
-#audit-container, #sessions-panel {
+#audit-container, #sessions-panel, #credentials-container {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
@@ -238,6 +238,7 @@
 #groups-container > .ss-card,
 #roles-container  > .ss-card,
 #audit-container  > .ss-card,
+#credentials-container > .ss-card,
 #history-container > .ss-card {
     flex: 1 1 auto;
     display: flex;
@@ -283,6 +284,7 @@
 #users-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
 #groups-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
 #roles-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
+#credentials-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
 #audit-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band) {
     flex: 1 1 auto;
     overflow: auto;

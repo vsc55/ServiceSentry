@@ -162,6 +162,38 @@ def _rekey_items_by_uid(data: dict) -> None:
                 module_cfg[coll_name] = _rekey_collection(coll)
 
 
+def _strip_credential_fields(wa, data):
+    """For items that reference a credential (``cred_uid``), drop the module's
+    inline credential fields (e.g. web's auth_user/auth_password) so a stale
+    user/secret can't linger — the credential supplies them at runtime."""
+    try:
+        from lib.credential_schemas import credential_schemas  # noqa: PLC0415
+        cat = credential_schemas(wa._modules_dir)
+    except Exception:  # pylint: disable=broad-except
+        return
+    by_module = {}
+    for spec in cat.values():
+        mod = spec.get('module')
+        if mod and mod != '__core__':
+            by_module.setdefault(mod, set()).update(
+                f['name'] for f in (spec.get('fields') or []))
+    if not by_module:
+        return
+    for mod_key, mod_cfg in data.items():
+        if not isinstance(mod_cfg, dict):
+            continue
+        fields = by_module.get(mod_key.split('.')[-1])
+        if not fields:
+            continue
+        for coll, items in mod_cfg.items():
+            if coll.startswith('__') or not isinstance(items, dict):
+                continue
+            for item in items.values():
+                if isinstance(item, dict) and str(item.get('cred_uid') or '').strip():
+                    for f in fields:
+                        item.pop(f, None)
+
+
 def register(app, wa):
     login_required = wa._login_required
 
@@ -222,6 +254,9 @@ def register(app, wa):
         # Restore masked secrets BEFORE authorization so an unchanged item with a
         # masked secret is not seen as "modified" (which would over-require edit).
         secret_manager.restore_sensitive(data, old_data, keys=wa._secret_keys)
+        # Items bound to a credential keep no inline user/secret (cleared after
+        # the restore above so a stale value can't be persisted/restored).
+        _strip_credential_fields(wa, data)
         if not has_global_edit:
             for name in set(old_data) | set(data):
                 if not _authorize_module_write(name, old_data.get(name), data.get(name), perms):
@@ -474,6 +509,24 @@ def register(app, wa):
         except Exception:  # pylint: disable=broad-except
             pass
 
+        # Reusable credentials: how many are defined, by type / enabled. Only
+        # non-sensitive metadata (count + type), never the secret values.
+        cred_total = cred_enabled = 0
+        cred_by_type: dict = {}
+        try:
+            _cstore = getattr(wa, '_credentials_store', None)
+            if _cstore is not None:
+                for _c in (_cstore.list(decrypt=False) or []):
+                    if not isinstance(_c, dict):
+                        continue
+                    cred_total += 1
+                    if _c.get('enabled') is not False:
+                        cred_enabled += 1
+                    _ct = str(_c.get('ctype') or '').strip() or 'ssh'
+                    cred_by_type[_ct] = cred_by_type.get(_ct, 0) + 1
+        except Exception:  # pylint: disable=broad-except
+            pass
+
         # Monitoring coverage: share of servers with at least one active check.
         hosts_monitored = sum(
             1 for s in servers_list if (s.get('checks') or {}).get('total', 0) > 0)
@@ -514,6 +567,11 @@ def register(app, wa):
             'webhooks': {
                 'total': webhooks_total,
                 'enabled': webhooks_enabled,
+            },
+            'credentials': {
+                'total': cred_total,
+                'enabled': cred_enabled,
+                'by_type': cred_by_type,
             },
             'coverage': {
                 'hosts_total': servers_total,

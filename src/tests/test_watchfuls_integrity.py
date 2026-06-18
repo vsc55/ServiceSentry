@@ -108,9 +108,9 @@ class TestRealModuleImport:
         mod = importlib.import_module(f"watchfuls.{mod_name}")
         schema = mod.Watchful.ITEM_SCHEMA
         for collection, fields in schema.items():
-            if collection in ("__i18n__", "__host_profile__", "__host_multiple__"):
-                # host-binding metadata (dict/list/bool), not a renderable
-                # collection of field defs.
+            if collection.startswith("__"):
+                # dunder metadata (i18n, host profile/multiple, credential…),
+                # not a renderable collection of field defs.
                 continue
             assert isinstance(fields, dict), (
                 f"{mod_name}.ITEM_SCHEMA['{collection}'] is not a dict"
@@ -312,7 +312,7 @@ class TestDiscoverSchemasRealModules:
         """Schema fields must carry label_i18n entries loaded from lang/ files."""
         schema_keys = [
             k for k in self.schemas
-            if k.startswith(f"{mod_name}|") and "__i18n__" not in k
+            if k.startswith(f"{mod_name}|") and not k.split('|', 1)[1].startswith('__')
         ]
         for sk in schema_keys:
             for field_key, field_meta in self.schemas[sk].items():

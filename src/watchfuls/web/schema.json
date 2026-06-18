@@ -8,6 +8,13 @@
     },
     "__history__": {"field": null, "unit": null, "label": "HTTP Check"},
     "__host_profile__": {"key": "http", "address_field": "url", "fields": []},
+    "__credential__": {
+        "type": "web_auth",
+        "fields": [
+            {"name": "auth_user",     "kind": "text",     "label": "auth_user"},
+            {"name": "auth_password", "kind": "password", "secret": true, "label": "auth_password"}
+        ]
+    },
     "__host_multiple__": true,
     "list": {
         "__check_title_field__": "label",

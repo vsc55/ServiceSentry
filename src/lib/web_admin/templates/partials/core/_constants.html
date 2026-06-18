@@ -43,6 +43,7 @@ let sessionsData = {};
 let rolesData = {};
 let groupsData = {};
 let hostsData = {};   // {uid: {name, address, tags, profiles, …}} — host registry
+let credentialsData = {};   // {uid: {name, ctype, data:{ssh_*}}} — reusable credentials
 let currentUser = {};
 let _uid = 0;
 let _defaultPageSize = 25;
@@ -101,6 +102,7 @@ const ITEM_SCHEMAS = Object.fromEntries([
 // Host registry: per-protocol connection-profile catalog + the connection
 // fields each module contributes (hidden on a check once it is bound to a host).
 const HOST_PROFILES = {{ host_profiles | default({}) | tojson }};
+const CREDENTIAL_TYPES = {{ credential_types | default({}) | tojson }};
 const MODULE_HOST_FIELDS = {{ module_host_fields | default({}) | tojson }};
 // Which collection(s) of each host-centric module may bind to a host (show the
 // host picker).  SSH-only/address-only modules expose their item collection even

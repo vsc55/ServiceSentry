@@ -264,6 +264,15 @@ class TestApiOverview:
         assert roles["custom"] == 1
         assert roles["total"] == len(BUILTIN_ROLE_PERMISSIONS) + 1
 
+    def test_credentials_summary_keys(self, client):
+        """credentials key has total, enabled and by_type sub-keys."""
+        _login(client)
+        creds = client.get("/api/v1/modules/overview").get_json()["credentials"]
+        assert "total" in creds
+        assert "enabled" in creds
+        assert "by_type" in creds
+        assert isinstance(creds["by_type"], dict)
+
     # ---- per-module checks ----
 
     def test_modules_have_checks_key(self, client):

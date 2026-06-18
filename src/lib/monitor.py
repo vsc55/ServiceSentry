@@ -82,6 +82,7 @@ class Monitor(ObjectBase):
         # The working state lives in the DB (check_state) — no status.json.
         self._read_status()
         self._hosts_store = self._init_hosts_store()
+        self._credentials_store = self._init_credentials_store()
         self._audit_store = self._init_audit_store()
         self._reconcile_module_tables()
         self.debug.print("> Monitor >> Monitor Init OK")
@@ -118,6 +119,23 @@ class Monitor(ObjectBase):
             secret_keys = secret_manager.ENCRYPT_KEYS | ModuleBase.discover_secret_fields(self.dir_modules)
             return HostsStore(self._db, fernet=getattr(self, '_fernet', None),
                               secret_keys=secret_keys)
+        except Exception:  # pylint: disable=broad-except
+            return None
+
+    def _init_credentials_store(self):
+        """Create the reusable-credentials store so checks can resolve cred_uid."""
+        if self._db is None:
+            return None
+        try:
+            from lib.stores.credentials import CredentialsStore   # noqa: PLC0415
+            from lib import secret_manager                        # noqa: PLC0415
+            from lib.modules import ModuleBase                    # noqa: PLC0415
+            from lib.credential_schemas import credential_secret_fields  # noqa: PLC0415
+            secret_keys = (secret_manager.ENCRYPT_KEYS
+                           | ModuleBase.discover_secret_fields(self.dir_modules)
+                           | credential_secret_fields(self.dir_modules))
+            return CredentialsStore(self._db, fernet=getattr(self, '_fernet', None),
+                                    secret_keys=secret_keys)
         except Exception:  # pylint: disable=broad-except
             return None
 

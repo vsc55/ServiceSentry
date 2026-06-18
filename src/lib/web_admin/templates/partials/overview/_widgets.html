@@ -445,6 +445,29 @@ function _dwContent(id, data) {
                 servers.total || 0, 'overview_servers', sub);
         }
 
+        case 'credentials': {
+            const creds = data.credentials || {};
+            const byType = creds.by_type || {};
+            const disabled = (creds.total || 0) - (creds.enabled || 0);
+            // Distinct solid colour per credential type (stable by type name).
+            const _credPalette = ['text-bg-info', 'text-bg-primary', 'text-bg-success',
+                                  'text-bg-warning', 'text-bg-danger', 'text-bg-secondary'];
+            const _credBadge = (ct) => {
+                let h = 0;
+                for (let i = 0; i < ct.length; i++) h = (h * 31 + ct.charCodeAt(i)) >>> 0;
+                return _credPalette[h % _credPalette.length];
+            };
+            const sub = [
+                ...Object.entries(byType).map(([ct, n]) =>
+                    `<span class="badge ${_credBadge(ct)}" style="font-size:.72rem">${n} ${esc(_credTypeLabel(ct))}</span>`),
+                disabled > 0
+                    ? `<span class="badge text-bg-light text-muted" style="font-size:.72rem">${tf('overview_credentials_disabled', disabled)}</span>`
+                    : '',
+            ].filter(Boolean).join('') || '<span class="text-muted small">—</span>';
+            return _dwStatCard('linear-gradient(90deg,#14b8a6,#0ea5e9)', 'rgba(20,184,166,.12)', '#14b8a6',
+                'bi-key-fill', creds.total || 0, 'overview_credentials', sub);
+        }
+
         case 'coverage': {
             const cov = data.coverage || {};
             const pct = cov.pct || 0;

@@ -169,10 +169,17 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             from lib.hosts.profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
         except Exception:  # pylint: disable=broad-except
             CORE_SSH_SECRET_FIELDS = frozenset()
+        # Secret fields declared by credential-type schemas (built-in ssh +
+        # module __credential__), so reusable credentials encrypt/mask them too.
+        try:
+            from lib.credential_schemas import credential_secret_fields  # noqa: PLC0415
+            _cred_secrets = credential_secret_fields(modules_dir)
+        except Exception:  # pylint: disable=broad-except
+            _cred_secrets = set()
         self._secret_keys = (secret_manager.ENCRYPT_KEYS | CORE_SSH_SECRET_FIELDS
-                             | self._module_secret_fields)
+                             | self._module_secret_fields | _cred_secrets)
         self._sensitive_fields = (self._SENSITIVE_FIELDS | CORE_SSH_SECRET_FIELDS
-                                  | self._module_secret_fields)
+                                  | self._module_secret_fields | _cred_secrets)
         self._secure_cookies = bool(secure_cookies)
         self._REMEMBER_ME_DAYS = int(remember_me_days)
         self._AUDIT_MAX_ENTRIES = int(audit_max_entries)
@@ -421,6 +428,13 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Host registry — connection profiles defined once, reused by modules.
         from lib.stores.hosts import HostsStore  # noqa: PLC0415
         self._hosts_store = HostsStore(
+            self._db_connector,
+            fernet=self._get_fernet(),
+            secret_keys=getattr(self, '_secret_keys', None),
+        )
+        # Reusable named credentials (SSH identities referenced by hosts/checks).
+        from lib.stores.credentials import CredentialsStore  # noqa: PLC0415
+        self._credentials_store = CredentialsStore(
             self._db_connector,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),

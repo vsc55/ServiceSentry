@@ -423,7 +423,9 @@ class ModuleBase(ObjectBase):
             return item
         host_uid = str(item.get('host_uid') or '').strip()
         if not host_uid:
-            return item
+            # Inline check (no host): still honour a referenced named credential.
+            cred_uid = str(item.get('cred_uid') or '').strip()
+            return self._apply_cred(item, cred_uid) if cred_uid else item
         store = getattr(self._monitor, '_hosts_store', None)
         if store is None:
             return item
@@ -470,6 +472,16 @@ class ModuleBase(ObjectBase):
                 conn.update({k: v for k, v in prof.items()
                              if k in declared and k != addr_field and v not in (None, '')})
         resolved = {**item, **conn}
+        # A named credential supplies the identity, overlaying the inline fields.
+        # The check's own cred_uid (any type, e.g. web auth) applies regardless of
+        # host kind; the host's ssh-profile cred_uid is the SSH identity, so it
+        # only applies to a remote host.
+        cred_uid = str(item.get('cred_uid') or '').strip()
+        if not cred_uid and is_remote:
+            ssh_prof = profiles.get('ssh') if isinstance(profiles.get('ssh'), dict) else {}
+            cred_uid = str(ssh_prof.get('cred_uid') or '').strip()
+        if cred_uid:
+            resolved = self._apply_cred(resolved, cred_uid)
         # Expose the host's OS so modules that run OS-specific commands can
         # branch on it.  'auto' on a LOCAL host resolves to this process's
         # platform; on a remote host it stays 'auto' (resolved over SSH by the
@@ -486,6 +498,24 @@ class ModuleBase(ObjectBase):
             resolved['enabled'] = False
             resolved['_host_maintenance'] = True
         return resolved
+
+    def _apply_cred(self, target: dict, cred_uid: str) -> dict:
+        """Overlay a named credential's SSH identity onto *target* (by cred_uid).
+
+        Returns *target* unchanged if there is no credentials store, the uid is
+        unknown, or lookup fails — so a dangling reference never breaks a check.
+        """
+        cstore = getattr(self._monitor, '_credentials_store', None)
+        if cstore is None:
+            return target
+        try:
+            cred = cstore.get(cred_uid)
+        except Exception:  # pylint: disable=broad-except
+            return target
+        if not cred:
+            return target
+        from lib.stores.credentials import apply_credential  # noqa: PLC0415
+        return apply_credential(target, cred)
 
     # ── Host-aware command execution ─────────────────────────────────────────
     def host_os(self, item: dict) -> str:

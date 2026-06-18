@@ -15,7 +15,7 @@ const _DW_H_PRESET    = { sm: 150, md: 280, lg: 420, xl: 560 };
 // Order + default size here defines the DEFAULT dashboard layout (new users
 // and "Reset Layout"). Rows flow left-to-right filling 12 columns:
 //   row 1: checks·modules·servers·users·groups·roles  (6 × 2)
-//   row 2: sessions·webhooks·coverage (3 × 2) + sessions_list (6)
+//   row 2: sessions·webhooks·credentials·coverage (4 × 2) + sessions_list (6)
 //   row 3: incidents (6) + failed_logins (6)
 //   row 4: modules_list·servers_list·activity (3 × 4)
 const _DW_DEFS = {
@@ -35,6 +35,8 @@ const _DW_DEFS = {
                     canShow: (p)         => true },
     webhooks:     { icon: 'bi-broadcast',     lkey: 'overview_webhooks',         dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p, admin)  => admin },
+    credentials:  { icon: 'bi-key',           lkey: 'overview_credentials',      dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => p.has('credentials_view') || p.has('servers_view') || p.has('modules_view') },
     coverage:     { icon: 'bi-pie-chart',     lkey: 'overview_coverage',         dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
     sessions_list:{ icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 6,  dH: 140,    hasH: true,
