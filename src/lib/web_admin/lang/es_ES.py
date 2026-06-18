@@ -743,7 +743,6 @@ LANG = {
         'public_status_detail': 'Mostrar detalle de items a invitados',
         'status_refresh_secs': 'Intervalo de refresco del estado (s)',
         'status_lang':       'Idioma de la página de estado',
-        'port':              'Puerto web',
         'proxy_count':       'Número de proxies inversos',
         'public_url':        'URL pública',
         'force_https':       'Forzar HTTPS',

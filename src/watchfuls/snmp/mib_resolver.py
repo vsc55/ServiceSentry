@@ -463,7 +463,7 @@ def compile_raw_mibs_progressive(
         return {'ok': True, 'compiled': False, 'partial': False, 'results': {}}
 
     try:
-        from pysmi.reader import FileReader, HttpReader    # type: ignore[import]
+        from pysmi.reader import FileReader    # type: ignore[import]
         from pysmi.searcher import PyFileSearcher, StubSearcher  # type: ignore[import]
         from pysmi.writer import PyFileWriter              # type: ignore[import]
         from pysmi.parser.smi import parserFactory         # type: ignore[import]

@@ -64,14 +64,6 @@ class _SessionsMixin:
             del self._sessions[t]
         if stale:
             self._persist_sessions()
-        # Migrate sessions created before the public uid was introduced
-        migrated = False
-        for entry in self._sessions.values():
-            if not entry.get('uid'):
-                entry['uid'] = secrets.token_hex(8)
-                migrated = True
-        if migrated:
-            self._persist_sessions()
 
     def _persist_sessions(self) -> bool:
         """Write sessions registry to the database (columnar sessions table)."""

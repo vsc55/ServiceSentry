@@ -741,7 +741,6 @@ LANG = {
         'public_status_detail': 'Show item detail to guests',
         'status_refresh_secs': 'Status refresh interval (s)',
         'status_lang':       'Status page language',
-        'port':              'Web port',
         'proxy_count':       'Reverse proxy count',
         'public_url':        'Public URL',
         'force_https':       'Force HTTPS',

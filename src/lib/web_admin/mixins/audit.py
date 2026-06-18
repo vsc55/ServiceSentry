@@ -3,11 +3,9 @@
 """Audit log mixin for WebAdmin.
 
 Audit entries are stored in the ``audit`` table in ``data.db`` (shared with
-the history store).  The old ``audit.json`` file is migrated automatically on
-first startup and then kept as a backup (renamed to ``audit.json.bak``).
+the history store).
 """
 
-import json
 import os
 from datetime import datetime, timezone
 
@@ -30,7 +28,7 @@ class _AuditMixin:
     # ── Initialisation ────────────────────────────────────────────────────────
 
     def _init_audit_store(self) -> None:
-        """Create the AuditStore on the shared connector and migrate audit.json."""
+        """Create the AuditStore on the shared connector."""
         from lib.stores.audit import AuditStore  # noqa: PLC0415
         from lib.db import get_connector        # noqa: PLC0415
         connector = getattr(self, '_db_connector', None)
@@ -39,24 +37,6 @@ class _AuditMixin:
             connector = get_connector(None, default_sqlite_path=db_path)
             self._db_connector = connector
         self._audit_store = AuditStore(connector)
-        self._migrate_audit_json()
-
-    def _migrate_audit_json(self) -> None:
-        """If audit.json exists and the DB table is empty, import its entries."""
-        json_path = os.path.join(self._config_dir, self._AUDIT_FILE)
-        if not os.path.isfile(json_path):
-            return
-        try:
-            with open(json_path, encoding='utf-8') as fh:
-                entries = json.load(fh)
-            if not isinstance(entries, list):
-                return
-            migrated = self._audit_store.migrate_from_list(entries)
-            if migrated:
-                bak = json_path + '.bak'
-                os.replace(json_path, bak)
-        except (OSError, ValueError):
-            pass
 
     # ── Legacy in-memory list (kept for test and backward compat) ─────────────
     # Code that reads/writes ``wa._audit_log`` still works via the property.

@@ -9,7 +9,6 @@ are not registered.
 
 import hashlib
 import json
-import os
 import uuid
 
 from lib.config.spec import cfg_default, cfg_get

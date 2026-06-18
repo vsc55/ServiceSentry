@@ -23,7 +23,7 @@ class TestNtpQuery:
     @patch('watchfuls.ntp.socket.socket')
     def test_ntp_query_returns_offset_and_delay(self, mock_sock_cls):
         """_ntp_query returns (offset, delay) tuple on success."""
-        import struct, time
+        import time
         NTP_DELTA = ntp_module.NTP_DELTA
         now = time.time()
         # Simulate server timestamps very close to now

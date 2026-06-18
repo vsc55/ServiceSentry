@@ -566,7 +566,7 @@ class Watchful(ModuleBase):
                 body = json.loads(resp.read())
             status = body.get('status', '')
             if status == 'red':
-                return False, f'Cluster status is RED'
+                return False, 'Cluster status is RED'
             return True, ''
         except urllib.error.HTTPError as exc:
             return False, f'HTTP {exc.code}: {exc.reason}'

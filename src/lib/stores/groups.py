@@ -118,10 +118,6 @@ class GroupsStore:
         row = self._db.fetchone('SELECT COUNT(*) FROM groups')
         return row[0] if row else 0
 
-    def count_roles(self) -> int:
-        row = self._db.fetchone('SELECT COUNT(*) FROM groups_roles')
-        return row[0] if row else 0
-
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def save_all(self, groups: dict) -> bool:

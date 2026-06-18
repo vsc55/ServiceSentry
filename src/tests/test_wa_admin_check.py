@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the unified admin check, the audit-stamp helper and the
-global.debug → global.log_level migration (m012)."""
+"""Tests for the unified admin check and the audit-stamp helper."""
 
 import pytest
 
@@ -88,26 +87,3 @@ class TestTouchEntity:
             ctx.pop()
         assert entity['updated_by'] == 'admin'
         assert entity['updated_at'].endswith(('Z', '+00:00')) or 'T' in entity['updated_at']
-
-
-class TestMigrationM012:
-
-    def _run(self, wa, global_section):
-        cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
-        cfg['global'] = global_section
-        wa._save_config_file(wa._CONFIG_FILE, cfg)
-        from lib.web_admin.migrations import m012_global_debug_to_log_level as m
-        m.run(wa)
-        return wa._read_config_file(wa._CONFIG_FILE).get('global', {})
-
-    def test_debug_true_to_debug_level(self, admin):
-        g = self._run(admin, {'debug': True})
-        assert g.get('log_level') == 'debug' and 'debug' not in g
-
-    def test_debug_false_to_off(self, admin):
-        g = self._run(admin, {'debug': False})
-        assert g.get('log_level') == 'off' and 'debug' not in g
-
-    def test_existing_log_level_kept(self, admin):
-        g = self._run(admin, {'debug': True, 'log_level': 'warning'})
-        assert g.get('log_level') == 'warning' and 'debug' not in g

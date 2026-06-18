@@ -3,7 +3,7 @@
 """Tests for watchfuls/ups."""
 
 import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 from conftest import create_mock_monitor
 
 import watchfuls.ups as ups_module

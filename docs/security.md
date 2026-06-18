@@ -36,7 +36,7 @@ Cada usuario en `users.json` tiene un campo `auth_source` que determina cómo se
 | `"oidc"` | Autenticado mediante SSO OIDC; no tiene `password_hash` |
 | `"saml2"` | Autenticado mediante SSO SAML2; no tiene `password_hash` |
 
-La migración `m002_add_auth_source` añade `auth_source: "local"` a los usuarios existentes al arrancar, garantizando compatibilidad hacia atrás.
+Los usuarios locales llevan `auth_source: "local"`; los autenticados por LDAP/SSO toman el valor correspondiente al crearse o en el primer inicio de sesión.
 
 ### Tests de autenticación
 

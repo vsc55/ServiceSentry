@@ -10,12 +10,6 @@ from datetime import datetime, timezone
 
 from ..constants import BUILTIN_GROUP_UIDS, BUILTIN_ROLE_UIDS, SYSTEM_USER
 
-# Default roles for built-in groups (keyed by uid) — used to recover after a
-# migration that lost the groups_roles table contents.
-_BUILTIN_DEFAULT_ROLES: dict[str, list] = {
-    BUILTIN_GROUP_UIDS['administrators']: [BUILTIN_ROLE_UIDS['admin']],
-}
-
 
 class _GroupsMixin:
     """Persistence and lookup for user groups (DB table ``groups``)."""
@@ -43,14 +37,6 @@ class _GroupsMixin:
 
         self._groups = data
         dirty = False
-
-        # Recovery: if groups_roles is empty (lost during a migration),
-        # restore the known default roles for built-in groups.
-        if self._groups_store.count_roles() == 0 and self._groups:
-            for gid, gdata in self._groups.items():
-                if gid in _BUILTIN_DEFAULT_ROLES and not gdata.get('roles'):
-                    gdata['roles'] = list(_BUILTIN_DEFAULT_ROLES[gid])
-                    dirty = True
 
         # Ensure every group has its uid embedded in the dict value.
         for gid, gdata in self._groups.items():

@@ -30,7 +30,6 @@ from lib.config.spec import CFG_BY_PATH, cfg_validate, env_field_specs, normaliz
 from .auth import ldap_auth as _ldap_auth
 from .auth import oidc_auth as _oidc_auth
 from .auth import saml_auth as _saml_auth
-from .migrations import run_all as _run_migrations
 
 # Maps environment variable names to (config_path, expected_type), derived from
 # the central registry (lib.config.spec).  Env vars are runtime-only
@@ -71,7 +70,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _GROUPS_FILE = 'groups.json'
     _SECRET_KEY_FILE = '.flask_secret'
     _SESSIONS_FILE = 'sessions.json'
-    _AUDIT_FILE = 'audit.json'
     _CONFIG_FILE = 'config.json'
     _MODULES_FILE = 'modules.json'
     _STATUS_FILE = 'status.json'
@@ -208,12 +206,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._builtin_role_names: dict[str, str] = {}
         self._builtin_role_overrides: dict[str, dict] = {}
         self._groups: dict[str, dict] = {}
-        self._init_entity_store()  # DB-backed entities (migrates JSON files if present)
+        self._init_entity_store()  # DB-backed entities (users/groups/roles/sessions/hosts)
         self._load_or_create_users(username, password)
         self._load_sessions()
         self._load_roles()
         self._load_groups()
-        _run_migrations(self)
         self._apply_saved_config()
         self._apply_log_level()    # honour global|log_level for web_admin debug output
         self._init_audit_store()   # after apply_saved_config so _AUDIT_MAX_ENTRIES is final

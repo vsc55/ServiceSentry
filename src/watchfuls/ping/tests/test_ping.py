@@ -296,7 +296,6 @@ class TestIcmpNative:
 
     def test_icmp_ping_sendto_fails(self):
         """If sendto raises OSError, returns None (native path)."""
-        import socket
         mock_sock = patch('socket.socket').start()
         mock_instance = mock_sock.return_value
         mock_instance.sendto.side_effect = OSError("Network unreachable")

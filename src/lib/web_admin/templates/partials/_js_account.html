@@ -21,38 +21,6 @@ function roleBadgeClass(uid) {
     return BUILTIN_ROLE_BADGES[rd.key || uid] || 'text-bg-info';
 }
 
-// Populate a role <select> from rolesData (keyed by UID)
-function populateRoleDropdown(selectId, selected) {
-    const sel = document.getElementById(selectId);
-    if (!sel) return;
-    sel.innerHTML = '';
-    const builtinUids = {{ wa_builtin_roles | tojson }};
-    const builtinSet  = new Set(builtinUids);
-    for (const uid of builtinUids) {
-        const rd  = rolesData[uid] || {};
-        const opt = document.createElement('option');
-        opt.value       = uid;
-        opt.textContent = rd.name || uid;
-        if (uid === selected) opt.selected = true;
-        sel.appendChild(opt);
-    }
-    const customs = Object.entries(rolesData)
-        .filter(([uid]) => !builtinSet.has(uid))
-        .sort((a, b) => (a[1].name || '').localeCompare(b[1].name || ''));
-    if (customs.length) {
-        const grp  = document.createElement('optgroup');
-        grp.label  = t('role_management');
-        for (const [uid, rd] of customs) {
-            const opt = document.createElement('option');
-            opt.value       = uid;
-            opt.textContent = rd.name || uid;
-            if (uid === selected) opt.selected = true;
-            grp.appendChild(opt);
-        }
-        sel.appendChild(grp);
-    }
-}
-
 // Render role radio buttons in #umRoleContainer, filtered by searchVal.
 // Selection state lives in _umSelectedRole (defined in _js_users.html).
 function _umPopulateRoles(searchVal) {

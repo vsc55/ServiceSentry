@@ -332,9 +332,6 @@ El **último estado conocido** de cada comprobación se persiste en la tabla
 Sobrevive a los reinicios, de modo que un cambio de estado no se vuelve a
 notificar al arrancar. Ver [check_state_store](architecture.md) para el detalle.
 
-> El antiguo fichero `status.json` quedó obsoleto y se elimina automáticamente
-> en una migración de arranque.
-
 Ejecuta con `-c` / `--clear` (`SS_CLEAR`) para vaciar el estado antes de empezar
 y forzar la re-notificación en el siguiente ciclo.
 

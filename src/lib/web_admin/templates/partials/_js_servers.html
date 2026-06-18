@@ -757,34 +757,6 @@ async function testHostRow(uid) {
     }
 }
 
-// ── Credentials tab (per-protocol connection profiles) ──────────────
-function _renderCredentialsSection() {
-    const d = _hostDraft;
-    // Skip address-only protocols (e.g. ICMP) and 'ssh' (the core SSH block
-    // above owns it) — nothing to configure here beyond the address.
-    const protos = Object.entries(HOST_PROFILES).filter(([proto, spec]) =>
-        proto !== 'ssh' && (spec.fields || []).some(f => f.name !== spec.address_field));
-    if (!protos.length) {
-        return `<div class="small text-muted">${esc(t('host_no_profiles_needed'))}</div>`;
-    }
-    let h = `<div class="small text-muted mb-2">${esc(t('host_profiles_hint'))}</div>
-        <div class="accordion" id="hmProfiles">`;
-    for (const [proto, spec] of protos) {
-        const active = d.profiles && d.profiles[proto] &&
-            Object.values(d.profiles[proto]).some(v => v !== null && v !== '' && v !== false);
-        const cid = 'hmProf_' + proto.replace(/\W/g, '_');
-        h += `<div class="accordion-item">
-            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button"
-                data-bs-toggle="collapse" data-bs-target="#${cid}">
-                ${esc(proto.toUpperCase())}
-                ${active ? '<span class="badge bg-success ms-2">●</span>' : ''}
-                <span class="text-muted small ms-2">(${esc(spec.module)})</span></button></h2>
-            <div id="${cid}" class="accordion-collapse collapse" data-bs-parent="#hmProfiles">
-                <div class="accordion-body"><div class="row g-2" id="hmProfFields_${proto.replace(/\W/g, '_')}">${_renderProfileFields(proto, spec)}</div></div>
-            </div></div>`;
-    }
-    return h + '</div>';
-}
 
 // Active/total count badge content for a module (mirrors the Modules section).
 function _hostCountHtml(st) {
