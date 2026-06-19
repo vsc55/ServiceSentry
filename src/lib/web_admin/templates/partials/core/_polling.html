@@ -8,12 +8,32 @@ function _updateStickyOffset() {
     if (el) document.documentElement.style.setProperty('--ss-top-offset', el.offsetHeight + 'px');
 }
 
+let _reloadCountdownTimer = null;
 function _showReloadBanner() {
     const banner = document.getElementById('page-reload-banner');
     const msg    = document.getElementById('page-reload-msg');
     if (!banner) return;
-    if (msg) msg.textContent = t('page_reload_banner');
     banner.classList.remove('d-none');
+    const wa = configData?.web_admin || {};
+    // Force-reload off → keep the current behaviour: show the message only.
+    if (wa.force_reload_on_update !== true) {
+        if (msg) msg.textContent = t('page_reload_banner');
+        return;
+    }
+    if (_reloadCountdownTimer) return;        // already counting down
+    let secs = parseInt(wa.force_reload_secs, 10);
+    if (!Number.isFinite(secs) || secs < 1) secs = 10;
+    const tick = () => {
+        if (msg) msg.textContent = tf('page_reload_countdown', secs);
+        if (secs <= 0) {
+            clearInterval(_reloadCountdownTimer);
+            location.reload();
+            return;
+        }
+        secs--;
+    };
+    tick();
+    _reloadCountdownTimer = setInterval(tick, 1000);
 }
 
 function _startVersionPoll(intervalMs = 60000) {

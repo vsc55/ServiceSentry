@@ -108,6 +108,8 @@ function renderConfig() {
     if (!('session_check_secs'        in wa)) wa.session_check_secs        = 20;
     if (!('session_revoke_redirect_secs' in wa)) wa.session_revoke_redirect_secs = 3;
     if (!('access_poll_secs'             in wa)) wa.access_poll_secs             = 30;
+    if (!('force_reload_on_update'       in wa)) wa.force_reload_on_update       = false;
+    if (!('force_reload_secs'            in wa)) wa.force_reload_secs            = 10;
 
     const _cfgSectionAccent = {
         cfgcol_daemon:     'linear-gradient(90deg,#6366f1,#8b5cf6)',
@@ -152,6 +154,7 @@ function renderConfig() {
         'config_poll_secs', 'config_update_banner_secs',
         'lockout_max_attempts', 'lockout_duration_secs',
         'session_check_secs', 'session_revoke_redirect_secs', 'access_poll_secs',
+        'force_reload_on_update', 'force_reload_secs',
     ];
     // Pre-populate LDAP section defaults so it always appears in the config UI
     if (!configData.ldap) configData.ldap = {};
@@ -475,6 +478,14 @@ function renderConfig() {
     hInterface += renderField('session_check_secs', wa.session_check_secs, 'web_admin|session_check_secs', 'config');
     hInterface += renderField('session_revoke_redirect_secs', wa.session_revoke_redirect_secs, 'web_admin|session_revoke_redirect_secs', 'config');
     hInterface += renderField('access_poll_secs', wa.access_poll_secs, 'web_admin|access_poll_secs', 'config');
+    // Force-reload-on-update: toggle (off → banner only, as today) + the seconds
+    // field, which only shows when the toggle is on (data-sw-when, evaluated by
+    // _refreshConditionalFields against configData.web_admin).
+    hInterface += renderField('force_reload_on_update', wa.force_reload_on_update, 'web_admin|force_reload_on_update', 'config');
+    hInterface += `<div data-sw-item-path="web_admin">
+        <div class="sw-field" data-sw-when='{"force_reload_on_update":[true]}'>
+            ${renderField('force_reload_secs', wa.force_reload_secs, 'web_admin|force_reload_secs', 'config')}
+        </div></div>`;
     hInterface += cfgCardClose;
 
     // ── Assemble Bootstrap tabs
@@ -513,6 +524,9 @@ function renderConfig() {
         });
     });
     initTooltips(c);
+    // Apply initial show_when visibility for the web_admin conditional fields
+    // (e.g. hide force_reload_secs when force-reload is off).
+    _refreshConditionalFields('web_admin');
     // Re-compute status link on any field change (public_url / force_https)
     c.removeEventListener('change', _refreshStatusLink);
     c.addEventListener('change', _refreshStatusLink);

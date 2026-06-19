@@ -811,6 +811,8 @@ LANG = {
         'session_check_secs':          'Intervalo de keepalive de sesión (s)',
         'session_revoke_redirect_secs':'Espera antes del logout por revocación (s)',
         'access_poll_secs':            'Intervalo de refresco del tab Acceso (s)',
+        'force_reload_on_update':      'Forzar recarga al actualizar',
+        'force_reload_secs':           'Cuenta atrás de recarga (s)',
         # LDAP
         'server':            'Servidor LDAP',
         'port':              'Puerto',
@@ -920,6 +922,8 @@ LANG = {
         'web_admin|session_check_secs':           'Cada cuántos segundos el navegador comprueba en silencio si la sesión sigue activa (5–300 s). Valores bajos detectan revocaciones remotas antes, a costa de algo más de tráfico de red.',
         'web_admin|session_revoke_redirect_secs': 'Segundos de espera antes de redirigir al login cuando se revoca una sesión (0–30). Se aplica a todos los escenarios de revocación (por admin, autorevocación, cerrar todas).',
         'web_admin|access_poll_secs':             'Cada cuántos segundos se refresca automáticamente el tab Acceso (usuarios, sesiones, roles, grupos) mientras está abierto (5–300 s).',
+        'web_admin|force_reload_on_update':       'Cuando el backend se reinicia/actualiza aparece el aviso de recarga. Desactivado (por defecto): el aviso solo invita a recargar manualmente. Activado: el aviso muestra una cuenta atrás y la página se recarga automáticamente.',
+        'web_admin|force_reload_secs':            'Segundos que espera la cuenta atrás antes de recargar la página automáticamente tras una actualización del backend (1–300). Solo se usa si "Forzar recarga al actualizar" está activo.',
         'pretty_name':                  'Nombre de visualización opcional. Si está vacío, se usa el identificador del módulo.',
         'threads':                      'Número de hilos paralelos utilizados para ejecutar las comprobaciones simultáneamente.',
         # LDAP
@@ -1177,6 +1181,7 @@ LANG = {
     'cfg_update_col_value':       'Nuevo valor',
     'restart_pending_banner': 'Reinicio pendiente — algunos cambios de configuración no se aplicarán hasta reiniciar el servicio.',
     'page_reload_banner':    'El servicio se ha reiniciado — recarga la página para continuar.',
+    'page_reload_countdown': 'El servicio se ha reiniciado — recargando en {} s…',
     'reload':                'Recargar',
     'proxy_section': 'Acceso Externo',
     'tables_section':      'Tablas',

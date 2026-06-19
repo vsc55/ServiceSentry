@@ -30,7 +30,14 @@ def _watchful(items, hosts=None):
     return Watchful(mm)
 
 
-_THERMAL = "x86_pkg_temp|45000\nacpitz|39500\nacpitz|41000\n"
+_THERMAL = (
+    "/sys/class/thermal/thermal_zone0/type:x86_pkg_temp\n"
+    "/sys/class/thermal/thermal_zone1/type:acpitz\n"
+    "/sys/class/thermal/thermal_zone2/type:acpitz\n"
+    "/sys/class/thermal/thermal_zone0/temp:45000\n"
+    "/sys/class/thermal/thermal_zone1/temp:39500\n"
+    "/sys/class/thermal/thermal_zone2/temp:41000\n"
+)
 
 
 class TestParser:
@@ -41,6 +48,14 @@ class TestParser:
         assert d['x86_pkg_temp'] == 45.0
         assert d['acpitz'] == 39.5
         assert d['acpitz_1'] == 41.0       # duplicate type → suffixed
+
+    def test_command_is_allowlist_friendly(self):
+        """The remote command is a single fixed ``grep`` with no shell loop or
+        chaining, so it fits a strict SSH command allowlist (docs/ssh-hardening.md)."""
+        from watchfuls.temperature import _THERMAL_CMD
+        assert _THERMAL_CMD.startswith('grep ')
+        for token in (' for ', ';', '&&', '|', '$('):
+            assert token not in _THERMAL_CMD
 
 
 class TestCheck:

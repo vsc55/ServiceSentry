@@ -78,6 +78,15 @@ class TestParsers:
         assert ram is not None and 70 < ram < 80
         assert round(swap, 1) == 25.0     # 512/2048
 
+    def test_commands_are_allowlist_friendly(self):
+        """Every per-OS reading is a single binary with no shell chaining (the
+        _SEP marker is inserted in Python), so it fits a strict SSH allowlist."""
+        from watchfuls.ram_swap import _MEM_CMDS
+        for os_, cmds in _MEM_CMDS.items():
+            for cmd in cmds:
+                for token in (';', '|', '&&', '$(', '`', ' for ', 'echo'):
+                    assert token not in cmd, f'{os_}: {cmd!r} contains {token!r}'
+
 
 class TestCheck:
 

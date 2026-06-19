@@ -38,15 +38,21 @@ from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
-_SEP = 'echo ---SS---'
+# Marker joining the per-OS sub-readings (inserted in Python, not by a remote
+# ``echo``); the parsers split the combined output on it.
+_SEP = '---SS---'
 
-# Per-OS command that yields the memory figures parsed below.
+# Per-OS command(s) that yield the memory figures parsed below.  macOS/FreeBSD
+# need several readings: each is a separate single-binary command (no shell
+# chaining) so the set fits a strict SSH allowlist (see docs/ssh-hardening.md);
+# their outputs are joined here with _SEP.
 _MEM_CMDS = {
-    'linux':   'cat /proc/meminfo',
-    'windows': 'wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value',
-    'darwin':  f'sysctl -n hw.memsize; {_SEP}; vm_stat; {_SEP}; sysctl -n vm.swapusage',
-    'freebsd': ('sysctl -n hw.pagesize vm.stats.vm.v_page_count vm.stats.vm.v_free_count '
-                f'vm.stats.vm.v_inactive_count vm.stats.vm.v_cache_count; {_SEP}; swapinfo -k'),
+    'linux':   ['cat /proc/meminfo'],
+    'windows': ['wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value'],
+    'darwin':  ['sysctl -n hw.memsize', 'vm_stat', 'sysctl -n vm.swapusage'],
+    'freebsd': ['sysctl -n hw.pagesize vm.stats.vm.v_page_count vm.stats.vm.v_free_count '
+                'vm.stats.vm.v_inactive_count vm.stats.vm.v_cache_count',
+                'swapinfo -k'],
 }
 
 
@@ -89,10 +95,14 @@ class Watchful(ModuleBase):
             self.dict_return.set(f'{key}_ram', False,
                                  f'Memory: {label} - *unsupported host OS: {os_}* ⚠️')
             return
-        out, err, code = self.host_exec(item, _MEM_CMDS[os_],
-                                        timeout=self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']))
-        if code != 0 and not out:
-            raise OSError((err or '').strip() or f'memory query exited {code}')
+        timeout = self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+        outs = []
+        for cmd in _MEM_CMDS[os_]:
+            out, err, code = self.host_exec(item, cmd, timeout=timeout)
+            if code != 0 and not out:
+                raise OSError((err or '').strip() or f'memory query exited {code}')
+            outs.append(out)
+        out = f'\n{_SEP}\n'.join(outs)
         ram_pct, swap_pct = self._parse(os_, out)
         if ram_pct is None:
             raise ValueError('could not parse memory output')

@@ -676,6 +676,15 @@
 .dw { display: flex; flex-direction: column; }
 .dw-content { flex: 1; min-height: 0; overflow: hidden; }
 
+/* Click-through widgets jump to their tab — only outside edit mode. The card
+   sits inside .dw-content, so the affordance is applied there; interactive
+   controls (sort headers, links) keep their own cursor via [onclick] etc. */
+.dashboard-grid:not(.dashboard-edit) .dw-clickable .dw-content { cursor: pointer; }
+.dashboard-grid:not(.dashboard-edit) .dw-clickable:hover {
+    outline: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+}
+
 /* Thin, rounded scrollbars for the widget listings (and any scroll area
    nested inside them) — the default chunky bars clash with the cards. */
 .dw-content, .dw-content * {

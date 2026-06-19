@@ -176,10 +176,12 @@ async function renderOverview() {
         const def = _dwDef(item.id);
         if (!def || !def.canShow(perms, isAdmin)) continue;
         const spClass = def.spacer ? ' dw-spacer' : '';
+        // Clickable when it maps to a tab/sub-tab the user is allowed to view.
+        const navClass = (!def.spacer && _dwIsNavigable(item.id)) ? ' dw-clickable' : '';
         const display = item.hidden ? ' style="display:none"' : '';
         const hpx     = def.hasH ? _dwHpx(item.h) : null;
         const cStyle  = hpx ? ` style="flex:none;height:${hpx}px;overflow-y:auto"` : '';
-        h += `<div class="dw dw-c${item.cols}${spClass}" data-wid="${escAttr(item.id)}"
+        h += `<div class="dw dw-c${item.cols}${spClass}${navClass}" data-wid="${escAttr(item.id)}"
                data-cols="${item.cols}" data-h="${escAttr(String(item.h || 'auto'))}"${display}>`;
         h += _dwToolbar(item.id, item.cols, item.h || 'auto');
         h += `<div class="dw-content"${cStyle}>${_dwContent(item.id, data)}</div>`;
@@ -189,6 +191,9 @@ async function renderOverview() {
     h += `</div>`;
 
     c.innerHTML = h;
+
+    // Click a widget → jump to its tab (gated by permission in _dwNavigate).
+    document.getElementById('dashboardGrid')?.addEventListener('click', _dwOnGridClick);
 
     // (Re)start the countdown ticker for the freshly-rendered bar.
     _startOverviewCountdown(_ovInt);

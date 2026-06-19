@@ -53,6 +53,69 @@ const _DW_DEFS = {
                     canShow: (p, admin)  => admin },
 };
 
+// Click-through target for each widget → the tab (and sub-tab, if any) it
+// summarises, addressed by the tab-pane selector. Navigation is gated by
+// permission: a tab/sub-tab whose <li> is hidden (no view rights) is skipped.
+const _DW_NAV = {
+    checks:        { tab: '#tab-status'  },
+    modules:       { tab: '#tab-modules' },
+    servers:       { tab: '#tab-servers' },
+    users:         { tab: '#tab-access',  sub: '#subtab-users'    },
+    groups:        { tab: '#tab-access',  sub: '#subtab-groups'   },
+    roles:         { tab: '#tab-access',  sub: '#subtab-roles'    },
+    sessions:      { tab: '#tab-access',  sub: '#subtab-sessions' },
+    webhooks:      { tab: '#tab-config'  },
+    credentials:   { tab: '#tab-access',  sub: '#subtab-credentials' },
+    coverage:      { tab: '#tab-servers' },
+    sessions_list: { tab: '#tab-access',  sub: '#subtab-sessions' },
+    incidents:     { tab: '#tab-status'  },
+    failed_logins: { tab: '#tab-audit'   },
+    modules_list:  { tab: '#tab-modules' },
+    servers_list:  { tab: '#tab-servers' },
+    activity:      { tab: '#tab-audit'   },
+};
+
+// Resolve the tab/sub-tab toggle button for a pane selector, but ONLY if it is
+// available to the current user. Tab/sub-tab <li>s are set to display:none when
+// the user lacks the section's view permission (see _js_init.html), so a hidden
+// <li> means "not navigable".
+function _dwTabBtn(sel) {
+    if (!sel) return null;
+    const btn = document.querySelector(`[data-bs-toggle="tab"][data-bs-target="${sel}"]`);
+    if (!btn || btn.closest('li')?.style.display === 'none') return null;
+    return btn;
+}
+
+// A widget is navigable when its target tab — and its sub-tab, if it has one —
+// are both permitted for the current user.
+function _dwIsNavigable(wid) {
+    const nav = _DW_NAV[wid];
+    if (!nav || !_dwTabBtn(nav.tab)) return false;
+    return !nav.sub || !!_dwTabBtn(nav.sub);
+}
+
+// Switch to the widget's tab (and sub-tab). No-op without permission.
+function _dwNavigate(wid) {
+    const nav = _DW_NAV[wid];
+    if (!nav) return;
+    const main = _dwTabBtn(nav.tab);
+    if (!main) return;
+    const sub = nav.sub ? _dwTabBtn(nav.sub) : null;
+    if (nav.sub && !sub) return;
+    bootstrap.Tab.getOrCreateInstance(main).show();
+    if (sub) bootstrap.Tab.getOrCreateInstance(sub).show();
+}
+
+// Delegated click on the grid: outside edit mode, clicking a widget's body
+// (not an interactive control) jumps to its tab.
+function _dwOnGridClick(e) {
+    if (_dwEditing) return;
+    const dw = e.target.closest('.dw[data-wid]');
+    if (!dw || _dwIsSpacer(dw.dataset.wid)) return;
+    if (e.target.closest('a,button,input,select,label,textarea,.page-link,[role="button"],[onclick]')) return;
+    _dwNavigate(dw.dataset.wid);
+}
+
 // Spacers are dynamic (multiple instances, ids "spacer:N"); they have no
 // catalog entry, so resolve their definition synthetically.
 function _dwIsSpacer(id) { return String(id).startsWith('spacer:'); }

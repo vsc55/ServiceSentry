@@ -129,6 +129,12 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         attr='_SESSION_REVOKE_REDIRECT_SECS', min=0, max=30),
     Cfg('web_admin|access_poll_secs', int, 30, attr='_ACCESS_POLL_SECS',
         min=5, max=300),
+    # When the backend restarts (startup_id changes), the page-reload banner is
+    # shown. With force-reload on, the banner also counts down and auto-reloads.
+    Cfg('web_admin|force_reload_on_update', bool, False,
+        attr='_FORCE_RELOAD_ON_UPDATE'),
+    Cfg('web_admin|force_reload_secs', int, 10, attr='_FORCE_RELOAD_SECS',
+        min=1, max=300),
     # web_admin first-run credentials + bind address (read in main.py)
     Cfg('web_admin|username', str, 'admin', no_rule=True),
     Cfg('web_admin|password', str, 'admin', no_rule=True),

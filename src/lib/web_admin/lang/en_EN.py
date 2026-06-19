@@ -809,6 +809,8 @@ LANG = {
         'session_check_secs':          'Session keepalive interval (s)',
         'session_revoke_redirect_secs':'Redirect delay on revoke (s)',
         'access_poll_secs':            'Access tab refresh interval (s)',
+        'force_reload_on_update':      'Force reload on update',
+        'force_reload_secs':           'Reload countdown (s)',
         # LDAP
         'server':            'LDAP Server',
         'port':              'Port',
@@ -919,6 +921,8 @@ LANG = {
         'web_admin|session_check_secs':           'How often the browser silently checks whether the current session is still valid (5–300 seconds). Lower values detect remote revocations faster at the cost of slightly more network traffic.',
         'web_admin|session_revoke_redirect_secs': 'Seconds to wait before redirecting to the login page after a session is revoked (0–30). Used for all revocation scenarios (remote revocation by admin, self-revoke, invalidate all).',
         'web_admin|access_poll_secs':             'How often the Access tab automatically refreshes its data (users, sessions, roles, groups) while it is open (5–300 seconds).',
+        'web_admin|force_reload_on_update':       'When the backend is restarted/updated, the reload banner appears. Off (default): the banner only invites you to reload manually. On: the banner shows a countdown and the page reloads automatically.',
+        'web_admin|force_reload_secs':            'Seconds the countdown waits before the page reloads automatically after a backend update (1–300). Only used when "Force reload on update" is on.',
         'pretty_name':                  'Optional display name shown in the interface. If empty, the module identifier is used.',
         'threads':                      'Number of parallel threads used to run checks simultaneously.',
         # LDAP
@@ -1176,6 +1180,7 @@ LANG = {
     'cfg_update_col_value':       'New value',
     'restart_pending_banner': 'Restart pending — some configuration changes will not take effect until the service is restarted.',
     'page_reload_banner':    'The service was restarted — reload the page to continue.',
+    'page_reload_countdown': 'The service was restarted — reloading in {} s…',
     'reload':                'Reload',
     'proxy_section': 'External Access',
     'tables_section':      'Tables',

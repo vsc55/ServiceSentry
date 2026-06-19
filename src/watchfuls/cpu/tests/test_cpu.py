@@ -8,7 +8,17 @@ against canned command output.
 
 from unittest.mock import patch
 
+import pytest
+
 from conftest import create_mock_monitor
+
+
+@pytest.fixture(autouse=True)
+def _no_sleep():
+    """Linux/FreeBSD CPU now waits the interval in Python between two samples;
+    skip the real sleep so the suite stays fast."""
+    with patch('watchfuls.cpu.time.sleep'):
+        yield
 
 
 class _FakeStore:
@@ -62,6 +72,15 @@ class TestParsers:
     def test_single_sample_is_none(self):
         from watchfuls.cpu import Watchful
         assert Watchful._parse_proc_stat("cpu 1 0 0 1 0\n") is None
+
+    def test_commands_are_allowlist_friendly(self):
+        """Each per-OS command is a single binary with no shell chaining, so it
+        fits a strict SSH command allowlist (docs/ssh-hardening.md)."""
+        from watchfuls.cpu import _cpu_cmd
+        for os_ in ('linux', 'freebsd', 'darwin', 'windows'):
+            cmd = _cpu_cmd(os_)
+            for token in (';', '|', '&&', '$(', '`', ' for '):
+                assert token not in cmd, f'{os_}: {cmd!r} contains {token!r}'
 
 
 class TestCheck:

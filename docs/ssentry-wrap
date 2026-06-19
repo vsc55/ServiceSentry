@@ -1,0 +1,49 @@
+#!/bin/sh
+# ssentry-wrap — SSH forced-command wrapper for ServiceSentry monitoring.
+#
+# Install on each MONITORED host as /usr/local/bin/ssentry-wrap (root:root, 0755)
+# and reference it from the monitoring account's authorized_keys:
+#
+#   restrict,command="/usr/local/bin/ssentry-wrap" ssh-ed25519 AAAA... servicesentry
+#
+# It allows ONLY the read-only commands ServiceSentry needs (plus, optionally,
+# service remediation via sudo). Everything else is rejected and logged to
+# syslog. Trim the allowed cases to the modules you actually run — fewer cases
+# means a smaller attack surface.
+#
+# See docs/ssh-hardening.md for the full rationale and the per-module command list.
+
+cmd="$SSH_ORIGINAL_COMMAND"
+
+case "$cmd" in
+  # ---- read-only metrics (no privilege required) -------------------------
+  "df -P -k")                                   ;;  # filesystemusage
+  "ps -A -o comm=")                             ;;  # process
+  "cat /proc/meminfo")                          ;;  # ram_swap
+  "cat /proc/mdstat")                           ;;  # raid
+  "grep -H . /sys/class/thermal/"*)             ;;  # temperature
+  "dig +short "*)                               ;;  # dns
+  "systemctl is-active "*)                      ;;  # service_status (check)
+  "cat /proc/stat")                             ;;  # cpu (sampled twice by ServiceSentry)
+
+  # ---- macOS / FreeBSD hosts (uncomment only if you monitor them) --------
+  # "sysctl -n "*)                              ;;  # cpu / ram_swap (BSD/macOS)
+  # "vm_stat")                                  ;;  # ram_swap (macOS)
+  # "swapinfo -k")                              ;;  # ram_swap (FreeBSD)
+  # "top -l 2 -n 0")                            ;;  # cpu (macOS)
+
+  # ---- service remediation (needs the sudoers rule; remove if unused) ----
+  "sudo systemctl start "*   \
+  |"sudo systemctl stop "*   \
+  |"sudo systemctl restart "*)                  ;;
+
+  # ---- everything else is denied -----------------------------------------
+  *)
+    logger -t ssentry-wrap "DENIED from ${SSH_CONNECTION%% *}: $cmd"
+    echo "ssentry-wrap: command not allowed" >&2
+    exit 1
+    ;;
+esac
+
+logger -t ssentry-wrap "OK from ${SSH_CONNECTION%% *}: $cmd"
+exec /bin/sh -c "$cmd"

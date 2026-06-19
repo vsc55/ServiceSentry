@@ -35,10 +35,13 @@ from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
-# Reads every thermal zone: prints "<type>|<millidegrees>" per zone.
+# Reads every thermal zone with a single fixed ``grep`` (no remote shell loop,
+# so the command fits a strict SSH allowlist); ``grep -H .`` emits one
+# "<path>:<value>" line per file and the type↔temp correlation is done in
+# Python by :meth:`_parse_thermal`.
 _THERMAL_CMD = (
-    'for z in /sys/class/thermal/thermal_zone*; do '
-    'printf "%s|%s\\n" "$(cat "$z/type" 2>/dev/null)" "$(cat "$z/temp" 2>/dev/null)"; done'
+    'grep -H . /sys/class/thermal/thermal_zone*/type '
+    '/sys/class/thermal/thermal_zone*/temp'
 )
 
 
@@ -93,19 +96,32 @@ class Watchful(ModuleBase):
 
     @staticmethod
     def _parse_thermal(out):
-        """Lines "<type>|<millidegrees>" → [(name, celsius)] (dedup type → type_N)."""
-        seen, result = {}, []
+        """Parse ``grep -H .`` output over /sys/class/thermal/*/{type,temp}.
+
+        Each line is ``<path>:<value>``; ``type`` and ``temp`` are correlated
+        per thermal-zone directory.  Returns ``[(name, celsius)]`` in zone
+        order (duplicate type → type_N)."""
+        zones: dict = {}
         for line in (out or '').splitlines():
-            if '|' not in line:
+            path, sep, val = line.partition(':')
+            if not sep:
                 continue
-            typ, _, val = line.partition('|')
-            typ, val = typ.strip(), val.strip()
-            if not typ or not val.lstrip('-').isdigit():
+            zone, _, leaf = path.rpartition('/')
+            val = val.strip()
+            if leaf == 'type' and val:
+                zones.setdefault(zone, {})['type'] = val
+            elif leaf == 'temp' and val.lstrip('-').isdigit():
+                zones.setdefault(zone, {})['temp'] = int(val)
+        seen, result = {}, []
+        for zone in sorted(zones):
+            typ = zones[zone].get('type')
+            temp = zones[zone].get('temp')
+            if not typ or temp is None:
                 continue
             n = seen.get(typ, 0)
             seen[typ] = n + 1
             name = typ if n == 0 else f'{typ}_{n}'
-            result.append((name, int(val) / 1000.0))
+            result.append((name, temp / 1000.0))
         return result
 
     @classmethod

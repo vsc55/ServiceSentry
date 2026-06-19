@@ -23,27 +23,32 @@
 
 Host-centric: each check binds to a host (``host_uid``).  CPU usage is sampled
 on that host via :meth:`ModuleBase.host_exec` using an OS-appropriate command
-(two ``/proc/stat`` reads on Linux, ``kern.cp_time`` on FreeBSD, ``top -l2`` on
-macOS, ``wmic`` on Windows) and compared with a per-check threshold.
+(``/proc/stat`` on Linux, ``kern.cp_time`` on FreeBSD, ``top -l2`` on macOS,
+``wmic`` on Windows) and compared with a per-check threshold.
+
+Each command is a single binary with no shell chaining, so it fits a strict SSH
+command allowlist (see ``docs/ssh-hardening.md``).  Linux/FreeBSD need a delta
+over an interval, so the second sample is taken by a second call and the wait
+happens here in Python — not via a remote ``sleep``.
 """
 
 import json
 import os
+import time
 
 from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
 
-def _cpu_cmds(interval: float) -> dict:
-    """Per-OS command that yields the samples parsed below ({sleep} = interval)."""
-    s = max(0.1, float(interval))
+def _cpu_cmd(os_: str) -> str:
+    """Single-sample command for *os_* (no shell loop/pipe/chaining)."""
     return {
-        'linux':   f"cat /proc/stat | grep '^cpu '; sleep {s}; cat /proc/stat | grep '^cpu '",
-        'freebsd': f"sysctl -n kern.cp_time; sleep {s}; sysctl -n kern.cp_time",
-        'darwin':  "top -l 2 -n 0",
-        'windows': "wmic cpu get loadpercentage /value",
-    }
+        'linux':   'cat /proc/stat',
+        'freebsd': 'sysctl -n kern.cp_time',
+        'darwin':  'top -l 2 -n 0',
+        'windows': 'wmic cpu get loadpercentage /value',
+    }.get(os_, 'cat /proc/stat')
 
 
 class Watchful(ModuleBase):
@@ -74,12 +79,23 @@ class Watchful(ModuleBase):
         label = (item.get('label') or '').strip() or key
         os_ = self.host_os(item)
         interval = self.get_conf('interval', self._MODULE_DEFAULTS['interval'])
-        cmds = _cpu_cmds(interval)
-        cmd = cmds.get(os_) or cmds['linux']
-        timeout = self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']) + interval
-        out, err, code = self.host_exec(item, cmd, timeout=int(timeout) + 2)
-        if code != 0 and not out:
-            raise OSError((err or '').strip() or f'cpu query exited {code}')
+        cmd = _cpu_cmd(os_)
+        timeout = int(self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])) + 2
+
+        def _sample():
+            out, err, code = self.host_exec(item, cmd, timeout=timeout)
+            if code != 0 and not out:
+                raise OSError((err or '').strip() or f'cpu query exited {code}')
+            return out
+
+        if os_ in ('linux', 'freebsd'):
+            # Delta over the interval: two single-sample reads with the wait in
+            # Python (keeps the remote command a single allowlist-able binary).
+            out_a = _sample()
+            time.sleep(max(0.1, float(interval)))
+            out = f'{out_a}\n{_sample()}'
+        else:
+            out = _sample()
         usage = self._parse(os_, out)
         if usage is None:
             raise ValueError('could not parse CPU output')

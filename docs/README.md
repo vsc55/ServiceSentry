@@ -17,6 +17,7 @@
 | [modules.md](modules.md) | Los 16 módulos integrados: referencia de configuración, campos y flujo de cada uno |
 | [web_admin.md](web_admin.md) | Interfaz web Flask: características, roles (28 permisos), notificaciones, seguridad, endpoints REST, i18n, formularios por schema |
 | [security.md](security.md) | Autenticación (local/LDAP/OIDC/SAML2), RBAC, sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |
+| [ssh-hardening.md](ssh-hardening.md) | Endurecer los hosts monitorizados: cuenta dedicada, comando forzado + envoltorio con allowlist ([ssentry-wrap](ssentry-wrap)), sudoers mínimo para remediación |
 | [development.md](development.md) | Setup local, tests, pytest, depuración en VS Code, convenciones de código, dependencias |
 | [watchful_guide.md](watchful_guide.md) | Guía paso a paso para crear un nuevo módulo de monitorización |
 | [schema.md](schema.md) | Referencia completa de `schema.json`: todas las propiedades de campo, meta-claves, archivos de idioma y pipeline de `discover_schemas` |
