@@ -143,9 +143,14 @@ class Watchful(ModuleBase):
 
             def _alert(field):
                 try:
-                    return int(value.get(field, self._DEFAULTS[field]) or 0)
+                    v = int(value.get(field, self._DEFAULTS[field]) or 0)
                 except (TypeError, ValueError):
-                    return int(self._DEFAULTS[field])
+                    v = int(self._DEFAULTS[field])
+                # battery/load thresholds fall back to the module-wide default when
+                # the item leaves them blank (0), like the per-item timeout does.
+                if v == 0 and field in self._MODULE_DEFAULTS:
+                    return int(self.get_conf(field, self._MODULE_DEFAULTS[field]) or 0)
+                return v
 
             list_items.append({
                 'key': key,

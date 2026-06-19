@@ -1,6 +1,9 @@
 {
     "pretty_name": "Uso de CPU",
     "module_description": "Monitoriza el uso de CPU en el host vinculado (en local o por SSH) y genera alertas cuando supera el umbral configurado.",
+    "history": {
+        "used": "Uso de CPU"
+    },
     "labels": {
         "enabled":  "Habilitado",
         "threads":  "Hilos",

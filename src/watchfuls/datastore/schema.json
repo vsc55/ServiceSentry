@@ -3,7 +3,18 @@
         "enabled": {"type": "bool", "default": true},
         "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
     },
-    "__history__": {"field": null, "unit": null, "label": "Connection"},
+    "__credential__": {
+        "type": "datastore_auth",
+        "fields": [
+            {"name": "user",     "kind": "text",     "label": "user"},
+            {"name": "password", "kind": "password", "secret": true, "label": "password"}
+        ]
+    },
+    "__history__": {"field": "connections", "unit": "", "label": "Connections",
+                    "fields": {"connections": {"unit": ""},
+                               "uptime": {"unit": "s"},
+                               "memory": {"unit": "MB"},
+                               "queries": {"unit": ""}}},
     "__host_profile__": [
         {"key": "db", "address_field": "host", "fields": []},
         {"key": "ssh", "address_field": "ssh_host",
@@ -22,7 +33,7 @@
             "enabled", "label", "conn_type", "db_type",
             "ssh_host", "ssh_port", "ssh_user", "ssh_password", "ssh_key", "ssh_key_string", "ssh_verify_host",
             "scheme", "host", "port", "socket",
-            "user", "password", "token", "db", "auth_db", "db_index", "tls"
+            "user", "password", "token", "db", "auth_db", "db_index", "tls", "alert_connections"
         ],
         "__group_when__": {
             "ssh": {"conn_type": ["ssh"]}
@@ -35,15 +46,6 @@
                 "show_when":  {"conn_type": ["ssh"]},
                 "group":      "ssh",
                 "icon":       "bi-hdd-network",
-                "variant":    "info",
-                "full_width": true,
-                "result":     "toast"
-            },
-            {
-                "id":         "test_connection",
-                "url":        "/api/v1/watchfuls/datastore/test_connection",
-                "extra":      {},
-                "icon":       "bi-plug",
                 "variant":    "info",
                 "full_width": true,
                 "result":     "toast"
@@ -101,7 +103,8 @@
                              "extra":        {},
                              "icon":         "bi-database",
                              "result":       "field_picker",
-                             "result_field": "db"
+                             "result_field": "db",
+                             "result_multi": true
                          }},
         "auth_db":      {"type": "str",  "default": "admin",
                          "show_when": {"db_type": ["mongodb"]}, "group": "server"},
@@ -109,6 +112,9 @@
                          "show_when": {"db_type": ["redis","valkey"]}, "group": "server"},
         "tls":          {"type": "bool", "default": false,
                          "show_when": {"db_type": ["postgres","mssql","mongodb","redis","valkey"]},
-                         "group": "server"}
+                         "group": "server"},
+        "alert_connections": {"type": "int", "default": 0, "min": 0, "max": 1000000,
+                         "show_when": {"db_type": ["mysql","mariadb","postgres","mssql","mongodb","redis","valkey","memcached"]},
+                         "group": "alerts"}
     }
 }

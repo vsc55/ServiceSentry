@@ -1,6 +1,11 @@
 {
     "pretty_name": "Monitor UPS (NUT)",
     "module_description": "Monitoriza el estado de SAIs (Sistemas de Alimentación Ininterrumpida) vía NUT (Network UPS Tools). Genera alertas ante cortes de corriente, batería baja y estados anómalos.",
+    "history": {
+        "battery_charge": "Carga de batería",
+        "runtime": "Autonomía",
+        "load": "Carga"
+    },
     "labels": {
         "enabled":  "Habilitado",
         "threads":  "Hilos",
@@ -10,10 +15,10 @@
         "ups_name": "Nombre UPS",
         "user":     "Usuario",
         "password": "Contraseña",
-        "alert_on_battery": "Avisar con batería",
-        "alert_battery":    "Aviso de batería (%)",
-        "alert_runtime":    "Aviso de autonomía (min)",
-        "alert_load":       "Aviso de carga (%)"
+        "alert_on_battery": "Con batería",
+        "alert_battery":    "Batería (%)",
+        "alert_runtime":    "Autonomía (min)",
+        "alert_load":       "Carga (%)"
     },
     "hints": {
         "enabled":  "Habilitar o deshabilitar la monitorización UPS para esta entrada.",
@@ -25,9 +30,14 @@
         "user":     "Usuario para autenticación NUT. Dejar vacío para acceso sin autenticación (la lectura de estado no requiere auth).",
         "password": "Contraseña para autenticación NUT.",
         "alert_on_battery": "Avisar cuando el SAI pasa a batería (estado OB).",
-        "alert_battery":    "Avisar cuando la carga de batería baja de este porcentaje (0 = desactivado).",
-        "alert_runtime":    "Avisar cuando la autonomía estimada baja de estos minutos (0 = desactivado).",
-        "alert_load":       "Avisar cuando la carga del SAI supera este porcentaje (0 = desactivado)."
+        "alert_battery":    "Avisar cuando la batería baja de este porcentaje. El valor por ítem anula el global; vacío usa el global (0 a nivel de módulo = desactivado).",
+        "alert_runtime":    "Avisar cuando la autonomía estimada baja de estos minutos. El valor por ítem anula el global; vacío usa el global (0 a nivel de módulo = desactivado).",
+        "alert_load":       "Avisar cuando la carga del SAI supera este porcentaje. El valor por ítem anula el global; vacío usa el global (0 a nivel de módulo = desactivado)."
+    },
+    "group_labels": {
+        "connection": "Conexión",
+        "auth":       "Autenticación",
+        "alerts":     "Alertas"
     },
     "new_item_key_label": "Nombre del UPS o identificador:",
     "rename_item_prompt": "Introduce el nuevo nombre del UPS o identificador:",

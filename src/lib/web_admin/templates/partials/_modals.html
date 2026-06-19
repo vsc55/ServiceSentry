@@ -619,9 +619,14 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body pb-2">
-                <input type="search" class="form-control form-control-sm mb-3"
+                <input type="search" class="form-control form-control-sm mb-2"
                     id="fieldPickerFilter"
                     placeholder="{{ i18n.discover }}…">
+                <div id="fieldPickerMultiBar" class="d-flex align-items-center gap-2 mb-2" style="display:none">
+                    <button type="button" class="btn btn-sm btn-secondary" id="fpSelectAllBtn" onclick="_fpSelectAll()"></button>
+                    <button type="button" class="btn btn-sm btn-secondary" id="fpDeselectAllBtn" onclick="_fpDeselectAll()"></button>
+                    <span class="ms-auto small text-muted" id="fieldPickerCount"></span>
+                </div>
                 <div id="fieldPickerModalBody" style="max-height:55vh;overflow-y:auto"></div>
             </div>
             <div class="modal-footer py-1">

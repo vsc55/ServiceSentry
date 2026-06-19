@@ -14,10 +14,10 @@
         "verify_ssl":       "Verify SSL",
         "check_content":    "Check Content",
         "content_contains": "Content Contains",
-        "auth_enabled":     "Enable authentication",
+        "auth_enabled":     "Enabled",
         "auth_user":        "Username",
         "auth_password":    "Password",
-        "alert":            "Alert threshold"
+        "alert":            "Threshold"
     },
     "hints": {
         "enabled":          "Enable or disable monitoring for this URL.",
@@ -41,8 +41,10 @@
         "method": {"GET": "GET", "HEAD": "HEAD (no body)", "POST": "POST"}
     },
     "group_labels": {
-        "content": "Content check",
-        "auth":    "Basic Authentication"
+        "connection": "Connection",
+        "response":   "Response",
+        "alerts":     "Alerts",
+        "auth":       "Basic Authentication"
     },
     "action_labels": {
         "test_connection": "Test endpoint"

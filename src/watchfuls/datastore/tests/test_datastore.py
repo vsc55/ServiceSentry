@@ -81,7 +81,7 @@ class TestBackendDispatch:
 
     def test_unknown_db_type(self):
         from watchfuls.datastore import Watchful
-        ok, msg = Watchful._backend_check_direct('fakedb', {})
+        ok, msg, _m = Watchful._backend_check_direct('fakedb', {})
         assert ok is False
         assert 'fakedb' in msg
 
@@ -91,7 +91,7 @@ class TestBackendDispatch:
         orig = mod._PARAMIKO
         mod._PARAMIKO = False
         try:
-            ok, msg = Watchful._backend_check('mysql', 'ssh', {
+            ok, msg, _m = Watchful._backend_check('mysql', 'ssh', {
                 'ssh_host': 'h', 'ssh_port': 22, 'ssh_user': 'u',
                 'ssh_password': '', 'ssh_key': '', 'host': 'db', 'port': 3306,
             })
@@ -111,7 +111,7 @@ class TestMysqlBackend:
         mock_conn.__enter__ = lambda s: s
         mock_conn.__exit__ = MagicMock(return_value=False)
         with patch('pymysql.connect', return_value=mock_conn):
-            ok, msg = Watchful._test_mysql(
+            ok, msg, _m = Watchful._test_mysql(
                 {'conn_type': 'tcp', 'host': '127.0.0.1', 'port': 3306,
                  'user': 'root', 'password': '', 'db': ''})
             assert ok is True
@@ -121,7 +121,7 @@ class TestMysqlBackend:
         import pymysql.err
         with patch('pymysql.connect',
                    side_effect=pymysql.err.OperationalError(1045, 'Access denied')):
-            ok, msg = Watchful._test_mysql(
+            ok, msg, _m = Watchful._test_mysql(
                 {'conn_type': 'tcp', 'host': '127.0.0.1', 'port': 3306,
                  'user': 'bad', 'password': 'bad', 'db': ''})
             assert ok is False
@@ -129,7 +129,7 @@ class TestMysqlBackend:
 
     def test_socket_missing_path(self):
         from watchfuls.datastore import Watchful
-        ok, msg = Watchful._test_mysql(
+        ok, msg, _m = Watchful._test_mysql(
             {'conn_type': 'socket', 'socket': '/nonexistent.sock',
              'user': 'root', 'password': '', 'db': ''})
         assert ok is False
@@ -146,7 +146,7 @@ class TestPostgresBackend:
         orig = mod._PSYCOPG2
         mod._PSYCOPG2 = False
         try:
-            ok, msg = Watchful._test_postgres(
+            ok, msg, _m = Watchful._test_postgres(
                 {'conn_type': 'tcp', 'host': 'h', 'port': 5432,
                  'user': 'u', 'password': 'p', 'db': 'db', 'tls': False})
             assert ok is False
@@ -182,7 +182,7 @@ class TestMssqlBackend:
         orig = mod._PYMSSQL
         mod._PYMSSQL = False
         try:
-            ok, msg = Watchful._test_mssql(
+            ok, msg, _m = Watchful._test_mssql(
                 {'host': 'h', 'port': 1433, 'user': 'u',
                  'password': 'p', 'db': 'db', 'tls': False})
             assert ok is False
@@ -201,7 +201,7 @@ class TestMongoBackend:
         orig = mod._PYMONGO
         mod._PYMONGO = False
         try:
-            ok, msg = Watchful._test_mongodb(
+            ok, msg, _m = Watchful._test_mongodb(
                 {'host': 'h', 'port': 27017, 'user': 'u',
                  'password': 'p', 'auth_db': 'admin', 'tls': False})
             assert ok is False
@@ -220,7 +220,7 @@ class TestRedisBackend:
         orig = mod._REDIS
         mod._REDIS = False
         try:
-            ok, msg = Watchful._test_redis(
+            ok, msg, _m = Watchful._test_redis(
                 {'conn_type': 'tcp', 'host': 'h', 'port': 6379,
                  'password': '', 'db_index': 0, 'tls': False})
             assert ok is False
@@ -239,7 +239,7 @@ class TestMemcachedBackend:
         orig = mod._PYMEMCACHE
         mod._PYMEMCACHE = False
         try:
-            ok, msg = Watchful._test_memcached(
+            ok, msg, _m = Watchful._test_memcached(
                 {'conn_type': 'tcp', 'host': 'h', 'port': 11211, 'socket': ''})
             assert ok is False
             assert 'pymemcache' in msg
@@ -258,7 +258,7 @@ class TestElasticsearchBackend:
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_resp.read.return_value = b'{"status": "red"}'
         with patch('urllib.request.urlopen', return_value=mock_resp):
-            ok, msg = Watchful._test_elasticsearch(
+            ok, msg, _m = Watchful._test_elasticsearch(
                 {'scheme': 'http', 'host': 'h', 'port': 9200, 'user': '', 'password': ''})
             assert ok is False
             assert 'RED' in msg
@@ -270,7 +270,7 @@ class TestElasticsearchBackend:
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_resp.read.return_value = b'{"status": "green"}'
         with patch('urllib.request.urlopen', return_value=mock_resp):
-            ok, _ = Watchful._test_elasticsearch(
+            ok, _, _m = Watchful._test_elasticsearch(
                 {'scheme': 'http', 'host': 'h', 'port': 9200, 'user': '', 'password': ''})
             assert ok is True
 
@@ -286,7 +286,7 @@ class TestInfluxdbBackend:
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_resp.read.return_value = b'{"status": "pass"}'
         with patch('urllib.request.urlopen', return_value=mock_resp):
-            ok, _ = Watchful._test_influxdb(
+            ok, _, _m = Watchful._test_influxdb(
                 {'scheme': 'http', 'host': 'h', 'port': 8086,
                  'token': '', 'user': '', 'password': ''})
             assert ok is True
@@ -298,7 +298,7 @@ class TestInfluxdbBackend:
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_resp.read.return_value = b'{"status": "fail"}'
         with patch('urllib.request.urlopen', return_value=mock_resp):
-            ok, msg = Watchful._test_influxdb(
+            ok, msg, _m = Watchful._test_influxdb(
                 {'scheme': 'http', 'host': 'h', 'port': 8086,
                  'token': '', 'user': '', 'password': ''})
             assert ok is False
@@ -311,7 +311,7 @@ class TestTestConnection:
 
     def test_routes_to_mysql(self):
         from watchfuls.datastore import Watchful
-        with patch.object(Watchful, '_test_mysql', return_value=(True, '')) as m:
+        with patch.object(Watchful, '_test_mysql', return_value=(True, '', {})) as m:
             result = Watchful.test_connection({
                 'db_type': 'mysql', 'conn_type': 'tcp',
                 'host': 'h', 'port': 3306, 'user': 'u', 'password': 'p', 'db': ''})
@@ -320,7 +320,7 @@ class TestTestConnection:
 
     def test_routes_to_postgres(self):
         from watchfuls.datastore import Watchful
-        with patch.object(Watchful, '_test_postgres', return_value=(True, '')) as m:
+        with patch.object(Watchful, '_test_postgres', return_value=(True, '', {})) as m:
             Watchful.test_connection({
                 'db_type': 'postgres', 'conn_type': 'tcp',
                 'host': 'h', 'port': 5432, 'user': 'u', 'password': 'p',
@@ -332,7 +332,7 @@ class TestTestConnection:
         captured = {}
         def fake_test_redis(cfg):
             captured['port'] = cfg['port']
-            return True, ''
+            return True, '', {}
         with patch.object(Watchful, '_test_redis', side_effect=fake_test_redis):
             Watchful.test_connection({'db_type': 'redis', 'conn_type': 'tcp',
                                       'host': 'h', 'port': 0, 'password': '',

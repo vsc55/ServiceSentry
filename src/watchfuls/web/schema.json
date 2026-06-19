@@ -23,44 +23,41 @@
         "__discovery_label_template__": "{host} - {url}",
         "__new_item_fields__": ["label", "url"],
         "__field_order__": [
-            "enabled", "label", "url", "path", "scheme", "method",
-            "code", "timeout", "verify_ssl",
-            "check_content", "content_contains",
-            "alert",
-            "auth_enabled", "auth_user", "auth_password"
+            "enabled", "label",
+            "url", "path", "scheme", "method", "verify_ssl", "timeout",
+            "code", "check_content", "content_contains",
+            "auth_enabled", "auth_user", "auth_password",
+            "alert"
         ],
-        "__group_when__": {
-            "content": {"check_content": [true]},
-            "auth":    {"auth_enabled": [true]}
-        },
         "__test__": "/api/v1/watchfuls/web/test_connection",
 
         "enabled":          {"type": "bool", "default": true},
         "label":            {"type": "str",  "default": ""},
-        "url":              {"type": "str",  "default": "", "placeholder": "__address__"},
-        "path":             {"type": "str",  "default": "", "placeholder": "/health"},
-        "scheme":           {"type": "str",  "default": "https", "options": ["http", "https"]},
-        "method":           {"type": "str",  "default": "GET",   "options": ["GET", "HEAD", "POST"]},
-        "code":             {"type": "int",  "default": 0, "min": 0, "max": 9999,
-                             "zero_as_blank": true, "placeholder_module": "code"},
-        "timeout":          {"type": "int",  "default": 0, "min": 0, "max": 300,
-                             "zero_as_blank": true, "placeholder_module": "timeout"},
-        "verify_ssl":       {"type": "bool", "default": true,
-                             "show_when": {"scheme": ["https"]}},
 
-        "check_content":    {"type": "bool", "default": false},
+        "url":              {"type": "str",  "default": "", "placeholder": "__address__", "group": "connection"},
+        "path":             {"type": "str",  "default": "", "placeholder": "/health", "group": "connection"},
+        "scheme":           {"type": "str",  "default": "https", "options": ["http", "https"], "group": "connection"},
+        "method":           {"type": "str",  "default": "GET",   "options": ["GET", "HEAD", "POST"], "group": "connection"},
+        "verify_ssl":       {"type": "bool", "default": true,
+                             "show_when": {"scheme": ["https"]}, "group": "connection"},
+        "timeout":          {"type": "int",  "default": 0, "min": 0, "max": 300,
+                             "zero_as_blank": true, "placeholder_module": "timeout", "group": "connection"},
+
+        "code":             {"type": "int",  "default": 0, "min": 0, "max": 9999,
+                             "zero_as_blank": true, "placeholder_module": "code", "group": "response"},
+        "check_content":    {"type": "bool", "default": false, "group": "response"},
         "content_contains": {"type": "str",  "default": "",
                              "show_when": {"check_content": [true]},
-                             "group": "content"},
+                             "group": "response"},
 
-        "auth_enabled":     {"type": "bool", "default": false},
+        "alert":            {"type": "int",  "default": 1,  "min": 1, "max": 10, "group": "alerts"},
+
+        "auth_enabled":     {"type": "bool", "default": false, "group": "auth"},
         "auth_user":        {"type": "str",  "default": "",
                              "show_when": {"auth_enabled": [true]},
                              "group": "auth"},
         "auth_password":    {"type": "str",  "default": "", "sensitive": true,
                              "show_when": {"auth_enabled": [true]},
-                             "group": "auth"},
-
-        "alert":            {"type": "int",  "default": 1,  "min": 1, "max": 10}
+                             "group": "auth"}
     }
 }

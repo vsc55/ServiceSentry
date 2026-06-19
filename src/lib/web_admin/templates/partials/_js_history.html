@@ -18,12 +18,28 @@ let _historyTooltip  = null;
 let _historyResizeOb = null;
 let _historyFilter   = '';
 let _historyCollapsed = new Set();  // module names whose series group is collapsed
+let _historyTimer    = null;        // auto-refresh timer {_id, _interval}
+let _histCountId     = null;        // countdown ticker id
+// Compare mode: overlay several numeric series (same metric/unit) on one chart.
+let _historyCompare      = false;   // compare (multi-series) mode on/off
+let _historyCompareSel   = [];      // [{module,key,uid,label,pretty}] in the overlay
+let _historyCompareData  = [];      // [{...sel, color, points, stats}] fetched for drawing
+let _historyCompareField = null;    // shared numeric field of the overlay
+let _historyCompareUnit  = '';
+let _historyCompareLabel = '';
+let _historyCompareFields = {};     // {field:{unit,label}} for the active module
+let _historyFields        = {};     // {field:{unit,label}} for the single series
+// Distinct line colours per overlaid series (cycled).
+const _HISTORY_PALETTE = ['#0d6efd', '#dc3545', '#198754', '#fd7e14', '#6f42c1',
+                          '#20c997', '#d63384', '#0dcaf0', '#ffc107', '#6610f2'];
 
 // ── localStorage keys ─────────────────────────────────────────────────────────
 const _HLS_HOURS     = 'ss_history_hours';
 const _HLS_MOD       = 'ss_history_mod';
 const _HLS_KEY       = 'ss_history_key';
 const _HLS_COLLAPSED = 'ss_history_collapsed';
+const _HLS_AUTO      = 'ss_history_auto';   // auto-refresh interval (seconds, 0 = off)
+const _HLS_FIELD     = 'ss_history_field';  // last-chosen metric field (shared single/compare)
 
 function _historyLoadCollapsed() {
     try {
@@ -62,14 +78,26 @@ async function renderHistory() {
     if (!cont) return;
 
     // Restore persisted state before building the layout
-    _historyHours = parseInt(localStorage.getItem(_HLS_HOURS) || '24', 10) || 24;
+    _historyHours = parseFloat(localStorage.getItem(_HLS_HOURS) || '24') || 24;
     const savedMod = localStorage.getItem(_HLS_MOD);
     const savedKey = localStorage.getItem(_HLS_KEY);
+
+    // Re-entering the tab rebuilds the DOM → drop any running timer; it is
+    // re-armed below from the saved interval only when a series is shown.
+    _historyStopTimer();
+    // Compare overlay is a transient, in-session view → reset on a full rebuild.
+    _historyCompare = false;
+    _historyCompareSel = [];
+    _historyCompareData = [];
+    _historyCompareField = null;
+    _historyCompareFields = {};
 
     _historyLoadCollapsed();
     cont.innerHTML = _historySkeletonHTML();
     await _historyLoadIndex();
     _historyRenderLayout();
+    // Refresh scheduler state for the "Auto" option, then update the control.
+    _loadSchedulerState().then(_historyRenderAutoRefresh);
 
     // Restore previously selected series if it still exists in the index
     if (savedMod && savedKey &&
@@ -85,6 +113,8 @@ async function renderHistory() {
         _historyScrollToActive();
         _historyShowToolbar();
         await _historyLoadChart();
+        // Restore the saved auto-refresh interval now that a chart is shown.
+        setHistoryAutoRefresh(parseInt(localStorage.getItem(_HLS_AUTO) || '0', 10) || 0);
     } else {
         _historyShowPlaceholder();
     }
@@ -103,27 +133,91 @@ async function _historyLoadIndex() {
     _historyIndex = await apiGet('/api/v1/history/index') || [];
 }
 
-async function _historyLoadChart() {
+async function _historyLoadChart(soft = false) {
     const chartArea = document.getElementById('history-chart-area');
     if (!chartArea) return;
-    chartArea.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
+    // Auto-refresh ticks pass soft=true: no spinner (avoid flicker) and a
+    // transient fetch error keeps the current chart instead of wiping it.
+    if (!soft) chartArea.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
 
     const url = `/api/v1/history?module=${encodeURIComponent(_historyMod)}&key=${encodeURIComponent(_historyKey)}&hours=${_historyHours}&points=600` +
         (_historyUid   ? `&uid=${encodeURIComponent(_historyUid)}`     : '') +
         (_historyField ? `&field=${encodeURIComponent(_historyField)}`  : '');
     const res = await apiGet(url);
-    if (!res) { _historyShowPlaceholder(); return; }
+    if (!res) { if (!soft) _historyShowPlaceholder(); return; }
 
     _historyPoints     = res.points || [];
     _historyStats      = res.stats  || {};
+    _historyFields     = res.fields || {};   // {field:{unit,label}} (translated)
     _historyUnit       = res.unit   || '';
     _historyLabel      = res.metric_label || '';
     // _historySchemaNull: the MODULE declared field:null in __history__ (not user choice).
     // suggested_field===null with a label means the schema explicitly set field:null.
     _historySchemaNull = (res.suggested_field === null && !!res.metric_label);
-    if (!_historyField) _historyField = res.suggested_field ?? null;
+    if (!_historyField) {
+        // Restore the persisted field only if it's a DECLARED metric of this
+        // series (same set the selector offers — never an internal value like
+        // the alert threshold); otherwise use the module's suggested field.
+        const declared = Object.keys(_historyFields);
+        const avail = declared.length ? declared : _historyNumericFields(_historyPoints);
+        const saved = localStorage.getItem(_HLS_FIELD) || '';
+        _historyField = (saved && avail.includes(saved)) ? saved : (res.suggested_field ?? null);
+    }
 
     _historyRenderChartArea();
+    if (soft) _startHistoryCountdown(_historyTimer?._interval || 0);
+}
+
+// ── Auto-refresh (interval-driven soft chart reload) ───────────────────────────
+function _historyStopTimer() {
+    if (_historyTimer) { clearInterval(_historyTimer._id); _historyTimer = null; }
+    if (_histCountId)  { clearInterval(_histCountId); _histCountId = null; }
+}
+
+function setHistoryAutoRefresh(seconds) {
+    _historyStopTimer();
+    try { localStorage.setItem(_HLS_AUTO, String(seconds || 0)); } catch (e) {}
+    if (seconds > 0) {
+        const id = setInterval(() => {
+            const pane = document.getElementById('tab-history');
+            if (!pane || !pane.classList.contains('active')) return;
+            // Only refresh when there is something to redraw, per current mode.
+            if (_historyCompare) {
+                if (_historyCompareSel.length) _historyLoadCompare(true);
+            } else if (_historyMod && _historyKey) {
+                _historyLoadChart(true);
+            }
+        }, seconds * 1000);
+        _historyTimer = { _id: id, _interval: seconds };
+    }
+    _historyRenderAutoRefresh();
+}
+
+// Render the shared compact auto-refresh control into the toolbar slot.
+function _historyRenderAutoRefresh() {
+    const el = document.getElementById('history-auto-refresh');
+    if (el) el.innerHTML = _autoRefreshControl({
+        id: 'hist', interval: _historyTimer?._interval || 0,
+        setFn: 'setHistoryAutoRefresh',
+        countId: 'hist-refresh-count', fillId: 'hist-refresh-fill',
+    });
+    _startHistoryCountdown(_historyTimer?._interval || 0);
+}
+
+// Visual countdown (cosmetic; the real refresh is driven by _historyTimer).
+function _startHistoryCountdown(total) {
+    if (_histCountId) { clearInterval(_histCountId); _histCountId = null; }
+    if (!total) return;
+    const cEl = document.getElementById('hist-refresh-count');
+    const fEl = document.getElementById('hist-refresh-fill');
+    let rem = total;
+    if (cEl) cEl.textContent = rem;
+    if (fEl) fEl.style.width = '100%';
+    _histCountId = setInterval(() => {
+        rem = rem > 0 ? rem - 1 : total;
+        if (cEl) cEl.textContent = rem;
+        if (fEl) fEl.style.width = (rem / total * 100) + '%';
+    }, 1000);
 }
 
 // ── Layout ────────────────────────────────────────────────────────────────────
@@ -135,16 +229,29 @@ function _historyRenderLayout() {
 
 <!-- Header: title + search + Clear All (matches the other sections' toolbar) -->
 <div class="ss-card-header" id="history-tab-header">
-  <h6 class="mb-0 me-2"><i class="bi bi-graph-up me-2"></i>${esc(t('tab_history'))}</h6>
-  <div class="input-group input-group-sm" style="max-width:220px">
+  <h6 class="mb-0 me-2 flex-shrink-0 text-nowrap"><i class="bi bi-graph-up me-2"></i>${esc(t('tab_history'))}</h6>
+  <!-- Search expands to fill the free space between the title and the actions. -->
+  <div class="input-group input-group-sm flex-grow-1">
     <span class="input-group-text"><i class="bi bi-search"></i></span>
     <input type="text" class="form-control" id="history-search"
            placeholder="${esc(t('history_search'))}" oninput="_historyOnSearch(this.value)">
   </div>
-  <div class="ms-auto" id="history-clear-all-wrap">
-    <button class="btn btn-sm btn-danger" onclick="_historyClearAll()">
-      <i class="bi bi-trash3 me-1"></i>${esc(t('history_clear_all'))}
+  <!-- Right-aligned actions: Compare (acts on the series list), refresh,
+       auto-refresh and Clear All. Kept on one line; search shrinks instead. -->
+  <div class="d-flex flex-nowrap align-items-center gap-2 ms-2 flex-shrink-0">
+    <button class="btn btn-sm btn-secondary" id="history-compare-btn"
+            onclick="_historyToggleCompareMode()" title="${escAttr(t('history_compare_tt'))}">
+      <i class="bi bi-bar-chart-steps me-1"></i>${esc(t('history_compare'))}
     </button>
+    <button class="btn btn-sm btn-secondary" onclick="_historyRefresh()" title="${escAttr(t('refresh'))}">
+      <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}
+    </button>
+    <span id="history-auto-refresh" class="d-flex align-items-center gap-2"></span>
+    <span id="history-clear-all-wrap">
+      <button class="btn btn-sm btn-danger" onclick="_historyClearAll()">
+        <i class="bi bi-trash3 me-1"></i>${esc(t('history_clear_all'))}
+      </button>
+    </span>
   </div>
 </div>
 
@@ -180,14 +287,23 @@ function _historyRenderLayout() {
               style="width:auto;display:none" onchange="_historyOnFieldChange(this.value)">
       </select>
 
-      <!-- Time range — options built dynamically from config -->
-      <select class="form-select form-select-sm" style="width:auto"
-              id="history-range-sel" onchange="_historyOnRangeChange(this.value)">
-      </select>
+      <!-- Time range — dropdown (presets + custom hours/days), populated by JS -->
+      <span id="history-range"></span>
 
-      <button class="btn btn-sm btn-secondary" onclick="_historyLoadChart()">
-        <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}
-      </button>
+      <!-- Export chart as PNG (image) or CSV (data) -->
+      <div class="btn-group btn-group-sm">
+        <button type="button" class="btn btn-sm btn-secondary dropdown-toggle"
+                data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('export'))}">
+          <i class="bi bi-download me-1"></i>${esc(t('export'))}
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end p-1" style="font-size:.8rem">
+          <li><button type="button" class="dropdown-item d-flex align-items-center gap-2" onclick="_historyExportPNG()">
+            <i class="bi bi-image"></i>PNG</button></li>
+          <li><button type="button" class="dropdown-item d-flex align-items-center gap-2" onclick="_historyExportCSV()">
+            <i class="bi bi-filetype-csv"></i>CSV</button></li>
+        </ul>
+      </div>
+
       <button class="btn btn-sm btn-danger" id="history-clear-btn" style="display:none"
               onclick="_historyClearSeries()">
         <i class="bi bi-trash3 me-1"></i>${esc(t('history_clear_series'))}
@@ -196,6 +312,8 @@ function _historyRenderLayout() {
 
     <!-- Padded drawing zone + stats -->
     <div class="flex-grow-1 d-flex flex-column gap-2 p-2 overflow-hidden" style="min-height:0">
+      <!-- Compare legend (colour + series + last value), shown in compare mode -->
+      <div id="history-legend" class="d-flex flex-wrap gap-2" style="flex-shrink:0"></div>
       <div id="history-chart-area" class="flex-grow-1 position-relative" style="min-height:150px;overflow:hidden">
       </div>
       <div id="history-stats-row" class="d-flex gap-3 flex-wrap" style="font-size:.85rem;flex-shrink:0">
@@ -206,6 +324,7 @@ function _historyRenderLayout() {
 </div>`;
 
     _historyRenderSeriesList();
+    _historyUpdateCompareBtn();
     _historyApplyPermissions();
 }
 
@@ -214,12 +333,15 @@ function _historyApplyPermissions() {
     // Clear All button
     const clearAllWrap = document.getElementById('history-clear-all-wrap');
     if (clearAllWrap) clearAllWrap.style.display = canDelete ? '' : 'none';
-    // Clear series button (also controlled in _historyShowToolbar)
+    // Clear series button (also controlled in _historyShowToolbar). Hidden in
+    // compare mode (it acts on a single series, which is ambiguous there).
     const clearBtn = document.getElementById('history-clear-btn');
-    if (clearBtn) clearBtn.style.display = (_historyMod && canDelete) ? '' : 'none';
+    if (clearBtn) clearBtn.style.display = (_historyMod && canDelete && !_historyCompare) ? '' : 'none';
 }
 
 function _historyShowPlaceholder() {
+    // No series selected → nothing to auto-refresh.
+    _historyStopTimer();
     const chartArea = document.getElementById('history-chart-area');
     if (chartArea) {
         chartArea.innerHTML = `
@@ -274,8 +396,8 @@ function _historyRenderSeriesList() {
   <span class="badge bg-secondary" style="font-size:.65rem;flex-shrink:0">${series.length}</span>
 </div>`;
         if (collapsed) continue;
+        const activeMetric = _historyActiveMetricKey();   // null when nothing picked yet
         for (const s of series) {
-            const active  = s.module === _historyMod && s.key === _historyKey;
             // Dot reflects the last recorded status (OK / error); when the
             // series has no status yet, fall back to the uptime health band.
             const dotCls  = s.last_status === true  ? 'text-success'
@@ -284,15 +406,34 @@ function _historyRenderSeriesList() {
             const lastVal = _historyLastVal(s);
             // Use data-* attributes to avoid JS string escaping issues with keys
             // that contain backslashes (e.g. Windows paths like "C:\").
-            html += `
+            if (_historyCompare) {
+                // Compare mode: checkbox rows. Non-numeric series and series of a
+                // different metric than the active one are disabled.
+                const mk        = _historyMetricKey(s);
+                const checked   = _historyInCompare(s.module, s.key);
+                const disabled  = !mk || (activeMetric && mk !== activeMetric && !checked);
+                html += `
+<button class="btn btn-sm w-100 text-start d-flex align-items-center gap-1 mb-1 ${checked ? 'btn-primary' : 'btn-outline-secondary'}"
+        style="padding:.25rem .5rem .25rem 1.25rem;font-size:.8rem${disabled ? ';opacity:.4;pointer-events:none' : ''}"
+        data-hmod="${esc(s.module)}" data-hkey="${esc(s.key)}"
+        onclick="_historyToggleCompareMember(this.dataset.hmod, this.dataset.hkey)"
+        title="${escAttr(!mk ? t('history_compare_not_numeric') : (disabled ? t('history_compare_unit_mismatch') : ''))}">
+  <i class="bi ${checked ? 'bi-check-square' : 'bi-square'}" style="font-size:.7rem;flex-shrink:0"></i>
+  <span class="text-truncate flex-grow-1">${esc(s.label || s.key)}</span>
+  ${lastVal !== null ? `<span class="text-muted" style="font-size:.75rem;flex-shrink:0">${lastVal}</span>` : ''}
+</button>`;
+            } else {
+                const active = s.module === _historyMod && s.key === _historyKey;
+                html += `
 <button class="btn btn-sm w-100 text-start d-flex align-items-center gap-1 mb-1 ${active ? 'btn-primary' : 'btn-outline-secondary'}"
         style="padding:.25rem .5rem .25rem 1.25rem;font-size:.8rem"
         data-hmod="${esc(s.module)}" data-hkey="${esc(s.key)}"
-        onclick="_historySelectSeries(this.dataset.hmod, this.dataset.hkey)">
+        onclick="_historySelectSeries(this.dataset.hmod, this.dataset.hkey, event)">
   <i class="bi bi-circle-fill ${dotCls}" style="font-size:.45rem;flex-shrink:0"></i>
   <span class="text-truncate flex-grow-1">${esc(s.label || s.key)}</span>
   ${lastVal !== null ? `<span class="text-muted" style="font-size:.75rem;flex-shrink:0">${lastVal}</span>` : ''}
 </button>`;
+            }
         }
     }
     el.innerHTML = html;
@@ -324,7 +465,13 @@ function _historyLastVal(s) {
     return `${s.uptime}%`;
 }
 
-function _historySelectSeries(mod, key) {
+function _historySelectSeries(mod, key, ev) {
+    // Compare mode (or Ctrl/Cmd-click) → add/remove from the overlay instead of
+    // switching the single selection.
+    if (_historyCompare || (ev && (ev.ctrlKey || ev.metaKey))) {
+        _historyToggleCompareMember(mod, key);
+        return;
+    }
     _historyMod   = mod;
     _historyKey   = key;
     _historyUid   = _historyIndex.find(s => s.module === mod && s.key === key)?.item_uid || null;
@@ -337,6 +484,14 @@ function _historySelectSeries(mod, key) {
     _historyRenderSeriesList();
     _historyShowToolbar();
     _historyLoadChart();
+    // Apply the saved auto-refresh preference when none is active yet.
+    if (!_historyTimer) setHistoryAutoRefresh(parseInt(localStorage.getItem(_HLS_AUTO) || '0', 10) || 0);
+}
+
+// Refresh the chart respecting the current mode (single vs compare overlay).
+function _historyRefresh() {
+    if (_historyCompare) { if (_historyCompareSel.length) _historyLoadCompare(); }
+    else if (_historyMod && _historyKey) _historyLoadChart();
 }
 
 function _historyShowToolbar() {
@@ -344,35 +499,41 @@ function _historyShowToolbar() {
     if (tb) tb.style.removeProperty('display');
     const title = document.getElementById('history-title');
     if (title) {
-        const entry = _historyIndex.find(s => s.module === _historyMod && s.key === _historyKey);
-        const prettyMod = (entry?.pretty_name) || _historyMod;
-        title.textContent = `${prettyMod} / ${(entry?.label) || _historyKey}`;
-    }
-    // Populate range selector from config and restore saved value
-    const rangeSel = document.getElementById('history-range-sel');
-    if (rangeSel) {
-        const ranges = _historyConfigRanges();
-        rangeSel.innerHTML = ranges.map(h => {
-            const days = h / 24;
-            const lbl  = (days >= 1 && days === Math.floor(days))
-                ? `${days} ${t('history_d')}`
-                : `${h} ${t('history_h')}`;
-            return `<option value="${h}" ${h === _historyHours ? 'selected' : ''}>${esc(lbl)}</option>`;
-        }).join('');
-        // If saved value is not in configured ranges, pick the closest
-        if (!ranges.includes(_historyHours)) {
-            _historyHours = ranges.reduce((a, b) =>
-                Math.abs(b - _historyHours) < Math.abs(a - _historyHours) ? b : a);
-            rangeSel.value = String(_historyHours);
+        if (_historyCompare) {
+            title.textContent = _historyCompareSel.length
+                ? tf('history_compare_title', _historyCompareSel.length)
+                : t('history_compare');   // empty set → just "Compare" (no "0 series")
+        } else {
+            const entry = _historyIndex.find(s => s.module === _historyMod && s.key === _historyKey);
+            const prettyMod = (entry?.pretty_name) || _historyMod;
+            title.textContent = `${prettyMod} / ${(entry?.label) || _historyKey}`;
         }
     }
+    _historyUpdateCompareBtn();
+    _historyRenderLegend();
+    _historyRenderRange();
+    _historyRenderAutoRefresh();
     _historyApplyPermissions();
 }
 
+// Compare toggle (in the header) reflects the current mode; keep the ms-2 spacing.
+function _historyUpdateCompareBtn() {
+    const b = document.getElementById('history-compare-btn');
+    if (b) b.className = `btn btn-sm ${_historyCompare ? 'btn-primary' : 'btn-secondary'}`;
+}
+
+function _historyHideToolbar() {
+    const tb = document.getElementById('history-toolbar');
+    if (tb) tb.style.setProperty('display', 'none', 'important');
+}
+
 function _historyOnRangeChange(val) {
-    _historyHours = parseInt(val, 10) || 24;
+    let h = parseFloat(val);
+    if (!Number.isFinite(h) || h <= 0) h = 24;
+    _historyHours = Math.min(87600, Math.max(1 / 60, h));   // 1 min … 10 years
     localStorage.setItem(_HLS_HOURS, String(_historyHours));
-    _historyLoadChart();
+    _historyRenderRange();   // reflect the new selection in the dropdown
+    _historyRefresh();
 }
 
 function _historyConfigRanges() {
@@ -381,12 +542,597 @@ function _historyConfigRanges() {
         const valid = cfg.filter(r => typeof r === 'number' && r > 0 && Number.isFinite(r));
         if (valid.length > 0) return valid;
     }
-    return [1, 6, 24, 72, 168, 720];
+    return [0.5, 1, 6, 24, 72, 168, 720];   // 30 m, 1 h, 6 h, 1 d, 3 d, 7 d, 30 d
+}
+
+// Range units expressed in minutes (month = 30 d, year = 365 d), largest first.
+// Suffix is what the user types / what the compact form shows; lkey is the i18n
+// label key. NOTE: months are 'mo' (not 'm') so they don't clash with minutes.
+const _HISTORY_UNITS = [
+    { suffix: 'y',  mins: 525600, lkey: 'history_y',  one: 'history_year_1',  many: 'history_year_n'  },
+    { suffix: 'mo', mins: 43200,  lkey: 'history_mo', one: 'history_month_1', many: 'history_month_n' },
+    { suffix: 'w',  mins: 10080,  lkey: 'history_w',  one: 'history_week_1',  many: 'history_week_n'  },
+    { suffix: 'd',  mins: 1440,   lkey: 'history_d',  one: 'history_day_1',   many: 'history_day_n'   },
+    { suffix: 'h',  mins: 60,     lkey: 'history_h',  one: 'history_hour_1',  many: 'history_hour_n'  },
+    { suffix: 'm',  mins: 1,      lkey: 'history_m',  one: 'history_min_1',   many: 'history_min_n'   },
+];
+function _historyRangeUnit(h) {
+    const mins = Math.round(h * 60);
+    return _HISTORY_UNITS.find(x => mins % x.mins === 0) || _HISTORY_UNITS.at(-1);
+}
+// Compact label for the toggle button → e.g. "2 w" / "1 mo" / "30 m".
+function _historyRangeLabel(h) {
+    const u = _historyRangeUnit(h);
+    return `${Math.round(h * 60) / u.mins} ${t(u.lkey)}`;
+}
+// Descriptive label for the menu list → e.g. "2 weeks" / "1 month" / "30 minutes".
+function _historyRangeLabelLong(h) {
+    const u = _historyRangeUnit(h);
+    const n = Math.round(h * 60) / u.mins;
+    return `${n} ${t(n === 1 ? u.one : u.many)}`;
+}
+// Compact form (no space) for prefilling the custom input: "2w" / "1mo" / "10m".
+function _historyRangeShort(h) {
+    const u = _historyRangeUnit(h);
+    return `${Math.round(h * 60) / u.mins}${u.suffix}`;
+}
+// Parse a free-form range like "10m", "6h", "2d", "3w", "2mo", "1y" → hours.
+// A bare number defaults to hours. 'mo' must precede 'm' in the pattern.
+function _historyParseRange(s) {
+    const m = String(s).trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(mo|m|h|d|w|y)?$/);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    if (!(n > 0)) return null;
+    const u = _HISTORY_UNITS.find(x => x.suffix === (m[2] || 'h'));
+    return n * (u ? u.mins : 60) / 60;   // → hours
+}
+
+// Compact time-range dropdown: presets (from config) + a free-form custom value
+// where you type the unit directly (10m / 6h / 2d). Mirrors the auto-refresh look.
+function _historyRangeControl() {
+    const ranges = _historyConfigRanges();
+    const cur = _historyHours;
+    const isCustom = !ranges.includes(cur);
+    let items = `<li><h6 class="dropdown-header py-1">${esc(t('history_range'))}</h6></li>`;
+    for (const h of ranges) {
+        const active = cur === h;
+        items += `<li><button type="button" class="dropdown-item d-flex align-items-center gap-2 ${active ? 'active' : ''}"
+            onclick="_historyOnRangeChange(${h})"><i class="bi ${active ? 'bi-check2' : 'bi-clock-history'}" style="width:1em;flex-shrink:0"></i>${esc(_historyRangeLabelLong(h))}</button></li>`;
+    }
+    // Custom row: prefix turns into a highlighted check when this value is active;
+    // the icon's tooltip explains the accepted formats.
+    const cval = isCustom ? _historyRangeShort(cur) : '';
+    items += `<li><hr class="dropdown-divider my-1"></li>
+      <li class="px-2 pb-1"><div class="input-group input-group-sm flex-nowrap${isCustom ? ' border border-primary rounded' : ''}">
+        <span class="input-group-text${isCustom ? ' text-bg-primary' : ''}" style="cursor:help" title="${escAttr(t('history_range_help'))}"><i class="bi ${isCustom ? 'bi-check2' : 'bi-clock-history'}"></i></span>
+        <input type="text" id="hist-range-custom" class="form-control"
+               placeholder="${escAttr(t('history_range_custom'))}" value="${escAttr(cval)}"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();_historyApplyCustomRange();}">
+        <button class="btn btn-primary" type="button" onclick="_historyApplyCustomRange()">${esc(t('apply'))}</button>
+      </div></li>`;
+    return `<div class="btn-group btn-group-sm">
+      <button type="button" class="btn btn-sm btn-secondary dropdown-toggle text-center" style="min-width:5.5rem"
+              data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" title="${escAttr(t('history_range'))}">
+        <i class="bi bi-clock-history me-1"></i>${esc(_historyRangeLabel(cur))}
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end p-1" style="font-size:.8rem;min-width:13.5rem">${items}</ul>
+    </div>`;
+}
+
+function _historyRenderRange() {
+    const el = document.getElementById('history-range');
+    if (el) el.innerHTML = _historyRangeControl();
+}
+
+function _historyApplyCustomRange() {
+    const inp = document.getElementById('hist-range-custom');
+    if (!inp) return;
+    const hrs = _historyParseRange(inp.value);
+    if (hrs == null) return;
+    _historyOnRangeChange(hrs);
+}
+
+// ── Export (PNG image / CSV data) ───────────────────────────────────────────────
+function _historyExportFilename(ext) {
+    const range = _historyRangeShort(_historyHours);
+    const base = _historyCompare
+        ? `history_compare_${range}`
+        : `history_${_historyMod || 'series'}_${_historyKey || ''}_${range}`;
+    return base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/_+\./, '.') + '.' + ext;
+}
+
+function _historyDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+}
+
+// Title for the exported image: "<series> — <metric> (<range>)".
+function _historyExportTitle() {
+    const range = _historyRangeLabel(_historyHours);
+    if (_historyCompare) {
+        const metric = _historyCompareLabel || _historyCompareField || '';
+        const unit   = _historyCompareUnit ? ` (${_historyCompareUnit})` : '';
+        return `${tf('history_compare_title', _historyCompareSel.length)} — ${metric}${unit} · ${range}`;
+    }
+    const e = _historyIndex.find(x => x.module === _historyMod && x.key === _historyKey);
+    const series = `${(e?.pretty_name) || _historyMod} / ${(e?.label) || _historyKey}`;
+    const metric = _historyLabel || t('history_status_only');
+    const unit   = _historyUnit ? ` (${_historyUnit})` : '';
+    return `${series} — ${metric}${unit} · ${range}`;
+}
+
+// Single-series stats line for the exported image footer
+// (samples · uptime · min/max/avg). Empty in compare mode (uses a legend).
+function _historyExportStats() {
+    const s = _historyStats;
+    if (!s || !s.count) return '';
+    const u = _historyUnit || '';
+    const parts = [`${t('history_samples')}: ${s.count}`, `${t('history_uptime')}: ${s.uptime}%`];
+    if (s.min !== undefined) {
+        parts.push(`${t('history_min')}: ${_hFmtNum(s.min)}${u}`,
+                   `${t('history_max')}: ${_hFmtNum(s.max)}${u}`,
+                   `${t('history_avg')}: ${_hFmtNum(s.avg)}${u}`);
+    }
+    return parts.join('   ·   ');
+}
+
+// Composite a titled chart (transparent canvas over the surface colour, with a
+// header line and a footer — stats for a single series, or a colour legend in
+// compare mode so each line is identifiable) and download it as PNG.
+function _historyExportPNG() {
+    const canvas = document.getElementById('history-canvas');
+    if (!canvas) { showToast(t('history_no_data'), 'warning'); return; }
+    const dpr   = window.devicePixelRatio || 1;
+    const padX  = 12 * dpr;
+    const headH = 32 * dpr;
+    const cs  = getComputedStyle(document.body);
+    const bg  = (cs.getPropertyValue('--ss-surface-bg') || cs.getPropertyValue('--bs-body-bg') || '#ffffff').trim();
+    const fg  = (cs.getPropertyValue('--bs-body-color') || '#000').trim();
+    const mut = (cs.getPropertyValue('--bs-secondary-color') || fg).trim();
+    const legendFont = `${11 * dpr}px system-ui, sans-serif`;
+
+    // Footer: single → stats text; compare → wrapped colour legend.
+    const statsText = _historyCompare ? '' : _historyExportStats();
+    const rowH = 18 * dpr, sw = 10 * dpr, swGap = 6 * dpr, itemGap = 18 * dpr;
+    const maxW = canvas.width - padX;
+    let placed = [], legendLines = 0;
+    if (_historyCompare) {
+        const meas = document.createElement('canvas').getContext('2d');
+        meas.font = legendFont;
+        let x = padX, line = 0;
+        for (const s of _historyCompareData) {
+            const label = `${s.pretty} / ${s.label}`;
+            const w = sw + swGap + meas.measureText(label).width + itemGap;
+            if (x + w > maxW && x > padX) { line++; x = padX; }
+            placed.push({ color: s.color, label, x, line });
+            x += w;
+        }
+        legendLines = placed.length ? line + 1 : 0;
+    }
+    const footH = _historyCompare ? (legendLines ? legendLines * rowH + 10 * dpr : 0)
+                                  : (statsText ? 26 * dpr : 0);
+
+    const out = document.createElement('canvas');
+    out.width  = canvas.width;
+    out.height = canvas.height + headH + footH;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = bg || '#ffffff';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    // Header
+    ctx.fillStyle = fg;
+    ctx.font = `600 ${13 * dpr}px system-ui, sans-serif`;
+    ctx.fillText(_historyExportTitle(), padX, headH / 2);
+    // Chart
+    ctx.drawImage(canvas, 0, headH);
+    // Footer
+    const footTop = headH + canvas.height;
+    if (_historyCompare && legendLines) {
+        ctx.font = legendFont;
+        for (const it of placed) {
+            const y = footTop + 8 * dpr + it.line * rowH + rowH / 2;
+            ctx.fillStyle = it.color;
+            ctx.fillRect(it.x, y - sw / 2, sw, sw);
+            ctx.fillStyle = fg;
+            ctx.fillText(it.label, it.x + sw + swGap, y);
+        }
+    } else if (statsText) {
+        ctx.fillStyle = mut;
+        ctx.font = legendFont;
+        ctx.fillText(statsText, padX, footTop + footH / 2);
+    }
+    out.toBlob(b => { if (b) _historyDownload(b, _historyExportFilename('png')); }, 'image/png');
+}
+
+// CSV: single series → timestamp,value,status; compare → timestamp,series,value.
+function _historyExportCSV() {
+    const csvEsc = (v) => {
+        const s = String(v ?? '');
+        return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const iso = (ts) => new Date(ts * 1000).toISOString();
+    const rows = [];
+    if (_historyCompare) {
+        rows.push(['timestamp', 'series', _historyCompareField || 'value'].join(','));
+        for (const s of _historyCompareData) {
+            const name = `${s.pretty} / ${s.label}`;
+            for (const p of (s.points || [])) {
+                const v = p.data?.[_historyCompareField];
+                if (typeof v === 'number') rows.push([csvEsc(iso(p.ts)), csvEsc(name), v].join(','));
+            }
+        }
+    } else {
+        const field = _historyField;
+        rows.push(['timestamp', field || 'value', 'status'].join(','));
+        for (const p of _historyPoints) {
+            const v = field ? p.data?.[field] : null;
+            const st = p.status === true ? 'ok' : p.status === false ? 'error' : '';
+            rows.push([csvEsc(iso(p.ts)), (typeof v === 'number' ? v : ''), st].join(','));
+        }
+    }
+    if (rows.length <= 1) { showToast(t('history_no_data'), 'warning'); return; }
+    _historyDownload(new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' }),
+                     _historyExportFilename('csv'));
 }
 
 function _historyOnFieldChange(val) {
+    if (_historyCompare) {
+        // Switch the overlaid metric (points already carry every field → just redraw).
+        _historyCompareField = val || _historyCompareField;
+        _historySaveField(_historyCompareField);
+        const fm = _historyCompareFields[_historyCompareField] || {};
+        _historyCompareUnit  = fm.unit  || '';
+        _historyCompareLabel = fm.label || _historyCompareField || '';
+        _historyDrawMulti(document.getElementById('history-canvas'));
+        _historyRenderLegend();
+        return;
+    }
     _historyField = val || null;
+    _historySaveField(_historyField);
     _historyRenderChartArea();
+}
+
+// Persist the chosen metric field so it survives refresh and single↔compare
+// switches (validated against the module's available fields on restore).
+function _historySaveField(field) {
+    try { localStorage.setItem(_HLS_FIELD, field || ''); } catch (e) {}
+}
+
+// ── Compare mode (multi-series overlay) ────────────────────────────────────────
+// A series is comparable only when its module declares a numeric __history__
+// field; the overlay restricts members to the SAME field+unit so the Y axis is
+// meaningful (e.g. ping latency_ms across several hosts).
+function _historyMetricKey(s) {
+    const c = s?.history_cfg || {};
+    const numeric = (typeof c.field === 'string' && c.field)
+                    || (c.fields && Object.keys(c.fields).length > 0);
+    return numeric ? s.module : null;   // group comparable series by module
+}
+// Translated label for a history field (backend resolves it from module lang).
+function _historyFieldLabel(fields, field) {
+    if (!field) return '';
+    const f = fields || {};
+    return (f[field] && f[field].label) || field;
+}
+function _historyActiveMetricKey() {
+    if (!_historyCompareSel.length) return null;
+    const f = _historyCompareSel[0];
+    const s = _historyIndex.find(x => x.module === f.module && x.key === f.key);
+    return s ? _historyMetricKey(s) : null;
+}
+function _historySelToObj(s) {
+    return { module: s.module, key: s.key, uid: s.item_uid || null,
+             label: s.label || s.key, pretty: s.pretty_name || s.module };
+}
+function _historyInCompare(mod, key) {
+    return _historyCompareSel.some(x => x.module === mod && x.key === key);
+}
+
+function _historyToggleCompareMode() {
+    _historyCompare = !_historyCompare;
+    if (_historyCompare) {
+        // Carry the single-view field choice into the overlay (validated later).
+        if (_historyField) _historyCompareField = _historyField;
+        // Seed with the series currently shown, if it is numeric.
+        if (!_historyCompareSel.length && _historyMod && _historyKey) {
+            const s = _historyIndex.find(x => x.module === _historyMod && x.key === _historyKey);
+            if (s && _historyMetricKey(s)) _historyCompareSel = [_historySelToObj(s)];
+        }
+        _historyAfterCompareChange();
+    } else {
+        // Carry the overlay's field choice back into the single view.
+        if (_historyCompareField) _historyField = _historyCompareField;
+        _historyCompareSel = [];
+        _historyCompareData = [];
+        _historyRenderSeriesList();
+        _historyUpdateCompareBtn();
+        if (_historyMod && _historyKey) { _historyShowToolbar(); _historyLoadChart(); }
+        else { _historyHideToolbar(); _historyShowPlaceholder(); }
+    }
+}
+
+function _historyToggleCompareMember(mod, key) {
+    const s = _historyIndex.find(x => x.module === mod && x.key === key);
+    if (!s) return;
+    const mk = _historyMetricKey(s);
+    if (!mk) { showToast(t('history_compare_not_numeric'), 'warning'); return; }
+    _historyCompare = true;
+    if (_historyInCompare(mod, key)) {
+        _historyCompareSel = _historyCompareSel.filter(x => !(x.module === mod && x.key === key));
+    } else {
+        const active = _historyActiveMetricKey();
+        if (active && active !== mk) { showToast(t('history_compare_unit_mismatch'), 'warning'); return; }
+        _historyCompareSel.push(_historySelToObj(s));
+    }
+    _historyAfterCompareChange();
+}
+
+function _historyRemoveCompareMember(mod, key) {
+    _historyCompareSel = _historyCompareSel.filter(x => !(x.module === mod && x.key === key));
+    _historyAfterCompareChange();
+}
+
+// Shared follow-up after the compare set changes (add/remove from list or
+// legend): refresh the list + toolbar title, then redraw — or, when nothing is
+// left, clear the legend/data and show the placeholder (no stale chip/title).
+function _historyAfterCompareChange() {
+    _historyRenderSeriesList();
+    _historyUpdateCompareBtn();
+    if (_historyCompareSel.length) {
+        _historyShowToolbar();      // updates the "Comparing N series" title
+        _historyLoadCompare();
+    } else {
+        // Nothing selected → hide the chart toolbar, clear the legend, placeholder.
+        _historyCompareData = [];
+        _historyHideToolbar();
+        _historyRenderLegend();
+        _historyShowPlaceholder();
+    }
+}
+
+async function _historyLoadCompare(soft = false) {
+    const area = document.getElementById('history-chart-area');
+    if (!area) return;
+    if (!_historyCompareSel.length) { _historyShowPlaceholder(); return; }
+    if (!soft) area.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
+
+    const sample = _historyIndex.find(x => x.module === _historyCompareSel[0].module && x.key === _historyCompareSel[0].key);
+    const cfg = sample?.history_cfg || {};
+    _historyCompareFields = cfg.fields || {};
+    // Keep the current field if still valid for this module; else the persisted
+    // choice; else the module's primary (or first available) field.
+    if (!_historyCompareField || !(_historyCompareField in _historyCompareFields)) {
+        const saved = localStorage.getItem(_HLS_FIELD) || '';
+        _historyCompareField = (saved && saved in _historyCompareFields) ? saved
+            : (cfg.field || Object.keys(_historyCompareFields)[0] || null);
+    }
+    const fm = _historyCompareFields[_historyCompareField] || {};
+    _historyCompareUnit  = fm.unit  || cfg.unit  || '';
+    _historyCompareLabel = fm.label || cfg.label || _historyCompareField || '';
+
+    const results = await Promise.all(_historyCompareSel.map(sel => {
+        const url = `/api/v1/history?module=${encodeURIComponent(sel.module)}&key=${encodeURIComponent(sel.key)}&hours=${_historyHours}&points=600` +
+            (sel.uid ? `&uid=${encodeURIComponent(sel.uid)}` : '') +
+            (_historyCompareField ? `&field=${encodeURIComponent(_historyCompareField)}` : '');
+        return apiGet(url).then(res => ({ sel, res })).catch(() => ({ sel, res: null }));
+    }));
+    if (!soft || _historyCompareData.length !== results.length) {
+        _historyCompareData = [];
+    }
+    _historyCompareData = results.map((r, i) => ({
+        ...r.sel,
+        color:  _HISTORY_PALETTE[i % _HISTORY_PALETTE.length],
+        points: (r.res && Array.isArray(r.res.points)) ? r.res.points : [],
+        stats:  (r.res && r.res.stats) || {},
+    }));
+    _historyRenderCompareArea();
+    if (soft) _startHistoryCountdown(_historyTimer?._interval || 0);
+}
+
+function _historyRenderCompareArea() {
+    const area = document.getElementById('history-chart-area');
+    if (!area) return;
+    const hasAny = _historyCompareData.some(s => s.points && s.points.length);
+    if (!hasAny) {
+        area.innerHTML = `<div class="d-flex align-items-center justify-content-center h-100 text-muted"
+            style="min-height:200px"><p>${esc(t('history_no_data'))}</p></div>`;
+        _historyRenderStats({});
+        _historyRenderLegend();
+        return;
+    }
+    area.innerHTML = `
+<div id="history-canvas-wrap" class="position-absolute top-0 start-0 end-0 bottom-0">
+  <canvas id="history-canvas" style="display:block;cursor:crosshair"></canvas>
+</div>
+<div id="history-tooltip" class="card shadow px-2 py-1"
+     style="position:fixed;display:none;font-size:.78rem;pointer-events:none;z-index:1090;min-width:150px"></div>`;
+    _historyTooltip = document.getElementById('history-tooltip');
+    const canvas = document.getElementById('history-canvas');
+    // Field selector: lets you pick which metric to overlay when the module
+    // records several (e.g. ups → battery_charge / runtime / load).
+    const fieldSel = document.getElementById('history-field-sel');
+    if (fieldSel) {
+        const keys = Object.keys(_historyCompareFields);
+        if (keys.length > 1) {
+            fieldSel.style.display = '';
+            fieldSel.innerHTML = keys.map(f =>
+                `<option value="${esc(f)}" ${f === _historyCompareField ? 'selected' : ''}>${esc(_historyFieldLabel(_historyCompareFields, f))}</option>`
+            ).join('');
+        } else {
+            fieldSel.style.display = 'none';
+        }
+    }
+
+    _historyDrawMulti(canvas);
+    _historyRenderStats({});       // combined per-series stats live in the legend
+    _historyRenderLegend();
+
+    canvas.addEventListener('mousemove', e => _historyOnHoverMulti(e, canvas));
+    canvas.addEventListener('mouseleave', () => { if (_historyTooltip) _historyTooltip.style.display = 'none'; });
+    if (_historyResizeOb) _historyResizeOb.disconnect();
+    _historyResizeOb = new ResizeObserver(() => _historyDrawMulti(canvas));
+    _historyResizeOb.observe(area);
+}
+
+// Legend chips (colour + name + last value + remove) shown in compare mode.
+function _historyRenderLegend() {
+    const el = document.getElementById('history-legend');
+    if (!el) return;
+    if (!_historyCompare || !_historyCompareData.length) { el.innerHTML = ''; return; }
+    el.innerHTML = _historyCompareData.map(s => {
+        const last = s.points.length
+            ? s.points.map(p => (typeof p.data?.[_historyCompareField] === 'number' ? p.data[_historyCompareField] : null))
+                      .filter(v => v !== null).at(-1)
+            : null;
+        const lastTxt = (last != null) ? `${_hFmtNum(last)}${_historyCompareUnit}` : '—';
+        return `<span class="badge d-inline-flex align-items-center gap-1"
+            style="background:var(--bs-tertiary-bg);color:var(--bs-body-color);border:1px solid var(--bs-border-color);font-weight:400">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s.color};flex-shrink:0"></span>
+            <span class="text-truncate" style="max-width:220px">${esc(s.pretty)} / ${esc(s.label)}</span>
+            <span class="text-muted">${lastTxt}</span>
+            <button type="button" class="btn-close btn-close-sm ms-1" style="font-size:.5rem"
+                title="${escAttr(t('remove'))}"
+                onclick="_historyRemoveCompareMember(${jsStr(s.module)}, ${jsStr(s.key)})"></button>
+        </span>`;
+    }).join('');
+}
+
+// Multi-series line chart (no per-status colouring; one fixed colour per series).
+function _historyDrawMulti(canvas) {
+    const series = _historyCompareData.filter(s => s.points && s.points.length);
+    if (!canvas || !series.length) return;
+    const field = _historyCompareField, unit = _historyCompareUnit || '', metricLabel = _historyCompareLabel || '';
+    const wrap = canvas.parentElement;
+    const dpr  = window.devicePixelRatio || 1;
+    const W    = wrap.clientWidth  || 600;
+    const H    = Math.max(150, wrap.clientHeight || 300);
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const bodyStyle = getComputedStyle(document.body);
+    const C = {
+        text: bodyStyle.getPropertyValue('--bs-body-color').trim() || bodyStyle.color,
+        grid: bodyStyle.getPropertyValue('--bs-border-color').trim() || 'rgba(128,128,128,.2)',
+        axis: bodyStyle.getPropertyValue('--bs-border-color').trim() || 'rgba(128,128,128,.4)',
+    };
+    const PAD = { t: 14, r: 14, b: 38, l: 58 };
+    const cw = W - PAD.l - PAD.r;
+    const ch = H - PAD.t - PAD.b;
+
+    // Combined ranges across every overlaid series.
+    let tmin = Infinity, tmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+    for (const s of series) {
+        for (const p of s.points) {
+            if (p.ts < tmin) tmin = p.ts;
+            if (p.ts > tmax) tmax = p.ts;
+            const v = (typeof p.data?.[field] === 'number') ? p.data[field] : null;
+            if (v !== null) { if (v < ymin) ymin = v; if (v > ymax) ymax = v; }
+        }
+    }
+    if (!isFinite(ymin)) { ymin = 0; ymax = 1; }
+    if (ymin === ymax) { ymin -= 1; ymax += 1; }
+    const span = ymax - ymin;
+    const mag  = Math.pow(10, Math.floor(Math.log10(span || 1)));
+    const step = mag * (span / mag > 5 ? 2 : span / mag > 2 ? 1 : 0.5);
+    ymin = Math.floor(ymin / step) * step;
+    ymax = Math.ceil(ymax / step) * step;
+    const tSpan = (tmax - tmin) || _historyHours * 3600;
+    const t0 = tmin - tSpan * 0.02, t1 = tmax + tSpan * 0.02;
+
+    const sx = t => PAD.l + (t - t0) / (t1 - t0) * cw;
+    const sy = v => PAD.t + (1 - (v - ymin) / (ymax - ymin)) * ch;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Grid + Y labels
+    ctx.font = '10px system-ui, sans-serif';
+    const NY = 4;
+    for (let i = 0; i <= NY; i++) {
+        const y = PAD.t + (i / NY) * ch;
+        const v = ymax - (i / NY) * (ymax - ymin);
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + cw, y); ctx.stroke();
+        ctx.fillStyle = C.text; ctx.textAlign = 'right';
+        ctx.fillText(_hFmtNum(v) + unit, PAD.l - 5, y + 3.5);
+    }
+    // X labels
+    ctx.textAlign = 'center';
+    const NX = Math.min(6, Math.max(2, Math.floor(cw / 80)));
+    for (let i = 0; i <= NX; i++) {
+        const tt = t0 + (i / NX) * (t1 - t0);
+        ctx.fillStyle = C.text;
+        ctx.fillText(_hFmtTime(tt, tSpan), PAD.l + (i / NX) * cw, PAD.t + ch + 14);
+    }
+
+    // One coloured line per series.
+    ctx.lineWidth = 1.75; ctx.lineJoin = 'round';
+    for (const s of series) {
+        ctx.strokeStyle = s.color;
+        ctx.beginPath();
+        let first = true;
+        for (const p of s.points) {
+            const v = (typeof p.data?.[field] === 'number') ? p.data[field] : null;
+            if (v === null) { first = true; continue; }
+            const X = sx(p.ts), Y = sy(v);
+            first ? ctx.moveTo(X, Y) : ctx.lineTo(X, Y);
+            first = false;
+        }
+        ctx.stroke();
+    }
+
+    // Y-axis label
+    if (metricLabel) {
+        ctx.save();
+        ctx.translate(10, PAD.t + ch / 2); ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center'; ctx.font = '10px system-ui, sans-serif';
+        ctx.fillStyle = C.text; ctx.globalAlpha = 0.6;
+        ctx.fillText(metricLabel, 0, 0); ctx.restore(); ctx.globalAlpha = 1;
+    }
+    // Axes
+    ctx.strokeStyle = C.axis; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PAD.l, PAD.t); ctx.lineTo(PAD.l, PAD.t + ch); ctx.lineTo(PAD.l + cw, PAD.t + ch);
+    ctx.stroke();
+
+    canvas._histMulti = { series, field, unit, sx, sy, t0, t1, tSpan, PAD, cw, ch };
+}
+
+// Hover for the overlay: vertical guide + box listing each series value at the
+// nearest sample to the cursor's time.
+function _historyOnHoverMulti(e, canvas) {
+    const meta = canvas._histMulti;
+    if (!meta || !_historyTooltip) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    if (x < meta.PAD.l || x > meta.PAD.l + meta.cw) { _historyTooltip.style.display = 'none'; return; }
+    const tAt = meta.t0 + (x - meta.PAD.l) / meta.cw * (meta.t1 - meta.t0);
+    const rows = [];
+    for (const s of meta.series) {
+        let best = null, bestD = Infinity;
+        for (const p of s.points) {
+            const v = (typeof p.data?.[meta.field] === 'number') ? p.data[meta.field] : null;
+            if (v === null) continue;
+            const d = Math.abs(p.ts - tAt);
+            if (d < bestD) { bestD = d; best = { ts: p.ts, v }; }
+        }
+        if (best) rows.push({ color: s.color, label: `${s.pretty} / ${s.label}`, v: best.v, ts: best.ts });
+    }
+    if (!rows.length) { _historyTooltip.style.display = 'none'; return; }
+    const head = `<div class="text-muted mb-1">${esc(_hFmtTime(tAt, meta.tSpan))}</div>`;
+    const body = rows.map(r => `<div class="d-flex align-items-center gap-1">
+        <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${r.color}"></span>
+        <span class="text-truncate" style="max-width:200px">${esc(r.label)}</span>
+        <span class="ms-auto fw-semibold">${_hFmtNum(r.v)}${esc(meta.unit)}</span>
+    </div>`).join('');
+    _historyTooltip.innerHTML = head + body;
+    _historyTooltip.style.display = 'block';
+    _historyTooltip.style.left = Math.min(e.clientX + 14, window.innerWidth - 230) + 'px';
+    _historyTooltip.style.top  = Math.max(8, e.clientY - 10) + 'px';
 }
 
 // ── Clear history ─────────────────────────────────────────────────────────────
@@ -465,13 +1211,17 @@ function _historyRenderChartArea() {
     // AND the module hasn't explicitly declared field:null (status-only).
     const fieldSel = document.getElementById('history-field-sel');
     if (fieldSel) {
-        const fields = _historyNumericFields(_historyPoints);
+        // Offer the metrics the module DECLARES (translated, no internal values
+        // like the alert threshold); fall back to auto-detection only when the
+        // module declares none.
+        const declared = Object.keys(_historyFields);
+        const fields = declared.length ? declared : _historyNumericFields(_historyPoints);
         // Hide selector only when the module schema declared field:null (status-only).
         // A user manually selecting "Status Only" should keep the selector visible.
         if (!_historySchemaNull && fields.length > 1) {
             fieldSel.style.display = '';
             fieldSel.innerHTML = fields.map(f =>
-                `<option value="${esc(f)}" ${f === _historyField ? 'selected' : ''}>${esc(f)}</option>`
+                `<option value="${esc(f)}" ${f === _historyField ? 'selected' : ''}>${esc(_historyFieldLabel(_historyFields, f))}</option>`
             ).join('') + `<option value="" ${!_historyField ? 'selected' : ''}>${esc(t('history_status_only'))}</option>`;
         } else {
             fieldSel.style.display = 'none';

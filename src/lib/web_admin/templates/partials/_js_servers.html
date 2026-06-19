@@ -506,7 +506,7 @@ function _renderSshFields() {
     // secret fields are hidden (port and host-key policy stay).
     const picker = `<div class="col-12">
         <label class="form-label form-label-sm mb-1">${esc(t('cred_use'))}</label>
-        <select class="form-select form-select-sm" onchange="_setProfileField('ssh','cred_uid',this.value)">${credentialOptions(prof.cred_uid, 'ssh')}</select>
+        <select class="form-select form-select-sm ss-cred-picker" data-cred-ctype="ssh" onchange="_setProfileField('ssh','cred_uid',this.value)">${credentialOptions(prof.cred_uid, 'ssh')}</select>
         <div class="form-text small">${esc(t('cred_use_hint'))}</div>
     </div>`;
     let out = '';
@@ -987,9 +987,16 @@ function _renderMonitoringSection() {
 // and clears them (the credential supplies them at runtime).
 function _hostCredPicker(mod, idx, curUid, ctype) {
     if (typeof credentialOptions !== 'function') return '';
+    // No decorative key icon; an info button reveals the hint below (same as the
+    // Modules credential picker).
+    const hid = 'hcredusehint_' + (mod + '_' + idx).replace(/\W/g, '_');
+    const info = ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn" tabindex="-1"
+            data-bs-toggle="collapse" data-bs-target="#${hid}" aria-expanded="false"><i class="bi bi-info-circle"></i></button>`;
+    const panel = `<div class="collapse" id="${hid}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(t('cred_use_hint'))}</div></div>`;
     return `<div class="col-12">
-        <label class="form-label form-label-sm mb-1"><i class="bi bi-key me-1"></i>${esc(t('cred_use'))}</label>
-        <select class="form-select form-select-sm" onchange="_setHostCheckCred(${jsStr(mod)},${idx},this.value)">${credentialOptions(curUid, ctype)}</select>
+        <label class="form-label form-label-sm mb-1">${esc(t('cred_use'))}${info}</label>
+        <select class="form-select form-select-sm ss-cred-picker" data-cred-ctype="${escAttr(ctype || '')}" onchange="_setHostCheckCred(${jsStr(mod)},${idx},this.value)">${credentialOptions(curUid, ctype)}</select>
+        ${panel}
     </div>`;
 }
 
@@ -1020,8 +1027,36 @@ function _hostCheckFieldsHtml(mod, idx, it, metas) {
     const credFields = spec ? spec.fields : [];
     const bound = !!it.cred_uid;
     const ctx = { mod, fields: it.fields, itemKey: it._key || _hostDraft.name, idx };
-    let html = '', pickerDone = false;
+    // Group headers (Connection / Server / Alerts …), same as the Modules tab.
+    // The schema's __group_when__ controls a header's own visibility; this whole
+    // list re-renders when a controller changes, so visibility is computed inline.
+    const coll = (_hostChecks[mod] || {}).collection;
+    const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
+    const groupWhen = sch['__group_when__'] || {};
+    const i18n = ITEM_SCHEMAS[mod + '|__i18n__'];
+    const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
+    const groupLabels = (ld && ld.group_labels) || {};
+    const _groupShown = (g) => {
+        const gw = groupWhen[g];
+        if (gw) {
+            for (const [ctrl, allowed] of Object.entries(gw)) {
+                if (!Array.isArray(allowed) || !allowed.includes(it.fields[ctrl])) return false;
+            }
+        }
+        // Don't print an empty header: the group needs ≥1 currently-visible field.
+        return metas.some(m => (m.group || null) === g && _hostFieldVisible(m, ctx));
+    };
+    let html = '', pickerDone = false, curGroup = null;
     for (const f of metas) {
+        const g = f.group || null;
+        if (g !== curGroup) {
+            curGroup = g;
+            if (g && _groupShown(g)) {
+                html += `<div class="col-12" style="border-bottom:1px solid var(--bs-border-color);margin:.6rem 0 .25rem">
+                    <small class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">${esc(groupLabels[g] || g)}</small>
+                </div>`;
+            }
+        }
         const isCred = credFields.includes(f.name);
         // The picker shares the credential field's visibility (e.g. auth_enabled):
         // only emit it once, before the first VISIBLE credential field.  The host
@@ -1409,16 +1444,25 @@ function _hostFieldRow(f, val, onch, ctx) {
     if (!_hostFieldVisible(f, ctx)) return '';
     const _term = _fieldTerm(ctx.mod, f, ctx.fields);
     const hint = (_term && _term.hint) || _hostFieldHint(ctx.mod, f.name);
+    // Hint shown as an inline collapsible panel below the control (same as the
+    // Modules tab), not a floating tooltip.  The id is unique per check/field.
+    const _hintId = hint
+        ? ('hhint_' + (ctx.mod + '_' + (ctx.idx != null ? ctx.idx : 'p') + '_' + f.name).replace(/\W/g, '_'))
+        : '';
     const info = hint
-        ? ` <i class="bi bi-info-circle text-muted" style="cursor:help"
-              data-bs-toggle="tooltip" title="${escAttr(hint)}"></i>`
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+              data-bs-toggle="collapse" data-bs-target="#${_hintId}"
+              aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const hintPanel = hint
+        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(hint)}</div></div>`
         : '';
     const label = esc((_term && _term.label) || _profileFieldLabel(f));
     // Each attribute stacked vertically inside its card: label above the control,
     // full width (the cards themselves are laid out two-up).
     return `<div class="col-12">
         <label class="form-label small mb-1 d-block">${label}${info}</label>
-        ${_hostFieldControl(f, val, onch, ctx)}</div>`;
+        ${_hostFieldControl(f, val, onch, ctx)}${hintPanel}</div>`;
 }
 
 function _hostFieldVisible(f, ctx) {
@@ -1558,21 +1602,22 @@ function _hostModuleDefault(mod, key) {
 }
 
 // Shared field-control renderer for both credential profiles and check fields.
-// Mirrors the Modules section: numbers show the default as placeholder (blank
-// when 0/unset) instead of a literal 0.
+// Delegates the control markup to fieldCtl() (core/_field_render.html) so the
+// host modal renders identically to the Modules tab — numbers show the default
+// as placeholder (blank when 0/unset), secrets mask, multi fields use chips.
+// Only the data wiring (onch / _setHostCheckField) is host-specific.
 function _hostFieldControl(f, val, onch, ctx) {
     if (f.type === 'bool') {
-        return `<div class="form-check form-switch"><input class="form-check-input" type="checkbox"
-            ${val ? 'checked' : ''} onchange="${onch}this.checked)"></div>`;
+        return fieldCtl({kind: 'switch', value: val, onChange: `${onch}this.checked)`});
     }
     if (Array.isArray(f.options) && f.options.length) {
         const _optLabel = o => {
             const oi = f.options_i18n && f.options_i18n[o];
             return (oi && (oi[CURRENT_LANG] || oi[SYSTEM_DEFAULT_LANG])) || o;
         };
-        return `<select class="form-select form-select-sm" onchange="${onch}this.value)">` +
-            f.options.map(o => `<option value="${escAttr(o)}" ${String(val) === String(o) ? 'selected' : ''}>${esc(_optLabel(o))}</option>`).join('') +
-            `</select>`;
+        const opts = f.options.map(o =>
+            `<option value="${escAttr(o)}" ${String(val) === String(o) ? 'selected' : ''}>${esc(_optLabel(o))}</option>`).join('');
+        return fieldCtl({kind: 'select', optionsHtml: opts, onChange: `${onch}this.value)`});
     }
     if (f.type === 'textarea') {
         // Large multi-line field (e.g. an inline SSH private key).  When the
@@ -1581,9 +1626,8 @@ function _hostFieldControl(f, val, onch, ctx) {
         const rows   = f.rows || 4;
         const masked = (f.secret || f.sensitive) && val === null;
         const ph     = masked ? (t('secret_defined') || '••••••') : (f.placeholder != null ? String(f.placeholder) : '');
-        return `<textarea class="form-control form-control-sm" rows="${rows}"
-            style="font-family:var(--bs-font-monospace);font-size:.78rem;white-space:pre"
-            placeholder="${escAttr(ph)}" onchange="${onch}this.value)">${masked || val == null ? '' : esc(val)}</textarea>`;
+        return fieldCtl({kind: 'textarea', rows, placeholder: ph,
+            textareaVal: (masked || val == null) ? '' : esc(val), onChange: `${onch}this.value)`});
     }
     if (f.type === 'int' || f.type === 'float') {
         const step = f.type === 'float' ? ' step="0.1"' : ' step="1"';
@@ -1605,13 +1649,14 @@ function _hostFieldControl(f, val, onch, ctx) {
         // "use default" semantics: a 0/unset value renders blank with the placeholder.
         if (ph != null && (val === 0 || val == null || val === '')) display = '';
         const phA = (ph != null && ph !== 0) ? ` placeholder="${escAttr(String(ph))}"` : '';
-        return `<input type="number" class="form-control form-control-sm"${minA}${maxA}${step}${phA}
-            value="${display === '' ? '' : escAttr(display)}"
-            onchange="${onch}this.value===''?'':Number(this.value))">`;
+        return fieldCtl({kind: 'number',
+            inputAttrs: `${minA}${maxA}${step}${phA} value="${display === '' ? '' : escAttr(display)}"`,
+            onChange: `${onch}this.value===''?'':Number(this.value))`});
     }
     if (f.secret || f.sensitive) {
-        return `<input type="password" class="form-control form-control-sm" autocomplete="new-password"
-            placeholder="${val === null ? escAttr(t('secret_defined') || '••••••') : ''}" onchange="${onch}this.value)">`;
+        return fieldCtl({kind: 'secret',
+            inputAttrs: ` autocomplete="new-password" placeholder="${val === null ? escAttr(t('secret_defined') || '••••••') : ''}"`,
+            onChange: `${onch}this.value)`});
     }
     // Placeholder: the 'label' field (or a schema placeholder of '__key__')
     // shows the check's identifier as its default — same as the Modules section.
@@ -1625,20 +1670,29 @@ function _hostFieldControl(f, val, onch, ctx) {
         _ph = String(f.placeholder);
     }
     const phStr = _ph ? ` placeholder="${escAttr(_ph)}"` : '';
-    const _input = `<input type="text" class="form-control form-control-sm"${phStr}
-        value="${val == null ? '' : escAttr(val)}" onchange="${onch}this.value)">`;
+    const _textAttrs = ` value="${val == null ? '' : escAttr(val)}"${phStr}`;
     // input_action: a per-field action button (e.g. datastore's "List databases"),
     // same as the Modules tab.  Only inside a check (ctx.idx) — not host profiles.
     const _ia = f.input_action;
     if (_ia && ctx && ctx.idx != null) {
         const _t = _fieldTerm(ctx.mod, f, ctx.fields);
         const _al = escAttr((_t && _t.action) || _hostActionLabel(ctx.mod, _ia.id));
-        return `<div class="input-group input-group-sm">${_input}
-            <button class="btn btn-secondary" type="button" title="${_al}"
-                onclick="_runHostFieldAction(${jsStr(ctx.mod)},${ctx.idx},${jsStr(f.name)})">
-                <i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button></div>`;
+        const _btn = `<button class="btn btn-secondary" type="button" title="${_al}"
+                onclick="_runHostFieldAction(${jsStr(ctx.mod)},${ctx.idx},${jsStr(f.name)},this)">
+                <i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button>`;
+        // Multi value (several databases) → shared removable-chips widget, bound to
+        // this check's data via a field adapter keyed "mod|idx|field".
+        if (_ia.result_multi) {
+            const _key = ctx.mod + '|' + ctx.idx + '|' + f.name;
+            registerFieldAdapter(_key,
+                () => { const it = _hostChecks[ctx.mod] && _hostChecks[ctx.mod].items[ctx.idx];
+                        return it ? it.fields[f.name] : ''; },
+                v => _setHostCheckField(ctx.mod, ctx.idx, f.name, v));
+            return fieldCtl({kind: 'multi', key: _key, value: val, trailing: _btn});
+        }
+        return fieldCtl({kind: 'text', inputAttrs: _textAttrs, onChange: `${onch}this.value)`, trailing: _btn});
     }
-    return _input;
+    return fieldCtl({kind: 'text', inputAttrs: _textAttrs, onChange: `${onch}this.value)`});
 }
 
 // Action label from the module's i18n (action_labels), like the Modules tab.
@@ -1651,7 +1705,7 @@ function _hostActionLabel(mod, id) {
 // Run a per-field action (input_action) for a host-bound check: POST the check's
 // fields + host binding (so the server resolves the host's address/SSH) and, for
 // a field_picker result, write the chosen value back into the check.
-async function _runHostFieldAction(mod, idx, fieldName) {
+async function _runHostFieldAction(mod, idx, fieldName, btn) {
     const st = _hostChecks[mod];
     const it = st && st.items[idx];
     if (!it) return;
@@ -1660,10 +1714,14 @@ async function _runHostFieldAction(mod, idx, fieldName) {
     if (!ia) return;
     // _item_key lets the server restore this check's masked secrets (e.g. the DB
     // password) from the stored config, so the action authenticates after reload.
-    const payload = { ...it.fields, ...(ia.extra || {}),
+    const payload = { ...it.fields, ...(ia.extra || {}), cred_uid: it.cred_uid || '',
                       _item_key: it._key || '', ..._hostDraftPayload() };
-    showToast(t('host_test_running') || 'Testing…');
+    // Spinner on the button (no "Testing…" toast — this isn't a test, e.g. it
+    // just lists databases), mirroring the Modules tab's itemAction().
+    const _orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>'; }
     const res = await apiPost('/api/v1/watchfuls/' + mod + '/' + ia.id, payload);
+    if (btn) { btn.disabled = false; btn.innerHTML = _orig; }
     const d = res && res.data;
     if (!d || !d.ok) { showToast((d && d.message) || t('connection_error'), 'danger'); return; }
     if (ia.result === 'field_picker') {
@@ -1676,7 +1734,7 @@ async function _runHostFieldAction(mod, idx, fieldName) {
             it.fields[field] = value;
             // Re-render only this card's fields so it stays expanded.
             if (st.multiple) _refreshHostCheckItemFields(mod, idx); else _refreshSingleCheck(mod);
-        }, it.fields[field]);   // highlight the currently-selected value
+        }, it.fields[field], !!ia.result_multi);   // current value + multi-select mode
     } else {
         showToast(d.message || 'OK', 'success');
     }

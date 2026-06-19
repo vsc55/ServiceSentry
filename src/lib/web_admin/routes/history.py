@@ -42,6 +42,63 @@ def _history_config(modules_dir: str | None, module: str) -> dict:
         return {}
 
 
+def _prettify_field(field: str) -> str:
+    """Fallback label for a history field name: 'battery_charge' → 'Battery charge'."""
+    s = str(field or '').replace('_', ' ').strip()
+    return s[:1].upper() + s[1:] if s else field
+
+
+def _history_labels(modules_dir: str | None, module: str, lang: str) -> dict:
+    """Per-field display labels from the module lang JSON ``history`` map."""
+    if not modules_dir:
+        return {}
+    for try_lang in (lang, 'en_EN'):
+        path = os.path.join(modules_dir, module, 'lang', f'{try_lang}.json')
+        try:
+            with open(path, encoding='utf-8') as fh:
+                data = json.load(fh)
+            hist = data.get('history')
+            if isinstance(hist, dict) and hist:
+                return {k: str(v) for k, v in hist.items()}
+        except (OSError, ValueError):
+            pass
+    return {}
+
+
+def _history_meta(modules_dir: str | None, module: str, lang: str) -> dict:
+    """``__history__`` enriched with a resolved per-field ``fields`` map.
+
+    ``fields`` is ``{name: {unit, label}}`` for every numeric field the module
+    records (declared in ``__history__.fields`` and/or the single ``field``).
+    Labels come from the module lang ``history`` map, falling back to the
+    schema label (primary field) or a prettified field name.  Status-only
+    modules (``field: null`` with no ``fields``) get an empty map.
+    """
+    cfg = dict(_history_config(modules_dir, module))
+    labels = _history_labels(modules_dir, module, lang)
+    declared = cfg.get('fields') if isinstance(cfg.get('fields'), dict) else {}
+    primary  = cfg.get('field') if isinstance(cfg.get('field'), str) else None
+    fields: dict = {}
+    for name, meta in declared.items():
+        meta = meta if isinstance(meta, dict) else {}
+        fields[name] = {
+            'unit':  meta.get('unit', cfg.get('unit') or ''),
+            'label': labels.get(name) or meta.get('label')
+                     or (cfg.get('label') if name == primary else None)
+                     or _prettify_field(name),
+        }
+    if primary and primary not in fields:
+        fields[primary] = {
+            'unit':  cfg.get('unit') or '',
+            'label': labels.get(primary) or cfg.get('label') or _prettify_field(primary),
+        }
+    cfg['fields'] = fields
+    # Translate the top-level label too (single-series Y-axis / metric label).
+    if primary:
+        cfg['label'] = labels.get(primary) or cfg.get('label') or _prettify_field(primary)
+    return cfg
+
+
 def register(app, wa):
     history_view_req   = wa._perm_required('history_view')
     history_delete_req = wa._perm_required('history_delete')
@@ -79,9 +136,9 @@ def register(app, wa):
             mod = entry['module']
             if mod not in _name_cache:
                 _name_cache[mod]    = _pretty_name(wa._modules_dir, mod, lang)
-                _history_cache[mod] = _history_config(wa._modules_dir, mod)
+                _history_cache[mod] = _history_meta(wa._modules_dir, mod, lang)
             entry['pretty_name']  = _name_cache[mod]
-            entry['history_cfg']  = _history_cache[mod]  # {field, unit, label}
+            entry['history_cfg']  = _history_cache[mod]  # {field, unit, label, fields}
             # Friendly label priority:
             #  1. the item's editable 'label' in modules.json (matched by key/uid)
             #  2. the display 'name' the module stored in the record's other_data
@@ -117,7 +174,9 @@ def register(app, wa):
             return jsonify({'error': 'module and key are required'}), 400
 
         try:
-            hours  = min(8760, max(1, int(request.args.get('hours', 24))))
+            # Fractional hours allowed (sub-hour ranges like "10m" → 1/6 h);
+            # up to ~10 years for "Ny" ranges.
+            hours  = min(87600.0, max(1 / 60, float(request.args.get('hours', 24))))
             points = min(2000, max(10, int(request.args.get('points', 500))))
         except (TypeError, ValueError):
             return jsonify({'error': 'invalid hours or points'}), 400
@@ -128,7 +187,8 @@ def register(app, wa):
         data     = wa._history.query(
             module, key, from_ts, to_ts, points, item_uid=item_uid
         )
-        hist_cfg = _history_config(wa._modules_dir, module)
+        lang     = session.get('lang') or wa._default_lang or DEFAULT_LANG
+        hist_cfg = _history_meta(wa._modules_dir, module, lang)
 
         # field priority: explicit query param > module schema > auto-detect
         field = request.args.get('field') or None
@@ -144,11 +204,14 @@ def register(app, wa):
             module, key, from_ts, to_ts, field, item_uid=item_uid
         )
 
+        # Unit / label follow the SELECTED field (modules can record several).
+        fmeta = (hist_cfg.get('fields') or {}).get(field or '', {})
         return jsonify({
             'points':          data,
             'suggested_field': field,
-            'unit':            hist_cfg.get('unit') or '',
-            'metric_label':    hist_cfg.get('label') or '',
+            'unit':            fmeta.get('unit', hist_cfg.get('unit') or ''),
+            'metric_label':    fmeta.get('label') or hist_cfg.get('label') or '',
+            'fields':          hist_cfg.get('fields') or {},
             'stats':           stats,
         })
 

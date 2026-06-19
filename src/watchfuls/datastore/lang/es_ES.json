@@ -5,8 +5,8 @@
         "enabled":      "Habilitado",
         "threads":      "Hilos",
         "label":        "Etiqueta",
-        "db_type":      "Tipo de base de datos",
-        "conn_type":    "Tipo de conexión",
+        "db_type":      "Base de datos",
+        "conn_type":    "Tipo",
         "host":         "Host",
         "port":         "Puerto",
         "user":         "Usuario",
@@ -24,19 +24,27 @@
         "scheme":       "Esquema",
         "auth_db":      "Base de datos de autenticación",
         "db_index":     "Índice de base de datos",
-        "tls":          "TLS / SSL"
+        "tls":          "TLS / SSL",
+        "alert_connections": "Máx. conexiones"
+    },
+    "history": {
+        "connections": "Conexiones",
+        "uptime":      "Tiempo activo",
+        "memory":      "Memoria",
+        "queries":     "Consultas"
     },
     "hints": {
+        "alert_connections": "Avisa cuando el número de conexiones activas del servidor supera este valor (0 = desactivado). Solo motores que lo exponen: MySQL/MariaDB, PostgreSQL, MSSQL, MongoDB, Redis/Valkey, Memcached.",
         "threads":      "Número de entradas a comprobar en paralelo.",
         "label":        "Nombre de visualización opcional que aparece en las notificaciones y el panel en lugar de la clave del ítem.",
         "db_type":      "Motor de base de datos al que conectar.",
         "conn_type":    "Cómo conectar al servidor: conexión TCP directa, socket Unix o TCP tunelizado vía SSH.",
-        "host":         "Dirección IP o nombre de host del servidor. Utilizado en los modos TCP y túnel SSH.",
+        "host":         "Dirección IP o nombre de host del servidor de base de datos. Utilizado en los modos TCP y túnel SSH. Cuando el check está vinculado a un host se mantiene editable a propósito: a través de un túnel SSH la base de datos suele estar en otra máquina accesible solo desde ese host (p. ej. 127.0.0.1 o una dirección interna de Docker/privada). Déjalo vacío para usar la dirección del host vinculado.",
         "port":         "Puerto TCP en el que escucha el servidor. Usa 0 para aplicar el puerto por defecto del motor (MySQL/MariaDB: 3306, PostgreSQL: 5432, MSSQL: 1433, MongoDB: 27017, Redis/Valkey: 6379, Elasticsearch/OpenSearch: 9200, InfluxDB: 8086, Memcached: 11211).",
         "user":         "Usuario para la autenticación.",
         "password":     "Contraseña para la autenticación.",
         "token":        "Token de API de InfluxDB 2.x. Tiene prioridad sobre usuario/contraseña si está definido.",
-        "db":           "Nombre de la base de datos o bucket. Para Elasticsearch/OpenSearch/InfluxDB se usa como filtro en el selector.",
+        "db":           "Nombre de base de datos / bucket / índice. Puedes indicar varias (separadas por comas) — el selector permite marcar múltiples — y el check verifica que todas existen en el servidor. Para Elasticsearch/OpenSearch/InfluxDB el selector filtra índices/buckets.",
         "socket":       "Ruta completa al archivo de socket Unix. Solo se usa en el modo socket.",
         "ssh_host":     "Nombre de host o IP del servidor SSH de salto.",
         "ssh_port":     "Puerto SSH en el servidor de salto (por defecto 22).",
@@ -74,7 +82,8 @@
     "group_labels": {
         "connection": "Conexión",
         "ssh":        "Túnel SSH",
-        "server":     "Servidor"
+        "server":     "Servidor",
+        "alerts":     "Alertas"
     },
     "action_labels": {
         "test_ssh":            "Probar SSH",

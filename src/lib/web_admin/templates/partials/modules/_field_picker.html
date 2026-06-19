@@ -7,20 +7,31 @@ let _fpFieldPathStr = null;
 let _fpItems        = null;
 let _fpOnPick       = null;   // optional callback(value) — used by the server modal
 let _fpCurrent      = '';     // currently-selected value (to highlight it)
+let _fpMulti        = false;  // multi-select mode → toggle, comma-separated value
+let _fpValue        = '';     // multi-mode source of truth (comma-separated)
 
-function openFieldPickerModal(fieldPathStr, items, title, onPick, currentVal) {
+function openFieldPickerModal(fieldPathStr, items, title, onPick, currentVal, multi) {
     _fpFieldPathStr = fieldPathStr;
     _fpItems = items;
     _fpOnPick = (typeof onPick === 'function') ? onPick : null;
+    _fpMulti = !!multi;
     // The current value to highlight: explicit (server modal) or read from the
     // path in modulesData (Modules tab).
     _fpCurrent = (currentVal != null && currentVal !== '')
         ? String(currentVal)
         : (fieldPathStr ? (getPath(modulesData, fieldPathStr.split('|')) || '') : '');
+    _fpValue = String(_fpCurrent || '');   // multi-select source of truth
     const titleEl = document.getElementById('fieldPickerModalTitle');
     if (titleEl) titleEl.textContent = title || '';
     const filterEl = document.getElementById('fieldPickerFilter');
     if (filterEl) filterEl.value = '';
+    // Select-all / deselect-all bar: only in multi mode.
+    const bar = document.getElementById('fieldPickerMultiBar');
+    if (bar) bar.style.display = _fpMulti ? '' : 'none';
+    const sa = document.getElementById('fpSelectAllBtn');
+    if (sa) sa.innerHTML = `<i class="bi bi-check-all me-1"></i>${esc(t('checks_select_all'))}`;
+    const da = document.getElementById('fpDeselectAllBtn');
+    if (da) da.innerHTML = `<i class="bi bi-x-square me-1"></i>${esc(t('checks_select_none'))}`;
     _renderFieldPickerList();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('fieldPickerModal')).show();
 }
@@ -34,22 +45,72 @@ function _renderFieldPickerList() {
         body.innerHTML = `<div class="text-center py-4 text-muted">${esc(t('no_items'))}</div>`;
         return;
     }
-    const currentVal = String(_fpCurrent || '').trim().toLowerCase();
+    // Multi mode highlights every value present in the comma-separated field;
+    // single mode highlights the one current value.
+    const selected = _fpMulti
+        ? new Set(_fpSelectedList().map(s => s.toLowerCase()))
+        : new Set([String(_fpCurrent || '').trim().toLowerCase()].filter(Boolean));
     let h = '<div class="d-flex flex-column gap-1">';
     for (const item of filtered) {
-        const isSelected = currentVal && item.toLowerCase() === currentVal;
+        const isSelected = selected.has(item.toLowerCase());
+        const act = _fpMulti ? `_toggleFieldValue(${jsStr(item)})` : `_pickFieldValue(${jsStr(item)})`;
+        const icon = _fpMulti
+            ? (isSelected ? 'bi-check-square text-primary' : 'bi-square text-secondary')
+            : `bi-database ${isSelected ? 'text-primary' : 'text-secondary'}`;
         h += `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border${isSelected ? ' border-primary' : ''}"
                    style="background:var(--bs-body-bg);cursor:pointer"
-                   onclick="_pickFieldValue(${jsStr(item)})">
-            <i class="bi bi-database flex-shrink-0 ${isSelected ? 'text-primary' : 'text-secondary'}" style="font-size:.9rem"></i>
+                   onclick="${act}">
+            <i class="bi ${icon} flex-shrink-0" style="font-size:.9rem"></i>
             <code class="flex-grow-1 text-truncate" style="font-size:.82rem">${esc(item)}</code>
-            ${isSelected
+            ${(!_fpMulti && isSelected)
                 ? `<span class="badge bg-primary flex-shrink-0" style="font-size:.65rem">${esc(t('selected') || 'Selected')}</span>`
-                : `<i class="bi bi-arrow-right-circle text-success flex-shrink-0"></i>`}
+                : (!_fpMulti ? `<i class="bi bi-arrow-right-circle text-success flex-shrink-0"></i>` : '')}
         </div>`;
     }
     h += '</div>';
     body.innerHTML = h;
+    if (_fpMulti) {
+        const c = document.getElementById('fieldPickerCount');
+        if (c) c.textContent = `${_fpSelectedList().length} ${t('selected') || 'selected'}`;
+    }
+}
+
+// Current multi selection (from the source-of-truth value) as a trimmed list.
+function _fpSelectedList() {
+    return String(_fpValue || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+// Persist a multi selection: works both for a modules-tab field path and for
+// the host-modal callback (_fpOnPick). The modal stays open.
+function _fpCommit(list) {
+    const seen = new Set(), out = [];
+    for (const v of list) { const k = v.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(v); } }
+    _fpValue = out.join(', ');
+    if (_fpOnPick) {
+        _fpOnPick(_fpValue);
+    } else if (_fpFieldPathStr) {
+        updateField('modules', _fpFieldPathStr, _fpValue);
+        const inp = document.querySelector(`input[data-field-path="${CSS.escape(_fpFieldPathStr)}"]`);
+        if (inp) inp.value = _fpValue;
+        // Refresh the removable-chips view of the field, if it uses one.
+        if (typeof renderChips === 'function') renderChips(_fpFieldPathStr);
+    }
+    _renderFieldPickerList();
+}
+
+// Items currently visible under the filter (select/deselect-all act on these).
+function _fpFilteredItems() {
+    const filter = (document.getElementById('fieldPickerFilter')?.value || '').toLowerCase();
+    return (_fpItems || []).filter(s => !filter || s.toLowerCase().includes(filter));
+}
+// Select all = add every filtered item to the current selection.
+function _fpSelectAll() {
+    _fpCommit([..._fpSelectedList(), ..._fpFilteredItems()]);
+}
+// Deselect all = remove the filtered items from the selection.
+function _fpDeselectAll() {
+    const rm = new Set(_fpFilteredItems().map(s => s.toLowerCase()));
+    _fpCommit(_fpSelectedList().filter(x => !rm.has(x.toLowerCase())));
 }
 
 function _pickFieldValue(value) {
@@ -61,6 +122,14 @@ function _pickFieldValue(value) {
         if (inp) inp.value = value;
     }
     bootstrap.Modal.getInstance(document.getElementById('fieldPickerModal'))?.hide();
+}
+
+// Multi mode: add/remove a value; keep the modal open so several can be picked.
+function _toggleFieldValue(value) {
+    const list = _fpSelectedList();
+    const i = list.findIndex(x => x.toLowerCase() === String(value).toLowerCase());
+    if (i >= 0) list.splice(i, 1); else list.push(value);
+    _fpCommit(list);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

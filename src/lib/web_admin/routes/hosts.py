@@ -538,6 +538,10 @@ def register(app, wa):
         key = str(body.get('key') or 'check')
         record = _probe_host_record(wa, body)
         fields = dict(body.get('fields') or {})
+        # The modal sends cred_uid at the body level (the check's binding lives
+        # outside its fields); fold it in so the credential is actually applied.
+        if body.get('cred_uid') and not fields.get('cred_uid'):
+            fields['cred_uid'] = body.get('cred_uid')
         _restore_check_secrets(wa, module, coll, key, fields)
         fields = _apply_check_cred(wa, fields)
         item = {**fields, 'host_uid': record['uid'], 'enabled': True}
@@ -577,6 +581,8 @@ def register(app, wa):
                 coll = str(c.get('collection') or 'list')
                 key = str(c.get('key') or '') or f'check{len(grouped)}'
                 fields = dict(c.get('fields') or {})
+                if c.get('cred_uid') and not fields.get('cred_uid'):
+                    fields['cred_uid'] = c.get('cred_uid')
                 _restore_check_secrets(wa, bare, coll, key, fields)
                 fields = _apply_check_cred(wa, fields)
                 grouped.setdefault((bare, coll), {})[key] = {

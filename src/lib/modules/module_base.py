@@ -188,10 +188,13 @@ class ModuleBase(ObjectBase):
             partial_deps  = list(getattr(watchful_cls, 'PARTIAL_DEPS',  None) or [])
 
             for collection, fields in item_schema.items():
-                if collection in ('__i18n__', '__host_profile__', '__host_multiple__'):
+                if collection in ('__i18n__', '__host_profile__', '__host_multiple__',
+                                   '__credential__', '__credentials__'):
                     # __i18n__ handled separately; __host_profile__/__host_multiple__
-                    # are host-binding metadata (read from ITEM_SCHEMA), not
-                    # renderable collections.
+                    # are host-binding metadata; __credential__ is consumed by the
+                    # central credentials catalog (credential_schemas reads it from
+                    # schema.json directly) — none of these are renderable
+                    # collections, so keep them out of ITEM_SCHEMAS.
                     continue
                 col_fields = dict(fields)
                 # Merge label_i18n from lang files.

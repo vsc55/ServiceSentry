@@ -1,6 +1,9 @@
 {
     "pretty_name": "CPU Usage",
     "module_description": "Monitors CPU usage on the bound host (locally or over SSH) and alerts when it exceeds the configured threshold.",
+    "history": {
+        "used": "CPU usage"
+    },
     "labels": {
         "enabled":  "Enabled",
         "threads":  "Threads",

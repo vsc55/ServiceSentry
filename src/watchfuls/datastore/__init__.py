@@ -288,14 +288,28 @@ class Watchful(ModuleBase):
         disp = (self.get_conf(['list', key, 'label'], '') or '').strip() or _PRETTY.get(db_type, db_type)
 
         cfg = self._build_cfg(key, db_type)
-        ok, msg = self._backend_check(db_type, conn_type, cfg)
+        ok, msg, metrics = self._check_databases(db_type, conn_type, cfg)
 
-        if ok:
-            s_msg = f'*{disp}* ✅'
+        # Numeric engine metrics (connections/uptime/memory/queries) recorded for
+        # the history charts; non-numeric values are dropped.
+        other = {'message': msg}
+        for mk, mv in (metrics or {}).items():
+            if isinstance(mv, (int, float)) and not isinstance(mv, bool):
+                other[mk] = mv
+
+        conns = other.get('connections')
+        limit = int(self.get_conf(['list', key, 'alert_connections'], 0) or 0)
+        if ok and limit > 0 and isinstance(conns, (int, float)) and conns > limit:
+            ok  = False
+            msg = f'{int(conns)} connections > {limit}'
+            s_msg = f'*{disp}* - *{msg}* ⚠️'
+        elif ok:
+            # Shared formatter → identical detail to the web "Test connection".
+            s_msg = f'*{disp}* — {self._summary_text(True, msg, metrics)} ✅'
         else:
             s_msg = f'*{disp}* - *Error: {msg}* ⚠️'
 
-        self.dict_return.set(key, ok, s_msg, False, {'message': msg})
+        self.dict_return.set(key, ok, s_msg, False, other)
         if self.check_status_custom(ok, key, msg):
             self.send_message(s_msg, ok)
 
@@ -331,11 +345,57 @@ class Watchful(ModuleBase):
     # ── Backend dispatcher ────────────────────────────────────────────
 
     @classmethod
-    def _backend_check(cls, db_type, conn_type, cfg) -> tuple[bool, str]:
-        """Return (ok, message) for the given db_type + conn_type."""
+    def _check_databases(cls, db_type, conn_type, cfg) -> tuple:
+        """Connectivity + multi-database existence check.
+
+        The ``db`` field may hold several comma-separated databases. With one
+        (or none) it connects normally to that database; with several it
+        connects at server level (for connectivity + metrics) and verifies that
+        every listed database exists, reusing the per-engine listing. Returns
+        ``(ok, message, metrics)``."""
+        dbs = [d.strip() for d in str(cfg.get('db') or '').split(',') if d.strip()]
+        if len(dbs) <= 1:
+            return cls._backend_check(db_type, conn_type, {**cfg, 'db': dbs[0] if dbs else ''})
+
+        ok, msg, metrics = cls._backend_check(db_type, conn_type, {**cfg, 'db': ''})
+        if ok:
+            listing = cls.list_databases({**cfg, 'db_type': db_type, 'conn_type': conn_type, 'db': ''})
+            if listing.get('ok'):
+                avail = {str(x).lower() for x in (listing.get('items') or [])}
+                missing = [d for d in dbs if d.lower() not in avail]
+                if missing:
+                    ok, msg = False, f"missing: {', '.join(missing)}"
+                else:
+                    msg = f'{len(dbs)} databases OK'
+            else:
+                ok, msg = False, (listing.get('message') or 'cannot list databases')
+        return ok, msg, metrics
+
+    @staticmethod
+    def _summary_text(ok, msg, metrics) -> str:
+        """Human detail line shared by the monitoring check (``_ds_check``) and the
+        web "Test connection" action, so both always report the same thing:
+        the database-existence result (e.g. "32 databases OK") plus the live
+        connection count when the engine exposes it."""
+        if not ok:
+            return msg or 'connection failed'
+        conns = (metrics or {}).get('connections')
+        bits = []
+        if msg:
+            bits.append(msg)
+        if isinstance(conns, (int, float)) and not isinstance(conns, bool):
+            bits.append(f'{int(conns)} conn.')
+        return ', '.join(bits) if bits else 'connection successful'
+
+    @classmethod
+    def _backend_check(cls, db_type, conn_type, cfg) -> tuple:
+        """Return (ok, message, metrics) for the given db_type + conn_type.
+
+        ``metrics`` is a dict of engine stats (connections/uptime/memory/queries)
+        the backend could read — empty when the engine doesn't expose them."""
         if conn_type == 'ssh':
             if not _PARAMIKO:
-                return False, 'paramiko is not installed (pip install paramiko)'
+                return False, 'paramiko is not installed (pip install paramiko)', {}
             try:
                 tunnel = _SSHTunnel(
                     cfg['ssh_host'], cfg['ssh_port'], cfg['ssh_user'],
@@ -344,7 +404,7 @@ class Watchful(ModuleBase):
                     verify_host=bool(cfg.get('ssh_verify_host', False)),
                     ssh_key_string=cfg.get('ssh_key_string', ''))
             except Exception as exc:
-                return False, f'SSH error: {exc}'
+                return False, f'SSH error: {exc}', {}
             try:
                 return cls._backend_check_direct(db_type, {**cfg, 'host': '127.0.0.1', 'port': tunnel.local_port})
             finally:
@@ -352,7 +412,7 @@ class Watchful(ModuleBase):
         return cls._backend_check_direct(db_type, cfg)
 
     @classmethod
-    def _backend_check_direct(cls, db_type, cfg) -> tuple[bool, str]:
+    def _backend_check_direct(cls, db_type, cfg) -> tuple:
         if db_type in ('mysql', 'mariadb'):
             return cls._test_mysql(cfg)
         if db_type == 'postgres':
@@ -369,17 +429,17 @@ class Watchful(ModuleBase):
             return cls._test_influxdb(cfg)
         if db_type == 'memcached':
             return cls._test_memcached(cfg)
-        return False, f'Unknown db_type: {db_type}'
+        return False, f'Unknown db_type: {db_type}', {}
 
     # ── MySQL / MariaDB ───────────────────────────────────────────────
 
     @classmethod
-    def _test_mysql(cls, cfg) -> tuple[bool, str]:
+    def _test_mysql(cls, cfg) -> tuple:
         conn_type = cfg.get('conn_type', 'tcp')
         if conn_type == 'socket':
             path = cfg.get('socket', '')
             if not path or not os.path.exists(path):
-                return False, 'Socket file does not exist'
+                return False, 'Socket file does not exist', {}
             return cls._pymysql_ping(unix_socket=path,
                 user=cfg['user'], password=cfg['password'], db=cfg['db'])
         return cls._pymysql_ping(
@@ -387,9 +447,9 @@ class Watchful(ModuleBase):
             user=cfg['user'], password=cfg['password'], db=cfg['db'])
 
     @staticmethod
-    def _pymysql_ping(host='', port=3306, user='', password='', db='', unix_socket='') -> tuple[bool, str]:
+    def _pymysql_ping(host='', port=3306, user='', password='', db='', unix_socket='') -> tuple:
         if not _PYMYSQL:
-            return False, 'PyMySQL is not installed (pip install PyMySQL)'
+            return False, 'PyMySQL is not installed (pip install PyMySQL)', {}
         try:
             kw = {'user': user, 'password': password, 'db': db,
                   'charset': 'utf8mb4', 'connect_timeout': 10,
@@ -403,28 +463,39 @@ class Watchful(ModuleBase):
             msg = repr(exc)
             code = str(exc).split(',')[0][1:]
             if code == '1045':
-                return False, 'Access denied'
+                return False, 'Access denied', {}
             if code == '2003':
-                if '(timed out)' in msg:   return False, "Can't connect: timed out"
-                if '[Errno 111]' in msg:   return False, "Can't connect: connection refused"
-                if '[Errno 113]' in msg:   return False, "Can't connect: no route to host"
-                return False, "Can't connect to MySQL server"
-            return False, msg
+                if '(timed out)' in msg:   return False, "Can't connect: timed out", {}
+                if '[Errno 111]' in msg:   return False, "Can't connect: connection refused", {}
+                if '[Errno 113]' in msg:   return False, "Can't connect: no route to host", {}
+                return False, "Can't connect to MySQL server", {}
+            return False, msg, {}
         try:
             with conn.cursor() as cur:
                 cur.execute('SELECT 1')
-            return True, ''
+            metrics = {}
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SHOW GLOBAL STATUS WHERE Variable_name IN "
+                                "('Threads_connected','Uptime','Queries')")
+                    st = {r['Variable_name']: r['Value'] for r in cur.fetchall()}
+                if 'Threads_connected' in st: metrics['connections'] = int(st['Threads_connected'])
+                if 'Uptime' in st:            metrics['uptime']      = int(st['Uptime'])
+                if 'Queries' in st:           metrics['queries']     = int(st['Queries'])
+            except Exception:  # pylint: disable=broad-except
+                pass
+            return True, '', metrics
         except Exception as exc:
-            return False, repr(exc)
+            return False, repr(exc), {}
         finally:
             conn.close()
 
     # ── PostgreSQL ────────────────────────────────────────────────────
 
     @classmethod
-    def _test_postgres(cls, cfg) -> tuple[bool, str]:
+    def _test_postgres(cls, cfg) -> tuple:
         if not _PSYCOPG2:
-            return False, 'psycopg2 is not installed (pip install psycopg2-binary)'
+            return False, 'psycopg2 is not installed (pip install psycopg2-binary)', {}
         conn_type = cfg.get('conn_type', 'tcp')
         try:
             kw = {'user': cfg['user'], 'password': cfg['password'],
@@ -434,16 +505,26 @@ class Watchful(ModuleBase):
             if conn_type == 'socket':
                 path = cfg.get('socket', '')
                 if not path:
-                    return False, 'Socket path not configured'
+                    return False, 'Socket path not configured', {}
                 kw['host'] = path
             else:
                 kw['host'] = cfg['host']
                 kw['port'] = int(cfg['port'])
             conn = psycopg2.connect(**kw)
+            metrics = {}
+            try:
+                cur = conn.cursor()
+                cur.execute('SELECT (SELECT count(*) FROM pg_stat_activity), '
+                            'EXTRACT(EPOCH FROM now() - pg_postmaster_start_time())::bigint')
+                row = cur.fetchone()
+                cur.close()
+                metrics = {'connections': int(row[0]), 'uptime': int(row[1])}
+            except Exception:  # pylint: disable=broad-except
+                pass
             conn.close()
-            return True, ''
+            return True, '', metrics
         except Exception as exc:
-            return False, str(exc)
+            return False, str(exc), {}
 
     # ── Microsoft SQL Server ──────────────────────────────────────────
 
@@ -478,26 +559,36 @@ class Watchful(ModuleBase):
         return str(raw).strip()
 
     @classmethod
-    def _test_mssql(cls, cfg) -> tuple[bool, str]:
+    def _test_mssql(cls, cfg) -> tuple:
         if not _PYMSSQL:
-            return False, 'pymssql is not installed (pip install pymssql)'
+            return False, 'pymssql is not installed (pip install pymssql)', {}
         try:
             conn = pymssql.connect(
                 server=cfg['host'], port=str(int(cfg['port'])),
                 user=cfg['user'], password=cfg['password'],
                 database=cfg['db'] or 'master',
                 login_timeout=10, tds_version='7.4')
+            metrics = {}
+            try:
+                cur = conn.cursor()
+                cur.execute('SELECT (SELECT count(*) FROM sys.dm_exec_connections), '
+                            'DATEDIFF(second, (SELECT sqlserver_start_time FROM sys.dm_os_sys_info), GETDATE())')
+                row = cur.fetchone()
+                cur.close()
+                metrics = {'connections': int(row[0]), 'uptime': int(row[1])}
+            except Exception:  # pylint: disable=broad-except
+                pass
             conn.close()
-            return True, ''
+            return True, '', metrics
         except Exception as exc:
-            return False, cls._mssql_msg(exc)
+            return False, cls._mssql_msg(exc), {}
 
     # ── MongoDB ───────────────────────────────────────────────────────
 
     @classmethod
-    def _test_mongodb(cls, cfg) -> tuple[bool, str]:
+    def _test_mongodb(cls, cfg) -> tuple:
         if not _PYMONGO:
-            return False, 'pymongo is not installed (pip install pymongo)'
+            return False, 'pymongo is not installed (pip install pymongo)', {}
         try:
             kw = {
                 'host': cfg['host'], 'port': int(cfg['port']),
@@ -512,17 +603,27 @@ class Watchful(ModuleBase):
                 kw['tls'] = True
             client = pymongo.MongoClient(**kw)
             client.admin.command('ping')
+            metrics = {}
+            try:
+                ss = client.admin.command('serverStatus')
+                metrics['connections'] = int(ss.get('connections', {}).get('current', 0))
+                metrics['uptime']      = int(ss.get('uptime', 0))
+                res = ss.get('mem', {}).get('resident')   # already in MB
+                if res is not None:
+                    metrics['memory'] = int(res)
+            except Exception:  # pylint: disable=broad-except
+                pass
             client.close()
-            return True, ''
+            return True, '', metrics
         except Exception as exc:
-            return False, str(exc)
+            return False, str(exc), {}
 
     # ── Redis / Valkey ────────────────────────────────────────────────
 
     @classmethod
-    def _test_redis(cls, cfg) -> tuple[bool, str]:
+    def _test_redis(cls, cfg) -> tuple:
         if not _REDIS:
-            return False, 'redis is not installed (pip install redis)'
+            return False, 'redis is not installed (pip install redis)', {}
         conn_type = cfg.get('conn_type', 'tcp')
         try:
             kw = {
@@ -536,7 +637,7 @@ class Watchful(ModuleBase):
             if conn_type == 'socket':
                 path = cfg.get('socket', '')
                 if not path:
-                    return False, 'Socket path not configured'
+                    return False, 'Socket path not configured', {}
                 kw['unix_socket_path'] = path
                 r = redis_lib.Redis(**kw)
             else:
@@ -544,15 +645,24 @@ class Watchful(ModuleBase):
                 kw['port'] = int(cfg['port'])
                 r = redis_lib.Redis(**kw)
             r.ping()
+            metrics = {}
+            try:
+                info = r.info()
+                metrics['connections'] = int(info.get('connected_clients', 0))
+                metrics['uptime']      = int(info.get('uptime_in_seconds', 0))
+                metrics['memory']      = round(int(info.get('used_memory', 0)) / 1048576, 1)
+                metrics['queries']     = int(info.get('total_commands_processed', 0))
+            except Exception:  # pylint: disable=broad-except
+                pass
             r.close()
-            return True, ''
+            return True, '', metrics
         except Exception as exc:
-            return False, str(exc)
+            return False, str(exc), {}
 
     # ── Elasticsearch / OpenSearch ────────────────────────────────────
 
     @classmethod
-    def _test_elasticsearch(cls, cfg) -> tuple[bool, str]:
+    def _test_elasticsearch(cls, cfg) -> tuple:
         scheme = cfg.get('scheme', 'http')
         host   = cfg['host']
         port   = int(cfg['port'])
@@ -566,17 +676,17 @@ class Watchful(ModuleBase):
                 body = json.loads(resp.read())
             status = body.get('status', '')
             if status == 'red':
-                return False, 'Cluster status is RED'
-            return True, ''
+                return False, 'Cluster status is RED', {}
+            return True, '', {}
         except urllib.error.HTTPError as exc:
-            return False, f'HTTP {exc.code}: {exc.reason}'
+            return False, f'HTTP {exc.code}: {exc.reason}', {}
         except Exception as exc:
-            return False, str(exc)
+            return False, str(exc), {}
 
     # ── InfluxDB ──────────────────────────────────────────────────────
 
     @classmethod
-    def _test_influxdb(cls, cfg) -> tuple[bool, str]:
+    def _test_influxdb(cls, cfg) -> tuple:
         scheme   = cfg.get('scheme', 'http')
         host     = cfg['host']
         port     = int(cfg['port'])
@@ -598,44 +708,55 @@ class Watchful(ModuleBase):
             with urllib.request.urlopen(_req('/health'), timeout=10) as resp:
                 body = json.loads(resp.read())
             status = body.get('status', '')
-            return (True, '') if status == 'pass' else (False, f'Health status: {status}')
+            return (True, '', {}) if status == 'pass' else (False, f'Health status: {status}', {})
         except urllib.error.HTTPError as exc:
             if exc.code != 404:
-                return False, f'HTTP {exc.code}: {exc.reason}'
+                return False, f'HTTP {exc.code}: {exc.reason}', {}
         except Exception as exc:
-            return False, str(exc)
+            return False, str(exc), {}
 
         # InfluxDB 1.x — /ping endpoint (returns 204 No Content)
         try:
             with urllib.request.urlopen(_req('/ping'), timeout=10):
                 pass
-            return True, ''
+            return True, '', {}
         except urllib.error.HTTPError as exc:
-            return False, f'HTTP {exc.code}: {exc.reason}'
+            return False, f'HTTP {exc.code}: {exc.reason}', {}
         except Exception as exc:
-            return False, str(exc)
+            return False, str(exc), {}
 
     # ── Memcached ─────────────────────────────────────────────────────
 
     @classmethod
-    def _test_memcached(cls, cfg) -> tuple[bool, str]:
+    def _test_memcached(cls, cfg) -> tuple:
         if not _PYMEMCACHE:
-            return False, 'pymemcache is not installed (pip install pymemcache)'
+            return False, 'pymemcache is not installed (pip install pymemcache)', {}
         conn_type = cfg.get('conn_type', 'tcp')
         try:
             if conn_type == 'socket':
                 path = cfg.get('socket', '')
                 if not path:
-                    return False, 'Socket path not configured'
+                    return False, 'Socket path not configured', {}
                 server = path
             else:
                 server = (cfg['host'], int(cfg['port']))
             client = _pmc.Client(server, connect_timeout=10, timeout=10)
             client.get('__ping__')
+            metrics = {}
+            try:
+                raw = client.stats() or {}
+                st = {(k.decode() if isinstance(k, bytes) else k):
+                      (v.decode() if isinstance(v, bytes) else v) for k, v in raw.items()}
+                metrics['connections'] = int(st.get('curr_connections', 0))
+                metrics['uptime']      = int(st.get('uptime', 0))
+                metrics['memory']      = round(int(st.get('bytes', 0)) / 1048576, 1)
+                metrics['queries']     = int(st.get('cmd_get', 0)) + int(st.get('cmd_set', 0))
+            except Exception:  # pylint: disable=broad-except
+                pass
             client.close()
-            return True, ''
+            return True, '', metrics
         except Exception as exc:
-            return False, str(exc)
+            return False, str(exc), {}
 
     # ── Web UI — test_connection ──────────────────────────────────────
 
@@ -651,9 +772,9 @@ class Watchful(ModuleBase):
         cfg = {**config, 'port': port, 'ssh_port': ssh_port, 'conn_type': conn_type,
                'db_index': int(config.get('db_index', 0) or 0)}
 
-        ok, msg = cls._backend_check(db_type, conn_type, cfg)
+        ok, msg, metrics = cls._check_databases(db_type, conn_type, cfg)
         label = _PRETTY.get(db_type, db_type)
-        return {'ok': ok, 'message': f'{label}: {msg}' if not ok else f'{label}: connection successful'}
+        return {'ok': ok, 'message': f'{label}: {cls._summary_text(ok, msg, metrics)}'}
 
     @classmethod
     def _test_ssh_only(cls, config: dict) -> dict:

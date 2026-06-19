@@ -68,6 +68,7 @@ async function renderStatus() {
         return;
     }
 
+    await _loadSchedulerState();   // for the auto-refresh "Auto" option
     const canRun = new Set(currentUser.permissions || []).has('checks_run');
     let h = '';
 
@@ -91,17 +92,11 @@ async function renderStatus() {
             <span class="spinner-border spinner-border-sm me-1"></span>${t('checks_running')}
           </span>` : '';
 
-    // Countdown to the next auto-refresh, inline right after the interval
-    // buttons. Only rendered while auto-refresh is ON (rendering it hidden
-    // wouldn't work: Bootstrap's .d-flex uses display:flex !important).
-    const _stInt = _statusTimer?._interval || 0;
-    const countdownHtml = _stInt > 0 ? `<span class="st-rc-pill ms-3" title="${escAttr(t('status_refreshing_in'))} ${_stInt}${t('status_seconds_abbr')}">
-        <span class="st-rc-fill" id="st-refresh-fill" style="width:100%"></span>
-        <span class="st-rc-txt"><i class="bi bi-arrow-clockwise me-1"></i><span id="st-refresh-count">${_stInt}</span>${t('status_seconds_abbr')}</span>
-    </span>` : '';
-
+    // The auto-refresh countdown lives inside the dropdown button now
+    // (_startStatusCountdown animates #st-refresh-fill / #st-refresh-count).
     h += _renderRefreshBar('status-container', 'renderStatus',
-        () => _statusTimer, 'setStatusAutoRefresh', countdownHtml + actionBtns);
+        () => _statusTimer, 'setStatusAutoRefresh', actionBtns,
+        { id: 'st', countId: 'st-refresh-count', fillId: 'st-refresh-fill' });
 
     if (canRun) {
         // ── Background scheduler widget ───────────────────────

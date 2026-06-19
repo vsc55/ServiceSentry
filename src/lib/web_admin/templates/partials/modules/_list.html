@@ -240,7 +240,7 @@ function _discoveredModuleNames() {
         const sep = key.indexOf('|');
         if (sep < 0) continue;
         const col = key.slice(sep + 1);
-        if (col !== '__i18n__' && col !== '__module__' && col !== '__history__') names.add(key.slice(0, sep));
+        if (!['__i18n__', '__module__', '__history__', '__credential__', '__credentials__'].includes(col)) names.add(key.slice(0, sep));
     }
     return [...names].sort();
 }
@@ -336,7 +336,7 @@ function addModuleFromPicker(name) {
     for (const key of Object.keys(ITEM_SCHEMAS)) {
         if (!key.startsWith(name + '|')) continue;
         const col = key.slice(name.length + 1);
-        if (col === '__i18n__' || col === '__module__' || col === '__history__') continue;
+        if (['__i18n__', '__module__', '__history__', '__credential__', '__credentials__'].includes(col)) continue;
         cfg[col] = {};
     }
     const modDefaults = schemaDefaults(moduleSchema(name));

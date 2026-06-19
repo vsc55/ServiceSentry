@@ -27,7 +27,7 @@ function renderField(key, value, pathStr, target = 'modules') {
     const _hint = (_term0 && _term0.hint) || fieldHint(pathStr);
     const _hintId = _hint ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
     const _infoIcon = _hint
-        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+        ? `<button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
                 data-bs-toggle="collapse" data-bs-target="#${_hintId}"
                 aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
         : '';
@@ -88,7 +88,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
     if (meta && meta.hidden) return '';
 
     if (meta && meta.__unsupported__) {
-        return `<div class="row mb-2 align-items-center opacity-50">
+        return `<div class="row mb-2 align-items-start opacity-50">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
         <div class="col-sm-8">
             <span class="badge bg-secondary bg-opacity-75" style="font-size:.75rem">
@@ -116,43 +116,24 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
 
     // Sensitive field masked by the server (null = value is set but never transmitted)
     if (value === null && (SENSITIVE.has(key) || (meta && meta.sensitive))) {
-        return `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8"><div class="input-group input-group-sm">
-            <input type="password" class="form-control"
-                data-field-path="${escAttr(pathStr)}"
-                value=""
-                placeholder="${escAttr(t('secret_defined') || '••••••')}"
-                oninput="updateField(${tg},${sp},this.value)">${_actionBtn}
-        </div>${_hintHtml}</div></div>`;
+        return _fieldRow(lblHtml, fieldCtl({kind: 'secret',
+            inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="" placeholder="${escAttr(t('secret_defined') || '••••••')}"`,
+            onInput: `updateField(${tg},${sp},this.value)`, trailing: _actionBtn}), _hintHtml);
     }
 
     if (typeof value === 'boolean') {
         const _boolItemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
-        return `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8">
-            <div class="d-flex align-items-center gap-2">
-                <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox" role="switch"
-                        ${value ? 'checked' : ''}
-                        onchange="updateField(${tg},${sp},this.checked);_refreshConditionalFields(${_boolItemPath})">
-                </div>${_actionBtn}
-            </div>${_hintHtml}</div></div>`;
+        return _fieldRow(lblHtml, fieldCtl({kind: 'switch', value,
+            onChange: `updateField(${tg},${sp},this.checked);_refreshConditionalFields(${_boolItemPath})`,
+            trailing: _actionBtn}), _hintHtml);
     }
     if (typeof value === 'number' && meta && Array.isArray(meta.options_int)) {
         const opts = meta.options_int.map(s => {
             const label = s === 0 ? t('all') : s;
             return `<option value="${s}"${value === s ? ' selected' : ''}>${label}</option>`;
         }).join('');
-        return `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8"><div class="input-group input-group-sm">
-            <select class="form-select"
-                onchange="updateField(${tg},${sp},parseInt(this.value,10))">
-                ${opts}
-            </select>${_actionBtn}
-        </div>${_hintHtml}</div></div>`;
+        return _fieldRow(lblHtml, fieldCtl({kind: 'select', optionsHtml: opts,
+            onChange: `updateField(${tg},${sp},parseInt(this.value,10))`, trailing: _actionBtn}), _hintHtml);
     }
     if (typeof value === 'number') {
         const minA = meta && meta.min != null ? ` min="${meta.min}"` : '';
@@ -192,16 +173,11 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             extraAttrs += ` data-zero-as-blank="1"`;
             if (value === 0) displayValue = '';
         }
-        return `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8"><div class="input-group input-group-sm">
-            <input type="number" class="form-control"
-                data-cfg-path="${escAttr(pathStr)}"
-                value="${displayValue}"${minA}${maxA}${stepA}${extraAttrs}
-                ${_onkeydown}
-                oninput="markDirty(${tg})"
-                onchange="validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})">${_actionBtn}
-        </div>${_hintHtml}</div></div>`;
+        return _fieldRow(lblHtml, fieldCtl({kind: 'number',
+            inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value="${displayValue}"${minA}${maxA}${stepA}${extraAttrs} ${_onkeydown}`,
+            onInput: `markDirty(${tg})`,
+            onChange: `validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})`,
+            trailing: _actionBtn}), _hintHtml);
     }
     if (typeof value === 'string') {
         // Language selector
@@ -211,7 +187,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 const sel = value === code ? ' selected' : '';
                 opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
             }
-            return `<div class="row mb-2 align-items-center">
+            return `<div class="row mb-2 align-items-start">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
             <div class="col-sm-8"><div class="input-group input-group-sm">
                 <select class="form-select"
@@ -228,7 +204,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 const sel = value === code ? ' selected' : '';
                 opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
             }
-            return `<div class="row mb-2 align-items-center">
+            return `<div class="row mb-2 align-items-start">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
             <div class="col-sm-8"><div class="input-group input-group-sm">
                 <select class="form-select"
@@ -245,7 +221,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 const sel = value === code ? ' selected' : '';
                 opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
             }
-            return `<div class="row mb-2 align-items-center">
+            return `<div class="row mb-2 align-items-start">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
             <div class="col-sm-8"><div class="input-group input-group-sm">
                 <select class="form-select"
@@ -274,14 +250,9 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 return `<option value="${escAttr(o)}"${value === o ? ' selected' : ''}>${label}</option>`;
             }).join('');
             const _itemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
-            return `<div class="row mb-2 align-items-center">
-            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8"><div class="input-group input-group-sm">
-                <select class="form-select"
-                    onchange="updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})">
-                    ${opts}
-                </select>${_actionBtn}
-            </div>${_hintHtml}</div></div>`;
+            return _fieldRow(lblHtml, fieldCtl({kind: 'select', optionsHtml: opts,
+                onChange: `updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})`,
+                trailing: _actionBtn}), _hintHtml);
         }
         const isSensitive = (meta && meta.sensitive) || SENSITIVE.has(key);
         const tp = isSensitive ? 'password' : 'text';
@@ -326,22 +297,10 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _pickTitle    = escAttr(t('pick_from_collection') || _pickLabel);
             // Inline onclick that builds the list at click-time (picks up newly-added items)
             const _pickClick    = `openFieldPickerModal(${sp},Object.keys((modulesData[${jsStr(_pickModName)}]||{})[${jsStr(_pickCollection)}]||{}),${jsStr(lbl)})`;
-            return `<div class="row mb-2 align-items-center">
-            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8">
-                <div class="input-group input-group-sm">
-                    <input type="${tp}" class="form-control${_strPhCls}"
-                        data-field-path="${escAttr(pathStr)}"
-                        value="${escAttr(value)}"${_numKbd}${_strPh}
-                        oninput="markDirty(${tg})"
-                        onchange="updateField(${tg},${sp},this.value.trim())">
-                    <button class="btn btn-secondary" type="button"
-                        title="${_pickTitle}"
-                        onclick="${_pickClick}">
-                        <i class="bi bi-chevron-expand"></i>
-                    </button>${_actionBtn}
-                </div>${_hintHtml}
-            </div></div>`;
+            return _fieldRow(lblHtml, fieldCtl({kind: 'text', inputType: tp, inputCls: _strPhCls,
+                inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="${escAttr(value)}"${_numKbd}${_strPh}`,
+                onInput: `markDirty(${tg})`, onChange: `updateField(${tg},${sp},this.value.trim())`,
+                trailing: `<button class="btn btn-secondary" type="button" title="${_pickTitle}" onclick="${_pickClick}"><i class="bi bi-chevron-expand"></i></button>${_actionBtn}`}), _hintHtml);
         }
         // Inline discover button for __discovery_field__ string fields.
         // URL is built from the action name (__discovery__) and the API version
@@ -360,21 +319,9 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _rdHandlers = _isReadOnly
                 ? ''
                 : `oninput="markDirty(${tg})" onchange="updateField(${tg},${sp},this.value.trim())"`;
-            return `<div class="row mb-2 align-items-center">
-            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8">
-                <div class="input-group input-group-sm">
-                    <input type="${tp}" class="form-control${_strPhCls}"
-                        data-field-path="${escAttr(pathStr)}"
-                        value="${escAttr(value)}"${_numKbd}${_strPh}${_rdAttr}
-                        ${_rdHandlers}>
-                    <button class="btn btn-secondary" type="button"
-                        title="${escAttr(t('discover') || 'Discover')}"
-                        onclick="openDiscoverModalForField(${sp},${jsStr(_discoverFieldUrl)})">
-                        <i class="bi bi-search"></i>
-                    </button>${_actionBtn}
-                </div>${_hintHtml}
-            </div></div>`;
+            return _fieldRow(lblHtml, fieldCtl({kind: 'text', inputType: tp, inputCls: _strPhCls,
+                inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="${escAttr(value)}"${_numKbd}${_strPh}${_rdAttr} ${_rdHandlers}`,
+                trailing: `<button class="btn btn-secondary" type="button" title="${escAttr(t('discover') || 'Discover')}" onclick="openDiscoverModalForField(${sp},${jsStr(_discoverFieldUrl)})"><i class="bi bi-search"></i></button>${_actionBtn}`}), _hintHtml);
         }
         // input_action: render as Bootstrap input-group with an icon button appended
         const _ia = meta && meta.input_action && typeof meta.input_action === 'object'
@@ -386,40 +333,38 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _al2      = (_modLd2 && _modLd2.action_labels) || {};
             const _iaLabel  = escAttr((_term && _term.action) || _al2[_ia.id] || t(_ia.id) || _ia.id);
             const _itemPath = escAttr(pathStr.split('|').slice(0, -1).join('|'));
-            return `<div class="row mb-2 align-items-center">
-            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8">
-                <div class="input-group input-group-sm">
-                    <input type="${tp}" class="form-control${_strPhCls}"
-                        data-field-path="${escAttr(pathStr)}"
-                        value="${escAttr(value)}"${_numKbd}${_strPh}
-                        oninput="markDirty(${tg})"
-                        onchange="updateField(${tg},${sp},this.value.trim())">
-                    <button class="btn btn-secondary" type="button" data-test-btn
+            const _pickerBtn = `<button class="btn btn-secondary" type="button" data-test-btn
                         data-action-path="${_itemPath}"
                         data-action-url="${escAttr(_ia.url || '')}"
                         data-action-extra="${escAttr(JSON.stringify(_ia.extra || {}))}"
                         data-action-result="${escAttr(_ia.result || 'toast')}"
                         data-action-result-field="${escAttr(_ia.result_field || '')}"
+                        data-action-result-multi="${_ia.result_multi ? 'true' : 'false'}"
                         onclick="itemAction(this)"
                         data-bs-toggle="tooltip" data-bs-placement="top"
-                        title="${_iaLabel}"><i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button>${_actionBtn}
-                </div>${_hintHtml}
-            </div></div>`;
+                        title="${_iaLabel}"><i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button>`;
+            // Multi value (e.g. several databases) → removable chips + an "add"
+            // box + the picker, instead of a raw comma-separated text input.
+            if (_ia.result_multi) {
+                registerFieldAdapter(pathStr,
+                    () => getPath(target === 'config' ? configData : modulesData, pathStr.split('|')),
+                    v => updateField(target, pathStr, v));
+                return _fieldRow(lblHtml, fieldCtl({kind: 'multi', key: pathStr, value,
+                    trailing: `${_pickerBtn}${_actionBtn}`}), _hintHtml);
+            }
+            return _fieldRow(lblHtml, fieldCtl({kind: 'text', inputType: tp, inputCls: _strPhCls,
+                inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="${escAttr(value)}"${_numKbd}${_strPh}`,
+                onInput: `markDirty(${tg})`, onChange: `updateField(${tg},${sp},this.value.trim())`,
+                trailing: `${_pickerBtn}${_actionBtn}`}), _hintHtml);
         }
-        return `<div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-        <div class="col-sm-8"><div class="input-group input-group-sm">
-            <input type="${tp}" class="form-control${_strPhCls}"
-                data-field-path="${escAttr(pathStr)}"
-                value="${escAttr(value)}"${_numKbd}${_strPh}
-                oninput="markDirty(${tg})"
-                onchange="updateField(${tg},${sp},this.value.trim())">${_actionBtn}
-        </div>${_hintHtml}</div></div>`;
+        return _fieldRow(lblHtml, fieldCtl({kind: 'text', inputType: tp, inputCls: _strPhCls,
+            inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="${escAttr(value)}"${_numKbd}${_strPh}`,
+            onInput: `markDirty(${tg})`, onChange: `updateField(${tg},${sp},this.value.trim())`,
+            trailing: _actionBtn}), _hintHtml);
     }
     if (Array.isArray(value)) {
         const csv = value.map(v => String(v)).join(', ');
-        return `<div class="row mb-2 align-items-center">
+        return `<div class="row mb-2 align-items-start">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
         <div class="col-sm-8"><div class="input-group input-group-sm">
             <input type="text" class="form-control"
@@ -683,6 +628,108 @@ function _onHostPick(itemPath, uid, target) {
         .forEach(el => { el.style.display = uid ? 'none' : ''; });
     // When unbinding, restore each field's own show_when visibility.
     if (!uid) _refreshConditionalFields(itemPath);
+}
+
+// ── Field-value adapter registry ────────────────────────────────────────────
+// Maps a field key → {get,set} so stateful widgets (currently the removable
+// chips multi-field) bind to ANY data model.  The Modules tab registers an
+// adapter backed by modulesData/updateField; the host edit modal one backed by
+// _hostChecks/_setHostCheckField.  Both then drive ONE widget implementation,
+// so a change to the widget applies to both places.
+const _fieldAdapters = {};
+function registerFieldAdapter(key, get, set) { _fieldAdapters[key] = { get, set }; }
+function _faGet(key) { const a = _fieldAdapters[key]; return a ? (a.get() || '') : ''; }
+function _faSet(key, v) { const a = _fieldAdapters[key]; if (a) a.set(v); }
+
+// ── Multi-value field as removable chips (e.g. datastore's list of databases) ───
+function _multiList(value) {
+    return String(value || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+function chipsHtml(key, value) {
+    return _multiList(value).map(v =>
+        `<span class="badge text-bg-secondary d-inline-flex align-items-center gap-1 multi-chip" style="font-weight:400">
+            ${esc(v)}<button type="button" class="btn-close btn-close-white" style="font-size:.5rem"
+                aria-label="${escAttr(t('remove'))}" title="${escAttr(t('remove'))}"
+                onclick="chipRemove(${jsStr(key)},${jsStr(v)})"></button></span>`
+    ).join('');
+}
+// Re-render only the chips, keeping the inline "add" input that lives in the box.
+function renderChips(key) {
+    const box = document.querySelector(`[data-multi-chips="${CSS.escape(key)}"]`);
+    if (!box) return;
+    box.querySelectorAll('.multi-chip').forEach(e => e.remove());
+    const html = chipsHtml(key, _faGet(key));
+    const inp = box.querySelector('input');
+    if (inp) inp.insertAdjacentHTML('beforebegin', html);
+    else box.insertAdjacentHTML('afterbegin', html);
+}
+function chipsSet(key, list) {
+    const seen = new Set(), out = [];
+    for (const v of list) { const k = v.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(v); } }
+    _faSet(key, out.join(', '));
+    renderChips(key);
+}
+function chipAdd(key, inp) {
+    const added = _multiList(inp.value);     // also accepts a pasted comma list
+    if (!added.length) return;
+    chipsSet(key, _multiList(_faGet(key)).concat(added));
+    inp.value = '';
+}
+function chipRemove(key, value) {
+    chipsSet(key, _multiList(_faGet(key)).filter(x => x.toLowerCase() !== String(value).toLowerCase()));
+}
+
+// ── Shared field-control skeleton (single source for Modules + host modal) ────
+// Assembles the input-group markup for one control kind.  Data-model wiring
+// (onchange / oninput JS, options, value, placeholder, trailing buttons) is
+// computed by the caller and passed in, so the markup itself lives in one place
+// and any visual change applies to both the Modules tab and the host modal.
+//   spec = { kind:'switch'|'select'|'number'|'secret'|'textarea'|'multi'|'text',
+//            value, onChange, onInput, key, trailing, optionsHtml,
+//            inputType, inputCls, inputAttrs, rows, placeholder, textareaVal }
+function fieldCtl(spec) {
+    const tr = spec.trailing || '';
+    const oc = spec.onChange ? ` onchange="${spec.onChange}"` : '';
+    const oi = spec.onInput  ? ` oninput="${spec.onInput}"`   : '';
+    const at = spec.inputAttrs || '';
+    switch (spec.kind) {
+        case 'switch':
+            return `<div class="d-flex align-items-center gap-2">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" ${spec.value ? 'checked' : ''}${oc}>
+                </div>${tr}</div>`;
+        case 'select':
+            return `<div class="input-group input-group-sm">
+                <select class="form-select"${oc}>${spec.optionsHtml || ''}</select>${tr}</div>`;
+        case 'number':
+            return `<div class="input-group input-group-sm">
+                <input type="number" class="form-control"${at}${oi}${oc}>${tr}</div>`;
+        case 'secret':
+            return `<div class="input-group input-group-sm">
+                <input type="password" class="form-control"${at}${oi}${oc}>${tr}</div>`;
+        case 'textarea':
+            return `<textarea class="form-control form-control-sm" rows="${spec.rows || 4}"
+                style="font-family:var(--bs-font-monospace);font-size:.78rem;white-space:pre"
+                placeholder="${escAttr(spec.placeholder || '')}"${oc}>${spec.textareaVal || ''}</textarea>`;
+        case 'multi':
+            return `<div class="input-group input-group-sm">
+                <div class="form-control d-flex flex-wrap align-items-center gap-1"
+                     style="height:auto;min-height:calc(1.5em + .5rem + 2px);cursor:text"
+                     data-multi-chips="${escAttr(spec.key)}" onclick="this.querySelector('input')?.focus()">${chipsHtml(spec.key, spec.value)}<input
+                    type="text" class="border-0 p-0 flex-grow-1 bg-transparent" style="outline:none;box-shadow:none;min-width:6rem"
+                    placeholder="${escAttr(t('multi_add'))}"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();chipAdd(${jsStr(spec.key)},this);}"></div>
+                ${tr}</div>`;
+        default:
+            return `<div class="input-group input-group-sm">
+                <input type="${spec.inputType || 'text'}" class="form-control${spec.inputCls || ''}"${at}${oi}${oc}>${tr}</div>`;
+    }
+}
+// Two-column field row (label + control), the Modules/Config layout.
+function _fieldRow(lblHtml, inner, hint) {
+    return `<div class="row mb-2 align-items-start">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8">${inner}${hint || ''}</div></div>`;
 }
 
 /**

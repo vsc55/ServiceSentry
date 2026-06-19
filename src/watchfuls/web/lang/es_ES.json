@@ -14,10 +14,10 @@
         "verify_ssl":       "Verificar SSL",
         "check_content":    "Verificar contenido",
         "content_contains": "El contenido contiene",
-        "auth_enabled":     "Activar autenticación",
+        "auth_enabled":     "Habilitado",
         "auth_user":        "Usuario",
         "auth_password":    "Contraseña",
-        "alert":            "Umbral de alerta"
+        "alert":            "Umbral"
     },
     "hints": {
         "enabled":          "Habilitar o deshabilitar la monitorización de esta URL.",
@@ -41,8 +41,10 @@
         "method": {"GET": "GET", "HEAD": "HEAD (sin cuerpo)", "POST": "POST"}
     },
     "group_labels": {
-        "content": "Verificación de contenido",
-        "auth":    "Autenticación Basic"
+        "connection": "Conexión",
+        "response":   "Respuesta",
+        "alerts":     "Alertas",
+        "auth":       "Autenticación Basic"
     },
     "action_labels": {
         "test_connection": "Probar endpoint"

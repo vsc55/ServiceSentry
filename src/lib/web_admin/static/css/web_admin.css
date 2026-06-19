@@ -628,6 +628,7 @@
     font-size: .85em;
     line-height: 1;
     vertical-align: text-bottom;
+    margin-left: .25rem;   /* spacing without a breakable space → icon never orphans */
 }
 
 /* ── Config preset hint (small secondary text) ──────────────────────── */
@@ -806,6 +807,20 @@ body.ss-kiosk #ov-refresh-bar { display: block; }
 .st-rc-pill.st-rc-sm .st-rc-fill {
     background: linear-gradient(90deg, rgba(6,182,212,.40), rgba(14,165,233,.40));
 }
+
+/* Auto-refresh dropdown button (Status / Overview / History): an active blue
+   button with a translucent fill that drains over the interval (countdown
+   effect), with the text + caret kept above it. */
+.ss-ar-btn { position: relative; overflow: hidden; }
+.ss-ar-btn .ss-ar-fill {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 100%;
+    background: linear-gradient(90deg, rgba(0,0,0,.30), rgba(0,0,0,.12));
+    transition: width 1s linear; z-index: 0; pointer-events: none;
+}
+.ss-ar-btn .ss-ar-lbl {
+    position: relative; z-index: 1; font-variant-numeric: tabular-nums;
+}
+.ss-ar-btn.dropdown-toggle::after { position: relative; z-index: 1; }
 
 /* Kiosk / 24/7 fullscreen mode — hide all chrome, show only the grid */
 body.ss-kiosk #ss-sticky-top,

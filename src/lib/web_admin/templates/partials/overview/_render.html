@@ -81,22 +81,85 @@ if (!window._kioskFsHooked) {
     document.addEventListener('webkitfullscreenchange', _onFsChange);
 }
 
-function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '') {
-    const intervals = [0, 10, 30, 60];
+// ─────────────────── Shared auto-refresh control ──────────────────
+// Background-scheduler state, used by the "Auto" option (mirrors its interval
+// and is disabled when stopped). Shared across Status / Overview / History.
+let _schedulerState = { running: false, interval: 0 };
+async function _loadSchedulerState() {
+    const res = await apiGetSilent('/api/v1/daemon/status');   // needs checks_run
+    const st  = res ? (res.data ?? res) : null;
+    _schedulerState = st
+        ? { running: !!st.running, interval: parseInt(st.interval, 10) || 0 }
+        : { running: false, interval: 0 };
+}
+
+// Compact auto-refresh dropdown: a single button (showing the live countdown
+// with a draining fill when active) + a menu with Auto / OFF / presets / a free
+// seconds input. opts: { id, interval, setFn, countId|countClass, fillId|fillClass }.
+function _autoRefreshControl(o) {
+    const presets = [10, 30, 60];           // OFF and Auto are handled separately
+    const cur = o.interval || 0;
+    const sec = t('status_seconds_abbr');
+    // Scheduler interval backing the "Auto" option (0 when stopped).
+    const si  = _schedulerState.running ? (parseInt(_schedulerState.interval, 10) || 0) : 0;
+    // "Custom" is active when a non-preset, non-Auto interval is running.
+    const isCustom = cur > 0 && !presets.includes(cur) && cur !== si;
+    const idAttr = (x) => x ? ` id="${x}"` : '';
+    const countEl = `<span${idAttr(o.countId)} class="${o.countClass || ''}">${cur || ''}</span>`;
+    const toggleLbl = cur > 0 ? `${countEl}${sec}` : esc(t('auto_refresh_off'));
+    // Two columns: icon + name on the left, the interval value right-aligned
+    // (fills the row and lines the values up in a tidy column). Active → check.
+    const item = (val, label, active, icon, right) =>
+        `<li><button type="button" class="dropdown-item d-flex align-items-center gap-2 ${active ? 'active' : ''}"
+            onclick="${o.setFn}(${val})"><i class="bi ${active ? 'bi-check2' : icon}" style="width:1em;flex-shrink:0"></i><span>${label}</span>${
+            right ? `<span class="ms-auto ps-3 small" style="opacity:.7;font-variant-numeric:tabular-nums">${right}</span>` : ''}</button></li>`;
+    let items = `<li><h6 class="dropdown-header py-1">${esc(t('auto_refresh'))}</h6></li>`;
+    // Order: OFF, Auto, then the presets.
+    items += item(0, t('auto_refresh_off'), cur === 0, 'bi-x-circle');
+    // "Auto" follows the scheduler's interval; disabled while it is stopped.
+    if (si > 0) {
+        items += item(si, t('auto_refresh_auto'), cur === si, 'bi-magic', `${si}${sec}`);
+    } else {
+        items += `<li><span class="dropdown-item disabled d-flex align-items-center gap-2 text-muted">
+            <i class="bi bi-magic" style="width:1em;flex-shrink:0"></i><span>${esc(t('auto_refresh_auto'))}</span>
+            <span class="ms-auto ps-3 small">(${esc(t('daemon_stopped'))})</span></span></li>`;
+    }
+    for (const s of presets) items += item(s, t('auto_refresh_every'), cur === s, 'bi-clock', `${s}${sec}`);
+    // Custom row — the prefix turns into a highlighted check when it is active.
+    items += `<li><hr class="dropdown-divider my-1"></li>
+      <li class="px-2 pb-1"><div class="input-group input-group-sm flex-nowrap${isCustom ? ' border border-primary rounded' : ''}">
+        <span class="input-group-text${isCustom ? ' text-bg-primary' : ''}"><i class="bi ${isCustom ? 'bi-check2' : 'bi-stopwatch'}"></i></span>
+        <input type="number" min="1" max="3600" id="${o.id}-auto-custom" class="form-control"
+               placeholder="${escAttr(t('history_auto_custom'))}" value="${isCustom ? cur : ''}"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();_applyAutoCustom('${o.id}','${o.setFn}');}">
+        <button class="btn btn-primary" type="button" onclick="_applyAutoCustom('${o.id}','${o.setFn}')">${esc(t('apply'))}</button>
+      </div></li>`;
+    const fill = cur > 0 ? `<span${idAttr(o.fillId)} class="ss-ar-fill ${o.fillClass || ''}"></span>` : '';
+    return `<div class="btn-group btn-group-sm">
+      <button type="button" class="btn btn-sm ${cur > 0 ? 'btn-primary ss-ar-btn' : 'btn-dark'} dropdown-toggle text-center"
+              style="min-width:6rem" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+              title="${escAttr(t('auto_refresh'))}">
+        ${fill}<span class="ss-ar-lbl"><i class="bi bi-arrow-repeat me-1"></i>${toggleLbl}</span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end p-1" style="font-size:.8rem;min-width:12rem">${items}</ul>
+    </div>`;
+}
+
+// Apply a free-form interval typed in an auto-refresh dropdown.
+function _applyAutoCustom(id, setFn) {
+    const el = document.getElementById(id + '-auto-custom');
+    if (!el) return;
+    const v = parseInt(el.value, 10);
+    if (!Number.isFinite(v) || v < 1) return;
+    const fn = window[setFn];
+    if (typeof fn === 'function') fn(Math.min(3600, Math.max(1, v)));
+}
+
+function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '', arOpts = {}) {
     let h = `<div class="d-flex flex-wrap align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border" style="background:var(--bs-secondary-bg)">`;
     h += `<button class="btn btn-sm btn-secondary" onclick="${renderFn}()" title="${escAttr(t('refresh_tt'))}">`;
     h += `<i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`;
-    h += `<div class="btn-group btn-group-sm" role="group">`;
-    h += `<span class="btn btn-sm btn-secondary disabled px-2">`;
-    h += `<i class="bi bi-clock me-1"></i>${t('auto_refresh')}</span>`;
-    for (const s of intervals) {
-        const label = s === 0 ? 'OFF' : tf('auto_refresh_seconds', s);
-        const activeInterval = timerGet()?._interval || 0;
-        const active = (s === 0 && !timerGet()) || (s > 0 && activeInterval === s);
-        h += `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}" `;
-        h += `onclick="${timerSet}(${s})">${label}</button>`;
-    }
-    h += `</div>`;
+    h += _autoRefreshControl({ interval: timerGet()?._interval || 0, setFn: timerSet, ...arOpts });
     if (extraBtns) h += extraBtns;
     h += `</div>`;
     return h;
@@ -126,6 +189,7 @@ async function renderOverview() {
         return;
     }
     _lastOverviewData = data;
+    await _loadSchedulerState();   // for the auto-refresh "Auto" option
 
     const perms   = new Set(currentUser.permissions || []);
     const isAdmin = currentUser.role === 'admin';
@@ -141,20 +205,17 @@ async function renderOverview() {
     const kioskBtn = `
         <button class="btn btn-sm btn-secondary${_canEditLayout ? '' : ' ms-auto'}" onclick="_dwToggleKiosk()" title="${escAttr(t('dashboard_fullscreen_tt'))}">
             <i class="bi bi-arrows-fullscreen me-1"></i>${t('dashboard_fullscreen')}</button>`;
-    // Inline countdown pill (same amber chip as the Status tab), shown in the
-    // toolbar in normal mode. In kiosk the toolbar is hidden, so the centered
-    // #ov-refresh-bar (below) takes over instead.
+    // The auto-refresh countdown now lives inside the dropdown button (rendered
+    // by _renderRefreshBar). The kiosk centred bar below reuses the same
+    // .ov-rc-* classes so _startOverviewCountdown animates both at once.
     const _ovInt = _overviewTimer?._interval || 0;
-    const ovPill = _ovInt > 0 ? `<span class="st-rc-pill ms-3" title="${escAttr(t('status_refreshing_in'))} ${_ovInt}${t('status_seconds_abbr')}">
-        <span class="st-rc-fill ov-rc-fill" style="width:100%"></span>
-        <span class="st-rc-txt"><i class="bi bi-arrow-clockwise me-1"></i><span class="ov-rc-count">${_ovInt}</span>${t('status_seconds_abbr')}</span>
-    </span>` : '';
-    const ctrlBtns = ovPill + editBtns + kioskBtn;
+    const ctrlBtns = editBtns + kioskBtn;
 
     // Controls bar (hidden in kiosk mode) wraps the refresh/edit/fullscreen buttons.
     let h = `<div id="overview-controls">`;
     h += _renderRefreshBar('overview-container', 'renderOverview',
-        () => _overviewTimer, 'setOverviewAutoRefresh', ctrlBtns);
+        () => _overviewTimer, 'setOverviewAutoRefresh', ctrlBtns,
+        { id: 'ov', countClass: 'ov-rc-count', fillClass: 'ov-rc-fill' });
     h += `</div>`;
 
     // Add-widget bar (shown only in edit mode)

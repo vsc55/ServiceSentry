@@ -47,6 +47,7 @@ async function itemAction(btn) {
     const result    = btn.dataset.actionResult || 'toast';
     const resultId  = btn.dataset.actionResultId;
     const resultFld = btn.dataset.actionResultField || '';
+    const resultMulti = btn.dataset.actionResultMulti === 'true';
 
     const parts    = pathStr.split('|');
     const _itemKey = parts.length > 0 ? parts[parts.length - 1] : '';
@@ -108,7 +109,7 @@ async function itemAction(btn) {
             const _tm = _fieldTermFor(resultFld, _m, pathStr + '|' + resultFld, 'modules');
             _pkTitle = (_tm && _tm.pick) || btn.title || resultFld;
         }
-        openFieldPickerModal(pathStr + '|' + resultFld, items, _pkTitle);
+        openFieldPickerModal(pathStr + '|' + resultFld, items, _pkTitle, undefined, undefined, resultMulti);
     } else if (result === 'modal') {
         // On success show a modal with everything the endpoint returned
         // (res.data.info: object or [[k,v],…]); on failure fall back to a toast.

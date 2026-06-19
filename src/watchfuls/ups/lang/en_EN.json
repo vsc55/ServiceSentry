@@ -1,6 +1,11 @@
 {
     "pretty_name": "UPS Monitor (NUT)",
     "module_description": "Monitors UPS (Uninterruptible Power Supply) status via NUT (Network UPS Tools). Alerts on power failures, low battery, and abnormal UPS states.",
+    "history": {
+        "battery_charge": "Battery charge",
+        "runtime": "Runtime",
+        "load": "Load"
+    },
     "labels": {
         "enabled":  "Enabled",
         "threads":  "Threads",
@@ -10,10 +15,10 @@
         "ups_name": "UPS name",
         "user":     "Username",
         "password": "Password",
-        "alert_on_battery": "Alert on battery",
-        "alert_battery":    "Battery alert (%)",
-        "alert_runtime":    "Runtime alert (min)",
-        "alert_load":       "Load alert (%)"
+        "alert_on_battery": "On battery",
+        "alert_battery":    "Battery (%)",
+        "alert_runtime":    "Runtime (min)",
+        "alert_load":       "Load (%)"
     },
     "hints": {
         "enabled":  "Enable or disable UPS monitoring for this entry.",
@@ -25,9 +30,14 @@
         "user":     "Username for NUT authentication. Leave empty for unauthenticated access (status reads need no auth).",
         "password": "Password for NUT authentication.",
         "alert_on_battery": "Raise an alert when the UPS switches to battery power (status OB).",
-        "alert_battery":    "Alert when the battery charge drops below this percentage (0 = disabled).",
-        "alert_runtime":    "Alert when the estimated runtime drops below this many minutes (0 = disabled).",
-        "alert_load":       "Alert when the UPS load rises above this percentage (0 = disabled)."
+        "alert_battery":    "Alert when the battery drops below this percentage. Per-item value overrides the global; blank uses the global (0 at module level = disabled).",
+        "alert_runtime":    "Alert when the estimated runtime drops below this many minutes. Per-item value overrides the global; blank uses the global (0 at module level = disabled).",
+        "alert_load":       "Alert when the UPS load rises above this percentage. Per-item value overrides the global; blank uses the global (0 at module level = disabled)."
+    },
+    "group_labels": {
+        "connection": "Connection",
+        "auth":       "Authentication",
+        "alerts":     "Alerts"
     },
     "new_item_key_label": "UPS name or identifier:",
     "rename_item_prompt": "Enter new UPS name or identifier:",

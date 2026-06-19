@@ -5,8 +5,8 @@
         "enabled":      "Enabled",
         "threads":      "Threads",
         "label":        "Label",
-        "db_type":      "Database type",
-        "conn_type":    "Connection type",
+        "db_type":      "Database",
+        "conn_type":    "Type",
         "host":         "Host",
         "port":         "Port",
         "user":         "User",
@@ -24,19 +24,27 @@
         "scheme":       "Scheme",
         "auth_db":      "Auth database",
         "db_index":     "Database index",
-        "tls":          "TLS / SSL"
+        "tls":          "TLS / SSL",
+        "alert_connections": "Max connections"
+    },
+    "history": {
+        "connections": "Connections",
+        "uptime":      "Uptime",
+        "memory":      "Memory",
+        "queries":     "Queries"
     },
     "hints": {
+        "alert_connections": "Warn when the server's active connection count exceeds this value (0 = disabled). Only engines that expose it: MySQL/MariaDB, PostgreSQL, MSSQL, MongoDB, Redis/Valkey, Memcached.",
         "threads":      "Number of entries to check in parallel.",
         "label":        "Optional display name shown in notifications and the dashboard instead of the item key.",
         "db_type":      "Database engine to connect to.",
         "conn_type":    "How to reach the server: TCP direct connection, Unix socket file, or TCP tunnelled over SSH.",
-        "host":         "IP address or hostname of the server. Used for TCP and SSH tunnel modes.",
+        "host":         "IP address or hostname of the database server. Used for TCP and SSH tunnel modes. When the check is bound to a host it stays editable on purpose: over an SSH tunnel the database often lives on a different machine reachable only from that host (e.g. 127.0.0.1 or an internal Docker/private address). Leave it empty to fall back to the bound host's address.",
         "port":         "TCP port the server is listening on. Use 0 to apply the engine default (MySQL/MariaDB: 3306, PostgreSQL: 5432, MSSQL: 1433, MongoDB: 27017, Redis/Valkey: 6379, Elasticsearch/OpenSearch: 9200, InfluxDB: 8086, Memcached: 11211).",
         "user":         "Username for authentication.",
         "password":     "Password for authentication.",
         "token":        "InfluxDB 2.x API token. Takes precedence over user/password when set.",
-        "db":           "Database or bucket name. For Elasticsearch/OpenSearch/InfluxDB this is used as a filter in the picker.",
+        "db":           "Database / bucket / index name. You can list several (comma-separated) — the picker lets you select multiple — and the check then verifies that every one of them exists on the server. For Elasticsearch/OpenSearch/InfluxDB the picker filters indices/buckets.",
         "socket":       "Full path to the Unix domain socket file. Used only in socket mode.",
         "ssh_host":     "Hostname or IP of the SSH jump server.",
         "ssh_port":     "SSH port on the jump server (default 22).",
@@ -74,7 +82,8 @@
     "group_labels": {
         "connection": "Connection",
         "ssh":        "SSH Tunnel",
-        "server":     "Server"
+        "server":     "Server",
+        "alerts":     "Alerts"
     },
     "action_labels": {
         "test_ssh":            "Test SSH",
