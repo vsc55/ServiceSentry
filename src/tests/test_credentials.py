@@ -307,7 +307,7 @@ class TestApiCredentials:
             'k1': {'enabled': True, 'url': 'http://x', 'cred_uid': uid,
                    'auth_user': 'inlineuser', 'auth_password': 'inlinepw'}}}})
         assert r.status_code == 200
-        item = next(iter(admin._read_config_file(admin._MODULES_FILE)['web']['list'].values()))
+        item = next(iter(admin._load_modules()['web']['list'].values()))
         assert item.get('cred_uid') == uid
         assert 'auth_user' not in item and 'auth_password' not in item
 

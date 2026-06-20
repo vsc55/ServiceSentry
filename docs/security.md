@@ -379,7 +379,7 @@ Los tests de regresión de seguridad están centralizados en `src/tests/test_sec
 
 ## Cifrado de Credenciales en Disco
 
-Los campos sensibles almacenados en `modules.json` y `config.json` se cifran en reposo usando **Fernet** (AES-128-CBC + HMAC-SHA256) de la librería `cryptography`.
+Los campos sensibles se cifran en reposo usando **Fernet** (AES-128-CBC + HMAC-SHA256) de la librería `cryptography`. Los secretos de la configuración de módulos se cifran dentro de la base de datos (tablas `module_config` / `module_config_items`), mientras que los secretos de `config.json` siguen cifrados en el propio fichero.
 
 ### Campos cifrados
 
@@ -421,9 +421,9 @@ La clave Fernet se deriva del propio archivo `.flask_secret` (el mismo secreto q
 
 No existe un archivo de clave separado. Si `.flask_secret` se borra o cambia, **los valores cifrados existentes ya no podrán descifrarse** (mismo efecto que rotar la secret key: también invalida las sesiones).
 
-### Formato en disco
+### Formato de los valores cifrados
 
-Los valores cifrados se almacenan con el prefijo `enc:` seguido del token Fernet en base64:
+Los valores cifrados se almacenan con el prefijo `enc:` seguido del token Fernet en base64. El mismo formato se usa tanto en `config.json` (en disco) como en el JSON de la configuración de módulos (ahora en la BD, tablas `module_config` / `module_config_items`):
 
 ```json
 {
@@ -441,13 +441,13 @@ Los valores cifrados se almacenan con el prefijo `enc:` seguido del token Fernet
 }
 ```
 
-Los valores sin el prefijo `enc:` (ficheros escritos antes de activar el cifrado) se cargan tal cual — **no se requiere migración**. El cifrado se aplica automáticamente la próxima vez que se guarda desde el panel web.
+Arriba, el bloque `mysql.list…` es la forma lógica de la configuración de módulos (almacenada en la tabla `module_config_items`), mientras que `telegram.token` vive en `config.json`. Los valores sin el prefijo `enc:` (escritos antes de activar el cifrado) se cargan tal cual — **no se requiere migración**. El cifrado se aplica automáticamente la próxima vez que se guarda.
 
 ### Transparencia en tiempo de ejecución
 
 - `WebAdmin._read_config_file` descifra los valores **antes** de enviarlos al navegador.
 - `WebAdmin._save_config_file` cifra los campos sensibles **antes** de escribir a disco.
-- `Monitor._read_config` descifra `modules.json` y `config.json` al arrancar.
+- El monitor descifra la configuración de módulos que carga desde la base de datos (`DbBackedModules.read`) y descifra `config.json` al arrancar.
 - El resto del código siempre trabaja con texto en claro en memoria.
 
 ### Degradación elegante
@@ -635,7 +635,7 @@ Todos los eventos relevantes para la seguridad quedan registrados en la tabla `a
 | `login_ok` | Login exitoso (local, LDAP, OIDC o SAML2). Los logins externos incluyen `detail.auth_source`. |
 | `login_failed` | Credenciales inválidas, usuario inexistente, cuenta desactivada/bloqueada o error LDAP/SAML2. `detail.reason` almacena la clave i18n: `invalid_credentials`, `user_not_found`, `account_disabled`, `account_locked`, `ldap_invalid_credentials`, `ldap_user_not_found`, `ldap_connection_error`, `saml2_error`, `saml2_not_authenticated`. |
 | `logout` | Cierre de sesión |
-| `modules_saved` | Guardado de `modules.json` (con diff de campos) |
+| `modules_saved` | Guardado de la configuración de módulos (en la BD, con diff de campos) |
 | `config_saved` | Guardado de `config.json` (con diff de campos) |
 | `user_created` | Creación de usuario |
 | `user_updated` | Modificación de usuario (con old/new por campo) |

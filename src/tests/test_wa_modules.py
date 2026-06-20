@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests for module routes: /api/modules, /api/status, /api/overview."""
 
-import json
 import os
 
 import pytest
@@ -16,7 +15,7 @@ except ImportError:
 from lib.modules import ModuleBase
 from watchfuls.web import Watchful as WebWatchful
 
-from tests.conftest import _login
+from tests.conftest import _login, _SAMPLE_MODULES
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
@@ -43,16 +42,15 @@ class TestApiModules:
         assert data["ping"]["enabled"] is True
         assert data["ping"]["threads"] == 5
 
-    def test_put_saves_data(self, client, config_dir):
+    def test_put_saves_data(self, client):
         _login(client)
         new = {"ping": {"enabled": False, "timeout": 10}}
         resp = client.put("/api/v1/modules", json=new)
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
 
-        # Verify the saved file
-        with open(f"{config_dir}/modules.json", encoding="utf-8") as f:
-            saved = json.load(f)
+        # Verify it persisted (DB-backed module store)
+        saved = client.get("/api/v1/modules").get_json()
         assert saved["ping"]["enabled"] is False
         assert saved["ping"]["timeout"] == 10
 
@@ -306,6 +304,7 @@ class TestApiOverview:
         var = tmp_path / "var2"
         var.mkdir()
         wa = WebAdmin(config_dir, "admin", "pass", var_dir=str(var))
+        wa._save_modules(_SAMPLE_MODULES)
         wa._check_state_store.persist_status({
             "ping": {
                 "192.168.1.1": {"status": False},
@@ -497,7 +496,7 @@ class TestConfigEdgeCases:
     """Edge cases around missing or empty config files."""
 
     def test_get_modules_empty_dir(self, tmp_path):
-        """Config dir exists but modules.json does not."""
+        """Config dir exists but the module store is empty."""
         wa = WebAdmin(str(tmp_path), "a", "b")
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
@@ -506,15 +505,15 @@ class TestConfigEdgeCases:
         assert resp.status_code == 200
         assert resp.get_json() == {}
 
-    def test_save_creates_file(self, tmp_path):
-        """Saving to a non-existent file creates it."""
+    def test_save_persists(self, tmp_path):
+        """Saving persists to the DB-backed store."""
         wa = WebAdmin(str(tmp_path), "a", "b")
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "a", "password": "b"})
         resp = c.put("/api/v1/modules", json={"test": {"enabled": True}})
         assert resp.status_code == 200
-        assert (tmp_path / "modules.json").exists()
+        assert c.get("/api/v1/modules").get_json() == {"test": {"enabled": True}}
 
 
 class TestRekeyItemsByUid:

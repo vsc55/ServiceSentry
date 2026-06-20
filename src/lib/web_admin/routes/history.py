@@ -111,10 +111,10 @@ def register(app, wa):
             return jsonify([])
         lang  = session.get('lang') or wa._default_lang or DEFAULT_LANG
         index = wa._history.get_index()
-        modules_cfg = wa._read_config_file(wa._MODULES_FILE) or {}
+        modules_cfg = wa._load_modules()
 
         def _check_label(mod: str, key: str, item_uid: str) -> str:
-            """The item's display 'label' from modules.json — the series key may
+            """The item's display 'label' from the module configuration — the series key may
             be an opaque UID, so show the friendly name instead."""
             for mk in (mod, f'watchfuls.{mod}', mod.split('.')[-1]):
                 mc = modules_cfg.get(mk)
@@ -140,7 +140,7 @@ def register(app, wa):
             entry['pretty_name']  = _name_cache[mod]
             entry['history_cfg']  = _history_cache[mod]  # {field, unit, label, fields}
             # Friendly label priority:
-            #  1. the item's editable 'label' in modules.json (matched by key/uid)
+            #  1. the item's editable 'label' in the module configuration (matched by key/uid)
             #  2. the display 'name' the module stored in the record's other_data
             #     (covers derived result keys like "<uid>_ram"/"_swap" that are not
             #     a real item key, so step 1 can't find them)

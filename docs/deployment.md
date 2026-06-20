@@ -58,15 +58,16 @@ arranca por primera vez, se crean automáticamente con valores predeterminados:
 
 | Fichero | Creado por | Contenido |
 | ------- | ---------- | --------- |
-| `config.json` | Daemon de monitorización en el primer arranque | Configuración mínima (debug desactivado, intervalo 300 s) |
-| `modules.json` | Daemon de monitorización en el primer arranque | `{}` vacío — todos los módulos habilitados pero sin objetivos |
-| `data.db` | Panel web en el primer inicio | Base de datos (SQLite) con la cuenta `admin` y contraseña predeterminada |
+| `config.json` | Daemon de monitorización en el primer arranque | Configuración mínima (debug desactivado, intervalo 300 s) — único fichero que se crea en disco |
+| `data.db` | Panel web / daemon en el primer inicio | Base de datos (SQLite) con la cuenta `admin` y contraseña predeterminada **y** la configuración de módulos/ítems (tablas `module_config`/`module_config_items`); las tablas se crean automáticamente |
 
-> **Persistencia:** usuarios, roles, grupos, sesiones, auditoría e historial se
-> almacenan en **`data.db`** (SQLite) dentro del directorio var
-> (`/var/lib/ServiSesentry/` en Linux). El esquema se crea y reconcilia
-> automáticamente. Opcionalmente puede usarse PostgreSQL o MySQL configurando la
-> sección `database` de `config.json` (ver [configuration.md](configuration.md)).
+> **Persistencia:** usuarios, roles, grupos, sesiones, auditoría, historial **y la
+> configuración de módulos/ítems** (tablas `module_config`/`module_config_items`) se
+> almacenan en **`data.db`** (SQLite) dentro del
+> directorio var (`/var/lib/ServiSesentry/` en Linux). El esquema se crea y
+> reconcilia automáticamente. Opcionalmente puede usarse PostgreSQL o MySQL
+> configurando la sección `database` de `config.json` (ver
+> [configuration.md](configuration.md)).
 
 Tras el primer arranque puedes abrir el panel web para configurar las alertas de
 Telegram, añadir objetivos de monitorización y cambiar la contraseña de administrador.
@@ -74,22 +75,22 @@ Telegram, añadir objetivos de monitorización y cambiar la contraseña de admin
 ### Instalación preconfigurada
 
 Si quieres que la instalación llegue con una configuración específica ya
-establecida — por ejemplo en un despliegue automatizado o por script — coloca tus
-ficheros `config.json` y/o `modules.json` en el directorio `data/`
-antes de ejecutar `install.sh`:
+establecida — por ejemplo en un despliegue automatizado o por script — coloca tu
+fichero `config.json` en el directorio `data/` antes de ejecutar `install.sh`:
 
 ```text
 data/
-├── config.json      # configuración global, token de Telegram, opciones del panel web
-└── modules.json     # módulos habilitados y sus objetivos
+└── config.json      # configuración global, token de Telegram, opciones del panel web
 ```
 
 `install.sh` copiará los ficheros `data/*.json` que encuentre allí a
-`/etc/ServiSesentry/`. Los ficheros que no estén en `data/` se omiten — la
-aplicación los genera en el primer arranque tal como se describe más arriba.
-Los usuarios, roles, grupos, sesiones, auditoría, historial y estado de las
-comprobaciones **no** son ficheros: viven en la base de datos (`data.db`), que se
-crea automáticamente en el directorio var en el primer inicio del panel web.
+`/etc/ServiSesentry/`. `config.json` es el único fichero que se siembra: si no
+está, la aplicación lo genera en el primer arranque tal como se describe más
+arriba. La configuración de módulos/ítems vive en la base de datos
+(`data.db`, tablas `module_config`/`module_config_items`), que se crea automáticamente;
+se configura desde el panel web. Los usuarios, roles, grupos, sesiones,
+auditoría, historial y estado de las comprobaciones tampoco son ficheros: viven
+en `data.db`, que se crea automáticamente en el directorio var en el primer inicio.
 
 > **Nota:** `data/*.json` está en `.gitignore` porque esos ficheros suelen contener
 > credenciales (token de Telegram, secretos de módulos cifrados). No los subas nunca a

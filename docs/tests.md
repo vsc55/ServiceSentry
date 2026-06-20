@@ -383,8 +383,8 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_discovers_multiple_package_modules` | Varias carpetas con `__init__.py` | Todos en la lista | Si falta alguno |
 | `test_ignores_dir_without_init` | Carpeta sin `__init__.py` | No aparece en la lista | Si aparece |
 | `test_ignores_dunder_dirs` | Directorio `__pycache__` con `__init__.py` | No aparece en la lista | Si aparece |
-| `test_respects_enabled_false_in_config` | `modules.json` marca módulo como `enabled: false` | Módulo excluido | Si se incluye |
-| `test_respects_enabled_true_in_config` | `modules.json` marca módulo como `enabled: true` | Módulo incluido | Si se excluye |
+| `test_respects_enabled_false_in_config` | La configuración de módulos marca módulo como `enabled: false` | Módulo excluido | Si se incluye |
+| `test_respects_enabled_true_in_config` | La configuración de módulos marca módulo como `enabled: true` | Módulo incluido | Si se excluye |
 | `test_flat_py_files_are_not_discovered` | Archivo `.py` suelto en el directorio | No aparece (formato legacy no soportado) | Si aparece |
 
 ### `TestCheckModule` — Ejecución de un módulo
@@ -631,7 +631,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_get_status_requires_auth` | Sin login | `302` | Si devuelve datos |
 | `test_get_status_returns_dict` | `GET /api/status` | Dict JSON con el estado | Si es otro tipo |
 | `test_modules_list` | Lista de módulos en el estado | Los módulos esperados presentes | Si están ausentes |
-| `test_modules_enabled_flag` | Flag `enabled` por módulo | Valor correcto según `modules.json` | Si difiere |
+| `test_modules_enabled_flag` | Flag `enabled` por módulo | Valor correcto según la configuración de módulos | Si difiere |
 | `test_modules_items_count` | Número de ítems por módulo | Conteo correcto | Si difiere |
 
 ### `TestApiOverview`
@@ -1108,7 +1108,7 @@ Verifica que todos los endpoints JSON del web admin se comportan correctamente a
 | `test_null_bytes_in_values` | Bytes nulos (`\x00`) en valores → 201 o 400 |
 | `test_unicode_abuse` | RTL override, emoji, cadenas largas → 201, 400 o 409 |
 
-> **`conftest.py` (tests/):** La fixture `admin` crea una instancia `WebAdmin` con credenciales `admin`/`secret` (los usuarios se guardan en la BD) y siembra en la tabla `check_state` el estado de ejemplo que esperan los tests (`ping/192.168.1.1` OK). La fixture `config_dir` escribe `config.json` y `modules.json` de prueba en un directorio temporal.
+> **`conftest.py` (tests/):** La fixture `admin` crea una instancia `WebAdmin` con credenciales `admin`/`secret` (los usuarios se guardan en la BD), siembra la configuración de módulos de ejemplo (`_SAMPLE_MODULES`) en el store de BD vía `_save_modules()`, y siembra en la tabla `check_state` el estado de ejemplo que esperan los tests (`ping/192.168.1.1` OK). La fixture `config_dir` escribe solo un `config.json` de prueba en un directorio temporal.
 
 ---
 

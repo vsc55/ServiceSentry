@@ -55,6 +55,10 @@ _GROUPS_ROLES_SCHEMA = TableSpec(
     unique_constraints=(('group_uid', 'role_uid'),),
 )
 
+# Table names — single source of truth.
+_T_GROUPS = _GROUPS_SCHEMA.name
+_T_GROUPS_ROLES = _GROUPS_ROLES_SCHEMA.name
+
 
 def _now() -> str:
     return _time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime())
@@ -75,7 +79,7 @@ class GroupsStore:
         db.reconcile_table(_GROUPS_ROLES_SCHEMA)
         # Backfill empty audit columns for existing rows.
         db.execute(
-            "UPDATE groups SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
+            f"UPDATE {_T_GROUPS} SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
             (_now(), _now(), 'system'),
         )
         db.commit()
@@ -88,7 +92,7 @@ class GroupsStore:
         groups: dict = {}
         for row in self._db.fetchall(
             'SELECT uid, name, description, enabled, created_at, updated_at, updated_by '
-            'FROM groups'
+            f'FROM {_T_GROUPS}'
         ):
             uid, name, desc, enabled, created_at, updated_at, updated_by = row
             groups[uid] = {
@@ -103,7 +107,7 @@ class GroupsStore:
             }
         for row in self._db.fetchall(
             'SELECT uid, group_uid, role_uid, created_at, created_by '
-            'FROM groups_roles ORDER BY group_uid, role_uid'
+            f'FROM {_T_GROUPS_ROLES} ORDER BY group_uid, role_uid'
         ):
             _, grp_uid, role_uid, r_created_at, r_created_by = row
             if grp_uid in groups:
@@ -115,7 +119,7 @@ class GroupsStore:
         return groups
 
     def count(self) -> int:
-        row = self._db.fetchone('SELECT COUNT(*) FROM groups')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T_GROUPS}')
         return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
@@ -127,22 +131,22 @@ class GroupsStore:
             with self._db.transaction():
                 existing_created = {
                     r[0]: r[1]
-                    for r in self._db.fetchall('SELECT uid, created_at FROM groups')
+                    for r in self._db.fetchall(f'SELECT uid, created_at FROM {_T_GROUPS}')
                 }
                 existing_role_ts = {
                     (r[0], r[1]): {'uid': r[2], 'created_at': r[3], 'created_by': r[4]}
                     for r in self._db.fetchall(
-                        'SELECT group_uid, role_uid, uid, created_at, created_by FROM groups_roles'
+                        f'SELECT group_uid, role_uid, uid, created_at, created_by FROM {_T_GROUPS_ROLES}'
                     )
                 }
-                self._db.execute('DELETE FROM groups_roles')
-                self._db.execute('DELETE FROM groups')
+                self._db.execute(f'DELETE FROM {_T_GROUPS_ROLES}')
+                self._db.execute(f'DELETE FROM {_T_GROUPS}')
                 for uid, d in groups.items():
                     created_at = existing_created.get(uid) or d.get('created_at') or now
                     updated_at = d.get('updated_at') or now
                     updated_by = d.get('updated_by') if d.get('updated_by') is not None else ''
                     self._db.execute(
-                        'INSERT INTO groups(uid,name,description,enabled,'
+                        f'INSERT INTO {_T_GROUPS}(uid,name,description,enabled,'
                         'created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?)',
                         (uid, d.get('name', uid), d.get('description', ''),
                          1 if d.get('enabled', True) else 0,
@@ -153,7 +157,7 @@ class GroupsStore:
                             continue
                         existing = existing_role_ts.get((uid, role_uid), {})
                         self._db.execute(
-                            'INSERT INTO groups_roles(uid,group_uid,role_uid,created_at,created_by)'
+                            f'INSERT INTO {_T_GROUPS_ROLES}(uid,group_uid,role_uid,created_at,created_by)'
                             ' VALUES(?,?,?,?,?)',
                             (existing.get('uid') or str(_uuid_mod.uuid4()), uid, str(role_uid),
                              existing.get('created_at') or now,
@@ -168,14 +172,14 @@ class GroupsStore:
         now = _now()
         try:
             with self._db.transaction():
-                row = self._db.fetchone('SELECT created_at FROM groups WHERE uid = ?', (uid,))
+                row = self._db.fetchone(f'SELECT created_at FROM {_T_GROUPS} WHERE uid = ?', (uid,))
                 created_at = (row[0] if row else None) or data.get('created_at') or now
                 updated_at = data.get('updated_at') or now
                 updated_by = data.get('updated_by') if data.get('updated_by') is not None else ''
                 # Portable upsert: delete-then-insert the group row.
-                self._db.execute('DELETE FROM groups WHERE uid = ?', (uid,))
+                self._db.execute(f'DELETE FROM {_T_GROUPS} WHERE uid = ?', (uid,))
                 self._db.execute(
-                    'INSERT INTO groups(uid,name,description,enabled,'
+                    f'INSERT INTO {_T_GROUPS}(uid,name,description,enabled,'
                     'created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?)',
                     (uid, data.get('name', uid), data.get('description', ''),
                      1 if data.get('enabled', True) else 0,
@@ -185,17 +189,17 @@ class GroupsStore:
                     r[0]: {'row_uid': r[1], 'created_at': r[2], 'created_by': r[3]}
                     for r in self._db.fetchall(
                         'SELECT role_uid, uid, created_at, created_by '
-                        'FROM groups_roles WHERE group_uid=?', (uid,)
+                        f'FROM {_T_GROUPS_ROLES} WHERE group_uid=?', (uid,)
                     )
                 }
                 new_roles = {str(r) for r in data.get('roles', []) if r}
                 for role_uid in set(existing_roles) - new_roles:
                     self._db.execute(
-                        'DELETE FROM groups_roles WHERE group_uid=? AND role_uid=?', (uid, role_uid)
+                        f'DELETE FROM {_T_GROUPS_ROLES} WHERE group_uid=? AND role_uid=?', (uid, role_uid)
                     )
                 for role_uid in new_roles - set(existing_roles):
                     self._db.execute(
-                        'INSERT INTO groups_roles(uid,group_uid,role_uid,created_at,created_by)'
+                        f'INSERT INTO {_T_GROUPS_ROLES}(uid,group_uid,role_uid,created_at,created_by)'
                         ' VALUES(?,?,?,?,?)',
                         (str(_uuid_mod.uuid4()), uid, role_uid, now, updated_by),
                     )
@@ -207,8 +211,8 @@ class GroupsStore:
         """Delete a group and its role assignments."""
         try:
             with self._db.transaction():
-                self._db.execute('DELETE FROM groups_roles WHERE group_uid = ?', (uid,))
-                deleted = self._db.execute('DELETE FROM groups WHERE uid = ?', (uid,))
+                self._db.execute(f'DELETE FROM {_T_GROUPS_ROLES} WHERE group_uid = ?', (uid,))
+                deleted = self._db.execute(f'DELETE FROM {_T_GROUPS} WHERE uid = ?', (uid,))
             return deleted > 0
         except Exception:  # pylint: disable=broad-except
             return False

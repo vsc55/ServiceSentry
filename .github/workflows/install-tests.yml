@@ -117,12 +117,13 @@ jobs:
             || fail "monitoring daemon exited with non-zero status"
           echo "OK: monitoring daemon single check passed"
 
-      - name: Verify first-run config files were created
+      - name: Verify first-run config + database were created
         run: |
           fail() { echo "FAIL: $1"; exit 1; }
-          test -f /etc/ServiSesentry/config.json  || fail "config.json not created on first run"
-          test -f /etc/ServiSesentry/modules.json || fail "modules.json not created on first run"
-          echo "OK: first-run config files verified"
+          test -f /etc/ServiSesentry/config.json || fail "config.json not created on first run"
+          # Module/item config (and users/roles/…/history) now live in the DB.
+          test -f /var/lib/ServiSesentry/data.db || fail "data.db not created on first run"
+          echo "OK: first-run config + database verified"
 
       - name: Test web service startup
         run: |

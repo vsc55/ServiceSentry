@@ -12,7 +12,7 @@ def test_index_label_from_item_label(client, admin):
     if admin._history is None:
         return  # history store unavailable in this environment
     # Find ping's "Router" item by its (possibly migration-rekeyed) UID key.
-    mods = admin._read_config_file(admin._MODULES_FILE) or {}
+    mods = admin._load_modules()
     ping_items = (mods.get('ping') or {}).get('list') or {}
     key = next(k for k, v in ping_items.items()
                if isinstance(v, dict) and v.get('label') == 'Router')

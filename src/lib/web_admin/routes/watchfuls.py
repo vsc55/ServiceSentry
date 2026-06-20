@@ -49,7 +49,7 @@ def _resolve_host_ctx(wa, config):
 
 def _restore_action_secrets(wa, module, config):
     """Restore masked (null/'') secret fields in an action's *config* from the
-    stored modules.json item (matched by the injected ``_item_key``), so a web
+    stored module-config item (matched by the injected ``_item_key``), so a web
     action (e.g. datastore test_connection / list_databases) run AFTER a reload
     uses the real stored secret instead of the masked placeholder."""
     key = str(config.get('_item_key') or '').strip()
@@ -57,7 +57,7 @@ def _restore_action_secrets(wa, module, config):
         return
     try:
         from lib import secret_manager  # noqa: PLC0415
-        modules = wa._read_config_file(wa._MODULES_FILE) or {}
+        modules = wa._load_modules()
     except Exception:  # pylint: disable=broad-except
         return
     for mk in (module, f'watchfuls.{module}'):

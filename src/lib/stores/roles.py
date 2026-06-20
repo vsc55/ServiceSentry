@@ -37,6 +37,8 @@ _SCHEMA = TableSpec(
     indexes=(Index('idx_roles_name', ('name',), unique=True),),
 )
 
+_T = _SCHEMA.name  # table name — single source of truth
+
 
 class RolesStore:
     """Relational store for custom roles + built-in overrides (backend-agnostic)."""
@@ -54,7 +56,7 @@ class RolesStore:
         import time as _t  # noqa: PLC0415
         _now = _t.strftime('%Y-%m-%dT%H:%M:%SZ', _t.gmtime())
         db.execute(
-            "UPDATE roles SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
+            f"UPDATE {_T} SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
             (_now, _now, 'system'),
         )
         db.commit()
@@ -66,7 +68,7 @@ class RolesStore:
         enabled, created_at, updated_at, updated_by}}``."""
         rows = self._db.fetchall(
             'SELECT uid, name, description, permissions, enabled, '
-            'created_at, updated_at, updated_by FROM roles'
+            f'created_at, updated_at, updated_by FROM {_T}'
         )
         result = {}
         for r in rows:
@@ -88,7 +90,7 @@ class RolesStore:
 
     def count(self) -> int:
         """Return the number of rows in the roles table."""
-        row = self._db.fetchone('SELECT COUNT(*) FROM roles')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
         return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
@@ -102,10 +104,10 @@ class RolesStore:
         """
         try:
             with self._db.transaction():
-                self._db.execute('DELETE FROM roles')
+                self._db.execute(f'DELETE FROM {_T}')
                 for uid, d in roles.items():
                     self._db.execute(
-                        'INSERT INTO roles(uid, name, description, permissions, enabled,'
+                        f'INSERT INTO {_T}(uid, name, description, permissions, enabled,'
                         ' created_at, updated_at, updated_by) VALUES(?,?,?,?,?,?,?,?)',
                         (uid, d.get('name', uid),
                          d.get('description', ''),
@@ -123,7 +125,7 @@ class RolesStore:
         """Delete a role row by UID.  Returns True if found."""
         try:
             with self._db.transaction():
-                deleted = self._db.execute('DELETE FROM roles WHERE uid = ?', (uid,))
+                deleted = self._db.execute(f'DELETE FROM {_T} WHERE uid = ?', (uid,))
             return deleted > 0
         except Exception:  # pylint: disable=broad-except
             return False

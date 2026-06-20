@@ -276,15 +276,39 @@ global**. Se edita en **Configuration > Modules** del panel web.
 
 ---
 
-## modules.json
+## Configuración de módulos (en base de datos)
 
-Configuración por módulo. Cada clave de primer nivel debe coincidir con el nombre de la carpeta del módulo en `watchfuls/`.
+Configuración por módulo. **Se persiste en la base de datos**, en dos tablas
+(ver [architecture.md](architecture.md)):
+
+Tabla `module_config`: una fila por módulo — los campos a nivel de módulo
+(`enabled`, `alert`, meta `__*__`) como JSON en la columna `data`.
+
+Tabla `module_config_items`: una fila por ítem — `host_uid`, `label` y `enabled`
+promovidos a columnas (para joins y búsquedas) y el resto del ítem como JSON en
+la columna `data`.
+
+La configuración de módulos solo vive en la BD (las tablas se crean y reconcilian
+automáticamente al arrancar); **el único fichero de configuración que queda en
+disco es `config.json`**.
+
+Los **secretos** siguen cifrados a nivel de valor con Fernet (`enc:…`), ahora
+dentro del JSON almacenado en las tablas: se descifran al leer y se vuelven a
+cifrar al guardar, igual que hacían los helpers de fichero.
+
+La estructura lógica que se edita en **Configuration > Modules** del panel web
+(y que devuelve la API) sigue siendo el árbol anidado por módulo, donde cada
+clave de primer nivel coincide con el nombre de la carpeta del módulo en
+`watchfuls/`:
 
 ```json
 {
     "nombre_modulo": {
         "enabled": true,
-        ...configuración específica del módulo...
+        ...configuración específica del módulo...,
+        "list": {
+            "uid-del-item": { "host_uid": "...", "label": "...", "enabled": true, ... }
+        }
     }
 }
 ```

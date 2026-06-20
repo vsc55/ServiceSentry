@@ -21,32 +21,37 @@ from watchfuls.web import Watchful as WebWatchful
 
 # ──────────────────────────── Fixtures ─────────────────────────────
 
+# Sample module/item configuration the tests expect. Seeded directly into the
+# DB-backed modules store by the ``admin`` fixture (module config lives in the
+# database).
+_SAMPLE_MODULES = {
+    "ping": {
+        "enabled": True,
+        "threads": 5,
+        "timeout": 5,
+        "attempt": 3,
+        "list": {
+            "192.168.1.1": {
+                "enabled": True,
+                "label": "Router",
+                "timeout": 5,
+            },
+            "192.168.1.2": False,
+        },
+    },
+    "web": {
+        "enabled": True,
+        "threads": 5,
+        "list": {
+            "www.example.com": True,
+        },
+    },
+}
+
+
 @pytest.fixture()
 def config_dir(tmp_path):
-    """Temporary config directory with sample modules.json and config.json."""
-    modules = {
-        "ping": {
-            "enabled": True,
-            "threads": 5,
-            "timeout": 5,
-            "attempt": 3,
-            "list": {
-                "192.168.1.1": {
-                    "enabled": True,
-                    "label": "Router",
-                    "timeout": 5,
-                },
-                "192.168.1.2": False,
-            },
-        },
-        "web": {
-            "enabled": True,
-            "threads": 5,
-            "list": {
-                "www.example.com": True,
-            },
-        },
-    }
+    """Temporary config directory with a sample config.json."""
     config = {
         "daemon": {"timer_check": 300},
         "global": {"log_level": "off"},
@@ -56,9 +61,6 @@ def config_dir(tmp_path):
             "group_messages": False,
         },
     }
-    (tmp_path / "modules.json").write_text(
-        json.dumps(modules, indent=4), encoding="utf-8"
-    )
     (tmp_path / "config.json").write_text(
         json.dumps(config, indent=4), encoding="utf-8"
     )
@@ -83,6 +85,8 @@ def admin(config_dir, var_dir):
     """WebAdmin instance with testing config (users are stored in the DB)."""
     wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                   pw_require_upper=False, pw_require_digit=False)
+    # Module config lives in the DB — seed the sample.
+    wa._save_modules(_SAMPLE_MODULES)
     # The working check state lives in the DB now (no status.json). Seed the
     # sample state the tests expect (ping/192.168.1.1 OK) into check_state.
     if getattr(wa, "_check_state_store", None):

@@ -58,9 +58,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin):
     """Web administration server for ServiceSentry configuration.
 
-    Provides a browser-based UI for editing ``modules.json`` and
-    ``config.json``, viewing ``status.json``, and managing users and
-    module settings without touching files directly.
+    Provides a browser-based UI for editing the configuration and managing
+    users and module settings without touching files directly.
     """
 
     DEFAULT_PORT = 8080
@@ -70,7 +69,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _SECRET_KEY_FILE = '.flask_secret'
     _SESSIONS_FILE = 'sessions.json'
     _CONFIG_FILE = CONFIG_FILENAME          # single source of truth (lib.config)
-    _MODULES_FILE = 'modules.json'
     _STATUS_FILE = 'status.json'
     # Defaults below come from the central registry (config_spec.CONFIG_FIELDS)
     # via _cfg_default(); editing a default means editing only that registry.
@@ -438,6 +436,17 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
+        # Watchful module/item configuration (DB-backed, shared with the monitor
+        # through the same database).
+        from lib.stores.modules import (  # noqa: PLC0415
+            ModulesStore, DbBackedModules)
+        self._modules_store = ModulesStore(self._db_connector)
+        self._modules_facade = DbBackedModules(
+            self._modules_store,
+            fernet=self._get_fernet(),
+            secret_keys=getattr(self, '_secret_keys', None),
+        )
+        self._modules_facade.read()
         # Let watchful modules create their own tables on the shared connector.
         try:
             reconcile_module_tables(self._db_connector)
@@ -926,6 +935,18 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                   f"(encrypted={'yes' if fernet else 'no'})",
                   DebugLevel.debug if ok else DebugLevel.error)
         return ok
+
+    def _load_modules(self) -> dict:
+        """Current watchful module/item configuration (DB-backed), decrypted and
+        deep-copied so callers can mutate it freely."""
+        import copy as _copy  # noqa: PLC0415
+        return _copy.deepcopy(self._modules_facade.reload_if_changed())
+
+    def _save_modules(self, data: dict) -> bool:
+        """Persist the module/item configuration to the database (encrypts secrets)."""
+        import copy as _copy  # noqa: PLC0415
+        self._modules_facade.save(_copy.deepcopy(data))
+        return True
 
     # ------------------------------------------------------------------
     # Route registration

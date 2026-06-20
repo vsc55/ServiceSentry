@@ -115,7 +115,7 @@ def register(app, wa):
                 if ssh.get('cred_uid') == uid:
                     hosts.append({'uid': h.get('uid'), 'name': h.get('name')})
         checks = []
-        modules = wa._read_config_file(wa._MODULES_FILE) or {}
+        modules = wa._load_modules()
         for mod_key, mod_cfg in modules.items():
             if not isinstance(mod_cfg, dict):
                 continue

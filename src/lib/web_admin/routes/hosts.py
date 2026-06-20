@@ -9,7 +9,7 @@ Access is gated by the dedicated ``servers_view`` / ``servers_edit`` /
 ``servers_delete`` permissions (the Servers tab).  Secret values inside the
 profiles are masked on read and restored from
 the stored value when the client omits them on write — the same scheme as
-modules.json.
+the module configuration.
 """
 
 import re
@@ -87,11 +87,11 @@ def _probe_host_record(wa, body):
 
 def _restore_check_secrets(wa, bare_module, coll, key, fields):
     """Restore masked (null/'') secret fields in a check's *fields* from the
-    stored modules.json item, so a test run AFTER a reload (when the UI only
+    stored module-config item, so a test run AFTER a reload (when the UI only
     holds masked secrets) uses the real, stored values instead of empties."""
     if not isinstance(fields, dict):
         return
-    modules = wa._read_config_file(wa._MODULES_FILE) or {}
+    modules = wa._load_modules()
     for mk in (bare_module, f'watchfuls.{bare_module}'):
         mod = modules.get(mk)
         items = mod.get(coll) if isinstance(mod, dict) else None
@@ -116,8 +116,8 @@ def _apply_check_cred(wa, fields):
 
 def _checks_for_host(wa, uid):
     """Grouped ``{(bare_module, collection): {key: item}}`` for every check in
-    modules.json bound to *uid* (used when the client doesn't send the list)."""
-    modules = wa._read_config_file(wa._MODULES_FILE) or {}
+    the module configuration bound to *uid* (used when the client doesn't send the list)."""
+    modules = wa._load_modules()
     grouped = {}
     for mod_key, mod_cfg in modules.items():
         if not isinstance(mod_cfg, dict):
@@ -136,7 +136,7 @@ def _checks_for_host(wa, uid):
 
 def _host_statuses(wa):
     """Return ``{host_uid: 'ok'|'error'|'warning'}`` derived from the daemon's
-    status file and the host_uid binding of each check in modules.json.
+    status file and the host_uid binding of each check in the module configuration.
 
     The check status is binary (True = OK), so a host is:
       * ``error``   — at least one of its enabled checks reports not-OK;
@@ -157,7 +157,7 @@ def _host_statuses(wa):
                 return info.get('status') if isinstance(info, dict) else None
         return '__absent__'
 
-    modules = wa._read_config_file(wa._MODULES_FILE) or {}
+    modules = wa._load_modules()
     agg = {}   # uid -> {'has_error': bool, 'known': int, 'total': int}
     for mod_key, mod_cfg in modules.items():
         if not isinstance(mod_cfg, dict):
@@ -196,7 +196,7 @@ def _host_statuses(wa):
 def _host_bound_modules(wa):
     """Return ``{host_uid: {bare_module: any_check_enabled}}`` — which modules
     have checks bound to each host and whether any of them is enabled."""
-    modules = wa._read_config_file(wa._MODULES_FILE) or {}
+    modules = wa._load_modules()
     out = {}
     for mod_key, mod_cfg in modules.items():
         if not isinstance(mod_cfg, dict):
@@ -570,7 +570,7 @@ def register(app, wa):
         if str(record.get('kind') or '').lower() == 'remote' and not body.get('no_ssh'):
             out['ssh'] = _ssh_test(record)
 
-        # Checks: explicit list from the modal, else everything bound in modules.json.
+        # Checks: explicit list from the modal, else everything bound in the module configuration.
         grouped = {}
         checks = body.get('checks')
         if isinstance(checks, list):
@@ -635,7 +635,7 @@ def register(app, wa):
         """Return the migration proposal (candidate hosts; secrets masked)."""
         if 'servers_edit' not in wa._get_session_permissions():
             return jsonify({'error': wa._t('access_denied')}), 403
-        modules = wa._read_config_file(wa._MODULES_FILE)
+        modules = wa._load_modules()
         plan = build_migration_plan(modules, wa._modules_dir)
         return jsonify(secret_manager.mask_sensitive(plan, wa._secret_keys))
 
@@ -645,7 +645,7 @@ def register(app, wa):
         """Create hosts for the accepted candidates and rewrite the checks.
 
         Body: ``{"accept": [{"id": <candidate id>, "name": <optional>}]}``.
-        The plan is rebuilt server-side from the (decrypted) modules.json, so the
+        The plan is rebuilt server-side from the (decrypted) module configuration, so the
         client never supplies credentials — only which candidates to accept.
         """
         if 'servers_edit' not in wa._get_session_permissions():
@@ -657,7 +657,7 @@ def register(app, wa):
         if err:
             return err
         accept = body.get('accept') or []
-        modules = wa._read_config_file(wa._MODULES_FILE)
+        modules = wa._load_modules()
         plan = build_migration_plan(modules, wa._modules_dir)
         by_id = {c['id']: c for c in plan['candidates']}
         actor = session.get('username', SYSTEM_USER)
@@ -681,7 +681,7 @@ def register(app, wa):
 
         if applied:
             apply_to_modules(modules, applied, wa._modules_dir)
-            if not wa._save_config_file(wa._MODULES_FILE, modules):
+            if not wa._save_modules(modules):
                 return jsonify({'error': wa._t('save_file_error')}), 500
             wa._audit('hosts_migrated', detail={
                 'hosts': len(created),

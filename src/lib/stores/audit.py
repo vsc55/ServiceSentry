@@ -38,6 +38,8 @@ _SCHEMA = TableSpec(
     ),
 )
 
+_T = _SCHEMA.name  # table name — single source of truth
+
 
 class AuditStore:
     """Relational audit log (backend-agnostic)."""
@@ -74,7 +76,7 @@ class AuditStore:
             if not isinstance(detail, str) else detail
         )
         self._db.execute(
-            'INSERT INTO audit(ts, event, user, ip, detail) VALUES(?,?,?,?,?)',
+            f'INSERT INTO {_T}(ts, event, user, ip, detail) VALUES(?,?,?,?,?)',
             (ts, event, user, ip, raw_detail),
         )
         self._db.commit()
@@ -84,13 +86,13 @@ class AuditStore:
     def delete_all(self) -> int:
         """Delete every entry.  Returns the number deleted."""
         with self._db.transaction():
-            deleted = self._db.execute('DELETE FROM audit')
+            deleted = self._db.execute(f'DELETE FROM {_T}')
         return deleted
 
     def delete_by_id(self, entry_id: int) -> bool:
         """Delete one entry by its primary key.  Returns True if found."""
         with self._db.transaction():
-            deleted = self._db.execute('DELETE FROM audit WHERE id = ?', (entry_id,))
+            deleted = self._db.execute(f'DELETE FROM {_T} WHERE id = ?', (entry_id,))
         return deleted > 0
 
     # ── Read ──────────────────────────────────────────────────────────────────
@@ -99,12 +101,12 @@ class AuditStore:
         """Return all entries as a list of dicts."""
         order = 'DESC' if newest_first else 'ASC'
         rows = self._db.fetchall(
-            f'SELECT id, ts, event, user, ip, detail FROM audit ORDER BY id {order}'
+            f'SELECT id, ts, event, user, ip, detail FROM {_T} ORDER BY id {order}'
         )
         return [_row_to_dict(r) for r in rows]
 
     def count(self) -> int:
-        row = self._db.fetchone('SELECT COUNT(*) FROM audit')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
         return row[0] if row else 0
 
     # ── Migration ─────────────────────────────────────────────────────────────
@@ -128,7 +130,7 @@ class AuditStore:
             ))
         with self._db.transaction():
             self._db.executemany(
-                'INSERT INTO audit(ts, event, user, ip, detail) VALUES(?,?,?,?,?)',
+                f'INSERT INTO {_T}(ts, event, user, ip, detail) VALUES(?,?,?,?,?)',
                 rows,
             )
         return len(rows)
@@ -137,9 +139,9 @@ class AuditStore:
 
     def _prune_one(self, max_entries: int) -> None:
         """Delete the single oldest entry if the table exceeds *max_entries*."""
-        row = self._db.fetchone('SELECT COUNT(*) FROM audit')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
         if row and row[0] > max_entries:
-            self._db.execute('DELETE FROM audit WHERE id = (SELECT MIN(id) FROM audit)')
+            self._db.execute(f'DELETE FROM {_T} WHERE id = (SELECT MIN(id) FROM {_T})')
             self._db.commit()
 
     def close(self) -> None:

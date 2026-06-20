@@ -75,7 +75,7 @@ def register(app, wa):
 
         status_raw: dict = wa._read_check_status()
 
-        modules_cfg = wa._read_config_file(wa._MODULES_FILE)
+        modules_cfg = wa._load_modules()
 
         modules = []
         total_ok = 0
@@ -83,7 +83,7 @@ def register(app, wa):
         for mod_name, checks in status_raw.items():
             if not isinstance(checks, dict):
                 continue
-            # Pretty name priority: watchful lang file > modules.json label > title-cased fallback
+            # Pretty name priority: watchful lang file > module config label > title-cased fallback
             mod_cfg = (modules_cfg.get(mod_name)
                        or modules_cfg.get(f'watchfuls.{mod_name}')
                        or modules_cfg.get(mod_name.split('.')[-1]) or {})

@@ -197,7 +197,7 @@ def _strip_credential_fields(wa, data):
 def register(app, wa):
     login_required = wa._login_required
 
-    # --- API: modules.json ----------------------------------------
+    # --- API: module configuration --------------------------------
 
     @app.route('/api/v1/modules', methods=['GET'])
     @login_required
@@ -210,7 +210,7 @@ def register(app, wa):
         no modules are accessible at all.
         """
         perms = wa._get_session_permissions()
-        all_data = wa._read_config_file(wa._MODULES_FILE)
+        all_data = wa._load_modules()
         if 'modules_view' in perms:
             return jsonify(secret_manager.mask_sensitive(all_data, wa._secret_keys))
         visible = {n: c for n, c in all_data.items() if f'module.{n}.view' in perms}
@@ -221,7 +221,7 @@ def register(app, wa):
     @app.route('/api/v1/modules', methods=['PUT'])
     @login_required
     def api_save_modules():
-        """Overwrite ``modules.json`` with the request body.
+        """Overwrite the module configuration with the request body.
 
         Users with ``modules_edit`` may save any change.  Without it, each
         modified module is authorized individually: a ``module.{name}.edit``
@@ -250,7 +250,7 @@ def register(app, wa):
             return err
         if not all(isinstance(v, dict) for v in data.values()):
             return jsonify({'error': wa._t('invalid_modules_data')}), 400
-        old_data = wa._read_config_file(wa._MODULES_FILE)
+        old_data = wa._load_modules()
         # Restore masked secrets BEFORE authorization so an unchanged item with a
         # masked secret is not seen as "modified" (which would over-require edit).
         secret_manager.restore_sensitive(data, old_data, keys=wa._secret_keys)
@@ -263,7 +263,7 @@ def register(app, wa):
                     return jsonify({'error': wa._t('access_denied')}), 403
         _ensure_item_uids(data)     # generate stable UIDs for new items
         _rekey_items_by_uid(data)   # keep each item's dict key == its UID
-        if wa._save_config_file(wa._MODULES_FILE, data):
+        if wa._save_modules(data):
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._sensitive_fields,
             )
@@ -313,7 +313,7 @@ def register(app, wa):
             return {'total': tot, 'ok': ok, 'error': err}
 
         # Modules summary
-        modules_raw = wa._read_config_file(wa._MODULES_FILE)
+        modules_raw = wa._load_modules()
         modules_list = []
         for name, cfg in modules_raw.items():
             if not isinstance(cfg, dict):
@@ -433,7 +433,7 @@ def register(app, wa):
                 _hosts = _hstore.list(decrypt=False) or []
                 _hstatuses = _host_statuses(wa)
                 _hbound = _host_bound_modules(wa)
-                # Enabled bound-check tally per host (from modules.json), with
+                # Enabled bound-check tally per host (from the module configuration), with
                 # OK/error breakdown pulled from the status file — same shape as
                 # the per-module ``checks`` object so the table can reuse it.
                 _hchecks: dict = {}

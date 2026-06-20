@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """Assisted migration from inline per-module connections to shared hosts.
 
-Scans ``modules.json`` for items (snmp servers, ping/datastore/… list entries)
+Scans the module configuration for items (snmp servers, ping/datastore/… list
+entries)
 whose connection is declared inline, groups the ones that point at the same
 server, and proposes a single Host per group — so the same connection +
 credentials defined N times across modules collapses into one reusable host.
@@ -21,7 +22,7 @@ Two functions, both pure (no I/O), so they're easy to test:
   the now-host-owned connection fields, keeping the check-specific fields.
 
 The route layer turns a plan into hosts (via HostsStore) and persists the
-rewritten modules.json.
+rewritten module configuration.
 """
 
 from __future__ import annotations
@@ -96,7 +97,7 @@ def build_migration_plan(modules_data: dict, watchfuls_dir: str | None = None) -
 
     Each candidate: ``{address, suggested_name, profiles, protocols, members,
     modules, is_duplicate}``.  ``members`` are ``{module, collection, key}``
-    references into modules.json.  ``is_duplicate`` is True when the candidate
+    references into the module configuration.  ``is_duplicate`` is True when the candidate
     groups more than one item (the dedup wins).
     """
     by_mod = _specs_by_module(watchfuls_dir)

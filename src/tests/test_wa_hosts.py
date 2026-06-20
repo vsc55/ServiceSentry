@@ -79,7 +79,7 @@ class TestApiHosts:
             'c_maint': {'host_uid': uids['maint'], 'enabled': True},
             'c_off':   {'host_uid': uids['none'],  'enabled': False},  # disabled → ignored
         }}}
-        assert admin._save_config_file(admin._MODULES_FILE, modules)
+        assert admin._save_modules(modules)
         admin._check_state_store.persist_status({'web': {
             'c_ok':    {'status': True},
             'c_err':   {'status': False},
@@ -111,7 +111,7 @@ class TestApiHosts:
             # Host B: only a disabled check, and 'cpu' not in any saved list.
             'cpu': {'enabled': True, 'list': {'c1': {'host_uid': b, 'enabled': False}}},
         }
-        assert admin._save_config_file(admin._MODULES_FILE, modules)
+        assert admin._save_modules(modules)
 
         hosts = {h['uid']: h for h in client.get('/api/v1/hosts').get_json()['hosts']}
         # A: web (active) + cpu (added, no check) → 1 active / 2 total
@@ -342,11 +342,11 @@ class TestHostStatus:
         _login(client)
         uid = client.post('/api/v1/hosts', json=_HOST).get_json()['uid']
         # Bind a ping check to this host.
-        mods = admin._read_config_file(admin._MODULES_FILE) or {}
+        mods = admin._load_modules()
         mods.setdefault('ping', {}).setdefault('list', {})['chk1'] = {
             'host_uid': uid, 'enabled': True, 'host': '10.0.0.5',
             'label': 'My Ping', 'uid': 'u1'}
-        assert admin._save_config_file(admin._MODULES_FILE, mods)
+        assert admin._save_modules(mods)
         # Daemon recorded a result for it (in the check_state DB).
         admin._check_state_store.persist_status({'ping': {'chk1': {
             'status': True, 'message': 'pong', 'other_data': {'latency_ms': 1.2}}}})
@@ -361,10 +361,10 @@ class TestHostStatus:
         """ram_swap derived keys (<uid>_ram) match their base bound item."""
         _login(client)
         uid = client.post('/api/v1/hosts', json=_HOST).get_json()['uid']
-        mods = admin._read_config_file(admin._MODULES_FILE) or {}
+        mods = admin._load_modules()
         mods.setdefault('ram_swap', {}).setdefault('list', {})['base1'] = {
             'host_uid': uid, 'enabled': True, 'label': 'NS1', 'uid': 'rs1'}
-        assert admin._save_config_file(admin._MODULES_FILE, mods)
+        assert admin._save_modules(mods)
         admin._check_state_store.persist_status({'ram_swap': {'base1_ram': {
             'status': True, 'other_data': {'name': 'NS1 - RAM', 'used': 42.0}}}})
         r = client.get(f'/api/v1/hosts/{uid}/status')
@@ -377,10 +377,10 @@ class TestCheckSecretRestore:
 
     def test_restores_masked_password_from_stored_item(self, admin):
         from lib.web_admin.routes.hosts import _restore_check_secrets
-        mods = admin._read_config_file(admin._MODULES_FILE) or {}
+        mods = admin._load_modules()
         mods.setdefault('datastore', {}).setdefault('list', {})['d1'] = {
             'db_type': 'mysql', 'user': 'u', 'password': 'REALPASS', 'uid': 'u1'}
-        assert admin._save_config_file(admin._MODULES_FILE, mods)
+        assert admin._save_modules(mods)
         # The modal would send the masked secret (null) on a post-reload test.
         fields = {'db_type': 'mysql', 'user': 'u', 'password': None}
         _restore_check_secrets(admin, 'datastore', 'list', 'd1', fields)
@@ -389,10 +389,10 @@ class TestCheckSecretRestore:
 
     def test_explicit_new_password_is_kept(self, admin):
         from lib.web_admin.routes.hosts import _restore_check_secrets
-        mods = admin._read_config_file(admin._MODULES_FILE) or {}
+        mods = admin._load_modules()
         mods.setdefault('datastore', {}).setdefault('list', {})['d1'] = {
             'password': 'OLDPASS', 'uid': 'u1'}
-        assert admin._save_config_file(admin._MODULES_FILE, mods)
+        assert admin._save_modules(mods)
         fields = {'password': 'TYPED_NEW'}           # user typed a new one
         _restore_check_secrets(admin, 'datastore', 'list', 'd1', fields)
         assert fields['password'] == 'TYPED_NEW'     # the typed value wins
@@ -546,8 +546,8 @@ class TestPerServerPermissions:
 
     # ── 'add' permission: add modules/checks to a server ─────────────────────
     def _modules_with_check(self, admin, host_uid, key='newchk', **fields):
-        """Full modules.json (post-migration) plus one host-bound ping check."""
-        data = copy.deepcopy(admin._read_config_file(admin._MODULES_FILE) or {})
+        """Full module configuration plus one host-bound ping check."""
+        data = copy.deepcopy(admin._load_modules())
         data.setdefault('ping', {}).setdefault('list', {})[key] = {
             'host_uid': host_uid, 'enabled': True, 'host': '10.0.0.5', **fields}
         return data
@@ -570,10 +570,10 @@ class TestPerServerPermissions:
         uid = admin._hosts_store.create({**_HOST}, actor='admin')
         # Seed an existing host-bound check, then try to modify it with add-only.
         seed = self._modules_with_check(admin, uid, key='chk1', uid='u-chk1')
-        admin._save_config_file(admin._MODULES_FILE, seed)
+        admin._save_modules(seed)
         self._make_user(admin, [f'server.{uid}.view', f'server.{uid}.add'])
         _login(client, 'srvuser')
-        data = copy.deepcopy(admin._read_config_file(admin._MODULES_FILE) or {})
+        data = copy.deepcopy(admin._load_modules())
         data['ping']['list']['chk1']['enabled'] = False   # modify existing → edit
         assert client.put('/api/v1/modules', json=data).status_code == 403
 

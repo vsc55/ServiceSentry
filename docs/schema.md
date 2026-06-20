@@ -43,7 +43,7 @@ Tipo de dato del campo.
 
 ### `default` — **obligatorio**
 
-Valor por defecto cuando el campo falta en `modules.json`. Usado por Python para rellenar valores ausentes y por la UI para inicializar formularios nuevos.
+Valor por defecto cuando el campo falta en la configuración del módulo. Usado por Python para rellenar valores ausentes y por la UI para inicializar formularios nuevos.
 
 ```json
 "timeout": {"type": "int", "default": 10}
@@ -214,7 +214,7 @@ Modos de resultado (`result`):
 
 ### `hidden`
 
-Si es `true`, el campo se almacena en `modules.json` pero nunca se renderiza en la UI. Útil para guardar metadatos internos generados automáticamente (p. ej. el tipo SNMP detectado al hacer un Discover).
+Si es `true`, el campo se almacena en la configuración del módulo pero nunca se renderiza en la UI. Útil para guardar metadatos internos generados automáticamente (p. ej. el tipo SNMP detectado al hacer un Discover).
 
 ```json
 "snmp_type": {"type": "str", "default": "", "hidden": true}

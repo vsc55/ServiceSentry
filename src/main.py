@@ -38,8 +38,6 @@ class Main(ObjectBase):
 
     monitor = None
     cfg_general = None
-    cfg_modules = None
-    _cfg_file_modules = 'modules.json'
 
     def __init__(self, args: argparse.Namespace):
         """ Initializes the Main class with the provided command-line arguments. """

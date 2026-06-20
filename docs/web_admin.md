@@ -274,7 +274,7 @@ El permiso requerido se indica entre paréntesis.
 
 Define un servidor una vez (dirección + perfiles de conexión por protocolo) y
 reutilízalo desde los checks de cualquier módulo. Los secretos de los perfiles
-se enmascaran en lectura y se restauran al guardar (igual que `modules.json`).
+se enmascaran en lectura y se restauran al guardar (igual que la configuración de módulos, hoy también respaldada por la BD).
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
@@ -296,7 +296,7 @@ Módulos host-capaces: snmp, ping, datastore, ssl_cert, ntp, web. `dns` se queda
 inline (su target es un dominio, no un servidor con credenciales).
 
 **Asistente de migración** (botón "Detectar duplicados" en *Servers*). Escanea
-`modules.json`, agrupa ítems por dirección uniéndolos solo si son compatibles
+la configuración de módulos (en la BD), agrupa ítems por dirección uniéndolos solo si son compatibles
 (sin conflicto de credenciales en protocolos compartidos) y agregando perfiles
 entre módulos; propone N hosts. Tras confirmar, crea los hosts (credenciales
 cifradas) y reescribe los checks con `host_uid`, quitando los campos de conexión
@@ -708,7 +708,7 @@ Todos los eventos auditados:
 | `login_ok` | Login exitoso (local, LDAP, OIDC o SAML2). Los logins externos incluyen `detail.auth_source`. |
 | `login_failed` | Credenciales incorrectas, usuario inexistente, cuenta desactivada/bloqueada o error LDAP. `detail.reason` indica la causa (`invalid_credentials`, `user_not_found`, `account_disabled`, `account_locked`, `ldap_invalid_credentials`, `ldap_user_not_found`, `ldap_connection_error`, `saml2_error`…). |
 | `logout` | Cierre de sesión |
-| `modules_saved` | Guardado de `modules.json` (con diff de campos) |
+| `modules_saved` | Guardado de la configuración de módulos (en la BD, con diff de campos) |
 | `config_saved` | Guardado de `config.json` (con diff de campos) |
 | `user_created` | Creación de usuario |
 | `user_updated` | Modificación de usuario (con diff por campo) |

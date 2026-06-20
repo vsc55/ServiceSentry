@@ -9,13 +9,13 @@ Guía paso a paso para crear un módulo de monitorización desde cero en Service
 ```text
 main.py -> Monitor
               |-- Descubre módulos en watchfuls/ (packages o archivos *.py)
-              |-- Lee modules.json para comprobar si están habilitados
+              |-- Lee la configuración (BD, vía config_modules) para comprobar si están habilitados
               |-- Instancia Watchful(monitor) por cada módulo
               +-- Ejecuta module.check() en paralelo
                        |
                        v
               Watchful(ModuleBase)
-                  |-- Lee su configuración desde modules.json
+                  |-- Lee su configuración (almacenada en la BD)
                   |-- Ejecuta la lógica de monitorización
                   |-- Almacena resultados en dict_return
                   |-- Detecta cambios de estado (check_status)
@@ -285,7 +285,7 @@ Estas claves controlan el comportamiento de la UI y no corresponden a campos de 
 | Propiedad             | Tipo   | Obligatorio | Descripción |
 |-----------------------|--------|-------------|-------------|
 | `type`                | str    | Sí | `"bool"`, `"int"`, `"float"`, `"str"`, `"list"` |
-| `default`             | any    | Sí | Valor por defecto cuando el campo falta en `modules.json` |
+| `default`             | any    | Sí | Valor por defecto cuando el campo falta en la configuración del módulo |
 | `min`                 | number | No | Valor mínimo (`int` / `float`) |
 | `max`                 | number | No | Valor máximo (`int` / `float`) |
 | `sensitive`           | bool   | No | Si `true`, se renderiza como campo de contraseña (oculto) en la UI |
@@ -515,7 +515,7 @@ def discover(cls) -> list[dict]:
     ]
 ```
 
-La UI solo consume los campos `key` y `label` de cada dict. Cualquier campo adicional es ignorado por el modal de descubrimiento. `key` es el identificador que se guarda en `modules.json`; `label` es el texto visible en la lista.
+La UI solo consume los campos `key` y `label` de cada dict. Cualquier campo adicional es ignorado por el modal de descubrimiento. `key` es el identificador que se guarda en la configuración del módulo (BD); `label` es el texto visible en la lista.
 
 ---
 
@@ -627,7 +627,7 @@ de conexión (los de `__host_profile__`) porque vienen del host.
 
 **Almacenamiento.** Los hosts viven en la BD general (`HostsStore`, tabla
 `hosts`); los secretos de los perfiles se cifran con `secret_manager` igual que
-en `modules.json`. El monitor expone el registro como `self._monitor._hosts_store`
+en la configuración del módulo. El monitor expone el registro como `self._monitor._hosts_store`
 y `resolve_host` lo usa de forma transparente.
 
 **Cuándo NO declararlo.** Si el "target" del módulo no es un servidor con
@@ -1038,10 +1038,14 @@ is_ok = (update == RaidMdstat.UpdateStatus.ok)
 
 ---
 
-## 6. Configuración en modules.json
+## 6. Configuración del módulo
 
-El `Monitor` lee `modules.json` para decidir qué módulos están habilitados y
-con qué configuración. La estructura para tu módulo:
+La configuración de los módulos se almacena en la **base de datos** (tablas
+`module_config` + `module_config_items`). El `Monitor` la lee a través de `config_modules`
+(una fachada `DbBackedModules` sobre el almacén) para decidir qué módulos están
+habilitados y con qué configuración. El modelo de desarrollo no cambia: sigues
+leyendo con `self.get_conf(...)` y el siguiente dict es la estructura que editas
+en la UI y la que devuelve `get_conf`:
 
 ```json
 {
@@ -1089,7 +1093,7 @@ se usa la clave como valor operativo.
 
 ### Valores sensibles — prefijo `enc:`
 
-Los campos marcados como `sensitive: true` en `schema.json` (contraseñas, tokens, claves SSH) se guardan cifrados en `modules.json` con el prefijo `enc:`:
+Los campos marcados como `sensitive: true` en `schema.json` (contraseñas, tokens, claves SSH) se guardan cifrados en la configuración del módulo (BD) con el prefijo `enc:`:
 
 ```json
 {
@@ -1114,9 +1118,9 @@ Hay dos mecanismos independientes:
 | Mecanismo | Cómo activarlo | Efecto |
 | --- | --- | --- |
 | **Campo contraseña en UI** | `"sensitive": true` en `schema.json` | El campo se renderiza como `<input type="password">` — el valor queda oculto en pantalla |
-| **Cifrado en disco** | El nombre del campo debe ser `password`, `ssh_password`, `token` o `secret` | El valor se guarda con prefijo `enc:` en `modules.json` y se descifra automáticamente al leerlo |
+| **Cifrado en reposo** | El nombre del campo debe ser `password`, `ssh_password`, `token` o `secret` | El valor se guarda con prefijo `enc:` en la configuración del módulo (BD) y se descifra automáticamente al leerlo |
 
-Si añades un campo sensible con un nombre distinto a esos cuatro (p. ej. `api_key`), márcalo con `"sensitive": true` — la UI lo ocultará visualmente — pero **no se cifrará en disco** a menos que el nombre esté en `ENCRYPT_KEYS`. Para cifrado en disco, usa uno de los cuatro nombres reservados.
+Si añades un campo sensible con un nombre distinto a esos cuatro (p. ej. `api_key`), márcalo con `"sensitive": true` — la UI lo ocultará visualmente — pero **no se cifrará en reposo** a menos que el nombre esté en `ENCRYPT_KEYS`. Para cifrado en reposo, usa uno de los cuatro nombres reservados.
 
 ---
 
@@ -1136,7 +1140,7 @@ watchfuls/
 El `Monitor`:
 1. Escanea `watchfuls/` en busca de subdirectorios con `__init__.py` (packages)
 2. También descubre módulos legacy `watchfuls/*.py` de archivo único
-3. Comprueba `modules.json[mi_modulo].enabled` (por defecto: `True`)
+3. Comprueba `config_modules.get_conf([mi_modulo, "enabled"])` (por defecto: `True`)
 4. Usa `importlib.import_module('watchfuls.mi_modulo')`
 5. Instancia `Watchful(monitor)`
 6. Llama a `check()`
@@ -1426,7 +1430,7 @@ class Watchful(ModuleBase):
 }
 ```
 
-### Configuración (`modules.json`)
+### Configuración del módulo (almacenada en la BD)
 
 ```json
 {
@@ -1470,7 +1474,7 @@ class Watchful(ModuleBase):
 - [ ] Llamar a `super().check()` antes de devolver
 - [ ] Usar `dict_return.set()` para almacenar cada resultado
 - [ ] Usar `check_status()` + `send_message()` para las notificaciones
-- [ ] Añadir una sección en `modules.json` con `enabled: true`
+- [ ] Habilitar el módulo en su configuración (UI / `config_modules`) con `enabled: true`
 - [ ] Crear `tests/test_mi_modulo.py` con tests unitarios
 - [ ] Ejecutar `pytest tests/ watchfuls/ -q` y verificar que todo pasa
 

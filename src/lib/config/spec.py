@@ -35,7 +35,7 @@ Notes
   ``bool_rules`` / ``json_dict_fields`` (used for fields handled by dedicated
   code, read only at the point of use, or belonging to array/non-web_admin
   sections).  It does NOT affect :func:`cfg_default`.
-* Per-module watchful settings (``modules.json`` ``list[item]`` fields) are
+* Per-module watchful settings (the module config ``list[item]`` fields) are
   deliberately NOT here: each watchful owns its own declarative defaults in its
   ``schema.json`` / module ``DEFAULTS`` to keep modules independent of the core.
 * ``database|port`` has no single default — it is driver-specific (3306 for

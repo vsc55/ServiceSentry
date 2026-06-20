@@ -19,7 +19,7 @@
 - **Parallel execution** — modules and per-module items run in `ThreadPoolExecutor`.
 - **Cross-platform** — 12 of 15 modules run on Linux, Windows and macOS; services module supports systemd, OpenRC, SysV and Windows SCM.
 - **Remote execution** — SSH command execution via paramiko for RAID and other remote checks.
-- **Encrypted storage** — sensitive fields (passwords, tokens) are encrypted at rest in `modules.json`.
+- **Encrypted storage** — sensitive fields (passwords, tokens) are encrypted at rest: in the database for module configuration, and in `config.json` for its own secrets.
 - **Public status page** — optional `/status` endpoint (no login required) with real-time health and configurable auto-refresh.
 - **Custom error pages** — branded 400/403/404/405/500 pages that inherit dark/light theme; API routes return JSON errors.
 
@@ -144,7 +144,7 @@ sudo rc-update add ServiSesentry-web default && sudo rc-service ServiSesentry-we
 | [docs/docker.md](docs/docker.md) | Docker deployment: environment variables, volumes, update and reverse proxy |
 | [docs/README.md](docs/README.md) | Documentation index |
 | [docs/architecture.md](docs/architecture.md) | Component diagram, class hierarchy, directory structure, execution flow |
-| [docs/configuration.md](docs/configuration.md) | config.json, modules.json, CLI options, Telegram, debug |
+| [docs/configuration.md](docs/configuration.md) | config.json, module configuration (now in the database), CLI options, Telegram, debug |
 | [docs/modules.md](docs/modules.md) | All 15 modules: config reference, fields and flow |
 | [docs/web_admin.md](docs/web_admin.md) | Web admin features, roles, security, API endpoints |
 | [docs/security.md](docs/security.md) | Authentication, RBAC, sessions, XSS, path traversal, audit log and security tests |

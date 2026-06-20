@@ -196,7 +196,7 @@ Resumen rápido:
 3. Cargar `_SCHEMA = json.load(...)` desde `schema.json`
 4. Llamar a `super().__init__(monitor, __package__)`
 5. Implementar `check()` devolviendo `self.dict_return`
-6. Añadir `mi_modulo: {enabled: true}` en `modules.json`
+6. Habilitar el módulo en su configuración (UI / `config_modules`) con `enabled: true`
 7. Escribir tests en `watchfuls/mi_modulo/tests/`
 8. Ejecutar `pytest tests/ watchfuls/ -q` para verificar
 
@@ -218,7 +218,7 @@ Siempre necesarias, independientemente de qué módulos estén activos:
 
 ### Dependencias por módulo
 
-Solo se necesitan si el módulo correspondiente está activo en `modules.json`:
+Solo se necesitan si el módulo correspondiente está activo en su configuración:
 
 | Paquete | Versión | Módulo | Propósito |
 | ------- | ------- | ------ | --------- |

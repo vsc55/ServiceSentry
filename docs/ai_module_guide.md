@@ -548,11 +548,11 @@ class Watchful(ModuleBase):
 | Property | Type | Required | Description |
 |----------|------|:--------:|-------------|
 | `type` | `"bool"\|"str"\|"int"\|"float"` | **YES** | Data type |
-| `default` | any | **YES** | Default value when key absent in modules.json |
+| `default` | any | **YES** | Default value when key absent in the module configuration (DB-backed; read via `config_modules`) |
 | `min` | number | no | Minimum value for int/float |
 | `max` | number | no | Maximum value for int/float |
 | `sensitive` | bool | no | Render as password input. Auto-encrypted in disk if field name is `password`, `ssh_password`, `token`, or `secret` |
-| `hidden` | bool | no | Store in modules.json but never render. Exempt from label requirement |
+| `hidden` | bool | no | Store in the module configuration but never render. Exempt from label requirement |
 | `readonly` | bool | no | Render as non-editable. Action buttons (discover, input_action) still work |
 | `options` | string[] | no | Allowed values for `str` → renders `<select>` |
 | `options_int` | int[] | no | Allowed values for `int` → renders `<select>`. Value `0` displays as `t('all')` |

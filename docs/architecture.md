@@ -70,7 +70,8 @@ ObjectBase (lib/object_base.py)
 │   ├── CheckStateStore (lib/stores/check_state.py)  → tabla check_state (estado vivo de checks)
 │   ├── CredentialsStore(lib/stores/credentials.py)  → tabla credentials (identidades SSH reutilizables)
 │   ├── HistoryStore    (lib/stores/history.py)      → tabla history (series temporales)
-│   └── HostsStore      (lib/stores/hosts.py)        → tabla hosts (servidores + perfiles de conexión)
+│   ├── HostsStore      (lib/stores/hosts.py)        → tabla hosts (servidores + perfiles de conexión)
+│   └── ModulesStore    (lib/stores/modules.py)      → tablas module_config, module_config_items (config de módulos/ítems)
 └── ModuleBase (lib/modules/module_base.py)
     ├── watchfuls.datastore::Watchful         🌐 (multiplataforma)
     ├── watchfuls.filesystemusage::Watchful  🌐 (multiplataforma)
@@ -120,7 +121,8 @@ ServiceSentry/
 │   │   │   ├── check_state.py           # CheckStateStore → tabla check_state (estado vivo de checks)
 │   │   │   ├── credentials.py           # CredentialsStore→ tabla credentials (identidades SSH reutilizables)
 │   │   │   ├── history.py               # HistoryStore    → tabla history (series temporales)
-│   │   │   └── hosts.py                 # HostsStore      → tabla hosts (servidores + perfiles)
+│   │   │   ├── hosts.py                 # HostsStore      → tabla hosts (servidores + perfiles)
+│   │   │   └── modules.py               # ModulesStore    → tablas module_config, module_config_items (config de módulos/ítems)
 │   │   ├── hosts/                       # Dominio de hosts (no la tabla; eso es stores/hosts.py)
 │   │   │   ├── profiles.py              # Catálogo protocolo→campos (de __host_profile__)
 │   │   │   ├── runner.py                # Ejecución de comandos local/SSH (run, is_remote)
@@ -223,9 +225,8 @@ ServiceSentry/
 │       ├── test_wa_ui.py
 │       └── test_wa_json_helpers.py
 ├── data/                                # Datos en modo desarrollo (config_dir == var_dir)
-│   ├── config.json                     # Config del sistema (se crea/siembra en el primer arranque)
-│   ├── modules.json                    # Definiciones de módulos/ítems (secretos cifrados)
-│   └── data.db                         # BD SQLite por defecto (usuarios, roles, sesiones, auditoría, hosts, credenciales, historial, estado de checks)
+│   ├── config.json                     # Config del sistema (se crea/siembra en el primer arranque) — ÚNICO fichero en disco
+│   └── data.db                         # BD SQLite por defecto (usuarios, roles, sesiones, auditoría, hosts, credenciales, historial, estado de checks Y config de módulos/ítems: tablas module_config/module_config_items)
 └── docs/
     ├── architecture.md                  # Este archivo
     ├── configuration.md
@@ -266,7 +267,7 @@ ServiceSentry/
 Monitor.check():
 │
 ├── 1. Escanea watchfuls/ (packages con __init__.py y archivos *.py heredados)
-├── 2. Filtra por módulos habilitados en modules.json
+├── 2. Filtra por módulos habilitados (config de módulos en la BD: tablas module_config/module_config_items, vía Monitor.config_modules)
 ├── 3. Lee el estado anterior (tabla check_state)
 ├── 4. Crea ThreadPoolExecutor(max_workers=threads)
 │
@@ -320,8 +321,19 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 La capa de datos del core (`lib/db/`) abstrae el motor mediante `BaseConnector`,
 con implementaciones para **SQLite** (por defecto), **MySQL/MariaDB** y
 **PostgreSQL**. Todos los stores de `lib/stores/` (`users`, `groups`, `roles`,
-`sessions`, `audit`, `check_state`, `credentials`, `history`, `hosts`) reciben un
-conector inyectado y no hablan nunca con un driver concreto.
+`sessions`, `audit`, `check_state`, `credentials`, `history`, `hosts`, `modules`)
+reciben un conector inyectado y no hablan nunca con un driver concreto.
+
+El **store de módulos** (`lib/stores/modules.py`) guarda la configuración de
+watchfuls, en dos tablas: `module_config` (una
+fila por módulo: campos a nivel de módulo —`enabled`, `alert`, `interval`, meta
+`__*__`— como JSON) y `module_config_items` (una fila por ítem: `host_uid`/`label`/
+`enabled` promovidos a columnas para joins/búsquedas, el resto del ítem como
+JSON). El facade `DbBackedModules` subclasa `ConfigControl`, por lo que
+`Monitor.config_modules` y el acceso desde el panel web son idénticos para quien
+los usa, y la misma BD se comparte entre web y worker. Los secretos siguen
+cifrados con Fernet a nivel de valor, ahora dentro
+del JSON de las tablas.
 
 ### Reconciliación declarativa de esquema
 

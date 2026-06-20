@@ -63,6 +63,8 @@ _SCHEMA = TableSpec(
     composite_pk=('module', 'key', 'metric'),
 )
 
+_T = _SCHEMA.name  # table name — single source of truth
+
 
 def _load_json(raw):
     if not raw:
@@ -112,7 +114,7 @@ class CheckStateStore:
         try:
             rows = self._db.fetchall(
                 'SELECT uid, module, key, item_uid, metric, status, message, '
-                'other_data, fail_count, last_change_ts FROM check_state'
+                f'other_data, fail_count, last_change_ts FROM {_T}'
             )
             for r in rows:
                 out[(r[1], r[2], r[4] or '')] = {
@@ -160,18 +162,18 @@ class CheckStateStore:
         metric = kw.get('metric') or ''
         try:
             existing = self._db.fetchone(
-                'SELECT uid FROM check_state WHERE module=? AND key=? AND metric=?',
+                f'SELECT uid FROM {_T} WHERE module=? AND key=? AND metric=?',
                 (module, key, metric),
             )
             row_uid = (existing[0] if existing and existing[0] else None) \
                 or str(uuid.uuid4())
             with self._db.transaction():
                 self._db.execute(
-                    'DELETE FROM check_state WHERE module=? AND key=? AND metric=?',
+                    f'DELETE FROM {_T} WHERE module=? AND key=? AND metric=?',
                     (module, key, metric),
                 )
                 self._db.execute(
-                    'INSERT INTO check_state(uid, module, key, item_uid, metric, '
+                    f'INSERT INTO {_T}(uid, module, key, item_uid, metric, '
                     'status, message, other_data, fail_count, last_change_ts) '
                     'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     (
@@ -226,10 +228,10 @@ class CheckStateStore:
                 ))
         try:
             with self._db.transaction():
-                self._db.execute('DELETE FROM check_state')
+                self._db.execute(f'DELETE FROM {_T}')
                 if rows:
                     self._db.executemany(
-                        'INSERT INTO check_state(uid, module, key, item_uid, metric, '
+                        f'INSERT INTO {_T}(uid, module, key, item_uid, metric, '
                         'status, message, other_data, fail_count, last_change_ts) '
                         'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                         rows,
@@ -244,7 +246,7 @@ class CheckStateStore:
         """Forget the current state of a check (all its metrics)."""
         try:
             self._db.execute(
-                'DELETE FROM check_state WHERE module = ? AND key = ?', (module, key))
+                f'DELETE FROM {_T} WHERE module = ? AND key = ?', (module, key))
             self._db.commit()
             return True
         except Exception:  # pylint: disable=broad-except
@@ -253,7 +255,7 @@ class CheckStateStore:
     def clear(self) -> bool:
         """Forget all current state."""
         try:
-            self._db.execute('DELETE FROM check_state')
+            self._db.execute(f'DELETE FROM {_T}')
             self._db.commit()
             return True
         except Exception:  # pylint: disable=broad-except

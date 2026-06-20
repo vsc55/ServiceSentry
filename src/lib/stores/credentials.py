@@ -56,6 +56,8 @@ _CREDS_SCHEMA = TableSpec(
     indexes=(Index('idx_credentials_name', ('name',)),),
 )
 
+_T = _CREDS_SCHEMA.name  # table name — single source of truth
+
 _COLS = ('uid', 'name', 'ctype', 'enabled', 'description', 'data',
          'created_at', 'updated_at', 'updated_by')
 _SELECT = ', '.join(_COLS)
@@ -136,18 +138,18 @@ class CredentialsStore:
     def list(self, *, decrypt: bool = True) -> list[dict]:
         """Return all credentials ordered by name."""
         return [self._row_to_cred(r, decrypt)
-                for r in self._db.fetchall(f'SELECT {_SELECT} FROM credentials ORDER BY name')]
+                for r in self._db.fetchall(f'SELECT {_SELECT} FROM {_T} ORDER BY name')]
 
     def get(self, uid: str, *, decrypt: bool = True) -> dict | None:
-        row = self._db.fetchone(f'SELECT {_SELECT} FROM credentials WHERE uid = ?', (uid,))
+        row = self._db.fetchone(f'SELECT {_SELECT} FROM {_T} WHERE uid = ?', (uid,))
         return self._row_to_cred(row, decrypt) if row else None
 
     def get_by_name(self, name: str, *, decrypt: bool = True) -> dict | None:
-        row = self._db.fetchone(f'SELECT {_SELECT} FROM credentials WHERE name = ?', (name,))
+        row = self._db.fetchone(f'SELECT {_SELECT} FROM {_T} WHERE name = ?', (name,))
         return self._row_to_cred(row, decrypt) if row else None
 
     def count(self) -> int:
-        row = self._db.fetchone('SELECT COUNT(*) FROM credentials')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
         return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
@@ -156,14 +158,14 @@ class CredentialsStore:
         name = str(data.get('name') or '').strip()
         if not name:
             return None
-        if self._db.fetchone('SELECT 1 FROM credentials WHERE name = ?', (name,)):
+        if self._db.fetchone(f'SELECT 1 FROM {_T} WHERE name = ?', (name,)):
             return None  # duplicate name
         uid = str(data.get('uid') or uuid.uuid4())
         now = _now()
         try:
             with self._db.transaction():
                 self._db.execute(
-                    f'INSERT INTO credentials ({_SELECT}) VALUES (?,?,?,?,?,?,?,?,?)',
+                    f'INSERT INTO {_T} ({_SELECT}) VALUES (?,?,?,?,?,?,?,?,?)',
                     (uid, name, str(data.get('ctype') or 'ssh'),
                      0 if data.get('enabled') is False else 1,
                      str(data.get('description') or ''),
@@ -177,19 +179,19 @@ class CredentialsStore:
     def update(self, uid: str, data: dict, *, actor: str = '') -> bool:
         """Update a credential.  ``data`` is replaced wholesale (the caller
         should have restored any masked secrets first)."""
-        if not self._db.fetchone('SELECT 1 FROM credentials WHERE uid = ?', (uid,)):
+        if not self._db.fetchone(f'SELECT 1 FROM {_T} WHERE uid = ?', (uid,)):
             return False
         name = str(data.get('name') or '').strip()
         if not name:
             return False
         clash = self._db.fetchone(
-            'SELECT uid FROM credentials WHERE name = ? AND uid <> ?', (name, uid))
+            f'SELECT uid FROM {_T} WHERE name = ? AND uid <> ?', (name, uid))
         if clash:
             return False
         try:
             with self._db.transaction():
                 self._db.execute(
-                    'UPDATE credentials SET name=?, ctype=?, enabled=?, description=?, data=?, '
+                    f'UPDATE {_T} SET name=?, ctype=?, enabled=?, description=?, data=?, '
                     'updated_at=?, updated_by=? WHERE uid=?',
                     (name, str(data.get('ctype') or 'ssh'),
                      0 if data.get('enabled') is False else 1,
@@ -203,10 +205,10 @@ class CredentialsStore:
 
     def delete(self, uid: str) -> bool:
         try:
-            if not self._db.fetchone('SELECT 1 FROM credentials WHERE uid = ?', (uid,)):
+            if not self._db.fetchone(f'SELECT 1 FROM {_T} WHERE uid = ?', (uid,)):
                 return False
             with self._db.transaction():
-                self._db.execute('DELETE FROM credentials WHERE uid = ?', (uid,))
+                self._db.execute(f'DELETE FROM {_T} WHERE uid = ?', (uid,))
             return True
         except Exception:  # pylint: disable=broad-except
             return False

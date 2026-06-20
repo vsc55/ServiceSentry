@@ -315,11 +315,11 @@ class TestSecurityInjection:
         wa = self._make_multiuser(config_dir, var_dir)
         c = wa.app.test_client()
         self._login(c)
-        mods = wa._read_config_file(wa._MODULES_FILE) or {}
+        mods = wa._load_modules()
         mods.setdefault('datastore', {}).setdefault('list', {})['x'] = {
             'db_type': 'mysql', 'user': 'u', 'password': 'SUPERSECRET123',
             'token': 'TOKSECRET', 'ssh_password': 'SSHSECRET', 'host_uid': 'h'}
-        assert wa._save_config_file(wa._MODULES_FILE, mods)
+        assert wa._save_modules(mods)
         resp = c.get("/api/v1/modules")
         assert resp.status_code == 200
         item = resp.get_json()['datastore']['list']['x']

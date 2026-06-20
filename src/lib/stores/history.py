@@ -52,6 +52,8 @@ _SCHEMA = TableSpec(
     ),
 )
 
+_T = _SCHEMA.name  # table name — single source of truth
+
 
 class HistoryStore:
     """Backend-agnostic time-series store."""
@@ -79,7 +81,7 @@ class HistoryStore:
         """Insert one sample."""
         try:
             self._db.execute(
-                'INSERT INTO history(ts, module, item_uid, key, status, data) '
+                f'INSERT INTO {_T}(ts, module, item_uid, key, status, data) '
                 'VALUES(?, ?, ?, ?, ?, ?)',
                 (
                     time.time(),
@@ -107,11 +109,11 @@ class HistoryStore:
             with self._db.transaction():
                 if item_uid:
                     deleted = self._db.execute(
-                        'DELETE FROM history WHERE item_uid = ?', (item_uid,)
+                        f'DELETE FROM {_T} WHERE item_uid = ?', (item_uid,)
                     )
                 else:
                     deleted = self._db.execute(
-                        'DELETE FROM history WHERE module = ? AND key = ?',
+                        f'DELETE FROM {_T} WHERE module = ? AND key = ?',
                         (module, key),
                     )
             return deleted
@@ -121,7 +123,7 @@ class HistoryStore:
     def delete_all(self) -> int:
         """Delete all rows and reclaim disk space."""
         try:
-            deleted = self._db.execute('DELETE FROM history')
+            deleted = self._db.execute(f'DELETE FROM {_T}')
             self._db.commit()
             self._db.vacuum()
             return deleted
@@ -134,7 +136,7 @@ class HistoryStore:
             return 0
         cutoff = time.time() - retention_days * 86400
         try:
-            deleted = self._db.execute('DELETE FROM history WHERE ts < ?', (cutoff,))
+            deleted = self._db.execute(f'DELETE FROM {_T} WHERE ts < ?', (cutoff,))
             self._db.commit()
             self._db.checkpoint()
             return deleted
@@ -155,7 +157,7 @@ class HistoryStore:
         slow as the history grew).
         """
         try:
-            rows = self._db.fetchall('''
+            rows = self._db.fetchall(f'''
                 WITH ranked AS (
                     SELECT
                         module, item_uid, key, ts, status, data,
@@ -164,7 +166,7 @@ class HistoryStore:
                             PARTITION BY COALESCE(item_uid, module || ':' || key)
                             ORDER BY ts DESC, id DESC
                         ) AS rn
-                    FROM history
+                    FROM {_T}
                 ),
                 agg AS (
                     SELECT
@@ -173,7 +175,7 @@ class HistoryStore:
                         MAX(ts)       AS last_ts,
                         MIN(ts)       AS first_ts,
                         AVG(status)   AS uptime
-                    FROM history
+                    FROM {_T}
                     GROUP BY COALESCE(item_uid, module || ':' || key)
                 )
                 SELECT
@@ -222,7 +224,7 @@ class HistoryStore:
             w_args = (module, key, from_ts, to_ts)
         try:
             row = self._db.fetchone(
-                f'SELECT COUNT(*) FROM history WHERE {where}', w_args
+                f'SELECT COUNT(*) FROM {_T} WHERE {where}', w_args
             )
             count = row[0] if row else 0
             if count == 0:
@@ -231,7 +233,7 @@ class HistoryStore:
             bucket = (to_ts - from_ts) / max_points if max_points > 0 else 0
             if count <= max_points or bucket <= 0:
                 rows = self._db.fetchall(
-                    f'SELECT ts, status, data FROM history '
+                    f'SELECT ts, status, data FROM {_T} '
                     f'WHERE {where} ORDER BY ts',
                     w_args,
                 )
@@ -241,7 +243,7 @@ class HistoryStore:
                         CAST((ts - ?) / ? AS INTEGER) * ? + ? AS bts,
                         CAST(ROUND(AVG(status)) AS INTEGER),
                         data
-                    FROM history WHERE {where}
+                    FROM {_T} WHERE {where}
                     GROUP BY CAST((ts - ?) / ? AS INTEGER)
                     ORDER BY bts''',
                     (from_ts, bucket, bucket, from_ts) + w_args + (from_ts, bucket),
@@ -274,7 +276,7 @@ class HistoryStore:
         try:
             row = self._db.fetchone(
                 f'SELECT COUNT(*), AVG(status), MIN(ts), MAX(ts) '
-                f'FROM history WHERE {where}',
+                f'FROM {_T} WHERE {where}',
                 w_args,
             )
             if not row or not row[0]:
@@ -292,7 +294,7 @@ class HistoryStore:
                     "SELECT MIN(CAST(json_extract(data, ?) AS REAL)),"
                     "       MAX(CAST(json_extract(data, ?) AS REAL)),"
                     "       AVG(CAST(json_extract(data, ?) AS REAL)) "
-                    f"FROM history WHERE {where} "
+                    f"FROM {_T} WHERE {where} "
                     "AND json_extract(data, ?) IS NOT NULL",
                     (path, path, path) + w_args + (path,),
                 )

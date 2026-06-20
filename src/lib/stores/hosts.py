@@ -12,7 +12,7 @@ PostgreSQL/MySQL through the same interface), like the other entity stores.
 
 Secret values inside the per-protocol ``profiles`` (ssh/db passwords, SNMPv3
 keys, tokens…) are encrypted at rest with :mod:`lib.secret_manager` using the
-same value-level Fernet scheme as ``modules.json`` / ``config.json``.  ``get``
+same value-level Fernet scheme as the module config / ``config.json``.  ``get``
 and ``list`` return decrypted profiles (so the monitor can connect); the API
 route is responsible for masking secrets before sending them to the client.
 
@@ -59,6 +59,8 @@ _HOSTS_SCHEMA = TableSpec(
     ),
     indexes=(Index('idx_hosts_name', ('name',)),),
 )
+
+_T = _HOSTS_SCHEMA.name  # table name — single source of truth
 
 _COLS = ('uid', 'name', 'address', 'kind', 'os', 'maintenance', 'tags', 'description',
          'profiles', 'modules', 'created_at', 'updated_at', 'updated_by')
@@ -140,18 +142,18 @@ class HostsStore:
     def list(self, *, decrypt: bool = True) -> list[dict]:
         """Return all hosts ordered by name."""
         return [self._row_to_host(r, decrypt)
-                for r in self._db.fetchall(f'SELECT {_SELECT} FROM hosts ORDER BY name')]
+                for r in self._db.fetchall(f'SELECT {_SELECT} FROM {_T} ORDER BY name')]
 
     def get(self, uid: str, *, decrypt: bool = True) -> dict | None:
-        row = self._db.fetchone(f'SELECT {_SELECT} FROM hosts WHERE uid = ?', (uid,))
+        row = self._db.fetchone(f'SELECT {_SELECT} FROM {_T} WHERE uid = ?', (uid,))
         return self._row_to_host(row, decrypt) if row else None
 
     def get_by_name(self, name: str, *, decrypt: bool = True) -> dict | None:
-        row = self._db.fetchone(f'SELECT {_SELECT} FROM hosts WHERE name = ?', (name,))
+        row = self._db.fetchone(f'SELECT {_SELECT} FROM {_T} WHERE name = ?', (name,))
         return self._row_to_host(row, decrypt) if row else None
 
     def count(self) -> int:
-        row = self._db.fetchone('SELECT COUNT(*) FROM hosts')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
         return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
@@ -160,14 +162,14 @@ class HostsStore:
         name = str(data.get('name') or '').strip()
         if not name:
             return None
-        if self._db.fetchone('SELECT 1 FROM hosts WHERE name = ?', (name,)):
+        if self._db.fetchone(f'SELECT 1 FROM {_T} WHERE name = ?', (name,)):
             return None  # duplicate name
         uid = str(data.get('uid') or uuid.uuid4())
         now = _now()
         try:
             with self._db.transaction():
                 self._db.execute(
-                    f'INSERT INTO hosts ({_SELECT}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    f'INSERT INTO {_T} ({_SELECT}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (uid, name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),
                      self._norm_os(data.get('os')),
@@ -185,19 +187,19 @@ class HostsStore:
     def update(self, uid: str, data: dict, *, actor: str = '') -> bool:
         """Update an existing host.  ``profiles`` is replaced wholesale (the
         caller should have restored any masked secrets first)."""
-        if not self._db.fetchone('SELECT 1 FROM hosts WHERE uid = ?', (uid,)):
+        if not self._db.fetchone(f'SELECT 1 FROM {_T} WHERE uid = ?', (uid,)):
             return False
         name = str(data.get('name') or '').strip()
         if not name:
             return False
         # Reject a rename that collides with another host's name.
-        clash = self._db.fetchone('SELECT uid FROM hosts WHERE name = ? AND uid <> ?', (name, uid))
+        clash = self._db.fetchone(f'SELECT uid FROM {_T} WHERE name = ? AND uid <> ?', (name, uid))
         if clash:
             return False
         try:
             with self._db.transaction():
                 self._db.execute(
-                    'UPDATE hosts SET name=?, address=?, kind=?, os=?, maintenance=?, '
+                    f'UPDATE {_T} SET name=?, address=?, kind=?, os=?, maintenance=?, '
                     'tags=?, description=?, profiles=?, modules=?, updated_at=?, updated_by=? WHERE uid=?',
                     (name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),
@@ -215,11 +217,11 @@ class HostsStore:
 
     def delete(self, uid: str) -> bool:
         try:
-            row = self._db.fetchone('SELECT 1 FROM hosts WHERE uid = ?', (uid,))
+            row = self._db.fetchone(f'SELECT 1 FROM {_T} WHERE uid = ?', (uid,))
             if not row:
                 return False
             with self._db.transaction():
-                self._db.execute('DELETE FROM hosts WHERE uid = ?', (uid,))
+                self._db.execute(f'DELETE FROM {_T} WHERE uid = ?', (uid,))
             return True
         except Exception:  # pylint: disable=broad-except
             return False

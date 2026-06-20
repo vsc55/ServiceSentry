@@ -36,6 +36,8 @@ _SCHEMA = TableSpec(
     renames={'sid': 'uid'},  # legacy column rename, data preserved
 )
 
+_T = _SCHEMA.name  # table name — single source of truth
+
 
 class SessionsStore:
     """Relational store for WebAdmin sessions (backend-agnostic)."""
@@ -55,7 +57,7 @@ class SessionsStore:
         """Return all sessions as ``{token: {uid, user_uid, …}}``."""
         rows = self._db.fetchall(
             'SELECT token, uid, user_uid, created, last_seen, ip, user_agent '
-            'FROM sessions'
+            f'FROM {_T}'
         )
         return {
             r[0]: {
@@ -71,7 +73,7 @@ class SessionsStore:
 
     def count(self) -> int:
         """Return the number of stored sessions."""
-        row = self._db.fetchone('SELECT COUNT(*) FROM sessions')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
         return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
@@ -80,10 +82,10 @@ class SessionsStore:
         """Replace all sessions atomically."""
         try:
             with self._db.transaction():
-                self._db.execute('DELETE FROM sessions')
+                self._db.execute(f'DELETE FROM {_T}')
                 for token, s in sessions.items():
                     self._db.execute(
-                        'INSERT INTO sessions'
+                        f'INSERT INTO {_T}'
                         '(token, uid, user_uid, created, last_seen, ip, user_agent)'
                         ' VALUES(?,?,?,?,?,?,?)',
                         (token,
@@ -99,9 +101,9 @@ class SessionsStore:
         """Insert or replace a single session row (portable delete-then-insert)."""
         try:
             with self._db.transaction():
-                self._db.execute('DELETE FROM sessions WHERE token = ?', (token,))
+                self._db.execute(f'DELETE FROM {_T} WHERE token = ?', (token,))
                 self._db.execute(
-                    'INSERT INTO sessions'
+                    f'INSERT INTO {_T}'
                     '(token, uid, user_uid, created, last_seen, ip, user_agent)'
                     ' VALUES(?,?,?,?,?,?,?)',
                     (token,
@@ -117,7 +119,7 @@ class SessionsStore:
         """Delete a single session by token.  Returns True if found."""
         try:
             with self._db.transaction():
-                deleted = self._db.execute('DELETE FROM sessions WHERE token = ?', (token,))
+                deleted = self._db.execute(f'DELETE FROM {_T} WHERE token = ?', (token,))
             return deleted > 0
         except Exception:  # pylint: disable=broad-except
             return False
@@ -126,7 +128,7 @@ class SessionsStore:
         """Delete all sessions for a given user UID.  Returns count deleted."""
         try:
             with self._db.transaction():
-                deleted = self._db.execute('DELETE FROM sessions WHERE user_uid = ?', (user_uid,))
+                deleted = self._db.execute(f'DELETE FROM {_T} WHERE user_uid = ?', (user_uid,))
             return deleted
         except Exception:  # pylint: disable=broad-except
             return 0

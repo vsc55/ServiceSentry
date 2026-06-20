@@ -33,7 +33,6 @@ def client_with_modules(tmp_path):
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(var_dir, exist_ok=True)
 
-    (pathlib.Path(config_dir) / "modules.json").write_text("{}", encoding="utf-8")
     (pathlib.Path(config_dir) / "config.json").write_text("{}", encoding="utf-8")
 
     wa = WebAdmin(

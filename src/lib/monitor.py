@@ -82,6 +82,9 @@ class Monitor(ObjectBase):
         self._read_config()
         self._init_telegram()
         self._db = self._init_db()
+        # Module configuration lives in the DB; needs the connector + fernet, so
+        # it is wired here rather than in _read_config.
+        self.config_modules = self._init_modules()
         self._history = self._init_history()
         self._check_state_store = self._init_check_state()
         # The working state lives in the DB (check_state) — no status.json.
@@ -352,13 +355,8 @@ class Monitor(ObjectBase):
             if _fernet:
                 secret_manager.decrypt_all(self.config.data, _fernet)
 
-            self.config_modules = ConfigControl(os.path.join(self.dir_config, 'modules.json'))
-            self.config_modules.read()
-            if _fernet:
-                secret_manager.decrypt_all(self.config_modules.data, _fernet)
-            if not self.config_modules.is_data:
-                self.config_modules.data = {}
-                self.config_modules.save()
+            # config_modules (DB-backed) is set up by _init_modules() in __init__,
+            # once the shared DB connector exists.
 
             _raw_url = normalize_url(self.config.get_conf(['web_admin', 'public_url'], ''))
             if _raw_url:
@@ -369,8 +367,23 @@ class Monitor(ObjectBase):
                 self._public_url = ''
         else:
             self.config = ConfigControl(None, {})
-            self.config_modules = ConfigControl(None, {})
             self._public_url = ''
+
+    def _init_modules(self):
+        """Module configuration store (DB-backed).
+
+        Mirrors :meth:`_read_status`: a ``DbBackedModules`` facade over
+        ``ModulesStore`` so every ``config_modules.get_conf(...)`` caller is
+        unchanged.  Falls back to an in-memory ConfigControl when no DB is
+        available.
+        """
+        if getattr(self, '_db', None) is None:
+            return ConfigControl(None, {})
+        from lib.stores.modules import ModulesStore, DbBackedModules  # noqa: PLC0415
+        store = ModulesStore(self._db)
+        facade = DbBackedModules(store, fernet=getattr(self, '_fernet', None))
+        facade.read()
+        return facade
 
     def _read_status(self):
         """Load the working state from the ``check_state`` DB table.

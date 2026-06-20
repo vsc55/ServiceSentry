@@ -102,7 +102,7 @@ class TestPublicStatusPage:
                       public_status=True, public_status_detail=True,
                       pw_require_upper=False, pw_require_digit=False)
         # modules config and check state keyed consistently (by the item key).
-        wa._save_config_file(wa._MODULES_FILE, {"ping": {"enabled": True, "list": {
+        wa._save_modules({"ping": {"enabled": True, "list": {
             "u-router": {"enabled": True, "label": "Router", "host": "192.168.1.1"}}}})
         wa._check_state_store.persist_status({"ping": {"u-router": {"status": True}}})
         wa.app.config["TESTING"] = True
@@ -115,7 +115,7 @@ class TestPublicStatusPage:
         wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                       public_status=True, public_status_detail=False,
                       pw_require_upper=False, pw_require_digit=False)
-        wa._save_config_file(wa._MODULES_FILE, {"ping": {"enabled": True, "list": {
+        wa._save_modules({"ping": {"enabled": True, "list": {
             "u-router": {"enabled": True, "label": "Router", "host": "192.168.1.1"}}}})
         wa._check_state_store.persist_status({"ping": {"u-router": {"status": True}}})
         wa.app.config["TESTING"] = True
@@ -128,7 +128,7 @@ class TestPublicStatusPage:
         wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                       public_status=True, public_status_detail=True,
                       pw_require_upper=False, pw_require_digit=False)
-        wa._save_config_file(wa._MODULES_FILE, {"ping": {"enabled": True, "list": {
+        wa._save_modules({"ping": {"enabled": True, "list": {
             "u-router": {"enabled": True, "label": "Router", "host": "192.168.1.1"}}}})
         wa._check_state_store.persist_status({"ping": {"u-router": {"status": True}}})
         wa.app.config["TESTING"] = True
@@ -141,7 +141,7 @@ class TestPublicStatusPage:
                       public_status=True, public_status_detail=True,
                       pw_require_upper=False, pw_require_digit=False)
         uid = "abc-123-uid"
-        wa._save_config_file(wa._MODULES_FILE, {"service_status": {
+        wa._save_modules({"service_status": {
             "enabled": True,
             "list": {uid: {"enabled": True, "service": "named", "label": "NS1 - named"}},
         }})

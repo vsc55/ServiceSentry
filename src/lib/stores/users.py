@@ -71,6 +71,11 @@ _USERS_GROUPS_SCHEMA = TableSpec(
 )
 
 
+# Table names — single source of truth (the TableSpecs above), reused by every query.
+_T_USERS = _USERS_SCHEMA.name
+_T_USERS_GROUPS = _USERS_GROUPS_SCHEMA.name
+
+
 class UsersStore:
     """Relational store for WebAdmin user accounts (backend-agnostic)."""
 
@@ -89,7 +94,7 @@ class UsersStore:
         import time as _t  # noqa: PLC0415
         _now = _t.strftime('%Y-%m-%dT%H:%M:%SZ', _t.gmtime())
         db.execute(
-            "UPDATE users SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
+            f"UPDATE {_T_USERS} SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
             (_now, _now, 'system'),
         )
         db.commit()
@@ -105,7 +110,7 @@ class UsersStore:
         dm    = data.get('dark_mode')
         extra = {k: v for k, v in data.items() if k not in _CORE and k != 'groups'}
         self._db.execute(
-            'INSERT INTO users'
+            f'INSERT INTO {_T_USERS}'
             '(username, uid, password_hash, role, display_name, email,'
             ' lang, dark_mode, enabled, auth_source, extra,'
             ' created_at, updated_at, updated_by)'
@@ -134,7 +139,7 @@ class UsersStore:
         for row in self._db.fetchall(
             'SELECT username, uid, password_hash, role, display_name, email,'
             ' lang, dark_mode, enabled, auth_source, extra,'
-            ' created_at, updated_at, updated_by FROM users'
+            f' created_at, updated_at, updated_by FROM {_T_USERS}'
         ):
             (username, uid, pw_hash, role, display_name, email,
              lang, dark_mode, enabled, auth_source, extra_raw,
@@ -164,7 +169,7 @@ class UsersStore:
 
         # Populate groups from the relationship table
         for user_uid, group_uid in self._db.fetchall(
-            'SELECT user_uid, group_uid FROM users_groups ORDER BY user_uid, group_uid'
+            f'SELECT user_uid, group_uid FROM {_T_USERS_GROUPS} ORDER BY user_uid, group_uid'
         ):
             name = uid_to_name.get(user_uid)
             if name and name in users:
@@ -174,12 +179,12 @@ class UsersStore:
 
     def count(self) -> int:
         """Return the number of stored users."""
-        row = self._db.fetchone('SELECT COUNT(*) FROM users')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T_USERS}')
         return row[0] if row else 0
 
     def count_groups(self) -> int:
         """Return the total number of user-group memberships."""
-        row = self._db.fetchone('SELECT COUNT(*) FROM users_groups')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T_USERS_GROUPS}')
         return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
@@ -188,14 +193,14 @@ class UsersStore:
         """Replace all users and their group memberships atomically."""
         try:
             with self._db.transaction():
-                self._db.execute('DELETE FROM users_groups')
-                self._db.execute('DELETE FROM users')
+                self._db.execute(f'DELETE FROM {_T_USERS_GROUPS}')
+                self._db.execute(f'DELETE FROM {_T_USERS}')
                 for username, data in users.items():
                     uid = self._insert_user_row(username, data)
                     for grp_uid in dict.fromkeys(data.get('groups', [])):  # dedupe, keep order
                         if grp_uid:
                             self._db.execute(
-                                'INSERT INTO users_groups(user_uid, group_uid) VALUES(?,?)',
+                                f'INSERT INTO {_T_USERS_GROUPS}(user_uid, group_uid) VALUES(?,?)',
                                 (uid, str(grp_uid)),
                             )
             return True
@@ -207,13 +212,13 @@ class UsersStore:
         try:
             with self._db.transaction():
                 uid = data.get('uid') or username
-                self._db.execute('DELETE FROM users WHERE username = ?', (username,))
-                self._db.execute('DELETE FROM users_groups WHERE user_uid = ?', (uid,))
+                self._db.execute(f'DELETE FROM {_T_USERS} WHERE username = ?', (username,))
+                self._db.execute(f'DELETE FROM {_T_USERS_GROUPS} WHERE user_uid = ?', (uid,))
                 uid = self._insert_user_row(username, data)
                 for grp_uid in dict.fromkeys(data.get('groups', [])):
                     if grp_uid:
                         self._db.execute(
-                            'INSERT INTO users_groups(user_uid, group_uid) VALUES(?,?)',
+                            f'INSERT INTO {_T_USERS_GROUPS}(user_uid, group_uid) VALUES(?,?)',
                             (uid, str(grp_uid)),
                         )
             return True
@@ -223,13 +228,13 @@ class UsersStore:
     def delete(self, username: str) -> bool:
         """Delete a user and their group memberships."""
         try:
-            row = self._db.fetchone('SELECT uid FROM users WHERE username = ?', (username,))
+            row = self._db.fetchone(f'SELECT uid FROM {_T_USERS} WHERE username = ?', (username,))
             if not row:
                 return False
             uid = row[0]
             with self._db.transaction():
-                self._db.execute('DELETE FROM users_groups WHERE user_uid = ?', (uid,))
-                self._db.execute('DELETE FROM users WHERE username = ?', (username,))
+                self._db.execute(f'DELETE FROM {_T_USERS_GROUPS} WHERE user_uid = ?', (uid,))
+                self._db.execute(f'DELETE FROM {_T_USERS} WHERE username = ?', (username,))
             return True
         except Exception:  # pylint: disable=broad-except
             return False
