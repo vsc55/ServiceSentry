@@ -102,7 +102,7 @@ jobs:
             # (python3-flask pulls in python3-werkzeug.)
             apt-get install -y --no-install-recommends \
               python3-flask python3-werkzeug python3-cryptography \
-              python3-psutil python3-requests
+              python3-psutil python3-requests python3-paramiko
           else
             # Gentoo stage3 ships no pip and has no synced ebuild tree — bootstrap
             # pip (ensurepip, else get-pip) and install with the PEP 668 override.
@@ -110,7 +110,7 @@ jobs:
               || { wget -qO /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py \
                    && python3 /tmp/get-pip.py --break-system-packages; }
             python3 -m pip install --break-system-packages --quiet \
-              flask werkzeug cryptography psutil requests
+              flask werkzeug cryptography psutil requests paramiko
           fi
 
       - name: Test monitoring daemon (single check, no modules)
