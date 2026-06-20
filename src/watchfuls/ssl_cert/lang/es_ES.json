@@ -5,10 +5,10 @@
         "enabled":      "Habilitado",
         "label":        "Etiqueta",
         "threads":      "Hilos",
-        "warning_days": "Umbral de aviso (días)",
+        "warning_days": "Umbral (días)",
         "timeout":      "Timeout (s)",
         "host":         "Host",
-        "server_name":  "Nombre de servidor (SNI/FQDN)",
+        "server_name":  "Nombre de servidor",
         "port":         "Puerto",
         "verify":       "Verificar cadena y hostname"
     },
@@ -21,6 +21,11 @@
         "server_name":  "FQDN enviado como SNI y validado contra el certificado. Vacío = usar la dirección del host. Útil para un proxy inverso que sirve un certificado distinto por FQDN en la misma dirección.",
         "port":         "Puerto HTTPS. Dejar vacío (0) para usar el puerto estándar 443.",
         "verify":       "Validar la cadena del certificado y que coincide con el nombre del servidor. Desactívalo para permitir certificados autofirmados/no confiables y comprobar solo la caducidad."
+    },
+    "group_labels": {
+        "connection": "Conexión",
+        "validation": "Validación",
+        "alerts":     "Alertas"
     },
     "new_item_key_label": "Nombre de host o identificador:",
     "rename_item_prompt": "Introduce el nuevo nombre de host o identificador:",

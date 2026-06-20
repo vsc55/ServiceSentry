@@ -128,6 +128,10 @@
         "mib_browser_collapse_all":   "Colapsar todo",
         "mib_browser_copy_oid":       "Copiar OID"
     },
+    "group_labels": {
+        "connection": "Conexión",
+        "auth":       "Autenticación"
+    },
     "collections": {
         "servers": "Servidores",
         "checks":  "Comprobaciones OID"

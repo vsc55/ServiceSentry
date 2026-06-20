@@ -13,11 +13,12 @@
         "__discovery_uid_key__": true,
         "__discovery_label_template__": "{host}",
         "__new_item_fields__": ["label"],
+        "__field_order__": ["enabled", "label", "server", "port", "timeout", "max_offset"],
         "enabled":    {"type": "bool",  "default": true},
         "label":      {"type": "str",   "default": ""},
-        "server":     {"type": "str",   "default": "pool.ntp.org"},
-        "port":       {"type": "int",   "default": 0, "min": 0, "max": 65535, "placeholder": 123},
-        "max_offset": {"type": "float", "default": 0.0, "min": 0.0, "max": 3600.0, "placeholder_module": "max_offset"},
-        "timeout":    {"type": "int",   "default": 0,   "min": 0,   "max": 30,     "placeholder_module": "timeout"}
+        "server":     {"type": "str",   "default": "pool.ntp.org", "group": "connection"},
+        "port":       {"type": "int",   "default": 0, "min": 0, "max": 65535, "placeholder": 123, "group": "connection"},
+        "max_offset": {"type": "float", "default": 0.0, "min": 0.0, "max": 3600.0, "placeholder_module": "max_offset", "group": "alerts"},
+        "timeout":    {"type": "int",   "default": 0,   "min": 0,   "max": 30,     "placeholder_module": "timeout", "group": "connection"}
     }
 }

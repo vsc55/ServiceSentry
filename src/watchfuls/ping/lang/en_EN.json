@@ -7,7 +7,7 @@
         "host":    "Host",
         "timeout": "Timeout (s)",
         "attempt": "Attempts",
-        "alert":   "Alert threshold",
+        "alert":   "Threshold",
         "threads": "Threads"
     },
     "hints": {
@@ -21,5 +21,9 @@
     },
     "new_item_key_label": "Host name or identifier:",
     "rename_item_prompt": "Enter new host name or identifier:",
+    "group_labels": {
+        "connection": "Connection",
+        "alerts":     "Alerts"
+    },
     "collections": {"list": "Hosts"}
 }

@@ -18,6 +18,6 @@
         "__check_title_field__": "process",
         "enabled":   {"type": "bool", "default": true},
         "process":   {"type": "str",  "default": "", "placeholder": "__key__"},
-        "min_count": {"type": "int",  "default": 0,  "min": 0, "max": 1000, "placeholder_module": "min_count"}
+        "min_count": {"type": "int",  "default": 0,  "min": 0, "max": 1000, "placeholder_module": "min_count", "group": "alerts"}
     }
 }

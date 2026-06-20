@@ -14,13 +14,22 @@
         "__discovery_uid_key__": true,
         "__discovery_label_template__": "{host} - {server_name}",
         "__new_item_fields__": ["label", "server_name"],
+        "__field_order__": [
+            "enabled", "label",
+            "host", "server_name", "port", "timeout",
+            "verify",
+            "warning_days"
+        ],
         "enabled":      {"type": "bool", "default": true},
         "label":        {"type": "str",  "default": ""},
-        "host":         {"type": "str",  "default": ""},
-        "server_name":  {"type": "str",  "default": "", "placeholder": "__address__"},
-        "port":         {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 443},
-        "verify":       {"type": "bool", "default": true},
-        "warning_days": {"type": "int",  "default": 0,   "min": 0, "max": 365, "placeholder_module": "warning_days"},
-        "timeout":      {"type": "int",  "default": 0,   "min": 0, "max": 60,  "placeholder_module": "timeout"}
+
+        "host":         {"type": "str",  "default": "", "group": "connection"},
+        "server_name":  {"type": "str",  "default": "", "placeholder": "__address__", "group": "connection"},
+        "port":         {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 443, "group": "connection"},
+        "timeout":      {"type": "int",  "default": 0,   "min": 0, "max": 60,  "placeholder_module": "timeout", "group": "connection"},
+
+        "verify":       {"type": "bool", "default": true, "group": "validation"},
+
+        "warning_days": {"type": "int",  "default": 0,   "min": 0, "max": 365, "placeholder_module": "warning_days", "group": "alerts"}
     }
 }

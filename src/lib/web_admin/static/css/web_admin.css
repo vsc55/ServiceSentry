@@ -634,6 +634,17 @@
 /* ── Config preset hint (small secondary text) ──────────────────────── */
 .cfg-preset-hint { font-size: .78em; }
 
+/* ── Settings section header (field groups, "Default" title, widget labels) ─ */
+.ss-section-hdr {
+    border-bottom: 1px solid var(--bs-border-color);
+    margin: .6rem 0 .5rem;
+}
+.ss-section-title {
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+
 /* ── Notification template toolbar buttons ──────────────────────────── */
 .notif-tpl-btn { font-size: .75rem; }
 

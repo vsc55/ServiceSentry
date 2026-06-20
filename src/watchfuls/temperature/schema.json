@@ -21,6 +21,6 @@
         "enabled": {"type": "bool",  "default": true},
         "label":   {"type": "str",   "default": ""},
         "sensor":  {"type": "str",   "default": ""},
-        "alert":   {"type": "float", "default": 80, "min": 0, "max": 150}
+        "alert":   {"type": "float", "default": 80, "min": 0, "max": 150, "group": "alerts"}
     }
 }

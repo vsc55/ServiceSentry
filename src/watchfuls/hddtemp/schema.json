@@ -12,7 +12,7 @@
         "__new_item_fields__": ["label"],
         "enabled": {"type": "bool", "default": true},
         "label":   {"type": "str",  "default": ""},
-        "port":    {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 7634},
-        "exclude": {"type": "list", "default": []}
+        "port":    {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 7634, "group": "connection"},
+        "exclude": {"type": "list", "default": [], "group": "connection"}
     }
 }

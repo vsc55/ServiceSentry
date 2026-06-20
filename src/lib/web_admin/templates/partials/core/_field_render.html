@@ -267,6 +267,16 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _itemKey = _phParts.length >= 4 ? _phParts[_phParts.length - 2] : '';
             if (key === 'label' && _itemKey) {
                 _strPh = ` placeholder="${escAttr(_itemKey)}"`;
+            } else if (meta && meta.placeholder_module != null) {
+                // Module-level default shown as the per-item placeholder (string
+                // analogue of the numeric placeholder_module); falls back to the
+                // field's own static placeholder when the module value is empty.
+                const _modName = pathStr.split('|')[0];
+                const _modPh = (modulesData[_modName] || {})[meta.placeholder_module];
+                const _phVal = (_modPh != null && _modPh !== '')
+                    ? String(_modPh)
+                    : (meta.placeholder != null ? String(meta.placeholder) : '');
+                _strPh = _phVal ? ` placeholder="${escAttr(_phVal)}"` : '';
             } else if (meta && meta.placeholder != null) {
                 const _phRaw = String(meta.placeholder);
                 let _phVal = _phRaw;
@@ -545,11 +555,9 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
                 }
                 const _glabel = esc(_groupLabels[_group] || _group);
                 const _swAttr = _gWhen ? ` data-sw-when="${escAttr(JSON.stringify(_gWhen))}"` : '';
-                const _hdrDisp = _gVisible
-                    ? 'border-bottom:1px solid var(--bs-border-color);margin:.6rem 0 .5rem'
-                    : 'display:none;border-bottom:1px solid var(--bs-border-color);margin:.6rem 0 .5rem';
-                h += `<div class="sw-field"${_swAttr} style="${_hdrDisp}">
-                    <small class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">${_glabel}</small>
+                const _hdrHide = _gVisible ? '' : ' style="display:none"';
+                h += `<div class="sw-field ss-section-hdr"${_swAttr}${_hdrHide}>
+                    <small class="text-muted ss-section-title">${_glabel}</small>
                 </div>`;
             }
             _curGroup = _group;

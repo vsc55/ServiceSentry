@@ -17,6 +17,6 @@
         "__new_item_fields__": ["label"],
         "enabled": {"type": "bool", "default": true},
         "label":   {"type": "str",  "default": ""},
-        "alert":   {"type": "int",  "default": 85, "min": 1, "max": 100}
+        "alert":   {"type": "int",  "default": 85, "min": 1, "max": 100, "group": "alerts"}
     }
 }

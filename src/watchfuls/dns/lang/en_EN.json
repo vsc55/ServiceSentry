@@ -35,6 +35,10 @@
     },
     "new_item_key_label": "Host name or identifier:",
     "rename_item_prompt": "Enter new host name or identifier:",
+    "group_labels": {
+        "connection": "Connection",
+        "query": "Query"
+    },
     "collections": {"list": "Hosts"},
     "ui": {
         "discover_title":        "Discover DNS records",

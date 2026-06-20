@@ -323,7 +323,7 @@ function _dwStatCard(accent, avBg, avColor, icon, count, labelKey, subtitle) {
                     <i class="bi ${icon}"></i></span>
                 <div>
                     <div class="fs-2 fw-bold lh-1">${count}</div>
-                    <div class="fw-semibold text-muted mt-1" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">${t(labelKey)}</div>
+                    <div class="fw-semibold text-muted mt-1 ss-section-title">${t(labelKey)}</div>
                 </div>
             </div>
             ${subtitle ? `<div class="d-flex flex-wrap gap-1 mt-1">${subtitle}</div>` : ''}
@@ -346,7 +346,7 @@ function _dwTableCard(accent, avBg, avColor, icon, title, tableHtml) {
 
 function _dwTheadRow(...ths) {
     return `<thead style="position:sticky;top:0;z-index:1;background:var(--bs-tertiary-bg)">
-        <tr style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--bs-secondary-color)">${ths.join('')}</tr>
+        <tr class="ss-section-title" style="color:var(--bs-secondary-color)">${ths.join('')}</tr>
     </thead>`;
 }
 

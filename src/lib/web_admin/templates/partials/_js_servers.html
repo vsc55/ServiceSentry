@@ -1052,8 +1052,8 @@ function _hostCheckFieldsHtml(mod, idx, it, metas) {
         if (g !== curGroup) {
             curGroup = g;
             if (g && _groupShown(g)) {
-                html += `<div class="col-12" style="border-bottom:1px solid var(--bs-border-color);margin:.6rem 0 .25rem">
-                    <small class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">${esc(groupLabels[g] || g)}</small>
+                html += `<div class="col-12 ss-section-hdr">
+                    <small class="text-muted ss-section-title">${esc(groupLabels[g] || g)}</small>
                 </div>`;
             }
         }
@@ -1666,6 +1666,12 @@ function _hostFieldControl(f, val, onch, ctx) {
         _ph = _itemKey;
     } else if (f.placeholder === '__address__') {
         _ph = (_hostDraft && _hostDraft.address) || '';   // blank server_name → host address
+    } else if (f.placeholder_module != null && ctx) {
+        // Module-level default shown as placeholder (e.g. dns nameserver), falling
+        // back to the field's static placeholder when the global is empty.
+        const _mp = _hostModuleDefault(ctx.mod, f.placeholder_module);
+        _ph = (_mp != null && _mp !== '') ? String(_mp)
+            : (f.placeholder != null && f.placeholder !== '__key__' ? String(f.placeholder) : '');
     } else if (f.placeholder != null && f.placeholder !== '__key__') {
         _ph = String(f.placeholder);
     }

@@ -5,10 +5,10 @@
         "enabled":      "Enabled",
         "label":        "Label",
         "threads":      "Threads",
-        "warning_days": "Warning threshold (days)",
+        "warning_days": "Threshold (days)",
         "timeout":      "Timeout (s)",
         "host":         "Host",
-        "server_name":  "Server name (SNI/FQDN)",
+        "server_name":  "Server name",
         "port":         "Port",
         "verify":       "Verify chain & hostname"
     },
@@ -21,6 +21,11 @@
         "server_name":  "FQDN sent as SNI and validated against the certificate. Leave empty to use the host address. Useful for a reverse proxy that serves a different certificate per FQDN on the same address.",
         "port":         "HTTPS port. Leave empty (0) to use the standard port 443.",
         "verify":       "Validate the certificate chain and that it matches the server name. Disable to allow self-signed/untrusted certificates and only check expiry."
+    },
+    "group_labels": {
+        "connection": "Connection",
+        "validation": "Validation",
+        "alerts":     "Alerts"
     },
     "new_item_key_label": "Host name or identifier:",
     "rename_item_prompt": "Enter new host name or identifier:",

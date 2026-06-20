@@ -16,7 +16,7 @@
         "__new_item_fields__": ["label"],
         "enabled":    {"type": "bool", "default": true},
         "label":      {"type": "str",  "default": ""},
-        "alert_ram":  {"type": "int",  "default": 60, "min": 0, "max": 100},
-        "alert_swap": {"type": "int",  "default": 60, "min": 0, "max": 100}
+        "alert_ram":  {"type": "int",  "default": 60, "min": 0, "max": 100, "group": "alerts"},
+        "alert_swap": {"type": "int",  "default": 60, "min": 0, "max": 100, "group": "alerts"}
     }
 }

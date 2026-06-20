@@ -399,6 +399,15 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function renderModuleBody(name, cfg) {
+// Materialise any module-level defaults missing from the stored config so the
+// "Default" section always shows every default value (covers fields added to a
+// module's __module__ schema after the config was first written).
+const _modDefaults = schemaDefaults(moduleSchema(name));
+if (_modDefaults) {
+    for (const [k, v] of Object.entries(_modDefaults)) {
+        if (!(k in cfg)) cfg[k] = Array.isArray(v) ? [...v] : v;
+    }
+}
 // Toolbar buttons declared by the module in its __toolbar__ schema entry.
 // Rendered generically — no module-specific logic here.
 const _modSch  = ITEM_SCHEMAS[name + '|__module__'] || null;
@@ -437,7 +446,15 @@ const colKeys = [];
 for (const [k, v] of Object.entries(cfg)) {
 if (typeof v === 'object' && v !== null && !Array.isArray(v)) colKeys.push(k);
 }
-h += renderScalarFields(cfg, name, 'modules', ['enabled', 'pretty_name', ...colKeys]);
+// Module-level fields below the display name are the per-check defaults; head
+// them with a "Default" section title (only when there are such fields).
+const _modScalars = renderScalarFields(cfg, name, 'modules', ['enabled', 'pretty_name', ...colKeys]);
+if (_modScalars.trim()) {
+    h += `<div class="sw-field ss-section-hdr">
+        <small class="text-muted ss-section-title">${esc(t('module_defaults'))}</small>
+    </div>`;
+}
+h += _modScalars;
 for (const k of colKeys) h += renderCollection(k, cfg[k], name + '|' + k, 'modules');
 return h;
 }

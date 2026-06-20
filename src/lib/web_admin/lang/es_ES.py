@@ -234,6 +234,7 @@ LANG = {
     'no_users': 'No hay usuarios.',
     'you_badge': 'Tú',
     'display_name': 'Nombre para mostrar',
+    'module_defaults': 'Por defecto',
     'email': 'Email',
     'role': 'Rol',
     'role_admin_desc': 'Admin — Control total',

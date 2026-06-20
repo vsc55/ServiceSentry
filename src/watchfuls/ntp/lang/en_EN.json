@@ -20,5 +20,9 @@
     },
     "new_item_key_label": "NTP server or identifier:",
     "rename_item_prompt": "Enter new NTP server or identifier:",
+    "group_labels": {
+        "connection": "Connection",
+        "alerts":     "Alerts"
+    },
     "collections": {"list": "NTP Servers"}
 }

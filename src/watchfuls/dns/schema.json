@@ -1,8 +1,9 @@
 {
     "__module__": {
-        "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5, "min": 1, "max": 100},
-        "timeout": {"type": "int",  "default": 5, "min": 1, "max": 30}
+        "enabled":    {"type": "bool", "default": true},
+        "threads":    {"type": "int",  "default": 5, "min": 1, "max": 100},
+        "nameserver": {"type": "str",  "default": "", "placeholder": "system resolver"},
+        "timeout":    {"type": "int",  "default": 5, "min": 1, "max": 30}
     },
     "__history__": {"field": "response_time", "unit": "ms", "label": "DNS Resolution Time"},
     "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
@@ -21,6 +22,7 @@
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__new_item_fields__": ["label", "host", "record_type"],
+        "__field_order__": ["enabled", "label", "nameserver", "timeout", "host", "record_type", "expected"],
         "__discovery_subtitle__": "{value}",
         "__discovery_dedup_with_type__": true,
         "__discovery_probe_types__": ["A", "AAAA", "MX", "TXT", "NS", "SOA", "CNAME", "CAA", "SRV"],
@@ -42,11 +44,11 @@
         ],
         "enabled":     {"type": "bool", "default": true},
         "label":       {"type": "str",  "default": ""},
-        "host":        {"type": "str",  "default": ""},
+        "host":        {"type": "str",  "default": "", "group": "query"},
         "record_type": {"type": "str",  "default": "A",
-                        "options": ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SOA"]},
-        "nameserver":  {"type": "str",  "default": "", "placeholder": "system resolver"},
-        "expected":    {"type": "str",  "default": ""},
-        "timeout":     {"type": "int",  "default": 0, "min": 0, "max": 30, "placeholder_module": "timeout"}
+                        "options": ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SOA"], "group": "query"},
+        "nameserver":  {"type": "str",  "default": "", "placeholder": "system resolver", "placeholder_module": "nameserver", "group": "connection"},
+        "expected":    {"type": "str",  "default": "", "group": "query"},
+        "timeout":     {"type": "int",  "default": 0, "min": 0, "max": 30, "placeholder_module": "timeout", "group": "connection"}
     }
 }

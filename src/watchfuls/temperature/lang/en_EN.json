@@ -7,7 +7,7 @@
         "timeout": "Timeout (s)",
         "sensor":  "Sensor",
         "label":   "Label",
-        "alert":   "Alert (\u00b0C)"
+        "alert":   "Threshold (\u00b0C)"
     },
     "hints": {
         "enabled": "Enable or disable monitoring for this sensor.",
@@ -19,6 +19,9 @@
     },
     "new_item_key_label": "Sensor name:",
     "rename_item_prompt": "Enter new sensor name:",
+    "group_labels": {
+        "alerts": "Alerts"
+    },
     "collections": {"list": "Sensors"},
     "ui": {
         "discover_title": "Discover Sensors",

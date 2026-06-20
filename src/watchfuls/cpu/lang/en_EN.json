@@ -10,7 +10,7 @@
         "timeout":  "Timeout (s)",
         "interval": "Sampling interval (s)",
         "label":    "Label",
-        "alert":    "Alert threshold (%)"
+        "alert":    "Threshold (%)"
     },
     "hints": {
         "enabled":  "Enable or disable this CPU check.",
@@ -22,5 +22,8 @@
     },
     "new_item_key_label": "Check name or identifier:",
     "rename_item_prompt": "Enter new check name or identifier:",
+    "group_labels": {
+        "alerts": "Alerts"
+    },
     "collections": {"list": "CPU checks"}
 }

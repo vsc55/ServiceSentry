@@ -20,5 +20,9 @@
     },
     "new_item_key_label": "Servidor NTP o identificador:",
     "rename_item_prompt": "Introduce el nuevo servidor NTP o identificador:",
+    "group_labels": {
+        "connection": "Conexión",
+        "alerts":     "Alertas"
+    },
     "collections": {"list": "Servidores NTP"}
 }

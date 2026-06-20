@@ -18,10 +18,11 @@
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__new_item_fields__": ["label", "service"],
+        "__field_order__": ["enabled", "label", "service", "expected", "remediation"],
         "enabled":     {"type": "bool",   "default": true},
         "label":       {"type": "str",   "default": ""},
-        "service":     {"type": "str",   "default": ""},
-        "expected":    {"type": "str",   "default": "running", "options": ["running", "stopped"]},
-        "remediation": {"type": "bool",  "default": false}
+        "service":     {"type": "str",   "default": "", "group": "service"},
+        "expected":    {"type": "str",   "default": "running", "options": ["running", "stopped"], "group": "status"},
+        "remediation": {"type": "bool",  "default": false, "group": "remediation"}
     }
 }

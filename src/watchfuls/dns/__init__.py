@@ -581,7 +581,11 @@ class Watchful(ModuleBase):
                 continue
             host = (value.get('host', '') or '').strip() or key
             record_type = (value.get('record_type', '') or '').strip().upper() or 'A'
-            nameserver = (value.get('nameserver', '') or '').strip()
+            # Per-item nameserver, or the module-wide default, or the system
+            # resolver (blank) — same "item overrides global" pattern as timeout.
+            nameserver = ((value.get('nameserver', '') or '').strip()
+                          or str(self.get_conf('nameserver',
+                                  self._MODULE_DEFAULTS.get('nameserver', '')) or '').strip())
             label = (value.get('label', '') or '').strip()
             expected = (value.get('expected', '') or '').strip()
             # Robust parse: a hand-edited / migrated non-numeric value must not

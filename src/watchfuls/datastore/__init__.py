@@ -217,6 +217,7 @@ class ConfigOptions(IntEnum):
     auth_db      = 107
     db_index     = 108
     tls          = 109
+    timeout      = 111
     token        = 110
     ssh_host        = 200
     ssh_port        = 201
@@ -340,6 +341,8 @@ class Watchful(ModuleBase):
             'ssh_key':      self._get_conf(ConfigOptions.ssh_key,      key),
             'ssh_key_string': self._get_conf(ConfigOptions.ssh_key_string, key),
             'ssh_verify_host': self._get_conf(ConfigOptions.ssh_verify_host, key),
+            'timeout':      (self._get_conf(ConfigOptions.timeout, key)
+                             or int(self.get_conf('timeout', 10) or 10)),
         }
 
     # ── Backend dispatcher ────────────────────────────────────────────
@@ -387,6 +390,14 @@ class Watchful(ModuleBase):
             bits.append(f'{int(conns)} conn.')
         return ', '.join(bits) if bits else 'connection successful'
 
+    @staticmethod
+    def _to(cfg) -> int:
+        """Connection timeout (seconds) from cfg; blank/invalid -> 10."""
+        try:
+            return int(cfg.get('timeout') or 0) or 10
+        except (TypeError, ValueError):
+            return 10
+
     @classmethod
     def _backend_check(cls, db_type, conn_type, cfg) -> tuple:
         """Return (ok, message, metrics) for the given db_type + conn_type.
@@ -402,7 +413,7 @@ class Watchful(ModuleBase):
                     cfg['ssh_password'], cfg['ssh_key'],
                     cfg['host'], cfg['port'],
                     verify_host=bool(cfg.get('ssh_verify_host', False)),
-                    ssh_key_string=cfg.get('ssh_key_string', ''))
+                    ssh_key_string=cfg.get('ssh_key_string', ''), timeout=cls._to(cfg))
             except Exception as exc:
                 return False, f'SSH error: {exc}', {}
             try:
@@ -441,18 +452,18 @@ class Watchful(ModuleBase):
             if not path or not os.path.exists(path):
                 return False, 'Socket file does not exist', {}
             return cls._pymysql_ping(unix_socket=path,
-                user=cfg['user'], password=cfg['password'], db=cfg['db'])
+                user=cfg['user'], password=cfg['password'], db=cfg['db'], timeout=cls._to(cfg))
         return cls._pymysql_ping(
             host=cfg['host'], port=int(cfg['port']),
-            user=cfg['user'], password=cfg['password'], db=cfg['db'])
+            user=cfg['user'], password=cfg['password'], db=cfg['db'], timeout=cls._to(cfg))
 
     @staticmethod
-    def _pymysql_ping(host='', port=3306, user='', password='', db='', unix_socket='') -> tuple:
+    def _pymysql_ping(host='', port=3306, user='', password='', db='', unix_socket='', timeout=10) -> tuple:
         if not _PYMYSQL:
             return False, 'PyMySQL is not installed (pip install PyMySQL)', {}
         try:
             kw = {'user': user, 'password': password, 'db': db,
-                  'charset': 'utf8mb4', 'connect_timeout': 10,
+                  'charset': 'utf8mb4', 'connect_timeout': timeout,
                   'cursorclass': pymysql.cursors.DictCursor}
             if unix_socket:
                 kw['unix_socket'] = unix_socket
@@ -499,7 +510,7 @@ class Watchful(ModuleBase):
         conn_type = cfg.get('conn_type', 'tcp')
         try:
             kw = {'user': cfg['user'], 'password': cfg['password'],
-                  'dbname': cfg['db'] or 'postgres', 'connect_timeout': 10}
+                  'dbname': cfg['db'] or 'postgres', 'connect_timeout': cls._to(cfg)}
             if cfg.get('tls'):
                 kw['sslmode'] = 'require'
             if conn_type == 'socket':
@@ -567,7 +578,7 @@ class Watchful(ModuleBase):
                 server=cfg['host'], port=str(int(cfg['port'])),
                 user=cfg['user'], password=cfg['password'],
                 database=cfg['db'] or 'master',
-                login_timeout=10, tds_version='7.4')
+                login_timeout=cls._to(cfg), tds_version='7.4')
             metrics = {}
             try:
                 cur = conn.cursor()
@@ -592,8 +603,8 @@ class Watchful(ModuleBase):
         try:
             kw = {
                 'host': cfg['host'], 'port': int(cfg['port']),
-                'serverSelectionTimeoutMS': 10000,
-                'connectTimeoutMS': 10000,
+                'serverSelectionTimeoutMS': cls._to(cfg) * 1000,
+                'connectTimeoutMS': cls._to(cfg) * 1000,
             }
             if cfg['user']:
                 kw['username'] = cfg['user']
@@ -629,8 +640,8 @@ class Watchful(ModuleBase):
             kw = {
                 'password': cfg['password'] or None,
                 'db': int(cfg.get('db_index', 0)),
-                'socket_timeout': 10,
-                'socket_connect_timeout': 10,
+                'socket_timeout': cls._to(cfg),
+                'socket_connect_timeout': cls._to(cfg),
             }
             if cfg.get('tls'):
                 kw['ssl'] = True
@@ -672,7 +683,7 @@ class Watchful(ModuleBase):
             if cfg['user']:
                 creds = base64.b64encode(f"{cfg['user']}:{cfg['password']}".encode()).decode()
                 req.add_header('Authorization', f'Basic {creds}')
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=cls._to(cfg)) as resp:
                 body = json.loads(resp.read())
             status = body.get('status', '')
             if status == 'red':
@@ -705,7 +716,7 @@ class Watchful(ModuleBase):
 
         # InfluxDB 2.x — /health endpoint
         try:
-            with urllib.request.urlopen(_req('/health'), timeout=10) as resp:
+            with urllib.request.urlopen(_req('/health'), timeout=cls._to(cfg)) as resp:
                 body = json.loads(resp.read())
             status = body.get('status', '')
             return (True, '', {}) if status == 'pass' else (False, f'Health status: {status}', {})
@@ -717,7 +728,7 @@ class Watchful(ModuleBase):
 
         # InfluxDB 1.x — /ping endpoint (returns 204 No Content)
         try:
-            with urllib.request.urlopen(_req('/ping'), timeout=10):
+            with urllib.request.urlopen(_req('/ping'), timeout=cls._to(cfg)):
                 pass
             return True, '', {}
         except urllib.error.HTTPError as exc:
@@ -740,7 +751,7 @@ class Watchful(ModuleBase):
                 server = path
             else:
                 server = (cfg['host'], int(cfg['port']))
-            client = _pmc.Client(server, connect_timeout=10, timeout=10)
+            client = _pmc.Client(server, connect_timeout=cls._to(cfg), timeout=cls._to(cfg))
             client.get('__ping__')
             metrics = {}
             try:
@@ -770,7 +781,8 @@ class Watchful(ModuleBase):
         port      = int(config.get('port') or 0) or _DEFAULT_PORTS.get(db_type, 0)
         ssh_port  = int(config.get('ssh_port') or 22)
         cfg = {**config, 'port': port, 'ssh_port': ssh_port, 'conn_type': conn_type,
-               'db_index': int(config.get('db_index', 0) or 0)}
+               'db_index': int(config.get('db_index', 0) or 0),
+               'timeout': int(config.get('timeout') or 0) or 10}
 
         ok, msg, metrics = cls._check_databases(db_type, conn_type, cfg)
         label = _PRETTY.get(db_type, db_type)
@@ -787,7 +799,7 @@ class Watchful(ModuleBase):
                 'hostname': str(config.get('ssh_host', '')),
                 'port': int(config.get('ssh_port') or 22),
                 'username': str(config.get('ssh_user', '')),
-                'timeout': 10, 'banner_timeout': 10, 'auth_timeout': 10,
+                'timeout': cls._to(config), 'banner_timeout': cls._to(config), 'auth_timeout': cls._to(config),
             }
             if config.get('ssh_key_string'):
                 kw['pkey'] = _pkey_from_string(str(config['ssh_key_string']),
@@ -810,7 +822,8 @@ class Watchful(ModuleBase):
         conn_type = str(config.get('conn_type', 'tcp'))
         port      = int(config.get('port') or 0) or _DEFAULT_PORTS.get(db_type, 0)
         ssh_port  = int(config.get('ssh_port') or 22)
-        cfg = {**config, 'port': port, 'ssh_port': ssh_port, 'conn_type': conn_type}
+        cfg = {**config, 'port': port, 'ssh_port': ssh_port, 'conn_type': conn_type,
+               'timeout': int(config.get('timeout') or 0) or 10}
 
         if conn_type == 'ssh':
             if not _PARAMIKO:
@@ -820,7 +833,7 @@ class Watchful(ModuleBase):
                     cfg['ssh_host'], cfg['ssh_port'], cfg['ssh_user'],
                     cfg['ssh_password'], cfg['ssh_key'],
                     cfg['host'], port,
-                    verify_host=bool(cfg.get('ssh_verify_host', False)))
+                    verify_host=bool(cfg.get('ssh_verify_host', False)), timeout=cls._to(cfg))
             except Exception as exc:
                 return {'ok': False, 'message': f'SSH error: {exc}', 'items': []}
             try:
@@ -852,7 +865,7 @@ class Watchful(ModuleBase):
         conn_type = cfg.get('conn_type', 'tcp')
         try:
             kw = {'user': cfg['user'], 'password': cfg['password'],
-                  'charset': 'utf8mb4', 'connect_timeout': 10,
+                  'charset': 'utf8mb4', 'connect_timeout': cls._to(cfg),
                   'cursorclass': pymysql.cursors.DictCursor}
             if conn_type == 'socket':
                 kw['unix_socket'] = cfg.get('socket', '')
@@ -877,7 +890,7 @@ class Watchful(ModuleBase):
         conn_type = cfg.get('conn_type', 'tcp')
         try:
             kw = {'user': cfg['user'], 'password': cfg['password'],
-                  'dbname': 'postgres', 'connect_timeout': 10}
+                  'dbname': 'postgres', 'connect_timeout': cls._to(cfg)}
             if cfg.get('tls'):
                 kw['sslmode'] = 'require'
             if conn_type == 'socket':
@@ -901,7 +914,7 @@ class Watchful(ModuleBase):
             conn = pymssql.connect(
                 server=cfg['host'], port=str(int(cfg['port'])),
                 user=cfg['user'], password=cfg['password'],
-                database='master', login_timeout=10)
+                database='master', login_timeout=cls._to(cfg))
             with conn.cursor() as cur:
                 cur.execute('SELECT name FROM sys.databases ORDER BY name')
                 dbs = [r[0] for r in cur.fetchall()]
@@ -916,7 +929,7 @@ class Watchful(ModuleBase):
             return {'ok': False, 'message': 'pymongo is not installed', 'databases': []}
         try:
             kw = {'host': cfg['host'], 'port': int(cfg['port']),
-                  'serverSelectionTimeoutMS': 10000}
+                  'serverSelectionTimeoutMS': cls._to(cfg) * 1000}
             if cfg['user']:
                 kw['username'] = cfg['user']
                 kw['password'] = cfg['password']
@@ -939,7 +952,7 @@ class Watchful(ModuleBase):
             if cfg['user']:
                 creds = base64.b64encode(f"{cfg['user']}:{cfg['password']}".encode()).decode()
                 req.add_header('Authorization', f'Basic {creds}')
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=cls._to(cfg)) as resp:
                 body = json.loads(resp.read())
             indices = sorted(e['index'] for e in body if not e['index'].startswith('.'))
             return {'ok': True, 'message': '', 'items': indices}
@@ -966,7 +979,7 @@ class Watchful(ModuleBase):
 
         # InfluxDB 2.x — list buckets
         try:
-            with urllib.request.urlopen(_req('/api/v2/buckets'), timeout=10) as resp:
+            with urllib.request.urlopen(_req('/api/v2/buckets'), timeout=cls._to(cfg)) as resp:
                 body = json.loads(resp.read())
             buckets = sorted(b['name'] for b in body.get('buckets', []) if not b['name'].startswith('_'))
             return {'ok': True, 'message': '', 'items': buckets}
@@ -978,7 +991,7 @@ class Watchful(ModuleBase):
 
         # InfluxDB 1.x — SHOW DATABASES
         try:
-            with urllib.request.urlopen(_req('/query?q=SHOW+DATABASES'), timeout=10) as resp:
+            with urllib.request.urlopen(_req('/query?q=SHOW+DATABASES'), timeout=cls._to(cfg)) as resp:
                 body = json.loads(resp.read())
             values = body.get('results', [{}])[0].get('series', [{}])[0].get('values', [])
             dbs = sorted(r[0] for r in values if r[0] != '_internal')
@@ -1013,6 +1026,8 @@ class Watchful(ModuleBase):
                     default = self.get_conf('db_index', self._DEFAULTS.get('db_index', 0))
                 case ConfigOptions.tls:
                     default = self.get_conf('tls', self._DEFAULTS.get('tls', False))
+                case ConfigOptions.timeout:
+                    default = self.get_conf('timeout', self._DEFAULTS.get('timeout', 10) or 10)
                 case ConfigOptions.enabled:
                     default = self.get_conf('enabled', self._DEFAULTS['enabled'])
                 case _:
@@ -1022,7 +1037,7 @@ class Watchful(ModuleBase):
         item = self._resolved_item(key)
         val = item.get(opt.name, default) if isinstance(item, dict) else default
         match opt:
-            case ConfigOptions.port | ConfigOptions.ssh_port | ConfigOptions.db_index:
+            case ConfigOptions.port | ConfigOptions.ssh_port | ConfigOptions.db_index | ConfigOptions.timeout:
                 return self._parse_conf_int(val, default)
             case ConfigOptions.enabled | ConfigOptions.tls | ConfigOptions.ssh_verify_host:
                 # Bool fields: a string parse would turn False into "False"

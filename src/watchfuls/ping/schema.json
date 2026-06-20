@@ -16,9 +16,9 @@
         "__new_item_fields__": ["label"],
         "enabled": {"type": "bool", "default": true},
         "label":   {"type": "str",  "default": ""},
-        "host":    {"type": "str",  "default": ""},
-        "timeout": {"type": "int",  "default": 0, "min": 0, "max": 300, "placeholder_module": "timeout"},
-        "attempt": {"type": "int",  "default": 0, "min": 0, "max": 50,  "placeholder_module": "attempt"},
-        "alert":   {"type": "int",  "default": 0, "min": 0, "max": 100, "placeholder_module": "alert"}
+        "host":    {"type": "str",  "default": "", "group": "connection"},
+        "timeout": {"type": "int",  "default": 0, "min": 0, "max": 300, "placeholder_module": "timeout", "group": "connection"},
+        "attempt": {"type": "int",  "default": 0, "min": 0, "max": 50,  "placeholder_module": "attempt", "group": "connection"},
+        "alert":   {"type": "int",  "default": 0, "min": 0, "max": 100, "placeholder_module": "alert", "group": "alerts"}
     }
 }

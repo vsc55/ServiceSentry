@@ -5,7 +5,7 @@
         "enabled":   "Habilitado",
         "threads":   "Hilos",
         "timeout":   "Timeout (s)",
-        "alert":     "Alerta (%)",
+        "alert":     "Umbral (%)",
         "partition": "Partición",
         "label":     "Etiqueta"
     },
@@ -19,6 +19,9 @@
     },
     "new_item_key_label": "Ruta de partición (p. ej. / o C:\\):",
     "rename_item_prompt": "Introduce la nueva ruta de partición (p. ej. / o C:\\):",
+    "group_labels": {
+        "alerts": "Alertas"
+    },
     "collections": {
         "list": "Particiones"
     },

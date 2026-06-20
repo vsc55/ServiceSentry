@@ -1,7 +1,8 @@
 {
     "__module__": {
         "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5, "min": 1, "max": 100}
+        "threads": {"type": "int",  "default": 5,  "min": 1, "max": 100},
+        "timeout": {"type": "int",  "default": 10, "min": 1, "max": 300}
     },
     "__credential__": {
         "type": "datastore_auth",
@@ -32,7 +33,7 @@
         "__field_order__": [
             "enabled", "label", "conn_type", "db_type",
             "ssh_host", "ssh_port", "ssh_user", "ssh_password", "ssh_key", "ssh_key_string", "ssh_verify_host",
-            "scheme", "host", "port", "socket",
+            "scheme", "host", "port", "socket", "timeout",
             "user", "password", "token", "db", "auth_db", "db_index", "tls", "alert_connections"
         ],
         "__group_when__": {
@@ -87,6 +88,8 @@
         "socket":       {"type": "str",  "default": "",
                          "show_when": {"conn_type": ["socket"], "db_type": ["mysql","mariadb","postgres","redis","valkey"]},
                          "group": "server"},
+        "timeout":      {"type": "int",  "default": 0, "min": 0, "max": 300,
+                         "placeholder_module": "timeout", "group": "server"},
         "user":         {"type": "str",  "default": "",
                          "show_when": {"db_type": ["mysql","mariadb","postgres","mssql","mongodb","elasticsearch","opensearch","influxdb"]},
                          "group": "server"},

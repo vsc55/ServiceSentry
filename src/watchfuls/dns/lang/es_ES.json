@@ -35,6 +35,10 @@
     },
     "new_item_key_label": "Nombre de host o identificador:",
     "rename_item_prompt": "Introduce el nuevo nombre de host o identificador:",
+    "group_labels": {
+        "connection": "Conexión",
+        "query": "Consulta"
+    },
     "collections": {"list": "Hosts"},
     "ui": {
         "discover_title":        "Descubrir registros DNS",
