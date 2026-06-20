@@ -94,7 +94,24 @@ jobs:
       # Heavy optional drivers (pymssql, pymongo…) are skipped; modules with
       # empty target lists exit immediately without making real connections.
       - name: Install Python dependencies
-        run: python3 -m pip install --quiet flask werkzeug cryptography psutil requests
+        run: |
+          set -e
+          if [ "${{ matrix.init }}" = "systemd" ]; then
+            # Debian/Ubuntu: the system Python is externally managed (PEP 668),
+            # so install the dependencies as distro packages instead of via pip.
+            # (python3-flask pulls in python3-werkzeug.)
+            apt-get install -y --no-install-recommends \
+              python3-flask python3-werkzeug python3-cryptography \
+              python3-psutil python3-requests
+          else
+            # Gentoo stage3 ships no pip and has no synced ebuild tree — bootstrap
+            # pip (ensurepip, else get-pip) and install with the PEP 668 override.
+            python3 -m ensurepip --upgrade 2>/dev/null \
+              || { wget -qO /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py \
+                   && python3 /tmp/get-pip.py --break-system-packages; }
+            python3 -m pip install --break-system-packages --quiet \
+              flask werkzeug cryptography psutil requests
+          fi
 
       - name: Test monitoring daemon (single check, no modules)
         run: |
