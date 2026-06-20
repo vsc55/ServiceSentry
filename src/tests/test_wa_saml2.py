@@ -3,7 +3,6 @@
 """Tests for SAML2 SSO authentication integration."""
 
 import json
-import pathlib
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -75,19 +74,8 @@ def _mock_auth(name_id='jane', attrs=None, errors=None, authenticated=True):
 @pytest.fixture()
 def saml2_admin_client(config_dir, var_dir):
     """WebAdmin + test client with SAML2 routes registered (python3-saml mocked)."""
-    from werkzeug.security import generate_password_hash
     import lib.web_admin.auth.saml_auth as saml_mod
 
-    users = {
-        'admin': {
-            'password_hash': generate_password_hash('secret', method='pbkdf2:sha256'),
-            'role': 'admin',
-            'display_name': 'Administrator',
-        }
-    }
-    (pathlib.Path(config_dir) / 'users.json').write_text(
-        json.dumps(users, indent=4), encoding='utf-8'
-    )
     with patch.object(saml_mod, '_HAS_SAML2', True):
         wa = WebAdmin(config_dir, 'admin', 'secret', var_dir,
                       pw_require_upper=False, pw_require_digit=False)

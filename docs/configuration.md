@@ -252,19 +252,22 @@ Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/
 
 ---
 
-## monitor.json
+## Sección `modules` (en config.json)
 
-Configuración del motor de monitorización.
+Defaults globales que **heredan todos los módulos** cuando su propio valor se
+deja en blanco. La resolución sigue la cadena **item → default del módulo →
+global**. Se edita en **Configuration > Modules** del panel web.
 
 ```json
 {
-    "threads": 5
+    "modules": { "threads": 5, "timeout": 15 }
 }
 ```
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `threads` | int | 5 | Número máximo de hilos del `ThreadPoolExecutor` principal |
+| `threads` | int | 5 | Hilos en paralelo: cuántos módulos comprueba el monitor a la vez y, dentro de cada módulo, cuántos ítems en paralelo |
+| `timeout` | int | 15 | Timeout de conexión por defecto (segundos) |
 
 ---
 

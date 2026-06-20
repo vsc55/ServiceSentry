@@ -53,8 +53,9 @@ function _buildPermsAccordion(activePerms, isBuiltin) {
             style="font-size:.72rem"
             onclick="_togglePermFilter('${f.key}')">${esc(t(f.lkey))}</button>`;
     }
-    h += `</div></div>
-    <div class="accordion accordion-flush rounded-3 overflow-hidden border" id="rmPermsAccordion">`;
+    h += `</div></div>`;
+    h += _permsBulkToolbar(isBuiltin);
+    h += `<div class="accordion accordion-flush rounded-3 overflow-hidden border" id="rmPermsAccordion">`;
 
     for (const [groupKey, perms] of sorted) {
         const collapseId = 'rmAccGroup_' + groupKey;
@@ -115,6 +116,69 @@ function _buildPermsAccordion(activePerms, isBuiltin) {
     grid.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
         new bootstrap.Tooltip(el, { trigger: 'hover focus' })
     );
+}
+
+// Bulk controls above the accordion: expand/collapse every group, and (custom
+// roles only) a dropdown to tick all permissions of a given action or all/none.
+function _permsBulkToolbar(isBuiltin) {
+    let h = `<div class="d-flex flex-wrap gap-1 mb-2 align-items-center">
+        <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-secondary py-0 px-2" onclick="_permsExpandAll(true)"
+                    title="${escAttr(t('perm_expand_all'))}"><i class="bi bi-arrows-expand"></i></button>
+            <button type="button" class="btn btn-secondary py-0 px-2" onclick="_permsExpandAll(false)"
+                    title="${escAttr(t('perm_collapse_all'))}"><i class="bi bi-arrows-collapse"></i></button>
+        </div>`;
+    if (!isBuiltin) {
+        h += `<div class="dropdown">
+            <button type="button" class="btn btn-sm btn-secondary py-0 px-2 dropdown-toggle"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-check2-square me-1"></i>${esc(t('perm_mark'))}
+            </button>
+            <ul class="dropdown-menu p-1" style="font-size:.85rem">
+                <li><h6 class="dropdown-header py-1">${esc(t('perm_mark_by_action'))}</h6></li>
+                <li><button type="button" class="dropdown-item" onclick="_permsSelectAction('view', true)">${esc(t('module_perm_view'))}</button></li>
+                <li><button type="button" class="dropdown-item" onclick="_permsSelectAction('add', true)">${esc(t('module_perm_add'))}</button></li>
+                <li><button type="button" class="dropdown-item" onclick="_permsSelectAction('edit', true)">${esc(t('module_perm_edit'))}</button></li>
+                <li><button type="button" class="dropdown-item" onclick="_permsSelectAction('delete', true)">${esc(t('module_perm_delete'))}</button></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><button type="button" class="dropdown-item" onclick="_permsSelectAll(true)">${esc(t('perm_mark_all'))}</button></li>
+                <li><button type="button" class="dropdown-item" onclick="_permsSelectAll(false)">${esc(t('perm_unmark_all'))}</button></li>
+            </ul>
+        </div>`;
+    }
+    h += `</div>`;
+    return h;
+}
+
+// Expand or collapse every permission group (panels are independent — no
+// data-bs-parent — so they can all be open at once).
+function _permsExpandAll(expand) {
+    const acc = document.getElementById('rmPermsAccordion');
+    if (!acc) return;
+    acc.querySelectorAll('.accordion-collapse').forEach(panel => {
+        const inst = bootstrap.Collapse.getOrCreateInstance(panel, { toggle: false });
+        expand ? inst.show() : inst.hide();
+    });
+}
+
+// Bulk-select acts on the GLOBAL permission switches only (the .rm-perm-item
+// accordion rows) — NOT the granular per-module/per-server grids. So "mark all"
+// matches what the built-in roles hold (admin = the global set); the granular
+// overrides stay opt-in, ticked individually in their grids. Disabled (built-in
+// role) boxes are left untouched.
+function _permsSelectAction(action, checked) {
+    const grid = document.getElementById('rolePermissionsGrid');
+    if (!grid) return;
+    grid.querySelectorAll('.rm-perm-item input[type=checkbox]:not([disabled])').forEach(cb => {
+        if (cb.value.endsWith('_' + action)) cb.checked = checked;
+    });
+}
+
+// Tick/untick every enabled GLOBAL permission switch (mark all / clear all).
+function _permsSelectAll(checked) {
+    const grid = document.getElementById('rolePermissionsGrid');
+    if (!grid) return;
+    grid.querySelectorAll('.rm-perm-item input[type=checkbox]:not([disabled])').forEach(cb => { cb.checked = checked; });
 }
 
 function _filterPermsAccordion(query) {
@@ -239,7 +303,8 @@ function _buildModulePermsGrid(activePerms, disabled) {
 
 /** Build the per-server permissions table inside #rmServerPermsGrid.
  *  Mirrors _buildModulePermsGrid but for hosts (servers): actions are
- *  view/edit/delete (no 'add' — creating a host needs the global servers_edit).
+ *  view/add/edit/delete, where 'add' means "add host-bound checks to THIS host"
+ *  (creating a new host is the global servers_add, not a per-server action).
  *  For built-in roles (disabled) the checked state reflects the global
  *  servers_* permissions; for custom roles only explicit server.{uid}.{a} keys. */
 function _buildServerPermsGrid(activePerms, disabled) {
@@ -252,8 +317,16 @@ function _buildServerPermsGrid(activePerms, disabled) {
     if (section) section.style.display = '';
     const actions = ['view', 'add', 'edit', 'delete'];
     const _globalFor = { view: 'servers_view', add: 'servers_add', edit: 'servers_edit', delete: 'servers_delete' };
-    const hdrs = actions.map(a => `<th class="text-center" style="width:54px">${esc(t('module_perm_' + a) || a)}</th>`).join('');
-    let h = `<table class="table table-sm table-bordered align-middle mb-0" style="font-size:.82rem;table-layout:fixed;width:100%">
+    const hdrs = actions.map(a => {
+        // 'add' on a server means "add checks to this host" — relabel + explain it
+        // so it isn't confused with creating a host (the global servers_add).
+        const lbl = a === 'add' ? (t('server_perm_add') || t('module_perm_add')) : (t('module_perm_' + a) || a);
+        const tt  = a === 'add' ? ` title="${escAttr(t('server_perm_add_tt'))}"` : '';
+        // width:1% + nowrap → each action column hugs its (single-line) header;
+        // the Server column takes the remaining width.
+        return `<th class="text-center" style="width:1%;white-space:nowrap;padding-left:.65rem;padding-right:.65rem"${tt}>${esc(lbl)}</th>`;
+    }).join('');
+    let h = `<table class="table table-sm table-bordered align-middle mb-0" style="font-size:.82rem;width:100%">
     <thead class="ss-thead"><tr>
         <th>${esc(t('col_server') || 'Server')}</th>${hdrs}
     </tr></thead><tbody>`;

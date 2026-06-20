@@ -372,7 +372,7 @@ class ModuleBase(ObjectBase):
         module's ``threads`` setting.  Shared by the watchfuls whose check loop
         follows the ``submit(fn, key, value)`` contract.
         """
-        workers = self.get_conf('threads', self._default_threads)
+        workers = max(1, self.module_default('threads', self._DEFAULT_THREADS))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {executor.submit(check_fn, k, v): k for k, v in items}
             for future in concurrent.futures.as_completed(futures):
@@ -584,6 +584,59 @@ class ModuleBase(ObjectBase):
     def _default_threads(self) -> int:
         """ Default number of threads for parallel processing. """
         return self._DEFAULT_THREADS
+
+    def _module_schema_defaults(self) -> dict:
+        """``__module__`` schema defaults for THIS module (cached per instance).
+
+        Read straight from the module's ``schema.json`` so module_default() can
+        fall back to a module's own declared default (e.g. dns timeout 5)."""
+        cache = self.__dict__.get('_mod_sch_defaults')
+        if cache is not None:
+            return cache
+        defaults: dict = {}
+        base = getattr(self._monitor, 'dir_modules', None) if self.is_monitor_exist else None
+        name = (self.name_module or '').split('.')[-1]
+        if base and name:
+            try:
+                with open(os.path.join(base, name, 'schema.json'), encoding='utf-8') as _f:
+                    defaults = ModuleBase._schema_defaults(json.load(_f).get('__module__', {}))
+            except (OSError, ValueError):
+                defaults = {}
+        self.__dict__['_mod_sch_defaults'] = defaults
+        return defaults
+
+    def module_default(self, field: str, fallback: int = 0) -> int:
+        """Resolve a module-level config field via the item → module → global
+        chain, deciding by PRESENCE in the saved module config:
+
+        * key **absent** (module never saved / field just added) → the module's
+          own ``__module__`` schema default;
+        * key **present with a value** → that value;
+        * key **present but blank/0** (user cleared it) → the global
+          ``Configuration > Modules`` value (config.json ``modules|<field>``).
+
+        Generic for ``threads``, ``timeout`` and any future ``modules|*`` global.
+        Always returns an int."""
+        def _int(val, default):
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return int(default)
+
+        schema_default = self._module_schema_defaults().get(field, fallback)
+        mod_cfg = self.get_conf() if self.is_monitor_exist else {}
+        if not isinstance(mod_cfg, dict) or field not in mod_cfg:
+            return _int(schema_default, fallback)              # new / never saved
+        v = mod_cfg.get(field)
+        # Only a truly BLANK value (null / empty string) inherits the global —
+        # an explicit 0 is a real value, not "unset".
+        if v not in (None, ''):
+            return _int(v, schema_default)                     # explicit value (incl 0)
+        cfg = getattr(self._monitor, 'config', None) if self.is_monitor_exist else None
+        glob = cfg.get_conf(['modules', field], None) if cfg is not None else None
+        if glob in (None, ''):
+            return _int(schema_default, fallback)
+        return _int(glob, schema_default)
 
     @property
     def is_monitor_exist(self) -> bool:

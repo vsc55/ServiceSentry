@@ -20,37 +20,37 @@ const _DW_H_PRESET    = { sm: 150, md: 280, lg: 420, xl: 560 };
 //   row 4: modules_list·servers_list·activity (3 × 4)
 const _DW_DEFS = {
     checks:       { icon: 'bi-activity',      lkey: 'overview_status',           dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => true },
+                    canShow: (p)         => p.has('checks_view') || p.has('checks_run') },
     modules:      { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => true },
+                    canShow: (p)         => p.has('modules_view') },
     servers:      { icon: 'bi-hdd-network',   lkey: 'overview_servers',          dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
     users:        { icon: 'bi-person',         lkey: 'overview_users',            dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => true },
+                    canShow: (p)         => p.has('users_view') },
     groups:       { icon: 'bi-people',        lkey: 'overview_groups',           dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => true },
+                    canShow: (p)         => p.has('groups_view') },
     roles:        { icon: 'bi-shield-shaded',   lkey: 'overview_roles',            dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => true },
+                    canShow: (p)         => p.has('roles_view') },
     sessions:     { icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => true },
+                    canShow: (p)         => p.has('sessions_view') },
     webhooks:     { icon: 'bi-broadcast',     lkey: 'overview_webhooks',         dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p, admin)  => admin },
+                    canShow: (p)         => p.has('config_view') || p.has('config_edit') },
     credentials:  { icon: 'bi-key',           lkey: 'overview_credentials',      dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => p.has('credentials_view') || p.has('servers_view') || p.has('modules_view') },
     coverage:     { icon: 'bi-pie-chart',     lkey: 'overview_coverage',         dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
-    sessions_list:{ icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 6,  dH: 140,    hasH: true,
-                    canShow: (p, admin)  => admin },
+    sessions_list:{ icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 4,  dH: 140,    hasH: true,
+                    canShow: (p)         => p.has('sessions_view') },
     incidents:    { icon: 'bi-exclamation-triangle', lkey: 'overview_incidents',  dCols: 6,  dH: 200,    hasH: true,
                     canShow: (p)         => p.has('modules_view') },
     failed_logins:{ icon: 'bi-shield-lock',   lkey: 'overview_failed_logins',    dCols: 6,  dH: 200,    hasH: true,
-                    canShow: (p, admin)  => admin },
+                    canShow: (p)         => p.has('audit_view') },
     modules_list: { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 4,  dH: 340,    hasH: true,
                     canShow: (p)         => p.has('modules_view') },
     servers_list: { icon: 'bi-hdd-network',   lkey: 'overview_servers',          dCols: 4,  dH: 340,    hasH: true,
                     canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
     activity:     { icon: 'bi-clock-history', lkey: 'overview_recent_activity',  dCols: 4,  dH: 340,    hasH: true,
-                    canShow: (p, admin)  => admin },
+                    canShow: (p)         => p.has('audit_view') },
 };
 
 // Click-through target for each widget → the tab (and sub-tab, if any) it
@@ -129,7 +129,39 @@ function _dwDef(id) {
 // ──────────────────────── Layout persistence ──────────────────────
 function _dwKey() { return 'ss_layout2_' + (currentUser.username || '_'); }
 
+// Org-wide default layout set by an admin (fetched on init). Empty ⇒ use the
+// built-in layout defined by _DW_DEFS order/sizes.
+let _dwGlobalDefault = [];
+
+function _dwBuiltinLayout() {
+    return Object.entries(_DW_DEFS).map(([id, d]) => ({ id, cols: d.dCols, h: d.dH, hidden: false }));
+}
+
+// Append any widget present in _DW_DEFS but missing from *layout* (added since the
+// layout was saved) so nothing is silently dropped.
+function _dwMergeMissing(layout) {
+    for (const [id, d] of Object.entries(_DW_DEFS)) {
+        if (!layout.find(w => w.id === id))
+            layout.push({ id, cols: d.dCols, h: d.dH, hidden: false });
+    }
+    return layout;
+}
+
+// Starting layout for a user who hasn't customised theirs: the admin-defined
+// global default if set, otherwise the built-in layout.
+function _dwResolvedDefault() {
+    if (Array.isArray(_dwGlobalDefault) && _dwGlobalDefault.length) {
+        const known = new Set(Object.keys(_DW_DEFS));
+        const layout = _dwGlobalDefault
+            .filter(w => w && (known.has(w.id) || _dwIsSpacer(w.id)))
+            .map(w => ({ ...w }));
+        return _dwMergeMissing(layout);
+    }
+    return _dwBuiltinLayout();
+}
+
 function _dwLoad() {
+    // 1) Local working copy (unsaved draft) if present.
     try {
         const raw = localStorage.getItem(_dwKey());
         if (raw) {
@@ -137,14 +169,18 @@ function _dwLoad() {
             const known = new Set(Object.keys(_DW_DEFS));
             const layout = (Array.isArray(saved) ? saved : [])
                 .filter(w => known.has(w.id) || _dwIsSpacer(w.id));
-            for (const [id, d] of Object.entries(_DW_DEFS)) {
-                if (!layout.find(w => w.id === id))
-                    layout.push({ id, cols: d.dCols, h: d.dH, hidden: false });
-            }
-            return layout;
+            return _dwMergeMissing(layout);
         }
     } catch (_) {}
-    return Object.entries(_DW_DEFS).map(([id, d]) => ({ id, cols: d.dCols, h: d.dH, hidden: false }));
+    // 2) The user's saved layout from the DB (account preferences).
+    const db = (currentUser && Array.isArray(currentUser.dashboard_layout)) ? currentUser.dashboard_layout : [];
+    if (db.length) {
+        const known = new Set(Object.keys(_DW_DEFS));
+        const layout = db.filter(w => w && (known.has(w.id) || _dwIsSpacer(w.id))).map(w => ({ ...w }));
+        return _dwMergeMissing(layout);
+    }
+    // 3) Org-wide default → 4) factory built-in.
+    return _dwResolvedDefault();
 }
 
 function _dwSave() {
@@ -163,6 +199,14 @@ function _dwSave() {
 let _dwEditing = false;
 let _dwDragState = null;
 
+// Keep the split-button caret's colour in sync with the Edit/Save main button.
+function _dwSetCaretVariant(variant) {
+    const c = document.getElementById('dwEditCaret');
+    if (!c) return;
+    c.classList.remove('btn-secondary', 'btn-warning');
+    c.classList.add(variant);
+}
+
 function _dwToggleEdit() {
     _dwEditing = !_dwEditing;
     const grid   = document.getElementById('dashboardGrid');
@@ -173,20 +217,22 @@ function _dwToggleEdit() {
         grid.classList.add('dashboard-edit');
         addBar?.classList.remove('d-none');
         if (btn) {
-            btn.className = 'btn btn-sm btn-warning ms-auto';
+            btn.className = 'btn btn-sm btn-warning';
             btn.innerHTML = `<i class="bi bi-x-lg me-1"></i>${t('dashboard_save')}`;
             btn.title = t('dashboard_save_tt');
         }
+        _dwSetCaretVariant('btn-warning');
         _dwInitDnd(grid);
         _dwRefreshAddBar();
     } else {
         grid.classList.remove('dashboard-edit');
         addBar?.classList.add('d-none');
         if (btn) {
-            btn.className = 'btn btn-sm btn-secondary ms-auto';
+            btn.className = 'btn btn-sm btn-secondary';
             btn.innerHTML = `<i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}`;
             btn.title = t('dashboard_edit_tt');
         }
+        _dwSetCaretVariant('btn-secondary');
         _dwSave();
     }
 }
@@ -359,10 +405,78 @@ function _dwRefreshAddBar() {
     bar.innerHTML = h;
 }
 
+// "Reset default": drop my customisation so I fall back to the org-wide default
+// layout (or the factory built-in when no default has been set). Any user.
 function _dwReset() {
     localStorage.removeItem(_dwKey());
     _dwEditing = false;
     renderOverview();
+}
+
+// "Use default": drop my own saved layout (local draft + DB) so I follow the
+// org-wide default from now on — including any future changes to that default.
+async function _dwClearConfig() {
+    localStorage.removeItem(_dwKey());
+    const r = await apiPut('/api/v1/users/me/preferences', { dashboard_layout: [] });
+    if (r && r.ok && typeof currentUser === 'object' && currentUser) {
+        currentUser.dashboard_layout = [];
+    }
+    _dwEditing = false;
+    renderOverview();
+}
+
+// "Reset Factory" (overview_reset_factory): force MY layout back to the original
+// built-in, ignoring any org-wide default. Persisted to the account + audited.
+async function _dwResetFactory() {
+    const factory = _dwBuiltinLayout();
+    localStorage.setItem(_dwKey(), JSON.stringify(factory));
+    const r = await apiPost('/api/v1/overview/reset-factory', { layout: factory });
+    if (r && r.ok && typeof currentUser === 'object' && currentUser) {
+        currentUser.dashboard_layout = factory;
+    }
+    _dwEditing = false;
+    renderOverview();
+}
+
+// "Save": persist the current arrangement to the user's account (DB) so it is
+// restored on any device. Also keeps the local working copy in sync.
+async function _dwSaveDb() {
+    const grid = document.getElementById('dashboardGrid');
+    if (!grid) return;
+    const layout = [...grid.querySelectorAll('.dw[data-wid]')].map(el => ({
+        id:     el.dataset.wid,
+        cols:   parseInt(el.dataset.cols) || 2,
+        h:      el.dataset.h || 'auto',
+        hidden: el.style.display === 'none',
+    }));
+    localStorage.setItem(_dwKey(), JSON.stringify(layout));
+    const r = await apiPut('/api/v1/users/me/preferences', { dashboard_layout: layout });
+    if (r && r.ok) {
+        if (typeof currentUser === 'object' && currentUser) currentUser.dashboard_layout = layout;
+        showToast(t('dashboard_saved'), 'success');
+    } else {
+        showToast((r && r.error) || t('error') || 'Error', 'danger');
+    }
+}
+
+// Save the current arrangement as the org-wide default (for users who haven't
+// customised theirs). Requires overview_edit (gated on the dropdown + endpoint).
+async function _dwSetDefault() {
+    const grid = document.getElementById('dashboardGrid');
+    if (!grid) return;
+    const layout = [...grid.querySelectorAll('.dw[data-wid]')].map(el => ({
+        id:     el.dataset.wid,
+        cols:   parseInt(el.dataset.cols) || 2,
+        h:      el.dataset.h || 'auto',
+        hidden: el.style.display === 'none',
+    }));
+    const r = await apiPut('/api/v1/overview/default-layout', { layout });
+    if (r && r.ok) {
+        _dwGlobalDefault = layout;
+        showToast(t('dashboard_set_default_done'), 'success');
+    } else {
+        showToast((r && r.error) || t('error') || 'Error', 'danger');
+    }
 }
 
 // ──────────────────────── Widget toolbar HTML ─────────────────────

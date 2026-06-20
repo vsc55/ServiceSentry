@@ -28,7 +28,7 @@ import sys
 import time
 
 from lib import Monitor, ObjectBase
-from lib.config import ConfigControl
+from lib.config import load_config
 from lib.config.spec import cfg_default
 from lib.debug import DebugLevel
 
@@ -38,10 +38,7 @@ class Main(ObjectBase):
 
     monitor = None
     cfg_general = None
-    cfg_monitor = None
     cfg_modules = None
-    _cfg_file_config = 'config.json'
-    _cfg_file_monitor = 'monitor.json'
     _cfg_file_modules = 'modules.json'
 
     def __init__(self, args: argparse.Namespace):
@@ -75,13 +72,11 @@ class Main(ObjectBase):
         Raises:
             ValueError: If the configuration cannot be loaded.
         """
-        self.cfg_general = ConfigControl(self._config_file)
-        self.cfg_general.read()
-        _is_new = not self.cfg_general.is_data
+        # Centralised loader: reads config.json and seeds any missing registry
+        # default (persisting + reporting new ones).  Same code path as the web
+        # admin (start_web) — one source of truth, no duplicated seeding logic.
+        self.cfg_general = load_config(self._config_dir)
         if self._check_config():
-            self._default_conf()
-            if _is_new:
-                self.cfg_general.save()
             self._read_config()
         else:
             raise ValueError("Error load config.")
@@ -94,27 +89,6 @@ class Main(ObjectBase):
             bool: True if the general configuration is set, False otherwise.
         """
         return bool(self.cfg_general)
-
-    def _default_conf(self):
-        """
-        Ensures that the default configuration settings are present.
-
-        This method checks if certain configuration settings exist in the 
-        configuration file. If they do not exist, it sets them to default values.
-
-        Returns:
-            bool: True if the configuration check is enabled and the default 
-                  settings are ensured, False otherwise.
-        """
-        if self._check_config():
-            if not self.cfg_general.is_exist_conf(['daemon', 'timer_check']):
-                self.cfg_general.set_conf(['daemon', 'timer_check'], cfg_default('daemon|timer_check'))
-
-            if not self.cfg_general.is_exist_conf(['global', 'log_level']):
-                self.cfg_general.set_conf(['global', 'log_level'], cfg_default('global|log_level'))
-
-            return True
-        return False
 
     def _read_config(self):
         """
@@ -182,7 +156,11 @@ class Main(ObjectBase):
         with the provided directory paths for the main directory, configuration directory,
         modules directory, and variable directory.
         """
-        self.monitor = Monitor(self._dir, self._config_dir, self._modules_dir, self._var_dir)
+        # Hand over the config already loaded+seeded in _init_config so config.json
+        # is read once: the monitor reuses it (and decrypts it for runtime) instead
+        # of opening the file again.
+        self.monitor = Monitor(self._dir, self._config_dir, self._modules_dir, self._var_dir,
+                               config=self.cfg_general)
 
     @property
     def _is_mode_dev(self):
@@ -249,17 +227,6 @@ class Main(ObjectBase):
             )
         else:
             return '/var/lib/ServiSesentry/'
-
-    @property
-    def _config_file(self):
-        """
-        Constructs the full path to the configuration file.
-
-        Returns:
-            str: The full path to the configuration file, constructed by joining
-                 the configuration directory and the configuration file name.
-        """
-        return os.path.join(self._config_dir, self._cfg_file_config)
 
     @property
     def _timer_check(self) -> int:
@@ -344,8 +311,6 @@ def start_web(args):
         print("       Instálalo con:  pip install flask")
         sys.exit(1)
 
-    from lib.config import ConfigControl as _CC
-
     dir_base = os.path.dirname(os.path.abspath(__file__))
     is_dev = 'src' in dir_base
 
@@ -366,8 +331,7 @@ def start_web(args):
     else:
         var_dir = '/var/lib/ServiSesentry/'
 
-    cfg = _CC(os.path.join(config_dir, 'config.json'))
-    cfg.read()
+    cfg = load_config(config_dir)
 
     # Env vars take precedence for first-run credential setup (never written to disk)
     username = os.environ.get('WA_USERNAME') or cfg.get_conf(['web_admin', 'username'], 'admin')

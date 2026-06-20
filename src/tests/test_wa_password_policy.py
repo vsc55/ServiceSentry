@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests for the configurable password policy (_validate_password + API enforcement)."""
 
-import json
-import pathlib
 
 import pytest
 
@@ -13,27 +11,13 @@ try:
 except ImportError:
     _HAS_FLASK = False
 
-from werkzeug.security import generate_password_hash
 
 from tests.conftest import _login
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
-_ADMIN_HASH = generate_password_hash("Admin123!", method="pbkdf2:sha256")
-
-
 def _make_wa(config_dir, var_dir, **policy):
-    """Create a WebAdmin instance with admin user pre-seeded and given policy."""
-    users = {
-        "admin": {
-            "password_hash": _ADMIN_HASH,
-            "role": "admin",
-            "display_name": "Administrator",
-        }
-    }
-    (pathlib.Path(config_dir) / "users.json").write_text(
-        json.dumps(users), encoding="utf-8"
-    )
+    """Create a WebAdmin instance with the admin user and the given policy."""
     wa = WebAdmin(config_dir, "admin", "Admin123!", var_dir, **policy)
     wa.app.config["TESTING"] = True
     return wa

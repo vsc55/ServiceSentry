@@ -136,7 +136,7 @@ sudo rc-update add ServiSesentry-web default && sudo rc-service ServiSesentry-we
 | [docs/docker.md](docs/docker.md) | Docker deployment: environment variables, volumes, update and reverse proxy |
 | [docs/README.md](docs/README.md) | Documentation index |
 | [docs/architecture.md](docs/architecture.md) | Component diagram, class hierarchy, directory structure, execution flow |
-| [docs/configuration.md](docs/configuration.md) | config.json, monitor.json, modules.json, CLI options, Telegram, debug |
+| [docs/configuration.md](docs/configuration.md) | config.json, modules.json, CLI options, Telegram, debug |
 | [docs/modules.md](docs/modules.md) | All 15 modules: config reference, fields and flow |
 | [docs/web_admin.md](docs/web_admin.md) | Web admin features, roles, security, API endpoints |
 | [docs/security.md](docs/security.md) | Authentication, RBAC, sessions, XSS, path traversal, audit log and security tests |

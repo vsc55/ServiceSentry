@@ -78,7 +78,7 @@ class Watchful(ModuleBase):
         sensor = (item.get('sensor', '') or '').strip() or key
         label = (item.get('label', '') or '').strip() or sensor
         out, err, code = self.host_exec(
-            item, _THERMAL_CMD, timeout=self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']))
+            item, _THERMAL_CMD, timeout=self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
         if code != 0 and not out:
             raise OSError((err or '').strip() or f'sensor read exited {code}')
         temps = dict(self._parse_thermal(out))

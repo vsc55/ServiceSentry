@@ -40,6 +40,17 @@ def register(app, wa):
             return wa._uid_to_role_name(uid_or_name) or uid_or_name
         return uid_or_name
 
+    def _default_role_uid() -> str:
+        """Configured default role for new users (a UID). Falls back to the
+        built-in 'none' role when unset or pointing at a role that no longer
+        exists (e.g. a custom role that was deleted)."""
+        none_uid = BUILTIN_ROLE_UIDS['none']
+        cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        raw = (cfg.get('users') or {}).get('default_role') or none_uid
+        uid = raw if wa._is_uid(raw) else (wa._role_name_to_uid(raw) or none_uid)
+        valid = set(BUILTIN_ROLE_UIDS.values()) | set(wa._custom_roles.keys())
+        return uid if uid in valid else none_uid
+
     def _groups_display(uid_or_name_list: list) -> list:
         """Return group UIDs — filter out any that no longer exist in _groups."""
         return [g for g in uid_or_name_list if g in wa._groups]
@@ -65,6 +76,11 @@ def register(app, wa):
                 'created_at':  udata.get('created_at', ''),
                 'updated_at':  udata.get('updated_at', ''),
                 'updated_by':  udata.get('updated_by', ''),
+                # Per-table column layout + whether a custom dashboard exists, so
+                # the Edit User → Customisations tab can enable a table's "clear"
+                # checkbox only when that table was actually customised.
+                'table_config': udata.get('table_config') if isinstance(udata.get('table_config'), dict) else {},
+                'has_dashboard_layout': bool(udata.get('dashboard_layout')),
             }
         return jsonify(safe)
 
@@ -77,7 +93,7 @@ def register(app, wa):
             return err
         uname = data.get('username', '').strip()
         pw = data.get('password', '')
-        role = data.get('role', 'viewer')
+        role = data.get('role') or _default_role_uid()
         dname = data.get('display_name', '').strip() or uname
         email = data.get('email', '').strip()
         if not uname:
@@ -248,6 +264,16 @@ def register(app, wa):
                 user['enabled'] = new_enabled
                 if not new_enabled:
                     wa._revoke_user_sessions(username)
+        # Admin housekeeping: clear a user's stored UI customisations so they fall
+        # back to the defaults — specific table column layouts (clear_table_keys)
+        # and/or the overview dashboard layout.
+        clear_keys = data.get('clear_table_keys')
+        if isinstance(clear_keys, list) and isinstance(user.get('table_config'), dict):
+            removed = [k for k in clear_keys if user['table_config'].pop(str(k), None) is not None]
+            if removed:
+                changes.append({'field': 'table_config', 'old': sorted(removed), 'new': 'cleared'})
+        if data.get('clear_dashboard_layout') and user.pop('dashboard_layout', None):
+            changes.append({'field': 'dashboard_layout', 'old': 'custom', 'new': 'cleared'})
         touch_entity(user)
         wa._persist_users()
         if changes:
@@ -336,6 +362,10 @@ def register(app, wa):
             tc = data['table_config']
             if isinstance(tc, dict):
                 user['table_config'] = tc
+        if 'dashboard_layout' in data:
+            dl = data['dashboard_layout']
+            if isinstance(dl, list):
+                user['dashboard_layout'] = dl
         wa._persist_users()
         if changes:
             wa._audit('user_preferences_changed', detail={'username': uname, 'changes': changes})

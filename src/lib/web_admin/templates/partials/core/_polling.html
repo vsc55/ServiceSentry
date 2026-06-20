@@ -47,8 +47,14 @@ function _startVersionPoll(intervalMs = 60000) {
     setInterval(async () => {
         if (_sessionTerminated) return;
         try {
+            // Capture the local-edit epoch BEFORE the request so a response that
+            // raced with the user's own save (in flight at fetch time) is discarded.
+            const _ep = (typeof _tcEpoch === 'number') ? _tcEpoch : undefined;
             const r = await fetch('/api/v1/me');
-            if (r.status === 401) _onSessionTerminated();
+            if (r.status === 401) { _onSessionTerminated(); return; }
+            if (r.ok && typeof _syncRemoteTableConfig === 'function') {
+                _syncRemoteTableConfig(await r.json(), _ep);
+            }
         } catch (_) { /* ignore network errors */ }
     }, (configData?.web_admin?.session_check_secs ?? 20) * 1000);
     // Config field version poll — interval is read dynamically from configData each cycle.

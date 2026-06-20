@@ -112,7 +112,7 @@ class Watchful(ModuleBase):
                 list_host.append((key, host))
 
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.get_conf('threads', self._default_threads)) as executor:
+            max_workers=max(1, self.module_default('threads', self._default_threads))) as executor:
             future_to_ping = {
                 executor.submit(self._ping_check, name, host): (name, host)
                 for name, host in list_host
@@ -133,7 +133,7 @@ class Watchful(ModuleBase):
 
     def _ping_check(self, name, host):
         t_alert   = self.get_conf_in_list("alert",   name, 0) or self.get_conf('alert',   self._MODULE_DEFAULTS['alert'])
-        t_timeout = self.get_conf_in_list("timeout", name, 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+        t_timeout = self.get_conf_in_list("timeout", name, 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         t_attempt = self.get_conf_in_list("attempt", name, 0) or self.get_conf('attempt', self._MODULE_DEFAULTS['attempt'])
 
         ping_ok, rtt_ms = self._ping_return(host, t_timeout, t_attempt)

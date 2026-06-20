@@ -1,8 +1,8 @@
 {
     "__module__": {
         "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 3,  "min": 1, "max": 100},
-        "timeout": {"type": "int",  "default": 10, "min": 1, "max": 60},
+        "threads": {"type": "int",  "default": 3,  "min": 0, "inherit_blank": true, "max": 100},
+        "timeout": {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 60},
         "alert_battery": {"type": "int", "default": 20, "min": 0, "max": 100},
         "alert_runtime": {"type": "int", "default": 10, "min": 0, "max": 1440},
         "alert_load":    {"type": "int", "default": 0,  "min": 0, "max": 100}

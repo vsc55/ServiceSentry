@@ -697,6 +697,32 @@
     border-radius: var(--bs-border-radius);
 }
 
+/* Hover "focus" effect: the non-table widget under the cursor scales up toward
+   the viewer (as if coming out of the screen) with a depth shadow, while the
+   OTHER widgets shrink and dim a touch so it stands out and the growth doesn't
+   visually collide with its neighbours. Outside edit mode only, to avoid
+   clashing with drag-to-reorder. Uses :has() (all current browsers). */
+.dashboard-grid:not(.dashboard-edit) .dw:not(.dw-spacer) {
+    transition: transform .2s ease, box-shadow .2s ease, opacity .2s ease;
+}
+/* Siblings of the hovered widget recede (everything except the hovered one). */
+.dashboard-grid:not(.dashboard-edit):has(.dw:not(.dw-spacer):not(:has(table)):hover)
+        .dw:not(.dw-spacer):not(:hover) {
+    transform: scale(.95);
+    opacity: .7;
+}
+/* The hovered non-table widget pops out. */
+/* Luminous focus glow, tinted per theme so it stands out on either background. */
+[data-bs-theme="dark"]  .dashboard-grid { --ss-focus-glow: 245, 158, 11; }  /* amber */
+[data-bs-theme="light"] .dashboard-grid { --ss-focus-glow: 37, 99, 235; }   /* blue */
+.dashboard-grid:not(.dashboard-edit) .dw:not(.dw-spacer):not(:has(table)):hover {
+    transform: scale(1.04);
+    box-shadow: 0 0 18px 1px rgba(var(--ss-focus-glow, 56, 189, 248), .6),
+                0 8px 24px rgba(0, 0, 0, .35);
+    position: relative;
+    z-index: 3;
+}
+
 /* Thin, rounded scrollbars for the widget listings (and any scroll area
    nested inside them) — the default chunky bars clash with the cards. */
 .dw-content, .dw-content * {
@@ -940,6 +966,12 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     align-items: center;
     justify-content: center;
     padding: 2rem 1rem;
+}
+/* Same card, but bounded for use inside the SPA (a tab pane) rather than a
+   full-page HTTP error — no 100vh so it doesn't push the layout. */
+.error-wrap.error-wrap-inline {
+    min-height: 0;
+    padding: 3rem 1rem;
 }
 .error-card {
     max-width: 480px;

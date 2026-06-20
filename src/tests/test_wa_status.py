@@ -2,9 +2,7 @@
 # -*- coding: utf-8 -*-
 """Tests for the /status public status page and language priority logic."""
 
-import json
 import os
-import pathlib
 
 import pytest
 
@@ -14,7 +12,6 @@ try:
 except ImportError:
     _HAS_FLASK = False
 
-from werkzeug.security import generate_password_hash
 
 from tests.conftest import _login
 
@@ -25,7 +22,6 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask not available")
 # ---------------------------------------------------------------------------
 
 _ADMIN_PASS = "secret"
-_ADMIN_HASH = generate_password_hash(_ADMIN_PASS, method="pbkdf2:sha256")
 
 # Absolute path to the watchfuls directory (used for pretty-name tests)
 _WATCHFULS_DIR = os.path.join(
@@ -39,16 +35,6 @@ def _make_wa(config_dir, var_dir, *,
              status_lang: str = '',
              modules_dir: str | None = None):
     """Create a WebAdmin instance with custom lang / status settings."""
-    users = {
-        "admin": {
-            "password_hash": _ADMIN_HASH,
-            "role": "admin",
-            "display_name": "Administrator",
-        }
-    }
-    (pathlib.Path(config_dir) / "users.json").write_text(
-        json.dumps(users), encoding="utf-8"
-    )
     wa = WebAdmin(
         config_dir,
         "admin",

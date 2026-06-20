@@ -37,8 +37,15 @@
         "alert":            "Fallos consecutivos antes de disparar una alerta. Usar >1 para suprimir errores transitorios."
     },
     "option_labels": {
-        "scheme": {"http": "HTTP", "https": "HTTPS"},
-        "method": {"GET": "GET", "HEAD": "HEAD (sin cuerpo)", "POST": "POST"}
+        "scheme": {
+            "http": "HTTP",
+            "https": "HTTPS"
+        },
+        "method": {
+            "GET": "GET",
+            "HEAD": "HEAD (sin cuerpo)",
+            "POST": "POST"
+        }
     },
     "group_labels": {
         "connection": "Conexión",

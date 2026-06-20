@@ -66,6 +66,8 @@ class Cfg:
     admin_only: bool = False          # only admins may modify it
     flask_cfg: tuple | None = None    # (app.config key, transform) to sync Flask
     no_rule: bool = False             # exclude from the derived web_admin rule dicts
+    no_seed: bool = False             # never auto-write to config.json on startup
+                                      # (first-run-only credentials)
 
 
 # ── The registry ────────────────────────────────────────────────────────────
@@ -136,8 +138,8 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('web_admin|force_reload_secs', int, 10, attr='_FORCE_RELOAD_SECS',
         min=1, max=300),
     # web_admin first-run credentials + bind address (read in main.py)
-    Cfg('web_admin|username', str, 'admin', no_rule=True),
-    Cfg('web_admin|password', str, 'admin', no_rule=True),
+    Cfg('web_admin|username', str, 'admin', no_rule=True, no_seed=True),
+    Cfg('web_admin|password', str, 'admin', no_rule=True, no_seed=True),
     Cfg('web_admin|host', str, '0.0.0.0', no_rule=True),
 
     # ══ telegram (env-overridable; not mirrored on the instance) ═════════════
@@ -149,6 +151,19 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ daemon scheduler ═════════════════════════════════════════════════════
     Cfg('daemon|timer_check', int, 300, min=10, max=86400, env='CHECK_INTERVAL'),
     Cfg('daemon|web_autostart', bool, False),
+
+    # ══ modules: global defaults inherited by every watchful module ══════════
+    # Last link of the item → module → global resolution chain.  'threads' also
+    # sets how many modules the monitor checks in parallel.
+    Cfg('modules|threads', int, 5,  min=1, max=100),
+    Cfg('modules|timeout', int, 15, min=1, max=600),
+    # Role assigned to newly-created users (a role UID). Empty means "unset" and
+    # resolves to the built-in 'none' role — the consumers own that fallback
+    # (web_admin uses BUILTIN_ROLE_UIDS['none']) so the canonical UID is never
+    # duplicated here. Also used when the configured role was deleted.
+    Cfg('users|default_role', str, '', no_rule=True, admin_only=True),
+    # Role pre-selected for newly-created groups (same scheme/fallback as users).
+    Cfg('groups|default_role', str, '', no_rule=True, admin_only=True),
 
     # ══ global ═══════════════════════════════════════════════════════════════
     # Log verbosity: 'off' disables debug output; otherwise a DebugLevel name
@@ -279,6 +294,63 @@ def cfg_default(path: str):
     across the app pass this as their fallback instead of hardcoding a literal.
     """
     return CFG_BY_PATH[path].default
+
+
+def cfg_meta(path: str) -> dict:
+    """UI metadata (``{type, default[, min, max]}``) for a config field, from the
+    registry — for fields the config schema endpoint exposes outside the
+    auto-derived web_admin set (e.g. the ``modules`` section).  Empty if unknown."""
+    f = CFG_BY_PATH.get(path)
+    if f is None:
+        return {}
+    if f.type is bool:
+        return {'type': 'bool', 'default': f.default}
+    if f.type is int:
+        return {'type': 'int', 'default': f.default, 'min': f.min, 'max': f.max}
+    return {'type': 'str', 'default': f.default}
+
+
+def seed_missing_defaults(config) -> list:
+    """Write every registry default that is missing from *config*.
+
+    *config* is a ``ConfigControl``-like object (``is_exist_conf`` / ``set_conf``).
+    Skips ``no_seed`` fields (first-run-only credentials) and fields without a
+    canonical default (``None``).  Returns the ``[(path, value), …]`` actually
+    added so the caller can report/persist them."""
+    added = []
+    for f in CONFIG_FIELDS:
+        if f.no_seed or f.default is None:
+            continue
+        keys = f.path.split('|')
+        if not config.is_exist_conf(keys):
+            config.set_conf(keys, f.default)
+            added.append((f.path, f.default))
+    return added
+
+
+def ensure_config_defaults(config, *, log=print) -> list:
+    """Startup hook: materialise missing registry defaults into *config*, persist
+    if anything changed, and report newly-added options (grouped by section, but
+    silently when the config was brand new).  Single home shared by the daemon
+    (main.py) and the web admin (start_web).  Returns the added ``(path, value)``.
+
+    So a new config option (e.g. a future ``modules|*`` global) lands in
+    config.json on the next startup instead of only living in memory."""
+    is_new = not config.is_data
+    added = seed_missing_defaults(config)
+    if is_new:
+        config.save()                       # first run: create everything quietly
+        return added
+    if added:
+        by_section: dict = {}
+        for path, val in added:
+            section, _, field = path.partition('|')
+            by_section.setdefault(section, []).append(f"{field}={val!r}")
+        for section, items in by_section.items():
+            log(f"[config] New defaults detected and added in "
+                f"'{section}': {', '.join(items)}")
+        config.save()                       # existing config: persist the new keys
+    return added
 
 
 def cfg_get(section_data: dict, path: str, *, falsy: bool = False):

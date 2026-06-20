@@ -2,6 +2,78 @@
    User modal — openNewUserModal, openEditUserModal, saveUserModal.
    ================================================================ #}
 
+// Factory defaults per DB-backed table — the visible-column set plus the full
+// column definitions (for the default order). These globals live in each table's
+// partial and are shared in this single concatenated <script> scope.
+const _UM_TABLE_DEFAULTS = {
+    users:    { cols: () => _USERS_DEFAULT_COLS,    all: () => _USR_COLS },
+    roles:    { cols: () => _ROLES_DEFAULT_COLS,    all: () => _ROL_COLS },
+    groups:   { cols: () => _GROUPS_DEFAULT_COLS,   all: () => _GRP_COLS },
+    audit:    { cols: () => _AUDIT_DEFAULT_COLS,    all: () => _AUDIT_COLS },
+    sessions: { cols: () => _SESSIONS_DEFAULT_COLS, all: () => _SES_COLS },
+};
+
+// 'uid' is injected at the front of the order only for admin viewers; strip it so
+// an admin's saved layout isn't mistaken for a customisation.
+function _umStripUid(arr) { return Array.isArray(arr) ? arr.filter(c => c !== 'uid') : []; }
+
+// True when the stored layout for `tbl` differs from its factory default in any
+// of: resized columns, visible-column set, column order, or (sessions) view mode.
+function _umTableCustomised(tbl, cfg) {
+    if (!cfg || typeof cfg !== 'object') return false;
+    if (cfg.w && typeof cfg.w === 'object' && Object.keys(cfg.w).length) return true;
+    const def = _UM_TABLE_DEFAULTS[tbl];
+    if (!def) return false;
+    const defCols = def.cols();
+    if (Array.isArray(cfg.cols)) {
+        const cur = _umStripUid(cfg.cols);
+        if (cur.length !== defCols.size || cur.some(c => !defCols.has(c))) return true;
+    }
+    if (Array.isArray(cfg.order)) {
+        const base = (def.all() || []).map(c => c.id).filter(c => c !== 'uid');
+        if (JSON.stringify(_umStripUid(cfg.order)) !== JSON.stringify(base)) return true;
+    }
+    if (tbl === 'sessions' && cfg.view && cfg.view !== 'card') return true;
+    return false;
+}
+
+// Render the per-table "clear layout" checkboxes (one per DB-backed table) in the
+// Edit User → Customisations tab. Each box carries .um-clear-table + the table key;
+// boxes for tables the user never customised are disabled.
+function _umRenderClearTables() {
+    const tables = [['users', 'subtab_users'], ['roles', 'subtab_roles'],
+                    ['groups', 'subtab_groups'], ['audit', 'tab_audit'],
+                    ['sessions', 'subtab_sessions']];
+    const tc = (usersData[_editingUser] || {}).table_config || {};
+    const grid = document.getElementById('umClearTablesGrid');
+    if (grid) grid.innerHTML = tables.map(([k, lk]) => {
+        const on = _umTableCustomised(k, tc[k]);
+        const hint = on ? '' : ` <span class="text-body-tertiary">(${esc(t('user_not_customised'))})</span>`;
+        return `<div class="col-sm-6"><div class="form-check">
+            <input class="form-check-input um-clear-table" type="checkbox" id="umClearTbl_${k}" value="${k}"
+                   ${on ? '' : 'disabled'} onchange="_umSyncMasterTables()">
+            <label class="form-check-label small${on ? '' : ' text-body-tertiary'}" for="umClearTbl_${k}">${esc(t(lk))}${hint}</label>
+        </div></div>`;
+    }).join('');
+    _umSyncMasterTables();
+}
+
+// Master "Clear all table layouts" checkbox ↔ the per-table boxes (enabled ones only).
+function _umToggleAllTables(checked) {
+    document.querySelectorAll('#umClearTablesGrid .um-clear-table:not(:disabled)').forEach(cb => { cb.checked = checked; });
+    const m = document.getElementById('umClearAllTables');
+    if (m) m.indeterminate = false;
+}
+function _umSyncMasterTables() {
+    const boxes = [...document.querySelectorAll('#umClearTablesGrid .um-clear-table:not(:disabled)')];
+    const n = boxes.filter(cb => cb.checked).length;
+    const m = document.getElementById('umClearAllTables');
+    if (!m) return;
+    m.disabled = boxes.length === 0;   // nothing customised → master disabled
+    m.checked = n > 0 && n === boxes.length;
+    m.indeterminate = n > 0 && n < boxes.length;
+}
+
 function openNewUserModal() {
     _editingUser = null;
     document.getElementById('userModalTitle').textContent = t('new_user');
@@ -25,9 +97,10 @@ function openNewUserModal() {
     document.getElementById('umUidRow').classList.add('d-none');
     document.getElementById('umUid').value = '';
     document.getElementById('umSessionsGroup').style.display = 'none';
+    document.getElementById('umTabPrefsLi').style.display = 'none';   // new user: no prefs yet
     document.getElementById('umRoleSearch').value = '';
     document.getElementById('umGroupSearch').value = '';
-    _umSelectedRole = 'none';
+    _umSelectedRole = _defaultUserRole();
     _umSelectedGroups = new Set();
     _umPopulateRoles('');
     _umPopulateGroups('');
@@ -35,8 +108,13 @@ function openNewUserModal() {
     bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
 }
 
-function openEditUserModal(username) {
+async function openEditUserModal(username) {
     _editingUser = username;
+    // Refresh from the server first — another session may have changed this
+    // user's saved layouts, so the Customisations tab reflects current state
+    // without needing a full page reload.
+    const _fresh = await apiGet('/api/v1/users');
+    if (_fresh && _fresh[username]) usersData = _fresh;
     const u = usersData[username] || {};
     document.getElementById('userModalTitle').textContent = t('edit_user_title') + ': ' + username;
     document.getElementById('umUsername').value = username;
@@ -60,6 +138,11 @@ function openEditUserModal(username) {
     document.getElementById('umUidRow').classList.remove('d-none');
     document.getElementById('umUid').value = u.uid || '';
     document.getElementById('umEnabledGroup').style.display = '';
+    document.getElementById('umTabPrefsLi').style.display = '';
+    _umRenderClearTables();
+    const _umDash = document.getElementById('umClearDashboard');
+    _umDash.checked = false;
+    _umDash.disabled = !u.has_dashboard_layout;   // enable only if a custom layout exists
     _umSessionsSort = 'last_seen';
     _umSessionsSortDir = 'desc';
     _umRenderSessions(username);
@@ -88,7 +171,11 @@ async function saveUserModal() {
         const email   = document.getElementById('umEmail').value.trim();
         const _dmVal  = document.getElementById('umDarkMode').value;
         const dark_mode = _dmVal === 'dark' ? true : _dmVal === 'light' ? false : null;
-        const body = { role, display_name, lang, groups, enabled, email, dark_mode };
+        const clear_table_keys = [...document.querySelectorAll('#umClearTablesGrid .um-clear-table:checked')]
+            .map(cb => cb.value);
+        const clear_dashboard_layout = document.getElementById('umClearDashboard').checked;
+        const body = { role, display_name, lang, groups, enabled, email, dark_mode,
+                       clear_table_keys, clear_dashboard_layout };
         const r = await apiPut('/api/v1/users/' + encodeURIComponent(_editingUser), body);
         if (r && r.ok) {
             showToast(t('user_updated'));
@@ -106,6 +193,11 @@ async function saveUserModal() {
             }
             const _nowU = _nowISO();
             usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email, dark_mode, updated_at: _nowU, updated_by: currentUser.username || '' };
+            // Reflect just-cleared layouts locally so reopening the modal shows the
+            // correct (disabled) checkboxes without a page reload.
+            if (clear_table_keys.length && usersData[_editingUser].table_config)
+                clear_table_keys.forEach(k => delete usersData[_editingUser].table_config[k]);
+            if (clear_dashboard_layout) usersData[_editingUser].has_dashboard_layout = false;
             if (_editingUser === currentUser.username) {
                 currentUser.role = role;
                 currentUser.display_name = display_name || _editingUser;

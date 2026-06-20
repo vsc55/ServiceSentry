@@ -1,8 +1,8 @@
 {
     "__module__": {
         "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5,  "min": 1, "max": 100},
-        "timeout": {"type": "int",  "default": 30, "min": 1, "max": 600},
+        "threads": {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "timeout": {"type": "int",  "default": 30, "min": 0, "inherit_blank": true, "max": 600},
         "mdstat_path": {"type": "str", "default": "/proc/mdstat"}
     },
     "__history__": {"field": null, "unit": null, "label": "RAID Status"},

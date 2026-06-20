@@ -97,14 +97,54 @@
     },
     "field_terms": {
         "db": {
-            "mysql":         {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
-            "mariadb":       {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
-            "postgres":      {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
-            "mssql":         {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
-            "mongodb":       {"label": "Database", "hint": "Database name to monitor.", "action": "List databases", "pick": "Select database"},
-            "elasticsearch": {"label": "Index",    "hint": "Index to monitor.",        "action": "List indices",   "pick": "Select index"},
-            "opensearch":    {"label": "Index",    "hint": "Index to monitor.",        "action": "List indices",   "pick": "Select index"},
-            "influxdb":      {"label": "Bucket",   "hint": "Bucket to monitor.",       "action": "List buckets",   "pick": "Select bucket"}
+            "mysql": {
+                "label": "Database",
+                "hint": "Database name to monitor.",
+                "action": "List databases",
+                "pick": "Select database"
+            },
+            "mariadb": {
+                "label": "Database",
+                "hint": "Database name to monitor.",
+                "action": "List databases",
+                "pick": "Select database"
+            },
+            "postgres": {
+                "label": "Database",
+                "hint": "Database name to monitor.",
+                "action": "List databases",
+                "pick": "Select database"
+            },
+            "mssql": {
+                "label": "Database",
+                "hint": "Database name to monitor.",
+                "action": "List databases",
+                "pick": "Select database"
+            },
+            "mongodb": {
+                "label": "Database",
+                "hint": "Database name to monitor.",
+                "action": "List databases",
+                "pick": "Select database"
+            },
+            "elasticsearch": {
+                "label": "Index",
+                "hint": "Index to monitor.",
+                "action": "List indices",
+                "pick": "Select index"
+            },
+            "opensearch": {
+                "label": "Index",
+                "hint": "Index to monitor.",
+                "action": "List indices",
+                "pick": "Select index"
+            },
+            "influxdb": {
+                "label": "Bucket",
+                "hint": "Bucket to monitor.",
+                "action": "List buckets",
+                "pick": "Select bucket"
+            }
         }
     },
     "new_item_title": "New Datastore",

@@ -2,8 +2,8 @@
     "__module__": {
         "api_ver":   "v1",
         "enabled":   {"type": "bool", "default": true},
-        "threads":   {"type": "int",  "default": 5,  "min": 1, "max": 100},
-        "timeout":   {"type": "int",  "default": 15, "min": 1, "max": 600},
+        "threads":   {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "timeout":   {"type": "int",  "default": 15, "min": 0, "inherit_blank": true, "max": 600},
         "min_count": {"type": "int",  "default": 1,  "min": 1, "max": 1000}
     },
     "__history__": {"field": "count", "unit": "", "label": "Process Count"},
@@ -17,7 +17,7 @@
         "__key_mirrors_field__": "process",
         "__check_title_field__": "process",
         "enabled":   {"type": "bool", "default": true},
-        "process":   {"type": "str",  "default": "", "placeholder": "__key__"},
+        "process":   {"type": "str",  "default": "", "placeholder": "__key__", "group": "process"},
         "min_count": {"type": "int",  "default": 0,  "min": 0, "max": 1000, "placeholder_module": "min_count", "group": "alerts"}
     }
 }

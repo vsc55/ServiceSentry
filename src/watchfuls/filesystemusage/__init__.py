@@ -85,7 +85,7 @@ class Watchful(ModuleBase):
         os_ = self.host_os(item)
         cmd = self.host_cmd_for(item, _DF_CMDS, default_os='linux')
         out, err, code = self.host_exec(
-            item, cmd, timeout=self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']))
+            item, cmd, timeout=self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
         if code != 0 and not out:
             raise OSError((err or '').strip() or f'df exited {code}')
         used = self._parse(os_, out, part)

@@ -182,6 +182,13 @@ function setOverviewAutoRefresh(seconds) {
 async function renderOverview() {
     const c = document.getElementById('overview-container');
     if (!c) return;
+    // The overview needs overview_view. Check it up front and show a clear
+    // "no permission" notice instead of firing the (now permission-gated) API
+    // and surfacing the 403 as a generic connection error.
+    if (!new Set(currentUser.permissions || []).has('overview_view')) {
+        c.innerHTML = errorState(403, 'bi-lock', t('err_403_title'), t('err_403_desc'));
+        return;
+    }
     c.innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>';
     const data = await apiGet('/api/v1/modules/overview');
     if (!data) {
@@ -197,10 +204,26 @@ async function renderOverview() {
 
     const _canEditLayout = perms.has('overview_edit');
     const editBtns = _canEditLayout ? `
-        <button class="btn btn-sm btn-secondary ms-auto" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
-            <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
-        <button class="btn btn-sm btn-secondary" onclick="_dwReset()" title="${escAttr(t('dashboard_reset_tt'))}">
-            <i class="bi bi-arrow-counterclockwise me-1"></i>${t('dashboard_reset')}</button>` : '';
+        <div class="btn-group ms-auto" role="group">
+            <button class="btn btn-sm btn-secondary" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
+                <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
+            <button type="button" class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split" id="dwEditCaret"
+                    data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">
+                <span class="visually-hidden">${t('dashboard_save_layout')}</span></button>
+            <ul class="dropdown-menu dropdown-menu-end" style="font-size:.82rem">
+                <li><button type="button" class="dropdown-item py-1" onclick="_dwSaveDb()" title="${escAttr(t('dashboard_save_layout_tt'))}">
+                    <i class="bi bi-save me-1"></i>${t('dashboard_save_layout')}</button></li>
+                <li><button type="button" class="dropdown-item py-1" onclick="_dwReset()" title="${escAttr(t('dashboard_reset_tt'))}">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>${t('dashboard_reset')}</button></li>
+                <li><button type="button" class="dropdown-item py-1" onclick="_dwClearConfig()" title="${escAttr(t('dashboard_clear_tt'))}">
+                    <i class="bi bi-eraser me-1"></i>${t('dashboard_clear')}</button></li>
+                ${perms.has('overview_set_default') ? `<li><hr class="dropdown-divider my-1"></li>
+                <li><button type="button" class="dropdown-item py-1" onclick="_dwSetDefault()" title="${escAttr(t('dashboard_set_default_tt'))}">
+                    <i class="bi bi-pin-angle me-1"></i>${t('dashboard_set_default')}</button></li>` : ''}
+                ${perms.has('overview_reset_factory') ? `<li><button type="button" class="dropdown-item py-1 text-danger" onclick="_dwResetFactory()" title="${escAttr(t('dashboard_reset_factory_tt'))}">
+                    <i class="bi bi-bootstrap-reboot me-1"></i>${t('dashboard_reset_factory')}</button></li>` : ''}
+            </ul>
+        </div>` : '';
     // Fullscreen / 24/7 kiosk toggle — available to everyone who can see the overview.
     const kioskBtn = `
         <button class="btn btn-sm btn-secondary${_canEditLayout ? '' : ' ms-auto'}" onclick="_dwToggleKiosk()" title="${escAttr(t('dashboard_fullscreen_tt'))}">
@@ -266,9 +289,10 @@ async function renderOverview() {
         const bar  = document.getElementById('dwAddBar');
         grid?.classList.add('dashboard-edit');
         if (btn) {
-            btn.className = 'btn btn-sm btn-warning ms-auto';
+            btn.className = 'btn btn-sm btn-warning';
             btn.innerHTML = `<i class="bi bi-x-lg me-1"></i>${t('dashboard_save')}`;
         }
+        _dwSetCaretVariant('btn-warning');
         bar?.classList.remove('d-none');
         if (grid) { _dwInitDnd(grid); _dwRefreshAddBar(); }
     }

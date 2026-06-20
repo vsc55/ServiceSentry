@@ -2,9 +2,9 @@
     "__module__": {
         "api_ver": "v1",
         "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5,   "min": 1, "max": 100},
+        "threads": {"type": "int",  "default": 5,   "min": 0, "inherit_blank": true, "max": 100},
         "code":    {"type": "int",  "default": 200,  "min": 1, "max": 9999},
-        "timeout": {"type": "int",  "default": 15,   "min": 1, "max": 300}
+        "timeout": {"type": "int",  "default": 15,   "min": 0, "inherit_blank": true, "max": 300}
     },
     "__history__": {"field": null, "unit": null, "label": "HTTP Check"},
     "__host_profile__": {"key": "http", "address_field": "url", "fields": []},

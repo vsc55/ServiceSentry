@@ -75,7 +75,7 @@ class Watchful(ModuleBase):
 
     def _check_run(self, list_hosts):
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)) as executor:
+                max_workers=max(1, self.module_default('threads', self._default_threads))) as executor:
             future_to_hddtemp = {executor.submit(self._hddtemp_check, hddtemp): hddtemp for hddtemp in list_hosts}
             for future in concurrent.futures.as_completed(future_to_hddtemp):
                 hddtemp = future_to_hddtemp[future]
@@ -128,7 +128,7 @@ class Watchful(ModuleBase):
                 self.send_message(s_message, False)
 
     def _hddtemp_return(self, hddtemp):
-        timeout = self.get_conf('timeout', self._DEFAULT_TIMEOUT)
+        timeout = self.module_default('timeout', self._DEFAULT_TIMEOUT)
         try:
             with socket.create_connection(
                 (hddtemp.host, hddtemp.port),

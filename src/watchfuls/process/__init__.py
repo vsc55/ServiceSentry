@@ -84,7 +84,7 @@ class Watchful(ModuleBase):
         module_min = int(self.get_conf('min_count', self._MODULE_DEFAULTS.get('min_count', 1)) or 1)
         min_count = int(item.get('min_count', 0) or 0) or module_min
         os_ = self.host_os(item)
-        timeout = self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+        timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
 
         cmd = self.host_cmd_for(item, _LIST_CMDS, default_os='linux')
         out, err, code = self.host_exec(item, cmd, timeout=timeout)

@@ -9,11 +9,12 @@ const _ROL_COLS = [
     { id: 'uid',         label: () => 'UID',                            sortKey: 'uid',         always: false },
     { id: 'name',        label: () => t('col_role_name'),               sortKey: 'name',       always: true  },
     { id: 'description', label: () => t('role_description'),            sortKey: null,          always: false },
+    { id: 'perm_count',  label: () => t('col_perm_count'),              sortKey: 'perm_count',  always: false },
     { id: 'created_at',  label: () => t('col_created_at')||'Created',   sortKey: 'created_at',  always: false },
     { id: 'updated_at',  label: () => t('col_updated_at')||'Last Updated', sortKey: 'updated_at', always: false },
     { id: 'updated_by',  label: () => t('col_updated_by')||'Updated By',sortKey: 'updated_by',  always: false },
 ];
-const _ROLES_DEFAULT_COLS = new Set(['description']);
+const _ROLES_DEFAULT_COLS = new Set(['description', 'perm_count']);
 
 let _rolesVisibleCols = (() => {
     try { const s = JSON.parse(localStorage.getItem('ss_roles_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){}
@@ -23,6 +24,21 @@ let _rolesColOrder = (() => {
     try { const s = JSON.parse(localStorage.getItem('ss_roles_col_order')||'null'); if (Array.isArray(s)) return s; } catch(_){}
     return _ROL_COLS.map(c => c.id);
 })();
+// One-time: surface the new "permissions count" column for users whose saved
+// column prefs predate it — visible by default and placed right before "created"
+// (they can still hide/reorder it afterwards).
+if (!localStorage.getItem('ss_roles_permcount_migr2')) {
+    _rolesVisibleCols.add('perm_count');
+    if (!_rolesColOrder.includes('perm_count')) {
+        const _i = _rolesColOrder.indexOf('created_at');
+        _rolesColOrder.splice(_i >= 0 ? _i : _rolesColOrder.length, 0, 'perm_count');
+    }
+    try {
+        localStorage.setItem('ss_roles_cols', JSON.stringify([..._rolesVisibleCols]));
+        localStorage.setItem('ss_roles_col_order', JSON.stringify(_rolesColOrder));
+    } catch(_){}
+    localStorage.setItem('ss_roles_permcount_migr2', '1');
+}
 function _resetRolesCols() {
     _rolesVisibleCols = new Set(_ROLES_DEFAULT_COLS);
     _rolesColOrder    = _ROL_COLS.map(c => c.id);
@@ -79,6 +95,7 @@ function renderRoles() {
             case 'created_at':
             case 'updated_at': return mul * (rda[_rolesSort]||'').localeCompare(rdb[_rolesSort]||'');
             case 'updated_by': return mul * (rda.updated_by||'').toLowerCase().localeCompare((rdb.updated_by||'').toLowerCase());
+            case 'perm_count': return mul * ((rda.permissions||[]).length - (rdb.permissions||[]).length);
             default:           return mul * (rda.name||'').toLowerCase().localeCompare((rdb.name||'').toLowerCase());
         }
     });
@@ -133,6 +150,7 @@ function renderRoles() {
         const cells = orderedCols.map(col => {
             switch (col.id) {
                 case 'name':        return `<td class="text-nowrap"><span class="fw-semibold">${esc(rd.name || name)}</span>${builtinBadge}${disabledBadge}</td>`;
+                case 'perm_count':  return `<td class="text-center"><span class="badge bg-secondary rounded-pill">${(rd.permissions || []).length}</span></td>`;
                 case 'uid':         return `<td><code class="text-muted" style="font-size:.7rem">${esc(name)}</code></td>`;
                 case 'description': return `<td class="text-muted small">${esc(rd.description || '')}</td>`;
                 case 'created_at':  return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(rd.created_at))}</td>`;

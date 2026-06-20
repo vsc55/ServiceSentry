@@ -70,7 +70,7 @@ class Watchful(ModuleBase):
             server_name = (value.get('server_name', '') or '').strip() or host
             verify = str(value.get('verify', True)).lower() not in ('false', '0', 'no', 'off', 'disable')
             warning_days = int(value.get('warning_days', 0) or 0) or self.get_conf('warning_days', self._MODULE_DEFAULTS['warning_days'])
-            timeout = int(value.get('timeout', 0) or 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+            timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
             label = (value.get('label', '') or '').strip() or server_name or host or key
             self._debug(f"SSL Cert: {self.item_label(key)} - host={host}:{port} sni={server_name} verify={verify} warning_days={warning_days}", DebugLevel.info)
             list_items.append({
@@ -85,7 +85,7 @@ class Watchful(ModuleBase):
             })
 
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)) as executor:
+                max_workers=max(1, self.module_default('threads', self._default_threads))) as executor:
             future_to_item = {
                 executor.submit(self._ssl_check, item): item
                 for item in list_items

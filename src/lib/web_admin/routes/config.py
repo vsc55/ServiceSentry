@@ -12,7 +12,7 @@ from ..constants import SUPPORTED_LANGS, coerce_lang
 from lib.debug import DebugLevel
 from lib.config.spec import (
     CFG_BY_PATH, int_rules, bool_rules, json_dict_fields, admin_only_fields,
-    normalize_url, cfg_default, cfg_validate, frontend_schema,
+    normalize_url, cfg_default, cfg_meta, cfg_validate, frontend_schema,
 )
 from lib import secret_manager
 
@@ -108,6 +108,21 @@ def register(app, wa):
         schema['global|log_level'] = {
             'options': ['off', 'debug', 'info', 'warning', 'error'],
             'default': cfg_default('global|log_level'),
+        }
+        # modules section: not web_admin-instance-backed, so expose its registry
+        # metadata (type/default/min/max) here so the UI knows the source-of-truth
+        # defaults and ranges (no hardcoded values in the frontend).
+        schema['modules|threads'] = cfg_meta('modules|threads')
+        schema['modules|timeout'] = cfg_meta('modules|timeout')
+        schema['users|default_role'] = cfg_meta('users|default_role')
+        schema['groups|default_role'] = cfg_meta('groups|default_role')
+        # database: driver renders as a dedicated select (MySQL/MariaDB merged);
+        # the port is driver-specific (blank ⇒ the connector's 5432/3306 default)
+        # so it carries a hint + range.
+        schema['database|driver'] = cfg_meta('database|driver')
+        schema['database|port'] = {
+            **cfg_meta('database|port'), 'min': 1, 'max': 65535,
+            'placeholder': '5432 / 3306',
         }
         schema['telegram|chat_id'] = {'numericString': True}
         schema['web_admin|role_modal_scrollable'] = {'type': 'bool', 'default': True}

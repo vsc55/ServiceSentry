@@ -18,6 +18,7 @@
     "new_item_key_label": "Nombre del proceso o identificador:",
     "rename_item_prompt": "Introduce el nuevo nombre del proceso o identificador:",
     "group_labels": {
+        "process": "Proceso",
         "alerts": "Alertas"
     },
     "collections": {"list": "Procesos"},

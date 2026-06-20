@@ -15,8 +15,9 @@ __all__ = [
 ]
 
 _MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
-# Per-server (host) permission key.  'add' authorizes adding modules/checks to
-# the server; 'edit'/'delete' act on existing host-bound checks and the host.
+# Per-server (host) permission key.  'add' authorizes adding host-bound checks to
+# THIS specific host (not creating a host — that is the global ``servers_add``);
+# 'edit'/'delete' act on existing host-bound checks and the host record.
 _SERVER_PERM_RE = re.compile(r'^server\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
 
 
@@ -65,6 +66,8 @@ PERMISSIONS = (
     'config_edit',     # write config.json
     'overview_view',   # view the overview dashboard
     'overview_edit',   # customise the overview dashboard layout
+    'overview_set_default',    # save the org-wide default dashboard layout
+    'overview_reset_factory',  # reset the dashboard to the factory built-in layout
     'sessions_view',   # view active sessions
     'sessions_revoke', # revoke sessions
     'checks_view',     # view check results / status tab
@@ -83,7 +86,7 @@ PERMISSION_GROUPS = [
     ('perm_group_servers',  ['servers_view', 'servers_add', 'servers_edit', 'servers_delete']),
     ('perm_group_credentials', ['credentials_view', 'credentials_add', 'credentials_edit', 'credentials_delete']),
     ('perm_group_config',   ['config_view', 'config_edit']),
-    ('perm_group_overview', ['overview_view', 'overview_edit']),
+    ('perm_group_overview', ['overview_view', 'overview_edit', 'overview_set_default', 'overview_reset_factory']),
     ('perm_group_sessions', ['sessions_view', 'sessions_revoke']),
     ('perm_group_checks',   ['checks_view', 'checks_run']),
     ('perm_group_history',  ['history_view', 'history_delete']),
@@ -94,7 +97,7 @@ BUILTIN_ROLE_UIDS: dict[str, str] = {
     'admin':    '00000000-0000-4000-8000-000000000001',
     'editor':   '00000000-0000-4000-8000-000000000002',
     'viewer':   '00000000-0000-4000-8000-000000000003',
-    'none':     '00000000-0000-4000-8000-000000000004',
+    'none':     '00000000-0000-4000-8000-000000000000',
 }
 BUILTIN_GROUP_UIDS: dict[str, str] = {
     'administrators': '00000000-0000-4000-8000-000000000010',

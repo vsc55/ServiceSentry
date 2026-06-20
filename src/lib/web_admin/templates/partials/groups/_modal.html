@@ -9,6 +9,20 @@ let _gmIsBuiltin     = false;
 let _gmSelectedRoles   = new Set();
 let _gmSelectedMembers = new Set();
 
+// UID of the built-in 'none' role (the roles grid is keyed by UID).
+function _noneRoleUid() {
+    for (const [uid, rd] of Object.entries(rolesData || {})) {
+        if (rd && rd.key === 'none') return uid;
+    }
+    return 'none';   // last resort; the backend still resolves the 'none' name
+}
+// Default role pre-selected for a NEW group: the configured groups|default_role
+// if it still exists, else the built-in 'none' role (mirrors the users default).
+function _defaultGroupRole() {
+    const want = (configData && configData.groups) ? configData.groups.default_role : '';
+    return (want && rolesData && rolesData[want]) ? want : _noneRoleUid();
+}
+
 // Bind search inputs and event delegation once (after DOM ready)
 document.addEventListener('DOMContentLoaded', () => {
     _bindSetSelection('groupRolesGrid', _gmSelectedRoles, 'checkbox');
@@ -79,7 +93,7 @@ function openNewGroupModal() {
     gmEnabledNew.disabled = false;
     document.getElementById('gmRoleSearch').value   = '';
     document.getElementById('gmMemberSearch').value = '';
-    _gmSelectedRoles   = new Set(['none']);
+    _gmSelectedRoles   = new Set([_defaultGroupRole()]);
     _gmSelectedMembers = new Set();
     _gmPopulateRoles('');
     _gmPopulateMembers('');

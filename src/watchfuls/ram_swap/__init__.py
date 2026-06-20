@@ -95,7 +95,7 @@ class Watchful(ModuleBase):
             self.dict_return.set(f'{key}_ram', False,
                                  f'Memory: {label} - *unsupported host OS: {os_}* ⚠️')
             return
-        timeout = self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+        timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         outs = []
         for cmd in _MEM_CMDS[os_]:
             out, err, code = self.host_exec(item, cmd, timeout=timeout)

@@ -37,6 +37,11 @@
                             <i class="bi bi-collection me-1"></i>{{ i18n.col_groups }}
                         </button>
                     </li>
+                    <li class="nav-item" id="umTabPrefsLi" style="display:none">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#umTabPrefs" type="button">
+                            <i class="bi bi-eraser me-1"></i>{{ i18n.tab_customisations }}
+                        </button>
+                    </li>
                 </ul>
                 <div class="tab-content px-3 py-3 gm-tab-content" id="userModalTabContent">
                     <div class="tab-pane fade show active" id="umTabGeneral">
@@ -110,6 +115,18 @@
                             placeholder="{{ i18n.config_search }}">
                         <div id="umGroupsContainer" class="flex-grow-1"
                             style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:6px 10px">
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="umTabPrefs">
+                        <p class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>{{ i18n.user_prefs_info }}</p>
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox" id="umClearAllTables" onchange="_umToggleAllTables(this.checked)">
+                            <label class="form-check-label small fw-semibold" for="umClearAllTables"><i class="bi bi-table me-1"></i>{{ i18n.user_clear_tables }}</label>
+                        </div>
+                        <div class="row g-1 mb-3 ms-4" id="umClearTablesGrid"></div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="umClearDashboard">
+                            <label class="form-check-label small fw-semibold" for="umClearDashboard"><i class="bi bi-grid-1x2 me-1"></i>{{ i18n.user_clear_dashboard }}</label>
                         </div>
                     </div>
                 </div>

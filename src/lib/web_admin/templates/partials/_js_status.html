@@ -70,6 +70,11 @@ async function renderStatus() {
 
     await _loadSchedulerState();   // for the auto-refresh "Auto" option
     const canRun = new Set(currentUser.permissions || []).has('checks_run');
+    // Restore the saved check selection (falling back to the enabled modules the
+    // first time). Set before the toolbar because its run-selected count badge
+    // and the module checklist both read _checkSelection.
+    const _statusMods = Object.keys(modulesData).filter(k => typeof modulesData[k] === 'object');
+    _checkSelection = _loadCheckSelection(_statusMods);
     let h = '';
 
     // ── Unified toolbar: refresh/auto-refresh on the left, run/select
@@ -78,15 +83,28 @@ async function renderStatus() {
           <button class="btn btn-sm btn-primary ms-auto" id="btnRunAll" onclick="runAllChecks()" title="${escAttr(t('run_all_checks_tt'))}">
             <i class="bi bi-play-fill me-1"></i>${t('run_all_checks')}
           </button>
-          <button class="btn btn-sm btn-primary" id="btnRunSelected" onclick="runSelectedChecks()" title="${escAttr(t('run_selected_checks_tt'))}">
-            <i class="bi bi-check2-square me-1"></i>${t('run_selected_checks')}
-          </button>
+
+          <!-- Split button: the left part runs the current selection, the caret
+               opens an inline module checklist (auto-close=outside keeps it open
+               while you tick modules; the count badge sits on the caret side). -->
+          <div class="btn-group">
+            <button class="btn btn-sm btn-primary" id="btnRunSelected" onclick="runSelectedChecks()" title="${escAttr(t('run_selected_checks_tt'))}" ${_checkSelection.size ? '' : 'disabled'}>
+              <i class="bi bi-check2-square me-1"></i>${t('run_selected_checks')}
+            </button>
+            <button type="button" class="btn btn-sm btn-primary dropdown-toggle dropdown-toggle-split"
+                    data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                    style="filter:brightness(.82);border-left:1px solid rgba(255,255,255,.35)">
+              <span class="badge bg-light text-dark me-1 run-sel-count">${_selCountLabel()}</span>
+              <span class="visually-hidden">${t('run_selected_checks')}</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end p-1" style="max-height:60vh;overflow:auto;min-width:240px">
+              ${_renderModuleChecklist('split')}
+            </ul>
+          </div>
+
           <div class="vr mx-1 d-none d-sm-block"></div>
-          <button class="btn btn-sm btn-secondary" onclick="toggleCheckSelection(true)" title="${escAttr(t('checks_select_all_tt'))}">
-            ${t('checks_select_all')}
-          </button>
-          <button class="btn btn-sm btn-secondary" onclick="toggleCheckSelection(false)" title="${escAttr(t('checks_select_none_tt'))}">
-            ${t('checks_select_none')}
+          <button class="btn btn-sm btn-warning" onclick="resetStatus()" title="${escAttr(t('status_reset_tt'))}">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>${t('status_reset')}
           </button>
           <span id="checksSpinner" class="d-none text-muted small">
             <span class="spinner-border spinner-border-sm me-1"></span>${t('checks_running')}
@@ -131,27 +149,6 @@ async function renderStatus() {
                 </div>
             </div>
         </div>`;
-
-        // ── Module chip selector ──────────────────────────────
-        const mods = Object.keys(modulesData).filter(k => typeof modulesData[k] === 'object');
-        if (mods.length) {
-            h += `<div class="d-flex flex-wrap gap-2 mb-3">`;
-            _checkSelection.clear();
-            for (const m of mods) {
-                const enabled = modulesData[m].enabled;
-                if (enabled) _checkSelection.add(m);
-                const icon  = moduleIcon(m, modulesData[m]);
-                const pname = modulePrettyName(m, modulesData[m]);
-                h += `<input class="btn-check check-module-cb" type="checkbox" value="${escAttr(m)}"
-                         id="chk-${escAttr(m)}" autocomplete="off" ${enabled ? 'checked' : ''}
-                         onchange="onCheckModuleToggle(this)">
-                      <label class="btn btn-sm btn-secondary d-flex align-items-center gap-1"
-                             for="chk-${escAttr(m)}" style="font-size:.8rem">
-                        ${icon} ${esc(pname)}
-                      </label>`;
-            }
-            h += `</div>`;
-        }
     }
 
     // ── Results area ──────────────────────────────────────────
@@ -222,6 +219,12 @@ function _renderOneStatusCard(mod, checks) {
         const noItems = total === 0;
         const errCnt  = total - okCnt;
         const pct     = noItems ? 0 : Math.round(100 * okCnt / total);
+        // The check list starts collapsed when everything is OK and expanded as
+        // soon as something failed, so problem checks are visible without a click.
+        // (Re-applied on every render, incl. after a run.)  Only cards with rows
+        // are collapsible.
+        const hasRows   = total > 0;
+        const collapsed = allOk;
 
         const accentGrad = noItems
             ? 'linear-gradient(90deg,#94a3b8,#cbd5e1)'
@@ -243,8 +246,10 @@ function _renderOneStatusCard(mod, checks) {
         // Accent strip
         h += `<div style="height:3px;background:${accentGrad}"></div>`;
 
-        // Card header
-        h += `<div class="d-flex align-items-center gap-2 px-3 py-2" style="border-bottom:1px solid var(--bs-border-color)">
+        // Card header (clickable to collapse/expand the check list when it has rows)
+        h += `<div class="d-flex align-items-center gap-2 px-3 py-2 status-card-header"
+                   ${hasRows ? 'onclick="_toggleStatusCard(this)"' : ''}
+                   style="border-bottom:1px solid var(--bs-border-color)${hasRows ? ';cursor:pointer' : ''}">
             <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
                   style="width:38px;height:38px;background:${avBg};color:${avColor};font-size:1.1rem">${icon}</span>
             <div class="flex-grow-1 min-w-0">
@@ -259,6 +264,8 @@ function _renderOneStatusCard(mod, checks) {
                     ? `<i class="bi bi-check-lg"></i> ${t('status_ok')}`
                     : `<i class="bi bi-x-lg"></i> ${errCnt} ${t('status_error')}`}
             </span>
+            ${hasRows ? `<i class="bi bi-chevron-down ss-card-chevron flex-shrink-0 text-muted"
+                  style="font-size:.8rem;transition:transform .2s${collapsed ? ';transform:rotate(-90deg)' : ''}"></i>` : ''}
         </div>`;
 
         // Progress bar
@@ -266,7 +273,8 @@ function _renderOneStatusCard(mod, checks) {
             <div style="height:100%;width:${pct}%;background:${pbarBg};transition:width .5s ease"></div>
         </div>`;
 
-        // Check rows
+        // Check rows (collapsible body)
+        h += `<div class="ss-card-checks"${collapsed ? ' style="display:none"' : ''}>`;
         for (const [ck, info] of rows) {
             const st = info?.status;
             const ok = st === true;
@@ -308,9 +316,21 @@ function _renderOneStatusCard(mod, checks) {
                       style="font-size:.68rem;background:${cbBg};color:${cbColor}">${cbTxt}</span>
             </div>`;
         }
+        h += `</div>`; // .ss-card-checks (collapsible body)
 
         h += `</div>`; // card
         return h;
+}
+
+// Collapse/expand a status card's check list (header click).
+function _toggleStatusCard(headerEl) {
+    const card = headerEl.closest('[data-status-card]');
+    const body = card && card.querySelector('.ss-card-checks');
+    if (!body) return;
+    const isCollapsed = body.style.display === 'none';
+    body.style.display = isCollapsed ? '' : 'none';
+    const chev = headerEl.querySelector('.ss-card-chevron');
+    if (chev) chev.style.transform = isCollapsed ? '' : 'rotate(-90deg)';
 }
 
 function _renderStatusCards(data) {
@@ -322,17 +342,93 @@ function _renderStatusCards(data) {
     return h;
 }
 
-function onCheckModuleToggle(el) {
-    if (el.checked) _checkSelection.add(el.value);
-    else _checkSelection.delete(el.value);
+// Build the per-module checklist shown inside the Run-Selected split button's
+// dropdown. *prefix* namespaces the checkbox ids; every box carries
+// .check-module-cb so _syncModuleSelectionUI keeps the boxes and the count
+// badge in step.
+function _renderModuleChecklist(prefix) {
+    const mods = Object.keys(modulesData).filter(k => typeof modulesData[k] === 'object');
+    if (!mods.length) return `<li><span class="dropdown-item-text text-muted small">${t('status_empty')}</span></li>`;
+    let h = `<li class="d-flex gap-1 px-1 pb-1 mb-1 border-bottom">
+        <button type="button" class="btn btn-sm btn-secondary flex-fill py-0" onclick="toggleCheckSelection(true)">${t('checks_select_all')}</button>
+        <button type="button" class="btn btn-sm btn-secondary flex-fill py-0" onclick="toggleCheckSelection(false)">${t('checks_select_none')}</button>
+    </li>`;
+    for (const m of mods) {
+        const icon  = moduleIcon(m, modulesData[m]);
+        const pname = modulePrettyName(m, modulesData[m]);
+        h += `<li>
+            <label class="dropdown-item d-flex align-items-center gap-2 py-1" style="cursor:pointer">
+              <input type="checkbox" class="form-check-input m-0 check-module-cb" value="${escAttr(m)}"
+                     id="${escAttr(prefix)}-chk-${escAttr(m)}" ${_checkSelection.has(m) ? 'checked' : ''}
+                     onchange="_moduleCheckChanged(this)">
+              <span class="d-flex align-items-center gap-1">${icon} ${esc(pname)}</span>
+            </label>
+        </li>`;
+    }
+    return h;
 }
 
+// Persist the module selection so it survives reloads (per browser).
+const _CHECK_SEL_KEY = 'ss_status_check_selection';
+function _loadCheckSelection(mods) {
+    try {
+        const raw = localStorage.getItem(_CHECK_SEL_KEY);
+        if (raw !== null) {
+            const saved = JSON.parse(raw);
+            if (Array.isArray(saved)) return new Set(saved.filter(m => mods.includes(m)));
+        }
+    } catch (e) { /* missing/corrupt value → fall through to default */ }
+    return new Set(mods.filter(m => modulesData[m] && modulesData[m].enabled));
+}
+function _saveCheckSelection() {
+    try { localStorage.setItem(_CHECK_SEL_KEY, JSON.stringify([..._checkSelection])); }
+    catch (e) { /* storage unavailable/full → selection just won't persist */ }
+}
+
+// A single module checkbox toggled (in either menu).
+function _moduleCheckChanged(el) {
+    if (el.checked) _checkSelection.add(el.value);
+    else _checkSelection.delete(el.value);
+    _syncModuleSelectionUI();
+}
+
+// Select all / none from inside a dropdown header.
 function toggleCheckSelection(selectAll) {
+    if (selectAll) {
+        Object.keys(modulesData)
+            .filter(k => typeof modulesData[k] === 'object')
+            .forEach(m => _checkSelection.add(m));
+    } else {
+        _checkSelection.clear();
+    }
+    _syncModuleSelectionUI();
+}
+
+// Label shown in the selection-count badge: "None" when empty, "All" when every
+// module is selected, otherwise the plain count.
+function _selModuleCount() {
+    return Object.keys(modulesData).filter(k => typeof modulesData[k] === 'object').length;
+}
+function _selCountLabel() {
+    const n = _checkSelection.size, total = _selModuleCount();
+    if (n === 0) return t('none');
+    return (total > 0 && n === total) ? t('all') : n;
+}
+
+// Reflect _checkSelection into every rendered module checkbox (both menus) and
+// refresh the selection-count badges on both run controls.
+function _syncModuleSelectionUI() {
     document.querySelectorAll('.check-module-cb').forEach(cb => {
-        cb.checked = selectAll;
-        if (selectAll) _checkSelection.add(cb.value);
-        else _checkSelection.delete(cb.value);
+        cb.checked = _checkSelection.has(cb.value);
     });
+    const n = _checkSelection.size;
+    const label = _selCountLabel();
+    document.querySelectorAll('.run-sel-count').forEach(b => { b.textContent = label; });
+    // Nothing selected → disable the run action (the caret stays clickable so you
+    // can still open the checklist); the badge keeps showing "0".
+    const runBtn = document.getElementById('btnRunSelected');
+    if (runBtn) runBtn.disabled = (n === 0);
+    _saveCheckSelection();
 }
 
 async function runAllChecks() {
@@ -343,6 +439,20 @@ async function runSelectedChecks() {
     const mods = [..._checkSelection];
     if (!mods.length) { showToast(t('checks_no_selection'), 'warning'); return; }
     await _doRunChecks(mods);
+}
+
+// Empty the current check-state table (status.json equivalent) so monitoring
+// starts from a clean slate.  Destructive → confirm first.
+function resetStatus() {
+    showConfirmModal(t('status_reset_confirm'), async () => {
+        const r = await apiDelete('/api/v1/modules/status');
+        if (r && r.status === 200 && r.data && r.data.ok) {
+            showToast(t('status_reset_done'), 'success');
+            renderStatus();
+        } else {
+            showToast(t('status_reset_error') || t('error'), 'danger');
+        }
+    });
 }
 
 async function _doRunChecks(modules) {
@@ -422,7 +532,7 @@ async function _doRunChecks(modules) {
         clearInterval(pollTimer);
         if (spinner) spinner.classList.add('d-none');
         if (btnAll)  btnAll.disabled  = false;
-        if (btnSel)  btnSel.disabled  = false;
+        if (btnSel)  btnSel.disabled  = (_checkSelection.size === 0);
 
         if (!res || res.status !== 200) {
             showToast(res?.data?.error || t('checks_error'), 'danger');
@@ -447,7 +557,7 @@ async function _doRunChecks(modules) {
         clearInterval(pollTimer);
         if (spinner) spinner.classList.add('d-none');
         if (btnAll)  btnAll.disabled  = false;
-        if (btnSel)  btnSel.disabled  = false;
+        if (btnSel)  btnSel.disabled  = (_checkSelection.size === 0);
     }
 }
 

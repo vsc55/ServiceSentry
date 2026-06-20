@@ -8,6 +8,13 @@
 let _umSelectedRole   = 'none';
 let _umSelectedGroups = new Set();
 
+// Default role for a NEW user — the configured users|default_role if it still
+// exists, otherwise the built-in 'none' role (mirrors the backend fallback).
+function _defaultUserRole() {
+    const want = (configData && configData.users) ? configData.users.default_role : '';
+    return (want && rolesData && rolesData[want]) ? want : 'none';
+}
+
 // Bind search inputs and event delegation once (after DOM ready)
 document.addEventListener('DOMContentLoaded', () => {
     _bindSetSelection('umRoleContainer', null, 'radio', v => _umSelectedRole = v);

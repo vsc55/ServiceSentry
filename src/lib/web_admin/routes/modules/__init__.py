@@ -5,7 +5,7 @@
 import re
 import uuid
 
-from flask import jsonify
+from flask import jsonify, session
 
 from lib import secret_manager
 
@@ -281,10 +281,23 @@ def register(app, wa):
         """Return the current check state (from the check_state DB table)."""
         return jsonify(wa._read_check_status())
 
+    checks_run_req = wa._perm_required('checks_run')
+
+    @app.route('/api/v1/modules/status', methods=['DELETE'])
+    @checks_run_req
+    def api_clear_status():
+        """Empty the current check-state table so monitoring starts clean."""
+        store = getattr(wa, '_check_state_store', None)
+        ok = bool(store and store.clear())
+        wa._audit('status_cleared', detail={'ok': ok})
+        return jsonify({'ok': ok})
+
     # --- API: overview (dashboard summary) -----------------------
 
+    overview_view_req = wa._perm_required('overview_view')
+
     @app.route('/api/v1/modules/overview', methods=['GET'])
-    @login_required
+    @overview_view_req
     def api_get_overview():
         """Return a summary snapshot for the overview dashboard."""
         # Current check state (read first so modules can reference per-module counts)
@@ -384,6 +397,25 @@ def register(app, wa):
         # Roles summary
         builtin_roles = len(BUILTIN_ROLE_PERMISSIONS)
         custom_roles = len(wa._custom_roles)
+
+        # uid → display name for every role, so the users/groups/sessions by-role
+        # breakdowns resolve names even for a viewer without roles_view (the
+        # frontend's rolesData needs roles_view; role names aren't sensitive).
+        # role_names → display name; role_keys → builtin key ('admin'/'viewer'/…)
+        # so the frontend can colour the badge without roles_view (custom = '').
+        role_names: dict[str, str] = {}
+        role_keys: dict[str, str] = {}
+        for _k in BUILTIN_ROLE_PERMISSIONS:
+            _u = BUILTIN_ROLE_UIDS.get(_k, '')
+            if not _u:
+                continue
+            _ov = wa._builtin_role_overrides.get(_u, {})
+            role_names[_u] = _ov.get('name') or wa._builtin_role_names.get(_k, _k.title())
+            role_keys[_u] = _k
+        for _u, _rd in wa._custom_roles.items():
+            if isinstance(_rd, dict):
+                role_names[_u] = _rd.get('name', _u)
+                role_keys[_u] = ''
 
         # Last audit events
         last_events = list(reversed(wa._audit_log))[:10]
@@ -564,6 +596,8 @@ def register(app, wa):
                 'builtin': builtin_roles,
                 'custom': custom_roles,
             },
+            'role_names': role_names,
+            'role_keys': role_keys,
             'webhooks': {
                 'total': webhooks_total,
                 'enabled': webhooks_enabled,
@@ -582,3 +616,76 @@ def register(app, wa):
             'failed_logins': failed_logins,
             'last_events': last_events,
         })
+
+    # --- API: org-wide default dashboard layout ------------------
+    @app.route('/api/v1/overview/default-layout', methods=['GET'])
+    @overview_view_req
+    def api_get_default_layout():
+        """Org-wide default dashboard layout, applied to users who have not
+        customised theirs. Empty ⇒ the frontend falls back to its built-in layout."""
+        cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        return jsonify((cfg.get('overview') or {}).get('default_layout') or [])
+
+    overview_setdef_req = wa._perm_required('overview_set_default')
+
+    @app.route('/api/v1/overview/default-layout', methods=['PUT'])
+    @overview_setdef_req
+    def api_set_default_layout():
+        """Save the posted layout as the org-wide default (config.overview).
+
+        Gated by the dedicated ``overview_set_default`` permission — it changes
+        the default for *every* user, beyond editing one's own dashboard."""
+        data, err = wa._require_json()
+        if err:
+            return err
+        widgets = data.get('layout')
+        if not isinstance(widgets, list):
+            return jsonify({'error': wa._t('invalid_modules_data')}), 400
+        layout = [
+            {
+                'id':     str(w.get('id', '')),
+                'cols':   int(w.get('cols') or 2),
+                'h':      w.get('h', 'auto'),
+                'hidden': bool(w.get('hidden')),
+            }
+            for w in widgets if isinstance(w, dict) and w.get('id')
+        ]
+        cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        cfg.setdefault('overview', {})['default_layout'] = layout
+        ok = wa._save_config_file(wa._CONFIG_FILE, cfg)
+        wa._audit('overview_default_layout_set', detail={
+            'widgets': len(layout),
+            'visible': [w['id'] for w in layout if not w.get('hidden')],
+        })
+        return jsonify({'ok': bool(ok)})
+
+    overview_resetfac_req = wa._perm_required('overview_reset_factory')
+
+    @app.route('/api/v1/overview/reset-factory', methods=['POST'])
+    @overview_resetfac_req
+    def api_reset_factory_layout():
+        """Reset the caller's own dashboard to the factory built-in layout,
+        persisted to their account — audited as a permission-gated action."""
+        data, err = wa._require_json()
+        if err:
+            return err
+        widgets = data.get('layout')
+        layout = [
+            {
+                'id':     str(w.get('id', '')),
+                'cols':   int(w.get('cols') or 2),
+                'h':      w.get('h', 'auto'),
+                'hidden': bool(w.get('hidden')),
+            }
+            for w in (widgets if isinstance(widgets, list) else [])
+            if isinstance(w, dict) and w.get('id')
+        ]
+        user = wa._users.get(session.get('username', ''))
+        if user is not None:
+            user['dashboard_layout'] = layout
+            wa._persist_users()
+        wa._audit('overview_reset_factory', detail={
+            'widgets': len(layout),
+            'visible': [w['id'] for w in layout if not w.get('hidden')],
+        })
+        return jsonify({'ok': True})

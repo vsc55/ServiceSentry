@@ -13,7 +13,7 @@
 | [deployment.md](deployment.md) | Resumen de métodos de despliegue: install.sh, systemd y OpenRC |
 | [docker.md](docker.md) | Despliegue con Docker: variables de entorno, volúmenes, actualización y proxy inverso |
 | [architecture.md](architecture.md) | Diagrama de componentes, jerarquía de clases, estructura de directorios, flujo de ejecución, modelo de concurrencia |
-| [configuration.md](configuration.md) | config.json (database, ldap, oidc, saml2, email, notifications, webhooks…), monitor.json, modules.json, estado de checks, opciones CLI, variables de entorno (`SS_*`), sistema de debug (niveles, colores) |
+| [configuration.md](configuration.md) | config.json (database, ldap, oidc, saml2, email, notifications, webhooks, modules…), modules.json, estado de checks, opciones CLI, variables de entorno (`SS_*`), sistema de debug (niveles, colores) |
 | [modules.md](modules.md) | Los 16 módulos integrados: referencia de configuración, campos y flujo de cada uno |
 | [web_admin.md](web_admin.md) | Interfaz web Flask: características, roles (28 permisos), notificaciones, seguridad, endpoints REST, i18n, formularios por schema |
 | [security.md](security.md) | Autenticación (local/LDAP/OIDC/SAML2), RBAC, sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |

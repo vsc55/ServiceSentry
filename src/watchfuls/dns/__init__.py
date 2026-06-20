@@ -592,7 +592,7 @@ class Watchful(ModuleBase):
             # raise here (the loop runs in the main thread — it would abort the
             # whole module check instead of failing just this item).
             timeout = (_coerce_int(value.get('timeout'))
-                       or _coerce_int(self.get_conf('timeout', self._MODULE_DEFAULTS['timeout']))
+                       or _coerce_int(self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
                        or self._MODULE_DEFAULTS['timeout'])
             self._debug(f"DNS: {self.item_label(key)} - host={host} type={record_type} expected={expected!r}", DebugLevel.info)
             # Carry the resolved value (ssh_*, host_os, host_kind) plus the
@@ -610,7 +610,7 @@ class Watchful(ModuleBase):
             list_items.append(item)
 
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)) as executor:
+                max_workers=max(1, self.module_default('threads', self._default_threads))) as executor:
             future_to_item = {
                 executor.submit(self._dns_check, item): item
                 for item in list_items

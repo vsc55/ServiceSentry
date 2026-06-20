@@ -156,6 +156,20 @@ function escAttr(s) {
  * surrounding double-quotes so they don't terminate the HTML attribute. */
 function jsStr(s) { return escAttr(JSON.stringify(s)); }
 
+/** In-app error/empty panel mirroring the server-rendered error.html page
+ * (404/500/403…). Reusable for any "access denied" / error state shown inside
+ * the SPA. Pass code='' to omit the big number (e.g. a plain empty state). */
+function errorState(code, icon, title, description) {
+    return `<div class="error-wrap error-wrap-inline">
+        <div class="error-card">
+            ${code !== '' && code != null ? `<div class="error-code mb-2">${esc(String(code))}</div>` : ''}
+            <div class="error-icon text-secondary"><i class="bi ${escAttr(icon)}"></i></div>
+            <h1 class="h4 fw-semibold mb-2">${esc(title)}</h1>
+            <p class="text-secondary mb-0">${esc(description)}</p>
+        </div>
+    </div>`;
+}
+
 function setPath(obj, parts, val) {
     let cur = obj;
     for (let i = 0; i < parts.length - 1; i++) {

@@ -74,7 +74,7 @@ class Watchful(ModuleBase):
                 f'RAID: {label} - *mdstat only available on Linux (host OS: {os_})* ⚠️')
             return
         path = self.get_conf('mdstat_path', self._MODULE_DEFAULTS['mdstat_path']) or '/proc/mdstat'
-        timeout = self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+        timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         out, err, code = self.host_exec(item, f"cat {shlex.quote(path)}", timeout=timeout)
         if code != 0:
             raise OSError((err or '').strip() or f'cat {path} exited {code}')

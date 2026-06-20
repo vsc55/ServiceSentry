@@ -2,7 +2,7 @@
     "__module__": {
         "api_ver": "v1",
         "enabled":  {"type": "bool", "default": true},
-        "threads":  {"type": "int",  "default": 5, "min": 1, "max": 50},
+        "threads":  {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 50},
         "mib_dirs": {"type": "str",  "default": ""},
         "mib_repos": {"type": "str", "default": "", "hidden": true}
     },
@@ -16,7 +16,7 @@
         "port":                 {"type": "int",  "default": 161,   "min": 1,  "max": 65535, "group": "connection"},
         "version":              {"type": "str",  "default": "2c",  "options": ["1", "2c", "3"], "group": "auth"},
         "community":            {"type": "str",  "default": "public", "group": "auth"},
-        "timeout":              {"type": "int",  "default": 5,     "min": 1,  "max": 60, "group": "connection"},
+        "timeout":              {"type": "int",  "default": 5,     "min": 0, "inherit_blank": true,  "max": 60, "group": "connection"},
         "retries":              {"type": "int",  "default": 1,     "min": 0,  "max": 10, "group": "connection"},
         "snmpv3_username":      {"type": "str",  "default": "",    "show_when": {"version": ["3"]}, "group": "auth"},
         "snmpv3_auth_key":      {"type": "str",  "default": "",    "secret": true, "show_when": {"version": ["3"]}, "group": "auth"},

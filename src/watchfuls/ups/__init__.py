@@ -138,7 +138,7 @@ class Watchful(ModuleBase):
             ups_name = (value.get('ups_name', '') or '').strip() or self._DEFAULTS['ups_name']
             user = (value.get('user', '') or '').strip()
             password = (value.get('password', '') or '').strip()
-            timeout = int(value.get('timeout', 0) or 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+            timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
             self._debug(f"UPS: {self.item_label(key)} - host={host}:{port} ups_name={ups_name}", DebugLevel.info)
 
             def _alert(field):
@@ -170,7 +170,7 @@ class Watchful(ModuleBase):
             })
 
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)) as executor:
+                max_workers=max(1, self.module_default('threads', self._default_threads))) as executor:
             future_to_item = {
                 executor.submit(self._ups_check, item): item
                 for item in list_items

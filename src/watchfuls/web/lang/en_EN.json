@@ -37,8 +37,15 @@
         "alert":            "Consecutive failures before triggering an alert. Use >1 to suppress transient errors."
     },
     "option_labels": {
-        "scheme": {"http": "HTTP", "https": "HTTPS"},
-        "method": {"GET": "GET", "HEAD": "HEAD (no body)", "POST": "POST"}
+        "scheme": {
+            "http": "HTTP",
+            "https": "HTTPS"
+        },
+        "method": {
+            "GET": "GET",
+            "HEAD": "HEAD (no body)",
+            "POST": "POST"
+        }
     },
     "group_labels": {
         "connection": "Connection",

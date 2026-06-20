@@ -20,6 +20,7 @@
     "new_item_key_label": "Sensor name:",
     "rename_item_prompt": "Enter new sensor name:",
     "group_labels": {
+        "sensor": "Sensor",
         "alerts": "Alerts"
     },
     "collections": {"list": "Sensors"},

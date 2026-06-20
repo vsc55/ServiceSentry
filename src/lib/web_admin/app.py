@@ -16,7 +16,7 @@ from jinja2 import ChoiceLoader, FileSystemLoader
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from lib.config import ConfigControl
+from lib.config import ConfigControl, CONFIG_FILENAME
 from lib.debug import DebugLevel
 from lib.object_base import ObjectBase
 from lib import secret_manager
@@ -65,12 +65,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
 
     DEFAULT_PORT = 8080
     DEFAULT_HOST = '0.0.0.0'
-    _USERS_FILE = 'users.json'
     _ROLES_FILE = 'roles.json'
     _GROUPS_FILE = 'groups.json'
     _SECRET_KEY_FILE = '.flask_secret'
     _SESSIONS_FILE = 'sessions.json'
-    _CONFIG_FILE = 'config.json'
+    _CONFIG_FILE = CONFIG_FILENAME          # single source of truth (lib.config)
     _MODULES_FILE = 'modules.json'
     _STATUS_FILE = 'status.json'
     # Defaults below come from the central registry (config_spec.CONFIG_FIELDS)
@@ -141,9 +140,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     ):
         """Initialise the web administration server.
 
-        On first run (no ``users.json`` present) a default *admin*
+        On first run (no users in the database) a default *admin*
         account is created from the supplied *username* / *password*.
-        Subsequent runs always authenticate against ``users.json``.
+        Subsequent runs load users from the database.
 
         Args:
             config_dir: Path to the configuration directory.
@@ -703,6 +702,12 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
 
         @app.after_request
         def _trace_request_end(response):
+            # Dynamic API responses must never be browser-cached: a stale GET
+            # (e.g. /api/v1/users or /api/v1/me) would show an admin a user's
+            # pre-clear table layout even after a full page reload, and would
+            # break the keepalive live-sync of layout changes.
+            if request.path.startswith('/api/'):
+                response.headers['Cache-Control'] = 'no-store'
             # Generic per-endpoint trace, for EVERY API, gated by log_level:
             # GET/static at debug, mutations at info, 4xx/5xx at warning. Logs the
             # endpoint, input KEYS (query + json body — never values, so no

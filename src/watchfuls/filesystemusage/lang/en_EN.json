@@ -20,6 +20,7 @@
     "new_item_key_label": "Partition path (e.g. / or C:\\):",
     "rename_item_prompt": "Enter new partition path (e.g. / or C:\\):",
     "group_labels": {
+        "disk":       "Disk",
         "alerts": "Alerts"
     },
     "collections": {

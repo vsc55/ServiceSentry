@@ -5,6 +5,18 @@
 
 let _hostDraft = null;        // working copy while the host modal is open
 let _editingHostUid = null;   // null = new, uid = editing
+let _hostModalReadonly = false;  // true → no edit rights: fields disabled, no save
+
+// Per-host permission checks: the global servers_* permission OR the granular
+// per-server one (server.<uid>.<action>), mirroring the backend (routes/hosts.py).
+function _canEditHost(uid) {
+    const p = currentUser.permissions || [];
+    return p.includes('servers_edit') || p.includes('server.' + uid + '.edit');
+}
+function _canDeleteHost(uid) {
+    const p = currentUser.permissions || [];
+    return p.includes('servers_delete') || p.includes('server.' + uid + '.delete');
+}
 let _hostChecks = {};         // {module: {collection, enabled, _key, fieldsMeta, fields}}
 let _hostShownMods = new Set(); // modules shown for this host (add/remove per host)
 let _hostCheckFilters = {};   // {module: filter text} for the per-module check list
@@ -192,12 +204,13 @@ function renderServers() {
     </tr></thead><tbody>`;
 
     for (const host of pageHosts) {
-        const rowStyle = host.maintenance ? ' style="opacity:.7"' : '';
+        // Maintenance is shown by the status badge; don't dim the whole row (it
+        // looked disabled and washed the normal colours out).
         const cells = orderedCols.map(col => {
             switch (col.id) {
-                case 'name':    return `<td class="text-nowrap fw-semibold">${esc(host.name)}</td>`;
+                case 'name':    return `<td class="text-nowrap fw-semibold"${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.name)}</td>`;
                 case 'uid':     return `<td><code class="text-muted" style="font-size:.7rem">${esc(host.uid||'')}</code></td>`;
-                case 'address': return `<td class="text-nowrap"><code>${esc(host.address || '')}</code></td>`;
+                case 'address': return `<td class="text-nowrap"><code${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.address || '')}</code></td>`;
                 case 'kind':    return `<td class="text-center">${host.kind === 'remote'
                     ? `<span class="badge text-bg-secondary"><i class="bi bi-hdd-network me-1"></i>${esc(t('host_kind_remote'))}</span>`
                     : `<span class="badge text-bg-light border">${esc(t('host_kind_local'))}</span>`}</td>`;
@@ -224,15 +237,17 @@ function renderServers() {
                 default:            return '<td></td>';
             }
         }).join('');
-        h += `<tr${rowStyle}>
+        const ceHost = _canEditHost(host.uid);
+        const cdHost = _canDeleteHost(host.uid);
+        h += `<tr>
             ${canDelete ? `<td><input type="checkbox" class="form-check-input" ${_selectedServers.has(host.uid)?'checked':''} onchange="_serversToggleOne(${jsStr(host.uid)}, this.checked)"></td>` : ''}
             ${cells}
             <td class="ss-td-actions">
-                ${canEdit ? `<button class="btn btn-sm btn-info py-0 px-1 me-1" onclick="testHostRow(${jsStr(host.uid)})"
+                ${ceHost ? `<button class="btn btn-sm btn-info py-0 px-1 me-1" onclick="testHostRow(${jsStr(host.uid)})"
                         title="${escAttr(t('host_test'))}"><i class="bi bi-play-circle"></i></button>` : ''}
-                <button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditHostModal(${jsStr(host.uid)})"
-                        title="${escAttr(t('host_edit'))}"><i class="bi bi-pencil"></i></button>
-                ${canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteHost(${jsStr(host.uid)})"
+                <button class="btn btn-sm ${ceHost ? 'btn-primary' : 'btn-secondary'} py-0 px-1 me-1" onclick="openEditHostModal(${jsStr(host.uid)})"
+                        title="${escAttr(ceHost ? t('host_edit') : t('host_view'))}"><i class="bi ${ceHost ? 'bi-pencil' : 'bi-eye'}"></i></button>
+                ${cdHost ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteHost(${jsStr(host.uid)})"
                         title="${escAttr(t('delete_tt')||t('delete')||'Delete')}"><i class="bi bi-trash3"></i></button>` : ''}
             </td>
         </tr>`;
@@ -315,6 +330,7 @@ async function _bulkDeleteServers() {
 // ──────────────────────────── Modal ────────────────────────────────
 function openNewHostModal() {
     _editingHostUid = null;
+    _hostModalReadonly = false;   // reachable only with edit rights (toolbar-gated)
     _hostDraft = { name: '', address: '', kind: 'local', os: 'auto', maintenance: false,
                    tags: [], description: '', profiles: {} };
     document.getElementById('hostModalTitle').textContent = t('host_new');
@@ -331,6 +347,9 @@ function openEditHostModal(uid) {
     const host = hostsData[uid];
     if (!host) return;
     _editingHostUid = uid;
+    // View-only users (no edit rights on this host) can open it to inspect, but
+    // the modal is locked: fields disabled and the save/test actions hidden.
+    _hostModalReadonly = !_canEditHost(uid);
     // Deep copy so edits aren't applied until saved.
     _hostDraft = JSON.parse(JSON.stringify({
         name: host.name || '', address: host.address || '',
@@ -441,6 +460,29 @@ function _renderHostModalBody() {
     const body = document.getElementById('hostModalBody');
     body.innerHTML = h;
     initTooltips(body);   // activate the field info-icon tooltips
+    _applyHostModalPerms();   // lock the fields/actions when opened read-only
+}
+
+// Enforce the host modal's read-only state (set by openEditHostModal from the
+// per-host edit permission). Re-run after every body render: disable all fields
+// and body action buttons (tab nav stays usable) and hide the footer save/test/
+// undo actions, leaving only Cancel. No-op when the user can edit.
+function _applyHostModalPerms() {
+    const modal = document.getElementById('hostModal');
+    if (!modal) return;
+    const ro = _hostModalReadonly;
+    modal.querySelectorAll('#hostModalBody input, #hostModalBody select, #hostModalBody textarea')
+        .forEach(el => { el.disabled = ro; });
+    modal.querySelectorAll('#hostModalBody button').forEach(b => {
+        if (b.getAttribute('data-bs-toggle') === 'tab') return;   // keep tab navigation
+        b.disabled = ro;
+    });
+    modal.querySelectorAll('.modal-footer button').forEach(b => {
+        if (b.hasAttribute('data-bs-dismiss')) return;            // keep the Cancel button
+        b.classList.toggle('d-none', ro);
+    });
+    const title = document.getElementById('hostModalTitle');
+    if (title && ro) title.textContent = t('host_view');
 }
 
 // Collapsible card wrapper (host modal). The header (chevron + title) toggles

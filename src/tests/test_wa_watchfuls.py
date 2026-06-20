@@ -2,13 +2,11 @@
 # -*- coding: utf-8 -*-
 """Tests for the generic watchful action endpoint: GET|POST /api/watchfuls/<module>/<action>."""
 
-import json
 import os
 import pathlib
 from unittest.mock import patch
 
 import pytest
-from werkzeug.security import generate_password_hash
 
 try:
     from lib.web_admin import WebAdmin
@@ -22,7 +20,6 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 _SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _WATCHFULS_DIR = os.path.join(_SRC_DIR, "watchfuls")
-_ADMIN_HASH = generate_password_hash("secret", method="pbkdf2:sha256")
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -36,16 +33,6 @@ def client_with_modules(tmp_path):
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(var_dir, exist_ok=True)
 
-    users = {
-        "admin": {
-            "password_hash": _ADMIN_HASH,
-            "role": "admin",
-            "display_name": "Administrator",
-        }
-    }
-    (pathlib.Path(config_dir) / "users.json").write_text(
-        json.dumps(users, indent=4), encoding="utf-8"
-    )
     (pathlib.Path(config_dir) / "modules.json").write_text("{}", encoding="utf-8")
     (pathlib.Path(config_dir) / "config.json").write_text("{}", encoding="utf-8")
 

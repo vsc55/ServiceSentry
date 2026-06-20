@@ -433,6 +433,19 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         }
 
         const itemOpacity = itemOn ? '' : ';opacity:.6';
+        // Maintenance marker: when this check is bound to a host in maintenance,
+        // its monitoring and any auto-remediation are suspended — flag it so it's
+        // clear from the Modules list without opening the host.
+        let _maintBadge = '';
+        const _hUid = (itemValue && typeof itemValue === 'object') ? (itemValue.host_uid || '') : '';
+        if (_hUid && typeof hostsList === 'function') {
+            const _h = hostsList().find(hh => hh.uid === _hUid);
+            if (_h && _h.maintenance) {
+                _maintBadge = `<span class="badge rounded-pill flex-shrink-0 me-1" data-no-collapse="1"
+                    style="background:#fd7e14;color:#fff;font-size:.62rem"
+                    title="${escAttr(t('host_status_maintenance'))}"><i class="bi bi-cone-striped me-1"></i>${esc(t('host_status_maintenance'))}</span>`;
+            }
+        }
         const isAutoExpand = (_autoExpandItemPath === pathStr);
         if (isAutoExpand) _autoExpandItemPath = null;
         return `<div class="rounded-3 overflow-hidden border" data-item-path="${escAttr(pathStr)}" style="background:var(--ss-surface-bg,var(--bs-body-bg))${itemOpacity}">
@@ -440,7 +453,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                  style="background:var(--bs-tertiary-bg);cursor:pointer"
                  role="button" onclick="toggleCollapseFromHeader(event,'${id}')">
                 <code class="flex-grow-1 min-w-0" style="font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}${keyBadge}</code>
-                ${sw}${testBtn}${editLabelBtn}${renameBtn}${cloneBtn}${delBtn}
+                ${_maintBadge}${sw}${testBtn}${editLabelBtn}${renameBtn}${cloneBtn}${delBtn}
                 <button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     style="background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"

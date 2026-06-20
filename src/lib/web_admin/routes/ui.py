@@ -80,6 +80,7 @@ def register(app, wa):
             'pref_lang': user_data.get('lang', ''),
             'pref_dark_mode': user_data.get('dark_mode'),
             'table_config': user_data.get('table_config', {}),
+            'dashboard_layout': user_data.get('dashboard_layout', []),
             'restart_pending': wa._restart_pending,
             'startup_id':      wa._startup_id,
         })

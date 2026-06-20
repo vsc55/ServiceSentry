@@ -4,10 +4,15 @@ Initialisation — role restrictions, event listeners, data load.
 
 // ── Per-user table config (server-side persistence) ───────────────
 let _tcSaveTimer = null;
+let _tcSavePending = false;   // suppresses remote re-sync while our own save is in flight
+let _tcEpoch = 0;             // bumped on every local edit; a keepalive response whose
+                              // in-flight fetch predates the latest edit is discarded
 
 function _persistTableConfig() {
+    _tcSavePending = true;
+    _tcEpoch++;
     clearTimeout(_tcSaveTimer);
-    _tcSaveTimer = setTimeout(() => {
+    _tcSaveTimer = setTimeout(async () => {
         const _cw = tbl => { try { return JSON.parse(localStorage.getItem(`ss_${tbl}_col_w`) || '{}'); } catch(_){ return {}; } };
         const tc = {
             groups:   { cols: [...(_groupsVisibleCols   || [])], order: _groupsColOrder   || [], w: _cw('groups') },
@@ -17,46 +22,85 @@ function _persistTableConfig() {
             sessions: { cols: [...(_sessionsVisibleCols || [])], order: _sessionsColOrder || [], w: _cw('sessions'),
                         view: (typeof _sessionsViewMode !== 'undefined' ? _sessionsViewMode : 'card') },
         };
-        apiPut('/api/v1/users/me/preferences', { table_config: tc });
+        currentUser.table_config = tc;   // keep in sync so the keepalive poll won't re-render our own change
+        try { await apiPut('/api/v1/users/me/preferences', { table_config: tc }); }
+        finally { _tcSavePending = false; }
     }, 1500);
 }
 
+// Per-table descriptors — used to apply a saved layout OR reset to factory
+// default. The DB is authoritative: a table absent from `tc` (never customised,
+// or cleared by an admin) is reset to default and its stale localStorage dropped,
+// so a clear propagates on reload and on the live keepalive re-sync.
+function _tcTables() {
+    return [
+        { k: 'groups',   def: _GROUPS_DEFAULT_COLS,   all: _GRP_COLS,
+          getVis: () => _groupsVisibleCols,   setVis: s => { _groupsVisibleCols = s; },
+          setOrd: o => { _groupsColOrder = o; },     ls: ['ss_groups_cols','ss_groups_col_order','ss_groups_col_w'] },
+        { k: 'users',    def: _USERS_DEFAULT_COLS,    all: _USR_COLS,
+          getVis: () => _usersVisibleCols,    setVis: s => { _usersVisibleCols = s; },
+          setOrd: o => { _usersColOrder = o; },      ls: ['ss_users_cols','ss_users_col_order','ss_users_col_w'] },
+        { k: 'roles',    def: _ROLES_DEFAULT_COLS,    all: _ROL_COLS,
+          getVis: () => _rolesVisibleCols,    setVis: s => { _rolesVisibleCols = s; },
+          setOrd: o => { _rolesColOrder = o; },      ls: ['ss_roles_cols','ss_roles_col_order','ss_roles_col_w'] },
+        { k: 'audit',    def: _AUDIT_DEFAULT_COLS,    all: _AUDIT_COLS,
+          getVis: () => _auditVisibleCols,    setVis: s => { _auditVisibleCols = s; },
+          setOrd: o => { _auditColOrder = o; },      ls: ['ss_audit_cols','ss_audit_col_order','ss_audit_col_w'] },
+        { k: 'sessions', def: _SESSIONS_DEFAULT_COLS, all: _SES_COLS,
+          getVis: () => _sessionsVisibleCols, setVis: s => { _sessionsVisibleCols = s; },
+          setOrd: o => { _sessionsColOrder = o; },   ls: ['ss_sessions_cols','ss_sessions_col_order','ss_sessions_col_w'] },
+    ];
+}
+
 function _applyUserTableConfig(tc) {
-    if (!tc || typeof tc !== 'object') return;
-    const apply = (tbl, visRef, ordRef, lsVis, lsOrd, lsW) => {
-        const cfg = tc[tbl];
-        if (!cfg) return;
-        if (Array.isArray(cfg.cols))  {
-            const s = new Set(cfg.cols);
-            if (visRef) { visRef.clear(); cfg.cols.forEach(c => visRef.add(c)); }
+    tc = (tc && typeof tc === 'object') ? tc : {};
+    for (const td of _tcTables()) {
+        const cfg = tc[td.k];
+        const [lsVis, lsOrd, lsW] = td.ls;
+        if (!cfg || typeof cfg !== 'object') {
+            // No server config → reset to factory default, drop stale local layout.
+            td.setVis(new Set(td.def));
+            td.setOrd(td.all.map(c => c.id));
+            localStorage.removeItem(lsVis);
+            localStorage.removeItem(lsOrd);
+            localStorage.removeItem(lsW);
+            continue;
+        }
+        if (Array.isArray(cfg.cols)) {
+            td.setVis(new Set(cfg.cols));
             localStorage.setItem(lsVis, JSON.stringify(cfg.cols));
         }
         if (Array.isArray(cfg.order)) {
-            if (ordRef !== null) { ordRef.splice(0, ordRef.length, ...cfg.order); }
+            td.setOrd(cfg.order.slice());
             localStorage.setItem(lsOrd, JSON.stringify(cfg.order));
         }
         if (cfg.w && typeof cfg.w === 'object') {
             localStorage.setItem(lsW, JSON.stringify(cfg.w));
+        } else {
+            localStorage.removeItem(lsW);
         }
-    };
-    // Pass null for ordRef — arrays can't be replaced by reference, store via localStorage only
-    apply('groups',   _groupsVisibleCols,   null, 'ss_groups_cols',   'ss_groups_col_order',   'ss_groups_col_w');
-    apply('users',    _usersVisibleCols,    null, 'ss_users_cols',    'ss_users_col_order',    'ss_users_col_w');
-    apply('roles',    _rolesVisibleCols,    null, 'ss_roles_cols',    'ss_roles_col_order',    'ss_roles_col_w');
-    apply('audit',    _auditVisibleCols,    null, 'ss_audit_cols',    'ss_audit_col_order',    'ss_audit_col_w');
-    apply('sessions', _sessionsVisibleCols, null, 'ss_sessions_cols', 'ss_sessions_col_order', 'ss_sessions_col_w');
-    // Sessions view mode (card/table) is persisted alongside the column config.
-    const _sesCfg = tc.sessions;
-    if (_sesCfg && (_sesCfg.view === 'card' || _sesCfg.view === 'table')) {
-        _sessionsViewMode = _sesCfg.view;
-        localStorage.setItem('ss_sessions_view', _sesCfg.view);
     }
-    // Re-read order arrays from localStorage (arrays are passed by reference but reassignment breaks it)
-    try { const s = JSON.parse(localStorage.getItem('ss_groups_col_order')||'null'); if(Array.isArray(s)) { _groupsColOrder.length=0; s.forEach(c=>_groupsColOrder.push(c)); } } catch(_){}
-    try { const s = JSON.parse(localStorage.getItem('ss_users_col_order') ||'null'); if(Array.isArray(s)) { _usersColOrder.length=0;  s.forEach(c=>_usersColOrder.push(c));  } } catch(_){}
-    try { const s = JSON.parse(localStorage.getItem('ss_roles_col_order') ||'null'); if(Array.isArray(s)) { _rolesColOrder.length=0;  s.forEach(c=>_rolesColOrder.push(c));  } } catch(_){}
-    try { const s = JSON.parse(localStorage.getItem('ss_audit_col_order') ||'null'); if(Array.isArray(s)) { _auditColOrder.length=0;  s.forEach(c=>_auditColOrder.push(c));  } } catch(_){}
-    try { const s = JSON.parse(localStorage.getItem('ss_sessions_col_order')||'null'); if(Array.isArray(s)) { _sessionsColOrder.length=0; s.forEach(c=>_sessionsColOrder.push(c)); } } catch(_){}
+    // Sessions view mode (card/table) — defaults to 'card' when absent/cleared.
+    const _sv = tc.sessions && tc.sessions.view;
+    _sessionsViewMode = (_sv === 'card' || _sv === 'table') ? _sv : 'card';
+    localStorage.setItem('ss_sessions_view', _sessionsViewMode);
+}
+
+// Re-sync layout prefs pushed from the server (keepalive poll). When an admin
+// clears another user's saved table layout, that user's open page reflects it on
+// the next poll without a manual reload.
+function _syncRemoteTableConfig(me, ep) {
+    if (!me || typeof me !== 'object' || _tcSavePending) return;
+    // Discard a stale snapshot: if a local edit happened while this /me fetch was
+    // in flight, the response predates our change and would wrongly revert it.
+    if (typeof ep === 'number' && ep !== _tcEpoch) return;
+    const incoming = (me.table_config && typeof me.table_config === 'object') ? me.table_config : {};
+    if (JSON.stringify(incoming) === JSON.stringify(currentUser.table_config || {})) return;
+    currentUser.table_config = incoming;
+    _applyUserTableConfig(incoming);
+    ['renderUsers', 'renderRoles', 'renderGroups', 'renderSessions', 'renderAudit'].forEach(fn => {
+        try { if (typeof window[fn] === 'function') window[fn](); } catch (_) {}
+    });
 }
 
 // ── Shared table column helpers ────────────────────────────────────
@@ -295,6 +339,10 @@ renderGroups();
 }
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
 document.getElementById('btn-tab-history')?.addEventListener('shown.bs.tab', renderHistory);
+// Re-fetch host status every time the Servers tab is shown, so the Status column
+// reflects a "Run all" or a status "clean" done from the Status tab (both leave
+// hostsData stale until reloaded).
+document.getElementById('btn-tab-servers')?.addEventListener('shown.bs.tab', reloadHosts);
 document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
 document.getElementById('btnResetPasswordOk').addEventListener('click', resetUserPassword);
 document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
@@ -350,6 +398,10 @@ try {
     if ((currentUser.permissions || []).some(p =>
         p === 'servers_view' || p === 'servers_edit' || p === 'servers_delete' || p.startsWith('server.'))) {
         await loadHosts();
+    }
+    // Org-wide default dashboard layout (for users who haven't customised theirs).
+    if ((currentUser.permissions || []).includes('overview_view')) {
+        _dwGlobalDefault = await apiGet('/api/v1/overview/default-layout') || [];
     }
     // Credentials are needed both for their own tab and for the host SSH picker,
     // so load them for credential managers AND server editors.

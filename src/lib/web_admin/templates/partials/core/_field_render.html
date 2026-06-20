@@ -121,6 +121,47 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             onInput: `updateField(${tg},${sp},this.value)`, trailing: _actionBtn}), _hintHtml);
     }
 
+    // Nullable int/float that inherits a global Configuration > Modules default
+    // when left blank.  Cleared → stored as null (≠ 0, which stays a real value);
+    // rendered blank with the inherited global shown as the placeholder.
+    if (meta && meta.inherit_blank && (meta.type === 'int' || meta.type === 'float')
+        && (typeof value === 'number' || value == null || value === '')) {
+        const _isF = meta.type === 'float';
+        const _minA = meta.min != null ? ` min="${meta.min}"` : '';
+        const _maxA = meta.max != null ? ` max="${meta.max}"` : '';
+        const _minV = meta.min != null ? meta.min : 'null';
+        const _maxV = meta.max != null ? meta.max : 'null';
+        // Global value: from the live config if present, else the spec default
+        // (so the placeholder shows even before config.json gets the section).
+        let _gv = (typeof configData !== 'undefined' && configData.modules) ? configData.modules[key] : null;
+        if (_gv == null || _gv === '') _gv = CONFIG_FIELD_DEFAULTS['modules|' + key];
+        const _gph = (_gv != null && _gv !== '') ? ` placeholder="${escAttr(String(_gv))}"` : '';
+        const _dispV = (value == null || value === '') ? '' : value;
+        return _fieldRow(lblHtml, fieldCtl({kind: 'number',
+            inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value="${_dispV}"${_minA}${_maxA}${_isF ? ' step="0.1"' : ' step="1"'}${_gph} data-inherit-blank="1" onkeydown="blockNonNumericKey(event,${_isF})"`,
+            onInput: `markDirty(${tg})`,
+            onChange: `validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})`,
+            trailing: _actionBtn}), _hintHtml);
+    }
+
+    // Unset int/float field (no value in config yet, e.g. a driver-specific DB
+    // port with no fixed default): render a blank number input so it is typed and
+    // stored as a number, not text. Must precede the string branch ('' is a string).
+    if ((value == null || value === '') && meta && (meta.type === 'int' || meta.type === 'float')
+        && !meta.inherit_blank) {
+        const _isF = meta.type === 'float';
+        const minA = meta.min != null ? ` min="${meta.min}"` : '';
+        const maxA = meta.max != null ? ` max="${meta.max}"` : '';
+        const _minV = meta.min != null ? meta.min : 'null';
+        const _maxV = meta.max != null ? meta.max : 'null';
+        const _ph = meta.placeholder != null ? ` placeholder="${escAttr(String(meta.placeholder))}"` : '';
+        return _fieldRow(lblHtml, fieldCtl({kind: 'number',
+            inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value=""${minA}${maxA}${_isF ? ' step="0.1"' : ' step="1"'}${_ph} onkeydown="blockNonNumericKey(event,${_isF})"`,
+            onInput: `markDirty(${tg})`,
+            onChange: `validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})`,
+            trailing: _actionBtn}), _hintHtml);
+    }
+
     if (typeof value === 'boolean') {
         const _boolItemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
         return _fieldRow(lblHtml, fieldCtl({kind: 'switch', value,
@@ -167,7 +208,15 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             if (value === 0) displayValue = '';
         } else if (meta && meta.placeholder_module != null) {
             const _modName = pathStr.split('|')[0];
-            const _modPh = (modulesData[_modName] || {})[meta.placeholder_module];
+            let _modPh = (modulesData[_modName] || {})[meta.placeholder_module];
+            // Cascade: when the module-level default is blank it inherits the
+            // global Configuration > Modules value (live config, else spec default).
+            if (_modPh == null || _modPh === 0 || _modPh === '') {
+                const _g = (typeof configData !== 'undefined' && configData.modules)
+                    ? configData.modules[meta.placeholder_module] : undefined;
+                _modPh = (_g != null && _g !== '') ? _g
+                    : CONFIG_FIELD_DEFAULTS['modules|' + meta.placeholder_module];
+            }
             if (_modPh != null && _modPh !== 0) extraAttrs += ` placeholder="${escAttr(String(_modPh))}"`;
             extraAttrs += ` data-placeholder-module="${escAttr(String(meta.placeholder_module))}"`;
             extraAttrs += ` data-zero-as-blank="1"`;
@@ -229,6 +278,56 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                     ${opts}
                 </select>${_actionBtn}
             </div>${_hintHtml}</div></div>`;
+        }
+        // Default-role selector (new users): a live dropdown of every role.
+        if (key === 'default_role') {
+            const roles = (rolesData && typeof rolesData === 'object') ? rolesData : {};
+            const entries = Object.entries(roles).sort((a, b) => {
+                const ba = a[1].builtin ? 0 : 1, bb = b[1].builtin ? 0 : 1;
+                return ba !== bb ? ba - bb : String(a[1].name||'').localeCompare(String(b[1].name||''));
+            });
+            // Empty value (unset) resolves to the built-in 'none' role — located
+            // here by its 'key' so the canonical UID isn't duplicated client-side.
+            let noneUid = '';
+            for (const [uid, ro] of entries) { if (ro && ro.key === 'none') { noneUid = uid; break; } }
+            const effective = value || noneUid;
+            let opts = '', found = false;
+            for (const [uid, ro] of entries) {
+                const sel = effective === uid ? ' selected' : '';
+                if (value === uid) found = true;
+                opts += `<option value="${escAttr(uid)}"${sel}>${esc(ro.name || uid)}</option>`;
+            }
+            // A non-empty value with no matching role → it was deleted; flag it
+            // (the backend falls back to none).
+            if (value && !found) {
+                opts = `<option value="${escAttr(value)}" selected>${esc(t('role_deleted'))}</option>` + opts;
+            }
+            return `<div class="row mb-2 align-items-start">
+            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+            <div class="col-sm-8"><div class="input-group input-group-sm">
+                <select class="form-select" onchange="updateField(${tg},${sp},this.value)">
+                    ${opts}
+                </select>${_actionBtn}
+            </div>${_hintHtml}</div></div>`;
+        }
+        // Database engine selector — MySQL and MariaDB share one option (same
+        // settings/connector). onChange refreshes the per-engine conditional fields.
+        if (key === 'driver' && pathStr.split('|')[0] === 'database') {
+            const DRIVERS = [['sqlite', 'SQLite'], ['postgresql', 'PostgreSQL'], ['mysql', 'MySQL / MariaDB']];
+            let opts = '', found = false;
+            for (const [v, lab] of DRIVERS) {
+                const sel = value === v ? ' selected' : '';
+                if (sel) found = true;
+                opts += `<option value="${escAttr(v)}"${sel}>${esc(lab)}</option>`;
+            }
+            // Preserve an existing alias not listed (e.g. a stored 'mariadb').
+            if (value && !found) {
+                opts = `<option value="${escAttr(value)}" selected>${esc(value)}</option>` + opts;
+            }
+            const _dbItemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
+            return _fieldRow(lblHtml, fieldCtl({kind: 'select', optionsHtml: opts,
+                onChange: `updateField(${tg},${sp},this.value);_refreshConditionalFields(${_dbItemPath})`,
+                trailing: _actionBtn}), _hintHtml);
         }
         // String select — options array defined in schema
         if (meta && Array.isArray(meta.options)) {
@@ -424,8 +523,13 @@ function validateAndUpdateNumber(el, target, pathStr, min, max) {
     const raw = el.value;
     const v = parseInt(raw, 10);
     const hasZeroAsBlank = el.hasAttribute('data-zero-as-blank');
+    const hasInheritBlank = el.hasAttribute('data-inherit-blank');
     if (raw === '' || isNaN(v)) {
-        if (hasZeroAsBlank) {
+        if (hasInheritBlank) {
+            // Blank → null = inherit the global default (distinct from 0, a real value).
+            el.value = '';
+            updateField(target, pathStr, null);
+        } else if (hasZeroAsBlank) {
             // Blank means "use default" — store 0, keep display blank.
             el.value = '';
             updateField(target, pathStr, min ?? 0);

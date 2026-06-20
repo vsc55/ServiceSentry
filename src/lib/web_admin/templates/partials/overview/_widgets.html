@@ -353,7 +353,6 @@ function _dwTheadRow(...ths) {
 function _dwContent(id, data) {
     if (_dwIsSpacer(id)) return '<div class="dw-spacer-box"></div>';
     const perms   = new Set(currentUser.permissions || []);
-    const isAdmin = currentUser.role === 'admin';
 
     const modules  = data.modules  || [];
     const status   = data.status   || {};
@@ -362,6 +361,17 @@ function _dwContent(id, data) {
     const groups   = data.groups   || {};
     const roles    = data.roles    || {};
     const events   = data.last_events || [];
+    // Role uid→name map from the overview payload — lets the by-role breakdowns
+    // resolve names WITHOUT the roles_view permission (rolesData needs it).
+    const roleNames = data.role_names || {};
+    const roleKeys  = data.role_keys  || {};
+    const _roleName = (r) => roleNames[r] || (rolesData[r] && rolesData[r].name)
+        || ROLE_LABELS[(rolesData[r] && rolesData[r].key) || r] || r;
+    // Badge colour by builtin key (admin/viewer/…); custom/unknown → default.
+    const _roleBadge = (r) => {
+        const k = roleKeys[r] != null ? roleKeys[r] : (rolesData[r] && rolesData[r].key);
+        return BUILTIN_ROLE_BADGES[k || r] || 'text-bg-info';
+    };
 
     const enabled  = modules.filter(m => m.enabled).length;
     const disabled = modules.length - enabled;
@@ -393,7 +403,7 @@ function _dwContent(id, data) {
         case 'sessions': {
             const byRole = sessions.by_role || {};
             const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)}" style="font-size:.72rem">${n} ${esc((rolesData[r]?.name) || ROLE_LABELS[rolesData[r]?.key || r] || r)}</span>`)
+                .map(([r, n]) => `<span class="badge ${_roleBadge(r)}" style="font-size:.72rem">${n} ${esc(_roleName(r))}</span>`)
                 .join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#06b6d4,#3b82f6)', 'rgba(6,182,212,.12)', '#06b6d4',
                 'bi-plug-fill', sessions.active || 0, 'overview_sessions', sub);
@@ -402,7 +412,7 @@ function _dwContent(id, data) {
         case 'users': {
             const byRole = users.by_role || {};
             const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)}" style="font-size:.72rem">${n} ${esc((rolesData[r]?.name) || ROLE_LABELS[rolesData[r]?.key || r] || r)}</span>`)
+                .map(([r, n]) => `<span class="badge ${_roleBadge(r)}" style="font-size:.72rem">${n} ${esc(_roleName(r))}</span>`)
                 .join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#f59e0b,#f97316)', 'rgba(245,158,11,.12)', '#f59e0b',
                 'bi-person-fill', users.total || 0, 'overview_users', sub);
@@ -411,7 +421,7 @@ function _dwContent(id, data) {
         case 'groups': {
             const byRole = groups.by_role || {};
             const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${roleBadgeClass(r)}" style="font-size:.72rem">${n} ${esc((rolesData[r]?.name) || ROLE_LABELS[rolesData[r]?.key || r] || r)}</span>`)
+                .map(([r, n]) => `<span class="badge ${_roleBadge(r)}" style="font-size:.72rem">${n} ${esc(_roleName(r))}</span>`)
                 .join('')
                 || (groups.members ? `<span class="text-muted small">${tf('overview_members', groups.members)}</span>` : '<span class="text-muted small">—</span>');
             return _dwStatCard('linear-gradient(90deg,#10b981,#14b8a6)', 'rgba(16,185,129,.12)', '#10b981',
@@ -523,7 +533,7 @@ function _dwContent(id, data) {
         }
 
         case 'sessions_list': {
-            if (!isAdmin)
+            if (!perms.has('sessions_view'))
                 return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
             const slist = (data.sessions || {}).list || [];
             const table = `<table class="table table-sm table-hover align-middle mb-0">
@@ -556,7 +566,7 @@ function _dwContent(id, data) {
         }
 
         case 'failed_logins': {
-            if (!isAdmin)
+            if (!perms.has('audit_view'))
                 return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
             const flist = data.failed_logins || [];
             const table = `<table class="table table-sm table-hover align-middle mb-0">
@@ -573,7 +583,7 @@ function _dwContent(id, data) {
         }
 
         case 'activity': {
-            if (!isAdmin)
+            if (!perms.has('audit_view'))
                 return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
             if (!events.length)
                 return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('status_empty')}</div>`;

@@ -152,7 +152,7 @@ class Watchful(ModuleBase):
         svc = service_name if os_ == 'windows' else shlex.quote(service_name)
         cmd = _STATUS_CMDS[os_].format(svc=svc)
         out, err, code = self.host_exec(
-            item, cmd, timeout=self.get_conf('timeout', 15))
+            item, cmd, timeout=self.module_default('timeout', 15))
         return self._parse_state(os_, out, err, code)
 
     @classmethod
@@ -192,7 +192,7 @@ class Watchful(ModuleBase):
         action = 'stop' if expected == 'stopped' else 'start'
         svc = service_name if os_ == 'windows' else shlex.quote(service_name)
         cmd = _ACTION_CMDS[os_].format(action=action, svc=svc)
-        self.host_exec(item, cmd, timeout=self.get_conf('timeout', 15))
+        self.host_exec(item, cmd, timeout=self.module_default('timeout', 15))
 
     # ── Discover (local autocomplete, or over SSH for a remote host) ──────────
     @classmethod

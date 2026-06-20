@@ -60,7 +60,7 @@ class Watchful(ModuleBase):
                 names.append(key)
 
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.get_conf('threads', self._default_threads)
+            max_workers=max(1, self.module_default('threads', self._default_threads))
         ) as executor:
             futures = {executor.submit(self._web_check, name): name for name in names}
             for future in concurrent.futures.as_completed(futures):
@@ -100,7 +100,7 @@ class Watchful(ModuleBase):
         scheme       = (it.get('scheme', '') or 'https').strip()
         verify_ssl   = bool(it.get('verify_ssl', True))
         code_exp     = it.get('code', 0) or self.get_conf('code', self._MODULE_DEFAULTS['code'])
-        timeout      = it.get('timeout', 0) or self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])
+        timeout      = it.get('timeout', 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         method           = str(it.get('method', 'GET') or 'GET').upper()
         check_content    = bool(it.get('check_content', False))
         content_contains = str(it.get('content_contains', '') or '')

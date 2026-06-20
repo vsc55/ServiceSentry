@@ -97,14 +97,54 @@
     },
     "field_terms": {
         "db": {
-            "mysql":         {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
-            "mariadb":       {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
-            "postgres":      {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
-            "mssql":         {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
-            "mongodb":       {"label": "Base de datos", "hint": "Nombre de la base de datos a monitorizar.", "action": "Listar bases de datos", "pick": "Seleccionar base de datos"},
-            "elasticsearch": {"label": "Índice", "hint": "Índice a monitorizar.", "action": "Listar índices", "pick": "Seleccionar índice"},
-            "opensearch":    {"label": "Índice", "hint": "Índice a monitorizar.", "action": "Listar índices", "pick": "Seleccionar índice"},
-            "influxdb":      {"label": "Bucket", "hint": "Bucket a monitorizar.", "action": "Listar buckets", "pick": "Seleccionar bucket"}
+            "mysql": {
+                "label": "Base de datos",
+                "hint": "Nombre de la base de datos a monitorizar.",
+                "action": "Listar bases de datos",
+                "pick": "Seleccionar base de datos"
+            },
+            "mariadb": {
+                "label": "Base de datos",
+                "hint": "Nombre de la base de datos a monitorizar.",
+                "action": "Listar bases de datos",
+                "pick": "Seleccionar base de datos"
+            },
+            "postgres": {
+                "label": "Base de datos",
+                "hint": "Nombre de la base de datos a monitorizar.",
+                "action": "Listar bases de datos",
+                "pick": "Seleccionar base de datos"
+            },
+            "mssql": {
+                "label": "Base de datos",
+                "hint": "Nombre de la base de datos a monitorizar.",
+                "action": "Listar bases de datos",
+                "pick": "Seleccionar base de datos"
+            },
+            "mongodb": {
+                "label": "Base de datos",
+                "hint": "Nombre de la base de datos a monitorizar.",
+                "action": "Listar bases de datos",
+                "pick": "Seleccionar base de datos"
+            },
+            "elasticsearch": {
+                "label": "Índice",
+                "hint": "Índice a monitorizar.",
+                "action": "Listar índices",
+                "pick": "Seleccionar índice"
+            },
+            "opensearch": {
+                "label": "Índice",
+                "hint": "Índice a monitorizar.",
+                "action": "Listar índices",
+                "pick": "Seleccionar índice"
+            },
+            "influxdb": {
+                "label": "Bucket",
+                "hint": "Bucket a monitorizar.",
+                "action": "Listar buckets",
+                "pick": "Seleccionar bucket"
+            }
         }
     },
     "new_item_title": "Nuevo almacén de datos",

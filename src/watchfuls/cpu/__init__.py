@@ -80,7 +80,7 @@ class Watchful(ModuleBase):
         os_ = self.host_os(item)
         interval = self.get_conf('interval', self._MODULE_DEFAULTS['interval'])
         cmd = _cpu_cmd(os_)
-        timeout = int(self.get_conf('timeout', self._MODULE_DEFAULTS['timeout'])) + 2
+        timeout = int(self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])) + 2
 
         def _sample():
             out, err, code = self.host_exec(item, cmd, timeout=timeout)

@@ -207,7 +207,6 @@ ServiceSentry/
 │       └── test_wa_json_helpers.py
 ├── data/                                # Config en modo desarrollo
 │   ├── config.json
-│   ├── monitor.json
 │   └── modules.json
 └── docs/
     ├── architecture.md                  # Este archivo
@@ -233,7 +232,7 @@ ServiceSentry/
    ├── _init_config() → lee config.json, aplica defaults, lee valores
    ├── _init_monitor() → crea Monitor(dir_base, dir_config, dir_modules, dir_var)
    │   └── Monitor.__init__():
-   │       ├── Lee config.json, monitor.json, modules.json
+   │       ├── Lee config.json, modules.json
    │       ├── Inicializa el estado de checks (tabla check_state en data.db)
    │       └── Inicializa Telegram (token + chat_id)
    └── _args_cmd() → ejecuta comandos (ej: clear_status)

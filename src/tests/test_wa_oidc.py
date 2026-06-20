@@ -3,7 +3,6 @@
 """Tests for OIDC/OAuth2 SSO authentication integration."""
 
 import json
-import pathlib
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -60,19 +59,8 @@ def _make_userinfo(username='jane', email='jane@example.com', name='Jane Doe', g
 @pytest.fixture()
 def oidc_admin_client(config_dir, var_dir):
     """WebAdmin + test client with OIDC routes registered (authlib mocked)."""
-    from werkzeug.security import generate_password_hash
     import lib.web_admin.auth.oidc_auth as oidc_mod
 
-    users = {
-        'admin': {
-            'password_hash': generate_password_hash('secret', method='pbkdf2:sha256'),
-            'role': 'admin',
-            'display_name': 'Administrator',
-        }
-    }
-    (pathlib.Path(config_dir) / 'users.json').write_text(
-        json.dumps(users, indent=4), encoding='utf-8'
-    )
     with patch.object(oidc_mod, '_HAS_AUTHLIB', True):
         wa = WebAdmin(config_dir, 'admin', 'secret', var_dir,
                       pw_require_upper=False, pw_require_digit=False)

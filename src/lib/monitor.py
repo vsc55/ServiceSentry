@@ -35,7 +35,7 @@ import sys
 import tempfile
 import time
 
-from lib.config import ConfigControl
+from lib.config import ConfigControl, load_config
 from lib.config.spec import cfg_default, normalize_url
 from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
@@ -68,11 +68,16 @@ class Monitor(ObjectBase):
     # (otherwise the counters would be lost in systemd one-shot mode).
     _status_counts_dirty = False
 
-    def __init__(self, dir_base: str, dir_config: str, dir_modules: str, dir_var: str):
+    def __init__(self, dir_base: str, dir_config: str, dir_modules: str, dir_var: str,
+                 *, config=None):
         self.dir_base = dir_base
         self.dir_config = dir_config
         self.dir_modules = dir_modules
         self.dir_var = dir_var
+        # An already-loaded config (the daemon's Main loads+seeds config.json once
+        # and hands it over) so we don't read the file a second time.  When None
+        # (e.g. the web admin spawns monitors on demand) we load it ourselves.
+        self._injected_config = config
 
         self._read_config()
         self._init_telegram()
@@ -336,13 +341,16 @@ class Monitor(ObjectBase):
             _fernet = secret_manager.fernet_from_secret_file(_secret_file)
             self._fernet = _fernet   # kept for the host registry (decrypts profiles)
 
-            self.config = ConfigControl(os.path.join(self.dir_config, 'config.json'))
-            self.config.read()
+            # Reuse the config the caller already loaded (centralised single read);
+            # only fall back to loading it ourselves when none was injected. Either
+            # way the monitor owns runtime decryption of the secrets.  seed=False:
+            # the entry point already seeded missing defaults.
+            if self._injected_config is not None:
+                self.config = self._injected_config
+            else:
+                self.config = load_config(self.dir_config, seed=False)
             if _fernet:
                 secret_manager.decrypt_all(self.config.data, _fernet)
-
-            self.config_monitor = ConfigControl(os.path.join(self.dir_config, 'monitor.json'))
-            self.config_monitor.read()
 
             self.config_modules = ConfigControl(os.path.join(self.dir_config, 'modules.json'))
             self.config_modules.read()
@@ -361,7 +369,6 @@ class Monitor(ObjectBase):
                 self._public_url = ''
         else:
             self.config = ConfigControl(None, {})
-            self.config_monitor = ConfigControl(None, {})
             self.config_modules = ConfigControl(None, {})
             self._public_url = ''
 
@@ -438,12 +445,6 @@ class Monitor(ObjectBase):
     def dir_var(self, val):
         """ Set the variable directory. """
         self._dir_var = val
-
-    def get_conf(self, find_key=None, default_val=None):
-        """ Get a configuration value from the monitor configuration. """
-        if self.config_monitor:
-            return self.config_monitor.get_conf(find_key, default_val)
-        return default_val
 
     def send_message(self, message, status=None) -> None:
         """ Send a message to Telegram if the Telegram object is initialized. """
@@ -601,7 +602,13 @@ class Monitor(ObjectBase):
                     f"> Monitor > check >> preload {_m} failed: {_e}", DebugLevel.warning)
 
         changed = False
-        max_threads = self.get_conf('threads', self._DEFAULT_THREADS)
+        # How many modules to check in parallel — the global Modules default
+        # (Configuration > Modules).
+        max_threads = self.config.get_conf(['modules', 'threads'], self._DEFAULT_THREADS)
+        try:
+            max_threads = int(max_threads) or self._DEFAULT_THREADS
+        except (TypeError, ValueError):
+            max_threads = self._DEFAULT_THREADS
 
         self.debug.print(
             f"> Monitor > check >> Monitor Max Threads: {max_threads}",

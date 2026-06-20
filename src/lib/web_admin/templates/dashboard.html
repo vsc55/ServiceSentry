@@ -277,35 +277,9 @@
 
         <!-- ==================== Audit Tab ====================== -->
         <div class="tab-pane fade" id="tab-audit">
-            <div class="d-flex align-items-center mb-2 gap-2">
-                <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>{{ i18n.audit_log }}</h5>
-                <div class="ms-auto d-flex gap-1">
-                    <button class="btn btn-sm btn-secondary" onclick="renderAudit()" title="{{ i18n.refresh_tt }}">
-                        <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}
-                    </button>
-                    <div class="btn-group">
-                        <button type="button" class="btn btn-sm btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-download me-1"></i>{{ i18n.export }}
-                        </button>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><h6 class="dropdown-header py-1">{{ i18n.export }}</h6></li>
-                            <li><hr class="dropdown-divider my-0"></li>
-                            <li><a class="dropdown-item" href="#" onclick="exportAudit('csv');return false;" title="{{ i18n.export_csv_tt }}">
-                                <i class="bi bi-filetype-csv me-2 text-success"></i>{{ i18n.export_csv }}
-                            </a></li>
-                            <li><a class="dropdown-item" href="#" onclick="exportAudit('json');return false;" title="{{ i18n.export_json_tt }}">
-                                <i class="bi bi-filetype-json me-2 text-warning"></i>{{ i18n.export_json }}
-                            </a></li>
-                        </ul>
-                    </div>
-                    <button class="btn btn-sm btn-danger" id="btnClearAudit" onclick="confirmClearAudit()" title="{{ i18n.audit_clear_all }}">
-                        <i class="bi bi-trash3"></i>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Controls bar — fixed natural height (the .card-body flex:1 1 auto
-                 would otherwise grow it; only #audit-container should expand). -->
+            <!-- Controls bar — sort/group + actions (refresh/export/clear) on the
+                 right, filters below. Fixed natural height; only #audit-container
+                 expands. -->
             <div class="card card-body py-2 mb-3 bg-body-secondary flex-grow-0">
                 <div class="row g-2 align-items-center">
                     <div class="col-auto">
@@ -333,6 +307,21 @@
                                 <option value="ip">{{ i18n.col_ip }}</option>
                             </select>
                         </div>
+                    </div>
+                    <div class="col d-flex gap-1 justify-content-end">
+                        <button class="btn btn-sm btn-secondary" onclick="renderAudit()" title="{{ i18n.refresh_tt }}">
+                            <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}</button>
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-sm btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="bi bi-download me-1"></i>{{ i18n.export }}</button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><h6 class="dropdown-header py-1">{{ i18n.export }}</h6></li>
+                                <li><hr class="dropdown-divider my-0"></li>
+                                <li><a class="dropdown-item" href="#" onclick="exportAudit('csv');return false;" title="{{ i18n.export_csv_tt }}"><i class="bi bi-filetype-csv me-2 text-success"></i>{{ i18n.export_csv }}</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="exportAudit('json');return false;" title="{{ i18n.export_json_tt }}"><i class="bi bi-filetype-json me-2 text-warning"></i>{{ i18n.export_json }}</a></li>
+                            </ul>
+                        </div>
+                        <button class="btn btn-sm btn-danger" id="btnClearAudit" onclick="confirmClearAudit()" title="{{ i18n.audit_clear_all }}"><i class="bi bi-trash3"></i></button>
                     </div>
                 </div>
                 <div class="row g-2 align-items-center mt-1">

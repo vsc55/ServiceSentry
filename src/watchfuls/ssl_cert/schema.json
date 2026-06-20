@@ -1,9 +1,9 @@
 {
     "__module__": {
         "enabled":      {"type": "bool", "default": true},
-        "threads":      {"type": "int",  "default": 5,  "min": 1, "max": 100},
+        "threads":      {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
         "warning_days": {"type": "int",  "default": 30, "min": 1, "max": 365},
-        "timeout":      {"type": "int",  "default": 10, "min": 1, "max": 60}
+        "timeout":      {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 60}
     },
     "__history__": {"field": "days_left", "unit": " days", "label": "Days Until Expiry"},
     "__host_profile__": {"key": "tls", "address_field": "host", "fields": ["host"]},

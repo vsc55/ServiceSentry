@@ -269,7 +269,7 @@ class Watchful(ModuleBase):
                      (v.get('enabled', self._DEFAULTS['enabled']) if isinstance(v, dict)
                       else self._DEFAULTS['enabled']))]
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)) as ex:
+                max_workers=max(1, self.module_default('threads', self._default_threads))) as ex:
             futures = {ex.submit(self._ds_check, key): key for key in items}
             for future in concurrent.futures.as_completed(futures):
                 key = futures[future]
@@ -342,7 +342,7 @@ class Watchful(ModuleBase):
             'ssh_key_string': self._get_conf(ConfigOptions.ssh_key_string, key),
             'ssh_verify_host': self._get_conf(ConfigOptions.ssh_verify_host, key),
             'timeout':      (self._get_conf(ConfigOptions.timeout, key)
-                             or int(self.get_conf('timeout', 10) or 10)),
+                             or int(self.module_default('timeout', 10) or 10)),
         }
 
     # ── Backend dispatcher ────────────────────────────────────────────
@@ -1027,7 +1027,7 @@ class Watchful(ModuleBase):
                 case ConfigOptions.tls:
                     default = self.get_conf('tls', self._DEFAULTS.get('tls', False))
                 case ConfigOptions.timeout:
-                    default = self.get_conf('timeout', self._DEFAULTS.get('timeout', 10) or 10)
+                    default = self.module_default('timeout', self._DEFAULTS.get('timeout', 10) or 10)
                 case ConfigOptions.enabled:
                     default = self.get_conf('enabled', self._DEFAULTS['enabled'])
                 case _:

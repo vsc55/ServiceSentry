@@ -1292,7 +1292,7 @@ class Watchful(ModuleBase):
         # Friendly label per result key (keys are opaque "<srv_uid>.<chk_uid>").
         labels = {k: (str(c.get('label') or '').strip() or k) for k, c, _ in items}
 
-        max_workers = self.get_conf('threads', self._DEFAULT_THREADS)
+        max_workers = max(1, self.module_default('threads', self._DEFAULT_THREADS))
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
                 pool.submit(self._check_item, key, cfg, srv): key

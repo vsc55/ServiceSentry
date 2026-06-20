@@ -1,8 +1,8 @@
 {
     "__module__": {
         "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5,  "min": 1, "max": 100},
-        "timeout": {"type": "int",  "default": 15, "min": 1, "max": 600}
+        "threads": {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "timeout": {"type": "int",  "default": 15, "min": 0, "inherit_blank": true, "max": 600}
     },
     "__history__": {"field": "used", "unit": "%", "label": "Memory Usage"},
     "__host_profile__": {"key": "ssh", "address_field": "ssh_host",

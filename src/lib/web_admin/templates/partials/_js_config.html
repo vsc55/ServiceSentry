@@ -68,6 +68,32 @@ function _refreshStatusLink() {
     if (a)   { a.textContent = url; a.title = url; a.href = url; }
 }
 
+// Database card: a driver dropdown plus only the fields the chosen engine needs.
+// Uses the standard sw-field conditional mechanism keyed on the 'driver' value
+// (the driver <select> onChange already calls _refreshConditionalFields).
+function _renderDatabaseSection(db) {
+    db = db || {};
+    const driver = db.driver || 'sqlite';
+    const NET = ['postgresql', 'mysql', 'mariadb'];
+    const hideUnless = (drivers) => drivers.includes(driver) ? '' : ' style="display:none"';
+    const _val = (f) => (db[f] != null ? db[f] : '');
+    let h = renderField('driver', driver, 'database|driver', 'config');
+    h += `<div data-sw-item-path="database">`;
+    // SQLite → just the file path.
+    h += `<div class="sw-field" data-sw-when='{"driver":["sqlite"]}'${hideUnless(['sqlite'])}>
+        ${renderField('path', _val('path'), 'database|path', 'config')}
+    </div>`;
+    // Network engines → connection settings.
+    const netWhen = JSON.stringify({ driver: NET });
+    for (const f of ['host', 'port', 'name', 'user', 'password']) {
+        h += `<div class="sw-field" data-sw-when='${netWhen}'${hideUnless(NET)}>
+            ${renderField(f, _val(f), 'database|' + f, 'config')}
+        </div>`;
+    }
+    h += `</div>`;
+    return h;
+}
+
 function renderConfig() {
     const c = document.getElementById('config-container');
     // Save collapse state so re-renders preserve open/closed panels
@@ -178,6 +204,14 @@ function renderConfig() {
     if (!('fallback_to_local' in _ldap)) _ldap.fallback_to_local = true;
     if (!('auto_create_users' in _ldap)) _ldap.auto_create_users = true;
 
+    // Pre-populate Modules section so the card appears even on a fresh config;
+    // the values come from the schema defaults (CONFIG_FIELD_DEFAULTS, backfilled
+    // from the server's config spec) — not hardcoded here.
+    if (!configData.modules) configData.modules = {};
+    const _mods = configData.modules;
+    if (!('threads' in _mods)) _mods.threads = CONFIG_FIELD_DEFAULTS['modules|threads'];
+    if (!('timeout' in _mods)) _mods.timeout = CONFIG_FIELD_DEFAULTS['modules|timeout'];
+
     // Pre-populate OIDC section defaults
     if (!configData.oidc) configData.oidc = {};
     const _oidc = configData.oidc;
@@ -260,7 +294,7 @@ function renderConfig() {
     const AUTH_SECS  = new Set(['ldap', 'oidc', 'saml2']);
     const NOTIF_SECS = new Set(['telegram']);
 
-    const order = ['daemon', 'global', 'telegram', 'web_admin', 'email', 'webhooks', 'notifications', 'ldap', 'oidc', 'saml2'];
+    const order = ['daemon', 'modules', 'global', 'telegram', 'web_admin', 'email', 'webhooks', 'notifications', 'ldap', 'oidc', 'saml2'];
     const sections = Object.keys(configData).sort((a, b) => {
         const ai = order.indexOf(a), bi = order.indexOf(b);
         return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
@@ -299,6 +333,23 @@ function renderConfig() {
             hServer += cfgCardOpen(cfgId, '<i class="bi bi-cpu me-1"></i>', lbl);
             hServer += renderScalarFields(data, sec, 'config', []);
             hServer += cfgCardClose;
+            continue;
+        }
+
+        if (sec === 'modules') {
+            // Server tab: global module defaults (threads/timeout inherited by
+            // every module when its own value is blank).
+            hServer += cfgCardOpen(cfgId, '<i class="bi bi-grid-3x3-gap-fill me-1"></i>', lbl);
+            hServer += renderScalarFields(data, sec, 'config', []);
+            hServer += cfgCardClose;
+            continue;
+        }
+
+        if (sec === 'database') {
+            // General tab: DB engine selector + only the chosen engine's settings.
+            hGeneral += cfgCardOpen(cfgId, '<i class="bi bi-database me-1"></i>', lbl);
+            hGeneral += _renderDatabaseSection(data);
+            hGeneral += cfgCardClose;
             continue;
         }
 
