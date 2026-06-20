@@ -17,7 +17,12 @@ Referencia completa de todos los archivos de configuración y opciones CLI de Se
 
 ## config.json
 
-Configuración global de la aplicación.
+Configuración global de la aplicación. En cada arranque la aplicación
+**rellena automáticamente** cualquier default del registro que falte en el
+fichero (y lo persiste); en la primera ejecución crea el fichero completo de
+forma silenciosa. Las credenciales de primer arranque `web_admin.username` /
+`web_admin.password` son la excepción: se usan solo para crear el admin inicial
+y **nunca** se escriben en disco.
 
 ```json
 {
@@ -176,7 +181,7 @@ Requiere el paquete opcional `ldap3` (`pip install ldap3`). Si no está instalad
 | `ldap.fallback_to_local` | bool | `true` | Si LDAP falla por error de red (no por credenciales incorrectas), intentar autenticación local |
 | `ldap.allow_email_login` | bool | `false` | Permitir que los usuarios introduzcan su dirección de email en lugar del username LDAP |
 
-Los usuarios autenticados por LDAP se crean o sincronizan automáticamente en `users.json` con `auth_source: "ldap"`. Los usuarios locales (`auth_source: "local"`) nunca pasan por LDAP.
+Los usuarios autenticados por LDAP se crean o sincronizan automáticamente en la tabla `users` de la base de datos con `auth_source: "ldap"`. Los usuarios locales (`auth_source: "local"`) nunca pasan por LDAP.
 
 ### Sección `oidc`
 
@@ -194,7 +199,7 @@ Requiere el paquete opcional `authlib` (`pip install authlib`).
 | `oidc.name_claim` | string | `"name"` | Claim del que se extrae el nombre visible |
 | `oidc.groups_claim` | string | `"groups"` | Claim del que se leen los grupos (p.ej. Object IDs en Entra ID) |
 | `oidc.group_role_map` | string (JSON) | `"{}"` | Objeto JSON que mapea valores del claim de grupos a roles de la app |
-| `oidc.auto_create_users` | bool | `true` | Crear automáticamente el usuario en `users.json` en el primer login |
+| `oidc.auto_create_users` | bool | `true` | Crear automáticamente el usuario en la tabla `users` de la base de datos en el primer login |
 
 Cuando está habilitado, aparece el botón **Login with SSO** en la pantalla de login. El wizard integrado en la pestaña de configuración puede registrar la aplicación en Microsoft Entra ID automáticamente mediante Device Code Flow.
 
@@ -288,25 +293,31 @@ Consulta [modules.md](modules.md) para la referencia completa de configuración 
 
 ---
 
-## webhooks.json (auto-gestionado)
+## Sección `webhooks` (en config.json, auto-gestionada)
 
-Lista de webhooks HTTP para notificaciones salientes. Este fichero es **gestionado automáticamente** por el panel web — no es necesario editarlo a mano. Los webhooks se crean, editan y eliminan desde la pestaña **Configuración → Notifications → Providers**.
+Lista de webhooks HTTP para notificaciones salientes, almacenada como el array
+`webhooks` dentro de `config.json`. Esta sección es **gestionada
+automáticamente** por el panel web — no es necesario editarla a mano. Los
+webhooks se crean, editan y eliminan desde la pestaña **Configuración →
+Notifications → Providers**.
 
 ```json
-[
-    {
-        "id": "uuid4-aquí",
-        "name": "Slack Alertas",
-        "enabled": true,
-        "url": "https://hooks.slack.com/services/...",
-        "method": "POST",
-        "timeout": 10,
-        "headers": "",
-        "body_template": "{\"text\": \"[{kind}] {module}/{item} → {status}\"}",
-        "secret": "enc:gAAAAABn...",
-        "secret_header": "X-Hub-Signature-256"
-    }
-]
+{
+    "webhooks": [
+        {
+            "id": "uuid4-aquí",
+            "name": "Slack Alertas",
+            "enabled": true,
+            "url": "https://hooks.slack.com/services/...",
+            "method": "POST",
+            "timeout": 10,
+            "headers": "",
+            "body_template": "{\"text\": \"[{kind}] {module}/{item} → {status}\"}",
+            "secret": "enc:gAAAAABn...",
+            "secret_header": "X-Hub-Signature-256"
+        }
+    ]
+}
 ```
 
 | Campo | Tipo | Descripción |
@@ -376,7 +387,7 @@ Cada argumento del CLI puede darse también por **variable de entorno** `SS_*` (
 SS_WEB=true SS_WEB_PORT=9090 SS_VERBOSE=1 python3 main.py
 ```
 
-Esto es independiente de las variables de entorno que sobreescriben **campos de `config.json`** (`WA_*`, `CHECK_INTERVAL`, `TELEGRAM_*`) — ver [docker.md](docker.md). Aquellas configuran valores en runtime; las `SS_*` controlan cómo se lanza el proceso.
+Esto es independiente de las variables de entorno que sobreescriben **campos de `config.json`** (`WA_*`, `SS_CHECK_INTERVAL`, `TELEGRAM_*`) — ver [docker.md](docker.md). Aquellas configuran valores en runtime; las `SS_*` controlan cómo se lanza el proceso.
 
 ### Ejemplos
 

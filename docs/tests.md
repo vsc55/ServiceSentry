@@ -30,6 +30,7 @@
 16. [Panel Web — Permisos granulares y roles personalizados](#16-panel-web--permisos-granulares-y-roles-personalizados)
 16b. [Panel Web — Helpers JSON y validación de payloads](#16b-panel-web--helpers-json-y-validación-de-payloads)
 16c. [Panel Web — Endpoint de acciones de watchfuls](#16c-panel-web--endpoint-de-acciones-de-watchfuls)
+16d. [Panel Web — Matriz de permisos por endpoint](#16d-panel-web--matriz-de-permisos-por-endpoint)
 17. [Watchful: filesystemusage](#17-watchful-filesystemusage)
 18. [Watchful: hddtemp](#18-watchful-hddtemp)
 19. [Watchful: datastore](#19-watchful-datastore)
@@ -651,7 +652,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_last_events_max_10` | Con >10 eventos en audit | Máximo 10 devueltos | Si devuelve más |
 | `test_dashboard_has_overview_tab` | HTML del dashboard contiene `tab-overview` | Elemento presente | Si no aparece |
 | `test_groups_summary_keys` | `groups` tiene `total` y `members` | Ambas claves presentes | Si falta alguna |
-| `test_groups_default_administrators` | Sin `groups.json` → grupo `administrators` creado | `total=1`, `members=0` | Si difiere |
+| `test_groups_default_administrators` | Sin grupos previos → grupo `administrators` creado | `total=1`, `members=0` | Si difiere |
 | `test_roles_summary_keys` | `roles` tiene `total`, `builtin`, `custom` | Todas presentes | Si falta alguna |
 | `test_roles_builtin_count` | Roles integrados = 3 (admin/editor/viewer) | `builtin=3`, `custom=0` | Si difiere |
 | `test_roles_custom_count` | Añadir rol personalizado en runtime | `custom=1`, `total=4` | Si no incrementa |
@@ -812,7 +813,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_all_sessions_revoked_audited` | Revocar todas las sesiones genera evento | `"sessions_revoked"` en audit | Si no aparece |
 | `test_audit_api_returns_entries` | `GET /api/audit` devuelve la lista | Lista con entradas | Si está vacía |
 | `test_audit_api_viewer_can_read_but_not_delete` | Viewer puede leer pero no borrar | `200` GET / `403` DELETE | Si puede borrar |
-| `test_audit_persisted_to_file` | Entradas se guardan en disco | Archivo actualizado tras evento | Si solo en memoria |
+| `test_audit_persisted_to_db` | Entradas se guardan en la tabla `audit` de la BD | BD actualizada tras evento | Si solo en memoria |
 | `test_audit_max_entries` | Límite máximo de entradas | No supera el máximo configurado | Si crece sin límite |
 | `test_audit_tab_in_ui` | Pestaña de audit visible en el dashboard | `id="tab-audit"` en HTML | Si no aparece |
 | `test_audit_entry_has_required_fields` | Estructura de cada entrada | Campos `event`, `user`, `ts` presentes | Si falta alguno |
@@ -823,12 +824,12 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_no_update_audit_when_no_changes` | Guardar sin cambios no genera evento | Lista de audit sin `"user_updated"` | Si genera evento vacío |
 | `test_diff_dicts_helper` | Helper `_diff_dicts` calcula el diff correcto | Sólo claves modificadas en el resultado | Si incluye todas |
 | `test_clear_all_entries` | `DELETE /api/audit` vacía la lista | `200`, lista vacía tras la petición | Si quedan entradas |
-| `test_clear_all_persisted_to_disk` | Vaciar audit persiste en disco | Archivo en disco vacío tras borrar | Si sólo en memoria |
+| `test_clear_all_persisted_to_db` | Vaciar audit persiste en la BD | Tabla `audit` vacía tras borrar | Si sólo en memoria |
 | `test_delete_single_entry` | `DELETE /api/audit/<idx>` elimina entrada puntual | `200`, entrada ya no en lista | Si permanece |
 | `test_delete_single_entry_oob` | Índice fuera de rango | `404` | Si borra o lanza |
 | `test_delete_single_entry_negative` | Índice negativo | `404` | Si borra o lanza |
 | `test_delete_single_entry_viewer_forbidden` | Viewer no puede borrar entradas | `403` | Si borra |
-| `test_delete_single_entry_persisted` | Borrado puntual persiste en disco | Archivo actualizado sin la entrada | Si sólo en memoria |
+| `test_delete_single_entry_persisted` | Borrado puntual persiste en la BD | Tabla `audit` actualizada sin la entrada | Si sólo en memoria |
 
 ### `TestSecurityInjection`
 
@@ -1043,7 +1044,7 @@ Verifica que los errores HTTP devuelven la plantilla `error.html` (o JSON para `
 | `test_cannot_delete_builtin_role` | Eliminar rol integrado | `403` | Si lo elimina |
 | `test_cannot_delete_role_in_use` | Eliminar rol asignado a un usuario | `409` | Si lo elimina |
 | `test_delete_nonexistent_role` | `DELETE /api/roles/fantasma` | `404` | Si devuelve otro código |
-| `test_roles_persisted_to_file` | Rol creado se guarda en `roles.json` | Archivo contiene el nuevo rol | Si no persiste |
+| `test_roles_persisted_to_db` | Rol creado se guarda en la BD (`_roles_store`) | La BD contiene el nuevo rol | Si no persiste |
 | `test_custom_role_accepted_for_user_creation` | Crear usuario con rol personalizado | `201`, rol asignado | Si rechaza el rol |
 | `test_custom_role_audited_on_create` | Crear rol genera evento de auditoría | Evento `role_created` en log | Si no se audita |
 | `test_custom_role_audited_on_update` | Editar rol genera evento de auditoría | Evento `role_updated` en log | Si no se audita |
@@ -1107,7 +1108,7 @@ Verifica que todos los endpoints JSON del web admin se comportan correctamente a
 | `test_null_bytes_in_values` | Bytes nulos (`\x00`) en valores → 201 o 400 |
 | `test_unicode_abuse` | RTL override, emoji, cadenas largas → 201, 400 o 409 |
 
-> **`conftest.py` (tests/):** El hash de la contraseña de admin se pre-computa una sola vez a nivel de módulo usando `pbkdf2:sha256` en lugar de scrypt. Esto evita recalcular el hash en cada fixture de test y reduce el tiempo de suite de ~4 min a ~2 min con xdist.
+> **`conftest.py` (tests/):** La fixture `admin` crea una instancia `WebAdmin` con credenciales `admin`/`secret` (los usuarios se guardan en la BD) y siembra en la tabla `check_state` el estado de ejemplo que esperan los tests (`ping/192.168.1.1` OK). La fixture `config_dir` escribe `config.json` y `modules.json` de prueba en un directorio temporal.
 
 ---
 
@@ -1159,6 +1160,22 @@ Verifica el endpoint `GET|POST /api/watchfuls/<module>/<action>` — autenticaci
 | `test_long_action_name_not_in_whitelist_returns_404` | Acción de 200 chars válida según regex pero no en whitelist | 404 | Si ejecuta |
 | `test_enc_prefix_in_post_body_does_not_crash` | Valor `enc:attacker-payload` en POST body | 200, valor pasado tal cual al classmethod | Si lanza o descifra |
 | `test_unauthenticated_user_cannot_call_any_action` | GET y POST sin sesión en múltiples rutas | 302 en todas | Si alguna responde sin login |
+
+---
+
+## 16d. Panel Web — Matriz de permisos por endpoint
+
+**Archivo:** `tests/test_wa_permissions.py`
+
+Cobertura de la matriz de acceso completa: para cada endpoint protegido por permiso se comprueba el acceso de los 4 roles integrados (`admin` / `editor` / `viewer` / `none`). Las expectativas se derivan de `BUILTIN_ROLE_PERMISSIONS`/`BUILTIN_ROLE_UIDS` (`lib/web_admin/constants`), con semántica *any-of* sobre el/los permiso(s) requerido(s) por endpoint. La tabla recorre rutas `/api/v1/*` de usuarios, roles, grupos, checks/estado, overview, config, sesiones, audit, history y hosts (servidores).
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_unauthenticated_is_blocked[<ep>]` | Llamada sin autenticar a cada endpoint protegido | `401` o `403` (nunca 2xx) | Si responde con éxito |
+| `test_permission_matrix[<role>-<ep>]` | Un rol accede si y solo si tiene uno de los permisos requeridos | Rol con permiso → ≠ `403`; rol sin permiso → `403` | Si la puerta no se abre/cierra como debe |
+| `test_matrix_covers_all_crud_actions` | La tabla ejercita view/add/edit/delete (`GET`/`POST`/`PUT`/`DELETE`) | Los 4 métodos presentes | Si falta alguno |
+
+> Las fixtures crean los usuarios `editor`/`viewer`/`none` en `admin._users` y los persisten en la BD vía `admin._persist_users()`; el host de prueba se crea con `admin._hosts_store.create(...)` (registro de hosts en BD).
 
 ---
 

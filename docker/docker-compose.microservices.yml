@@ -1,3 +1,18 @@
+# ServiceSentry — microservices topology
+# =======================================
+# Two containers: the web admin panel (UI + on-demand checks) and a dedicated
+# worker that runs the periodic monitoring loop. The web does NOT self-schedule
+# here (SS_AUTOSTART=false) — the worker owns monitoring, which survives web
+# restarts and keeps check load off the request path.
+#
+#   cp docker/env.example docker/.env      # then edit docker/.env (at least SS_PASSWORD)
+#   docker compose -f docker/docker-compose.microservices.yml up -d
+#
+# Secrets and custom settings live in docker/.env (gitignored); see env.example.
+# Do NOT also enable SS_AUTOSTART on the web service: the worker and the web
+# scheduler are separate processes with no shared lock, so running both would
+# double every check (duplicate history + notification storms).
+
 services:
 
   # ── Web admin panel ─────────────────────────────────────────────────────────
@@ -17,45 +32,19 @@ services:
       # The web panel runs module checks in-process when triggered manually.
       # Ping modules require raw ICMP sockets. Remove if not using ping monitoring.
       - NET_RAW
+    # Secrets + custom config (credentials, telegram, locale, security, …).
+    env_file:
+      - .env
+    # Per-topology values — kept here, not in .env:
     environment:
-      - SERVICE_ROLE=web
-      - TZ=UTC
-
-      # Web server
-      - WEB_HOST=0.0.0.0
-      - WEB_PORT=8080
-
-      # Credentials — change these before first run
-      - WA_USERNAME=admin
-      - WA_PASSWORD=admin
-
-      # Appearance / locale
-      - WA_LANG=en_EN
-      - WA_DARK_MODE=false
-
-      # Security
-      - WA_SECURE_COOKIES=false       # set true when serving over HTTPS
-      - WA_REMEMBER_ME_DAYS=30
-      - WA_PROXY_COUNT=0              # number of reverse proxies in front
-
-      # Public status page
-      - WA_PUBLIC_STATUS=false
-      - WA_STATUS_REFRESH_SECS=60
-      - WA_STATUS_LANG=               # defaults to WA_LANG when empty
-
-      # Audit log
-      - WA_AUDIT_MAX_ENTRIES=500
-
-      # Telegram notifications
-      # - TELEGRAM_TOKEN=
-      # - TELEGRAM_CHAT_ID=
-      # - TELEGRAM_GROUP_MESSAGES=false
-
-      # Misc
-      # - VERBOSE=false
+      - SS_SERVICE_ROLE=web
+      - SS_WEB_HOST=0.0.0.0
+      - SS_WEB_PORT=8080
+      # Keep false: the worker container does the monitoring.
+      - SS_AUTOSTART=false
 
     healthcheck:
-      test: ["CMD-SHELL", "curl -f -s http://localhost:${WEB_PORT:-8080}/"]
+      test: ["CMD-SHELL", "curl -f -s http://localhost:${SS_WEB_PORT:-8080}/"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -76,20 +65,11 @@ services:
       # Required by the ping watchful module (raw ICMP sockets).
       # Remove if not using ping monitoring.
       - NET_RAW
+    # Same shared secrets/config; the worker only needs SS_CHECK_INTERVAL + telegram.
+    env_file:
+      - .env
     environment:
-      - SERVICE_ROLE=worker
-      - TZ=UTC
-
-      # Monitoring interval (seconds)
-      - CHECK_INTERVAL=300
-
-      # Telegram notifications
-      # - TELEGRAM_TOKEN=
-      # - TELEGRAM_CHAT_ID=
-      # - TELEGRAM_GROUP_MESSAGES=false
-
-      # Misc
-      # - VERBOSE=false
+      - SS_SERVICE_ROLE=worker
 
     depends_on:
       web:

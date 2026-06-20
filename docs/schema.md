@@ -160,11 +160,18 @@ Objeto que mapea el valor de otro campo al placeholder de este campo. Usado para
     "placeholder_map": {
         "mysql": 3306, "postgres": 5432, "mssql": 1433,
         "mongodb": 27017, "redis": 6379, "influxdb": 8086
-    }
+    },
+    "placeholder_map_field": "db_type"
 }
 ```
 
-La clave del `placeholder_map` es el valor del campo inmediatamente anterior que actúa como control (en el caso del ejemplo, `db_type`).
+Las claves del `placeholder_map` son los valores del campo de control indicado por `placeholder_map_field` (en el ejemplo, `db_type`).
+
+---
+
+### `placeholder_map_field`
+
+Nombre del campo de control cuyo valor se usa como clave en `placeholder_map`. Cuando ese campo cambia, el placeholder de este campo se recalcula con la entrada correspondiente del mapa.
 
 ---
 
@@ -253,6 +260,16 @@ Si es `true`, el valor `0` se muestra como campo vacío (placeholder en lugar de
 
 ```json
 "port": {"type": "int", "default": 0, "zero_as_blank": true, "placeholder_module": "port"}
+```
+
+---
+
+### `inherit_blank`
+
+Solo para campos `int`/`float` a nivel de módulo (`__module__`). Si es `true`, dejar el campo en blanco lo almacena como `null` (distinto de `0`, que sigue siendo un valor real) y hace que herede el valor global de `Configuration > Modules` (`config.json` → `modules|<campo>`), que se muestra como placeholder. Es la contraparte en la UI de la resolución ítem → módulo → global de `ModuleBase.module_default()`. Usado en `threads` y `timeout` de cada módulo.
+
+```json
+"timeout": {"type": "int", "default": 10, "min": 0, "max": 300, "inherit_blank": true}
 ```
 
 ---

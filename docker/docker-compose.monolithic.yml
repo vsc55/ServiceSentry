@@ -1,0 +1,57 @@
+# ServiceSentry — monolithic topology
+# ====================================
+# A single container: the web admin panel with its embedded scheduler enabled
+# (SS_AUTOSTART=true), so the periodic monitoring loop runs in-process — no
+# separate worker. Simplest setup; ideal for small/single-host deployments.
+#
+#   cp docker/env.example docker/.env      # then edit docker/.env (at least SS_PASSWORD)
+#   docker compose -f docker/docker-compose.monolithic.yml up -d
+#
+# Secrets and custom settings live in docker/.env (gitignored); see env.example.
+# SS_CHECK_INTERVAL (in .env) sets the scheduler period. Do NOT pair this with a
+# worker container: that would double every check (duplicate history + notifications).
+
+services:
+
+  # ── Web admin panel + embedded scheduler ────────────────────────────────────
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: servicesentry:latest
+    container_name: servicesentry
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    cap_add:
+      # The embedded scheduler runs module checks in-process. Ping modules
+      # require raw ICMP sockets. Remove if not using ping monitoring.
+      - NET_RAW
+    # Secrets + custom config (credentials, telegram, locale, security, …).
+    env_file:
+      - .env
+    # Per-topology values — kept here, not in .env:
+    environment:
+      - SS_SERVICE_ROLE=web
+      - SS_WEB_HOST=0.0.0.0
+      - SS_WEB_PORT=8080
+      # Run the periodic checks in this same process (monolithic mode).
+      - SS_AUTOSTART=true
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -s http://localhost:${SS_WEB_PORT:-8080}/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+# Docker manages these volumes; inspect their location with:
+#   docker volume inspect docker_config
+#   docker volume inspect docker_vardata
+volumes:
+  config:
+  vardata:

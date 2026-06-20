@@ -150,8 +150,8 @@ class TestDerivedRuleDicts:
 
     def test_env_field_specs(self):
         e = env_field_specs()
-        assert e['WA_PORT'] == ('web_admin|port', int)
-        assert e['CHECK_INTERVAL'] == ('daemon|timer_check', int)
+        assert e['SS_PORT'] == ('web_admin|port', int)
+        assert e['SS_CHECK_INTERVAL'] == ('daemon|timer_check', int)
 
     def test_admin_only_fields(self):
         a = admin_only_fields()

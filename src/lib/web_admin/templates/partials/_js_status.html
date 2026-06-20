@@ -130,6 +130,8 @@ async function renderStatus() {
                    min="10" max="86400" step="1" style="width:80px"
                    onchange="_daemonSaveInterval(this.value)">
             <span class="text-muted" style="font-size:.78rem">${t('daemon_interval_s')}</span>
+            <i id="daemonIntervalLock" class="bi bi-lock-fill text-warning ms-1" style="display:none;font-size:.72rem"
+               title="${escAttr(t('env_locked_tooltip'))}"></i>
             <div class="vr mx-1"></div>
             <button id="daemonToggleBtn" class="btn btn-sm btn-secondary"
                     onclick="_daemonToggle()"></button>
@@ -139,6 +141,8 @@ async function renderStatus() {
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
             <div class="ms-auto d-flex align-items-center gap-2">
+                <i id="daemonAutostartLock" class="bi bi-lock-fill text-warning" style="display:none;font-size:.72rem"
+                   title="${escAttr(t('env_locked_tooltip'))}"></i>
                 <label class="form-check-label text-muted" style="font-size:.78rem"
                        title="${escAttr(t('daemon_autostart_tt'))}" for="daemonAutostart">
                     ${t('daemon_autostart')}
@@ -654,6 +658,13 @@ function _daemonApply(st) {
     // Sync interval input from server (skip if user is actively editing)
     if (interval && document.activeElement !== interval)
         interval.value = st.interval ?? 300;
+    // Fields fixed by an env var (SS_CHECK_INTERVAL / SS_AUTOSTART) are read-only —
+    // disable the control and reveal the lock icon (tooltip explains the source).
+    if (interval) {
+        interval.disabled = !!st.interval_locked;
+        const il = document.getElementById('daemonIntervalLock');
+        if (il) il.style.display = st.interval_locked ? '' : 'none';
+    }
 
     // The thread keeps running until its current cycle finishes, so a Stop
     // request stays "running" for a while. Show "Stopping…" (disabled) until
@@ -706,6 +717,11 @@ function _daemonApply(st) {
     // Only skip if the user is actively clicking the toggle.
     if (autostart && document.activeElement !== autostart) {
         autostart.checked = st.web_autostart ?? false;
+    }
+    if (autostart) {
+        autostart.disabled = !!st.web_autostart_locked;
+        const al = document.getElementById('daemonAutostartLock');
+        if (al) al.style.display = st.web_autostart_locked ? '' : 'none';
     }
 }
 

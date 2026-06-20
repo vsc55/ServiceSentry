@@ -138,7 +138,7 @@ class Watchful(ModuleBase):
     def _run_checks(self, items):
         """Ejecuta las comprobaciones en paralelo usando ThreadPoolExecutor."""
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)
+                max_workers=max(1, self.module_default('threads', self._default_threads))
         ) as executor:
             futures = {
                 executor.submit(self._item_check, name, target): (name, target)
@@ -644,6 +644,7 @@ se queda inline-only.
 | Método | Propósito | Ejemplo |
 |--------|-----------|---------|
 | `get_conf(key, default)` | Leer configuración a nivel de módulo | `self.get_conf('timeout', 10)` |
+| `module_default(field, fallback)` | Resolver un ajuste de módulo (`threads`, `timeout`…) por la cadena ítem→módulo→global. Devuelve el valor del módulo si está; si el campo está en blanco, hereda el global `modules\|<field>` de `config.json`; si no existe, el default del schema. Siempre devuelve `int` | `self.module_default('threads', self._default_threads)` |
 | `get_conf_in_list(field, item_key, default)` | Leer un campo de un ítem de la colección `list` | `self.get_conf_in_list('port', 'mibd', 3306)` |
 | `get_conf_in_list(field, item_key, default, key_name_list='config')` | Leer un campo de una colección distinta a `list` | `self.get_conf_in_list('alert', 'ram', 80, 'config')` |
 | `_parse_conf_int(value, default, min_val=1)` | Parsear a entero (descarta valores < `min_val`) | `self._parse_conf_int('5', 0)` |
@@ -1349,7 +1350,7 @@ class Watchful(ModuleBase):
                 items.append((key, host))
 
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.get_conf('threads', self._default_threads)
+                max_workers=max(1, self.module_default('threads', self._default_threads))
         ) as executor:
             futures = {
                 executor.submit(self._tcp_check, name, host): (name, host)

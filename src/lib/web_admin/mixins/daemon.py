@@ -37,8 +37,12 @@ class _DaemonMixin:
         self._daemon_last_prune_ts: float = 0.0  # epoch of last history prune
         self._daemon_lifecycle_lock = threading.Lock()  # guards start/stop races
 
+        # An env var (SS_AUTOSTART) overrides the saved value and wins here too —
+        # _apply_env_overrides() already ran, so the override value is available.
+        ov = self._env_override_values.get('daemon|web_autostart')
         cfg = self._read_config_file(self._CONFIG_FILE) or {}
-        if cfg_get(cfg.get('daemon', {}), 'daemon|web_autostart'):
+        autostart = ov if ov is not None else cfg_get(cfg.get('daemon', {}), 'daemon|web_autostart')
+        if autostart:
             self._daemon_start(run_now=True)
 
     # ── Properties ────────────────────────────────────────────────────────────
@@ -49,7 +53,13 @@ class _DaemonMixin:
 
     @property
     def _daemon_interval(self) -> int:
-        """Interval in seconds (re-read from config so live changes take effect)."""
+        """Interval in seconds (re-read from config so live changes take effect).
+
+        An env var (SS_CHECK_INTERVAL) overrides the saved value and wins — so the
+        embedded scheduler honours it in the monolithic Docker mode."""
+        ov = self._env_override_values.get('daemon|timer_check')
+        if ov is not None:
+            return max(10, int(ov))
         cfg = self._read_config_file(self._CONFIG_FILE) or {}
         return max(10, cfg_get(cfg.get('daemon', {}), 'daemon|timer_check', falsy=True))
 
@@ -64,12 +74,18 @@ class _DaemonMixin:
         """Return a serialisable snapshot of the scheduler state."""
         cfg = self._read_config_file(self._CONFIG_FILE) or {}
         daemon_cfg = cfg.get('daemon', {})
+        # Effective values prefer an env override (SS_AUTOSTART / SS_CHECK_INTERVAL);
+        # *_locked tells the UI to render those controls read-only.
+        autostart_ov = self._env_override_values.get('daemon|web_autostart')
         return {
             'running':     self._daemon_running,
             'interval':    self._daemon_interval,
             'next_in':     self._daemon_seconds_until_next,
             'last_run':    self._daemon_last_run_ts,
-            'web_autostart': cfg_get(daemon_cfg, 'daemon|web_autostart'),
+            'web_autostart': autostart_ov if autostart_ov is not None
+                             else cfg_get(daemon_cfg, 'daemon|web_autostart'),
+            'web_autostart_locked': 'daemon|web_autostart' in self._env_locked,
+            'interval_locked':      'daemon|timer_check' in self._env_locked,
         }
 
     # ── Control ───────────────────────────────────────────────────────────────

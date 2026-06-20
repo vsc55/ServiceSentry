@@ -334,8 +334,8 @@ def start_web(args):
     cfg = load_config(config_dir)
 
     # Env vars take precedence for first-run credential setup (never written to disk)
-    username = os.environ.get('WA_USERNAME') or cfg.get_conf(['web_admin', 'username'], 'admin')
-    password = os.environ.get('WA_PASSWORD') or cfg.get_conf(['web_admin', 'password'], 'admin')
+    username = os.environ.get('SS_USERNAME') or cfg.get_conf(['web_admin', 'username'], 'admin')
+    password = os.environ.get('SS_PASSWORD') or cfg.get_conf(['web_admin', 'password'], 'admin')
     # All web_admin runtime options are loaded from config.json by WebAdmin
     # itself (via _apply_saved_config / the central registry config_spec), so
     # they need not be read or forwarded here — only the first-run credentials
@@ -432,8 +432,8 @@ def args_init() -> argparse.Namespace:
     Every argument falls back to an ``SS_*`` environment variable (handy for
     Docker, where flags are awkward): e.g. ``SS_WEB=true``, ``SS_WEB_PORT=8080``,
     ``SS_CONFIG_DIR=/config``, ``SS_VERBOSE=1``, ``SS_NOCOLOR=1``.  Config.json
-    fields keep their own env vars (``WA_*``, ``CHECK_INTERVAL``, ``TELEGRAM_*``).
-    The standard ``NO_COLOR`` env var is also honoured.
+    fields use ``SS_*`` env vars too (e.g. ``SS_USERNAME``, ``SS_CHECK_INTERVAL``,
+    ``SS_TELEGRAM_TOKEN``).  The standard ``NO_COLOR`` env var is also honoured.
 
     Returns:
         argparse.Namespace: The parsed command-line arguments.

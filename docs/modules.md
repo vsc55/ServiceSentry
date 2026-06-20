@@ -163,12 +163,14 @@ Comprueba que los hostnames resuelven correctamente para todos los tipos de regi
         "enabled": true,
         "threads": 5,
         "timeout": 5,
+        "nameserver": "",
         "list": {
             "google-a": {
                 "enabled": true,
                 "host": "google.com",
                 "record_type": "A",
                 "expected": "",
+                "nameserver": "",
                 "timeout": 0
             },
             "mi_mail": {
@@ -191,9 +193,11 @@ Comprueba que los hostnames resuelven correctamente para todos los tipos de regi
 | Clave | Tipo | Por defecto | Descripción |
 | --- | --- | --- | --- |
 | `timeout` | int | 5 | Timeout de resolución DNS en segundos (global) |
+| `nameserver` | string | `""` | Servidor DNS por defecto (IP o hostname) al que dirigir las consultas. Vacío = resolver del sistema |
 | `list.*.host` | string | clave | Hostname a resolver. Si está vacío, se usa la clave del ítem |
 | `list.*.record_type` | string | `"A"` | Tipo de registro: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `PTR`, `SOA` |
 | `list.*.expected` | string | `""` | Valor que debe aparecer (subcadena, insensible a mayúsculas) en al menos un registro. Vacío = solo comprueba que resuelve |
+| `list.*.nameserver` | string | `""` | Servidor DNS por host al que dirigir la consulta. Vacío usa el valor del módulo o el resolver del sistema |
 | `list.*.timeout` | int | 0 | Timeout por host. `0` usa el valor global |
 
 **Flujo:** A/AAAA → `socket.getaddrinfo()` con `AF_INET`/`AF_INET6`; demás tipos → `dns.resolver.resolve()` (dnspython). En ambos casos los resultados se normalizan a lista de strings y se comprueba `expected` como subcadena insensible a mayúsculas.
@@ -422,6 +426,7 @@ Verifica que los servidores de bases de datos son accesibles y responden correct
     "datastore": {
         "enabled": true,
         "threads": 5,
+        "timeout": 10,
         "list": {
             "produccion": {
                 "enabled": true,
@@ -432,7 +437,8 @@ Verifica que los servidores de bases de datos son accesibles y responden correct
                 "port": 0,
                 "user": "monitor",
                 "password": "enc:gAAAAA...",
-                "db": "myapp"
+                "db": "myapp",
+                "timeout": 0
             }
         }
     }
@@ -532,6 +538,7 @@ Verifica que los servidores de bases de datos son accesibles y responden correct
 | `host` | string | `""` | IP/hostname. Usado en modos `tcp` y `ssh` |
 | `port` | int | `0` | Puerto TCP. `0` aplica el puerto por defecto del motor. La UI muestra el puerto por defecto como placeholder cuando está vacío |
 | `socket` | string | `""` | Ruta al socket Unix. Solo en modo `socket` y motores compatibles |
+| `timeout` | int | `0` | Timeout de conexión en segundos. `0` usa el valor global del módulo (10 por defecto). La UI muestra el valor del módulo como placeholder |
 | `user` | string | `""` | Usuario de autenticación. No aplica a Redis/Valkey, Memcached ni InfluxDB con token |
 | `password` | string | `""` | Contraseña (**cifrada en disco** con `enc:`) |
 | `token` | string | `""` | Token API de InfluxDB 2.x (**cifrado en disco** con `enc:`). Tiene prioridad sobre `user`/`password` |

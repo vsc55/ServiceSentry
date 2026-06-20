@@ -50,7 +50,9 @@ def register(app, wa):
         daemon_cfg = dict(raw.get('daemon', {}))
 
         changed = False
-        if 'timer_check' in data:
+        # Fields fixed by an env var (SS_CHECK_INTERVAL / SS_AUTOSTART) are read-only
+        # and cannot be changed from the UI — ignore them silently here too.
+        if 'timer_check' in data and 'daemon|timer_check' not in wa._env_locked:
             try:
                 secs = max(10, min(86400, int(data['timer_check'])))
             except (TypeError, ValueError):
@@ -58,7 +60,7 @@ def register(app, wa):
             daemon_cfg['timer_check'] = secs
             changed = True
 
-        if 'web_autostart' in data:
+        if 'web_autostart' in data and 'daemon|web_autostart' not in wa._env_locked:
             daemon_cfg['web_autostart'] = bool(data['web_autostart'])
             changed = True
 

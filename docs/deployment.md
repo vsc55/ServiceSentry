@@ -24,7 +24,9 @@ Este documento cubre todas las formas soportadas de desplegar ServiceSentry en p
 Consulta [docs/docker.md](docker.md) para la referencia completa de Docker: variables de entorno, volúmenes y configuración de proxy inverso.
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
+# Monolítica (un contenedor) o microservicios (web + worker):
+docker compose -f docker/docker-compose.monolithic.yml   up -d
+docker compose -f docker/docker-compose.microservices.yml up -d
 ```
 
 ---
@@ -65,8 +67,6 @@ arranca por primera vez, se crean automáticamente con valores predeterminados:
 > (`/var/lib/ServiSesentry/` en Linux). El esquema se crea y reconcilia
 > automáticamente. Opcionalmente puede usarse PostgreSQL o MySQL configurando la
 > sección `database` de `config.json` (ver [configuration.md](configuration.md)).
-> Si existen ficheros legacy `users.json` / `roles.json` / `groups.json` /
-> `audit.json`, se **migran automáticamente** a `data.db` en el primer arranque.
 
 Tras el primer arranque puedes abrir el panel web para configurar las alertas de
 Telegram, añadir objetivos de monitorización y cambiar la contraseña de administrador.
@@ -75,22 +75,24 @@ Telegram, añadir objetivos de monitorización y cambiar la contraseña de admin
 
 Si quieres que la instalación llegue con una configuración específica ya
 establecida — por ejemplo en un despliegue automatizado o por script — coloca tus
-ficheros `config.json`, `modules.json` y/o `users.json` en el directorio `data/`
+ficheros `config.json` y/o `modules.json` en el directorio `data/`
 antes de ejecutar `install.sh`:
 
 ```text
 data/
 ├── config.json      # configuración global, token de Telegram, opciones del panel web
-├── modules.json     # módulos habilitados y sus objetivos
-└── users.json       # cuentas de usuario (hashes de contraseñas)
+└── modules.json     # módulos habilitados y sus objetivos
 ```
 
-`install.sh` copiará los ficheros que encuentre allí a `/etc/ServiSesentry/`.
-Los ficheros que no estén en `data/` se omiten — la aplicación los genera en el
-primer arranque tal como se describe más arriba.
+`install.sh` copiará los ficheros `data/*.json` que encuentre allí a
+`/etc/ServiSesentry/`. Los ficheros que no estén en `data/` se omiten — la
+aplicación los genera en el primer arranque tal como se describe más arriba.
+Los usuarios, roles, grupos, sesiones, auditoría, historial y estado de las
+comprobaciones **no** son ficheros: viven en la base de datos (`data.db`), que se
+crea automáticamente en el directorio var en el primer inicio del panel web.
 
 > **Nota:** `data/*.json` está en `.gitignore` porque esos ficheros suelen contener
-> credenciales (tokens de Telegram, hashes de contraseñas). No los subas nunca a
+> credenciales (token de Telegram, secretos de módulos cifrados). No los subas nunca a
 > un repositorio público.
 
 ### Actualización
@@ -291,7 +293,7 @@ método de despliegue sin pasar por el panel:
 | ------ | ---------------------------- |
 | **systemd** | Edita `ExecStart` en `ServiSesentry-web.service`: añade `--web-port 9090` |
 | **OpenRC** | Define `SS_WEB_PORT="9090"` en `/etc/conf.d/ServiSesentry-web` |
-| **Docker** | Variable de entorno `WEB_PORT: "9090"` en `docker-compose.yml` |
+| **Docker** | Variable de entorno `SS_WEB_PORT=9090` en `docker/.env` (o en tu fichero compose) |
 | **Manual** | Argumento `--web-port 9090` al lanzar `main.py` |
 
 > El argumento `--web-port` tiene prioridad sobre el valor guardado en
@@ -328,9 +330,9 @@ configuración avanzada.
 
    Y en **Panel Web**: *Cookies seguras* = activado.
 
-> Si usas Docker, pasa estas variables de entorno en `docker-compose.yml`:
-> `WA_PROXY_COUNT=1`, `WA_PUBLIC_URL=monitor.example.com`,
-> `WA_FORCE_HTTPS=true`, `WA_SECURE_COOKIES=true`.
+> Si usas Docker, pasa estas variables de entorno en `docker/.env`:
+> `SS_PROXY_COUNT=1`, `SS_PUBLIC_URL=monitor.example.com`,
+> `SS_FORCE_HTTPS=true`, `SS_SECURE_COOKIES=true`.
 
 ---
 
@@ -356,10 +358,10 @@ services:
       - "traefik.http.routers.sentry.tls.certresolver=letsencrypt"
       - "traefik.http.services.sentry.loadbalancer.server.port=8080"
     environment:
-      WA_PROXY_COUNT: "1"
-      WA_PUBLIC_URL: "monitor.example.com"
-      WA_FORCE_HTTPS: "true"
-      WA_SECURE_COOKIES: "true"
+      SS_PROXY_COUNT: "1"
+      SS_PUBLIC_URL: "monitor.example.com"
+      SS_FORCE_HTTPS: "true"
+      SS_SECURE_COOKIES: "true"
 
 networks:
   traefik_public:

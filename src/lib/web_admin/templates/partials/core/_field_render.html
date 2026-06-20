@@ -34,8 +34,14 @@ function renderField(key, value, pathStr, target = 'modules') {
     const _hintPanel = _hint
         ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_hint)}</div></div>`
         : '';
-    const _fhtml = _renderFieldInner(key, value, pathStr, target, _infoIcon, _hintPanel);
+    let _fhtml = _renderFieldInner(key, value, pathStr, target, _infoIcon, _hintPanel);
     if (!_fhtml) return _fhtml;
+    // Env-var-sourced config fields are read-only: disable just the form controls
+    // (input/select/textarea). The lock badge + tooltip already flag the source,
+    // and the info/hint button (a <button>) stays clickable.
+    if (target === 'config' && typeof ENV_LOCKED !== 'undefined' && ENV_LOCKED.has(pathStr)) {
+        _fhtml = _fhtml.replace(/<(input|select|textarea)\b/gi, '<$1 disabled');
+    }
     let _conflictBanner = '';
     let _wrapCls = '';
     if (target === 'config') {

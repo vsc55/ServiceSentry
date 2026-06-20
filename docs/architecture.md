@@ -21,10 +21,11 @@ jerarquía de clases, estructura de directorios y flujo de ejecución.
 └───────┬──────────┬──────────┬───────────────────────┘
         │          │          │
         ▼          ▼          ▼
-┌──────────┐ ┌──────────┐ ┌──────────────┐
-│ Telegram │ │  Status  │ │  Watchfuls   │
-│ (lib/)   │ │ (JSON)   │ │  (packages)  │
-└──────────┘ └──────────┘ └──────┬───────┘
+┌──────────┐ ┌──────────────┐ ┌──────────────┐
+│ Telegram │ │ Estado checks │ │  Watchfuls   │
+│ (lib/)   │ │ (tabla BD     │ │  (packages)  │
+│          │ │  check_state) │ │              │
+└──────────┘ └──────────────┘ └──────┬───────┘
                                  │
                     ┌────────────┼────────────┐
                     ▼            ▼            ▼
@@ -43,8 +44,10 @@ ObjectBase (lib/object_base.py)
 ├── Main (main.py)
 ├── Monitor (lib/monitor.py)
 ├── Telegram (lib/telegram.py)
-├── ConfigStore (lib/config/config_store.py)
+├── ConfigStore (lib/config/config_store.py)     ← I/O JSON de config.json
 │   └── ConfigControl (lib/config/config_control.py)
+│       (lib/config/spec.py: registro central de defaults + overrides por env;
+│        lib/config/__init__.py: load_config() lee y siembra defaults)
 ├── WebAdmin (lib/web_admin/app.py)
 │   ├── _UsersMixin      (lib/web_admin/mixins/users.py)
 │   ├── _RolesMixin      (lib/web_admin/mixins/roles.py)
@@ -58,14 +61,16 @@ ObjectBase (lib/object_base.py)
 │   ├── SQLiteConnector       (lib/db/sqlite.py)      [por defecto]
 │   ├── MySQLConnector        (lib/db/mysql.py)
 │   └── PostgreSQLConnector   (lib/db/postgresql.py)
-├── Stores (reciben un BaseConnector inyectado)
-│   ├── UsersStore     (lib/users_store.py)     → tablas users, users_groups
-│   ├── GroupsStore    (lib/groups_store.py)    → tablas groups, groups_roles
-│   ├── RolesStore     (lib/roles_store.py)     → tabla roles
-│   ├── SessionsStore  (lib/sessions_store.py)  → tabla sessions
-│   ├── AuditStore     (lib/audit_store.py)     → tabla audit
-│   ├── HistoryStore   (lib/history_store.py)   → tabla history (series temporales)
-│   └── HostsStore     (lib/hosts_store.py)     → tabla hosts (servidores + perfiles de conexión)
+├── Stores (lib/stores/, reciben un BaseConnector inyectado)
+│   ├── UsersStore      (lib/stores/users.py)        → tablas users, users_groups
+│   ├── GroupsStore     (lib/stores/groups.py)       → tablas groups, groups_roles
+│   ├── RolesStore      (lib/stores/roles.py)        → tabla roles
+│   ├── SessionsStore   (lib/stores/sessions.py)     → tabla sessions
+│   ├── AuditStore      (lib/stores/audit.py)        → tabla audit
+│   ├── CheckStateStore (lib/stores/check_state.py)  → tabla check_state (estado vivo de checks)
+│   ├── CredentialsStore(lib/stores/credentials.py)  → tabla credentials (identidades SSH reutilizables)
+│   ├── HistoryStore    (lib/stores/history.py)      → tabla history (series temporales)
+│   └── HostsStore      (lib/stores/hosts.py)        → tabla hosts (servidores + perfiles de conexión)
 └── ModuleBase (lib/modules/module_base.py)
     ├── watchfuls.datastore::Watchful         🌐 (multiplataforma)
     ├── watchfuls.filesystemusage::Watchful  🌐 (multiplataforma)
@@ -98,29 +103,40 @@ ServiceSentry/
 │   │   ├── monitor.py                   # Motor de monitorización
 │   │   ├── telegram.py                  # Envío de mensajes Telegram
 │   │   ├── exe.py                       # Ejecución de comandos local/remoto
+│   │   ├── ssh_client.py               # Cliente SSH (paramiko) compartido
+│   │   ├── os_detect.py                # Detección de SO del host (local/remoto)
 │   │   ├── mem.py                       # Lectura de RAM/SWAP (multiplataforma vía psutil)
 │   │   ├── mem_info.py                  # Dataclass MemInfo (total, free, used, percent)
-│   │   ├── dict_files_path.py           # Diccionario de rutas de archivos
 │   │   ├── secret_manager.py            # Cifrado Fernet de valores sensibles (enc: prefix)
+│   │   ├── credential_schemas.py        # Esquemas de tipos de credencial reutilizable
 │   │   ├── net_guard.py                 # validate_external_url(): protección SSRF para URLs de usuario
 │   │   ├── tools.py                     # Utilidades (bytes2human)
-│   │   ├── users_store.py               # UsersStore     → tablas users, users_groups
-│   │   ├── groups_store.py              # GroupsStore    → tablas groups, groups_roles
-│   │   ├── roles_store.py               # RolesStore     → tabla roles
-│   │   ├── sessions_store.py            # SessionsStore  → tabla sessions
-│   │   ├── audit_store.py               # AuditStore     → tabla audit
-│   │   ├── history_store.py             # HistoryStore   → tabla history (series temporales)
-│   │   ├── hosts_store.py               # HostsStore     → tabla hosts (servidores + perfiles)
-│   │   ├── host_profiles.py             # Catálogo protocolo→campos (de __host_profile__)
-│   │   ├── host_migrate.py              # Asistente: agrupar conexiones inline en hosts
+│   │   ├── stores/                      # Repositorios DB-backed, uno por entidad (cada uno declara su TableSpec)
+│   │   │   ├── users.py                 # UsersStore      → tablas users, users_groups
+│   │   │   ├── groups.py                # GroupsStore     → tablas groups, groups_roles
+│   │   │   ├── roles.py                 # RolesStore      → tabla roles
+│   │   │   ├── sessions.py              # SessionsStore   → tabla sessions
+│   │   │   ├── audit.py                 # AuditStore      → tabla audit
+│   │   │   ├── check_state.py           # CheckStateStore → tabla check_state (estado vivo de checks)
+│   │   │   ├── credentials.py           # CredentialsStore→ tabla credentials (identidades SSH reutilizables)
+│   │   │   ├── history.py               # HistoryStore    → tabla history (series temporales)
+│   │   │   └── hosts.py                 # HostsStore      → tabla hosts (servidores + perfiles)
+│   │   ├── hosts/                       # Dominio de hosts (no la tabla; eso es stores/hosts.py)
+│   │   │   ├── profiles.py              # Catálogo protocolo→campos (de __host_profile__)
+│   │   │   ├── runner.py                # Ejecución de comandos local/SSH (run, is_remote)
+│   │   │   ├── probe.py                 # Ejecuta un check de un módulo una sola vez (asistente)
+│   │   │   └── migrate.py               # Asistente: agrupar conexiones inline en hosts
 │   │   ├── db/                          # Capa de BD pluggable (SQLite/MySQL/PostgreSQL)
 │   │   │   ├── __init__.py              # get_connector(config, default_sqlite_path)
 │   │   │   ├── base.py                  # BaseConnector + reconcile_table() (reconciliación de esquema)
 │   │   │   ├── schema.py                # TableSpec/Column/Index, diff_table(), generador de DDL
 │   │   │   ├── sqlite.py                # SQLiteConnector (WAL, por defecto)
 │   │   │   ├── mysql.py                 # MySQLConnector (PyMySQL)
-│   │   │   └── postgresql.py            # PostgreSQLConnector (psycopg2)
+│   │   │   ├── postgresql.py            # PostgreSQLConnector (psycopg2)
+│   │   │   └── module_tables.py         # Tablas declaradas por módulos (reconciliadas en la BD general)
 │   │   ├── config/
+│   │   │   ├── __init__.py              # load_config(): lee config.json y siembra defaults; CONFIG_FILENAME
+│   │   │   ├── spec.py                  # Registro central de defaults/reglas/overrides por env (cfg_default, ensure_config_defaults)
 │   │   │   ├── config_store.py          # I/O JSON (lectura/escritura)
 │   │   │   ├── config_control.py        # Operaciones sobre config (get/set/exist)
 │   │   │   └── config_type_return.py    # Enum tipos de retorno
@@ -134,6 +150,7 @@ ServiceSentry/
 │   │   │   └── raid_mdstat.py           # Parser /proc/mdstat (RAID)
 │   │   ├── modules/
 │   │   │   ├── module_base.py           # Clase base para todos los watchfuls
+│   │   │   ├── dict_files_path.py       # Diccionario de rutas de archivos
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck
 │   │   │   └── enum_config_options.py   # Enum opciones de config comunes
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
@@ -205,9 +222,10 @@ ServiceSentry/
 │       ├── test_wa_telegram.py
 │       ├── test_wa_ui.py
 │       └── test_wa_json_helpers.py
-├── data/                                # Config en modo desarrollo
-│   ├── config.json
-│   └── modules.json
+├── data/                                # Datos en modo desarrollo (config_dir == var_dir)
+│   ├── config.json                     # Config del sistema (se crea/siembra en el primer arranque)
+│   ├── modules.json                    # Definiciones de módulos/ítems (secretos cifrados)
+│   └── data.db                         # BD SQLite por defecto (usuarios, roles, sesiones, auditoría, hosts, credenciales, historial, estado de checks)
 └── docs/
     ├── architecture.md                  # Este archivo
     ├── configuration.md
@@ -232,9 +250,10 @@ ServiceSentry/
    ├── _init_config() → lee config.json, aplica defaults, lee valores
    ├── _init_monitor() → crea Monitor(dir_base, dir_config, dir_modules, dir_var)
    │   └── Monitor.__init__():
-   │       ├── Lee config.json, modules.json
-   │       ├── Inicializa el estado de checks (tabla check_state en data.db)
-   │       └── Inicializa Telegram (token + chat_id)
+   │       ├── Reutiliza la config ya cargada (o la lee si no se inyecta)
+   │       ├── Inicializa Telegram (token + chat_id)
+   │       ├── Abre el conector de BD (sección database; SQLite data.db por defecto)
+   │       └── Crea los stores: check_state, history, hosts, credentials, audit
    └── _args_cmd() → ejecuta comandos (ej: clear_status)
 3. Main.start():
    ├── Modo single: monitor.check() una vez
@@ -300,9 +319,9 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 
 La capa de datos del core (`lib/db/`) abstrae el motor mediante `BaseConnector`,
 con implementaciones para **SQLite** (por defecto), **MySQL/MariaDB** y
-**PostgreSQL**. Todos los stores (`users_store`, `groups_store`, `roles_store`,
-`sessions_store`, `audit_store`, `history_store`) reciben un conector inyectado y
-no hablan nunca con un driver concreto.
+**PostgreSQL**. Todos los stores de `lib/stores/` (`users`, `groups`, `roles`,
+`sessions`, `audit`, `check_state`, `credentials`, `history`, `hosts`) reciben un
+conector inyectado y no hablan nunca con un driver concreto.
 
 ### Reconciliación declarativa de esquema
 

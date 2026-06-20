@@ -79,7 +79,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 |---------------|-------------|
 | **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas; barra de herramientas con **Añadir**, **Recargar** (descarta cambios y recarga desde el servidor) y **Deshacer** (revierte cambios no guardados al último estado guardado) |
 | **Servers (hosts)** | Define un servidor una vez (dirección + perfiles de conexión por protocolo: ssh/snmp/db/http/tls…) y vincúlalo desde los checks de cualquier módulo, que heredan dirección + credenciales. Asistente "Detectar duplicados" que agrupa conexiones inline repetidas en hosts compartidos. Secretos cifrados en la BD general. Ver §[Servers (registro de hosts)](#servers-registro-de-hosts) |
-| **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en `localStorage`; modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
+| **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | 6 tarjetas de resumen (Modules, Checks, Sessions, Users, Groups, Roles) + 2 widgets de tabla (lista de módulos con estado por check, actividad reciente); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables |
 | **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador; paneles colapsables por sección |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
@@ -117,13 +117,13 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | `editor` | `modules_view`, `modules_add`, `modules_edit`, `config_edit`, `checks_view`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
 | `viewer` | `modules_view`, `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view`, `checks_view` |
 
-> Los roles integrados **no pueden eliminarse** ni cambiar sus permisos via API. Sí permiten actualizar la **etiqueta** (`label`) y gestionar qué usuarios y grupos tienen ese rol asignado. La etiqueta personalizada se persiste en `roles.json` bajo la clave `__builtin_labels__`.
+> Los roles integrados **no pueden eliminarse** ni cambiar sus permisos via API. Sí permiten actualizar la **etiqueta** (`label`) y gestionar qué usuarios y grupos tienen ese rol asignado. La etiqueta personalizada (override de nombre/descripción) se persiste como una fila más en la tabla `roles` de la BD.
 
 ### Roles personalizados
 
 Se pueden crear roles adicionales desde la pestaña **Acceso → Roles** asignando
 cualquier combinación de los 28 permisos disponibles. Los roles personalizados se
-persisten en `roles.json`.
+persisten en la tabla `roles` de la BD.
 
 ```
 /api/v1/roles             POST   → crear rol
@@ -156,7 +156,7 @@ la unión de los permisos de todos los roles de todos sus grupos.
 
 Cada grupo tiene:
 - `roles: []` — lista de nombres de rol cuyos permisos se añaden a los miembros
-- `members` — calculado dinámicamente a partir de `users.json` (campo `groups` de cada usuario)
+- `members` — calculado dinámicamente a partir del store de usuarios en la BD (campo `groups` de cada usuario)
 
 ---
 
@@ -410,7 +410,7 @@ Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `tim
 | `DELETE` | `/api/v1/users/<username>` | `users_delete` | Eliminar un usuario |
 | `GET` | `/api/v1/me` | auth | Obtener información del usuario actual (permisos, preferencias, `table_config`) |
 | `PUT` | `/api/v1/users/me/password` | auth | Cambiar la contraseña propia |
-| `PUT` | `/api/v1/users/me/preferences` | auth | Guardar preferencias propias: `lang`, `dark_mode` y `table_config` (sin permiso especial) |
+| `PUT` | `/api/v1/users/me/preferences` | auth | Guardar preferencias propias: `lang`, `dark_mode`, `table_config` y `dashboard_layout` (sin permiso especial) |
 
 **Configuración de tablas por usuario (`table_config`):** cada usuario guarda
 su propia configuración de columnas de las tablas del panel (columnas visibles,
@@ -533,7 +533,7 @@ El nombre del módulo y de la acción deben coincidir con la regex `^[a-z][a-z0-
 
 ## Dashboard Personalizable
 
-La pestaña **Overview** del panel de administración incluye un dashboard totalmente personalizable por usuario. Los cambios se persisten en `localStorage` con la clave `ss_layout2_<username>`.
+La pestaña **Overview** del panel de administración incluye un dashboard totalmente personalizable por usuario. Los cambios se persisten server-side en la BD (campo `dashboard_layout` de las preferencias, vía `PUT /api/v1/users/me/preferences` y devuelto en `GET /api/v1/me`), por lo que el layout se mantiene entre dispositivos y sesiones; además se cachea en `localStorage` con la clave `ss_layout2_<username>`.
 
 ![Dashboard Overview](images/dashboard_overview.svg)
 
@@ -693,7 +693,7 @@ Esto implica:
 
 ## Registro de Auditoría
 
-Cada cambio de configuración se registra en `audit.json` con:
+Cada cambio de configuración se registra en la tabla `audit` de la BD (`data.db`) con:
 - Marca de tiempo
 - Usuario que realizó el cambio
 - Diff a nivel de campo (`valor_anterior` → `valor_nuevo`)

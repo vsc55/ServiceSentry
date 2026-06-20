@@ -49,7 +49,10 @@ python3 main.py -d -t 300
 python3 main.py --web
 ```
 
-Edit `data/config.json` to add your Telegram bot token and chat ID before running.
+On first run the app creates `config.json` (under `data/`, or the config dir in a
+packaged install) seeded with defaults. Add your Telegram bot token and chat ID
+afterwards — either from the web admin panel or via the `SS_TELEGRAM_*` environment
+variables.
 
 ---
 
@@ -66,12 +69,17 @@ See [`docs/deployment.md`](docs/deployment.md) for the full deployment reference
 
 ### Docker
 
+Two topologies are provided — pick one:
+
 ```bash
-# Build and start (web panel + background monitoring worker)
-docker compose -f docker/docker-compose.yml up -d
+# Monolithic: a single container, checks run in-process (simplest)
+docker compose -f docker/docker-compose.monolithic.yml up -d
+
+# Microservices: web panel + a dedicated monitoring worker
+docker compose -f docker/docker-compose.microservices.yml up -d
 ```
 
-Edit `docker/docker-compose.yml` before first run — at minimum change `WA_USERNAME` and `WA_PASSWORD`.
+Edit the chosen compose file before first run — at minimum change `SS_USERNAME` and `SS_PASSWORD`.
 The web admin panel is available at `http://your-host:8080`.
 
 ### install.sh

@@ -207,7 +207,7 @@ class Watchful(ModuleBase):
 - [ ] `WATCHFUL_TOOLBAR` — toolbar buttons in module card
 - [ ] `audit_detail(cls, action, result)` — custom audit log entries
 - [ ] `web/_ui.html` + `web/_modals.html` — custom JS/HTML
-- [ ] `_fail_count: dict` in `__init__` — consecutive failure tracking
+- [ ] `fail_streak(key, failed)` — consecutive failure tracking (persisted in check_state DB; survives cycles/processes)
 
 ---
 
@@ -453,13 +453,12 @@ class Watchful(ModuleBase):
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
-        self._fail_count: dict[str, int] = {}  # optional: consecutive failure tracking
 
     # ── Monitoring loop (REQUIRED) ────────────────────────────────────────
     def check(self):
         items = self._get_items()
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.get_conf('threads', self._default_threads)
+            max_workers=max(1, self.module_default('threads', self._default_threads))
         ) as executor:
             futures = {
                 executor.submit(self._item_check, name, target): (name, target)
@@ -493,13 +492,13 @@ class Watchful(ModuleBase):
         timeout = self.get_conf_in_list('timeout', name, self._DEFAULTS.get('timeout', 10))
         ok, detail = self._do_check(target, timeout)
 
-        # Optional: consecutive failure threshold
+        # Optional: consecutive failure threshold. Counter is persisted in the
+        # check_state DB via fail_streak — NOT an instance dict, which would reset
+        # every cycle (the monitor builds a fresh Watchful each cycle, and the
+        # systemd one-shot mode runs each cycle in a fresh process).
         alert = int(self.get_conf_in_list('alert', name, 1) or 1)
-        if not ok:
-            self._fail_count[name] = self._fail_count.get(name, 0) + 1
-        else:
-            self._fail_count[name] = 0
-        effective_ok = ok or (self._fail_count.get(name, 0) < alert)
+        streak = self.fail_streak(name, not ok)
+        effective_ok = ok or (streak < alert)
 
         msg = f'Mi Modulo: *{name}* {"OK" if ok else f"FAIL — {detail}"}'
         other_data = {'target': target, 'detail': detail}
@@ -711,6 +710,13 @@ INVARIANT: EVERY field in EVERY collection — including __module__ — MUST hav
 value = self.get_conf('timeout', default=10)
 value = self.get_conf('threads', 5, select_module='watchfuls.other')
 
+# Module-level setting resolved via the item → module → global chain.
+# Returns the module's saved value; if blank, inherits the global modules|<field>
+# (config.json); if absent, the schema default. Always returns int.
+# Use this (NOT get_conf) for 'threads' and 'timeout'.
+workers = self.module_default('threads', self._default_threads)
+timeout = self.module_default('timeout', 10)
+
 # Item field from collection "list" (default)
 value = self.get_conf_in_list('timeout', item_key, default=10)
 
@@ -761,6 +767,12 @@ if self.check_status(ok, self.name_module, key):
 # Use when: ok=False AND error message is in other_data={'message': error_detail}
 if self.check_status_custom(ok, key, error_detail):
     self.send_message(msg, ok)
+
+# Consecutive-failure counter, persisted in the check_state DB (survives cycles
+# and processes — do NOT use an instance dict, it resets every cycle).
+# Returns the updated streak for `key`; reset to 0 when failed=False.
+streak = self.fail_streak(key, not ok)
+effective_ok = ok or (streak < alert_threshold)
 ```
 
 ### Commands
