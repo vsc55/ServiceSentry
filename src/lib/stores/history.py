@@ -144,32 +144,47 @@ class HistoryStore:
     # ── Read ──────────────────────────────────────────────────────────────────
 
     def get_index(self) -> list[dict]:
-        """Return metadata for every recorded series."""
+        """Return metadata for every recorded series.
+
+        One table scan: a window function picks each series' latest row (for
+        ``last_data`` / ``last_status`` / current ``key``) while a grouped
+        aggregate gives count / first / last / uptime.  This replaces the two
+        correlated subqueries per series the previous version ran — those keyed
+        on ``COALESCE(item_uid, module||':'||key)``, an expression no index can
+        serve, so each rescanned the whole table (O(series x rows), which got
+        slow as the history grew).
+        """
         try:
             rows = self._db.fetchall('''
+                WITH ranked AS (
+                    SELECT
+                        module, item_uid, key, ts, status, data,
+                        COALESCE(item_uid, module || ':' || key) AS grp,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY COALESCE(item_uid, module || ':' || key)
+                            ORDER BY ts DESC, id DESC
+                        ) AS rn
+                    FROM history
+                ),
+                agg AS (
+                    SELECT
+                        COALESCE(item_uid, module || ':' || key) AS grp,
+                        COUNT(*)      AS cnt,
+                        MAX(ts)       AS last_ts,
+                        MIN(ts)       AS first_ts,
+                        AVG(status)   AS uptime
+                    FROM history
+                    GROUP BY COALESCE(item_uid, module || ':' || key)
+                )
                 SELECT
-                    h.module,
-                    h.item_uid,
-                    h.key,
-                    COUNT(*)          AS cnt,
-                    MAX(h.ts)         AS last_ts,
-                    MIN(h.ts)         AS first_ts,
-                    AVG(h.status)     AS uptime,
-                    (
-                        SELECT h2.data FROM history h2
-                        WHERE COALESCE(h2.item_uid, h2.module || ':' || h2.key)
-                            = COALESCE(h.item_uid, h.module || ':' || h.key)
-                        ORDER BY h2.ts DESC LIMIT 1
-                    ) AS last_data,
-                    (
-                        SELECT h3.status FROM history h3
-                        WHERE COALESCE(h3.item_uid, h3.module || ':' || h3.key)
-                            = COALESCE(h.item_uid, h.module || ':' || h.key)
-                        ORDER BY h3.ts DESC LIMIT 1
-                    ) AS last_status
-                FROM history h
-                GROUP BY COALESCE(h.item_uid, h.module || ':' || h.key)
-                ORDER BY h.module, h.key
+                    r.module, r.item_uid, r.key,
+                    a.cnt, a.last_ts, a.first_ts, a.uptime,
+                    r.data   AS last_data,
+                    r.status AS last_status
+                FROM ranked r
+                JOIN agg a ON a.grp = r.grp
+                WHERE r.rn = 1
+                ORDER BY r.module, r.key
             ''')
         except Exception:  # pylint: disable=broad-except
             return []
