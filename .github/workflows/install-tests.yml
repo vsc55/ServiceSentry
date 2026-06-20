@@ -4,9 +4,6 @@ on:
   push:
     tags: ["test"]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   install:
     name: ${{ matrix.os }}
@@ -30,7 +27,7 @@ jobs:
       image: ${{ matrix.image }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Python 3 is pre-installed on Gentoo (required by Portage).
       # On Debian/Ubuntu images it must be installed explicitly.

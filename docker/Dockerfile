@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # freetds-dev + libssl-dev: compile pymssql from source when no binary wheel is available.
 # iputils-ping: raw ICMP socket access required by the ping watchful module.
