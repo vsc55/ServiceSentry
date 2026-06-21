@@ -533,7 +533,7 @@ def register(app, wa):
         # Webhooks: how many are configured / enabled.
         webhooks_total = webhooks_enabled = 0
         try:
-            _wh = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('webhooks')
+            _wh = wa._load_webhooks()
             if isinstance(_wh, list):
                 webhooks_total = len(_wh)
                 webhooks_enabled = sum(
@@ -652,7 +652,7 @@ def register(app, wa):
         ]
         cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
         cfg.setdefault('overview', {})['default_layout'] = layout
-        ok = wa._save_config_file(wa._CONFIG_FILE, cfg)
+        ok = wa._write_config(cfg)
         wa._audit('overview_default_layout_set', detail={
             'widgets': len(layout),
             'visible': [w['id'] for w in layout if not w.get('hidden')],

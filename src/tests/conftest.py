@@ -80,11 +80,38 @@ def var_dir(tmp_path):
     return str(d)
 
 
+def _seed_editable_config(wa, config_dir):
+    """Move the sample editable config from config.json into the DB.
+
+    The production file→DB migration was removed (data already migrated), so for
+    tests we replicate it: a field left in config.json is a read-only override, so
+    to exercise *editable* config we clear the sample from the file and seed it
+    into the DB (the single source) through the normal write path.
+    """
+    p = os.path.join(config_dir, "config.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            sample = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+    if not sample:
+        return
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump({}, f)
+    wa._config_mgr.invalidate()
+    wa._read_config_file(wa._CONFIG_FILE)   # recompute file_locked from the now-empty file
+    wa._write_config(sample)
+    wa._apply_saved_config()
+    wa._apply_log_level()
+
+
 @pytest.fixture()
 def admin(config_dir, var_dir):
     """WebAdmin instance with testing config (users are stored in the DB)."""
     wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                   pw_require_upper=False, pw_require_digit=False)
+    # Editable config lives in the DB (single source) — seed the sample there.
+    _seed_editable_config(wa, config_dir)
     # Module config lives in the DB — seed the sample.
     wa._save_modules(_SAMPLE_MODULES)
     # The working check state lives in the DB now (no status.json). Seed the

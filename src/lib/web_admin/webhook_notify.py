@@ -34,10 +34,12 @@ _PLACEHOLDERS = ('kind', 'module', 'item', 'status', 'message', 'timestamp')
 def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
              status: str = '', message: str = '',
              timestamp: str = '', cfg: dict | None = None) -> tuple[bool, str]:
-    """Send to all enabled webhooks. Returns (all_ok, summary)."""
-    if cfg is None:
-        cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
-    webhooks = [w for w in (cfg.get('webhooks') or [])
+    """Send to all enabled webhooks. Returns (all_ok, summary).
+
+    Webhooks live in their own DB-backed store (``wa._load_webhooks``); *cfg* is
+    accepted only for backwards compatibility and ignored for the webhook list.
+    """
+    webhooks = [w for w in (wa._load_webhooks() or [])
                 if w.get('enabled') and (w.get('url') or '').strip()]
     if not webhooks:
         return False, 'No enabled webhooks configured'

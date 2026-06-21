@@ -44,10 +44,12 @@ ObjectBase (lib/object_base.py)
 ├── Main (main.py)
 ├── Monitor (lib/monitor.py)
 ├── Telegram (lib/telegram.py)
-├── ConfigStore (lib/config/config_store.py)     ← I/O JSON de config.json
-│   └── ConfigControl (lib/config/config_control.py)
-│       (lib/config/spec.py: registro central de defaults + overrides por env;
-│        lib/config/__init__.py: load_config() lee y siembra defaults)
+├── ConfigManager (lib/config/manager.py)         ← ÚNICO dueño de la E/S de config (read/write/migrate)
+│   ├── ConfigStore-BD (lib/stores/config.py)      ← capa editable: tabla `config` (una fila por sección|campo)
+│   ├── ConfigControl (lib/config/config_control.py)  ← I/O JSON de config.json (solo arranque + pins)
+│   └── lib/config/resolve.py: resolve_config() fusiona env > config.json > BD > default;
+│       migrate_config_to_db() migración única; FILE_ONLY_SECTIONS = {database, webhooks}
+│       (lib/config/spec.py: registro central de defaults; load_config() ya NO siembra a disco)
 ├── WebAdmin (lib/web_admin/app.py)
 │   ├── _UsersMixin      (lib/web_admin/mixins/users.py)
 │   ├── _RolesMixin      (lib/web_admin/mixins/roles.py)
@@ -225,8 +227,8 @@ ServiceSentry/
 │       ├── test_wa_ui.py
 │       └── test_wa_json_helpers.py
 ├── data/                                # Datos en modo desarrollo (config_dir == var_dir)
-│   ├── config.json                     # Config del sistema (se crea/siembra en el primer arranque) — ÚNICO fichero en disco
-│   └── data.db                         # BD SQLite por defecto (usuarios, roles, sesiones, auditoría, hosts, credenciales, historial, estado de checks Y config de módulos/ítems: tablas module_config/module_config_items)
+│   ├── config.json                     # Capa de solo-lectura + arranque: sección `database`, credenciales de primer arranque, overrides bloqueados y datos de feature (webhooks/overview/plantillas)
+│   └── data.db                         # BD SQLite por defecto (usuarios, roles, sesiones, auditoría, hosts, credenciales, historial, estado de checks, config de módulos/ítems Y la configuración editable: tabla `config`)
 └── docs/
     ├── architecture.md                  # Este archivo
     ├── configuration.md
@@ -254,6 +256,7 @@ ServiceSentry/
    │       ├── Reutiliza la config ya cargada (o la lee si no se inyecta)
    │       ├── Inicializa Telegram (token + chat_id)
    │       ├── Abre el conector de BD (sección database; SQLite data.db por defecto)
+   │       ├── _apply_db_config() → fusiona la config editable de la BD bajo config.json
    │       └── Crea los stores: check_state, history, hosts, credentials, audit
    └── _args_cmd() → ejecuta comandos (ej: clear_status)
 3. Main.start():

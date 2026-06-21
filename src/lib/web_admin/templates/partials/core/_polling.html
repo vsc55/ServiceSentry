@@ -105,9 +105,12 @@ async function _doConfigFieldPoll() {
                         configData[sec] = newCfg[sec];
                         if (_serverConfigData) _serverConfigData[sec] = newCfg[sec];
                     }
+                    _fieldVersions[path] = newVer[path] || serverVersions[path];
+                    // Internal change-signal (e.g. webhooks|_version): the list was
+                    // reloaded above — sync the token but show no "field refreshed" banner.
+                    if (field === '_version') continue;
                     _updateDetails.push({ path, sec, field, isArray,
                         newValue: isArray ? null : newCfg[sec]?.[field] });
-                    _fieldVersions[path] = newVer[path] || serverVersions[path];
                     _autoupdatedFields.add(path);
                     // Auto-remove indicator after the configured duration; 0 = manual dismiss only.
                     const _bannerSecs = configData?.web_admin?.config_update_banner_secs ?? 8;
@@ -127,7 +130,7 @@ async function _doConfigFieldPoll() {
         for (const path of changedDirty) {
             _serverChangedDirtyPaths.add(path);
         }
-        if (changedNonDirty.size) _showConfigUpdatedBanner(changedNonDirty.size, _updateDetails);
+        if (_updateDetails.length) _showConfigUpdatedBanner(_updateDetails.length, _updateDetails);
         renderConfig();
     } catch (_) { /* ignore network errors during poll */ }
 }

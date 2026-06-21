@@ -16,7 +16,7 @@ from jinja2 import ChoiceLoader, FileSystemLoader
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from lib.config import ConfigControl, CONFIG_FILENAME
+from lib.config import CONFIG_FILENAME
 from lib.debug import DebugLevel
 from lib.object_base import ObjectBase
 from lib import secret_manager
@@ -198,6 +198,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._config_version  = str(uuid.uuid4())
         self._env_locked: frozenset[str] = frozenset()
         self._env_override_values: dict[str, object] = {}
+        # Editable config lives in the DB; config.json overrides are read-only.
+        # All config I/O goes through the ConfigManager (built in _init_entity_store).
+        self._config_store = None
+        self._config_mgr = None
         self._check_lock = threading.Lock()
         self._data_lock = threading.RLock()
         self._history = self._init_history()
@@ -436,6 +440,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
+        # Outgoing notification webhooks — their own table, like every other
+        # editable dataset (one row per webhook; the ``secret`` is encrypted).
+        from lib.stores.webhooks import WebhooksStore  # noqa: PLC0415
+        self._webhooks_store = WebhooksStore(
+            self._db_connector,
+            fernet=self._get_fernet(),
+            secret_keys=getattr(self, '_secret_keys', None),
+        )
         # Watchful module/item configuration (DB-backed, shared with the monitor
         # through the same database).
         from lib.stores.modules import (  # noqa: PLC0415
@@ -447,6 +459,17 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             secret_keys=getattr(self, '_secret_keys', None),
         )
         self._modules_facade.read()
+        # Editable configuration: a row per ``section|field`` in the DB, owned by
+        # the single ConfigManager (the one place that reads/writes config).
+        from lib.stores.config import ConfigStore     # noqa: PLC0415
+        from lib.config.manager import ConfigManager  # noqa: PLC0415
+        self._config_store = ConfigStore(self._db_connector)
+        self._config_mgr = ConfigManager(
+            self._config_store,
+            os.path.join(self._config_dir, self._CONFIG_FILE),
+            fernet=self._get_fernet(),
+            secret_keys=getattr(self, '_secret_keys', None),
+        )
         # Let watchful modules create their own tables on the shared connector.
         try:
             reconcile_module_tables(self._db_connector)
@@ -805,6 +828,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_status_lang': self._STATUS_LANG,
                 'wa_web_port': self._WEB_PORT,
                 'wa_env_locked_fields': sorted(self._env_locked),
+                'wa_file_locked_fields': sorted(getattr(self, '_file_locked', frozenset())),
                 'wa_proxy_count': self._proxy_count,
                 'wa_public_url': self._public_url,
                 'wa_force_https': self._force_https,
@@ -869,41 +893,38 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             self._fernet = secret_manager.fernet_from_secret_file(self._secret_key_path)
         return self._fernet
 
-    def _read_config_file(self, filename: str) -> dict:
-        """Read a JSON config file, decrypting sensitive values.
+    @property
+    def _file_locked(self) -> frozenset:
+        """Paths pinned read-only in ``config.json`` — owned by the ConfigManager."""
+        mgr = getattr(self, '_config_mgr', None)
+        return mgr.file_locked if mgr is not None else frozenset()
 
-        Cached by file mtime so the disk read + recursive Fernet decryption
-        (which runs on every rendered page and every status poll) is skipped
-        when the file is unchanged.  A deep copy is returned so callers can
-        mutate the result without corrupting the cache.
+    def _read_config_file(self, filename: str) -> dict:
+        """Effective configuration (the single read), via the ConfigManager.
+
+        Before the manager exists (the bootstrap ``database`` read that builds the
+        connector) this falls back to a direct, un-merged disk read.
         """
-        import copy as _copy  # noqa: PLC0415
-        path = os.path.join(self._config_dir, filename)
-        cache = getattr(self, '_cfg_read_cache', None)
-        if cache is None:
-            cache = self._cfg_read_cache = {}
-            self._cfg_read_lock = threading.Lock()
-        try:
-            mtime = os.path.getmtime(path)
-        except OSError:
-            mtime = None
-        if mtime is not None:
-            entry = cache.get(filename)
-            if entry is not None and entry[0] == mtime:
-                return _copy.deepcopy(entry[1])
-        # Cache miss / file changed / stat failed → read fresh.
-        self._dbg(f"> File >> reading {filename} (cache miss/changed)", DebugLevel.debug)
-        cfg  = ConfigControl(path)
-        data = cfg.read()
-        if data:
-            fernet = self._get_fernet()
-            if fernet:
-                secret_manager.decrypt_all(data, fernet)
-        data = data if data else {}
-        if mtime is not None:
-            with self._cfg_read_lock:
-                cache[filename] = (mtime, _copy.deepcopy(data))
-        return data
+        mgr = getattr(self, '_config_mgr', None)
+        if mgr is not None:
+            return mgr.read()
+        from lib.config.manager import read_config_raw  # noqa: PLC0415
+        return read_config_raw(os.path.join(self._config_dir, filename), self._get_fernet())
+
+    def _read_config_file_raw(self, filename: str) -> dict:
+        """The raw (un-merged) ``config.json`` — the manager's ``read_raw`` once it
+        exists, or a direct disk read during bootstrap."""
+        mgr = getattr(self, '_config_mgr', None)
+        if mgr is not None:
+            return mgr.read_raw()
+        from lib.config.manager import read_config_raw  # noqa: PLC0415
+        return read_config_raw(os.path.join(self._config_dir, filename), self._get_fernet())
+
+    def _invalidate_config_cache(self) -> None:
+        """Drop the cached effective config so the next read re-resolves it."""
+        mgr = getattr(self, '_config_mgr', None)
+        if mgr is not None:
+            mgr.invalidate()
 
     def _config_section(self, name: str) -> dict:
         """Return the *name* section of config.json as a dict (``{}`` if absent).
@@ -924,16 +945,20 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         debug printer (gated by ``global|log_level``).  Never pass secrets."""
         ObjectBase.debug.print(msg, level)
 
-    def _save_config_file(self, filename: str, data: dict) -> bool:
-        """Encrypt sensitive values in *data* and save to the config file."""
-        fernet = self._get_fernet()
-        if fernet:
-            data = secret_manager.encrypt_sensitive(data, fernet, keys=self._secret_keys)
-        cfg = ConfigControl(os.path.join(self._config_dir, filename))
-        ok = cfg.save(data)
-        self._dbg(f"> File >> {'wrote' if ok else 'FAILED to write'} {filename} "
-                  f"(encrypted={'yes' if fernet else 'no'})",
-                  DebugLevel.debug if ok else DebugLevel.error)
+    def _write_config(self, data: dict, actor: str = '') -> bool:
+        """The single config writer — delegated to the ConfigManager.
+
+        Callers hand over the full (effective-shaped) config dict; the manager
+        routes editable ``section|field`` leaves to the DB (the single source) and
+        keeps the bootstrap ``database`` section, credentials and env/file-locked
+        overrides in ``config.json``.
+        """
+        mgr = getattr(self, '_config_mgr', None)
+        if mgr is None:                       # never in practice — routes run post-init
+            return False
+        mgr.env_locked = self._env_locked
+        ok = mgr.write(data, actor=actor)
+        self._dbg(f"> Config >> wrote via ConfigManager (ok={ok})", DebugLevel.debug)
         return ok
 
     def _load_modules(self) -> dict:
@@ -947,6 +972,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         import copy as _copy  # noqa: PLC0415
         self._modules_facade.save(_copy.deepcopy(data))
         return True
+
+    def _load_webhooks(self, *, decrypt: bool = True) -> list:
+        """Current notification webhooks from the DB-backed store (decrypted)."""
+        store = getattr(self, '_webhooks_store', None)
+        return store.list(decrypt=decrypt) if store else []
 
     # ------------------------------------------------------------------
     # Route registration

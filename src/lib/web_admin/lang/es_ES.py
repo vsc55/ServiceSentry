@@ -1242,6 +1242,7 @@ LANG = {
     'copy_uid': 'Copiar UID',
     'invalid_public_url': 'La URL pública debe ser un nombre de host válido sin espacios (p. ej. monitor.example.com)',
     'env_locked_tooltip': 'Valor establecido por variable de entorno — cámbiala ahí para modificarlo',
+    'file_locked_tooltip': 'Valor fijado en config.json (solo lectura) — edita el archivo para cambiarlo',
     'config_conflict':        'La configuración fue modificada por otro usuario — recarga y vuelve a aplicar tus cambios.',
     'config_saved_restart':   'Configuración guardada — reinicia el servicio para que los cambios tengan efecto.',
     'cfg_auto_updated':           'Actualizado desde el servidor',

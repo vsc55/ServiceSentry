@@ -5,7 +5,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from flask import jsonify
+from flask import jsonify, session
 from lib import secret_manager
 
 
@@ -38,18 +38,12 @@ def register(app, wa):
     config_view_req = wa._perm_required('config_view', 'config_edit')
     config_edit_req = wa._perm_required('config_edit')
 
-    def _load():
-        return (wa._read_config_file(wa._CONFIG_FILE) or {}).get('webhooks') or []
-
-    def _save(webhooks: list) -> bool:
-        cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
-        cfg['webhooks'] = webhooks
-        return wa._save_config_file(wa._CONFIG_FILE, cfg)
+    store = wa._webhooks_store
 
     @app.route('/api/v1/webhooks', methods=['GET'])
     @config_view_req
     def api_list_webhooks():
-        return jsonify({'webhooks': secret_manager.mask_sensitive(_load())})
+        return jsonify({'webhooks': secret_manager.mask_sensitive(wa._load_webhooks())})
 
     @app.route('/api/v1/webhooks', methods=['POST'])
     @config_edit_req
@@ -72,9 +66,7 @@ def register(app, wa):
             'secret': (data.get('secret') or ''),
             'secret_header': (data.get('secret_header') or 'X-Hub-Signature-256').strip(),
         }
-        webhooks = _load()
-        webhooks.append(webhook)
-        if _save(webhooks):
+        if store.upsert(webhook, actor=session.get('username', '')):
             wa._field_versions['webhooks|_version'] = str(uuid.uuid4())
             _skip = (None, '')
             wa._audit('webhook_created', detail={
@@ -99,16 +91,14 @@ def register(app, wa):
         err_msg = _validate(data)
         if err_msg:
             return jsonify({'error': err_msg}), 400
-        webhooks = _load()
-        idx = next((i for i, w in enumerate(webhooks) if w.get('id') == wh_id), None)
-        if idx is None:
+        stored = store.get(wh_id)
+        if stored is None:
             return jsonify({'error': 'Not found'}), 404
-        stored = webhooks[idx]
         # null secret = masked field, keep stored value
         secret = data.get('secret')
         if secret is None:
             secret = stored.get('secret') or ''
-        webhooks[idx] = {
+        updated = {
             'id': wh_id,
             'name': (data.get('name') or stored.get('name') or 'Webhook').strip(),
             'enabled': bool(data.get('enabled', stored.get('enabled', True))),
@@ -120,9 +110,8 @@ def register(app, wa):
             'secret': secret,
             'secret_header': (data.get('secret_header') or stored.get('secret_header') or 'X-Hub-Signature-256').strip(),
         }
-        if _save(webhooks):
+        if store.upsert(updated, actor=session.get('username', '')):
             wa._field_versions['webhooks|_version'] = str(uuid.uuid4())
-            updated = webhooks[idx]
             detail = {'name': updated['name'], 'id': wh_id}
             # Build changes list with old→new pairs for all non-sensitive fields.
             # String fields: normalize None == '' to avoid spurious diffs on old records.
@@ -147,26 +136,20 @@ def register(app, wa):
     @app.route('/api/v1/webhooks/<wh_id>', methods=['DELETE'])
     @config_edit_req
     def api_delete_webhook(wh_id):
-        webhooks = _load()
-        before = len(webhooks)
-        deleted = next((w for w in webhooks if w.get('id') == wh_id), None)
-        webhooks = [w for w in webhooks if w.get('id') != wh_id]
-        if len(webhooks) == before:
+        deleted = store.get(wh_id)
+        if deleted is None or not store.delete(wh_id):
             return jsonify({'error': 'Not found'}), 404
-        if _save(webhooks):
-            wa._field_versions['webhooks|_version'] = str(uuid.uuid4())
-            wa._audit('webhook_deleted', detail={
-                'id': wh_id, 'name': (deleted or {}).get('name', ''),
-            })
-            return jsonify({'ok': True})
-        return jsonify({'error': wa._t('save_file_error')}), 500
+        wa._field_versions['webhooks|_version'] = str(uuid.uuid4())
+        wa._audit('webhook_deleted', detail={
+            'id': wh_id, 'name': (deleted or {}).get('name', ''),
+        })
+        return jsonify({'ok': True})
 
     @app.route('/api/v1/webhooks/<wh_id>/test', methods=['POST'])
     @config_edit_req
     def api_test_webhook_by_id(wh_id):
         from lib.web_admin import webhook_notify
-        webhooks = _load()
-        stored = next((w for w in webhooks if w.get('id') == wh_id), None)
+        stored = store.get(wh_id)
         if stored is None:
             return jsonify({'error': 'Not found'}), 404
         ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')

@@ -15,14 +15,51 @@ Referencia completa de todos los archivos de configuración y opciones CLI de Se
 
 ---
 
+## Dónde vive la configuración (BD + `config.json`)
+
+La **configuración editable** (todos los campos del registro `lib/config/spec.py`)
+vive ahora en la **base de datos** (tabla `config`, una fila por `sección|campo`).
+Se lee y se escribe desde el panel web y se comparte con el monitor a través de la
+misma BD. `config.json` se sigue usando como **capa de solo-lectura y de
+arranque**:
+
+- **Una sola entrada (lectura)** — todo el sistema lee la *configuración
+  efectiva*: los valores editables de la BD con las claves de `config.json`
+  superpuestas encima. Precedencia por campo: **variable de entorno > `config.json`
+  > BD > default del registro**.
+- **Una sola salida (escritura)** — al guardar, los campos del registro se
+  escriben en la BD (los secretos cifrados); el resto permanece en `config.json`.
+- **Solo lectura**: un campo presente en `config.json` (igual que uno fijado por
+  variable de entorno) **anula** la BD y se muestra bloqueado en la UI con un
+  candado y el tooltip «valor fijado en config.json». Para volver a hacerlo
+  editable, elimínalo del fichero.
+- **Qué se queda en `config.json`** (única-fuente-de-verdad `FILE_ONLY_SECTIONS`):
+  solo la sección **`database`** (arranque — el conector se construye a partir de
+  ella, antes de que exista la capa de config en BD), la lista **`webhooks`** (es
+  una lista top-level de objetos con su propia CRUD, no encaja en `sección|campo`)
+  y las **credenciales** de primer arranque (`web_admin.username` / `password`).
+- **Todo lo demás va a la BD**, incluida la configuración de feature con forma
+  `sección|campo`: el layout `overview`, las plantillas `notif_templates` /
+  `notif_html_templates`. Tienen su propia UI y nunca aparecen como tarjetas de
+  configuración (el frontend las omite vía `FEATURE_NONCONFIG_KEYS`).
+- **Los defaults NO se escriben en disco.** Faltando un valor, se resuelve con el
+  default del registro (`spec.py`) en tiempo de lectura. `load_config()` ya no
+  siembra `config.json` (`seed=False`), así que ni el worker ni el web rellenan el
+  fichero al arrancar.
+
+### Migración automática (una vez)
+
+La primera vez que arranca con esta versión, si existe un `config.json` con la
+configuración antigua, se **importan** sus campos editables a la BD, se respalda
+el fichero como `config.json.bak` y se recorta `config.json` para dejar solo la
+capa de arranque (`database` + credenciales). A partir de ahí la configuración se
+edita en la BD y el fichero solo contiene overrides de solo-lectura y el arranque.
+
 ## config.json
 
-Configuración global de la aplicación. En cada arranque la aplicación
-**rellena automáticamente** cualquier default del registro que falte en el
-fichero (y lo persiste); en la primera ejecución crea el fichero completo de
-forma silenciosa. Las credenciales de primer arranque `web_admin.username` /
-`web_admin.password` son la excepción: se usan solo para crear el admin inicial
-y **nunca** se escriben en disco.
+El ejemplo siguiente muestra la **forma efectiva** de la configuración (lo que
+devuelve la lectura única); en disco, tras la migración, solo quedan las claves de
+solo-lectura/arranque.
 
 ```json
 {
@@ -257,11 +294,13 @@ Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/
 
 ---
 
-## Sección `modules` (en config.json)
+## Sección `modules` (configuración editable, en BD)
 
 Defaults globales que **heredan todos los módulos** cuando su propio valor se
 deja en blanco. La resolución sigue la cadena **item → default del módulo →
-global**. Se edita en **Configuration > Modules** del panel web.
+global**. Se edita en **Configuration > Modules** del panel web y, como el resto
+de la configuración editable, se persiste en la tabla `config` de la BD (un
+`config.json` con `modules` lo dejaría de solo-lectura).
 
 ```json
 {

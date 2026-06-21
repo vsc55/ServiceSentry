@@ -108,7 +108,7 @@ def register(app, wa):
             cfg['notif_templates'].pop(lang, None)
         if not cfg['notif_templates']:
             del cfg['notif_templates']
-        wa._save_config_file(wa._CONFIG_FILE, cfg)
+        wa._write_config(cfg)
 
         wa._audit('notif_template_saved', detail={'lang': lang, 'keys': sorted(clean.keys())})
         return jsonify({'ok': True, 'lang': lang, 'overrides': clean}), 200
@@ -127,7 +127,7 @@ def register(app, wa):
                 cfg['notif_templates'] = tpl
             else:
                 cfg.pop('notif_templates', None)
-            wa._save_config_file(wa._CONFIG_FILE, cfg)
+            wa._write_config(cfg)
 
         if removed:
             wa._audit('notif_template_reset', detail={'lang': lang})
@@ -265,7 +265,7 @@ def register(app, wa):
                 tpls.pop(tpl_type, None)
         if not tpls:
             cfg.pop('notif_html_templates', None)
-        wa._save_config_file(wa._CONFIG_FILE, cfg)
+        wa._write_config(cfg)
 
         wa._audit('notif_html_template_saved', detail={'type': tpl_type, 'lang': lang})
         return jsonify({'ok': True}), 200
@@ -286,7 +286,7 @@ def register(app, wa):
                 cfg['notif_html_templates'] = tpls
             else:
                 cfg.pop('notif_html_templates', None)
-            wa._save_config_file(wa._CONFIG_FILE, cfg)
+            wa._write_config(cfg)
         if removed:
             wa._audit('notif_html_template_reset', detail={'type': tpl_type, 'lang': lang})
         return jsonify({'ok': True}), 200

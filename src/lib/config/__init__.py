@@ -14,7 +14,6 @@ from lib.config.spec import (
     cfg_default,
     cfg_get,
     cfg_validate,
-    ensure_config_defaults,
     normalize_url,
 )
 
@@ -29,18 +28,19 @@ def config_path(config_dir: str) -> str:
     return os.path.join(config_dir, CONFIG_FILENAME)
 
 
-def load_config(config_dir: str, *, seed: bool = True, log=print) -> ConfigControl:
-    """Single, centralised entry point to open the system ``config.json``.
+def load_config(config_dir: str) -> ConfigControl:
+    """Open the system ``config.json`` (the bootstrap/read-only file layer).
 
     Takes the **config directory** (not a file path) — the file name is defined
-    once, here — reads it and, by default, ensures every registry default is
-    present (persisting and reporting any newly-added option).  Every place that
-    loads config.json (the daemon, the web admin, the monitor) goes through here,
-    so both the file location and the read+seed behaviour live in **one** spot."""
+    once, here.  This only *reads* the file; it never writes to it.
+
+    Editable configuration is **not** stored here: it lives in the DB (single
+    source), read and written through :class:`lib.config.manager.ConfigManager`.
+    Missing values fall back to the registry default (``spec.py``) at read time,
+    so nothing is ever materialised into ``config.json`` on startup.
+    """
     cc = ConfigControl(config_path(config_dir))
     cc.read()
-    if seed:
-        ensure_config_defaults(cc, log=log)
     return cc
 
 
@@ -54,7 +54,6 @@ __all__ = [
     'cfg_default',
     'cfg_get',
     'cfg_validate',
-    'ensure_config_defaults',
     'load_config',
     'config_path',
     'CONFIG_FILENAME',

@@ -5,7 +5,7 @@
 import copy
 import uuid
 
-from flask import jsonify
+from flask import jsonify, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from ..constants import SUPPORTED_LANGS, coerce_lang
@@ -62,6 +62,9 @@ def register(app, wa):
         for path, value in wa._env_override_values.items():
             section, field = path.split('|')
             raw.setdefault(section, {})[field] = value
+        # Webhooks live in their own store; bundle the list (read-only) so the
+        # Notifications tab can render it.  Editing still goes through /api/v1/webhooks.
+        raw['webhooks'] = wa._load_webhooks()
         resp = jsonify({
             'config': secret_manager.mask_sensitive(raw, wa._secret_keys),
             'versions': dict(wa._field_versions),
@@ -232,8 +235,10 @@ def register(app, wa):
                 new_data[section] = value
         wa._dbg(f"> Config PUT >> merged config: applying {sorted(to_apply.keys())}", DebugLevel.debug)
 
-        # Env-locked fields must not be persisted — restore original saved values.
-        for path in wa._env_locked:
+        # Locked fields must not be persisted — restore original effective values.
+        # Env vars and ``config.json`` overrides are both read-only layers.
+        _locked = set(wa._env_locked) | set(getattr(wa, '_file_locked', frozenset()))
+        for path in _locked:
             section, field = path.split('|')
             sec_new = new_data.get(section)
             if not isinstance(sec_new, dict):
@@ -243,8 +248,8 @@ def register(app, wa):
                 sec_new[field] = sec_old[field]
             elif field in sec_new:
                 del sec_new[field]
-        if wa._env_locked:
-            wa._dbg(f"> Config PUT >> env-locked enforced: {sorted(wa._env_locked)}", DebugLevel.debug)
+        if _locked:
+            wa._dbg(f"> Config PUT >> locked enforced (env+file): {sorted(_locked)}", DebugLevel.debug)
 
         wa._dbg("> Config PUT >> validating fields", DebugLevel.debug)
         # Validate integer fields (type + [min, max] range) via the registry.
@@ -304,10 +309,10 @@ def register(app, wa):
             web_data['public_url'] = v
 
         wa._dbg("> Config PUT >> validation passed; restoring masked secrets, "
-                "encrypting + writing to disk", DebugLevel.debug)
+                "encrypting + writing editable layer to DB", DebugLevel.debug)
         secret_manager.restore_sensitive(new_data, old_data, keys=wa._secret_keys)
 
-        if wa._save_config_file(wa._CONFIG_FILE, new_data):
+        if wa._write_config(new_data, actor=session.get('username', '')):
             wa._dbg(f"> Config >> saved {len(to_apply)} field(s): "
                     f"{sorted(to_apply.keys())}", DebugLevel.info)
             wa._dbg("> Config PUT >> file written; applying runtime values", DebugLevel.debug)

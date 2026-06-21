@@ -295,6 +295,9 @@ function renderConfig() {
     const NOTIF_SECS = new Set(['telegram']);
 
     const order = ['daemon', 'modules', 'global', 'telegram', 'web_admin', 'email', 'webhooks', 'notifications', 'ldap', 'oidc', 'saml2'];
+    // Top-level keys carried in config.json that are feature state, not editable
+    // config (own UIs handle them) — never rendered as generic config cards.
+    const FEATURE_NONCONFIG_KEYS = new Set(['overview', 'notif_templates', 'notif_html_templates']);
     const sections = Object.keys(configData).sort((a, b) => {
         const ai = order.indexOf(a), bi = order.indexOf(b);
         return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
@@ -311,6 +314,10 @@ function renderConfig() {
         if (sec === 'email') continue;           // built separately below
         if (sec === 'webhooks') continue;       // built separately via _renderWebhooksSection
         if (sec === 'notifications') continue;  // built separately via _renderNotificationsMatrix
+        // Feature data that lives in config.json but is NOT editable config:
+        // the dashboard layout and the notification template overrides have
+        // their own UIs and must never appear as generic config cards.
+        if (FEATURE_NONCONFIG_KEYS.has(sec)) continue;
 
         if (AUTH_SECS.has(sec)) {
             hAuthExt += _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose);

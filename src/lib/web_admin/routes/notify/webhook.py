@@ -23,8 +23,7 @@ def register(app, wa):
 
         # If an id is given and secret is masked (null), restore stored secret
         if wh_id and data.get('secret') is None:
-            stored_list = (wa._read_config_file(wa._CONFIG_FILE) or {}).get('webhooks') or []
-            stored = next((w for w in stored_list if w.get('id') == wh_id), None)
+            stored = wa._webhooks_store.get(wh_id)
             if stored:
                 data['secret'] = stored.get('secret') or ''
 

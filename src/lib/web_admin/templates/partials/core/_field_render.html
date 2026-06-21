@@ -39,7 +39,9 @@ function renderField(key, value, pathStr, target = 'modules') {
     // Env-var-sourced config fields are read-only: disable just the form controls
     // (input/select/textarea). The lock badge + tooltip already flag the source,
     // and the info/hint button (a <button>) stays clickable.
-    if (target === 'config' && typeof ENV_LOCKED !== 'undefined' && ENV_LOCKED.has(pathStr)) {
+    if (target === 'config' && (
+            (typeof ENV_LOCKED  !== 'undefined' && ENV_LOCKED.has(pathStr)) ||
+            (typeof FILE_LOCKED !== 'undefined' && FILE_LOCKED.has(pathStr)))) {
         _fhtml = _fhtml.replace(/<(input|select|textarea)\b/gi, '<$1 disabled');
     }
     let _conflictBanner = '';
@@ -110,14 +112,18 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             data-bs-toggle="tooltip" data-bs-placement="top"
             title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`
         : '';
-    // Env-var lock — field is read-only when set by a Docker environment variable
-    const _isEnvLocked = target === 'config' && ENV_LOCKED.has(pathStr);
-    const _lockBtn = _isEnvLocked
+    // Read-only locks — env var (Docker) takes precedence over a config.json pin.
+    const _isEnvLocked  = target === 'config' && ENV_LOCKED.has(pathStr);
+    const _isFileLocked = target === 'config' && typeof FILE_LOCKED !== 'undefined'
+                          && FILE_LOCKED.has(pathStr) && !_isEnvLocked;
+    const _isLocked     = _isEnvLocked || _isFileLocked;
+    const _lockTip = _isEnvLocked ? t('env_locked_tooltip') : t('file_locked_tooltip');
+    const _lockBtn = _isLocked
         ? `<span class="input-group-text text-warning" tabindex="-1"
             data-bs-toggle="tooltip" data-bs-placement="top"
-            title="${escAttr(t('env_locked_tooltip'))}"><i class="bi bi-lock-fill" style="font-size:.75rem"></i></span>`
+            title="${escAttr(_lockTip)}"><i class="bi bi-lock-fill" style="font-size:.75rem"></i></span>`
         : '';
-    const _actionBtn  = _isEnvLocked ? _lockBtn : _resetBtn;
+    const _actionBtn  = _isLocked ? _lockBtn : _resetBtn;
     const _isReadOnly = !!(meta && meta.readonly);
 
     // Sensitive field masked by the server (null = value is set but never transmitted)
@@ -638,7 +644,10 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
         const _meta = fieldMeta(_sch, k);
         const _rawFHtml = renderField(k, v, pathPrefix + '|' + k, target);
-        const _fhtml = (target === 'config' && ENV_LOCKED.has(pathPrefix + '|' + k) && _rawFHtml)
+        const _pp = pathPrefix + '|' + k;
+        const _fhtml = (target === 'config' && _rawFHtml &&
+                        (ENV_LOCKED.has(_pp) ||
+                         (typeof FILE_LOCKED !== 'undefined' && FILE_LOCKED.has(_pp))))
             ? _rawFHtml.replace(/^<div /, '<div data-env-locked="1" ')
             : _rawFHtml;
 

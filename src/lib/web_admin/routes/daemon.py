@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Background scheduler routes: /api/v1/daemon/*"""
 
-from flask import jsonify
+from flask import jsonify, session
 
 
 def register(app, wa):
@@ -50,9 +50,11 @@ def register(app, wa):
         daemon_cfg = dict(raw.get('daemon', {}))
 
         changed = False
-        # Fields fixed by an env var (SS_CHECK_INTERVAL / SS_AUTOSTART) are read-only
-        # and cannot be changed from the UI — ignore them silently here too.
-        if 'timer_check' in data and 'daemon|timer_check' not in wa._env_locked:
+        # Fields fixed by an env var (SS_CHECK_INTERVAL / SS_AUTOSTART) or pinned
+        # in config.json are read-only and cannot be changed from the UI — ignore
+        # them silently here too.
+        _locked = set(wa._env_locked) | set(getattr(wa, '_file_locked', frozenset()))
+        if 'timer_check' in data and 'daemon|timer_check' not in _locked:
             try:
                 secs = max(10, min(86400, int(data['timer_check'])))
             except (TypeError, ValueError):
@@ -60,13 +62,13 @@ def register(app, wa):
             daemon_cfg['timer_check'] = secs
             changed = True
 
-        if 'web_autostart' in data and 'daemon|web_autostart' not in wa._env_locked:
+        if 'web_autostart' in data and 'daemon|web_autostart' not in _locked:
             daemon_cfg['web_autostart'] = bool(data['web_autostart'])
             changed = True
 
         if changed:
             raw['daemon'] = daemon_cfg
-            wa._save_config_file(wa._CONFIG_FILE, raw)
+            wa._write_config(raw, actor=session.get('username', ''))
             wa._audit('daemon_config_changed', detail={
                 k: daemon_cfg.get(k) for k in ('timer_check', 'web_autostart') if k in data
             })

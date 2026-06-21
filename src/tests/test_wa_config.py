@@ -17,6 +17,11 @@ except ImportError:
 
 from tests.conftest import _login
 
+
+def _effective(admin):
+    """Single effective config read (DB-editable + config.json overrides)."""
+    return admin._read_config_file(admin._CONFIG_FILE) or {}
+
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 # Idioma válido garantizado (siempre existe al menos en_EN)
@@ -62,13 +67,12 @@ class TestApiConfigGet:
 class TestApiConfigPutBasic:
     """Comportamiento básico de PUT /api/config."""
 
-    def test_put_saves_data(self, client, config_dir):
+    def test_put_saves_data(self, client, admin):
         _login(client)
         resp = client.put("/api/v1/config", json={"daemon": {"timer_check": 600}})
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["daemon"]["timer_check"] == 600
+        assert _effective(admin)["daemon"]["timer_check"] == 600
 
     def test_put_empty_object_saves(self, client):
         _login(client)
@@ -257,41 +261,37 @@ class TestApiConfigPutRememberMeDays:
 
     # --- disk tests: invalid value returns 400 and does not write config.json ---
 
-    def test_string_does_not_corrupt_disk(self, client, config_dir):
+    def test_string_does_not_corrupt_disk(self, client, admin):
         """Una cadena devuelve 400 y no corrompe config.json."""
         _login(client)
         self._put(client, 30)
         resp = self._put(client, "60")
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["remember_me_days"] == 30
+        assert _effective(admin)["web_admin"]["remember_me_days"] == 30
 
-    def test_null_does_not_corrupt_disk(self, client, config_dir):
+    def test_null_does_not_corrupt_disk(self, client, admin):
         """null devuelve 400 y no corrompe config.json."""
         _login(client)
         self._put(client, 30)
         resp = self._put(client, None)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["remember_me_days"] == 30
+        assert _effective(admin)["web_admin"]["remember_me_days"] == 30
 
-    def test_below_min_does_not_corrupt_disk(self, client, config_dir):
+    def test_below_min_does_not_corrupt_disk(self, client, admin):
         """Valor fuera de rango (< 1) devuelve 400 y no corrompe config.json."""
         _login(client)
         self._put(client, 30)
         resp = self._put(client, 0)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["remember_me_days"] == 30
+        assert _effective(admin)["web_admin"]["remember_me_days"] == 30
 
-    def test_above_max_does_not_corrupt_disk(self, client, config_dir):
+    def test_above_max_does_not_corrupt_disk(self, client, admin):
         """Valor fuera de rango (> 365) devuelve 400 y no corrompe config.json."""
         _login(client)
         self._put(client, 30)
         resp = self._put(client, 366)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["remember_me_days"] == 30
+        assert _effective(admin)["web_admin"]["remember_me_days"] == 30
 
 
 # ─────────────────────────── audit_max_entries ─────────────────────
@@ -385,41 +385,37 @@ class TestApiConfigPutAuditMaxEntries:
 
     # --- disk tests: invalid value returns 400 and does not write config.json ---
 
-    def test_string_does_not_corrupt_disk(self, client, config_dir):
+    def test_string_does_not_corrupt_disk(self, client, admin):
         """Una cadena devuelve 400 y no corrompe config.json."""
         _login(client)
         self._put(client, 500)
         resp = self._put(client, "1000")
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["audit_max_entries"] == 500
+        assert _effective(admin)["web_admin"]["audit_max_entries"] == 500
 
-    def test_null_does_not_corrupt_disk(self, client, config_dir):
+    def test_null_does_not_corrupt_disk(self, client, admin):
         """null devuelve 400 y no corrompe config.json."""
         _login(client)
         self._put(client, 500)
         resp = self._put(client, None)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["audit_max_entries"] == 500
+        assert _effective(admin)["web_admin"]["audit_max_entries"] == 500
 
-    def test_below_min_does_not_corrupt_disk(self, client, config_dir):
+    def test_below_min_does_not_corrupt_disk(self, client, admin):
         """Valor fuera de rango (< 0) devuelve 400 y no corrompe config.json."""
         _login(client)
         self._put(client, 500)
         resp = self._put(client, -1)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["audit_max_entries"] == 500
+        assert _effective(admin)["web_admin"]["audit_max_entries"] == 500
 
-    def test_above_max_does_not_corrupt_disk(self, client, config_dir):
+    def test_above_max_does_not_corrupt_disk(self, client, admin):
         """Valor fuera de rango (> 10000) devuelve 400 y no corrompe config.json."""
         _login(client)
         self._put(client, 500)
         resp = self._put(client, 10001)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["audit_max_entries"] == 500
+        assert _effective(admin)["web_admin"]["audit_max_entries"] == 500
 
 
 # ───────────────────────────────── lang ────────────────────────────
@@ -795,57 +791,50 @@ class TestApiConfigPutDefaultPageSize:
 
     # --- disk safety: invalid values must not corrupt config.json ---
 
-    def test_above_max_does_not_corrupt_disk(self, client, config_dir):
+    def test_above_max_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 25)
         resp = self._put(client, 201)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["default_page_size"] == 25
 
-    def test_negative_does_not_corrupt_disk(self, client, config_dir):
+    def test_negative_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 25)
         resp = self._put(client, -1)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["default_page_size"] == 25
 
-    def test_string_does_not_corrupt_disk(self, client, config_dir):
+    def test_string_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 25)
         resp = self._put(client, "50")
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["default_page_size"] == 25
 
-    def test_null_does_not_corrupt_disk(self, client, config_dir):
+    def test_null_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 25)
         resp = self._put(client, None)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["default_page_size"] == 25
 
-    def test_bool_does_not_corrupt_disk(self, client, config_dir):
+    def test_bool_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 25)
         resp = self._put(client, True)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["default_page_size"] == 25
 
-    def test_valid_value_saved_to_disk(self, client, config_dir):
+    def test_valid_value_saved_to_disk(self, client, admin):
         _login(client)
         self._put(client, 100)
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["default_page_size"] == 100
+        assert _effective(admin)["web_admin"]["default_page_size"] == 100
 
-    def test_zero_saved_to_disk(self, client, config_dir):
+    def test_zero_saved_to_disk(self, client, admin):
         _login(client)
         self._put(client, 0)
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["default_page_size"] == 0
+        assert _effective(admin)["web_admin"]["default_page_size"] == 0
 
     def test_returns_ok_on_valid(self, client):
         _login(client)
@@ -862,35 +851,34 @@ class TestApiConfigPutPageSizes:
     def _put(self, client, value):
         return client.put("/api/v1/config", json={"web_admin": {"page_sizes": value}})
 
-    def _saved(self, config_dir):
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            return json.load(f).get("web_admin", {}).get("page_sizes")
+    def _saved(self, admin):
+        return (_effective(admin).get("web_admin") or {}).get("page_sizes")
 
     _DEFAULT = [25, 50, 100, 200, 0]
 
     # --- happy path ---
 
-    def test_valid_array_saved(self, client, config_dir):
+    def test_valid_array_saved(self, client, admin):
         _login(client)
         self._put(client, [10, 25, 50])
-        assert self._saved(config_dir) == [10, 25, 50]
+        assert self._saved(admin) == [10, 25, 50]
 
-    def test_standard_defaults_saved(self, client, config_dir):
+    def test_standard_defaults_saved(self, client, admin):
         _login(client)
         self._put(client, [25, 50, 100, 200, 0])
-        assert self._saved(config_dir) == [25, 50, 100, 200, 0]
+        assert self._saved(admin) == [25, 50, 100, 200, 0]
 
-    def test_zero_kept_as_all_option(self, client, config_dir):
+    def test_zero_kept_as_all_option(self, client, admin):
         """0 representa 'Todos' y debe conservarse."""
         _login(client)
         self._put(client, [25, 50, 0])
-        assert self._saved(config_dir) == [25, 50, 0]
+        assert self._saved(admin) == [25, 50, 0]
 
-    def test_only_zero_saved(self, client, config_dir):
+    def test_only_zero_saved(self, client, admin):
         """Un array con solo 0 (= Todos) es válido."""
         _login(client)
         self._put(client, [0])
-        assert self._saved(config_dir) == [0]
+        assert self._saved(admin) == [0]
 
     def test_returns_ok_on_valid(self, client):
         _login(client)
@@ -971,11 +959,11 @@ class TestApiConfigPutPageSizes:
 
     # --- campo ausente del payload ---
 
-    def test_absent_from_payload_not_written(self, client, config_dir):
+    def test_absent_from_payload_not_written(self, client, admin):
         """Si page_sizes no se envía, no debe aparecer en config.json."""
         _login(client)
         client.put("/api/v1/config", json={"web_admin": {}})
-        assert "page_sizes" not in (self._saved(config_dir) or {})
+        assert "page_sizes" not in (self._saved(admin) or {})
 
     # --- seguridad: inyección dentro del array → 400 (string/dict no son enteros) ---
 
@@ -1003,16 +991,16 @@ class TestApiConfigPutPageSizes:
         resp = self._put(client, list(range(1, 201)))
         assert resp.status_code == 200
 
-    def test_very_large_single_value_accepted(self, client, config_dir):
+    def test_very_large_single_value_accepted(self, client, admin):
         """No hay límite por valor individual — valores grandes se conservan."""
         _login(client)
         self._put(client, [25, 999999, 50])
-        assert self._saved(config_dir) == [25, 999999, 50]
+        assert self._saved(admin) == [25, 999999, 50]
 
-    def test_duplicate_values_preserved(self, client, config_dir):
+    def test_duplicate_values_preserved(self, client, admin):
         _login(client)
         self._put(client, [25, 25, 50])
-        assert self._saved(config_dir) == [25, 25, 50]
+        assert self._saved(admin) == [25, 25, 50]
 
     def test_mixed_valid_and_invalid_rejected(self, client):
         """Array con mezcla de enteros válidos e inválidos → 400, nada guardado."""
@@ -1021,13 +1009,12 @@ class TestApiConfigPutPageSizes:
 
     # --- interacción con default_page_size ---
 
-    def test_page_sizes_and_default_page_size_saved_together(self, client, config_dir):
+    def test_page_sizes_and_default_page_size_saved_together(self, client, admin):
         _login(client)
         client.put("/api/v1/config", json={
             "web_admin": {"page_sizes": [10, 25, 50], "default_page_size": 10}
         })
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            wa = json.load(f)["web_admin"]
+        wa = _effective(admin)["web_admin"]
         assert wa["page_sizes"] == [10, 25, 50]
         assert wa["default_page_size"] == 10
 
@@ -1103,13 +1090,12 @@ class TestApiConfigPutProxyCount:
         client.put("/api/v1/config", json={})
         assert admin._proxy_count == 2
 
-    def test_above_max_does_not_corrupt_disk(self, client, config_dir):
+    def test_above_max_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 0)
         resp = self._put(client, 11)
         assert resp.status_code == 400
-        with open(f"{config_dir}/config.json", encoding="utf-8") as f:
-            assert json.load(f)["web_admin"]["proxy_count"] == 0
+        assert _effective(admin)["web_admin"]["proxy_count"] == 0
 
     def test_nosql_operator_rejected(self, client, admin):
         _login(client)

@@ -266,7 +266,7 @@ Si es `true`, el valor `0` se muestra como campo vacío (placeholder en lugar de
 
 ### `inherit_blank`
 
-Solo para campos `int`/`float` a nivel de módulo (`__module__`). Si es `true`, dejar el campo en blanco lo almacena como `null` (distinto de `0`, que sigue siendo un valor real) y hace que herede el valor global de `Configuration > Modules` (`config.json` → `modules|<campo>`), que se muestra como placeholder. Es la contraparte en la UI de la resolución ítem → módulo → global de `ModuleBase.module_default()`. Usado en `threads` y `timeout` de cada módulo.
+Solo para campos `int`/`float` a nivel de módulo (`__module__`). Si es `true`, dejar el campo en blanco lo almacena como `null` (distinto de `0`, que sigue siendo un valor real) y hace que herede el valor global de `Configuration > Modules` (config editable `modules|<campo>`, en la tabla `config` de la BD), que se muestra como placeholder. Es la contraparte en la UI de la resolución ítem → módulo → global de `ModuleBase.module_default()`. Usado en `threads` y `timeout` de cada módulo.
 
 ```json
 "timeout": {"type": "int", "default": 10, "min": 0, "max": 300, "inherit_blank": true}

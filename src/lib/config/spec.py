@@ -66,7 +66,7 @@ class Cfg:
     admin_only: bool = False          # only admins may modify it
     flask_cfg: tuple | None = None    # (app.config key, transform) to sync Flask
     no_rule: bool = False             # exclude from the derived web_admin rule dicts
-    no_seed: bool = False             # never auto-write to config.json on startup
+    no_seed: bool = False             # exclude from default materialisation (creds only)
                                       # (first-run-only credentials)
 
 
@@ -269,17 +269,21 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('notifications|webhook_on_recovery', bool, False),
     Cfg('notifications|webhook_on_warn', bool, False),
 
-    # ══ Webhooks (per-item array; these are the per-webhook defaults) ════════
-    Cfg('webhooks|enabled', bool, False, no_rule=True),
-    Cfg('webhooks|url', str, '', no_rule=True),
-    Cfg('webhooks|method', str, 'POST', no_rule=True),
-    Cfg('webhooks|timeout', int, 10, no_rule=True),
-    Cfg('webhooks|secret', str, '', no_rule=True),
-    Cfg('webhooks|secret_header', str, 'X-Hub-Signature-256', no_rule=True),
-    Cfg('webhooks|headers', str, '', no_rule=True),
+    # ══ Webhooks (editor schema only) ═══════════════════════════════════════
+    # These are the per-webhook FORM field defaults (type/default for the editor
+    # via frontend_schema).  Webhooks are stored as records in their own table
+    # (lib/stores/webhooks.py), NOT as singleton config — so they are no_seed:
+    # never materialised as ``webhooks|*`` rows in the config table.
+    Cfg('webhooks|enabled', bool, False, no_rule=True, no_seed=True),
+    Cfg('webhooks|url', str, '', no_rule=True, no_seed=True),
+    Cfg('webhooks|method', str, 'POST', no_rule=True, no_seed=True),
+    Cfg('webhooks|timeout', int, 10, no_rule=True, no_seed=True),
+    Cfg('webhooks|secret', str, '', no_rule=True, no_seed=True),
+    Cfg('webhooks|secret_header', str, 'X-Hub-Signature-256', no_rule=True, no_seed=True),
+    Cfg('webhooks|headers', str, '', no_rule=True, no_seed=True),
     # body_template default lives in webhook_notify._DEFAULT_BODY_TPL (a large
     # JSON template); documented here but not duplicated.
-    Cfg('webhooks|body_template', str, None, no_rule=True),
+    Cfg('webhooks|body_template', str, None, no_rule=True, no_seed=True),
 )
 
 CFG_BY_PATH: dict[str, Cfg] = {f.path: f for f in CONFIG_FIELDS}
@@ -308,49 +312,6 @@ def cfg_meta(path: str) -> dict:
     if f.type is int:
         return {'type': 'int', 'default': f.default, 'min': f.min, 'max': f.max}
     return {'type': 'str', 'default': f.default}
-
-
-def seed_missing_defaults(config) -> list:
-    """Write every registry default that is missing from *config*.
-
-    *config* is a ``ConfigControl``-like object (``is_exist_conf`` / ``set_conf``).
-    Skips ``no_seed`` fields (first-run-only credentials) and fields without a
-    canonical default (``None``).  Returns the ``[(path, value), …]`` actually
-    added so the caller can report/persist them."""
-    added = []
-    for f in CONFIG_FIELDS:
-        if f.no_seed or f.default is None:
-            continue
-        keys = f.path.split('|')
-        if not config.is_exist_conf(keys):
-            config.set_conf(keys, f.default)
-            added.append((f.path, f.default))
-    return added
-
-
-def ensure_config_defaults(config, *, log=print) -> list:
-    """Startup hook: materialise missing registry defaults into *config*, persist
-    if anything changed, and report newly-added options (grouped by section, but
-    silently when the config was brand new).  Single home shared by the daemon
-    (main.py) and the web admin (start_web).  Returns the added ``(path, value)``.
-
-    So a new config option (e.g. a future ``modules|*`` global) lands in
-    config.json on the next startup instead of only living in memory."""
-    is_new = not config.is_data
-    added = seed_missing_defaults(config)
-    if is_new:
-        config.save()                       # first run: create everything quietly
-        return added
-    if added:
-        by_section: dict = {}
-        for path, val in added:
-            section, _, field = path.partition('|')
-            by_section.setdefault(section, []).append(f"{field}={val!r}")
-        for section, items in by_section.items():
-            log(f"[config] New defaults detected and added in "
-                f"'{section}': {', '.join(items)}")
-        config.save()                       # existing config: persist the new keys
-    return added
 
 
 def cfg_get(section_data: dict, path: str, *, falsy: bool = False):

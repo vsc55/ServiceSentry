@@ -54,6 +54,10 @@ class Main(ObjectBase):
         self._sys_path_insert([self._dir, self._modules_dir])
         self._init_config()
         self._init_monitor()
+        # The Monitor folds the editable DB config under config.json into the
+        # shared config object (``_apply_db_config``); re-read so the daemon's
+        # interval and log level honour the DB layer, not just the file.
+        self._read_config()
 
         if getattr(args, 'clear_status', False) and self.monitor:
             self.monitor.clear_status()
@@ -329,24 +333,22 @@ def start_web(args):
     else:
         var_dir = '/var/lib/ServiSesentry/'
 
+    # First-run credentials only: env > config.json bootstrap (never the DB).
+    # All other web_admin options — including the bind host/port — come from the
+    # effective config (DB ← config.json), read below from the WebAdmin itself so
+    # config.json is never consulted for editable settings.
     cfg = load_config(config_dir)
-
-    # Env vars take precedence for first-run credential setup (never written to disk)
     username = os.environ.get('SS_USERNAME') or cfg.get_conf(['web_admin', 'username'], 'admin')
     password = os.environ.get('SS_PASSWORD') or cfg.get_conf(['web_admin', 'password'], 'admin')
-    # All web_admin runtime options are loaded from config.json by WebAdmin
-    # itself (via _apply_saved_config / the central registry config_spec), so
-    # they need not be read or forwarded here — only the first-run credentials
-    # and the bind host/port (which also accept CLI overrides) are handled here.
-    host = getattr(args, 'web_host', None) or cfg.get_conf(
-        ['web_admin', 'host'], WebAdmin.DEFAULT_HOST
-    )
-    port = getattr(args, 'web_port', None) or cfg.get_conf(
-        ['web_admin', 'port'], WebAdmin.DEFAULT_PORT
-    )
 
     admin = WebAdmin(config_dir, str(username), str(password), var_dir,
                      modules_dir=os.path.join(dir_base, 'watchfuls'))
+
+    # Bind host/port from the effective config (the DB is the single source);
+    # CLI overrides win.
+    _wa_cfg = (admin._read_config_file(admin._CONFIG_FILE) or {}).get('web_admin') or {}
+    host = getattr(args, 'web_host', None) or _wa_cfg.get('host') or WebAdmin.DEFAULT_HOST
+    port = getattr(args, 'web_port', None) or _wa_cfg.get('port') or WebAdmin.DEFAULT_PORT
 
     print("ServiceSentry Web Admin")
     print(f"  URL:    http://{host}:{port}")

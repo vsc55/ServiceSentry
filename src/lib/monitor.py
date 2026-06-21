@@ -82,6 +82,9 @@ class Monitor(ObjectBase):
         self._read_config()
         self._init_telegram()
         self._db = self._init_db()
+        # Fold the editable DB config layer under the read-only config.json now
+        # that the shared connector exists (config.json/env stay read-only on top).
+        self._apply_db_config()
         # Module configuration lives in the DB; needs the connector + fernet, so
         # it is wired here rather than in _read_config.
         self.config_modules = self._init_modules()
@@ -110,6 +113,39 @@ class Monitor(ObjectBase):
                                  default_sqlite_path=os.path.join(self.dir_var, 'data.db'))
         except Exception:  # pylint: disable=broad-except
             return None
+
+    def _apply_db_config(self):
+        """Overlay the editable DB config under the read-only ``config.json``.
+
+        The connector was built from the (file/env) ``database`` section; here we
+        fold in the rest of the configuration that now lives in the DB so every
+        ``self.config.get_conf(...)`` sees the effective values.  ``config.json``
+        keeps overriding the DB (read-only), exactly like the web admin.  Secrets
+        in the DB are ciphertext → decrypted by field name.  The monitor only
+        *reads*; the one-time file→DB migration is owned by the web admin.
+        """
+        if getattr(self, '_db', None) is None or not self.dir_config:
+            return
+        try:
+            from lib.stores.config  import ConfigStore     # noqa: PLC0415
+            from lib.config         import config_path      # noqa: PLC0415
+            from lib.config.manager import ConfigManager   # noqa: PLC0415
+            # Same single ConfigManager the web admin uses — the one place that
+            # merges the editable DB layer under config.json.  The monitor only
+            # reads; the file→DB migration is owned by the web admin.
+            mgr = ConfigManager(ConfigStore(self._db), config_path(self.dir_config),
+                                fernet=getattr(self, '_fernet', None))
+            self.config.data = mgr.read()
+        except Exception:  # pylint: disable=broad-except
+            return
+        # Recompute the public URL from the now-effective config.
+        _raw_url = normalize_url(self.config.get_conf(['web_admin', 'public_url'], ''))
+        if _raw_url:
+            _force_https = self.config.get_conf(
+                ['web_admin', 'force_https'], cfg_default('web_admin|force_https'))
+            self._public_url = ('https://' if _force_https else 'http://') + _raw_url
+        else:
+            self._public_url = ''
 
     @property
     def db(self):
@@ -351,7 +387,7 @@ class Monitor(ObjectBase):
             if self._injected_config is not None:
                 self.config = self._injected_config
             else:
-                self.config = load_config(self.dir_config, seed=False)
+                self.config = load_config(self.dir_config)
             if _fernet:
                 secret_manager.decrypt_all(self.config.data, _fernet)
 

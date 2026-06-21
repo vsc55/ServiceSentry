@@ -189,31 +189,28 @@ class TestWebhookArbitraryTest:
         assert data['ok'] is False
 
     def test_stored_secret_kept_on_null(self, admin, client):
-        """Sending id + secret=null merges the stored secret from the webhooks list."""
-        stored_cfg = {
-            'webhooks': [{
-                'id': 'test-wh-id',
-                'enabled': True,
-                'url': 'https://hooks.example.com/test',
-                'method': 'POST',
-                'timeout': 5,
-                'secret': 'stored-secret',
-                'secret_header': 'X-Hub-Signature-256',
-            }]
-        }
+        """Sending id + secret=null merges the stored secret from the webhooks store."""
+        admin._webhooks_store.upsert({
+            'id': 'test-wh-id',
+            'enabled': True,
+            'url': 'https://hooks.example.com/test',
+            'method': 'POST',
+            'timeout': 5,
+            'secret': 'stored-secret',
+            'secret_header': 'X-Hub-Signature-256',
+        })
         _login(client)
         captured_headers = {}
         def fake_post(url, data, headers, timeout):
             captured_headers.update(headers)
             return unittest.mock.Mock(status_code=200)
-        with unittest.mock.patch.object(admin, '_read_config_file', return_value=stored_cfg):
-            with unittest.mock.patch('requests.post', side_effect=fake_post):
-                resp = client.post('/api/v1/notify/webhook/test', json={
-                    'id': 'test-wh-id',
-                    'enabled': True, 'url': 'https://hooks.example.com/test',
-                    'method': 'POST', 'timeout': 5,
-                    'secret': None,  # null = keep stored
-                })
+        with unittest.mock.patch('requests.post', side_effect=fake_post):
+            resp = client.post('/api/v1/notify/webhook/test', json={
+                'id': 'test-wh-id',
+                'enabled': True, 'url': 'https://hooks.example.com/test',
+                'method': 'POST', 'timeout': 5,
+                'secret': None,  # null = keep stored
+            })
         assert resp.get_json()['ok'] is True
         assert 'X-Hub-Signature-256' in captured_headers
 
