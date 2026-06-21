@@ -137,6 +137,58 @@ class TestCheck:
         he.assert_not_called()
 
 
+class TestThresholdInheritance:
+    """A blank/absent per-item Threshold inherits the module-level value."""
+
+    @staticmethod
+    def _w(cfg, hosts=None):
+        from watchfuls.cpu import Watchful
+        mm = create_mock_monitor({'watchfuls.cpu': cfg})
+        mm._hosts_store = _FakeStore(hosts or {'h1': _host()})
+        return Watchful(mm)
+
+    def test_blank_item_inherits_module_threshold(self):
+        # Module-level Threshold 85; item has no alert → inherits 85; 75% < 85 → ok.
+        w = self._w({'alert': 85, 'list': {'c': {'enabled': True, 'host_uid': 'h1'}}})
+        with patch.object(w, 'host_exec', return_value=(_PROC_STAT, '', 0)):
+            items = w.check().list
+        assert items['c']['other_data']['alert'] == 85.0
+        assert items['c']['status'] is True
+
+    def test_null_item_inherits_module_threshold(self):
+        # An explicitly-cleared (null) per-item alert also inherits the module value.
+        w = self._w({'alert': 90, 'list': {'c': {'enabled': True, 'alert': None, 'host_uid': 'h1'}}})
+        with patch.object(w, 'host_exec', return_value=(_PROC_STAT, '', 0)):
+            items = w.check().list
+        assert items['c']['other_data']['alert'] == 90.0
+        assert items['c']['status'] is True
+
+    def test_blank_item_no_module_uses_schema_default(self):
+        # No module-level alert saved → item inherits the module schema default (85).
+        w = self._w({'list': {'c': {'enabled': True, 'host_uid': 'h1'}}})
+        with patch.object(w, 'host_exec', return_value=(_PROC_STAT, '', 0)):
+            items = w.check().list
+        assert items['c']['other_data']['alert'] == 85.0
+        assert items['c']['status'] is True
+
+    def test_explicit_item_value_wins(self):
+        # An explicit per-item value overrides the module-level Threshold.
+        w = self._w({'alert': 85, 'list': {'c': {'enabled': True, 'alert': 60, 'host_uid': 'h1'}}})
+        with patch.object(w, 'host_exec', return_value=(_PROC_STAT, '', 0)):
+            items = w.check().list
+        assert items['c']['other_data']['alert'] == 60.0
+        assert items['c']['status'] is False        # 75% >= 60%
+
+    def test_item_zero_inherits_module(self):
+        # 0 is not a useful threshold (0% = always alert), so it inherits the
+        # module value too — this also covers items saved as 0 by the old schema.
+        w = self._w({'alert': 85, 'list': {'c': {'enabled': True, 'alert': 0, 'host_uid': 'h1'}}})
+        with patch.object(w, 'host_exec', return_value=(_PROC_STAT, '', 0)):
+            items = w.check().list
+        assert items['c']['other_data']['alert'] == 85.0
+        assert items['c']['status'] is True         # 75% < 85% (inherited)
+
+
 class TestSchema:
 
     def test_host_centric(self):

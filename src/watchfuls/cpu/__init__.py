@@ -100,7 +100,13 @@ class Watchful(ModuleBase):
         if usage is None:
             raise ValueError('could not parse CPU output')
 
-        alert = float(item.get('alert', self._DEFAULTS['alert']) or self._DEFAULTS['alert'])
+        # Threshold resolution: a real per-item value wins; blank/0/absent inherits
+        # the module-level "Threshold (%)" (Configuration > Modules), falling back to
+        # the module schema default — never the item default (0).  Mirrors
+        # filesystemusage; ``or`` so 0/blank/null all inherit (0% is not a useful
+        # threshold), which also fixes items saved as 0 by the old schema.
+        alert = float(item.get('alert', 0)
+                      or self.module_default('alert', self._MODULE_DEFAULTS['alert']))
         used = round(float(usage), 1)
         ok = used < alert
         msg = f'CPU ({label}) used {used:.1f}%'

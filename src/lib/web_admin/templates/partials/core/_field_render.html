@@ -166,9 +166,25 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         const maxA = meta.max != null ? ` max="${meta.max}"` : '';
         const _minV = meta.min != null ? meta.min : 'null';
         const _maxV = meta.max != null ? meta.max : 'null';
-        const _ph = meta.placeholder != null ? ` placeholder="${escAttr(String(meta.placeholder))}"` : '';
+        let _ph = meta.placeholder != null ? ` placeholder="${escAttr(String(meta.placeholder))}"` : '';
+        let _pmAttr = '';
+        // A per-item field that inherits a module-level default (placeholder_module)
+        // shows that value as the placeholder even when stored blank/null — same
+        // cascade as the value-present branch below (module → global → spec default).
+        if (!_ph && meta.placeholder_module != null) {
+            const _modName = pathStr.split('|')[0];
+            let _modPh = (modulesData[_modName] || {})[meta.placeholder_module];
+            if (_modPh == null || _modPh === 0 || _modPh === '') {
+                const _g = (typeof configData !== 'undefined' && configData.modules)
+                    ? configData.modules[meta.placeholder_module] : undefined;
+                _modPh = (_g != null && _g !== '') ? _g
+                    : CONFIG_FIELD_DEFAULTS['modules|' + meta.placeholder_module];
+            }
+            if (_modPh != null && _modPh !== 0) _ph = ` placeholder="${escAttr(String(_modPh))}"`;
+            _pmAttr = ` data-placeholder-module="${escAttr(String(meta.placeholder_module))}" data-zero-as-blank="1"`;
+        }
         return _fieldRow(lblHtml, fieldCtl({kind: 'number',
-            inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value=""${minA}${maxA}${_isF ? ' step="0.1"' : ' step="1"'}${_ph} onkeydown="blockNonNumericKey(event,${_isF})"`,
+            inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value=""${minA}${maxA}${_isF ? ' step="0.1"' : ' step="1"'}${_ph}${_pmAttr} onkeydown="blockNonNumericKey(event,${_isF})"`,
             onInput: `markDirty(${tg})`,
             onChange: `validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})`,
             trailing: _actionBtn}), _hintHtml);

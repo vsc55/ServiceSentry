@@ -92,7 +92,11 @@ class Watchful(ModuleBase):
         if used is None:
             raise ValueError(f'mount point "{part}" not found')
 
-        alert = float(item.get('alert', 0) or self.get_conf('alert', self._MODULE_DEFAULTS['alert']))
+        # Blank/0/absent inherits the module-level "Threshold (%)" via the canonical
+        # item -> module -> global chain (module_default also handles a blank module
+        # value safely, unlike a raw get_conf which could yield float('') ).
+        alert = float(item.get('alert', 0)
+                      or self.module_default('alert', self._MODULE_DEFAULTS['alert']))
         ok = used <= alert
         msg = f'{label} ({part}) used {used}%' if label != part else f'partition {part} used {used}%'
         msg = f'Normal {msg} ✅' if ok else f'Warning {msg} ⚠️'
