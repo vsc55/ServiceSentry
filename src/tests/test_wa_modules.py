@@ -426,8 +426,11 @@ class TestModuleItemSchemas:
         """hddtemp is host-centric: the daemon address comes from the bound host."""
         schema = self.schemas['hddtemp|list']
         user_keys = {k for k in schema.keys() if not k.startswith('__')}
-        assert user_keys == {'enabled', 'label', 'port', 'exclude'}
+        assert user_keys == {'enabled', 'label', 'port', 'exclude', 'alert'}
         assert schema['exclude']['type'] == 'list'
+        # Per-item threshold inherits the module-level default (50) when blank/0.
+        assert schema['alert']['default'] == 0
+        assert schema['alert']['placeholder_module'] == 'alert'
         import watchfuls.hddtemp as _h
         assert _h.Watchful.ITEM_SCHEMA['__host_profile__']['address_field'] == 'host'
 
@@ -448,8 +451,13 @@ class TestModuleItemSchemas:
         schema = self.schemas.get('ram_swap|list')
         assert schema is not None
         assert 'alert_ram' in schema and 'alert_swap' in schema
-        assert schema['alert_ram']['default'] == 60
+        # Per-item default is 0 → inherits the module-level threshold (60).
+        assert schema['alert_ram']['default'] == 0
+        assert schema['alert_ram']['placeholder_module'] == 'alert_ram'
         assert schema['alert_ram']['min'] == 0 and schema['alert_ram']['max'] == 100
+        mod_schema = self.schemas.get('ram_swap|__module__')
+        assert mod_schema['alert_ram']['default'] == 60
+        assert mod_schema['alert_swap']['default'] == 60
         import watchfuls.ram_swap as _rs
         assert _rs.Watchful.ITEM_SCHEMA['__host_profile__']['key'] == 'ssh'
 

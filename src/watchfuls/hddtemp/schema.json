@@ -9,10 +9,12 @@
     "__host_profile__": {"key": "hddtemp", "address_field": "host", "fields": ["host"]},
     "list": {
         "__check_title_field__": "label",
+        "__field_order__": ["enabled", "label", "port", "exclude", "alert"],
         "__new_item_fields__": ["label"],
         "enabled": {"type": "bool", "default": true},
         "label":   {"type": "str",  "default": ""},
         "port":    {"type": "int",  "default": 0, "min": 0, "max": 65535, "placeholder": 7634, "group": "connection"},
-        "exclude": {"type": "list", "default": [], "group": "connection"}
+        "exclude": {"type": "list", "default": [], "group": "connection"},
+        "alert":   {"type": "int",  "default": 0, "min": 0, "max": 200, "placeholder_module": "alert", "group": "alerts"}
     }
 }

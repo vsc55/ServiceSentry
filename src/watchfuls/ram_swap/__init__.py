@@ -107,11 +107,15 @@ class Watchful(ModuleBase):
         if ram_pct is None:
             raise ValueError('could not parse memory output')
 
+        # Blank/0/absent per-item threshold inherits the module-level value
+        # (Configuration > Modules), then the module schema default.
         self._emit(f'{key}_ram', 'RAM', label, ram_pct,
-                   self._alert(item.get('alert_ram'), self._DEFAULTS['alert_ram']))
+                   self._alert(item.get('alert_ram') or None,
+                               self.module_default('alert_ram', self._MODULE_DEFAULTS['alert_ram'])))
         if swap_pct is not None:
             self._emit(f'{key}_swap', 'SWAP', label, swap_pct,
-                       self._alert(item.get('alert_swap'), self._DEFAULTS['alert_swap']))
+                       self._alert(item.get('alert_swap') or None,
+                                   self.module_default('alert_swap', self._MODULE_DEFAULTS['alert_swap'])))
 
     def _emit(self, result_key, caption, label, used_pct, alert):
         used = round(float(used_pct), 1)

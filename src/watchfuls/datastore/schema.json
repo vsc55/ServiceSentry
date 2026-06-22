@@ -1,8 +1,9 @@
 {
     "__module__": {
-        "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
-        "timeout": {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 300}
+        "enabled":           {"type": "bool", "default": true},
+        "alert_connections": {"type": "int",  "default": 0, "min": 0, "max": 1000000},
+        "threads":           {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "timeout":           {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 300}
     },
     "__credential__": {
         "type": "datastore_auth",
@@ -118,6 +119,6 @@
                          "group": "server"},
         "alert_connections": {"type": "int", "default": 0, "min": 0, "max": 1000000,
                          "show_when": {"db_type": ["mysql","mariadb","postgres","mssql","mongodb","redis","valkey","memcached"]},
-                         "group": "alerts"}
+                         "placeholder_module": "alert_connections", "group": "alerts"}
     }
 }

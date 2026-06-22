@@ -23,7 +23,8 @@
     "new_item_key_label": "Check name or identifier:",
     "rename_item_prompt": "Enter new check name or identifier:",
     "group_labels": {
-        "alerts": "Alerts"
+        "alerts": "Alerts",
+        "execution": "Execution"
     },
     "collections": {"list": "CPU checks"}
 }

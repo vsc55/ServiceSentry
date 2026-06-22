@@ -13,6 +13,7 @@
         "__title_editable__": true,
         "__discovery_uid_key__": true,
         "__discovery_label_template__": "{host}",
+        "__field_order__": ["enabled", "label", "host", "timeout", "attempt", "alert"],
         "__new_item_fields__": ["label"],
         "enabled": {"type": "bool", "default": true},
         "label":   {"type": "str",  "default": ""},

@@ -603,11 +603,28 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     // __group_when__: explicit show_when for group headers (independent of field show_when)
     const _groupWhen = (_sch && _sch['__group_when__']) || {};
 
-    // Sort keys: follow schema definition order when available, else enabled-first + alpha
+    // Module-level infra fields (threads/timeout) group under an "Execution" header
+    // even without an explicit schema `group` — only on the module-level pane
+    // (pathPrefix has no '|'), never on item fields.
+    const _isModuleLevel = target === 'modules' && !pathPrefix.includes('|');
+    const _effGroup = (k) => {
+        const m = fieldMeta(_sch, k);
+        if (m && m.group) return m.group;
+        if (_isModuleLevel && (k === 'threads' || k === 'timeout')) return 'execution';
+        return null;
+    };
+
+    // Sort keys: follow schema definition order when available, else enabled-first + alpha.
+    // On the module-level pane, execution-group fields always sort last (after Defaults).
     const _schemaKeys = _sch
         ? (_sch['__field_order__'] || Object.keys(_sch).filter(k => !k.startsWith('__')))
         : null;
     const keys = (_schemaKeys ? Object.keys(obj).filter(k => _schemaKeys.includes(k)) : Object.keys(obj)).sort((a, b) => {
+        if (_isModuleLevel) {
+            const ae = _effGroup(a) === 'execution' ? 1 : 0;
+            const be = _effGroup(b) === 'execution' ? 1 : 0;
+            if (ae !== be) return ae - be;          // execution group last
+        }
         if (_schemaKeys) {
             const ai = _schemaKeys.indexOf(a), bi = _schemaKeys.indexOf(b);
             if (ai !== -1 && bi !== -1) return ai - bi;
@@ -667,7 +684,8 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
             ? _rawFHtml.replace(/^<div /, '<div data-env-locked="1" ')
             : _rawFHtml;
 
-        const _group = _meta && _meta.group ? _meta.group : null;
+        const _group = (_meta && _meta.group) ? _meta.group
+            : (_isModuleLevel && (k === 'threads' || k === 'timeout') ? 'execution' : null);
         const _showWhen = _meta && _meta.show_when && typeof _meta.show_when === 'object'
             ? _meta.show_when : null;
 
@@ -688,7 +706,8 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
                         }
                     }
                 }
-                const _glabel = esc(_groupLabels[_group] || _group);
+                const _glabel = esc(_groupLabels[_group]
+                    || (_group === 'execution' ? (t('module_execution') || 'Execution') : _group));
                 const _swAttr = _gWhen ? ` data-sw-when="${escAttr(JSON.stringify(_gWhen))}"` : '';
                 const _hdrHide = _gVisible ? '' : ' style="display:none"';
                 h += `<div class="sw-field ss-section-hdr"${_swAttr}${_hdrHide}>

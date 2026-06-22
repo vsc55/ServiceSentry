@@ -68,7 +68,10 @@ class Watchful(ModuleBase):
             new_hddtemp = self.Hddtemp_Info((value.get('label') or '').strip() or key, key)
             new_hddtemp.host = host
             new_hddtemp.port = value.get("port") or 7634     # standard hddtemp daemon port
-            new_hddtemp.alert = self.get_conf('alert', self._DEFAULT_ALERT)
+            # Per-item threshold overrides; blank/0 inherits the module-level
+            # "Threshold" (Configuration > Modules), then the module schema default.
+            new_hddtemp.alert = (value.get('alert', 0)
+                                 or self.module_default('alert', self._DEFAULT_ALERT))
             new_hddtemp.exclude = value.get("exclude", [])
             return_list.append(new_hddtemp)
         return return_list

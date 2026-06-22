@@ -675,6 +675,12 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             static_folder=static_dir,
             static_url_path='/static',
         )
+        # Preserve dict insertion order in all JSON output (jsonify + the Jinja
+        # ``tojson`` filter).  Flask's default JSON provider sorts keys
+        # alphabetically, which reordered the module/item schemas sent to the UI
+        # and made grouped item fields render in alphabetical group order
+        # (e.g. "Alerts" before "Connection") instead of their schema order.
+        app.json.sort_keys = False
 
         # Discover watchful modules that ship their own web UI partials.
         # Convention (all files are optional per module):

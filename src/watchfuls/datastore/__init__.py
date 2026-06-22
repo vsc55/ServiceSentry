@@ -299,7 +299,10 @@ class Watchful(ModuleBase):
                 other[mk] = mv
 
         conns = other.get('connections')
-        limit = int(self.get_conf(['list', key, 'alert_connections'], 0) or 0)
+        # Per-item limit overrides; blank/0 inherits the module-level default
+        # (Configuration > Modules).  0 everywhere = disabled.
+        limit = int(self.get_conf(['list', key, 'alert_connections'], 0)
+                    or self.module_default('alert_connections', 0) or 0)
         if ok and limit > 0 and isinstance(conns, (int, float)) and conns > limit:
             ok  = False
             msg = f'{int(conns)} connections > {limit}'

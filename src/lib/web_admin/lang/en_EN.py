@@ -247,6 +247,7 @@ LANG = {
     'you_badge': 'You',
     'display_name': 'Display name',
     'module_defaults': 'Defaults',
+    'module_execution': 'Execution',
     'email': 'Email',
     'role': 'Role',
     'role_admin_desc': 'Admin — Full control',

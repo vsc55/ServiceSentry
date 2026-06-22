@@ -1,9 +1,10 @@
 {
     "__module__": {
         "api_ver": "v1",
-        "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
-        "timeout": {"type": "int",  "default": 15, "min": 0, "inherit_blank": true, "max": 600}
+        "enabled": {"type": "bool",  "default": true},
+        "alert":   {"type": "float", "default": 80, "min": 0, "max": 150},
+        "threads": {"type": "int",   "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "timeout": {"type": "int",   "default": 15, "min": 0, "inherit_blank": true, "max": 600}
     },
     "__history__": {"field": "temp", "unit": "°C", "label": "Temperature"},
     "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
@@ -17,10 +18,11 @@
         "__discovery_label_template__": "{host} - {name}",
         "__check_title_field__": "label",
         "__title_editable__": true,
+        "__field_order__": ["enabled", "label", "sensor", "alert"],
         "__new_item_fields__": ["label", "sensor"],
         "enabled": {"type": "bool",  "default": true},
         "label":   {"type": "str",   "default": ""},
         "sensor":  {"type": "str",   "default": "", "group": "sensor"},
-        "alert":   {"type": "float", "default": 80, "min": 0, "max": 150, "group": "alerts"}
+        "alert":   {"type": "float", "default": 0, "min": 0, "max": 150, "placeholder_module": "alert", "group": "alerts"}
     }
 }

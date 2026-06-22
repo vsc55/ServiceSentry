@@ -16,6 +16,7 @@
         "__discovery_field__":   "process",
         "__key_mirrors_field__": "process",
         "__check_title_field__": "process",
+        "__field_order__":       ["enabled", "process", "min_count"],
         "enabled":   {"type": "bool", "default": true},
         "process":   {"type": "str",  "default": "", "placeholder": "__key__", "group": "process"},
         "min_count": {"type": "int",  "default": 0,  "min": 0, "max": 1000, "placeholder_module": "min_count", "group": "alerts"}

@@ -1,9 +1,10 @@
 {
     "__module__": {
+        "__field_order__": ["enabled", "alert", "threads", "timeout", "interval"],
         "enabled":  {"type": "bool",  "default": true},
-        "threads":  {"type": "int",   "default": 5,   "min": 0, "inherit_blank": true,   "max": 100},
-        "timeout":  {"type": "int",   "default": 15,  "min": 0, "inherit_blank": true,   "max": 600},
-        "interval": {"type": "float", "default": 1.0, "min": 0.1, "max": 10.0},
+        "threads":  {"type": "int",   "default": 5,   "min": 0, "inherit_blank": true,   "max": 100, "group": "execution"},
+        "timeout":  {"type": "int",   "default": 15,  "min": 0, "inherit_blank": true,   "max": 600, "group": "execution"},
+        "interval": {"type": "float", "default": 1.0, "min": 0.1, "max": 10.0, "group": "execution"},
         "alert":    {"type": "int",   "default": 85,  "min": 0, "max": 100}
     },
     "__history__": {"field": "used", "unit": "%", "label": "CPU Usage"},

@@ -107,7 +107,10 @@ class Watchful(ModuleBase):
         auth_enabled     = bool(it.get('auth_enabled', False))
         auth_user        = str(it.get('auth_user', '') or '') if auth_enabled else ''
         auth_password    = str(it.get('auth_password', '') or '') if auth_enabled else ''
-        alert            = int(it.get('alert', 1) or 1)
+        # Consecutive-failure threshold: blank/0 inherits the module-level value
+        # (Configuration > Modules), then the module schema default — like ping.
+        alert            = int(it.get('alert', 0)
+                               or self.module_default('alert', self._MODULE_DEFAULTS['alert']))
 
         code, detail = self._web_request(
             url, timeout, verify_ssl, scheme,

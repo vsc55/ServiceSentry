@@ -86,7 +86,12 @@ class Watchful(ModuleBase):
             raise ValueError(f'sensor "{sensor}" not found')
 
         temp = temps[sensor]
-        alert = float(item.get('alert', 0) or self._DEFAULTS['alert'])
+        # Blank/0/absent inherits the module-level Threshold (Configuration >
+        # Modules), then the module schema default — never the item default (0).
+        # get_conf (not module_default) preserves the float threshold.
+        alert = float(item.get('alert', 0)
+                      or self.get_conf('alert', None)
+                      or self._MODULE_DEFAULTS['alert'])
         warning = temp > alert
         msg = f'Sensor *{label}*, '
         msg += (f'*over temperature Warning {temp:.1f} ºC* 🔥' if warning

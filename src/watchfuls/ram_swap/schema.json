@@ -1,8 +1,10 @@
 {
     "__module__": {
-        "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
-        "timeout": {"type": "int",  "default": 15, "min": 0, "inherit_blank": true, "max": 600}
+        "enabled":    {"type": "bool", "default": true},
+        "alert_ram":  {"type": "int",  "default": 60, "min": 0, "max": 100},
+        "alert_swap": {"type": "int",  "default": 60, "min": 0, "max": 100},
+        "threads":    {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "timeout":    {"type": "int",  "default": 15, "min": 0, "inherit_blank": true, "max": 600}
     },
     "__history__": {"field": "used", "unit": "%", "label": "Memory Usage"},
     "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
@@ -16,7 +18,7 @@
         "__new_item_fields__": ["label"],
         "enabled":    {"type": "bool", "default": true},
         "label":      {"type": "str",  "default": ""},
-        "alert_ram":  {"type": "int",  "default": 60, "min": 0, "max": 100, "group": "alerts"},
-        "alert_swap": {"type": "int",  "default": 60, "min": 0, "max": 100, "group": "alerts"}
+        "alert_ram":  {"type": "int",  "default": 0, "min": 0, "max": 100, "placeholder_module": "alert_ram", "group": "alerts"},
+        "alert_swap": {"type": "int",  "default": 0, "min": 0, "max": 100, "placeholder_module": "alert_swap", "group": "alerts"}
     }
 }

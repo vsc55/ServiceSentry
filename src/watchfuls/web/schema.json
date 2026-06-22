@@ -4,6 +4,7 @@
         "enabled": {"type": "bool", "default": true},
         "threads": {"type": "int",  "default": 5,   "min": 0, "inherit_blank": true, "max": 100},
         "code":    {"type": "int",  "default": 200,  "min": 1, "max": 9999},
+        "alert":   {"type": "int",  "default": 1,    "min": 1, "max": 10},
         "timeout": {"type": "int",  "default": 15,   "min": 0, "inherit_blank": true, "max": 300}
     },
     "__history__": {"field": null, "unit": null, "label": "HTTP Check"},
@@ -50,7 +51,8 @@
                              "show_when": {"check_content": [true]},
                              "group": "response"},
 
-        "alert":            {"type": "int",  "default": 1,  "min": 1, "max": 10, "group": "alerts"},
+        "alert":            {"type": "int",  "default": 0,  "min": 0, "max": 10,
+                             "zero_as_blank": true, "placeholder_module": "alert", "group": "alerts"},
 
         "auth_enabled":     {"type": "bool", "default": false, "group": "auth"},
         "auth_user":        {"type": "str",  "default": "",
