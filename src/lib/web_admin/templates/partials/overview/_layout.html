@@ -51,6 +51,10 @@ const _DW_DEFS = {
                     canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
     activity:     { icon: 'bi-clock-history', lkey: 'overview_recent_activity',  dCols: 4,  dH: 340,    hasH: true,
                     canShow: (p)         => p.has('audit_view') },
+    syslog_stats: { icon: 'bi-card-list',     lkey: 'overview_syslog_stats',     dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => p.has('syslog_view') },
+    syslog:       { icon: 'bi-card-list',     lkey: 'overview_syslog',           dCols: 6,  dH: 200,    hasH: true,
+                    canShow: (p)         => p.has('syslog_view') },
 };
 
 // Click-through target for each widget → the tab (and sub-tab, if any) it
@@ -73,6 +77,8 @@ const _DW_NAV = {
     modules_list:  { tab: '#tab-modules' },
     servers_list:  { tab: '#tab-servers' },
     activity:      { tab: '#tab-audit'   },
+    syslog:        { tab: '#tab-syslog'  },
+    syslog_stats:  { tab: '#tab-syslog'  },
 };
 
 // Resolve the tab/sub-tab toggle button for a pane selector, but ONLY if it is
@@ -191,6 +197,8 @@ function _dwSave() {
         cols:   parseInt(el.dataset.cols) || 3,
         h:      el.dataset.h  || 'auto',
         hidden: el.style.display === 'none',
+        ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
+        ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
 }
@@ -246,7 +254,9 @@ function _dwInitDnd(grid) {
         el.removeAttribute('draggable');
         const tb = el.querySelector('.dw-toolbar');
         if (tb) tb.onpointerdown = e => {
-            if (e.button !== 0 || e.target.closest('button')) return;
+            // Start a drag only from the toolbar chrome — never from an
+            // interactive control (the close button, the syslog severity select…).
+            if (e.button !== 0 || e.target.closest('button, select, input, option, label, .dw-sev')) return;
             _dwBeginDrag(e, grid, el);
         };
         const rh = el.querySelector('.dw-resize');
@@ -293,6 +303,27 @@ function _dwBeginDrag(e, grid, el) {
 }
 
 // ──────────────────────── Toolbar actions ─────────────────────────
+// Set the syslog table widget's minimum severity (live preview + persist).
+function _dwSetSyslogSev(sel) {
+    const dw = sel.closest('.dw[data-wid]');
+    if (!dw) return;
+    if (sel.value === '') delete dw.dataset.sev; else dw.dataset.sev = sel.value;
+    const content = dw.querySelector('.dw-content');
+    if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwSyslogAsyncRefresh();   // load a full list at the chosen minimum severity
+    _dwSave();
+}
+
+// Set the servers table widget's host filter (all / error / maintenance / both).
+function _dwSetServerFilter(sel) {
+    const dw = sel.closest('.dw[data-wid]');
+    if (!dw) return;
+    if (sel.value === '') delete dw.dataset.srvf; else dw.dataset.srvf = sel.value;
+    const content = dw.querySelector('.dw-content');
+    if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwSave();
+}
+
 function _dwCycleW(btn, dir) {
     const dw    = btn.closest('.dw');
     const cycle = _dwIsSpacer(dw.dataset.wid) ? _DW_COLS_CYCLE_SP : _DW_COLS_CYCLE;
@@ -448,6 +479,8 @@ async function _dwSaveDb() {
         cols:   parseInt(el.dataset.cols) || 2,
         h:      el.dataset.h || 'auto',
         hidden: el.style.display === 'none',
+        ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
+        ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
     const r = await apiPut('/api/v1/users/me/preferences', { dashboard_layout: layout });
@@ -469,6 +502,8 @@ async function _dwSetDefault() {
         cols:   parseInt(el.dataset.cols) || 2,
         h:      el.dataset.h || 'auto',
         hidden: el.style.display === 'none',
+        ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
+        ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
     }));
     const r = await apiPut('/api/v1/overview/default-layout', { layout });
     if (r && r.ok) {
@@ -480,13 +515,31 @@ async function _dwSetDefault() {
 }
 
 // ──────────────────────── Widget toolbar HTML ─────────────────────
-function _dwToolbar(id, cols, h) {
+function _dwToolbar(id, cols, h, item) {
     const def  = _dwDef(id);
     const hasH = def?.hasH;
     let tb = `<div class="dw-toolbar" title="${escAttr(t('dashboard_drag'))}">`;
     tb += `<span class="dw-drag-handle"><i class="bi bi-grip-horizontal"></i></span>`;
     tb += `<span class="small text-muted text-truncate" style="max-width:8em">${esc(t(def?.lkey || id))}</span>`;
     tb += `<span class="d-flex align-items-center gap-1 ms-auto">`;
+    // Syslog table widget: minimum severity to show.
+    if (id === 'syslog') {
+        const sev = item ? (item.sev ?? '') : '';
+        const opts = [`<option value="">${esc(t('syslog_all'))}</option>`].concat(
+            (typeof _SYSLOG_SEV !== 'undefined' ? _SYSLOG_SEV : [])
+                .map((n, i) => `<option value="${i}"${String(sev) === String(i) ? ' selected' : ''}>${esc(n)}</option>`));
+        tb += `<select class="form-select form-select-sm dw-sev py-0" style="width:auto;min-width:5.5em;font-size:.72rem"
+            onchange="_dwSetSyslogSev(this)" title="${escAttr(t('syslog_min_severity'))}">${opts.join('')}</select>`;
+    }
+    // Servers table widget: which hosts to show (all / error / maintenance / both).
+    if (id === 'servers_list') {
+        const f = item ? (item.srvf ?? '') : '';
+        const so = [['', t('all')], ['error', t('host_status_error')],
+                    ['maint', t('host_status_maintenance')], ['errmaint', t('dw_srv_err_maint')]]
+            .map(([v, lbl]) => `<option value="${v}"${f === v ? ' selected' : ''}>${esc(lbl)}</option>`).join('');
+        tb += `<select class="form-select form-select-sm dw-srvf py-0" style="width:auto;min-width:6em;font-size:.72rem"
+            onchange="_dwSetServerFilter(this)" title="${escAttr(t('dw_srv_filter'))}">${so}</select>`;
+    }
     // Width
     tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;
     tb += `<span class="dw-w-lbl small fw-semibold" style="min-width:1.4em;text-align:center">${cols}</span>`;

@@ -135,6 +135,18 @@ class TestApiOverview:
         for key in ("modules", "status", "sessions", "users", "groups", "roles", "last_events"):
             assert key in data
 
+    def test_syslog_widget_data(self, admin, client):
+        """The overview payload carries syslog data (total + recent) for the widget."""
+        _login(client)
+        admin._syslog_store.add({
+            'ts': 1000.0, 'received_at': '2026-06-23T10:00:00Z', 'source': '10.0.0.1',
+            'hostname': 'h1', 'app': 'sshd', 'procid': '1', 'severity': 3, 'facility': 4,
+            'msgid': '', 'message': 'boom', 'raw': ''})
+        sl = client.get("/api/v1/modules/overview").get_json().get("syslog")
+        assert sl and sl["total"] == 1
+        assert sl["recent"][0]["message"] == "boom"
+        assert sl["recent"][0]["severity_name"] == "err"
+
     def test_modules_list(self, client):
         """Modules list contains the two sample modules (ping, web)."""
         _login(client)

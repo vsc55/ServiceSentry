@@ -564,8 +564,24 @@ def register(app, wa):
             1 for s in servers_list if (s.get('checks') or {}).get('total', 0) > 0)
         coverage_pct = round(100 * hosts_monitored / servers_total) if servers_total else 0
 
+        # Syslog summary — latest messages + total + severity breakdown, only when
+        # the user may view it (feeds both the table and counter widgets).
+        syslog_recent, syslog_total, syslog_by_sev = [], 0, []
+        try:
+            if 'syslog_view' in wa._get_session_permissions():
+                _sstore = getattr(wa, '_syslog_store', None)
+                if _sstore is not None:
+                    syslog_recent = _sstore.query(limit=15)
+                    _sstats = _sstore.stats(top=1)
+                    syslog_total = _sstats.get('total', 0)
+                    syslog_by_sev = _sstats.get('by_severity', [])
+        except Exception:  # pylint: disable=broad-except
+            syslog_recent, syslog_total, syslog_by_sev = [], 0, []
+
         return jsonify({
             'modules': modules_list,
+            'syslog': {'total': syslog_total, 'recent': syslog_recent,
+                       'by_severity': syslog_by_sev},
             'status': {
                 'total': total_checks,
                 'ok': checks_ok,

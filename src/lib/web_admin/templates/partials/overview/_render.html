@@ -46,6 +46,7 @@ async function _softRefreshOverview() {
             content.innerHTML = _dwContent(id, data);
         }
     });
+    _dwSyslogAsyncRefresh();
     _startOverviewCountdown(_overviewTimer?._interval || 0);
 }
 
@@ -182,7 +183,10 @@ function setOverviewAutoRefresh(seconds) {
         const id = setInterval(() => {
             const pane = document.getElementById('tab-overview');
             // Auto-tick uses the soft (content-only) refresh to avoid flicker.
-            if (pane && pane.classList.contains('active')) _softRefreshOverview();
+            // Kiosk/fullscreen always shows the overview, so refresh there too even
+            // if the tab-pane active check doesn't hold.
+            if ((pane && pane.classList.contains('active')) || document.body.classList.contains('ss-kiosk'))
+                _softRefreshOverview();
         }, seconds * 1000);
         _overviewTimer = { _id: id, _interval: seconds };
     }
@@ -277,9 +281,9 @@ async function renderOverview() {
         const hpx     = def.hasH ? _dwHpx(item.h) : null;
         const cStyle  = hpx ? ` style="flex:none;height:${hpx}px;overflow-y:auto"` : '';
         h += `<div class="dw dw-c${item.cols}${spClass}${navClass}" data-wid="${escAttr(item.id)}"
-               data-cols="${item.cols}" data-h="${escAttr(String(item.h || 'auto'))}"${display}>`;
-        h += _dwToolbar(item.id, item.cols, item.h || 'auto');
-        h += `<div class="dw-content"${cStyle}>${_dwContent(item.id, data)}</div>`;
+               data-cols="${item.cols}" data-h="${escAttr(String(item.h || 'auto'))}"${item.sev ? ` data-sev="${escAttr(String(item.sev))}"` : ''}${item.srvf ? ` data-srvf="${escAttr(String(item.srvf))}"` : ''}${display}>`;
+        h += _dwToolbar(item.id, item.cols, item.h || 'auto', item);
+        h += `<div class="dw-content"${cStyle}>${_dwContent(item.id, data, item)}</div>`;
         if (def.hasH) h += `<div class="dw-resize" title="${escAttr(t('widget_resize_h') || 'Drag to resize height')}"></div>`;
         h += `</div>`;
     }
@@ -307,4 +311,7 @@ async function renderOverview() {
         bar?.classList.remove('d-none');
         if (grid) { _dwInitDnd(grid); _dwRefreshAddBar(); }
     }
+
+    // Syslog table widget with a minimum severity → load that level server-side.
+    _dwSyslogAsyncRefresh();
 }

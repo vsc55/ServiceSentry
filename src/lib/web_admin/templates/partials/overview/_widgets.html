@@ -108,6 +108,26 @@ function _dwModulesBadge(active, total) {
         <i class="bi bi-puzzle me-1" style="color:${icl}"></i>${active}/${total}</span>`;
 }
 
+// Servers table widget host filter (set in the layout editor): '' (all),
+// 'error' (a check is failing or the host status is error), 'maint' (in
+// maintenance), or 'errmaint' (either). Mirrors the table's Status/Checks columns.
+function _dwServerWidgetFilter() {
+    const el = document.querySelector('.dw[data-wid="servers_list"]');
+    return el ? (el.dataset.srvf || '') : '';
+}
+function _dwSrvHasError(h) { return (h.checks?.error ?? 0) > 0 || h.status === 'error'; }
+// f is the filter value; pass it explicitly (during a full render the widget's
+// DOM node isn't inserted yet, so reading data-srvf would be stale). Omit it to
+// resolve from the live DOM (soft refresh).
+function _dwServerFiltered(list, f) {
+    if (f === undefined) f = _dwServerWidgetFilter();
+    const arr = list || [];
+    if (f === 'error')    return arr.filter(_dwSrvHasError);
+    if (f === 'maint')    return arr.filter(h => h.maintenance);
+    if (f === 'errmaint') return arr.filter(h => _dwSrvHasError(h) || h.maintenance);
+    return arr;
+}
+
 function _dwBuildServerRows(servers) {
     const s = _dwSort['servers_list'];
     let rows = [...servers];
@@ -163,6 +183,66 @@ function _dwBuildActivityRows(events) {
           <td class="small text-nowrap text-muted">${esc(date)}</td>
           <td><span class="badge rounded-pill" style="${badgeStyle}">${esc(label)}</span></td>
           <td><code style="font-size:.8rem">${esc(e.user)}</code></td></tr>`;
+    }).join('');
+}
+
+// The syslog table widget's configured minimum severity (data-sev), or null.
+function _dwSyslogMinSev() {
+    const el = document.querySelector('.dw[data-wid="syslog"]');
+    const n = el ? parseInt(el.dataset.sev, 10) : NaN;
+    return Number.isInteger(n) ? n : null;   // null = all severities
+}
+
+// Recent messages filtered by the widget's minimum severity (lower number =
+// more severe, so keep severity <= the configured max), newest first. Used for
+// the synchronous initial render; _dwSyslogAsyncRefresh then loads a full list
+// of that severity server-side.
+function _dwSyslogFiltered(recent, sev) {
+    if (sev === undefined) sev = _dwSyslogMinSev();
+    const list = recent || [];
+    return sev == null ? list : list.filter(m => (m.severity ?? 7) <= sev);
+}
+
+// When the syslog table widget has a minimum severity, fetch the latest messages
+// AT THAT LEVEL OR MORE SEVERE from the server, so it shows a full list (not just
+// whatever the overview's recent slice happened to contain). No-op without a
+// minimum set (the overview's recent list already drives the widget).
+let _dwSyslogAsyncBusy = false;
+async function _dwSyslogAsyncRefresh() {
+    const dw = document.querySelector('.dw[data-wid="syslog"]');
+    if (!dw || dw.style.display === 'none') return;
+    const tbody = dw.querySelector('tbody');
+    const sev = _dwSyslogMinSev();
+    if (!tbody || sev == null || _dwSyslogAsyncBusy) return;
+    _dwSyslogAsyncBusy = true;
+    try {
+        const data = await apiGet(`/api/v1/syslog?severity_max=${sev}&limit=20`);
+        const cur = document.querySelector('.dw[data-wid="syslog"]');     // may have changed
+        if (cur && _dwSyslogMinSev() === sev) {
+            const tb = cur.querySelector('tbody');
+            const msgs = (data && data.messages) || [];
+            if (tb) tb.innerHTML = msgs.length
+                ? _dwBuildSyslogRows(msgs)
+                : `<tr><td colspan="4" class="text-center text-muted py-3">${esc(t('syslog_empty'))}</td></tr>`;
+        }
+    } finally {
+        _dwSyslogAsyncBusy = false;
+    }
+}
+
+// Recent syslog messages (newest first); reuses the syslog severity colours/
+// row tint from _js_syslog.html.
+function _dwBuildSyslogRows(msgs) {
+    if (!msgs || !msgs.length) return '';
+    return msgs.map(m => {
+        const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
+        const when = (m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '')).replace('T', ' ').replace('Z', '');
+        const host = m.hostname || m.source || '';
+        return `<tr class="sl-row-${cls}">
+          <td class="small text-nowrap text-muted pe-4" style="width:1%">${esc(when)}</td>
+          <td class="text-nowrap pe-4" style="width:1%"><span class="badge bg-${cls}">${esc(m.severity_name || '')}</span></td>
+          <td class="small text-nowrap pe-4" style="width:1%;max-width:12em;overflow:hidden;text-overflow:ellipsis" title="${escAttr(host)}">${esc(host)}</td>
+          <td class="small text-break">${esc(m.message || '')}</td></tr>`;
     }).join('');
 }
 
@@ -303,11 +383,12 @@ function _dwTbodyHtml(wid) {
     if (!d) return null;
     switch (wid) {
         case 'modules_list':  return _dwBuildModuleRows(d.modules || []);
-        case 'servers_list':  return _dwBuildServerRows((d.servers || {}).list || []);
+        case 'servers_list':  return _dwBuildServerRows(_dwServerFiltered((d.servers || {}).list, _dwServerWidgetFilter()));
         case 'sessions_list': return _dwBuildSessionRows((d.sessions || {}).list || []);
         case 'incidents':     return _dwBuildIncidentRows(d.failing_checks || []);
         case 'failed_logins': return _dwBuildFailedLoginRows(d.failed_logins || []);
         case 'activity':      return _dwBuildActivityRows(d.last_events || []);
+        case 'syslog':        return _dwBuildSyslogRows(_dwSyslogFiltered((d.syslog || {}).recent, _dwSyslogMinSev()));
         default:              return null;
     }
 }
@@ -340,7 +421,7 @@ function _dwTableCard(accent, avBg, avColor, icon, title, tableHtml) {
                 <i class="bi ${icon}"></i></span>
             <span class="fw-semibold" style="font-size:.92rem">${title}</span>
         </div>
-        <div style="overflow-y:auto;flex:1">${tableHtml}</div>
+        <div style="overflow-y:auto;flex:1;font-size:.875rem">${tableHtml}</div>
     </div>`;
 }
 
@@ -350,7 +431,19 @@ function _dwTheadRow(...ths) {
     </thead>`;
 }
 
-function _dwContent(id, data) {
+// `item` is the layout entry (with per-widget config like srvf/sev). Passed on a
+// full render because the widget's DOM node isn't inserted yet; omitted on the
+// soft refresh / re-add paths where the live DOM dataset is read instead.
+// Filter badge: a leading colour dot, then a soft (subtle) colour pill.
+function _dwFilterBadge(label, color, subtleBg) {
+    return `<i class="bi bi-circle-fill ms-2 me-1" style="color:${color};font-size:.5rem;vertical-align:middle"></i>`
+         + `<span class="badge fw-normal" style="font-size:.7rem;vertical-align:middle;background:${subtleBg};color:${color}">${esc(label)}</span>`;
+}
+const _DW_SEV_HEX = { danger: '#dc3545', warning: '#ffc107', info: '#0dcaf0', secondary: '#6c757d' };
+const _DW_SEV_SUBTLE = { danger: 'rgba(220,53,69,.16)', warning: 'rgba(255,193,7,.20)',
+                         info: 'rgba(13,202,240,.16)', secondary: 'rgba(108,117,125,.18)' };
+
+function _dwContent(id, data, item) {
     if (_dwIsSpacer(id)) return '<div class="dw-spacer-box"></div>';
     const perms   = new Set(currentUser.permissions || []);
 
@@ -518,7 +611,16 @@ function _dwContent(id, data) {
         case 'servers_list': {
             if (!perms.has('servers_view') && ![...perms].some(x => x.startsWith('server.')))
                 return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const slist = (data.servers || {}).list || [];
+            const _srvf = item ? (item.srvf || '') : _dwServerWidgetFilter();
+            const slist = _dwServerFiltered((data.servers || {}).list, _srvf);
+            // One badge per active condition, each with its own colour: error
+            // (red), maintenance (orange), or both for 'errmaint'.
+            const _bErr   = _dwFilterBadge(t('host_status_error'), '#dc3545', 'rgba(220,53,69,.16)');
+            const _bMaint = _dwFilterBadge(t('host_status_maintenance'), '#fd7e14', 'rgba(253,126,20,.18)');
+            const _srvBadge = (_srvf === 'error') ? _bErr
+                : (_srvf === 'maint') ? _bMaint
+                : (_srvf === 'errmaint') ? (_bErr + _bMaint) : '';
+            const _srvTitle = t('overview_servers') + _srvBadge;
             const table = `<table class="table table-sm table-hover align-middle mb-0">
                 ${_dwTheadRow(
                     _dwTh('servers_list','name',t('col_server')),
@@ -529,7 +631,7 @@ function _dwContent(id, data) {
                 <tbody>${_dwBuildServerRows(slist)}</tbody>
             </table>`;
             return _dwTableCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
-                'bi-hdd-network', t('overview_servers'), table);
+                'bi-hdd-network', _srvTitle, table);
         }
 
         case 'sessions_list': {
@@ -597,6 +699,52 @@ function _dwContent(id, data) {
             </table>`;
             return _dwTableCard('linear-gradient(90deg,#64748b,#475569)', 'rgba(100,116,139,.12)', '#64748b',
                 'bi-clock-history', t('overview_recent_activity'), table);
+        }
+
+        case 'syslog_stats': {
+            if (!perms.has('syslog_view'))
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            const sl = data.syslog || {};
+            // Severity breakdown badges (only non-zero), coloured like the syslog tab.
+            const sub = (sl.by_severity || [])
+                .filter(s => s.count)
+                .map(s => {
+                    const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[s.value]) || 'secondary';
+                    return `<span class="badge bg-${cls}" style="font-size:.72rem">${s.count} ${esc(s.name)}</span>`;
+                }).join('') || '<span class="text-muted small">—</span>';
+            return _dwStatCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
+                'bi-card-list', sl.total || 0, 'overview_syslog_stats', sub);
+        }
+
+        case 'syslog': {
+            if (!perms.has('syslog_view'))
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            // sev from the layout item on a full render (DOM not inserted yet),
+            // else from the live DOM.
+            const _sevRaw = item ? item.sev : (document.querySelector('.dw[data-wid="syslog"]')?.dataset.sev);
+            const _sev = (_sevRaw == null || _sevRaw === '') ? null : (parseInt(_sevRaw, 10) || 0);
+            const slist = _dwSyslogFiltered((data.syslog || {}).recent, _sev);
+            // With a minimum severity set, always render the table shell (its
+            // body is (re)filled server-side by _dwSyslogAsyncRefresh) so an empty
+            // client-side slice never collapses it to an empty state without a
+            // <tbody> for the async fill to target.
+            if (_sev == null && !slist.length)
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('syslog_empty')}</div>`;
+            const table = `<table class="table table-sm table-hover align-middle mb-0">
+                ${_dwTheadRow(
+                    `<th class="small pe-4" style="white-space:nowrap;width:1%">${esc(t('syslog_time'))}</th>`,
+                    `<th class="small pe-4" style="white-space:nowrap;width:1%">${esc(t('syslog_severity'))}</th>`,
+                    `<th class="small pe-4" style="white-space:nowrap;width:1%">${esc(t('syslog_host'))}</th>`,
+                    `<th class="small">${esc(t('syslog_message'))}</th>`
+                )}
+                <tbody>${_dwBuildSyslogRows(slist)}</tbody>
+            </table>`;
+            const _slSev = (_sev != null && typeof _SYSLOG_SEV !== 'undefined' && _SYSLOG_SEV[_sev]) || (_sev != null ? _sev : null);
+            const _slCls = (_sev != null && typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[_sev]) || 'secondary';
+            const _slTitle = t('overview_syslog') + (_slSev != null
+                ? _dwFilterBadge('≥ ' + _slSev, _DW_SEV_HEX[_slCls] || '#6c757d', _DW_SEV_SUBTLE[_slCls] || 'rgba(108,117,125,.18)') : '');
+            return _dwTableCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
+                'bi-card-list', _slTitle, table);
         }
 
         default: return '';
