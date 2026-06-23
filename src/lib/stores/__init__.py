@@ -15,6 +15,7 @@ exposes a Store class:
                    tables: module_config, module_config_items)
     roles        — RolesStore
     sessions     — SessionsStore
+    syslog       — SyslogStore (received syslog messages; time+row retention)
     users        — UsersStore (tables: users, users_groups)
     webhooks     — WebhooksStore (outgoing notification webhooks)
 """

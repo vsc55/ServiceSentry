@@ -108,7 +108,10 @@ class Monitor(ObjectBase):
             return None
         try:
             from lib.db import get_connector  # noqa: PLC0415
-            db_cfg = self.config.get_conf(['database']) or {}
+            from lib.config.manager import bootstrap_database_cfg  # noqa: PLC0415
+            # Overlay SS_DB_* env on the config.json database section (same
+            # bootstrap path the web admin and syslog service use).
+            db_cfg = bootstrap_database_cfg({'database': self.config.get_conf(['database']) or {}})
             return get_connector(db_cfg or None,
                                  default_sqlite_path=os.path.join(self.dir_var, 'data.db'))
         except Exception:  # pylint: disable=broad-except

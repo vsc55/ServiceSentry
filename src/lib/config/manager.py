@@ -40,6 +40,34 @@ def read_config_raw(path: str, fernet=None) -> dict:
     return data
 
 
+def bootstrap_database_cfg(file_cfg: dict | None) -> dict | None:
+    """The ``database`` section for connector bootstrap, with ``SS_DB_*`` env overlaid.
+
+    The database section is consumed *before* the ConfigManager (and its DB
+    connector) exists, so the normal web-layer env-override path hasn't run yet.
+    Overlaying the env here lets a containerised deployment point ServiceSentry
+    at MySQL/MariaDB/PostgreSQL purely through env vars (no config.json edit),
+    while a config.json ``database`` block still works when no env is set.
+    """
+    from lib.config.spec import env_field_specs  # noqa: PLC0415 (avoid import cycle)
+    db = dict((file_cfg or {}).get('database') or {})
+    for env_key, (path, cast) in env_field_specs().items():
+        if not path.startswith('database|'):
+            continue
+        raw = os.environ.get(env_key)
+        if raw in (None, ''):
+            continue
+        field = path.split('|', 1)[1]
+        if cast is int:
+            try:
+                db[field] = int(raw)
+            except (TypeError, ValueError):
+                continue
+        else:
+            db[field] = raw
+    return db or None
+
+
 def _decrypt_db_values(db_vals: dict, fernet) -> dict:
     """DB values store ciphertext for secrets; decrypt them by field name (reusing
     the nested key-matching of :mod:`lib.secret_manager`)."""

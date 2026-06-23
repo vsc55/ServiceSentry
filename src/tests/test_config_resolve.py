@@ -75,3 +75,34 @@ class TestPrecedence:
             {}, {}, include_defaults=False)
         assert eff['web_admin']['page_sizes'] == [10, 25]
         assert eff['oidc']['group_role_map'] == {'admins': 'admin'}
+
+
+class TestBootstrapDatabaseCfg:
+    """SS_DB_* env overlay used to point the connector at MySQL/PostgreSQL."""
+
+    def test_env_overlays_file_section(self, monkeypatch):
+        from lib.config.manager import bootstrap_database_cfg
+        monkeypatch.setenv('SS_DB_DRIVER', 'mysql')
+        monkeypatch.setenv('SS_DB_HOST', 'db')
+        monkeypatch.setenv('SS_DB_PORT', '3306')
+        monkeypatch.setenv('SS_DB_NAME', 'ss')
+        monkeypatch.setenv('SS_DB_USER', 'svc')
+        monkeypatch.setenv('SS_DB_PASSWORD', 'secret')
+        db = bootstrap_database_cfg({'database': {'driver': 'sqlite'}})
+        assert db['driver'] == 'mysql' and db['host'] == 'db'
+        assert db['port'] == 3306 and isinstance(db['port'], int)
+        assert db['name'] == 'ss' and db['user'] == 'svc' and db['password'] == 'secret'
+
+    def test_no_env_returns_file_section(self, monkeypatch):
+        from lib.config.manager import bootstrap_database_cfg
+        for k in ('SS_DB_DRIVER', 'SS_DB_HOST', 'SS_DB_PORT', 'SS_DB_NAME',
+                  'SS_DB_USER', 'SS_DB_PASSWORD', 'SS_DB_PATH'):
+            monkeypatch.delenv(k, raising=False)
+        assert bootstrap_database_cfg({'database': {'driver': 'sqlite'}}) == {'driver': 'sqlite'}
+        assert bootstrap_database_cfg({}) is None      # nothing to bootstrap
+
+    def test_bad_port_is_ignored(self, monkeypatch):
+        from lib.config.manager import bootstrap_database_cfg
+        monkeypatch.setenv('SS_DB_PORT', 'notaport')
+        db = bootstrap_database_cfg({'database': {'driver': 'mysql', 'port': 3306}})
+        assert db['port'] == 3306                       # invalid env left the file value

@@ -20,11 +20,30 @@ def _resolve_host_ctx(wa, config):
     """
     from lib import os_detect  # noqa: PLC0415
 
+    def _apply_ssh_cred(ssh):
+        """Overlay a named SSH credential (ssh profile ``cred_uid``) — the host
+        may reference the credential manager instead of inline secrets, so
+        host-aware discovery must resolve it (like ModuleBase does for checks)."""
+        ssh = dict(ssh or {})
+        cred_uid = str(ssh.get('cred_uid') or '').strip()
+        cstore = getattr(wa, '_credentials_store', None)
+        if not cred_uid or cstore is None:
+            return ssh
+        try:
+            cred = cstore.get(cred_uid)
+        except Exception:  # pylint: disable=broad-except
+            return ssh
+        if not cred:
+            return ssh
+        from lib.stores.credentials import apply_credential  # noqa: PLC0415
+        return apply_credential(ssh, cred)
+
     def _ctx(address, kind, os_, ssh):
         os_ = str(os_ or 'auto').strip().lower()
         if os_ == 'auto':
             os_ = os_detect.local_os() if kind != 'remote' else 'linux'
-        return {'address': address or '', 'kind': kind or 'local', 'os': os_, 'ssh': ssh or {}}
+        return {'address': address or '', 'kind': kind or 'local', 'os': os_,
+                'ssh': _apply_ssh_cred(ssh)}
 
     store = getattr(wa, '_hosts_store', None)
     uid = str(config.get('host_uid') or '').strip()

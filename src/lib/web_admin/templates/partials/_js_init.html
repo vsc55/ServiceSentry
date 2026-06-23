@@ -247,6 +247,12 @@ if (statusLi) statusLi.style.display = hasChecks ? '' : 'none';
 // History tab
 const historyLi = document.getElementById('tab-history-li');
 if (historyLi) historyLi.style.display = perms.has('history_view') ? '' : 'none';
+// Syslog tab
+const syslogLi = document.getElementById('tab-syslog-li');
+if (syslogLi) syslogLi.style.display = perms.has('syslog_view') ? '' : 'none';
+// Services tab
+const servicesLi = document.getElementById('tab-services-li');
+if (servicesLi) servicesLi.style.display = perms.has('services_view') ? '' : 'none';
 // Audit tab
 const auditLi = document.getElementById('tab-audit-li');
 if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
@@ -339,6 +345,8 @@ renderGroups();
 }
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
 document.getElementById('btn-tab-history')?.addEventListener('shown.bs.tab', renderHistory);
+document.getElementById('btn-tab-syslog')?.addEventListener('shown.bs.tab', renderSyslog);
+document.getElementById('btn-tab-services')?.addEventListener('shown.bs.tab', renderServices);
 // Re-fetch host status every time the Servers tab is shown, so the Status column
 // reflects a "Run all" or a status "clean" done from the Status tab (both leave
 // hostsData stale until reloaded).

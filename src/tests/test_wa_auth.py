@@ -100,6 +100,19 @@ class TestAuthentication:
         resp = client.get("/")
         assert resp.status_code == 200
 
+    def test_dashboard_seeds_config_defaults_from_registry(self, client):
+        """The config UI's section defaults come from the registry (spec), not
+        hardcoded literals: the rendered page injects CONFIG_REGISTRY_DEFAULTS
+        carrying the spec's values (e.g. syslog|udp_port=514)."""
+        from lib.config.spec import registry_defaults
+        _login(client)
+        html = client.get("/").get_data(as_text=True)
+        assert "CONFIG_REGISTRY_DEFAULTS" in html
+        defs = registry_defaults()
+        assert defs["syslog|udp_port"] == 514
+        # the registry is the single source — spec, not the template, owns these
+        assert "syslog|udp_port" in defs and "notifications|telegram_on_down" in defs
+
     def test_session_stores_user_info(self, client):
         """Login populates session with username, role and display_name."""
         _login(client)

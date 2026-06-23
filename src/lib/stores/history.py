@@ -145,6 +145,17 @@ class HistoryStore:
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
+    def latest_ts(self) -> float | None:
+        """Unix timestamp of the most recent recorded check, or None if empty.
+
+        Used to detect an external monitoring worker: if the web's own scheduler
+        is stopped yet checks keep landing here, a separate worker is running."""
+        try:
+            row = self._db.fetchone(f'SELECT MAX(ts) FROM {_T}')
+        except Exception:  # pylint: disable=broad-except
+            return None
+        return row[0] if row and row[0] is not None else None
+
     def get_index(self) -> list[dict]:
         """Return metadata for every recorded series.
 

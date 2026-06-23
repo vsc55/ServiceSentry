@@ -171,13 +171,16 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('global|log_level', str, 'off', no_rule=True),
 
     # ══ database (port is driver-specific → no single default) ═══════════════
-    Cfg('database|driver', str, 'sqlite', no_rule=True),
-    Cfg('database|path', str, '', no_rule=True),       # '' → default_sqlite_path
-    Cfg('database|host', str, 'localhost', no_rule=True),
-    Cfg('database|port', int, None, no_rule=True),     # 3306 MySQL / 5432 PostgreSQL
-    Cfg('database|name', str, 'servicesentry', no_rule=True),
-    Cfg('database|user', str, '', no_rule=True),
-    Cfg('database|password', str, '', no_rule=True),
+    # Bootstrap section: read before the DB connector exists, so the env vars are
+    # overlaid at connector-build time (see lib.config.bootstrap_database_cfg),
+    # not through the usual web-layer override path.
+    Cfg('database|driver', str, 'sqlite', env='SS_DB_DRIVER', no_rule=True),
+    Cfg('database|path', str, '', env='SS_DB_PATH', no_rule=True),  # '' → default_sqlite_path
+    Cfg('database|host', str, 'localhost', env='SS_DB_HOST', no_rule=True),
+    Cfg('database|port', int, None, env='SS_DB_PORT', no_rule=True),  # 3306 MySQL / 5432 PostgreSQL
+    Cfg('database|name', str, 'servicesentry', env='SS_DB_NAME', no_rule=True),
+    Cfg('database|user', str, '', env='SS_DB_USER', no_rule=True),
+    Cfg('database|password', str, '', env='SS_DB_PASSWORD', no_rule=True),
 
     # ══ LDAP ═════════════════════════════════════════════════════════════════
     Cfg('ldap|enabled', bool, False),
@@ -268,6 +271,28 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('notifications|webhook_on_down', bool, False),
     Cfg('notifications|webhook_on_recovery', bool, False),
     Cfg('notifications|webhook_on_warn', bool, False),
+    # Syslog-receiver alert routing (kind='syslog'): a matching received message
+    # notifies the enabled channels, same matrix as the check events.
+    Cfg('notifications|telegram_on_syslog', bool, False),
+    Cfg('notifications|email_on_syslog', bool, False),
+    Cfg('notifications|webhook_on_syslog', bool, False),
+
+    # ══ Syslog receiver ═════════════════════════════════════════════════════
+    # Built-in syslog server: receive RFC 3164/5424 events from external hosts
+    # over UDP/TCP(+TLS), store them (lib/stores/syslog.py) and optionally alert.
+    Cfg('syslog|enabled',         bool, False, admin_only=True),
+    Cfg('syslog|bind_host',       str, '0.0.0.0', admin_only=True),
+    Cfg('syslog|udp_port',        int, 514, min=0, max=65535, admin_only=True),
+    Cfg('syslog|tcp_port',        int, 514, min=0, max=65535, admin_only=True),
+    Cfg('syslog|tls_port',        int, 0,   min=0, max=65535, admin_only=True),
+    Cfg('syslog|tls_cert',        str, '', admin_only=True),
+    Cfg('syslog|tls_key',         str, '', admin_only=True),
+    Cfg('syslog|allowed_sources', str, '', admin_only=True),   # comma/space/newline IPs or CIDRs
+    Cfg('syslog|retention_days',  int, 30, min=0, max=3650, admin_only=True),
+    Cfg('syslog|max_rows',        int, 500000, min=0, max=100000000, admin_only=True),
+    Cfg('syslog|alert_enabled',   bool, False, admin_only=True),
+    Cfg('syslog|alert_severity_max', int, 3, min=0, max=7, admin_only=True),   # err and worse
+    Cfg('syslog|alert_regex',     str, '', admin_only=True),
 
     # ══ Webhooks (editor schema only) ═══════════════════════════════════════
     # These are the per-webhook FORM field defaults (type/default for the editor
@@ -430,6 +455,41 @@ def env_field_specs() -> dict:
 def admin_only_fields() -> set:
     """Set of web_admin field paths only admins may modify."""
     return {f.path for f in CONFIG_FIELDS if f.admin_only}
+
+
+def registry_defaults() -> dict:
+    """``{path: default}`` for every registry field eligible for UI seeding.
+
+    The config UI pre-populates each section so its card renders before the
+    option has ever been saved.  Those initial values come from here — the
+    central registry — instead of being hardcoded in the template, so the
+    frontend can never drift from the source of truth.  ``no_seed`` fields
+    (webhooks/credentials, stored as records elsewhere) are excluded; a
+    JSON-object field with no default seeds an empty object string.
+    """
+    out: dict = {}
+    for f in CONFIG_FIELDS:
+        if f.no_seed:
+            continue
+        default = f.default
+        if f.type is dict and default is None:
+            default = '{}'
+        out[f.path] = default
+    return out
+
+
+def section_defaults(section: str) -> dict:
+    """Registry defaults for one section as ``{field: default}``.
+
+    Defaults are resolved lazily (never materialised in the DB), so a section
+    read back from the effective config only contains the fields a user has
+    actually saved.  Consumers that need a *complete* section (e.g. the syslog
+    listener, which must see its ports even when only ``enabled`` was saved)
+    merge these defaults underneath the saved values.
+    """
+    prefix = section + '|'
+    return {p[len(prefix):]: d for p, d in registry_defaults().items()
+            if p.startswith(prefix)}
 
 
 def frontend_schema() -> dict:

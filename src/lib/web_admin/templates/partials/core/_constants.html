@@ -144,6 +144,14 @@ const CONFIG_FIELD_DEFAULTS = {
     'web_admin|role_modal_scrollable': true,
 };
 
+/**
+ * Default values for EVERY config field, keyed by 'section|field', derived
+ * server-side from the central registry (lib.config.spec.registry_defaults).
+ * The config UI seeds each section from here so its card renders before the
+ * option is ever saved — the single source of truth, never hardcoded literals.
+ */
+const CONFIG_REGISTRY_DEFAULTS = {{ config_registry_defaults | default({}) | tojson }};
+
 // Field schema loaded from /api/config/schema — min, max, default per field.
 let configSchema = {};
 

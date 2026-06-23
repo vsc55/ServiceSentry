@@ -26,7 +26,8 @@ from .constants import (
     BUILTIN_ROLE_UIDS,
     ROLES,
 )
-from lib.config.spec import CFG_BY_PATH, cfg_validate, env_field_specs, normalize_url
+from lib.config.spec import (
+    CFG_BY_PATH, cfg_validate, env_field_specs, normalize_url, registry_defaults)
 from .auth import ldap_auth as _ldap_auth
 from .auth import oidc_auth as _oidc_auth
 from .auth import saml_auth as _saml_auth
@@ -48,14 +49,16 @@ def _cfg_default(path: str):
     return CFG_BY_PATH[path].default
 from .mixins import (
     _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-    _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin,
+    _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin, _SyslogMixin,
+    _ServicesMixin,
 )
 
 __all__ = ['WebAdmin']
 
 
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-               _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin):
+               _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin, _SyslogMixin,
+               _ServicesMixin):
     """Web administration server for ServiceSentry configuration.
 
     Provides a browser-based UI for editing the configuration and managing
@@ -235,6 +238,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
 
         # Start the background scheduler if auto-start is configured.
         self._daemon_init()
+        # Start the syslog receiver if enabled (own listener threads + retention).
+        self._init_syslog()
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -419,8 +424,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         from lib.stores.groups   import GroupsStore     # noqa: PLC0415
         from lib.stores.sessions import SessionsStore   # noqa: PLC0415
         from lib.stores.roles    import RolesStore      # noqa: PLC0415
+        from lib.config.manager import bootstrap_database_cfg  # noqa: PLC0415
         db_path = os.path.join(self._var_dir or self._config_dir, 'data.db')
-        db_cfg  = (self._read_config_file(self._CONFIG_FILE) or {}).get('database')
+        db_cfg  = bootstrap_database_cfg(self._read_config_file(self._CONFIG_FILE))
         self._db_connector   = get_connector(db_cfg or None, default_sqlite_path=db_path)
         self._users_store    = UsersStore(self._db_connector)
         self._groups_store   = GroupsStore(self._db_connector)
@@ -841,6 +847,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_force_fqdn':  self._force_fqdn,
                 'wa_startup_id':  self._startup_id,
                 'wa_default_dark_mode': self._default_dark_mode,
+                'config_registry_defaults': registry_defaults(),
                 'ldap_enabled':       _ldap_auth.is_available()  and bool(_ldap_cfg.get('enabled')),
                 'ldap_button_label':  (_ldap_cfg.get('button_label')  or '').strip(),
                 'oidc_enabled':       _oidc_auth.is_available()  and bool(_oidc_cfg.get('enabled')),

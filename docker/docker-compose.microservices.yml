@@ -1,19 +1,56 @@
-# ServiceSentry — microservices topology
-# =======================================
-# Two containers: the web admin panel (UI + on-demand checks) and a dedicated
-# worker that runs the periodic monitoring loop. The web does NOT self-schedule
-# here (SS_AUTOSTART=false) — the worker owns monitoring, which survives web
-# restarts and keeps check load off the request path.
+# ServiceSentry — microservices topology (MariaDB-backed)
+# ========================================================
+# Four containers sharing one MariaDB database:
+#   • db      — MariaDB, the single shared datastore (config, users, history,
+#               module tables, syslog messages …).
+#   • web     — the admin panel / UI (on-demand checks only; does NOT schedule).
+#   • worker  — the periodic monitoring loop (owns scheduling).
+#   • syslog  — the standalone syslog receiver (binds the UDP/TCP/TLS ports).
 #
-#   cp docker/env.example docker/.env      # then edit docker/.env (at least SS_PASSWORD)
+#   cp docker/env.example docker/.env     # then edit (at least SS_PASSWORD + SS_DB_*)
 #   docker compose -f docker/docker-compose.microservices.yml up -d
 #
-# Secrets and custom settings live in docker/.env (gitignored); see env.example.
-# Do NOT also enable SS_AUTOSTART on the web service: the worker and the web
-# scheduler are separate processes with no shared lock, so running both would
-# double every check (duplicate history + notification storms).
+# Why split the syslog receiver out: it binds privileged-ish network ports and
+# handles untrusted input, so isolating it keeps that surface off the web/worker.
+# The web container therefore runs with SS_SYSLOG_EMBEDDED=0 — it still shows the
+# Syslog tab and serves stored messages from the shared DB, but does not bind the
+# ports (the syslog container owns them). Enabling/disabling the receiver or
+# changing its ports from the UI is picked up by the syslog container live (it
+# polls the shared DB), so no restart is needed.
+#
+# Do NOT enable SS_AUTOSTART on the web service: the worker owns monitoring, and
+# two schedulers with no shared lock would double every check.
+
+# Shared database connection env — overlaid onto the (empty) config.json
+# ``database`` section at bootstrap by every ServiceSentry process (SS_DB_*).
+x-db-env: &db-env
+  SS_DB_DRIVER: mysql
+  SS_DB_HOST: db
+  SS_DB_PORT: "3306"
+  SS_DB_NAME: ${SS_DB_NAME:-servicesentry}
+  SS_DB_USER: ${SS_DB_USER:-servicesentry}
+  SS_DB_PASSWORD: ${SS_DB_PASSWORD:?set SS_DB_PASSWORD in docker/.env}
 
 services:
+
+  # ── Shared database ─────────────────────────────────────────────────────────
+  db:
+    image: mariadb:11
+    container_name: servicesentry-db
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${SS_DB_NAME:-servicesentry}
+      MARIADB_USER: ${SS_DB_USER:-servicesentry}
+      MARIADB_PASSWORD: ${SS_DB_PASSWORD:?set SS_DB_PASSWORD in docker/.env}
+      MARIADB_ROOT_PASSWORD: ${SS_DB_ROOT_PASSWORD:?set SS_DB_ROOT_PASSWORD in docker/.env}
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # ── Web admin panel ─────────────────────────────────────────────────────────
   web:
@@ -37,12 +74,17 @@ services:
       - .env
     # Per-topology values — kept here, not in .env:
     environment:
-      - SS_SERVICE_ROLE=web
-      - SS_WEB_HOST=0.0.0.0
-      - SS_WEB_PORT=8080
+      <<: *db-env
+      SS_SERVICE_ROLE: web
+      SS_WEB_HOST: 0.0.0.0
+      SS_WEB_PORT: "8080"
       # Keep false: the worker container does the monitoring.
-      - SS_AUTOSTART=false
-
+      SS_AUTOSTART: "false"
+      # The syslog container owns the listener; the web only shows stored data.
+      SS_SYSLOG_EMBEDDED: "0"
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f -s http://localhost:${SS_WEB_PORT:-8080}/"]
       interval: 30s
@@ -65,13 +107,42 @@ services:
       # Required by the ping watchful module (raw ICMP sockets).
       # Remove if not using ping monitoring.
       - NET_RAW
-    # Same shared secrets/config; the worker only needs SS_CHECK_INTERVAL + telegram.
     env_file:
       - .env
     environment:
-      - SS_SERVICE_ROLE=worker
-
+      <<: *db-env
+      SS_SERVICE_ROLE: worker
     depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+  # ── Standalone syslog receiver ──────────────────────────────────────────────
+  syslog:
+    image: servicesentry:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: servicesentry-syslog
+    restart: unless-stopped
+    # Syslog listener ports. Defaults: UDP 514, TCP 514, TLS 6514 (TLS off until
+    # tls_cert/tls_key are configured). Adjust the host side if 514 is taken.
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+      - "6514:6514/tcp"
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    env_file:
+      - .env
+    environment:
+      <<: *db-env
+      SS_SERVICE_ROLE: syslog
+    depends_on:
+      db:
+        condition: service_healthy
       web:
         condition: service_healthy
 
@@ -79,6 +150,8 @@ services:
 # Docker manages these volumes; inspect their location with:
 #   docker volume inspect docker_config
 #   docker volume inspect docker_vardata
+#   docker volume inspect docker_dbdata
 volumes:
   config:
   vardata:
+  dbdata:

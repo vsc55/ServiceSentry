@@ -1,0 +1,157 @@
+// ── Services tab ──────────────────────────────────────────────────────────────
+// Central view of the background services (scheduler / syslog / worker / DB) with
+// start/stop for the ones this process hosts. Status comes from /api/v1/services;
+// control via POST /api/v1/services/<name>/<action>.
+
+// state → Bootstrap colour for the status badge / dot.
+const _SVC_STATE_CLS = {
+    running:  'success', active:   'success', embedded: 'info',
+    stopped:  'secondary', disabled: 'secondary', external: 'info',
+    stale:    'warning', unknown:  'secondary', error:    'danger',
+};
+
+let _svcPollTimer = null;
+
+function _svcStateLabel(state) { return t('svc_state_' + state) || state; }
+
+function _svcAgo(ts) {
+    if (!ts) return '—';
+    const secs = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+    if (secs < 60) return t('svc_just_now');
+    if (secs < 3600) return Math.floor(secs / 60) + ' min';
+    if (secs < 86400) return Math.floor(secs / 3600) + ' h';
+    return Math.floor(secs / 86400) + ' d';
+}
+
+function _svcIn(secs) {
+    if (secs == null) return '—';
+    if (secs <= 0) return t('svc_now');
+    if (secs < 60) return secs + ' s';
+    if (secs < 3600) return Math.floor(secs / 60) + ' min';
+    return Math.floor(secs / 3600) + ' h';
+}
+
+function _svcRow(label, value) {
+    return `<div class="d-flex justify-content-between small py-1 border-top">
+        <span class="text-muted">${esc(label)}</span><span>${value}</span></div>`;
+}
+
+// Render one service card. `meta` = {key, icon, title, rows[], canControl, running}
+function _svcCard(meta) {
+    const cls = _SVC_STATE_CLS[meta.state] || 'secondary';
+    const canCtl = currentUser.permissions?.includes('services_control');
+    let actions = '';
+    if (meta.controllable && canCtl) {
+        actions = meta.running
+            ? `<button class="btn btn-warning btn-sm" onclick="servicesControl('${meta.key}','stop')">
+                   <i class="bi bi-stop-fill me-1"></i>${esc(t('svc_stop'))}</button>`
+            : `<button class="btn btn-success btn-sm" onclick="servicesControl('${meta.key}','start')">
+                   <i class="bi bi-play-fill me-1"></i>${esc(t('svc_start'))}</button>`;
+    } else if (!meta.embedded) {
+        actions = `<span class="small text-muted fst-italic">${esc(t('svc_external_managed'))}</span>`;
+    }
+    return `<div class="col-md-6 col-xl-3 mb-3">
+        <div class="card h-100 shadow-sm svc-card border-${cls}">
+            <div class="svc-card-accent bg-${cls}"></div>
+            <div class="card-body d-flex flex-column">
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi ${meta.icon} fs-4 me-2 text-${cls}"></i>
+                    <h6 class="mb-0 flex-grow-1">${esc(meta.title)}</h6>
+                    <span class="badge bg-${cls}">${esc(_svcStateLabel(meta.state))}</span>
+                </div>
+                <div class="flex-grow-1">${meta.rows.join('')}</div>
+                <div class="mt-2 d-flex justify-content-end" style="min-height:2rem">${actions}</div>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function renderServices() {
+    const c = document.getElementById('services-container');
+    if (!c) return;
+    const resp = await apiGet('/api/v1/services');
+    const s = (resp && resp.services) || {};
+
+    const cards = [];
+
+    // Scheduler (embedded monitoring loop)
+    if (s.scheduler) {
+        const d = s.scheduler;
+        cards.push(_svcCard({
+            key: 'scheduler', icon: 'bi-arrow-repeat', title: t('svc_scheduler'),
+            state: d.state, running: d.running, controllable: d.controllable, embedded: d.embedded,
+            rows: [
+                _svcRow(t('svc_interval'), d.interval != null ? d.interval + ' s' : '—'),
+                _svcRow(t('svc_next_run'), d.running ? _svcIn(d.next_in) : '—'),
+                _svcRow(t('svc_last_run'), _svcAgo(d.last_run)),
+                _svcRow(t('svc_autostart'), d.autostart ? t('svc_yes') : t('svc_no')),
+            ],
+        }));
+    }
+
+    // Syslog receiver
+    if (s.syslog) {
+        const d = s.syslog;
+        cards.push(_svcCard({
+            key: 'syslog', icon: 'bi-hdd-stack', title: t('svc_syslog'),
+            state: d.state, running: d.running, controllable: d.controllable, embedded: d.embedded,
+            rows: [
+                _svcRow(t('svc_ports'), `UDP ${d.udp_port||'—'} · TCP ${d.tcp_port||'—'} · TLS ${d.tls_port||'—'}`),
+                _svcRow(t('svc_messages'), d.count),
+                _svcRow(t('svc_mode'), d.embedded ? t('svc_mode_embedded') : t('svc_mode_container')),
+            ],
+        }));
+    }
+
+    // Worker (external monitoring process)
+    if (s.worker) {
+        const d = s.worker;
+        cards.push(_svcCard({
+            key: 'worker', icon: 'bi-cpu', title: t('svc_worker'),
+            state: d.state, running: false, controllable: false, embedded: false,
+            rows: [
+                _svcRow(t('svc_last_activity'), _svcAgo(d.last_activity)),
+                _svcRow(t('svc_recent_checks'), d.fresh ? t('svc_yes') : t('svc_no')),
+            ],
+        }));
+    }
+
+    // Database
+    if (s.database) {
+        const d = s.database;
+        cards.push(_svcCard({
+            key: 'database', icon: 'bi-database', title: t('svc_database'),
+            state: d.state, running: false, controllable: false, embedded: false,
+            rows: [
+                _svcRow(t('svc_driver'), esc(d.driver || '—')),
+                _svcRow(t('svc_host'), esc(d.host || '—')),
+            ],
+        }));
+    }
+
+    const refreshBtn = `<button class="btn btn-secondary btn-sm" onclick="renderServices()">
+        <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('svc_refresh'))}</button>`;
+
+    c.innerHTML = `<div class="d-flex align-items-center mb-3">
+            <h5 class="mb-0 flex-grow-1"><i class="bi bi-hdd-rack me-2"></i>${esc(t('tab_services'))}</h5>
+            ${refreshBtn}
+        </div>
+        <div class="row">${cards.join('') || `<p class="text-muted">${esc(t('svc_none'))}</p>`}</div>`;
+
+    // Light auto-refresh while the Services tab stays visible.
+    if (_svcPollTimer) clearTimeout(_svcPollTimer);
+    _svcPollTimer = setTimeout(() => {
+        if (document.getElementById('tab-services')?.classList.contains('active')) renderServices();
+    }, 5000);
+}
+
+async function servicesControl(name, action) {
+    const r = await apiPost(`/api/v1/services/${name}/${action}`, {});
+    if (r && (r.status === 200) && r.data?.ok) {
+        showToast(t('svc_' + action + '_ok'), 'success');
+    } else {
+        const reason = r?.data?.reason;
+        showToast(reason ? (t('svc_err_' + reason) || reason) : t('svc_action_error'), 'warning');
+    }
+    renderServices();
+}

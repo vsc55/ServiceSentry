@@ -319,6 +319,10 @@ def register(app, wa):
             # Re-apply log level immediately so a verbosity change in the UI
             # takes effect for request tracing without waiting for a restart.
             wa._apply_log_level()
+            # Restart the syslog listener when any syslog setting changed.
+            if any(p.startswith('syslog|') for p in to_apply) and hasattr(wa, '_syslog_apply_config'):
+                wa._invalidate_config_cache()
+                wa._syslog_apply_config()
             # Apply web_admin.lang at runtime if changed
             new_lang = (new_data.get('web_admin') or {}).get('lang', '')
             wa._default_lang = coerce_lang(new_lang, wa._default_lang)

@@ -74,6 +74,10 @@ PERMISSIONS = (
     'checks_run',      # trigger module checks on demand
     'history_view',    # view historical check data and charts
     'history_delete',  # delete historical data
+    'syslog_view',     # view received syslog messages
+    'syslog_delete',   # clear stored syslog messages
+    'services_view',   # view the Services dashboard (scheduler/syslog/worker/DB)
+    'services_control',  # start/stop embedded services from the Services tab
 )
 
 # Permissions grouped for the role editor UI.
@@ -90,6 +94,8 @@ PERMISSION_GROUPS = [
     ('perm_group_sessions', ['sessions_view', 'sessions_revoke']),
     ('perm_group_checks',   ['checks_view', 'checks_run']),
     ('perm_group_history',  ['history_view', 'history_delete']),
+    ('perm_group_syslog',   ['syslog_view', 'syslog_delete']),
+    ('perm_group_services', ['services_view', 'services_control']),
 ]
 
 # Stable UUIDs for built-in roles and groups (never change these).
@@ -129,12 +135,16 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
         'roles_view', 'roles_edit',
         'groups_view', 'groups_edit',
         'history_view',
+        'syslog_view',
+        'services_view', 'services_control',
     }),
     'viewer': frozenset({
         'users_view', 'roles_view', 'groups_view',
         'audit_view', 'sessions_view', 'modules_view', 'checks_view', 'overview_view',
         'servers_view',
         'history_view',
+        'syslog_view',
+        'services_view',
     }),
     'none': frozenset(),
 }

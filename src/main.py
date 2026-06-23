@@ -200,35 +200,13 @@ class Main(ObjectBase):
 
     @property
     def _config_dir(self):
-        """Path config files.
-
-        Returns:
-        str: Returning value
-
-        """
-        if self._path_config:
-            return self._path_config
-        elif self._is_mode_dev:
-            return os.path.normpath(os.path.join(self._dir, '../data/'))
-        else:
-            return '/etc/ServiSesentry/'
+        """Path config files (shared resolution — see ``compute_app_dirs``)."""
+        return compute_app_dirs(self._dir, self._is_mode_dev, self._path_config)[0]
 
     @property
     def _var_dir(self):
-        """Path /var/lib...
-
-        Returns:
-        str: Returning value
-
-        """
-        if self._is_mode_dev:
-            return self._config_dir
-        elif sys.platform == 'win32':
-            return os.path.join(
-                os.environ.get('PROGRAMDATA', 'C:\\ProgramData'), 'ServiSesentry'
-            )
-        else:
-            return '/var/lib/ServiSesentry/'
+        """Path /var/lib... (shared resolution — see ``compute_app_dirs``)."""
+        return compute_app_dirs(self._dir, self._is_mode_dev, self._path_config)[1]
 
     @property
     def _timer_check(self) -> int:
@@ -300,23 +278,16 @@ class Main(ObjectBase):
         return 2
 
 
-def start_web(args):
-    """Start the web administration server.
+def compute_app_dirs(dir_base: str, is_dev: bool, path_config) -> 'tuple[str, str]':
+    """Resolve the (config_dir, var_dir) pair from primitive inputs.
 
-    Reads web_admin settings from ``config.json`` and launches a Flask
-    server for browser-based configuration editing.
+    The single source of this convention, shared by the monitor (the ``Main``
+    properties), the web panel and the standalone syslog receiver so they always
+    agree on where config.json and the database live:
+      * ``--path`` / ``SS_CONFIG_DIR`` wins for the config dir;
+      * a dev checkout (``src`` in the path) keeps both dirs together;
+      * otherwise the platform's standard locations are used.
     """
-    try:
-        from lib.web_admin import WebAdmin  # noqa: WPS433 – conditional import
-    except ImportError:
-        print("Error: Flask es necesario para el panel web.")
-        print("       Instálalo con:  pip install flask")
-        sys.exit(1)
-
-    dir_base = os.path.dirname(os.path.abspath(__file__))
-    is_dev = 'src' in dir_base
-
-    path_config = getattr(args, 'path', None)
     if path_config:
         config_dir = path_config
     elif is_dev:
@@ -332,6 +303,29 @@ def start_web(args):
         )
     else:
         var_dir = '/var/lib/ServiSesentry/'
+    return config_dir, var_dir
+
+
+def _resolve_app_dirs(args) -> 'tuple[str, str]':
+    """``compute_app_dirs`` for the CLI run modes (web / syslog), keyed off args."""
+    dir_base = os.path.dirname(os.path.abspath(__file__))
+    return compute_app_dirs(dir_base, 'src' in dir_base, getattr(args, 'path', None))
+
+
+def start_web(args):
+    """Start the web administration server.
+
+    Reads web_admin settings from ``config.json`` and launches a Flask
+    server for browser-based configuration editing.
+    """
+    try:
+        from lib.web_admin import WebAdmin  # noqa: WPS433 – conditional import
+    except ImportError:
+        print("Error: Flask es necesario para el panel web.")
+        print("       Instálalo con:  pip install flask")
+        sys.exit(1)
+
+    config_dir, var_dir = _resolve_app_dirs(args)
 
     # First-run credentials only: env > config.json bootstrap (never the DB).
     # All other web_admin options — including the bind host/port — come from the
@@ -341,8 +335,9 @@ def start_web(args):
     username = os.environ.get('SS_USERNAME') or cfg.get_conf(['web_admin', 'username'], 'admin')
     password = os.environ.get('SS_PASSWORD') or cfg.get_conf(['web_admin', 'password'], 'admin')
 
+    modules_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'watchfuls')
     admin = WebAdmin(config_dir, str(username), str(password), var_dir,
-                     modules_dir=os.path.join(dir_base, 'watchfuls'))
+                     modules_dir=modules_dir)
 
     # Bind host/port from the effective config (the DB is the single source);
     # CLI overrides win.
@@ -360,6 +355,24 @@ def start_web(args):
     print()
 
     admin.run(host=str(host), port=int(port), debug=getattr(args, 'verbose', False))
+
+
+def start_syslog(args) -> int:
+    """Run the standalone syslog receiver (shares the DB with the rest of the app).
+
+    Resolves config/var dirs exactly like :func:`start_web` so the same
+    ``config.json`` and database are used, then blocks on the listener.
+    """
+    from lib.syslog.service import SyslogService  # noqa: WPS433 – conditional import
+
+    config_dir, var_dir = _resolve_app_dirs(args)
+
+    print("ServiceSentry Syslog Receiver")
+    print(f"  Config: {config_dir}")
+    print("  Pulsa Ctrl+C para detener")
+    print()
+
+    return SyslogService(config_dir, var_dir).run()
 
 
 def arg_check_dir_path(path):
@@ -514,6 +527,16 @@ def args_init() -> argparse.Namespace:
         dest="web_host",
         help="host/IP to bind the web admin panel (default: 0.0.0.0) (env: SS_WEB_HOST)",
     )
+
+    # Syslog receiver (standalone) — run only the syslog listener, sharing the DB.
+    syslog_group = ap.add_argument_group('syslog receiver')
+    syslog_group.add_argument(
+        '--syslog',
+        default=_env_bool('SS_SYSLOG', False),
+        action="store_true",
+        dest="syslog_mode",
+        help="run only the standalone syslog receiver (no web/monitor) (env: SS_SYSLOG)",
+    )
     return ap.parse_args()
 
 if __name__ == "__main__":
@@ -523,6 +546,8 @@ if __name__ == "__main__":
         _Debug.set_color(False)
     if getattr(_args, 'web_mode', False):
         start_web(_args)
+    elif getattr(_args, 'syslog_mode', False):
+        sys.exit(start_syslog(_args))
     else:
         main = Main(_args)
         start_code = main.start()

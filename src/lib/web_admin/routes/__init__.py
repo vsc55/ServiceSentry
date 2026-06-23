@@ -23,6 +23,8 @@ from .credentials import register as _credentials
 from .watchfuls import register as _watchfuls
 from .daemon import register as _daemon
 from .history import register as _history
+from .syslog import register as _syslog
+from .services import register as _services
 from .ui import register as _ui
 from .status import register as _status
 from .errors import register as _errors
@@ -53,3 +55,5 @@ def register_all(app, wa):
     _watchfuls(app, wa)
     _daemon(app, wa)
     _history(app, wa)
+    _syslog(app, wa)
+    _services(app, wa)

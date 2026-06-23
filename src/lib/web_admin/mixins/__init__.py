@@ -7,6 +7,8 @@ from .sessions import _SessionsMixin
 from .audit import _AuditMixin
 from .checks import _ChecksMixin
 from .daemon import _DaemonMixin
+from .syslog import _SyslogMixin
+from .services import _ServicesMixin
 
 __all__ = [
     '_UsersMixin',
@@ -17,4 +19,6 @@ __all__ = [
     '_AuditMixin',
     '_ChecksMixin',
     '_DaemonMixin',
+    '_SyslogMixin',
+    '_ServicesMixin',
 ]

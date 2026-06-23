@@ -6,13 +6,19 @@ Se ofrecen dos topologías a partir de la misma imagen; elige una:
   `servicesentry`: el panel web con su scheduler embebido activado
   (`SS_AUTOSTART=true`), que ejecuta los checks periódicos en el propio proceso.
   La opción más simple.
-- **Microservicios** (`docker/docker-compose.microservices.yml`) — dos
-  contenedores: `servicesentry-web` (panel Flask, `--web`) y
-  `servicesentry-worker` (daemon de monitorización, `--daemon`). Separa el
-  monitoreo del panel: sobrevive a reinicios del web y no compite por recursos.
+- **Microservicios** (`docker/docker-compose.microservices.yml`) — cuatro
+  contenedores sobre una **MariaDB** compartida: `servicesentry-db` (la base de
+  datos), `servicesentry-web` (panel Flask, `--web`), `servicesentry-worker`
+  (daemon de monitorización, `--daemon`) y `servicesentry-syslog` (receptor
+  syslog independiente, `--syslog`). Separa cada responsabilidad: el monitoreo
+  sobrevive a reinicios del web, y el receptor syslog (que liga puertos de red y
+  procesa entrada no confiable) queda aislado del panel.
 
-En microservicios ambos contenedores comparten los mismos volúmenes con nombre,
-por lo que leen y escriben el mismo estado.
+La conexión a la BD se inyecta por env `SS_DB_*` (ver
+[configuration.md](configuration.md) → *Sección `database`*); el `web` arranca con
+`SS_SYSLOG_EMBEDDED=0` para **no** ligar los puertos syslog (los gestiona el
+contenedor `syslog`). Los contenedores comparten los volúmenes con nombre y la
+base de datos, por lo que leen y escriben el mismo estado.
 
 > **No mezcles las dos.** No actives `SS_AUTOSTART` en el `web` a la vez que
 > corres el `worker`: son procesos distintos sin lock compartido y duplicarían
@@ -64,10 +70,19 @@ el panel web sobreviven a los reinicios del contenedor.
 
 | Variable | Valor por defecto | Descripción |
 | -------- | ----------------- | ----------- |
-| `SS_SERVICE_ROLE` | *(obligatorio)* | `web` o `worker` |
+| `SS_SERVICE_ROLE` | *(obligatorio)* | `web`, `worker` o `syslog` |
 | `TZ` | `UTC` | Zona horaria del contenedor |
+| **Base de datos** (microservicios) | | |
+| `SS_DB_DRIVER` | `sqlite` | Motor: `sqlite` / `mysql` / `postgresql` (`mariadb` = alias de `mysql`) |
+| `SS_DB_HOST` | `localhost` | Host del servidor de BD (p. ej. `db`) |
+| `SS_DB_PORT` | *(según motor)* | Puerto (3306 MySQL/MariaDB, 5432 PostgreSQL) |
+| `SS_DB_NAME` | `servicesentry` | Nombre de la base de datos |
+| `SS_DB_USER` | *(vacío)* | Usuario de la BD |
+| `SS_DB_PASSWORD` | *(vacío)* | Contraseña de la BD |
+| `SS_DB_ROOT_PASSWORD` | *(vacío)* | Solo para el contenedor MariaDB del compose (root) |
 | **Servidor web** | | |
 | `SS_WEB_HOST` | `0.0.0.0` | Dirección a la que se enlaza el panel web |
+| `SS_SYSLOG_EMBEDDED` | `1` | `0` para que el web **no** ligue los puertos syslog (los gestiona el contenedor `syslog`) |
 | `SS_WEB_PORT` | `8080` | Puerto en el que escucha el panel web (argumento `--web-port`). Tiene prioridad sobre `SS_PORT` y el valor guardado en `config.json` |
 | `SS_PORT` | `8080` | Override en runtime del puerto web (`web_admin` → `port`); equivalente al campo **Puerto web** en Configuración → Acceso Externo. Si `SS_WEB_PORT` también está definido, este tiene prioridad |
 | **Credenciales** | | |

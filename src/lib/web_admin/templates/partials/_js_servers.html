@@ -434,6 +434,7 @@ function _renderHostModalBody() {
     // Two tabs: General (server data) and Monitoring (per-module checks).  All
     // connection settings live on each module's check — there is no separate
     // Credentials tab; the host only provides the address (+ SSH in General).
+    const _canSyslog = (currentUser.permissions || []).includes('syslog_view');
     let h = `<ul class="nav nav-tabs mb-3" role="tablist">
         <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab"
             data-bs-target="#hmTabGeneral" type="button">
@@ -444,6 +445,9 @@ function _renderHostModalBody() {
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
             data-bs-target="#hmTabLatest" type="button" onclick="_loadHostLatestData()">
             <i class="bi bi-clock-history me-1"></i>${esc(t('host_tab_latest'))}</button></li>
+        ${_canSyslog ? `<li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
+            data-bs-target="#hmTabLogs" type="button" onclick="_loadHostLogs()">
+            <i class="bi bi-card-list me-1"></i>${esc(t('host_tab_logs'))}</button></li>` : ''}
     </ul>
     <div class="tab-content">
         <div class="tab-pane fade show active" id="hmTabGeneral">${general}</div>
@@ -456,6 +460,14 @@ function _renderHostModalBody() {
             </div>
             <div id="hmLatestBody"></div>
         </div>
+        ${_canSyslog ? `<div class="tab-pane fade" id="hmTabLogs">
+            <div class="d-flex align-items-center mb-2">
+                <span class="small text-muted me-auto">${esc(t('host_logs_hint'))}</span>
+                <button class="btn btn-sm btn-secondary" onclick="_loadHostLogs()" title="${escAttr(t('refresh'))}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+            </div>
+            <div id="hmLogsBody"></div>
+        </div>` : ''}
     </div>`;
     const body = document.getElementById('hostModalBody');
     body.innerHTML = h;
@@ -790,6 +802,171 @@ async function _loadHostLatestData() {
                 ${metrics ? `<div class="mt-1">${metrics}</div>` : ''}
             </div>${histIcon}</div>`;
     }).join('');
+}
+
+// Per-server syslog logs (by address: hostname or sender IP), with a filter bar
+// and pagination. Reuses the syslog severity colours/labels from _js_syslog.html
+// and the shared _renderPagination control.
+let _hostLogsState = null;   // {addr, page, pageSize, severity_max, q, since, until}
+
+let _hostLogsTimer = null;       // interval-driven / live refresh
+
+function _hostLogsReset(addr) {
+    _hostLogsState = { addr, page: 1, pageSize: _defaultPageSize || 50,
+                       severity_max: '', q: '', since: '', until: '', auto: 0 };
+}
+
+function _hostLogsStopTimer() {
+    if (_hostLogsTimer) { clearInterval(_hostLogsTimer); _hostLogsTimer = null; }
+}
+
+// (Re)start the refresh timer from state.auto (0=off, secs, or 'live').
+function _hostLogsApplyTimer() {
+    _hostLogsStopTimer();
+    const a = _hostLogsState ? _hostLogsState.auto : 0;
+    const live = a === 'live';
+    const secs = live ? (typeof _SL_LIVE_SECS !== 'undefined' ? _SL_LIVE_SECS : 2) : (parseInt(a, 10) || 0);
+    if (secs > 0) {
+        _hostLogsTimer = setInterval(() => {
+            const pane = document.getElementById('hmTabLogs');
+            if (!pane || !document.getElementById('hml-rows')) { _hostLogsStopTimer(); return; }
+            if (pane.classList.contains('active')) _hostLogsFetch();   // skip while on another tab
+        }, secs * 1000);
+    }
+}
+
+function setHostLogsAutoRefresh(seconds) {
+    if (_hostLogsState) _hostLogsState.auto = seconds;
+    _hostLogsApplyTimer();
+    _hostLogsRenderAutoRefresh();
+}
+
+function toggleHostLogsLive() {
+    if (_hostLogsState) _hostLogsState.auto = (_hostLogsState.auto === 'live') ? 0 : 'live';
+    _hostLogsApplyTimer();
+    _hostLogsRenderAutoRefresh();
+}
+
+function _hostLogsRenderAutoRefresh() {
+    const el = document.getElementById('hml-auto-refresh');
+    if (!el || !_hostLogsState) return;
+    const live = _hostLogsState.auto === 'live';
+    el.innerHTML = _autoRefreshControl({
+        id: 'hostlogs', interval: live ? 0 : (parseInt(_hostLogsState.auto, 10) || 0),
+        setFn: 'setHostLogsAutoRefresh', liveFn: 'toggleHostLogsLive', liveActive: live, hideAuto: true,
+        countId: 'hml-refresh-count', fillId: 'hml-refresh-fill',
+    });
+}
+
+function _hostLogsGoPage(p) { _hostLogsState.page = Math.max(1, p | 0); _hostLogsFetch(); }
+function _hostLogsSetPageSize(v) { _hostLogsState.pageSize = parseInt(v, 10) || 0; _hostLogsState.page = 1; _hostLogsFetch(); }
+
+// Render the Logs tab shell (filter bar + table + pager) and load the first page.
+async function _loadHostLogs() {
+    const body = document.getElementById('hmLogsBody');
+    if (!body) return;
+    const addr = (_hostDraft && _hostDraft.address || '').trim();
+    if (!addr) {
+        body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(t('host_logs_no_address'))}</div>`;
+        return;
+    }
+    if (!_hostLogsState || _hostLogsState.addr !== addr) _hostLogsReset(addr);
+    const st = _hostLogsState;
+    const sevOpts = `<option value="">${esc(t('syslog_all'))}</option>` +
+        (typeof _SYSLOG_SEV !== 'undefined' ? _SYSLOG_SEV : [])
+            .map((n, i) => `<option value="${i}"${String(st.severity_max) === String(i) ? ' selected' : ''}>${esc(n)}</option>`).join('');
+    body.innerHTML = `
+        <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+            <div><label class="form-label small mb-1">${esc(t('syslog_min_severity'))}</label>
+                <select id="hml-sev" class="form-select form-select-sm" style="min-width:120px">${sevOpts}</select></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_from'))}</label>
+                <input id="hml-from" type="datetime-local" class="form-control form-control-sm" style="min-width:165px"></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_to'))}</label>
+                <input id="hml-to" type="datetime-local" class="form-control form-control-sm" style="min-width:165px"></div>
+            <div class="flex-grow-1"><label class="form-label small mb-1">${esc(t('syslog_search'))}</label>
+                <input id="hml-q" type="search" class="form-control form-control-sm" placeholder="${escAttr(t('syslog_search'))}"></div>
+            <div class="d-flex align-items-end"><span id="hml-auto-refresh"></span></div>
+        </div>
+        <div id="hml-pager-top" class="mb-1"></div>
+        <div class="table-responsive rounded border" style="background:var(--ss-pagination-bg, var(--bs-secondary-bg));max-height:340px;overflow:auto">
+        <table class="table table-sm table-striped table-hover align-middle mb-0" style="font-size:.8rem;--bs-table-bg:transparent">
+            <thead><tr>
+                <th class="text-nowrap">${esc(t('syslog_time'))}</th>
+                <th>${esc(t('syslog_severity'))}</th>
+                <th>${esc(t('syslog_facility'))}</th>
+                <th>${esc(t('syslog_app'))}</th>
+                <th style="width:55%">${esc(t('syslog_message'))}</th>
+            </tr></thead><tbody id="hml-rows"></tbody>
+        </table></div>
+        <div id="hml-empty" class="text-center text-muted py-3" style="display:none">${esc(t('host_logs_none'))}</div>
+        <div id="hml-pager" class="mt-2"></div>`;
+    // restore + wire filters
+    const fromEl = document.getElementById('hml-from'), toEl = document.getElementById('hml-to');
+    if (typeof _tsToLocalInput !== 'undefined') { fromEl.value = _tsToLocalInput(st.since); toEl.value = _tsToLocalInput(st.until); }
+    document.getElementById('hml-q').value = st.q;
+    const toTs = (v) => (typeof _localInputToTs !== 'undefined') ? _localInputToTs(v) : '';
+    document.getElementById('hml-sev').onchange = (e) => { st.severity_max = e.target.value; st.page = 1; _hostLogsFetch(); };
+    fromEl.onchange = (e) => { st.since = toTs(e.target.value); st.page = 1; _hostLogsFetch(); };
+    toEl.onchange = (e) => { st.until = toTs(e.target.value); st.page = 1; _hostLogsFetch(); };
+    let qTimer = null;
+    document.getElementById('hml-q').oninput = (e) => {
+        clearTimeout(qTimer);
+        qTimer = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; _hostLogsFetch(); }, 350);
+    };
+    // Stop polling when the host modal closes (bind once).
+    const modalEl = document.getElementById('hostModal');
+    if (modalEl && !modalEl._hmLogsHideBound) {
+        modalEl._hmLogsHideBound = true;
+        modalEl.addEventListener('hidden.bs.modal', _hostLogsStopTimer);
+    }
+    _hostLogsRenderAutoRefresh();
+    _hostLogsApplyTimer();
+    _hostLogsFetch();
+}
+
+// Fetch + render rows/pager for the current host-logs state (no shell rebuild).
+async function _hostLogsFetch() {
+    const st = _hostLogsState;
+    const tbody = document.getElementById('hml-rows');
+    if (!st || !tbody) return;
+    const all = !st.pageSize;
+    const limit = all ? 5000 : st.pageSize;
+    const offset = all ? 0 : (st.page - 1) * st.pageSize;
+    const qs = new URLSearchParams({ host: st.addr, limit: String(limit), offset: String(offset) });
+    for (const k of ['severity_max', 'q', 'since', 'until']) if (st[k] !== '' && st[k] != null) qs.set(k, st[k]);
+    const data = await apiGet('/api/v1/syslog?' + qs.toString());
+    const msgs = (data && data.messages) || [];
+    const total = (data && data.total) || 0;
+    if (!all) {
+        const pages = Math.max(1, Math.ceil(total / st.pageSize));
+        if (st.page > pages) { st.page = pages; return _hostLogsFetch(); }
+    }
+    document.getElementById('hml-empty').style.display = msgs.length ? 'none' : '';
+    tbody.innerHTML = msgs.map(m => {
+        const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
+        const when = (m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '')).replace('T', ' ').replace('Z', '');
+        const appp = (m.app || '') + (m.procid ? `[${m.procid}]` : '');
+        return `<tr class="sl-row-${cls}">
+            <td class="text-muted text-nowrap">${esc(when)}</td>
+            <td><span class="badge bg-${cls}">${esc(m.severity_name || '')}</span></td>
+            <td class="text-muted">${esc(m.facility_name || '')}</td>
+            <td><code style="font-size:.78rem">${esc(appp)}</code></td>
+            <td style="word-break:break-word">
+                <div class="d-flex align-items-start gap-2">
+                    <span class="flex-grow-1">${esc(m.message || '')}</span>
+                    <button class="btn btn-sm btn-link p-0 text-muted sl-copy-btn" tabindex="-1"
+                        title="${escAttr(t('syslog_copy'))}" data-msg="${escAttr(m.message || '')}"
+                        onclick="_syslogCopyMsg(this)"><i class="bi bi-clipboard"></i></button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+    const pagerHtml = total > 0
+        ? _renderPagination(total, all ? 1 : st.page, all ? 0 : st.pageSize, '_hostLogsGoPage', '_hostLogsSetPageSize')
+        : '';
+    for (const id of ['hml-pager-top', 'hml-pager']) {
+        const el = document.getElementById(id); if (el) el.innerHTML = pagerHtml;
+    }
 }
 
 // Jump from a "Latest data" row to that series' chart in the History tab.

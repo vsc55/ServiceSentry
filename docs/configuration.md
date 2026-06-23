@@ -144,10 +144,34 @@ automáticamente en cada arranque (ver [architecture.md](architecture.md) →
 
 > PostgreSQL requiere `psycopg2-binary`; MySQL/MariaDB requiere `PyMySQL`. Ambos
 > son dependencias opcionales — sin ellas, solo está disponible SQLite.
+> `mariadb` es un **alias** de `mysql` (mismo conector PyMySQL).
 >
 > **Convención de fechas:** las columnas de fecha/hora se almacenan como `TEXT`
 > ISO 8601 UTC en los tres motores (SQLite no tiene tipo de fecha nativo). Ver
 > la nota *TODO* en [architecture.md](architecture.md).
+
+#### Configuración por variables de entorno (`SS_DB_*`)
+
+A diferencia del resto de la config (que solo se sobreescribe por env en la capa
+web), la sección `database` se lee en el **arranque**, antes de que exista el
+conector, por lo que sus env se superponen ahí mismo
+(`lib.config.manager.bootstrap_database_cfg`). Esto permite apuntar a
+MySQL/MariaDB/PostgreSQL **solo con variables de entorno**, sin editar
+`config.json` — ideal para contenedores. Lo usan por igual el panel web, el
+worker (monitor) y el receptor syslog independiente.
+
+| Variable | Equivale a | Ejemplo |
+|----------|------------|---------|
+| `SS_DB_DRIVER` | `database.driver` | `mysql` |
+| `SS_DB_HOST` | `database.host` | `db` |
+| `SS_DB_PORT` | `database.port` | `3306` |
+| `SS_DB_NAME` | `database.name` | `servicesentry` |
+| `SS_DB_USER` | `database.user` | `servicesentry` |
+| `SS_DB_PASSWORD` | `database.password` | `secret` |
+| `SS_DB_PATH` | `database.path` | `/var/lib/.../data.db` |
+
+> El `docker-compose.microservices.yml` usa estas variables para compartir un
+> contenedor **MariaDB** entre los servicios `web`, `worker` y `syslog`.
 
 ### Sección `telegram`
 
@@ -402,6 +426,79 @@ Si `secret` no está vacío, el servidor añade la cabecera `<secret_header>: sh
 
 ---
 
+## Servidor Syslog (sección `syslog`, en BD)
+
+ServiceSentry puede actuar como **servidor de syslog**, recibiendo eventos (RFC
+3164 / RFC 5424) de servidores externos por **UDP/TCP(+TLS)**, almacenándolos en
+la tabla `syslog` de la base de datos y mostrándolos en la pestaña **Syslog** del
+panel. Opcionalmente, una regla de alerta notifica los mensajes que coincidan.
+
+Configurable en **Configuration > Syslog Receiver** (es config editable en BD,
+solo-admin). Campos:
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `enabled` | bool | false | Activa el receptor. |
+| `bind_host` | str | `0.0.0.0` | Interfaz de escucha. |
+| `udp_port` | int | 514 | Puerto UDP (0 = desactivado). <1024 requiere privilegios. |
+| `tcp_port` | int | 514 | Puerto TCP (0 = desactivado). |
+| `tls_port` | int | 0 | Puerto TCP+TLS (RFC 5425; 0 = desactivado). |
+| `tls_cert` / `tls_key` | str | `''` | Rutas del cert/clave PEM para TLS. |
+| `allowed_sources` | str | `''` | IPs/CIDRs permitidos (coma/espacio); vacío = todos. |
+| `retention_days` | int | 30 | Borra mensajes más antiguos (0 = sin límite). |
+| `max_rows` | int | 500000 | Tope de filas; rota las más antiguas (0 = sin tope). |
+| `alert_enabled` | bool | false | Activa la regla de alerta. |
+| `alert_severity_max` | int | 3 | Alerta si severidad ≤ este valor (3 = `err` y peor). |
+| `alert_regex` | str | `''` | Si se define, además exige coincidencia en el mensaje. |
+
+Las alertas se enrutan por la matriz de notificaciones con `kind='syslog'`
+(`notifications.{telegram,email,webhook}_on_syslog`), con un *cooldown* por origen
+para evitar avalanchas. El listener corre en hilos de fondo del proceso web y se
+reinicia al guardar cambios; la retención se aplica periódicamente. Permisos:
+`syslog_view` (ver) y `syslog_delete` (vaciar).
+
+### Receptor syslog como servicio independiente
+
+El receptor puede ejecutarse como **proceso/contenedor propio**, compartiendo la
+misma base de datos y `config.json`:
+
+```bash
+python3 main.py --syslog        # (env: SS_SYSLOG=true / SS_SERVICE_ROLE=syslog)
+```
+
+Recibe → almacena → alerta → purga, sin arrancar Flask ni el monitor. Lee la
+config de syslog (y de notificaciones, para las alertas) del mismo sitio que el
+resto y **vigila** la BD compartida: activar/desactivar el receptor o cambiar sus
+puertos desde la UI surte efecto **sin reiniciar el contenedor**.
+
+Cuando el receptor corre aparte, el panel web debe arrancarse con
+`SS_SYSLOG_EMBEDDED=0`: sigue mostrando la pestaña Syslog y sirviendo los mensajes
+almacenados, pero **no liga los puertos** (los gestiona el contenedor dedicado).
+El `docker-compose.microservices.yml` lo configura así (contenedor `syslog`).
+
+---
+
+## Pestaña Services (estado y control de servicios)
+
+La pestaña **Services** muestra de forma centralizada el estado de los servicios
+de fondo y permite **iniciar/detener** los que se ejecutan dentro del propio
+proceso web:
+
+| Servicio | Estado | Control |
+|----------|--------|---------|
+| **Scheduler** (monitor embebido) | running / stopped | start / stop |
+| **Receptor syslog** | running / stopped / disabled / external | start / stop (si embebido y activo) |
+| **Worker** (monitor externo) | active / stale / unknown | solo lectura (vive en otro proceso) |
+| **Base de datos** | running / error (sonda `SELECT 1`) | solo lectura |
+
+El worker externo se detecta por la **actividad reciente de checks** en la BD
+compartida (`HistoryStore.latest_ts()`). Los servicios que viven en otro
+contenedor se muestran en solo-lectura. API: `GET /api/v1/services` y
+`POST /api/v1/services/<name>/<start|stop>`. Permisos: `services_view` (ver) y
+`services_control` (operar).
+
+---
+
 ## Estado de los checks (tabla `check_state`)
 
 El **último estado conocido** de cada comprobación se persiste en la tabla
@@ -440,6 +537,16 @@ python3 main.py [opciones]
 | `--web-port PORT` | `SS_WEB_PORT` | Puerto TCP del panel web (por defecto `8080` o el valor de `config.json`) |
 
 > Los valores `--web-host` y `--web-port` tienen prioridad sobre `web_admin.host` y `web_admin.port` de `config.json`.
+
+### Receptor syslog (`--syslog`)
+
+| Opción | Env var | Descripción |
+|--------|---------|-------------|
+| `--syslog` | `SS_SYSLOG` / `SS_SERVICE_ROLE=syslog` | Arranca **solo** el receptor syslog independiente (sin web ni monitor), compartiendo la BD |
+
+> En Docker se selecciona el rol con `SS_SERVICE_ROLE` (`web` / `worker` / `syslog`).
+> El panel web que delega los puertos a este contenedor debe arrancar con
+> `SS_SYSLOG_EMBEDDED=0`.
 
 ### Variables de entorno
 

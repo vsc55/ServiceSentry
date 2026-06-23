@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_38_flags(self):
+    def test_permissions_tuple_has_42_flags(self):
         from lib.web_admin.app import PERMISSIONS
-        assert len(PERMISSIONS) == 38
+        assert len(PERMISSIONS) == 42
 
     def test_permissions_are_unique(self):
         from lib.web_admin.app import PERMISSIONS
@@ -49,6 +49,8 @@ class TestPermissionsConstants:
             'sessions_view', 'sessions_revoke',
             'checks_view', 'checks_run',
             'history_view', 'history_delete',
+            'syslog_view', 'syslog_delete',
+            'services_view', 'services_control',
         }
         assert set(PERMISSIONS) == expected
 

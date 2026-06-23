@@ -182,94 +182,38 @@ function renderConfig() {
         'session_check_secs', 'session_revoke_redirect_secs', 'access_poll_secs',
         'force_reload_on_update', 'force_reload_secs',
     ];
-    // Pre-populate LDAP section defaults so it always appears in the config UI
-    if (!configData.ldap) configData.ldap = {};
-    const _ldap = configData.ldap;
-    if (!('enabled'           in _ldap)) _ldap.enabled           = false;
-    if (!('server'            in _ldap)) _ldap.server            = '';
-    if (!('port'              in _ldap)) _ldap.port              = 389;
-    if (!('use_ssl'           in _ldap)) _ldap.use_ssl           = false;
-    if (!('timeout'           in _ldap)) _ldap.timeout           = 5;
-    if (!('bind_dn'           in _ldap)) _ldap.bind_dn           = '';
-    if (!('bind_password'     in _ldap)) _ldap.bind_password     = '';
-    if (!('base_dn'           in _ldap)) _ldap.base_dn           = '';
-    if (!('user_filter'       in _ldap)) _ldap.user_filter       = '(sAMAccountName={username})';
-    if (!('email_attr'        in _ldap)) _ldap.email_attr        = 'mail';
-    if (!('name_attr'         in _ldap)) _ldap.name_attr         = 'displayName';
-    if (!('username_attr'     in _ldap)) _ldap.username_attr     = '';
-    if (!('group_attr'        in _ldap)) _ldap.group_attr        = 'memberOf';
-    if (!('group_role_map'      in _ldap)) _ldap.group_role_map      = '{}';
-    if (!('group_display_names' in _ldap)) _ldap.group_display_names = '{}';
-    if (!('default_role'        in _ldap)) _ldap.default_role        = (rolesData.none?.uid || 'none');
-    if (!('fallback_to_local' in _ldap)) _ldap.fallback_to_local = true;
-    if (!('auto_create_users' in _ldap)) _ldap.auto_create_users = true;
+    // Pre-populate config sections from the central registry so each card
+    // renders before the option has ever been saved. The values come from the
+    // server's spec (CONFIG_REGISTRY_DEFAULTS) — never hardcoded here — so the
+    // UI can't drift from the source of truth.
+    function _seedSection(section) {
+        if (!configData[section]) configData[section] = {};
+        const tgt = configData[section];
+        for (const path in CONFIG_REGISTRY_DEFAULTS) {
+            const sep = path.indexOf('|');
+            if (path.slice(0, sep) !== section) continue;
+            const field = path.slice(sep + 1);
+            if (!(field in tgt)) {
+                const def = CONFIG_REGISTRY_DEFAULTS[path];
+                tgt[field] = (def === null ? '' : def);
+            }
+        }
+    }
+    ['ldap', 'oidc', 'email', 'notifications', 'syslog'].forEach(_seedSection);
 
-    // Pre-populate Modules section so the card appears even on a fresh config;
-    // the values come from the schema defaults (CONFIG_FIELD_DEFAULTS, backfilled
-    // from the server's config spec) — not hardcoded here.
+    // Dynamic defaults the static registry can't express: the "no access" role's
+    // uid depends on the live roles list.
+    for (const s of ['ldap', 'oidc']) {
+        if (!configData[s].default_role) configData[s].default_role = (rolesData.none?.uid || 'none');
+    }
+
+    // Modules card: seed threads/timeout from the schema defaults (also registry).
     if (!configData.modules) configData.modules = {};
-    const _mods = configData.modules;
-    if (!('threads' in _mods)) _mods.threads = CONFIG_FIELD_DEFAULTS['modules|threads'];
-    if (!('timeout' in _mods)) _mods.timeout = CONFIG_FIELD_DEFAULTS['modules|timeout'];
+    if (!('threads' in configData.modules)) configData.modules.threads = CONFIG_FIELD_DEFAULTS['modules|threads'];
+    if (!('timeout' in configData.modules)) configData.modules.timeout = CONFIG_FIELD_DEFAULTS['modules|timeout'];
 
-    // Pre-populate OIDC section defaults
-    if (!configData.oidc) configData.oidc = {};
-    const _oidc = configData.oidc;
-    if (!('enabled'          in _oidc)) _oidc.enabled          = false;
-    if (!('provider_url'     in _oidc)) _oidc.provider_url     = '';
-    if (!('client_id'        in _oidc)) _oidc.client_id        = '';
-    if (!('client_secret'    in _oidc)) _oidc.client_secret    = '';
-    if (!('scopes'           in _oidc)) _oidc.scopes           = 'openid email profile';
-    if (!('username_claim'   in _oidc)) _oidc.username_claim   = 'preferred_username';
-    if (!('email_claim'      in _oidc)) _oidc.email_claim      = 'email';
-    if (!('name_claim'       in _oidc)) _oidc.name_claim       = 'name';
-    if (!('groups_claim'     in _oidc)) _oidc.groups_claim     = 'groups';
-    if (!('group_role_map'      in _oidc)) _oidc.group_role_map      = '{}';
-    if (!('group_display_names' in _oidc)) _oidc.group_display_names = '{}';
-    if (!('default_role'        in _oidc)) _oidc.default_role        = (rolesData.none?.uid || 'none');
-    if (!('auto_create_users' in _oidc)) _oidc.auto_create_users = true;
-
-    // Pre-populate Email section defaults
-    if (!configData.email) configData.email = {};
-    const _email = configData.email;
-    if (!('enabled'             in _email)) _email.enabled             = false;
-    if (!('provider'            in _email)) _email.provider            = 'smtp';
-    if (!('from_email'          in _email)) _email.from_email          = '';
-    if (!('from_name'           in _email)) _email.from_name           = 'ServiceSentry';
-    if (!('recipients'          in _email)) _email.recipients          = '';
-    if (!('subject_prefix'      in _email)) _email.subject_prefix      = '[ServiceSentry]';
-    if (!('lang'                in _email)) _email.lang                = '';
-    if (!('notify_on_down'      in _email)) _email.notify_on_down      = true;
-    if (!('notify_on_recovery'  in _email)) _email.notify_on_recovery  = true;
-    if (!('notify_on_warn'      in _email)) _email.notify_on_warn      = false;
-    if (!('smtp_host'           in _email)) _email.smtp_host           = '';
-    if (!('smtp_port'           in _email)) _email.smtp_port           = 587;
-    if (!('smtp_use_tls'        in _email)) _email.smtp_use_tls        = true;
-    if (!('smtp_use_ssl'        in _email)) _email.smtp_use_ssl        = false;
-    if (!('smtp_username'       in _email)) _email.smtp_username       = '';
-    if (!('smtp_password'       in _email)) _email.smtp_password       = '';
-    if (!('ms365_tenant_id'     in _email)) _email.ms365_tenant_id     = '';
-    if (!('ms365_client_id'     in _email)) _email.ms365_client_id     = '';
-    if (!('ms365_client_secret' in _email)) _email.ms365_client_secret = '';
-    if (!('gmail_client_id'     in _email)) _email.gmail_client_id     = '';
-    if (!('gmail_client_secret' in _email)) _email.gmail_client_secret = '';
-    if (!('gmail_refresh_token' in _email)) _email.gmail_refresh_token = '';
-
-    // Pre-populate Webhooks list (array — CRUD managed separately)
+    // Webhooks list (array — CRUD managed separately)
     if (!Array.isArray(configData.webhooks)) configData.webhooks = [];
-
-    // Pre-populate Notifications routing defaults
-    if (!configData.notifications) configData.notifications = {};
-    const _notif = configData.notifications;
-    if (!('telegram_on_down'     in _notif)) _notif.telegram_on_down     = true;
-    if (!('telegram_on_recovery' in _notif)) _notif.telegram_on_recovery = true;
-    if (!('telegram_on_warn'     in _notif)) _notif.telegram_on_warn     = false;
-    if (!('email_on_down'        in _notif)) _notif.email_on_down        = true;
-    if (!('email_on_recovery'    in _notif)) _notif.email_on_recovery    = true;
-    if (!('email_on_warn'        in _notif)) _notif.email_on_warn        = false;
-    if (!('webhook_on_down'      in _notif)) _notif.webhook_on_down      = true;
-    if (!('webhook_on_recovery'  in _notif)) _notif.webhook_on_recovery  = true;
-    if (!('webhook_on_warn'      in _notif)) _notif.webhook_on_warn      = false;
 
     // Pre-populate SAML2 section defaults
     if (!configData.saml2) configData.saml2 = {};
@@ -303,7 +247,7 @@ function renderConfig() {
         return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
     });
 
-    let hGeneral = '', hServer = '', hAuthExt = '', hNotifs = '', hInterface = '';
+    let hGeneral = '', hServer = '', hAuthExt = '', hNotifs = '', hInterface = '', hSyslog = '';
 
     for (const sec of sections) {
         const data = configData[sec];
@@ -357,6 +301,15 @@ function renderConfig() {
             hGeneral += cfgCardOpen(cfgId, '<i class="bi bi-database me-1"></i>', lbl);
             hGeneral += _renderDatabaseSection(data);
             hGeneral += cfgCardClose;
+            continue;
+        }
+
+        if (sec === 'syslog') {
+            // Its own tab: the syslog receiver settings (listener ports, retention,
+            // alert rule) — kept apart from the general options.
+            hSyslog += cfgCardOpen(cfgId, '<i class="bi bi-hdd-stack me-1"></i>', lbl);
+            hSyslog += renderScalarFields(data, sec, 'config', []);
+            hSyslog += cfgCardClose;
             continue;
         }
 
@@ -552,6 +505,7 @@ function renderConfig() {
         { id: 'cfg-tab-server',    label: t('cfg_tab_server'),        icon: 'bi-hdd-network',  html: hServer    },
         { id: 'cfg-tab-auth',      label: t('cfg_tab_auth'),          icon: 'bi-person-lock',  html: hAuth      },
         { id: 'cfg-tab-notifs',    label: t('cfg_tab_notifications'), icon: 'bi-bell',         html: hNotifs    },
+        { id: 'cfg-tab-syslog',    label: t('cfg_tab_syslog'),        icon: 'bi-hdd-stack',    html: hSyslog    },
         { id: 'cfg-tab-interface', label: t('cfg_tab_interface'),     icon: 'bi-layout-wtf',   html: hInterface },
     ];
     let tabNav = `<ul class="nav nav-tabs mb-3" id="cfg-tab-nav" role="tablist">`;

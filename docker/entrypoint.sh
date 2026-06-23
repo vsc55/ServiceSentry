@@ -17,8 +17,11 @@ case "${SS_SERVICE_ROLE}" in
   worker)
     set -- --daemon
     ;;
+  syslog)
+    set -- --syslog
+    ;;
   *)
-    echo "ERROR: SS_SERVICE_ROLE must be 'web' or 'worker' (got: '${SS_SERVICE_ROLE}')" >&2
+    echo "ERROR: SS_SERVICE_ROLE must be 'web', 'worker' or 'syslog' (got: '${SS_SERVICE_ROLE}')" >&2
     exit 1
     ;;
 esac

@@ -106,7 +106,10 @@ function _autoRefreshControl(o) {
     const isCustom = cur > 0 && !presets.includes(cur) && cur !== si;
     const idAttr = (x) => x ? ` id="${x}"` : '';
     const countEl = `<span${idAttr(o.countId)} class="${o.countClass || ''}">${cur || ''}</span>`;
-    const toggleLbl = cur > 0 ? `${countEl}${sec}` : esc(t('auto_refresh_off'));
+    // Optional "Live" mode (fast poll) — when on, it owns the toggle label/state.
+    const liveActive = !!o.liveActive;
+    const toggleLbl = liveActive ? esc(t('auto_refresh_live'))
+        : (cur > 0 ? `${countEl}${sec}` : esc(t('auto_refresh_off')));
     // Two columns: icon + name on the left, the interval value right-aligned
     // (fills the row and lines the values up in a tidy column). Active → check.
     const item = (val, label, active, icon, right) =>
@@ -114,15 +117,23 @@ function _autoRefreshControl(o) {
             onclick="${o.setFn}(${val})"><i class="bi ${active ? 'bi-check2' : icon}" style="width:1em;flex-shrink:0"></i><span>${label}</span>${
             right ? `<span class="ms-auto ps-3 small" style="opacity:.7;font-variant-numeric:tabular-nums">${right}</span>` : ''}</button></li>`;
     let items = `<li><h6 class="dropdown-header py-1">${esc(t('auto_refresh'))}</h6></li>`;
-    // Order: OFF, Auto, then the presets.
-    items += item(0, t('auto_refresh_off'), cur === 0, 'bi-x-circle');
+    // Order: OFF, [Live | Auto], then the presets.
+    items += item(0, t('auto_refresh_off'), cur === 0 && !liveActive, 'bi-x-circle');
+    // "Live": a fast poll, offered when the caller passes a liveFn (e.g. syslog).
+    if (o.liveFn) {
+        items += `<li><button type="button" class="dropdown-item d-flex align-items-center gap-2 ${liveActive ? 'active' : ''}"
+            onclick="${o.liveFn}()"><i class="bi ${liveActive ? 'bi-check2' : 'bi-broadcast'}" style="width:1em;flex-shrink:0"></i><span>${esc(t('auto_refresh_live'))}</span></button></li>`;
+    }
     // "Auto" follows the scheduler's interval; disabled while it is stopped.
-    if (si > 0) {
-        items += item(si, t('auto_refresh_auto'), cur === si, 'bi-magic', `${si}${sec}`);
-    } else {
-        items += `<li><span class="dropdown-item disabled d-flex align-items-center gap-2 text-muted">
-            <i class="bi bi-magic" style="width:1em;flex-shrink:0"></i><span>${esc(t('auto_refresh_auto'))}</span>
-            <span class="ms-auto ps-3 small">(${esc(t('daemon_stopped'))})</span></span></li>`;
+    // Hidden when the caller replaces it with Live (o.hideAuto).
+    if (!o.hideAuto) {
+        if (si > 0) {
+            items += item(si, t('auto_refresh_auto'), cur === si, 'bi-magic', `${si}${sec}`);
+        } else {
+            items += `<li><span class="dropdown-item disabled d-flex align-items-center gap-2 text-muted">
+                <i class="bi bi-magic" style="width:1em;flex-shrink:0"></i><span>${esc(t('auto_refresh_auto'))}</span>
+                <span class="ms-auto ps-3 small">(${esc(t('daemon_stopped'))})</span></span></li>`;
+        }
     }
     for (const s of presets) items += item(s, t('auto_refresh_every'), cur === s, 'bi-clock', `${s}${sec}`);
     // Custom row — the prefix turns into a highlighted check when it is active.
@@ -136,7 +147,7 @@ function _autoRefreshControl(o) {
       </div></li>`;
     const fill = cur > 0 ? `<span${idAttr(o.fillId)} class="ss-ar-fill ${o.fillClass || ''}"></span>` : '';
     return `<div class="btn-group btn-group-sm">
-      <button type="button" class="btn btn-sm ${cur > 0 ? 'btn-primary ss-ar-btn' : 'btn-dark'} dropdown-toggle text-center"
+      <button type="button" class="btn btn-sm ${(cur > 0 || liveActive) ? 'btn-primary ss-ar-btn' : 'btn-dark'} dropdown-toggle text-center"
               style="min-width:6rem" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
               title="${escAttr(t('auto_refresh'))}">
         ${fill}<span class="ss-ar-lbl"><i class="bi bi-arrow-repeat me-1"></i>${toggleLbl}</span>

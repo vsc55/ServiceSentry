@@ -74,6 +74,43 @@ class TestMergeHostConn:
         assert cfg['host'] == 'explicit.db'       # the check's own value is kept
 
 
+class TestResolveHostCtxCred:
+    """Host-aware discovery must resolve a host's named SSH credential (cred_uid),
+    not only inline secrets — else disk/services/temperature discover get no data."""
+
+    def test_ssh_cred_uid_is_resolved(self):
+        from lib.web_admin.routes.watchfuls import _resolve_host_ctx
+
+        class _Cstore:
+            def get(self, uid, decrypt=True):
+                return ({'enabled': True,
+                         'data': {'ssh_user': 'svc', 'ssh_password': 'secret'}}
+                        if uid == 'cred1' else None)
+
+        class _WA:
+            _hosts_store = None
+            _credentials_store = _Cstore()
+
+        cfg = {'_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                         'profiles': {'ssh': {'cred_uid': 'cred1', 'ssh_port': 22}}}}
+        ctx = _resolve_host_ctx(_WA(), cfg)
+        assert ctx['ssh']['ssh_user'] == 'svc'        # credential identity applied
+        assert ctx['ssh']['ssh_password'] == 'secret'
+        assert ctx['ssh']['ssh_port'] == 22           # other ssh fields preserved
+
+    def test_no_cred_uid_left_unchanged(self):
+        from lib.web_admin.routes.watchfuls import _resolve_host_ctx
+
+        class _WA:
+            _hosts_store = None
+            _credentials_store = None
+
+        cfg = {'_host': {'address': 'h', 'kind': 'remote', 'os': 'linux',
+                         'profiles': {'ssh': {'ssh_user': 'root'}}}}
+        ctx = _resolve_host_ctx(_WA(), cfg)
+        assert ctx['ssh']['ssh_user'] == 'root'
+
+
 class TestApiWatchfulActionAuth:
     """Unauthenticated requests are redirected to /login."""
 

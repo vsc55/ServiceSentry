@@ -585,6 +585,39 @@
     border-bottom: 1px solid var(--bs-border-color);
 }
 .cfg-card-title { font-size: .92rem; }
+
+/* ── Services cards ───────────────────────────────────────────────── */
+/* Use the elevated surface so cards stand out from the page background,
+   with a state-coloured accent strip on top. */
+.svc-card {
+    background: var(--ss-card-header-bg, var(--bs-secondary-bg));
+    overflow: hidden;
+}
+.svc-card .card-body { background: transparent; }
+.svc-card-accent { height: 4px; }
+
+/* Clickable syslog breakdown bars (click to filter) */
+.sl-bar-row { cursor: pointer; transition: background-color .12s; }
+.sl-bar-row:hover { background: rgba(128,128,128,.18); }
+.sl-bar-active { background: rgba(128,128,128,.28); outline: 1px solid var(--bs-border-color); }
+
+/* Severity tint on syslog rows, by severity colour. The tint is the base cell
+   bg; the striped/hover overlays are zeroed so every matching row looks
+   identical (no odd/even difference) and the colour doesn't shift on hover.
+   A solid left accent makes the severity unmistakable while keeping text
+   readable. */
+.sl-row-danger   { --bs-table-bg: rgba(220,53,69,.28); }
+.sl-row-warning  { --bs-table-bg: rgba(255,193,7,.26); }
+.sl-row-info     { --bs-table-bg: rgba(13,202,240,.22); }
+.sl-row-secondary{ --bs-table-bg: rgba(108,117,125,.18); }
+.sl-row-danger, .sl-row-warning, .sl-row-info, .sl-row-secondary {
+    --bs-table-striped-bg: transparent;
+    --bs-table-hover-bg: transparent;
+}
+.sl-row-danger   > td:first-child { border-left: 3px solid var(--bs-danger); }
+.sl-row-warning  > td:first-child { border-left: 3px solid var(--bs-warning); }
+.sl-row-info     > td:first-child { border-left: 3px solid var(--bs-info); }
+.sl-row-secondary> td:first-child { border-left: 3px solid var(--bs-secondary); }
 .cfg-chevron {
     font-size: .8rem;
     transition: transform .2s;
