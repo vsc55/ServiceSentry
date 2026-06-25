@@ -185,7 +185,7 @@ Botón de icono acoplado al input (Bootstrap input-group). Permite ejecutar una 
     "default": "",
     "input_action": {
         "id":           "list_databases",
-        "url":          "/api/watchfuls/datastore/list_databases",
+        "url":          "/api/v1/watchfuls/datastore/list_databases",
         "extra":        {},
         "icon":         "bi-database",
         "result":       "field_picker",
@@ -271,6 +271,63 @@ Solo para campos `int`/`float` a nivel de módulo (`__module__`). Si es `true`, 
 ```json
 "timeout": {"type": "int", "default": 10, "min": 0, "max": 300, "inherit_blank": true}
 ```
+
+---
+
+### `nullable`
+
+Para campos `int`/`float`. Si es `true`, dejar el campo en blanco lo almacena como
+`null` (distinto de `0`) — semántica "usar el valor por defecto". La UI renderiza un
+input numérico que en blanco muestra como placeholder el default del campo (o el de
+`placeholder_map`). Se diferencia de `inherit_blank` (que es la cascada ítem→módulo
+→global de los módulos); `nullable` es genérico y se usa también en la config del
+panel (p. ej. puertos de syslog/BD).
+
+```json
+"udp_port": {"type": "int", "default": 514, "nullable": true}
+```
+
+---
+
+### `multi`
+
+Para campos `str`. Renderiza el valor como una **lista de chips** eliminables
+(separadores coma/espacio/línea), almacenada como cadena unida por comas. Útil para
+listas de IPs, interfaces, etc.
+
+```json
+"allowed_sources": {"type": "str", "default": "", "multi": true}
+```
+
+---
+
+### `ipkind`
+
+Declara un campo como **dirección IP** y activa validación en cliente y servidor.
+Valores: `"ip"` (IPv4/IPv6, sin máscara) o `"cidr"` (dirección IP **o** red CIDR).
+Combinable con `multi` (lista de IPs validadas). Un valor inválido se rechaza con
+`400` al guardar.
+
+```json
+"bind_host": {"type": "str", "default": "", "multi": true, "ipkind": "ip"}
+```
+
+---
+
+### `term_field`
+
+Nombre de un campo hermano cuyo valor selecciona la etiqueta/hint/acción del campo
+desde el diccionario `field_terms` del i18n del módulo. Permite que un mismo campo
+cambie de nombre visible según otro campo (p. ej. en `datastore`, el campo `db`
+muestra "Base de datos" / "Índice" / "Bucket" según `db_type`).
+
+---
+
+### `result_multi`
+
+Para campos con `input_action`. Si es `true`, el resultado de la acción se renderiza
+como **chips** eliminables (varios valores) en vez de un único texto; el picker
+permite seleccionar varios elementos.
 
 ---
 
@@ -362,7 +419,7 @@ Lista de botones de acción para el formulario del ítem. Cada acción genera un
 "__actions__": [
     {
         "id":         "test_connection",
-        "url":        "/api/watchfuls/datastore/test_connection",
+        "url":        "/api/v1/watchfuls/datastore/test_connection",
         "extra":      {},
         "icon":       "bi-plug",
         "variant":    "outline-info",
@@ -371,7 +428,7 @@ Lista de botones de acción para el formulario del ítem. Cada acción genera un
     },
     {
         "id":         "test_ssh",
-        "url":        "/api/watchfuls/datastore/test_connection",
+        "url":        "/api/v1/watchfuls/datastore/test_connection",
         "extra":      {"_test_mode": "ssh"},
         "show_when":  {"conn_type": ["ssh"]},
         "group":      "ssh",
@@ -405,7 +462,7 @@ Propiedades de cada acción:
 URL del endpoint de test rápido. Aparece como botón en el encabezado de la colección (no en cada ítem individualmente). Hace POST con los datos del ítem seleccionado.
 
 ```json
-"__test__": "/api/watchfuls/datastore/test_connection"
+"__test__": "/api/v1/watchfuls/datastore/test_connection"
 ```
 
 La acción invocada debe estar en `WATCHFUL_ACTIONS` del módulo.
@@ -596,6 +653,64 @@ Versión de la API que usa el módulo para sus endpoints watchful. Controla el p
 
 La UI usa este valor para construir todas las URLs de acciones del módulo (`discover`, `test_connection`, etc.).
 
+### `__history__`
+
+Declara qué campo(s) numérico(s) registra el módulo como **serie temporal** (para
+las gráficas de historial). `{"field": "temp", "unit": "°C", "label": "Temperatura"}`,
+o `{"fields": {nombre: {unit, label}}}` para varios; `{"field": null}` para módulos
+solo-estado. Lo lee `routes/history.py`.
+
+### `__host_profile__`
+
+Declara los campos de conexión que un check puede **heredar de un host vinculado**
+del registro. Dict (o lista de dicts) con `{"key": <protocolo>, "address_field":
+<campo de dirección>, "fields": [campos a heredar]}`. Lo resuelve
+`ModuleBase.resolve_host()`. Ver [web_admin.md → Servers](web_admin.md#servers-registro-de-hosts).
+
+```json
+"__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host"]}
+```
+
+### `__host_multiple__`
+
+Bool. Si es `true`, el check puede vincularse a **varios hosts** (selección múltiple).
+Por defecto `false`.
+
+### `__credential__`
+
+Declara campos de **credencial reutilizable** del módulo (separados de los campos
+inline del ítem), referenciables desde el registro de credenciales. `{"type":
+"web_auth", "fields": ["auth_user", "auth_password"]}`. Usado por `datastore`
+(`datastore_auth`) y `web` (`web_auth`).
+
+### Meta-claves de UI / descubrimiento adicionales
+
+Usadas por la UI (lista/modal de descubrimiento), normalmente en `list`:
+
+| Meta-clave | Descripción |
+|-----------|-------------|
+| `__check_title_field__` | Campo que contiene la etiqueta visible del ítem (p. ej. `"label"`, `"process"`) |
+| `__title_editable__` | Bool: permite renombrar el ítem editando ese campo |
+| `__discovery_uid_key__` | Bool: la clave del ítem es un UUID opaco (no editable) |
+| `__discovery_label_template__` | Plantilla `{campo}` para construir la etiqueta de cada fila descubierta (p. ej. `"{host} - {db_type}"`) |
+| `__discovery_inputs__` | Lista de controles de entrada extra en el modal de descubrimiento (filtros) |
+| `__discovery_value_field__` | Campo del resultado de descubrimiento con el que se rellena el ítem (en vez de la clave) |
+
+### Gating por dependencias (variables de clase Python)
+
+No son de `schema.json` sino de la clase `Watchful`:
+
+| Variable | Efecto en `discover_schemas()` |
+|----------|--------------------------------|
+| `MISSING_DEPS: list[str]` | Si tiene paquetes ausentes, marca el módulo/colección `__unsupported__` e inyecta `__missing_deps__` (la UI muestra "pip install …") |
+| `PARTIAL_DEPS: list[str]` | Inyecta `__partial_deps__` (badge de aviso; el módulo sigue usable) |
+| `WATCHFUL_TOOLBAR: tuple` | Se propaga como `__toolbar__` (botones de barra de herramientas del módulo) |
+| `WATCHFUL_UI: frozenset` | Se propaga como `__ui__` (capacidades de UI legacy) |
+
+> Claves inyectadas en runtime por `discover_schemas()` (no se escriben en
+> `schema.json`): `__unsupported__`, `__missing_deps__`, `__partial_deps__`,
+> `options_disabled`, `__toolbar__`, `__ui__`.
+
 ---
 
 ## Archivos de idioma (`lang/*.json`)
@@ -651,7 +766,7 @@ class Watchful(ModuleBase):
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'test_connection', 'list_databases'})
 ```
 
-El endpoint genérico `GET|POST /api/watchfuls/<module>/<action>` comprueba que la acción esté en este frozenset antes de ejecutarla. Cualquier acción no listada devuelve `404`.
+El endpoint genérico `GET|POST /api/v1/watchfuls/<module>/<action>` comprueba que la acción esté en este frozenset antes de ejecutarla. Cualquier acción no listada devuelve `404`.
 
 - **GET**: llama al classmethod sin argumentos → usado por `discover()`
 - **POST**: llama al classmethod con el body JSON como `dict` → usado por `test_connection()` y `list_databases()`
@@ -692,13 +807,19 @@ Usa `SUPPORTED_PLATFORMS` en la clase cuando el módulo entero es inútil en esa
 
 | Módulo | Colecciones | `__actions__` | `__test__` | `__discovery__` | POST discovery | Sub-colección | `__discovery_field__` | `__key_mirrors_field__` | `WATCHFUL_TOOLBAR` |
 |--------|-------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `cpu` | `__module__`, `list` | — | — | — | — | — | — | — | — |
 | `datastore` | `__module__`, `list` | ✓ | ✓ | — | — | — | — | — | — |
+| `dns` | `__module__`, `list` | — | — | ✓ | ✓ | — | ✓ (`host`) | — | — |
 | `filesystemusage` | `__module__`, `list` | — | — | ✓ | — | — | ✓ (`partition`) | — | — |
 | `hddtemp` | `__module__`, `list` | — | — | — | — | — | — | — | — |
+| `ntp` | `__module__`, `list` | — | — | — | — | — | — | — | — |
 | `ping` | `__module__`, `list` | — | — | — | — | — | — | — | — |
+| `process` | `__module__`, `list` | — | — | ✓ | — | — | ✓ (`process`) | ✓ (`process`) | — |
 | `raid` | `__module__`, `list` | — | — | — | — | — | — | — | — |
 | `ram_swap` | `__module__` | — | — | — | — | — | — | — | — |
 | `service_status` | `__module__`, `list` | — | — | ✓ | — | — | ✓ (`service`) | ✓ (`service`) | — |
 | `snmp` | `__module__`, `servers` → `checks` | — | — | ✓ | ✓ | ✓ (`checks`) | ✓ (`oid`) | ✓ (`oid`) | ✓ (file_manager, mib_browser) |
+| `ssl_cert` | `__module__`, `list` | — | — | — | — | — | — | — | — |
 | `temperature` | `__module__`, `list` | — | — | ✓ | — | — | — | — | — |
-| `web` | `__module__`, `list` | — | — | — | — | — | — | — | — |
+| `ups` | `__module__`, `list` | — | ✓ | — | — | — | — | — | — |
+| `web` | `__module__`, `list` | — | ✓ | — | — | — | — | — | — |

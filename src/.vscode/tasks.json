@@ -13,7 +13,7 @@
       "label": "🔄 Watch & Restart Web",
       "type": "shell",
       "command": "${workspaceFolder}/.venv/Scripts/python",
-      "args": ["${workspaceFolder}/dev_watch.py"],
+      "args": ["${workspaceFolder}/dev_watch.py", "--verbose"],
       "options": { "cwd": "${workspaceFolder}" },
       "presentation": {
         "reveal": "always",

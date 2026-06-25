@@ -14,11 +14,18 @@ from lib.debug import DebugLevel
 
 def dispatch(wa, kind: str, module: str = '', item: str = '',
              status: str = '', message: str = '',
-             timestamp: str = '') -> dict[str, tuple[bool, str]]:
+             timestamp: str = '', channels=None,
+             webhook_ids=None) -> dict[str, tuple[bool, str]]:
     """Send a notification to every enabled channel for the given event kind.
 
+    By default the channels are chosen by the ``notifications`` routing matrix
+    (``{channel}_on_{kind}``).  Pass *channels* (an iterable of channel names) to
+    target an explicit set instead — used by the event-rules manager, where each
+    rule picks its own channels.  *webhook_ids* optionally restricts the webhook
+    channel to specific destinations (empty/None → every enabled webhook).
+
     Returns a dict mapping channel name → (ok, message) for each channel
-    attempted. Channels not triggered (routing config off) are omitted.
+    attempted. Channels not triggered are omitted.
     """
     results: dict[str, tuple[bool, str]] = {}
     try:
@@ -30,12 +37,15 @@ def dispatch(wa, kind: str, module: str = '', item: str = '',
     notif = cfg.get('notifications') or {}
     kwargs = dict(kind=kind, module=module, item=item,
                   status=status, message=message, timestamp=timestamp)
-    _channels = [c for c in ('telegram', 'email', 'webhook')
-                 if notif.get(f'{c}_on_{kind}', False)]
-    wa._dbg(f"> Notify >> {kind} {module}/{item}: channels={_channels or 'none'}",
+    if channels is not None:
+        _active = {c for c in ('telegram', 'email', 'webhook') if c in set(channels)}
+    else:
+        _active = {c for c in ('telegram', 'email', 'webhook')
+                   if notif.get(f'{c}_on_{kind}', False)}
+    wa._dbg(f"> Notify >> {kind} {module}/{item}: channels={sorted(_active) or 'none'}",
             DebugLevel.info)
 
-    if notif.get(f'telegram_on_{kind}', False):
+    if 'telegram' in _active:
         try:
             from lib.web_admin import telegram_notify
             ok, msg = telegram_notify._dispatch(cfg.get('telegram') or {}, **kwargs)
@@ -46,7 +56,7 @@ def dispatch(wa, kind: str, module: str = '', item: str = '',
             results['telegram'] = (False, str(exc))
             wa._dbg(f"> Notify > telegram >> {type(exc).__name__}: {exc}", DebugLevel.error)
 
-    if notif.get(f'email_on_{kind}', False):
+    if 'email' in _active:
         try:
             from lib.web_admin import email_notify, email_templates
             email_cfg = cfg.get('email') or {}
@@ -72,6 +82,7 @@ def dispatch(wa, kind: str, module: str = '', item: str = '',
                 email_cfg,
                 subject=subject,
                 body_html=body_html,
+                recipients=None,   # None → fall back to the configured recipients
             )
             results['email'] = (ok, msg)
             wa._dbg(f"> Notify > email >> ok={ok}: {msg}",
@@ -80,10 +91,10 @@ def dispatch(wa, kind: str, module: str = '', item: str = '',
             results['email'] = (False, str(exc))
             wa._dbg(f"> Notify > email >> {type(exc).__name__}: {exc}", DebugLevel.error)
 
-    if notif.get(f'webhook_on_{kind}', False):
+    if 'webhook' in _active:
         try:
             from lib.web_admin import webhook_notify
-            ok, msg = webhook_notify.send_all(wa, cfg=cfg, **kwargs)
+            ok, msg = webhook_notify.send_all(wa, cfg=cfg, webhook_ids=webhook_ids, **kwargs)
             results['webhook'] = (ok, msg)
             wa._dbg(f"> Notify > webhook >> ok={ok}: {msg}",
                     DebugLevel.debug if ok else DebugLevel.warning)

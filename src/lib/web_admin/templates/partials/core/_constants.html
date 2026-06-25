@@ -121,7 +121,9 @@ const LDAP_AVAILABLE  = {{ ldap_available  | tojson }};
 const OIDC_AVAILABLE  = {{ oidc_available  | tojson }};
 const SAML2_AVAILABLE = {{ saml2_available | tojson }};
 // Fields that require a service restart to take effect after being saved
-const RESTART_REQUIRED_FIELDS = new Set(['web_admin|port', 'web_admin|proxy_count']);
+const RESTART_REQUIRED_FIELDS = new Set(['web_admin|port', 'web_admin|proxy_count',
+    'syslog_db|enabled', 'syslog_db|driver', 'syslog_db|path', 'syslog_db|host',
+    'syslog_db|port', 'syslog_db|name', 'syslog_db|user', 'syslog_db|password']);
 
 /**
  * Default values for config fields, keyed by 'section|field'.

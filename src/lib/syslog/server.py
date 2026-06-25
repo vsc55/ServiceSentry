@@ -32,48 +32,47 @@ _MAX_DATAGRAM = 65535          # UDP theoretical max
 _FLUSH_SECS = 1.0              # writer batch interval
 _FLUSH_MAX = 500              # writer batch size cap
 _SOCK_TIMEOUT = 0.5            # so stop() is responsive
+_DROP_LOG_EVERY = 30.0        # min seconds between allowlist-drop logs per source
+_DROPS_MAX = 500              # cap distinct dropped sources tracked in memory
 
 
-def build_server(cfg: dict, *, sink, on_message=None, dbg=None) -> 'SyslogServer':
+def build_server(cfg: dict, *, sink, on_message=None, dbg=None,
+                 dbg_warn=None, on_drop=None) -> 'SyslogServer':
     """Construct a :class:`SyslogServer` from a ``syslog`` config dict.  Shared by
     the in-web-admin mixin and the standalone service so the wiring lives once."""
     sources = [s for s in re.split(r'[,\s]+', str(cfg.get('allowed_sources') or '')) if s]
     return SyslogServer(
         sink=sink, on_message=on_message,
-        bind_host=str(cfg.get('bind_host') or '0.0.0.0'),
+        bind_host=str(cfg.get('bind_host') or ''),   # blank → all IPv4 + IPv6 (see _parse_binds)
         udp_port=int(cfg.get('udp_port') or 0),
         tcp_port=int(cfg.get('tcp_port') or 0),
         tls_port=int(cfg.get('tls_port') or 0),
         tls_cert=str(cfg.get('tls_cert') or ''),
         tls_key=str(cfg.get('tls_key') or ''),
-        allowed_sources=sources, dbg=dbg)
+        allowed_sources=sources, dbg=dbg, dbg_warn=dbg_warn, on_drop=on_drop)
 
 
-def should_alert(cfg: dict, rec: dict, alert_last: dict, *, cooldown: int = 60) -> bool:
-    """Decide whether *rec* matches the alert rule (severity ≤ threshold and, if
-    set, the regex) honouring a per-source cooldown.  Mutates *alert_last* on a
-    positive so the caller just dispatches.  Shared by mixin + standalone service."""
-    if not cfg.get('alert_enabled'):
-        return False
-    try:
-        sev_max = int(cfg.get('alert_severity_max', 3))
-    except (TypeError, ValueError):
-        sev_max = 3
-    if rec.get('severity', 5) > sev_max:            # lower number = more severe
-        return False
-    rx = str(cfg.get('alert_regex') or '').strip()
-    if rx:
+def _parse_binds(bind_host) -> list:
+    """Return ``[(family, address)]`` for every configured bind address.
+
+    ``bind_host`` may list several addresses (comma/space/newline separated) so
+    the receiver can listen on specific interfaces only; each is detected as IPv4
+    or IPv6.  Blank → all IPv4 interfaces (``0.0.0.0``); use ``::`` for all IPv6.
+    """
+    raw = [s.strip().strip('[]') for s in re.split(r'[,\s]+', str(bind_host or '')) if s.strip()]
+    if not raw:
+        return [(socket.AF_INET, '0.0.0.0'), (socket.AF_INET6, '::')]   # all IPv4 + IPv6
+    out, seen = [], set()
+    for a in raw:
         try:
-            if not re.search(rx, rec.get('message', '')):
-                return False
-        except re.error:
-            return False
-    src = rec.get('source') or rec.get('hostname') or '?'
-    now = time.time()
-    if now - alert_last.get(src, 0) < cooldown:
-        return False
-    alert_last[src] = now
-    return True
+            fam = socket.AF_INET6 if ipaddress.ip_address(a).version == 6 else socket.AF_INET
+        except ValueError:
+            fam = socket.AF_INET                # hostname or junk → let bind() decide/fail
+        key = (fam, a)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
 
 
 def _parse_allowlist(sources) -> list:
@@ -95,10 +94,11 @@ class SyslogServer:
 
     def __init__(self, *, sink, on_message=None, bind_host='0.0.0.0',
                  udp_port=0, tcp_port=0, tls_port=0, tls_cert='', tls_key='',
-                 allowed_sources=None, dbg=None):
+                 allowed_sources=None, dbg=None, dbg_warn=None, on_drop=None):
         self._sink = sink                       # callable(list[dict]) -> None  (batch store)
         self._on_message = on_message           # optional callable(dict) per message
         self._bind = bind_host or '0.0.0.0'
+        self._binds = _parse_binds(self._bind)  # [(family, address)] — one per interface
         self._udp_port = int(udp_port or 0)
         self._tcp_port = int(tcp_port or 0)
         self._tls_port = int(tls_port or 0)
@@ -106,6 +106,9 @@ class SyslogServer:
         self._tls_key = tls_key or ''
         self._allow = _parse_allowlist(allowed_sources)
         self._dbg = dbg or (lambda *a, **k: None)
+        self._dbg_warn = dbg_warn or self._dbg   # drop notices log at warning
+        self._on_drop = on_drop                  # callable(source, transport, delta)
+        self._drops: dict = {}                  # ip -> {count, last_log, flushed}
         self._q: queue.Queue = queue.Queue(maxsize=200000)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -119,24 +122,15 @@ class SyslogServer:
         problems: list[str] = []
         self._stop.clear()
         if self._udp_port:
-            try:
-                self._start_udp(self._udp_port)
-            except OSError as e:
-                problems.append(f'UDP :{self._udp_port}: {e}')
+            problems += self._start_udp(self._udp_port)
         if self._tcp_port:
-            try:
-                self._start_tcp(self._tcp_port, tls_ctx=None)
-            except OSError as e:
-                problems.append(f'TCP :{self._tcp_port}: {e}')
+            problems += self._start_tcp(self._tcp_port, tls_ctx=None)
         if self._tls_port:
             ctx, err = self._tls_context()
             if err:
                 problems.append(f'TLS :{self._tls_port}: {err}')
             else:
-                try:
-                    self._start_tcp(self._tls_port, tls_ctx=ctx)
-                except OSError as e:
-                    problems.append(f'TLS :{self._tls_port}: {e}')
+                problems += self._start_tcp(self._tls_port, tls_ctx=ctx)
         if self._threads:                       # at least one transport bound
             self._spawn(self._writer_loop, name='syslog-writer')
             self.running = True
@@ -161,25 +155,49 @@ class SyslogServer:
         self._threads.append(t)
 
     # ── transports ─────────────────────────────────────────────────────────────
-    def _start_udp(self, port: int) -> None:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    def _new_socket(self, family: int, sock_type: int, addr: str, port: int):
+        """Create, configure and bind one socket (IPv6 bound v6-only so IPv4 and
+        IPv6 wildcards don't collide)."""
+        s = socket.socket(family, sock_type)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((self._bind, port))
+        if family == socket.AF_INET6:
+            try:
+                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            except (OSError, AttributeError):
+                pass
+        s.bind((addr, port))
         s.settimeout(_SOCK_TIMEOUT)
-        self._socks.append(s)
-        self._spawn(self._udp_loop, name=f'syslog-udp-{port}', args=(s,))
-        self._dbg(f'> Syslog >> UDP listening on {self._bind}:{port}')
+        return s
 
-    def _start_tcp(self, port: int, *, tls_ctx) -> None:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((self._bind, port))
-        s.listen(64)
-        s.settimeout(_SOCK_TIMEOUT)
-        self._socks.append(s)
+    def _start_udp(self, port: int) -> list:
+        """Bind a UDP socket per configured address; return per-address problems."""
+        problems = []
+        for fam, addr in self._binds:
+            try:
+                s = self._new_socket(fam, socket.SOCK_DGRAM, addr, port)
+            except OSError as e:
+                problems.append(f'UDP {addr}:{port}: {e}')
+                continue
+            self._socks.append(s)
+            self._spawn(self._udp_loop, name=f'syslog-udp-{port}', args=(s,))
+            self._dbg(f'> Syslog >> UDP listening on {addr}:{port}')
+        return problems
+
+    def _start_tcp(self, port: int, *, tls_ctx) -> list:
+        """Bind a TCP/TLS socket per configured address; return per-address problems."""
         kind = 'TLS' if tls_ctx else 'TCP'
-        self._spawn(self._tcp_accept_loop, name=f'syslog-{kind.lower()}-{port}', args=(s, tls_ctx))
-        self._dbg(f'> Syslog >> {kind} listening on {self._bind}:{port}')
+        problems = []
+        for fam, addr in self._binds:
+            try:
+                s = self._new_socket(fam, socket.SOCK_STREAM, addr, port)
+                s.listen(64)
+            except OSError as e:
+                problems.append(f'{kind} {addr}:{port}: {e}')
+                continue
+            self._socks.append(s)
+            self._spawn(self._tcp_accept_loop, name=f'syslog-{kind.lower()}-{port}', args=(s, tls_ctx))
+            self._dbg(f'> Syslog >> {kind} listening on {addr}:{port}')
+        return problems
 
     def _tls_context(self):
         if not (self._tls_cert and self._tls_key):
@@ -201,6 +219,29 @@ class SyslogServer:
             return False
         return any(addr in net for net in self._allow)
 
+    def _note_drop(self, ip: str, transport: str) -> None:
+        """Count an allowlist-rejected packet/connection.  At most once every
+        ``_DROP_LOG_EVERY`` seconds per source (so a flood never spams) it logs a
+        warning and flushes the new drops to the persistent tally via ``on_drop``."""
+        d = self._drops.get(ip)
+        if d is None:
+            if len(self._drops) >= _DROPS_MAX:   # cap distinct sources (spoof flood)
+                return
+            d = self._drops[ip] = {'count': 0, 'last_log': 0.0, 'flushed': 0}
+        d['count'] += 1
+        now = time.time()
+        if now - d['last_log'] >= _DROP_LOG_EVERY:
+            d['last_log'] = now
+            delta = d['count'] - d['flushed']
+            d['flushed'] = d['count']
+            self._dbg_warn(f'> Syslog >> dropped {transport} from {ip or "?"} '
+                           f'(not in allowed sources) — {d["count"]} dropped so far')
+            if self._on_drop and delta > 0:
+                try:
+                    self._on_drop(ip, transport, delta)
+                except Exception:               # pylint: disable=broad-except
+                    pass
+
     def _udp_loop(self, sock: socket.socket) -> None:
         while not self._stop.is_set():
             try:
@@ -209,9 +250,13 @@ class SyslogServer:
                 continue
             except OSError:
                 break
+            if not data:
+                continue
             ip = addr[0] if addr else ''
-            if data and self._allowed(ip):
+            if self._allowed(ip):
                 self._enqueue(data, ip)
+            else:
+                self._note_drop(ip, 'UDP')
 
     def _tcp_accept_loop(self, sock: socket.socket, tls_ctx) -> None:
         while not self._stop.is_set():
@@ -223,6 +268,7 @@ class SyslogServer:
                 break
             ip = addr[0] if addr else ''
             if not self._allowed(ip):
+                self._note_drop(ip, 'TCP')
                 try:
                     conn.close()
                 except OSError:

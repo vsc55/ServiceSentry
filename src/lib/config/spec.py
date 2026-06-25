@@ -68,6 +68,7 @@ class Cfg:
     no_rule: bool = False             # exclude from the derived web_admin rule dicts
     no_seed: bool = False             # exclude from default materialisation (creds only)
                                       # (first-run-only credentials)
+    nullable: bool = False            # blank/null is valid (= "use the default")
 
 
 # ── The registry ────────────────────────────────────────────────────────────
@@ -177,7 +178,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('database|driver', str, 'sqlite', env='SS_DB_DRIVER', no_rule=True),
     Cfg('database|path', str, '', env='SS_DB_PATH', no_rule=True),  # '' → default_sqlite_path
     Cfg('database|host', str, 'localhost', env='SS_DB_HOST', no_rule=True),
-    Cfg('database|port', int, None, env='SS_DB_PORT', no_rule=True),  # 3306 MySQL / 5432 PostgreSQL
+    Cfg('database|port', int, None, env='SS_DB_PORT', no_rule=True, nullable=True),  # 3306 MySQL / 5432 PostgreSQL
     Cfg('database|name', str, 'servicesentry', env='SS_DB_NAME', no_rule=True),
     Cfg('database|user', str, '', env='SS_DB_USER', no_rule=True),
     Cfg('database|password', str, '', env='SS_DB_PASSWORD', no_rule=True),
@@ -281,18 +282,35 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # Built-in syslog server: receive RFC 3164/5424 events from external hosts
     # over UDP/TCP(+TLS), store them (lib/stores/syslog.py) and optionally alert.
     Cfg('syslog|enabled',         bool, False, admin_only=True),
-    Cfg('syslog|bind_host',       str, '0.0.0.0', admin_only=True),
-    Cfg('syslog|udp_port',        int, 514, min=0, max=65535, admin_only=True),
-    Cfg('syslog|tcp_port',        int, 514, min=0, max=65535, admin_only=True),
-    Cfg('syslog|tls_port',        int, 0,   min=0, max=65535, admin_only=True),
+    Cfg('syslog|bind_host',       str, '0.0.0.0, ::', admin_only=True),  # all IPv4 + IPv6
+    Cfg('syslog|udp_port',        int, 514, min=0, max=65535, admin_only=True, nullable=True),
+    Cfg('syslog|tcp_port',        int, 514, min=0, max=65535, admin_only=True, nullable=True),
+    Cfg('syslog|tls_port',        int, 0,   min=0, max=65535, admin_only=True, nullable=True),
     Cfg('syslog|tls_cert',        str, '', admin_only=True),
     Cfg('syslog|tls_key',         str, '', admin_only=True),
     Cfg('syslog|allowed_sources', str, '', admin_only=True),   # comma/space/newline IPs or CIDRs
-    Cfg('syslog|retention_days',  int, 30, min=0, max=3650, admin_only=True),
-    Cfg('syslog|max_rows',        int, 500000, min=0, max=100000000, admin_only=True),
-    Cfg('syslog|alert_enabled',   bool, False, admin_only=True),
-    Cfg('syslog|alert_severity_max', int, 3, min=0, max=7, admin_only=True),   # err and worse
-    Cfg('syslog|alert_regex',     str, '', admin_only=True),
+    Cfg('syslog|retention_days',  int, 30, min=0, max=3650, admin_only=True, nullable=True),
+    Cfg('syslog|max_rows',        int, 500000, min=0, max=100000000, admin_only=True, nullable=True),
+    # Syslog→notification routing is handled by the Event-rules manager (Events
+    # tab), not a built-in alert here — one place owns event→notification.
+
+    # ── Events (event-rules manager) ──────────────────────────────────────────
+    # Global default cooldown (s) inherited by any event rule that leaves its own
+    # Cooldown field blank.  0 = notify on every match.
+    Cfg('events|cooldown',        int, 0, min=0, max=86400),
+
+    # ── Syslog dedicated database (optional) ──────────────────────────────────
+    # When enabled, syslog messages are stored in their own database (isolating
+    # high-volume ingestion from the system DB).  Otherwise they share it.
+    # Mirrors the ``database`` section's fields; the password is encrypted at rest.
+    Cfg('syslog_db|enabled',  bool, False, admin_only=True, env='SS_SYSLOG_DB_ENABLED'),
+    Cfg('syslog_db|driver',   str, 'sqlite', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_DRIVER'),
+    Cfg('syslog_db|path',     str, '', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_PATH'),
+    Cfg('syslog_db|host',     str, 'localhost', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_HOST'),
+    Cfg('syslog_db|port',     int, None, admin_only=True, no_rule=True, env='SS_SYSLOG_DB_PORT', nullable=True),
+    Cfg('syslog_db|name',     str, 'servicesentry_syslog', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_NAME'),
+    Cfg('syslog_db|user',     str, '', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_USER'),
+    Cfg('syslog_db|password', str, '', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_PASSWORD'),
 
     # ══ Webhooks (editor schema only) ═══════════════════════════════════════
     # These are the per-webhook FORM field defaults (type/default for the editor
@@ -312,6 +330,15 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
 )
 
 CFG_BY_PATH: dict[str, Cfg] = {f.path: f for f in CONFIG_FIELDS}
+
+# Config paths removed from the registry but possibly still stored from older
+# versions.  They are stripped on read (so the UI never shows them) and the next
+# save prunes their DB rows.  Add a path here when you delete a Cfg above.
+OBSOLETE_CONFIG_PATHS: frozenset[str] = frozenset({
+    'syslog|alert_enabled',        # built-in syslog alert → replaced by Event rules
+    'syslog|alert_severity_max',
+    'syslog|alert_regex',
+})
 
 
 # ── Default accessor ──────────────────────────────────────────────────────────
@@ -335,7 +362,10 @@ def cfg_meta(path: str) -> dict:
     if f.type is bool:
         return {'type': 'bool', 'default': f.default}
     if f.type is int:
-        return {'type': 'int', 'default': f.default, 'min': f.min, 'max': f.max}
+        m = {'type': 'int', 'default': f.default, 'min': f.min, 'max': f.max}
+        if f.nullable:
+            m['nullable'] = True
+        return m
     return {'type': 'str', 'default': f.default}
 
 

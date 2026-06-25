@@ -35,7 +35,9 @@ def _start() -> subprocess.Popen:
         kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         kwargs['start_new_session'] = True
-    proc = subprocess.Popen([sys.executable, str(ROOT / 'main.py'), '--web'], **kwargs)
+    # Forward any extra args (e.g. --verbose for Flask debug mode) to main.py.
+    proc = subprocess.Popen(
+        [sys.executable, str(ROOT / 'main.py'), '--web', *sys.argv[1:]], **kwargs)
     print(f'[watch] started  pid={proc.pid}', flush=True)
     return proc
 

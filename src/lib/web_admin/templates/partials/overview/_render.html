@@ -281,7 +281,7 @@ async function renderOverview() {
         const hpx     = def.hasH ? _dwHpx(item.h) : null;
         const cStyle  = hpx ? ` style="flex:none;height:${hpx}px;overflow-y:auto"` : '';
         h += `<div class="dw dw-c${item.cols}${spClass}${navClass}" data-wid="${escAttr(item.id)}"
-               data-cols="${item.cols}" data-h="${escAttr(String(item.h || 'auto'))}"${item.sev ? ` data-sev="${escAttr(String(item.sev))}"` : ''}${item.srvf ? ` data-srvf="${escAttr(String(item.srvf))}"` : ''}${display}>`;
+               data-cols="${item.cols}" data-h="${escAttr(String(item.h || 'auto'))}"${item.sev ? ` data-sev="${escAttr(String(item.sev))}"` : ''}${item.srvf ? ` data-srvf="${escAttr(String(item.srvf))}"` : ''}${item.modf ? ` data-modf="${escAttr(String(item.modf))}"` : ''}${display}>`;
         h += _dwToolbar(item.id, item.cols, item.h || 'auto', item);
         h += `<div class="dw-content"${cStyle}>${_dwContent(item.id, data, item)}</div>`;
         if (def.hasH) h += `<div class="dw-resize" title="${escAttr(t('widget_resize_h') || 'Drag to resize height')}"></div>`;

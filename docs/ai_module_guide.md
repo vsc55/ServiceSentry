@@ -1,8 +1,8 @@
 ---
 purpose: AI agent reference for creating ServiceSentry watchful modules
-version: "2.0"
-last_validated: "2026-05-29"
-validated_by: "Agent demo — http_check module created from this doc alone, 393/393 tests pass"
+version: "2.1"
+last_validated: "2026-06-26"
+validated_by: "Code-vs-doc audit (2026-06-26): reconciled host binding (__host_profile__ / __host_multiple__ / __credential__), __history__, field props (multi / nullable / ipkind / term_field / result_multi / placeholder_map_field), discovery UI meta-keys (__check_title_field__, __title_editable__, __discovery_uid_key__/_label_template__/_inputs__/_value_field__/_dedup_with_type__), MISSING_DEPS/PARTIAL_DEPS, host-aware exec helpers. No reverse drift (every documented symbol exists). Prior: agent built http_check from this doc alone, 393/393 tests pass (2026-05-29)."
 coverage: "100% — all code features documented"
 ---
 
@@ -205,7 +205,10 @@ class Watchful(ModuleBase):
 - [ ] `WATCHFUL_ACTIONS` — expose classmethods as web endpoints
 - [ ] `READ_ONLY_ACTIONS` — suppress audit for read-only actions
 - [ ] `WATCHFUL_TOOLBAR` — toolbar buttons in module card
+- [ ] `MISSING_DEPS` — list of required pip packages; if absent, module shows `__unsupported__` + "pip install …"
+- [ ] `PARTIAL_DEPS` — list of optional pip packages; if absent, module shows a warning badge but stays usable
 - [ ] `audit_detail(cls, action, result)` — custom audit log entries
+- [ ] `host_os()` / `host_cmd_for()` / `host_exec()` — host-aware (local/SSH) execution helpers (see §7)
 - [ ] `web/_ui.html` + `web/_modals.html` — custom JS/HTML
 - [ ] `fail_streak(key, failed)` — consecutive failure tracking (persisted in check_state DB; survives cycles/processes)
 
@@ -562,12 +565,20 @@ class Watchful(ModuleBase):
 | `placeholder` | string | no | Static hint text. `"__key__"` uses the item key |
 | `placeholder_module` | string | no | Name of a `__module__`-level field whose value becomes the placeholder |
 | `placeholder_map` | `{value: hint}` | no | Map from preceding field's value to placeholder |
+| `placeholder_map_field` | string | no | Name of the field whose value keys `placeholder_map` (defaults to the preceding field) |
 | `zero_as_blank` | bool | no | Display value `0` as blank (shows placeholder). Semantic: "0 = use module default" |
+| `inherit_blank` | bool | no | int/float `__module__` field: blank → stored `null`, inherits the global `modules\|<field>`, shown as placeholder |
+| `nullable` | bool | no | int/float: blank → stored `null` ("use default"); placeholder shows the default. Generic (also used by panel config) |
+| `multi` | bool | no | `str` field rendered as a removable-chips list (comma/space/newline separated; stored comma-joined) |
+| `ipkind` | string | no | Validate field as an IP address (client + server). `"ip"` (IPv4/IPv6, no mask) or `"cidr"` (IP or CIDR). Combine with `multi` for a validated list |
+| `term_field` | string | no | Sibling field whose value selects this field's label/hint/action from the lang `field_terms` map |
 | `numericString` | bool | no | Restrict keyboard to digits only (for `str` fields containing numbers) |
 | `__pick_from_collection__` | string | no | Name of sibling collection for picker button |
 | `input_action` | object | no | Icon button on field. See §5.1 |
 | `supported_platforms` | string[] | no | `["linux","win32","darwin"]` — field disabled on other platforms |
 | `label_i18n` | dict | — | Auto-injected from lang/*.json. Never write manually |
+
+> `placeholder` also accepts the special value `"__address__"` (resolves to the item's `host`/`url`/`address`, or the bound host's address).
 
 ### §5.1 `input_action` properties
 
@@ -579,6 +590,7 @@ class Watchful(ModuleBase):
 | `icon` | **YES** | Bootstrap Icons class |
 | `result` | **YES** | `"toast"` \| `"list"` \| `"field_picker"` |
 | `result_field` | if field_picker | Field name to receive selected value |
+| `result_multi` | no | `true` = picker result is a removable-chips multi-value instead of a single value |
 
 ### §5.2 Collection meta-keys (`__*__`)
 
@@ -597,9 +609,21 @@ class Watchful(ModuleBase):
 | `__discovery_categories__` | no | `{category: {icon, color}}` — category badge styles |
 | `__discovery_default_operators__` | no | `{category: operator}` — auto-set operator on add |
 | `__discovery_type_store_field__` | no | Hidden field name to store detected type on add |
+| `__discovery_label_template__` | no | Template `{field}` to build each discovered row's label (e.g. `"{host} - {db_type}"`) |
+| `__discovery_uid_key__` | no | `true` = discovered item keys are opaque UUIDs (key not user-editable) |
+| `__discovery_value_field__` | no | Field of the discover result used to fill the item (instead of the key) |
+| `__discovery_inputs__` | no | Array of extra input controls shown in the discover modal (filters) |
+| `__discovery_dedup_with_type__` | no | `true` = dedupe discovered items using the type field as part of the key |
 | `__key_mirrors_field__` | no | Auto-sync item key with this field value on discover-add |
+| `__check_title_field__` | no | Field holding the item's visible label (e.g. `"label"`, `"process"`) |
+| `__title_editable__` | no | `true` = the item label (`__check_title_field__`) is renameable in the UI |
 | `__new_item_fields__` | no | Fields shown in "new item" dialog before full form |
 | `type: "sub_collection"` | — | Nested collection. See §5.4 |
+
+> **Module-private meta-keys:** a module may stash its own `__custom__` config in
+> `schema.json` and read it from `_SCHEMA` in its classmethods (e.g. `dns` defines
+> `__discovery_probe_types__` and reads it in `discover()`). Core ignores unknown
+> `__*__` keys (stripped from `ITEM_SCHEMAS`), so they're safe for module-specific use.
 
 ### §5.3 `__actions__` entry properties
 
@@ -646,6 +670,32 @@ When discover runs on `checks` (POST), body includes module scalars + parent ser
 ```json
 {"enabled": true, "threads": 5, "servers": {"server_key": {...full server data...}}, "__var_dir__": "..."}
 ```
+
+### §5.5 Module-level meta-keys (`__module__`)
+
+For host-aware / history / credential-backed modules, declare these in `__module__`:
+
+| Key | Description |
+|-----|-------------|
+| `api_ver` | API version for action URLs (`/api/<ver>/watchfuls/...`). Default `"v1"` |
+| `__host_profile__` | Connection fields a check inherits when bound to a host: `{"key": <proto>, "address_field": <field>, "fields": [...]}` (dict or list). Resolved by `ModuleBase.resolve_host()` |
+| `__host_multiple__` | `true` = a check can bind to several hosts (multi-select) |
+| `__credential__` | Reusable-credential fields: `{"type": "web_auth", "fields": [...]}` (referenceable from the credential store) |
+| `__history__` | Numeric field(s) recorded as a time series for the history graphs: `{"field": "temp", "unit": "°C", "label": "..."}`, or `{"fields": {name: {...}}}`, or `{"field": null}` for status-only |
+
+```json
+"__module__": {
+    "api_ver": "v1",
+    "__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host"]},
+    "__host_multiple__": true,
+    "__history__": {"field": "percent", "unit": "%", "label": "Usage"},
+    "enabled": {"type": "bool", "default": true}
+}
+```
+
+> Runtime-injected keys (set by `discover_schemas()`, do NOT write in `schema.json`):
+> `__unsupported__`, `__missing_deps__`, `__partial_deps__`, `options_disabled`,
+> `__toolbar__`, `__ui__`, `__i18n__`, `label_i18n`.
 
 ---
 
@@ -805,6 +855,13 @@ runner = Exec()
 runner.set_remote(host='h', port=22, user='root', key_file='/path/key', timeout=15.0)
 runner.command = 'uptime'; r1 = runner.start()
 runner.command = 'df -h';  r2 = runner.start()
+
+# Host-aware helpers (PREFERRED for host-bound checks) — pick the per-OS command
+# and run it locally or over SSH using the item's bound host, transparently:
+os_name = self.host_os(item)                       # 'linux' | 'darwin' | 'win32'
+cmd     = self.host_cmd_for(item, {'linux': 'cat /proc/stat',
+                                   'darwin': 'top -l 2 -n 0'})
+out, err, code = self.host_exec(item, cmd, timeout=15)
 ```
 
 ### Useful properties
@@ -1022,6 +1079,10 @@ WATCHFUL_TOOLBAR: tuple[dict, ...] = (
 - The JS function MUST be defined globally in `web/_ui.html`
 - Function signature: `function myFn(modName) { ... }`
 - `label_key` must have a matching entry in `lang/*.json → ui`
+
+> **Legacy `WATCHFUL_UI`:** an optional `frozenset[str]` class var, propagated by
+> `discover_schemas()` as `__ui__`. Superseded by `WATCHFUL_TOOLBAR` (no current
+> module uses it); prefer the toolbar.
 
 ---
 

@@ -3,6 +3,8 @@
 """Config routes: /api/config (GET, PUT) with per-field version tracking."""
 
 import copy
+import ipaddress
+import re
 import uuid
 
 from flask import jsonify, session
@@ -26,6 +28,32 @@ from lib import secret_manager
 INT_RULES = int_rules()
 BOOL_RULES = bool_rules()
 JSON_DICT_FIELDS = json_dict_fields()
+
+# IP-address config fields (authoritative server-side check, mirrors the frontend
+# ``meta.ipkind``).  ``'ip'`` = a bind address, IPv4/IPv6 only (no mask); ``'cidr'``
+# = an IPv4/IPv6 address OR a CIDR network (192.168.0.0/24, 2001:db8::/32).  The
+# list-valued fields are comma/space/newline separated; ``web_admin|host`` is a
+# single value.
+IP_FIELDS = {
+    'web_admin|host': 'ip',
+    'syslog|bind_host': 'ip',
+    'syslog|allowed_sources': 'cidr',
+}
+
+
+def _ip_token_ok(token, kind):
+    """True if ``token`` is a valid IP (kind 'ip') or IP/CIDR (kind 'cidr')."""
+    token = token.strip().strip('[]')          # tolerate bracketed IPv6
+    if not token:
+        return False
+    try:
+        if kind == 'cidr' and '/' in token:
+            ipaddress.ip_network(token, strict=False)
+        else:
+            ipaddress.ip_address(token)
+        return True
+    except ValueError:
+        return False
 
 
 def register(app, wa):
@@ -119,14 +147,40 @@ def register(app, wa):
         schema['modules|timeout'] = cfg_meta('modules|timeout')
         schema['users|default_role'] = cfg_meta('users|default_role')
         schema['groups|default_role'] = cfg_meta('groups|default_role')
-        # database: driver renders as a dedicated select (MySQL/MariaDB merged);
-        # the port is driver-specific (blank ⇒ the connector's 5432/3306 default)
-        # so it carries a hint + range.
-        schema['database|driver'] = cfg_meta('database|driver')
+        # database / syslog_db: the engine renders as a select of the supported
+        # drivers; the port is driver-specific (blank ⇒ the connector's
+        # 5432/3306 default) so it carries a hint + range.
+        _DB_DRIVERS = ['sqlite', 'postgresql', 'mysql', 'mariadb']
+        # The port placeholder shows the engine's default (live-keyed by driver);
+        # blank stores null so the connector uses that default.
+        _DB_PORT_DEFAULTS = {'postgresql': 5432, 'mysql': 3306, 'mariadb': 3306}
+        schema['database|driver'] = {**cfg_meta('database|driver'), 'options': _DB_DRIVERS}
         schema['database|port'] = {
-            **cfg_meta('database|port'), 'min': 1, 'max': 65535,
-            'placeholder': '5432 / 3306',
+            **cfg_meta('database|port'), 'min': 1, 'max': 65535, 'nullable': True,
+            'placeholder_map_field': 'driver', 'placeholder_map': _DB_PORT_DEFAULTS,
         }
+        schema['syslog_db|driver'] = {**cfg_meta('syslog_db|driver'), 'options': _DB_DRIVERS}
+        schema['syslog_db|port'] = {
+            **cfg_meta('syslog_db|port'), 'min': 1, 'max': 65535, 'nullable': True,
+            'placeholder_map_field': 'driver', 'placeholder_map': _DB_PORT_DEFAULTS,
+        }
+        # Syslog listener numeric fields: blank = use the registry default (shown as
+        # the placeholder), so clearing one never auto-fills the previous value.
+        for _p in ('syslog|udp_port', 'syslog|tcp_port', 'syslog|tls_port',
+                   'syslog|retention_days', 'syslog|max_rows'):
+            schema[_p] = {**cfg_meta(_p), 'nullable': True}
+        # Sender allowlist renders as a removable-chips list; each entry must be a
+        # valid IPv4/IPv6 address OR a CIDR network (192.168.0.0/24, 2001:db8::/32).
+        schema['syslog|allowed_sources'] = {
+            **cfg_meta('syslog|allowed_sources'), 'multi': True, 'ipkind': 'cidr'}
+        # Bind addresses: a chips list so the receiver can listen on several
+        # interfaces (IPv4 and/or IPv6); blank = all IPv4 (0.0.0.0). Each entry is a
+        # plain bind address (no CIDR mask).
+        schema['syslog|bind_host'] = {
+            **cfg_meta('syslog|bind_host'), 'multi': True, 'ipkind': 'ip'}
+        # Web panel bind address: a single IPv4/IPv6 the HTTP server listens on
+        # (0.0.0.0 = all IPv4); validated as an IP, no CIDR.
+        schema['web_admin|host'] = {**cfg_meta('web_admin|host'), 'ipkind': 'ip'}
         schema['telegram|chat_id'] = {'numericString': True}
         schema['web_admin|role_modal_scrollable'] = {'type': 'bool', 'default': True}
         return jsonify(schema)
@@ -258,6 +312,9 @@ def register(app, wa):
             sec_data = new_data.get(section)
             if not isinstance(sec_data, dict) or field not in sec_data:
                 continue
+            _f = CFG_BY_PATH.get(path)
+            if sec_data[field] is None and _f is not None and _f.nullable:
+                continue                     # blank = "use the registry default" (valid)
             ok, _err = cfg_validate(path, sec_data[field])
             if not ok:
                 wa._dbg(f"> Config PUT >> reject {path}={sec_data[field]!r}: {_err} "
@@ -308,6 +365,25 @@ def register(app, wa):
                 return jsonify({'error': wa._t('invalid_public_url')}), 400
             web_data['public_url'] = v
 
+        # Validate IP / bind-address fields (single value or comma/space/newline
+        # list).  Blank is allowed (the field falls back to its registry default);
+        # any non-empty entry must be a real IPv4/IPv6 (or CIDR where allowed).
+        for path, kind in IP_FIELDS.items():
+            section, field = path.split('|')
+            sec_data = new_data.get(section)
+            if not isinstance(sec_data, dict) or field not in sec_data:
+                continue
+            raw = sec_data[field]
+            if not isinstance(raw, str):
+                return jsonify({'error': wa._t('invalid_ip_field', field, raw)}), 400
+            tokens = [t for t in re.split(r'[,\s]+', raw) if t]
+            bad = [t for t in tokens if not _ip_token_ok(t, kind)]
+            if bad:
+                wa._dbg(f"> Config PUT >> reject {path}: invalid IP(s) {bad}",
+                        DebugLevel.warning)
+                return jsonify({'error': wa._t(
+                    'invalid_ip_field', field, ', '.join(bad))}), 400
+
         wa._dbg("> Config PUT >> validation passed; restoring masked secrets, "
                 "encrypting + writing editable layer to DB", DebugLevel.debug)
         secret_manager.restore_sensitive(new_data, old_data, keys=wa._secret_keys)
@@ -350,6 +426,10 @@ def register(app, wa):
                     cfg_key, transform = rule['flask_cfg']
                     wa._app.config[cfg_key] = transform(v)
             if wa._WEB_PORT != _pre_port or wa._proxy_count != _pre_proxy:
+                wa._restart_pending = True
+            # The syslog database connector is built at startup; any change needs
+            # a restart to take effect (like the system database section).
+            if (old_data.get('syslog_db') or {}) != (new_data.get('syslog_db') or {}):
                 wa._restart_pending = True
             for path, attr in BOOL_RULES.items():
                 if attr is None:

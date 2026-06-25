@@ -1,36 +1,37 @@
-# ServiceSentry — microservices topology (MariaDB-backed)
-# ========================================================
-# Five containers, two MariaDB databases:
-#   • db        — main MariaDB datastore (config, users, history, module tables,
-#                 event rules, notification log …).
-#   • syslog-db — dedicated MariaDB for the (high-volume) syslog messages, kept
-#                 off the main DB so syslog ingestion/retention never contends
-#                 with monitoring data.
-#   • web       — the admin panel / UI (on-demand checks only; does NOT schedule).
-#   • worker    — the periodic monitoring loop (owns scheduling).
-#   • syslog    — the standalone syslog receiver (binds the UDP/TCP/TLS ports).
+# ServiceSentry — microservices topology behind Traefik (public/Internet)
+# =======================================================================
+# Same five-container, two-database split as docker-compose.microservices.yml,
+# but published to the Internet through a Traefik reverse proxy with automatic
+# Let's Encrypt TLS. Six containers, two MariaDB databases:
+#   • traefik    — reverse proxy: terminates TLS, redirects HTTP→HTTPS, routes
+#                  your domain to the web container (the ONLY service publishing
+#                  80/443 to the host).
+#   • db         — main MariaDB datastore (config, users, history, module tables,
+#                  event rules, notification log …).
+#   • syslog-db  — dedicated MariaDB for the (high-volume) syslog messages.
+#   • web        — the admin panel / UI (no host port; Traefik fronts it).
+#   • worker     — the periodic monitoring loop (owns scheduling).
+#   • syslog     — the standalone syslog receiver (binds the UDP/TCP/TLS ports
+#                  directly on the host; raw syslog is NOT proxied by Traefik).
 #
-#   cp docker/env.example docker/.env     # then edit (at least SS_PASSWORD + SS_DB_*
-#                                         #  + SS_SYSLOG_DB_PASSWORD)
-#   docker compose -f docker/docker-compose.microservices.yml up -d
+#   cp docker/env.example docker/.env     # then edit. REQUIRED here, on top of
+#                                         #  the microservices vars:
+#                                         #    SS_DOMAIN, SS_ACME_EMAIL
+#   docker compose -f docker/docker-compose.microservices-traefik.yml up -d
 #
-# Why split the syslog receiver out: it binds privileged-ish network ports and
-# handles untrusted input, so isolating it keeps that surface off the web/worker.
-# The web container therefore runs with SS_SYSLOG_EMBEDDED=0 — it still shows the
-# Syslog tab and serves stored messages from the syslog DB, but does not bind the
-# ports (the syslog container owns them). Enabling/disabling the receiver or
-# changing its ports from the UI is picked up by the syslog container live (it
-# polls the main DB for config), so no restart is needed.
+# DNS: point an A/AAAA record for SS_DOMAIN at this host BEFORE first start, so
+# the Let's Encrypt TLS-ALPN challenge on :443 can validate the certificate.
 #
-# The syslog messages live in their own database (SS_SYSLOG_DB_ENABLED=1): the web
-# and syslog containers both point at ``syslog-db``; the worker doesn't touch
-# syslog so it only gets the main DB env.
+# Networks (isolation):
+#   • backend  — internal service↔service + database traffic; the databases live
+#                ONLY here, never on the public plane.
+#   • frontend — Traefik ↔ web. Only Traefik publishes ports to the host.
 #
 # Do NOT enable SS_AUTOSTART on the web service: the worker owns monitoring, and
 # two schedulers with no shared lock would double every check.
 
-# Main database connection env — overlaid onto the (empty) config.json
-# ``database`` section at bootstrap by every ServiceSentry process (SS_DB_*).
+# Main database connection env (SS_DB_*) — overlaid onto the config.json
+# ``database`` section at bootstrap by every ServiceSentry process.
 x-db-env: &db-env
   SS_DB_DRIVER: mysql
   SS_DB_HOST: db
@@ -39,9 +40,8 @@ x-db-env: &db-env
   SS_DB_USER: ${SS_DB_USER:-servicesentry}
   SS_DB_PASSWORD: ${SS_DB_PASSWORD:?set SS_DB_PASSWORD in docker/.env}
 
-# Dedicated syslog database env — overlaid onto the config.json ``syslog_db``
-# section (SS_SYSLOG_DB_*). ENABLED=1 routes syslog messages here instead of the
-# main DB. Applied to the web + syslog containers only.
+# Dedicated syslog database env (SS_SYSLOG_DB_*). ENABLED=1 routes syslog messages
+# to syslog-db instead of the main DB. Applied to the web + syslog containers.
 x-syslog-db-env: &syslog-db-env
   SS_SYSLOG_DB_ENABLED: "1"
   SS_SYSLOG_DB_DRIVER: mysql
@@ -52,6 +52,42 @@ x-syslog-db-env: &syslog-db-env
   SS_SYSLOG_DB_PASSWORD: ${SS_SYSLOG_DB_PASSWORD:?set SS_SYSLOG_DB_PASSWORD in docker/.env}
 
 services:
+
+  # ── Reverse proxy (public TLS) ──────────────────────────────────────────────
+  traefik:
+    image: traefik:v3.1
+    container_name: servicesentry-traefik
+    restart: unless-stopped
+    command:
+      # Docker provider: only containers with traefik.enable=true are exposed.
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=ss_frontend"
+      # Entry points: :80 (HTTP, redirected) and :443 (HTTPS).
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Global HTTP→HTTPS redirect.
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      # Let's Encrypt via the TLS-ALPN-01 challenge on :443.
+      - "--certificatesresolvers.le.acme.tlschallenge=true"
+      - "--certificatesresolvers.le.acme.email=${SS_ACME_EMAIL:?set SS_ACME_EMAIL in docker/.env}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Read-only docker socket so Traefik can watch container labels.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # ── Main database ───────────────────────────────────────────────────────────
   db:
@@ -95,7 +131,7 @@ services:
       retries: 10
       start_period: 30s
 
-  # ── Web admin panel ─────────────────────────────────────────────────────────
+  # ── Web admin panel (behind Traefik, no host port) ──────────────────────────
   web:
     build:
       context: ..
@@ -104,11 +140,9 @@ services:
     container_name: servicesentry-web
     restart: unless-stopped
     networks:
-      # backend: reach the databases; frontend: the externally-published plane.
+      # backend: reach the databases; frontend: Traefik routes to it here.
       - backend
       - frontend
-    ports:
-      - "8080:8080"
     volumes:
       - config:/etc/ServiSesentry
       - vardata:/var/lib/ServiSesentry
@@ -129,6 +163,20 @@ services:
       SS_AUTOSTART: "false"
       # The syslog container owns the listener; the web only shows stored data.
       SS_SYSLOG_EMBEDDED: "0"
+      # Behind a TLS-terminating reverse proxy: trust 1 proxy hop, mark cookies
+      # secure, and advertise the public URL for absolute links / redirects.
+      SS_PROXY_COUNT: "1"
+      SS_SECURE_COOKIES: "true"
+      SS_PUBLIC_URL: ${SS_DOMAIN:?set SS_DOMAIN in docker/.env}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=ss_frontend"
+      # HTTPS router for your domain → this service on :8080.
+      - "traefik.http.routers.ss-web.rule=Host(`${SS_DOMAIN:?set SS_DOMAIN in docker/.env}`)"
+      - "traefik.http.routers.ss-web.entrypoints=websecure"
+      - "traefik.http.routers.ss-web.tls=true"
+      - "traefik.http.routers.ss-web.tls.certresolver=le"
+      - "traefik.http.services.ss-web.loadbalancer.server.port=8080"
     depends_on:
       db:
         condition: service_healthy
@@ -178,8 +226,8 @@ services:
     container_name: servicesentry-syslog
     restart: unless-stopped
     networks:
-      # backend only: the DBs. Its external ingress is the host port mapping
-      # below (raw UDP/TCP), not the frontend HTTP plane.
+      # backend only: the DBs. Raw syslog ingress is the host port mapping below
+      # (UDP/TCP) — Traefik only proxies HTTP(S), so it does not front syslog.
       - backend
     # Syslog listener ports. Defaults: UDP 514, TCP 514, TLS 6514 (TLS off until
     # tls_cert/tls_key are configured). Adjust the host side if 514 is taken.
@@ -204,23 +252,21 @@ services:
         condition: service_healthy
 
 # ── Named volumes ─────────────────────────────────────────────────────────────
-# Docker manages these volumes; inspect their location with:
-#   docker volume inspect docker_config
-#   docker volume inspect docker_vardata
-#   docker volume inspect docker_dbdata
-#   docker volume inspect docker_syslogdbdata
 volumes:
   config:
   vardata:
   dbdata:
   syslogdbdata:
+  letsencrypt:           # Traefik's acme.json (issued certificates)
 
 # ── Networks ──────────────────────────────────────────────────────────────────
-# Two planes for isolation:
-#   • backend  — internal service↔service + database traffic. The databases live
-#                ONLY here, so they're never on the externally-reachable plane.
-#   • frontend — the externally-facing plane (the web panel; in the Traefik
-#                topology, the reverse proxy routes to the web over this network).
+# backend  — internal service↔service + database traffic (databases ONLY here).
+# frontend — Traefik ↔ web (the only externally-published plane). Fixed names
+#            (ss_backend / ss_frontend) so Traefik's provider.docker.network +
+#            the per-service traefik.docker.network label resolve regardless of
+#            the compose project name.
 networks:
   backend:
+    name: ss_backend
   frontend:
+    name: ss_frontend

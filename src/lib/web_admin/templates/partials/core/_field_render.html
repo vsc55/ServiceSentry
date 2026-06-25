@@ -156,6 +156,42 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             trailing: _actionBtn}), _hintHtml);
     }
 
+    // Nullable int/float (e.g. a DB port): blank is a valid value meaning "use the
+    // default". Clearing it stores null (no auto-fill on blur) and shows the
+    // default as the placeholder. Handles both a present value and a blank one.
+    if (meta && meta.nullable && (meta.type === 'int' || meta.type === 'float')
+        && (typeof value === 'number' || value == null || value === '')) {
+        const _isF = meta.type === 'float';
+        const _minA = meta.min != null ? ` min="${meta.min}"` : '';
+        const _maxA = meta.max != null ? ` max="${meta.max}"` : '';
+        const _minV = meta.min != null ? meta.min : 'null';
+        const _maxV = meta.max != null ? meta.max : 'null';
+        // Placeholder = the effective default. A placeholder_map keyed by a sibling
+        // field (e.g. the DB driver → 5432/3306) updates live via
+        // _refreshConditionalFields; otherwise a static placeholder is used.
+        let _ph = '', _pm = '';
+        if (meta.placeholder_map) {
+            const _ip = pathStr.split('|').slice(0, -1);
+            const _id = getPath(modulesData, _ip) || getPath(configData, _ip) || {};
+            const _kf = meta.placeholder_map_field || '';
+            const _pv = _kf ? meta.placeholder_map[_id[_kf] || ''] : undefined;
+            if (_pv != null) _ph = ` placeholder="${escAttr(String(_pv))}"`;
+            _pm = ` data-placeholder-map="${escAttr(JSON.stringify(meta.placeholder_map))}" data-placeholder-map-field="${escAttr(_kf)}"`;
+        } else {
+            // Explicit placeholder, else the registry default for this field — so a
+            // blank field always shows the value the system will use.
+            let _pv = (meta.placeholder != null) ? meta.placeholder
+                : (typeof CONFIG_FIELD_DEFAULTS !== 'undefined' ? CONFIG_FIELD_DEFAULTS[pathStr] : null);
+            if (_pv != null && _pv !== '') _ph = ` placeholder="${escAttr(String(_pv))}"`;
+        }
+        const _dispV = (value == null || value === '') ? '' : value;
+        return _fieldRow(lblHtml, fieldCtl({kind: 'number',
+            inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value="${_dispV}"${_minA}${_maxA}${_isF ? ' step="0.1"' : ' step="1"'}${_ph}${_pm} data-inherit-blank="1" onkeydown="blockNonNumericKey(event,${_isF})"`,
+            onInput: `markDirty(${tg})`,
+            onChange: `validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})`,
+            trailing: _actionBtn}), _hintHtml);
+    }
+
     // Unset int/float field (no value in config yet, e.g. a driver-specific DB
     // port with no fixed default): render a blank number input so it is typed and
     // stored as a number, not text. Must precede the string branch ('' is a string).
@@ -379,6 +415,35 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _itemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
             return _fieldRow(lblHtml, fieldCtl({kind: 'select', optionsHtml: opts,
                 onChange: `updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})`,
+                trailing: _actionBtn}), _hintHtml);
+        }
+        // Multi-value string (removable chips) — declared via schema meta.multi
+        // (e.g. the syslog sender allowlist). Stored as a comma-joined string;
+        // whitespace/newline separators are normalised into chips too.
+        if (meta && meta.multi) {
+            const _norm = v => String(v == null ? '' : v).split(/[,\s]+/).filter(Boolean).join(', ');
+            registerFieldAdapter(pathStr,
+                () => _norm(getPath(target === 'config' ? configData : modulesData, pathStr.split('|'))),
+                v => updateField(target, pathStr, v));
+            // Empty box shows the registry default as a hint (e.g. bind_host → 0.0.0.0, ::).
+            const _mph = (meta.placeholder != null) ? meta.placeholder
+                : (typeof CONFIG_FIELD_DEFAULTS !== 'undefined' ? CONFIG_FIELD_DEFAULTS[pathStr] : null);
+            return _fieldRow(lblHtml, fieldCtl({kind: 'multi', key: pathStr, value: _norm(value),
+                placeholder: (_mph != null && _mph !== '') ? String(_mph) : '',
+                validate: (meta.ipkind || ''), trailing: _actionBtn}), _hintHtml);
+        }
+        // Single IP / bind-address field (e.g. web_admin|host) — validate on
+        // change, revert + toast on invalid. Placeholder shows the registry default.
+        if (meta && meta.ipkind && !meta.multi) {
+            const _ipDef = (meta.placeholder != null && meta.placeholder !== '')
+                ? String(meta.placeholder)
+                : (typeof CONFIG_FIELD_DEFAULTS !== 'undefined' ? CONFIG_FIELD_DEFAULTS[pathStr] : '');
+            const _ipPh = _ipDef ? ` placeholder="${escAttr(_ipDef)}"` : '';
+            return _fieldRow(lblHtml, fieldCtl({kind: 'text', inputType: 'text',
+                inputCls: _ipPh ? ' item-key-ph' : '',
+                inputAttrs: ` data-field-path="${escAttr(pathStr)}" data-ip-validate="${escAttr(meta.ipkind)}" value="${escAttr(value)}"${_ipPh}`,
+                onInput: `markDirty(${tg})`,
+                onChange: `_ipFieldChange(this,${tg},${sp},${jsStr(meta.ipkind)})`,
                 trailing: _actionBtn}), _hintHtml);
         }
         const isSensitive = (meta && meta.sensitive) || SENSITIVE.has(key);
@@ -807,6 +872,47 @@ function _faSet(key, v) { const a = _fieldAdapters[key]; if (a) a.set(v); }
 function _multiList(value) {
     return String(value || '').split(',').map(s => s.trim()).filter(Boolean);
 }
+
+// ── IP / CIDR validation (mirrors the backend's ipaddress check) ───────────────
+// Frontend gives immediate feedback; routes/config.py is the authoritative gate.
+function _ipv4Ok(s) {
+    const p = String(s).split('.');
+    return p.length === 4 && p.every(o => /^\d{1,3}$/.test(o) && +o <= 255 && String(+o) === o);
+}
+// Comprehensive IPv6 matcher: full, ::-compressed, and all-zeros (::) forms.
+const _IPV6_RE = new RegExp('^(' +
+    '([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|' +
+    '([0-9a-fA-F]{1,4}:){1,7}:|' +
+    '([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|' +
+    '([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|' +
+    '([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|' +
+    '([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|' +
+    '([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|' +
+    '[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|' +
+    ':((:[0-9a-fA-F]{1,4}){1,7}|:))$');
+function _ipv6Ok(s) { return _IPV6_RE.test(String(s)); }
+// kind: 'ip' (bind address, no mask) or 'cidr' (IP or CIDR network).
+function _ipTokenOk(v, kind) {
+    v = String(v || '').trim();
+    if (!v) return false;
+    if (kind === 'cidr') {
+        const i = v.indexOf('/');
+        if (i === -1) return _ipv4Ok(v) || _ipv6Ok(v);
+        const base = v.slice(0, i), pre = v.slice(i + 1);
+        if (!/^\d{1,3}$/.test(pre)) return false;
+        const p = +pre;
+        if (_ipv4Ok(base)) return p <= 32;
+        if (_ipv6Ok(base)) return p <= 128;
+        return false;
+    }
+    return _ipv4Ok(v) || _ipv6Ok(v);
+}
+function _ipWarn(bad) {
+    if (bad.length && typeof showToast === 'function') {
+        showToast((typeof tf === 'function' ? tf('invalid_ip_value', bad.join(', '))
+            : 'Invalid IP: ' + bad.join(', ')), 'danger');
+    }
+}
 function chipsHtml(key, value) {
     return _multiList(value).map(v =>
         `<span class="badge text-bg-secondary d-inline-flex align-items-center gap-1 multi-chip" style="font-weight:400">
@@ -824,6 +930,12 @@ function renderChips(key) {
     const inp = box.querySelector('input');
     if (inp) inp.insertAdjacentHTML('beforebegin', html);
     else box.insertAdjacentHTML('afterbegin', html);
+    // Empty → show the default-value hint; non-empty → just the "add" cue.
+    if (inp) {
+        const _has = _multiList(_faGet(key)).length > 0;
+        inp.placeholder = _has ? (box.dataset.multiAddPh || '')
+            : (box.dataset.multiEmptyPh || box.dataset.multiAddPh || '');
+    }
 }
 function chipsSet(key, list) {
     const seen = new Set(), out = [];
@@ -834,11 +946,32 @@ function chipsSet(key, list) {
 function chipAdd(key, inp) {
     const added = _multiList(inp.value);     // also accepts a pasted comma list
     if (!added.length) return;
-    chipsSet(key, _multiList(_faGet(key)).concat(added));
+    // IP/CIDR-validated lists reject bad entries (with a toast) but still add the
+    // valid ones from a pasted batch.
+    const box = inp.closest('[data-multi-chips]');
+    const vkind = box ? (box.dataset.multiValidate || '') : '';
+    let ok = added;
+    if (vkind) {
+        ok = added.filter(v => _ipTokenOk(v, vkind));
+        _ipWarn(added.filter(v => !_ipTokenOk(v, vkind)));
+    }
+    if (ok.length) chipsSet(key, _multiList(_faGet(key)).concat(ok));
     inp.value = '';
 }
 function chipRemove(key, value) {
     chipsSet(key, _multiList(_faGet(key)).filter(x => x.toLowerCase() !== String(value).toLowerCase()));
+}
+// Single IP/bind-address input: validate on change, revert + toast on invalid.
+// Blank is allowed (field falls back to its registry default).
+function _ipFieldChange(el, target, pathStr, kind) {
+    const v = el.value.trim();
+    if (v && !_ipTokenOk(v, kind)) {
+        _ipWarn([v]);
+        const prev = getPath(target === 'config' ? configData : modulesData, pathStr.split('|'));
+        el.value = (prev == null ? '' : prev);
+        return;
+    }
+    updateField(target, pathStr, v);
 }
 
 // ── Shared field-control skeleton (single source for Modules + host modal) ────
@@ -873,15 +1006,22 @@ function fieldCtl(spec) {
             return `<textarea class="form-control form-control-sm" rows="${spec.rows || 4}"
                 style="font-family:var(--bs-font-monospace);font-size:.78rem;white-space:pre"
                 placeholder="${escAttr(spec.placeholder || '')}"${oc}>${spec.textareaVal || ''}</textarea>`;
-        case 'multi':
+        case 'multi': {
+            // When empty, hint the default value + the add cue; once it has chips,
+            // just the add cue (renderChips() keeps this in sync on add/remove).
+            const _addPh = t('multi_add');
+            const _emptyPh = spec.placeholder ? `${spec.placeholder} — ${_addPh}` : _addPh;
+            const _ph = _multiList(spec.value).length ? _addPh : _emptyPh;
             return `<div class="input-group input-group-sm">
                 <div class="form-control d-flex flex-wrap align-items-center gap-1"
                      style="height:auto;min-height:calc(1.5em + .5rem + 2px);cursor:text"
-                     data-multi-chips="${escAttr(spec.key)}" onclick="this.querySelector('input')?.focus()">${chipsHtml(spec.key, spec.value)}<input
+                     data-multi-chips="${escAttr(spec.key)}" data-multi-add-ph="${escAttr(_addPh)}" data-multi-empty-ph="${escAttr(_emptyPh)}" data-multi-validate="${escAttr(spec.validate || '')}"
+                     onclick="this.querySelector('input')?.focus()">${chipsHtml(spec.key, spec.value)}<input
                     type="text" class="border-0 p-0 flex-grow-1 bg-transparent" style="outline:none;box-shadow:none;min-width:6rem"
-                    placeholder="${escAttr(t('multi_add'))}"
+                    placeholder="${escAttr(_ph)}"
                     onkeydown="if(event.key==='Enter'){event.preventDefault();chipAdd(${jsStr(spec.key)},this);}"></div>
                 ${tr}</div>`;
+        }
         default:
             return `<div class="input-group input-group-sm">
                 <input type="${spec.inputType || 'text'}" class="form-control${spec.inputCls || ''}"${at}${oi}${oc}>${tr}</div>`;

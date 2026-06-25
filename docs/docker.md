@@ -1,24 +1,40 @@
 # Despliegue con Docker
 
-Se ofrecen dos topologías a partir de la misma imagen; elige una:
+Se ofrecen tres topologías a partir de la misma imagen; elige una:
 
 - **Monolítica** (`docker/docker-compose.monolithic.yml`) — un solo contenedor
   `servicesentry`: el panel web con su scheduler embebido activado
   (`SS_AUTOSTART=true`), que ejecuta los checks periódicos en el propio proceso.
   La opción más simple.
-- **Microservicios** (`docker/docker-compose.microservices.yml`) — cuatro
-  contenedores sobre una **MariaDB** compartida: `servicesentry-db` (la base de
-  datos), `servicesentry-web` (panel Flask, `--web`), `servicesentry-worker`
-  (daemon de monitorización, `--daemon`) y `servicesentry-syslog` (receptor
-  syslog independiente, `--syslog`). Separa cada responsabilidad: el monitoreo
-  sobrevive a reinicios del web, y el receptor syslog (que liga puertos de red y
-  procesa entrada no confiable) queda aislado del panel.
+- **Microservicios** (`docker/docker-compose.microservices.yml`) — cinco
+  contenedores y **dos** MariaDB: `servicesentry-db` (BD principal: config,
+  usuarios, historial, reglas de eventos, log de notificaciones…),
+  `servicesentry-syslog-db` (BD dedicada para los mensajes syslog, de alto
+  volumen, aislados de la principal), `servicesentry-web` (panel Flask, `--web`),
+  `servicesentry-worker` (daemon de monitorización, `--daemon`) y
+  `servicesentry-syslog` (receptor syslog independiente, `--syslog`). Separa cada
+  responsabilidad: el monitoreo sobrevive a reinicios del web, y el receptor
+  syslog (que liga puertos de red y procesa entrada no confiable) queda aislado
+  del panel.
+- **Microservicios + Traefik** (`docker/docker-compose.microservices-traefik.yml`)
+  — la misma topología anterior **más** un contenedor `servicesentry-traefik`
+  como proxy inverso, para **publicar a Internet** por HTTPS con certificado
+  **Let's Encrypt** automático (redirección HTTP→HTTPS incluida). Es el único que
+  expone los puertos `80`/`443` al host; el `web` ya no publica el `8080`. Requiere
+  definir `SS_DOMAIN` y `SS_ACME_EMAIL` (ver tabla más abajo) y apuntar el DNS de
+  `SS_DOMAIN` a este host **antes** del primer arranque, para que el challenge
+  TLS-ALPN-01 pueda validar el certificado.
 
-La conexión a la BD se inyecta por env `SS_DB_*` (ver
-[configuration.md](configuration.md) → *Sección `database`*); el `web` arranca con
-`SS_SYSLOG_EMBEDDED=0` para **no** ligar los puertos syslog (los gestiona el
-contenedor `syslog`). Los contenedores comparten los volúmenes con nombre y la
-base de datos, por lo que leen y escriben el mismo estado.
+La conexión a la BD principal se inyecta por env `SS_DB_*` y la de syslog por
+`SS_SYSLOG_DB_*` (ver [configuration.md](configuration.md) → *Sección `database`*);
+el `web` arranca con `SS_SYSLOG_EMBEDDED=0` para **no** ligar los puertos syslog
+(los gestiona el contenedor `syslog`). Los contenedores comparten los volúmenes con
+nombre y las bases de datos, por lo que leen y escriben el mismo estado.
+
+Ambas topologías de microservicios definen dos **redes** (ver
+[Redes](#redes)): `backend` (tráfico interno servicio↔servicio y bases de datos —
+las BD viven **solo** aquí) y `frontend` (plano externo: el panel web y, en la
+variante Traefik, el proxy↔web).
 
 > **No mezcles las dos.** No actives `SS_AUTOSTART` en el `web` a la vez que
 > corres el `worker`: son procesos distintos sin lock compartido y duplicarían
@@ -30,11 +46,15 @@ base de datos, por lo que leen y escriben el mismo estado.
 # Monolítica (un contenedor)
 docker compose -f docker/docker-compose.monolithic.yml up -d
 
-# Microservicios (web + worker)
+# Microservicios (web + worker + syslog, 2 BD)
 docker compose -f docker/docker-compose.microservices.yml up -d
+
+# Microservicios + Traefik (publicado a Internet por HTTPS)
+docker compose -f docker/docker-compose.microservices-traefik.yml up -d
 ```
 
-El panel web de administración queda disponible en `http://tu-servidor:8080`.
+El panel web de administración queda disponible en `http://tu-servidor:8080`
+(o en `https://SS_DOMAIN` con la topología Traefik).
 
 ## Construir y ejecutar
 
@@ -46,6 +66,8 @@ docker compose -f docker/docker-compose.monolithic.yml up -d --build
 docker logs -f servicesentry            # monolítica
 docker logs -f servicesentry-web        # microservicios
 docker logs -f servicesentry-worker     # microservicios
+docker logs -f servicesentry-syslog     # microservicios (receptor syslog)
+docker logs -f servicesentry-traefik    # topología Traefik (proxy/TLS)
 
 # Parar
 docker compose -f docker/docker-compose.monolithic.yml down
@@ -80,11 +102,23 @@ el panel web sobreviven a los reinicios del contenedor.
 | `SS_DB_USER` | *(vacío)* | Usuario de la BD |
 | `SS_DB_PASSWORD` | *(vacío)* | Contraseña de la BD |
 | `SS_DB_ROOT_PASSWORD` | *(vacío)* | Solo para el contenedor MariaDB del compose (root) |
+| **Base de datos de syslog** (microservicios) | | |
+| `SS_SYSLOG_DB_ENABLED` | `0` | `1` enruta los mensajes syslog a su BD dedicada; `0`/vacío los deja en la BD principal |
+| `SS_SYSLOG_DB_DRIVER` | `sqlite` | Motor de la BD de syslog (`sqlite` / `mysql` / `postgresql`) |
+| `SS_SYSLOG_DB_HOST` | `localhost` | Host de la BD de syslog (p. ej. `syslog-db`) |
+| `SS_SYSLOG_DB_PORT` | *(según motor)* | Puerto de la BD de syslog |
+| `SS_SYSLOG_DB_NAME` | `servicesentry_syslog` | Nombre de la BD de syslog |
+| `SS_SYSLOG_DB_USER` | *(vacío)* | Usuario de la BD de syslog |
+| `SS_SYSLOG_DB_PASSWORD` | *(vacío)* | Contraseña de la BD de syslog |
+| `SS_SYSLOG_DB_ROOT_PASSWORD` | *(vacío)* | Solo para el contenedor MariaDB `syslog-db` del compose (root) |
+| **Traefik / TLS público** (topología Traefik) | | |
+| `SS_DOMAIN` | *(obligatorio)* | FQDN público, p. ej. `monitor.example.com`. Usado por el router de Traefik y como `SS_PUBLIC_URL` |
+| `SS_ACME_EMAIL` | *(obligatorio)* | Email para el registro del certificado Let's Encrypt |
 | **Servidor web** | | |
 | `SS_WEB_HOST` | `0.0.0.0` | Dirección a la que se enlaza el panel web |
 | `SS_SYSLOG_EMBEDDED` | `1` | `0` para que el web **no** ligue los puertos syslog (los gestiona el contenedor `syslog`) |
 | `SS_WEB_PORT` | `8080` | Puerto en el que escucha el panel web (argumento `--web-port`). Tiene prioridad sobre `SS_PORT` y el valor guardado en `config.json` |
-| `SS_PORT` | `8080` | Override en runtime del puerto web (`web_admin` → `port`); equivalente al campo **Puerto web** en Configuración → Acceso Externo. Si `SS_WEB_PORT` también está definido, este tiene prioridad |
+| `SS_PORT` | `8080` | Override en runtime del puerto web (`web_admin` → `port`); equivalente al campo **Puerto web** en Configuración → Acceso Externo. Si además se define `SS_WEB_PORT`, manda **`SS_WEB_PORT`** (prioridad: `SS_WEB_PORT` > `SS_PORT` > `config.json`) |
 | **Credenciales** | | |
 | `SS_USERNAME` | *(obligatorio)* | Usuario del panel de administración |
 | `SS_PASSWORD` | *(obligatorio)* | Contraseña del panel de administración |
@@ -136,16 +170,21 @@ variables de entorno en texto plano.
 
 ```yaml
 volumes:
-  config:    # → /etc/ServiSesentry      (config.json)
-  vardata:   # → /var/lib/ServiSesentry  (data.db: usuarios, roles, grupos, sesiones, auditoría, hosts, credenciales, historial, estado de checks y config de módulos/ítems — tablas module_config/module_config_items)
+  config:        # → /etc/ServiSesentry      (config.json)
+  vardata:       # → /var/lib/ServiSesentry  (data.db: usuarios, roles, grupos, sesiones, auditoría, hosts, credenciales, historial, estado de checks y config de módulos/ítems — tablas module_config/module_config_items)
+  dbdata:        # MariaDB principal           (solo microservicios)
+  syslogdbdata:  # MariaDB de syslog           (solo microservicios)
+  letsencrypt:   # acme.json de Traefik        (solo topología Traefik)
 ```
 
-Ambos volúmenes son volúmenes con nombre gestionados por Docker. Para inspeccionar
-su ubicación en disco:
+Todos son volúmenes con nombre gestionados por Docker. Para inspeccionar su
+ubicación en disco:
 
 ```bash
 docker volume inspect docker_config
 docker volume inspect docker_vardata
+docker volume inspect docker_dbdata
+docker volume inspect docker_syslogdbdata
 ```
 
 Para hacer una copia de seguridad o precargar el volumen de configuración:
@@ -155,6 +194,24 @@ Para hacer una copia de seguridad o precargar el volumen de configuración:
 docker run --rm -v docker_config:/data -v $(pwd)/data:/src alpine \
     cp /src/config.json /data/config.json
 ```
+
+## Redes
+
+Las topologías de microservicios segmentan el tráfico en dos redes para aislar
+las bases de datos del plano expuesto:
+
+| Red | Quién la usa | Para qué |
+| --- | ------------ | -------- |
+| `backend` | `db`, `syslog-db`, `web`, `worker`, `syslog` | Tráfico interno servicio↔servicio y a las bases de datos. Las BD viven **solo** aquí, así que nunca quedan en el plano externo. |
+| `frontend` | `web` (y `traefik` en la variante con proxy) | Plano externo. En la variante Traefik, el proxy enruta al `web` por esta red. |
+
+- El `worker` solo necesita `backend` (alcanza la BD y hace egress de
+  monitorización por el gateway de esa red).
+- El `syslog` está solo en `backend`; su entrada externa es el mapeo de puertos
+  al host (UDP/TCP crudo), no el plano `frontend`.
+- En la variante Traefik las redes llevan **nombres fijos** (`ss_backend` /
+  `ss_frontend`) para que el routing del proxy (`providers.docker.network` y la
+  label `traefik.docker.network`) no dependa del nombre del proyecto compose.
 
 ## Actualización
 
@@ -181,9 +238,20 @@ environment:
   SS_SECURE_COOKIES: "true"
 ```
 
-### Traefik (labels en docker-compose)
+### Traefik
 
-Añade las labels al servicio `servicesentry-web` y conecta el contenedor a la red de Traefik:
+La forma más sencilla es usar el compose ya preparado
+`docker/docker-compose.microservices-traefik.yml`, que incluye un contenedor
+Traefik con TLS Let's Encrypt automático y todo cableado (solo necesitas
+`SS_DOMAIN` y `SS_ACME_EMAIL` en `docker/.env`):
+
+```bash
+docker compose -f docker/docker-compose.microservices-traefik.yml up -d
+```
+
+Si en cambio ya tienes una instancia de Traefik propia y solo quieres exponer el
+`web`, añade las labels al servicio `servicesentry-web` y conéctalo a la red de
+tu Traefik:
 
 ```yaml
 services:

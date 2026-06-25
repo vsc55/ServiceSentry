@@ -65,8 +65,10 @@ def register(app, wa):
         filters = _syslog_filters()
         limit  = _int_arg('limit', 200) or 200
         offset = _int_arg('offset', 0) or 0
+        sort   = request.args.get('sort', 'ts').strip() or 'ts'
+        order  = request.args.get('order', 'desc').strip() or 'desc'
         try:
-            messages = store.query(filters, limit=limit, offset=offset)
+            messages = store.query(filters, limit=limit, offset=offset, sort=sort, order=order)
             total = store.count(filters)
         except Exception:  # pylint: disable=broad-except
             return jsonify({'messages': [], 'total': 0})
@@ -121,3 +123,35 @@ def register(app, wa):
         deleted = store.delete_all() if store else 0
         wa._audit('syslog_cleared', detail={'deleted': deleted})
         return jsonify({'ok': True, 'deleted': deleted})
+
+    @app.route('/api/v1/syslog/drops', methods=['GET'])
+    @syslog_view_req
+    def api_syslog_drops():
+        """Senders rejected by the allowlist — what is being dropped (per source)."""
+        store = getattr(wa, '_syslog_drops_store', None)
+        if store is None:
+            return jsonify({'drops': [], 'sources': 0, 'dropped': 0})
+        try:
+            return jsonify({'drops': store.query(limit=_int_arg('limit', 200) or 200),
+                            **store.totals()})
+        except Exception:  # pylint: disable=broad-except
+            return jsonify({'drops': [], 'sources': 0, 'dropped': 0})
+
+    @app.route('/api/v1/syslog/drops', methods=['DELETE'])
+    @syslog_delete_req
+    def api_syslog_drops_clear():
+        """Reset the dropped-sender tally."""
+        store = getattr(wa, '_syslog_drops_store', None)
+        deleted = store.delete_all() if store else 0
+        wa._audit('syslog_drops_cleared', detail={'deleted': deleted})
+        return jsonify({'ok': True, 'deleted': deleted})
+
+    @app.route('/api/v1/syslog/drops/<uid>', methods=['DELETE'])
+    @syslog_delete_req
+    def api_syslog_drop_delete(uid):
+        """Remove a single dropped source from the tally."""
+        store = getattr(wa, '_syslog_drops_store', None)
+        if store is None or not store.delete(uid):
+            return jsonify({'error': 'Not found'}), 404
+        wa._audit('syslog_drops_cleared', detail={'uid': uid})
+        return jsonify({'ok': True})

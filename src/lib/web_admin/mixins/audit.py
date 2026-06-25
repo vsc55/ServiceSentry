@@ -88,6 +88,10 @@ class _AuditMixin:
                 event=event, user=user, ip=ip, detail=detail,
                 max_entries=self._AUDIT_MAX_ENTRIES,
             )
+            # Event-rules manager: notify on matching audit events.
+            _eval = getattr(self, '_eval_event', None)
+            if callable(_eval):
+                _eval('audit', {'event': event, 'user': user, 'detail': detail})
         except Exception as exc:  # pylint: disable=broad-except
             conn = getattr(self, '_db_connector', None)
             if conn is not None:

@@ -26,25 +26,32 @@ from __future__ import annotations
 import os
 import signal
 import threading
+import time
 
 from lib.config import CONFIG_FILENAME, config_path
 from lib.config.manager import ConfigManager, bootstrap_database_cfg, read_config_raw
 from lib.db import get_connector
 from lib.debug import Debug, DebugLevel
 from lib.stores.config import ConfigStore
+from lib.stores.event_rules import EventRulesStore
+from lib.stores.notification_log import NotificationLogStore
 from lib.stores.syslog import SyslogStore
+from lib.stores.syslog_drops import SyslogDropsStore
 from lib.stores.webhooks import WebhooksStore
-from lib.syslog.alert import dispatch_syslog_alert
-from lib.syslog.server import build_server, should_alert
+from lib.syslog.server import build_server
+from lib.event_manager import _EventsMixin
 from lib import secret_manager
 
 _RETENTION_EVERY = 300          # prune sweep interval (s)
-_ALERT_COOLDOWN = 60            # min seconds between alerts per source
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for syslog config changes (s)
 
 
-class SyslogService:
-    """Own the syslog listener as a self-contained, DB-sharing daemon."""
+class SyslogService(_EventsMixin):
+    """Own the syslog listener as a self-contained, DB-sharing daemon.
+
+    Syslog→notification routing reuses the Event-rules manager (the same rules
+    edited in the web UI, stored in the shared DB), so standalone and embedded
+    receivers behave identically and write to the same notification log."""
 
     _CONFIG_FILE = CONFIG_FILENAME
 
@@ -65,9 +72,23 @@ class SyslogService:
         self._config_mgr = ConfigManager(
             self._config_store, config_path(config_dir),
             fernet=self._fernet, secret_keys=self._secret_keys)
-        self._syslog_store = SyslogStore(self._db_connector)
+        # Syslog storage may live in its own DB (high-volume isolation); falls
+        # back to the system connector when ``syslog_db`` is not enabled.  Env
+        # (SS_SYSLOG_DB_*) is overlaid so it can be configured purely via Docker.
+        from lib.db import build_syslog_connector  # noqa: PLC0415
+        from lib.config.manager import overlay_section_env  # noqa: PLC0415
+        _sdb = overlay_section_env('syslog_db', self._config_section('syslog_db'))
+        self._syslog_db_connector = build_syslog_connector(
+            _sdb, main_connector=self._db_connector,
+            default_sqlite_path=os.path.join(self._var_dir, 'syslog.db'))
+        self._syslog_store = SyslogStore(self._syslog_db_connector)
+        self._syslog_drops_store = SyslogDropsStore(self._syslog_db_connector)
         self._webhooks_store = WebhooksStore(
             self._db_connector, fernet=self._fernet, secret_keys=self._secret_keys)
+        # Event-rules manager (shared DB): syslog→notification routing + send log.
+        self._event_rules_store = EventRulesStore(self._db_connector)
+        self._notification_log_store = NotificationLogStore(self._db_connector)
+        self._init_events()
 
         self._debug = Debug()
         self._debug.set_from_config(
@@ -75,7 +96,6 @@ class SyslogService:
         self._server = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._alert_last: dict[str, float] = {}
 
         backend = (db_cfg or {}).get('engine') or (db_cfg or {}).get('type') or 'sqlite'
         self._dbg(f'> Syslog >> service init: config={config_dir} var={self._var_dir} '
@@ -103,7 +123,11 @@ class SyslogService:
         # Merge registry defaults underneath the saved values (defaults are lazy,
         # so a config with only ``enabled`` saved would otherwise lack the ports).
         from lib.config.spec import section_defaults  # noqa: PLC0415
-        return {**section_defaults('syslog'), **(self._config_section('syslog') or {})}
+        saved = self._config_section('syslog') or {}
+        # A null (blank) value means "use the registry default" → skip nulls so the
+        # merged default underneath wins.
+        return {**section_defaults('syslog'),
+                **{k: v for k, v in saved.items() if v is not None}}
 
     @staticmethod
     def _config_summary(cfg: dict) -> str:
@@ -121,8 +145,7 @@ class SyslogService:
                 f"transports=[{', '.join(ports) or 'none'}] "
                 f"allow={allow or 'any'} "
                 f"retention_days={cfg.get('retention_days', 0) or 0} "
-                f"max_rows={cfg.get('max_rows', 0) or 0} "
-                f"alert={'on' if cfg.get('alert_enabled') else 'off'}")
+                f"max_rows={cfg.get('max_rows', 0) or 0}")
 
     def _apply_config(self) -> list[str]:
         """(Re)build and (re)start the listener from the current config."""
@@ -145,7 +168,9 @@ class SyslogService:
             srv = build_server(
                 cfg, sink=self._syslog_store.add_many,
                 on_message=self._on_message,
-                dbg=lambda m: self._dbg(m, DebugLevel.info))
+                dbg=lambda m: self._dbg(m, DebugLevel.info),
+                dbg_warn=lambda m: self._dbg(m, DebugLevel.warning),
+                on_drop=self._record_drop)
             problems = srv.start()
             for p in problems:
                 self._dbg(f'> Syslog >> bind problem: {p}', DebugLevel.error)
@@ -158,13 +183,16 @@ class SyslogService:
             return problems
 
     def _on_message(self, rec: dict) -> None:
-        if should_alert(self._syslog_cfg(), rec, self._alert_last,
-                        cooldown=_ALERT_COOLDOWN):
-            src = rec.get('hostname') or rec.get('source') or '?'
-            self._dbg(f"> Syslog >> alert match from {src} "
-                      f"(sev={rec.get('severity_name') or rec.get('severity')}); "
-                      f"dispatching", DebugLevel.warning)
-            dispatch_syslog_alert(self, rec)
+        # Route each received message through the Event-rules manager (the same
+        # rules edited in the web UI, read from the shared DB).
+        self._eval_event('syslog', rec)
+
+    def _record_drop(self, source: str, transport: str, delta: int) -> None:
+        """Persist allowlist drops (shared DB → visible in the web Syslog tab)."""
+        try:
+            self._syslog_drops_store.record(source, transport, delta, time.time())
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     def _retention_loop(self) -> None:
         while not self._stop.wait(_RETENTION_EVERY):
@@ -193,6 +221,7 @@ class SyslogService:
         sig = self._config_signature()
         while not self._stop.wait(_CONFIG_WATCH_EVERY):
             self._config_mgr.invalidate()            # drop the cache, read fresh DB
+            self._events_reload()                    # pick up event-rule edits too
             new = self._config_signature()
             if new != sig:
                 sig = new

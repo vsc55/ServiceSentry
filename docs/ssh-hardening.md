@@ -24,7 +24,7 @@ salvo la remediación de servicios:
 | process | `ps -A -o comm=` | usuario | ✅ |
 | ram_swap | `cat /proc/meminfo` | usuario | ✅ |
 | raid | `cat /proc/mdstat` | usuario | ✅ |
-| temperature | `grep -H . /sys/class/thermal/thermal_zone*/{type,temp}` | usuario | ✅ |
+| temperature | `grep -H . /sys/class/thermal/thermal_zone*/type /sys/class/thermal/thermal_zone*/temp` | usuario | ✅ |
 | dns | `dig +short …` | usuario | ✅ |
 | service_status (check) | `systemctl is-active <svc>` | usuario | ✅ |
 | cpu | `cat /proc/stat` (×2, intervalo en Python) | usuario | ✅ |
@@ -34,6 +34,13 @@ salvo la remediación de servicios:
 > basta. Solo la **remediación** (arrancar/parar/reiniciar servicios) necesita
 > root, y se acota con una regla `sudoers` mínima. Si no usas remediación, la
 > cuenta puede ser 100 % de solo lectura y **sin sudo**.
+>
+> **macOS / BSD:** los comandos cambian (`top -l 2 -n 0`, `sysctl -n …`,
+> `vm_stat`, `swapinfo -k`…); añádelos a la allowlist si monitorizas esos SO.
+> **Windows:** los hosts Windows usan otros comandos (`wmic`, `tasklist`,
+> `sc query`, `Get-*`) y **no** los cubre este envoltorio POSIX (`ssentry-wrap`);
+> para hosts Windows por SSH adapta la allowlist a esos comandos o usa una cuenta
+> de solo lectura sin wrapper.
 
 Todos los comandos son un **binario suelto** sin encadenamiento de shell. Los
 módulos que necesitan varias lecturas (cpu muestrea `/proc/stat` dos veces;

@@ -21,6 +21,14 @@ function _persistTableConfig() {
             audit:    { cols: [...(_auditVisibleCols    || [])], order: _auditColOrder    || [], w: _cw('audit')  },
             sessions: { cols: [...(_sessionsVisibleCols || [])], order: _sessionsColOrder || [], w: _cw('sessions'),
                         view: (typeof _sessionsViewMode !== 'undefined' ? _sessionsViewMode : 'card') },
+            evrules:  { cols: [...(typeof _evrVisibleCols !== 'undefined' ? _evrVisibleCols : [])],
+                        order: (typeof _evrColOrder !== 'undefined' ? _evrColOrder : []), w: _cw('evrules') },
+            evlog:    { cols: [...(typeof _evlVisibleCols !== 'undefined' ? _evlVisibleCols : [])],
+                        order: (typeof _evlColOrder !== 'undefined' ? _evlColOrder : []), w: _cw('evlog') },
+            syslog:   { cols: [...(typeof _slVisibleCols !== 'undefined' ? _slVisibleCols : [])],
+                        order: (typeof _slColOrder !== 'undefined' ? _slColOrder : []), w: _cw('syslog') },
+            sldrops:  { cols: [...(typeof _sldVisibleCols !== 'undefined' ? _sldVisibleCols : [])],
+                        order: (typeof _sldColOrder !== 'undefined' ? _sldColOrder : []), w: _cw('sldrops') },
         };
         currentUser.table_config = tc;   // keep in sync so the keepalive poll won't re-render our own change
         try { await apiPut('/api/v1/users/me/preferences', { table_config: tc }); }
@@ -49,6 +57,18 @@ function _tcTables() {
         { k: 'sessions', def: _SESSIONS_DEFAULT_COLS, all: _SES_COLS,
           getVis: () => _sessionsVisibleCols, setVis: s => { _sessionsVisibleCols = s; },
           setOrd: o => { _sessionsColOrder = o; },   ls: ['ss_sessions_cols','ss_sessions_col_order','ss_sessions_col_w'] },
+        { k: 'evrules',  def: _EVR_DEFAULT_COLS,      all: _EVR_COLS,
+          getVis: () => _evrVisibleCols,      setVis: s => { _evrVisibleCols = s; },
+          setOrd: o => { _evrColOrder = o; },        ls: ['ss_evrules_cols','ss_evrules_col_order','ss_evrules_col_w'] },
+        { k: 'evlog',    def: _EVL_DEFAULT_COLS,      all: _EVL_COLS,
+          getVis: () => _evlVisibleCols,      setVis: s => { _evlVisibleCols = s; },
+          setOrd: o => { _evlColOrder = o; },        ls: ['ss_evlog_cols','ss_evlog_col_order','ss_evlog_col_w'] },
+        { k: 'syslog',   def: _SL_DEFAULT_COLS,       all: _SL_COLS,
+          getVis: () => _slVisibleCols,       setVis: s => { _slVisibleCols = s; },
+          setOrd: o => { _slColOrder = o; },         ls: ['ss_syslog_cols','ss_syslog_col_order','ss_syslog_col_w'] },
+        { k: 'sldrops',  def: _SLD_DEFAULT_COLS,      all: _SLD_COLS,
+          getVis: () => _sldVisibleCols,      setVis: s => { _sldVisibleCols = s; },
+          setOrd: o => { _sldColOrder = o; },        ls: ['ss_sldrops_cols','ss_sldrops_col_order','ss_sldrops_col_w'] },
     ];
 }
 
@@ -98,7 +118,7 @@ function _syncRemoteTableConfig(me, ep) {
     if (JSON.stringify(incoming) === JSON.stringify(currentUser.table_config || {})) return;
     currentUser.table_config = incoming;
     _applyUserTableConfig(incoming);
-    ['renderUsers', 'renderRoles', 'renderGroups', 'renderSessions', 'renderAudit'].forEach(fn => {
+    ['renderUsers', 'renderRoles', 'renderGroups', 'renderSessions', 'renderAudit', 'renderEvents', 'renderSyslog'].forEach(fn => {
         try { if (typeof window[fn] === 'function') window[fn](); } catch (_) {}
     });
 }
@@ -253,6 +273,9 @@ if (syslogLi) syslogLi.style.display = perms.has('syslog_view') ? '' : 'none';
 // Services tab
 const servicesLi = document.getElementById('tab-services-li');
 if (servicesLi) servicesLi.style.display = perms.has('services_view') ? '' : 'none';
+// Events tab
+const eventsLi = document.getElementById('tab-events-li');
+if (eventsLi) eventsLi.style.display = perms.has('events_view') ? '' : 'none';
 // Audit tab
 const auditLi = document.getElementById('tab-audit-li');
 if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
@@ -347,6 +370,7 @@ document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', rende
 document.getElementById('btn-tab-history')?.addEventListener('shown.bs.tab', renderHistory);
 document.getElementById('btn-tab-syslog')?.addEventListener('shown.bs.tab', renderSyslog);
 document.getElementById('btn-tab-services')?.addEventListener('shown.bs.tab', renderServices);
+document.getElementById('btn-tab-events')?.addEventListener('shown.bs.tab', renderEvents);
 // Re-fetch host status every time the Servers tab is shown, so the Status column
 // reflects a "Run all" or a status "clean" done from the Status tab (both leave
 // hostsData stale until reloaded).

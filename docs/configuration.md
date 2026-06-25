@@ -108,7 +108,8 @@ solo-lectura/arranque.
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `daemon.timer_check` | int | 300 | Segundos entre cada ciclo de comprobación en modo daemon |
+| `daemon.timer_check` | int | 300 | Segundos entre cada ciclo de comprobación en modo daemon (env `SS_CHECK_INTERVAL`) |
+| `daemon.web_autostart` | bool | `false` | Arrancar el scheduler embebido del panel web (env `SS_AUTOSTART`). `true` en monolítico; `false` si corre un worker aparte |
 
 ### Sección `global`
 
@@ -173,6 +174,30 @@ worker (monitor) y el receptor syslog independiente.
 > El `docker-compose.microservices.yml` usa estas variables para compartir un
 > contenedor **MariaDB** entre los servicios `web`, `worker` y `syslog`.
 
+#### Base de datos de syslog (`SS_SYSLOG_DB_*`)
+
+El receptor syslog puede guardar sus mensajes (de alto volumen) en una **base de
+datos dedicada**, separada de la principal. Se activa con
+`SS_SYSLOG_DB_ENABLED=1`; si está desactivada, los mensajes van a la BD principal.
+Las claves equivalen a la sección `syslog_db` del `config.json` y replican las de
+`database`:
+
+| Variable | Equivale a | Ejemplo |
+|----------|------------|---------|
+| `SS_SYSLOG_DB_ENABLED` | `syslog_db.enabled` | `1` |
+| `SS_SYSLOG_DB_DRIVER` | `syslog_db.driver` | `mysql` |
+| `SS_SYSLOG_DB_HOST` | `syslog_db.host` | `syslog-db` |
+| `SS_SYSLOG_DB_PORT` | `syslog_db.port` | `3306` |
+| `SS_SYSLOG_DB_NAME` | `syslog_db.name` | `servicesentry_syslog` |
+| `SS_SYSLOG_DB_USER` | `syslog_db.user` | `servicesentry` |
+| `SS_SYSLOG_DB_PASSWORD` | `syslog_db.password` | `secret` |
+| `SS_SYSLOG_DB_PATH` | `syslog_db.path` | `/var/lib/.../syslog.db` |
+
+> El `docker-compose.microservices.yml` levanta un segundo contenedor MariaDB
+> (`syslog-db`) y apunta los servicios `web` y `syslog` a él con estas variables.
+> Cambiar la BD de syslog requiere **reiniciar** (banner de reinicio pendiente en
+> la UI).
+
 ### Sección `telegram`
 
 | Clave | Tipo | Por defecto | Descripción |
@@ -187,15 +212,18 @@ Matriz de routing: qué eventos se envían por cada canal. Los webhooks individu
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `notifications.telegram_on_down` | bool | `true` | Enviar por Telegram cuando un check falla |
-| `notifications.telegram_on_recovery` | bool | `true` | Enviar por Telegram cuando un check se recupera |
+| `notifications.telegram_on_down` | bool | `false` | Enviar por Telegram cuando un check falla |
+| `notifications.telegram_on_recovery` | bool | `false` | Enviar por Telegram cuando un check se recupera |
 | `notifications.telegram_on_warn` | bool | `false` | Enviar por Telegram en estado de advertencia |
-| `notifications.email_on_down` | bool | `true` | Enviar por email cuando un check falla |
-| `notifications.email_on_recovery` | bool | `true` | Enviar por email cuando un check se recupera |
+| `notifications.telegram_on_syslog` | bool | `false` | Enviar por Telegram en eventos de syslog |
+| `notifications.email_on_down` | bool | `false` | Enviar por email cuando un check falla |
+| `notifications.email_on_recovery` | bool | `false` | Enviar por email cuando un check se recupera |
 | `notifications.email_on_warn` | bool | `false` | Enviar por email en estado de advertencia |
-| `notifications.webhook_on_down` | bool | `true` | Enviar a webhooks cuando un check falla |
-| `notifications.webhook_on_recovery` | bool | `true` | Enviar a webhooks cuando un check se recupera |
+| `notifications.email_on_syslog` | bool | `false` | Enviar por email en eventos de syslog |
+| `notifications.webhook_on_down` | bool | `false` | Enviar a webhooks cuando un check falla |
+| `notifications.webhook_on_recovery` | bool | `false` | Enviar a webhooks cuando un check se recupera |
 | `notifications.webhook_on_warn` | bool | `false` | Enviar a webhooks en estado de advertencia |
+| `notifications.webhook_on_syslog` | bool | `false` | Enviar a webhooks en eventos de syslog |
 
 Esta matriz es configurable desde la pestaña **Configuración → Notifications → Routing** del panel web.
 
@@ -218,7 +246,39 @@ Esta matriz es configurable desde la pestaña **Configuración → Notifications
 | `web_admin.pw_require_symbol` | bool | `false` | Exigir al menos un símbolo (`!`, `@`, `#`…) en la contraseña |
 | `web_admin.proxy_count` | int | `0` | Número de proxies inversos delante del servidor Flask (0–10). Activa `ProxyFix` de Werkzeug para leer correctamente la IP real del cliente. |
 | `web_admin.port` | int | `8080` | Puerto TCP del servidor web. Puede sobreescribirse con `--web-port`. |
-| `web_admin.host` | string | `"0.0.0.0"` | Dirección IP donde escucha el servidor. Puede sobreescribirse con `--web-host`. |
+| `web_admin.host` | string | `"0.0.0.0"` | Dirección IP (IPv4/IPv6) donde escucha el servidor. Puede sobreescribirse con `--web-host`. Validada como IP. |
+| `web_admin.public_status_detail` | bool | `false` | Mostrar el detalle por ítem en la página pública `/status` |
+| `web_admin.public_url` | string | `""` | Host público (sin esquema) cuando se sirve tras un proxy; usado para enlaces absolutos y la página de estado |
+| `web_admin.force_https` | bool | `false` | Generar URLs `https://` (proxy con terminación TLS) |
+| `web_admin.force_fqdn` | bool | `false` | Redirigir a `public_url` si se accede por IP u otro host (requiere `public_url`) |
+| `web_admin.default_page_size` | int | `25` | Tamaño de página por defecto en los listados (0 = "Todos") (0–200) |
+| `web_admin.config_poll_secs` | int | `30` | Intervalo del poll de versiones de config para detectar cambios concurrentes (10–300) |
+| `web_admin.config_update_banner_secs` | int | `8` | Segundos que se muestra el banner de "configuración actualizada" (0–60) |
+| `web_admin.lockout_max_attempts` | int | `5` | Intentos fallidos antes de bloquear la cuenta (0 = desactivado) (0–100) |
+| `web_admin.lockout_duration_secs` | int | `900` | Duración del bloqueo de cuenta en segundos (60–86400) |
+| `web_admin.session_check_secs` | int | `20` | Intervalo del poll de keepalive de sesión (detecta revocación) (5–300) |
+| `web_admin.session_revoke_redirect_secs` | int | `3` | Segundos antes de redirigir al login tras detectar la sesión revocada (0–30) |
+| `web_admin.access_poll_secs` | int | `30` | Intervalo de auto-refresco de la pestaña Access (5–300) |
+| `web_admin.force_reload_on_update` | bool | `false` | Forzar recarga del navegador cuando cambia la versión de arranque del servidor |
+| `web_admin.force_reload_secs` | int | `10` | Margen antes de forzar la recarga del navegador (1–300) |
+
+> `web_admin.username`/`web_admin.password` son **credenciales de primer arranque** (crean el admin inicial); no se persisten en `config.json` ni se editan desde el panel (ver `SS_USERNAME`/`SS_PASSWORD`).
+
+### Sección `modules` (defaults globales)
+
+Valores por defecto heredados por todos los módulos (cada módulo/ítem puede sobreescribirlos; en blanco hereda este global, mostrado como placeholder).
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `modules.threads` | int | `5` | Hilos paralelos por defecto para procesar ítems |
+| `modules.timeout` | int | `15` | Timeout por defecto de las comprobaciones (segundos) |
+
+### Secciones `users` / `groups`
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `users.default_role` | string | `""` | Rol asignado por defecto a usuarios nuevos (vacío = `none`). Solo-admin |
+| `groups.default_role` | string | `""` | Rol asignado por defecto a grupos nuevos (vacío = `none`). Solo-admin |
 
 ### Sección `ldap`
 
@@ -237,8 +297,11 @@ Requiere el paquete opcional `ldap3` (`pip install ldap3`). Si no está instalad
 | `ldap.user_filter` | string | `"(sAMAccountName={username})"` | Filtro LDAP para localizar al usuario; `{username}` se sustituye en tiempo de ejecución |
 | `ldap.email_attr` | string | `"mail"` | Atributo LDAP del que se lee el email |
 | `ldap.name_attr` | string | `"displayName"` | Atributo LDAP del que se lee el nombre visible |
+| `ldap.username_attr` | string | `""` | Atributo del que derivar el username (vacío = usa el introducido en login) |
 | `ldap.group_attr` | string | `"memberOf"` | Atributo LDAP del que se leen los grupos |
 | `ldap.group_role_map` | string (JSON) | `"{}"` | Objeto JSON `{"CN=Admins,...": "admin", ...}` que mapea grupos LDAP a roles de la app |
+| `ldap.group_display_names` | dict | `{}` | Cache `{DN: nombre visible}` de grupos (autocompletado del mapeo) |
+| `ldap.default_role` | string | `""` | Rol por defecto para usuarios LDAP sin mapeo de grupo (vacío = `none`) |
 | `ldap.fallback_to_local` | bool | `true` | Si LDAP falla por error de red (no por credenciales incorrectas), intentar autenticación local |
 | `ldap.allow_email_login` | bool | `false` | Permitir que los usuarios introduzcan su dirección de email en lugar del username LDAP |
 
@@ -260,6 +323,8 @@ Requiere el paquete opcional `authlib` (`pip install authlib`).
 | `oidc.name_claim` | string | `"name"` | Claim del que se extrae el nombre visible |
 | `oidc.groups_claim` | string | `"groups"` | Claim del que se leen los grupos (p.ej. Object IDs en Entra ID) |
 | `oidc.group_role_map` | string (JSON) | `"{}"` | Objeto JSON que mapea valores del claim de grupos a roles de la app |
+| `oidc.group_display_names` | dict | `{}` | Cache `{id de grupo: nombre visible}` (autocompletado del mapeo) |
+| `oidc.default_role` | string | `""` | Rol por defecto para usuarios OIDC sin mapeo de grupo (vacío = `none`) |
 | `oidc.auto_create_users` | bool | `true` | Crear automáticamente el usuario en la tabla `users` de la base de datos en el primer login |
 
 Cuando está habilitado, aparece el botón **Login with SSO** en la pantalla de login. El wizard integrado en la pestaña de configuración puede registrar la aplicación en Microsoft Entra ID automáticamente mediante Device Code Flow.
@@ -283,6 +348,8 @@ Requiere el paquete opcional `python3-saml` (`pip install python3-saml`). **[alp
 | `saml2.name_attr` | string | `"displayName"` | Atributo SAML del que se lee el nombre visible |
 | `saml2.groups_attr` | string | `"groups"` | Atributo SAML del que se leen los grupos |
 | `saml2.group_role_map` | string (JSON) | `"{}"` | Mapeo `{grupo SAML: rol}` |
+| `saml2.group_display_names` | dict | `{}` | Cache `{grupo: nombre visible}` (autocompletado del mapeo) |
+| `saml2.default_role` | string | `""` | Rol por defecto para usuarios SAML sin mapeo de grupo (vacío = `none`) |
 | `saml2.auto_create_users` | bool | `true` | Crear el usuario en el primer login |
 
 Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/metadata` (metadatos SP para registrar en el IdP). Los usuarios se sincronizan con `auth_source: "saml2"`.
@@ -297,9 +364,9 @@ Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/
 | `email.subject_prefix` | string | `""` | Prefijo opcional para el asunto del mensaje |
 | `email.notify_on_down` | bool | `true` | Enviar alerta cuando un check falla *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
 | `email.notify_on_recovery` | bool | `true` | Enviar alerta cuando se recupera un check *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
-| `email.notify_on_warn` | bool | `false` | Enviar alerta en estado de advertencia *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
+| `email.notify_on_warn` | bool | `true` | Enviar alerta en estado de advertencia *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
 | `email.from_email` | string | `""` | Dirección de envío (campo `From:`) |
-| `email.from_name` | string | `""` | Nombre del remitente que aparece en el campo `From:` |
+| `email.from_name` | string | `"ServiceSentry"` | Nombre del remitente que aparece en el campo `From:` |
 | `email.lang` | string | `""` | Idioma de las notificaciones de email. Vacío = usa el idioma por defecto del panel (`web_admin.lang`). |
 | `email.smtp_host` | string | `""` | Servidor SMTP (solo para `provider=smtp`) |
 | `email.smtp_port` | int | `587` | Puerto SMTP (1–65535) |
@@ -431,7 +498,9 @@ Si `secret` no está vacío, el servidor añade la cabecera `<secret_header>: sh
 ServiceSentry puede actuar como **servidor de syslog**, recibiendo eventos (RFC
 3164 / RFC 5424) de servidores externos por **UDP/TCP(+TLS)**, almacenándolos en
 la tabla `syslog` de la base de datos y mostrándolos en la pestaña **Syslog** del
-panel. Opcionalmente, una regla de alerta notifica los mensajes que coincidan.
+panel. Las notificaciones de syslog se gestionan con el **Gestor de eventos**
+(reglas con `source='syslog'`, ver [Gestor de eventos](#gestor-de-eventos)), no con
+campos de alerta en esta sección.
 
 Configurable en **Configuration > Syslog Receiver** (es config editable en BD,
 solo-admin). Campos:
@@ -439,22 +508,22 @@ solo-admin). Campos:
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
 | `enabled` | bool | false | Activa el receptor. |
-| `bind_host` | str | `0.0.0.0` | Interfaz de escucha. |
-| `udp_port` | int | 514 | Puerto UDP (0 = desactivado). <1024 requiere privilegios. |
+| `bind_host` | str | `0.0.0.0, ::` | Interfaces de escucha (lista de IPs IPv4/IPv6, coma/espacio). Validadas como IP. Vacío = todas las IPv4 (`0.0.0.0`). |
+| `udp_port` | int | 514 | Puerto UDP (0 = desactivado). <1024 requiere privilegios. Vacío = default. |
 | `tcp_port` | int | 514 | Puerto TCP (0 = desactivado). |
 | `tls_port` | int | 0 | Puerto TCP+TLS (RFC 5425; 0 = desactivado). |
 | `tls_cert` / `tls_key` | str | `''` | Rutas del cert/clave PEM para TLS. |
-| `allowed_sources` | str | `''` | IPs/CIDRs permitidos (coma/espacio); vacío = todos. |
+| `allowed_sources` | str | `''` | IPs **o** CIDRs permitidos (coma/espacio/líneas), como lista de chips validada. Vacío = todos. |
 | `retention_days` | int | 30 | Borra mensajes más antiguos (0 = sin límite). |
 | `max_rows` | int | 500000 | Tope de filas; rota las más antiguas (0 = sin tope). |
-| `alert_enabled` | bool | false | Activa la regla de alerta. |
-| `alert_severity_max` | int | 3 | Alerta si severidad ≤ este valor (3 = `err` y peor). |
-| `alert_regex` | str | `''` | Si se define, además exige coincidencia en el mensaje. |
 
-Las alertas se enrutan por la matriz de notificaciones con `kind='syslog'`
-(`notifications.{telegram,email,webhook}_on_syslog`), con un *cooldown* por origen
-para evitar avalanchas. El listener corre en hilos de fondo del proceso web y se
-reinicia al guardar cambios; la retención se aplica periódicamente. Permisos:
+Los orígenes que no pasan el `allowed_sources` se descartan y quedan registrados en
+el **registro de descartes** (panel colapsable en la pestaña Syslog, con
+búsqueda/orden y borrado por IP). El listener corre en hilos de fondo del proceso
+web (o en el contenedor `syslog` dedicado) y se reinicia al guardar cambios; la
+retención se aplica periódicamente. Soporta escuchar en **varias interfaces**
+(IPv4 e IPv6). Los mensajes pueden almacenarse en una **BD dedicada** (ver
+[Base de datos de syslog](#base-de-datos-de-syslog-ss_syslog_db_)). Permisos:
 `syslog_view` (ver) y `syslog_delete` (vaciar).
 
 ### Receptor syslog como servicio independiente
@@ -475,6 +544,36 @@ Cuando el receptor corre aparte, el panel web debe arrancarse con
 `SS_SYSLOG_EMBEDDED=0`: sigue mostrando la pestaña Syslog y sirviendo los mensajes
 almacenados, pero **no liga los puertos** (los gestiona el contenedor dedicado).
 El `docker-compose.microservices.yml` lo configura así (contenedor `syslog`).
+
+---
+
+## Gestor de eventos
+
+La pestaña **Events** centraliza las **reglas de notificación**: cada regla observa
+una fuente de eventos, filtra por condiciones y, al coincidir, envía a uno o varios
+canales. Sustituye a las antiguas opciones de alerta del receptor syslog. Las reglas
+viven en la tabla `event_rules` (columnas `uid`/`name`/`enabled`/`description` + un
+blob JSON con el resto), y cada envío queda registrado en `notification_log`.
+
+El modal de edición se organiza en tres pestañas:
+
+- **General** — nombre, UID, descripción y activación.
+- **Conditions** — `source` (`audit` o `syslog`); filtros por evento/severidad/host/
+  app; y el `match_type` (`contains` / `not_contains` / `starts` / `ends` / `regex` /
+  `any`) con su `match_text`.
+- **Notifications** — canales destino (Telegram, email y **webhooks concretos** por
+  su id) y el `cooldown` por regla.
+
+**Cooldown global.** `events.cooldown` define el *cooldown* por defecto (segundos)
+entre notificaciones de una misma regla; dejar el campo de la regla en blanco hace
+que **herede** el global (el placeholder muestra el valor heredado).
+
+La pestaña incluye además el **log de notificaciones** (qué regla disparó, canales,
+resultado y mensaje), con el mismo sistema de columnas (orden/mostrar-ocultar/
+reordenar/redimensionar, persistido por usuario) que el resto de tablas. En el
+**Overview** hay un widget *Events* con el total de reglas, activas/inactivas y
+notificaciones enviadas. Permisos: `events_view`, `events_add`, `events_edit` (y
+vaciar el log) y `events_delete`.
 
 ---
 

@@ -86,25 +86,28 @@ Los tests están junto a cada módulo:
 ```
 src/
 ├── conftest.py                          # Fixtures compartidos: admin, client, _login()
-├── tests/                               # Tests de core y web admin
+├── tests/                               # Tests de core y web admin (~62 ficheros)
 │   ├── conftest.py                      # Fixtures de web_admin (config_dir, var_dir, admin, client)
-│   ├── test_wa_init.py
-│   ├── test_wa_users.py
-│   ├── test_wa_roles.py
-│   ├── test_wa_groups.py
-│   ├── test_wa_config.py
-│   ├── test_wa_modules.py
-│   ├── test_wa_sessions.py
-│   ├── test_wa_audit.py
-│   ├── test_wa_security.py
-│   ├── test_wa_telegram.py
-│   ├── test_wa_ui.py
-│   ├── test_wa_json_helpers.py
-│   └── ...
+│   ├── # Core: test_config*.py, test_debug.py, test_exe.py, test_mem.py,
+│   ├── #       test_thermal.py, test_tools.py, test_parse_helpers.py,
+│   ├── #       test_secret_manager.py, test_ssh_client.py
+│   ├── # BD/esquema: test_db_schema.py, test_db_module_tables.py,
+│   ├── #            test_modules_store.py, test_hosts_store.py, test_credentials.py
+│   ├── # Hosts: test_host_exec.py, test_host_migrate.py, test_host_probe.py,
+│   ├── #        test_host_profiles.py, test_host_resolution.py
+│   ├── # Monitor: test_monitor.py, test_watchfuls_integrity.py
+│   ├── # Syslog: test_syslog_parser.py, test_syslog_server.py,
+│   ├── #         test_syslog_service.py, test_syslog_store.py
+│   ├── # Panel web (test_wa_*.py): init, auth, users, roles, groups, sessions,
+│   ├── #   config, modules, checks, status, audit, security, permissions,
+│   ├── #   ldap, oidc, saml2, history, hosts, webhook, notif_templates,
+│   ├── #   password_policy, errors, ui, telegram, watchfuls,
+│   ├── #   syslog, events, services
+│   └── # (ver docs/tests.md para el inventario completo por test)
 └── watchfuls/
     ├── ping/tests/test_ping.py
     ├── datastore/tests/test_datastore.py
-    └── ...
+    └── ...                              # un test_<modulo>.py por watchful
 ```
 
 ### `create_mock_monitor`

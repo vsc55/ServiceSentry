@@ -1,0 +1,595 @@
+// ── Events tab ────────────────────────────────────────────────────────────────
+// Event→notification rules: a compact list (search + add) editing in a modal,
+// plus a notification-send log. Channels reuse the dispatcher.
+
+let _eventRules = [];
+let _eventDraft = null;     // rule being edited in the modal
+let _eventSearch = '';
+let _eventLog = [];
+let _eventAuditFilter = '';   // filter text for the audit-events multiselect
+
+const _EV_MATCH_TYPES = ['any', 'contains', 'not_contains', 'starts', 'ends', 'regex'];
+
+// ── Column infrastructure (shared with the users/groups/roles tables) ─────────
+const _EVR_COLS = [
+    { id: 'uid',         label: () => t('event_uid'),         sortKey: 'uid',         always: false },
+    { id: 'name',        label: () => t('event_name'),        sortKey: 'name',        always: true  },
+    { id: 'description', label: () => t('event_description'), sortKey: 'description', always: false },
+    { id: 'source',      label: () => t('event_source'),      sortKey: 'source',      always: false },
+    { id: 'match',       label: () => t('event_match'),       sortKey: null,          always: false },
+    { id: 'channels',    label: () => t('event_channels'),    sortKey: null,          always: false },
+    { id: 'last_notif',  label: () => t('event_last_notif'),  sortKey: 'last_fired',  always: false },
+    { id: 'enabled',     label: () => t('event_enabled'),     sortKey: 'enabled',     always: false },
+    { id: 'created_at',  label: () => t('col_created_at') || 'Created',    sortKey: 'created_at', always: false },
+    { id: 'updated_at',  label: () => t('col_updated_at') || 'Last Updated', sortKey: 'updated_at', always: false },
+    { id: 'updated_by',  label: () => t('col_updated_by') || 'Updated By',  sortKey: 'updated_by', always: false },
+];
+const _EVR_DEFAULT_COLS = new Set(['source', 'match', 'channels', 'last_notif', 'enabled']);
+const _EVL_COLS = [
+    { id: 'ts',        label: () => t('event_log_time'),     sortKey: 'ts',        always: true  },
+    { id: 'rule_name', label: () => t('event_name'),         sortKey: 'rule_name', always: false },
+    { id: 'source',    label: () => t('event_source'),       sortKey: 'source',    always: false },
+    { id: 'channels',  label: () => t('event_channels'),     sortKey: 'channels',  always: false },
+    { id: 'status',    label: () => t('event_log_status'),   sortKey: 'ok',        always: false },
+    { id: 'detail',    label: () => t('event_log_detail'),   sortKey: null,        always: false },
+];
+const _EVL_DEFAULT_COLS = new Set(['rule_name', 'source', 'channels', 'status', 'detail']);
+
+function _evLoadCols(key, def) {
+    try { const s = JSON.parse(localStorage.getItem(key) || 'null'); if (Array.isArray(s)) return new Set(s); } catch (_) {}
+    return new Set(def);
+}
+function _evLoadOrder(key, cols) {
+    try { const s = JSON.parse(localStorage.getItem(key) || 'null'); if (Array.isArray(s)) return s; } catch (_) {}
+    return cols.map(c => c.id);
+}
+function _evCW(key) { try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch (_) { return {}; } }
+
+let _evrVisibleCols = _evLoadCols('ss_evrules_cols', _EVR_DEFAULT_COLS);
+let _evrColOrder    = _evLoadOrder('ss_evrules_col_order', _EVR_COLS);
+let _evrSort = 'name', _evrSortDir = 'asc';
+let _evlVisibleCols = _evLoadCols('ss_evlog_cols', _EVL_DEFAULT_COLS);
+let _evlColOrder    = _evLoadOrder('ss_evlog_col_order', _EVL_COLS);
+let _evlSort = 'ts', _evlSortDir = 'desc';
+
+function _evrToggleCol(col) {
+    const adding = !_evrVisibleCols.has(col);
+    _evrVisibleCols.has(col) ? _evrVisibleCols.delete(col) : _evrVisibleCols.add(col);
+    if (adding && col === 'uid') {   // UID always shows first, like the users/groups/roles tables
+        _evrColOrder = ['uid', ..._evrColOrder.filter(c => c !== 'uid')];
+        localStorage.setItem('ss_evrules_col_order', JSON.stringify(_evrColOrder));
+    }
+    localStorage.setItem('ss_evrules_cols', JSON.stringify([..._evrVisibleCols]));
+    _persistTableConfig(); _eventRulesBody();
+}
+function _resetEvrCols() {
+    _evrVisibleCols = new Set(_EVR_DEFAULT_COLS); _evrColOrder = _EVR_COLS.map(c => c.id);
+    localStorage.setItem('ss_evrules_cols', JSON.stringify([..._evrVisibleCols]));
+    localStorage.setItem('ss_evrules_col_order', JSON.stringify(_evrColOrder));
+    localStorage.removeItem('ss_evrules_col_w');
+    _persistTableConfig(); _eventRulesBody();
+}
+function _evrSaveColOrder() { localStorage.setItem('ss_evrules_col_order', JSON.stringify(_evrColOrder)); _persistTableConfig(); }
+function _sortEventRules(col) {
+    if (_evrSort === col) _evrSortDir = _evrSortDir === 'asc' ? 'desc' : 'asc';
+    else { _evrSort = col; _evrSortDir = 'asc'; }
+    _eventRulesBody();
+}
+function _evlToggleCol(col) {
+    _evlVisibleCols.has(col) ? _evlVisibleCols.delete(col) : _evlVisibleCols.add(col);
+    localStorage.setItem('ss_evlog_cols', JSON.stringify([..._evlVisibleCols]));
+    _persistTableConfig(); _renderEventLog();
+}
+function _resetEvlCols() {
+    _evlVisibleCols = new Set(_EVL_DEFAULT_COLS); _evlColOrder = _EVL_COLS.map(c => c.id);
+    localStorage.setItem('ss_evlog_cols', JSON.stringify([..._evlVisibleCols]));
+    localStorage.setItem('ss_evlog_col_order', JSON.stringify(_evlColOrder));
+    localStorage.removeItem('ss_evlog_col_w');
+    _persistTableConfig(); _renderEventLog();
+}
+function _evlSaveColOrder() { localStorage.setItem('ss_evlog_col_order', JSON.stringify(_evlColOrder)); _persistTableConfig(); }
+function _sortEventLog(col) {
+    if (_evlSort === col) _evlSortDir = _evlSortDir === 'asc' ? 'desc' : 'asc';
+    else { _evlSort = col; _evlSortDir = 'asc'; }
+    _renderEventLog();
+}
+// Resolve the ordered, visible column descriptors for a table.
+function _evOrdered(cols, order, visible) {
+    const known = new Set(cols.map(c => c.id));
+    cols.forEach(c => { if (!order.includes(c.id)) order.push(c.id); });
+    order = order.filter(id => known.has(id));
+    return order.map(id => cols.find(c => c.id === id)).filter(c => c && (c.always || visible.has(c.id)));
+}
+
+// ── Percentage column widths (CSS-native, never overflows) ────────────────────
+// Default relative weights; normalised at render to fill the available width.
+const _EVR_DEFW = { uid: 14, name: 12, description: 14, source: 9, match: 22,
+                    channels: 7, last_notif: 11, enabled: 6, created_at: 10, updated_at: 10, updated_by: 9 };
+let _evrPct = _evCW('ss_evrules_col_w');   // {id: percent} — reuses the server-persisted key
+
+// width% per visible id so they fill (100 - reserve)%, where `reserve` is the
+// fixed actions column. With table-layout:fixed;width:100% the browser keeps the
+// table exactly at container width on load and live — no JS clamp, no h-scroll.
+function _evPctMap(ids, pctMap, defW, reserve) {
+    ids.forEach(id => { if (typeof pctMap[id] !== 'number') pctMap[id] = defW[id] || 10; });
+    Object.keys(pctMap).forEach(id => { if (!ids.includes(id)) delete pctMap[id]; });
+    const sum = ids.reduce((s, id) => s + pctMap[id], 0) || 1;
+    const avail = 100 - (reserve || 0);
+    const out = {}; ids.forEach(id => out[id] = pctMap[id] / sum * avail); return out;
+}
+
+// Reorder (drag) + percentage resize + dbl-click auto-fit. Widening a column
+// shrinks the others proportionally, keeping the total constant (= no scroll).
+function _evAttachPctCols(tableId, getOrder, setOrder, saveOrder, render, pctMap, pctKey) {
+    const tbl = document.getElementById(tableId);
+    if (!tbl) return;
+    let dragSrc = null;
+    const ths = () => [...tbl.querySelectorAll('thead th.ss-th-resizable')];
+    const applyResize = (col, targetPx) => {
+        const list = ths(), tableW = tbl.offsetWidth || 1;
+        const start = {}; list.forEach(t => start[t.dataset.col] = t.offsetWidth / tableW * 100);
+        const group = list.reduce((s, t) => s + start[t.dataset.col], 0);   // ≈ available %
+        const np = Math.max(4, Math.min(group - 4 * (list.length - 1), targetPx / tableW * 100));
+        const oldOthers = group - start[col] || 1, scale = (group - np) / oldOthers;
+        list.forEach(t => { t.style.width = (t.dataset.col === col ? np : start[t.dataset.col] * scale).toFixed(3) + '%'; });
+        list.forEach(t => { pctMap[t.dataset.col] = parseFloat(t.style.width); });
+    };
+    ths().forEach(th => {
+        th.querySelector('.ss-resize-handle')?.remove();
+        th.style.position = 'relative'; th.style.overflow = 'hidden';
+        th.addEventListener('dragstart', e => { dragSrc = th.dataset.col; e.dataTransfer.effectAllowed = 'move'; th.style.opacity = '0.4'; });
+        th.addEventListener('dragend',   () => { th.style.opacity = ''; dragSrc = null; });
+        th.addEventListener('dragover',  e => { e.preventDefault(); th.classList.add('ss-th-drag-over'); });
+        th.addEventListener('dragleave', () => th.classList.remove('ss-th-drag-over'));
+        th.addEventListener('drop', e => {
+            e.preventDefault(); th.classList.remove('ss-th-drag-over');
+            const src = dragSrc, dst = th.dataset.col;
+            if (!src || src === dst) return;
+            const o = getOrder(), si = o.indexOf(src), di = o.indexOf(dst);
+            if (si < 0 || di < 0) return;
+            o.splice(si, 1); o.splice(di, 0, src); setOrder(o); saveOrder(); render();
+        });
+        const handle = document.createElement('div');
+        handle.className = 'ss-resize-handle';
+        handle.style.cssText = 'position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:2;background:transparent';
+        handle.addEventListener('mousedown', e => {
+            e.preventDefault(); e.stopPropagation();
+            const startX = e.clientX, startW = th.offsetWidth, col = th.dataset.col;
+            const onMove = ev => applyResize(col, startW + (ev.clientX - startX));
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                localStorage.setItem(pctKey, JSON.stringify(pctMap)); _persistTableConfig();
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+        handle.addEventListener('dblclick', e => {
+            e.preventDefault(); e.stopPropagation();
+            const colIdx = [...th.closest('tr').querySelectorAll('th')].indexOf(th);
+            const tmp = document.createElement('div');
+            tmp.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden';
+            document.body.appendChild(tmp);
+            let maxW = 0;
+            const meas = cell => { const c = cell.cloneNode(true); c.querySelector?.('.ss-resize-handle')?.remove();
+                c.style.cssText = 'display:inline-block;white-space:nowrap;width:auto;padding:2px 11px';
+                tmp.appendChild(c); maxW = Math.max(maxW, c.scrollWidth); tmp.removeChild(c); };
+            meas(th); tbl.querySelectorAll('tbody tr').forEach(tr => { const td = tr.cells[colIdx]; if (td) meas(td); });
+            document.body.removeChild(tmp);
+            applyResize(th.dataset.col, maxW + 12);
+            localStorage.setItem(pctKey, JSON.stringify(pctMap)); _persistTableConfig();
+        });
+        th.appendChild(handle);
+    });
+}
+
+function _evCan(p) { return (currentUser.permissions || []).includes(p); }
+// Inline help icon for a modal field: renders only when the i18n key exists.
+function _evHelp(key) {
+    const txt = (typeof I18N !== 'undefined') ? I18N[key] : '';
+    return txt ? ` <i class="bi bi-info-circle text-muted ms-1" style="cursor:help" title="${escAttr(txt)}"></i>` : '';
+}
+function _eventGlobalCooldown() {
+    const live = (typeof configData !== 'undefined' && configData.events) ? configData.events.cooldown : null;
+    if (live != null && live !== '') return live;
+    const def = (typeof CONFIG_FIELD_DEFAULTS !== 'undefined') ? CONFIG_FIELD_DEFAULTS['events|cooldown'] : null;
+    return (def != null) ? def : 0;
+}
+function _evWhen(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts * 1000);
+    return isNaN(d) ? '—' : d.toLocaleString();
+}
+
+async function renderEvents() {
+    const [rules, log] = await Promise.all([
+        apiGet('/api/v1/event-rules'),
+        apiGet('/api/v1/notifications/log?limit=200'),
+    ]);
+    _eventRules = (rules && rules.rules) || [];
+    _eventLog = (log && log.log) || [];
+    _eventsRender();
+}
+
+function _eventsRender() {
+    const c = document.getElementById('events-container');
+    if (!c) return;
+    const canAdd = _evCan('events_add');
+    const canEdit = _evCan('events_edit');
+    const rulesChooser = _buildColChooser(_EVR_COLS, _evrVisibleCols, '_evrToggleCol', '_resetEvrCols');
+    c.innerHTML = `
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <h5 class="mb-0 me-auto"><i class="bi bi-bell me-2"></i>${esc(t('tab_events'))}</h5>
+            <input id="ev-search" type="search" class="form-control form-control-sm" style="max-width:240px"
+                placeholder="${escAttr(t('event_search'))}" value="${escAttr(_eventSearch)}"
+                oninput="_eventSearch=this.value;_eventRulesBody()">
+            ${rulesChooser}
+            <button class="btn btn-secondary btn-sm" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+            ${canAdd ? `<button class="btn btn-primary btn-sm" onclick="openEventRuleModal(null)"><i class="bi bi-plus-lg me-1"></i>${esc(t('event_add'))}</button>` : ''}
+        </div>
+        <p class="text-muted small">${esc(t('event_hint'))}</p>
+        <div id="ev-rules-wrap" class="mb-4"></div>
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <h6 class="mb-0 me-auto"><i class="bi bi-clock-history me-2"></i>${esc(t('event_log_title'))}</h6>
+            <span id="ev-log-chooser"></span>
+            ${canEdit ? `<button class="btn btn-danger btn-sm" onclick="_eventClearLog()"><i class="bi bi-trash me-1"></i>${esc(t('event_log_clear'))}</button>` : ''}
+        </div>
+        <div id="ev-log"></div>`;
+    _eventRulesBody();
+    _renderEventLog();
+}
+
+function _evrSortVal(r, key) {
+    switch (key) {
+        case 'name':        return (r.name || '').toLowerCase();
+        case 'source':      return (r.source || 'audit');
+        case 'last_fired':  return r.last_fired || 0;
+        case 'enabled':     return r.enabled ? 1 : 0;
+        case 'description': return (r.description || '').toLowerCase();
+        case 'uid':         return (r.id || '').toLowerCase();
+        case 'created_at':  return r.created_at || '';
+        case 'updated_at':  return r.updated_at || '';
+        case 'updated_by':  return (r.updated_by || '').toLowerCase();
+        default:            return '';
+    }
+}
+function _evrCell(r, colId, canEdit, cw) {
+    cw = cw || {};
+    // Single-line, ellipsised cell (the table uses table-layout:fixed, so the
+    // column width comes from the resizable <th> and .text-truncate clips here).
+    const _ell = (cls, txt) => `<td class="${cls} text-truncate" title="${escAttr(txt)}">${esc(txt)}</td>`;
+    switch (colId) {
+        case 'name':       return `<td class="fw-semibold text-truncate" title="${escAttr(r.name || '')}">${esc(r.name || '')}</td>`;
+        case 'source':     return `<td><span class="badge bg-secondary">${esc(t('event_src_' + (r.source || 'audit')))}</span></td>`;
+        case 'match':      return _ell('small text-muted', _eventMatchSummary(r));
+        case 'channels':   return `<td>${_eventChannelsBadges(r)}</td>`;
+        case 'last_notif': return `<td class="small text-nowrap">${r.last_fired
+            ? `<span class="badge bg-${r.last_ok ? 'success' : 'danger'} me-1">${r.last_ok ? esc(t('event_ok')) : esc(t('event_err'))}</span>${esc(_evWhen(r.last_fired))}`
+            : '<span class="text-muted">—</span>'}</td>`;
+        case 'enabled':    return `<td class="text-center align-middle"><span class="form-switch d-inline-block" style="padding-left:0;min-height:0">
+            <input class="form-check-input m-0" type="checkbox" role="switch" style="margin-left:0;float:none;cursor:pointer"${r.enabled ? ' checked' : ''}${canEdit ? '' : ' disabled'}
+                onchange="_eventToggleEnabled('${r.id}',this.checked)"></span></td>`;
+        case 'description':return _ell('small text-muted', r.description || '', '18rem');
+        case 'uid':        return `<td class="text-truncate" title="${escAttr(r.id || '')}"><code class="text-muted" style="font-size:.7rem">${esc(r.id || '')}</code></td>`;
+        case 'created_at': return `<td class="text-truncate small text-muted">${esc(_fmtDateTime(r.created_at))}</td>`;
+        case 'updated_at': return `<td class="text-truncate small text-muted">${esc(_fmtDateTime(r.updated_at))}</td>`;
+        case 'updated_by': return `<td class="text-truncate small text-muted" title="${escAttr(r.updated_by || '')}">${esc(r.updated_by || '—')}</td>`;
+        default:           return '<td></td>';
+    }
+}
+function _eventRulesBody() {
+    const wrap = document.getElementById('ev-rules-wrap');
+    if (!wrap) return;
+    const q = _eventSearch.trim().toLowerCase();
+    const canEdit = _evCan('events_edit');
+    const canDelete = _evCan('events_delete');
+    const showActions = canEdit || canDelete;
+    let rows = _eventRules.filter(r => !q || (r.name || '').toLowerCase().includes(q)
+        || (r.source || '').toLowerCase().includes(q));
+    rows = rows.slice().sort((a, b) => {
+        const va = _evrSortVal(a, _evrSort), vb = _evrSortVal(b, _evrSort);
+        const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
+        return _evrSortDir === 'asc' ? c : -c;
+    });
+    const ordered = _evOrdered(_EVR_COLS, _evrColOrder, _evrVisibleCols);
+    _evrPct = _evCW('ss_evrules_col_w');   // refresh from storage (remote sync may have changed it)
+    const wpct = _evPctMap(ordered.map(c => c.id), _evrPct, _EVR_DEFW, showActions ? 6 : 0);
+    const thRow = ordered.map(col => {
+        const inner = col.sortKey ? _thSortInner(col.label(), col.sortKey, _evrSort, _evrSortDir, '_sortEventRules')
+            : `<span class="small">${esc(col.label())}</span>`;
+        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true" style="width:${wpct[col.id].toFixed(3)}%">${inner}</th>`;
+    }).join('');
+    const body = !rows.length
+        ? `<tr><td colspan="${ordered.length + (showActions ? 1 : 0)}" class="text-center text-muted py-3">${esc(t('event_none'))}</td></tr>`
+        : rows.map(r => `<tr>
+            ${ordered.map(col => _evrCell(r, col.id, canEdit)).join('')}
+            ${showActions ? `<td class="text-nowrap text-end ss-td-actions">
+                ${canEdit ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('event_test'))}" onclick="_eventTestRule('${r.id}')"><i class="bi bi-send"></i></button>
+                <button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('edit'))}" onclick="openEventRuleModal('${r.id}')"><i class="bi bi-pencil"></i></button>` : ''}
+                ${canDelete ? `<button class="btn btn-sm btn-link text-danger p-0" title="${escAttr(t('event_delete'))}" onclick="_eventDeleteRule('${r.id}')"><i class="bi bi-trash"></i></button>` : ''}
+            </td>` : ''}
+        </tr>`).join('');
+    wrap.innerHTML = `<div class="table-responsive rounded border" style="background:var(--ss-pagination-bg,var(--bs-secondary-bg))">
+        <table class="table table-sm table-striped table-hover align-middle mb-0 ss-table" id="ev-rules-table" style="font-size:.85rem;table-layout:fixed;width:100%">
+            <thead class="ss-thead"><tr>${thRow}${showActions ? `<th class="ss-th ss-th-actions" style="width:6%">${esc(t('col_actions'))}</th>` : ''}</tr></thead>
+            <tbody>${body}</tbody>
+        </table></div>`;
+    setTimeout(() => _evAttachPctCols('ev-rules-table',
+        () => _evrColOrder, o => { _evrColOrder = o; }, _evrSaveColOrder, _eventRulesBody, _evrPct, 'ss_evrules_col_w'), 0);
+}
+
+function _eventMatchSummary(r) {
+    if ((r.source || 'audit') === 'audit')
+        return (r.events && r.events.length) ? tf('event_n_events', r.events.length) : t('all');
+    const bits = [];
+    if (r.severity_max !== '' && r.severity_max != null)
+        bits.push('≤ ' + ((typeof _SYSLOG_SEV !== 'undefined' && _SYSLOG_SEV[r.severity_max]) || r.severity_max));
+    if (r.host) bits.push('host=' + r.host);
+    if (r.app) bits.push('app=' + r.app);
+    if (r.match_type && r.match_type !== 'any' && r.match_text)
+        bits.push(t('event_mt_' + r.match_type) + ' "' + r.match_text + '"');
+    return bits.join(', ') || t('all');
+}
+
+function _eventChannelsBadges(r) {
+    const icon = { telegram: 'bi-telegram', email: 'bi-envelope', webhook: 'bi-broadcast' };
+    return (r.channels || []).map(c => {
+        const n = (c === 'webhook' && (r.webhook_ids || []).length) ? (r.webhook_ids.length) : '';
+        const title = c === 'webhook' && n ? `${t('event_ch_webhook')} (${n})` : t('event_ch_' + c);
+        return `<span class="me-1 text-nowrap" title="${escAttr(title)}"><i class="bi ${icon[c] || 'bi-bell'}"></i>${n ? `<sup>${n}</sup>` : ''}</span>`;
+    }).join('') || '<span class="text-muted">—</span>';
+}
+
+// ── Modal (add/edit) ────────────────────────────────────────────────────────
+function openEventRuleModal(rid) {
+    const found = rid ? _eventRules.find(r => r.id === rid) : null;
+    _eventDraft = found ? JSON.parse(JSON.stringify(found))
+        : { id: null, name: '', description: '', enabled: true, source: 'audit', events: [],
+            severity_max: '', host: '', app: '', match_type: 'any', match_text: '',
+            channels: [], webhook_ids: [], cooldown: null };
+    _eventAuditFilter = '';
+    document.getElementById('eventRuleModalTitle').textContent = found ? t('event_edit') : t('event_add');
+    document.getElementById('eventRuleModalError').textContent = '';
+    document.getElementById('eventRuleModalBody').innerHTML = _eventModalForm();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('eventRuleModal')).show();
+}
+
+function _eventAuditOptionsHtml() {
+    const d = _eventDraft, AE = I18N.audit_events || {};
+    const q = (_eventAuditFilter || '').trim().toLowerCase();
+    return Object.keys(AE)
+        .filter(k => !q || (AE[k] || k).toLowerCase().includes(q) || k.toLowerCase().includes(q))
+        .sort((a, b) => (AE[a] || a).localeCompare(AE[b] || b))
+        .map(k => `<option value="${escAttr(k)}"${(d.events || []).includes(k) ? ' selected' : ''}>${esc(AE[k] || k)}</option>`).join('');
+}
+
+// Merge the rendered selection back into the draft, preserving selections that
+// are currently filtered out of view.
+function _eventAuditOnChange(sel) {
+    const rendered = [...sel.options].map(o => o.value);
+    const selectedNow = [...sel.selectedOptions].map(o => o.value);
+    const keptHidden = (_eventDraft.events || []).filter(e => !rendered.includes(e));
+    _eventDraft.events = [...keptHidden, ...selectedNow];
+}
+
+function _eventAuditFilterInput(q) {
+    _eventAuditFilter = q;
+    const sel = document.getElementById('evm-events');
+    if (sel) sel.innerHTML = _eventAuditOptionsHtml();
+}
+
+// Conditions tab body (source-specific). Re-rendered on its own when the
+// source toggles, so the active tab is preserved.
+function _eventConditionsHtml() {
+    const d = _eventDraft;
+    if (d.source === 'audit') {
+        // Fill the modal's tab area: a flex column where the list grows to take
+        // all remaining height (label/filter/hint keep their natural size).
+        return `<div class="d-flex flex-column" style="height:22rem">
+            <label class="form-label small mb-1">${esc(t('event_audit_events'))}${_evHelp('event_audit_events_hint')}</label>
+            <input type="search" class="form-control form-control-sm mb-1" placeholder="${escAttr(t('event_audit_filter'))}"
+                value="${escAttr(_eventAuditFilter)}" oninput="_eventAuditFilterInput(this.value)">
+            <select id="evm-events" multiple class="form-select form-select-sm" style="flex:1 1 auto;min-height:0"
+                onchange="_eventAuditOnChange(this)">${_eventAuditOptionsHtml()}</select>
+            <div class="form-text mb-0">${esc(t('event_audit_hint'))}</div></div>`;
+    }
+    const sevOpts = `<option value="">${esc(t('syslog_all'))}</option>` +
+        (typeof _SYSLOG_SEV !== 'undefined' ? _SYSLOG_SEV : [])
+            .map((n, s) => `<option value="${s}"${String(d.severity_max) === String(s) ? ' selected' : ''}>${esc(n)}</option>`).join('');
+    const mtOpts = _EV_MATCH_TYPES.map(m => `<option value="${m}"${d.match_type === m ? ' selected' : ''}>${esc(t('event_mt_' + m))}</option>`).join('');
+    return `<div class="row g-2">
+            <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('syslog_min_severity'))}${_evHelp('event_sev_hint')}</label>
+                <select class="form-select form-select-sm" onchange="_eventDraft.severity_max=this.value">${sevOpts}</select></div>
+            <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('syslog_host'))}${_evHelp('event_host_hint')}</label>
+                <input class="form-control form-control-sm" value="${escAttr(d.host || '')}" oninput="_eventDraft.host=this.value"></div>
+            <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('syslog_app'))}${_evHelp('event_app_hint')}</label>
+                <input class="form-control form-control-sm" value="${escAttr(d.app || '')}" oninput="_eventDraft.app=this.value"></div>
+            <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('event_match_type'))}${_evHelp('event_match_type_hint')}</label>
+                <select class="form-select form-select-sm" onchange="_eventDraft.match_type=this.value">${mtOpts}</select></div>
+            <div class="col-12"><label class="form-label small mb-1">${esc(t('event_match_text'))}${_evHelp('event_match_text_hint')}</label>
+                <input class="form-control form-control-sm" value="${escAttr(d.match_text || '')}" oninput="_eventDraft.match_text=this.value" placeholder="${escAttr(t('event_match_text_ph'))}"></div>
+        </div>`;
+}
+
+// Notifications tab body. Re-rendered on its own when a channel toggles so the
+// webhook destination sub-list shows/hides without losing the active tab.
+function _eventNotifyHtml() {
+    const d = _eventDraft;
+    const chIcon = { telegram: 'bi-telegram', email: 'bi-envelope', webhook: 'bi-broadcast' };
+    const ch = (name) => `<div class="form-check">
+        <input class="form-check-input" type="checkbox" id="evm-ch-${name}"${(d.channels || []).includes(name) ? ' checked' : ''}
+            onchange="_eventDraftToggleChannel('${name}',this.checked)">
+        <label class="form-check-label" for="evm-ch-${name}"><i class="bi ${chIcon[name]} me-1"></i>${esc(t('event_ch_' + name))}</label></div>`;
+    let webhookBlock = '';
+    if ((d.channels || []).includes('webhook')) {
+        const all = (typeof configData !== 'undefined' && configData.webhooks) || [];
+        const dests = all.filter(w => w.enabled);
+        const sel = new Set(d.webhook_ids || []);
+        const rows = dests.length
+            ? dests.map(w => `<div class="form-check">
+                <input class="form-check-input" type="checkbox" id="evm-wh-${escAttr(w.id)}"${sel.has(w.id) ? ' checked' : ''}
+                    onchange="_eventToggleWebhookId('${escAttr(w.id)}',this.checked)">
+                <label class="form-check-label small" for="evm-wh-${escAttr(w.id)}">${esc(w.name || w.id)}
+                    <span class="text-muted">${esc(w.url || '')}</span></label></div>`).join('')
+            : `<div class="text-muted small">${esc(t('event_wh_none'))}</div>`;
+        webhookBlock = `<div class="border rounded p-2 mt-1 ms-4">
+            <div class="small text-muted mb-1">${esc(t('event_wh_targets'))}</div>
+            ${rows}
+            ${dests.length ? `<div class="form-text">${esc(t('event_wh_hint'))}</div>` : ''}</div>`;
+    }
+    return `<label class="form-label small mb-2 d-block">${esc(t('event_channels'))}${_evHelp('event_channels_hint')}</label>
+        ${ch('telegram')}${ch('email')}${ch('webhook')}${webhookBlock}`;
+}
+
+function _eventModalForm() {
+    const d = _eventDraft;
+    const tab = (id, label, active) => `<li class="nav-item" role="presentation">
+        <button class="nav-link${active ? ' active' : ''} py-1 px-3" data-bs-toggle="tab"
+            data-bs-target="#evm-pane-${id}" type="button" role="tab">${esc(label)}</button></li>`;
+    return `
+        <ul class="nav nav-tabs mb-3" role="tablist">
+            ${tab('general', t('event_tab_general'), true)}
+            ${tab('cond', t('event_tab_conditions'), false)}
+            ${tab('notify', t('event_tab_notify'), false)}
+        </ul>
+        <div class="tab-content" style="min-height:24rem">
+            <div class="tab-pane fade show active" id="evm-pane-general" role="tabpanel">
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-6"><label class="form-label small mb-1">${esc(t('event_name'))}${_evHelp('event_name_hint')}</label>
+                        <input class="form-control form-control-sm" value="${escAttr(d.name || '')}" oninput="_eventDraft.name=this.value"></div>
+                    <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('event_source'))}${_evHelp('event_source_hint')}</label>
+                        <select class="form-select form-select-sm" onchange="_eventDraft.source=this.value;document.getElementById('evm-pane-cond').innerHTML=_eventConditionsHtml()">
+                            <option value="audit"${d.source === 'audit' ? ' selected' : ''}>${esc(t('event_src_audit'))}</option>
+                            <option value="syslog"${d.source === 'syslog' ? ' selected' : ''}>${esc(t('event_src_syslog'))}</option>
+                        </select></div>
+                    <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('event_cooldown'))}${_evHelp('event_cooldown_hint')}</label>
+                        <input type="number" min="0" class="form-control form-control-sm"
+                            value="${(d.cooldown === null || d.cooldown === undefined || d.cooldown === '') ? '' : escAttr(String(d.cooldown))}"
+                            placeholder="${escAttr(String(_eventGlobalCooldown()))}"
+                            oninput="_eventDraft.cooldown = this.value === '' ? null : (parseInt(this.value,10)||0)"></div>
+                </div>
+                ${d.id ? `<div class="mb-2"><label class="form-label small mb-1 text-muted">${esc(t('event_uid'))}${_evHelp('event_uid_hint')}</label>
+                    <input class="form-control form-control-sm font-monospace text-muted" value="${escAttr(d.id)}" readonly onclick="this.select()"></div>` : ''}
+                <div class="mb-2"><label class="form-label small mb-1">${esc(t('event_description'))}${_evHelp('event_description_hint')}</label>
+                    <textarea class="form-control form-control-sm" rows="8" oninput="_eventDraft.description=this.value" placeholder="${escAttr(t('event_description_ph'))}">${esc(d.description || '')}</textarea></div>
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="evm-enabled"${d.enabled ? ' checked' : ''} onchange="_eventDraft.enabled=this.checked">
+                    <label class="form-check-label small" for="evm-enabled">${esc(t('event_enabled'))}${_evHelp('event_enabled_hint')}</label></div>
+            </div>
+            <div class="tab-pane fade" id="evm-pane-cond" role="tabpanel">${_eventConditionsHtml()}</div>
+            <div class="tab-pane fade" id="evm-pane-notify" role="tabpanel">${_eventNotifyHtml()}</div>
+        </div>`;
+}
+
+function _eventDraftToggleChannel(name, on) {
+    const set = new Set(_eventDraft.channels || []);
+    if (on) set.add(name); else set.delete(name);
+    _eventDraft.channels = [...set];
+    if (name === 'webhook') {   // show/hide the destination sub-list
+        const pane = document.getElementById('evm-pane-notify');
+        if (pane) pane.innerHTML = _eventNotifyHtml();
+    }
+}
+
+function _eventToggleWebhookId(id, on) {
+    const set = new Set(_eventDraft.webhook_ids || []);
+    if (on) set.add(id); else set.delete(id);
+    _eventDraft.webhook_ids = [...set];
+}
+
+async function _eventModalSave() {
+    const d = _eventDraft;
+    if (!d) return;
+    const url = d.id ? '/api/v1/event-rules/' + encodeURIComponent(d.id) : '/api/v1/event-rules';
+    const resp = d.id ? await apiPut(url, d) : await apiPost(url, d);
+    const ok = d.id ? (resp && resp.ok) : (resp && resp.status === 200 && resp.data && resp.data.ok);
+    if (ok) {
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('eventRuleModal')).hide();
+        showToast(t('event_saved'), 'success');
+        renderEvents();
+    } else {
+        const err = (resp && (resp.error || (resp.data && resp.data.error))) || t('error');
+        document.getElementById('eventRuleModalError').textContent = err;
+    }
+}
+
+// ── Row actions ─────────────────────────────────────────────────────────────
+async function _eventToggleEnabled(rid, on) {
+    const r = _eventRules.find(x => x.id === rid);
+    if (!r) return;
+    const resp = await apiPut('/api/v1/event-rules/' + encodeURIComponent(rid), { ...r, enabled: on });
+    if (resp && resp.ok) { r.enabled = on; } else { showToast(t('error'), 'danger'); renderEvents(); }
+}
+function _eventDeleteRule(rid) {
+    showConfirmModal(t('event_delete_confirm'), async () => {
+        const resp = await apiDelete('/api/v1/event-rules/' + encodeURIComponent(rid));
+        if (resp && resp.data && resp.data.ok) { showToast(t('event_deleted'), 'success'); renderEvents(); }
+        else showToast(t('error'), 'danger');
+    });
+}
+async function _eventTestRule(rid) {
+    const resp = await apiPost('/api/v1/event-rules/' + encodeURIComponent(rid) + '/test', {});
+    if (resp && resp.status === 200 && resp.data && resp.data.ok) showToast(t('event_test_ok'), 'success');
+    else showToast(t('event_test_fail'), 'warning');
+    renderEvents();   // refresh last-notification + log
+}
+
+// ── Notification log ────────────────────────────────────────────────────────
+function _evlSortVal(e, key) {
+    switch (key) {
+        case 'ts':        return e.ts || 0;
+        case 'rule_name': return (e.rule_name || '').toLowerCase();
+        case 'source':    return (e.source || 'audit');
+        case 'channels':  return (e.channels || '').toLowerCase();
+        case 'ok':        return e.ok ? 1 : 0;
+        default:          return '';
+    }
+}
+function _evlCell(e, colId) {
+    switch (colId) {
+        case 'ts':        return `<td class="text-muted text-nowrap">${esc(_evWhen(e.ts))}</td>`;
+        case 'rule_name': return `<td>${esc(e.rule_name || '')}</td>`;
+        case 'source':    return `<td><span class="badge bg-secondary">${esc(t('event_src_' + (e.source || 'audit')))}</span></td>`;
+        case 'channels':  return `<td class="small">${esc(e.channels || '')}</td>`;
+        case 'status':    return `<td><span class="badge bg-${e.ok ? 'success' : 'danger'}">${e.ok ? esc(t('event_ok')) : esc(t('event_err'))}</span></td>`;
+        case 'detail':    return `<td class="small text-break">${esc(e.message || '')}</td>`;
+        default:          return '<td></td>';
+    }
+}
+function _renderEventLog() {
+    const chooserEl = document.getElementById('ev-log-chooser');
+    if (chooserEl) chooserEl.innerHTML = _eventLog.length
+        ? _buildColChooser(_EVL_COLS, _evlVisibleCols, '_evlToggleCol', '_resetEvlCols') : '';
+    const el = document.getElementById('ev-log');
+    if (!el) return;
+    if (!_eventLog.length) { el.innerHTML = `<p class="text-muted small">${esc(t('event_log_empty'))}</p>`; return; }
+    const rows = _eventLog.slice().sort((a, b) => {
+        const va = _evlSortVal(a, _evlSort), vb = _evlSortVal(b, _evlSort);
+        const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
+        return _evlSortDir === 'asc' ? c : -c;
+    });
+    const ordered = _evOrdered(_EVL_COLS, _evlColOrder, _evlVisibleCols);
+    const cw = _evCW('ss_evlog_col_w');
+    const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';
+    const thRow = ordered.map(col => {
+        const inner = col.sortKey ? _thSortInner(col.label(), col.sortKey, _evlSort, _evlSortDir, '_sortEventLog')
+            : `<span class="small">${esc(col.label())}</span>`;
+        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${thW(col.id)}>${inner}</th>`;
+    }).join('');
+    el.innerHTML = `<div class="table-responsive rounded border" style="background:var(--ss-pagination-bg,var(--bs-secondary-bg));max-height:320px;overflow:auto">
+        <table class="table table-sm table-striped align-middle mb-0 ss-table" id="ev-log-table" style="font-size:.82rem">
+            <thead class="ss-thead"><tr>${thRow}</tr></thead>
+            <tbody>${rows.map(e => `<tr>${ordered.map(col => _evlCell(e, col.id)).join('')}</tr>`).join('')}</tbody>
+        </table></div>`;
+    setTimeout(() => _attachColFeatures('ev-log-table',
+        () => _evlColOrder, o => { _evlColOrder = o; }, _evlSaveColOrder, _renderEventLog,
+        (col, w) => { const m = _evCW('ss_evlog_col_w'); m[col] = w; localStorage.setItem('ss_evlog_col_w', JSON.stringify(m)); }), 0);
+}
+
+function _eventClearLog() {
+    showConfirmModal(t('event_log_clear_confirm'), async () => {
+        const resp = await apiDelete('/api/v1/notifications/log');
+        if (resp && resp.data && resp.data.ok) { showToast(t('event_log_cleared'), 'success'); renderEvents(); }
+        else showToast(t('error'), 'danger');
+    });
+}

@@ -13,13 +13,12 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 
 from lib.debug import DebugLevel
-from lib.syslog.alert import dispatch_syslog_alert
-from lib.syslog.server import build_server, should_alert
+from lib.syslog.server import build_server
 
 _RETENTION_EVERY = 300          # prune sweep interval (s)
-_ALERT_COOLDOWN = 60            # min seconds between alerts per source (anti-storm)
 
 
 def _embedded_listener_enabled() -> bool:
@@ -43,13 +42,21 @@ class _SyslogMixin:
         self._syslog_server = None
         self._syslog_lock = threading.Lock()
         self._syslog_retention_stop = threading.Event()
-        self._syslog_alert_last: dict[str, float] = {}
         connector = getattr(self, '_db_connector', None)
         if connector is None:
             return
         try:
+            from lib.db import build_syslog_connector  # noqa: PLC0415
             from lib.stores.syslog import SyslogStore  # noqa: PLC0415
-            self._syslog_store = SyslogStore(connector)
+            from lib.stores.syslog_drops import SyslogDropsStore  # noqa: PLC0415
+            from lib.config.manager import overlay_section_env  # noqa: PLC0415
+            var = getattr(self, '_var_dir', None) or getattr(self, '_config_dir', '')
+            sdb = overlay_section_env('syslog_db', self._config_section('syslog_db'))
+            self._syslog_db_connector = build_syslog_connector(
+                sdb, main_connector=connector,
+                default_sqlite_path=os.path.join(var, 'syslog.db'))
+            self._syslog_store = SyslogStore(self._syslog_db_connector)
+            self._syslog_drops_store = SyslogDropsStore(self._syslog_db_connector)
         except Exception:  # pylint: disable=broad-except
             return
         self._syslog_apply_config()
@@ -61,7 +68,11 @@ class _SyslogMixin:
         # (not stored), so a config where only ``enabled`` was toggled would
         # otherwise lack the ports and the listener would bind nothing.
         from lib.config.spec import section_defaults  # noqa: PLC0415
-        return {**section_defaults('syslog'), **(self._config_section('syslog') or {})}
+        saved = self._config_section('syslog') or {}
+        # A null (blank) value means "use the registry default", so it must not
+        # override the default merged underneath — skip nulls.
+        return {**section_defaults('syslog'),
+                **{k: v for k, v in saved.items() if v is not None}}
 
     def _syslog_apply_config(self) -> list[str]:
         """(Re)build and (re)start the listener from the current config.
@@ -87,6 +98,8 @@ class _SyslogMixin:
                 sink=self._syslog_store.add_many,
                 on_message=self._syslog_alert,
                 dbg=lambda m: self._dbg(m, DebugLevel.info),
+                dbg_warn=lambda m: self._dbg(m, DebugLevel.warning),
+                on_drop=self._syslog_record_drop,
             )
             problems = srv.start()
             for p in problems:
@@ -116,17 +129,23 @@ class _SyslogMixin:
                 self._syslog_server = None
                 self._dbg("> Syslog >> embedded listener stopped", DebugLevel.info)
 
-    # ── alert rule ──────────────────────────────────────────────────────────────
+    # ── dropped-sender tally (allowlist) ─────────────────────────────────────────
+    def _syslog_record_drop(self, source: str, transport: str, delta: int) -> None:
+        """Persist allowlist drops so the Syslog tab can show what's being dropped."""
+        store = getattr(self, '_syslog_drops_store', None)
+        if store is not None:
+            try:
+                store.record(source, transport, delta, time.time())
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+    # ── per-message hook ─────────────────────────────────────────────────────────
     def _syslog_alert(self, rec: dict) -> None:
-        """Notify (via the dispatcher, kind='syslog') when a message matches the
-        rule: severity at/above the threshold and, if set, the regex."""
-        if should_alert(self._syslog_cfg(), rec, self._syslog_alert_last,
-                        cooldown=_ALERT_COOLDOWN):
-            src = rec.get('hostname') or rec.get('source') or '?'
-            self._dbg(f"> Syslog >> alert match from {src} "
-                      f"(sev={rec.get('severity_name') or rec.get('severity')}); "
-                      f"dispatching", DebugLevel.warning)
-            dispatch_syslog_alert(self, rec)
+        """Evaluate the Event-rules manager against each received message; matching
+        rules notify their chosen channels (severity/host/app/match + cooldown)."""
+        _eval = getattr(self, '_eval_event', None)
+        if callable(_eval):
+            _eval('syslog', rec)
 
     # ── retention ────────────────────────────────────────────────────────────────
     def _syslog_retention_loop(self) -> None:

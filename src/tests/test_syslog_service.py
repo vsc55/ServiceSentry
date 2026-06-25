@@ -94,36 +94,80 @@ class TestReceive:
         assert int(cfg['udp_port']) == 514 and int(cfg['tcp_port']) == 514
 
 
+def _add_syslog_rule(service, **over):
+    """Create an enabled syslog event-rule on the service's shared store and make
+    the manager pick it up (the standalone service evaluates the same rules)."""
+    rule = {'name': 'r', 'enabled': True, 'source': 'syslog',
+            'severity_max': 3, 'host': '', 'app': '',
+            'match_type': 'any', 'match_text': '',
+            'channels': ['webhook'], 'cooldown': 0}
+    rule.update(over)
+    service._event_rules_store.upsert(rule, actor='test')
+    service._events_reload()
+
+
 class TestAlert:
+    """Syslog→notification now runs through the Event-rules manager, evaluated
+    by the standalone service against the same shared rules."""
 
-    def _enable_rule(self, admin, **over):
-        cfg = {'alert_enabled': True, 'alert_severity_max': 3, 'alert_regex': ''}
-        cfg.update(over)
-        admin._write_config({'syslog': cfg})
-        admin._invalidate_config_cache()
-
-    def test_alert_dispatched(self, admin, service):
-        self._enable_rule(admin)
+    def test_alert_dispatched(self, service):
+        _add_syslog_rule(service)
         with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
             service._on_message({'severity': 2, 'severity_name': 'crit', 'source': '9.9.9.9',
                                  'message': 'kernel panic', 'hostname': 'h', 'received_at': ''})
-        assert disp.called and disp.call_args.kwargs['kind'] == 'syslog'
+        assert disp.called and disp.call_args.kwargs['kind'] == 'event'
 
-    def test_no_alert_below_threshold(self, admin, service):
-        self._enable_rule(admin)
+    def test_no_alert_below_threshold(self, service):
+        _add_syslog_rule(service)
         with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
             service._on_message({'severity': 6, 'source': '9.9.9.8', 'message': 'fine',
                                  'hostname': 'h', 'received_at': ''})
         assert not disp.called
 
-    def test_cooldown_suppresses_second(self, admin, service):
-        self._enable_rule(admin)
+    def test_cooldown_suppresses_second(self, service):
+        _add_syslog_rule(service, cooldown=60)
         rec = {'severity': 1, 'severity_name': 'alert', 'source': '9.9.9.7',
                'message': 'down', 'hostname': 'h', 'received_at': ''}
         with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
             service._on_message(dict(rec))
             service._on_message(dict(rec))
         assert disp.call_count == 1            # second within cooldown is dropped
+
+    def test_no_rule_no_dispatch(self, service):
+        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
+            service._on_message({'severity': 1, 'source': '9.9.9.6', 'message': 'x',
+                                 'hostname': 'h', 'received_at': ''})
+        assert not disp.called                 # nothing configured → nothing sent
+
+
+class TestDedicatedDb:
+
+    def test_disabled_shares_system_db(self, service):
+        # No syslog_db config → the syslog store uses the system connector.
+        assert service._syslog_db_connector is service._db_connector
+
+    def test_enabled_uses_separate_db(self, admin):
+        admin._write_config({'syslog_db': {'enabled': True, 'driver': 'sqlite', 'path': ''}})
+        admin._invalidate_config_cache()
+        svc = SyslogService(admin._config_dir, admin._var_dir)
+        try:
+            assert svc._syslog_db_connector is not svc._db_connector
+            svc._syslog_store.add({'ts': 1.0, 'received_at': '', 'source': '1.1.1.1',
+                                   'hostname': 'h', 'app': 'a', 'procid': '', 'severity': 5,
+                                   'facility': 1, 'msgid': '', 'message': 'sep', 'raw': ''})
+            assert svc._syslog_store.count() == 1
+        finally:
+            svc.stop()
+
+    def test_env_enables_dedicated_db(self, admin):
+        # Docker: SS_SYSLOG_DB_* env enables a dedicated DB without any saved config.
+        with mock.patch.dict('os.environ', {'SS_SYSLOG_DB_ENABLED': 'true',
+                                            'SS_SYSLOG_DB_DRIVER': 'sqlite'}):
+            svc = SyslogService(admin._config_dir, admin._var_dir)
+        try:
+            assert svc._syslog_db_connector is not svc._db_connector
+        finally:
+            svc.stop()
 
 
 class TestRun:
@@ -215,11 +259,10 @@ class TestTraceability:
         out = capsys.readouterr().out
         assert 'disabled in config' in out
 
-    def test_alert_match_is_logged(self, admin, service, capsys):
+    def test_event_rule_match_is_logged(self, service, capsys):
         self._trace_on(service)
-        admin._write_config({'syslog': {'alert_enabled': True, 'alert_severity_max': 3}})
-        admin._invalidate_config_cache()
+        _add_syslog_rule(service)
         with mock.patch('lib.web_admin.notification_dispatcher.dispatch'):
             service._on_message({'severity': 1, 'severity_name': 'alert', 'source': '7.7.7.7',
                                  'message': 'boom', 'hostname': 'h', 'received_at': ''})
-        assert 'alert match' in capsys.readouterr().out
+        assert 'matched' in capsys.readouterr().out

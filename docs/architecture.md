@@ -58,7 +58,10 @@ ObjectBase (lib/object_base.py)
 │   ├── _SessionsMixin   (lib/web_admin/mixins/sessions.py)
 │   ├── _AuditMixin      (lib/web_admin/mixins/audit.py)
 │   ├── _ChecksMixin     (lib/web_admin/mixins/checks.py)
-│   └── _DaemonMixin     (lib/web_admin/mixins/daemon.py)
+│   ├── _DaemonMixin     (lib/web_admin/mixins/daemon.py)
+│   ├── _SyslogMixin     (lib/web_admin/mixins/syslog.py)     ← receptor syslog + registro de descartes
+│   ├── _ServicesMixin   (lib/web_admin/mixins/services.py)   ← estado/control de servicios
+│   └── _EventsMixin     (lib/event_manager.py, reexportado por mixins/events.py; SIN Flask, lo comparte el servicio syslog)
 ├── BaseConnector (lib/db/base.py)              ← capa de BD pluggable
 │   ├── SQLiteConnector       (lib/db/sqlite.py)      [por defecto]
 │   ├── MySQLConnector        (lib/db/mysql.py)
@@ -73,7 +76,13 @@ ObjectBase (lib/object_base.py)
 │   ├── CredentialsStore(lib/stores/credentials.py)  → tabla credentials (identidades SSH reutilizables)
 │   ├── HistoryStore    (lib/stores/history.py)      → tabla history (series temporales)
 │   ├── HostsStore      (lib/stores/hosts.py)        → tabla hosts (servidores + perfiles de conexión)
-│   └── ModulesStore    (lib/stores/modules.py)      → tablas module_config, module_config_items (config de módulos/ítems)
+│   ├── ModulesStore    (lib/stores/modules.py)      → tablas module_config, module_config_items (config de módulos/ítems)
+│   ├── ConfigStore     (lib/stores/config.py)       → tabla config (capa editable: una fila por sección|campo)
+│   ├── WebhooksStore   (lib/stores/webhooks.py)     → tabla webhooks (destinos HTTP salientes)
+│   ├── EventRulesStore (lib/stores/event_rules.py)  → tabla event_rules (reglas de notificación)
+│   ├── NotificationLogStore (lib/stores/notification_log.py) → tabla notification_log (log de envíos)
+│   ├── SyslogStore     (lib/stores/syslog.py)        → tabla syslog (mensajes; puede ir en BD dedicada)
+│   └── SyslogDropsStore(lib/stores/syslog_drops.py)  → tabla syslog_drops (orígenes descartados por la allowlist)
 └── ModuleBase (lib/modules/module_base.py)
     ├── watchfuls.datastore::Watchful         🌐 (multiplataforma)
     ├── watchfuls.filesystemusage::Watchful  🌐 (multiplataforma)
@@ -124,7 +133,18 @@ ServiceSentry/
 │   │   │   ├── credentials.py           # CredentialsStore→ tabla credentials (identidades SSH reutilizables)
 │   │   │   ├── history.py               # HistoryStore    → tabla history (series temporales)
 │   │   │   ├── hosts.py                 # HostsStore      → tabla hosts (servidores + perfiles)
-│   │   │   └── modules.py               # ModulesStore    → tablas module_config, module_config_items (config de módulos/ítems)
+│   │   │   ├── modules.py               # ModulesStore    → tablas module_config, module_config_items (config de módulos/ítems)
+│   │   │   ├── config.py                # ConfigStore     → tabla config (capa editable: una fila por sección|campo)
+│   │   │   ├── webhooks.py              # WebhooksStore   → tabla webhooks (destinos HTTP salientes)
+│   │   │   ├── event_rules.py           # EventRulesStore → tabla event_rules (reglas de notificación)
+│   │   │   ├── notification_log.py      # NotificationLogStore → tabla notification_log (log de envíos)
+│   │   │   ├── syslog.py                # SyslogStore     → tabla syslog (mensajes; BD dedicada opcional)
+│   │   │   └── syslog_drops.py          # SyslogDropsStore→ tabla syslog_drops (orígenes descartados)
+│   │   ├── event_manager.py            # _EventsMixin (sin Flask): evalúa reglas y despacha notificaciones; compartido por WebAdmin y el servicio syslog
+│   │   ├── syslog/                      # Receptor syslog (RFC 3164/5424)
+│   │   │   ├── parser.py                # Parser de mensajes RFC 3164/5424
+│   │   │   ├── server.py                # Listener UDP/TCP/TLS multi-bind (IPv4/IPv6) + allowlist + registro de descartes
+│   │   │   └── service.py               # Servicio standalone (recibe→almacena→evento→purga), sin Flask
 │   │   ├── hosts/                       # Dominio de hosts (no la tabla; eso es stores/hosts.py)
 │   │   │   ├── profiles.py              # Catálogo protocolo→campos (de __host_profile__)
 │   │   │   ├── runner.py                # Ejecución de comandos local/SSH (run, is_remote)
@@ -158,8 +178,8 @@ ServiceSentry/
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck
 │   │   │   └── enum_config_options.py   # Enum opciones de config comunes
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
-│   │       ├── app.py                   # Clase WebAdmin (hereda de los 8 mixins)
-│   │       ├── constants.py             # PERMISSIONS (28), BUILTIN_ROLE_UIDS/GROUP_UIDS, SYSTEM_USER
+│   │       ├── app.py                   # Clase WebAdmin (hereda de los 11 mixins)
+│   │       ├── constants.py             # PERMISSIONS (46), BUILTIN_ROLE_UIDS/GROUP_UIDS, SYSTEM_USER
 │   │       ├── i18n.py                  # Cargador de traducciones
 │   │       ├── email_notify.py          # Envío de email (SMTP / Microsoft 365 / Gmail)
 │   │       ├── email_templates.py       # Motor de plantillas HTML de email
@@ -171,10 +191,13 @@ ServiceSentry/
 │   │       │   ├── ldap_auth.py         # LDAP/AD (ldap3)
 │   │       │   ├── oidc_auth.py         # OIDC/OAuth2 SSO (authlib)
 │   │       │   └── saml_auth.py         # SAML2 SSO (python3-saml) [alpha]
-│   │       ├── mixins/                  # Lógica de negocio por dominio (8 mixins)
+│   │       ├── mixins/                  # Lógica de negocio por dominio (11 mixins)
 │   │       │   ├── users.py roles.py groups.py permissions.py
 │   │       │   ├── sessions.py audit.py checks.py
-│   │       │   └── daemon.py            # _DaemonMixin: planificador en segundo plano
+│   │       │   ├── daemon.py            # _DaemonMixin: planificador en segundo plano
+│   │       │   ├── syslog.py            # _SyslogMixin: receptor syslog + descartes
+│   │       │   ├── services.py          # _ServicesMixin: estado/control de servicios
+│   │       │   └── events.py            # reexporta _EventsMixin de lib/event_manager.py
 │   │       └── routes/                  # Registradores de rutas Flask (ver web_admin.md)
 │   │           ├── __init__.py          # register_all(app, wa)
 │   │           ├── auth/                # /login, /logout, /api/v1/auth/ldap|entra/*
@@ -183,6 +206,7 @@ ServiceSentry/
 │   │           ├── modules/             # /api/v1/modules, status, overview, checks/run
 │   │           ├── notify/              # /api/v1/notify/* (telegram, email, webhook, templates)
 │   │           ├── config.py webhooks.py watchfuls.py history.py daemon.py
+│   │           ├── hosts.py credentials.py syslog.py events.py services.py
 │   │           ├── status.py ui.py errors.py
 │   │           └── …                    # (inventario completo de endpoints en web_admin.md)
 │   ├── watchfuls/                       # Módulos de monitorización (packages)
@@ -324,8 +348,22 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 La capa de datos del core (`lib/db/`) abstrae el motor mediante `BaseConnector`,
 con implementaciones para **SQLite** (por defecto), **MySQL/MariaDB** y
 **PostgreSQL**. Todos los stores de `lib/stores/` (`users`, `groups`, `roles`,
-`sessions`, `audit`, `check_state`, `credentials`, `history`, `hosts`, `modules`)
-reciben un conector inyectado y no hablan nunca con un driver concreto.
+`sessions`, `audit`, `check_state`, `credentials`, `history`, `hosts`, `modules`,
+`config`, `webhooks`, `event_rules`, `notification_log`, `syslog`, `syslog_drops`)
+reciben un conector inyectado y no hablan nunca con un driver concreto. Se crea **un único conector
+compartido por proceso**: los stores lo reciben inyectado (no abren conexiones
+propias).
+
+### Base de datos de syslog dedicada
+
+Los mensajes de syslog (alto volumen) pueden vivir en una **BD separada** de la
+principal. `lib/db/build_syslog_connector(syslog_db_cfg, *, main_connector,
+default_sqlite_path)` devuelve el `main_connector` cuando `syslog_db.enabled` es
+falso, o crea un **segundo `BaseConnector`** apuntando a la sección `syslog_db`
+cuando está activo. `SyslogStore`/`SyslogDropsStore` usan ese conector; el resto
+sigue en la BD principal. La topología `docker-compose.microservices.yml` levanta
+dos MariaDB y enruta syslog a la dedicada vía `SS_SYSLOG_DB_*` (ver
+[configuration.md](configuration.md) y [docker.md](docker.md)).
 
 El **store de módulos** (`lib/stores/modules.py`) guarda la configuración de
 watchfuls, en dos tablas: `module_config` (una

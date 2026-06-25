@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~1662 tests** | Todos deben pasar con `pytest` para que el build sea válido. Los 6 tests de RAID local se saltan en Windows/macOS (`skipif sys.platform != 'linux'`).
+**Total: ~2582 tests** | Todos deben pasar con `pytest` para que el build sea válido. Los 6 tests de RAID local se saltan en Windows/macOS (`skipif sys.platform != 'linux'`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -47,6 +47,36 @@
 30. [Watchful: dns](#30-watchful-dns)
 31. [Watchful: ntp](#31-watchful-ntp)
 32. [Watchful: ups](#32-watchful-ups)
+33. [Core — CLI y variables de entorno](#33-core--cli-y-variables-de-entorno)
+34. [Core — Resolución de configuración](#34-core--resolución-de-configuración)
+35. [Core — Registro central de config (spec)](#35-core--registro-central-de-config-spec)
+36. [Core — Almacén de config en BD](#36-core--almacén-de-config-en-bd)
+37. [BD — Tablas declaradas por módulos](#37-bd--tablas-declaradas-por-módulos)
+38. [BD — ModulesStore](#38-bd--modulesstore)
+39. [BD — HostsStore](#39-bd--hostsstore)
+40. [BD — CredentialsStore](#40-bd--credentialsstore)
+41. [Core — Cliente SSH](#41-core--cliente-ssh)
+42. [Hosts — Ejecución local/SSH](#42-hosts--ejecución-localssh)
+43. [Hosts — Perfiles de protocolo](#43-hosts--perfiles-de-protocolo)
+44. [Hosts — Resolución host→check](#44-hosts--resolución-hostcheck)
+45. [Hosts — Sonda de check único](#45-hosts--sonda-de-check-único)
+46. [Hosts — Asistente de migración](#46-hosts--asistente-de-migración)
+47. [Seguridad — Regresión](#47-seguridad--regresión)
+48. [Syslog — Parser RFC 3164/5424](#48-syslog--parser-rfc-31645424)
+49. [Syslog — Listener UDP/TCP/TLS](#49-syslog--listener-udptcptls)
+50. [Syslog — SyslogStore](#50-syslog--syslogstore)
+51. [Syslog — Servicio independiente](#51-syslog--servicio-independiente)
+52. [Panel Web — Comprobación de rol admin](#52-panel-web--comprobación-de-rol-admin)
+53. [Panel Web — LDAP](#53-panel-web--ldap)
+54. [Panel Web — OIDC/SSO](#54-panel-web--oidcsso)
+55. [Panel Web — SAML2](#55-panel-web--saml2)
+56. [Panel Web — Servidores (hosts)](#56-panel-web--servidores-hosts)
+57. [Panel Web — Historial](#57-panel-web--historial)
+58. [Panel Web — Webhooks](#58-panel-web--webhooks)
+59. [Panel Web — Plantillas de notificación](#59-panel-web--plantillas-de-notificación)
+60. [Panel Web — Syslog](#60-panel-web--syslog)
+61. [Panel Web — Gestor de eventos](#61-panel-web--gestor-de-eventos)
+62. [Panel Web — Servicios](#62-panel-web--servicios)
 
 ---
 
@@ -1116,7 +1146,7 @@ Verifica que todos los endpoints JSON del web admin se comportan correctamente a
 
 **Archivo:** `tests/test_wa_watchfuls.py`
 
-Verifica el endpoint `GET|POST /api/watchfuls/<module>/<action>` — autenticación, validación de entrada, despacho a classmethods y seguridad de importación.
+Verifica el endpoint `GET|POST /api/v1/watchfuls/<module>/<action>` — autenticación, validación de entrada, despacho a classmethods y seguridad de importación.
 
 ### `TestApiWatchfulActionAuth`
 
@@ -1634,3 +1664,746 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_check_connection_error_handled` | Error de conexión al demonio NUT | `status = False` sin lanzar | Si lanza al caller |
 | `test_check_other_data_populated` | `other_data` contiene `status`, `battery_charge`, `runtime`, `load` | Todos los campos presentes | Si faltan |
 | `test_check_ol_lb_combination_is_not_ok` | Estado `OL LB` (en línea pero batería baja) | `status = False` | Si es `True` |
+
+---
+
+## 33. Core — CLI y variables de entorno
+
+**Archivo:** `tests/test_cli_env.py` — 6 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_defaults_without_env` | Defaults without env |
+| `test_env_maps_to_args` | Env maps to args |
+| `test_nocolor_env` | Nocolor env |
+| `test_no_color_standard_env` | The de-facto NO_COLOR standard: present (non-empty) disables colour |
+| `test_bool_falsey_values` | Bool falsey values |
+| `test_cli_flag_overrides_absent_env` | Cli flag overrides absent env |
+
+## 34. Core — Resolución de configuración
+
+**Archivo:** `tests/test_config_resolve.py` — 13 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_flattens_two_levels` | Flattens two levels |
+| `test_ignores_non_dict_sections` | Ignores non dict sections |
+| `test_db_value_is_editable` | Db value is editable |
+| `test_file_overrides_db_and_locks` | File overrides db and locks |
+| `test_env_overrides_file_and_db` | Env overrides file and db |
+| `test_default_when_unset` | Default when unset |
+| `test_database_section_never_from_db` | Database section never from db |
+| `test_database_default_when_only_db` | Database default when only db |
+| `test_locked_set_is_union_of_env_and_file` | Locked set is union of env and file |
+| `test_opaque_leaf_values_preserved` | Opaque leaf values preserved |
+| `test_env_overlays_file_section` | Env overlays file section |
+| `test_no_env_returns_file_section` | No env returns file section |
+| `test_bad_port_is_ignored` | Bad port is ignored |
+
+## 35. Core — Registro central de config (spec)
+
+**Archivo:** `tests/test_config_spec.py` — 33 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_no_duplicate_paths` | No duplicate paths |
+| `test_cfg_by_path_complete` | Cfg by path complete |
+| `test_every_path_has_section_and_field` | Every path has section and field |
+| `test_known_defaults` | Known defaults |
+| `test_notifications_default_false` | Notifications default false |
+| `test_missing_uses_default_coerced` | Missing uses default coerced |
+| `test_present_value` | Present value |
+| `test_bool_coercion` | Bool coercion |
+| `test_falsy_false_keeps_empty` | Falsy false keeps empty |
+| `test_falsy_true_replaces_empty` | Falsy true replaces empty |
+| `test_int_ok` | Int ok |
+| `test_int_out_of_range` | Int out of range |
+| `test_int_wrong_type` | Int wrong type |
+| `test_int_rejects_bool` | Int rejects bool |
+| `test_json_dict_ok_string` | Json dict ok string |
+| `test_json_dict_ok_dict` | Json dict ok dict |
+| `test_json_dict_bad` | Json dict bad |
+| `test_json_dict_empty_ok` | Json dict empty ok |
+| `test_unconstrained_passes` | Unconstrained passes |
+| `test_store_form` | Store form |
+| `test_bool_field` | Bool field |
+| `test_int_field_has_range` | Int field has range |
+| `test_excludes_non_attr_fields` | Excludes non attr fields |
+| `test_int_rules` | Int rules |
+| `test_bool_rules` | Bool rules |
+| `test_json_dict_fields` | Json dict fields |
+| `test_env_field_specs` | Env field specs |
+| `test_admin_only_fields` | Admin only fields |
+| `test_valid_kept` | Valid kept |
+| `test_invalid_falls_back` | Invalid falls back |
+| `test_records_and_applies_change` | Records and applies change |
+| `test_no_change_no_record` | No change no record |
+| `test_old_default` | Old default |
+
+## 36. Core — Almacén de config en BD
+
+**Archivo:** `tests/test_config_store.py` — 9 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_is_empty` | Is empty |
+| `test_type_preservation_roundtrip` | Type preservation roundtrip |
+| `test_get_and_has` | Get and has |
+| `test_stored_null_vs_absent` | Stored null vs absent |
+| `test_set_many_upsert` | Set many upsert |
+| `test_delete` | Delete |
+| `test_value_agnostic_stores_ciphertext_asis` | Value agnostic stores ciphertext asis |
+| `test_audit_columns_populated` | Audit columns populated |
+| `test_version_increments` | Version increments |
+
+## 37. BD — Tablas declaradas por módulos
+
+**Archivo:** `tests/test_db_module_tables.py` — 15 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_prefixes_table_and_indexes` | Prefixes table and indexes |
+| `test_prefix_is_idempotent` | Prefix is idempotent |
+| `test_carries_pk_and_unique` | Carries pk and unique |
+| `test_valid_namespaced_table` | Valid namespaced table |
+| `test_wrong_prefix_skipped` | Wrong prefix skipped |
+| `test_raw_unprefixed_tablespec_skipped` | Raw unprefixed tablespec skipped |
+| `test_non_tablespec_skipped` | Non tablespec skipped |
+| `test_missing_function` | Missing function |
+| `test_non_callable_attribute` | Non callable attribute |
+| `test_raising_function_is_contained` | Raising function is contained |
+| `test_empty_return` | Empty return |
+| `test_reconcile_creates_usable_table` | Reconcile creates usable table |
+| `test_reconcile_module_tables_real_dir_is_safe` | Reconcile module tables real dir is safe |
+| `test_collect_module_tables_real_dir` | Collect module tables real dir |
+| `test_reconcile_failure_is_isolated` | Reconcile failure is isolated |
+
+## 38. BD — ModulesStore
+
+**Archivo:** `tests/test_modules_store.py` — 17 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_is_empty` | Is empty |
+| `test_roundtrip_exact` | Roundtrip exact |
+| `test_promoted_columns_not_duplicated_in_data` | Promoted columns not duplicated in data |
+| `test_host_uid_omitted_when_empty` | Host uid omitted when empty |
+| `test_enabled_false_preserved` | Enabled false preserved |
+| `test_meta_key_is_module_field_not_collection` | Meta key is module field not collection |
+| `test_scalar_legacy_items_preserved` | Scalar legacy items preserved |
+| `test_multiple_collection_keys` | Multiple collection keys |
+| `test_sync_removes_item` | Sync removes item |
+| `test_sync_removes_module` | Sync removes module |
+| `test_module_uid_stable_across_saves` | Module uid stable across saves |
+| `test_version_increments_on_write` | Version increments on write |
+| `test_save_read_roundtrip` | Save read roundtrip |
+| `test_get_conf_parity_with_configcontrol` | Get conf parity with configcontrol |
+| `test_set_conf_then_save_persists` | Set conf then save persists |
+| `test_secrets_encrypted_at_rest_decrypted_on_read` | Secrets encrypted at rest decrypted on read |
+| `test_reload_if_changed` | Reload if changed |
+
+## 39. BD — HostsStore
+
+**Archivo:** `tests/test_hosts_store.py` — 20 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_create_and_get_roundtrip` | Create and get roundtrip |
+| `test_create_requires_name` | Create requires name |
+| `test_duplicate_name_rejected` | Duplicate name rejected |
+| `test_list_ordered_by_name` | List ordered by name |
+| `test_get_by_name` | Get by name |
+| `test_count` | Count |
+| `test_update_replaces_fields` | Update replaces fields |
+| `test_update_rejects_name_clash` | Update rejects name clash |
+| `test_update_unknown_uid` | Update unknown uid |
+| `test_delete` | Delete |
+| `test_kind_defaults_to_local` | Kind defaults to local |
+| `test_create_remote_and_maintenance` | Create remote and maintenance |
+| `test_invalid_kind_normalised_to_local` | Invalid kind normalised to local |
+| `test_os_defaults_to_auto_and_persists` | Os defaults to auto and persists |
+| `test_invalid_os_normalised_to_auto` | Invalid os normalised to auto |
+| `test_modules_list_persists` | Modules list persists |
+| `test_update_toggles_kind_and_maintenance` | Update toggles kind and maintenance |
+| `test_secrets_encrypted_at_rest` | Secrets encrypted at rest |
+| `test_no_fernet_stores_plaintext` | No fernet stores plaintext |
+| `test_persists_across_store_instances` | Persists across store instances |
+
+## 40. BD — CredentialsStore
+
+**Archivo:** `tests/test_credentials.py` — 29 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_create_get_roundtrip` | Create get roundtrip |
+| `test_secret_encrypted_at_rest` | Secret encrypted at rest |
+| `test_duplicate_name_rejected` | Duplicate name rejected |
+| `test_update_and_list` | Update and list |
+| `test_delete` | Delete |
+| `test_enabled_default_and_toggle` | Enabled default and toggle |
+| `test_overlay_wins_for_identity` | Overlay wins for identity |
+| `test_empty_cred_fields_do_not_clobber` | Empty cred fields do not clobber |
+| `test_none_cred_returns_copy` | None cred returns copy |
+| `test_disabled_credential_ignored` | Disabled credential ignored |
+| `test_inline_check_uses_credential` | Inline check uses credential |
+| `test_host_ssh_profile_cred_uid` | Host ssh profile cred uid |
+| `test_dangling_cred_uid_is_ignored` | Dangling cred uid is ignored |
+| `test_inline_check_uses_non_ssh_credential` | Inline check uses non ssh credential |
+| `test_builtin_ssh_present` | Builtin ssh present |
+| `test_module_declared_type_discovered` | Module declared type discovered |
+| `test_secret_fields_union` | Secret fields union |
+| `test_requires_auth` | Requires auth |
+| `test_create_list_and_mask` | Create list and mask |
+| `test_update_keeps_masked_secret` | Update keeps masked secret |
+| `test_delete` | Delete |
+| `test_duplicate_name_rejected` | Duplicate name rejected |
+| `test_clone_preserves_secret_and_renames` | Clone preserves secret and renames |
+| `test_host_test_ssh_uses_credential_not_stored` | Host test ssh uses credential not stored |
+| `test_action_config_applies_credential` | Action config applies credential |
+| `test_check_test_applies_credential` | Check test applies credential |
+| `test_modules_save_strips_inline_cred_fields` | Modules save strips inline cred fields |
+| `test_usage_lists_referencing_host` | Usage lists referencing host |
+| `test_test_endpoint_uses_stored_secret` | Test endpoint uses stored secret |
+
+## 41. Core — Cliente SSH
+
+**Archivo:** `tests/test_ssh_client.py` — 15 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_parses_generated_key` | Parses generated key |
+| `test_invalid_key_raises` | Invalid key raises |
+| `test_empty_address_reported` | Empty address reported |
+| `test_success` | Success |
+| `test_failure_is_caught` | Failure is caught |
+| `test_build_connect_kwargs_auth_precedence` | Build connect kwargs auth precedence |
+| `test_build_connect_kwargs_password_only` | Build connect kwargs password only |
+| `test_no_paramiko_degrades_gracefully` | No paramiko degrades gracefully |
+| `test_uname_linux` | Uname linux |
+| `test_uname_darwin` | Uname darwin |
+| `test_uname_freebsd` | Uname freebsd |
+| `test_windows_via_ver` | Windows via ver |
+| `test_unknown_is_other` | Unknown is other |
+| `test_test_connection_detect_returns_os` | Test connection detect returns os |
+| `test_local_os_is_canonical` | Local os is canonical |
+
+## 42. Hosts — Ejecución local/SSH
+
+**Archivo:** `tests/test_host_exec.py` — 11 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_picks_by_os` | Picks by os |
+| `test_falls_back_to_default_os` | Falls back to default os |
+| `test_empty_cmds` | Empty cmds |
+| `test_local_inline_runs_locally` | Local inline runs locally |
+| `test_no_command_is_error` | No command is error |
+| `test_remote_runs_over_ssh` | Remote runs over ssh |
+| `test_remote_without_address_errors` | Remote without address errors |
+| `test_remote_without_paramiko` | Remote without paramiko |
+| `test_remote_ssh_failure_caught` | Remote ssh failure caught |
+| `test_run_command_decodes_and_exit_code` | Run command decodes and exit code |
+| `test_run_command_transport_error` | Run command transport error |
+
+## 43. Hosts — Perfiles de protocolo
+
+**Archivo:** `tests/test_host_profiles.py` — 9 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_protocols_discovered` | Protocols discovered |
+| `test_snmp_profile_is_address_only` | Snmp profile is address only |
+| `test_ssh_is_core_builtin` | Ssh is core builtin |
+| `test_datastore_db_endpoint_is_not_a_profile` | Datastore db endpoint is not a profile |
+| `test_module_host_specs_preserves_datastore_ssh` | Module host specs preserves datastore ssh |
+| `test_module_host_fields` | Module host fields |
+| `test_module_host_multiple` | Module host multiple |
+| `test_module_host_collections` | Module host collections |
+| `test_missing_dir_is_empty` | Missing dir is empty |
+
+## 44. Hosts — Resolución host→check
+
+**Archivo:** `tests/test_host_resolution.py` — 20 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_inline_item_unchanged` | Inline item unchanged |
+| `test_no_store_returns_item` | No store returns item |
+| `test_unknown_host_returns_item` | Unknown host returns item |
+| `test_address_injected_and_host_wins` | Address injected and host wins |
+| `test_snmp_inherits_only_address` | Snmp inherits only address |
+| `test_ssl_cert_host_address_port_stays_on_check` | Ssl cert host address port stays on check |
+| `test_ntp_host_address_port_stays_on_check` | Ntp host address port stays on check |
+| `test_datastore_address_and_ssh_from_host_db_creds_from_check` | Datastore address and ssh from host db creds from check |
+| `test_web_inherits_only_address` | Web inherits only address |
+| `test_local_host_skips_ssh_profile` | Local host skips ssh profile |
+| `test_remote_host_injects_ssh_profile` | Remote host injects ssh profile |
+| `test_maintenance_disables_check` | Maintenance disables check |
+| `test_no_maintenance_keeps_enabled` | No maintenance keeps enabled |
+| `test_host_os_explicit_injected` | Host os explicit injected |
+| `test_host_os_auto_local_resolves_to_platform` | Host os auto local resolves to platform |
+| `test_host_os_auto_remote_stays_auto` | Host os auto remote stays auto |
+| `test_dns_has_ssh_host_profile` | Dns has ssh host profile |
+| `test_dns_in_module_host_fields` | Dns in module host fields |
+| `test_resolved_item_inherits_host` | Resolved item inherits host |
+| `test_resolved_item_inline_unchanged` | Resolved item inline unchanged |
+
+## 45. Hosts — Sonda de check único
+
+**Archivo:** `tests/test_host_probe.py` — 4 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_is_a_monitor` | Is a monitor |
+| `test_runs_process_check_remote` | Runs process check remote |
+| `test_runs_process_check_failure` | Runs process check failure |
+| `test_returns_draft_for_its_uid` | Returns draft for its uid |
+
+## 46. Hosts — Asistente de migración
+
+**Archivo:** `tests/test_host_migrate.py` — 7 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_merges_duplicates_and_cross_module` | Merges duplicates and cross module |
+| `test_same_address_merges_regardless_of_settings` | Same address merges regardless of settings |
+| `test_different_address_separate` | Different address separate |
+| `test_skips_already_bound_and_empty_address` | Skips already bound and empty address |
+| `test_datastore_ssh_profile_db_creds_stay_on_check` | Datastore ssh profile db creds stay on check |
+| `test_strips_connection_and_sets_host_uid` | Strips connection and sets host uid |
+| `test_apply_ignores_unknown_members` | Apply ignores unknown members |
+
+## 47. Seguridad — Regresión
+
+**Archivo:** `tests/test_security_regression.py` — 30 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_safe_filename_rejects_path_separator` | Safe filename rejects path separator |
+| `test_safe_filename_rejects_dot_prefix` | Safe filename rejects dot prefix |
+| `test_safe_filename_rejects_shell_metacharacters` | Safe filename rejects shell metacharacters |
+| `test_safe_filename_accepts_valid_names` | Safe filename accepts valid names |
+| `test_safe_filename_rejects_wrong_extension_for_compiled` | Safe filename rejects wrong extension for compiled |
+| `test_confined_path_blocks_traversal` | Confined path blocks traversal |
+| `test_confined_path_allows_valid_subpath` | Confined path allows valid subpath |
+| `test_non_admin_cannot_delete_admin` | Non admin cannot delete admin |
+| `test_admin_can_delete_non_admin` | Admin can delete non admin |
+| `test_non_admin_cannot_create_role_with_admin_permissions` | User with roles_add cannot create a role that has permissions |
+| `test_non_admin_can_create_role_with_own_permissions_only` | User with roles_add CAN create a role that only uses their own permissions |
+| `test_non_admin_cannot_edit_role_to_add_permissions_they_lack` | User with roles_edit cannot add permissions to a role that they don't hold |
+| `test_admin_can_create_role_with_any_permissions` | Admin is not restricted — can create roles with any permissions |
+| `test_non_admin_cannot_create_group_with_admin_role` | Non admin cannot create group with admin role |
+| `test_non_admin_cannot_assign_admin_role_to_existing_group` | Non admin cannot assign admin role to existing group |
+| `test_non_admin_cannot_edit_group_that_already_has_admin_role` | Even modifying name/members of an admin-role group requires admin |
+| `test_admin_can_create_group_with_admin_role` | Admin can create group with admin role |
+| `test_non_admin_cannot_modify_ldap_section` | Non admin cannot modify ldap section |
+| `test_non_admin_cannot_modify_oidc_section` | Non admin cannot modify oidc section |
+| `test_non_admin_cannot_modify_email_section` | Non admin cannot modify email section |
+| `test_non_admin_cannot_modify_telegram_section` | Non admin cannot modify telegram section |
+| `test_non_admin_can_modify_non_sensitive_section` | config_edit users CAN modify non-sensitive sections (e.g. daemon) |
+| `test_admin_can_modify_ldap_section` | Admin has no restriction on config sections |
+| `test_versioned_format_also_blocked_for_non_admin` | The new versioned PUT format is also blocked for sensitive sections |
+| `test_non_admin_cannot_disable_lockout` | Non admin cannot disable lockout |
+| `test_non_admin_cannot_disable_secure_cookies` | Non admin cannot disable secure cookies |
+| `test_non_admin_cannot_weaken_password_policy` | Non admin cannot weaken password policy |
+| `test_non_admin_cannot_change_proxy_count` | Non admin cannot change proxy count |
+| `test_admin_can_modify_web_admin_security_fields` | Admin can modify web admin security fields |
+| `test_empty_password_rejected` | Empty password rejected |
+
+## 48. Syslog — Parser RFC 3164/5424
+
+**Archivo:** `tests/test_syslog_parser.py` — 14 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_facility_severity_split` | Facility severity split |
+| `test_local0_info` | Local0 info |
+| `test_invalid_pri_ignored` | Invalid pri ignored |
+| `test_classic` | Classic |
+| `test_tag_with_pid` | Tag with pid |
+| `test_no_timestamp` | No timestamp |
+| `test_full` | Full |
+| `test_structured_data_stripped` | Structured data stripped |
+| `test_nil_fields` | Nil fields |
+| `test_no_pri_keeps_raw` | No pri keeps raw |
+| `test_bytes_input_and_source` | Bytes input and source |
+| `test_trailing_newline_stripped` | Trailing newline stripped |
+| `test_empty` | Empty |
+| `test_names_tables` | Names tables |
+
+## 49. Syslog — Listener UDP/TCP/TLS
+
+**Archivo:** `tests/test_syslog_server.py` — 10 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_blank_defaults_to_all_ipv4_and_ipv6` | Blank defaults to all ipv4 and ipv6 |
+| `test_detects_family_and_multiple` | Detects family and multiple |
+| `test_dedup` | Dedup |
+| `test_receive_udp` | Receive udp |
+| `test_allowlist_blocks` | Allowlist blocks |
+| `test_drop_logging_counts_and_rate_limits` | Drop logging counts and rate limits |
+| `test_newline_framing` | Newline framing |
+| `test_octet_counted_framing` | Octet counted framing |
+| `test_bind_failure_reported` | Bind failure reported |
+| `test_no_ports_no_threads` | No ports no threads |
+
+## 50. Syslog — SyslogStore
+
+**Archivo:** `tests/test_syslog_store.py` — 16 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_add_and_query` | Add and query |
+| `test_add_many` | Add many |
+| `test_filter_severity_max` | Filter severity max |
+| `test_filter_host_app_facility_text` | Filter host app facility text |
+| `test_filter_time_range` | Filter time range |
+| `test_distinct` | Distinct |
+| `test_prune_by_age` | Prune by age |
+| `test_prune_by_max_rows` | Prune by max rows |
+| `test_prune_disabled` | Prune disabled |
+| `test_delete_all` | Delete all |
+| `test_breakdowns_and_total` | Breakdowns and total |
+| `test_stats_honour_filters` | Stats honour filters |
+| `test_stats_empty` | Stats empty |
+| `test_stats_faceting_keeps_own_dimension_options` | Stats faceting keeps own dimension options |
+| `test_effective_host_falls_back_to_source` | Effective host falls back to source |
+| `test_stats_multi_value` | Stats multi value |
+
+## 51. Syslog — Servicio independiente
+
+**Archivo:** `tests/test_syslog_service.py` — 20 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_reads_shared_config` | Reads shared config |
+| `test_load_webhooks_returns_list` | Load webhooks returns list |
+| `test_read_config_file_is_effective` | Read config file is effective |
+| `test_udp_message_is_stored` | Udp message is stored |
+| `test_disabled_does_not_bind` | Disabled does not bind |
+| `test_enable_only_still_has_default_ports` | Enable only still has default ports |
+| `test_alert_dispatched` | Alert dispatched |
+| `test_no_alert_below_threshold` | No alert below threshold |
+| `test_cooldown_suppresses_second` | Cooldown suppresses second |
+| `test_no_rule_no_dispatch` | No rule no dispatch |
+| `test_disabled_shares_system_db` | Disabled shares system db |
+| `test_enabled_uses_separate_db` | Enabled uses separate db |
+| `test_env_enables_dedicated_db` | Env enables dedicated db |
+| `test_run_stays_alive_when_disabled_then_stops` | Run stays alive when disabled then stops |
+| `test_watch_reloads_on_enable` | Watch reloads on enable |
+| `test_init_is_logged` | Init is logged |
+| `test_init_respects_log_off` | Init respects log off |
+| `test_start_and_stop_are_logged` | Start and stop are logged |
+| `test_disabled_is_logged` | Disabled is logged |
+| `test_event_rule_match_is_logged` | Event rule match is logged |
+
+## 52. Panel Web — Comprobación de rol admin
+
+**Archivo:** `tests/test_wa_admin_check.py` — 5 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_direct_admin` | Direct admin |
+| `test_admin_via_enabled_group` | Admin via enabled group |
+| `test_not_admin_via_disabled_group` | Not admin via disabled group |
+| `test_plain_non_admin` | Plain non admin |
+| `test_stamps_updated_fields` | Stamps updated fields |
+
+## 53. Panel Web — LDAP
+
+**Archivo:** `tests/test_wa_ldap.py` — 21 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_is_available_returns_bool` | Is available returns bool |
+| `test_admin_group_maps_to_admin` | Admin group maps to admin |
+| `test_no_match_returns_empty_string` | No match returns empty string |
+| `test_editor_maps_correctly` | Editor maps correctly |
+| `test_highest_priority_wins` | Highest priority wins |
+| `test_disabled_returns_ldap_disabled` | Disabled returns ldap disabled |
+| `test_unavailable_returns_ldap_unavailable` | Unavailable returns ldap unavailable |
+| `test_connection_error_returns_connection_error` | Connection error returns connection error |
+| `test_user_not_found_returns_not_found` | User not found returns not found |
+| `test_invalid_password_returns_invalid_credentials` | Invalid password returns invalid credentials |
+| `test_successful_auth_returns_attrs` | Successful auth returns attrs |
+| `test_posix_group_memberuid_maps_role` | posixGroup membership via memberUid on the group object maps the role |
+| `test_new_user_is_created` | New user is created |
+| `test_existing_user_role_is_resynced` | Existing user role is resynced |
+| `test_new_user_uid_is_generated` | New user uid is generated |
+| `test_ldap_user_logged_in_successfully` | Ldap user logged in successfully |
+| `test_local_user_bypasses_ldap` | A user with auth_source='local' always uses local auth |
+| `test_connection_error_fallback_to_local` | On LDAP connection error with fallback_to_local=True, local auth is tried |
+| `test_connection_error_no_fallback_returns_error` | On LDAP connection error with fallback_to_local=False, login fails |
+| `test_connection_test_creates_audit_entry` | Connection test creates audit entry |
+| `test_connection_error_message_differs_from_credential_error` | Connection errors and credential errors return different messages |
+
+## 54. Panel Web — OIDC/SSO
+
+**Archivo:** `tests/test_wa_oidc.py` — 20 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_is_available_returns_bool` | Is available returns bool |
+| `test_admin_group_maps_to_admin` | Admin group maps to admin |
+| `test_no_match_returns_empty_string` | No match returns empty string |
+| `test_editor_maps_correctly` | Editor maps correctly |
+| `test_highest_priority_wins` | Highest priority wins |
+| `test_case_insensitive_match` | Case insensitive match |
+| `test_new_user_is_created` | New user is created |
+| `test_existing_user_role_is_resynced` | Existing user role is resynced |
+| `test_auto_create_false_blocks_new_user` | Auto create false blocks new user |
+| `test_auto_create_false_allows_existing_user` | Auto create false allows existing user |
+| `test_new_user_uid_is_generated` | New user uid is generated |
+| `test_empty_userinfo_returns_none` | Empty userinfo returns none |
+| `test_sub_stored_as_auth_source_id` | Sub stored as auth source id |
+| `test_login_page_shows_sso_button` | SSO button appears on /login when OIDC is enabled |
+| `test_oidc_login_triggers_redirect` | GET /auth/oidc/login redirects via the OAuth client |
+| `test_callback_creates_user_and_session` | Successful OIDC callback creates user and establishes a session |
+| `test_callback_group_maps_to_admin_role` | OIDC group claim is mapped to the correct role on callback |
+| `test_callback_token_error_returns_to_login` | Token exchange failure redirects to /login with an error flash |
+| `test_auto_create_false_blocks_unknown_user` | auto_create_users=False rejects unknown users in the OIDC callback |
+| `test_disabled_account_blocked_at_callback` | A disabled OIDC user is blocked at the callback |
+
+## 55. Panel Web — SAML2
+
+**Archivo:** `tests/test_wa_saml2.py` — 22 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_is_available_returns_bool` | Is available returns bool |
+| `test_admin_group_maps_to_admin` | Admin group maps to admin |
+| `test_no_match_returns_empty_string` | No match returns empty string |
+| `test_editor_maps_correctly` | Editor maps correctly |
+| `test_highest_priority_wins` | Highest priority wins |
+| `test_case_insensitive_match` | Case insensitive match |
+| `test_new_user_is_created` | New user is created |
+| `test_name_id_used_when_no_username_attr` | Name id used when no username attr |
+| `test_existing_user_role_is_resynced` | Existing user role is resynced |
+| `test_auto_create_false_blocks_new_user` | Auto create false blocks new user |
+| `test_auto_create_false_allows_existing_user` | Auto create false allows existing user |
+| `test_new_user_uid_is_generated` | New user uid is generated |
+| `test_name_id_stored_as_auth_source_id` | Name id stored as auth source id |
+| `test_empty_name_id_and_no_attrs_returns_none` | Empty name id and no attrs returns none |
+| `test_login_page_shows_saml2_button` | SAML2 button appears on /login when SAML2 is enabled |
+| `test_saml2_login_redirects_to_idp` | GET /auth/saml2/login redirects to IdP SSO URL |
+| `test_acs_creates_user_and_session` | Successful SAMLResponse creates user and establishes a session |
+| `test_acs_group_maps_to_admin_role` | SAML2 groups claim is mapped to the correct role on ACS |
+| `test_acs_saml_errors_redirect_to_login` | SAML2 assertion errors redirect back to /login |
+| `test_acs_not_authenticated_redirects_to_login` | ACS returning is_authenticated=False redirects to /login |
+| `test_acs_auto_create_false_blocks_unknown_user` | auto_create_users=False rejects unknown users in ACS |
+| `test_acs_disabled_account_blocked` | A disabled SAML2 user is blocked at the ACS endpoint |
+
+## 56. Panel Web — Servidores (hosts)
+
+**Archivo:** `tests/test_wa_hosts.py` — 38 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_requires_auth` | Requires auth |
+| `test_create_list_and_mask` | Create list and mask |
+| `test_kind_and_maintenance_persist` | Kind and maintenance persist |
+| `test_status_derived_from_checks` | The listing carries a per-host monitoring status built from the |
+| `test_module_counts_in_listing` | The listing reports modules added vs active per host: total = the |
+| `test_create_requires_name` | Create requires name |
+| `test_duplicate_name_rejected` | Duplicate name rejected |
+| `test_update_restores_masked_secret` | Update restores masked secret |
+| `test_update_unknown_uid` | Update unknown uid |
+| `test_delete` | Delete |
+| `test_probe_uses_submitted_fields` | Probe uses submitted fields |
+| `test_probe_restores_masked_secret_from_stored_host` | Probe restores masked secret from stored host |
+| `test_probe_requires_edit_permission` | Probe requires edit permission |
+| `test_preview_and_apply` | Preview and apply |
+| `test_preview_masks_secrets` | Preview masks secrets |
+| `test_apply_requires_edit_permission` | Apply requires edit permission |
+| `test_update_audits_field_diff_with_masked_secret` | Update audits field diff with masked secret |
+| `test_added_ssh_profile_secret_masked_in_audit` | Regression: adding a whole SSH profile must NOT log the password / |
+| `test_create_and_delete_audit_details` | Create and delete audit details |
+| `test_migrate_audits_created_hosts` | Migrate audits created hosts |
+| `test_history_delete_audited` | History delete audited |
+| `test_history_delete_all_audited` | History delete all audited |
+| `test_returns_bound_check_status` | Returns bound check status |
+| `test_matches_derived_keys` | ram_swap derived keys (<uid>_ram) match their base bound item |
+| `test_restores_masked_password_from_stored_item` | Restores masked password from stored item |
+| `test_explicit_new_password_is_kept` | Explicit new password is kept |
+| `test_test_check_individual` | Test check individual |
+| `test_full_test_ssh_and_checks` | Full test ssh and checks |
+| `test_module_test_no_ssh_skips_ssh` | A module-scoped test (no_ssh) runs the checks but not the SSH probe |
+| `test_test_requires_edit_permission` | Test requires edit permission |
+| `test_view_scoped_to_granted_server` | View scoped to granted server |
+| `test_no_server_perm_forbidden` | No server perm forbidden |
+| `test_view_only_cannot_edit_or_delete` | View only cannot edit or delete |
+| `test_edit_and_delete_when_granted` | Edit and delete when granted |
+| `test_server_add_can_add_host_bound_check` | Server add can add host bound check |
+| `test_server_view_only_cannot_add_check` | Server view only cannot add check |
+| `test_server_add_cannot_edit_existing_check` | Server add cannot edit existing check |
+| `test_server_add_host_modules_growth_allowed_not_field_edit` | Server add host modules growth allowed not field edit |
+
+## 57. Panel Web — Historial
+
+**Archivo:** `tests/test_wa_history.py` — 2 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_index_label_from_item_label` | A series whose key matches a configured item shows that item's label |
+| `test_index_label_falls_back_to_record_name` | ram_swap emits derived keys ("<uid>_ram") that are not real item keys, so |
+
+## 58. Panel Web — Webhooks
+
+**Archivo:** `tests/test_wa_webhook.py` — 32 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_disabled_returns_error` | Disabled returns error |
+| `test_no_url_returns_error` | No url returns error |
+| `test_no_requests_package` | No requests package |
+| `test_post_success` | Post success |
+| `test_put_method` | Put method |
+| `test_get_method` | Get method |
+| `test_http_error_returns_failure` | Http error returns failure |
+| `test_network_exception` | Network exception |
+| `test_placeholder_substitution` | Placeholder substitution |
+| `test_default_body_template_used_when_empty` | Default body template used when empty |
+| `test_hmac_signature_added` | Hmac signature added |
+| `test_custom_headers_merged` | Custom headers merged |
+| `test_invalid_headers_json_returns_error` | Invalid headers json returns error |
+| `test_requires_auth` | Requires auth |
+| `test_viewer_denied` | Viewer denied |
+| `test_success_returns_ok` | Success returns ok |
+| `test_disabled_returns_ok_false` | Disabled returns ok false |
+| `test_stored_secret_kept_on_null` | Sending id + secret=null merges the stored secret from the webhooks store |
+| `test_audit_ok_on_success` | Audit ok on success |
+| `test_audit_fail_on_error` | Audit fail on error |
+| `test_create_requires_auth` | Create requires auth |
+| `test_list_requires_auth` | List requires auth |
+| `test_create_and_list` | Create and list |
+| `test_create_missing_url_fails` | Create missing url fails |
+| `test_update` | Update |
+| `test_delete` | Delete |
+| `test_delete_not_found` | Delete not found |
+| `test_test_by_id` | Test by id |
+| `test_test_by_id_not_found` | Test by id not found |
+| `test_secret_masked_in_list` | Secret masked in list |
+| `test_audit_on_create` | Audit on create |
+| `test_audit_on_delete` | Audit on delete |
+
+## 59. Panel Web — Plantillas de notificación
+
+**Archivo:** `tests/test_wa_notif_templates.py` — 47 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_default_returns_english` | Default returns english |
+| `test_unknown_lang_falls_back_to_english` | Unknown lang falls back to english |
+| `test_overrides_take_precedence` | Overrides take precedence |
+| `test_overrides_ignore_unknown_keys` | Overrides ignore unknown keys |
+| `test_overrides_ignore_empty_string_values` | Overrides ignore empty string values |
+| `test_overrides_with_known_lang` | Overrides stack on top of language-specific built-in overlay |
+| `test_none_overrides_same_as_no_overrides` | None overrides same as no overrides |
+| `test_render_test_uses_custom_strings` | Render test uses custom strings |
+| `test_render_alert_uses_custom_strings` | Render alert uses custom strings |
+| `test_render_summary_uses_custom_strings` | Render summary uses custom strings |
+| `test_render_test_without_strings_uses_lang` | Render test without strings uses lang |
+| `test_get_requires_auth` | Get requires auth |
+| `test_get_returns_defaults_and_overrides` | Get returns defaults and overrides |
+| `test_put_requires_auth` | Put requires auth |
+| `test_put_saves_overrides` | Put saves overrides |
+| `test_put_get_round_trip` | Put get round trip |
+| `test_put_ignores_unknown_keys` | Put ignores unknown keys |
+| `test_put_empty_values_not_stored` | Put empty values not stored |
+| `test_put_unknown_lang_returns_400` | Put unknown lang returns 400 |
+| `test_delete_requires_auth` | Delete requires auth |
+| `test_delete_resets_overrides` | Delete resets overrides |
+| `test_delete_nonexistent_lang_is_ok` | Delete nonexistent lang is ok |
+| `test_put_all_empty_clears_lang_entry` | Put all empty clears lang entry |
+| `test_get_html_requires_auth` | Get html requires auth |
+| `test_get_html_returns_structure` | Get html returns structure |
+| `test_builtin_uses_placeholder_keys` | 'Load built-in' should return {test_title} not the real title text |
+| `test_builtin_with_lang_uses_placeholder_keys` | Built-in with a language still returns {key} placeholders |
+| `test_builtin_string_overrides_reflected` | String overrides saved for a lang are applied to built-in preview |
+| `test_put_html_requires_auth` | Put html requires auth |
+| `test_put_html_saves` | Put html saves |
+| `test_put_html_round_trip` | Put html round trip |
+| `test_delete_html_requires_auth` | Delete html requires auth |
+| `test_delete_html_removes_entry` | Delete html removes entry |
+| `test_put_html_unknown_type_returns_400` | Put html unknown type returns 400 |
+| `test_apply_html_override_substitutes_strings` | apply_html_override replaces {key} with string values and runtime vars |
+| `test_apply_html_override_two_pass` | String values containing {vars} are pre-interpolated with runtime kwargs |
+| `test_apply_html_override_unknown_keys_unchanged` | Unknown {variables} are left as-is (not raised as errors) |
+| `test_render_test_with_html_override` | render_test uses html_override when provided |
+| `test_render_alert_with_html_override` | render_alert uses html_override; {item} substituted |
+| `test_preview_requires_auth` | Preview requires auth |
+| `test_preview_unknown_type_returns_400` | Preview unknown type returns 400 |
+| `test_preview_alert_with_custom_html` | Preview alert with custom html |
+| `test_preview_test_with_custom_html` | Preview test with custom html |
+| `test_preview_summary_with_custom_html` | Preview summary with custom html |
+| `test_preview_empty_html_uses_builtin` | Preview empty html uses builtin |
+| `test_preview_respects_string_overrides` | Preview respects string overrides |
+| `test_test_email_applies_html_and_string_overrides` | Test email applies html and string overrides |
+
+## 60. Panel Web — Syslog
+
+**Archivo:** `tests/test_wa_syslog.py` — 18 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_requires_auth` | Requires auth |
+| `test_list_empty` | List empty |
+| `test_list_and_filter` | List and filter |
+| `test_sort_by_column` | Sort by column |
+| `test_host_filter_matches_hostname_or_source` | Host filter matches hostname or source |
+| `test_multi_value_filter` | Multi value filter |
+| `test_exact_severity_filter` | Exact severity filter |
+| `test_pagination_offset_limit` | Pagination offset limit |
+| `test_date_range_filter` | Date range filter |
+| `test_facets` | Facets |
+| `test_status` | Status |
+| `test_stats` | Stats |
+| `test_stats_requires_auth` | Stats requires auth |
+| `test_clear` | Clear |
+| `test_null_field_uses_registry_default` | Null field uses registry default |
+| `test_drops_requires_auth` | Drops requires auth |
+| `test_drops_endpoint` | Drops endpoint |
+| `test_hook_delegates_to_event_manager` | Hook delegates to event manager |
+
+## 61. Panel Web — Gestor de eventos
+
+**Archivo:** `tests/test_wa_events.py` — 17 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_requires_auth` | Requires auth |
+| `test_crud` | Crud |
+| `test_promoted_columns` | name/enabled/description are first-class columns, not buried in data |
+| `test_validation` | Validation |
+| `test_audit_event_fires_rule` | Audit event fires rule |
+| `test_non_matching_audit_event_does_not_fire` | Non matching audit event does not fire |
+| `test_disabled_rule_does_not_fire` | Disabled rule does not fire |
+| `test_syslog_rule_matches_by_severity` | Syslog rule matches by severity |
+| `test_cooldown_suppresses_second` | Cooldown suppresses second |
+| `test_blank_cooldown_inherits_global` | Blank cooldown inherits global |
+| `test_explicit_zero_overrides_global` | Explicit zero overrides global |
+| `test_syslog_text_match` | Syslog text match |
+| `test_log_records_test_send_and_last_fired` | Log records test send and last fired |
+| `test_log_records_failure` | Log records failure |
+| `test_channels_override_targets_only_those` | Channels override targets only those |
+| `test_webhook_ids_restrict_destinations` | Webhook ids restrict destinations |
+| `test_empty_webhook_ids_targets_all` | Empty webhook ids targets all |
+
+## 62. Panel Web — Servicios
+
+**Archivo:** `tests/test_wa_services.py` — 10 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_requires_auth` | Requires auth |
+| `test_status_lists_all_services` | Status lists all services |
+| `test_database_reports_driver_and_connectivity` | Database reports driver and connectivity |
+| `test_worker_reflects_history_activity` | Worker reflects history activity |
+| `test_start_then_stop` | Start then stop |
+| `test_unknown_service_404` | Unknown service 404 |
+| `test_bad_action_400` | Bad action 400 |
+| `test_start_disabled_is_409` | Start disabled is 409 |
+| `test_start_stop_when_enabled` | Start stop when enabled |
+| `test_control_requires_services_control` | Control requires services control |
+

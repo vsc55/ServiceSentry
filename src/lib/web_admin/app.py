@@ -50,7 +50,7 @@ def _cfg_default(path: str):
 from .mixins import (
     _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin, _SyslogMixin,
-    _ServicesMixin,
+    _ServicesMixin, _EventsMixin,
 )
 
 __all__ = ['WebAdmin']
@@ -58,7 +58,7 @@ __all__ = ['WebAdmin']
 
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin, _SyslogMixin,
-               _ServicesMixin):
+               _ServicesMixin, _EventsMixin):
     """Web administration server for ServiceSentry configuration.
 
     Provides a browser-based UI for editing the configuration and managing
@@ -207,8 +207,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._config_mgr = None
         self._check_lock = threading.Lock()
         self._data_lock = threading.RLock()
-        self._history = self._init_history()
-        self._check_state_store = self._init_check_state()
+        self._history = None
+        self._check_state_store = None
         self._default_lang = coerce_lang(default_lang, DEFAULT_LANG)
         self._default_dark_mode = bool(default_dark_mode)
         self._users: dict[str, dict] = {}
@@ -218,6 +218,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._builtin_role_overrides: dict[str, dict] = {}
         self._groups: dict[str, dict] = {}
         self._init_entity_store()  # DB-backed entities (users/groups/roles/sessions/hosts)
+        # History + check-state stores reuse the single shared connector (created
+        # in _init_entity_store) — must come AFTER it, else they'd each open their
+        # own DB connection via their create() factory.
+        self._history = self._init_history()
+        self._check_state_store = self._init_check_state()
         self._load_or_create_users(username, password)
         self._load_sessions()
         self._load_roles()
@@ -240,6 +245,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._daemon_init()
         # Start the syslog receiver if enabled (own listener threads + retention).
         self._init_syslog()
+        # Event→notification rules manager (audit/syslog hooks).
+        self._init_events()
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -454,6 +461,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
+        # Event→notification rules (their own table, like webhooks).
+        from lib.stores.event_rules import EventRulesStore  # noqa: PLC0415
+        self._event_rules_store = EventRulesStore(self._db_connector)
+        from lib.stores.notification_log import NotificationLogStore  # noqa: PLC0415
+        self._notification_log_store = NotificationLogStore(self._db_connector)
         # Watchful module/item configuration (DB-backed, shared with the monitor
         # through the same database).
         from lib.stores.modules import (  # noqa: PLC0415
@@ -1013,8 +1025,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         Args:
             host: Network interface to bind to (default ``0.0.0.0``).
             port: TCP port to listen on (default ``8080``).
-            debug: Enable Flask debug / auto-reload mode.
+            debug: Enable Flask debug mode (interactive debugger + verbose errors).
         """
         host = host or self.DEFAULT_HOST
         port = port or self.DEFAULT_PORT
-        self._app.run(host=host, port=port, debug=debug)
+        # use_reloader=False: __init__ already binds the syslog ports and starts
+        # the scheduler, so Werkzeug's reloader (which re-runs __init__ in a child)
+        # would double-bind. Dev reloads are handled externally by dev_watch.py.
+        self._app.run(host=host, port=port, debug=debug, use_reloader=False)

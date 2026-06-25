@@ -868,6 +868,24 @@
     </div>
 </div>
 
+<!-- ==================== Event rule modal ===================== -->
+<div class="modal fade" id="eventRuleModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-bell me-1"></i><span id="eventRuleModalTitle">{{ i18n.event_add }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-3" id="eventRuleModalBody"></div>
+            <div class="modal-footer py-2">
+                <span class="text-danger small me-auto" id="eventRuleModalError"></span>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-success btn-sm" onclick="_eventModalSave()"><i class="bi bi-check-lg me-1"></i>{{ i18n.event_save }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# Module-specific modals — each watchful module may provide its own
    modal HTML under watchfuls/<mod>/web/_modals.html.  The list is
    built at startup by _create_app() with no module-specific knowledge. #}

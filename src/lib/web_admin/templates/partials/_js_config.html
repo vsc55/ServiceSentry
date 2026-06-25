@@ -71,23 +71,23 @@ function _refreshStatusLink() {
 // Database card: a driver dropdown plus only the fields the chosen engine needs.
 // Uses the standard sw-field conditional mechanism keyed on the 'driver' value
 // (the driver <select> onChange already calls _refreshConditionalFields).
-function _renderDatabaseSection(db) {
+function _renderDatabaseSection(db, prefix = 'database') {
     db = db || {};
     const driver = db.driver || 'sqlite';
     const NET = ['postgresql', 'mysql', 'mariadb'];
     const hideUnless = (drivers) => drivers.includes(driver) ? '' : ' style="display:none"';
     const _val = (f) => (db[f] != null ? db[f] : '');
-    let h = renderField('driver', driver, 'database|driver', 'config');
-    h += `<div data-sw-item-path="database">`;
+    let h = renderField('driver', driver, prefix + '|driver', 'config');
+    h += `<div data-sw-item-path="${prefix}">`;
     // SQLite → just the file path.
     h += `<div class="sw-field" data-sw-when='{"driver":["sqlite"]}'${hideUnless(['sqlite'])}>
-        ${renderField('path', _val('path'), 'database|path', 'config')}
+        ${renderField('path', _val('path'), prefix + '|path', 'config')}
     </div>`;
     // Network engines → connection settings.
     const netWhen = JSON.stringify({ driver: NET });
     for (const f of ['host', 'port', 'name', 'user', 'password']) {
         h += `<div class="sw-field" data-sw-when='${netWhen}'${hideUnless(NET)}>
-            ${renderField(f, _val(f), 'database|' + f, 'config')}
+            ${renderField(f, _val(f), prefix + '|' + f, 'config')}
         </div>`;
     }
     h += `</div>`;
@@ -199,7 +199,7 @@ function renderConfig() {
             }
         }
     }
-    ['ldap', 'oidc', 'email', 'notifications', 'syslog'].forEach(_seedSection);
+    ['ldap', 'oidc', 'email', 'notifications', 'syslog', 'syslog_db', 'events'].forEach(_seedSection);
 
     // Dynamic defaults the static registry can't express: the "no access" role's
     // uid depends on the live roles list.
@@ -236,9 +236,9 @@ function renderConfig() {
     if (!('auto_create_users' in _saml2)) _saml2.auto_create_users = true;
 
     const AUTH_SECS  = new Set(['ldap', 'oidc', 'saml2']);
-    const NOTIF_SECS = new Set(['telegram']);
+    const NOTIF_SECS = new Set(['telegram', 'events']);
 
-    const order = ['daemon', 'modules', 'global', 'telegram', 'web_admin', 'email', 'webhooks', 'notifications', 'ldap', 'oidc', 'saml2'];
+    const order = ['daemon', 'modules', 'global', 'telegram', 'web_admin', 'email', 'webhooks', 'notifications', 'events', 'syslog', 'syslog_db', 'ldap', 'oidc', 'saml2'];
     // Top-level keys carried in config.json that are feature state, not editable
     // config (own UIs handle them) — never rendered as generic config cards.
     const FEATURE_NONCONFIG_KEYS = new Set(['overview', 'notif_templates', 'notif_html_templates']);
@@ -305,10 +305,29 @@ function renderConfig() {
         }
 
         if (sec === 'syslog') {
-            // Its own tab: the syslog receiver settings (listener ports, retention,
-            // alert rule) — kept apart from the general options.
-            hSyslog += cfgCardOpen(cfgId, '<i class="bi bi-hdd-stack me-1"></i>', lbl);
-            hSyslog += renderScalarFields(data, sec, 'config', []);
+            // Its own tab, split into focused sections instead of one long card.
+            const _pick = (fields) => Object.fromEntries(fields.filter(f => f in data).map(f => [f, data[f]]));
+            // Connection: enable + bind + listener ports.
+            hSyslog += cfgCardOpen('cfgcol_syslog_conn', '<i class="bi bi-ethernet me-1"></i>', t('syslog_sec_connection'));
+            hSyslog += renderScalarFields(_pick(['enabled', 'bind_host', 'udp_port', 'tcp_port', 'tls_port']), sec, 'config', []);
+            hSyslog += cfgCardClose;
+            // Security: TLS material + sender allowlist.
+            hSyslog += cfgCardOpen('cfgcol_syslog_security', '<i class="bi bi-shield-lock me-1"></i>', t('syslog_sec_security'));
+            hSyslog += renderScalarFields(_pick(['tls_cert', 'tls_key', 'allowed_sources']), sec, 'config', []);
+            hSyslog += cfgCardClose;
+            // Retention / storage limits.
+            hSyslog += cfgCardOpen('cfgcol_syslog_retention', '<i class="bi bi-archive me-1"></i>', t('syslog_sec_retention'));
+            hSyslog += renderScalarFields(_pick(['retention_days', 'max_rows']), sec, 'config', []);
+            hSyslog += cfgCardClose;
+            continue;
+        }
+
+        if (sec === 'syslog_db') {
+            // Optional dedicated database for high-volume syslog storage. The
+            // connection fields apply only when "enabled" is on (used at startup).
+            hSyslog += cfgCardOpen(cfgId, '<i class="bi bi-database-gear me-1"></i>', lbl);
+            hSyslog += renderField('enabled', data.enabled === true, 'syslog_db|enabled', 'config');
+            hSyslog += _renderDatabaseSection(data, 'syslog_db');
             hSyslog += cfgCardClose;
             continue;
         }

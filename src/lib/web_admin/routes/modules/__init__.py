@@ -578,6 +578,25 @@ def register(app, wa):
         except Exception:  # pylint: disable=broad-except
             syslog_recent, syslog_total, syslog_by_sev = [], 0, []
 
+        # Event-notification rules summary — total/enabled + notifications logged,
+        # only when the user may view the events feature (feeds the counter widget).
+        events_total, events_enabled, events_by_source, notif_total = 0, 0, {}, 0
+        try:
+            if 'events_view' in wa._get_session_permissions():
+                _erstore = getattr(wa, '_event_rules_store', None)
+                if _erstore is not None:
+                    _rules = _erstore.list()
+                    events_total = len(_rules)
+                    events_enabled = sum(1 for r in _rules if r.get('enabled'))
+                    for r in _rules:
+                        _src = r.get('source') or 'audit'
+                        events_by_source[_src] = events_by_source.get(_src, 0) + 1
+                _nlstore = getattr(wa, '_notification_log_store', None)
+                if _nlstore is not None:
+                    notif_total = _nlstore.count()
+        except Exception:  # pylint: disable=broad-except
+            events_total, events_enabled, events_by_source, notif_total = 0, 0, {}, 0
+
         return jsonify({
             'modules': modules_list,
             'syslog': {'total': syslog_total, 'recent': syslog_recent,
@@ -617,6 +636,12 @@ def register(app, wa):
             'webhooks': {
                 'total': webhooks_total,
                 'enabled': webhooks_enabled,
+            },
+            'events': {
+                'total': events_total,
+                'enabled': events_enabled,
+                'by_source': events_by_source,
+                'notifications': notif_total,
             },
             'credentials': {
                 'total': cred_total,

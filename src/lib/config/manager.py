@@ -68,6 +68,49 @@ def bootstrap_database_cfg(file_cfg: dict | None) -> dict | None:
     return db or None
 
 
+def _strip_obsolete(effective: dict) -> None:
+    """Drop config leaves removed from the registry (so the UI never shows a
+    field that no longer exists). Mutates *effective* in place; empties sections
+    left blank."""
+    from lib.config.spec import OBSOLETE_CONFIG_PATHS  # noqa: PLC0415 (avoid import cycle)
+    for path in OBSOLETE_CONFIG_PATHS:
+        section, sep, field = path.partition('|')
+        sec = effective.get(section) if sep else None
+        if isinstance(sec, dict) and field in sec:
+            sec.pop(field, None)
+            if not sec:
+                effective.pop(section, None)
+
+
+def overlay_section_env(section_name: str, section_cfg: dict | None) -> dict:
+    """Overlay the registry's ``env=`` vars for *section_name* onto its config.
+
+    The ConfigManager read does not apply env overrides, so consumers that need
+    an env-overridable section *outside* the web layer (e.g. the syslog DB
+    connector, in both the web admin and the standalone receiver — for Docker)
+    call this to layer ``SS_*`` env on top of the stored values.
+    """
+    from lib.config.spec import env_field_specs  # noqa: PLC0415 (avoid import cycle)
+    out = dict(section_cfg or {})
+    for env_key, (path, cast) in env_field_specs().items():
+        sec, _, field = path.partition('|')
+        if sec != section_name:
+            continue
+        raw = os.environ.get(env_key)
+        if raw in (None, ''):
+            continue
+        if cast is bool:
+            out[field] = raw.strip().lower() in ('1', 'true', 'yes', 'on')
+        elif cast is int:
+            try:
+                out[field] = int(raw)
+            except (TypeError, ValueError):
+                continue
+        else:
+            out[field] = raw
+    return out
+
+
 def _decrypt_db_values(db_vals: dict, fernet) -> dict:
     """DB values store ciphertext for secrets; decrypt them by field name (reusing
     the nested key-matching of :mod:`lib.secret_manager`)."""
@@ -142,6 +185,7 @@ class ConfigManager:
             return copy.deepcopy(cache[2])
         db_vals = _decrypt_db_values(self._store.load_all(), self._fernet)
         effective, locked = resolve_config(db_vals, file_cfg, None, include_defaults=False)
+        _strip_obsolete(effective)
         self.file_locked = frozenset(locked)
         with self._lock:
             self._eff_cache = (ver, mtime, effective, self.file_locked)

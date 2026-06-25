@@ -78,6 +78,10 @@ PERMISSIONS = (
     'syslog_delete',   # clear stored syslog messages
     'services_view',   # view the Services dashboard (scheduler/syslog/worker/DB)
     'services_control',  # start/stop embedded services from the Services tab
+    'events_view',     # view the event-notification rules and send log
+    'events_add',      # create event-notification rules
+    'events_edit',     # edit event-notification rules (and clear the send log)
+    'events_delete',   # delete event-notification rules
 )
 
 # Permissions grouped for the role editor UI.
@@ -96,6 +100,7 @@ PERMISSION_GROUPS = [
     ('perm_group_history',  ['history_view', 'history_delete']),
     ('perm_group_syslog',   ['syslog_view', 'syslog_delete']),
     ('perm_group_services', ['services_view', 'services_control']),
+    ('perm_group_events',   ['events_view', 'events_add', 'events_edit', 'events_delete']),
 ]
 
 # Stable UUIDs for built-in roles and groups (never change these).
@@ -137,7 +142,8 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
         'history_view',
         'syslog_view',
         'services_view', 'services_control',
-    }),
+        'events_view', 'events_edit',
+    }),  # editor edits existing rules but never adds/deletes wholesale
     'viewer': frozenset({
         'users_view', 'roles_view', 'groups_view',
         'audit_view', 'sessions_view', 'modules_view', 'checks_view', 'overview_view',
@@ -145,6 +151,7 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
         'history_view',
         'syslog_view',
         'services_view',
+        'events_view',
     }),
     'none': frozenset(),
 }

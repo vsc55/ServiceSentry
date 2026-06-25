@@ -33,14 +33,22 @@ _PLACEHOLDERS = ('kind', 'module', 'item', 'status', 'message', 'timestamp')
 
 def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
              status: str = '', message: str = '',
-             timestamp: str = '', cfg: dict | None = None) -> tuple[bool, str]:
+             timestamp: str = '', cfg: dict | None = None,
+             webhook_ids=None) -> tuple[bool, str]:
     """Send to all enabled webhooks. Returns (all_ok, summary).
 
     Webhooks live in their own DB-backed store (``wa._load_webhooks``); *cfg* is
     accepted only for backwards compatibility and ignored for the webhook list.
+    When *webhook_ids* is a non-empty iterable, only those destinations (matched
+    by id) are notified; otherwise every enabled webhook is.
     """
     webhooks = [w for w in (wa._load_webhooks() or [])
                 if w.get('enabled') and (w.get('url') or '').strip()]
+    if webhook_ids:
+        wanted = {str(i) for i in webhook_ids}
+        webhooks = [w for w in webhooks if str(w.get('id') or w.get('uid') or '') in wanted]
+        if not webhooks:
+            return False, 'No matching enabled webhooks selected'
     if not webhooks:
         return False, 'No enabled webhooks configured'
     results = []

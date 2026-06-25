@@ -51,6 +51,26 @@ class TestSyslogApi:
         # text search
         assert client.get('/api/v1/syslog?q=error').get_json()['total'] == 1
 
+    def test_sort_by_column(self, client, admin):
+        _login(client)
+        _seed(admin, hostname='aaa', severity=2, message='m1')
+        _seed(admin, hostname='ccc', severity=6, message='m2')
+        _seed(admin, hostname='bbb', severity=4, message='m3')
+        # ascending by host
+        hosts = [m['hostname'] for m in
+                 client.get('/api/v1/syslog?sort=hostname&order=asc').get_json()['messages']]
+        assert hosts == ['aaa', 'bbb', 'ccc']
+        # descending by host
+        hosts = [m['hostname'] for m in
+                 client.get('/api/v1/syslog?sort=hostname&order=desc').get_json()['messages']]
+        assert hosts == ['ccc', 'bbb', 'aaa']
+        # ascending by severity (numeric)
+        sevs = [m['severity'] for m in
+                client.get('/api/v1/syslog?sort=severity&order=asc').get_json()['messages']]
+        assert sevs == [2, 4, 6]
+        # an unknown sort key falls back to ts (no error)
+        assert client.get('/api/v1/syslog?sort=bogus&order=asc').status_code == 200
+
     def test_host_filter_matches_hostname_or_source(self, client, admin):
         _login(client)
         _seed(admin, hostname='pve01.lan', source='10.0.0.9', message='a')
@@ -140,49 +160,50 @@ class TestSyslogApi:
         assert client.get('/api/v1/syslog').get_json()['total'] == 0
 
 
-class TestSyslogAlert:
+class TestSyslogCfgDefaults:
 
-    def _rule(self, admin, **over):
-        cfg = {'syslog': {'alert_enabled': True, 'alert_severity_max': 3, 'alert_regex': ''}}
-        cfg['syslog'].update(over)
-        admin._write_config(cfg)
+    def test_null_field_uses_registry_default(self, admin):
+        # A blank (null) numeric field falls back to the registry default; an
+        # explicit 0 is preserved (e.g. disable a transport).
+        admin._write_config({'syslog': {'enabled': True, 'udp_port': None, 'tcp_port': 0}})
         admin._invalidate_config_cache()
+        cfg = admin._syslog_cfg()
+        assert int(cfg['udp_port']) == 514     # null → default
+        assert int(cfg['tcp_port']) == 0       # explicit 0 kept
 
-    def test_alert_on_severity(self, admin):
-        self._rule(admin)
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
-            admin._syslog_alert({'severity': 2, 'severity_name': 'crit', 'source': '1.1.1.1',
-                                 'message': 'kernel panic', 'hostname': 'h', 'received_at': ''})
-        assert disp.called and disp.call_args.kwargs['kind'] == 'syslog'
 
-    def test_no_alert_below_threshold(self, admin):
-        self._rule(admin)
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
-            admin._syslog_alert({'severity': 6, 'source': '1.1.1.2', 'message': 'info',
-                                 'hostname': 'h', 'received_at': ''})
-        assert not disp.called
+class TestSyslogDrops:
 
-    def test_regex_filter(self, admin):
-        self._rule(admin, alert_regex='panic|OOM')
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
-            admin._syslog_alert({'severity': 2, 'source': '1.1.1.3', 'message': 'just a warning',
-                                 'hostname': 'h', 'received_at': ''})
-            assert not disp.called                       # no regex match
-            admin._syslog_alert({'severity': 2, 'source': '1.1.1.4', 'message': 'kernel panic',
-                                 'hostname': 'h', 'received_at': ''})
-            assert disp.called
+    def test_drops_requires_auth(self, client):
+        assert client.get('/api/v1/syslog/drops').status_code == 401
 
-    def test_disabled_no_alert(self, admin):
-        self._rule(admin, alert_enabled=False)
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
-            admin._syslog_alert({'severity': 0, 'source': '1.1.1.5', 'message': 'x',
-                                 'hostname': 'h', 'received_at': ''})
-        assert not disp.called
+    def test_drops_endpoint(self, client, admin):
+        _login(client)
+        admin._syslog_drops_store.record('5.5.5.5', 'UDP', 4, 1000.0)
+        admin._syslog_drops_store.record('6.6.6.6', 'TCP', 1, 1001.0)
+        d = client.get('/api/v1/syslog/drops').get_json()
+        assert d['sources'] == 2 and d['dropped'] == 5
+        assert {x['source']: x['count'] for x in d['drops']} == {'5.5.5.5': 4, '6.6.6.6': 1}
+        # delete a single source by its uid
+        uid = next(x['uid'] for x in d['drops'] if x['source'] == '5.5.5.5')
+        assert client.delete(f'/api/v1/syslog/drops/{uid}').get_json()['ok'] is True
+        left = client.get('/api/v1/syslog/drops').get_json()
+        assert left['sources'] == 1 and left['drops'][0]['source'] == '6.6.6.6'
+        assert client.delete('/api/v1/syslog/drops/nope').status_code == 404
+        # clear resets the tally
+        assert client.delete('/api/v1/syslog/drops').get_json()['ok'] is True
+        assert client.get('/api/v1/syslog/drops').get_json()['sources'] == 0
 
-    def test_cooldown_per_source(self, admin):
-        self._rule(admin)
-        rec = {'severity': 2, 'source': '2.2.2.2', 'message': 'panic', 'hostname': 'h', 'received_at': ''}
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
+
+class TestSyslogAlert:
+    """The legacy built-in syslog alert was removed; the per-message hook now
+    delegates to the Event-rules manager (see test_wa_events for match coverage).
+    Here we only assert the hook forwards each message to `_eval_event`."""
+
+    def test_hook_delegates_to_event_manager(self, admin):
+        rec = {'severity': 2, 'severity_name': 'crit', 'source': '1.1.1.1',
+               'message': 'kernel panic', 'hostname': 'h', 'received_at': ''}
+        with mock.patch.object(admin, '_eval_event') as ev:
             admin._syslog_alert(rec)
-            admin._syslog_alert(rec)                      # within cooldown → suppressed
-        assert disp.call_count == 1
+        assert ev.call_count == 1
+        assert ev.call_args.args[0] == 'syslog' and ev.call_args.args[1] is rec

@@ -9,6 +9,7 @@ from .checks import _ChecksMixin
 from .daemon import _DaemonMixin
 from .syslog import _SyslogMixin
 from .services import _ServicesMixin
+from .events import _EventsMixin
 
 __all__ = [
     '_UsersMixin',
@@ -21,4 +22,5 @@ __all__ = [
     '_DaemonMixin',
     '_SyslogMixin',
     '_ServicesMixin',
+    '_EventsMixin',
 ]

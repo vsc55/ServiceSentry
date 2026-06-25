@@ -8,7 +8,26 @@ import time
 
 import pytest
 
-from lib.syslog.server import SyslogServer
+from lib.syslog.server import SyslogServer, _parse_binds
+
+
+class TestParseBinds:
+    def test_blank_defaults_to_all_ipv4_and_ipv6(self):
+        both = [(socket.AF_INET, '0.0.0.0'), (socket.AF_INET6, '::')]
+        assert _parse_binds('') == both
+        assert _parse_binds(None) == both
+
+    def test_detects_family_and_multiple(self):
+        out = _parse_binds('0.0.0.0, ::, 192.168.1.5, [fe80::1]')
+        assert out == [
+            (socket.AF_INET, '0.0.0.0'),
+            (socket.AF_INET6, '::'),
+            (socket.AF_INET, '192.168.1.5'),
+            (socket.AF_INET6, 'fe80::1'),
+        ]
+
+    def test_dedup(self):
+        assert _parse_binds('127.0.0.1 127.0.0.1') == [(socket.AF_INET, '127.0.0.1')]
 
 
 def _free_port() -> int:
@@ -67,8 +86,22 @@ class TestUdp:
             c = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             c.sendto(b'<13>kernel: boom', ('127.0.0.1', port))
             assert not sink.wait(1, timeout=1.5)      # 127.0.0.1 not allowed → dropped
+            assert srv._drops.get('127.0.0.1', {}).get('count', 0) >= 1   # and counted
         finally:
             srv.stop()
+
+    def test_drop_logging_counts_and_rate_limits(self):
+        logs, drops = [], []
+        srv = SyslogServer(sink=lambda *_a: None, bind_host='127.0.0.1',
+                           allowed_sources=['10.0.0.0/8'],
+                           dbg_warn=lambda m: logs.append(m),
+                           on_drop=lambda s, tr, d: drops.append((s, tr, d)))
+        srv._note_drop('1.2.3.4', 'UDP')
+        srv._note_drop('1.2.3.4', 'UDP')   # within the window → counted, not re-logged/flushed
+        assert srv._drops['1.2.3.4']['count'] == 2
+        assert len(logs) == 1
+        assert 'dropped UDP from 1.2.3.4' in logs[0] and 'not in allowed sources' in logs[0]
+        assert drops == [('1.2.3.4', 'UDP', 1)]   # first flush delta = 1
 
 
 class TestTcp:

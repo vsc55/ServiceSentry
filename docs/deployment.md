@@ -24,9 +24,11 @@ Este documento cubre todas las formas soportadas de desplegar ServiceSentry en p
 Consulta [docs/docker.md](docker.md) para la referencia completa de Docker: variables de entorno, volúmenes y configuración de proxy inverso.
 
 ```bash
-# Monolítica (un contenedor) o microservicios (web + worker):
-docker compose -f docker/docker-compose.monolithic.yml   up -d
-docker compose -f docker/docker-compose.microservices.yml up -d
+# Monolítica (un contenedor), microservicios (web + worker + syslog, 2 BD)
+# o microservicios + Traefik (publicado por HTTPS con Let's Encrypt):
+docker compose -f docker/docker-compose.monolithic.yml           up -d
+docker compose -f docker/docker-compose.microservices.yml        up -d
+docker compose -f docker/docker-compose.microservices-traefik.yml up -d
 ```
 
 ---
@@ -338,6 +340,11 @@ configuración avanzada.
 ---
 
 ### Traefik
+
+> **Atajo:** el compose `docker/docker-compose.microservices-traefik.yml` ya trae
+> un Traefik integrado con TLS Let's Encrypt automático; solo necesitas definir
+> `SS_DOMAIN` y `SS_ACME_EMAIL`. Ver [docker.md → Traefik](docker.md#traefik). Lo
+> de abajo es para integrar con un Traefik **ya existente**.
 
 Traefik añade automáticamente `X-Forwarded-Proto: https` cuando la petición
 llega por el entrypoint HTTPS.

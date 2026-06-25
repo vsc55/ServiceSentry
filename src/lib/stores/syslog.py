@@ -159,13 +159,24 @@ class SyslogStore:
             'msgid': msgid, 'message': message, 'raw': raw,
         }
 
-    def query(self, filters: dict | None = None, *, limit: int = 200, offset: int = 0) -> list[dict]:
-        """Return matching messages, newest first."""
+    # Columns the API may sort by → physical column (whitelist; safe to inline).
+    _SORTABLE = {
+        'ts': 'ts', 'received_at': 'received_at', 'source': 'source', 'hostname': 'hostname',
+        'app': 'app', 'procid': 'procid', 'severity': 'severity', 'facility': 'facility',
+        'msgid': 'msgid', 'message': 'message',
+    }
+
+    def query(self, filters: dict | None = None, *, limit: int = 200, offset: int = 0,
+              sort: str = 'ts', order: str = 'desc') -> list[dict]:
+        """Return matching messages (newest first by default, or per *sort*/*order*)."""
         where, params = self._where(filters or {})
         limit = max(1, min(5000, int(limit)))
         offset = max(0, int(offset))
+        col = self._SORTABLE.get(sort, 'ts')
+        direction = 'ASC' if str(order).lower() == 'asc' else 'DESC'
         rows = self._db.fetchall(
-            f'SELECT {_SELECT} FROM {_T}{where} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?',
+            f'SELECT {_SELECT} FROM {_T}{where} ORDER BY {col} {direction}, id {direction} '
+            'LIMIT ? OFFSET ?',
             (*params, limit, offset))
         return [self._to_dict(r) for r in rows]
 

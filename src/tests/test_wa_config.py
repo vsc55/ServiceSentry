@@ -80,6 +80,14 @@ class TestApiConfigPutBasic:
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
 
+    def test_put_null_int_field_accepted(self, client, admin):
+        # Blanking a numeric field (null) is valid — it means "use the default".
+        _login(client)
+        resp = client.put("/api/v1/config", json={"syslog": {"udp_port": None}})
+        assert resp.status_code == 200 and resp.get_json()["ok"] is True
+        # and it resolves to the registry default, not an error
+        assert int(admin._syslog_cfg()["udp_port"]) == 514
+
     def test_put_invalid_json(self, client):
         _login(client)
         resp = client.put("/api/v1/config", data="{bad", content_type="application/json")

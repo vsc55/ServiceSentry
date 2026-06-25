@@ -69,18 +69,23 @@ See [`docs/deployment.md`](docs/deployment.md) for the full deployment reference
 
 ### Docker
 
-Two topologies are provided — pick one:
+Three topologies are provided — pick one:
 
 ```bash
 # Monolithic: a single container, checks run in-process (simplest)
 docker compose -f docker/docker-compose.monolithic.yml up -d
 
-# Microservices: web panel + a dedicated monitoring worker
+# Microservices: web + worker + syslog over two MariaDB databases
+# (main DB + a dedicated syslog DB)
 docker compose -f docker/docker-compose.microservices.yml up -d
+
+# Microservices + Traefik: the above, published to the Internet over HTTPS
+# with automatic Let's Encrypt certificates (set SS_DOMAIN + SS_ACME_EMAIL)
+docker compose -f docker/docker-compose.microservices-traefik.yml up -d
 ```
 
 Edit the chosen compose file before first run — at minimum change `SS_USERNAME` and `SS_PASSWORD`.
-The web admin panel is available at `http://your-host:8080`.
+The web admin panel is available at `http://your-host:8080` (or `https://SS_DOMAIN` with Traefik).
 
 ### install.sh
 

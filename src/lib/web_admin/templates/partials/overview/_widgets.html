@@ -27,6 +27,20 @@ function _dwChecksBadge(checks) {
     return `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>OK</span>`;
 }
 
+// Modules table widget filter (set in the layout editor): '' (all), 'on'
+// (enabled), or 'error' (a check is failing). Mirrors the Active/Checks columns.
+function _dwModuleWidgetFilter() {
+    const el = document.querySelector('.dw[data-wid="modules_list"]');
+    return el ? (el.dataset.modf || '') : '';
+}
+function _dwModuleFiltered(list, f) {
+    if (f === undefined) f = _dwModuleWidgetFilter();
+    const arr = list || [];
+    if (f === 'on')    return arr.filter(m => m.enabled);
+    if (f === 'error') return arr.filter(m => (m.checks?.error ?? 0) > 0);
+    return arr;
+}
+
 function _dwBuildModuleRows(modules) {
     const s = _dwSort['modules_list'];
     let rows = [...modules];
@@ -382,7 +396,7 @@ function _dwTbodyHtml(wid) {
     const d = _lastOverviewData;
     if (!d) return null;
     switch (wid) {
-        case 'modules_list':  return _dwBuildModuleRows(d.modules || []);
+        case 'modules_list':  return _dwBuildModuleRows(_dwModuleFiltered(d.modules || [], _dwModuleWidgetFilter()));
         case 'servers_list':  return _dwBuildServerRows(_dwServerFiltered((d.servers || {}).list, _dwServerWidgetFilter()));
         case 'sessions_list': return _dwBuildSessionRows((d.sessions || {}).list || []);
         case 'incidents':     return _dwBuildIncidentRows(d.failing_checks || []);
@@ -595,6 +609,10 @@ function _dwContent(id, data, item) {
         case 'modules_list': {
             if (!perms.has('modules_view'))
                 return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            const _modf = item ? (item.modf || '') : _dwModuleWidgetFilter();
+            const _mlist = _dwModuleFiltered(modules, _modf);
+            const _modBadge = (_modf === 'on') ? _dwFilterBadge(t('dw_mod_on'), '#16a34a', 'rgba(34,197,94,.16)')
+                : (_modf === 'error') ? _dwFilterBadge(t('host_status_error'), '#dc3545', 'rgba(220,53,69,.16)') : '';
             const table = `<table class="table table-sm table-hover align-middle mb-0">
                 ${_dwTheadRow(
                     _dwTh('modules_list','name',t('col_module')),
@@ -602,10 +620,10 @@ function _dwContent(id, data, item) {
                     _dwTh('modules_list','checks',t('col_checks')),
                     _dwTh('modules_list','items',t('overview_items'))
                 )}
-                <tbody>${_dwBuildModuleRows(modules)}</tbody>
+                <tbody>${_dwBuildModuleRows(_mlist)}</tbody>
             </table>`;
             return _dwTableCard('linear-gradient(90deg,#6366f1,#8b5cf6)', 'rgba(99,102,241,.12)', '#6366f1',
-                'bi-puzzle', t('overview_modules'), table);
+                'bi-puzzle', t('overview_modules') + _modBadge, table);
         }
 
         case 'servers_list': {
@@ -714,6 +732,25 @@ function _dwContent(id, data, item) {
                 }).join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
                 'bi-card-list', sl.total || 0, 'overview_syslog_stats', sub);
+        }
+
+        case 'events': {
+            if (!perms.has('events_view'))
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            const ev    = data.events || {};
+            const total = ev.total || 0;
+            const en    = ev.enabled || 0;
+            const dis   = total - en;
+            const notif = ev.notifications || 0;
+            // Enabled/disabled breakdown (like the modules card) + a notifications-
+            // sent badge from the notification log.
+            const sub = [
+                en  ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${en} ${t('overview_enabled')}</span>` : '',
+                dis ? `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">${dis} ${t('overview_disabled')}</span>` : '',
+                notif ? `<span class="badge rounded-pill" style="background:rgba(245,158,11,.15);color:#d97706;font-size:.72rem"><i class="bi bi-send me-1"></i>${tf('overview_events_notifications', notif)}</span>` : '',
+            ].filter(Boolean).join('') || '<span class="text-muted small">—</span>';
+            return _dwStatCard('linear-gradient(90deg,#ec4899,#f43f5e)', 'rgba(236,72,153,.12)', '#ec4899',
+                'bi-bell-fill', total, 'overview_events', sub);
         }
 
         case 'syslog': {

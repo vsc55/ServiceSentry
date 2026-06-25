@@ -14,10 +14,11 @@ const _DW_H_PRESET    = { sm: 150, md: 280, lg: 420, xl: 560 };
 
 // Order + default size here defines the DEFAULT dashboard layout (new users
 // and "Reset Layout"). Rows flow left-to-right filling 12 columns:
-//   row 1: checks·modules·servers·users·groups·roles  (6 × 2)
-//   row 2: sessions·webhooks·credentials·coverage (4 × 2) + sessions_list (6)
-//   row 3: incidents (6) + failed_logins (6)
-//   row 4: modules_list·servers_list·activity (3 × 4)
+//   row 1: checks·modules·servers·users·groups·roles                 (6 × 2)
+//   row 2: sessions·webhooks·credentials·coverage·syslog_stats·events (6 × 2)
+//   row 3: sessions_list·incidents·failed_logins                     (3 × 4)
+//   row 4: modules_list·servers_list·activity                        (3 × 4)
+//   row 5: syslog                                                    (1 × 12)
 const _DW_DEFS = {
     checks:       { icon: 'bi-activity',      lkey: 'overview_status',           dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => p.has('checks_view') || p.has('checks_run') },
@@ -39,11 +40,15 @@ const _DW_DEFS = {
                     canShow: (p)         => p.has('credentials_view') || p.has('servers_view') || p.has('modules_view') },
     coverage:     { icon: 'bi-pie-chart',     lkey: 'overview_coverage',         dCols: 2,  dH: 'auto', hasH: false,
                     canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
+    syslog_stats: { icon: 'bi-card-list',     lkey: 'overview_syslog_stats',     dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => p.has('syslog_view') },
+    events:       { icon: 'bi-bell',          lkey: 'overview_events',           dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => p.has('events_view') },
     sessions_list:{ icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 4,  dH: 140,    hasH: true,
                     canShow: (p)         => p.has('sessions_view') },
-    incidents:    { icon: 'bi-exclamation-triangle', lkey: 'overview_incidents',  dCols: 6,  dH: 200,    hasH: true,
+    incidents:    { icon: 'bi-exclamation-triangle', lkey: 'overview_incidents',  dCols: 4,  dH: 140,    hasH: true,
                     canShow: (p)         => p.has('modules_view') },
-    failed_logins:{ icon: 'bi-shield-lock',   lkey: 'overview_failed_logins',    dCols: 6,  dH: 200,    hasH: true,
+    failed_logins:{ icon: 'bi-shield-lock',   lkey: 'overview_failed_logins',    dCols: 4,  dH: 140,    hasH: true,
                     canShow: (p)         => p.has('audit_view') },
     modules_list: { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 4,  dH: 340,    hasH: true,
                     canShow: (p)         => p.has('modules_view') },
@@ -51,9 +56,7 @@ const _DW_DEFS = {
                     canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
     activity:     { icon: 'bi-clock-history', lkey: 'overview_recent_activity',  dCols: 4,  dH: 340,    hasH: true,
                     canShow: (p)         => p.has('audit_view') },
-    syslog_stats: { icon: 'bi-card-list',     lkey: 'overview_syslog_stats',     dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('syslog_view') },
-    syslog:       { icon: 'bi-card-list',     lkey: 'overview_syslog',           dCols: 6,  dH: 200,    hasH: true,
+    syslog:       { icon: 'bi-card-list',     lkey: 'overview_syslog',           dCols: 12, dH: 200,    hasH: true,
                     canShow: (p)         => p.has('syslog_view') },
 };
 
@@ -79,6 +82,7 @@ const _DW_NAV = {
     activity:      { tab: '#tab-audit'   },
     syslog:        { tab: '#tab-syslog'  },
     syslog_stats:  { tab: '#tab-syslog'  },
+    events:        { tab: '#tab-events'  },
 };
 
 // Resolve the tab/sub-tab toggle button for a pane selector, but ONLY if it is
@@ -199,6 +203,7 @@ function _dwSave() {
         hidden: el.style.display === 'none',
         ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
+        ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
 }
@@ -311,6 +316,16 @@ function _dwSetSyslogSev(sel) {
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwSyslogAsyncRefresh();   // load a full list at the chosen minimum severity
+    _dwSave();
+}
+
+// Set the modules table widget's filter (all / active on / error).
+function _dwSetModuleFilter(sel) {
+    const dw = sel.closest('.dw[data-wid]');
+    if (!dw) return;
+    if (sel.value === '') delete dw.dataset.modf; else dw.dataset.modf = sel.value;
+    const content = dw.querySelector('.dw-content');
+    if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwSave();
 }
 
@@ -481,6 +496,7 @@ async function _dwSaveDb() {
         hidden: el.style.display === 'none',
         ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
+        ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
     const r = await apiPut('/api/v1/users/me/preferences', { dashboard_layout: layout });
@@ -504,6 +520,7 @@ async function _dwSetDefault() {
         hidden: el.style.display === 'none',
         ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
+        ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
     }));
     const r = await apiPut('/api/v1/overview/default-layout', { layout });
     if (r && r.ok) {
@@ -530,6 +547,14 @@ function _dwToolbar(id, cols, h, item) {
                 .map((n, i) => `<option value="${i}"${String(sev) === String(i) ? ' selected' : ''}>${esc(n)}</option>`));
         tb += `<select class="form-select form-select-sm dw-sev py-0" style="width:auto;min-width:5.5em;font-size:.72rem"
             onchange="_dwSetSyslogSev(this)" title="${escAttr(t('syslog_min_severity'))}">${opts.join('')}</select>`;
+    }
+    // Modules table widget: which modules to show (all / active on / error).
+    if (id === 'modules_list') {
+        const f = item ? (item.modf ?? '') : '';
+        const mo = [['', t('all')], ['on', t('dw_mod_on')], ['error', t('host_status_error')]]
+            .map(([v, lbl]) => `<option value="${v}"${f === v ? ' selected' : ''}>${esc(lbl)}</option>`).join('');
+        tb += `<select class="form-select form-select-sm dw-modf py-0" style="width:auto;min-width:6em;font-size:.72rem"
+            onchange="_dwSetModuleFilter(this)" title="${escAttr(t('dw_mod_filter'))}">${mo}</select>`;
     }
     // Servers table widget: which hosts to show (all / error / maintenance / both).
     if (id === 'servers_list') {

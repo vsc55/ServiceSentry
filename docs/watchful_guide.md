@@ -227,7 +227,7 @@ Python inline. El archivo tiene una clave de primer nivel por **colección**:
         "__actions__": [
             {
                 "id":        "test_conn",
-                "url":       "/api/watchfuls/mi_modulo/test_connection",
+                "url":       "/api/v1/watchfuls/mi_modulo/test_connection",
                 "extra":     {},
                 "icon":      "bi-plug",
                 "variant":   "outline-info",
@@ -245,7 +245,7 @@ Python inline. El archivo tiene una clave de primer nivel por **colección**:
         "db":       {"type": "str",  "default": "", "group": "server",
                      "input_action": {
                          "id":           "list_dbs",
-                         "url":          "/api/watchfuls/mi_modulo/list_databases",
+                         "url":          "/api/v1/watchfuls/mi_modulo/list_databases",
                          "extra":        {},
                          "icon":         "bi-database",
                          "result":       "field_picker",
@@ -276,9 +276,20 @@ Estas claves controlan el comportamiento de la UI y no corresponden a campos de 
 | `__group_when__` | Dict `{nombre_grupo: show_when}`. Controla cuándo el **encabezado** de un grupo es visible, independientemente de los campos que contiene. Si un grupo no aparece aquí, su encabezado siempre se muestra. |
 | `__actions__` | Lista de botones de acción que aparecen al pie del formulario (o dentro de un grupo, ver `group` abajo). |
 | `__test__` | URL a la que se envía el formulario al pulsar el botón de test rápido del encabezado de colección. |
-| `__discovery__` | URL del endpoint `GET /api/watchfuls/<modulo>/discover`. Activa el botón de descubrimiento en el encabezado de la colección. |
+| `__discovery__` | **Nombre de la acción** de descubrimiento (p. ej. `"discover"`, no una URL); debe estar en `WATCHFUL_ACTIONS`. La UI construye la URL `/api/v1/watchfuls/<modulo>/<accion>` con el `api_ver` del `__module__`. Activa el botón de descubrimiento en el encabezado de la colección. Por defecto GET; `"__discovery_method__": "POST"` hace POST con la config como body. |
 | `__discovery_field__` | Nombre del campo al que se añade un botón de búsqueda inline (input-group). Al pulsarlo abre el modal de descubrimiento en modo selección de campo: los ítems ya añadidos aparecen desactivados y seleccionar uno escribe su valor en el campo. Requiere `__discovery__`. |
 | `__key_mirrors_field__` | Nombre de un campo. Cuando está definido, la clave del ítem se renombra automáticamente para coincidir con el valor de ese campo cada vez que se selecciona un valor desde el modal de descubrimiento. El botón de renombrar se oculta para los ítems de esta colección. |
+
+> **Referencia completa en [schema.md](schema.md).** Esta guía cubre lo esencial.
+> Para funciones avanzadas consulta schema.md: **sub-colecciones** (`type:
+> "sub_collection"`), **placeholders** (`placeholder`/`placeholder_module`/
+> `placeholder_map`/`zero_as_blank`), **descubrimiento enriquecido**
+> (`__discovery_method__`, `__discovery_subtitle__`, `__discovery_type_field__`,
+> `__discovery_category_field__`, `__discovery_categories__`,
+> `__check_title_field__`, `__title_editable__`, `__discovery_label_template__`),
+> opciones (`options_int`, `options_deps`), campos (`hidden`, `readonly`,
+> `numericString`, `multi`, `nullable`, `inherit_blank`), historial (`__history__`)
+> y **gating por dependencias** (`MISSING_DEPS`/`PARTIAL_DEPS` en la clase).
 
 ### Propiedades de campo
 
@@ -323,7 +334,7 @@ Un campo `str` puede tener un botón de icono acoplado como input-group Bootstra
     "group": "server",
     "input_action": {
         "id":           "list_databases",
-        "url":          "/api/watchfuls/datastore/list_databases",
+        "url":          "/api/v1/watchfuls/datastore/list_databases",
         "extra":        {},
         "icon":         "bi-database",
         "result":       "field_picker",
@@ -387,7 +398,7 @@ Además de `pretty_name` y `labels`, los archivos de idioma pueden incluir:
 La UI web puede invocar métodos de clase del módulo a través de un endpoint REST genérico:
 
 ```text
-GET|POST /api/watchfuls/<module_name>/<action>
+GET|POST /api/v1/watchfuls/<module_name>/<action>
 ```
 
 Para exponer un classmethod como acción web, debes añadir su nombre a la variable de clase `WATCHFUL_ACTIONS`:
@@ -473,7 +484,7 @@ class Watchful(ModuleBase):
 
 ### `test_connection(config: dict) -> dict`
 
-Invocado por `POST /api/watchfuls/<modulo>/test_connection`. Recibe los datos del formulario del ítem y devuelve `{"ok": bool, "message": str}`.
+Invocado por `POST /api/v1/watchfuls/<modulo>/test_connection`. Recibe los datos del formulario del ítem y devuelve `{"ok": bool, "message": str}`.
 
 ```python
 @classmethod
@@ -489,7 +500,7 @@ El resultado se muestra como un toast en la UI. La acción queda registrada en e
 
 ### `list_databases(config: dict) -> dict`
 
-Invocado por `POST /api/watchfuls/<modulo>/list_databases`. Devuelve `{"ok": bool, "items": list[str]}`.
+Invocado por `POST /api/v1/watchfuls/<modulo>/list_databases`. Devuelve `{"ok": bool, "items": list[str]}`.
 
 ```python
 @classmethod
@@ -503,19 +514,28 @@ def list_databases(cls, config: dict) -> dict:
 
 La acción queda registrada en el **log de auditoría** bajo el evento `watchful_action`.
 
-### `discover() -> list[dict]`
+### `discover(config=None) -> list[dict]`
 
-Invocado por `GET /api/watchfuls/<modulo>/discover`, donde `discover` debe estar en `WATCHFUL_ACTIONS`. Devuelve una lista de ítems descubiertos automáticamente (servicios, particiones, sensores…). La UI los muestra en el modal de descubrimiento para incorporarlos con un clic.
+Invocado por el endpoint de la acción `discover` (que debe estar en
+`WATCHFUL_ACTIONS`). Por defecto la UI hace **GET** y el método se llama **sin
+argumentos**; si el `schema.json` declara `"__discovery_method__": "POST"`, la UI
+hace POST y el método recibe la **configuración del módulo** como `dict` (acepta
+`config=None`). Devuelve una lista de ítems descubiertos (servicios, particiones,
+sensores…). La UI los muestra en el modal de descubrimiento para incorporarlos con
+un clic.
 
 ```python
 @classmethod
-def discover(cls) -> list[dict]:
+def discover(cls, config=None) -> list[dict]:
     return [
-        {"key": "item1", "label": "Nombre visible", ...},
+        {"name": "item1", "display_name": "Nombre visible", "status": True},
     ]
 ```
 
-La UI solo consume los campos `key` y `label` de cada dict. Cualquier campo adicional es ignorado por el modal de descubrimiento. `key` es el identificador que se guarda en la configuración del módulo (BD); `label` es el texto visible en la lista.
+Cada ítem usa **`name`** (identificador que se guarda como clave/valor del ítem) y
+**`display_name`** (texto visible). `status` (bool) es opcional. Campos extra
+(`type`, categoría…) los consumen las meta-claves `__discovery_*__` para enriquecer
+el modal (badges de tipo/categoría, subtítulos) — ver [schema.md](schema.md).
 
 ---
 

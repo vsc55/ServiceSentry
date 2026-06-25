@@ -28,7 +28,10 @@ lib/web_admin/
 │   ├── sessions.py           # _SessionsMixin (sesiones + clave secreta Flask)
 │   ├── audit.py              # _AuditMixin
 │   ├── checks.py             # _ChecksMixin
-│   └── daemon.py             # _DaemonMixin (planificador en segundo plano)
+│   ├── daemon.py             # _DaemonMixin (planificador en segundo plano)
+│   ├── syslog.py             # _SyslogMixin (receptor syslog + registro de descartes)
+│   ├── services.py           # _ServicesMixin (estado/control de servicios)
+│   └── events.py             # reexporta _EventsMixin de lib/event_manager.py (sin Flask)
 └── routes/
     ├── __init__.py           # register_all(app, wa)
     ├── auth/
@@ -53,6 +56,11 @@ lib/web_admin/
     │   └── templates.py      # /api/v1/notify/templates, /api/v1/notify/html-templates
     ├── config.py             # /api/v1/config, /api/v1/config/versions, /api/v1/config/schema
     ├── webhooks.py           # /api/v1/webhooks (CRUD de webhooks)
+    ├── hosts.py              # /api/v1/hosts (registro de servidores + migración)
+    ├── credentials.py        # /api/v1/credentials (identidades SSH reutilizables)
+    ├── syslog.py             # /api/v1/syslog (mensajes, stats, status, drops)
+    ├── events.py             # /api/v1/event-rules, /api/v1/notifications/log
+    ├── services.py           # /api/v1/services (estado + start/stop)
     ├── watchfuls.py          # /api/v1/watchfuls/<module>/<action>
     ├── history.py            # /api/v1/history (índice, consulta, borrado, diagnóstico)
     ├── daemon.py             # /api/v1/daemon (estado, start, stop, config del planificador)
@@ -79,14 +87,18 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 |---------------|-------------|
 | **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas; barra de herramientas con **Añadir**, **Recargar** (descarta cambios y recarga desde el servidor) y **Deshacer** (revierte cambios no guardados al último estado guardado) |
 | **Servers (hosts)** | Define un servidor una vez (dirección + perfiles de conexión por protocolo: ssh/snmp/db/http/tls…) y vincúlalo desde los checks de cualquier módulo, que heredan dirección + credenciales. Asistente "Detectar duplicados" que agrupa conexiones inline repetidas en hosts compartidos. Secretos cifrados en la BD general. Ver §[Servers (registro de hosts)](#servers-registro-de-hosts) |
+| **Credenciales** | Identidades SSH reutilizables (usuario + clave) referenciables desde hosts y checks, en vez de duplicar secretos; clonado y vista de uso. Secretos cifrados en la BD. Permisos `credentials_*`. |
+| **Receptor Syslog** | Servidor syslog integrado (RFC 3164/5424, UDP/TCP/TLS): pestaña Syslog con mensajes filtrables (severidad/host/app/búsqueda), allowlist de orígenes y **registro de descartes**; retención por antigüedad/filas; BD dedicada opcional; puede correr embebido o como contenedor aparte. Permisos `syslog_view`/`syslog_delete`. Ver §[Syslog](#syslog) |
+| **Gestor de eventos** | Reglas que observan eventos de auditoría o syslog y notifican por los canales configurados (Telegram/Email/webhooks concretos); cooldown global con herencia por regla; **log de notificaciones** enviadas. Permisos `events_*`. Ver §[Eventos (reglas de notificación)](#eventos-reglas-de-notificación) |
+| **Servicios** | Pestaña Services: estado y **control (start/stop)** de los servicios de fondo (scheduler embebido, receptor syslog, worker, base de datos). Permisos `services_view`/`services_control`. Ver §[Servicios](#servicios) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
-| **Vista general (Overview)** | 6 tarjetas de resumen (Modules, Checks, Sessions, Users, Groups, Roles) + 2 widgets de tabla (lista de módulos con estado por check, actividad reciente); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables |
+| **Vista general (Overview)** | 12 tarjetas de resumen (Modules, Checks, Servers, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente); cada widget enlaza a su pestaña; auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin |
 | **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador; paneles colapsables por sección |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 28 flags granulares; activar/desactivar desde el modal |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 46 flags granulares; activar/desactivar desde el modal |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
@@ -113,16 +125,16 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos (28 flags) |
-| `editor` | `modules_view`, `modules_add`, `modules_edit`, `config_edit`, `checks_view`, `checks_run`, `audit_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit` |
-| `viewer` | `modules_view`, `users_view`, `roles_view`, `groups_view`, `audit_view`, `sessions_view`, `checks_view` |
+| `admin` | Todos los permisos (46 flags) |
+| `editor` | Vista de todo + edición (sin borrar ni crear): `*_view` de todos los recursos, más `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `credentials_edit`, `events_edit`, `overview_edit`, `services_control` |
+| `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view` (sin `config_view`) |
 
 > Los roles integrados **no pueden eliminarse** ni cambiar sus permisos via API. Sí permiten actualizar la **etiqueta** (`label`) y gestionar qué usuarios y grupos tienen ese rol asignado. La etiqueta personalizada (override de nombre/descripción) se persiste como una fila más en la tabla `roles` de la BD.
 
 ### Roles personalizados
 
 Se pueden crear roles adicionales desde la pestaña **Acceso → Roles** asignando
-cualquier combinación de los 28 permisos disponibles. Los roles personalizados se
+cualquier combinación de los 46 permisos disponibles. Los roles personalizados se
 persisten en la tabla `roles` de la BD.
 
 ```
@@ -162,7 +174,7 @@ Cada grupo tiene:
 
 ## Sistema de Permisos
 
-El sistema de control de acceso usa **28 flags granulares** por acción y recurso.
+El sistema de control de acceso usa **46 flags granulares** por acción y recurso.
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -184,22 +196,34 @@ El sistema de control de acceso usa **28 flags granulares** por acción y recurs
 | | `modules_add` | Crear nuevas entradas de módulo |
 | | `modules_edit` | Guardar cambios en módulos |
 | | `modules_delete` | Eliminar entradas de módulo |
+| **Servers** | `servers_view` `servers_add` `servers_edit` `servers_delete` | CRUD del registro de hosts |
+| **Credenciales** | `credentials_view` `credentials_add` `credentials_edit` `credentials_delete` | CRUD de identidades SSH reutilizables |
 | **Config** | `config_view` | Leer `config.json` sin poder editarlo |
 | | `config_edit` | Guardar cambios en configuración |
 | **Overview** | `overview_view` | Ver el dashboard de resumen |
-| | `overview_edit` | Editar el layout del dashboard |
+| | `overview_edit` | Editar el layout propio del dashboard |
+| | `overview_set_default` | Fijar el layout como default global para todos |
+| | `overview_reset_factory` | Restaurar el layout de fábrica |
 | **Sesiones** | `sessions_view` | Ver sesiones activas |
 | | `sessions_revoke` | Revocar sesiones |
 | **Checks** | `checks_view` | Ver resultados de checks y la pestaña Status |
 | | `checks_run` | Lanzar comprobaciones bajo demanda |
 | **Historial** | `history_view` | Ver gráficas y series temporales del historial |
 | | `history_delete` | Borrar datos del historial |
+| **Syslog** | `syslog_view` | Ver mensajes syslog y el registro de descartes |
+| | `syslog_delete` | Vaciar mensajes / descartes |
+| **Servicios** | `services_view` | Ver el estado de los servicios |
+| | `services_control` | Iniciar/detener servicios |
+| **Eventos** | `events_view` | Ver reglas de notificación y el log de envíos |
+| | `events_add` | Crear reglas de evento |
+| | `events_edit` | Editar reglas (y vaciar el log de envíos) |
+| | `events_delete` | Eliminar reglas de evento |
 
-> Además de los 28 flags globales, cada módulo expone **permisos a nivel de módulo** dinámicos (`module.<nombre>.view`, `.add`, `.edit`, `.delete`) que permiten restringir el acceso a un módulo concreto.
+> Además de los 46 flags globales, cada módulo expone **permisos a nivel de módulo** dinámicos (`module.<nombre>.view`, `.add`, `.edit`, `.delete`) que permiten restringir el acceso a un módulo concreto.
 
 ### Implementación interna
 
-- `PERMISSIONS` — tupla con los 28 flags.
+- `PERMISSIONS` — tupla con los 46 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` para los roles integrados.
 - `_perm_required(*perms)` — factoría de decoradores: acepta si el usuario tiene **alguno** de los permisos indicados.
@@ -268,7 +292,11 @@ El permiso requerido se indica entre paréntesis.
 | `GET` | `/api/v1/modules` | `modules_view` | Obtener todas las configuraciones de módulos |
 | `PUT` | `/api/v1/modules` | `modules_edit` | Guardar todas las configuraciones de módulos |
 | `GET` | `/api/v1/modules/status` | `checks_view` o `checks_run` | Obtener el estado actual de los checks (tabla `check_state`, solo lectura) |
-| `GET` | `/api/v1/modules/overview` | auth | Obtener resumen del dashboard (módulos, checks, sesiones, usuarios, grupos, roles, últimos eventos) |
+| `DELETE` | `/api/v1/modules/status` | `checks_run` | Vaciar la tabla `check_state` (fuerza re-notificación en el siguiente ciclo) |
+| `GET` | `/api/v1/modules/overview` | auth | Obtener resumen del dashboard (módulos, checks, servidores, sesiones, usuarios, grupos, roles, webhooks, credenciales, cobertura, syslog, eventos, últimos eventos). Cada bloque se incluye solo si el usuario tiene el permiso de vista correspondiente |
+| `GET` | `/api/v1/overview/default-layout` | `overview_view` | Obtener el layout global por defecto fijado por un admin (vacío = layout de fábrica) |
+| `PUT` | `/api/v1/overview/default-layout` | `overview_set_default` | Fijar el layout actual como default global para todos los usuarios |
+| `POST` | `/api/v1/overview/reset-factory` | `overview_reset_factory` | Borrar el default global y volver al layout de fábrica |
 
 ### Servers (registro de hosts)
 
@@ -282,8 +310,12 @@ se enmascaran en lectura y se restauran al guardar (igual que la configuración 
 | `POST` | `/api/v1/hosts` | `modules_edit` | Crear un host `{name, address, tags, description, profiles}` |
 | `PUT` | `/api/v1/hosts/<uid>` | `modules_edit` | Actualizar un host (secretos omitidos se conservan) |
 | `DELETE` | `/api/v1/hosts/<uid>` | `modules_edit` | Eliminar un host |
-| `GET` | `/api/v1/hosts/migrate/preview` | `modules_edit` | Propuesta de migración: agrupa conexiones inline repetidas (secretos enmascarados) |
-| `POST` | `/api/v1/hosts/migrate/apply` | `modules_edit` | Crear hosts para los candidatos aceptados `{accept:[{id,name}]}` y vincular los checks |
+| `GET` | `/api/v1/hosts/<uid>/status` | `servers_view` | Últimos resultados de cada check vinculado al host |
+| `POST` | `/api/v1/hosts/test_ssh` | `servers_edit` | Probar conectividad SSH a un host |
+| `POST` | `/api/v1/hosts/test_check` | `servers_edit` | Probar un check concreto contra un host |
+| `POST` | `/api/v1/hosts/test` | `servers_edit` | Test genérico de una configuración de host |
+| `GET` | `/api/v1/hosts/migrate/preview` | `servers_edit` | Propuesta de migración: agrupa conexiones inline repetidas (secretos enmascarados) |
+| `POST` | `/api/v1/hosts/migrate/apply` | `servers_edit` | Crear hosts para los candidatos aceptados `{accept:[{id,name}]}` y vincular los checks |
 
 Un host se guarda en la BD general (tabla `hosts`); `profiles` es un JSON
 `{protocolo: {campo: valor}}` (ssh/snmp/db/http/tls…). Los protocolos y sus
@@ -302,6 +334,22 @@ entre módulos; propone N hosts. Tras confirmar, crea los hosts (credenciales
 cifradas) y reescribe los checks con `host_uid`, quitando los campos de conexión
 ya poseídos por el host. Es opt-in y reversible por revisión (coexistencia con
 los checks inline existentes).
+
+### Credenciales
+
+Identidades SSH reutilizables (usuario + clave/clave-privada) que los hosts y
+checks pueden referenciar en lugar de duplicar secretos. Los secretos se cifran en
+la BD y se enmascaran en lectura.
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/credentials` | `credentials_view` (o `servers_view`/`modules_view`/`*_edit`) | Listar credenciales (secretos enmascarados) |
+| `POST` | `/api/v1/credentials` | `credentials_add` | Crear una credencial |
+| `POST` | `/api/v1/credentials/<uid>/clone` | `credentials_add` | Clonar una credencial existente |
+| `GET` | `/api/v1/credentials/<uid>/usage` | `credentials_view` | Dónde se usa la credencial (hosts/checks) |
+| `PUT` | `/api/v1/credentials/<uid>` | `credentials_edit` | Editar una credencial (secretos omitidos se conservan) |
+| `DELETE` | `/api/v1/credentials/<uid>` | `credentials_delete` | Eliminar una credencial |
+| `POST` | `/api/v1/credentials/test` | auth | Probar una credencial (conexión SSH) |
 
 ### Configuración
 
@@ -393,6 +441,7 @@ Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `tim
 | `PUT` | `/api/v1/notify/html-templates/<type>/<lang>` | `config_edit` | Guardar plantilla HTML personalizada (tipo: `test`, `alert`, `summary`) |
 | `DELETE` | `/api/v1/notify/html-templates/<type>/<lang>` | `config_edit` | Eliminar plantilla HTML personalizada (restaura la integrada) |
 | `GET` | `/api/v1/notify/html-templates/<type>/built-in` | `config_edit` | Previsualizar la plantilla HTML integrada renderizada con datos de muestra |
+| `POST` | `/api/v1/notify/html-templates/<type>/preview` | `config_edit` | Renderizar una plantilla HTML arbitraria (del editor) con datos de muestra |
 
 ### Email (prueba)
 
@@ -423,7 +472,7 @@ mantiene entre dispositivos y sesiones.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/groups` | auth | Listar todos los grupos con miembros y roles |
+| `GET` | `/api/v1/groups` | `groups_view` | Listar todos los grupos con miembros y roles |
 | `POST` | `/api/v1/groups` | `groups_add` | Crear un grupo |
 | `PUT` | `/api/v1/groups/<name>` | `groups_edit` | Editar roles y miembros de un grupo (label/description ignorados en builtin) |
 | `DELETE` | `/api/v1/groups/<name>` | `groups_delete` | Eliminar un grupo (403 si es builtin) |
@@ -432,7 +481,7 @@ mantiene entre dispositivos y sesiones.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/roles` | auth | Listar todos los roles (integrados + personalizados) |
+| `GET` | `/api/v1/roles` | `roles_view` | Listar todos los roles (integrados + personalizados) |
 | `POST` | `/api/v1/roles` | `roles_add` | Crear un rol personalizado |
 | `PUT` | `/api/v1/roles/<name>` | `roles_edit` | Editar rol; en integrados solo se acepta `label`; en personalizados acepta `label` y `permissions` |
 | `DELETE` | `/api/v1/roles/<name>` | `roles_delete` | Eliminar un rol personalizado |
@@ -484,6 +533,48 @@ Controla el planificador en segundo plano que ejecuta los checks periódicamente
 | `POST` | `/api/v1/daemon/stop` | `checks_run` | Detener el planificador |
 | `PUT` | `/api/v1/daemon/config` | `checks_run` | Actualizar intervalo (`timer_check`) y autoarranque |
 
+### Syslog
+
+Receptor syslog: consulta de mensajes, estadísticas y el registro de descartes
+(orígenes rechazados por la allowlist).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/syslog` | `syslog_view` | Listar mensajes (filtros: severidad, host, app, búsqueda, orden, paginación) |
+| `GET` | `/api/v1/syslog/stats` | `syslog_view` | Total + desglose por severidad |
+| `GET` | `/api/v1/syslog/facets` | `syslog_view` | Valores distintos (host/app/severidad) para los filtros |
+| `GET` | `/api/v1/syslog/status` | `syslog_view` | Estado del listener (running/binds/problemas) |
+| `DELETE` | `/api/v1/syslog` | `syslog_delete` | Vaciar mensajes |
+| `GET` | `/api/v1/syslog/drops` | `syslog_view` | Listar orígenes descartados (con búsqueda/orden) |
+| `DELETE` | `/api/v1/syslog/drops` | `syslog_delete` | Vaciar el registro de descartes |
+| `DELETE` | `/api/v1/syslog/drops/<uid>` | `syslog_delete` | Borrar un origen descartado concreto |
+
+### Eventos (reglas de notificación)
+
+Reglas que observan eventos (`audit` o `syslog`) y notifican por los canales
+configurados; más el log de envíos. Ver [configuration.md → Gestor de eventos](configuration.md#gestor-de-eventos).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/event-rules` | `events_view`* | Listar reglas de evento |
+| `POST` | `/api/v1/event-rules` | `events_add` | Crear una regla |
+| `PUT` | `/api/v1/event-rules/<rid>` | `events_edit` | Editar una regla |
+| `DELETE` | `/api/v1/event-rules/<rid>` | `events_delete` | Eliminar una regla |
+| `POST` | `/api/v1/event-rules/<rid>/test` | `events_edit` | Disparar la regla con un mensaje de prueba |
+| `GET` | `/api/v1/notifications/log` | `events_view`* | Listar el log de notificaciones enviadas |
+| `DELETE` | `/api/v1/notifications/log` | `events_edit` | Vaciar el log de notificaciones |
+
+> \* `events_view` aquí acepta **cualquiera** de `events_view`/`events_add`/`events_edit`/`events_delete`.
+
+### Servicios
+
+Estado y control de los servicios de fondo (scheduler, receptor syslog…).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/services` | `services_view` | Estado de todos los servicios |
+| `POST` | `/api/v1/services/<name>/<action>` | `services_control` | `start`/`stop` de un servicio controlable |
+
 ### Salud
 
 | Método | Ruta | Permiso | Descripción |
@@ -510,6 +601,8 @@ Wizard interactivo de registro de aplicación en Microsoft Entra ID (Azure AD).
 | `POST` | `/api/v1/auth/entra/device-poll` | `config_edit` | Sondea el estado del flujo; al completarse crea la app, el service principal y el consentimiento de admin, y devuelve `client_id`, `client_secret`, `tenant_id` y `provider_url` |
 | `POST` | `/api/v1/auth/entra/groups` | `config_edit` | Obtiene todos los grupos del tenant mediante las credenciales OIDC guardadas (client credentials flow) |
 | `POST` | `/api/v1/auth/entra/group_lookup` | `config_edit` | Resolver el nombre visible de un grupo de Entra ID por su Object ID (usado para auto-completar el mapeo) |
+| `POST` | `/api/v1/auth/entra/saml2/device-code` | `config_edit` | Inicia el wizard de registro de la app **SAML2** en Entra ID (Device Code) |
+| `POST` | `/api/v1/auth/entra/saml2/device-poll` | `config_edit` | Sondea el registro SAML2; al completarse crea la app y devuelve sus metadatos |
 
 ### Watchfuls (acciones dinámicas)
 
@@ -539,16 +632,39 @@ La pestaña **Overview** del panel de administración incluye un dashboard total
 
 ### Widgets disponibles
 
+Tarjetas de resumen (stat cards):
+
 | Widget | ID | Descripción |
 | ------ | -- | ----------- |
-| Modules | `modules` | Tarjeta: total de módulos y cuántos están habilitados |
-| Checks | `checks` | Tarjeta: total de checks y resultado (OK / errores) |
-| Sessions | `sessions` | Tarjeta: sesiones activas y usuarios conectados |
-| Users | `users` | Tarjeta: total de usuarios por rol |
-| Groups | `groups` | Tarjeta: total de grupos y membresías |
-| Roles | `roles` | Tarjeta: roles integrados + personalizados |
-| Module List | `modules_list` | Tabla: módulo, estado activo, resultado de checks, nº de ítems; columnas ordenables |
-| Recent Activity | `activity` | Tabla: últimos 10 eventos de auditoría; columnas ordenables |
+| Modules | `modules` | Total de módulos y cuántos están habilitados |
+| Checks | `checks` | Total de checks y resultado (OK / errores) |
+| Servers | `servers` | Total de servidores y desglose por estado |
+| Users | `users` | Total de usuarios por rol |
+| Groups | `groups` | Total de grupos y membresías |
+| Roles | `roles` | Roles integrados + personalizados |
+| Sessions | `sessions` | Sesiones activas y usuarios conectados |
+| Webhooks | `webhooks` | Total de webhooks y cuántos habilitados |
+| Credentials | `credentials` | Total de credenciales por tipo |
+| Coverage | `coverage` | % de servidores con al menos un check |
+| Syslog | `syslog_stats` | Total de mensajes y desglose por severidad |
+| Events | `events` | Reglas de evento (activas/inactivas) + notificaciones enviadas |
+
+Widgets de tabla:
+
+| Widget | ID | Descripción |
+| ------ | -- | ----------- |
+| Module List | `modules_list` | Módulo, estado activo, resultado de checks, nº de ítems |
+| Server List | `servers_list` | Servidor, estado, checks, módulos activos |
+| Sessions | `sessions_list` | Usuario, IP, navegador, última actividad |
+| Active Issues | `incidents` | Checks que están fallando (módulo, check, host) |
+| Failed Logins | `failed_logins` | Intentos de login fallidos (hora, usuario, IP, detalle) |
+| Recent Activity | `activity` | Últimos eventos de auditoría |
+| Recent Syslog | `syslog` | Mensajes syslog recientes (filtrables por severidad mínima) |
+
+Todas las tablas tienen columnas ordenables. Cada widget enlaza (click) a su
+pestaña correspondiente. El **layout de fábrica** lo define `_DW_DEFS`
+(orden + tamaños) en `partials/overview/_layout.html`; un admin con
+`overview_set_default` puede fijar un **default global** para todos los usuarios.
 
 ### Modo edición
 
@@ -576,15 +692,26 @@ Para activar el modo edición, pulsa **✏ Edit Dashboard** en la barra de herra
     }
   ],
   "status":   { "total": 1, "ok": 1, "error": 0 },
-  "sessions": { "active": 1, "users": ["admin"] },
+  "servers":  { "total": 2, "status": { "ok": 2 }, "list": [] },
+  "sessions": { "active": 1, "users": ["admin"], "by_role": { "admin": 1 } },
   "users":    { "total": 1, "by_role": { "admin": 1 } },
-  "groups":   { "total": 1, "members": 0 },
+  "groups":   { "total": 1, "members": 0, "by_role": {} },
   "roles":    { "total": 3, "builtin": 3, "custom": 0 },
+  "webhooks": { "total": 1, "enabled": 1 },
+  "credentials": { "total": 0, "enabled": 0, "by_type": {} },
+  "coverage": { "hosts_total": 2, "hosts_monitored": 2, "pct": 100 },
+  "syslog":   { "total": 0, "recent": [], "by_severity": [] },
+  "events":   { "total": 0, "enabled": 0, "by_source": {}, "notifications": 0 },
+  "failing_checks": [],
+  "failed_logins": [],
   "last_events": [{ "ts": "...", "event": "login_ok", "user": "admin", "ip": "..." }]
 }
 ```
 
-Los contadores de `status` se calculan como la suma de `checks.total/ok/error` de todos los módulos.
+Los contadores de `status` se calculan como la suma de `checks.total/ok/error` de
+todos los módulos. Cada bloque (`servers`, `syslog`, `events`, `credentials`…) se
+incluye solo si el usuario tiene el permiso de vista correspondiente; en caso
+contrario llega vacío/ausente.
 
 ---
 
@@ -654,7 +781,7 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 28 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 46 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |
@@ -745,3 +872,23 @@ Todos los eventos auditados:
 | `audit_entry_deleted` | Borrado de una entrada concreta del registro |
 | `language_changed` | Cambio del idioma de la interfaz |
 | `watchful_action` | Invocación de una acción dinámica de un módulo watchful |
+| `event_rule_created` | Creación de una regla de evento |
+| `event_rule_updated` | Modificación de una regla de evento (con diff de campos) |
+| `event_rule_deleted` | Eliminación de una regla de evento |
+| `event_rule_test` | Disparo de prueba de una regla de evento |
+| `notification_log_cleared` | Vaciado del log de notificaciones |
+| `syslog_cleared` | Vaciado de los mensajes syslog |
+| `syslog_drops_cleared` | Vaciado del registro de descartes de syslog |
+| `syslog_started` / `syslog_stopped` | Arranque/parada del receptor syslog desde la pestaña Services |
+| `host_created` / `host_updated` / `host_deleted` | CRUD del registro de servidores |
+| `host_ssh_tested` / `host_test_check` / `host_tested` | Pruebas de conexión/check contra un host |
+| `hosts_migrated` | Migración de conexiones inline a hosts compartidos |
+| `credential_created` / `credential_cloned` / `credential_updated` / `credential_deleted` | CRUD de credenciales reutilizables |
+| `daemon_started` / `daemon_stopped` | Arranque/parada del scheduler embebido |
+| `daemon_config_changed` | Cambio de intervalo/autoarranque del scheduler |
+| `daemon_checks_run` / `daemon_error` | Ciclo de checks del scheduler / error del scheduler |
+| `status_cleared` | Vaciado de la tabla `check_state` |
+| `overview_default_layout_set` | Un admin fija el layout global por defecto del Overview |
+| `overview_reset_factory` | Restauración del layout de fábrica del Overview |
+| `history_deleted` / `history_all_deleted` | Borrado de historial de un `(module, key)` / de todo el historial |
+| `entra_app_provisioned` / `entra_app_provision_failed` | Registro automático de la app en Entra ID (OK/fallo) |
