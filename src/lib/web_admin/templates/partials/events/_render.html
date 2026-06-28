@@ -1,0 +1,340 @@
+async function renderEvents() {
+    // Only fetch what the user is allowed to see (avoids 403s and empty errors).
+    const [rules, log] = await Promise.all([
+        _evCanRules() ? apiGet('/api/v1/event-rules') : Promise.resolve(null),
+        _evCan('events_notify_view') ? apiGet('/api/v1/notifications/log?limit=200') : Promise.resolve(null),
+    ]);
+    _eventRules = (rules && rules.rules) || [];
+    _eventLog = (log && log.log) || [];
+    _eventsRender();
+}
+
+function _eventsRender() {
+    const c = document.getElementById('events-container');
+    if (!c) return;
+    const canAdd = _evCan('events_add');
+    const canNotifyDelete = _evCan('events_notify_delete');
+    const canRules = _evCanRules();
+    const canNotify = _evCan('events_notify_view');
+    const rulesChooser = _buildColChooser(_EVR_COLS, _evrVisibleCols, '_evrToggleCol', '_resetEvrCols');
+    const logChooser = _eventLog.length ? _buildColChooser(_EVL_COLS, _evlVisibleCols, '_evlToggleCol', '_resetEvlCols') : '';
+    // Each sub-tab (and its pane) only renders if the user may see it; the first
+    // visible one is active.
+    const rulesActive = canRules;
+    c.innerHTML = `
+        <ul class="nav nav-tabs mb-3" role="tablist">
+            ${canRules ? `<li class="nav-item" role="presentation">
+                <button class="nav-link${rulesActive ? ' active' : ''}" data-bs-toggle="tab" data-bs-target="#ev-pane-rules" type="button" role="tab">
+                    <i class="bi bi-bell me-1"></i>${esc(t('event_subtab_rules'))}</button></li>` : ''}
+            ${canNotify ? `<li class="nav-item" role="presentation">
+                <button class="nav-link${rulesActive ? '' : ' active'}" data-bs-toggle="tab" data-bs-target="#ev-pane-log" type="button" role="tab">
+                    <i class="bi bi-clock-history me-1"></i>${esc(t('event_subtab_log'))}</button></li>` : ''}
+        </ul>
+        <div class="tab-content">
+            ${canRules ? `<div class="tab-pane fade${rulesActive ? ' show active' : ''}" id="ev-pane-rules" role="tabpanel">
+                ${sessionStorage.getItem('ss_ev_hint_dismissed') === '1' ? '' : `<div class="alert alert-info d-flex align-items-center py-2 px-3 small mb-3" role="alert">
+                    <i class="bi bi-info-circle me-2"></i>${esc(t('event_hint'))}
+                    <button type="button" class="btn-close ms-auto" style="font-size:.65rem" data-bs-dismiss="alert"
+                        onclick="sessionStorage.setItem('ss_ev_hint_dismissed','1')" aria-label="${escAttr(t('close') || 'Close')}"></button></div>`}
+                <div class="ss-card ev-card">
+                    <div class="ss-accent ss-accent-purple"></div>
+                    <div class="ss-card-header">
+                        <h6 class="mb-0 me-auto"><i class="bi bi-bell me-2"></i>${esc(t('event_subtab_rules'))}</h6>
+                        <input id="ev-search" type="search" class="form-control form-control-sm" style="max-width:240px"
+                            placeholder="${escAttr(t('event_search'))}" value="${escAttr(_eventSearch)}"
+                            oninput="_eventSearch=this.value;_evrPage=1;_eventRulesBody()">
+                        ${rulesChooser}
+                        <button class="btn btn-sm btn-secondary" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+                        ${canAdd ? `<button class="btn btn-sm btn-success" onclick="openEventRuleModal(null)"><i class="bi bi-plus-lg me-1"></i>${esc(t('event_add'))}</button>` : ''}
+                    </div>
+                    <div class="ss-card-band ss-card-band-top" id="ev-rules-pager-top"></div>
+                    <div id="ev-rules-table-wrap"></div>
+                    <div class="ss-card-band ss-card-band-bottom" id="ev-rules-pager-bottom"></div>
+                </div>
+            </div>` : ''}
+            ${canNotify ? `<div class="tab-pane fade${rulesActive ? '' : ' show active'}" id="ev-pane-log" role="tabpanel">
+                <div class="ss-card ev-card">
+                    <div class="ss-accent ss-accent-slate"></div>
+                    <div class="ss-card-header">
+                        <h6 class="mb-0 me-auto"><i class="bi bi-clock-history me-2"></i>${esc(t('event_log_title'))}</h6>
+                        <input id="ev-log-search" type="search" class="form-control form-control-sm" style="max-width:240px"
+                            placeholder="${escAttr(t('event_search'))}" value="${escAttr(_evlSearch)}"
+                            oninput="_evlSearch=this.value;_evlPage=1;_renderEventLog()">
+                        ${logChooser}
+                        <button class="btn btn-sm btn-secondary" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+                        ${canNotifyDelete ? `<button class="btn btn-sm btn-danger" onclick="_eventClearLog()"><i class="bi bi-trash me-1"></i>${esc(t('event_log_clear'))}</button>` : ''}
+                    </div>
+                    <div class="ss-card-band ss-card-band-top" id="ev-log-pager-top"></div>
+                    <div id="ev-log-table-wrap"></div>
+                    <div class="ss-card-band ss-card-band-bottom" id="ev-log-pager-bottom"></div>
+                </div>
+            </div>` : ''}
+        </div>`;
+    if (canRules) _eventRulesBody();
+    if (canNotify) _renderEventLog();
+}
+
+function _evrSortVal(r, key) {
+    switch (key) {
+        case 'name':        return (r.name || '').toLowerCase();
+        case 'source':      return (r.source || 'audit');
+        case 'last_fired':  return r.last_fired || 0;
+        case 'enabled':     return r.enabled ? 1 : 0;
+        case 'description': return (r.description || '').toLowerCase();
+        case 'uid':         return (r.id || '').toLowerCase();
+        case 'created_at':  return r.created_at || '';
+        case 'updated_at':  return r.updated_at || '';
+        case 'updated_by':  return (r.updated_by || '').toLowerCase();
+        default:            return '';
+    }
+}
+function _evrCell(r, colId, canEdit, cw) {
+    cw = cw || {};
+    // Single-line, ellipsised cell (the table uses table-layout:fixed, so the
+    // column width comes from the resizable <th> and .text-truncate clips here).
+    const _ell = (cls, txt) => `<td class="${cls} text-truncate" title="${escAttr(txt)}">${esc(txt)}</td>`;
+    switch (colId) {
+        case 'name':       return `<td class="text-nowrap"><code>${esc(r.name || '')}</code></td>`;
+        case 'source':     return `<td><span class="badge bg-secondary">${esc(t('event_src_' + (r.source || 'audit')))}</span></td>`;
+        case 'tags':       return `<td class="text-truncate" title="${escAttr((r.tags || []).join(', '))}">${(r.tags || []).length
+            ? (r.tags || []).map(tg => `<span class="badge text-bg-secondary me-1 fw-normal">${esc(tg)}</span>`).join('')
+            : '<span class="text-muted">—</span>'}</td>`;
+        case 'match':      return _ell('small text-muted', _eventMatchSummary(r));
+        case 'channels':   return `<td>${_eventChannelsBadges(r)}</td>`;
+        case 'last_notif': return `<td class="small text-nowrap">${r.last_fired
+            ? `<span class="badge bg-${r.last_ok ? 'success' : 'danger'} me-1">${r.last_ok ? esc(t('event_ok')) : esc(t('event_err'))}</span>${esc(_evWhen(r.last_fired))}`
+            : '<span class="text-muted">—</span>'}</td>`;
+        case 'enabled':    return `<td class="text-center align-middle"><span class="form-switch d-inline-flex align-items-center m-0" style="padding-left:0;min-height:0;line-height:1">
+            <input class="form-check-input m-0" type="checkbox" role="switch" style="margin-left:0;margin-top:0;float:none;vertical-align:middle;cursor:pointer"${r.enabled ? ' checked' : ''}${canEdit ? '' : ' disabled'}
+                onchange="_eventToggleEnabled('${r.id}',this.checked)"></span></td>`;
+        case 'description':return _ell('small text-muted', r.description || '', '18rem');
+        case 'uid':        return `<td class="text-truncate" title="${escAttr(r.id || '')}"><code class="text-muted" style="font-size:.7rem">${esc(r.id || '')}</code></td>`;
+        case 'created_at': return `<td class="text-truncate small text-muted">${esc(_fmtDateTime(r.created_at))}</td>`;
+        case 'updated_at': return `<td class="text-truncate small text-muted">${esc(_fmtDateTime(r.updated_at))}</td>`;
+        case 'updated_by': return `<td class="text-truncate small text-muted" title="${escAttr(r.updated_by || '')}">${esc(r.updated_by || '—')}</td>`;
+        default:           return '<td></td>';
+    }
+}
+function _eventRulesBody() {
+    const tableWrap = document.getElementById('ev-rules-table-wrap');
+    if (!tableWrap) return;
+    const pagerTopEl = document.getElementById('ev-rules-pager-top');
+    const pagerBotEl = document.getElementById('ev-rules-pager-bottom');
+    const q = _eventSearch.trim().toLowerCase();
+    const canEdit = _evCan('events_edit');
+    const canDelete = _evCan('events_delete');
+    const canClone = _evCan('events_add');
+    const showActions = canEdit || canDelete || canClone;
+    let rows = _eventRules.filter(r => !q || (r.name || '').toLowerCase().includes(q)
+        || (r.source || '').toLowerCase().includes(q)
+        || (r.tags || []).some(tg => tg.toLowerCase().includes(q)));
+    rows = rows.slice().sort((a, b) => {
+        const va = _evrSortVal(a, _evrSort), vb = _evrSortVal(b, _evrSort);
+        const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
+        return _evrSortDir === 'asc' ? c : -c;
+    });
+    if (_evrPageSize === null) _evrPageSize = _defaultPageSize;
+    const total = rows.length;
+    const ps = _evrPageSize || total || 1;
+    _evrPage = Math.max(1, Math.min(_evrPage, Math.ceil((total || 1) / ps)));
+    const pageRows = rows.slice((_evrPage - 1) * ps, _evrPage * ps);
+    const ordered = _evOrdered(_EVR_COLS, _evrColOrder, _evrVisibleCols);
+    _evrPct = _evCW('ss_evrules_col_w');   // refresh from storage (remote sync may have changed it)
+    // Only the flexible columns get percentage widths; _EVR_FIT ones size to content.
+    const flexIds = ordered.filter(c => !_EVR_FIT.has(c.id)).map(c => c.id);
+    const wpct = _evPctMap(flexIds, _evrPct, _EVR_DEFW, 0);
+    const thRow = ordered.map(col => {
+        const inner = col.sortKey ? _thSortInner(col.label(), col.sortKey, _evrSort, _evrSortDir, '_sortEventRules')
+            : `<span class="small">${esc(col.label())}</span>`;
+        return _EVR_FIT.has(col.id)
+            ? `<th class="ss-th ss-th-fit" data-col="${col.id}" draggable="true" style="width:1%;white-space:nowrap">${inner}</th>`
+            : `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true" style="width:${wpct[col.id].toFixed(3)}%">${inner}</th>`;
+    }).join('');
+    const body = !total
+        ? `<tr><td colspan="${ordered.length + (showActions ? 1 : 0)}" class="text-center text-muted py-3">${esc(t('event_none'))}</td></tr>`
+        : pageRows.map(r => `<tr class="align-middle">
+            ${ordered.map(col => { const c = _evrCell(r, col.id, canEdit); return _EVR_FIT.has(col.id) ? c.replace('<td', '<td data-fit') : c; }).join('')}
+            ${showActions ? `<td data-fit class="text-nowrap text-end ss-td-actions">
+                ${canEdit ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('event_test'))}" onclick="_eventTestRule('${r.id}')"><i class="bi bi-send"></i></button>
+                <button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('edit'))}" onclick="openEventRuleModal('${r.id}')"><i class="bi bi-pencil"></i></button>` : ''}
+                ${canClone ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('clone'))}" onclick="cloneEventRuleModal('${r.id}')"><i class="bi bi-copy"></i></button>` : ''}
+                ${canDelete ? `<button class="btn btn-sm btn-link text-danger p-0" title="${escAttr(t('event_delete'))}" onclick="_eventDeleteRule('${r.id}')"><i class="bi bi-trash"></i></button>` : ''}
+            </td>` : ''}
+        </tr>`).join('');
+    const pagerHtml = total ? _renderPagination(total, _evrPage, _evrPageSize, '_goEvrPage', '_changeEvrPageSize') : '';
+    tableWrap.innerHTML = `<table class="table table-sm table-striped table-hover align-middle mb-0 ss-table" id="ev-rules-table" style="font-size:.85rem;table-layout:auto;width:100%">
+            <thead class="ss-thead"><tr>${thRow}${showActions ? `<th class="ss-th ss-th-fit text-end" style="width:1%;white-space:nowrap">${esc(t('col_actions'))}</th>` : ''}</tr></thead>
+            <tbody>${body}</tbody>
+        </table>`;
+    if (pagerTopEl) pagerTopEl.innerHTML = pagerHtml;
+    if (pagerBotEl) pagerBotEl.innerHTML = pagerHtml;
+    setTimeout(() => _evAttachPctCols('ev-rules-table',
+        () => _evrColOrder, o => { _evrColOrder = o; }, _evrSaveColOrder, _eventRulesBody, _evrPct, 'ss_evrules_col_w'), 0);
+}
+
+// Total number of matchers across all OR-groups (legacy single matcher = 1).
+function _evMatchersCount(r) {
+    if (Array.isArray(r.match_groups) && r.match_groups.length)
+        return r.match_groups.reduce((n, g) => n + (Array.isArray(g) ? g.length : 0), 0);
+    return (r.match_type && r.match_type !== 'any'
+            && (r.match_text || r.match_type === 'not_contains')) ? 1 : 0;
+}
+
+function _eventMatchSummary(r) {
+    if ((r.source || 'audit') === 'audit')
+        return (r.events && r.events.length) ? tf('event_n_events', r.events.length) : t('all');
+    const bits = [];
+    if (r.severity_max !== '' && r.severity_max != null)
+        bits.push('≤ ' + ((typeof _SYSLOG_SEV !== 'undefined' && _SYSLOG_SEV[r.severity_max]) || r.severity_max));
+    if (r.host) bits.push('host=' + r.host);
+    if (r.app) bits.push('app=' + r.app);
+    const n = _evMatchersCount(r);
+    if (n) bits.push(tf('event_n_matchers', n));
+    return bits.join(', ') || t('all');
+}
+
+// Ensure the draft has a normalised match_groups (OR-of-ANDs). Synthesises from a
+// legacy single match_type/match_text, and guarantees at least one group/matcher.
+// Conditions are STORED as match_groups (OR-of-ANDs / DNF), which is complete for
+// any boolean combination. The editor works on a FLAT list where each condition
+// after the first carries a join (AND/OR) to the previous one — more natural to
+// build. AND binds tighter than OR: a run of AND-joined matchers = one group, an
+// OR join starts a new group. We convert flat⇄DNF on load/save so the backend
+// (which evaluates match_groups) is untouched.
+function _evGroupsToFlat(groups) {
+    const flat = [];
+    (Array.isArray(groups) ? groups : []).forEach(g => {
+        (Array.isArray(g) ? g : []).forEach((m, mi) => {
+            if (!m || typeof m !== 'object') return;
+            flat.push({ field: m.field || 'message', type: m.type || 'contains', text: m.text || '',
+                        join: flat.length === 0 ? '' : (mi === 0 ? 'or' : 'and') });
+        });
+    });
+    return flat;
+}
+function _evFlatToGroups(flat) {
+    const groups = []; let cur = null;
+    (Array.isArray(flat) ? flat : []).forEach((m, i) => {
+        const matcher = { field: m.field || 'message', type: m.type || 'contains', text: m.text || '' };
+        if (i === 0 || m.join === 'or' || !cur) { cur = [matcher]; groups.push(cur); }   // OR → new group
+        else cur.push(matcher);                                                            // AND → same group
+    });
+    return groups;
+}
+function _evEnsureConditions(d) {
+    let groups = (Array.isArray(d.match_groups) ? d.match_groups : [])
+        .filter(Array.isArray)
+        .map(g => g.filter(m => m && typeof m === 'object')
+                   .map(m => ({ field: m.field || 'message', type: m.type || 'contains', text: m.text || '' })))
+        .filter(g => g.length);
+    // Legacy single matcher (rules saved before the conditions editor).
+    if (!groups.length && d.match_type && d.match_type !== 'any' && (d.match_text || d.match_type === 'not_contains'))
+        groups = [[{ field: 'message', type: d.match_type, text: d.match_text || '' }]];
+    // Migrate the OLD top-level filters (which were global AND preconditions) into
+    // every group as conditions, then drop them: host/app → 'equals', and the
+    // "min severity" threshold → 'severity ≤ N' (its original semantics).
+    const pre = [];
+    if (d.severity_max !== '' && d.severity_max != null)
+        pre.push({ field: 'severity', type: 'lte', text: String(d.severity_max) });
+    if (d.host) pre.push({ field: 'host', type: 'equals', text: String(d.host) });
+    if (d.app)  pre.push({ field: 'app',  type: 'equals', text: String(d.app) });
+    if (pre.length) {
+        groups = (groups.length ? groups : [[]]).map(g => [...pre.map(p => ({ ...p })), ...g]);
+        d.host = ''; d.app = ''; d.severity_max = '';
+    }
+    let flat = _evGroupsToFlat(groups);
+    if (!flat.length) flat = [{ field: 'message', type: 'contains', text: '', join: '' }];
+    flat[0].join = '';
+    d.conditions = flat;
+    delete d.match_type; delete d.match_text;
+}
+
+// ── Conditions editor (flat list with AND/OR connectors) ────────────────────
+function _evConditionsEditorHtml() {
+    const conds = _eventDraft.conditions || [];
+    // Operator options depend on the field (text vs numeric severity).
+    const mtOpts = (sel, fld) => _evOpsForField(fld).map(m =>
+        `<option value="${m}"${sel === m ? ' selected' : ''}>${esc(t('event_mt_' + m))}</option>`).join('');
+    const fldOpts = sel => ['message', 'host', 'app', 'severity'].map(f =>
+        `<option value="${f}"${sel === f ? ' selected' : ''}>${esc(t('event_field_' + f))}</option>`).join('');
+    // Value control: 'any' needs no value; severity → a level dropdown (0..7 with
+    // names); else free text.
+    const valueCtl = (m, i) => {
+        if (m.type === 'any')
+            return `<input class="form-control form-control-sm" disabled placeholder="${escAttr(t('event_any_no_value'))}">`;
+        if (m.field === 'severity') {
+            const opts = `<option value="">${esc(t('event_select') || '—')}</option>` +
+                (typeof _SYSLOG_SEV !== 'undefined' ? _SYSLOG_SEV : []).map((n, s) =>
+                    `<option value="${s}"${String(m.text) === String(s) ? ' selected' : ''}>${s} — ${esc(t('event_sevname_' + s) || n)}</option>`).join('');
+            return `<select class="form-select form-select-sm ev-sevsel" onchange="_evCondSet(${i},'text',this.value)">${opts}</select>`;
+        }
+        return `<input class="form-control form-control-sm" value="${escAttr(m.text || '')}" placeholder="${escAttr(t('event_match_text_ph'))}"
+                oninput="_evCondSet(${i},'text',this.value)">`;
+    };
+    const joinOpts = sel => [['and', t('event_and')], ['or', t('event_or')]].map(([v, l]) =>
+        `<option value="${v}"${sel === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
+    // Same <select> box as the connectors below, just hidden — so the first row's
+    // field/type/text align exactly with the rows that have an AND/OR connector.
+    const _joinStyle = 'width:4.5rem;flex:0 0 4.5rem;padding-left:.4rem;padding-right:1rem';
+    const leadSpacer = `<select class="form-select form-select-sm" style="${_joinStyle};visibility:hidden" tabindex="-1"><option>${esc(t('event_or'))}</option></select>`;
+    const rows = conds.map((m, i) => {
+        const lead = i === 0 ? leadSpacer
+            : `<select class="form-select form-select-sm fw-bold" style="${_joinStyle}" onchange="_evCondSet(${i},'join',this.value)">${joinOpts(m.join || 'and')}</select>`;
+        return `<div class="d-flex gap-1 mb-1 align-items-center">
+            ${lead}
+            <select class="form-select form-select-sm" style="max-width:8rem" onchange="_evCondSet(${i},'field',this.value)">${fldOpts(m.field || 'message')}</select>
+            <select class="form-select form-select-sm" style="max-width:10rem" onchange="_evCondSet(${i},'type',this.value)">${mtOpts(m.type, m.field || 'message')}</select>
+            ${valueCtl(m, i)}
+            <button class="btn btn-sm btn-danger" type="button" title="${escAttr(t('delete'))}"${conds.length <= 1 ? ' disabled' : ''}
+                onclick="_evCondRemove(${i})"><i class="bi bi-x-lg"></i></button>
+        </div>`;
+    }).join('');
+    return rows + `<button class="btn btn-sm btn-secondary mt-1" type="button" onclick="_evCondAdd()">
+        <i class="bi bi-plus-lg me-1"></i>${esc(t('event_add_cond'))}</button>`;
+}
+function _evRerenderMatch() {
+    const el = document.getElementById('evm-match-wrap');
+    if (el) el.innerHTML = _evConditionsEditorHtml();
+}
+function _evCondSet(i, field, value) {
+    const c = _eventDraft.conditions[i];
+    if (!c) return;
+    c[field] = value;
+    if (field === 'field') {
+        // Field changed: keep the operator if still valid, else a sensible default;
+        // a severity value must be a level number.
+        const ops = _evOpsForField(value);
+        if (!ops.includes(c.type)) c.type = (value === 'severity') ? 'lte' : 'contains';
+        if (value === 'severity' && !/^[0-7]$/.test(String(c.text))) c.text = '';
+        _evRerenderMatch();
+    } else if (field === 'type') {
+        _evRerenderMatch();   // the value control may change (any → none, severity → dropdown)
+    }
+    // text / join: the control already holds its value, no re-render needed
+}
+function _evCondAdd() { _eventDraft.conditions.push({ field: 'message', type: 'contains', text: '', join: 'and' }); _evRerenderMatch(); }
+function _evCondRemove(i) {
+    _eventDraft.conditions.splice(i, 1);
+    if (!_eventDraft.conditions.length) _eventDraft.conditions = [{ field: 'message', type: 'contains', text: '', join: '' }];
+    _eventDraft.conditions[0].join = '';   // the first row never has a connector
+    _evRerenderMatch();
+}
+
+function _eventChannelsBadges(r) {
+    const icon = { telegram: 'bi-telegram', email: 'bi-envelope', webhook: 'bi-broadcast' };
+    return (r.channels || []).map(c => {
+        const n = (c === 'webhook' && (r.webhook_ids || []).length) ? (r.webhook_ids.length) : '';
+        const title = c === 'webhook' && n ? `${t('event_ch_webhook')} (${n})` : t('event_ch_' + c);
+        return `<span class="me-1 text-nowrap" title="${escAttr(title)}"><i class="bi ${icon[c] || 'bi-bell'}"></i>${n ? `<sup>${n}</sup>` : ''}</span>`;
+    }).join('') || '<span class="text-muted">—</span>';
+}
+
+// Focus the Name field once the modal is shown — caret at the START, no selection.
+function _evFocusName() {
+    document.getElementById('eventRuleModal').addEventListener('shown.bs.modal', () => {
+        const n = document.getElementById('evm-name');
+        if (n) { n.focus(); try { n.setSelectionRange(0, 0); } catch (_) {} }
+    }, { once: true });
+}
+
+// ── Modal (add/edit) ────────────────────────────────────────────────────────

@@ -1,0 +1,532 @@
+function openNewHostModal() {
+    _editingHostUid = null;
+    _hostModalReadonly = false;   // reachable only with edit rights (toolbar-gated)
+    _hostDraft = { name: '', address: '', kind: 'local', os: 'auto', maintenance: false,
+                   tags: [], description: '', profiles: {} };
+    document.getElementById('hostModalTitle').textContent = t('host_new');
+    _hostChecks = _buildHostChecks(null);
+    _hostCheckFilters = {};
+    _hostShownMods = new Set();   // new host: start empty, add modules as needed
+    _snapshotHost();              // Undo baseline
+    _renderHostModalBody();
+    const err = document.getElementById('hostModalError'); if (err) err.textContent = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('hostModal')).show();
+}
+
+// Clone a host: a small modal asks for the new name (prefilled "<name> (copia)")
+// and address; on save the server duplicates the stored host (profiles + secrets)
+// under a new uid. "Save & edit" then opens the clone in the editor.
+let _cloneHostSourceUid = null;
+
+// Module checks bound to a host → [{module, coll, key, label}] (for the clone
+// picker). A multi-host (cluster) check the host is a member of is included too.
+function _hostBoundChecks(uid) {
+    const out = [];
+    for (const [mk, mc] of Object.entries(modulesData || {})) {
+        if (!mc || typeof mc !== 'object' || mk.startsWith('__')) continue;
+        for (const [coll, items] of Object.entries(mc)) {
+            if (coll.startsWith('__') || !items || typeof items !== 'object') continue;
+            for (const [key, v] of Object.entries(items)) {
+                if (!v || typeof v !== 'object') continue;
+                const bound = String(v.host_uid || '') === String(uid)
+                    || (Array.isArray(v.host_uids) && v.host_uids.map(String).includes(String(uid)));
+                if (bound) out.push({ module: mk, coll, key, label: (v.label || key) });
+            }
+        }
+    }
+    return out;
+}
+
+function _renderCloneChecks(uid) {
+    const wrap = document.getElementById('hostCloneChecksWrap');
+    const box  = document.getElementById('hostCloneChecks');
+    if (!wrap || !box) return;
+    const checks = _hostBoundChecks(uid);
+    if (!checks.length) { wrap.classList.add('d-none'); box.innerHTML = ''; return; }
+    wrap.classList.remove('d-none');
+    box.innerHTML = checks.map(c =>
+        `<label class="form-check d-flex align-items-center gap-2 mb-1" style="cursor:pointer">
+            <input class="form-check-input mt-0" type="checkbox" checked value="${escAttr(c.key)}" data-clone-check
+                   onchange="_cloneChecksCount()">
+            <span class="text-truncate"><span class="badge bg-secondary me-1" style="font-size:.62rem">${esc(_modPrettyName(c.module, modulesData[c.module] || {}))}</span>${esc(c.label)}</span>
+        </label>`).join('');
+    _cloneChecksCount();
+}
+// "All" / "None" buttons: tick or untick every check.
+function _cloneChecksToggleAll(on) {
+    document.querySelectorAll('#hostCloneChecks input[data-clone-check]').forEach(cb => { cb.checked = on; });
+    _cloneChecksCount();
+}
+// Update the "selected/total" counter next to the section title.
+function _cloneChecksCount() {
+    const cbs = [...document.querySelectorAll('#hostCloneChecks input[data-clone-check]')];
+    const el = document.getElementById('hostCloneChecksCount');
+    if (el) el.textContent = `${cbs.filter(cb => cb.checked).length}/${cbs.length}`;
+}
+
+function openCloneHostModal(uid) {
+    const host = hostsData[uid];
+    if (!host) return;
+    _cloneHostSourceUid = uid;
+    const nameEl = document.getElementById('hostCloneName');
+    const addrEl = document.getElementById('hostCloneAddress');
+    const errEl  = document.getElementById('hostCloneError');
+    if (errEl) errEl.textContent = '';
+    if (nameEl) nameEl.value = `${host.name || ''} (${t('host_clone_copy_suffix')})`;
+    if (addrEl) addrEl.value = host.address || '';
+    _renderCloneChecks(uid);
+    const modalEl = document.getElementById('hostCloneModal');
+    // Focus AFTER Bootstrap finishes showing (it moves focus to the modal itself),
+    // otherwise our focus/select is immediately stolen → odd flash.
+    modalEl.addEventListener('shown.bs.modal',
+        () => { if (nameEl) nameEl.focus(); }, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+async function _cloneHostSubmit(openEdit) {
+    if (!_cloneHostSourceUid) return;
+    const name = (document.getElementById('hostCloneName')?.value || '').trim();
+    const address = (document.getElementById('hostCloneAddress')?.value || '').trim();
+    const errEl = document.getElementById('hostCloneError');
+    if (!name) { if (errEl) errEl.textContent = t('host_name_required') || t('invalid'); return; }
+    // Selected checks to clone. When the section is shown, only the ticked ones
+    // are cloned (an empty selection clones no checks). When absent → clone all.
+    const wrap = document.getElementById('hostCloneChecksWrap');
+    const reqBody = { name, address };
+    if (wrap && !wrap.classList.contains('d-none')) {
+        reqBody.checks = [...document.querySelectorAll('#hostCloneChecks input[data-clone-check]:checked')]
+            .map(cb => cb.value);
+    }
+    const res = await apiPost('/api/v1/hosts/' + encodeURIComponent(_cloneHostSourceUid) + '/clone', reqBody);
+    const data = res && res.data;
+    if (!res || res.status !== 200 || !data || !data.uid) {
+        if (errEl) errEl.textContent = (data && data.error) || t('connection_error');
+        return;
+    }
+    bootstrap.Modal.getInstance(document.getElementById('hostCloneModal'))?.hide();
+    const newUid = data.uid;
+    await loadHosts();
+    // Module checks bound to the source were duplicated server-side → refresh the
+    // modules config so the editor (and Modules tab) show the cloned checks.
+    if (data.checks_cloned) {
+        modulesData = await apiGet('/api/v1/modules') || modulesData;
+        if (typeof renderModules === 'function') renderModules();
+    }
+    renderServers();
+    const n = data.checks_cloned || 0;
+    showToast(n ? `${t('host_clone_done')} (${n})` : t('host_clone_done'), 'success');
+    if (openEdit) openEditHostModal(newUid);
+}
+
+function openEditHostModal(uid) {
+    const host = hostsData[uid];
+    if (!host) return;
+    _editingHostUid = uid;
+    // View-only users (no edit rights on this host) can open it to inspect, but
+    // the modal is locked: fields disabled and the save/test actions hidden.
+    _hostModalReadonly = !_canEditHost(uid);
+    // Deep copy so edits aren't applied until saved.
+    _hostDraft = JSON.parse(JSON.stringify({
+        name: host.name || '', address: host.address || '',
+        kind: host.kind || 'local', os: host.os || 'auto', maintenance: !!host.maintenance,
+        tags: host.tags || [], description: host.description || '',
+        profiles: host.profiles || {},
+    }));
+    // Infer the SSH auth method for hosts saved before the selector existed:
+    // a file path → 'file'; stored key text (present, possibly masked) → 'text';
+    // otherwise password (the default).
+    const _ssh = _hostDraft.profiles && _hostDraft.profiles.ssh;
+    if (_ssh && _ssh.ssh_auth_method === undefined) {
+        _ssh.ssh_auth_method = _ssh.ssh_key ? 'file'
+            : (_ssh.ssh_key_string !== undefined ? 'text' : 'password');
+    }
+    _hostChecks = _buildHostChecks(uid);
+    _hostCheckFilters = {};
+    // Show the modules the host monitors: the persisted list (so a module added
+    // with no checks yet still appears) ∪ any module that has bound checks.
+    const _savedMods = Array.isArray(host.modules) ? host.modules : [];
+    _hostShownMods = new Set([
+        ..._savedMods.filter(m => m in _hostChecks),
+        ...Object.keys(_hostChecks).filter(m => (_hostChecks[m]._existingKeys || []).length > 0),
+    ]);
+    _snapshotHost();              // Undo baseline
+    const _hName = (_hostDraft.name || host.name || '').trim();
+    document.getElementById('hostModalTitle').textContent =
+        t(_hostModalReadonly ? 'host_view' : 'host_edit') + (_hName ? ': ' + _hName : '');
+    _renderHostModalBody();
+    const err = document.getElementById('hostModalError'); if (err) err.textContent = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('hostModal')).show();
+}
+
+function _renderHostModalBody() {
+    const d = _hostDraft;
+    // General tab: the server's own data (identity, kind/OS, maintenance, SSH).
+    const general = `<div class="row g-3">
+        <div class="col-sm-6">
+            <label class="form-label small fw-semibold">${esc(t('host_name'))}</label>
+            <input type="text" class="form-control form-control-sm" id="hmName"
+                   value="${escAttr(d.name)}" oninput="_hostDraft.name=this.value">
+        </div>
+        <div class="col-sm-6">
+            <label class="form-label small fw-semibold">${esc(t('host_address'))}</label>
+            <input type="text" class="form-control form-control-sm" id="hmAddress"
+                   value="${escAttr(d.address)}" oninput="_hostDraft.address=this.value"
+                   placeholder="host / IP">
+        </div>
+        <div class="col-sm-6">
+            <label class="form-label small fw-semibold">${esc(t('col_host_tags'))}</label>
+            <input type="text" class="form-control form-control-sm" id="hmTags"
+                   value="${escAttr((d.tags || []).join(', '))}"
+                   oninput="_hostDraft.tags=this.value.split(',').map(s=>s.trim()).filter(Boolean)"
+                   placeholder="prod, db">
+        </div>
+        <div class="col-sm-6">
+            <label class="form-label small fw-semibold">${esc(t('host_kind'))}</label>
+            <select class="form-select form-select-sm" id="hmKind" onchange="_onHostKindChange(this.value)">
+                <option value="local" ${d.kind !== 'remote' ? 'selected' : ''}>${esc(t('host_kind_local'))}</option>
+                <option value="remote" ${d.kind === 'remote' ? 'selected' : ''}>${esc(t('host_kind_remote'))}</option>
+            </select>
+            <div class="form-text small">${esc(t('host_kind_hint'))}</div>
+        </div>
+        <div class="col-sm-6" id="hmOsWrap">${_renderOsField()}</div>
+        <div class="col-sm-6 d-flex align-items-center">
+            <div class="form-check form-switch mt-3">
+                <input class="form-check-input" type="checkbox" id="hmMaint" ${d.maintenance ? 'checked' : ''}
+                       onchange="_hostDraft.maintenance=this.checked">
+                <label class="form-check-label small fw-semibold" for="hmMaint">
+                    <i class="bi bi-cone-striped me-1"></i>${esc(t('host_maintenance'))}</label>
+                <div class="form-text small">${esc(t('host_maintenance_hint'))}</div>
+            </div>
+        </div>
+    </div>
+    <div id="hmSshConnWrap" class="mt-3">${_renderSshConnection()}</div>
+    <div class="mt-3 flex-grow-1 d-flex flex-column" style="min-height:0">
+        <label class="form-label small fw-semibold">${esc(t('host_description'))}</label>
+        <textarea class="form-control form-control-sm flex-grow-1" id="hmDesc" style="resize:none;min-height:0"
+                  oninput="_hostDraft.description=this.value">${esc(d.description)}</textarea>
+    </div>`;
+
+    // The "Test server" button lives in the modal footer; results open in a
+    // separate modal (#hostTestModal) so they don't disrupt this form.
+    // Two tabs: General (server data) and Monitoring (per-module checks).  All
+    // connection settings live on each module's check — there is no separate
+    // Credentials tab; the host only provides the address (+ SSH in General).
+    const _canSyslog = (currentUser.permissions || []).includes('syslog_view');
+    let h = `<ul class="nav nav-tabs mb-3" role="tablist">
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab"
+            data-bs-target="#hmTabGeneral" type="button">
+            <i class="bi bi-hdd me-1"></i>${esc(t('host_tab_general'))}</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
+            data-bs-target="#hmTabMonitor" type="button">
+            <i class="bi bi-activity me-1"></i>${esc(t('host_tab_monitoring'))}</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
+            data-bs-target="#hmTabLatest" type="button" onclick="_loadHostLatestData()">
+            <i class="bi bi-clock-history me-1"></i>${esc(t('host_tab_latest'))}</button></li>
+        ${_canSyslog ? `<li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
+            data-bs-target="#hmTabLogs" type="button" onclick="_loadHostLogs()">
+            <i class="bi bi-card-list me-1"></i>${esc(t('host_tab_logs'))}</button></li>` : ''}
+    </ul>
+    <div class="tab-content gm-tab-content">
+        <div class="tab-pane fade show active" id="hmTabGeneral">${general}</div>
+        <div class="tab-pane fade" id="hmTabMonitor"><div id="hmMonitorBody">${_renderMonitoringSection()}</div></div>
+        <div class="tab-pane fade" id="hmTabLatest" data-ro-keep="1">
+            <div class="d-flex align-items-center mb-2">
+                <span class="small text-muted me-auto">${esc(t('host_latest_hint'))}</span>
+                ${_latestFilterSelect('hmLatestFilter', _hmLatestFilter, '_hmSetLatestFilter')}
+                <button class="btn btn-sm btn-secondary" onclick="_loadHostLatestData()" title="${escAttr(t('refresh'))}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+            </div>
+            <div id="hmLatestBody"></div>
+        </div>
+        ${_canSyslog ? `<div class="tab-pane fade" id="hmTabLogs" data-ro-keep="1">
+            <div class="d-flex align-items-center mb-2 flex-shrink-0">
+                <span class="small text-muted me-auto">${esc(t('host_logs_hint'))}</span>
+                <button class="btn btn-sm btn-secondary" onclick="_loadHostLogs()" title="${escAttr(t('refresh'))}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+            </div>
+            <div id="hmLogsBody" class="flex-grow-1 d-flex flex-column" style="min-height:0"></div>
+        </div>` : ''}
+    </div>`;
+    const body = document.getElementById('hostModalBody');
+    body.innerHTML = h;
+    initTooltips(body);   // activate the field info-icon tooltips
+    _applyHostModalPerms();   // lock the fields/actions when opened read-only
+}
+
+// Enforce the host modal's read-only state (set by openEditHostModal from the
+// per-host edit permission). Re-run after every body render: disable all fields
+// and body action buttons (tab nav stays usable) and hide the footer save/test/
+// undo actions, leaving only Cancel. No-op when the user can edit.
+function _applyHostModalPerms() {
+    const modal = document.getElementById('hostModal');
+    if (!modal) return;
+    const ro = _hostModalReadonly;
+    // Controls inside a [data-ro-keep] region are pure VIEW controls (Latest data /
+    // Logs filters, refresh, pagination) — they stay active even read-only.
+    modal.querySelectorAll('#hostModalBody input, #hostModalBody select, #hostModalBody textarea')
+        .forEach(el => { el.disabled = ro && !el.closest('[data-ro-keep]'); });
+    modal.querySelectorAll('#hostModalBody button').forEach(b => {
+        if (b.getAttribute('data-bs-toggle') === 'tab') return;   // keep tab navigation
+        b.disabled = ro && !b.closest('[data-ro-keep]');
+    });
+    modal.querySelectorAll('.modal-footer button').forEach(b => {
+        if (b.hasAttribute('data-bs-dismiss')) return;            // keep the Cancel button
+        b.classList.toggle('d-none', ro);
+    });
+    const title = document.getElementById('hostModalTitle');
+    if (title && ro) title.textContent = t('host_view');
+}
+
+// Collapsible card wrapper (host modal). The header (chevron + title) toggles
+// the body; action controls on the right are excluded from the toggle.
+//   id          unique collapse target id
+//   titleHtml   left-side header content (icon + title)
+//   actionsHtml right-side controls (buttons/switch) — clicks don't collapse
+//   bodyHtml    collapsible content
+//   expanded    initial state (default true)
+//   border      optional border class (e.g. 'border-info')
+function _collapsibleCard(id, titleHtml, actionsHtml, bodyHtml, expanded, border) {
+    const open = expanded !== false;
+    return `<div class="card mb-2 ${border || ''}">
+        <div class="card-body p-0">
+            <div class="d-flex align-items-center px-2 py-1">
+                <div class="ss-collapse-head d-flex align-items-center flex-grow-1${open ? '' : ' collapsed'}"
+                     data-bs-toggle="collapse" data-bs-target="#${id}" role="button" aria-expanded="${open}">
+                    <i class="bi bi-chevron-down ss-collapse-caret me-2"></i>
+                    ${titleHtml}
+                </div>
+                ${actionsHtml ? `<div class="ms-auto ps-2" onclick="event.stopPropagation()">${actionsHtml}</div>` : ''}
+            </div>
+            <div id="${id}" class="collapse${open ? ' show' : ''}">
+                <div class="px-2 pb-2 pt-1">${bodyHtml}</div>
+            </div>
+        </div>
+    </div>`;
+}
+
+// ── SSH connection (core, host-level) ───────────────────────────────
+// SSH is the server's own connection (not a module credential): shown only for
+// a remote host, reused by any module that runs commands on / tunnels through
+// the box.  Driven by the built-in HOST_PROFILES['ssh'] profile.
+function _renderSshConnection() {
+    if (_hostDraft.kind !== 'remote') return '';
+    const spec = HOST_PROFILES['ssh'];
+    if (!spec) return '';
+    const title = `<span class="fw-semibold"><i class="bi bi-hdd-network me-1"></i>${esc(t('host_ssh_conn'))}</span>`;
+    const actions = `<button class="btn btn-sm btn-info py-0 px-2" type="button" onclick="testHostSsh()">
+            <i class="bi bi-plug me-1"></i>${esc(t('host_ssh_test'))}</button>`;
+    const body = `<div class="small text-muted mb-2">${esc(t('host_ssh_hint'))}</div>
+        <div class="row g-2" id="hmSshFields">${_renderSshFields()}</div>`;
+    return `<div class="mb-3">${_collapsibleCard('hmSshCard', title, actions, body, false, 'border-info')}</div>`;
+}
+
+// Render the SSH profile's editable fields with the profile's own values as the
+// show_when context, so the key-source selector toggles the file/text field.
+// SSH identity fields supplied by a credential — hidden when one is selected.
+const _SSH_IDENTITY_FIELDS = new Set(['ssh_user', 'ssh_auth_method', 'ssh_password', 'ssh_key', 'ssh_key_string']);
+
+function _renderSshFields() {
+    const spec = HOST_PROFILES['ssh'];
+    if (!spec) return '';
+    const prof = (_hostDraft.profiles && _hostDraft.profiles.ssh) || {};
+    const usingCred = !!prof.cred_uid;
+    const eff = {};
+    for (const f of (spec.fields || [])) {
+        eff[f.name] = (prof[f.name] !== undefined && prof[f.name] !== null) ? prof[f.name] : f.default;
+    }
+    const ctx = { mod: '__host__', fields: eff };
+    // Reusable-credential picker, placed right before the SSH user.  When a
+    // credential is chosen it supplies the identity, so the inline user/auth/
+    // secret fields are hidden (port and host-key policy stay).
+    const picker = `<div class="col-12">
+        <label class="form-label form-label-sm mb-1">${esc(t('cred_use'))}</label>
+        <select class="form-select form-select-sm ss-cred-picker" data-cred-ctype="ssh" onchange="_setProfileField('ssh','cred_uid',this.value)">${credentialOptions(prof.cred_uid, 'ssh')}</select>
+        <div class="form-text small">${esc(t('cred_use_hint'))}</div>
+    </div>`;
+    let out = '';
+    let inserted = false;
+    for (const f of (spec.fields || [])) {
+        if (f.name === spec.address_field) continue;
+        if (f.name === 'ssh_user') { out += picker; inserted = true; }
+        if (usingCred && _SSH_IDENTITY_FIELDS.has(f.name)) continue;
+        out += _hostFieldRow(f, prof[f.name] !== undefined ? prof[f.name] : f.default,
+            `_setProfileField('ssh',${jsStr(f.name)},`, ctx);
+    }
+    if (!inserted) out = picker + out;
+    return out;
+}
+
+// ── Operating-system selector (auto / fixed) ────────────────────────
+function _osLabel(o) { return t('host_os_' + o) || o; }
+
+function _renderOsField() {
+    const d = _hostDraft;
+    const cur = d.os || 'auto';
+    const opts = (HOST_OS_OPTIONS && HOST_OS_OPTIONS.length)
+        ? HOST_OS_OPTIONS : ['auto', 'linux', 'windows', 'darwin', 'freebsd', 'other'];
+    const sel = opts.map(o =>
+        `<option value="${escAttr(o)}" ${cur === o ? 'selected' : ''}>${esc(_osLabel(o))}</option>`).join('');
+    let hint = '';
+    if (cur === 'auto') {
+        hint = d.kind === 'remote'
+            ? t('host_os_auto_remote')
+            : tf('host_os_auto_local', _osLabel(LOCAL_OS || 'other'));
+    }
+    return `<label class="form-label small fw-semibold">${esc(t('host_os'))}</label>
+        <select class="form-select form-select-sm" id="hmOs" onchange="_hostDraft.os=this.value;_refreshOsField()">${sel}</select>
+        ${hint ? `<div class="form-text small">${esc(hint)}</div>` : ''}`;
+}
+
+function _refreshOsField() {
+    const el = document.getElementById('hmOsWrap');
+    if (el) el.innerHTML = _renderOsField();
+}
+
+// Toggle the SSH block when local/remote changes (no full re-render needed).
+function _onHostKindChange(kind) {
+    _hostDraft.kind = (kind === 'remote') ? 'remote' : 'local';
+    const wrap = document.getElementById('hmSshConnWrap');
+    if (wrap) { wrap.innerHTML = _renderSshConnection(); initTooltips(wrap); }
+    _refreshOsField();   // the 'auto' hint depends on local vs remote
+}
+
+async function testHostSsh() {
+    // Send only the chosen method's credentials so a stale/masked value of
+    // another method isn't restored server-side and used instead.
+    const ssh = { ...(_hostDraft.profiles.ssh || {}) };
+    const m = ssh.ssh_auth_method || 'password';
+    if (m !== 'password') delete ssh.ssh_password;
+    if (m !== 'file')     delete ssh.ssh_key;
+    if (m !== 'text')     delete ssh.ssh_key_string;
+    const body = { uid: _editingHostUid || '', address: _hostDraft.address || '',
+                   profiles: { ssh } };
+    const res = await apiPost('/api/v1/hosts/test_ssh', body);
+    const d = res && res.data;
+    if (d && d.ok) {
+        let msg = d.message || t('host_ssh_ok');
+        // Reflect the OS detected over the connection; if the selector is on
+        // 'auto', adopt the detected value so it gets stored explicitly.
+        if (d.os) {
+            msg += ` — ${t('host_os')}: ${_osLabel(d.os)}`;
+            if ((_hostDraft.os || 'auto') === 'auto') { _hostDraft.os = d.os; _refreshOsField(); }
+        }
+        showToast(msg, 'success');
+    } else {
+        showToast((d && d.message) || (t('error') || 'Error'), 'danger');
+    }
+}
+
+// ── Server test (SSH connection + running each bound check once) ────
+// The current draft connection is sent so an unsaved/edited host is tested as
+// shown; the server resolves it (and restores masked secrets) before running.
+function _hostDraftPayload() {
+    return {
+        host_uid: _editingHostUid || '',
+        _host: {
+            address: _hostDraft.address || '', kind: _hostDraft.kind || 'local',
+            os: _hostDraft.os || 'auto', profiles: _hostDraft.profiles || {},
+        },
+    };
+}
+
+function _hostChecksPayload() {
+    const checks = [];
+    for (const [mod, st] of Object.entries(_hostChecks)) {
+        for (const it of st.items) {
+            if (!it.enabled) continue;                 // test what would actually run
+            checks.push({ module: mod, collection: st.collection,
+                          key: it._key || '', fields: { ...it.fields }, cred_uid: it.cred_uid || '' });
+        }
+    }
+    return checks;
+}
+
+// Open the results modal (over the edit-host modal) with a spinner.
+function _openHostTestModal(titleText) {
+    const titleEl = document.getElementById('hostTestModalTitle');
+    if (titleEl) titleEl.textContent = titleText;
+    const body = document.getElementById('hostTestModalBody');
+    if (body) body.innerHTML = `<div class="text-center py-4 text-muted">
+        <div class="spinner-border spinner-border-sm me-2"></div>${esc(t('host_test_running'))}</div>`;
+    const sum = document.getElementById('hostTestModalSummary');
+    if (sum) sum.innerHTML = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('hostTestModal')).show();
+}
+
+async function testHostServer() {
+    _openHostTestModal(t('host_test') + (_hostDraft.name ? ' — ' + _hostDraft.name : ''));
+    const res = await apiPost('/api/v1/hosts/test', { ..._hostDraftPayload(), checks: _hostChecksPayload() });
+    _renderHostTestResults(res && res.data);
+}
+
+function _renderHostTestResults(d) {
+    const body = document.getElementById('hostTestModalBody');
+    const sum  = document.getElementById('hostTestModalSummary');
+    if (!d) {
+        if (body) body.innerHTML = `<div class="text-center py-4 text-danger">
+            <i class="bi bi-exclamation-triangle me-2"></i>${esc(t('error') || 'Error')}</div>`;
+        return;
+    }
+    const rows = [];
+    if (d.ssh) rows.push({ label: t('host_ssh_conn'), ok: d.ssh.ok, message: d.ssh.message });
+    for (const r of (d.results || [])) {
+        const modName = modulePrettyName(r.module, {}) || r.module;
+        // Main label = module + item name; the opaque key/UID shown small below.
+        const label = r.name ? `${modName} — ${r.name}` : modName;
+        const sub = (r.key && r.key !== r.name) ? r.key : '';
+        rows.push({ label, sub, ok: r.ok, message: r.message });
+    }
+    const okc = rows.filter(r => r.ok).length;
+    if (sum) {
+        sum.innerHTML = rows.length
+            ? `<span class="badge ${d.ok ? 'text-bg-success' : 'text-bg-warning'}">${okc}/${rows.length} OK</span>`
+            : '';
+    }
+    if (!body) return;
+    body.innerHTML = rows.length
+        ? rows.map(r => `<div class="d-flex align-items-start gap-2 px-2 py-2 border rounded mb-1"
+                style="background:var(--bs-body-bg)">
+            <i class="bi ${r.ok ? 'bi-check-circle-fill text-success' : 'bi-exclamation-triangle-fill text-warning'} flex-shrink-0 mt-1"></i>
+            <div class="flex-grow-1 min-w-0">
+                <div class="small fw-semibold">${esc(r.label)}</div>
+                ${r.sub ? `<div class="text-muted font-monospace text-break" style="font-size:.68rem">${esc(r.sub)}</div>` : ''}
+                <div class="small text-muted text-break">${esc(r.message || '')}</div>
+            </div></div>`).join('')
+        : `<div class="text-center py-4 text-muted">${esc(t('host_test_none'))}</div>`;
+}
+
+async function testHostCheck(mod, i) {
+    const st = _hostChecks[mod];
+    const it = st && st.items[i];
+    if (!it) return;
+    showToast(t('host_test_running') || 'Testing…');
+    const res = await apiPost('/api/v1/hosts/test_check', {
+        ..._hostDraftPayload(), module: mod, collection: st.collection,
+        key: it._key || '', fields: { ...it.fields }, cred_uid: it.cred_uid || '',
+    });
+    const d = res && res.data;
+    if (!d) { showToast(t('error') || 'Error', 'danger'); return; }
+    const msg = (d.results || []).map(r => `${r.ok ? '✅' : '⚠️'} ${r.message || r.key}`).join(' · ')
+        || (d.ok ? 'OK' : (t('host_test_none') || '—'));
+    showToast(msg, d.ok ? 'success' : 'warning');
+}
+
+// Test every check of ONE module at once (module-level "test all").
+async function testHostModule(mod) {
+    const st = _hostChecks[mod];
+    if (!st) return;
+    const checks = st.items
+        .filter(it => it.enabled)
+        .map(it => ({ module: mod, collection: st.collection, key: it._key || '',
+                      fields: { ...it.fields }, cred_uid: it.cred_uid || '' }));
+    if (!checks.length) { showToast(t('host_test_none') || '—'); return; }
+    _openHostTestModal(_modPrettyName(mod));
+    // no_ssh: a module-scoped test skips the host's SSH connection check.
+    const res = await apiPost('/api/v1/hosts/test', { ..._hostDraftPayload(), checks, no_ssh: true });
+    _renderHostTestResults(res && res.data);
+}
+
+// "Latest data" tab: the last recorded results (daemon's status.json) for this
+// host's bound checks, with their metrics (battery %, latency, temp, …).
+let _hmLatestFilter = 'all';   // 'all' | 'issues' | 'errors'
+let _hmLatestRows = [];         // cached results so the filter re-renders w/o refetch

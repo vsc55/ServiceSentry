@@ -1,0 +1,134 @@
+function _sldToggleCol(col) {
+    _sldVisibleCols.has(col) ? _sldVisibleCols.delete(col) : _sldVisibleCols.add(col);
+    localStorage.setItem('ss_sldrops_cols', JSON.stringify([..._sldVisibleCols]));
+    _persistTableConfig(); _sldBody();
+}
+function _resetSldCols() {
+    _sldVisibleCols = new Set(_SLD_DEFAULT_COLS); _sldColOrder = _SLD_COLS.map(c => c.id);
+    localStorage.setItem('ss_sldrops_cols', JSON.stringify([..._sldVisibleCols]));
+    localStorage.setItem('ss_sldrops_col_order', JSON.stringify(_sldColOrder));
+    localStorage.removeItem('ss_sldrops_col_w');
+    _persistTableConfig(); _sldBody();
+}
+function _sldSaveColOrder() { localStorage.setItem('ss_sldrops_col_order', JSON.stringify(_sldColOrder)); _persistTableConfig(); }
+function _sortSldrops(col) {
+    if (_sldSort === col) _sldSortDir = _sldSortDir === 'asc' ? 'desc' : 'asc';
+    else { _sldSort = col; _sldSortDir = 'asc'; }
+    _sldBody();
+}
+function _sldSortVal(x, key) {
+    switch (key) {
+        case 'uid':        return (x.uid || '').toLowerCase();
+        case 'source':     return (x.source || '').toLowerCase();
+        case 'transport':  return (x.transport || '').toLowerCase();
+        case 'count':      return x.count || 0;
+        case 'last_seen':  return x.last_seen || 0;
+        case 'first_seen': return x.first_seen || 0;
+        default:           return '';
+    }
+}
+function _sldCell(x, colId) {
+    const _dt = ts => esc(ts ? new Date(ts * 1000).toLocaleString() : '');
+    switch (colId) {
+        case 'uid':       return `<td><code class="text-muted" style="font-size:.7rem">${esc(x.uid || '')}</code></td>`;
+        case 'source':    return `<td><code>${esc(x.source || '')}</code></td>`;
+        case 'transport': return `<td>${esc(x.transport || '')}</td>`;
+        case 'count':     return `<td class="text-end">${esc(String(x.count))}</td>`;
+        case 'last':      return `<td class="text-muted text-nowrap">${_dt(x.last_seen)}</td>`;
+        case 'first':     return `<td class="text-muted text-nowrap">${_dt(x.first_seen)}</td>`;
+        default:          return '<td></td>';
+    }
+}
+function _sldBody() {
+    const wrap = document.getElementById('sl-drops-body');
+    if (!wrap) return;
+    const canDel = _syslogCanDelete();
+    const q = (_sldSearch || '').trim().toLowerCase();
+    const rows = _slDropsData
+        .filter(x => !q || (x.source || '').toLowerCase().includes(q) || (x.uid || '').toLowerCase().includes(q))
+        .sort((a, b) => {
+        const va = _sldSortVal(a, _sldSort), vb = _sldSortVal(b, _sldSort);
+        const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
+        return _sldSortDir === 'asc' ? c : -c;
+    });
+    const ordered = _evOrdered(_SLD_COLS, _sldColOrder, _sldVisibleCols);
+    const cw = _evCW('ss_sldrops_col_w');
+    const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';
+    const thRow = ordered.map(col =>
+        `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${thW(col.id)}>${_thSortInner(col.label(), col.sortKey, _sldSort, _sldSortDir, '_sortSldrops')}</th>`).join('');
+    wrap.innerHTML = `<div class="table-responsive" style="max-height:220px;overflow:auto">
+        <table class="table table-sm align-middle mb-0 ss-table" id="sl-drops-table" style="font-size:.78rem">
+            <thead class="ss-thead"><tr>${thRow}${canDel ? `<th class="ss-th ss-th-actions text-center">${esc(t('col_actions'))}</th>` : ''}</tr></thead>
+            <tbody>${rows.map(x => `<tr>${ordered.map(col => _sldCell(x, col.id)).join('')}${canDel ? `<td class="text-center ss-td-actions"><button class="btn btn-sm btn-link text-danger p-0" title="${escAttr(t('remove'))}" onclick="_syslogDeleteDrop('${escAttr(x.uid)}')"><i class="bi bi-trash"></i></button></td>` : ''}</tr>`).join('')}</tbody>
+        </table></div>`;
+    setTimeout(() => _attachColFeatures('sl-drops-table',
+        () => _sldColOrder, o => { _sldColOrder = o; }, _sldSaveColOrder, _sldBody,
+        (col, w) => { const m = _evCW('ss_sldrops_col_w'); m[col] = w; localStorage.setItem('ss_sldrops_col_w', JSON.stringify(m)); }), 0);
+}
+function _syslogCanConfig() {
+    const p = currentUser.permissions || [];
+    return p.includes('config_view') || p.includes('config_edit');
+}
+// Jump to Configuration > Syslog (where "Allowed Sources" lives).
+function _gotoSyslogConfig() {
+    try { _activeCfgTab = 'cfg-tab-syslog'; localStorage.setItem('cfg_active_tab', 'cfg-tab-syslog'); } catch (e) {}
+    if (typeof bootstrap === 'undefined') return;
+    const cfgBtn = document.querySelector('#tab-config-li [data-bs-target="#tab-config"]');
+    if (cfgBtn) bootstrap.Tab.getOrCreateInstance(cfgBtn).show();
+    const sysBtn = document.getElementById('cfg-tab-syslog-btn');
+    if (sysBtn) bootstrap.Tab.getOrCreateInstance(sysBtn).show();
+}
+function _syslogToggleDrops() {
+    const body = document.getElementById('sl-drops-body');
+    const chev = document.getElementById('sl-drops-chevron');
+    if (!body) return;
+    const nowCollapsed = body.style.display !== 'none';
+    body.style.display = nowCollapsed ? 'none' : '';
+    if (chev) chev.className = 'bi ' + (nowCollapsed ? 'bi-chevron-right' : 'bi-chevron-down') + ' text-muted';
+    try { localStorage.setItem(_SL_DROPS_KEY, nowCollapsed ? '1' : '0'); } catch (e) {}
+}
+function _renderSyslogDrops(d) {
+    const el = document.getElementById('sl-drops');
+    if (!el) return;
+    _slDropsData = (d && d.drops) || [];
+    if (!_slDropsData.length) { el.innerHTML = ''; return; }
+    let collapsed = true;   // collapsed by default; honour the saved preference if any
+    try { const _v = localStorage.getItem(_SL_DROPS_KEY); if (_v !== null) collapsed = _v === '1'; } catch (e) {}
+    const canDel = _syslogCanDelete();
+    const chooser = _buildColChooser(_SLD_COLS, _sldVisibleCols, '_sldToggleCol', '_resetSldCols');
+    el.innerHTML = `<div class="alert alert-warning py-2 px-3 mb-0">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <span role="button" style="cursor:pointer" class="d-flex align-items-center gap-2 me-auto" onclick="_syslogToggleDrops()">
+                <i id="sl-drops-chevron" class="bi ${collapsed ? 'bi-chevron-right' : 'bi-chevron-down'} text-muted"></i>
+                <i class="bi bi-shield-exclamation"></i>
+                <strong>${esc(t('syslog_drops_title'))}</strong>
+                <span>${esc(tf('syslog_drops_summary', d.dropped, d.sources))}</span>
+            </span>
+            <div class="input-group input-group-sm" style="max-width:200px">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="search" class="form-control" placeholder="${escAttr(t('syslog_drops_search'))}"
+                    value="${escAttr(_sldSearch)}" oninput="_sldSearch=this.value;_sldBody()">
+            </div>
+            ${chooser}
+            ${_syslogCanConfig() ? `<button class="btn btn-sm btn-secondary" onclick="_gotoSyslogConfig()"><i class="bi bi-shield-check me-1"></i>${esc(t('syslog_drops_configure'))}</button>` : ''}
+            ${canDel ? `<button class="btn btn-sm btn-warning" onclick="_syslogClearDrops()"><i class="bi bi-trash me-1"></i>${esc(t('syslog_drops_clear'))}</button>` : ''}
+        </div>
+        <div id="sl-drops-body"${collapsed ? ' style="display:none"' : ''}></div></div>`;
+    _sldBody();
+}
+async function _loadSyslogDrops() {
+    _renderSyslogDrops(await apiGet('/api/v1/syslog/drops?limit=200'));
+}
+function _syslogClearDrops() {
+    showConfirmModal(t('syslog_drops_clear_confirm'), async () => {
+        const r = await apiDelete('/api/v1/syslog/drops');
+        if (r && r.data && r.data.ok) _loadSyslogDrops();   // panel disappears when empty
+        else showToast(t('error'), 'danger');
+    });
+}
+async function _syslogDeleteDrop(uid) {
+    const r = await apiDelete('/api/v1/syslog/drops/' + encodeURIComponent(uid));
+    if (r && r.data && r.data.ok) _loadSyslogDrops();   // refresh (panel hides if it was the last)
+    else showToast(t('error'), 'danger');
+}
+

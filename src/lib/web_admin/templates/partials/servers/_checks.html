@@ -1,0 +1,623 @@
+function _hostClusterMemberships(uid) {
+    const out = [];
+    if (!uid) return out;
+    for (const mod of Object.keys(MODULE_HOST_MULTI_BIND)) {
+        if (!MODULE_HOST_MULTI_BIND[mod]) continue;
+        const coll = _hostConnCollection(mod);
+        for (const mk of [mod, 'watchfuls.' + mod]) {
+            const c = modulesData[mk] && modulesData[mk][coll];
+            if (!c || typeof c !== 'object') continue;
+            for (const [k, v] of Object.entries(c)) {
+                if (v && typeof v === 'object' && Array.isArray(v.host_uids)
+                        && v.host_uids.map(String).includes(String(uid))) {
+                    out.push({ mod, key: k, label: (v.label || k), count: v.host_uids.length });
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// Read-only cards: "this host is a node of cluster check X (managed in Modules)".
+function _renderClusterMembershipCards(memberships) {
+    if (!memberships || !memberships.length) return '';
+    const ro = _hostModalReadonly ? 'disabled' : '';
+    return memberships.map(m => {
+        // The node name maps THIS host to its node in the cluster's API output.
+        // Stored on the host's module profile (proxmox → profiles.proxmox.node),
+        // read back by the module to correlate API nodes with hosts.
+        const pkey = m.mod.replace(/^watchfuls\./, '');
+        const node = ((_hostDraft.profiles || {})[pkey] || {}).node || '';
+        const selId = 'hcNode_' + (pkey + '_' + m.key).replace(/\W/g, '_');
+        return `<div class="card mb-2"><div class="card-body py-2 px-3">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <i class="bi bi-diagram-3"></i>
+                <span class="fw-semibold">${esc(_modPrettyName(m.mod))}</span>
+                <span class="badge bg-secondary">${esc(t('host_cluster_member'))}</span>
+                <span class="text-muted small ms-auto">${esc(m.label)} · ${m.count} ${esc(t('host_cluster_nodes'))}</span>
+            </div>
+            <div class="mt-2">
+                <label class="form-label form-label-sm mb-1">${esc(t('host_cluster_node'))}</label>
+                <div class="input-group input-group-sm">
+                    <select class="form-select form-select-sm" id="${selId}" ${ro}
+                            onchange="_setProfileField(${jsStr(pkey)}, 'node', this.value)">${_clusterNodeOptions(node, [])}</select>
+                    <button class="btn btn-secondary" type="button" ${ro}
+                            title="${escAttr(t('host_cluster_node_load'))}"
+                            onclick="_loadClusterNodes(${jsStr(pkey)},${jsStr(m.mod)},${jsStr(m.key)},${jsStr(selId)},this)">
+                        <i class="bi bi-arrow-repeat"></i></button>
+                </div>
+                <div class="small text-muted mt-1">${esc(t('host_cluster_node_hint'))}</div>
+            </div>
+        </div></div>`;
+    }).join('');
+}
+
+// <option> set for the node picker: a blank, the saved value (kept even if not in
+// the fetched list), and the cluster's node names.  Nodes already assigned to
+// ANOTHER host are shown disabled with the taker's name (one node ↔ one host).
+function _clusterNodeOptions(selected, list, taken) {
+    taken = taken || {};
+    const opts = [`<option value="">—</option>`];
+    if (selected && !list.includes(selected))
+        opts.push(`<option value="${escAttr(selected)}" selected>${esc(selected)}</option>`);
+    for (const n of list) {
+        const by = taken[n];
+        const lbl = by ? `${n} — ${t('host_cluster_node_taken')} ${by}` : n;
+        opts.push(`<option value="${escAttr(n)}"${n === selected ? ' selected' : ''}${by ? ' disabled' : ''}>${esc(lbl)}</option>`);
+    }
+    return opts.join('');
+}
+
+// Nodes already assigned (profiles[pkey].node) to hosts OTHER than the one being
+// edited → {node: takerHostName}, so the picker can flag/disable them.
+function _takenClusterNodes(pkey, exceptUid) {
+    const taken = {};
+    for (const [uid, h] of Object.entries(hostsData)) {
+        if (uid === exceptUid) continue;
+        const n = ((h.profiles || {})[pkey] || {}).node;
+        if (n) taken[n] = h.name || uid;
+    }
+    return taken;
+}
+
+// The cluster check item (and its collection) this host belongs to.
+function _clusterCheckItem(mod, key) {
+    const coll = _hostConnCollection(mod) || 'list';
+    for (const mk of [mod, 'watchfuls.' + mod]) {
+        const c = modulesData[mk] && modulesData[mk][coll];
+        if (c && c[key]) return c[key];
+    }
+    return null;
+}
+
+// Populate the node dropdown from the live cluster (list_nodes action on the
+// cluster check this host is a member of).
+async function _loadClusterNodes(pkey, mod, key, selId, btn) {
+    const sel = document.getElementById(selId);
+    const item = _clusterCheckItem(mod, key);
+    if (!sel || !item) { showToast(t('connection_error'), 'danger'); return; }
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`; }
+    const res = await apiPost('/api/v1/watchfuls/' + mod + '/list_nodes',
+                              Object.assign({}, item, { _item_key: key }));
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    const data = res && res.data;
+    if (!data || !data.ok) { showToast((data && data.message) || t('connection_error'), 'danger'); return; }
+    const cur = sel.value || ((_hostDraft.profiles || {})[pkey] || {}).node || '';
+    sel.innerHTML = _clusterNodeOptions(cur, data.items || [], _takenClusterNodes(pkey, _editingHostUid));
+}
+
+// Credential picker + fields for a host-bound check.  Mirrors the modules-tab
+// behaviour: a module that declares a credential type (e.g. web → web_auth) gets
+// a "Use credential" picker before its credential fields; selecting one hides
+// and clears them (the credential supplies them at runtime).
+function _hostCredPicker(mod, idx, curUid, ctype) {
+    if (typeof credentialOptions !== 'function') return '';
+    // No decorative key icon; an info button reveals the hint below (same as the
+    // Modules credential picker).
+    const hid = 'hcredusehint_' + (mod + '_' + idx).replace(/\W/g, '_');
+    const info = ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn" tabindex="-1"
+            data-bs-toggle="collapse" data-bs-target="#${hid}" aria-expanded="false"><i class="bi bi-info-circle"></i></button>`;
+    const panel = `<div class="collapse" id="${hid}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(t('cred_use_hint'))}</div></div>`;
+    return `<div class="col-12">
+        <label class="form-label form-label-sm mb-1">${esc(t('cred_use'))}${info}</label>
+        <select class="form-select form-select-sm ss-cred-picker" data-cred-ctype="${escAttr(ctype || '')}" onchange="_setHostCheckCred(${jsStr(mod)},${idx},this.value)">${credentialOptions(curUid, ctype)}</select>
+        ${panel}
+    </div>`;
+}
+
+function _setHostCheckCred(mod, idx, uid) {
+    const it = _hostChecks[mod] && _hostChecks[mod].items[idx];
+    if (!it) return;
+    it.cred_uid = uid || '';
+    const wraps = document.querySelectorAll(`.credprof-host[data-cp-host="${CSS.escape(mod + '|' + idx)}"]`);
+    if (uid) {
+        const spec = (typeof _credTypeForModule === 'function') ? _credTypeForModule(mod) : null;
+        if (spec) spec.fields.forEach(f => { it.fields[f.name] = ''; });
+        wraps.forEach(el => {
+            el.querySelectorAll('input, textarea, select').forEach(i => {
+                if (i.type === 'checkbox') i.checked = false; else i.value = '';
+            });
+            el.style.display = 'none';
+        });
+    } else {
+        wraps.forEach(el => { el.style.display = ''; });
+    }
+    markDirty('modules');
+}
+
+// Build a check's field rows, injecting the credential picker before the
+// credential fields and wrapping those so they hide when a credential is bound.
+function _hostCheckFieldsHtml(mod, idx, it, metas) {
+    const spec = (typeof _credTypeForModule === 'function') ? _credTypeForModule(mod) : null;
+    const credFields = spec ? spec.fields : [];
+    const bound = !!it.cred_uid;
+    const ctx = { mod, fields: it.fields, itemKey: it._key || _hostDraft.name, idx };
+    // Group headers (Connection / Server / Alerts …), same as the Modules tab.
+    // The schema's __group_when__ controls a header's own visibility; this whole
+    // list re-renders when a controller changes, so visibility is computed inline.
+    const coll = (_hostChecks[mod] || {}).collection;
+    const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
+    const groupWhen = sch['__group_when__'] || {};
+    const i18n = ITEM_SCHEMAS[mod + '|__i18n__'];
+    const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
+    const groupLabels = (ld && ld.group_labels) || {};
+    const _groupShown = (g) => {
+        const gw = groupWhen[g];
+        if (gw) {
+            for (const [ctrl, allowed] of Object.entries(gw)) {
+                if (!Array.isArray(allowed) || !allowed.includes(it.fields[ctrl])) return false;
+            }
+        }
+        // Don't print an empty header: the group needs ≥1 currently-visible field.
+        return metas.some(m => (m.group || null) === g && _hostFieldVisible(m, ctx));
+    };
+    let html = '', pickerDone = false, curGroup = null;
+    for (const f of metas) {
+        const g = f.group || null;
+        if (g !== curGroup) {
+            curGroup = g;
+            if (g && _groupShown(g)) {
+                html += `<div class="col-12 ss-section-hdr">
+                    <small class="text-muted ss-section-title">${esc(groupLabels[g] || g)}</small>
+                </div>`;
+            }
+        }
+        const isCred = credFields.includes(f.name);
+        // The picker shares the credential field's visibility (e.g. auth_enabled):
+        // only emit it once, before the first VISIBLE credential field.  The host
+        // modal re-renders this list when a controller (auth_enabled) changes, so
+        // the picker appears/disappears with the credential fields.
+        if (isCred && !pickerDone && _hostFieldVisible(f, ctx)) {
+            pickerDone = true;
+            html += _hostCredPicker(mod, idx, it.cred_uid || '', spec.type);
+        }
+        let row = _hostFieldRow(f, it.fields[f.name],
+            `_setHostCheckField(${jsStr(mod)},${idx},${jsStr(f.name)},`, ctx);
+        if (isCred && row) {
+            row = `<div class="credprof-host" data-cp-host="${escAttr(mod + '|' + idx)}"${bound ? ' style="display:none"' : ''}>${row}</div>`;
+        }
+        html += row;
+    }
+    return html;
+}
+
+// Single-check module: a master toggle (header) + the (one) check's fields in
+// the collapsible body.
+function _renderSingleCheck(mod) {
+    const st = _hostChecks[mod];
+    const it = st.items[0];
+    const slug = mod.replace(/\W/g, '_');
+    const bodyId = 'hmChk1_' + slug;
+    const fieldsHtml = st.fieldsMeta.length
+        ? _hostCheckFieldsHtml(mod, 0, it, st.fieldsMeta)
+        : `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
+    const title = `<span class="fw-semibold">${esc(_modPrettyName(mod))}</span>`;
+    // Just an enable switch (no redundant "Monitor with X" text) + run-test.
+    const actions = `<div class="d-flex align-items-center gap-2">
+        <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="sw_${bodyId}" ${it.enabled ? 'checked' : ''}
+                   onchange="_toggleSingleCheck(${jsStr(mod)}, this.checked)"
+                   title="${escAttr(t('enabled') || 'Enabled')}" aria-label="${escAttr(t('enabled') || 'Enabled')}">
+        </div>
+        <button class="btn btn-sm btn-info py-0 px-1" onclick="testHostCheck(${jsStr(mod)},0)"
+                title="${escAttr(t('host_test'))}"><i class="bi bi-play-circle"></i></button>
+        <button class="btn btn-sm btn-danger py-0 px-1" onclick="_removeHostModule(${jsStr(mod)})"
+                title="${escAttr(t('host_module_remove'))}"><i class="bi bi-x-lg"></i></button>
+        </div>`;
+    const body = `<div id="${bodyId}" class="row g-2">${fieldsHtml}</div>`;
+    // Collapsed when editing an existing host; expanded for a new one.
+    return _collapsibleCard('hmCard_' + slug, title, actions, body, !_editingHostUid);
+}
+
+// Enabling a single check expands its card; disabling collapses it.
+function _toggleSingleCheck(mod, on) {
+    const it = _hostChecks[mod] && _hostChecks[mod].items[0];
+    if (it) it.enabled = on;
+    const el = document.getElementById('hmCard_' + mod.replace(/\W/g, '_'));
+    if (el) bootstrap.Collapse.getOrCreateInstance(el)[on ? 'show' : 'hide']();
+}
+
+function _modPrettyName(mod) {
+    const i18n = ITEM_SCHEMAS[mod + '|__i18n__'];
+    const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
+    return (ld && (ld.pretty_name || ld.label)) || mod;
+}
+
+function _renderHostCheckList(mod) {
+    const st = _hostChecks[mod];
+    if (!st.items.length) return `<div class="text-muted small">${esc(t('host_check_none'))}</div>`;
+    const slug = mod.replace(/\W/g, '_');   // for collapse element ids
+    const coll = st.collection;
+    const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
+    // When the title field is editable via the title pencil it is NOT shown as a
+    // regular field in the body (e.g. service_status' 'label').
+    const titleEditable = !!sch['__title_editable__'];
+    const titleField = sch['__check_title_field__'];
+    const filter = (_hostCheckFilters[mod] || '').trim().toLowerCase();
+    const _matches = (it, i) => !filter
+        || _hostCheckTitle(mod, it, i).toLowerCase().includes(filter)
+        || Object.values(it.fields).some(v => String(v).toLowerCase().includes(filter));
+    // Cards laid out two-up; a lone card (single item, or the odd last one)
+    // spans the full width instead of leaving an empty half-column.
+    const shown = [];
+    st.items.forEach((it, i) => { if (_matches(it, i)) shown.push([it, i]); });
+    let h = '<div class="row g-2">';
+    shown.forEach(([it, i], pos) => {
+        const loneLast = (pos === shown.length - 1) && (shown.length % 2 === 1);
+        const colCls = loneLast ? 'col-12' : 'col-12 col-md-6';
+        const metas = st.fieldsMeta.filter(f => !(titleEditable && f.name === titleField));
+        const fieldsHtml = metas.length
+            ? _hostCheckFieldsHtml(mod, i, it, metas)
+            : `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
+        const editBtn = titleEditable
+            ? `<button class="btn btn-sm btn-secondary py-0 px-1" data-no-collapse="1" onclick="_editHostCheckLabel(${jsStr(mod)},${i})"
+                       title="${escAttr(t('host_edit_name') || 'Edit name')}"><i class="bi bi-pencil"></i></button>`
+            : '';
+        // Each check is collapsible: the header (switch + title + buttons) stays
+        // visible; clicking it toggles the fields.  Collapsed when editing an
+        // existing host, expanded for a new one.
+        const bid = 'hmChkBody_' + slug + '_' + i;
+        const expanded = !_editingHostUid;
+        h += `<div class="${colCls}">
+            <div class="border rounded h-100 overflow-hidden">
+            <div class="d-flex align-items-center gap-1 px-2 py-1" role="button"
+                 style="background:var(--bs-tertiary-bg);cursor:pointer"
+                 onclick="toggleCollapseFromHeader(event,'${bid}')">
+                <div class="form-check form-switch mb-0" data-no-collapse="1">
+                    <input class="form-check-input" type="checkbox" data-no-collapse="1" ${it.enabled ? 'checked' : ''}
+                           onclick="event.stopPropagation()"
+                           onchange="_hostChecks[${jsStr(mod)}].items[${i}].enabled=this.checked;_refreshHostCount(${jsStr(mod)})">
+                </div>
+                <span class="small text-truncate me-auto">${esc(_hostCheckTitle(mod, it, i))}</span>
+                ${editBtn}
+                <button class="btn btn-sm btn-info py-0 px-1" data-no-collapse="1" onclick="testHostCheck(${jsStr(mod)},${i})"
+                        title="${escAttr(t('host_test'))}"><i class="bi bi-play-circle"></i></button>
+                <button class="btn btn-sm btn-danger py-0 px-1" data-no-collapse="1" onclick="_removeHostCheck(${jsStr(mod)},${i})"
+                        title="${escAttr(t('delete') || 'Delete')}"><i class="bi bi-trash3"></i></button>
+                <i class="bi bi-chevron-down small ms-1" style="opacity:.5"></i>
+            </div>
+            <div class="collapse${expanded ? ' show' : ''}" id="${bid}">
+                <div class="px-2 py-2" style="border-top:1px solid var(--bs-border-color)"><div class="row g-2">${fieldsHtml}</div></div>
+            </div>
+            </div>
+        </div>`;
+    });
+    if (!shown.length) h += `<div class="col-12 text-muted small py-2">${esc(t('no_items') || 'No matches')}</div>`;
+    h += '</div>';
+    return h;
+}
+
+// Filter the per-module check list (re-renders only the list, so the filter
+// input keeps focus while typing).
+function _setHostCheckFilter(mod, val) {
+    _hostCheckFilters[mod] = val;
+    _refreshHostCheckList(mod);
+}
+
+// Edit the (editable) title field of a check via a small prompt modal.
+function _editHostCheckLabel(mod, i) {
+    const st = _hostChecks[mod];
+    const it = st && st.items[i];
+    if (!it) return;
+    const coll = st.collection;
+    const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
+    const titleField = sch['__check_title_field__'];
+    if (!titleField) return;
+    const input = document.getElementById('hostLabelInput');
+    input.value = String(it.fields[titleField] || '');
+    const modalEl = document.getElementById('hostLabelModal');
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    const ok = document.getElementById('btnHostLabelOk');
+    const handler = () => {
+        it.fields[titleField] = input.value.trim();
+        modal.hide();
+        _refreshHostCheckList(mod);
+    };
+    ok.onclick = handler;   // replace any prior handler
+    modal.show();
+    setTimeout(() => input.focus(), 200);
+}
+
+// A short title for a check card — the distinguishing field the module's
+// schema declares via __check_title_field__ in its collection (e.g.
+// datastore → db_type), falling back to the item key / index.
+// No module-specific field names in core.
+function _hostCheckTitle(mod, it, i) {
+    const coll = (_hostChecks[mod] || {}).collection || 'list';
+    const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
+    const titleField = sch['__check_title_field__'];
+    if (titleField && it.fields[titleField]) return String(it.fields[titleField]);
+    return it._key || (t('host_check_n').replace('{n}', i + 1));
+}
+
+function _addHostCheck(mod) {
+    const st = _hostChecks[mod];
+    const fields = {};
+    for (const fm of st.fieldsMeta) fields[fm.name] = (fm.default !== undefined ? fm.default : '');
+    st.items.push({ _key: null, enabled: true, fields });
+    _refreshHostCheckList(mod);
+}
+
+// ── Discovery in the Servers modal (runs on the bound host, local or SSH) ──
+// Reuses the shared discover modal in "host mode" (_discoverHostMod, declared in
+// modules/_discovery.html): results are added as checks to _hostChecks[mod]
+// instead of modulesData.  The server resolves the host's connection (address +
+// SSH) from host_uid / the draft and runs discovery there.
+async function openHostDiscover(mod) {
+    const st = _hostChecks[mod];
+    if (!st) return;
+    const sch = ITEM_SCHEMAS[mod + '|' + st.collection] || {};
+    const action = sch['__discovery__'];
+    if (!action) return;
+    const ver = (ITEM_SCHEMAS[mod + '|__module__'] || {})['api_ver'] || 'v1';
+    const url = `/api/${ver}/watchfuls/${encodeURIComponent(mod)}/${encodeURIComponent(action)}`;
+
+    // Put the shared modal into host mode and reset its other state.
+    _discoverHostMod = mod;
+    _discoverFieldPathStr = null;
+    _discoverPathStr = null;
+    _discoverServices = null;
+    _discoverUrl = url;
+    _discoverInputSpec = Array.isArray(sch['__discovery_inputs__']) ? sch['__discovery_inputs__'] : null;
+
+    const inputsEl = document.getElementById('discoverInputs');
+    if (inputsEl) inputsEl.innerHTML = '';
+    const titleEl = document.getElementById('discoverModalTitle');
+    if (titleEl) titleEl.textContent = (t('discover') || 'Discover') + ' — ' + _modPrettyName(mod);
+    const filterEl = document.getElementById('discoverFilter');
+    if (filterEl) filterEl.value = '';
+    const body = document.getElementById('discoverModalBody');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('discoverModal')).show();
+
+    // Input-driven discovery (e.g. DNS needs a domain): render the form and wait
+    // for the user to run it, instead of querying immediately.
+    if (_discoverInputSpec) {
+        if (inputsEl) inputsEl.innerHTML = _discoverRenderInputs(mod, _discoverInputSpec, '_runHostDiscovery');
+        _discoverInputDeps();
+        _discoverSetFilterVisible(false);
+        if (body) body.innerHTML = `<div class="text-center py-4 text-muted">${esc(_modUiStr(mod, 'discover_prompt', t('discover')))}</div>`;
+        const _first = _discoverInputSpec[0];
+        if (_first) setTimeout(() => document.getElementById('discInput_' + _first.key)?.focus(), 150);
+        return;
+    }
+
+    _discoverSetFilterVisible(true);
+    if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    await _hostDiscoverFetch(null);
+}
+
+// Run input-driven discovery from the Servers modal (collects the form values).
+async function _runHostDiscovery() {
+    const inp = _collectDiscoverInputs();
+    if (inp === null) return;
+    const body = document.getElementById('discoverModalBody');
+    if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    await _hostDiscoverFetch(inp);
+}
+
+// POST the discovery request with the host context (uid for the stored host's
+// authoritative SSH + the live draft for a new/edited host) and optional inputs.
+async function _hostDiscoverFetch(extraInput) {
+    const body = document.getElementById('discoverModalBody');
+    const postBody = {
+        host_uid: _editingHostUid || '',
+        _host: {
+            address: _hostDraft.address || '',
+            kind: _hostDraft.kind || 'local',
+            os: _hostDraft.os || 'auto',
+            profiles: { ssh: (_hostDraft.profiles && _hostDraft.profiles.ssh) || {} },
+        },
+    };
+    if (extraInput) postBody._discovery_input = extraInput;
+    const res = await apiPost(_discoverUrl, postBody);
+    const data = res && Array.isArray(res.data) ? res.data : null;
+    if (!Array.isArray(data)) {
+        if (body) body.innerHTML = `<div class="text-center py-4 text-danger">
+            <i class="bi bi-exclamation-triangle me-2"></i>${esc((res && res.data && res.data.message) || t('error') || '?')}</div>`;
+        return;
+    }
+    _discoverServices = data;
+    _discoverSetFilterVisible(true);
+    _renderDiscoverList();
+}
+
+// Add a discovered item as a host check (host mode of _addDiscoveredService).
+function _addDiscoveredHostCheck(serviceName, displayName, typeInfo, valueInfo) {
+    const mod = _discoverHostMod;
+    const st = _hostChecks[mod];
+    if (!st) return;
+    const coll = st.collection;
+    const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
+    const discField = sch['__discovery_field__'];
+    const typeStoreField = sch['__discovery_type_store_field__'];
+    // Dedup by field (+ type when the module records one per type, e.g. DNS).
+    const _norm = it => String(it.fields[discField] || '').toLowerCase()
+        + (typeStoreField ? '|' + String(it.fields[typeStoreField] || '').toLowerCase() : '');
+    const _want = String(serviceName).toLowerCase()
+        + (typeStoreField ? '|' + String(typeInfo || '').toLowerCase() : '');
+    if (discField && st.items.some(it => _norm(it) === _want)) {
+        showToast(t('already_added') || 'Already added'); return;
+    }
+    const fields = {};
+    for (const fm of st.fieldsMeta) fields[fm.name] = (fm.default !== undefined ? fm.default : '');
+    if (discField && discField in fields) fields[discField] = serviceName;
+    // Store the discovered record type and value in their schema-declared fields
+    // (e.g. DNS: record_type + expected) so the check matches what was found.
+    if (typeStoreField && typeInfo && typeStoreField in fields) fields[typeStoreField] = String(typeInfo);
+    const valueField = sch['__discovery_value_field__'];
+    if (valueField && valueInfo != null && valueInfo !== '' && valueField in fields)
+        fields[valueField] = String(valueInfo);
+    // Editable display label "host - service" (the key itself is a UUID); the row
+    // title and the notification read it, while the discovery field keeps the raw name.
+    const labelField = sch['__check_title_field__'];
+    const label = _discoveryLabel(sch, _hostDraft.name || '', serviceName, displayName, typeInfo || '', fields);
+    if (labelField && label && labelField in fields) fields[labelField] = label;
+    // Unique key (UUID when the schema asks for it).
+    const base = _discoveryItemKey(sch, serviceName, displayName);
+    const used = new Set();
+    for (const mk of [mod, 'watchfuls.' + mod]) {
+        const c = modulesData[mk] && modulesData[mk][coll];
+        if (c && typeof c === 'object') Object.keys(c).forEach(k => used.add(k.toLowerCase()));
+    }
+    st.items.forEach(it => { if (it._key) used.add(String(it._key).toLowerCase()); });
+    let key = base, n = 2;
+    while (used.has(key.toLowerCase())) key = base + '_' + n++;
+    st.items.push({ _key: key, enabled: true, fields });
+    _refreshHostCheckList(mod);
+    showToast(_modUiStr(mod, 'item_added', serviceName).replace('{}', serviceName));
+    _renderDiscoverList();   // reflect the now-added item
+}
+
+function _removeHostCheck(mod, i) {
+    const it = _hostChecks[mod] && _hostChecks[mod].items[i];
+    const name = it ? _hostCheckTitle(mod, it, i) : '';
+    const msg = (t('host_check_remove_confirm') || 'Remove "{name}"?').replace('{name}', name);
+    showConfirmModal(msg, () => {
+        _hostChecks[mod].items.splice(i, 1);
+        _refreshHostCheckList(mod);
+    });
+}
+
+function _refreshHostCheckList(mod) {
+    const slug = mod.replace(/\W/g, '_');
+    const el = document.getElementById('hmChkList_' + slug);
+    if (el) { el.innerHTML = _renderHostCheckList(mod); initTooltips(el); }
+    _refreshHostCount(mod);   // active/total badge in sync after add/remove
+}
+
+function _setHostCheckField(mod, i, field, value) {
+    const st = _hostChecks[mod];
+    const it = st && st.items[i];
+    if (!it) return;
+    it.fields[field] = value;
+    // Changing a controlling field (e.g. db_type/conn_type) re-renders the
+    // dependent fields so they appear/disappear.  Re-render ONLY this card's
+    // fields (not the whole list) so the card stays expanded and other cards'
+    // state (and sensitive fields' "Defined" markers) are preserved.
+    if (_hostFieldControls(st.fieldsMeta, field)) {
+        if (st.multiple) _refreshHostCheckItemFields(mod, i);
+        else _refreshSingleCheck(mod);
+    }
+}
+
+// Re-render just the fields inside one (multiple-module) check card, leaving the
+// card's header and collapse state untouched.
+function _refreshHostCheckItemFields(mod, i) {
+    const st = _hostChecks[mod];
+    const it = st && st.items[i];
+    if (!it) return;
+    const slug = mod.replace(/\W/g, '_');
+    const body = document.getElementById('hmChkBody_' + slug + '_' + i);
+    const row = body && body.querySelector('.row.g-2');
+    if (!row) return;
+    const coll = st.collection;
+    const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
+    const titleEditable = !!sch['__title_editable__'];
+    const titleField = sch['__check_title_field__'];
+    const metas = st.fieldsMeta.filter(f => !(titleEditable && f.name === titleField));
+    row.innerHTML = _hostCheckFieldsHtml(mod, i, it, metas);
+    initTooltips(row);
+}
+
+function _refreshSingleCheck(mod) {
+    const body = document.getElementById('hmChk1_' + mod.replace(/\W/g, '_'));
+    if (!body) return;
+    const st = _hostChecks[mod];
+    const it = st.items[0];
+    body.innerHTML = _hostCheckFieldsHtml(mod, 0, it, st.fieldsMeta)
+        || `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
+    initTooltips(body);
+}
+
+// One field row: label (+ info icon with the module's hint) + control.
+// Honours the schema's show_when against the sibling values (ctx.fields), same
+// as the Modules section: e.g. datastore only shows the fields relevant to the
+// selected db_type/conn_type; snmp only shows v3 credentials when version=3.
+// A field whose label/hint/action depend on a sibling field's value (e.g.
+// datastore's 'db' → "Database"/"Index"/"Bucket" by db_type).  Returns the
+// {label, hint, action, pick} term for the current sibling value, or null.
+function _fieldTerm(modName, f, fields) {
+    const tf = f && f.term_field;
+    if (!tf || !fields) return null;
+    const i18n = ITEM_SCHEMAS[modName + '|__i18n__'];
+    const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
+    const terms = ld && ld.field_terms && ld.field_terms[f.name];
+    return (terms && terms[fields[tf]]) || null;
+}
+
+function _hostFieldRow(f, val, onch, ctx) {
+    if (!_hostFieldVisible(f, ctx)) return '';
+    const _term = _fieldTerm(ctx.mod, f, ctx.fields);
+    const hint = (_term && _term.hint) || _hostFieldHint(ctx.mod, f.name);
+    // Hint shown as an inline collapsible panel below the control (same as the
+    // Modules tab), not a floating tooltip.  The id is unique per check/field.
+    const _hintId = hint
+        ? ('hhint_' + (ctx.mod + '_' + (ctx.idx != null ? ctx.idx : 'p') + '_' + f.name).replace(/\W/g, '_'))
+        : '';
+    const info = hint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+              data-bs-toggle="collapse" data-bs-target="#${_hintId}"
+              aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const hintPanel = hint
+        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(hint)}</div></div>`
+        : '';
+    const label = esc((_term && _term.label) || _profileFieldLabel(f));
+    // Each attribute stacked vertically inside its card: label above the control,
+    // full width (the cards themselves are laid out two-up).
+    return `<div class="col-12">
+        <label class="form-label small mb-1 d-block">${label}${info}</label>
+        ${_hostFieldControl(f, val, onch, ctx)}${hintPanel}</div>`;
+}
+
+function _hostFieldVisible(f, ctx) {
+    if (!f.show_when || typeof f.show_when !== 'object') return true;
+    const vals = (ctx && ctx.fields) || {};
+    for (const [c, allowed] of Object.entries(f.show_when)) {
+        // A condition whose controlling field does not exist in THIS context is
+        // ignored (e.g. datastore's ssh_* fields depend on the check's
+        // conn_type, which has no meaning inside the host's ssh profile).
+        if (!Object.prototype.hasOwnProperty.call(vals, c)) continue;
+        if (!Array.isArray(allowed) || !allowed.includes(vals[c])) return false;
+    }
+    return true;
+}
+
+// True when *name* controls some sibling's visibility (its change requires a
+// re-render of the field list).
+function _hostFieldControls(fieldsMeta, name) {
+    return (fieldsMeta || []).some(f =>
+        f.show_when && Object.prototype.hasOwnProperty.call(f.show_when, name));
+}
+
+// Field hint from the module's i18n (same source as the Modules section).
+function _hostFieldHint(mod, name) {
+    const i18n = ITEM_SCHEMAS[mod + '|__i18n__'];
+    const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
+    return (ld && ld.hints && ld.hints[name]) || '';
+}
+
+// Build the per-module check model from the current modules config: ALL items
+// bound to this host.  A module flagged __host_multiple__ may have several
+// checks (e.g. mysql + postgres); otherwise it's a single check per host.

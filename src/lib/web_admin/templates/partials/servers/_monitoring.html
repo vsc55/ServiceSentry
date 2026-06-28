@@ -1,0 +1,476 @@
+async function _loadHostLatestData() {
+    const body = document.getElementById('hmLatestBody');
+    if (!body) return;
+    if (!_editingHostUid) {
+        _hmLatestRows = [];
+        body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(t('host_latest_unsaved'))}</div>`;
+        return;
+    }
+    body.innerHTML = `<div class="text-center py-4 text-muted">
+        <div class="spinner-border spinner-border-sm me-2"></div>${esc(t('loading'))}</div>`;
+    const res = await apiGet('/api/v1/hosts/' + encodeURIComponent(_editingHostUid) + '/status');
+    _hmLatestRows = (res && res.results) || [];
+    _renderHostLatest();
+}
+function _hmSetLatestFilter(v) { _hmLatestFilter = v; _renderHostLatest(); }
+function _renderHostLatest() {
+    const body = document.getElementById('hmLatestBody');
+    if (!body) return;
+    if (!_hmLatestRows.length) {
+        body.innerHTML = `<div class="text-muted small py-4 text-center">
+            <i class="bi bi-inbox" style="font-size:1.6rem;opacity:.35;display:block;margin-bottom:.4rem"></i>
+            ${esc(t('host_latest_none'))}</div>`;
+        return;
+    }
+    const results = _hmLatestRows.filter(r =>
+        _latestFilterPass(r.level || (r.ok ? 'ok' : 'error'), _hmLatestFilter));
+    if (!results.length) {
+        body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(t('latest_filter_none'))}</div>`;
+        return;
+    }
+    // Clicking a row jumps to that series' history (only if the user can view it).
+    const canHistory = (currentUser.permissions || []).includes('history_view');
+    body.innerHTML = results.map(r => {
+        const modName = (modulePrettyName(r.module, {}) || r.module);
+        const _lvl = r.level || (r.ok ? 'ok' : 'error');
+        const icon = _lvl === 'ok' ? 'bi-check-circle-fill text-success'
+                   : _lvl === 'warning' ? 'bi-exclamation-triangle-fill text-warning'
+                   : 'bi-exclamation-triangle-fill text-danger';
+        const metrics = Object.entries(r.data || {})
+            .filter(([k, v]) => k !== 'name' && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean'))
+            .map(([k, v]) => `<span class="badge bg-secondary bg-opacity-25 text-body border me-1 mb-1" style="font-weight:normal">${esc(k)}: ${esc(String(v))}</span>`)
+            .join('');
+        // Live (from status.json) vs Historic (last value from the history DB —
+        // e.g. when the host is in maintenance and its live records were purged).
+        const isHist = r.source === 'history';
+        let when = '';
+        if (r.ts) {
+            const d = isHist ? new Date(r.ts * 1000) : new Date(r.ts);
+            if (!isNaN(d.getTime())) when = d.toLocaleString();
+        }
+        const srcBadge = isHist
+            ? `<span class="badge text-bg-secondary" style="font-size:.65rem"><i class="bi bi-clock-history me-1"></i>${esc(t('host_latest_historic'))}</span>`
+            : `<span class="badge text-bg-success" style="font-size:.65rem"><i class="bi bi-broadcast-pin me-1"></i>${esc(t('host_latest_live'))}</span>`;
+        const clickable = canHistory
+            ? ` role="button" style="background:var(--bs-body-bg);cursor:pointer"
+                onclick="_goToHistory(${jsStr(r.module)},${jsStr(r.key)})"
+                title="${escAttr(t('host_latest_view_history'))}"`
+            : ` style="background:var(--bs-body-bg)"`;
+        const histIcon = canHistory
+            ? `<i class="bi bi-graph-up text-muted flex-shrink-0 mt-1" style="font-size:.85rem"></i>` : '';
+        return `<div class="d-flex align-items-start gap-2 px-2 py-2 border rounded mb-1"${clickable}>
+            <i class="bi ${icon} flex-shrink-0 mt-1"></i>
+            <div class="flex-grow-1 min-w-0">
+                <div class="small fw-semibold d-flex align-items-center gap-2 flex-wrap">
+                    <span>${esc(modName)} — ${esc(r.name)}</span>${srcBadge}</div>
+                ${isHist && when ? `<div class="small text-muted">${esc(when)}</div>` : ''}
+                ${r.message ? `<div class="small text-muted text-break">${esc(r.message)}</div>` : ''}
+                ${metrics ? `<div class="mt-1">${metrics}</div>` : ''}
+            </div>${histIcon}</div>`;
+    }).join('');
+}
+
+// Per-server syslog logs (by address: hostname or sender IP), with a filter bar
+// and pagination. Reuses the syslog severity colours/labels from _js_syslog.html
+// and the shared _renderPagination control.
+let _hostLogsState = null;   // {addr, page, pageSize, severity_max, q, since, until}
+
+let _hostLogsTimer = null;       // interval-driven / live refresh
+
+function _hostLogsReset(addr) {
+    _hostLogsState = { addr, page: 1, pageSize: _defaultPageSize || 50,
+                       severity_max: '', q: '', since: '', until: '', auto: 0 };
+}
+
+function _hostLogsStopTimer() {
+    if (_hostLogsTimer) { clearInterval(_hostLogsTimer); _hostLogsTimer = null; }
+}
+
+// (Re)start the refresh timer from state.auto (0=off, secs, or 'live').
+function _hostLogsApplyTimer() {
+    _hostLogsStopTimer();
+    const a = _hostLogsState ? _hostLogsState.auto : 0;
+    const live = a === 'live';
+    const secs = live ? (typeof _SL_LIVE_SECS !== 'undefined' ? _SL_LIVE_SECS : 2) : (parseInt(a, 10) || 0);
+    if (secs > 0) {
+        _hostLogsTimer = setInterval(() => {
+            const pane = document.getElementById('hmTabLogs');
+            if (!pane || !document.getElementById('hml-rows')) { _hostLogsStopTimer(); return; }
+            if (pane.classList.contains('active')) _hostLogsFetch();   // skip while on another tab
+        }, secs * 1000);
+    }
+}
+
+function setHostLogsAutoRefresh(seconds) {
+    if (_hostLogsState) _hostLogsState.auto = seconds;
+    _hostLogsApplyTimer();
+    _hostLogsRenderAutoRefresh();
+}
+
+function toggleHostLogsLive() {
+    if (_hostLogsState) _hostLogsState.auto = (_hostLogsState.auto === 'live') ? 0 : 'live';
+    _hostLogsApplyTimer();
+    _hostLogsRenderAutoRefresh();
+}
+
+function _hostLogsRenderAutoRefresh() {
+    const el = document.getElementById('hml-auto-refresh');
+    if (!el || !_hostLogsState) return;
+    const live = _hostLogsState.auto === 'live';
+    el.innerHTML = _autoRefreshControl({
+        id: 'hostlogs', interval: live ? 0 : (parseInt(_hostLogsState.auto, 10) || 0),
+        setFn: 'setHostLogsAutoRefresh', liveFn: 'toggleHostLogsLive', liveActive: live, hideAuto: true,
+        countId: 'hml-refresh-count', fillId: 'hml-refresh-fill',
+    });
+}
+
+function _hostLogsGoPage(p) { _hostLogsState.page = Math.max(1, p | 0); _hostLogsFetch(); }
+function _hostLogsSetPageSize(v) { _hostLogsState.pageSize = parseInt(v, 10) || 0; _hostLogsState.page = 1; _hostLogsFetch(); }
+
+// Render the Logs tab shell (filter bar + table + pager) and load the first page.
+async function _loadHostLogs() {
+    const body = document.getElementById('hmLogsBody');
+    if (!body) return;
+    const addr = (_hostDraft && _hostDraft.address || '').trim();
+    if (!addr) {
+        body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(t('host_logs_no_address'))}</div>`;
+        return;
+    }
+    if (!_hostLogsState || _hostLogsState.addr !== addr) _hostLogsReset(addr);
+    const st = _hostLogsState;
+    const sevOpts = `<option value="">${esc(t('syslog_all'))}</option>` +
+        (typeof _SYSLOG_SEV !== 'undefined' ? _SYSLOG_SEV : [])
+            .map((n, i) => `<option value="${i}"${String(st.severity_max) === String(i) ? ' selected' : ''}>${esc(n)}</option>`).join('');
+    body.innerHTML = `
+        <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+            <div><label class="form-label small mb-1">${esc(t('syslog_min_severity'))}</label>
+                <select id="hml-sev" class="form-select form-select-sm" style="min-width:120px">${sevOpts}</select></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_from'))}</label>
+                <input id="hml-from" type="datetime-local" class="form-control form-control-sm" style="min-width:165px"></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_to'))}</label>
+                <input id="hml-to" type="datetime-local" class="form-control form-control-sm" style="min-width:165px"></div>
+            <div class="flex-grow-1"><label class="form-label small mb-1">${esc(t('syslog_search'))}</label>
+                <input id="hml-q" type="search" class="form-control form-control-sm" placeholder="${escAttr(t('syslog_search'))}"></div>
+            <div class="d-flex align-items-end"><span id="hml-auto-refresh"></span></div>
+        </div>
+        <div id="hml-pager-top" class="mb-1"></div>
+        <div class="table-responsive rounded border" style="background:var(--ss-pagination-bg, var(--bs-secondary-bg));flex:1 1 auto;min-height:0;overflow:auto">
+        <table class="table table-sm table-striped table-hover align-middle mb-0" style="font-size:.8rem;--bs-table-bg:transparent">
+            <thead><tr>
+                <th class="text-nowrap">${esc(t('syslog_time'))}</th>
+                <th>${esc(t('syslog_severity'))}</th>
+                <th>${esc(t('syslog_facility'))}</th>
+                <th>${esc(t('syslog_app'))}</th>
+                <th style="width:55%">${esc(t('syslog_message'))}</th>
+            </tr></thead><tbody id="hml-rows"></tbody>
+        </table></div>
+        <div id="hml-empty" class="text-center text-muted py-3" style="display:none">${esc(t('host_logs_none'))}</div>
+        <div id="hml-pager" class="mt-2"></div>`;
+    // restore + wire filters
+    const fromEl = document.getElementById('hml-from'), toEl = document.getElementById('hml-to');
+    if (typeof _tsToLocalInput !== 'undefined') { fromEl.value = _tsToLocalInput(st.since); toEl.value = _tsToLocalInput(st.until); }
+    document.getElementById('hml-q').value = st.q;
+    const toTs = (v) => (typeof _localInputToTs !== 'undefined') ? _localInputToTs(v) : '';
+    document.getElementById('hml-sev').onchange = (e) => { st.severity_max = e.target.value; st.page = 1; _hostLogsFetch(); };
+    fromEl.onchange = (e) => { st.since = toTs(e.target.value); st.page = 1; _hostLogsFetch(); };
+    toEl.onchange = (e) => { st.until = toTs(e.target.value); st.page = 1; _hostLogsFetch(); };
+    let qTimer = null;
+    document.getElementById('hml-q').oninput = (e) => {
+        clearTimeout(qTimer);
+        qTimer = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; _hostLogsFetch(); }, 350);
+    };
+    // Stop polling when the host modal closes (bind once).
+    const modalEl = document.getElementById('hostModal');
+    if (modalEl && !modalEl._hmLogsHideBound) {
+        modalEl._hmLogsHideBound = true;
+        modalEl.addEventListener('hidden.bs.modal', _hostLogsStopTimer);
+    }
+    _hostLogsRenderAutoRefresh();
+    _hostLogsApplyTimer();
+    _hostLogsFetch();
+}
+
+// Fetch + render rows/pager for the current host-logs state (no shell rebuild).
+async function _hostLogsFetch() {
+    const st = _hostLogsState;
+    const tbody = document.getElementById('hml-rows');
+    if (!st || !tbody) return;
+    const all = !st.pageSize;
+    const limit = all ? 5000 : st.pageSize;
+    const offset = all ? 0 : (st.page - 1) * st.pageSize;
+    const qs = new URLSearchParams({ host: st.addr, limit: String(limit), offset: String(offset) });
+    for (const k of ['severity_max', 'q', 'since', 'until']) if (st[k] !== '' && st[k] != null) qs.set(k, st[k]);
+    const data = await apiGet('/api/v1/syslog?' + qs.toString());
+    const msgs = (data && data.messages) || [];
+    const total = (data && data.total) || 0;
+    if (!all) {
+        const pages = Math.max(1, Math.ceil(total / st.pageSize));
+        if (st.page > pages) { st.page = pages; return _hostLogsFetch(); }
+    }
+    document.getElementById('hml-empty').style.display = msgs.length ? 'none' : '';
+    tbody.innerHTML = msgs.map(m => {
+        const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
+        const when = (m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '')).replace('T', ' ').replace('Z', '');
+        const appp = (m.app || '') + (m.procid ? `[${m.procid}]` : '');
+        return `<tr class="sl-row-${cls}">
+            <td class="text-muted text-nowrap">${esc(when)}</td>
+            <td><span class="badge bg-${cls}">${esc(m.severity_name || '')}</span></td>
+            <td class="text-muted">${esc(m.facility_name || '')}</td>
+            <td><code style="font-size:.78rem">${esc(appp)}</code></td>
+            <td style="word-break:break-word">
+                <div class="d-flex align-items-start gap-2">
+                    <span class="flex-grow-1">${esc(m.message || '')}</span>
+                    <button class="btn btn-sm btn-link p-0 text-muted sl-copy-btn" tabindex="-1"
+                        title="${escAttr(t('syslog_copy'))}" data-msg="${escAttr(m.message || '')}"
+                        onclick="_syslogCopyMsg(this)"><i class="bi bi-clipboard"></i></button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+    const pagerHtml = total > 0
+        ? _renderPagination(total, all ? 1 : st.page, all ? 0 : st.pageSize, '_hostLogsGoPage', '_hostLogsSetPageSize')
+        : '';
+    for (const id of ['hml-pager-top', 'hml-pager']) {
+        const el = document.getElementById(id); if (el) el.innerHTML = pagerHtml;
+    }
+}
+
+// Jump from a "Latest data" row to that series' chart in the History tab.
+function _goToHistory(mod, key) {
+    try {
+        localStorage.setItem('ss_history_mod', mod);
+        localStorage.setItem('ss_history_key', key);
+    } catch (e) { /* ignore */ }
+    bootstrap.Modal.getInstance(document.getElementById('hostModal'))?.hide();
+    const btn = document.getElementById('btn-tab-history');
+    if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();  // → shown.bs.tab → renderHistory restores the series
+}
+
+async function testHostRow(uid) {
+    // Open the results modal (with the per-check breakdown) so a failing check is
+    // identifiable — not just a "8/9" summary toast.
+    const host = hostsData[uid];
+    _openHostTestModal(t('host_test') + (host && host.name ? ' — ' + host.name : ''));
+    const res = await apiPost('/api/v1/hosts/test', { host_uid: uid });
+    const d = res && res.data;
+    _renderHostTestResults(d);
+    // Reflect the test outcome in the Status column right away (transient — the
+    // daemon's next run overwrites it on the following reload).
+    if (d && hostsData[uid]) {
+        hostsData[uid].status = d.ok ? 'ok' : 'error';
+        renderServers();
+    }
+}
+
+
+// Active/total count badge content for a module (mirrors the Modules section).
+function _hostCountHtml(st) {
+    const total = st.items.length;
+    const active = st.items.filter(it => it.enabled).length;
+    return `<i class="bi bi-list-ul me-1" style="opacity:.6"></i>${active}/${total}`;
+}
+
+// Refresh a module's header count badge (active/total + warning colour) and
+// keep the master enable switch in sync.
+function _refreshHostCount(mod) {
+    const st = _hostChecks[mod];
+    if (!st) return;
+    const slug = mod.replace(/\W/g, '_');
+    const total = st.items.length;
+    const active = st.items.filter(it => it.enabled).length;
+    const cnt = document.getElementById('hmCnt_' + slug);
+    if (cnt) {
+        cnt.innerHTML = _hostCountHtml(st);
+        cnt.style.color = active < total
+            ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)';
+    }
+    const master = document.getElementById('hmMaster_' + slug);
+    if (master) { master.checked = active > 0; master.disabled = total === 0; }
+}
+
+// Master switch: enable/disable ALL of a module's checks on this server.
+function _toggleHostModule(mod, on) {
+    const st = _hostChecks[mod];
+    if (!st) return;
+    st.items.forEach(it => { it.enabled = on; });
+    _refreshHostCheckList(mod);   // re-render item switches + count badge
+}
+
+// Re-render the whole Monitoring section (after add/remove of a module).
+function _refreshMonitoring() {
+    const el = document.getElementById('hmMonitorBody');
+    if (el) { el.innerHTML = _renderMonitoringSection(); initTooltips(el); }
+}
+
+// Add a module to this host (it then shows in the Monitoring list).
+function _addHostModule(mod) {
+    if (!_hostChecks[mod]) return;
+    _hostShownMods.add(mod);
+    // A single-check module starts enabled when added explicitly.
+    const st = _hostChecks[mod];
+    if (!st.multiple && st.items[0] && !st.items[0]._key) st.items[0].enabled = true;
+    _refreshMonitoring();
+}
+
+// Remove a module from this host: hide it and drop its checks (deleted on save).
+function _removeHostModule(mod) {
+    const msg = (t('host_module_remove_confirm') || 'Remove module "{name}" and its checks?')
+        .replace('{name}', _modPrettyName(mod));
+    showConfirmModal(msg, () => {
+        const st = _hostChecks[mod];
+        if (st) {
+            if (st.multiple) {
+                st.items = [];                 // existing checks deleted on save
+            } else if (st.items[0]) {
+                // Single-check: keep the slot but detach it so it's deleted on save.
+                st.items[0]._key = null;
+                st.items[0].enabled = false;
+            }
+        }
+        _hostShownMods.delete(mod);
+        _refreshMonitoring();
+    });
+}
+
+// Module picker modal (same look as the Modules section): a grid of the host's
+// available modules + an "already configured" list.  Reuses #addModuleModal.
+function openHostAddModule() {
+    const all = Object.keys(_hostChecks).sort();
+    const available  = all.filter(m => !_hostShownMods.has(m));
+    const configured = all.filter(m =>  _hostShownMods.has(m));
+
+    const titleEl = document.getElementById('addModuleModalTitle');
+    if (titleEl) titleEl.textContent = t('add_module') + (available.length ? ` (${available.length})` : '');
+    const body = document.getElementById('addModuleModalBody');
+    if (!body) return;
+
+    if (!available.length) {
+        body.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-check-circle" style="font-size:2rem;opacity:.5;color:#22c55e;display:block;margin-bottom:.5rem"></i>
+            <span>${esc(t('add_module_all_configured'))}</span></div>`;
+    } else {
+        let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.65rem">`;
+        for (const name of available) {
+            const icon = moduleIcon(name, {});
+            const pname = modulePrettyName(name, {});
+            const hue = _moduleHue(name);
+            const avBg = `hsla(${hue},65%,55%,.14)`, avColor = `hsl(${hue},60%,42%)`, accent = `hsl(${hue},65%,55%)`;
+            h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
+                       style="cursor:pointer;background:var(--ss-surface-bg,var(--bs-body-bg));transition:box-shadow .15s,border-color .15s"
+                       onclick="_hostAddModulePick(${jsStr(name)})"
+                       onmouseover="this.style.boxShadow='0 4px 14px rgba(0,0,0,.13)';this.style.borderColor='${accent}'"
+                       onmouseout="this.style.boxShadow='';this.style.borderColor=''">
+                <span class="rounded-2 d-flex align-items-center justify-content-center"
+                      style="width:46px;height:46px;background:${avBg};color:${avColor};font-size:1.35rem">${icon}</span>
+                <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${esc(pname)}</div>
+                <code class="text-muted" style="font-size:.7rem">${esc(name)}</code>
+            </div>`;
+        }
+        h += `</div>`;
+        if (configured.length) {
+            h += `<div class="text-muted mt-4 mb-2 pb-1 fw-semibold"
+                       style="font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--bs-border-color)">
+                <i class="bi bi-check-lg me-1"></i>${esc(t('add_module_already_configured'))}</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.4rem;opacity:.45">`;
+            for (const name of configured) {
+                h += `<div class="rounded-3 border d-flex align-items-center gap-2 px-2 py-1" style="background:var(--bs-secondary-bg)">
+                    <span style="font-size:1.05rem">${moduleIcon(name, {})}</span>
+                    <span class="text-muted text-truncate" style="font-size:.8rem">${esc(modulePrettyName(name, {}))}</span></div>`;
+            }
+            h += `</div>`;
+        }
+        body.innerHTML = h;
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('addModuleModal')).show();
+}
+
+function _hostAddModulePick(name) {
+    // Keep the picker open so several modules can be added in one go — the chosen
+    // module moves to the "already configured" list and the grid re-renders.
+    // Close it with the header ✕ / "Close" button when finished.
+    _addHostModule(name);
+    openHostAddModule();
+}
+
+// ── Monitoring tab (which modules check this host + their settings) ──
+// Each module can have SEVERAL checks bound to the host (e.g. one server runs
+// both MySQL and PostgreSQL → two Database Connectivity checks).
+function _renderMonitoringSection() {
+    const allMods = Object.keys(_hostChecks).sort();
+    if (!allMods.length) return `<div class="small text-muted">${esc(t('host_monitor_none'))}</div>`;
+    const shown = allMods.filter(m => _hostShownMods.has(m));
+
+    // Toolbar: hint + "Add module" button → opens the module picker modal.
+    let h = `<div class="d-flex align-items-center gap-2 mb-2">
+        <span class="small text-muted">${esc(t('host_monitor_hint'))}</span>
+        <button class="btn btn-sm btn-success ms-auto" onclick="openHostAddModule()">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('host_add_module'))}</button></div>`;
+
+    // Read-only: multi-bind (cluster) checks this host is a member of. They are
+    // managed in the Modules tab (one check spans all nodes), not per-host — but
+    // we surface them so the node shows it belongs to a cluster check.
+    const memberHtml = _renderClusterMembershipCards(_hostClusterMemberships(_editingHostUid));
+
+    if (!shown.length && !memberHtml) {
+        return h + `<div class="text-center py-4 text-muted small">
+            <i class="bi bi-plus-circle" style="font-size:1.6rem;opacity:.35;display:block;margin-bottom:.4rem"></i>
+            ${esc(t('host_monitor_empty'))}</div>`;
+    }
+    h += memberHtml;
+
+    for (const mod of shown) {
+        const st = _hostChecks[mod];
+        const slug = mod.replace(/\W/g, '_');
+        if (st.multiple) {
+            // Several checks allowed (e.g. datastore, web): a toolbar (Discover /
+            // Add) inside the card + per-item list. Header shows an active/total
+            // count (like the Modules section) and an icon-only "test all".
+            const title = `<span class="fw-semibold">${esc(_modPrettyName(mod))}</span>
+                <span class="badge rounded-pill flex-shrink-0 ms-2" id="hmCnt_${slug}"
+                      style="font-size:.7rem;background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color)">${_hostCountHtml(st)}</span>`;
+            const _sch = ITEM_SCHEMAS[mod + '|' + st.collection] || {};
+            const _hasDisc = !!_sch['__discovery__'];
+            // Header: a master enable switch (toggles ALL the module's checks on
+            // this server) + an icon-only "test all" (like the single-check ▶).
+            const _anyOn = st.items.some(it => it.enabled);
+            const actions = `<div class="d-flex align-items-center gap-2">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="hmMaster_${slug}" ${_anyOn ? 'checked' : ''}
+                           ${st.items.length ? '' : 'disabled'}
+                           onchange="_toggleHostModule(${jsStr(mod)}, this.checked)"
+                           title="${escAttr(t('host_module_enable'))}" aria-label="${escAttr(t('host_module_enable'))}">
+                </div>
+                <button class="btn btn-sm btn-info py-0 px-1" onclick="testHostModule(${jsStr(mod)})"
+                    title="${escAttr(t('host_test_all'))}"><i class="bi bi-play-circle"></i></button>
+                <button class="btn btn-sm btn-danger py-0 px-1" onclick="_removeHostModule(${jsStr(mod)})"
+                    title="${escAttr(t('host_module_remove'))}"><i class="bi bi-x-lg"></i></button>
+                </div>`;
+            // Toolbar inside the card body: a filter that fills the free space
+            // (with a clear button) + Discover/Add pushed to the right.
+            const toolbar = `<div class="d-flex align-items-center gap-2 mb-2 pb-2" style="border-bottom:1px solid var(--bs-border-color)">
+                <div class="input-group input-group-sm flex-grow-1">
+                    <span class="input-group-text"><i class="bi bi-funnel"></i></span>
+                    <input type="text" id="hmFilter_${slug}" class="form-control" placeholder="${escAttr(t('host_filter_checks') || 'Filter…')}"
+                        value="${escAttr(_hostCheckFilters[mod] || '')}"
+                        oninput="_setHostCheckFilter(${jsStr(mod)}, this.value)">
+                    <button class="btn btn-secondary" type="button" title="${escAttr(t('clear') || 'Clear')}"
+                        onclick="document.getElementById('hmFilter_${slug}').value='';_setHostCheckFilter(${jsStr(mod)}, '')"><i class="bi bi-x-lg"></i></button>
+                </div>
+                ${_hasDisc ? `<button class="btn btn-sm btn-info flex-shrink-0 text-nowrap" onclick="openHostDiscover(${jsStr(mod)})"
+                    title="${escAttr(t('discover'))}"><i class="bi bi-search me-1"></i>${esc(t('discover'))}</button>` : ''}
+                <button class="btn btn-sm btn-success flex-shrink-0 text-nowrap" onclick="_addHostCheck(${jsStr(mod)})"
+                    title="${escAttr(t('host_add_check'))}"><i class="bi bi-plus-lg me-1"></i>${esc(t('host_add_check'))}</button>
+            </div>`;
+            const body = `${toolbar}<div id="hmChkList_${slug}">${_renderHostCheckList(mod)}</div>`;
+            // Collapsed when editing an existing host; expanded for a new one.
+            h += _collapsibleCard('hmCard_' + slug, title, actions, body, !_editingHostUid);
+        } else {
+            // Single check per host (e.g. ping, ntp): one enable toggle + fields.
+            h += _renderSingleCheck(mod);
+        }
+    }
+    return h;
+}
+
+// Multi-bind (cluster) checks that reference this host via host_uids — the host
+// is one of the cluster's nodes.  Returns [{mod, key, label, count}].

@@ -1,0 +1,311 @@
+function _historyRenderChartArea() {
+    const area = document.getElementById('history-chart-area');
+    if (!area) return;
+
+    if (!_historyPoints.length) {
+        area.innerHTML = `<div class="d-flex align-items-center justify-content-center h-100 text-muted"
+            style="min-height:200px"><p>${esc(t('history_no_data'))}</p></div>`;
+        _historyRenderStats({});
+        return;
+    }
+
+    // Build canvas + tooltip overlay
+    area.innerHTML = `
+<div id="history-canvas-wrap" class="position-absolute top-0 start-0 end-0 bottom-0">
+  <canvas id="history-canvas" style="display:block;cursor:crosshair"></canvas>
+</div>
+<div id="history-tooltip"
+     class="card shadow px-2 py-1"
+     style="position:fixed;display:none;font-size:.78rem;pointer-events:none;z-index:1090;min-width:130px">
+</div>`;
+
+    _historyTooltip = document.getElementById('history-tooltip');
+    const canvas    = document.getElementById('history-canvas');
+
+    // Populate field selector — only show when there are multiple numeric fields
+    // AND the module hasn't explicitly declared field:null (status-only).
+    const fieldSel = document.getElementById('history-field-sel');
+    if (fieldSel) {
+        // Offer the metrics the module DECLARES (translated, no internal values
+        // like the alert threshold); fall back to auto-detection only when the
+        // module declares none.
+        const declared = Object.keys(_historyFields);
+        const fields = declared.length ? declared : _historyNumericFields(_historyPoints);
+        // Hide selector only when the module schema declared field:null (status-only).
+        // A user manually selecting "Status Only" should keep the selector visible.
+        if (!_historySchemaNull && fields.length > 1) {
+            fieldSel.style.display = '';
+            fieldSel.innerHTML = fields.map(f =>
+                `<option value="${esc(f)}" ${f === _historyField ? 'selected' : ''}>${esc(_historyFieldLabel(_historyFields, f))}</option>`
+            ).join('') + `<option value="" ${!_historyField ? 'selected' : ''}>${esc(t('history_status_only'))}</option>`;
+        } else {
+            fieldSel.style.display = 'none';
+        }
+    }
+
+    // Draw chart
+    _historyDraw(canvas, _historyPoints, _historyField, _historyUnit, _historyLabel);
+    _historyRenderStats(_historyStats);
+
+    // Hover tooltip
+    const wrap = document.getElementById('history-canvas-wrap');
+    if (wrap) {
+        canvas.addEventListener('mousemove', e => _historyOnHover(e, canvas));
+        canvas.addEventListener('mouseleave', () => { if (_historyTooltip) _historyTooltip.style.display = 'none'; });
+    }
+
+    // Responsive: redraw on resize
+    if (_historyResizeOb) _historyResizeOb.disconnect();
+    _historyResizeOb = new ResizeObserver(() => {
+        _historyDraw(canvas, _historyPoints, _historyField, _historyUnit, _historyLabel);
+    });
+    _historyResizeOb.observe(area);
+}
+
+// ── Stats row ─────────────────────────────────────────────────────────────────
+function _historyRenderStats(stats) {
+    const row = document.getElementById('history-stats-row');
+    if (!row) return;
+    if (!stats || !stats.count) { row.innerHTML = ''; return; }
+
+    const cards = [];
+    cards.push(`<div class="card px-3 py-2 text-center"><div class="text-muted small">${esc(t('history_samples'))}</div><div class="fw-semibold">${stats.count.toLocaleString()}</div></div>`);
+    cards.push(`<div class="card px-3 py-2 text-center"><div class="text-muted small">${esc(t('history_uptime'))}</div><div class="fw-semibold ${stats.uptime >= 95 ? 'text-success' : stats.uptime >= 80 ? 'text-warning' : 'text-danger'}">${stats.uptime}%</div></div>`);
+    if (stats.min !== undefined) {
+        cards.push(`<div class="card px-3 py-2 text-center"><div class="text-muted small">${esc(t('history_min'))}</div><div class="fw-semibold">${_hFmtNum(stats.min)}</div></div>`);
+        cards.push(`<div class="card px-3 py-2 text-center"><div class="text-muted small">${esc(t('history_max'))}</div><div class="fw-semibold">${_hFmtNum(stats.max)}</div></div>`);
+        cards.push(`<div class="card px-3 py-2 text-center"><div class="text-muted small">${esc(t('history_avg'))}</div><div class="fw-semibold">${_hFmtNum(stats.avg)}</div></div>`);
+    }
+    row.innerHTML = cards.join('');
+}
+
+// ── Canvas chart ──────────────────────────────────────────────────────────────
+function _historyDraw(canvas, points, field, unit, metricLabel) {
+    unit        = unit        || '';
+    metricLabel = metricLabel || field || '';
+    if (!canvas || !points.length) return;
+    const wrap = canvas.parentElement;
+    const dpr  = window.devicePixelRatio || 1;
+    const W    = wrap.clientWidth  || 600;
+    const H    = Math.max(150, wrap.clientHeight || 300);
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    // Colors from CSS so dark/light theme is automatic — no fill, transparent canvas.
+    const bodyStyle = getComputedStyle(document.body);
+    const C = {
+        text: bodyStyle.getPropertyValue('--bs-body-color').trim() || bodyStyle.color,
+        grid: bodyStyle.getPropertyValue('--bs-border-color').trim()
+              || (document.body.getAttribute('data-bs-theme') === 'dark'
+                  ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.08)'),
+        axis: bodyStyle.getPropertyValue('--bs-border-color').trim()
+              || 'rgba(128,128,128,.4)',
+        ok:   '#198754',
+        err:  '#dc3545',
+    };
+
+    const PAD = {t: 14, r: 14, b: 38, l: 58};
+    const cw = W - PAD.l - PAD.r;
+    const ch = H - PAD.t - PAD.b;
+
+    const vals = field ? points.map(p => (typeof p.data[field] === 'number' ? p.data[field] : null)) : [];
+    const hasNums = vals.some(v => v !== null);
+
+    // For single-point charts, pad the time axis so labels are meaningful.
+    const tmin = points[0].ts;
+    const tmax = points[points.length - 1].ts;
+    const tSpan = tmax - tmin || _historyHours * 3600;
+    const tDisplay0 = tmin - tSpan * 0.02;
+    const tDisplay1 = tmax + tSpan * 0.02;
+
+    let ymin, ymax;
+    if (hasNums) {
+        const nums = vals.filter(v => v !== null);
+        ymin = Math.min(...nums);
+        ymax = Math.max(...nums);
+        if (ymin === ymax) { ymin -= 1; ymax += 1; }
+        const span = ymax - ymin;
+        const mag  = Math.pow(10, Math.floor(Math.log10(span || 1)));
+        const step = mag * (span / mag > 5 ? 2 : span / mag > 2 ? 1 : 0.5);
+        ymin = Math.floor(ymin / step) * step;
+        ymax = Math.ceil(ymax / step) * step;
+    } else {
+        ymin = -0.05; ymax = 1.05;
+    }
+
+    const sx = t  => PAD.l + (t - tDisplay0) / (tDisplay1 - tDisplay0) * cw;
+    const sy = v  => PAD.t + (1 - (v - ymin) / (ymax - ymin)) * ch;
+
+    // Transparent canvas — no background fill, inherits container background.
+    ctx.clearRect(0, 0, W, H);
+
+    // Grid + Y labels
+    ctx.font = '10px system-ui, sans-serif';
+    const NY = 4;
+    for (let i = 0; i <= NY; i++) {
+        const y = PAD.t + (i / NY) * ch;
+        const v = ymax - (i / NY) * (ymax - ymin);
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + cw, y); ctx.stroke();
+        ctx.fillStyle = C.text; ctx.textAlign = 'right';
+        ctx.fillText(hasNums ? (_hFmtNum(v) + unit) : (i === 0 ? 'OK' : i === NY ? 'ERR' : ''), PAD.l - 5, y + 3.5);
+    }
+
+    // X labels
+    ctx.textAlign = 'center';
+    const rangeS  = tDisplay1 - tDisplay0;
+    const NX      = Math.min(6, Math.max(2, Math.floor(cw / 80)));
+    for (let i = 0; i <= NX; i++) {
+        const t = tDisplay0 + (i / NX) * rangeS;
+        const x = PAD.l + (i / NX) * cw;
+        ctx.fillStyle = C.text;
+        ctx.fillText(_hFmtTime(t, tSpan), x, PAD.t + ch + 14);
+    }
+
+    if (hasNums) {
+        // Gradient fill
+        const lineCol = points[points.length - 1]?.status ? C.ok : C.err;
+        ctx.beginPath();
+        let first = true;
+        for (let i = 0; i < points.length; i++) {
+            if (vals[i] === null) continue;
+            first ? ctx.moveTo(sx(points[i].ts), sy(vals[i])) : ctx.lineTo(sx(points[i].ts), sy(vals[i]));
+            first = false;
+        }
+        const lastIdx = vals.lastIndexOf(vals.filter(v => v !== null).at(-1));
+        ctx.lineTo(sx(points[lastIdx]?.ts ?? tmax), PAD.t + ch);
+        ctx.lineTo(sx(tDisplay0), PAD.t + ch);
+        ctx.closePath();
+        const grad = ctx.createLinearGradient(0, PAD.t, 0, PAD.t + ch);
+        grad.addColorStop(0, lineCol + '55');
+        grad.addColorStop(1, lineCol + '08');
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Line segments coloured by status
+        ctx.lineWidth = 2; ctx.lineJoin = 'round';
+        for (let i = 0; i < points.length - 1; i++) {
+            if (vals[i] === null || vals[i + 1] === null) continue;
+            ctx.beginPath();
+            ctx.strokeStyle = points[i].status ? C.ok : C.err;
+            ctx.moveTo(sx(points[i].ts), sy(vals[i]));
+            ctx.lineTo(sx(points[i + 1].ts), sy(vals[i + 1]));
+            ctx.stroke();
+        }
+    } else {
+        // Status blocks
+        for (let i = 0; i < points.length - 1; i++) {
+            const x1 = sx(points[i].ts);
+            const x2 = Math.max(x1 + 1, sx(points[i + 1].ts));
+            ctx.fillStyle = points[i].status ? C.ok + '55' : C.err + '55';
+            ctx.fillRect(x1, PAD.t, x2 - x1, ch);
+        }
+    }
+
+    // Status bar (thin strip below chart)
+    const SBY = PAD.t + ch + 22; const SBH = 5;
+    for (let i = 0; i < points.length; i++) {
+        const x1 = sx(points[i].ts);
+        const x2 = i < points.length - 1 ? Math.max(x1 + 1, sx(points[i + 1].ts)) : x1 + 2;
+        ctx.fillStyle = points[i].status ? C.ok : C.err;
+        ctx.fillRect(x1, SBY, x2 - x1, SBH);
+    }
+
+    // Y-axis label (rotated)
+    if (metricLabel) {
+        ctx.save();
+        ctx.translate(10, PAD.t + ch / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center';
+        ctx.font = '10px system-ui, sans-serif';
+        ctx.fillStyle = C.text;
+        ctx.globalAlpha = 0.6;
+        ctx.fillText(metricLabel, 0, 0);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+    }
+
+    // Axes
+    ctx.strokeStyle = C.axis; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PAD.l, PAD.t); ctx.lineTo(PAD.l, PAD.t + ch); ctx.lineTo(PAD.l + cw, PAD.t + ch);
+    ctx.stroke();
+
+    // Store for tooltip hit-test
+    canvas._histMeta = { points, vals, hasNums, field, unit, metricLabel, sx, sy, PAD, cw, ch, C };
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────────
+function _historyOnHover(e, canvas) {
+    const meta = canvas._histMeta;
+    if (!meta || !_historyTooltip) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx   = e.clientX - rect.left;
+    const { points, vals, hasNums, field, unit, metricLabel, sx, PAD, cw } = meta;
+
+    // Find closest point by X
+    let best = -1, bestDx = Infinity;
+    for (let i = 0; i < points.length; i++) {
+        const dx = Math.abs(sx(points[i].ts) - mx);
+        if (dx < bestDx) { bestDx = dx; best = i; }
+    }
+    if (best < 0 || bestDx > cw / points.length * 3) {
+        _historyTooltip.style.display = 'none'; return;
+    }
+
+    const p   = points[best];
+    const val = hasNums ? vals[best] : null;
+    const dt  = new Date(p.ts * 1000);
+    const ts  = dt.toLocaleDateString() + ' ' + dt.toTimeString().slice(0, 8);
+    const stCls = p.status ? 'text-success' : 'text-danger';
+    const stLbl = p.status ? 'OK' : 'Error';
+
+    const ttLabel = metricLabel || field || '';
+    _historyTooltip.innerHTML = `
+<div class="text-muted" style="font-size:.72rem">${esc(ts)}</div>
+${val !== null ? `<div>${esc(ttLabel)}: <strong>${_hFmtNum(val)}${esc(unit)}</strong></div>` : ''}
+<div class="${stCls} fw-semibold">${stLbl}</div>`;
+
+    const tx = e.clientX + 12, ty = e.clientY - 10;
+    _historyTooltip.style.left    = tx + 'px';
+    _historyTooltip.style.top     = ty + 'px';
+    _historyTooltip.style.display = 'block';
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function _historyNumericFields(points) {
+    const seen = new Set();
+    for (const p of points.slice(0, 20)) {
+        for (const [k, v] of Object.entries(p.data || {})) {
+            if (typeof v === 'number') seen.add(k);
+        }
+    }
+    return [...seen];
+}
+
+function _hFmtTime(ts, rangeS) {
+    const d = new Date(ts * 1000);
+    if (rangeS < 3600 * 8) {
+        return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+    } else if (rangeS < 86400 * 4) {
+        return (d.getMonth()+1) + '/' + d.getDate() + ' ' + d.getHours() + 'h';
+    }
+    return (d.getMonth()+1) + '/' + d.getDate();
+}
+
+function _hFmtNum(v) {
+    if (v === null || v === undefined) return '-';
+    const a = Math.abs(v);
+    if (a >= 10000) return v.toFixed(0);
+    if (a >= 100)   return v.toFixed(1);
+    if (a >= 1)     return v.toFixed(2);
+    return v.toFixed(3);
+}
+
+function _historySkeletonHTML() {
+    return `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
+}

@@ -1,0 +1,179 @@
+{# Add-item modal #}
+<div class="modal fade" id="addItemModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnAddItemOk').click();}">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-plus-circle me-1"></i><span id="addItemModalTitle">{{ i18n.new_item }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small" id="newItemNameLabel">{{ i18n.item_name }}</label>
+                <input type="text" class="form-control form-control-sm" id="newItemName"
+                    placeholder="{{ i18n.item_placeholder }}">
+                <div class="invalid-feedback" id="newItemNameError"></div>
+                <div id="newItemExtraFields"></div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnAddItemOk" title="{{ i18n.add_item_tt }}">
+                    <i class="bi bi-plus-lg me-1"></i>{{ i18n.add }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Cluster edit modal — hosts the shared field editor for one multi-bind check #}
+<div class="modal fade" id="clusterEditModal" tabindex="-1">
+    <div class="modal-dialog cl-modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-diagram-3 me-1"></i><span id="clusterEditTitle">{{ i18n.cl_edit_title }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="clusterEditBody"></div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnClusterEditSave" onclick="saveClusterEdit()" title="{{ i18n.save }}">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Toast notifications #}
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast" class="toast align-items-center border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body" id="toast-body"></div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+        </div>
+    </div>
+</div>
+
+
+{# Reset user password modal (admin) #}
+<div class="modal fade" id="resetPasswordModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnResetPasswordOk').click();}">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="resetPasswordTitle"><i class="bi bi-key me-1"></i>{{ i18n.reset_password }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="rpNewPassword"
+                        autocomplete="new-password"
+                        oninput="_checkPwMatch('rpNewPassword','rpConfirmPassword');_updatePasswordStrength('rpNewPassword','rpPwStrengthBar','rpPwStrengthLabel')">
+                    <div class="progress mt-1" style="height:4px" id="rpPwStrengthBar"><div class="progress-bar" role="progressbar"></div></div>
+                    <div class="text-muted small mt-1" id="rpPwStrengthLabel" style="min-height:1.1em"></div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="rpConfirmPassword"
+                        oninput="_checkPwMatch('rpNewPassword','rpConfirmPassword')">
+                    <div class="valid-feedback">{{ i18n.passwords_match }}</div>
+                    <div class="invalid-feedback">{{ i18n.passwords_dont_match }}</div>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-warning" id="btnResetPasswordOk" title="{{ i18n.reset_password_tt }}">
+                    <i class="bi bi-key me-1"></i>{{ i18n.reset_password }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Confirm delete item modal #}
+<div class="modal fade" id="confirmDeleteItemModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnConfirmDeleteItemOk').click();}">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-trash3 me-1 text-danger"></i>{{ i18n.delete }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0 small" id="confirmDeleteItemMsg"></p>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-danger" id="btnConfirmDeleteItemOk" title="{{ i18n.delete_tt }}">
+                    <i class="bi bi-trash3 me-1"></i>{{ i18n.delete }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Rename item modal #}
+<div class="modal fade" id="renameItemModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnRenameItemOk').click();}">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-pencil-square me-1"></i>{{ i18n.rename_item }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small" id="renameItemPrompt">{{ i18n.rename_item_prompt }}</label>
+                <input type="text" class="form-control form-control-sm" id="renameItemInput">
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnRenameItemOk" title="{{ i18n.rename_item }}">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Edit check name (label) modal — used by the Servers modal's title pencil #}
+<div class="modal fade" id="hostLabelModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnHostLabelOk').click();}">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-pencil-square me-1"></i>{{ i18n.host_edit_name }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small" for="hostLabelInput">{{ i18n.host_edit_name_prompt }}</label>
+                <input type="text" class="form-control form-control-sm" id="hostLabelInput">
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnHostLabelOk" title="{{ i18n.save }}">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Add module picker modal #}
+<div class="modal fade" id="addModuleModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title">
+                    <i class="bi bi-puzzle me-1"></i><span id="addModuleModalTitle">{{ i18n.add_module }}</span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body" id="addModuleModalBody">
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+

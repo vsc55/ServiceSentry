@@ -1,0 +1,228 @@
+// ── Events tab ────────────────────────────────────────────────────────────────
+// Event→notification rules: a compact list (search + add) editing in a modal,
+// plus a notification-send log. Channels reuse the dispatcher.
+
+let _eventRules = [];
+let _eventDraft = null;     // rule being edited in the modal
+let _eventSearch = '';
+let _eventLog = [];
+let _eventAuditFilter = '';   // filter text for the audit-events multiselect
+
+const _EV_MATCH_TYPES = ['any', 'equals', 'contains', 'not_contains', 'starts', 'ends', 'regex',
+                         'gt', 'gte', 'lt', 'lte'];
+// Operators offered per field: text fields get the string operators; the numeric
+// "severity" field gets equality + comparisons only.
+const _EV_TEXT_OPS = ['any', 'equals', 'contains', 'not_contains', 'starts', 'ends', 'regex'];
+const _EV_NUM_OPS  = ['any', 'equals', 'gte', 'gt', 'lte', 'lt'];
+function _evOpsForField(field) { return field === 'severity' ? _EV_NUM_OPS : _EV_TEXT_OPS; }
+
+// ── Column infrastructure (shared with the users/groups/roles tables) ─────────
+const _EVR_COLS = [
+    { id: 'uid',         label: () => t('event_uid'),         sortKey: 'uid',         always: false },
+    { id: 'name',        label: () => t('event_name'),        sortKey: 'name',        always: true  },
+    { id: 'description', label: () => t('event_description'), sortKey: 'description', always: false },
+    { id: 'source',      label: () => t('event_source'),      sortKey: 'source',      always: false },
+    { id: 'tags',        label: () => t('event_tags'),        sortKey: null,          always: false },
+    { id: 'match',       label: () => t('event_match'),       sortKey: null,          always: false },
+    { id: 'channels',    label: () => t('event_channels'),    sortKey: null,          always: false },
+    { id: 'last_notif',  label: () => t('event_last_notif'),  sortKey: 'last_fired',  always: false },
+    { id: 'enabled',     label: () => t('event_enabled'),     sortKey: 'enabled',     always: false },
+    { id: 'created_at',  label: () => t('col_created_at') || 'Created',    sortKey: 'created_at', always: false },
+    { id: 'updated_at',  label: () => t('col_updated_at') || 'Last Updated', sortKey: 'updated_at', always: false },
+    { id: 'updated_by',  label: () => t('col_updated_by') || 'Updated By',  sortKey: 'updated_by', always: false },
+];
+const _EVR_DEFAULT_COLS = new Set(['source', 'match', 'channels', 'last_notif', 'enabled']);
+// Columns that size to their content (not resizable). Everything else
+// (Name/Description/Tags) flexes and is resizable via percentage widths.
+const _EVR_FIT = new Set(['uid', 'source', 'match', 'channels', 'last_notif',
+                          'enabled', 'created_at', 'updated_at', 'updated_by']);
+const _EVL_COLS = [
+    { id: 'ts',        label: () => t('event_log_time'),     sortKey: 'ts',        always: true  },
+    { id: 'rule_name', label: () => t('event_name'),         sortKey: 'rule_name', always: false },
+    { id: 'source',    label: () => t('event_source'),       sortKey: 'source',    always: false },
+    { id: 'channels',  label: () => t('event_channels'),     sortKey: 'channels',  always: false },
+    { id: 'status',    label: () => t('event_log_status'),   sortKey: 'ok',        always: false },
+    { id: 'detail',    label: () => t('event_log_detail'),   sortKey: null,        always: false },
+];
+// Content-sized (non-resizable) log columns; rule_name/detail flex.
+const _EVL_FIT = new Set(['ts', 'source', 'channels', 'status']);
+const _EVL_DEFAULT_COLS = new Set(['rule_name', 'source', 'channels', 'status', 'detail']);
+
+function _evLoadCols(key, def) {
+    try { const s = JSON.parse(localStorage.getItem(key) || 'null'); if (Array.isArray(s)) return new Set(s); } catch (_) {}
+    return new Set(def);
+}
+function _evLoadOrder(key, cols) {
+    try { const s = JSON.parse(localStorage.getItem(key) || 'null'); if (Array.isArray(s)) return s; } catch (_) {}
+    return cols.map(c => c.id);
+}
+function _evCW(key) { try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch (_) { return {}; } }
+
+let _evrVisibleCols = _evLoadCols('ss_evrules_cols', _EVR_DEFAULT_COLS);
+let _evrColOrder    = _evLoadOrder('ss_evrules_col_order', _EVR_COLS);
+let _evrSort = 'name', _evrSortDir = 'asc';
+let _evrPage = 1, _evrPageSize = null;
+let _evlVisibleCols = _evLoadCols('ss_evlog_cols', _EVL_DEFAULT_COLS);
+let _evlColOrder    = _evLoadOrder('ss_evlog_col_order', _EVL_COLS);
+let _evlSort = 'ts', _evlSortDir = 'desc';
+let _evlPage = 1, _evlPageSize = null, _evlSearch = '';
+
+function _evrToggleCol(col) {
+    const adding = !_evrVisibleCols.has(col);
+    _evrVisibleCols.has(col) ? _evrVisibleCols.delete(col) : _evrVisibleCols.add(col);
+    if (adding && col === 'uid') {   // UID always shows first, like the users/groups/roles tables
+        _evrColOrder = ['uid', ..._evrColOrder.filter(c => c !== 'uid')];
+        localStorage.setItem('ss_evrules_col_order', JSON.stringify(_evrColOrder));
+    }
+    localStorage.setItem('ss_evrules_cols', JSON.stringify([..._evrVisibleCols]));
+    _persistTableConfig(); _eventRulesBody();
+}
+function _resetEvrCols() {
+    _evrVisibleCols = new Set(_EVR_DEFAULT_COLS); _evrColOrder = _EVR_COLS.map(c => c.id);
+    localStorage.setItem('ss_evrules_cols', JSON.stringify([..._evrVisibleCols]));
+    localStorage.setItem('ss_evrules_col_order', JSON.stringify(_evrColOrder));
+    localStorage.removeItem('ss_evrules_col_w');
+    _persistTableConfig(); _eventRulesBody();
+}
+function _evrSaveColOrder() { localStorage.setItem('ss_evrules_col_order', JSON.stringify(_evrColOrder)); _persistTableConfig(); }
+function _sortEventRules(col) {
+    if (_evrSort === col) _evrSortDir = _evrSortDir === 'asc' ? 'desc' : 'asc';
+    else { _evrSort = col; _evrSortDir = 'asc'; }
+    _eventRulesBody();
+}
+function _goEvrPage(p) { _evrPage = p; _eventRulesBody(); }
+function _changeEvrPageSize(v) { _evrPageSize = parseInt(v, 10); _evrPage = 1; _eventRulesBody(); }
+function _evlToggleCol(col) {
+    _evlVisibleCols.has(col) ? _evlVisibleCols.delete(col) : _evlVisibleCols.add(col);
+    localStorage.setItem('ss_evlog_cols', JSON.stringify([..._evlVisibleCols]));
+    _persistTableConfig(); _renderEventLog();
+}
+function _resetEvlCols() {
+    _evlVisibleCols = new Set(_EVL_DEFAULT_COLS); _evlColOrder = _EVL_COLS.map(c => c.id);
+    localStorage.setItem('ss_evlog_cols', JSON.stringify([..._evlVisibleCols]));
+    localStorage.setItem('ss_evlog_col_order', JSON.stringify(_evlColOrder));
+    localStorage.removeItem('ss_evlog_col_w');
+    _persistTableConfig(); _renderEventLog();
+}
+function _evlSaveColOrder() { localStorage.setItem('ss_evlog_col_order', JSON.stringify(_evlColOrder)); _persistTableConfig(); }
+function _goEvlPage(p) { _evlPage = p; _renderEventLog(); }
+function _changeEvlPageSize(v) { _evlPageSize = parseInt(v, 10); _evlPage = 1; _renderEventLog(); }
+function _sortEventLog(col) {
+    if (_evlSort === col) _evlSortDir = _evlSortDir === 'asc' ? 'desc' : 'asc';
+    else { _evlSort = col; _evlSortDir = 'asc'; }
+    _renderEventLog();
+}
+// Resolve the ordered, visible column descriptors for a table.
+function _evOrdered(cols, order, visible) {
+    const known = new Set(cols.map(c => c.id));
+    cols.forEach(c => { if (!order.includes(c.id)) order.push(c.id); });
+    order = order.filter(id => known.has(id));
+    return order.map(id => cols.find(c => c.id === id)).filter(c => c && (c.always || visible.has(c.id)));
+}
+
+// ── Percentage column widths (CSS-native, never overflows) ────────────────────
+// Default relative weights; normalised at render to fill the available width.
+const _EVR_DEFW = { uid: 14, name: 12, description: 14, source: 9, tags: 10, match: 22,
+                    channels: 7, last_notif: 11, enabled: 6, created_at: 10, updated_at: 10, updated_by: 9 };
+let _evrPct = _evCW('ss_evrules_col_w');   // {id: percent} — reuses the server-persisted key
+
+// width% per visible id, normalised to fill 100% among the flexible columns only.
+// The table uses table-layout:auto so _EVR_FIT columns shrink to their content
+// (width:1% + nowrap) while the flexible ones share the remaining width.
+function _evPctMap(ids, pctMap, defW, reserve) {
+    ids.forEach(id => { if (typeof pctMap[id] !== 'number') pctMap[id] = defW[id] || 10; });
+    Object.keys(pctMap).forEach(id => { if (!ids.includes(id)) delete pctMap[id]; });
+    const sum = ids.reduce((s, id) => s + pctMap[id], 0) || 1;
+    const avail = 100 - (reserve || 0);
+    const out = {}; ids.forEach(id => out[id] = pctMap[id] / sum * avail); return out;
+}
+
+// Reorder (drag) + percentage resize + dbl-click auto-fit. Widening a column
+// shrinks the others proportionally, keeping the total constant (= no scroll).
+function _evAttachPctCols(tableId, getOrder, setOrder, saveOrder, render, pctMap, pctKey) {
+    const tbl = document.getElementById(tableId);
+    if (!tbl) return;
+    let dragSrc = null;
+    const ths = () => [...tbl.querySelectorAll('thead th.ss-th-resizable')];
+    const applyResize = (col, targetPx) => {
+        const list = ths(), tableW = tbl.offsetWidth || 1;
+        const start = {}; list.forEach(t => start[t.dataset.col] = t.offsetWidth / tableW * 100);
+        const group = list.reduce((s, t) => s + start[t.dataset.col], 0);   // ≈ available %
+        const np = Math.max(4, Math.min(group - 4 * (list.length - 1), targetPx / tableW * 100));
+        const oldOthers = group - start[col] || 1, scale = (group - np) / oldOthers;
+        list.forEach(t => { t.style.width = (t.dataset.col === col ? np : start[t.dataset.col] * scale).toFixed(3) + '%'; });
+        list.forEach(t => { pctMap[t.dataset.col] = parseFloat(t.style.width); });
+    };
+    // Reorder (drag) applies to EVERY column — including the content-fit ones that
+    // aren't resizable. Resize (handle + dbl-click auto-fit) is added below only to
+    // the flexible columns.
+    [...tbl.querySelectorAll('thead th[data-col]')].forEach(th => {
+        th.addEventListener('dragstart', e => { dragSrc = th.dataset.col; e.dataTransfer.effectAllowed = 'move'; th.style.opacity = '0.4'; });
+        th.addEventListener('dragend',   () => { th.style.opacity = ''; dragSrc = null; });
+        th.addEventListener('dragover',  e => { e.preventDefault(); th.classList.add('ss-th-drag-over'); });
+        th.addEventListener('dragleave', () => th.classList.remove('ss-th-drag-over'));
+        th.addEventListener('drop', e => {
+            e.preventDefault(); th.classList.remove('ss-th-drag-over');
+            const src = dragSrc, dst = th.dataset.col;
+            if (!src || src === dst) return;
+            const o = getOrder(), si = o.indexOf(src), di = o.indexOf(dst);
+            if (si < 0 || di < 0) return;
+            o.splice(si, 1); o.splice(di, 0, src); setOrder(o); saveOrder(); render();
+        });
+    });
+    ths().forEach(th => {
+        th.querySelector('.ss-resize-handle')?.remove();
+        th.style.position = 'relative'; th.style.overflow = 'hidden';
+        const handle = document.createElement('div');
+        handle.className = 'ss-resize-handle';
+        handle.style.cssText = 'position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:2;background:transparent';
+        handle.addEventListener('mousedown', e => {
+            e.preventDefault(); e.stopPropagation();
+            const startX = e.clientX, startW = th.offsetWidth, col = th.dataset.col;
+            const onMove = ev => applyResize(col, startW + (ev.clientX - startX));
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                localStorage.setItem(pctKey, JSON.stringify(pctMap)); _persistTableConfig();
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+        handle.addEventListener('dblclick', e => {
+            e.preventDefault(); e.stopPropagation();
+            const colIdx = [...th.closest('tr').querySelectorAll('th')].indexOf(th);
+            const tmp = document.createElement('div');
+            tmp.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden';
+            document.body.appendChild(tmp);
+            let maxW = 0;
+            const meas = cell => { const c = cell.cloneNode(true); c.querySelector?.('.ss-resize-handle')?.remove();
+                c.style.cssText = 'display:inline-block;white-space:nowrap;width:auto;padding:2px 11px';
+                tmp.appendChild(c); maxW = Math.max(maxW, c.scrollWidth); tmp.removeChild(c); };
+            meas(th); tbl.querySelectorAll('tbody tr').forEach(tr => { const td = tr.cells[colIdx]; if (td) meas(td); });
+            document.body.removeChild(tmp);
+            applyResize(th.dataset.col, maxW + 12);
+            localStorage.setItem(pctKey, JSON.stringify(pctMap)); _persistTableConfig();
+        });
+        th.appendChild(handle);
+    });
+}
+
+function _evCan(p) { return (currentUser.permissions || []).includes(p); }
+// Inline help icon for a modal field: renders only when the i18n key exists.
+function _evHelp(key) {
+    const txt = (typeof I18N !== 'undefined') ? I18N[key] : '';
+    return txt ? ` <i class="bi bi-info-circle text-muted ms-1" style="cursor:help" title="${escAttr(txt)}"></i>` : '';
+}
+function _eventGlobalCooldown() {
+    const live = (typeof configData !== 'undefined' && configData.events) ? configData.events.cooldown : null;
+    if (live != null && live !== '') return live;
+    const def = (typeof CONFIG_FIELD_DEFAULTS !== 'undefined') ? CONFIG_FIELD_DEFAULTS['events|cooldown'] : null;
+    return (def != null) ? def : 0;
+}
+function _evWhen(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts * 1000);
+    return isNaN(d) ? '—' : d.toLocaleString();
+}
+
+function _evCanRules() { return ['events_view', 'events_add', 'events_edit', 'events_delete'].some(p => _evCan(p)); }

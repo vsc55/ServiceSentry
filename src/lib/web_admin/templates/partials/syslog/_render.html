@@ -1,0 +1,285 @@
+async function renderSyslog() {
+    const c = document.getElementById('syslog-container');
+    if (!c) return;
+    c.innerHTML = `
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+            <div><label class="form-label small mb-1">${esc(t('syslog_host'))}</label>
+              <select id="sl-host" class="form-select form-select-sm" style="min-width:140px"></select></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_min_severity'))}</label>
+              <select id="sl-sev" class="form-select form-select-sm" style="min-width:130px"></select></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_app'))}</label>
+              <select id="sl-app" class="form-select form-select-sm" style="min-width:130px"></select></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_from'))}</label>
+              <input id="sl-from" type="datetime-local" class="form-control form-control-sm" style="min-width:175px"></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_to'))}</label>
+              <input id="sl-to" type="datetime-local" class="form-control form-control-sm" style="min-width:175px"></div>
+            <div class="flex-grow-1"><label class="form-label small mb-1">${esc(t('syslog_search'))}</label>
+              <input id="sl-q" type="search" class="form-control form-control-sm" placeholder="${escAttr(t('syslog_search'))}"></div>
+            <div class="d-flex gap-2 align-items-center">
+              ${_buildColChooser(_SL_COLS, _slVisibleCols, '_slToggleCol', '_resetSlCols')}
+              <button class="btn btn-secondary btn-sm" onclick="_syslogReload()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+              <span id="sl-auto-refresh"></span>
+              ${_syslogCanDelete() ? `<button class="btn btn-danger btn-sm" onclick="_syslogClear()"><i class="bi bi-trash me-1"></i>${esc(t('syslog_clear'))}</button>` : ''}
+            </div>
+          </div>
+          <div id="sl-stats" class="mb-3"></div>
+          <div id="sl-active-filters" class="mb-2 d-flex flex-wrap align-items-center gap-1"></div>
+          <div id="sl-status" class="small text-muted mb-2"></div>
+          <div id="sl-drops" class="mb-2"></div>
+          <div id="sl-pager-top" class="mb-2"></div>
+          <div id="sl-table-wrap"></div>
+          <div id="sl-empty" class="text-center text-muted py-4" style="display:none">${esc(t('syslog_empty'))}</div>
+          <div id="sl-pager" class="mt-2"></div>
+        </div>
+      </div>`;
+    // severity select options (0..7, max-inclusive)
+    const sev = document.getElementById('sl-sev');
+    sev.innerHTML = `<option value="">${esc(t('syslog_all'))}</option>` +
+        _SYSLOG_SEV.map((n, i) => `<option value="${i}">${esc(n)}</option>`).join('');
+    sev.value = _syslogFilters.severity_max;
+    document.getElementById('sl-q').value = _syslogFilters.q;
+    // restore date inputs from the active filters (unix secs → datetime-local)
+    document.getElementById('sl-from').value = _tsToLocalInput(_syslogFilters.since);
+    document.getElementById('sl-to').value = _tsToLocalInput(_syslogFilters.until);
+    sev.onchange = () => { _syslogFilters.severity_max = sev.value; _syslogFilterChanged(); };
+    document.getElementById('sl-host').onchange = (e) => { _syslogFilters.hostname = e.target.value ? [e.target.value] : []; _syslogFilterChanged(); };
+    document.getElementById('sl-app').onchange = (e) => { _syslogFilters.app = e.target.value ? [e.target.value] : []; _syslogFilterChanged(); };
+    document.getElementById('sl-from').onchange = (e) => { _syslogFilters.since = _localInputToTs(e.target.value); _syslogFilterChanged(); };
+    document.getElementById('sl-to').onchange = (e) => { _syslogFilters.until = _localInputToTs(e.target.value); _syslogFilterChanged(); };
+    let _qTimer = null;
+    document.getElementById('sl-q').oninput = (e) => {
+        clearTimeout(_qTimer);
+        _qTimer = setTimeout(() => { _syslogFilters.q = e.target.value.trim(); _syslogFilterChanged(); }, 350);
+    };
+    await _loadSyslogFacets();
+    await _loadSyslog();
+    _syslogInitAutoRefresh();
+}
+
+async function _loadSyslogFacets() {
+    const f = await apiGet('/api/v1/syslog/facets');
+    if (!f) return;
+    const fill = (id, vals, cur) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.innerHTML = `<option value="">${esc(t('syslog_all'))}</option>` +
+            (vals || []).map(v => `<option value="${escAttr(v)}">${esc(v)}</option>`).join('');
+        el.value = cur || '';
+    };
+    const one = (a) => (Array.isArray(a) && a.length === 1) ? a[0] : '';
+    fill('sl-host', f.hostname, one(_syslogFilters.hostname));
+    fill('sl-app', f.app, one(_syslogFilters.app));
+}
+
+// Horizontal bar list for a breakdown. items: [{label, count, cls, fk, fv}]
+// Clicking a bar applies that value as a filter (fk = filter key, fv = value).
+function _slBars(items) {
+    if (!items || !items.length) return `<div class="small text-muted">${esc(t('syslog_no_data'))}</div>`;
+    const max = Math.max(1, ...items.map(i => i.count));
+    return items.map(i => {
+        const sel = Array.isArray(_syslogFilters[i.fk]) ? _syslogFilters[i.fk].map(String) : [];
+        const active = sel.includes(String(i.fv));
+        const click = i.fk ? ` role="button" class="sl-bar-row d-flex align-items-center gap-2 mb-1 px-1 rounded${active ? ' sl-bar-active' : ''}"
+            title="${escAttr(t('syslog_filter_by') + ': ' + i.label)}"
+            onclick="_syslogApplyBarFilter('${i.fk}', ${jsStr(String(i.fv))}, event)"` : ' class="d-flex align-items-center gap-2 mb-1 px-1"';
+        return `<div${click}>
+            <div class="text-truncate small" style="width:40%" title="${escAttr(i.label)}">${esc(i.label)}</div>
+            <div class="flex-grow-1 rounded" style="height:14px;background:rgba(128,128,128,.25)">
+                <div class="bg-${i.cls || 'primary'} rounded" style="height:100%;width:${(i.count / max * 100).toFixed(1)}%"></div>
+            </div>
+            <div class="small text-muted" style="width:3.5rem;text-align:right">${i.count}</div>
+        </div>`;
+    }).join('');
+}
+
+// Build the query string from the active filters (arrays → repeated params).
+function _syslogQS() {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(_syslogFilters)) {
+        if (Array.isArray(v)) { for (const x of v) if (x !== '' && x != null) qs.append(k, x); }
+        else if (v !== '' && v != null) qs.set(k, v);
+    }
+    return qs;
+}
+
+async function _loadSyslogStats() {
+    const el = document.getElementById('sl-stats');
+    if (!el) return;
+    const s = await apiGet('/api/v1/syslog/stats?' + _syslogQS().toString());
+    if (!s) { el.innerHTML = ''; return; }
+    const host = (s.by_host || []).map(x => ({ label: x.value || '—', count: x.count, cls: 'info', fk: x.value ? 'hostname' : '', fv: x.value }));
+    const appl = (s.by_app || []).map(x => ({ label: x.value || '—', count: x.count, cls: 'primary', fk: x.value ? 'app' : '', fv: x.value }));
+    const sev  = (s.by_severity || []).map(x => ({ label: x.name, count: x.count, cls: _SYSLOG_SEV_CLS[x.value] || 'secondary', fk: 'severity', fv: x.value }));
+    const fac  = (s.by_facility || []).map(x => ({ label: x.name, count: x.count, cls: 'secondary', fk: 'facility', fv: x.value }));
+    const panel = (title, bars) => `<div class="col-md-6 col-xl-3 mb-3">
+        <div class="card h-100 svc-card"><div class="card-body py-2 px-3">
+            <h6 class="small text-uppercase text-muted mb-2">${esc(title)}</h6>${bars}
+        </div></div></div>`;
+    let collapsed = false;
+    try { collapsed = localStorage.getItem(_SL_STATS_KEY) === '1'; } catch (e) {}
+    el.innerHTML = `
+        <div class="d-flex align-items-center gap-2 mb-2 pb-1 border-bottom" role="button"
+             style="cursor:pointer" onclick="_syslogToggleStats()">
+            <i id="sl-stats-chevron" class="bi ${collapsed ? 'bi-chevron-right' : 'bi-chevron-down'} text-muted"></i>
+            <span class="fw-semibold">${esc(t('syslog_stats'))}</span>
+            <span class="display-6 lh-1 ms-1">${s.total}</span>
+            <span class="text-muted">${esc(t('syslog_total_messages'))}</span>
+        </div>
+        <div id="sl-stats-body" class="row g-2"${collapsed ? ' style="display:none"' : ''}>
+            ${panel(t('syslog_by_host'), _slBars(host))}
+            ${panel(t('syslog_by_severity'), _slBars(sev))}
+            ${panel(t('syslog_by_facility'), _slBars(fac))}
+            ${panel(t('syslog_by_app'), _slBars(appl))}
+        </div>`;
+}
+
+function _syslogToggleStats() {
+    const body = document.getElementById('sl-stats-body');
+    const chev = document.getElementById('sl-stats-chevron');
+    if (!body) return;
+    const nowCollapsed = body.style.display !== 'none';
+    body.style.display = nowCollapsed ? 'none' : '';
+    if (chev) chev.className = 'bi ' + (nowCollapsed ? 'bi-chevron-right' : 'bi-chevron-down') + ' text-muted';
+    try { localStorage.setItem(_SL_STATS_KEY, nowCollapsed ? '1' : '0'); } catch (e) {}
+}
+
+// datetime-local <-> unix seconds helpers (local time, as the user expects).
+function _localInputToTs(v) {
+    if (!v) return '';
+    const ms = new Date(v).getTime();
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : '';
+}
+function _tsToLocalInput(ts) {
+    if (!ts) return '';
+    const d = new Date(ts * 1000);
+    if (isNaN(d)) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// A filter changed → back to page 1 and reload.
+function _syslogFilterChanged() { _syslogPage = 1; _loadSyslog(); }
+
+// Apply a filter from a clicked chart bar (host/app/severity/facility).
+// Plain click → select only that value (replace). Ctrl/⌘+click → add/remove
+// the value from the selection (multi-select of the same type). Clicking the
+// sole active value again clears it.
+function _syslogApplyBarFilter(kind, value, ev) {
+    value = String(value);
+    const multi = ev && (ev.ctrlKey || ev.metaKey);
+    const cur = Array.isArray(_syslogFilters[kind]) ? _syslogFilters[kind].map(String) : [];
+    let next;
+    if (multi) {
+        next = cur.includes(value) ? cur.filter(v => v !== value) : [...cur, value];
+    } else {
+        next = (cur.length === 1 && cur[0] === value) ? [] : [value];
+    }
+    _syslogFilters[kind] = next;
+    // single-select dropdowns can only mirror one value
+    if (kind === 'hostname') { const el = document.getElementById('sl-host'); if (el) el.value = next.length === 1 ? next[0] : ''; }
+    if (kind === 'app') { const el = document.getElementById('sl-app'); if (el) el.value = next.length === 1 ? next[0] : ''; }
+    _syslogFilterChanged();
+}
+
+function _syslogSyncSelect(kind) {
+    const id = { hostname: 'sl-host', app: 'sl-app' }[kind];
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (el) { const a = _syslogFilters[kind] || []; el.value = a.length === 1 ? a[0] : ''; }
+}
+
+// Remove one value from a multi-value filter (a single chip's ✕).
+function _syslogRemoveFilterValue(kind, value) {
+    value = String(value);
+    _syslogFilters[kind] = (_syslogFilters[kind] || []).map(String).filter(v => v !== value);
+    _syslogSyncSelect(kind);
+    _syslogFilterChanged();
+}
+
+function _syslogClearFilter(kind) {
+    _syslogFilters[kind] = _SL_MULTI_KEYS.includes(kind) ? [] : '';
+    const sel = { severity_max: 'sl-sev', since: 'sl-from', until: 'sl-to', q: 'sl-q' }[kind];
+    if (sel) { const el = document.getElementById(sel); if (el) el.value = ''; }
+    _syslogSyncSelect(kind);
+    _syslogFilterChanged();
+}
+
+function _syslogClearAllFilters() {
+    for (const k of Object.keys(_syslogFilters)) _syslogFilters[k] = _SL_MULTI_KEYS.includes(k) ? [] : '';
+    for (const id of ['sl-host', 'sl-app', 'sl-sev', 'sl-from', 'sl-to', 'sl-q']) {
+        const el = document.getElementById(id); if (el) el.value = '';
+    }
+    _syslogFilterChanged();
+}
+
+function _syslogDispVal(k, v) {
+    if (k === 'severity') return _SYSLOG_SEV[v] ?? v;
+    if (k === 'severity_max') return '≤ ' + (_SYSLOG_SEV[v] ?? v);
+    if (k === 'facility') return _syslogFacName(v);
+    if (k === 'since' || k === 'until') return _tsToLocalInput(v).replace('T', ' ');
+    return v;
+}
+
+// Active-filter chips (visible + removable), one per value for multi filters.
+function _syslogRenderActiveFilters() {
+    const el = document.getElementById('sl-active-filters');
+    if (!el) return;
+    const labels = {
+        hostname: t('syslog_host'), app: t('syslog_app'), severity: t('syslog_severity'),
+        severity_max: t('syslog_min_severity'), facility: t('syslog_facility'),
+        q: t('syslog_search'), since: t('syslog_from'), until: t('syslog_to'),
+    };
+    const chip = (k, v) => {
+        const onx = _SL_MULTI_KEYS.includes(k)
+            ? `_syslogRemoveFilterValue('${k}', ${jsStr(String(v))})`
+            : `_syslogClearFilter('${k}')`;
+        return `<span class="badge bg-secondary d-inline-flex align-items-center gap-1">
+            ${esc(labels[k] || k)}: ${esc(String(_syslogDispVal(k, v)))}
+            <i class="bi bi-x-lg" role="button" style="font-size:.7rem" onclick="${onx}"></i></span>`;
+    };
+    const chips = [];
+    for (const [k, v] of Object.entries(_syslogFilters)) {
+        if (Array.isArray(v)) { for (const x of v) chips.push(chip(k, x)); }
+        else if (v !== '' && v != null) chips.push(chip(k, v));
+    }
+    el.innerHTML = chips.length
+        ? chips.join(' ') + ` <button class="btn btn-sm btn-link p-0 ms-1" onclick="_syslogClearAllFilters()">${esc(t('syslog_clear_filters'))}</button>`
+        : '';
+}
+
+// Facility number → name (mirrors lib.syslog.FACILITIES order).
+const _SYSLOG_FAC = ['kern','user','mail','daemon','auth','syslog','lpr','news','uucp',
+                     'cron','authpriv','ftp','ntp','audit','console','cron2',
+                     'local0','local1','local2','local3','local4','local5','local6','local7'];
+function _syslogFacName(v) { return _SYSLOG_FAC[v] ?? String(v); }
+
+function _syslogGoPage(p) {
+    _syslogPage = Math.max(1, p | 0);
+    _loadSyslog();
+}
+function _syslogSetPageSize(v) {
+    _syslogPageSize = parseInt(v, 10) || 0;   // 0 = all
+    _syslogPage = 1;
+    _loadSyslog();
+}
+
+// ── Dropped senders (allowlist) — collapsible + configurable columns ──────────
+const _SL_DROPS_KEY = 'ss_syslog_drops_collapsed';
+const _SLD_COLS = [
+    { id: 'uid',       label: () => t('event_uid'),          sortKey: 'uid',        always: false },
+    { id: 'source',    label: () => t('syslog_host'),        sortKey: 'source',     always: true  },
+    { id: 'transport', label: () => t('syslog_transport'),   sortKey: 'transport',  always: false },
+    { id: 'count',     label: () => t('syslog_drops_count'), sortKey: 'count',      always: false },
+    { id: 'last',      label: () => t('syslog_drops_last'),  sortKey: 'last_seen',  always: false },
+    { id: 'first',     label: () => t('syslog_drops_first'), sortKey: 'first_seen', always: false },
+];
+const _SLD_DEFAULT_COLS = new Set(['uid', 'transport', 'count', 'last']);
+// Inline load (not _evLoadCols: that lives in _js_events.html which loads later).
+let _sldVisibleCols = (() => { try { const s = JSON.parse(localStorage.getItem('ss_sldrops_cols') || 'null'); if (Array.isArray(s)) return new Set(s); } catch (_) {} return new Set(_SLD_DEFAULT_COLS); })();
+let _sldColOrder    = (() => { try { const s = JSON.parse(localStorage.getItem('ss_sldrops_col_order') || 'null'); if (Array.isArray(s)) return s; } catch (_) {} return _SLD_COLS.map(c => c.id); })();
+let _sldSort = 'last_seen', _sldSortDir = 'desc';
+let _slDropsData = [];
+let _sldSearch = '';
+

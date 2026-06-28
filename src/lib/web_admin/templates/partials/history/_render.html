@@ -1,0 +1,330 @@
+{# ================================================================
+History tab — index, series list, Canvas chart renderer.
+================================================================ #}
+
+// ── State ────────────────────────────────────────────────────────────────────
+let _historyIndex    = [];   // [{module, item_uid, key, count, uptime, last_ts, last_data, pretty_name}]
+let _historyMod      = null;
+let _historyKey      = null;
+let _historyUid      = null; // stable item_uid — survives renames
+let _historyHours    = 24;
+let _historyField      = null;  // numeric field to chart (null = status-only)
+let _historyUnit       = '';    // Y-axis unit from module schema (e.g. "%" "°C" "ms")
+let _historyLabel      = '';    // metric label from module schema (e.g. "CPU Usage")
+let _historySchemaNull = false; // true when the module schema declared field:null (status-only)
+let _historyPoints   = [];
+let _historyStats    = {};
+let _historyTooltip  = null;
+let _historyResizeOb = null;
+let _historyFilter   = '';
+let _historyCollapsed = new Set();  // module names whose series group is collapsed
+let _historyTimer    = null;        // auto-refresh timer {_id, _interval}
+let _histCountId     = null;        // countdown ticker id
+// Compare mode: overlay several numeric series (same metric/unit) on one chart.
+let _historyCompare      = false;   // compare (multi-series) mode on/off
+let _historyCompareSel   = [];      // [{module,key,uid,label,pretty}] in the overlay
+let _historyCompareData  = [];      // [{...sel, color, points, stats}] fetched for drawing
+let _historyCompareField = null;    // shared numeric field of the overlay
+let _historyCompareUnit  = '';
+let _historyCompareLabel = '';
+let _historyCompareFields = {};     // {field:{unit,label}} for the active module
+let _historyFields        = {};     // {field:{unit,label}} for the single series
+// Distinct line colours per overlaid series (cycled).
+const _HISTORY_PALETTE = ['#0d6efd', '#dc3545', '#198754', '#fd7e14', '#6f42c1',
+                          '#20c997', '#d63384', '#0dcaf0', '#ffc107', '#6610f2'];
+
+// ── localStorage keys ─────────────────────────────────────────────────────────
+const _HLS_HOURS     = 'ss_history_hours';
+const _HLS_MOD       = 'ss_history_mod';
+const _HLS_KEY       = 'ss_history_key';
+const _HLS_COLLAPSED = 'ss_history_collapsed';
+const _HLS_AUTO      = 'ss_history_auto';   // auto-refresh interval (seconds, 0 = off)
+const _HLS_FIELD     = 'ss_history_field';  // last-chosen metric field (shared single/compare)
+
+function _historyLoadCollapsed() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(_HLS_COLLAPSED) || '[]');
+        _historyCollapsed = new Set(Array.isArray(raw) ? raw : []);
+    } catch (e) { _historyCollapsed = new Set(); }
+}
+
+function _historySaveCollapsed() {
+    try { localStorage.setItem(_HLS_COLLAPSED, JSON.stringify([..._historyCollapsed])); } catch (e) {}
+}
+
+function _historyToggleGroup(mod) {
+    if (_historyCollapsed.has(mod)) _historyCollapsed.delete(mod);
+    else _historyCollapsed.add(mod);
+    _historySaveCollapsed();
+    _historyRenderSeriesList();
+}
+
+function _historyExpandAll() {
+    _historyCollapsed.clear();
+    _historySaveCollapsed();
+    _historyRenderSeriesList();
+}
+
+function _historyCollapseAll() {
+    // Collapse every module currently present in the index.
+    for (const s of _historyIndex) _historyCollapsed.add(s.module);
+    _historySaveCollapsed();
+    _historyRenderSeriesList();
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+async function renderHistory() {
+    const cont = document.getElementById('history-container');
+    if (!cont) return;
+
+    // Restore persisted state before building the layout
+    _historyHours = parseFloat(localStorage.getItem(_HLS_HOURS) || '24') || 24;
+    const savedMod = localStorage.getItem(_HLS_MOD);
+    const savedKey = localStorage.getItem(_HLS_KEY);
+
+    // Re-entering the tab rebuilds the DOM → drop any running timer; it is
+    // re-armed below from the saved interval only when a series is shown.
+    _historyStopTimer();
+    // Compare overlay is a transient, in-session view → reset on a full rebuild.
+    _historyCompare = false;
+    _historyCompareSel = [];
+    _historyCompareData = [];
+    _historyCompareField = null;
+    _historyCompareFields = {};
+
+    _historyLoadCollapsed();
+    cont.innerHTML = _historySkeletonHTML();
+    await _historyLoadIndex();
+    _historyRenderLayout();
+    // Refresh scheduler state for the "Auto" option, then update the control.
+    _loadSchedulerState().then(_historyRenderAutoRefresh);
+
+    // Restore previously selected series if it still exists in the index
+    if (savedMod && savedKey &&
+        _historyIndex.some(s => s.module === savedMod && s.key === savedKey)) {
+        _historyMod = savedMod;
+        _historyKey = savedKey;
+        _historyUid = _historyIndex.find(s => s.module === savedMod && s.key === savedKey)?.item_uid || null;
+        // Make the selected series visible: expand its (possibly collapsed) group
+        // and scroll it into view so the highlighted entry is obvious.
+        _historyCollapsed.delete(savedMod);
+        _historySaveCollapsed();
+        _historyRenderSeriesList();
+        _historyScrollToActive();
+        _historyShowToolbar();
+        await _historyLoadChart();
+        // Restore the saved auto-refresh interval now that a chart is shown.
+        setHistoryAutoRefresh(parseInt(localStorage.getItem(_HLS_AUTO) || '0', 10) || 0);
+    } else {
+        _historyShowPlaceholder();
+    }
+}
+
+// Scroll the currently-selected series button into view within the SERIES list.
+function _historyScrollToActive() {
+    setTimeout(() => {
+        const el = document.querySelector('#history-series-list .btn-primary[data-hmod]');
+        if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 60);
+}
+
+// ── API calls ─────────────────────────────────────────────────────────────────
+async function _historyLoadIndex() {
+    _historyIndex = await apiGet('/api/v1/history/index') || [];
+}
+
+async function _historyLoadChart(soft = false) {
+    const chartArea = document.getElementById('history-chart-area');
+    if (!chartArea) return;
+    // Auto-refresh ticks pass soft=true: no spinner (avoid flicker) and a
+    // transient fetch error keeps the current chart instead of wiping it.
+    if (!soft) chartArea.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
+
+    const url = `/api/v1/history?module=${encodeURIComponent(_historyMod)}&key=${encodeURIComponent(_historyKey)}&hours=${_historyHours}&points=600` +
+        (_historyUid   ? `&uid=${encodeURIComponent(_historyUid)}`     : '') +
+        (_historyField ? `&field=${encodeURIComponent(_historyField)}`  : '');
+    const res = await apiGet(url);
+    if (!res) { if (!soft) _historyShowPlaceholder(); return; }
+
+    _historyPoints     = res.points || [];
+    _historyStats      = res.stats  || {};
+    _historyFields     = res.fields || {};   // {field:{unit,label}} (translated)
+    _historyUnit       = res.unit   || '';
+    _historyLabel      = res.metric_label || '';
+    // _historySchemaNull: the MODULE declared field:null in __history__ (not user choice).
+    // suggested_field===null with a label means the schema explicitly set field:null.
+    _historySchemaNull = (res.suggested_field === null && !!res.metric_label);
+    if (!_historyField) {
+        // Restore the persisted field only if it's a DECLARED metric of this
+        // series (same set the selector offers — never an internal value like
+        // the alert threshold); otherwise use the module's suggested field.
+        const declared = Object.keys(_historyFields);
+        const avail = declared.length ? declared : _historyNumericFields(_historyPoints);
+        const saved = localStorage.getItem(_HLS_FIELD) || '';
+        _historyField = (saved && avail.includes(saved)) ? saved : (res.suggested_field ?? null);
+    }
+
+    _historyRenderChartArea();
+    if (soft) _startHistoryCountdown(_historyTimer?._interval || 0);
+}
+
+// ── Auto-refresh (interval-driven soft chart reload) ───────────────────────────
+function _historyStopTimer() {
+    if (_historyTimer) { clearInterval(_historyTimer._id); _historyTimer = null; }
+    if (_histCountId)  { clearInterval(_histCountId); _histCountId = null; }
+}
+
+function setHistoryAutoRefresh(seconds) {
+    _historyStopTimer();
+    try { localStorage.setItem(_HLS_AUTO, String(seconds || 0)); } catch (e) {}
+    if (seconds > 0) {
+        const id = setInterval(() => {
+            const pane = document.getElementById('tab-history');
+            if (!pane || !pane.classList.contains('active')) return;
+            // Only refresh when there is something to redraw, per current mode.
+            if (_historyCompare) {
+                if (_historyCompareSel.length) _historyLoadCompare(true);
+            } else if (_historyMod && _historyKey) {
+                _historyLoadChart(true);
+            }
+        }, seconds * 1000);
+        _historyTimer = { _id: id, _interval: seconds };
+    }
+    _historyRenderAutoRefresh();
+}
+
+// Render the shared compact auto-refresh control into the toolbar slot.
+function _historyRenderAutoRefresh() {
+    const el = document.getElementById('history-auto-refresh');
+    if (el) el.innerHTML = _autoRefreshControl({
+        id: 'hist', interval: _historyTimer?._interval || 0,
+        setFn: 'setHistoryAutoRefresh',
+        countId: 'hist-refresh-count', fillId: 'hist-refresh-fill',
+    });
+    _startHistoryCountdown(_historyTimer?._interval || 0);
+}
+
+// Visual countdown (cosmetic; the real refresh is driven by _historyTimer).
+function _startHistoryCountdown(total) {
+    if (_histCountId) { clearInterval(_histCountId); _histCountId = null; }
+    if (!total) return;
+    const cEl = document.getElementById('hist-refresh-count');
+    const fEl = document.getElementById('hist-refresh-fill');
+    let rem = total;
+    if (cEl) cEl.textContent = rem;
+    if (fEl) fEl.style.width = '100%';
+    _histCountId = setInterval(() => {
+        rem = rem > 0 ? rem - 1 : total;
+        if (cEl) cEl.textContent = rem;
+        if (fEl) fEl.style.width = (rem / total * 100) + '%';
+    }, 1000);
+}
+
+// ── Layout ────────────────────────────────────────────────────────────────────
+function _historyRenderLayout() {
+    const cont = document.getElementById('history-container');
+    if (!cont) return;
+    cont.innerHTML = `<div class="ss-card">
+<div class="ss-accent ss-accent-blue"></div>
+
+<!-- Header: title + search + Clear All (matches the other sections' toolbar) -->
+<div class="ss-card-header" id="history-tab-header">
+  <h6 class="mb-0 me-2 flex-shrink-0 text-nowrap"><i class="bi bi-graph-up me-2"></i>${esc(t('tab_history'))}</h6>
+  <!-- Search expands to fill the free space between the title and the actions. -->
+  <div class="input-group input-group-sm flex-grow-1">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input type="text" class="form-control" id="history-search"
+           placeholder="${esc(t('history_search'))}" oninput="_historyOnSearch(this.value)">
+  </div>
+  <!-- Right-aligned actions: Compare (acts on the series list), refresh,
+       auto-refresh and Clear All. Kept on one line; search shrinks instead. -->
+  <div class="d-flex flex-nowrap align-items-center gap-2 ms-2 flex-shrink-0">
+    <button class="btn btn-sm btn-secondary" id="history-compare-btn"
+            onclick="_historyToggleCompareMode()" title="${escAttr(t('history_compare_tt'))}">
+      <i class="bi bi-bar-chart-steps me-1"></i>${esc(t('history_compare'))}
+    </button>
+    <button class="btn btn-sm btn-secondary" onclick="_historyRefresh()" title="${escAttr(t('refresh'))}">
+      <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}
+    </button>
+    <span id="history-auto-refresh" class="d-flex align-items-center gap-2"></span>
+    <span id="history-clear-all-wrap">
+      <button class="btn btn-sm btn-danger" onclick="_historyClearAll()">
+        <i class="bi bi-trash3 me-1"></i>${esc(t('history_clear_all'))}
+      </button>
+    </span>
+  </div>
+</div>
+
+<!-- Body: series sidebar (left) + chart drawing zone (right) -->
+<div class="ss-history-body d-flex flex-grow-1 overflow-hidden">
+
+  <!-- Series sidebar — distinct panel -->
+  <div class="ss-history-sidebar d-flex flex-column">
+    <div class="ss-history-sidebar-title text-muted">${esc(t('history_series'))}</div>
+    <div class="px-1 pt-1">
+      <div class="input-group input-group-sm w-100">
+        <button class="btn btn-secondary flex-fill text-truncate" onclick="_historyExpandAll()" title="${esc(t('history_expand_all'))}">
+          <i class="bi bi-arrows-expand me-1"></i>${esc(t('history_expand_all'))}
+        </button>
+        <button class="btn btn-secondary flex-fill text-truncate" onclick="_historyCollapseAll()" title="${esc(t('history_collapse_all'))}">
+          <i class="bi bi-arrows-collapse me-1"></i>${esc(t('history_collapse_all'))}
+        </button>
+      </div>
+    </div>
+    <div id="history-series-list" class="flex-grow-1 overflow-y-auto p-1"></div>
+  </div>
+
+  <!-- Chart panel -->
+  <div class="ss-history-main flex-grow-1 d-flex flex-column overflow-hidden">
+
+    <!-- Toolbar band — sits above the drawing zone, visually separated -->
+    <div class="ss-card-band ss-card-band-top d-flex flex-wrap align-items-center gap-2"
+         id="history-toolbar" style="display:none!important">
+      <span class="fw-semibold text-truncate me-auto" id="history-title" style="max-width:320px"></span>
+
+      <!-- Field selector -->
+      <select class="form-select form-select-sm" id="history-field-sel"
+              style="width:auto;display:none" onchange="_historyOnFieldChange(this.value)">
+      </select>
+
+      <!-- Time range — dropdown (presets + custom hours/days), populated by JS -->
+      <span id="history-range"></span>
+
+      <!-- Export chart as PNG (image) or CSV (data) -->
+      <div class="btn-group btn-group-sm">
+        <button type="button" class="btn btn-sm btn-secondary dropdown-toggle"
+                data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('export'))}">
+          <i class="bi bi-download me-1"></i>${esc(t('export'))}
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end p-1" style="font-size:.8rem">
+          <li><button type="button" class="dropdown-item d-flex align-items-center gap-2" onclick="_historyExportPNG()">
+            <i class="bi bi-image"></i>PNG</button></li>
+          <li><button type="button" class="dropdown-item d-flex align-items-center gap-2" onclick="_historyExportCSV()">
+            <i class="bi bi-filetype-csv"></i>CSV</button></li>
+        </ul>
+      </div>
+
+      <button class="btn btn-sm btn-danger" id="history-clear-btn" style="display:none"
+              onclick="_historyClearSeries()">
+        <i class="bi bi-trash3 me-1"></i>${esc(t('history_clear_series'))}
+      </button>
+    </div>
+
+    <!-- Padded drawing zone + stats -->
+    <div class="flex-grow-1 d-flex flex-column gap-2 p-2 overflow-hidden" style="min-height:0">
+      <!-- Compare legend (colour + series + last value), shown in compare mode -->
+      <div id="history-legend" class="d-flex flex-wrap gap-2" style="flex-shrink:0"></div>
+      <div id="history-chart-area" class="flex-grow-1 position-relative" style="min-height:150px;overflow:hidden">
+      </div>
+      <div id="history-stats-row" class="d-flex gap-3 flex-wrap" style="font-size:.85rem;flex-shrink:0">
+      </div>
+    </div>
+  </div>
+</div>
+</div>`;
+
+    _historyRenderSeriesList();
+    _historyUpdateCompareBtn();
+    _historyApplyPermissions();
+}
+

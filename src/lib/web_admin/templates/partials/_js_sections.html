@@ -1,0 +1,157 @@
+{# ================================================================
+   Dashboard JS bundle — single entry point that includes every
+   section's sub-partials (folders) in load order.
+   ================================================================ #}
+{# ================================================================
+   Core JS — i18n, constants, utilities, API helpers, field rendering.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/core/_constants.html" %}
+{% include "partials/core/_utils.html" %}
+{% include "partials/core/_toast.html" %}
+{% include "partials/core/_polling.html" %}
+{% include "partials/core/_api.html" %}
+{% include "partials/core/_field_render.html" %}
+{% include "partials/core/_collection_render.html" %}
+{% include "partials/core/_list_table.html" %}
+{# ================================================================
+   Modules tab — rendering logic.
+   Thin orchestrator: includes sub-partials in order.
+   Module-specific web UI fragments (e.g. MIB manager) are injected
+   from each module's own web/ directory via the module_web_ui list
+   built at startup — no module-specific knowledge lives here.
+   ================================================================ #}
+{% include "partials/modules/_list.html" %}
+{% include "partials/modules/_discovery.html" %}
+{% include "partials/modules/_field_picker.html" %}
+{% for _inc in module_web_ui %}{% include _inc %}{% endfor %}
+{# ================================================================
+   Config tab.
+   Thin orchestrator: sub-partials first, then the config render core.
+   ================================================================ #}
+{% include "partials/cfg/auth/_index.html" %}
+{% include "partials/cfg/notify/_index.html" %}
+{% include "partials/cfg/_render.html" %}
+{# ================================================================
+   Status tab — check cards and the scheduler/daemon panel.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/status/_checks.html" %}
+{% include "partials/status/_daemon.html" %}
+{# ================================================================
+   Actions — field updates, item add/remove, save operations.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/actions/_dirty.html" %}
+{% include "partials/actions/_field_ops.html" %}
+{% include "partials/actions/_save.html" %}
+{# ================================================================
+   Overview tab — drag/resize dashboard widgets.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/overview/_layout.html" %}
+{% include "partials/overview/_widgets.html" %}
+{% include "partials/overview/_render.html" %}
+{# ================================================================
+   Account — shared role constants, utilities and own-account actions (must load before users/roles/groups).
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/account/_modal.html" %}
+{# ================================================================
+   Users tab — user table, create/edit/delete, reset password.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/users/_list.html" %}
+{% include "partials/users/_modal.html" %}
+{% include "partials/users/_password.html" %}
+{# ================================================================
+   Servers tab — host registry (list, modal, monitoring, checks, save).
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/servers/_list.html" %}
+{% include "partials/servers/_modal.html" %}
+{% include "partials/servers/_monitoring.html" %}
+{% include "partials/servers/_checks.html" %}
+{% include "partials/servers/_save.html" %}
+{# ================================================================
+   Clusters tab — multi-bind checks (table + edit modal).
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/clusters/_table.html" %}
+{% include "partials/clusters/_modal.html" %}
+{# ================================================================
+   Credentials tab — reusable SSH identities (picker, list, modal).
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/credentials/_picker.html" %}
+{% include "partials/credentials/_list.html" %}
+{% include "partials/credentials/_modal.html" %}
+{# ================================================================
+   Generic, module-agnostic action modal (driven by an action spec).
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/module_action/_modal.html" %}
+{# ================================================================
+   Sessions tab — active sessions list and revoke actions.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/sessions/_render.html" %}
+{% include "partials/sessions/_actions.html" %}
+{# ================================================================
+   Roles tab — list, create, edit (incl. built-in), delete roles.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/roles/_permissions.html" %}
+{% include "partials/roles/_list.html" %}
+{% include "partials/roles/_modal.html" %}
+{# ================================================================
+   Groups tab — list, create, edit, delete groups.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/groups/_list.html" %}
+{% include "partials/groups/_modal.html" %}
+{# ================================================================
+   Audit log tab — event history table.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/audit/_detail.html" %}
+{% include "partials/audit/_export.html" %}
+{% include "partials/audit/_filters.html" %}
+{% include "partials/audit/_render.html" %}
+{# ================================================================
+   History tab — series list, range/export, compare and chart drawing.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/history/_render.html" %}
+{% include "partials/history/_series.html" %}
+{% include "partials/history/_export.html" %}
+{% include "partials/history/_compare.html" %}
+{% include "partials/history/_chart.html" %}
+{# ================================================================
+   Syslog tab — messages table, render, drops panel and polling.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/syslog/_table.html" %}
+{% include "partials/syslog/_render.html" %}
+{% include "partials/syslog/_drops.html" %}
+{% include "partials/syslog/_poll.html" %}
+{# ================================================================
+   Services tab — background-service status and start/stop.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/services/_render.html" %}
+{# ================================================================
+   Events tab — notification rules (table helpers, render, modal + log).
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/events/_table.html" %}
+{% include "partials/events/_render.html" %}
+{% include "partials/events/_modal.html" %}
+{# ================================================================
+   Page init — config persistence, table column features, modal behaviours and DOM/tab wiring.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/init/_persistence.html" %}
+{% include "partials/init/_table_features.html" %}
+{% include "partials/init/_behaviors.html" %}
+{% include "partials/init/_wiring.html" %}

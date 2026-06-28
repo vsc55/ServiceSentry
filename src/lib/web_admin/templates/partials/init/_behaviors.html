@@ -1,0 +1,230 @@
+document.querySelectorAll('button[onclick="saveModules()"]').forEach(b => b.style.display = 'none');
+}
+if (!perms.has('config_edit')) {
+document.querySelectorAll('button[onclick="saveConfig()"]').forEach(b => b.style.display = 'none');
+}
+// "New role" button
+const btnNewRole = document.getElementById('btnNewRole');
+if (btnNewRole) btnNewRole.style.display = perms.has('roles_add') ? '' : 'none';
+// "New group" button
+const btnNewGroup = document.getElementById('btnNewGroup');
+if (btnNewGroup) btnNewGroup.style.display = perms.has('groups_add') ? '' : 'none';
+// "New user" button
+const btnNewUser = document.getElementById('btnNewUser');
+if (btnNewUser) btnNewUser.style.display = perms.has('users_add') ? '' : 'none';
+// Audit clear button
+const btnClearAudit = document.getElementById('btnClearAudit');
+if (btnClearAudit) btnClearAudit.style.display = perms.has('audit_delete') ? '' : 'none';
+}
+
+// ─── Stacked-modal z-index support ────────────────────────────────────────
+// Bootstrap 5 keeps all modals at the same z-index (1055), so a second modal
+// opened while another is showing ends up hidden behind it.  These two
+// listeners auto-bump the new modal above the existing ones and move the
+// freshest backdrop to sit between the two modals.
+document.addEventListener('show.bs.modal', function(e) {
+    const open = document.querySelectorAll('.modal.show');
+    if (!open.length) {
+        // No modal open yet → any leftover .modal-backdrop is an ORPHAN (Bootstrap
+        // occasionally fails to remove one when modals open/close in quick
+        // succession). Drop it so the new modal isn't trapped beneath a stale
+        // dimming layer — the random "page stuck, must reload" bug.
+        document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+        return;
+    }
+    const topZ = Math.max(1055, ...[...open].map(m => parseInt(m.style.zIndex) || 1055));
+    e.target.style.zIndex = topZ + 20;
+});
+document.addEventListener('shown.bs.modal', function(e) {
+    const openModals = [...document.querySelectorAll('.modal.show')];
+    // Drop ORPHAN backdrops: more dimming layers than open modals means a stale
+    // one survived (Bootstrap occasionally fails to remove a backdrop when modals
+    // open/close in quick succession). A stray backdrop keeps its inline z-index
+    // from a previous stack, so a fresh single modal opened at the default 1055
+    // ends up *beneath* it — the random "modal stuck behind the dark overlay" bug.
+    // Remove the oldest (DOM-order) extras, keeping the freshest backdrop(s).
+    let backdrops = [...document.querySelectorAll('.modal-backdrop')];
+    while (backdrops.length > openModals.length && backdrops.length) {
+        backdrops.shift().remove();
+    }
+    backdrops = [...document.querySelectorAll('.modal-backdrop')];
+    if (!backdrops.length) return;
+    // Guarantee the just-shown modal sits above EVERY remaining backdrop,
+    // whatever inline z-index a leftover layer may carry.
+    const maxBd = Math.max(...backdrops.map(b => parseInt(b.style.zIndex)
+                                              || parseInt(getComputedStyle(b).zIndex) || 1050));
+    const myZ = parseInt(e.target.style.zIndex)
+             || parseInt(getComputedStyle(e.target).zIndex) || 1055;
+    if (myZ <= maxBd) e.target.style.zIndex = maxBd + 10;
+    // Stacked modals: keep the freshest backdrop between the two top modals.
+    if (openModals.length >= 2) {
+        const topZ = Math.max(...openModals.map(m => parseInt(m.style.zIndex) || 1055));
+        backdrops[backdrops.length - 1].style.zIndex = topZ - 10;
+    }
+});
+document.addEventListener('hidden.bs.modal', function(e) {
+    e.target.style.zIndex = '';   // clean up inline override when modal closes
+    // When the LAST modal closed, remove any stray backdrops and restore the body
+    // so a leftover dimming layer can't block the page.
+    if (!document.querySelector('.modal.show')) {
+        document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
+    }
+});
+
+// ─── Draggable modals: move ANY modal by its header ───────────────────────
+// Resize is opt-in via CSS (dialog-style modals: .modal-lg / .modal-xl); msgbox
+// modals (confirmations, yes/no) are only movable. Position resets to centre on
+// each open, but the last SIZE / maximized state is remembered per modal id and
+// restored on reopen — persisted per-user via table_config (see _modalSizeMem).
+let _modalDrag = null;   // {dlg, sx, sy, ox, oy}
+const _modalSizeMem = {};   // {modalId: {max:bool, w:string, h:string}} — saved in table_config.modals
+document.addEventListener('mousemove', e => {
+    if (!_modalDrag) return;
+    const d = _modalDrag;
+    let tx = d.ox + e.clientX - d.sx;
+    let ty = d.oy + e.clientY - d.sy;
+    // Keep the modal's visible box within the viewport (small margin). baseLeft/Top
+    // = the box position at translate 0; w/h = its size (captured at drag start).
+    const M = 4;
+    const minTx = M - d.baseLeft, maxTx = window.innerWidth  - M - d.w - d.baseLeft;
+    const minTy = M - d.baseTop,  maxTy = window.innerHeight - M - d.h - d.baseTop;
+    tx = Math.min(Math.max(tx, minTx), Math.max(minTx, maxTx));   // if bigger than the viewport, pin top-left
+    ty = Math.min(Math.max(ty, minTy), Math.max(minTy, maxTy));
+    d.dlg.style.transform = `translate(${tx}px, ${ty}px)`;
+    // Moving the (full-height, centered) dialog down makes its empty bottom overflow
+    // the .modal scroll area → a phantom scrollbar. Suppress it once moved.
+    if (d.modalEl) d.modalEl.style.overflowY = 'hidden';
+});
+document.addEventListener('mouseup', () => {
+    if (_modalDrag && _modalDrag.header) _modalDrag.header.style.cursor = 'grab';
+    _modalDrag = null;
+});
+// Nudge a moved modal back into view (it's offset via transform, so shrinking the
+// window can leave its visible box partly/entirely outside the viewport).
+function _clampModalToViewport(dlg, content) {
+    if (!dlg) return;
+    const m = new DOMMatrixReadOnly(getComputedStyle(dlg).transform);
+    if (!m.m41 && !m.m42) return;                        // untouched / centered: nothing to do
+    const cr = (content || dlg).getBoundingClientRect();
+    const M = 4, vw = window.innerWidth, vh = window.innerHeight;
+    let dx = 0, dy = 0;
+    if (cr.left < M)              dx = M - cr.left;
+    else if (cr.right > vw - M)  dx = Math.max((vw - M) - cr.right, M - cr.left);
+    if (cr.top < M)              dy = M - cr.top;
+    else if (cr.bottom > vh - M) dy = Math.max((vh - M) - cr.bottom, M - cr.top);
+    if (dx || dy) dlg.style.transform = `translate(${m.m41 + dx}px, ${m.m42 + dy}px)`;
+}
+window.addEventListener('resize', () => {
+    document.querySelectorAll('.modal.show').forEach(mEl =>
+        _clampModalToViewport(mEl.querySelector('.modal-dialog'), mEl.querySelector('.modal-content')));
+});
+// Remember each resizable modal's size + maximized state when it closes, so the
+// next open restores it (handled in show.bs.modal above).
+document.addEventListener('hide.bs.modal', function(e) {
+    if (!e.target.id) return;
+    const dlg     = e.target.querySelector('.modal-dialog');
+    const content = e.target.querySelector('.modal-content');
+    if (!dlg || !content) return;
+    if (!dlg.classList.contains('modal-lg') && !dlg.classList.contains('modal-xl')) return;
+    const maxBtn = e.target.querySelector('.modal-max-btn');
+    const max = !!(maxBtn && maxBtn.dataset.max === '1');
+    const w = content.style.width || '', h = content.style.height || '';
+    // Stash a human label (the modal's title) so the Customisations list can show
+    // something friendlier than the element id.
+    const ttl = (e.target.querySelector('.modal-title, .modal-header h5, .modal-header h6')?.textContent || '').trim();
+    if (max || w || h) _modalSizeMem[e.target.id] = { max, w, h, t: ttl };
+    else delete _modalSizeMem[e.target.id];   // back to default → don't store noise
+    _persistModalConfig();                    // persist per-user (debounced), separate from table layout
+});
+document.addEventListener('show.bs.modal', function(e) {
+    const dlg     = e.target.querySelector('.modal-dialog');
+    const content = e.target.querySelector('.modal-content');
+    const header  = e.target.querySelector('.modal-header');
+    // Reset POSITION (always re-centre) before the modal becomes visible; SIZE is
+    // restored from memory below so a maximized/resized modal reopens the same.
+    if (dlg) dlg.style.transform = '';
+    e.target.style.overflowY = '';   // undo the phantom-scrollbar suppression from a prior move
+    const _mem = _modalSizeMem[e.target.id];
+    [dlg, content].forEach(el => { if (el) { el.style.width = ''; el.style.height = ''; } });
+    // Maximize toggle (resizable dialogs only): a header icon next to the X that
+    // grows the dialog to ~95% of the work area, and back. Injected once per modal;
+    // its state + size are restored from the last time this modal was open.
+    const _resizable = dlg && (dlg.classList.contains('modal-lg') || dlg.classList.contains('modal-xl'));
+    if (_resizable && header && content) {
+        let maxBtn = header.querySelector('.modal-max-btn');
+        if (!maxBtn) {
+            maxBtn = document.createElement('button');
+            maxBtn.type = 'button';
+            maxBtn.className = 'modal-max-btn btn p-0 border-0 bg-transparent text-reset me-2 lh-1';
+            // Push the group (maximize + close) to the right and sit flush before the
+            // X: maximize takes the auto margin, the close button drops its own.
+            maxBtn.style.marginLeft = 'auto';
+            maxBtn.style.fontSize = '1.05rem';
+            maxBtn.title = (typeof t === 'function' ? t('modal_maximize') : '') || 'Maximize';
+            maxBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
+            const _toggleMax = () => {
+                const on = maxBtn.dataset.max === '1';
+                maxBtn.dataset.max = on ? '0' : '1';               // set state first: the resize
+                if (!on) dlg.style.transform = '';                 // clamp observer skips while maximized
+                content.style.width  = on ? '' : '95vw';
+                content.style.height = on ? '' : '95vh';
+                maxBtn.querySelector('i').className = on ? 'bi bi-arrows-fullscreen' : 'bi bi-fullscreen-exit';
+            };
+            maxBtn.addEventListener('click', _toggleMax);
+            // Double-click the title bar to maximize / restore (ignore controls).
+            header.addEventListener('dblclick', ev => {
+                if (ev.target.closest('button, a, input, select, textarea, .btn-close')) return;
+                _toggleMax();
+            });
+            const closeBtn = header.querySelector('.btn-close');
+            if (closeBtn) { closeBtn.style.marginLeft = '0'; header.insertBefore(maxBtn, closeBtn); }
+            else header.appendChild(maxBtn);
+        }
+        // Restore the last maximized state + size for this modal (set the max flag
+        // first so the clamp observer skips the restored maximized size).
+        const _wasMax = !!(_mem && _mem.max);
+        maxBtn.dataset.max = _wasMax ? '1' : '0';
+        maxBtn.querySelector('i').className = _wasMax ? 'bi bi-fullscreen-exit' : 'bi bi-arrows-fullscreen';
+        if (_mem) { content.style.width = _mem.w || ''; content.style.height = _mem.h || ''; }
+        // Stop the CSS resize at the viewport edge: clamp the content size to what
+        // fits given its centre (centre is stable under centering, so no oscillation).
+        // Only acts once the user has resized (inline width/height present).
+        if (!content._clampRO && 'ResizeObserver' in window) {
+            content._clampRO = new ResizeObserver(() => {
+                if (maxBtn.dataset.max === '1') return;   // don't clamp the maximized size
+                const M = 4, vw = window.innerWidth, vh = window.innerHeight;
+                const cr = content.getBoundingClientRect();
+                if (content.style.width) {
+                    const cx = cr.left + cr.width / 2, maxW = 2 * Math.min(cx - M, vw - M - cx);
+                    if (cr.width > maxW && maxW > 120) content.style.width = maxW + 'px';
+                }
+                if (content.style.height) {
+                    const cy = cr.top + cr.height / 2, maxH = 2 * Math.min(cy - M, vh - M - cy);
+                    if (cr.height > maxH && maxH > 120) content.style.height = maxH + 'px';
+                }
+            });
+            content._clampRO.observe(content);
+        }
+    }
+    if (!header || !dlg || header._dragBound) return;        // wire the drag once per modal
+    header._dragBound = true;
+    header.style.cursor = 'grab';   // draggable affordance (grab/grabbing, not 4-arrow move)
+    header.addEventListener('mousedown', ev => {
+        // Don't start a drag from an interactive control inside the header.
+        if (ev.target.closest('button, a, input, select, textarea, .btn-close')) return;
+        const m = new DOMMatrixReadOnly(getComputedStyle(dlg).transform);
+        const cr = (content || dlg).getBoundingClientRect();   // visible box geometry
+        _modalDrag = {
+            dlg, header, modalEl: dlg.closest('.modal'),
+            sx: ev.clientX, sy: ev.clientY, ox: m.m41, oy: m.m42,
+            baseLeft: cr.left - m.m41, baseTop: cr.top - m.m42, w: cr.width, h: cr.height,
+        };
+        header.style.cursor = 'grabbing';
+        ev.preventDefault();
+    });
+});
+
+// ──────────────────────────── Init ────────────────────────────────

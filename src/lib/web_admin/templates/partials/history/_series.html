@@ -1,0 +1,305 @@
+function _historyApplyPermissions() {
+    const canDelete = (currentUser?.permissions || []).includes('history_delete');
+    // Clear All button
+    const clearAllWrap = document.getElementById('history-clear-all-wrap');
+    if (clearAllWrap) clearAllWrap.style.display = canDelete ? '' : 'none';
+    // Clear series button (also controlled in _historyShowToolbar). Hidden in
+    // compare mode (it acts on a single series, which is ambiguous there).
+    const clearBtn = document.getElementById('history-clear-btn');
+    if (clearBtn) clearBtn.style.display = (_historyMod && canDelete && !_historyCompare) ? '' : 'none';
+}
+
+function _historyShowPlaceholder() {
+    // No series selected → nothing to auto-refresh.
+    _historyStopTimer();
+    const chartArea = document.getElementById('history-chart-area');
+    if (chartArea) {
+        chartArea.innerHTML = `
+<div class="d-flex align-items-center justify-content-center h-100 text-muted" style="min-height:240px">
+  <div class="text-center">
+    <i class="bi bi-graph-up" style="font-size:2.5rem;opacity:.3"></i>
+    <p class="mt-2 mb-0">${esc(_historyIndex.length ? t('history_select') : t('history_empty'))}</p>
+  </div>
+</div>`;
+    }
+}
+
+// ── Series list ───────────────────────────────────────────────────────────────
+function _historyOnSearch(val) {
+    _historyFilter = val.toLowerCase();
+    _historyRenderSeriesList();
+}
+
+function _historyRenderSeriesList() {
+    const el = document.getElementById('history-series-list');
+    if (!el) return;
+
+    const filter = _historyFilter;
+    const grouped = {};       // module → [series entries]
+    const prettyNames = {};   // module → pretty_name
+
+    for (const s of _historyIndex) {
+        const label = ((s.pretty_name || s.module) + ' ' + (s.label || '') + ' ' + s.key).toLowerCase();
+        if (filter && !label.includes(filter)) continue;
+        if (!grouped[s.module]) grouped[s.module] = [];
+        grouped[s.module].push(s);
+        prettyNames[s.module] = s.pretty_name || s.module;
+    }
+
+    if (!Object.keys(grouped).length) {
+        el.innerHTML = `<div class="text-muted small px-1 py-2">${esc(t('history_empty'))}</div>`;
+        return;
+    }
+
+    // While filtering, keep every group open so matches are never hidden.
+    const filtering = !!filter;
+    let html = '';
+    for (const [mod, series] of Object.entries(grouped)) {
+        const collapsed = !filtering && _historyCollapsed.has(mod);
+        const chevron   = collapsed ? 'bi-chevron-right' : 'bi-chevron-down';
+        html += `
+<div class="d-flex align-items-center gap-1 px-1 py-1 text-muted small fw-semibold"
+     style="cursor:pointer;user-select:none" data-hgroup="${esc(mod)}"
+     onclick="_historyToggleGroup(this.dataset.hgroup)">
+  <i class="bi ${chevron}" style="font-size:.7rem;flex-shrink:0"></i>
+  <span class="text-truncate flex-grow-1">${esc(prettyNames[mod])}</span>
+  <span class="badge bg-secondary" style="font-size:.65rem;flex-shrink:0">${series.length}</span>
+</div>`;
+        if (collapsed) continue;
+        const activeMetric = _historyActiveMetricKey();   // null when nothing picked yet
+        for (const s of series) {
+            // Dot reflects the last recorded status (OK / error); when the
+            // series has no status yet, fall back to the uptime health band.
+            const dotCls  = s.last_status === true  ? 'text-success'
+                          : s.last_status === false ? 'text-danger'
+                          : s.uptime >= 95 ? 'text-success' : s.uptime >= 80 ? 'text-warning' : 'text-danger';
+            const lastVal = _historyLastVal(s);
+            // Use data-* attributes to avoid JS string escaping issues with keys
+            // that contain backslashes (e.g. Windows paths like "C:\").
+            if (_historyCompare) {
+                // Compare mode: checkbox rows. Non-numeric series and series of a
+                // different metric than the active one are disabled.
+                const mk        = _historyMetricKey(s);
+                const checked   = _historyInCompare(s.module, s.key);
+                const disabled  = !mk || (activeMetric && mk !== activeMetric && !checked);
+                html += `
+<button class="btn btn-sm w-100 text-start d-flex align-items-center gap-1 mb-1 ${checked ? 'btn-primary' : 'btn-outline-secondary'}"
+        style="padding:.25rem .5rem .25rem 1.25rem;font-size:.8rem${disabled ? ';opacity:.4;pointer-events:none' : ''}"
+        data-hmod="${esc(s.module)}" data-hkey="${esc(s.key)}"
+        onclick="_historyToggleCompareMember(this.dataset.hmod, this.dataset.hkey)"
+        title="${escAttr(!mk ? t('history_compare_not_numeric') : (disabled ? t('history_compare_unit_mismatch') : ''))}">
+  <i class="bi ${checked ? 'bi-check-square' : 'bi-square'}" style="font-size:.7rem;flex-shrink:0"></i>
+  <span class="text-truncate flex-grow-1">${esc(s.label || s.key)}</span>
+  ${lastVal !== null ? `<span class="text-muted" style="font-size:.75rem;flex-shrink:0">${lastVal}</span>` : ''}
+</button>`;
+            } else {
+                const active = s.module === _historyMod && s.key === _historyKey;
+                html += `
+<button class="btn btn-sm w-100 text-start d-flex align-items-center gap-1 mb-1 ${active ? 'btn-primary' : 'btn-outline-secondary'}"
+        style="padding:.25rem .5rem .25rem 1.25rem;font-size:.8rem"
+        data-hmod="${esc(s.module)}" data-hkey="${esc(s.key)}"
+        onclick="_historySelectSeries(this.dataset.hmod, this.dataset.hkey, event)">
+  <i class="bi bi-circle-fill ${dotCls}" style="font-size:.45rem;flex-shrink:0"></i>
+  <span class="text-truncate flex-grow-1">${esc(s.label || s.key)}</span>
+  ${lastVal !== null ? `<span class="text-muted" style="font-size:.75rem;flex-shrink:0">${lastVal}</span>` : ''}
+</button>`;
+            }
+        }
+    }
+    el.innerHTML = html;
+}
+
+function _historyLastVal(s) {
+    // Use the module's __history__ schema as source of truth.
+    const cfg   = s.history_cfg || {};
+    const data  = s.last_data   || {};
+    const field = cfg.field;    // null = status-only, string = numeric field name
+    const unit  = cfg.unit || '';
+
+    if (field === null) {
+        // Module explicitly declared status-only (web, service_status, ping, dns…)
+        return `${s.uptime}%`;
+    }
+    if (field && typeof data[field] === 'number') {
+        // Use the declared field + unit (e.g. "74.5%" for RAM, "1.5ms" for ping)
+        return `${_hFmtNum(data[field])}${unit}`;
+    }
+    // No __history__ schema defined for this module: try auto-detect
+    const PREFERRED = ['temp','used','count','response_time','latency_ms','latency','value','rate','TEMP'];
+    for (const f of PREFERRED) {
+        if (typeof data[f] === 'number') return _hFmtNum(data[f]);
+    }
+    for (const [, v] of Object.entries(data)) {
+        if (typeof v === 'number') return _hFmtNum(v);
+    }
+    return `${s.uptime}%`;
+}
+
+function _historySelectSeries(mod, key, ev) {
+    // Compare mode (or Ctrl/Cmd-click) → add/remove from the overlay instead of
+    // switching the single selection.
+    if (_historyCompare || (ev && (ev.ctrlKey || ev.metaKey))) {
+        _historyToggleCompareMember(mod, key);
+        return;
+    }
+    _historyMod   = mod;
+    _historyKey   = key;
+    _historyUid   = _historyIndex.find(s => s.module === mod && s.key === key)?.item_uid || null;
+    _historyField      = null;
+    _historyUnit       = '';
+    _historyLabel      = '';
+    _historySchemaNull = false;
+    localStorage.setItem(_HLS_MOD, mod);
+    localStorage.setItem(_HLS_KEY, key);
+    _historyRenderSeriesList();
+    _historyShowToolbar();
+    _historyLoadChart();
+    // Apply the saved auto-refresh preference when none is active yet.
+    if (!_historyTimer) setHistoryAutoRefresh(parseInt(localStorage.getItem(_HLS_AUTO) || '0', 10) || 0);
+}
+
+// Refresh the chart respecting the current mode (single vs compare overlay).
+function _historyRefresh() {
+    if (_historyCompare) { if (_historyCompareSel.length) _historyLoadCompare(); }
+    else if (_historyMod && _historyKey) _historyLoadChart();
+}
+
+function _historyShowToolbar() {
+    const tb = document.getElementById('history-toolbar');
+    if (tb) tb.style.removeProperty('display');
+    const title = document.getElementById('history-title');
+    if (title) {
+        if (_historyCompare) {
+            title.textContent = _historyCompareSel.length
+                ? tf('history_compare_title', _historyCompareSel.length)
+                : t('history_compare');   // empty set → just "Compare" (no "0 series")
+        } else {
+            const entry = _historyIndex.find(s => s.module === _historyMod && s.key === _historyKey);
+            const prettyMod = (entry?.pretty_name) || _historyMod;
+            title.textContent = `${prettyMod} / ${(entry?.label) || _historyKey}`;
+        }
+    }
+    _historyUpdateCompareBtn();
+    _historyRenderLegend();
+    _historyRenderRange();
+    _historyRenderAutoRefresh();
+    _historyApplyPermissions();
+}
+
+// Compare toggle (in the header) reflects the current mode; keep the ms-2 spacing.
+function _historyUpdateCompareBtn() {
+    const b = document.getElementById('history-compare-btn');
+    if (b) b.className = `btn btn-sm ${_historyCompare ? 'btn-primary' : 'btn-secondary'}`;
+}
+
+function _historyHideToolbar() {
+    const tb = document.getElementById('history-toolbar');
+    if (tb) tb.style.setProperty('display', 'none', 'important');
+}
+
+function _historyOnRangeChange(val) {
+    let h = parseFloat(val);
+    if (!Number.isFinite(h) || h <= 0) h = 24;
+    _historyHours = Math.min(87600, Math.max(1 / 60, h));   // 1 min … 10 years
+    localStorage.setItem(_HLS_HOURS, String(_historyHours));
+    _historyRenderRange();   // reflect the new selection in the dropdown
+    _historyRefresh();
+}
+
+function _historyConfigRanges() {
+    const cfg = configData?.history?.ranges;
+    if (Array.isArray(cfg) && cfg.length > 0) {
+        const valid = cfg.filter(r => typeof r === 'number' && r > 0 && Number.isFinite(r));
+        if (valid.length > 0) return valid;
+    }
+    return [0.5, 1, 6, 24, 72, 168, 720];   // 30 m, 1 h, 6 h, 1 d, 3 d, 7 d, 30 d
+}
+
+// Range units expressed in minutes (month = 30 d, year = 365 d), largest first.
+// Suffix is what the user types / what the compact form shows; lkey is the i18n
+// label key. NOTE: months are 'mo' (not 'm') so they don't clash with minutes.
+const _HISTORY_UNITS = [
+    { suffix: 'y',  mins: 525600, lkey: 'history_y',  one: 'history_year_1',  many: 'history_year_n'  },
+    { suffix: 'mo', mins: 43200,  lkey: 'history_mo', one: 'history_month_1', many: 'history_month_n' },
+    { suffix: 'w',  mins: 10080,  lkey: 'history_w',  one: 'history_week_1',  many: 'history_week_n'  },
+    { suffix: 'd',  mins: 1440,   lkey: 'history_d',  one: 'history_day_1',   many: 'history_day_n'   },
+    { suffix: 'h',  mins: 60,     lkey: 'history_h',  one: 'history_hour_1',  many: 'history_hour_n'  },
+    { suffix: 'm',  mins: 1,      lkey: 'history_m',  one: 'history_min_1',   many: 'history_min_n'   },
+];
+function _historyRangeUnit(h) {
+    const mins = Math.round(h * 60);
+    return _HISTORY_UNITS.find(x => mins % x.mins === 0) || _HISTORY_UNITS.at(-1);
+}
+// Compact label for the toggle button → e.g. "2 w" / "1 mo" / "30 m".
+function _historyRangeLabel(h) {
+    const u = _historyRangeUnit(h);
+    return `${Math.round(h * 60) / u.mins} ${t(u.lkey)}`;
+}
+// Descriptive label for the menu list → e.g. "2 weeks" / "1 month" / "30 minutes".
+function _historyRangeLabelLong(h) {
+    const u = _historyRangeUnit(h);
+    const n = Math.round(h * 60) / u.mins;
+    return `${n} ${t(n === 1 ? u.one : u.many)}`;
+}
+// Compact form (no space) for prefilling the custom input: "2w" / "1mo" / "10m".
+function _historyRangeShort(h) {
+    const u = _historyRangeUnit(h);
+    return `${Math.round(h * 60) / u.mins}${u.suffix}`;
+}
+// Parse a free-form range like "10m", "6h", "2d", "3w", "2mo", "1y" → hours.
+// A bare number defaults to hours. 'mo' must precede 'm' in the pattern.
+function _historyParseRange(s) {
+    const m = String(s).trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(mo|m|h|d|w|y)?$/);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    if (!(n > 0)) return null;
+    const u = _HISTORY_UNITS.find(x => x.suffix === (m[2] || 'h'));
+    return n * (u ? u.mins : 60) / 60;   // → hours
+}
+
+// Compact time-range dropdown: presets (from config) + a free-form custom value
+// where you type the unit directly (10m / 6h / 2d). Mirrors the auto-refresh look.
+function _historyRangeControl() {
+    const ranges = _historyConfigRanges();
+    const cur = _historyHours;
+    const isCustom = !ranges.includes(cur);
+    let items = `<li><h6 class="dropdown-header py-1">${esc(t('history_range'))}</h6></li>`;
+    for (const h of ranges) {
+        const active = cur === h;
+        items += `<li><button type="button" class="dropdown-item d-flex align-items-center gap-2 ${active ? 'active' : ''}"
+            onclick="_historyOnRangeChange(${h})"><i class="bi ${active ? 'bi-check2' : 'bi-clock-history'}" style="width:1em;flex-shrink:0"></i>${esc(_historyRangeLabelLong(h))}</button></li>`;
+    }
+    // Custom row: prefix turns into a highlighted check when this value is active;
+    // the icon's tooltip explains the accepted formats.
+    const cval = isCustom ? _historyRangeShort(cur) : '';
+    items += `<li><hr class="dropdown-divider my-1"></li>
+      <li class="px-2 pb-1"><div class="input-group input-group-sm flex-nowrap${isCustom ? ' border border-primary rounded' : ''}">
+        <span class="input-group-text${isCustom ? ' text-bg-primary' : ''}" style="cursor:help" title="${escAttr(t('history_range_help'))}"><i class="bi ${isCustom ? 'bi-check2' : 'bi-clock-history'}"></i></span>
+        <input type="text" id="hist-range-custom" class="form-control"
+               placeholder="${escAttr(t('history_range_custom'))}" value="${escAttr(cval)}"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();_historyApplyCustomRange();}">
+        <button class="btn btn-primary" type="button" onclick="_historyApplyCustomRange()">${esc(t('apply'))}</button>
+      </div></li>`;
+    return `<div class="btn-group btn-group-sm">
+      <button type="button" class="btn btn-sm btn-secondary dropdown-toggle text-center" style="min-width:5.5rem"
+              data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" title="${escAttr(t('history_range'))}">
+        <i class="bi bi-clock-history me-1"></i>${esc(_historyRangeLabel(cur))}
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end p-1" style="font-size:.8rem;min-width:13.5rem">${items}</ul>
+    </div>`;
+}
+
+function _historyRenderRange() {
+    const el = document.getElementById('history-range');
+    if (el) el.innerHTML = _historyRangeControl();
+}
+
+function _historyApplyCustomRange() {
+    const inp = document.getElementById('hist-range-custom');
+    if (!inp) return;
+    const hrs = _historyParseRange(inp.value);
+    if (hrs == null) return;
+    _historyOnRangeChange(hrs);
+}
+
+// ── Export (PNG image / CSV data) ───────────────────────────────────────────────

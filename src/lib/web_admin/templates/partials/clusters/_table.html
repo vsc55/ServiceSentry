@@ -1,0 +1,307 @@
+{# ================================================================
+   Clusters sub-tab — table of multi-bind module checks + edit modal.
+
+   A "cluster" is one check bound to SEVERAL hosts at once (failover):
+   any module declaring __host_multiple_bind__ (exposed as
+   MODULE_HOST_MULTI_BIND) qualifies — Proxmox today, anything tomorrow.
+   The list is a compact table with quick actions; the "Edit" button opens
+   a modal that hosts the SHARED field editor (renderScalarFields, incl. the
+   multi-host picker), so there is NO module-specific code here. Extra table
+   columns are declared per-module via the __cluster_columns__ schema meta.
+   ================================================================ #}
+
+// Modules that bind ONE check to SEVERAL hosts (a cluster), present in config.
+function _clusterModules() {
+    return Object.keys(MODULE_HOST_MULTI_BIND || {})
+        .filter(m => MODULE_HOST_MULTI_BIND[m]
+                  && modulesData[m] && typeof modulesData[m] === 'object'
+                  && !Array.isArray(modulesData[m]));
+}
+
+// Cluster permissions (view/add/edit/delete) — gated STRICTLY by the dedicated
+// clusters_* (global) and cluster.{uid}.{action} (per-cluster) keys. Module-level
+// access does NOT grant cluster access: the Clusters surface is its own resource
+// (a modules_view user still sees clusters in the Modules tab, not here).
+function _clPerm(...names) {
+    const p = currentUser.permissions || [];
+    return names.some(n => p.includes(n));
+}
+// A global cluster permission grants the action on EVERY cluster.
+function _canAddClusters()  { return _clPerm('clusters_add'); }
+// Whether the user can perform *action* (view/edit/delete) on cluster *uid*:
+// the global clusters_{action} OR a per-cluster cluster.{uid}.{action}.
+function _clCan(uid, action) {
+    const g = { view: 'clusters_view', edit: 'clusters_edit', delete: 'clusters_delete' }[action];
+    return _clPerm(g) || (!!uid && _clPerm(`cluster.${uid}.${action}`));
+}
+// Seeing a cluster row = any of view/edit/delete on it (global or scoped).
+function _clCanSee(uid) { return _clCan(uid, 'view') || _clCan(uid, 'edit') || _clCan(uid, 'delete'); }
+// Global view/edit/delete (or any per-cluster key, or add) → the surface is usable.
+function _canViewClustersAny() {
+    return _clPerm('clusters_view', 'clusters_edit', 'clusters_delete', 'clusters_add')
+        || (currentUser.permissions || []).some(x => x.startsWith('cluster.'));
+}
+
+// The collection schema for a module's cluster checks (handles the optional
+// "watchfuls." prefix the schema map carries alongside the bare name).
+function _clColSchema(mod, coll) {
+    return ITEM_SCHEMAS[mod + '|' + coll]
+        || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll]
+        || ITEM_SCHEMAS[mod.replace('watchfuls.', '') + '|' + coll] || {};
+}
+
+let _clStatus = {};   // last fetched /modules/status payload, for the Status column
+
+// Aggregate a cluster's status from its check results: a multi-bind check emits
+// several sub-results keyed "<key>" and "<key>/...". OK only if all pass; a failure
+// is a warning only when EVERY failing sub-result is warning-severity, else error.
+function _clStatusAgg(mod, key) {
+    const st = _clStatus[mod] || _clStatus['watchfuls.' + mod]
+            || _clStatus[mod.replace('watchfuls.', '')] || {};
+    const rows = Object.entries(st).filter(([k]) => k === key || k.startsWith(key + '/'));
+    if (!rows.length) return 'unknown';
+    const bad = rows.filter(([, v]) => !(v && v.status === true));
+    if (!bad.length) return 'ok';
+    return bad.every(([, v]) => v && v.severity === 'warning') ? 'warn' : 'err';
+}
+
+function _clStatusHtml(state) {
+    if (state === 'ok')   return `<span class="badge text-bg-success"><i class="bi bi-check-lg me-1"></i>${esc(t('cl_status_ok'))}</span>`;
+    if (state === 'warn') return `<span class="badge text-bg-warning"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('cl_status_warn'))}</span>`;
+    if (state === 'err')  return `<span class="badge text-bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('cl_status_err'))}</span>`;
+    return `<span class="badge text-bg-secondary">${esc(t('cl_status_unknown'))}</span>`;
+}
+
+function _clMembersHtml(item) {
+    // Only count/name members the user may view (never leak a non-viewable host UID).
+    const names = (Array.isArray(item.host_uids) ? item.host_uids : [])
+        .map(u => (hostsList().find(h => h.uid === u) || {}).name)
+        .filter(Boolean);
+    if (!names.length) return `<span class="text-muted small">${esc(t('cl_no_members'))}</span>`;
+    // Just the member count; the member names stay available as a tooltip.
+    return `<span class="badge text-bg-secondary" title="${escAttr(names.join(', '))}">${names.length}</span>`;
+}
+
+// "New cluster" control: a plain button for a single multi-bind module, or a
+// dropdown to choose the module when several qualify.
+function _clNewControl(mods) {
+    if (mods.length === 1) {
+        return `<button class="btn btn-sm btn-success" onclick="newCluster('${esc(mods[0])}')">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('cl_new'))}</button>`;
+    }
+    const items = mods.map(m =>
+        `<li><button class="dropdown-item" onclick="newCluster('${esc(m)}')">${esc(_modPrettyName(m))}</button></li>`).join('');
+    return `<div class="dropdown d-inline-block">
+        <button class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('cl_new'))}</button>
+        <ul class="dropdown-menu dropdown-menu-end">${items}</ul></div>`;
+}
+
+// ── Table columns / sort / pagination (same machinery as the Servers table) ──
+const _CL_BASE_COLS = [
+    { id: 'status',     label: () => t('cl_col_status'),                 sortKey: 'status',     always: false, resizable: false },
+    { id: 'name',       label: () => t('cl_col_name'),                   sortKey: 'name',       always: true,  resizable: false },
+    _META_COL.uid,
+    { id: 'module',     label: () => t('cl_col_module'),                 sortKey: 'module',     always: false, resizable: false },
+    { id: 'description',label: () => t('cl_col_description'),            sortKey: 'description',always: false },
+    { id: 'members',    label: () => t('cl_col_members'),                sortKey: 'members',    always: false, resizable: false },
+    { id: 'summary',    label: () => t('cl_col_summary'),                sortKey: 'summary',    always: false, resizable: false },
+    ..._META_TAIL,
+    { id: 'enabled',    label: () => t('enabled'),                       sortKey: 'enabled',    always: false, resizable: false },
+];
+// Columns available in the chooser but hidden by default (parity with Servers).
+const _CL_HIDDEN_DEFAULT = new Set(['uid', 'description', 'created_at', 'updated_at', 'updated_by']);
+// Full column set = base + declarative per-module extra columns (e.g. proxmox vip),
+// inserted right after "members" for a sensible default order.
+function _clCols(extraCols) {
+    const ex = (extraCols || []).map(c => ({
+        id: 'x_' + c.field, label: () => c.label, sortKey: 'x_' + c.field, field: c.field, always: false,
+    }));
+    const cols = _CL_BASE_COLS.slice();
+    const at = cols.findIndex(c => c.id === 'members') + 1;
+    cols.splice(at, 0, ...ex);
+    return cols;
+}
+// Compact summary of a cluster's last status: "OK/total" badge + worst message.
+function _clStatusSummary(mod, key) {
+    const st = _clStatus[mod] || _clStatus['watchfuls.' + mod]
+            || _clStatus[mod.replace('watchfuls.', '')] || {};
+    const entries = Object.entries(st).filter(([k]) => k === key || k.startsWith(key + '/'));
+    if (!entries.length) return '<span class="text-muted small">—</span>';
+    const okN = entries.filter(([, v]) => v && v.status === true).length;
+    const total = entries.length;
+    // Green if all OK; yellow if the only failures are warnings; red if any hard error.
+    const agg = _clStatusAgg(mod, key);
+    const badge = agg === 'ok' ? 'text-bg-success' : agg === 'warn' ? 'text-bg-warning' : 'text-bg-danger';
+    return `<span class="badge ${badge}">${okN}/${total}</span>`;
+}
+let _clVisibleCols = (() => { try { const s = JSON.parse(localStorage.getItem('ss_clusters_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){} return null; })();
+let _clColOrder = (() => { try { const s = JSON.parse(localStorage.getItem('ss_clusters_col_order')||'null'); if (Array.isArray(s)) return s; } catch(_){} return []; })();
+let _clSort = 'name', _clSortDir = 'asc', _clPage = 1, _clPageSize = null;
+
+// Column visibility/order/sort/page/select handlers are generated by the factory
+// (createListTable below). Sort value for a row by column id:
+function _clSortVal(row, key) {
+    switch (key) {
+        case 'status':
+        case 'summary':    return { err: 0, warn: 1, unknown: 2, ok: 3 }[_clStatusAgg(row.mod, row.key)] ?? 4;
+        case 'module':     return _modPrettyName(row.mod).toLowerCase();
+        case 'description':return String(row.item.description || '').toLowerCase();
+        case 'members':    return Array.isArray(row.item.host_uids) ? row.item.host_uids.length : 0;
+        case 'name':       return String(row.name || '').toLowerCase();
+        case 'uid':        return String(row.key || '').toLowerCase();
+        case 'enabled':    return row.item.enabled !== false ? 1 : 0;
+        case 'created_at': return String(row.item.created_at || '');
+        case 'updated_at': return String(row.item.updated_at || '');
+        case 'updated_by': return String(row.item.updated_by || '').toLowerCase();
+        default:           return key.startsWith('x_') ? String(row.item[key.slice(2)] ?? '').toLowerCase() : '';
+    }
+}
+// True if the user can write ANY cluster (global add/edit/delete or a per-cluster
+// edit/delete) — controls whether the "Save" button is shown.
+function _canWriteAnyCluster() {
+    return _clPerm('clusters_add', 'clusters_edit', 'clusters_delete')
+        || (currentUser.permissions || []).some(x => /^cluster\..+\.(edit|delete)$/.test(x));
+}
+createListTable({
+    key: 'clusters', containerId: 'clusters-container', tableId: 'clusters-table',
+    cardClass: 'ss-card mb-3', accent: 'slate', icon: 'bi-diagram-3', title: () => esc(t('clusters_title')),
+    columns: ctx => _clCols((ctx && ctx.extraCols) || []),
+    defaultVisible: ctx => {
+        const s = new Set();
+        for (const co of _clCols((ctx && ctx.extraCols) || []))
+            if (!co.always && !_CL_HIDDEN_DEFAULT.has(co.id)) s.add(co.id);
+        return s;
+    },
+    autoRegister: true, hiddenDefault: _CL_HIDDEN_DEFAULT,
+    colChooserCols: cols => { const u = cols.find(c => c.id === 'uid'); return u ? [u, ...cols.filter(c => c.id !== 'uid')] : cols; },
+    thClass: { status: 'text-center', enabled: 'text-center' },
+    actionsLabel: () => esc(t('cl_col_actions')),
+    persist: true, clearLabelKey: 'subtab_clusters',
+    umCustomised: cfg => !!(cfg && ((cfg.w && Object.keys(cfg.w).length) || (Array.isArray(cfg.cols)) || (Array.isArray(cfg.order) && cfg.order.length))),
+    prepare: async () => {
+        const mods = _clusterModules();
+        try { _clStatus = await apiGet('/api/v1/modules/status') || {}; } catch (_) { _clStatus = {}; }
+        const extraCols = [];
+        const seenCol = new Set();
+        for (const mod of mods) {
+            const sch = _clColSchema(mod, _hostConnCollection(mod) || 'list');
+            for (const f of (Array.isArray(sch['__cluster_columns__']) ? sch['__cluster_columns__'] : [])) {
+                if (seenCol.has(f)) continue;
+                seenCol.add(f);
+                extraCols.push({ field: f, label: fieldLabel(f, fieldMeta(sch, f)) });
+            }
+        }
+        return { mods, extraCols, canSave: _canWriteAnyCluster() };
+    },
+    rows: ctx => {
+        const out = [];
+        for (const mod of ctx.mods) {
+            const coll = _hostConnCollection(mod) || 'list';
+            const data = modulesData[mod][coll];
+            if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
+            const titleField = _clColSchema(mod, coll)['__check_title_field__'] || 'label';
+            for (const [key, item] of Object.entries(data)) {
+                if (item && typeof item === 'object' && !Array.isArray(item) && _clCanSee(item.uid || key))
+                    out.push({ mod, coll, key, item, name: String(item[titleField] || key) });
+            }
+        }
+        return out;
+    },
+    rowKey: r => r.key,
+    record: r => r.item,
+    selectable: false,
+    sortValue: (row, sortKey) => _clSortVal(row, sortKey),
+    rowAttrs: row => ` style="opacity:${row.item.enabled !== false ? '1' : '.55'}"`,
+    cell: (row, colId) => {
+        const { mod, coll, key, item, name } = row;
+        const on = item.enabled !== false;
+        const _uid = item.uid || key;
+        switch (colId) {
+            case 'status':     return `<td class="text-center">${_clStatusHtml(_clStatusAgg(mod, key))}</td>`;
+            case 'name':       return `<td class="text-nowrap fw-semibold">${esc(name)}</td>`;
+            case 'module':     return `<td class="text-nowrap"><i class="bi bi-puzzle me-1" style="opacity:.6"></i>${esc(_modPrettyName(mod))}</td>`;
+            case 'description': { const _d = String(item.description || '').trim();
+                return `<td class="small text-truncate" style="max-width:280px" title="${escAttr(_d)}">${_d ? esc(_d) : '<span class="text-muted">—</span>'}</td>`; }
+            case 'members':    return `<td>${_clMembersHtml(item)}</td>`;
+            case 'enabled':    return `<td class="text-center align-middle"><span class="form-switch d-inline-flex align-items-center m-0" style="padding-left:0;min-height:0;line-height:1" title="${escAttr(t('enabled'))}">
+                    <input class="form-check-input m-0" type="checkbox" role="switch" style="margin-left:0;margin-top:0;float:none;vertical-align:middle;cursor:pointer" ${on ? 'checked' : ''} ${_clCan(_uid, 'edit') ? '' : 'disabled'}
+                        onchange="_clToggle('${esc(mod)}','${esc(coll)}',${jsStr(key)},this.checked,this)"></span></td>`;
+            case 'summary':    return `<td>${_clStatusSummary(mod, key)}</td>`;
+            default: {
+                const field = colId.startsWith('x_') ? colId.slice(2) : null;   // per-module extra column
+                if (!field) return '<td></td>';
+                const v = item[field];
+                return `<td class="small">${v != null && v !== '' ? esc(String(v)) : '<span class="text-muted">—</span>'}</td>`;
+            }
+        }
+    },
+    actions: row => {
+        const { mod, coll, key, item } = row;
+        const _uid = item.uid || key;
+        const canEdit = _clCan(_uid, 'edit');
+        const canDelete = _clCan(_uid, 'delete');
+        const _openBtn = `
+            <button class="btn btn-sm ${canEdit ? 'btn-primary' : 'btn-secondary'} py-0 px-1 me-1"
+                title="${escAttr(canEdit ? t('edit') : (t('cl_view') || t('host_view')))}"
+                onclick="openClusterEdit('${esc(mod)}','${esc(coll)}',${jsStr(key)})"><i class="bi ${canEdit ? 'bi-pencil' : 'bi-eye'}"></i></button>`;
+        const _delBtn = canDelete ? `
+            <button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+                onclick="removeItem('modules','${esc(mod)}|${esc(coll)}',${jsStr(key)})"><i class="bi bi-trash3"></i></button>` : '';
+        return _openBtn + _delBtn;
+    },
+    refreshButton: () => `<button class="btn btn-sm btn-secondary ms-1" onclick="renderClusters()" title="${escAttr(t('refresh_tt'))}">
+                <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>`,
+    headerButtons: ctx => `${_canAddClusters() && ctx.mods.length ? `<span class="ms-1">${_clNewControl(ctx.mods)}</span>` : ''}
+            ${ctx.canSave ? `<button class="btn btn-sm btn-success ms-1" onclick="saveModules().then(() => renderClusters())">
+                <i class="bi bi-save me-1"></i>${esc(t('save'))}</button>` : ''}`,
+    emptyBody: ctx => !ctx.mods.length
+        ? `<div class="p-3"><div class="alert alert-info mb-0">${esc(t('clusters_none_modules'))}</div></div>`
+        : `<div class="text-center py-5 text-muted">
+                 <i class="bi bi-diagram-3" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+                 <span>${esc(t('cl_empty'))}</span></div>`,
+    reset: () => {
+        _clVisibleCols = null; _clColOrder = [];
+        localStorage.removeItem('ss_clusters_cols');
+        localStorage.removeItem('ss_clusters_col_order');
+        localStorage.removeItem('ss_clusters_col_w');
+    },
+    state: {
+        visible: { get: () => _clVisibleCols, set: s => { _clVisibleCols = s; } },
+        order:   { get: () => _clColOrder,    set: o => { _clColOrder = o; } },
+        page:    { get: () => _clPage,        set: p => { _clPage = p; } },
+        pageSize:{ get: () => _clPageSize,    set: v => { _clPageSize = v; } },
+        sort:    { get: () => _clSort,        set: v => { _clSort = v; } },
+        sortDir: { get: () => _clSortDir,     set: v => { _clSortDir = v; } },
+        currentPage: { get: () => [], set: () => {} },
+    },
+    globalPrefix: {
+        render: 'renderClusters', goPage: '_goClPage', changePageSize: '_changeClPageSize',
+        sort: '_sortClusters', toggleCol: '_clToggleCol', resetCols: '_resetClCols',
+        saveOrder: '_clSaveColOrder', initFeatures: '_initClTableFeatures',
+    },
+});
+
+// Quick enable/disable from the table (no full re-render — just dim the row).
+function _clToggle(mod, coll, key, on, el) {
+    updateField('modules', mod + '|' + coll + '|' + key + '|enabled', on);
+    const tr = el && el.closest('tr');
+    if (tr) tr.style.opacity = on ? '1' : '.55';
+}
+
+// Create a fresh cluster (multi-bind check) and open its editor straight away.
+function newCluster(mod) {
+    const coll = _hostConnCollection(mod) || 'list';
+    const sch = _clColSchema(mod, coll);
+    const def = schemaDefaults(sch) || {};
+    if (!('enabled' in def)) def.enabled = true;
+    def.host_uids = Array.isArray(def.host_uids) ? def.host_uids : [];
+    if (!modulesData[mod][coll] || typeof modulesData[mod][coll] !== 'object'
+        || Array.isArray(modulesData[mod][coll])) modulesData[mod][coll] = {};
+    const key = 'cl-' + uid();          // opaque id; the human name lives in the title field
+    modulesData[mod][coll][key] = def;
+    markDirty('modules');
+    openClusterEdit(mod, coll, key, true);
+}
+
+// ── Edit modal ────────────────────────────────────────────────────────────

@@ -1,0 +1,122 @@
+// ── Syslog tab ────────────────────────────────────────────────────────────────
+// Received syslog messages with filters (host/severity/facility/search) + clear.
+const _SYSLOG_SEV = ['emerg','alert','crit','err','warning','notice','info','debug'];
+const _SYSLOG_SEV_CLS = {0:'danger',1:'danger',2:'danger',3:'danger',
+                         4:'warning',5:'info',6:'secondary',7:'secondary'};
+// hostname/app/severity/facility are multi-value (arrays) → Ctrl+click adds.
+let _syslogFilters = {severity_max:'', severity:[], hostname:[], app:[], facility:[], q:'', since:'', until:''};
+const _SL_MULTI_KEYS = ['hostname', 'app', 'severity', 'facility'];
+let _syslogPage = 1;
+let _syslogPageSize = _defaultPageSize || 50;
+let _syslogTimer = null;        // {_id, _interval} interval-driven refresh
+let _syslogCountId = null;      // cosmetic countdown ticker
+let _syslogLive = false;        // live mode (fast poll)
+let _syslogAutoInit = false;    // restore-from-storage done once
+const _SL_LIVE_SECS = 2;
+const _SL_AUTO_KEY = 'ss_syslog_auto';
+const _SL_STATS_KEY = 'ss_syslog_stats_collapsed';
+
+function _syslogCanDelete() {
+    return (currentUser.permissions || []).includes('syslog_delete');
+}
+
+// ── Column infrastructure (shared with users/groups/roles tables) ─────────────
+// Server-side sortable (sortKey maps to SyslogStore._SORTABLE).
+const _SL_COLS = [
+    { id: 'time',     label: () => t('syslog_time'),     sortKey: 'ts',       always: true  },
+    { id: 'host',     label: () => t('syslog_host'),     sortKey: 'hostname', always: false },
+    { id: 'severity', label: () => t('syslog_severity'), sortKey: 'severity', always: false },
+    { id: 'facility', label: () => t('syslog_facility'), sortKey: 'facility', always: false },
+    { id: 'app',      label: () => t('syslog_app'),      sortKey: 'app',      always: false },
+    { id: 'source',   label: () => t('syslog_source'),   sortKey: 'source',   always: false },
+    { id: 'procid',   label: () => t('syslog_procid'),   sortKey: 'procid',   always: false },
+    { id: 'msgid',    label: () => t('syslog_msgid'),    sortKey: 'msgid',    always: false },
+    { id: 'message',  label: () => t('syslog_message'),  sortKey: 'message',  always: false },
+];
+const _SL_DEFAULT_COLS = new Set(['host', 'severity', 'facility', 'app', 'message']);
+function _slLoadCols() {
+    try { const s = JSON.parse(localStorage.getItem('ss_syslog_cols') || 'null'); if (Array.isArray(s)) return new Set(s); } catch (_) {}
+    return new Set(_SL_DEFAULT_COLS);
+}
+function _slLoadOrder() {
+    try { const s = JSON.parse(localStorage.getItem('ss_syslog_col_order') || 'null'); if (Array.isArray(s)) return s; } catch (_) {}
+    return _SL_COLS.map(c => c.id);
+}
+function _slCW() { try { return JSON.parse(localStorage.getItem('ss_syslog_col_w') || '{}'); } catch (_) { return {}; } }
+let _slVisibleCols = _slLoadCols();
+let _slColOrder    = _slLoadOrder();
+let _slSort = 'ts', _slSortDir = 'desc';
+let _slRowsData = [];   // last loaded page, so column changes re-render without a refetch
+
+function _slToggleCol(col) {
+    _slVisibleCols.has(col) ? _slVisibleCols.delete(col) : _slVisibleCols.add(col);
+    localStorage.setItem('ss_syslog_cols', JSON.stringify([..._slVisibleCols]));
+    _persistTableConfig(); _slRenderTable();
+}
+function _resetSlCols() {
+    _slVisibleCols = new Set(_SL_DEFAULT_COLS); _slColOrder = _SL_COLS.map(c => c.id);
+    localStorage.setItem('ss_syslog_cols', JSON.stringify([..._slVisibleCols]));
+    localStorage.setItem('ss_syslog_col_order', JSON.stringify(_slColOrder));
+    localStorage.removeItem('ss_syslog_col_w');
+    _persistTableConfig(); _slRenderTable();
+}
+function _slSaveColOrder() { localStorage.setItem('ss_syslog_col_order', JSON.stringify(_slColOrder)); _persistTableConfig(); }
+function _sortSyslog(col) {
+    if (_slSort === col) _slSortDir = _slSortDir === 'asc' ? 'desc' : 'asc';
+    else { _slSort = col; _slSortDir = (col === 'ts') ? 'desc' : 'asc'; }
+    _syslogPage = 1;
+    _loadSyslog();   // server-side sort → reload
+}
+function _slOrdered() {
+    const known = new Set(_SL_COLS.map(c => c.id));
+    _SL_COLS.forEach(c => { if (!_slColOrder.includes(c.id)) _slColOrder.push(c.id); });
+    _slColOrder = _slColOrder.filter(id => known.has(id));
+    return _slColOrder.map(id => _SL_COLS.find(c => c.id === id)).filter(c => c && (c.always || _slVisibleCols.has(c.id)));
+}
+function _slCellHtml(m, colId) {
+    const cls = _SYSLOG_SEV_CLS[m.severity] || 'secondary';
+    switch (colId) {
+        case 'time': {
+            const when = m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '');
+            return `<td class="text-muted" style="white-space:nowrap">${esc(when.replace('T', ' ').replace('Z', ''))}</td>`;
+        }
+        case 'host':     return `<td>${esc(m.hostname || m.source || '')}</td>`;
+        case 'severity': return `<td><span class="badge bg-${cls}">${esc(m.severity_name)}</span></td>`;
+        case 'facility': return `<td class="text-muted">${esc(m.facility_name)}</td>`;
+        case 'app':      return `<td><code style="font-size:.78rem">${esc(m.app + (m.procid ? `[${m.procid}]` : ''))}</code></td>`;
+        case 'source':   return `<td class="text-muted">${esc(m.source || '')}</td>`;
+        case 'procid':   return `<td class="text-muted">${esc(m.procid || '')}</td>`;
+        case 'msgid':    return `<td class="text-muted">${esc(m.msgid || '')}</td>`;
+        case 'message':  return `<td style="word-break:break-word">
+            <div class="d-flex align-items-start gap-2">
+                <span class="flex-grow-1">${esc(m.message)}</span>
+                <button class="btn btn-sm btn-link p-0 text-muted sl-copy-btn" tabindex="-1"
+                    title="${escAttr(t('syslog_copy'))}" data-msg="${escAttr(m.message)}"
+                    onclick="_syslogCopyMsg(this)"><i class="bi bi-clipboard"></i></button>
+            </div></td>`;
+        default:         return '<td></td>';
+    }
+}
+// Rebuild the whole syslog table (thead reflects cols/sort, tbody the cached page).
+function _slRenderTable() {
+    const wrap = document.getElementById('sl-table-wrap');
+    if (!wrap) return;
+    const ordered = _slOrdered();
+    const cw = _slCW();
+    const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';
+    const thRow = ordered.map(col => {
+        const inner = col.sortKey ? _thSortInner(col.label(), col.sortKey, _slSort, _slSortDir, '_sortSyslog')
+            : `<span class="small">${esc(col.label())}</span>`;
+        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${thW(col.id)}>${inner}</th>`;
+    }).join('');
+    const body = _slRowsData.map(m => `<tr class="sl-row-${_SYSLOG_SEV_CLS[m.severity] || 'secondary'}">${ordered.map(col => _slCellHtml(m, col.id)).join('')}</tr>`).join('');
+    wrap.innerHTML = `<div class="table-responsive rounded border" style="background:var(--ss-pagination-bg, var(--bs-secondary-bg))">
+        <table class="table table-sm table-striped table-hover align-middle mb-0 ss-table" id="sl-table" style="font-size:.82rem;--bs-table-bg:transparent">
+            <thead class="ss-thead"><tr>${thRow}</tr></thead>
+            <tbody id="sl-rows">${body}</tbody>
+        </table></div>`;
+    setTimeout(() => _attachColFeatures('sl-table',
+        () => _slColOrder, o => { _slColOrder = o; }, _slSaveColOrder, _slRenderTable,
+        (col, w) => { const m = _slCW(); m[col] = w; localStorage.setItem('ss_syslog_col_w', JSON.stringify(m)); }), 0);
+}
+

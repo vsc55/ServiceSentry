@@ -1,0 +1,13 @@
+{# Read-only UID row with a copy button, shown in edit modals.
+   *p* is the field id prefix (um=user, gm=group, rm=role). #}
+{% macro uid_field(p) %}
+                        <div class="mb-2 flex-shrink-0 d-none" id="{{ p }}UidRow">
+                            <label class="form-label small text-muted mb-0">UID</label>
+                            <div class="input-group input-group-sm">
+                                <input type="text" class="form-control form-control-sm font-monospace text-muted" id="{{ p }}Uid" readonly>
+                                <button class="btn btn-sm btn-secondary" type="button"
+                                    onclick="_copyToClipboard(document.getElementById('{{ p }}Uid').value)"
+                                    title="{{ i18n.copy_uid }}"><i class="bi bi-copy"></i></button>
+                            </div>
+                        </div>
+{% endmacro %}

@@ -49,6 +49,11 @@ def _check_labels(mod_cfg) -> dict:
                 lbl = str(item.get('label') or '').strip()
                 if lbl:
                     out[key] = lbl
+                    # Multi-bind checks (e.g. clusters) are keyed in the status
+                    # payload by the item UID, not its collection key — map both.
+                    uid = str(item.get('uid') or '').strip()
+                    if uid:
+                        out[uid] = lbl
     return out
 
 
@@ -106,7 +111,15 @@ def register(app, wa):
                 # Display name priority: a name the module emitted (for derived
                 # result keys, e.g. "NS1 - RAM") > the item 'label' > the raw key.
                 disp = (extra.get('name') if isinstance(extra, dict) else None) \
-                    or check_labels.get(check_name) or check_name
+                    or check_labels.get(check_name)
+                if not disp and '/' in check_name:
+                    # Composite '<item>/<metric>' (multi-bind, e.g. clusters):
+                    # resolve the first segment to its label, keep the suffix.
+                    head, _, rest = check_name.partition('/')
+                    base = check_labels.get(head)
+                    if base:
+                        disp = f'{base} / {rest}'
+                disp = disp or check_name
                 items.append({'name': disp, 'ok': ok, 'extra': extra})
             n = len(items)
             total_ok += mod_ok

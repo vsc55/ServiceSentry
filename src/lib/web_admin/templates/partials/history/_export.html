@@ -1,0 +1,194 @@
+function _historyExportFilename(ext) {
+    const range = _historyRangeShort(_historyHours);
+    const base = _historyCompare
+        ? `history_compare_${range}`
+        : `history_${_historyMod || 'series'}_${_historyKey || ''}_${range}`;
+    return base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/_+\./, '.') + '.' + ext;
+}
+
+function _historyDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+}
+
+// Title for the exported image: "<series> — <metric> (<range>)".
+function _historyExportTitle() {
+    const range = _historyRangeLabel(_historyHours);
+    if (_historyCompare) {
+        const metric = _historyCompareLabel || _historyCompareField || '';
+        const unit   = _historyCompareUnit ? ` (${_historyCompareUnit})` : '';
+        return `${tf('history_compare_title', _historyCompareSel.length)} — ${metric}${unit} · ${range}`;
+    }
+    const e = _historyIndex.find(x => x.module === _historyMod && x.key === _historyKey);
+    const series = `${(e?.pretty_name) || _historyMod} / ${(e?.label) || _historyKey}`;
+    const metric = _historyLabel || t('history_status_only');
+    const unit   = _historyUnit ? ` (${_historyUnit})` : '';
+    return `${series} — ${metric}${unit} · ${range}`;
+}
+
+// Single-series stats line for the exported image footer
+// (samples · uptime · min/max/avg). Empty in compare mode (uses a legend).
+function _historyExportStats() {
+    const s = _historyStats;
+    if (!s || !s.count) return '';
+    const u = _historyUnit || '';
+    const parts = [`${t('history_samples')}: ${s.count}`, `${t('history_uptime')}: ${s.uptime}%`];
+    if (s.min !== undefined) {
+        parts.push(`${t('history_min')}: ${_hFmtNum(s.min)}${u}`,
+                   `${t('history_max')}: ${_hFmtNum(s.max)}${u}`,
+                   `${t('history_avg')}: ${_hFmtNum(s.avg)}${u}`);
+    }
+    return parts.join('   ·   ');
+}
+
+// Composite a titled chart (transparent canvas over the surface colour, with a
+// header line and a footer — stats for a single series, or a colour legend in
+// compare mode so each line is identifiable) and download it as PNG.
+function _historyExportPNG() {
+    const canvas = document.getElementById('history-canvas');
+    if (!canvas) { showToast(t('history_no_data'), 'warning'); return; }
+    const dpr   = window.devicePixelRatio || 1;
+    const padX  = 12 * dpr;
+    const headH = 32 * dpr;
+    const cs  = getComputedStyle(document.body);
+    const bg  = (cs.getPropertyValue('--ss-surface-bg') || cs.getPropertyValue('--bs-body-bg') || '#ffffff').trim();
+    const fg  = (cs.getPropertyValue('--bs-body-color') || '#000').trim();
+    const mut = (cs.getPropertyValue('--bs-secondary-color') || fg).trim();
+    const legendFont = `${11 * dpr}px system-ui, sans-serif`;
+
+    // Footer: single → stats text; compare → wrapped colour legend.
+    const statsText = _historyCompare ? '' : _historyExportStats();
+    const rowH = 18 * dpr, sw = 10 * dpr, swGap = 6 * dpr, itemGap = 18 * dpr;
+    const maxW = canvas.width - padX;
+    let placed = [], legendLines = 0;
+    if (_historyCompare) {
+        const meas = document.createElement('canvas').getContext('2d');
+        meas.font = legendFont;
+        let x = padX, line = 0;
+        for (const s of _historyCompareData) {
+            const label = `${s.pretty} / ${s.label}`;
+            const w = sw + swGap + meas.measureText(label).width + itemGap;
+            if (x + w > maxW && x > padX) { line++; x = padX; }
+            placed.push({ color: s.color, label, x, line });
+            x += w;
+        }
+        legendLines = placed.length ? line + 1 : 0;
+    }
+    const footH = _historyCompare ? (legendLines ? legendLines * rowH + 10 * dpr : 0)
+                                  : (statsText ? 26 * dpr : 0);
+
+    const out = document.createElement('canvas');
+    out.width  = canvas.width;
+    out.height = canvas.height + headH + footH;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = bg || '#ffffff';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    // Header
+    ctx.fillStyle = fg;
+    ctx.font = `600 ${13 * dpr}px system-ui, sans-serif`;
+    ctx.fillText(_historyExportTitle(), padX, headH / 2);
+    // Chart
+    ctx.drawImage(canvas, 0, headH);
+    // Footer
+    const footTop = headH + canvas.height;
+    if (_historyCompare && legendLines) {
+        ctx.font = legendFont;
+        for (const it of placed) {
+            const y = footTop + 8 * dpr + it.line * rowH + rowH / 2;
+            ctx.fillStyle = it.color;
+            ctx.fillRect(it.x, y - sw / 2, sw, sw);
+            ctx.fillStyle = fg;
+            ctx.fillText(it.label, it.x + sw + swGap, y);
+        }
+    } else if (statsText) {
+        ctx.fillStyle = mut;
+        ctx.font = legendFont;
+        ctx.fillText(statsText, padX, footTop + footH / 2);
+    }
+    out.toBlob(b => { if (b) _historyDownload(b, _historyExportFilename('png')); }, 'image/png');
+}
+
+// CSV: single series → timestamp,value,status; compare → timestamp,series,value.
+function _historyExportCSV() {
+    const csvEsc = (v) => {
+        const s = String(v ?? '');
+        return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const iso = (ts) => new Date(ts * 1000).toISOString();
+    const rows = [];
+    if (_historyCompare) {
+        rows.push(['timestamp', 'series', _historyCompareField || 'value'].join(','));
+        for (const s of _historyCompareData) {
+            const name = `${s.pretty} / ${s.label}`;
+            for (const p of (s.points || [])) {
+                const v = p.data?.[_historyCompareField];
+                if (typeof v === 'number') rows.push([csvEsc(iso(p.ts)), csvEsc(name), v].join(','));
+            }
+        }
+    } else {
+        const field = _historyField;
+        rows.push(['timestamp', field || 'value', 'status'].join(','));
+        for (const p of _historyPoints) {
+            const v = field ? p.data?.[field] : null;
+            const st = p.status === true ? 'ok' : p.status === false ? 'error' : '';
+            rows.push([csvEsc(iso(p.ts)), (typeof v === 'number' ? v : ''), st].join(','));
+        }
+    }
+    if (rows.length <= 1) { showToast(t('history_no_data'), 'warning'); return; }
+    _historyDownload(new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' }),
+                     _historyExportFilename('csv'));
+}
+
+function _historyOnFieldChange(val) {
+    if (_historyCompare) {
+        // Switch the overlaid metric (points already carry every field → just redraw).
+        _historyCompareField = val || _historyCompareField;
+        _historySaveField(_historyCompareField);
+        const fm = _historyCompareFields[_historyCompareField] || {};
+        _historyCompareUnit  = fm.unit  || '';
+        _historyCompareLabel = fm.label || _historyCompareField || '';
+        _historyDrawMulti(document.getElementById('history-canvas'));
+        _historyRenderLegend();
+        return;
+    }
+    _historyField = val || null;
+    _historySaveField(_historyField);
+    _historyRenderChartArea();
+}
+
+// Persist the chosen metric field so it survives refresh and single↔compare
+// switches (validated against the module's available fields on restore).
+function _historySaveField(field) {
+    try { localStorage.setItem(_HLS_FIELD, field || ''); } catch (e) {}
+}
+
+// ── Compare mode (multi-series overlay) ────────────────────────────────────────
+// A series is comparable only when its module declares a numeric __history__
+// field; the overlay restricts members to the SAME field+unit so the Y axis is
+// meaningful (e.g. ping latency_ms across several hosts).
+function _historyMetricKey(s) {
+    const c = s?.history_cfg || {};
+    const numeric = (typeof c.field === 'string' && c.field)
+                    || (c.fields && Object.keys(c.fields).length > 0);
+    return numeric ? s.module : null;   // group comparable series by module
+}
+// Translated label for a history field (backend resolves it from module lang).
+function _historyFieldLabel(fields, field) {
+    if (!field) return '';
+    const f = fields || {};
+    return (f[field] && f[field].label) || field;
+}
+function _historyActiveMetricKey() {
+    if (!_historyCompareSel.length) return null;
+    const f = _historyCompareSel[0];
+    const s = _historyIndex.find(x => x.module === f.module && x.key === f.key);
+    return s ? _historyMetricKey(s) : null;
+}
+function _historySelToObj(s) {
+    return { module: s.module, key: s.key, uid: s.item_uid || null,
+             label: s.label || s.key, pretty: s.pretty_name || s.module };
+}

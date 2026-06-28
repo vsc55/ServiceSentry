@@ -1,0 +1,214 @@
+{% from "partials/modals/_macros.html" import uid_field with context %}
+{# New/Edit user modal #}
+<div class="modal fade" id="userModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'&&document.activeElement?.type!=='search'){event.preventDefault();document.getElementById('btnUserModalOk').click();}">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-person me-1"></i><span id="userModalTitle">{{ i18n.new_user }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-0">
+                <ul class="nav nav-tabs px-3 pt-2" id="userModalTabs">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#umTabGeneral" type="button">
+                            <i class="bi bi-info-circle me-1"></i>{{ i18n.tab_general }}
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#umTabRole" type="button">
+                            <i class="bi bi-shield me-1"></i>{{ i18n.role }}
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#umTabGroups" type="button">
+                            <i class="bi bi-collection me-1"></i>{{ i18n.col_groups }}
+                        </button>
+                    </li>
+                    <li class="nav-item" id="umTabPrefsLi" style="display:none">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#umTabPrefs" type="button">
+                            <i class="bi bi-eraser me-1"></i>{{ i18n.tab_customisations }}
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content px-3 py-3 gm-tab-content" id="userModalTabContent">
+                    <div class="tab-pane fade show active" id="umTabGeneral">
+                        <div class="row g-3 mb-2 flex-shrink-0">
+                            <div class="col-sm-6">
+                                <label class="form-label small fw-semibold">{{ i18n.username }}</label>
+                                <input type="text" class="form-control form-control-sm" id="umUsername" autocomplete="off"
+                                    oninput="this.classList.remove('is-invalid')">
+                                <div class="invalid-feedback" id="umUsernameError"></div>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label small fw-semibold">{{ i18n.display_name }}</label>
+                                <input type="text" class="form-control form-control-sm" id="umDisplayName">
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-2 flex-shrink-0">
+                            <div class="col-sm-4">
+                                <label class="form-label small fw-semibold">{{ i18n.language }}</label>
+                                <select class="form-select form-select-sm" id="umLang">
+                                    <option value="">{{ i18n.system_default }}</option>
+                                    {% for l in supported_langs %}
+                                    <option value="{{ l }}">{{ i18n['lang_' + l] }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-sm-4">
+                                <label class="form-label small fw-semibold">{{ i18n.dark_mode }}</label>
+                                <select class="form-select form-select-sm" id="umDarkMode">
+                                    <option value="">{{ i18n.settings_theme_auto }}</option>
+                                    <option value="light">{{ i18n.settings_theme_light }}</option>
+                                    <option value="dark">{{ i18n.settings_theme_dark }}</option>
+                                </select>
+                            </div>
+                            <div class="col-sm-4">
+                                <label class="form-label small fw-semibold">{{ i18n.email }}</label>
+                                <input type="email" class="form-control form-control-sm" id="umEmail" autocomplete="off">
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-2 flex-shrink-0" id="umPasswordGroup">
+                            <div class="col-sm-6">
+                                <label class="form-label small fw-semibold">{{ i18n.password }}</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="password" class="form-control form-control-sm" id="umPassword" autocomplete="new-password"
+                                        oninput="_updatePasswordStrength('umPassword','umPwStrengthBar','umPwStrengthLabel')">
+                                    <button class="btn btn-secondary" type="button" id="umPwToggleBtn"
+                                        title="{{ i18n.pw_show_hide }}"
+                                        onclick="_togglePwVisibility('umPassword','umPwToggleBtn')">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button class="btn btn-secondary" type="button" id="umGenPwBtn"
+                                        title="{{ i18n.pw_generate }}"
+                                        onclick="_fillGeneratedPassword('umPassword','umPwStrengthBar','umPwStrengthLabel');_syncPwToggleIcon('umPassword','umPwToggleBtn')">
+                                        <i class="bi bi-shuffle"></i>
+                                    </button>
+                                </div>
+                                <div class="progress mt-1" style="height:4px" id="umPwStrengthBar"><div class="progress-bar" role="progressbar"></div></div>
+                                <div class="text-muted small mt-1" id="umPwStrengthLabel" style="min-height:1.1em"></div>
+                            </div>
+                        </div>
+{{ uid_field('um') }}
+                        <div class="mb-2 flex-shrink-0" id="umEnabledGroup" style="display:none">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="umEnabled">
+                                <label class="form-check-label small fw-semibold" for="umEnabled">{{ i18n.user_enabled }}</label>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-column flex-grow-1" id="umSessionsGroup" style="display:none">
+                            <label class="form-label small fw-semibold flex-shrink-0">
+                                <i class="bi bi-plug me-1"></i>{{ i18n.active_sessions }}
+                                <span id="umSessionsCount" class="badge bg-secondary fw-normal ms-1"></span>
+                            </label>
+                            <div id="umSessionsTable" class="flex-grow-1"
+                                style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem"></div>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="umTabRole">
+                        <input type="search" class="form-control form-control-sm mb-2 flex-shrink-0" id="umRoleSearch"
+                            placeholder="{{ i18n.config_search }}">
+                        <div id="umRoleContainer" class="flex-grow-1"
+                            style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:6px 10px">
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="umTabGroups">
+                        <input type="search" class="form-control form-control-sm mb-2 flex-shrink-0" id="umGroupSearch"
+                            placeholder="{{ i18n.config_search }}">
+                        <div id="umGroupsContainer" class="flex-grow-1"
+                            style="overflow-y:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:6px 10px">
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="umTabPrefs">
+                        <p class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>{{ i18n.user_prefs_info }}</p>
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox" id="umClearAllTables" onchange="_umToggleAllTables(this.checked)">
+                            <label class="form-check-label small fw-semibold" for="umClearAllTables"><i class="bi bi-table me-1"></i>{{ i18n.user_clear_tables }}</label>
+                        </div>
+                        <div class="row g-1 mb-3 ms-4" id="umClearTablesGrid"></div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="umClearDashboard">
+                            <label class="form-check-label small fw-semibold" for="umClearDashboard"><i class="bi bi-grid-1x2 me-1"></i>{{ i18n.user_clear_dashboard }}</label>
+                        </div>
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox" id="umClearAllModals" onchange="_umToggleAllModals(this.checked)">
+                            <label class="form-check-label small fw-semibold" for="umClearAllModals"><i class="bi bi-window-stack me-1"></i>{{ i18n.user_clear_modals }}</label>
+                        </div>
+                        <div class="row g-1 ms-4" id="umClearModalsGrid"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnUserModalOk" title="{{ i18n.save }}">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Account settings modal #}
+<div class="modal fade" id="accountSettingsModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnAccountSettingsOk').click();}">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-person-gear me-1"></i>{{ i18n.account_settings }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small fw-semibold text-muted mb-2 mt-1">
+                    <i class="bi bi-palette me-1"></i>{{ i18n.settings_appearance }}
+                </p>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.language }}</label>
+                    <select class="form-select form-select-sm" id="settingsLang">
+                        <option value="">{{ i18n.system_default }}</option>
+                        {% for l in supported_langs %}
+                        <option value="{{ l }}">{{ i18n['lang_' + l] }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label small fw-semibold">{{ i18n.dark_mode }}</label>
+                    <select class="form-select form-select-sm" id="settingsDarkMode">
+                        <option value="auto">{{ i18n.settings_theme_auto }}</option>
+                        <option value="light">{{ i18n.settings_theme_light }}</option>
+                        <option value="dark">{{ i18n.settings_theme_dark }}</option>
+                    </select>
+                </div>
+                <hr class="my-3">
+                <p class="small fw-semibold text-muted mb-2">
+                    <i class="bi bi-shield-lock me-1"></i>{{ i18n.settings_security }}
+                </p>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.current_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="settingsPwCurrent" autocomplete="current-password">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="settingsPwNew" autocomplete="new-password"
+                        oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm');_updatePasswordStrength('settingsPwNew','settingsPwStrengthBar','settingsPwStrengthLabel')">
+                    <div class="progress mt-1" style="height:4px" id="settingsPwStrengthBar"><div class="progress-bar" role="progressbar"></div></div>
+                    <div class="text-muted small mt-1" id="settingsPwStrengthLabel" style="min-height:1.1em"></div>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
+                    <input type="password" class="form-control form-control-sm" id="settingsPwConfirm" autocomplete="new-password"
+                        oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm')">
+                    <div class="valid-feedback">{{ i18n.passwords_match }}</div>
+                    <div class="invalid-feedback">{{ i18n.passwords_dont_match }}</div>
+                </div>
+                <div class="form-text mb-1">{{ i18n.leave_empty_no_change }}</div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnAccountSettingsOk" onclick="saveAccountPreferences()" title="{{ i18n.save }}">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+

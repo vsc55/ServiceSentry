@@ -1,0 +1,182 @@
+document.getElementById('btnAddItemOk').addEventListener('click', confirmAddItem);
+document.getElementById('addItemModal').addEventListener('keydown', e => {
+if (e.key === 'Enter') { e.preventDefault(); confirmAddItem(); }
+});
+document.getElementById('btnConfirmDeleteItemOk').addEventListener('click', _doDeleteItem);
+document.getElementById('btnConfirmModalOk').addEventListener('click', () => {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).hide();
+    const cb = _confirmModalCallback;
+    _confirmModalCallback = null;
+    if (cb) cb();
+});
+document.getElementById('btnRenameItemOk').addEventListener('click', _doRenameItem);
+document.getElementById('renameItemInput').addEventListener('keydown', e => {
+if (e.key === 'Enter') { e.preventDefault(); _doRenameItem(); }
+});
+document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', async () => {
+    await renderStatus();   // wait for DOM so daemon widget exists before first poll
+    _daemonStartPoll();
+});
+document.getElementById('btn-tab-status').addEventListener('hide.bs.tab', _daemonStopPoll);
+let _accessPollTimer = null;
+document.getElementById('btn-tab-access')?.addEventListener('shown.bs.tab', () => {
+    refreshAccessData();
+    _accessPollTimer = setInterval(refreshAccessData, (configData?.web_admin?.access_poll_secs ?? 30) * 1000);
+});
+document.getElementById('btn-tab-access')?.addEventListener('hide.bs.tab', () => {
+    clearInterval(_accessPollTimer);
+    _accessPollTimer = null;
+});
+
+async function refreshAccessData() {
+const [u, s, ro, gr] = await Promise.all([apiGet('/api/v1/users'), apiGet('/api/v1/sessions'), apiGet('/api/v1/roles'), apiGet('/api/v1/groups')]);
+usersData = u || {};
+sessionsData = s || {};
+rolesData = ro || {};
+groupsData = gr || {};
+renderSessions();
+renderUsers();
+renderRoles();
+renderGroups();
+}
+document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
+document.getElementById('btn-tab-history')?.addEventListener('shown.bs.tab', renderHistory);
+document.getElementById('btn-tab-syslog')?.addEventListener('shown.bs.tab', renderSyslog);
+document.getElementById('btn-tab-services')?.addEventListener('shown.bs.tab', renderServices);
+document.getElementById('btn-tab-events')?.addEventListener('shown.bs.tab', renderEvents);
+// Re-fetch host status every time the Servers tab is shown, so the Status column
+// reflects a "Run all" or a status "clean" done from the Status tab (both leave
+// hostsData stale until reloaded).
+document.getElementById('btn-tab-servers')?.addEventListener('shown.bs.tab', () => {
+    reloadHosts();
+    // Refresh the Clusters sub-tab too when it is the active pane (Bootstrap does
+    // not re-fire the sub-tab's shown event when only the parent tab changes).
+    if (document.getElementById('subtab-srv-clusters')?.classList.contains('active')
+        && typeof renderClusters === 'function') renderClusters();
+});
+// Infrastructure sub-tabs: render Clusters on demand; persist the active sub-tab.
+document.getElementById('btn-subtab-srv-clusters')?.addEventListener('shown.bs.tab', () => {
+    localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-clusters');
+    renderClusters();
+});
+document.getElementById('btn-subtab-srv-hosts')?.addEventListener('shown.bs.tab', () => {
+    localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-hosts');
+});
+document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
+document.getElementById('btnResetPasswordOk').addEventListener('click', resetUserPassword);
+document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
+document.getElementById('btnGroupModalOk').addEventListener('click', saveGroupModal);
+
+document.getElementById('btn-tab-overview')?.addEventListener('shown.bs.tab', renderOverview);
+document.getElementById('btn-subtab-credentials')?.addEventListener('shown.bs.tab', renderCredentials);
+document.getElementById('mainTabs')?.addEventListener('shown.bs.tab', e => {
+    localStorage.setItem('ss_active_tab', e.target.dataset.bsTarget);
+});
+// Clear auto-update field indicators when navigating away from the config tab.
+document.getElementById('btn-tab-config')?.addEventListener('hide.bs.tab', () => {
+    _autoupdatedFields.clear();
+    document.querySelectorAll('.cfg-field-wrap.cfg-auto-updated').forEach(el => {
+        el.classList.remove('cfg-auto-updated');
+        el.querySelector('.cfg-auto-update-bar')?.remove();
+    });
+});
+// Warn when leaving a tab that has unsaved changes
+document.getElementById('mainTabs')?.addEventListener('hide.bs.tab', e => {
+    const leaving = e.target?.dataset?.bsTarget;
+    const dirtyTarget = (leaving === '#tab-modules' && _isDirty('modules')) ? 'modules'
+                      : (leaving === '#tab-config'  && _isDirty('config'))  ? 'config'
+                      : null;
+    if (!dirtyTarget) return;
+    e.preventDefault();
+    showUnsavedChangesModal(dirtyTarget, e.relatedTarget);
+});
+// Warn on page close / refresh if there are unsaved changes — unless the user (or
+// the restart/reload banner) asked for an explicit reload via forcePageReload().
+window.addEventListener('beforeunload', e => {
+    if (window._forcePageReload) return;
+    if (_isDirty('modules') || _isDirty('config')) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
+// Persist the active Access sub-tab across reloads
+['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-credentials'].forEach(id => {
+    document.getElementById(id)?.addEventListener('shown.bs.tab', e => {
+        localStorage.setItem('ss_active_subtab_access', e.target.dataset.bsTarget);
+    });
+});
+
+(async function init() {
+try {
+    currentUser = await apiGet('/api/v1/me') || {};
+    _applyUserTableConfig(currentUser.table_config || {});
+    _applyUserModalConfig(currentUser.modal_config || {});
+    rolesData = await apiGet('/api/v1/roles') || {};
+    groupsData = await apiGet('/api/v1/groups') || {};
+    modulesData = await apiGet('/api/v1/modules') || {};
+    applyModuleDefaults();
+    _savedModulesData = deepClone(modulesData);
+    clearDirty('modules'); // applyModuleDefaults may call markDirty for migrations; reset here
+    if ((currentUser.permissions || []).some(p =>
+        p === 'servers_view' || p === 'servers_edit' || p === 'servers_delete' || p.startsWith('server.'))) {
+        await loadHosts();
+    }
+    // Org-wide default dashboard layout (for users who haven't customised theirs).
+    if ((currentUser.permissions || []).includes('overview_view')) {
+        _dwGlobalDefault = await apiGet('/api/v1/overview/default-layout') || [];
+    }
+    // Credentials are needed both for their own tab and for the host SSH picker,
+    // so load them for credential managers AND server editors.
+    if ((currentUser.permissions || []).some(p =>
+        p.startsWith('credentials_') || p === 'servers_view' || p === 'servers_edit'
+        || p === 'servers_delete' || p.startsWith('server.')
+        || p === 'modules_view' || p === 'modules_edit' || p.startsWith('module.'))) {
+        await loadCredentials();
+    }
+    configData = await loadConfig() || {};
+    _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
+    const _rawPS = configData?.web_admin?.page_sizes;
+    if (Array.isArray(_rawPS) && _rawPS.length > 0) {
+        const _parsedPS = _rawPS.map(s => parseInt(s, 10)).filter(s => !isNaN(s) && s >= 0);
+        if (_parsedPS.length > 0) _PAGE_SIZES = _parsedPS;
+    }
+    configSchema = await apiGet('/api/v1/config/schema') || {};
+    // Backfill CONFIG_FIELD_DEFAULTS with server defaults from schema
+    for (const [k, v] of Object.entries(configSchema)) {
+        if (!(k in CONFIG_FIELD_DEFAULTS) && v.default !== undefined) {
+            CONFIG_FIELD_DEFAULTS[k] = v.default;
+        }
+    }
+    // Sync default_page_size options to reflect current page_sizes config
+    if (configSchema['web_admin|default_page_size']) {
+        configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
+    }
+    _serverConfigData = deepClone(configData);
+    clearDirty('config'); // ensure config starts clean regardless of loadConfig side-effects
+    if (currentUser.restart_pending) _showRestartBanner();
+    _startVersionPoll();
+    renderModules();
+    renderConfig();
+    renderServers();
+    applyRoleRestrictions();
+    const _savedTab = localStorage.getItem('ss_active_tab');
+    if (_savedTab) {
+        const _tabBtn = document.querySelector(`[data-bs-target="${_savedTab}"]`);
+        if (_tabBtn && _tabBtn.closest('li')?.style.display !== 'none') {
+            bootstrap.Tab.getOrCreateInstance(_tabBtn).show();
+        }
+    }
+    renderOverview();
+    // Keep --ss-top-offset in sync with the sticky header height (navbar + visible banners)
+    const _stickyTop = document.getElementById('ss-sticky-top');
+    if (_stickyTop) {
+        _updateStickyOffset();
+        new ResizeObserver(_updateStickyOffset).observe(_stickyTop);
+    }
+} catch (e) {
+    console.error('Init error:', e);
+} finally {
+    const loading = document.getElementById('loading');
+    if (loading) loading.remove();
+}
+})();

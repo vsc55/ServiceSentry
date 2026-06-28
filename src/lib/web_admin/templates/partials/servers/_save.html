@@ -1,0 +1,612 @@
+function _buildHostChecks(uid) {
+    const out = {};
+    const _defaults = (fieldsMeta) => {
+        const f = {};
+        for (const fm of fieldsMeta) f[fm.name] = (fm.default !== undefined ? fm.default : '');
+        return f;
+    };
+    // Host-bindable = every module that declares a __host_profile__ (exposed via
+    // MODULE_HOST_MULTIPLE, which lists them all).  Not MODULE_HOST_FIELDS: a
+    // module may bind to a host yet hide NO fields (e.g. web, whose 'server' stays
+    // visible so a reverse proxy can carry several FQDNs).
+    for (const mod of Object.keys(MODULE_HOST_MULTIPLE)) {
+        // Multi-bind modules (e.g. proxmox cluster) are configured as a single
+        // multi-host check in Modules, not per-host — skip them here so enabling
+        // them on each node doesn't create duplicate cluster checks.
+        if (MODULE_HOST_MULTI_BIND[mod]) continue;
+        const coll = _hostConnCollection(mod);
+        const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
+        const mirrorField = sch['__key_mirrors_field__'];   // e.g. service_status → 'service'
+        const fieldsMeta = _hostCheckFields(mod, coll);
+        const multiple = !!MODULE_HOST_MULTIPLE[mod];
+        const items = [];
+        if (uid) {
+            for (const mk of [mod, 'watchfuls.' + mod]) {
+                const c = modulesData[mk] && modulesData[mk][coll];
+                if (!c || typeof c !== 'object') continue;
+                for (const [k, v] of Object.entries(c)) {
+                    if (!v || typeof v !== 'object' || v.host_uid !== uid) continue;
+                    const fields = _defaults(fieldsMeta);
+                    for (const fm of fieldsMeta) if (fm.name in v) fields[fm.name] = v[fm.name];
+                    // When the key mirrors a field (the value lives in the key,
+                    // e.g. the service name), surface it so the field/title shows it.
+                    if (mirrorField && mirrorField in fields && !String(fields[mirrorField] || '').trim())
+                        fields[mirrorField] = k;
+                    items.push({ _key: k, enabled: v.enabled !== false, fields,
+                                 cred_uid: v.cred_uid || '' });
+                }
+            }
+        }
+        // Single-check modules always render one slot (placeholder if none yet).
+        if (!multiple && !items.length) {
+            items.push({ _key: null, enabled: false, fields: _defaults(fieldsMeta) });
+        }
+        out[mod] = { collection: coll, fieldsMeta, items, multiple,
+                     _existingKeys: items.map(it => it._key).filter(Boolean) };
+    }
+    return out;
+}
+
+// The collection that holds a module's connection items (snmp 'servers', else 'list').
+function _hostConnCollection(mod) {
+    const fields = MODULE_HOST_FIELDS[mod] || [];
+    for (const key of Object.keys(ITEM_SCHEMAS)) {
+        if (!key.startsWith(mod + '|')) continue;
+        const coll = key.slice(mod.length + 1);
+        if (coll.includes('|') || coll.startsWith('__')) continue;
+        const sch = ITEM_SCHEMAS[key];
+        if (sch && fields.some(f => f in sch)) return coll;
+    }
+    return 'list';
+}
+
+// Editable check fields of a module: scalar item fields minus the host-owned
+// connection fields, minus 'enabled' (the master toggle) and sub-collections.
+function _hostCheckFields(mod, coll) {
+    const sch = ITEM_SCHEMAS[mod + '|' + coll] || {};
+    const hostF = new Set(MODULE_HOST_FIELDS[mod] || []);
+    const out = [];
+    const order = sch['__field_order__'] || Object.keys(sch);
+    for (const k of order) {
+        if (k.startsWith('__') || hostF.has(k) || k === 'enabled' || k === 'host_uid') continue;
+        const meta = sch[k];
+        if (!meta || typeof meta !== 'object' || !('type' in meta)) continue;
+        if (meta.type === 'sub_collection') continue;   // e.g. snmp OID checks
+        out.push({ name: k, ...meta });
+    }
+    return out;
+}
+
+// Render the editable fields of one protocol profile (skips the address_field).
+function _renderProfileFields(proto, spec) {
+    const prof = (_hostDraft.profiles && _hostDraft.profiles[proto]) || {};
+    // Effective values (stored ?? schema default) so show_when and selects
+    // evaluate correctly before the user has touched the profile.
+    const eff = {};
+    for (const f of (spec.fields || [])) {
+        eff[f.name] = (prof[f.name] !== undefined && prof[f.name] !== null)
+            ? prof[f.name] : f.default;
+    }
+    const ctx = { mod: spec.module, fields: eff };
+    let h = '';
+    for (const f of (spec.fields || [])) {
+        if (f.name === spec.address_field) continue;   // comes from host.address
+        h += _hostFieldRow(f, prof[f.name] !== undefined ? prof[f.name] : f.default,
+                           `_setProfileField(${jsStr(proto)},${jsStr(f.name)},`, ctx);
+    }
+    return h || `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
+}
+
+// Module-level default for a field referenced by placeholder_module (e.g. the
+// ping module's default timeout), falling back to the schema default.
+function _hostModuleDefault(mod, key) {
+    const mk = (modulesData[mod] !== undefined) ? mod
+             : (modulesData['watchfuls.' + mod] !== undefined ? 'watchfuls.' + mod : mod);
+    const v = (modulesData[mk] || {})[key];
+    if (v != null) return v;
+    const sd = schemaDefaults(moduleSchema(mk)) || {};
+    return sd[key];
+}
+
+// Shared field-control renderer for both credential profiles and check fields.
+// Delegates the control markup to fieldCtl() (core/_field_render.html) so the
+// host modal renders identically to the Modules tab — numbers show the default
+// as placeholder (blank when 0/unset), secrets mask, multi fields use chips.
+// Only the data wiring (onch / _setHostCheckField) is host-specific.
+function _hostFieldControl(f, val, onch, ctx) {
+    if (f.type === 'bool') {
+        return fieldCtl({kind: 'switch', value: val, onChange: `${onch}this.checked)`});
+    }
+    if (Array.isArray(f.options) && f.options.length) {
+        const _optLabel = o => {
+            const oi = f.options_i18n && f.options_i18n[o];
+            return (oi && (oi[CURRENT_LANG] || oi[SYSTEM_DEFAULT_LANG])) || o;
+        };
+        const opts = f.options.map(o =>
+            `<option value="${escAttr(o)}" ${String(val) === String(o) ? 'selected' : ''}>${esc(_optLabel(o))}</option>`).join('');
+        return fieldCtl({kind: 'select', optionsHtml: opts, onChange: `${onch}this.value)`});
+    }
+    if (f.type === 'textarea') {
+        // Large multi-line field (e.g. an inline SSH private key).  When the
+        // field is a secret already stored, val is null → show the masked
+        // placeholder and leave the box empty (typing replaces it).
+        const rows   = f.rows || 4;
+        const masked = (f.secret || f.sensitive) && val === null;
+        const ph     = masked ? (t('secret_defined') || '••••••') : (f.placeholder != null ? String(f.placeholder) : '');
+        return fieldCtl({kind: 'textarea', rows, placeholder: ph,
+            textareaVal: (masked || val == null) ? '' : esc(val), onChange: `${onch}this.value)`});
+    }
+    if (f.type === 'int' || f.type === 'float') {
+        const step = f.type === 'float' ? ' step="0.1"' : ' step="1"';
+        const minA = f.min != null ? ` min="${f.min}"` : '';
+        const maxA = f.max != null ? ` max="${f.max}"` : '';
+        let ph = null, display = (val == null) ? '' : val;
+        if (f.placeholder_map && ctx) {
+            // Keyed by the sibling field the schema declares (placeholder_map_field).
+            const keyField = f.placeholder_map_field || '';
+            const sib = keyField ? ((ctx.fields && ctx.fields[keyField]) || '') : '';
+            if (f.placeholder_map[sib] != null) ph = f.placeholder_map[sib];
+        } else if (f.placeholder != null) {
+            ph = f.placeholder;
+        } else if (f.placeholder_module != null && ctx) {
+            ph = _hostModuleDefault(ctx.mod, f.placeholder_module);
+        } else if (f.default != null && f.default !== 0) {
+            ph = f.default;   // generic: show the schema default
+        }
+        // "use default" semantics: a 0/unset value renders blank with the placeholder.
+        if (ph != null && (val === 0 || val == null || val === '')) display = '';
+        const phA = (ph != null && ph !== 0) ? ` placeholder="${escAttr(String(ph))}"` : '';
+        return fieldCtl({kind: 'number',
+            inputAttrs: `${minA}${maxA}${step}${phA} value="${display === '' ? '' : escAttr(display)}"`,
+            onChange: `${onch}this.value===''?'':Number(this.value))`});
+    }
+    if (f.secret || f.sensitive) {
+        return fieldCtl({kind: 'secret',
+            inputAttrs: ` autocomplete="new-password" placeholder="${val === null ? escAttr(t('secret_defined') || '••••••') : ''}"`,
+            onChange: `${onch}this.value)`});
+    }
+    // Placeholder: the 'label' field (or a schema placeholder of '__key__')
+    // shows the check's identifier as its default — same as the Modules section.
+    let _ph = '';
+    const _itemKey = (ctx && ctx.itemKey) || '';
+    if ((f.name === 'label' || f.placeholder === '__key__') && _itemKey) {
+        _ph = _itemKey;
+    } else if (f.placeholder === '__address__') {
+        _ph = (_hostDraft && _hostDraft.address) || '';   // blank server_name → host address
+    } else if (f.placeholder_module != null && ctx) {
+        // Module-level default shown as placeholder (e.g. dns nameserver), falling
+        // back to the field's static placeholder when the global is empty.
+        const _mp = _hostModuleDefault(ctx.mod, f.placeholder_module);
+        _ph = (_mp != null && _mp !== '') ? String(_mp)
+            : (f.placeholder != null && f.placeholder !== '__key__' ? String(f.placeholder) : '');
+    } else if (f.placeholder != null && f.placeholder !== '__key__') {
+        _ph = String(f.placeholder);
+    }
+    const phStr = _ph ? ` placeholder="${escAttr(_ph)}"` : '';
+    const _textAttrs = ` value="${val == null ? '' : escAttr(val)}"${phStr}`;
+    // input_action: a per-field action button (e.g. datastore's "List databases"),
+    // same as the Modules tab.  Only inside a check (ctx.idx) — not host profiles.
+    const _ia = f.input_action;
+    if (_ia && ctx && ctx.idx != null) {
+        const _t = _fieldTerm(ctx.mod, f, ctx.fields);
+        const _al = escAttr((_t && _t.action) || _hostActionLabel(ctx.mod, _ia.id));
+        const _btn = `<button class="btn btn-secondary" type="button" title="${_al}"
+                onclick="_runHostFieldAction(${jsStr(ctx.mod)},${ctx.idx},${jsStr(f.name)},this)">
+                <i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button>`;
+        // Multi value (several databases) → shared removable-chips widget, bound to
+        // this check's data via a field adapter keyed "mod|idx|field".
+        if (_ia.result_multi) {
+            const _key = ctx.mod + '|' + ctx.idx + '|' + f.name;
+            registerFieldAdapter(_key,
+                () => { const it = _hostChecks[ctx.mod] && _hostChecks[ctx.mod].items[ctx.idx];
+                        return it ? it.fields[f.name] : ''; },
+                v => _setHostCheckField(ctx.mod, ctx.idx, f.name, v));
+            return fieldCtl({kind: 'multi', key: _key, value: val, trailing: _btn});
+        }
+        return fieldCtl({kind: 'text', inputAttrs: _textAttrs, onChange: `${onch}this.value)`, trailing: _btn});
+    }
+    return fieldCtl({kind: 'text', inputAttrs: _textAttrs, onChange: `${onch}this.value)`});
+}
+
+// Action label from the module's i18n (action_labels), like the Modules tab.
+function _hostActionLabel(mod, id) {
+    const i18n = ITEM_SCHEMAS[mod + '|__i18n__'];
+    const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
+    return (ld && ld.action_labels && ld.action_labels[id]) || t(id) || id;
+}
+
+// Run a per-field action (input_action) for a host-bound check: POST the check's
+// fields + host binding (so the server resolves the host's address/SSH) and, for
+// a field_picker result, write the chosen value back into the check.
+async function _runHostFieldAction(mod, idx, fieldName, btn) {
+    const st = _hostChecks[mod];
+    const it = st && st.items[idx];
+    if (!it) return;
+    const meta = (st.fieldsMeta || []).find(f => f.name === fieldName);
+    const ia = meta && meta.input_action;
+    if (!ia) return;
+    // _item_key lets the server restore this check's masked secrets (e.g. the DB
+    // password) from the stored config, so the action authenticates after reload.
+    const payload = { ...it.fields, ...(ia.extra || {}), cred_uid: it.cred_uid || '',
+                      _item_key: it._key || '', ..._hostDraftPayload() };
+    // Spinner on the button (no "Testing…" toast — this isn't a test, e.g. it
+    // just lists databases), mirroring the Modules tab's itemAction().
+    const _orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>'; }
+    const res = await apiPost('/api/v1/watchfuls/' + mod + '/' + ia.id, payload);
+    if (btn) { btn.disabled = false; btn.innerHTML = _orig; }
+    const d = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || t('connection_error'), 'danger'); return; }
+    if (ia.result === 'field_picker') {
+        const items = (d.items || []).map(String);
+        if (!items.length) { showToast(t('no_items') || 'No items', 'secondary'); return; }
+        const field = ia.result_field || fieldName;
+        const _t = _fieldTerm(mod, meta, it.fields);
+        const _title = (_t && _t.pick) || _hostActionLabel(mod, ia.id);
+        openFieldPickerModal(null, items, _title, (value) => {
+            it.fields[field] = value;
+            // Re-render only this card's fields so it stays expanded.
+            if (st.multiple) _refreshHostCheckItemFields(mod, idx); else _refreshSingleCheck(mod);
+        }, it.fields[field], !!ia.result_multi);   // current value + multi-select mode
+    } else {
+        showToast(d.message || 'OK', 'success');
+    }
+}
+
+function _profileFieldLabel(f) {
+    const li = f.label_i18n;
+    if (li && (li[CURRENT_LANG] || li[SYSTEM_DEFAULT_LANG])) {
+        return li[CURRENT_LANG] || li[SYSTEM_DEFAULT_LANG];
+    }
+    return f.name;
+}
+
+function _setProfileField(proto, field, value) {
+    if (!_hostDraft.profiles) _hostDraft.profiles = {};
+    if (!_hostDraft.profiles[proto]) _hostDraft.profiles[proto] = {};
+    _hostDraft.profiles[proto][field] = value;
+    // Picking a credential clears the inline SSH identity so stale values don't
+    // linger in the draft and reappear if the credential is later cleared.
+    if (proto === 'ssh' && field === 'cred_uid' && value) {
+        _SSH_IDENTITY_FIELDS.forEach(f => delete _hostDraft.profiles.ssh[f]);
+    }
+    // Re-render the profile's fields when a controller changed (e.g. SNMP
+    // version=3 reveals the v3 credential fields; SSH key-source toggles the
+    // file/text field).
+    const spec = HOST_PROFILES[proto];
+    // cred_uid isn't a schema controller, but toggling it shows/hides the SSH
+    // identity fields, so re-render the SSH section too.
+    const credToggle = (proto === 'ssh' && field === 'cred_uid');
+    if (spec && (credToggle || _hostFieldControls(spec.fields, field))) {
+        if (proto === 'ssh') {
+            const el = document.getElementById('hmSshFields');
+            if (el) { el.innerHTML = _renderSshFields(); initTooltips(el); }
+        } else {
+            const el = document.getElementById('hmProfFields_' + proto.replace(/\W/g, '_'));
+            if (el) { el.innerHTML = _renderProfileFields(proto, spec); initTooltips(el); }
+        }
+    }
+}
+
+async function saveHostModal(closeAfter = true) {
+    const errEl = document.getElementById('hostModalError');
+    if (errEl) errEl.textContent = '';
+    const d = _hostDraft;
+    if (!d || !String(d.name || '').trim()) {
+        if (errEl) errEl.textContent = t('host_name_required');
+        return;
+    }
+    // Drop empty profiles (no field set) so we don't persist blank protocol blocks.
+    const profiles = {};
+    for (const [proto, fields] of Object.entries(d.profiles || {})) {
+        const kept = {};
+        for (const [k, v] of Object.entries(fields || {})) {
+            if (v !== null && v !== '' && v !== undefined) kept[k] = v;
+            else if (v === null) kept[k] = null;   // keep masked-secret marker
+        }
+        if (Object.keys(kept).length) profiles[proto] = kept;
+    }
+    // A local host keeps no SSH connection (it is reached directly).
+    if (d.kind !== 'remote') delete profiles.ssh;
+    // Honour the auth-method selector: drop the credentials of the other two
+    // methods so a stale value (incl. a masked-secret marker that would be
+    // restored server-side) can't win over the chosen one.
+    if (profiles.ssh) {
+        if (profiles.ssh.cred_uid) {
+            // A reusable credential supplies the identity — clear any previously
+            // stored inline user/auth/secret so they don't linger on the host.
+            _SSH_IDENTITY_FIELDS.forEach(f => delete profiles.ssh[f]);
+        } else {
+            // Honour the auth-method selector: drop the credentials of the other
+            // two methods so a stale value (incl. a masked-secret marker that
+            // would be restored server-side) can't win over the chosen one.
+            const m = (d.profiles.ssh || {}).ssh_auth_method || 'password';
+            if (m !== 'password') delete profiles.ssh.ssh_password;
+            if (m !== 'file')     delete profiles.ssh.ssh_key;
+            if (m !== 'text')     delete profiles.ssh.ssh_key_string;
+        }
+    }
+    const body = { name: d.name.trim(), address: d.address || '',
+                   kind: d.kind === 'remote' ? 'remote' : 'local',
+                   os: d.os || 'auto',
+                   maintenance: !!d.maintenance,
+                   tags: d.tags || [], description: d.description || '', profiles,
+                   // Persist which modules this server monitors (so a module
+                   // added without checks yet survives a reopen).
+                   modules: [..._hostShownMods] };
+
+    const wasNew = !_editingHostUid;
+    let ok = false, errMsg = '', uid = _editingHostUid;
+    if (_editingHostUid) {
+        const res = await apiPut('/api/v1/hosts/' + encodeURIComponent(_editingHostUid), body);
+        ok = !!(res && res.ok); errMsg = res && res.error;
+    } else {
+        const res = await apiPost('/api/v1/hosts', body);
+        ok = !!(res && res.status === 200 && res.data && res.data.ok);
+        errMsg = res && res.data && res.data.error;
+        uid = ok && res.data.uid;
+    }
+    if (!ok) {
+        if (errEl) errEl.textContent = errMsg || (t('error') || 'Error');
+        return;
+    }
+    // A freshly created host becomes the one being edited, so a follow-up Save
+    // updates it instead of creating a duplicate.
+    if (wasNew && uid) _editingHostUid = uid;
+
+    // Persist the monitoring choices (which modules check this host + settings).
+    const modsChanged = _applyHostChecks(uid);
+    if (modsChanged) {
+        const r = await apiPut('/api/v1/modules', modulesData);
+        if (!(r && r.ok)) {
+            // Host saved, but the checks couldn't be persisted.
+            if (errEl) errEl.textContent = (r && r.error) || (t('error') || 'Error');
+            await reloadHosts();
+            return;
+        }
+        _savedModulesData = deepClone(modulesData);
+        clearDirty('modules');
+        renderModules();
+    }
+
+    _snapshotHost();   // new baseline for Undo
+    showToast(t(wasNew ? 'host_created' : 'host_updated'));
+    await reloadHosts();
+    if (closeAfter) {
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('hostModal')).hide();
+    }
+}
+
+// Snapshot the current draft/checks/shown-modules so "Undo" can restore them.
+function _snapshotHost() {
+    _hostSnapshot = {
+        draft: deepClone(_hostDraft),
+        checks: deepClone(_hostChecks),
+        shown: [..._hostShownMods],
+    };
+}
+
+// Undo: discard edits made since the modal was opened (or the last save).
+function _undoHostModal() {
+    if (!_hostSnapshot) return;
+    _hostDraft = deepClone(_hostSnapshot.draft);
+    _hostChecks = deepClone(_hostSnapshot.checks);
+    _hostShownMods = new Set(_hostSnapshot.shown);
+    _renderHostModalBody();
+}
+
+// Apply the host's monitoring lists to modulesData (in place): create/update the
+// current checks bound to this host and delete the ones the user removed.
+// Returns true if anything changed.
+function _applyHostChecks(uid) {
+    let changed = false;
+    for (const [mod, st] of Object.entries(_hostChecks)) {
+        if (!st.items.length && !st._existingKeys.length) continue;
+        const coll = st.collection;
+        const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
+        // A key that identifies the check: the field the key mirrors, else the
+        // discovered operative field (e.g. the service unit name) — not the host name.
+        const keyField = sch['__key_mirrors_field__'] || sch['__discovery_field__'];
+        const uidKey = !!sch['__discovery_uid_key__'];   // key is an opaque UUID
+        const labelField = sch['__check_title_field__'];
+        const labelTpl = sch['__discovery_label_template__'];
+        const mk = (modulesData[mod] !== undefined) ? mod
+                 : (modulesData['watchfuls.' + mod] !== undefined ? 'watchfuls.' + mod : mod);
+        modulesData[mk] = modulesData[mk] || {};
+        modulesData[mk][coll] = modulesData[mk][coll] || {};
+        const col = modulesData[mk][coll];
+        const keptKeys = new Set();
+        for (const it of st.items) {
+            // A brand-new check left disabled is not created (e.g. an untouched
+            // single-check placeholder).
+            if (!it._key && !it.enabled) continue;
+            // Fill an empty label from the schema template (e.g. a manually added
+            // check) so the row/notification never falls back to the opaque key.
+            if (labelField && labelTpl && labelField in it.fields
+                    && !String(it.fields[labelField] || '').trim()) {
+                const svcVal = keyField ? String(it.fields[keyField] || '').trim() : '';
+                const lbl = _discoveryLabel(sch, _hostDraft.name || '', svcVal, '', '', it.fields);
+                if (lbl) it.fields[labelField] = lbl;
+            }
+            let key = it._key;
+            if (!key) {
+                // An opaque UUID when the schema asks for it; otherwise base the key
+                // on the check's identifying field (service name) — not the host name.
+                const idVal = keyField && String(it.fields[keyField] || '').trim();
+                key = uidKey ? _genUuid() : _uniqueItemKey(col, idVal || _hostDraft.name || uid);
+                col[key] = {};
+                it._key = key;
+            }
+            keptKeys.add(key);
+            const item = (col[key] && typeof col[key] === 'object') ? col[key] : (col[key] = {});
+            item.host_uid = uid;
+            item.enabled = !!it.enabled;
+            // Referenced credential (e.g. web_auth); the server strips the inline
+            // credential fields for items that carry a cred_uid.
+            if (it.cred_uid) item.cred_uid = it.cred_uid; else delete item.cred_uid;
+            // Sensitive fields: a null value means "a secret is stored, unchanged"
+            // — keep it as null (not deleted) so the field keeps showing
+            // "Defined — leave blank to keep" on reopen, and the server restores
+            // the stored secret on save (restore_sensitive). Deleting it would
+            // both blank the field and risk dropping the stored secret.
+            const _secret = new Set((st.fieldsMeta || [])
+                .filter(fm => fm.secret || fm.sensitive).map(fm => fm.name));
+            for (const [f, v] of Object.entries(it.fields)) {
+                if (v === null && _secret.has(f)) item[f] = null;
+                else if (v === '' || v === null || v === undefined) delete item[f];
+                else item[f] = v;
+            }
+            changed = true;
+        }
+        // Delete checks that were bound to this host but the user removed.
+        for (const oldKey of st._existingKeys) {
+            if (!keptKeys.has(oldKey) && oldKey in col) {
+                delete col[oldKey];
+                changed = true;
+            }
+        }
+        st._existingKeys = Array.from(keptKeys);
+    }
+    return changed;
+}
+
+function _uniqueItemKey(collection, base) {
+    let key = String(base || 'check').trim() || 'check';
+    if (!(key in collection)) return key;
+    for (let i = 2; i < 999; i++) {
+        if (!((key + '-' + i) in collection)) return key + '-' + i;
+    }
+    return key + '-' + Date.now();
+}
+
+// How many module checks are bound to this host (host_uid, or a member of a
+// multi-host host_uids) — drives the "also delete its checks?" prompt.
+function _hostBoundCheckCount(uid) {
+    let n = 0;
+    for (const [mk, mc] of Object.entries(modulesData || {})) {
+        if (!mc || typeof mc !== 'object' || mk.startsWith('__')) continue;
+        for (const [coll, items] of Object.entries(mc)) {
+            if (coll.startsWith('__') || !items || typeof items !== 'object') continue;
+            for (const v of Object.values(items)) {
+                if (!v || typeof v !== 'object') continue;
+                if (String(v.host_uid || '') === String(uid)) { n++; continue; }
+                if (Array.isArray(v.host_uids) && v.host_uids.map(String).includes(String(uid))) n++;
+            }
+        }
+    }
+    return n;
+}
+
+function deleteHost(uid) {
+    const host = hostsData[uid];
+    if (!host) return;
+    const n = _hostBoundCheckCount(uid);
+    const baseMsg = t('host_delete_confirm').replace('{name}', host.name || uid);
+    showConfirmModal(baseMsg, async () => {
+        const withChecks = n > 0 && document.getElementById('delHostWithChecks')?.checked;
+        const res = await apiDelete('/api/v1/hosts/' + encodeURIComponent(uid) + (withChecks ? '?with_checks=1' : ''));
+        if (res && res.status === 200) {
+            showToast(t('host_deleted'));
+            // If checks were deleted/unbound server-side, refresh the modules
+            // config AND re-render the Modules tab (it only renders on load, so the
+            // stale view would otherwise re-create them on the next "Save Modules").
+            if (res.data && res.data.checks_deleted) {
+                modulesData = await apiGet('/api/v1/modules') || modulesData;
+                if (typeof renderModules === 'function') renderModules();
+            }
+            await reloadHosts();
+        } else {
+            showToast((res && res.data && res.data.error) || (t('error') || 'Error'), 'danger');
+        }
+    });
+    // When the host has bound checks, offer to delete them too (opt-in checkbox
+    // injected into the confirm body, which showConfirmModal set as plain text).
+    if (n > 0) {
+        const msgEl = document.getElementById('confirmModalMsg');
+        if (msgEl) msgEl.innerHTML = `${esc(baseMsg)}
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="delHostWithChecks" checked>
+                <label class="form-check-label small" for="delHostWithChecks">${esc(tf('host_delete_with_checks', n))}</label>
+            </div>`;
+    }
+}
+
+// ──────────────────────────── Assisted migration ───────────────────
+let _migrateCandidates = [];   // last preview proposal
+
+async function openMigrateModal() {
+    const body = document.getElementById('hostMigrateBody');
+    const info = document.getElementById('hostMigrateInfo');
+    body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    if (info) info.textContent = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('hostMigrateModal')).show();
+
+    const plan = await apiGet('/api/v1/hosts/migrate/preview');
+    _migrateCandidates = (plan && plan.candidates) || [];
+    if (!_migrateCandidates.length) {
+        body.innerHTML = `<div class="text-center text-muted py-4 small">
+            <i class="bi bi-check2-circle me-1"></i>${esc(t('host_migrate_none'))}</div>`;
+        return;
+    }
+    const dups = _migrateCandidates.filter(c => c.is_duplicate).length;
+    let h = `<div class="small text-muted mb-2">${esc(t('host_migrate_hint'))}</div>
+        <table class="table table-sm align-middle"><thead><tr>
+            <th style="width:2rem"></th>
+            <th>${esc(t('host_name'))}</th>
+            <th>${esc(t('col_host_address'))}</th>
+            <th>${esc(t('col_host_profiles'))}</th>
+            <th>${esc(t('host_migrate_members'))}</th>
+        </tr></thead><tbody>`;
+    _migrateCandidates.forEach((c, i) => {
+        // Default-check the real duplicates (the dedup wins).
+        const chk = c.is_duplicate ? 'checked' : '';
+        const mem = c.members.map(m =>
+            `<span class="badge bg-light text-dark border me-1">${esc(m.module.split('.').pop())}/${esc(m.key)}</span>`).join('');
+        const protos = (c.protocols || []).map(p =>
+            `<span class="badge bg-info text-dark me-1">${esc(p)}</span>`).join('') || '<span class="text-muted">—</span>';
+        h += `<tr>
+            <td><input type="checkbox" class="form-check-input" data-mig-idx="${i}" ${chk}></td>
+            <td><input type="text" class="form-control form-control-sm" data-mig-name="${i}"
+                       value="${escAttr(c.suggested_name || c.address)}"></td>
+            <td><code>${esc(c.address)}</code>${c.is_duplicate ? ` <span class="badge bg-warning text-dark">×${c.members.length}</span>` : ''}</td>
+            <td>${protos}</td>
+            <td>${mem}</td>
+        </tr>`;
+    });
+    h += '</tbody></table>';
+    body.innerHTML = h;
+    if (info) info.textContent = tf('host_migrate_summary', _migrateCandidates.length, dups);
+}
+
+async function applyMigration() {
+    const accept = [];
+    document.querySelectorAll('#hostMigrateBody input[data-mig-idx]').forEach(cb => {
+        if (!cb.checked) return;
+        const i = parseInt(cb.dataset.migIdx, 10);
+        const cand = _migrateCandidates[i];
+        if (!cand) return;
+        const nameEl = document.querySelector(`#hostMigrateBody input[data-mig-name="${i}"]`);
+        accept.push({ id: cand.id, name: (nameEl && nameEl.value || '').trim() });
+    });
+    if (!accept.length) {
+        showToast(t('host_migrate_select'), 'warning');
+        return;
+    }
+    const btn = document.getElementById('btnMigrateApply');
+    if (btn) btn.disabled = true;
+    const res = await apiPost('/api/v1/hosts/migrate/apply', { accept });
+    if (btn) btn.disabled = false;
+    if (res && res.status === 200 && res.data && res.data.ok) {
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('hostMigrateModal')).hide();
+        showToast(tf('host_migrate_done', res.data.created, res.data.checks));
+        await reloadHosts();
+        // The checks now reference hosts — reload module config so the UI reflects it.
+        modulesData = await apiGet('/api/v1/modules') || modulesData;
+        applyModuleDefaults();
+        _savedModulesData = deepClone(modulesData);
+        clearDirty('modules');
+        renderModules();
+    } else {
+        showToast((res && res.data && res.data.error) || (t('error') || 'Error'), 'danger');
+    }
+}

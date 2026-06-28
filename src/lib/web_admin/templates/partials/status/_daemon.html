@@ -1,0 +1,267 @@
+let _daemonPollTimer = null;
+let _daemonLastModuleStatus = {};   // snapshot of last known module statuses
+let _schedCountId = null;
+let _schedSeenTick = false;   // have we counted down at least once this run?
+let _daemonStopping = false;  // a Stop was requested; thread still finishing
+let _daemonStopWaitId = null; // fast-poll timer while waiting for the stop
+
+// Set the pill text to a transient state (spinner + label), bar full.
+function _schedShowState(label) {
+    const txt = document.getElementById('daemon-rc-txt');
+    if (txt) txt.innerHTML = `<span class="spinner-border spinner-border-sm me-1" style="width:.6rem;height:.6rem;border-width:1.5px"></span>${label}`;
+    const fEl = document.getElementById('daemon-rc-fill');
+    if (fEl) fEl.style.width = '100%';
+}
+
+// Per-second countdown to the scheduler's next run (cyan pill). Re-seeded from
+// the server's next_in on every 5s poll, so it stays accurate; ticks locally
+// in between. When it elapses, a run is firing → show "Running…".
+function _startSchedulerCountdown(rem, total) {
+    if (_schedCountId) { clearInterval(_schedCountId); _schedCountId = null; }
+    if (rem == null) return;
+    _schedSeenTick = true;
+    const fEl = document.getElementById('daemon-rc-fill');
+    let r = rem;
+    const draw = () => {
+        const cEl = document.getElementById('daemon-rc-count');
+        if (cEl) cEl.textContent = Math.max(0, r);
+        if (fEl && total) fEl.style.width = (Math.max(0, Math.min(r, total)) / total * 100) + '%';
+    };
+    draw();
+    _schedCountId = setInterval(() => {
+        r -= 1;
+        if (r <= 0) {
+            // Elapsed → the scheduled run is firing. Stop ticking and show
+            // "Running…"; the next poll re-seeds when the next run is scheduled.
+            clearInterval(_schedCountId); _schedCountId = null;
+            _schedShowState(t('daemon_executing'));
+            return;
+        }
+        draw();
+    }, 1000);
+}
+
+async function _daemonRefresh() {
+    const res = await apiGet('/api/v1/daemon/status');
+    if (!res) return;
+    const st = res.data ?? res;
+    _daemonApply(st);
+
+    // When the scheduler is running, also poll module status and update any
+    // cards that changed since the last check — without a full re-render.
+    if (st.running) {
+        await _daemonSyncModuleCards();
+    }
+}
+
+async function _daemonSyncModuleCards() {
+    const area = document.getElementById('checksResultArea');
+    if (!area) return;
+
+    const polled = await apiGet('/api/v1/modules/status');
+    if (!polled) return;
+    const current = polled.data ?? polled;
+
+    const currentStr = JSON.stringify(current);
+    if (currentStr === JSON.stringify(_daemonLastModuleStatus)) return; // nothing changed
+
+    _daemonLastModuleStatus = JSON.parse(currentStr);
+
+    // Re-render the cards area with the updated status data.
+    // Preserve non-waiting cards that are NOT in the new status snapshot
+    // (modules currently running an on-demand check keep their waiting card).
+    area.innerHTML = _renderStatusCards(current);
+}
+
+function _daemonApply(st) {
+    const badge     = document.getElementById('daemonBadge');
+    const nextLbl   = document.getElementById('daemonNextLabel');
+    const toggleBtn = document.getElementById('daemonToggleBtn');
+    const reloadBtn = document.getElementById('daemonReloadBtn');
+    const interval  = document.getElementById('daemonIntervalInput');
+    const autostart = document.getElementById('daemonAutostart');
+    if (!badge) return;
+
+    const running = st.running;
+    badge.textContent = t(running ? 'daemon_running' : 'daemon_stopped');
+    badge.className   = `badge rounded-pill ${running ? 'bg-success' : 'bg-secondary'}`;
+    badge.style.fontSize = '.72rem';
+
+    // Sync interval input from server (skip if user is actively editing)
+    if (interval && document.activeElement !== interval)
+        interval.value = st.interval ?? 300;
+    // Fields fixed by an env var (SS_CHECK_INTERVAL / SS_AUTOSTART) are read-only —
+    // disable the control and reveal the lock icon (tooltip explains the source).
+    if (interval) {
+        interval.disabled = !!st.interval_locked;
+        const il = document.getElementById('daemonIntervalLock');
+        if (il) il.style.display = st.interval_locked ? '' : 'none';
+    }
+
+    // The thread keeps running until its current cycle finishes, so a Stop
+    // request stays "running" for a while. Show "Stopping…" (disabled) until
+    // the scheduler thread has actually exited.
+    if (_daemonStopping && !running) _daemonStopping = false;
+    const stopping = _daemonStopping && running;
+
+    if (toggleBtn) {
+        toggleBtn.disabled    = stopping;
+        toggleBtn.textContent = stopping ? t('daemon_stopping')
+                                         : t(running ? 'daemon_stop' : 'daemon_start');
+        toggleBtn.title       = t(running ? 'daemon_stop_tt' : 'daemon_start_tt');
+        toggleBtn.className    = `btn btn-sm ${running ? 'btn-warning' : 'btn-secondary'}`;
+    }
+    if (reloadBtn) reloadBtn.style.display = (running && !stopping) ? '' : 'none';
+
+    if (nextLbl) {
+        const n = st.next_in;
+        if (running) {
+            // Build the countdown pill once; keep it for the whole running session.
+            if (!document.getElementById('daemon-rc-txt')) {
+                nextLbl.textContent = '';
+                nextLbl.innerHTML = `<span class="st-rc-pill st-rc-sm" title="${escAttr(t('daemon_next_in'))}">
+                    <span class="st-rc-fill" id="daemon-rc-fill" style="width:100%"></span>
+                    <span class="st-rc-txt" id="daemon-rc-txt"></span>
+                </span>`;
+            }
+            const txt = document.getElementById('daemon-rc-txt');
+            const fEl = document.getElementById('daemon-rc-fill');
+            if (n != null) {
+                // Ready: show the ticking countdown and count down each second.
+                if (!document.getElementById('daemon-rc-count') && txt) {
+                    txt.innerHTML = `<i class="bi bi-clock-history me-1"></i><span id="daemon-rc-count">${n}</span>${t('daemon_interval_s')}`;
+                }
+                _startSchedulerCountdown(n, st.interval || n);
+            } else {
+                // No time-to-next yet: "Initializing…" before the very first run,
+                // "Running…" once we've already counted down (a run is firing).
+                if (_schedCountId) { clearInterval(_schedCountId); _schedCountId = null; }
+                _schedShowState(_schedSeenTick ? t('daemon_executing') : t('daemon_initializing'));
+            }
+        } else {
+            _schedSeenTick = false;
+            nextLbl.textContent = '';
+            _startSchedulerCountdown(null);
+        }
+    }
+
+    // Autostart: always sync from server so Config tab changes are reflected here.
+    // Only skip if the user is actively clicking the toggle.
+    if (autostart && document.activeElement !== autostart) {
+        autostart.checked = st.web_autostart ?? false;
+    }
+    if (autostart) {
+        autostart.disabled = !!st.web_autostart_locked;
+        const al = document.getElementById('daemonAutostartLock');
+        if (al) al.style.display = st.web_autostart_locked ? '' : 'none';
+    }
+}
+
+async function _daemonReload(saveFirst = true) {
+    // Persist the current interval input value before restarting so that
+    // clicking Restart while the input is still focused doesn't lose the edit.
+    if (saveFirst) {
+        const inp = document.getElementById('daemonIntervalInput');
+        if (inp) {
+            const secs = Math.max(10, Math.min(86400, parseInt(inp.value, 10)));
+            if (!isNaN(secs)) await _daemonPersistInterval(secs);
+        }
+    }
+    const res = await apiPost('/api/v1/daemon/stop', {});
+    if (res && res.data) _daemonApply(res.data.status ?? res.data);
+    await new Promise(r => setTimeout(r, 300));
+    const res2 = await apiPost('/api/v1/daemon/start', {run_now: true});
+    if (res2 && res2.data) _daemonApply(res2.data.status ?? res2.data);
+}
+
+async function _daemonToggle() {
+    const badge = document.getElementById('daemonBadge');
+    const running = badge && badge.classList.contains('bg-success');
+    if (running) {
+        // The scheduler finishes its current cycle before exiting, so reflect a
+        // "Stopping…" state and poll quickly until the thread is really gone.
+        _daemonStopping = true;
+        _daemonApply({ running: true, interval: parseInt(
+            document.getElementById('daemonIntervalInput')?.value, 10) || undefined });
+        const res = await apiPost('/api/v1/daemon/stop', {});
+        if (res && res.data) _daemonApply(res.data.status ?? res.data);
+        _daemonWaitStop();
+    } else {
+        _daemonStopping = false;
+        // run_now: true — start triggers an immediate check instead of waiting.
+        const res = await apiPost('/api/v1/daemon/start', {run_now: true});
+        if (res && res.data) _daemonApply(res.data.status ?? res.data);
+    }
+}
+
+// While a stop is pending, poll fast (1s) so the UI flips to "Stopped" as soon
+// as the scheduler thread actually exits — without waiting for the 5s poll.
+function _daemonWaitStop() {
+    if (_daemonStopWaitId) return;
+    _daemonStopWaitId = setInterval(async () => {
+        if (!_daemonStopping) { clearInterval(_daemonStopWaitId); _daemonStopWaitId = null; return; }
+        const res = await apiGet('/api/v1/daemon/status');
+        if (res) _daemonApply(res);
+    }, 1000);
+}
+
+async function _daemonPersistInterval(secs) {
+    /** Save interval to server + sync all UI elements. Returns true on success. */
+    if (isNaN(secs) || secs < 10) return false;
+    const res = await apiPut('/api/v1/daemon/config', {timer_check: secs});
+    if (res?.data?.ok === false) {
+        showToast(res.data.error || 'Save failed', 'danger');
+        return false;
+    }
+    // Sync in-memory configData
+    if (window.configData) {
+        if (!configData.daemon) configData.daemon = {};
+        configData.daemon.timer_check = secs;
+    }
+    // Sync the Status tab input (in case called from Restart)
+    const inp = document.getElementById('daemonIntervalInput');
+    if (inp) inp.value = secs;
+    // Sync the Config tab input directly (it won't re-render on its own)
+    const cfgInp = document.querySelector('[data-cfg-path="daemon|timer_check"] input');
+    if (cfgInp) cfgInp.value = secs;
+    showToast(`${t('daemon_interval')} → ${secs}${t('daemon_interval_s')}`, 'success');
+    return true;
+}
+
+async function _daemonSaveInterval(val) {
+    const secs = Math.max(10, Math.min(86400, parseInt(val, 10)));
+    const ok = await _daemonPersistInterval(secs);
+    if (!ok) return;
+    // Restart the scheduler immediately so the new interval takes effect now
+    const badge = document.getElementById('daemonBadge');
+    if (badge && badge.classList.contains('bg-success')) {
+        await _daemonReload(false);  // false = don't re-save, already saved above
+    } else {
+        _daemonRefresh();
+    }
+}
+
+async function _daemonSaveAutostart(checked) {
+    await apiPut('/api/v1/daemon/config', {web_autostart: checked});
+    if (window.configData) {
+        if (!configData.daemon) configData.daemon = {};
+        configData.daemon.web_autostart = checked;
+    }
+}
+
+// Start polling daemon status when the status tab is open
+async function _daemonStartPoll() {
+    // Seed the module status snapshot so the first sync only highlights CHANGES
+    const seed = await apiGet('/api/v1/modules/status');
+    if (seed) {
+        const data = seed.data ?? seed;
+        _daemonLastModuleStatus = JSON.parse(JSON.stringify(data));
+    }
+    _daemonRefresh();
+    if (!_daemonPollTimer)
+        _daemonPollTimer = setInterval(_daemonRefresh, 5000);
+}
+function _daemonStopPoll() {
+    if (_daemonPollTimer) { clearInterval(_daemonPollTimer); _daemonPollTimer = null; }
+    _daemonLastModuleStatus = {};
+}

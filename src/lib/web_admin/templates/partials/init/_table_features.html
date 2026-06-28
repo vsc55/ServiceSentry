@@ -1,0 +1,199 @@
+function _thSortInner(label, col, currentSort, dir, fn) {
+    const icon = currentSort === col
+        ? (dir === 'asc' ? '<i class="bi bi-sort-up ms-1"></i>' : '<i class="bi bi-sort-down ms-1"></i>')
+        : '<i class="bi bi-arrow-down-up ms-1 opacity-25"></i>';
+    return `<span class="ss-sort-link" style="cursor:pointer;user-select:none" onclick="${fn}('${col}')">${esc(label)}${icon}</span>`;
+}
+
+// Generically make the shared metadata columns (_LIST_FIT_COLS: uid/created_at/
+// updated_at/updated_by) size to their content and NOT be resizable — on ANY
+// table, with no per-table markup. They stay reorderable like any other column.
+function _applyFitCols(tbl) {
+    tbl.querySelectorAll('thead th[data-col]').forEach(th => {
+        if (typeof _LIST_FIT_COLS === 'undefined' || !_LIST_FIT_COLS.has(th.dataset.col)) return;
+        th.classList.remove('ss-th-resizable');
+        th.classList.add('ss-th-fit');
+        th.style.width = '1%';
+        th.style.whiteSpace = 'nowrap';
+        const idx = [...th.parentNode.children].indexOf(th);
+        tbl.querySelectorAll('tbody > tr').forEach(tr => {
+            const td = tr.children[idx];
+            if (td) td.setAttribute('data-fit', '');
+        });
+    });
+}
+
+// Generic column features: resize + dblclick auto-fit + drag-and-drop reorder.
+// tableId      — id of the <table> element
+// getOrder()   — returns the current col-order array (by reference OK)
+// setOrder(o)  — stores the new order array
+// saveOrder()  — persists to localStorage
+// render()     — re-renders the table
+// saveWidth(col, w) — persists a column width string to localStorage
+function _attachColFeatures(tableId, getOrder, setOrder, saveOrder, render, saveWidth) {
+    const tbl = document.getElementById(tableId);
+    if (!tbl) return;
+    _applyFitCols(tbl);   // generic: metadata cols size to content + aren't resizable
+    let _dragSrc = null;
+    // Reorder (drag) applies to every column with a data-col — including content-fit
+    // columns that aren't resizable. Resize is wired below, only to resizable ones.
+    tbl.querySelectorAll('thead th[data-col]').forEach(th => {
+        th.addEventListener('dragstart', e => { _dragSrc = th.dataset.col; e.dataTransfer.effectAllowed = 'move'; th.style.opacity = '0.4'; });
+        th.addEventListener('dragend',   () => { th.style.opacity = ''; _dragSrc = null; });
+        th.addEventListener('dragover',  e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.classList.add('ss-th-drag-over'); });
+        th.addEventListener('dragleave', () => th.classList.remove('ss-th-drag-over'));
+        th.addEventListener('drop',      e => {
+            e.preventDefault(); th.classList.remove('ss-th-drag-over');
+            const src = _dragSrc, dst = th.dataset.col;
+            if (!src || src === dst) return;
+            const order = getOrder(), si = order.indexOf(src), di = order.indexOf(dst);
+            if (si < 0 || di < 0) return;
+            order.splice(si, 1); order.splice(di, 0, src);
+            setOrder(order); saveOrder(); render();
+        });
+    });
+    tbl.querySelectorAll('th.ss-th-resizable').forEach(th => {
+        th.querySelector('.ss-resize-handle')?.remove();
+        th.style.position = 'relative'; th.style.overflow = 'hidden';
+
+        const handle = document.createElement('div');
+        handle.className = 'ss-resize-handle';
+        handle.style.cssText = 'position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:2;background:transparent';
+
+        handle.addEventListener('mousedown', e => {
+            e.preventDefault(); e.stopPropagation();
+            const startX = e.clientX, startW = th.offsetWidth, col = th.dataset.col;
+            const onMove = ev => { th.style.width = Math.max(40, startW + ev.clientX - startX) + 'px'; };
+            const onUp   = ev => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                saveWidth(col, Math.max(40, startW + ev.clientX - startX) + 'px');
+                _persistTableConfig();
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+
+        handle.addEventListener('dblclick', e => {
+            e.preventDefault(); e.stopPropagation();
+            const col    = th.dataset.col;
+            const colIdx = Array.from(th.closest('tr').querySelectorAll('th')).indexOf(th);
+            const tmp    = document.createElement('div');
+            tmp.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden';
+            document.body.appendChild(tmp);
+            let maxW = 0;
+            const measure = cell => {
+                const clone = cell.cloneNode(true);
+                clone.querySelector?.('.ss-resize-handle')?.remove();
+                clone.style.cssText = 'display:inline-block;white-space:nowrap;width:auto;padding:2px 11px';
+                tmp.appendChild(clone); maxW = Math.max(maxW, clone.scrollWidth); tmp.removeChild(clone);
+            };
+            measure(th);
+            tbl.querySelectorAll('tbody tr').forEach(tr => { const td = tr.cells[colIdx]; if (td) measure(td); });
+            document.body.removeChild(tmp);
+            const newW = Math.max(40, maxW + 8) + 'px';
+            th.style.width = newW; saveWidth(col, newW); _persistTableConfig();
+        });
+
+        th.appendChild(handle);
+    });
+}
+
+// ────────────────────────────── Permission-based UI ──────────────────
+ function applyRoleRestrictions() {
+const perms = new Set(currentUser.permissions || []);
+const hasAnyUser    = ['users_view','users_add','users_edit','users_delete'].some(p => perms.has(p));
+const hasAnyRole    = ['roles_view','roles_add','roles_edit','roles_delete'].some(p => perms.has(p));
+const hasAnyGroup   = ['groups_view','groups_add','groups_edit','groups_delete'].some(p => perms.has(p));
+const hasAnySessions = ['sessions_view','sessions_revoke'].some(p => perms.has(p));
+const hasAnyCredential = ['credentials_view','credentials_add','credentials_edit','credentials_delete']
+    .some(p => perms.has(p));
+const hasAnyModule  = ['modules_view','modules_add','modules_edit'].some(p => perms.has(p))
+    || [...perms].some(p => p.startsWith('module.'));
+const hasAnyAccess  = hasAnyUser || hasAnyRole || hasAnyGroup || hasAnySessions || hasAnyCredential;
+// Main access tab
+const accessLi = document.getElementById('tab-access-li');
+if (accessLi) accessLi.style.display = hasAnyAccess ? '' : 'none';
+// Sub-tabs
+const stSessions = document.getElementById('subtab-sessions-li');
+if (stSessions) stSessions.style.display = hasAnySessions ? '' : 'none';
+const stUsers = document.getElementById('subtab-users-li');
+if (stUsers) stUsers.style.display = hasAnyUser ? '' : 'none';
+const stGroups = document.getElementById('subtab-groups-li');
+if (stGroups) stGroups.style.display = hasAnyGroup ? '' : 'none';
+const stRoles = document.getElementById('subtab-roles-li');
+if (stRoles) stRoles.style.display = hasAnyRole ? '' : 'none';
+const stCredentials = document.getElementById('subtab-credentials-li');
+if (stCredentials) stCredentials.style.display = hasAnyCredential ? '' : 'none';
+// Activate saved sub-tab (or fall back to first visible)
+const _savedSubtabTarget = localStorage.getItem('ss_active_subtab_access');
+const _savedSubtabBtn = _savedSubtabTarget
+    ? document.querySelector(`[data-bs-target="${_savedSubtabTarget}"]`) : null;
+const _activeSubtab = (
+    _savedSubtabBtn && _savedSubtabBtn.closest('li')?.style.display !== 'none'
+        ? _savedSubtabBtn
+        : ['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-credentials']
+            .map(id => document.getElementById(id))
+            .find(btn => btn && btn.closest('li')?.style.display !== 'none')
+);
+if (_activeSubtab) bootstrap.Tab.getOrCreateInstance(_activeSubtab).show();
+// Overview tab
+const overviewLi = document.getElementById('tab-overview-li');
+if (overviewLi) overviewLi.style.display = perms.has('overview_view') ? '' : 'none';
+// Modules tab
+const modulesLi = document.getElementById('tab-modules-li');
+if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
+// Infrastructure tab (Servers + Clusters sub-tabs). The general tab shows when
+// the user can see hosts OR manage modules (clusters are multi-bind module checks).
+const hasAnyServer = ['servers_view','servers_edit','servers_delete'].some(p => perms.has(p))
+    || [...perms].some(p => p.startsWith('server.'));
+// Clusters are their OWN resource: gated strictly by clusters_* (global) or any
+// cluster.{uid}.* (per-cluster). Module permissions do NOT grant the Clusters tab.
+const hasAnyCluster = ['clusters_view','clusters_add','clusters_edit','clusters_delete'].some(p => perms.has(p))
+    || [...perms].some(p => p.startsWith('cluster.'));
+const serversLi = document.getElementById('tab-servers-li');
+if (serversLi) serversLi.style.display = (hasAnyServer || hasAnyModule || hasAnyCluster) ? '' : 'none';
+// Sub-tabs: Servers gated by host perms, Clusters by cluster perms.
+const stSrvHosts = document.getElementById('subtab-srv-hosts-li');
+if (stSrvHosts) stSrvHosts.style.display = hasAnyServer ? '' : 'none';
+const stSrvClusters = document.getElementById('subtab-srv-clusters-li');
+if (stSrvClusters) stSrvClusters.style.display = hasAnyCluster ? '' : 'none';
+// Activate the saved infra sub-tab, or the first visible one.
+const _savedInfra = localStorage.getItem('ss_active_subtab_infra');
+const _savedInfraBtn = _savedInfra ? document.querySelector(`[data-bs-target="${_savedInfra}"]`) : null;
+const _activeInfra = (_savedInfraBtn && _savedInfraBtn.closest('li')?.style.display !== 'none')
+    ? _savedInfraBtn
+    : ['btn-subtab-srv-hosts','btn-subtab-srv-clusters']
+        .map(id => document.getElementById(id))
+        .find(btn => btn && btn.closest('li')?.style.display !== 'none');
+if (_activeInfra) bootstrap.Tab.getOrCreateInstance(_activeInfra).show();
+// (New host / Migrate buttons now live inside the JS-rendered Servers card,
+//  gated there by servers_edit — see renderServers.)
+// Config tab
+const configLi = document.getElementById('tab-config-li');
+const hasConfigEdit = perms.has('config_edit');
+const hasConfigView = perms.has('config_view');
+if (configLi) configLi.style.display = (hasConfigEdit || hasConfigView) ? '' : 'none';
+// Status tab
+const statusLi = document.getElementById('tab-status-li');
+const hasChecks = perms.has('checks_view') || perms.has('checks_run');
+if (statusLi) statusLi.style.display = hasChecks ? '' : 'none';
+// History tab
+const historyLi = document.getElementById('tab-history-li');
+if (historyLi) historyLi.style.display = perms.has('history_view') ? '' : 'none';
+// Syslog tab
+const syslogLi = document.getElementById('tab-syslog-li');
+if (syslogLi) syslogLi.style.display = perms.has('syslog_view') ? '' : 'none';
+// Services tab
+const servicesLi = document.getElementById('tab-services-li');
+if (servicesLi) servicesLi.style.display = perms.has('services_view') ? '' : 'none';
+// Events tab
+const eventsLi = document.getElementById('tab-events-li');
+if (eventsLi) eventsLi.style.display = perms.has('events_view') ? '' : 'none';
+// Audit tab
+const auditLi = document.getElementById('tab-audit-li');
+if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
+// Modules buttons
+const btnNewModule = document.getElementById('btnNewModule');
+if (btnNewModule) btnNewModule.style.display = perms.has('modules_add') ? '' : 'none';
+if (!perms.has('modules_edit')) {

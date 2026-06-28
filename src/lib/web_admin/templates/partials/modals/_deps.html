@@ -1,0 +1,226 @@
+{# ── Missing / partial dependency install modal ──────────────────────── #}
+<div class="modal fade" id="depInstallModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:680px">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-box-seam text-warning"></i>
+                    <span id="depInstallModalTitle">{{ i18n.missing_dep }}</span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body pb-2">
+                <p class="small text-muted mb-3" id="depInstallModalDesc" style="display:none"></p>
+                <p class="small mb-2 text-muted">{{ i18n.dep_install_cmd_label }}</p>
+                {# Terminal-style block #}
+                <div class="rounded-3 overflow-hidden" style="border:1px solid #313244">
+                    {# title bar #}
+                    <div class="d-flex align-items-center gap-2 px-3 py-2"
+                         style="background:#1e1e2e;border-bottom:1px solid #313244">
+                        <span style="width:11px;height:11px;border-radius:50%;background:#ff5f57;display:inline-block"></span>
+                        <span style="width:11px;height:11px;border-radius:50%;background:#febc2e;display:inline-block"></span>
+                        <span style="width:11px;height:11px;border-radius:50%;background:#28c840;display:inline-block"></span>
+                        <span class="ms-1" style="font-size:.7rem;color:#6272a4;font-family:monospace">terminal</span>
+                    </div>
+                    {# command line #}
+                    <div class="px-3 py-3 d-flex align-items-center gap-3"
+                         style="background:#1e1e2e">
+                        <span style="color:#6272a4;font-family:monospace;font-size:.9rem;user-select:none">$</span>
+                        <code id="depInstallCmd"
+                              class="flex-grow-1 user-select-all"
+                              style="font-size:.95rem;color:#a6e3a1;background:transparent;word-break:break-all;font-family:'Cascadia Code','Fira Code','Consolas',monospace"></code>
+                        <button type="button" class="btn btn-sm flex-shrink-0"
+                                style="background:#313244;border:1px solid #45475a;color:#cdd6f4"
+                                onclick="_copyDepInstallCmd(this)">
+                            <i class="bi bi-clipboard me-1"></i>
+                            <span>{{ i18n.dep_install_copy }}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary"
+                    data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# New/Edit host (server) modal — body is built dynamically by saveHostModal/openEditHostModal. #}
+<div class="modal fade" id="hostModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-hdd-network me-1"></i><span id="hostModalTitle">{{ i18n.host_new }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="hostModalBody"></div>
+            <div class="modal-footer py-2">
+                <div class="d-flex align-items-center gap-2 me-auto">
+                    <button type="button" class="btn btn-sm btn-primary" onclick="testHostServer()">
+                        <i class="bi bi-play-circle me-1"></i>{{ i18n.host_test }}</button>
+                    <span class="text-danger small" id="hostModalError"></span>
+                </div>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="_undoHostModal()" title="{{ i18n.host_undo_tt }}">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo }}
+                </button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="saveHostModal(false)" title="{{ i18n.host_save_tt }}">
+                    <i class="bi bi-save me-1"></i>{{ i18n.save }}
+                </button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnHostModalOk" onclick="saveHostModal(true)">
+                    <i class="bi bi-save2 me-1"></i>{{ i18n.save_and_close }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Clone-host modal: ask name + new address, then create the duplicate. #}
+<div class="modal fade" id="hostCloneModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-copy me-1"></i>{{ i18n.host_clone_title }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div class="mb-2">
+                    <label class="form-label form-label-sm mb-1">{{ i18n.host_name }}</label>
+                    <input type="text" class="form-control form-control-sm" id="hostCloneName" autocomplete="off"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();_cloneHostSubmit(true);}">
+                </div>
+                <div class="mb-1">
+                    <label class="form-label form-label-sm mb-1">{{ i18n.host_address }}</label>
+                    <input type="text" class="form-control form-control-sm" id="hostCloneAddress" autocomplete="off"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();_cloneHostSubmit(true);}">
+                </div>
+                {# Bound module checks to clone (all selected by default). Hidden when none. #}
+                <div id="hostCloneChecksWrap" class="mt-3 d-none">
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <label class="form-label form-label-sm mb-0">{{ i18n.host_clone_checks }}</label>
+                        <span class="badge bg-secondary" id="hostCloneChecksCount" style="font-size:.7rem"></span>
+                        <button type="button" class="btn btn-sm btn-secondary py-0 px-2 ms-auto"
+                                onclick="_cloneChecksToggleAll(true)">{{ i18n.select_all }}</button>
+                        <button type="button" class="btn btn-sm btn-secondary py-0 px-2"
+                                onclick="_cloneChecksToggleAll(false)">{{ i18n.select_none }}</button>
+                    </div>
+                    <div id="hostCloneChecks" class="border rounded p-2"
+                         style="max-height:14rem;overflow:auto;background:var(--bs-body-bg)"></div>
+                </div>
+                <div class="text-danger small mt-2" id="hostCloneError"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="_cloneHostSubmit(false)">
+                    <i class="bi bi-save me-1"></i>{{ i18n.save }}</button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="_cloneHostSubmit(true)">
+                    <i class="bi bi-save2 me-1"></i>{{ i18n.host_clone_save_edit }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Host test results modal (shown over the edit-host modal). #}
+<div class="modal fade" id="hostTestModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-play-circle me-1"></i><span id="hostTestModalTitle">{{ i18n.host_test }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="hostTestModalBody"></div>
+            <div class="modal-footer py-2">
+                <span class="small me-auto" id="hostTestModalSummary"></span>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Assisted host migration modal — proposal of candidate hosts. #}
+<div class="modal fade" id="hostMigrateModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-magic me-1"></i>{{ i18n.host_migrate_title }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="hostMigrateBody"></div>
+            <div class="modal-footer py-2">
+                <span class="text-muted small me-auto" id="hostMigrateInfo"></span>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnMigrateApply" onclick="applyMigration()">
+                    <i class="bi bi-check2-circle me-1"></i>{{ i18n.host_migrate_apply }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Generic module-action modal ============ -->
+<!-- A reusable, module-AGNOSTIC modal: openModuleActionModal() fills the title,
+     body (the action's inputs) and behaviour entirely from the module's action
+     spec. No module-specific markup here. -->
+<div class="modal fade" id="moduleActionModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-lightning-charge me-1"></i><span id="moduleActionModalTitle"></span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="moduleActionModalBody"></div>
+            <div class="modal-footer py-2">
+                <div class="me-auto" id="moduleActionModalStatus"></div>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button type="button" class="btn btn-sm btn-primary" id="moduleActionRunBtn" onclick="_maRun()">
+                    <i class="bi bi-play-fill me-1"></i>{{ i18n.cred_action_run }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== Credential modal ===================== -->
+<div class="modal fade" id="credModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-key me-1"></i><span id="credModalTitle">{{ i18n.cred_new }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="credModalBody"></div>
+            <div class="modal-footer py-2">
+                <div class="d-flex align-items-center gap-2 me-auto">
+                    <span class="text-danger small" id="credModalError"></span>
+                </div>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="saveCredModal()">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== Event rule modal ===================== -->
+<div class="modal fade" id="eventRuleModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-bell me-1"></i><span id="eventRuleModalTitle">{{ i18n.event_add }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-3" id="eventRuleModalBody"></div>
+            <div class="modal-footer py-2">
+                <span class="text-danger small me-auto" id="eventRuleModalError"></span>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-success btn-sm" id="btnEventRuleSave" onclick="_eventModalSave()"><i class="bi bi-check-lg me-1"></i>{{ i18n.event_save }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Module-specific modals — each watchful module may provide its own
+   modal HTML under watchfuls/<mod>/web/_modals.html.  The list is
+   built at startup by _create_app() with no module-specific knowledge. #}
+{% for _inc in module_web_modals %}{% include _inc %}{% endfor %}

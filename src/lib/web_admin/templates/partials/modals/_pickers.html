@@ -1,0 +1,107 @@
+{# Field value picker modal (e.g. select database) #}
+<div class="modal fade" id="fieldPickerModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title">
+                    <i class="bi bi-database me-1"></i>
+                    <span id="fieldPickerModalTitle"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body pb-2">
+                <input type="search" class="form-control form-control-sm mb-2"
+                    id="fieldPickerFilter"
+                    placeholder="{{ i18n.discover }}…">
+                <div id="fieldPickerMultiBar" class="d-flex align-items-center gap-2 mb-2" style="display:none">
+                    <button type="button" class="btn btn-sm btn-secondary" id="fpSelectAllBtn" onclick="_fpSelectAll()"></button>
+                    <button type="button" class="btn btn-sm btn-secondary" id="fpDeselectAllBtn" onclick="_fpDeselectAll()"></button>
+                    <span class="ms-auto small text-muted" id="fieldPickerCount"></span>
+                </div>
+                <div id="fieldPickerModalBody" style="max-height:55vh;overflow-y:auto"></div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Service discovery modal #}
+<div class="modal fade" id="discoverModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title">
+                    <i class="bi bi-search me-1"></i>
+                    <span id="discoverModalTitle">{{ i18n.discover_services }}</span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body pb-2">
+                <div id="discoverInputs" class="mb-3"></div>
+                <input type="search" class="form-control form-control-sm mb-3"
+                    id="discoverFilter"
+                    placeholder="{{ i18n.discover }}…">
+                <div id="discoverModalBody" style="max-height:55vh;overflow-y:auto;overflow-x:hidden"></div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Notification HTML template preview modal ─────────────────────────── -->
+<div class="modal fade" id="notifHtmlPreviewModal" tabindex="-1"
+     aria-labelledby="notifHtmlPreviewLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="notifHtmlPreviewLabel">
+                    <i class="bi bi-eye me-1"></i>
+                    <span id="notifHtmlPreviewTitle">{{ i18n.notif_html_tpl_preview_title }}</span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-0" style="min-height:420px">
+                <div id="notifHtmlPreviewSpinner"
+                     class="d-flex align-items-center justify-content-center"
+                     style="min-height:420px">
+                    <span class="spinner-border text-secondary"></span>
+                </div>
+                <iframe id="notifHtmlPreviewFrame"
+                    class="d-none border-0 w-100"
+                    style="min-height:600px;height:70vh"
+                    sandbox="allow-same-origin"></iframe>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Module expand modal ─────────────────────────────────────────────── #}
+<div class="modal fade" id="moduleExpandModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl" style="height:90vh">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <span id="moduleExpandIcon"></span>
+                    <span id="moduleExpandTitle" class="fw-semibold"></span>
+                    <code id="moduleExpandCode" class="text-muted fw-normal" style="font-size:.75rem"></code>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="moduleExpandBody"></div>
+            <div class="modal-footer py-1">
+                <button type="button" class="btn btn-sm btn-secondary"
+                    data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+

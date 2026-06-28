@@ -1,0 +1,166 @@
+async function _loadSyslog() {
+    const qs = _syslogQS();
+    const all = !_syslogPageSize;             // page size 0 → all
+    const limit = all ? 5000 : _syslogPageSize;
+    const offset = all ? 0 : (_syslogPage - 1) * _syslogPageSize;
+    qs.set('limit', String(limit));
+    qs.set('offset', String(offset));
+    qs.set('sort', _slSort);
+    qs.set('order', _slSortDir);
+    const [data, st] = await Promise.all([
+        apiGet('/api/v1/syslog?' + qs.toString()),
+        apiGet('/api/v1/syslog/status'),
+        _loadSyslogStats(),
+        _loadSyslogDrops(),
+    ]);
+    const empty = document.getElementById('sl-empty');
+    const total = (data && data.total) || 0;
+    if (st) {
+        const state = st.enabled ? (st.running ? t('syslog_running') : t('syslog_stopped')) : t('syslog_disabled');
+        const ports = [st.udp_port && `UDP ${st.udp_port}`, st.tcp_port && `TCP ${st.tcp_port}`,
+                       st.tls_port && `TLS ${st.tls_port}`].filter(Boolean).join(' · ');
+        document.getElementById('sl-status').innerHTML =
+            `${esc(t('syslog_listener'))}: <strong>${esc(state)}</strong>${ports ? ' — ' + esc(ports) : ''}`;
+    }
+    _syslogRenderActiveFilters();
+    const msgs = (data && data.messages) || [];
+    if (empty) empty.style.display = msgs.length ? 'none' : '';
+    // Clamp the page if a filter shrank the result set, then re-fetch once.
+    if (!all) {
+        const pages = Math.max(1, Math.ceil(total / _syslogPageSize));
+        if (_syslogPage > pages) { _syslogPage = pages; return _loadSyslog(); }
+    }
+    const pagerHtml = total > 0
+        ? _renderPagination(total, all ? 1 : _syslogPage, all ? 0 : _syslogPageSize,
+                            '_syslogGoPage', '_syslogSetPageSize')
+        : '';
+    for (const pid of ['sl-pager-top', 'sl-pager']) {
+        const el = document.getElementById(pid);
+        if (el) el.innerHTML = pagerHtml;
+    }
+    _slRowsData = msgs;
+    _slRenderTable();
+}
+
+// ── Auto-refresh + Live ───────────────────────────────────────────────────────
+function _syslogPaneActive() {
+    const p = document.getElementById('tab-syslog');
+    return p && p.classList.contains('active');
+}
+
+// Skip an auto-refresh tick while the user has a menu open (column chooser, …) so
+// re-rendering the tables doesn't close it under them.
+function _syslogRefreshBlocked() {
+    const c = document.getElementById('syslog-container');
+    return !!(c && c.querySelector('.dropdown-menu.show'));
+}
+function _syslogAutoTick() {
+    if (_syslogPaneActive() && !_syslogRefreshBlocked()) _loadSyslog();
+}
+
+function _syslogStopTimer() {
+    if (_syslogTimer) { clearInterval(_syslogTimer._id); _syslogTimer = null; }
+    if (_syslogCountId) { clearInterval(_syslogCountId); _syslogCountId = null; }
+}
+
+// Standard interval auto-refresh (shares the control used by the other tabs).
+function setSyslogAutoRefresh(seconds) {
+    _syslogLive = false;
+    _syslogStopTimer();
+    try { localStorage.setItem(_SL_AUTO_KEY, String(seconds || 0)); } catch (e) {}
+    if (seconds > 0) {
+        const id = setInterval(_syslogAutoTick, seconds * 1000);
+        _syslogTimer = { _id: id, _interval: seconds };
+    }
+    _syslogRenderAutoRefresh();
+}
+
+// Live mode: fast poll so new messages show almost in real time.
+function toggleSyslogLive() {
+    _syslogLive = !_syslogLive;
+    _syslogStopTimer();
+    try { localStorage.setItem(_SL_AUTO_KEY, _syslogLive ? 'live' : '0'); } catch (e) {}
+    if (_syslogLive) {
+        const id = setInterval(_syslogAutoTick, _SL_LIVE_SECS * 1000);
+        _syslogTimer = { _id: id, _interval: 0 };   // interval 0 → dropdown shows OFF
+        _loadSyslog();
+    }
+    _syslogRenderAutoRefresh();
+}
+
+function _syslogRenderAutoRefresh() {
+    const el = document.getElementById('sl-auto-refresh');
+    if (el) el.innerHTML = _autoRefreshControl({
+        id: 'syslog', interval: _syslogLive ? 0 : (_syslogTimer?._interval || 0),
+        setFn: 'setSyslogAutoRefresh',
+        liveFn: 'toggleSyslogLive', liveActive: _syslogLive, hideAuto: true,
+        countId: 'sl-refresh-count', fillId: 'sl-refresh-fill',
+    });
+    _syslogStartCountdown(_syslogLive ? 0 : (_syslogTimer?._interval || 0));
+}
+
+function _syslogStartCountdown(total) {
+    if (_syslogCountId) { clearInterval(_syslogCountId); _syslogCountId = null; }
+    if (!total) return;
+    const c = document.getElementById('sl-refresh-count');
+    const f = document.getElementById('sl-refresh-fill');
+    let rem = total;
+    if (c) c.textContent = rem;
+    if (f) f.style.width = '100%';
+    _syslogCountId = setInterval(() => {
+        rem = rem > 0 ? rem - 1 : total;
+        if (c) c.textContent = rem;
+        if (f) f.style.width = (rem / total * 100) + '%';
+    }, 1000);
+}
+
+// Paint the auto-refresh control, restoring the saved mode the first time.
+function _syslogInitAutoRefresh() {
+    if (!_syslogAutoInit) {
+        _syslogAutoInit = true;
+        let saved = null;
+        try { saved = localStorage.getItem(_SL_AUTO_KEY); } catch (e) {}
+        if (saved === 'live') { toggleSyslogLive(); return; }
+        if (saved && +saved > 0) { setSyslogAutoRefresh(+saved); return; }
+    }
+    _syslogRenderAutoRefresh();
+}
+
+// Copy a row's message to the clipboard (+ toast). Falls back to execCommand
+// when the async Clipboard API isn't available (e.g. plain-HTTP contexts).
+function _syslogCopyMsg(btn) {
+    const text = (btn && btn.dataset.msg) || '';
+    const ok = () => {
+        showToast(t('syslog_copied'), 'success');
+        const i = btn.querySelector('i');
+        if (i) { i.className = 'bi bi-clipboard-check'; setTimeout(() => { i.className = 'bi bi-clipboard'; }, 1500); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(ok).catch(() => _syslogCopyFallback(text, ok));
+    } else {
+        _syslogCopyFallback(text, ok);
+    }
+}
+function _syslogCopyFallback(text, ok) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); ok(); }
+    catch (e) { showToast(t('syslog_copy_error'), 'warning'); }
+    document.body.removeChild(ta);
+}
+
+function _syslogReload() { _loadSyslogFacets(); _loadSyslog(); }
+
+function _syslogClear() {
+    showConfirmModal(t('syslog_clear_confirm'), async () => {
+        const r = await apiDelete('/api/v1/syslog');
+        if (r && r.data && r.data.ok) {
+            showToast(t('syslog_cleared'), 'success');
+            _loadSyslog();
+        }
+    });
+}
