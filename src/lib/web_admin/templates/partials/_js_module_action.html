@@ -1,0 +1,143 @@
+/* ================================================================
+   Generic module-action modal.
+
+   A single, module-AGNOSTIC modal that renders an action's `inputs` form,
+   POSTs to `action.url`, and hands the result to a caller-supplied callback.
+   Everything specific (inputs, labels, url, behaviour) comes from the module's
+   action spec (e.g. a credential type's `__credential__.actions`). No module
+   knowledge lives here.
+
+   openModuleActionModal(action, values, onResult)
+     action   = {id, url, icon, label_i18n|label, result, inputs:[…]}
+     values   = initial input values (defaults + prefill, e.g. a check's host)
+     onResult = fn(res.data)  // res.data: {ok, message, fields, …}
+   ================================================================ */
+let _maState = { action: null, values: {}, onResult: null };
+
+function _maDefaults(action) {
+    const d = {};
+    (action.inputs || []).forEach(f => { if (f.default !== undefined) d[f.name] = f.default; });
+    return d;
+}
+
+function _maVisible(f) {
+    if (!f.show_when) return true;
+    return Object.entries(f.show_when).every(([k, vals]) => vals.includes(_maState.values[k]));
+}
+
+function _maSet(name, value) {
+    _maState.values[name] = value;
+    const controls = ((_maState.action || {}).inputs || []).some(f => f.show_when && (name in f.show_when));
+    if (controls) _maRender();
+}
+
+function _maInputRow(f) {
+    const lbl = esc(_credText(f, 'label_i18n', 'label') || f.name);
+    const val = _maState.values[f.name];
+    const setter = `_maSet(${jsStr(f.name)}, this.value)`;
+    let input;
+    if (f.kind === 'credential') {
+        input = `<select class="form-select form-select-sm" onchange="${setter}">${credentialOptions(val || '', f.credential_type || 'ssh')}</select>`;
+    } else if (f.kind === 'select') {
+        const cur = (val != null && val !== '') ? val : f.default;
+        const opts = (f.options || []).map(o => {
+            const ov = (o && typeof o === 'object') ? o.value : o;
+            const ol = (o && typeof o === 'object') ? (_credText(o, 'label_i18n', 'label') || ov) : o;
+            return `<option value="${escAttr(ov)}" ${ov === cur ? 'selected' : ''}>${esc(ol)}</option>`;
+        }).join('');
+        input = `<select class="form-select form-select-sm" onchange="${setter}">${opts}</select>`;
+    } else if (f.kind === 'textarea') {
+        input = `<textarea class="form-control form-control-sm" rows="${f.rows || 5}" oninput="${setter}">${esc(val || '')}</textarea>`;
+    } else {
+        const type = f.kind === 'password' ? 'password' : 'text';
+        const ac = f.kind === 'password' ? 'new-password' : (f.autocomplete || 'on');
+        const ph = f.placeholder ? ` placeholder="${escAttr(f.placeholder)}"` : '';
+        input = `<input type="${type}" class="form-control form-control-sm" autocomplete="${ac}"${ph} value="${escAttr(val || '')}" oninput="${setter}">`;
+    }
+    return _credRow(lbl, input, esc(_credText(f, 'hint_i18n', 'hint')), 'ma_' + f.name);
+}
+
+function _maRender() {
+    const el = document.getElementById('moduleActionModalBody');
+    if (!el || !_maState.action) return;
+    const rows = (_maState.action.inputs || []).filter(_maVisible).map(_maInputRow).join('');
+    el.innerHTML = rows || `<div class="text-muted small">—</div>`;
+}
+
+function openModuleActionModal(action, values, onResult) {
+    if (!action) return;
+    _maState = {
+        action,
+        values: Object.assign({}, _maDefaults(action), values || {}),
+        onResult: onResult || null,
+    };
+    document.getElementById('moduleActionModalTitle').textContent =
+        _credText(action, 'label_i18n', 'label') || action.id || '';
+    document.getElementById('moduleActionModalStatus').innerHTML = '';
+    _maRender();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('moduleActionModal')).show();
+}
+
+async function _maRun() {
+    const a = _maState.action;
+    if (!a) return;
+    const btn = document.getElementById('moduleActionRunBtn');
+    const stat = document.getElementById('moduleActionModalStatus');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status"></span>`; }
+    const res = await apiPost(a.url, Object.assign({}, _maState.values));
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    if (!res) return;
+    const ok  = res.data && res.data.ok;
+    const msg = (res.data && res.data.message) || (ok ? t('connection_ok') : t('connection_error'));
+    if (stat) stat.innerHTML = `<div class="alert alert-${ok ? 'success' : 'danger'} py-1 px-2 mb-0 small">${esc(msg)}</div>`;
+    if (!ok) return;
+    if (_maState.onResult) _maState.onResult(res.data);
+    // Give the caller's form a moment to reflect the returned values, then close.
+    setTimeout(() => bootstrap.Modal.getInstance(document.getElementById('moduleActionModal'))?.hide(), 500);
+}
+
+// ── Open a module's credential-type action from a check's __actions__ button ──
+// The action (and its inputs) is declared once in the module's __credential__;
+// the check button just references it by id. Prefills the host (FQDN/IP) we
+// already have (the item's host, or its bound server's address) and writes the
+// returned token fields back into the item.
+function _openCredActionFromCheck(btn, actionId) {
+    const pathStr = btn.dataset.actionPath;
+    const parts = pathStr.split('|');
+    const modBase = parts[0].replace(/^watchfuls\./, '');
+    const spec = (typeof _credTypeForModule === 'function') ? _credTypeForModule(modBase) : null;
+    const ctype = spec && spec.type;
+    const action = ctype && ((_CRED_TYPES[ctype] || {}).actions || []).find(a => a.id === actionId);
+    if (!action) { showToast(t('connection_error'), 'danger'); return; }
+
+    const item = getPath(modulesData, parts) || {};
+    // The primary bound host: a single host_uid, or the first of a multi-host
+    // (cluster) binding (host_uids). Provisioning targets one node.
+    let primaryUid = String(item.host_uid || '').trim();
+    if (!primaryUid && Array.isArray(item.host_uids) && item.host_uids.length) {
+        primaryUid = String(item.host_uids[0] || '').trim();
+    }
+    let host = String(item.host || '').trim();
+    if (host) host = host.split(/[,\s]+/)[0];   // first address if a failover list
+    if (!host && primaryUid && typeof hostsList === 'function') {
+        const h = hostsList().find(x => x.uid === primaryUid);
+        host = (h && h.address) || '';
+    }
+    // Carry host_uid so the server resolves the bound host's SSH profile
+    // (address + port + credential) — the same SSH path the host-aware checks
+    // use, so provisioning reaches the node exactly like they do.
+    const init = {};
+    if (host) init.host = host;
+    if (primaryUid) init.host_uid = primaryUid;
+    openModuleActionModal(action, init, (data) => {
+        const fields = (data && data.fields) || {};
+        Object.entries(fields).forEach(([k, v]) => {
+            const fp = pathStr + '|' + k;
+            updateField('modules', fp, v);
+            const inp = document.querySelector(`[data-field-path="${CSS.escape(fp)}"]`);
+            if (inp && 'value' in inp) inp.value = v;
+        });
+        showToast(data.message || '', 'success');
+    });
+}

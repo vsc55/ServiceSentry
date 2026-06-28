@@ -188,6 +188,35 @@ def module_host_multiple(watchfuls_dir: str | None = None) -> dict:
     return out
 
 
+def module_host_multi_bind(watchfuls_dir: str | None = None) -> dict:
+    """Return ``{module: bool}`` — whether ONE check binds to SEVERAL hosts
+    (``host_uids`` list) instead of a single ``host_uid``.  Declared by
+    ``"__host_multiple_bind__": true`` (e.g. proxmox: a cluster check whose
+    failover address list spans all member nodes); default False.
+
+    Distinct from :func:`module_host_multiple` (several *checks* per one host).
+    A multi-bind module is configured as a single multi-host check (Modules),
+    not per-host — so it is excluded from the per-host "Servers" enable flow."""
+    base = _watchfuls_dir(watchfuls_dir)
+    out: dict = {}
+    if not os.path.isdir(base):
+        return out
+    for entry in sorted(os.listdir(base)):
+        if entry.startswith('_'):
+            continue
+        sp = os.path.join(base, entry, 'schema.json')
+        if not os.path.isfile(sp):
+            continue
+        try:
+            with open(sp, encoding='utf-8') as fh:
+                schema = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if schema.get('__host_profile__'):
+            out[entry] = bool(schema.get('__host_multiple_bind__'))
+    return out
+
+
 def module_host_specs(watchfuls_dir: str | None = None) -> dict:
     """Return ``{bare_module: [(protocol, address_field, [field names])]}`` read
     straight from each module's ``__host_profile__`` declaration.

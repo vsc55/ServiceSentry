@@ -189,6 +189,7 @@ class ModuleBase(ObjectBase):
 
             for collection, fields in item_schema.items():
                 if collection in ('__i18n__', '__host_profile__', '__host_multiple__',
+                                   '__host_multiple_bind__', '__overview_widget__',
                                    '__credential__', '__credentials__'):
                     # __i18n__ handled separately; __host_profile__/__host_multiple__
                     # are host-binding metadata; __credential__ is consumed by the
@@ -424,20 +425,49 @@ class ModuleBase(ObjectBase):
         """
         if not isinstance(item, dict):
             return item
+        # Multi-host binding (``__host_multiple_bind__`` modules, e.g. proxmox): a
+        # single check references several hosts via ``host_uids`` — its address
+        # field becomes the failover list of all member addresses.
+        host_uids = item.get('host_uids')
+        if isinstance(host_uids, list):
+            uids = [str(u).strip() for u in host_uids if str(u).strip()]
+            if uids:
+                return self._resolve_bound_hosts(item, uids, multi=True)
         host_uid = str(item.get('host_uid') or '').strip()
         if not host_uid:
             # Inline check (no host): still honour a referenced named credential.
             cred_uid = str(item.get('cred_uid') or '').strip()
             return self._apply_cred(item, cred_uid) if cred_uid else item
+        return self._resolve_bound_hosts(item, [host_uid])
+
+    def _resolve_bound_hosts(self, item: dict, uids: list, multi: bool = False) -> dict:
+        """Merge one or more referenced hosts onto a check (see resolve_host).
+
+        The FIRST resolved host is the primary: it supplies the per-protocol
+        profile fields, the SSH credential, OS and maintenance state.  The
+        address field is filled with the space-joined addresses of ALL bound
+        hosts, so a multi-host (cluster) check fails over across its nodes.
+
+        For a *multi*-host (cluster) binding, the member roster is exposed as
+        ``__cluster_members__`` (uid/name/address/maintenance + the manually
+        assigned ``node`` name from the host's profile), so the module can map
+        each API node to its host; and a member in maintenance does NOT disable
+        the whole check (the module skips just that node).
+        """
         store = getattr(self._monitor, '_hosts_store', None)
         if store is None:
             return item
-        try:
-            host = store.get(host_uid)
-        except Exception:  # pylint: disable=broad-except
+        hosts = []
+        for u in uids:
+            try:
+                h = store.get(u)
+            except Exception:  # pylint: disable=broad-except
+                h = None
+            if h:
+                hosts.append(h)
+        if not hosts:
             return item
-        if not host:
-            return item
+        primary = hosts[0]
 
         specs = (getattr(self, 'ITEM_SCHEMA', None) or {}).get('__host_profile__')
         if isinstance(specs, dict):
@@ -445,8 +475,13 @@ class ModuleBase(ObjectBase):
         if not isinstance(specs, list):
             return item
 
-        profiles = host.get('profiles') or {}
-        is_remote = str(host.get('kind') or 'local').strip().lower() == 'remote'
+        # Failover address list across every bound host (a cluster spans nodes).
+        addresses = [str(h.get('address')).strip() for h in hosts
+                     if str(h.get('address') or '').strip()]
+        address_value = ' '.join(addresses)
+
+        profiles = primary.get('profiles') or {}
+        is_remote = str(primary.get('kind') or 'local').strip().lower() == 'remote'
         conn: dict = {}
         for spec in specs:
             if not isinstance(spec, dict):
@@ -459,12 +494,12 @@ class ModuleBase(ObjectBase):
             addr_field = spec.get('address_field')
             # The host address fills the address_field ONLY when the check does
             # not already carry its own value.  A visible address_field (e.g.
-            # web's 'url') can thus be overridden per check — needed when one
+            # web's 'server') can thus be overridden per check — needed when one
             # host (a reverse proxy) serves several FQDNs — while hidden ones
             # (snmp 'host', ssh 'ssh_host') stay blank and always take the host.
-            if (addr_field and host.get('address')
+            if (addr_field and address_value
                     and not str(item.get(addr_field) or '').strip()):
-                conn[addr_field] = host['address']
+                conn[addr_field] = address_value
             prof = profiles.get(spec.get('key')) or {}
             if isinstance(prof, dict):
                 # Only non-empty values of fields the schema DECLARES as
@@ -489,15 +524,34 @@ class ModuleBase(ObjectBase):
         # branch on it.  'auto' on a LOCAL host resolves to this process's
         # platform; on a remote host it stays 'auto' (resolved over SSH by the
         # consumer when needed).
-        host_os = str(host.get('os') or 'auto').strip().lower()
+        host_os = str(primary.get('os') or 'auto').strip().lower()
         if host_os == 'auto' and not is_remote:
             host_os = os_detect.local_os()
         resolved['host_os'] = host_os
         resolved['host_kind'] = 'remote' if is_remote else 'local'
-        # A host in maintenance: skip every check bound to it this cycle.  We
-        # mark it disabled (modules already skip disabled items) and leave a
-        # marker for any caller that wants to report the maintenance state.
-        if host.get('maintenance'):
+        if multi:
+            # Cluster roster: each member's identity + its manually-assigned node
+            # name (host profile of the module's address-bearing key, e.g.
+            # proxmox → profiles.proxmox.node).  Lets the module correlate API
+            # nodes with hosts (maintenance-by-host, host name in status, …).
+            addr_key = next((s.get('key') for s in specs
+                             if isinstance(s, dict) and s.get('address_field')), None)
+            members = []
+            for h in hosts:
+                hp = (h.get('profiles') or {}).get(addr_key) or {} if addr_key else {}
+                members.append({
+                    'host_uid':    h.get('uid', ''),
+                    'name':        h.get('name', ''),
+                    'address':     h.get('address', ''),
+                    'maintenance': bool(h.get('maintenance')),
+                    'node':        str((hp.get('node') if isinstance(hp, dict) else '') or '').strip(),
+                })
+            resolved['__cluster_members__'] = members
+            # A member in maintenance must NOT disable the whole cluster check —
+            # the module skips just that node (via the roster).
+        elif primary.get('maintenance'):
+            # Single-host check: a host in maintenance skips every check bound to
+            # it this cycle (disabled; modules already skip disabled items).
             resolved['enabled'] = False
             resolved['_host_maintenance'] = True
         return resolved

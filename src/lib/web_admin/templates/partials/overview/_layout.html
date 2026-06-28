@@ -99,14 +99,14 @@ function _dwTabBtn(sel) {
 // A widget is navigable when its target tab — and its sub-tab, if it has one —
 // are both permitted for the current user.
 function _dwIsNavigable(wid) {
-    const nav = _DW_NAV[wid];
+    const nav = _DW_NAV[_dwBaseId(wid)];
     if (!nav || !_dwTabBtn(nav.tab)) return false;
     return !nav.sub || !!_dwTabBtn(nav.sub);
 }
 
 // Switch to the widget's tab (and sub-tab). No-op without permission.
 function _dwNavigate(wid) {
-    const nav = _DW_NAV[wid];
+    const nav = _DW_NAV[_dwBaseId(wid)];
     if (!nav) return;
     const main = _dwTabBtn(nav.tab);
     if (!main) return;
@@ -128,11 +128,38 @@ function _dwOnGridClick(e) {
 
 // Spacers are dynamic (multiple instances, ids "spacer:N"); they have no
 // catalog entry, so resolve their definition synthetically.
+// Module-contributed widgets (schema __overview_widget__) → addable widget types
+// keyed `mw_<module>`.  Instances carry a `:N` suffix; the core knows NOTHING
+// about any specific module — icon/title/multi/perm come from MODULE_WIDGETS and
+// the data from the module's overview_widget() hook.
+const _DW_MODULE = {};
+for (const [mod, def] of Object.entries((typeof MODULE_WIDGETS !== 'undefined' ? MODULE_WIDGETS : {}) || {})) {
+    _DW_MODULE['mw_' + mod] = {
+        module: mod, icon: def.icon || 'bi-grid-1x2', dCols: def.cols || 4, dH: def.h || 340,
+        hasH: true, multi: !!def.multi, perm: def.perm || 'modules_view',
+        label_i18n: def.label_i18n || {},
+        canShow: (p) => !def.perm || p.has(def.perm),
+    };
+}
+function _dwBaseId(id) { return String(id).split(':')[0]; }
+function _dwModuleDef(id) { return _DW_MODULE[_dwBaseId(id)] || null; }
+function _dwIsModuleWidget(id) { return !!_dwModuleDef(id); }
+function _dwIsMulti(id) { const d = _dwModuleDef(id); return !!(d && d.multi); }
+// Resolved display title for any widget def (core widgets use lkey; module widgets
+// carry a label_i18n map from their pretty_name).
+function _dwLabel(def) {
+    if (!def) return '';
+    if (def.lkey) return t(def.lkey);
+    const li = def.label_i18n || {};
+    return li[CURRENT_LANG] || li[SYSTEM_DEFAULT_LANG] || def.module || '';
+}
 function _dwIsSpacer(id) { return String(id).startsWith('spacer:'); }
 function _dwDef(id) {
     if (_dwIsSpacer(id))
         return { icon: 'bi-distribute-horizontal', lkey: 'overview_spacer',
                  dCols: 2, dH: 'auto', hasH: false, spacer: true, canShow: () => true };
+    const mw = _dwModuleDef(id);
+    if (mw) return mw;
     return _DW_DEFS[id];
 }
 
@@ -163,7 +190,7 @@ function _dwResolvedDefault() {
     if (Array.isArray(_dwGlobalDefault) && _dwGlobalDefault.length) {
         const known = new Set(Object.keys(_DW_DEFS));
         const layout = _dwGlobalDefault
-            .filter(w => w && (known.has(w.id) || _dwIsSpacer(w.id)))
+            .filter(w => w && (known.has(w.id) || _dwIsSpacer(w.id) || _dwIsModuleWidget(w.id)))
             .map(w => ({ ...w }));
         return _dwMergeMissing(layout);
     }
@@ -178,7 +205,7 @@ function _dwLoad() {
             const saved = JSON.parse(raw);
             const known = new Set(Object.keys(_DW_DEFS));
             const layout = (Array.isArray(saved) ? saved : [])
-                .filter(w => known.has(w.id) || _dwIsSpacer(w.id));
+                .filter(w => known.has(w.id) || _dwIsSpacer(w.id) || _dwIsModuleWidget(w.id));
             return _dwMergeMissing(layout);
         }
     } catch (_) {}
@@ -186,7 +213,7 @@ function _dwLoad() {
     const db = (currentUser && Array.isArray(currentUser.dashboard_layout)) ? currentUser.dashboard_layout : [];
     if (db.length) {
         const known = new Set(Object.keys(_DW_DEFS));
-        const layout = db.filter(w => w && (known.has(w.id) || _dwIsSpacer(w.id))).map(w => ({ ...w }));
+        const layout = db.filter(w => w && (known.has(w.id) || _dwIsSpacer(w.id) || _dwIsModuleWidget(w.id))).map(w => ({ ...w }));
         return _dwMergeMissing(layout);
     }
     // 3) Org-wide default → 4) factory built-in.
@@ -204,6 +231,7 @@ function _dwSave() {
         ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
         ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
+        ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
 }
@@ -339,6 +367,17 @@ function _dwSetServerFilter(sel) {
     _dwSave();
 }
 
+// Set a module widget's scope ('' = all entries, 'sum' = aggregate, or a specific
+// entry id) — generic across any module-contributed widget.
+function _dwSetModuleScope(sel) {
+    const dw = sel.closest('.dw[data-wid]');
+    if (!dw) return;
+    if (sel.value === '') delete dw.dataset.mws; else dw.dataset.mws = sel.value;
+    const content = dw.querySelector('.dw-content');
+    if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwSave();
+}
+
 function _dwCycleW(btn, dir) {
     const dw    = btn.closest('.dw');
     const cycle = _dwIsSpacer(dw.dataset.wid) ? _DW_COLS_CYCLE_SP : _DW_COLS_CYCLE;
@@ -391,10 +430,37 @@ function _dwBeginResize(e, dw) {
 
 function _dwRemove(btn) {
     const dw = btn.closest('.dw');
-    // Spacers are unlimited and disposable → delete them outright; real
-    // widgets are only hidden so they can be re-added from the bar.
-    if (_dwIsSpacer(dw.dataset.wid)) dw.remove();
+    // Spacers and module-contributed widgets are disposable instances → delete
+    // them outright; singleton core widgets are only hidden so they can be
+    // re-added from the bar.
+    if (_dwIsSpacer(dw.dataset.wid) || _dwIsModuleWidget(dw.dataset.wid)) dw.remove();
     else dw.style.display = 'none';
+    _dwSave();
+    _dwRefreshAddBar();
+}
+
+// Add a fresh instance of a multi-instance widget (new `<base>:N` id).
+function _dwAddInstance(base) {
+    const grid = document.getElementById('dashboardGrid');
+    if (!grid) return;
+    let n = 0;
+    grid.querySelectorAll(`.dw[data-wid^="${base}:"]`).forEach(el => {
+        const i = parseInt(String(el.dataset.wid).split(':')[1]) || 0;
+        if (i >= n) n = i + 1;
+    });
+    const id  = base + ':' + n;
+    const def = _dwDef(id);
+    const hpx = (def.dH && def.dH !== 'auto') ? def.dH : null;
+    const el  = document.createElement('div');
+    el.className = `dw dw-c${def.dCols}`;
+    el.dataset.wid = id;
+    el.dataset.cols = def.dCols;
+    el.dataset.h = def.dH || 'auto';
+    el.innerHTML = _dwToolbar(id, def.dCols, def.dH || 'auto')
+        + `<div class="dw-content"${hpx ? ` style="flex:none;height:${hpx}px;overflow-y:auto"` : ''}>${_dwContent(id, _lastOverviewData || {})}</div>`
+        + (def.hasH ? `<div class="dw-resize" title="${escAttr(t('widget_resize_h') || 'Drag to resize height')}"></div>` : '');
+    grid.appendChild(el);
+    _dwInitDnd(grid);   // wires drag (toolbar) + resize (.dw-resize handle)
     _dwSave();
     _dwRefreshAddBar();
 }
@@ -442,11 +508,21 @@ function _dwRefreshAddBar() {
     // Spacer can always be added (multiple instances allowed).
     h += `<button class="btn btn-sm btn-primary" onclick="_dwAddSpacer()">
         <i class="bi bi-distribute-horizontal me-1"></i>${esc(t('overview_spacer'))}</button>`;
+    // Module-contributed widgets: one button per type → adds a new instance each
+    // click (gated by the widget's permission).  A non-multi widget hides its
+    // button once an instance exists.
+    const _perms = new Set(currentUser.permissions || []);
+    for (const [base, def] of Object.entries(_DW_MODULE)) {
+        if (def.canShow && !def.canShow(_perms)) continue;
+        if (!def.multi && grid.querySelector(`.dw[data-wid^="${base}:"]`)) continue;
+        h += `<button class="btn btn-sm btn-primary" onclick="_dwAddInstance(${jsStr(base)})">
+            <i class="bi ${def.icon} me-1"></i>${esc(_dwLabel(def))}</button>`;
+    }
     for (const el of hidden) {
         const def = _dwDef(el.dataset.wid);
         if (!def) continue;
         h += `<button class="btn btn-sm btn-primary" onclick="_dwAdd(${jsStr(el.dataset.wid)})">
-            <i class="bi ${def.icon} me-1"></i>${esc(t(def.lkey))}</button>`;
+            <i class="bi ${def.icon} me-1"></i>${esc(_dwLabel(def))}</button>`;
     }
     bar.innerHTML = h;
 }
@@ -497,6 +573,7 @@ async function _dwSaveDb() {
         ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
         ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
+        ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
     const r = await apiPut('/api/v1/users/me/preferences', { dashboard_layout: layout });
@@ -521,6 +598,7 @@ async function _dwSetDefault() {
         ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
         ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
+        ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
     }));
     const r = await apiPut('/api/v1/overview/default-layout', { layout });
     if (r && r.ok) {
@@ -564,6 +642,18 @@ function _dwToolbar(id, cols, h, item) {
             .map(([v, lbl]) => `<option value="${v}"${f === v ? ' selected' : ''}>${esc(lbl)}</option>`).join('');
         tb += `<select class="form-select form-select-sm dw-srvf py-0" style="width:auto;min-width:6em;font-size:.72rem"
             onchange="_dwSetServerFilter(this)" title="${escAttr(t('dw_srv_filter'))}">${so}</select>`;
+    }
+    if (_dwIsModuleWidget(id)) {
+        const f = item ? (item.mws ?? '') : '';
+        const mod = _dwModuleDef(id).module;
+        const entries = (((_lastOverviewData || {}).module_widgets || {})[mod] || {}).entries || [];
+        const opts = [['', t('dw_mw_all')], ['sum', t('dw_mw_sum')]]
+            .map(([v, lbl]) => `<option value="${v}"${f === v ? ' selected' : ''}>${esc(lbl)}</option>`)
+            .concat(entries.map(e =>
+                `<option value="${escAttr(e.id)}"${f === e.id ? ' selected' : ''}>${esc(e.name)}</option>`))
+            .join('');
+        tb += `<select class="form-select form-select-sm dw-mws py-0" style="width:auto;min-width:7em;font-size:.72rem"
+            onchange="_dwSetModuleScope(this)">${opts}</select>`;
     }
     // Width
     tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;

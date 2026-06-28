@@ -1,5 +1,6 @@
 {# ================================================================
-   User modal — openNewUserModal, openEditUserModal, saveUserModal.
+   User modal — openUserModal (one modal for new/edit/clone) + the
+   openNewUserModal/openEditUserModal/cloneUserModal entry wrappers, saveUserModal.
    ================================================================ #}
 
 // Factory defaults per DB-backed table — the visible-column set plus the full
@@ -11,18 +12,31 @@ const _UM_TABLE_DEFAULTS = {
     groups:   { cols: () => _GROUPS_DEFAULT_COLS,   all: () => _GRP_COLS },
     audit:    { cols: () => _AUDIT_DEFAULT_COLS,    all: () => _AUDIT_COLS },
     sessions: { cols: () => _SESSIONS_DEFAULT_COLS, all: () => _SES_COLS },
+    evrules:  { cols: () => _EVR_DEFAULT_COLS,      all: () => _EVR_COLS },
+    evlog:    { cols: () => _EVL_DEFAULT_COLS,      all: () => _EVL_COLS },
+    syslog:   { cols: () => _SL_DEFAULT_COLS,       all: () => _SL_COLS },
+    sldrops:  { cols: () => _SLD_DEFAULT_COLS,      all: () => _SLD_COLS },
 };
 
 // 'uid' is injected at the front of the order only for admin viewers; strip it so
 // an admin's saved layout isn't mistaken for a customisation.
 function _umStripUid(arr) { return Array.isArray(arr) ? arr.filter(c => c !== 'uid') : []; }
 
+// Defaults for `tbl`: factory-driven tables come from the registry (their cols can
+// be dynamic), the rest from the static _UM_TABLE_DEFAULTS map.
+function _umTableDef(tbl) {
+    const r = (typeof _LIST_TABLE_REGISTRY !== 'undefined' ? _LIST_TABLE_REGISTRY : []).find(d => d.k === tbl);
+    if (r) return { cols: () => r.def(), all: () => r.all(), umCustomised: r.umCustomised };
+    return _UM_TABLE_DEFAULTS[tbl];
+}
+
 // True when the stored layout for `tbl` differs from its factory default in any
 // of: resized columns, visible-column set, column order, or (sessions) view mode.
 function _umTableCustomised(tbl, cfg) {
     if (!cfg || typeof cfg !== 'object') return false;
+    const def = _umTableDef(tbl);
+    if (def && def.umCustomised) return def.umCustomised(cfg);   // table-specific override
     if (cfg.w && typeof cfg.w === 'object' && Object.keys(cfg.w).length) return true;
-    const def = _UM_TABLE_DEFAULTS[tbl];
     if (!def) return false;
     const defCols = def.cols();
     if (Array.isArray(cfg.cols)) {
@@ -43,7 +57,14 @@ function _umTableCustomised(tbl, cfg) {
 function _umRenderClearTables() {
     const tables = [['users', 'subtab_users'], ['roles', 'subtab_roles'],
                     ['groups', 'subtab_groups'], ['audit', 'tab_audit'],
-                    ['sessions', 'subtab_sessions']];
+                    ['sessions', 'subtab_sessions'],
+                    ['evrules', 'tbl_lbl_evrules'], ['evlog', 'tbl_lbl_evlog'],
+                    ['syslog', 'tab_syslog'], ['sldrops', 'tbl_lbl_sldrops']];
+    // Append factory-driven tables not already listed (Credentials/Servers/Clusters).
+    const _have = new Set(tables.map(e => e[0]));
+    (typeof _LIST_TABLE_REGISTRY !== 'undefined' ? _LIST_TABLE_REGISTRY : []).forEach(d => {
+        if (d.clearLabelKey && !_have.has(d.k)) { _have.add(d.k); tables.push([d.k, d.clearLabelKey]); }
+    });
     const tc = (usersData[_editingUser] || {}).table_config || {};
     const grid = document.getElementById('umClearTablesGrid');
     if (grid) grid.innerHTML = tables.map(([k, lk]) => {
@@ -74,87 +95,155 @@ function _umSyncMasterTables() {
     m.indeterminate = n > 0 && n < boxes.length;
 }
 
-function openNewUserModal() {
-    _editingUser = null;
-    document.getElementById('userModalTitle').textContent = t('new_user');
-    document.getElementById('umUsername').value = '';
-    document.getElementById('umUsername').disabled = false;
-    document.getElementById('umDisplayName').value = '';
-    document.getElementById('umDisplayName').readOnly = false;
-    document.getElementById('umDisplayName').removeAttribute('title');
-    document.getElementById('umLang').value = '';
-    document.getElementById('umDarkMode').value = '';
-    document.getElementById('umPassword').value = '';
-    document.getElementById('umPasswordGroup').style.display = '';
-    _updatePasswordStrength('umPassword', 'umPwStrengthBar', 'umPwStrengthLabel');
-    document.getElementById('umEmail').value = '';
-    document.getElementById('umEmail').readOnly = false;
-    document.getElementById('umEmail').removeAttribute('title');
-    document.getElementById('umEnabledGroup').style.display = '';
-    const umEnabledNew = document.getElementById('umEnabled');
-    umEnabledNew.checked = true;
-    umEnabledNew.disabled = false;
-    document.getElementById('umUidRow').classList.add('d-none');
-    document.getElementById('umUid').value = '';
-    document.getElementById('umSessionsGroup').style.display = 'none';
-    document.getElementById('umTabPrefsLi').style.display = 'none';   // new user: no prefs yet
-    document.getElementById('umRoleSearch').value = '';
-    document.getElementById('umGroupSearch').value = '';
-    _umSelectedRole = _defaultUserRole();
-    _umSelectedGroups = new Set();
-    _umPopulateRoles('');
-    _umPopulateGroups('');
-    bootstrap.Tab.getOrCreateInstance(document.querySelector('#userModalTabs [data-bs-target="#umTabGeneral"]')).show();
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
+// Stable, localized label for a resizable modal by its element id (the saved
+// instance title like "Clone: X" can't tell user/group/role apart). Falls back to
+// a prettified id for any modal not in the map.
+const _UM_MODAL_LBL = {
+    userModal: 'user', groupModal: 'group', roleModal: 'role', eventRuleModal: 'event_rule',
+    credModal: 'credential', credModalBody: 'credential', hostModal: 'server',
+    addModuleModal: 'module', addModuleModalBody: 'module', moduleExpandModal: 'module',
+    moduleActionModalBody: 'module_action', discoverModal: 'discover', fieldPickerModal: 'field_picker',
+    hostTestModal: 'host_test', hostTestModalBody: 'host_test', notifHtmlPreviewModal: 'notif_preview',
+    infoModal: 'info', cfgUpdateDetailBody: 'cfg_update',
+};
+function _umModalLabel(id) {
+    const k = _UM_MODAL_LBL[id];
+    const lbl = k && t('modal_lbl_' + k);
+    if (lbl) return lbl;
+    return id.replace(/Modal(Body)?$/, '').replace(/([a-z])([A-Z])/g, '$1 $2')
+             .replace(/^./, c => c.toUpperCase()) || id;
+}
+// One checkbox per saved modal/dialog size (so the user clears only the ones they
+// want). Label = stable modal type; the saved instance title is a tooltip.
+function _umRenderClearModals() {
+    const mc = (usersData[_editingUser] || {}).modal_config || {};
+    const ids = Object.keys(mc).sort((a, b) => _umModalLabel(a).localeCompare(_umModalLabel(b)));
+    const grid = document.getElementById('umClearModalsGrid');
+    if (grid) grid.innerHTML = ids.length
+        ? ids.map(id => {
+            const label = _umModalLabel(id);
+            const tip = (mc[id] && mc[id].t) ? ` title="${escAttr(mc[id].t)}"` : '';
+            return `<div class="col-sm-6"><div class="form-check"${tip}>
+                <input class="form-check-input um-clear-modal" type="checkbox" id="umClearMdl_${esc(id)}" value="${escAttr(id)}" onchange="_umSyncMasterModals()">
+                <label class="form-check-label small" for="umClearMdl_${esc(id)}">${esc(label)}</label>
+            </div></div>`;
+        }).join('')
+        : `<div class="col-12"><span class="small text-body-tertiary">${esc(t('user_not_customised'))}</span></div>`;
+    _umSyncMasterModals();
+}
+function _umToggleAllModals(checked) {
+    document.querySelectorAll('#umClearModalsGrid .um-clear-modal').forEach(cb => { cb.checked = checked; });
+    const m = document.getElementById('umClearAllModals');
+    if (m) m.indeterminate = false;
+}
+function _umSyncMasterModals() {
+    const boxes = [...document.querySelectorAll('#umClearModalsGrid .um-clear-modal')];
+    const n = boxes.filter(cb => cb.checked).length;
+    const m = document.getElementById('umClearAllModals');
+    if (!m) return;
+    m.disabled = boxes.length === 0;
+    m.checked = n > 0 && n === boxes.length;
+    m.indeterminate = n > 0 && n < boxes.length;
 }
 
-async function openEditUserModal(username) {
-    _editingUser = username;
-    // Refresh from the server first — another session may have changed this
-    // user's saved layouts, so the Customisations tab reflects current state
-    // without needing a full page reload.
-    const _fresh = await apiGet('/api/v1/users');
-    if (_fresh && _fresh[username]) usersData = _fresh;
-    const u = usersData[username] || {};
-    document.getElementById('userModalTitle').textContent = t('edit_user_title') + ': ' + username;
-    document.getElementById('umUsername').value = username;
-    document.getElementById('umUsername').disabled = true;
-    document.getElementById('umDisplayName').value = u.display_name || '';
-    document.getElementById('umLang').value = u.lang || '';
-    const _dm = u.dark_mode;
-    document.getElementById('umDarkMode').value = _dm === true ? 'dark' : _dm === false ? 'light' : '';
-    document.getElementById('umPasswordGroup').style.display = 'none';
-    document.getElementById('umEmail').value = u.email || '';
-    const _isSsoUser = (u.auth_source && u.auth_source !== 'local');
-    const _ssoHint = _isSsoUser ? t('sso_field_managed_externally') : '';
-    document.getElementById('umDisplayName').readOnly = _isSsoUser;
-    document.getElementById('umDisplayName').title    = _ssoHint;
-    document.getElementById('umEmail').readOnly = _isSsoUser;
-    document.getElementById('umEmail').title    = _ssoHint;
-    const isSelf = username === currentUser.username;
-    const enabledChk = document.getElementById('umEnabled');
-    enabledChk.checked = u.enabled !== false;
-    enabledChk.disabled = isSelf;
-    document.getElementById('umUidRow').classList.remove('d-none');
-    document.getElementById('umUid').value = u.uid || '';
+// One modal for create / edit / clone — the entry point picks the mode:
+//   'new'   → blank form; password required.
+//   'edit'  → load the user (refreshed from the server so the Customisations tab
+//             reflects current state); username + password locked, Preferences
+//             tab + active sessions shown.
+//   'clone' → copy role/groups/lang/dark_mode/email/enabled into a NEW user; a new
+//             username + password are required (the password hash is never sent to
+//             the client, so it can't be copied). Display name gets a copy suffix.
+async function openUserModal(username, mode = 'edit') {
+    const clone = mode === 'clone';
+    const isNew = mode === 'new' || clone;          // both create a new user
+    // Edit refreshes from the server first — another session may have changed this
+    // user's saved layouts.
+    if (mode === 'edit' && username) {
+        const fresh = await apiGet('/api/v1/users');
+        if (fresh && fresh[username]) usersData = fresh;
+    }
+    const u = username ? (usersData[username] || {}) : {};
+    _editingUser = isNew ? null : username;         // null → save POSTs a new user
+
+    document.getElementById('userModalTitle').textContent =
+        clone ? (t('clone') + ': ' + username)
+              : (mode === 'new' ? t('new_user') : (t('edit_user_title') + ': ' + username));
+
+    const unameEl = document.getElementById('umUsername');
+    unameEl.value    = isNew ? '' : username;       // new/clone: admin enters a new username
+    unameEl.disabled = !isNew;                      // locked only on edit
+
+    // SSO-managed fields are read-only when editing an externally-sourced user.
+    const isSso   = !isNew && u.auth_source && u.auth_source !== 'local';
+    const ssoHint = isSso ? t('sso_field_managed_externally') : '';
+    const dn = document.getElementById('umDisplayName');
+    dn.value = clone ? (u.display_name || username) + ' (' + t('clone_copy_suffix') + ')'
+                     : (mode === 'new' ? '' : (u.display_name || ''));
+    dn.readOnly = isSso;
+    if (ssoHint) dn.title = ssoHint; else dn.removeAttribute('title');
+
+    document.getElementById('umLang').value = (mode === 'new') ? '' : (u.lang || '');
+    const dm = u.dark_mode;
+    document.getElementById('umDarkMode').value =
+        (mode === 'new') ? '' : (dm === true ? 'dark' : dm === false ? 'light' : '');
+
+    // Password: shown (and required) for new/clone, hidden on edit.
+    document.getElementById('umPasswordGroup').style.display = isNew ? '' : 'none';
+    if (isNew) {
+        const pwEl = document.getElementById('umPassword');
+        pwEl.value = '';
+        pwEl.type = 'password';                     // re-hide if a prior open revealed a generated one
+        _syncPwToggleIcon('umPassword', 'umPwToggleBtn');
+        _updatePasswordStrength('umPassword', 'umPwStrengthBar', 'umPwStrengthLabel');
+    }
+
+    const em = document.getElementById('umEmail');
+    em.value = (mode === 'new') ? '' : (u.email || '');
+    em.readOnly = isSso;
+    if (ssoHint) em.title = ssoHint; else em.removeAttribute('title');
+
     document.getElementById('umEnabledGroup').style.display = '';
-    document.getElementById('umTabPrefsLi').style.display = '';
-    _umRenderClearTables();
-    const _umDash = document.getElementById('umClearDashboard');
-    _umDash.checked = false;
-    _umDash.disabled = !u.has_dashboard_layout;   // enable only if a custom layout exists
-    _umSessionsSort = 'last_seen';
-    _umSessionsSortDir = 'desc';
-    _umRenderSessions(username);
+    const isSelf = !isNew && username === currentUser.username;
+    const en = document.getElementById('umEnabled');
+    en.checked  = (mode === 'new') ? true : u.enabled !== false;   // clone copies the source state
+    en.disabled = isSelf;                           // can't disable your own account
+
+    document.getElementById('umUidRow').classList.toggle('d-none', isNew);
+    document.getElementById('umUid').value = isNew ? '' : (u.uid || '');
+
+    // Active sessions + Preferences (Customisations) tab only exist for a real user.
+    if (isNew) {
+        document.getElementById('umSessionsGroup').style.display = 'none';
+        document.getElementById('umTabPrefsLi').style.display = 'none';
+    } else {
+        document.getElementById('umTabPrefsLi').style.display = '';
+        _umRenderClearTables();
+        const dash = document.getElementById('umClearDashboard');
+        dash.checked = false;
+        dash.disabled = !u.has_dashboard_layout;   // enable only if a custom layout exists
+        _umRenderClearModals();                    // per-saved-modal checkboxes
+        _umSessionsSort = 'last_seen';
+        _umSessionsSortDir = 'desc';
+        _umRenderSessions(username);                // toggles umSessionsGroup visibility
+    }
+
     document.getElementById('umRoleSearch').value = '';
     document.getElementById('umGroupSearch').value = '';
-    _umSelectedRole = u.role || 'viewer';
-    _umSelectedGroups = new Set(u.groups || []);
+    _umSelectedRole   = (mode === 'new') ? _defaultUserRole() : (u.role || (clone ? _defaultUserRole() : 'viewer'));
+    _umSelectedGroups = (mode === 'new') ? new Set() : new Set(u.groups || []);
     _umPopulateRoles('');
     _umPopulateGroups('');
-    bootstrap.Tab.getOrCreateInstance(document.querySelector('#userModalTabs [data-bs-target="#umTabGeneral"]')).show();
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
+    _setActiveTab('userModalTabs', 'userModalTabContent', '#umTabGeneral');
+    _setModalSaveButton('btnUserModalOk', mode);
+    const modalEl = document.getElementById('userModal');
+    // new/clone both need a fresh username typed → focus it (clone has no prefilled name).
+    _focusNameOnCreate(modalEl, 'umUsername', mode === 'clone' ? 'new' : mode);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
+function openNewUserModal()         { openUserModal(null, 'new'); }
+function openEditUserModal(username) { return openUserModal(username, 'edit'); }
+function cloneUserModal(username)    { openUserModal(username, 'clone'); }
 
 async function saveUserModal() {
     const username = document.getElementById('umUsername').value.trim();
@@ -162,9 +251,17 @@ async function saveUserModal() {
     const role = _umSelectedRole || 'none';
     const lang = document.getElementById('umLang').value;
     const groups = [..._umSelectedGroups];
-    if (!username) { showToast(t('username_required'), 'warning'); return; }
+    const unameEl = document.getElementById('umUsername');
+    const unameErr = document.getElementById('umUsernameError');
+    const markUsernameInvalid = (msg) => {
+        if (unameErr) unameErr.textContent = msg;
+        unameEl.classList.add('is-invalid');
+        bootstrap.Tab.getOrCreateInstance(document.querySelector('#userModalTabs [data-bs-target="#umTabGeneral"]')).show();
+        unameEl.focus();
+    };
+    if (!username) { markUsernameInvalid(t('username_required')); return; }
     if (!_editingUser && !_isUniqueName(username, usersData, k => k)) {
-        showToast(tf('user_already_exists', username), 'warning'); return;
+        markUsernameInvalid(tf('user_already_exists', username)); return;
     }
     if (_editingUser) {
         const enabled = document.getElementById('umEnabled').checked;
@@ -174,8 +271,10 @@ async function saveUserModal() {
         const clear_table_keys = [...document.querySelectorAll('#umClearTablesGrid .um-clear-table:checked')]
             .map(cb => cb.value);
         const clear_dashboard_layout = document.getElementById('umClearDashboard').checked;
+        const clear_modal_keys = [...document.querySelectorAll('#umClearModalsGrid .um-clear-modal:checked')]
+            .map(cb => cb.value);
         const body = { role, display_name, lang, groups, enabled, email, dark_mode,
-                       clear_table_keys, clear_dashboard_layout };
+                       clear_table_keys, clear_dashboard_layout, clear_modal_keys };
         const r = await apiPut('/api/v1/users/' + encodeURIComponent(_editingUser), body);
         if (r && r.ok) {
             showToast(t('user_updated'));
@@ -198,6 +297,15 @@ async function saveUserModal() {
             if (clear_table_keys.length && usersData[_editingUser].table_config)
                 clear_table_keys.forEach(k => delete usersData[_editingUser].table_config[k]);
             if (clear_dashboard_layout) usersData[_editingUser].has_dashboard_layout = false;
+            if (clear_modal_keys.length) {
+                const mc = usersData[_editingUser].modal_config || {};
+                clear_modal_keys.forEach(k => delete mc[k]);
+                usersData[_editingUser].modal_config = mc;
+                if (_editingUser === currentUser.username) {
+                    clear_modal_keys.forEach(k => { if (currentUser.modal_config) delete currentUser.modal_config[k]; });
+                    if (typeof _applyUserModalConfig === 'function') _applyUserModalConfig(currentUser.modal_config || {});
+                }
+            }
             if (_editingUser === currentUser.username) {
                 currentUser.role = role;
                 currentUser.display_name = display_name || _editingUser;
@@ -215,7 +323,7 @@ async function saveUserModal() {
         if (r && r.status === 201) {
             showToast(t('user_created'));
             const _nowC = _nowISO();
-            usersData[username] = { role, display_name: display_name || username, lang, groups, email, enabled, created_at: _nowC, updated_at: _nowC, updated_by: currentUser.username || '' };
+            usersData[username] = { uid: r.data?.uid || '', role, display_name: display_name || username, lang, groups, email, enabled, created_at: _nowC, updated_at: _nowC, updated_by: currentUser.username || '' };
             for (const g of groups) {
                 if (groupsData[g]) {
                     if (!groupsData[g].members) groupsData[g].members = [];

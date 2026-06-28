@@ -55,13 +55,18 @@ function _bindSearch(inputId, fn, checkBound = false) {
 /** Delegate `change` on a checkbox/radio container to keep a Set (checkboxes)
  *  or a scalar (radios) in sync with the user's selection.
  *  - checkbox: toggles *set* membership by the input value.
- *  - radio:    calls onRadio(value) so the caller can store the choice. */
-function _bindSetSelection(containerId, set, type, onRadio = null) {
+ *  - radio:    calls onRadio(value) so the caller can store the choice.
+ *  *setOrGetter* may be a Set OR a function returning the current Set — pass a
+ *  getter when the caller REASSIGNS the Set (e.g. `_x = new Set(...)` on each
+ *  modal open), so the handler always mutates the live Set, not a stale one. */
+function _bindSetSelection(containerId, setOrGetter, type, onRadio = null) {
     const el = document.getElementById(containerId);
     if (!el) return;
     el.addEventListener('change', e => {
         if (e.target.type !== type) return;
         if (type === 'checkbox') {
+            const set = (typeof setOrGetter === 'function') ? setOrGetter() : setOrGetter;
+            if (!set) return;
             if (e.target.checked) set.add(e.target.value);
             else set.delete(e.target.value);
         } else if (type === 'radio' && onRadio) {
@@ -76,17 +81,35 @@ function _bindSetSelection(containerId, set, type, onRadio = null) {
  *  toggleFn / resetFn — names (strings) of the global handlers wired into the
  *                       inline onchange/onclick (e.g. '_usersToggleCol').
  *  Returns the dropdown HTML string. */
+// Metadata columns shared by the list tables (Users/Groups/Roles/Credentials):
+// these size to their content and are NOT resizable (rendered as ss-th-fit + the
+// cell gets data-fit). They stay reorderable like any other column.
+const _LIST_FIT_COLS = new Set(['uid', 'created_at', 'updated_at', 'updated_by']);
+// Tracks whether Ctrl/⌘ is currently held, so the column chooser can keep its menu
+// open while ticking several columns (the checkbox 'change' event doesn't carry
+// modifier keys reliably). Reset on blur so a missed keyup can't leave it stuck.
+let _modCtrlHeld = false;
+document.addEventListener('keydown', e => { if (e.key === 'Control' || e.key === 'Meta') _modCtrlHeld = true; }, true);
+document.addEventListener('keyup',   e => { if (e.key === 'Control' || e.key === 'Meta') _modCtrlHeld = false; }, true);
+window.addEventListener('blur', () => { _modCtrlHeld = false; });
+
 function _buildColChooser(cols, visibleSet, toggleFn, resetFn, minWidth = 160) {
+    // Each column toggle re-renders the whole table, which destroys this open menu —
+    // so by default the chooser closes after picking a column (the historical
+    // behaviour). Holding Ctrl/⌘ while clicking keeps it open (_colChooserToggle
+    // re-opens the freshly rendered chooser, matched by the stable data-chooser id),
+    // letting you tick several columns in one go. data-bs-auto-close="outside" stops
+    // Bootstrap from also closing on the click, so the re-render alone controls it.
     return `<div class="dropdown">
-      <button class="btn btn-sm btn-secondary" data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('col_chooser_tt')||'Show/hide columns')}">
+      <button class="btn btn-sm btn-secondary ss-col-chooser" data-chooser="${escAttr(toggleFn)}" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" title="${escAttr((t('col_chooser_tt')||'Show/hide columns') + ' — ' + (t('col_chooser_ctrl_tt')||'hold Ctrl to pick several'))}">
         <i class="bi bi-layout-three-columns"></i>
       </button>
       <ul class="dropdown-menu dropdown-menu-end py-1" style="min-width:${minWidth}px">
         ${cols.map(col => `<li>
-          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="event.stopPropagation()">
-            <input type="checkbox" class="form-check-input m-0"
+          <label class="dropdown-item d-flex align-items-center gap-2 py-1${col.always?' opacity-75':''}" style="cursor:${col.always?'default':'pointer'}" onclick="${col.always ? 'event.stopPropagation()' : `_colChooserToggle(event,'${toggleFn}','${col.id}')`}">
+            <input type="checkbox" class="form-check-input m-0" style="pointer-events:none"
                    ${col.always || visibleSet.has(col.id) ? 'checked' : ''}
-                   ${col.always ? 'disabled' : `onchange="${toggleFn}('${col.id}')"`}>
+                   ${col.always ? 'disabled' : ''}>
             <span class="small">${esc(col.label())}</span>
             ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
           </label></li>`).join('')}
@@ -96,6 +119,38 @@ function _buildColChooser(cols, visibleSet, toggleFn, resetFn, minWidth = 160) {
         </button></li>
       </ul>
     </div>`;
+}
+
+/** Toggle a column from the chooser. Always runs the table's toggle (which re-renders
+ *  and thereby closes the menu); if Ctrl/⌘ is held, re-opens the freshly rendered
+ *  chooser so several columns can be picked without re-opening the menu each time.
+ *  The new chooser is found by its stable data-chooser id (= the toggle function name,
+ *  unique per table). Works for every table that uses _buildColChooser. */
+function _colChooserToggle(ev, fnName, colId) {
+    // Handler is on the <label>; preventDefault stops the label from also activating
+    // (synthesising) a click on the nested checkbox, which would fire this twice and
+    // cancel the toggle. We drive the checked state purely from the re-render.
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    // click fires reliably on Ctrl/⌘-click (change doesn't); fall back to the global
+    // key flag in case the modifier is missing on the event.
+    const keepOpen = (ev && (ev.ctrlKey || ev.metaKey)) || _modCtrlHeld;
+    // Capture the current chooser button so the reopen waits for a *new* one — some
+    // tables (e.g. clusters) re-render asynchronously, so the replacement button
+    // appears a tick later than the synchronous tables.
+    const oldBtn = keepOpen ? document.querySelector(`[data-chooser="${fnName}"]`) : null;
+    const fn = window[fnName];
+    if (typeof fn === 'function') fn(colId);          // runs the table's toggle + re-render
+    if (keepOpen) {
+        // Poll (after the current click resolves) until the re-render has swapped in
+        // the new chooser button, then re-open it. Generic across sync/async renders.
+        let tries = 0;
+        const reopen = () => {
+            const btn = document.querySelector(`[data-chooser="${fnName}"]`);
+            if (btn && btn !== oldBtn && window.bootstrap) { bootstrap.Dropdown.getOrCreateInstance(btn).show(); return; }
+            if (++tries < 40) setTimeout(reopen, 25);
+        };
+        setTimeout(reopen, 0);
+    }
 }
 
 /** Bulk enable/disable over a selection of access-management entities.
@@ -142,6 +197,68 @@ function _isUniqueName(value, collection, getName, excludeKey = null) {
     const v = String(value).toLowerCase();
     return !Object.entries(collection).some(([k, item]) =>
         k !== excludeKey && String(getName(k, item) || '').toLowerCase() === v);
+}
+
+/** Activate a Bootstrap tab synchronously by toggling the classes directly.
+ *  Bootstrap's own Tab.show() relies on transitionend, which never fires while the
+ *  modal is display:none — so setting the tab *before* showing the modal is
+ *  unreliable (the wrong pane can stay active). This sets it deterministically and
+ *  with no flash. navId/contentId = the nav <ul> id and the .tab-content id;
+ *  targetSel = the pane selector, e.g. '#rmTabPerms'. */
+function _setActiveTab(navId, contentId, targetSel) {
+    const cont = document.getElementById(contentId);
+    if (cont) cont.querySelectorAll(':scope > .tab-pane').forEach(p => {
+        const on = ('#' + p.id) === targetSel;
+        p.classList.toggle('show', on); p.classList.toggle('active', on);
+    });
+    const nav = document.getElementById(navId);
+    if (nav) nav.querySelectorAll('.nav-link').forEach(b => {
+        const on = b.getAttribute('data-bs-target') === targetSel;
+        b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on));
+    });
+}
+
+/** Set the primary (OK) button of a create/edit/clone modal: the verb reflects the
+ *  mode so it never reads "Save" when actually creating a brand-new record.
+ *    edit  → Save        (bi-check-lg)
+ *    new   → Create      (bi-plus-lg)
+ *    clone → Create copy (bi-copy) */
+function _setModalSaveButton(btnId, mode) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    const label = mode === 'clone' ? t('create_copy') : mode === 'new' ? t('create') : t('save');
+    const icon  = mode === 'clone' ? 'bi-copy' : mode === 'new' ? 'bi-plus-lg' : 'bi-check-lg';
+    btn.innerHTML = `<i class="bi ${icon} me-1"></i>${esc(label)}`;
+    btn.title = label;
+}
+
+/** Focus (and, when cloning, select) a modal's name field once the modal is fully
+ *  shown — only for create/clone, so editing doesn't steal focus from the content.
+ *  Bound with { once: true } so it never stacks across reopens. */
+function _focusNameOnCreate(modalEl, inputId, mode) {
+    if (!modalEl || mode === 'edit') return;
+    modalEl.addEventListener('shown.bs.modal', () => {
+        const el = document.getElementById(inputId);
+        if (!el) return;
+        el.focus();
+        if (mode === 'clone') el.select();   // copy name pre-filled → let the user retype
+    }, { once: true });
+}
+
+// Latest-data severity filter shared by the server + cluster "Latest data" tabs.
+//   level: 'ok' | 'warning' | 'error';  filter: 'all' | 'issues' | 'errors'.
+function _latestFilterPass(level, filter) {
+    if (filter === 'issues') return level !== 'ok';        // warnings + errors
+    if (filter === 'errors') return level === 'error';     // hard errors only
+    return true;                                            // all
+}
+// A <select> (all / warnings+errors / errors) wired to onchangeFn(value).
+function _latestFilterSelect(id, current, onchangeFn) {
+    const o = (v, label) => `<option value="${v}"${current === v ? ' selected' : ''}>${esc(label)}</option>`;
+    return `<select id="${id}" class="form-select form-select-sm w-auto me-2" style="min-width:11rem"
+        onchange="${onchangeFn}(this.value)" title="${escAttr(t('latest_filter_label'))}">
+        ${o('all', t('latest_filter_all'))}${o('issues', t('latest_filter_issues'))}${o('errors', t('latest_filter_errors'))}
+    </select>`;
 }
 
 function esc(s) {

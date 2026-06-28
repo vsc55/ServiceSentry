@@ -1,0 +1,135 @@
+{
+    "__module__": {
+        "api_ver": "v1",
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "alert":   {"type": "int",  "default": 3,  "min": 1, "max": 20},
+        "timeout": {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 300}
+    },
+    "__history__": {"field": null, "unit": null, "label": "Proxmox VE"},
+    "__host_profile__": {"key": "proxmox", "address_field": "host", "fields": ["host", "port"]},
+    "__host_multiple__": false,
+    "__host_multiple_bind__": true,
+    "__overview_widget__": {"icon": "bi-diagram-3", "multi": true, "perm": "modules_view"},
+    "__credential__": {
+        "type": "proxmox_auth",
+        "fields": [
+            {"name": "auth_method",  "kind": "select", "options": ["token", "password"],
+             "default": "token", "label": "auth_method"},
+            {"name": "token_id",     "kind": "text",     "label": "token_id",
+             "show_when": {"auth_method": ["token"]}},
+            {"name": "token_secret", "kind": "password", "secret": true, "label": "token_secret",
+             "show_when": {"auth_method": ["token"]}},
+            {"name": "username",     "kind": "text",     "label": "username",
+             "show_when": {"auth_method": ["password"]}},
+            {"name": "password",     "kind": "password", "secret": true, "label": "password",
+             "show_when": {"auth_method": ["password"]}}
+        ],
+        "actions": [
+            {
+                "id": "provision_token",
+                "url": "/api/v1/watchfuls/proxmox/provision_token",
+                "icon": "bi-key",
+                "result": "fields",
+                "inputs": [
+                    {"name": "mode",         "kind": "select", "default": "create", "label": "mode",
+                     "options": ["create", "renew"]},
+                    {"name": "host",         "kind": "text", "label": "host"},
+                    {"name": "prov_user",    "kind": "text", "default": "servicesentry@pve", "label": "prov_user"},
+                    {"name": "prov_token",   "kind": "text", "default": "monitoring", "label": "prov_token"},
+                    {"name": "prov_role",    "kind": "text", "default": "ServiceSentryMonitor", "label": "prov_role",
+                     "show_when": {"mode": ["create"]}},
+                    {"name": "allow_updates", "kind": "select", "default": "no", "options": ["no", "yes"],
+                     "label": "allow_updates", "show_when": {"mode": ["create"]}},
+                    {"name": "ssh_cred_uid", "kind": "credential", "credential_type": "ssh", "default": "", "label": "ssh_cred_uid"},
+                    {"name": "ssh_user",     "kind": "text", "placeholder": "root", "label": "ssh_user",
+                     "show_when": {"ssh_cred_uid": [""]}},
+                    {"name": "ssh_port",     "kind": "text", "placeholder": "22", "label": "ssh_port"},
+                    {"name": "ssh_password", "kind": "password", "secret": true, "label": "ssh_password",
+                     "show_when": {"ssh_cred_uid": [""]}}
+                ]
+            }
+        ]
+    },
+    "list": {
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__cluster_columns__": ["vip"],
+        "__edit_tabs__": [
+            {"id": "general", "general": true,      "icon": "bi-info-circle", "groups": ["general"]},
+            {"id": "setup",                         "icon": "bi-hdd-network", "groups": ["connection", "auth"]},
+            {"id": "hosts",   "member_table": true, "icon": "bi-hdd-stack",   "groups": []},
+            {"id": "monitoring",                    "icon": "bi-activity",    "groups": ["checks", "alerts"]},
+            {"id": "lastdata", "last_data": true,   "icon": "bi-clock-history", "groups": []},
+            {"id": "logs",     "logs": true, "perm": "syslog_view", "icon": "bi-card-list", "groups": []}
+        ],
+        "__new_item_fields__": ["label", "host"],
+        "__field_order__": [
+            "enabled", "label", "description",
+            "vip", "host", "port", "verify_ssl", "timeout",
+            "auth_method", "token_id", "token_secret", "username", "password",
+            "check_cluster", "check_nodes", "check_ceph", "check_network",
+            "check_updates", "updates_threshold",
+            "check_storage", "storage_threshold",
+            "check_permissions",
+            "alert"
+        ],
+        "__test__": "/api/v1/watchfuls/proxmox/test_connection",
+        "__actions__": [
+            {
+                "id": "provision_token",
+                "open_credential_action": true,
+                "icon": "bi-key",
+                "variant": "secondary",
+                "full_width": true,
+                "show_when": {"auth_method": ["token"]},
+                "group": "auth"
+            },
+            {
+                "id": "test_permissions",
+                "url": "/api/v1/watchfuls/proxmox/test_permissions",
+                "result": "modal",
+                "icon": "bi-shield-check",
+                "variant": "secondary",
+                "full_width": true,
+                "group": "checks"
+            }
+        ],
+
+        "enabled":      {"type": "bool", "default": true},
+        "label":        {"type": "str",  "default": ""},
+        "description":  {"type": "str",  "default": "", "multiline": true, "group": "general"},
+
+        "vip":          {"type": "str",  "default": "", "placeholder": "cluster.example.lan", "group": "connection"},
+        "host":         {"type": "str",  "default": "", "placeholder": "__address__", "group": "connection"},
+        "port":         {"type": "int",  "default": 8006, "min": 1, "max": 65535, "group": "connection"},
+        "verify_ssl":   {"type": "bool", "default": false, "group": "connection"},
+        "timeout":      {"type": "int",  "default": 0, "min": 0, "max": 300,
+                         "zero_as_blank": true, "placeholder_module": "timeout", "group": "connection"},
+
+        "auth_method":  {"type": "str",  "default": "token", "options": ["token", "password"], "group": "auth"},
+        "token_id":     {"type": "str",  "default": "", "placeholder": "monitor@pve!servicesentry",
+                         "show_when": {"auth_method": ["token"]}, "group": "auth"},
+        "token_secret": {"type": "str",  "default": "", "sensitive": true,
+                         "show_when": {"auth_method": ["token"]}, "group": "auth"},
+        "username":     {"type": "str",  "default": "", "placeholder": "root@pam",
+                         "show_when": {"auth_method": ["password"]}, "group": "auth"},
+        "password":     {"type": "str",  "default": "", "sensitive": true,
+                         "show_when": {"auth_method": ["password"]}, "group": "auth"},
+
+        "check_cluster":     {"type": "bool", "default": true,  "group": "checks"},
+        "check_nodes":       {"type": "bool", "default": true,  "group": "checks"},
+        "check_ceph":        {"type": "bool", "default": false, "group": "checks"},
+        "check_network":     {"type": "bool", "default": false, "group": "checks"},
+        "check_updates":     {"type": "bool", "default": true,  "group": "checks"},
+        "updates_threshold": {"type": "int",  "default": 1, "min": 0, "max": 9999,
+                              "show_when": {"check_updates": [true]}, "group": "checks"},
+        "check_storage":     {"type": "bool", "default": false, "group": "checks"},
+        "storage_threshold": {"type": "int",  "default": 90, "min": 0, "max": 100,
+                              "show_when": {"check_storage": [true]}, "group": "checks"},
+        "check_permissions": {"type": "bool", "default": true,  "group": "checks"},
+
+        "alert":        {"type": "int",  "default": 0, "min": 0, "max": 20,
+                         "zero_as_blank": true, "placeholder_module": "alert", "group": "alerts"}
+    }
+}

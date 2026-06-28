@@ -1,0 +1,285 @@
+{# ================================================================
+   Generic schema-driven list table.
+
+   createListTable(spec) wires the shared skeleton every entity table
+   needs — card shell, header (title/accent/chooser/refresh/extra
+   buttons/bulk bar), top+bottom pagination, sortable/reorderable/
+   resizable/content-fit columns, selection and the actions column —
+   from a per-table SPEC. Each table only declares its columns, cell
+   renderer, actions, header buttons and data source.
+
+   State stays in the caller's own globals (so the persistence layer and
+   inline handlers keep reading them by name); the spec passes get/set
+   accessors via `state`, and generated handlers are published under the
+   legacy names listed in `globalPrefix`.
+   ================================================================ #}
+
+// Tables that joined the factory (persist:true) register here so the per-user
+// persistence + Customisations machinery can be registry-driven. Shape mirrors
+// one `_tcTables()` descriptor: {k, def, all, getVis, setVis, getOrd, setOrd, ls,
+// clearLabelKey, umCustomised?}.
+const _LIST_TABLE_REGISTRY = [];
+
+// ── Shared metadata columns (single source of truth) ────────────────────────
+// Every list table reuses these definitions + cell renderers for uid/created_at/
+// updated_at/updated_by instead of re-declaring them. A table spreads
+// `_META_COL.uid` and `..._META_TAIL` into its column array, provides a
+// `record(row)` accessor (and `uidOf(row)` when the UID column shows something
+// other than the row key), and the factory renders these cells from here.
+const _META_COL = {
+    uid:        { id: 'uid',        label: () => 'UID',                                sortKey: 'uid',        always: false },
+    created_at: { id: 'created_at', label: () => t('col_created_at') || 'Created',      sortKey: 'created_at', always: false },
+    updated_at: { id: 'updated_at', label: () => t('col_updated_at') || 'Last Updated', sortKey: 'updated_at', always: false },
+    updated_by: { id: 'updated_by', label: () => t('col_updated_by') || 'Updated By',   sortKey: 'updated_by', always: false },
+};
+const _META_TAIL = [_META_COL.created_at, _META_COL.updated_at, _META_COL.updated_by];
+const _META_CELL = {
+    uid:        (rec, row, spec) => `<td><code class="text-muted" style="font-size:.7rem">${esc((spec.uidOf ? spec.uidOf(row) : spec.rowKey(row)) || '')}</code></td>`,
+    created_at: (rec) => `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(rec.created_at))}</td>`,
+    updated_at: (rec) => `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(rec.updated_at))}</td>`,
+    updated_by: (rec) => `<td class="small text-muted">${esc(rec.updated_by || '—')}</td>`,
+};
+
+function createListTable(spec) {
+    const st = spec.state;
+    const gp = spec.globalPrefix || {};
+    const tableId = spec.tableId || (spec.key + '-table');
+    const lsCols  = 'ss_' + spec.key + '_cols';
+    const lsOrder = 'ss_' + spec.key + '_col_order';
+    const lsW     = 'ss_' + spec.key + '_col_w';
+
+    const _cols   = (ctx) => (typeof spec.columns === 'function' ? spec.columns(ctx) : spec.columns);
+    const _defVis = (ctx) => (typeof spec.defaultVisible === 'function' ? spec.defaultVisible(ctx) : spec.defaultVisible);
+    const _readW  = () => { try { return JSON.parse(localStorage.getItem(lsW) || '{}'); } catch (_) { return {}; } };
+
+    // ── Handlers (published under legacy names) ─────────────────────────────
+    function toggleCol(col) {
+        const vis = st.visible.get();
+        const adding = !vis.has(col);
+        vis.has(col) ? vis.delete(col) : vis.add(col);
+        if (adding && col === 'uid') {                       // UID always shows first
+            st.order.set(['uid', ...st.order.get().filter(c => c !== 'uid')]);
+            localStorage.setItem(lsOrder, JSON.stringify(st.order.get()));
+        }
+        localStorage.setItem(lsCols, JSON.stringify([...vis]));
+        _persistTableConfig();
+        render();
+    }
+    function resetCols() {
+        if (spec.reset) {                       // table-specific reset (e.g. clusters null sentinel)
+            spec.reset();
+            render();
+            _persistTableConfig();
+            return;
+        }
+        st.visible.set(new Set(spec.resetVisible ? spec.resetVisible() : _defVis()));
+        st.order.set(_cols().map(c => c.id));
+        localStorage.setItem(lsCols, JSON.stringify([...st.visible.get()]));
+        localStorage.setItem(lsOrder, JSON.stringify(st.order.get()));
+        localStorage.removeItem(lsW);
+        _persistTableConfig();
+        render();
+    }
+    function saveOrder() { localStorage.setItem(lsOrder, JSON.stringify(st.order.get())); _persistTableConfig(); }
+    function goPage(p) { st.page.set(p); render(); }
+    function changePageSize(v) { st.pageSize.set(parseInt(v, 10)); st.page.set(1); render(); }
+    function sortBy(col) {
+        if (st.sort.get() === col) st.sortDir.set(st.sortDir.get() === 'asc' ? 'desc' : 'asc');
+        else { st.sort.set(col); st.sortDir.set('asc'); }
+        render();
+    }
+    function selectAll(checked) {
+        const sel = st.selected && st.selected();
+        if (!sel) return;
+        (st.currentPage.get() || []).forEach(k => {
+            if (spec.selectableRow && !spec.selectableRow(k)) return;   // e.g. built-in roles
+            checked ? sel.add(k) : sel.delete(k);
+        });
+        render();
+    }
+    function toggleOne(key, checked) {
+        const sel = st.selected && st.selected();
+        if (!sel) return;
+        checked ? sel.add(key) : sel.delete(key);
+        render();
+    }
+    function initFeatures() {
+        _attachColFeatures(tableId,
+            () => st.order.get(), o => st.order.set(o), saveOrder, render,
+            (col, w) => { const cw = _readW(); cw[col] = w; localStorage.setItem(lsW, JSON.stringify(cw)); });
+    }
+
+    // ── Render ──────────────────────────────────────────────────────────────
+    async function render() {
+        const c = document.getElementById(spec.containerId);
+        if (!c) return;
+        // Materialise dynamic state synchronously (before any await) so getVis()/
+        // getOrd() never return null (e.g. clusters' "use defaults" sentinel).
+        if (st.visible.get() == null) st.visible.set(new Set());
+        if (st.order.get() == null) st.order.set([]);
+        const ctx = (spec.prepare ? await spec.prepare() : {}) || {};
+        if (st.pageSize.get() == null) st.pageSize.set(_defaultPageSize);
+        const cols = _cols(ctx);
+
+        // Auto-register columns the user has never seen (dynamic tables).
+        if (spec.autoRegister) {
+            const vis = st.visible.get(), hidden = spec.hiddenDefault || new Set();
+            cols.forEach(co => {
+                if (!st.order.get().includes(co.id)) {
+                    st.order.set([...st.order.get(), co.id]);
+                    if (!co.always && !hidden.has(co.id)) vis.add(co.id);
+                }
+            });
+        }
+
+        let rows = spec.rows(ctx).slice();
+        const dir = st.sortDir.get();
+        rows.sort((a, b) => {
+            const va = spec.sortValue(a, st.sort.get(), ctx), vb = spec.sortValue(b, st.sort.get(), ctx);
+            const cmp = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
+            return dir === 'asc' ? cmp : -cmp;
+        });
+
+        const total = rows.length;
+        const sel = st.selected ? st.selected() : null;
+        // Optional alternate body modes (e.g. sessions card/table toggle).
+        const mode = spec.bodyMode ? spec.bodyMode(ctx) : 'table';
+        const showChooser = spec.showChooser ? spec.showChooser(mode) : true;
+
+        // Card header — shared by the empty and populated states.
+        const chooser = showChooser
+            ? _buildColChooser(spec.colChooserCols ? spec.colChooserCols(cols) : cols,
+                st.visible.get(), gp.toggleCol, gp.resetCols, spec.colChooserMinWidth || 160)
+            : '';
+        const bulkBar = (spec.bulkBar && sel) ? spec.bulkBar(ctx, sel) : '';
+        const headerLead = spec.headerLead ? (spec.headerLead(ctx, mode) || '') : '';
+        const refresh = spec.refreshButton ? (spec.refreshButton(ctx) || '') : '';
+        const headerBtns = spec.headerButtons ? (spec.headerButtons(ctx) || '') : '';
+        const accentDiv = spec.accent ? `<div class="ss-accent ss-accent-${spec.accent}"></div>` : '';
+        const headerHtml = `<div class="ss-card-header">
+            <h6 class="mb-0 me-auto"><i class="bi ${spec.icon} me-2"></i>${spec.title(ctx)}</h6>
+            ${bulkBar}
+            ${headerLead}
+            ${chooser}
+            ${refresh}
+            ${headerBtns}
+        </div>`;
+
+        const cardClass = spec.cardClass || 'ss-card';
+        if (!total) {
+            // emptyBody → card + header + body; emptyState → bare (no card).
+            if (spec.emptyBody) c.innerHTML = `<div class="${cardClass}">${accentDiv}${headerHtml}${spec.emptyBody(ctx)}</div>`;
+            else c.innerHTML = spec.emptyState ? spec.emptyState(ctx) : '';
+            return;
+        }
+
+        const ps = st.pageSize.get() || total;
+        const page = Math.max(1, Math.min(st.page.get(), Math.ceil(total / ps)));
+        st.page.set(page);
+        const pageRows = rows.slice((page - 1) * ps, page * ps);
+        st.currentPage.set(pageRows.map(r => spec.rowKey(r)));
+
+        let h;
+        if (mode === 'cards' && spec.cardsBody) {
+            // Alternate (non-table) body — e.g. the sessions card grid. Selection
+            // checkboxes inside it call the same toggleOne; no columns/resize.
+            h = spec.cardsBody(pageRows, ctx);
+        } else {
+            // Ordered, visible columns.
+            const knownIds = new Set(cols.map(co => co.id));
+            const order = st.order.get().slice();
+            cols.forEach(co => { if (!order.includes(co.id)) order.push(co.id); });
+            st.order.set(order.filter(id => knownIds.has(id)));
+            const orderedCols = st.order.get().map(id => cols.find(co => co.id === id))
+                .filter(co => co && (co.always || st.visible.get().has(co.id)));
+
+            const cw = _readW();
+            const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';
+            const thClassMap = spec.thClass || {};
+            const thRow = orderedCols.map(co => {
+                const inner = co.sortKey
+                    ? _thSortInner(co.label(), co.sortKey, st.sort.get(), st.sortDir.get(), gp.sort)
+                    : `<span class="small">${esc(co.label())}</span>`;
+                const xc = co.thClass || thClassMap[co.id];
+                // resizable:false → content-fit header (width:1% + nowrap): not resizable,
+                // sized to its content, still sortable + reorderable.
+                if (co.resizable === false) {
+                    const cls = ['ss-th', 'ss-th-fit']; if (xc) cls.push(xc);
+                    return `<th class="${cls.join(' ')}" data-col="${co.id}" draggable="true" style="width:1%;white-space:nowrap">${inner}</th>`;
+                }
+                const cls = ['ss-th', 'ss-th-resizable']; if (xc) cls.push(xc);
+                return `<th class="${cls.join(' ')}" data-col="${co.id}" draggable="true"${thW(co.id)}>${inner}</th>`;
+            }).join('');
+
+            const selectable = (typeof spec.selectable === 'function') ? spec.selectable(ctx) : spec.selectable;
+            const allSel = selectable && sel && pageRows.length > 0 && pageRows.every(r => sel.has(spec.rowKey(r)));
+            const actionsOn = !!spec.actions && (spec.actionsVisible ? spec.actionsVisible(ctx) : true);
+
+            h = `<table class="table table-sm table-hover align-middle mb-0 ss-table" id="${tableId}">
+    <thead class="ss-thead"><tr>
+        ${selectable ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${allSel ? 'checked' : ''} onchange="${gp.selectAll}(this.checked)"></th>` : ''}
+        ${thRow}
+        ${actionsOn ? `<th class="ss-th ss-th-actions">${spec.actionsLabel ? spec.actionsLabel() : t('col_actions')}</th>` : ''}
+    </tr></thead><tbody>`;
+            for (const row of pageRows) {
+                const k = spec.rowKey(row);
+                const cells = orderedCols.map(co => {
+                    // Shared metadata cells (uid/created_at/updated_at/updated_by) render
+                    // from the single source; everything else from the table's cell().
+                    const cd = (_META_CELL[co.id] && spec.record)
+                        ? _META_CELL[co.id](spec.record(row), row, spec)
+                        : spec.cell(row, co.id, ctx);
+                    return co.resizable === false ? cd.replace('<td', '<td data-fit') : cd;   // content-fit cell
+                }).join('');
+                h += `<tr${spec.rowAttrs ? spec.rowAttrs(row, ctx) : ''}>
+            ${selectable ? `<td><input type="checkbox" class="form-check-input" ${sel.has(k) ? 'checked' : ''} onchange="${gp.toggleOne}(${jsStr(k)}, this.checked)"${(spec.selectableRow && !spec.selectableRow(k, row, ctx)) ? ' disabled' : ''}></td>` : ''}
+            ${cells}
+            ${actionsOn ? `<td class="ss-td-actions"${spec.actionsTdAttrs ? spec.actionsTdAttrs(row, ctx) : ''}>${spec.actions(row, ctx)}</td>` : ''}
+        </tr>`;
+            }
+            h += `</tbody></table>`;
+        }
+
+        const pagination = _renderPagination(total, page, st.pageSize.get(), gp.goPage, gp.changePageSize);
+        c.innerHTML = `<div class="${cardClass}">
+        ${accentDiv}
+        ${headerHtml}
+        <div class="ss-card-band ss-card-band-top">${pagination}</div>
+        <div>${h}</div>
+        <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
+    </div>`;
+        if (mode !== 'cards') setTimeout(initFeatures, 0);
+    }
+
+    // ── Publish legacy global names ─────────────────────────────────────────
+    const pub = (name, fn) => { if (name) window[name] = fn; };
+    pub(gp.render, render);
+    pub(gp.goPage, goPage);
+    pub(gp.changePageSize, changePageSize);
+    pub(gp.sort, sortBy);
+    pub(gp.toggleCol, toggleCol);
+    pub(gp.resetCols, resetCols);
+    pub(gp.saveOrder, saveOrder);
+    pub(gp.selectAll, selectAll);
+    pub(gp.toggleOne, toggleOne);
+    pub(gp.initFeatures, initFeatures);
+
+    // ── Join the persistence/customisations registry ───────────────────────
+    if (spec.persist) {
+        _LIST_TABLE_REGISTRY.push({
+            k: spec.key,
+            def: () => new Set(_defVis()),
+            all: () => _cols(),
+            getVis: () => st.visible.get(),
+            setVis: s => st.visible.set(s),
+            getOrd: () => st.order.get(),
+            setOrd: o => st.order.set(o),
+            ls: [lsCols, lsOrder, lsW],
+            clearLabelKey: spec.clearLabelKey,
+            umCustomised: spec.umCustomised || null,
+            extra: spec.persistExtra || null,   // extra table_config fields (e.g. sessions view mode)
+        });
+    }
+
+    return { render, goPage, changePageSize, sort: sortBy, toggleCol, resetCols, saveOrder, selectAll, toggleOne, initFeatures };
+}

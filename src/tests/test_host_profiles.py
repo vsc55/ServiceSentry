@@ -93,6 +93,14 @@ class TestCatalog:
         assert m.get('ntp') is False and m.get('snmp') is False
         assert m.get('dns') is True         # host-aware: query via SSH from a host
 
+    def test_module_host_multi_bind(self):
+        # One check binding to several hosts is opt-in via __host_multiple_bind__.
+        from lib.hosts.profiles import module_host_multi_bind
+        m = module_host_multi_bind()
+        assert m.get('proxmox') is True     # cluster: one check spans member nodes
+        assert m.get('ping') is False       # single-host check
+        assert m.get('datastore') is False  # several checks per host, but one host each
+
     def test_module_host_collections(self):
         m = module_host_collections()
         # Every host-centric module exposes a host-capable item collection, so the

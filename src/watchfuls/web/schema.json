@@ -8,7 +8,7 @@
         "timeout": {"type": "int",  "default": 15,   "min": 0, "inherit_blank": true, "max": 300}
     },
     "__history__": {"field": null, "unit": null, "label": "HTTP Check"},
-    "__host_profile__": {"key": "http", "address_field": "url", "fields": []},
+    "__host_profile__": {"key": "http", "address_field": "server", "fields": []},
     "__credential__": {
         "type": "web_auth",
         "fields": [
@@ -21,11 +21,11 @@
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__discovery_uid_key__": true,
-        "__discovery_label_template__": "{host} - {url}",
-        "__new_item_fields__": ["label", "url"],
+        "__discovery_label_template__": "{host} - {server}",
+        "__new_item_fields__": ["label", "server"],
         "__field_order__": [
             "enabled", "label",
-            "url", "path", "scheme", "method", "verify_ssl", "timeout",
+            "scheme", "server", "port", "path", "method", "verify_ssl", "timeout",
             "code", "check_content", "content_contains",
             "auth_enabled", "auth_user", "auth_password",
             "alert"
@@ -35,9 +35,12 @@
         "enabled":          {"type": "bool", "default": true},
         "label":            {"type": "str",  "default": ""},
 
-        "url":              {"type": "str",  "default": "", "placeholder": "__address__", "group": "connection"},
-        "path":             {"type": "str",  "default": "", "placeholder": "/health", "group": "connection"},
         "scheme":           {"type": "str",  "default": "https", "options": ["http", "https"], "group": "connection"},
+        "server":           {"type": "str",  "default": "", "placeholder": "__address__",
+                             "__migrates_from__": "url", "group": "connection"},
+        "port":             {"type": "int",  "default": 0, "min": 0, "max": 65535,
+                             "zero_as_blank": true, "placeholder": "auto", "group": "connection"},
+        "path":             {"type": "str",  "default": "", "placeholder": "/health", "group": "connection"},
         "method":           {"type": "str",  "default": "GET",   "options": ["GET", "HEAD", "POST"], "group": "connection"},
         "verify_ssl":       {"type": "bool", "default": true,
                              "show_when": {"scheme": ["https"]}, "group": "connection"},

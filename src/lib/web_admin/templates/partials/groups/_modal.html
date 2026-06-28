@@ -1,6 +1,7 @@
 {# ================================================================
-   Group modal — openNewGroupModal, openEditGroupModal, saveGroupModal,
-   deleteGroup, _gmPopulateRoles, _gmPopulateMembers,
+   Group modal — openGroupModal (one modal for new/edit/clone) + the
+   openNewGroupModal/openEditGroupModal/cloneGroupModal entry wrappers,
+   saveGroupModal, deleteGroup, _gmPopulateRoles, _gmPopulateMembers,
    and DOMContentLoaded bindings for the group modal.
    ================================================================ #}
 
@@ -25,8 +26,8 @@ function _defaultGroupRole() {
 
 // Bind search inputs and event delegation once (after DOM ready)
 document.addEventListener('DOMContentLoaded', () => {
-    _bindSetSelection('groupRolesGrid', _gmSelectedRoles, 'checkbox');
-    _bindSetSelection('groupMembersGrid', _gmSelectedMembers, 'checkbox');
+    _bindSetSelection('groupRolesGrid', () => _gmSelectedRoles, 'checkbox');
+    _bindSetSelection('groupMembersGrid', () => _gmSelectedMembers, 'checkbox');
     _bindSearch('gmRoleSearch', _gmPopulateRoles);
     _bindSearch('gmMemberSearch', _gmPopulateMembers);
 });
@@ -75,58 +76,57 @@ function _gmPopulateMembers(searchVal) {
     });
 }
 
-function openNewGroupModal() {
-    _editingGroup = null;
-    _gmIsBuiltin  = false;
-    document.getElementById('groupModalTitle').textContent = t('new_group');
-    const _lbl = document.getElementById('gmLabel');
-    _lbl.value = ''; _lbl.disabled = false; _lbl.classList.remove('is-invalid');
-    const _err = document.getElementById('gmLabelError');
-    if (_err) _err.textContent = '';
-    document.getElementById('gmDescription').value = '';
-    document.getElementById('gmDescription').disabled = false;
-    document.getElementById('gmUidRow').classList.add('d-none');
-    document.getElementById('gmUid').value = '';
-    document.getElementById('gmEnabledGroup').style.display = '';
-    const gmEnabledNew = document.getElementById('gmEnabled');
-    gmEnabledNew.checked = true;
-    gmEnabledNew.disabled = false;
-    document.getElementById('gmRoleSearch').value   = '';
-    document.getElementById('gmMemberSearch').value = '';
-    _gmSelectedRoles   = new Set([_defaultGroupRole()]);
-    _gmSelectedMembers = new Set();
-    _gmPopulateRoles('');
-    _gmPopulateMembers('');
-    bootstrap.Tab.getOrCreateInstance(document.querySelector('#groupModalTabs [data-bs-target="#gmTabGeneral"]')).show();
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('groupModal')).show();
-}
+// One modal for create / edit / clone — the entry point picks the mode:
+//   'new'   → blank form, default role pre-selected.
+//   'edit'  → load the group; built-in groups get a read-only name.
+//   'clone' → load the source group's roles + members + description into a NEW
+//             group (name + copy suffix). Always opens on General.
+function openGroupModal(name, mode = 'edit') {
+    const clone = mode === 'clone';
+    const isNew = mode === 'new' || clone;          // both create a new group
+    const gd    = name ? (groupsData[name] || {}) : {};
+    _gmIsBuiltin  = !clone && !!gd.builtin;          // a clone is always custom
+    _editingGroup = isNew ? null : name;            // null → save POSTs a new group
 
-function openEditGroupModal(name) {
-    _editingGroup = name;
-    const gd = groupsData[name] || {};
-    _gmIsBuiltin  = !!gd.builtin;
-    // Show the human-readable label in the title, not the UID
-    document.getElementById('groupModalTitle').textContent = t('edit_group_title') + ': ' + (gd.name || name);
-    const _lbl2 = document.getElementById('gmLabel');
-    _lbl2.value = gd.name || ''; _lbl2.disabled = _gmIsBuiltin; _lbl2.classList.remove('is-invalid');
-    const _err2 = document.getElementById('gmLabelError');
-    if (_err2) _err2.textContent = '';
+    document.getElementById('groupModalTitle').textContent =
+        clone ? (t('clone') + ': ' + (gd.name || name))
+              : (mode === 'new' ? t('new_group') : (t('edit_group_title') + ': ' + (gd.name || name)));
+    const lbl = document.getElementById('gmLabel');
+    lbl.value = mode === 'new' ? ''
+              : (gd.name || name || '') + (clone ? ' (' + t('clone_copy_suffix') + ')' : '');
+    lbl.disabled = _gmIsBuiltin;
+    lbl.classList.remove('is-invalid');
+    const err = document.getElementById('gmLabelError'); if (err) err.textContent = '';
     document.getElementById('gmDescription').value = gd.description || '';
-    document.getElementById('gmDescription').disabled = false;  // description editable for all groups
-    document.getElementById('gmUidRow').classList.remove('d-none');
-    document.getElementById('gmUid').value = gd.uid || '';
-    const gmEnabledGroup = document.getElementById('gmEnabledGroup');
-    gmEnabledGroup.style.display = '';
-    document.getElementById('gmEnabled').checked = gd.enabled !== false;
+    document.getElementById('gmDescription').disabled = false;  // editable for all groups
+    document.getElementById('gmUidRow').classList.toggle('d-none', isNew);
+    document.getElementById('gmUid').value = isNew ? '' : (gd.uid || '');
+    document.getElementById('gmEnabledGroup').style.display = '';
+    const en = document.getElementById('gmEnabled');
+    en.checked = (mode === 'new') ? true : gd.enabled !== false;   // clone copies the source state
+    en.disabled = false;
     document.getElementById('gmRoleSearch').value   = '';
     document.getElementById('gmMemberSearch').value = '';
-    _gmSelectedRoles   = new Set(gd.roles   || []);
-    _gmSelectedMembers = new Set(gd.members || []);
+    _gmSelectedRoles   = mode === 'new' ? new Set([_defaultGroupRole()]) : new Set(gd.roles   || []);
+    _gmSelectedMembers = mode === 'new' ? new Set()                       : new Set(gd.members || []);
     _gmPopulateRoles('');
     _gmPopulateMembers('');
-    bootstrap.Tab.getOrCreateInstance(document.querySelector('#groupModalTabs [data-bs-target="#gmTabGeneral"]')).show();
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('groupModal')).show();
+    // New/clone open on General (to name the group); editing opens on Members.
+    const targetTab = isNew ? '#gmTabGeneral' : '#gmTabMembers';
+    _setActiveTab('groupModalTabs', 'groupModalTabContent', targetTab);   // pre-set: no flash
+    _setModalSaveButton('btnGroupModalOk', mode);
+    const modalEl = document.getElementById('groupModal');
+    _focusNameOnCreate(modalEl, 'gmLabel', mode);
+    // Re-assert once the modal is visible — activating a tab while hidden is unreliable.
+    modalEl.addEventListener('shown.bs.modal', () => {
+        bootstrap.Tab.getOrCreateInstance(
+            document.querySelector(`#groupModalTabs [data-bs-target="${targetTab}"]`)).show();
+    }, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
+function openNewGroupModal()     { openGroupModal(null, 'new'); }
+function openEditGroupModal(name) { openGroupModal(name, 'edit'); }
+function cloneGroupModal(name)    { openGroupModal(name, 'clone'); }
 
 async function saveGroupModal() {
     const label       = document.getElementById('gmLabel').value.trim();
@@ -215,7 +215,7 @@ async function saveGroupModal() {
 }
 
 async function deleteGroup(name) {
-    showConfirmModal(t('group_confirm_delete'), async () => {
+    showConfirmModal(tf('group_confirm_delete', groupsData[name]?.name || name), async () => {
         const r = await apiDelete('/api/v1/groups/' + encodeURIComponent(name));
         if (r && r.status === 200 && r.data?.ok) {
             showToast(t('group_deleted'));

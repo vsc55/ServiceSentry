@@ -64,7 +64,7 @@ function showUnsavedChangesModal(dirtyTarget, nextTabBtn) {
         if (dirtyTarget === 'modules') {
             modulesData = deepClone(_savedModulesData);
             clearDirty('modules');
-            renderModules();
+            _renderModulesSurface();
         } else {
             configData = deepClone(_serverConfigData);
             clearDirty('config'); // also clears _dirtyFields, _configConflicts, _serverChangedDirtyPaths

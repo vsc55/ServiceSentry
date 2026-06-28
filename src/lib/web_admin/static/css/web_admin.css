@@ -7,7 +7,7 @@
 /* ── Light theme variables ──────────────────────────────────────── */
 [data-bs-theme="light"] body { background-color: #f5f6fa }
 [data-bs-theme="light"] {
-    --ss-card-header-bg:   #e9ecef;
+    --ss-card-header-bg:   #dde2f2;
     --ss-pagination-bg:    #f0f2f5;
     --ss-cfg-update-bg:    var(--bs-success-bg-subtle);
     --ss-cfg-update-color: var(--bs-success-text-emphasis);
@@ -35,7 +35,7 @@
     --bs-danger-bg-subtle:          rgba(220,53,69,.10);
     --bs-form-control-bg:           #2a2a2a;
     --ss-surface-bg:                #212121;
-    --ss-card-header-bg:            #333333;
+    --ss-card-header-bg:            #262c40;
     --ss-pagination-bg:             #2a2a2a;
     --ss-ok-text:                   #4ade80;
     --ss-err-text:                  #f87171;
@@ -47,6 +47,11 @@
     background-color: var(--bs-tertiary-bg);
     border-color: var(--bs-border-color);
 }
+/* Chromium fills a styled <select>'s option highlight from the left edge to
+   (width − padding-right), so the big caret padding leaves a gap on the right of
+   the highlighted row. This select is wide with short options, so trim the right
+   padding to make the highlight span the full popup width. */
+.ev-sevsel { padding-right: .4rem; }
 [data-bs-theme="dark"] .input-group-text {
     background-color: #242424;
     border-color: var(--bs-border-color);
@@ -226,10 +231,26 @@
    rendered before the container keep their natural height (flexbox handles it). */
 #overview-container, #modules-container, #config-container, #status-container,
 #history-container, #users-container, #groups-container, #roles-container,
-#audit-container, #sessions-panel, #credentials-container {
+#audit-container, #sessions-container, #credentials-container, #events-container {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
+    min-height: 0;
+}
+/* Events tab has nested sub-tabs (Rules / Notifications): fill the viewport so the
+   active sub-tab's card stretches and its bottom pagination pins to the bottom. */
+#events-container > .tab-content,
+#events-container > .tab-content > .tab-pane.active,
+#events-container .tab-pane > .ss-card {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+#events-container .ss-card > #ev-rules-table-wrap,
+#events-container .ss-card > #ev-log-table-wrap {
+    flex: 1 1 auto;
+    overflow: auto;
     min-height: 0;
 }
 /* List/panel cards fill their container; the table/body area grows and scrolls
@@ -239,6 +260,7 @@
 #roles-container  > .ss-card,
 #audit-container  > .ss-card,
 #credentials-container > .ss-card,
+#sessions-container > .ss-card,
 #history-container > .ss-card {
     flex: 1 1 auto;
     display: flex;
@@ -285,20 +307,8 @@
 #groups-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
 #roles-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
 #credentials-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
+#sessions-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
 #audit-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band) {
-    flex: 1 1 auto;
-    overflow: auto;
-    min-height: 0;
-}
-/* Sessions panel: the body is a flex column so the bottom pagination stays
-   pinned; only the middle card-grid scrolls. */
-#sessions-panel > #sessions-container {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-#sessions-panel > #sessions-container > .ss-sessions-scroll {
     flex: 1 1 auto;
     overflow: auto;
     min-height: 0;
@@ -501,6 +511,107 @@
     height: 100%;
     min-height: 0;
 }
+
+/* ── Cluster edit modal: wide, draggable (by header) and user-resizable ──── */
+#clusterEditModal .cl-modal-dialog {
+    pointer-events: auto;               /* needed so the resize handle gets events */
+    max-width: 96vw;
+    width: min(1500px, 96vw);
+    height: min(82vh, 900px);
+    margin: 1.75rem auto;
+    resize: both;                        /* drag the bottom-right corner to resize */
+    overflow: hidden;
+    min-width: 620px;
+    min-height: 440px;
+}
+#clusterEditModal .modal-content {
+    height: 100%;
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#clusterEditModal .modal-body {
+    flex: 1 1 auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+#clusterEditModal .gm-tab-content {        /* fill the (resizable) body instead of a fixed vh */
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+#clusterEditModal .modal-header {
+    cursor: move;
+    user-select: none;
+}
+
+/* ── Generic: dialog-style modals (lg/xl) are user-resizable ─────────────────
+   The content is a flex column so its body fills/scrolls as the box is resized,
+   and the dialog grows with it. Small/default (msgbox: confirmations, yes/no)
+   modals are NOT targeted, so they are only movable (handled by JS). */
+.modal-lg, .modal-xl { max-width: 96vw; width: fit-content; }
+.modal-lg > .modal-content,
+.modal-xl > .modal-content {
+    resize: both;
+    overflow: hidden;
+    max-width: 96vw;
+    max-height: 92vh;
+    min-width: 340px;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+}
+.modal-lg > .modal-content { width: 800px; }
+.modal-xl > .modal-content { width: min(1500px, 96vw); }
+.modal-lg > .modal-content > .modal-body,
+.modal-xl > .modal-content > .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+.modal-header { user-select: none; }   /* don't select header text while dragging */
+
+/* Event-rule modal: flex-fill body so the General "Description" textarea (and the
+   Conditions/Notifications panes) stretch to the bottom as the dialog is resized. */
+/* Modest default (initial) height so the flex layout has room to distribute; the
+   width comes from the generic .modal-lg rule. Both are just the starting size —
+   the dialog stays freely resizable up to 96vw / viewport height. */
+#eventRuleModal .modal-content { height: min(66vh, 560px); }
+#eventRuleModal .modal-body { display: flex; flex-direction: column; overflow: hidden; }
+#eventRuleModal .evm-tabs { flex-shrink: 0; }
+#eventRuleModal .evm-content { flex: 1 1 auto; min-height: 0; }
+#eventRuleModal .evm-content > .tab-pane { overflow-y: auto; overflow-x: hidden; }
+#eventRuleModal .evm-content > .tab-pane.show.active { height: 100%; display: flex; flex-direction: column; }
+
+/* Host modal: flex-fill body so the General "Description" textarea and the Logs
+   table stretch to the bottom as the (resizable) dialog grows. */
+#hostModal .modal-content { width: min(1500px, 96vw); }
+#hostModal .modal-body { display: flex; flex-direction: column; overflow: hidden; }
+#hostModal .gm-tab-content { flex: 1 1 auto; min-height: 0; }
+#hostModal .gm-tab-content > .tab-pane { overflow-y: auto; overflow-x: hidden; }
+
+/* User / Role / Group edit modals (gm-tab-content tab layout): flex-fill so their
+   tab tables/lists (active sessions, permissions, assignments, roles, members…)
+   stretch to the bottom of the resizable dialog instead of a fixed 60vh. */
+#userModal .modal-body,
+#roleModal .modal-body,
+#groupModal .modal-body,
+#credModal .modal-body { display: flex; flex-direction: column; overflow: hidden; }
+/* Keep the gm-tab-content's default 60vh as the flex BASIS (default height
+   unchanged) but let it grow when the dialog is resized taller. */
+#userModal .gm-tab-content,
+#roleModal .gm-tab-content,
+#groupModal .gm-tab-content,
+#credModal .gm-tab-content { flex: 1 1 auto; min-height: 0; }
+#userModal .gm-tab-content > .tab-pane,
+#roleModal .gm-tab-content > .tab-pane,
+#groupModal .gm-tab-content > .tab-pane,
+#credModal .gm-tab-content > .tab-pane { overflow-y: auto; overflow-x: hidden; }
+/* Let the flex-grow list/table containers shrink + scroll inside their pane. */
+#umSessionsGroup, #umSessionsTable, #rmUsersGrid, #rmGroupsGrid,
+#groupRolesGrid, #groupMembersGrid, #rolePermissionsGrid { min-height: 0; }
 
 /* ── Notification HTML editor (CodeMirror) ───────────────────────── */
 #notifHtmlEditorWrap { display: flex; flex-direction: column; }
@@ -963,7 +1074,61 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 
 /* dark mode: make table rows distinguishable from card background */
 [data-bs-theme="dark"] .table > tbody > tr { --bs-table-bg: transparent; }
-[data-bs-theme="dark"] .table-hover > tbody > tr:hover > * { --bs-table-hover-bg: rgba(255,255,255,.05); }
+/* ── Unified base styling for EVERY app table (.ss-table) ───────────────────
+   Striping, hover and vertical centering applied consistently to all tables,
+   regardless of which Bootstrap helper classes (.table-striped / .table-hover)
+   the markup happens to carry — so they all share the same look. Uses Bootstrap
+   5.3's own --bs-table-bg-type/bg-state vars, so it's idempotent with tables that
+   already declare those classes, and respects rows that opt out by zeroing the
+   striped/hover vars (e.g. the colour-coded syslog severity rows). */
+.ss-table { --bs-table-hover-bg: rgba(0,0,0,.10); font-size: .85rem; }
+[data-bs-theme="dark"] .ss-table { --bs-table-hover-bg: rgba(255,255,255,.10); }
+.ss-table > tbody > tr:nth-of-type(odd) > * { --bs-table-bg-type: var(--bs-table-striped-bg); }
+.ss-table > tbody > tr:hover > * { --bs-table-bg-state: var(--bs-table-hover-bg); }
+/* Compact, uniform rows across every list table (Users/Groups/Roles/Credentials/
+   Events/…): same font size, tighter vertical padding, shorter badges. */
+.ss-table > tbody > tr > td,
+.ss-table > thead > tr > th { vertical-align: middle; padding-top: .2rem; padding-bottom: .2rem; }
+/* TODO(row-vertical-centering): badges/icons in table rows don't sit perfectly
+   centred next to plain text. The <td> is already vertical-align:middle, but
+   Bootstrap's inline-block .badge aligns to the cell's text baseline/strut (sized
+   by the body line-height ~1.5, taller than the badge), so it drifts slightly low.
+   Tried a custom inline-flex chip (.ss-badge) and cell line-height tweaks without a
+   clean, side-effect-free fix; reverted to the standard .badge for now. Revisit:
+   likely wrap row content in a flex container or normalise cell line-height. The
+   enabled switch is fine because its own flex wrapper (line-height:1) self-centres. */
+.ss-table .badge { padding-top: .2em; padding-bottom: .2em; }
+/* Compact action buttons (the icon group in each row's Actions cell). */
+.ss-table .ss-td-actions .btn { font-size: .72rem; }
+/* When the column chooser sits inside a pagination band (e.g. Audit) rather than a
+   card header, match the height/metrics of the adjacent pagination-sm buttons so it
+   doesn't look taller than them. */
+.ss-card-band .ss-col-chooser {
+    padding-top: .25rem;
+    padding-bottom: .25rem;
+    font-size: .875rem;
+    line-height: 1.25;
+}
+/* Truncating cells (e.g. description): fill the remaining column width then show an
+   ellipsis (full text in the title tooltip). max-width:0 lets the column flex within
+   the width:100% table; the resize handle still narrows it. Pair with .text-truncate. */
+.ss-table td.ss-td-ellipsis { max-width: 0; }
+/* Content-sized columns (width:1% on the th): keep their cells on one line so the
+   column shrinks to its content instead of wrapping, plus a bit of extra right
+   padding so adjacent content-fit columns don't sit glued together. */
+.ss-table td[data-fit] { white-space: nowrap; }
+.ss-table td[data-fit],
+.ss-table th.ss-th-fit { padding-right: 1.5rem; }
+/* Events cards: keep the standard header strip, with a slightly darker
+   pagination band than the shared default. */
+.ev-card .ss-card-band { background: #e4e7ec; }
+[data-bs-theme="dark"] .ev-card .ss-card-band { background: #242424; }
+/* Clip the accent strip to the card's rounded top corners. A 3px bar with an 8px
+   corner radius renders flakily in Firefox (the line jitters longer/shorter); a
+   square strip clipped by the card's overflow is stable. The card is full-height,
+   so the column-chooser dropdown still opens within it. */
+.ev-card { overflow: hidden; }
+.ev-card .ss-accent { border-radius: 0; }
 
 #loading {
     position: fixed;

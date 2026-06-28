@@ -58,7 +58,7 @@ def _loads_any(text):
 
 # Item fields stored as their own columns (never duplicated inside ``data``).
 # 'uid' is the primary key / the item's dict key, so it is not in ``data`` either.
-_ITEM_PROMOTED = ('host_uid', 'label', 'enabled')
+_ITEM_PROMOTED = ('host_uid', 'label', 'enabled', 'created_at', 'updated_at', 'updated_by')
 
 
 # ── Tabla 1: config a nivel de módulo ────────────────────────────────────────
@@ -143,9 +143,10 @@ class ModulesStore:
                 f'SELECT uid, module, data FROM {_T_CONFIG}'):
             uid2name[uid] = module
             modules[module] = _loads(data, {})
-        for uid, module_uid, collection, host_uid, label, enabled, data in self._db.fetchall(
-                f'SELECT uid, module_uid, collection, host_uid, label, enabled, data '
-                f'FROM {_T_ITEMS}'):
+        for (uid, module_uid, collection, host_uid, label, enabled, data,
+             created_at, updated_at, updated_by) in self._db.fetchall(
+                f'SELECT uid, module_uid, collection, host_uid, label, enabled, data, '
+                f'created_at, updated_at, updated_by FROM {_T_ITEMS}'):
             module = uid2name.get(module_uid)
             if module is None:
                 continue  # orphan item (module deleted) — skip
@@ -157,6 +158,14 @@ class ModulesStore:
                 item['enabled'] = bool(enabled)
                 if host_uid:                   # omit when empty to keep the original shape
                     item['host_uid'] = host_uid
+                # Per-item audit metadata (column-backed; stripped from the data
+                # blob on save via _ITEM_PROMOTED). Exposed read-only for the UI.
+                if created_at:
+                    item['created_at'] = created_at
+                if updated_at:
+                    item['updated_at'] = updated_at
+                if updated_by:
+                    item['updated_by'] = updated_by
             else:
                 item = parsed                  # legacy scalar item (e.g. name -> bool)
             modules.setdefault(module, {}).setdefault(collection or 'list', {})[uid] = item

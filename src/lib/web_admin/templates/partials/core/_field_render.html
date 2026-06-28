@@ -446,6 +446,18 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 onChange: `_ipFieldChange(this,${tg},${sp},${jsStr(meta.ipkind)})`,
                 trailing: _actionBtn}), _hintHtml);
         }
+        // Credential reference field (meta.credential_type) — render a picker of
+        // stored credentials of that type (e.g. an ssh credential for the proxmox
+        // provisioning). The chosen value is overlaid at action time
+        // (routes/watchfuls._apply_cred_to_config overlays any *_cred_uid).
+        if (meta && meta.credential_type && target !== 'config'
+                && typeof credentialOptions === 'function') {
+            const _itemPath = pathStr.split('|').slice(0, -1).join('|');
+            return _fieldRow(lblHtml, fieldCtl({kind: 'select',
+                optionsHtml: credentialOptions(value || '', meta.credential_type),
+                onChange: `updateField(${tg},${sp},this.value);if(typeof _refreshConditionalFields==='function')_refreshConditionalFields(${jsStr(_itemPath)})`,
+                trailing: _actionBtn}), _hintHtml);
+        }
         const isSensitive = (meta && meta.sensitive) || SENSITIVE.has(key);
         const tp = isSensitive ? 'password' : 'text';
         const _numKbd = (meta && meta.numericString)
@@ -475,13 +487,18 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 if (_phRaw === '__key__') {
                     _phVal = _itemKey;
                 } else if (_phRaw === '__address__') {
-                    // Resolve to the item's address field (host/url/address), or —
-                    // when bound to a host — to that host's address.
+                    // The address field auto-fills from the BOUND host at runtime
+                    // (resolve_host), so its placeholder is that host's address.
+                    // It must NOT echo stale per-item fields (a leftover legacy
+                    // value would mask the real host) — an inline check (no host)
+                    // simply has no placeholder. The field's own typed value, when
+                    // present, is shown as the value, not via this placeholder.
                     const _it = getPath(modulesData, pathStr.split('|').slice(0, -1)) || {};
-                    _phVal = _it.host || _it.url || _it.address || '';
-                    if (!_phVal && _it.host_uid && typeof hostsList === 'function') {
+                    if (_it.host_uid && typeof hostsList === 'function') {
                         const _h = hostsList().find(h => h.uid === _it.host_uid);
                         _phVal = (_h && _h.address) || '';
+                    } else {
+                        _phVal = '';
                     }
                 }
                 _strPh = _phVal ? ` placeholder="${escAttr(_phVal)}"` : '';
@@ -653,7 +670,10 @@ function resetConfigField(pathStr) {
 /** Render all scalar (non-object) fields of *obj*.
  *  _postGroupHtml: optional map of groupName → HTML string injected after
  *  the last field of that group (used to embed action buttons inside a group). */
-function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtml = {}) {
+// opts (all optional, used by the cluster edit modal's tabbed layout):
+//   onlyGroups     — render only fields whose `group` is in this list (a tab pane)
+//   skipHostPicker — do not emit the host / multi-host binding picker
+function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtml = {}, opts = {}) {
     let h = '';
     // _schemaKeyOf handles both flat ("snmp|servers") and nested ("snmp|servers|router|checks") paths.
     const _sch = ITEM_SCHEMAS[_schemaKeyOf(pathPrefix)]
@@ -667,6 +687,10 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
 
     // __group_when__: explicit show_when for group headers (independent of field show_when)
     const _groupWhen = (_sch && _sch['__group_when__']) || {};
+    // __group_collapsed__: group names that render collapsible + collapsed by default
+    // (e.g. proxmox 'provision'). The header becomes a toggle; the fields go in a
+    // Bootstrap .collapse closed initially.
+    const _groupCollapsed = (_sch && _sch['__group_collapsed__']) || [];
 
     // Module-level infra fields (threads/timeout) group under an "Execution" header
     // even without an explicit schema `group` — only on the module-level pane
@@ -684,7 +708,7 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     const _schemaKeys = _sch
         ? (_sch['__field_order__'] || Object.keys(_sch).filter(k => !k.startsWith('__')))
         : null;
-    const keys = (_schemaKeys ? Object.keys(obj).filter(k => _schemaKeys.includes(k)) : Object.keys(obj)).sort((a, b) => {
+    let keys = (_schemaKeys ? Object.keys(obj).filter(k => _schemaKeys.includes(k)) : Object.keys(obj)).sort((a, b) => {
         if (_isModuleLevel) {
             const ae = _effGroup(a) === 'execution' ? 1 : 0;
             const be = _effGroup(b) === 'execution' ? 1 : 0;
@@ -699,6 +723,11 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         if (a === 'enabled') return -1; if (b === 'enabled') return 1;
         return a.localeCompare(b);
     });
+    // Optional (modal tab panes): restrict to specific field groups. The cred
+    // picker (auto-scoped to the auth fields below) follows the same filter.
+    if (opts && Array.isArray(opts.onlyGroups)) {
+        keys = keys.filter(k => opts.onlyGroups.includes(_effGroup(k)));
+    }
 
     // ── Host binding (host-centric config) ──────────────────────────────────
     // A module whose connection fields are declared in __host_profile__ (exposed
@@ -717,9 +746,14 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     const _hostColls = (target !== 'config')
         ? (MODULE_HOST_COLLECTIONS[_modBase] || MODULE_HOST_COLLECTIONS[_modName] || null) : null;
     const _hostCapable = !!(_hostColls && _collSuffix && _hostColls.includes(_collSuffix));
-    const _hostBound = _hostCapable && obj && obj.host_uid;
-    if (_hostCapable) {
-        h += _renderHostPicker(pathPrefix, obj.host_uid || '', target);
+    // Multi-bind modules (e.g. proxmox cluster) bind to several hosts via host_uids.
+    const _hostMultiBind = !!(MODULE_HOST_MULTI_BIND[_modBase] || MODULE_HOST_MULTI_BIND[_modName]);
+    const _hostBound = _hostCapable && obj &&
+        (_hostMultiBind ? (Array.isArray(obj.host_uids) && obj.host_uids.length) : obj.host_uid);
+    if (_hostCapable && !(opts && opts.skipHostPicker)) {
+        h += _hostMultiBind
+            ? _renderHostMultiPicker(pathPrefix, obj.host_uids || [], target)
+            : _renderHostPicker(pathPrefix, obj.host_uid || '', target);
     }
 
     // ── Credential binding (module-declared credential type) ──────────────────
@@ -734,10 +768,12 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     let _credPickerDone = false;
 
     let _curGroup = null;
+    let _openCollapseId = null;   // id of an open collapsible-group <div>, if any
     for (const k of keys) {
         if (exclude.includes(k)) continue;
         if (k === 'host_uid') continue;   // rendered by the host picker above
         if (k === 'cred_uid') continue;   // rendered by the credential picker
+        if (k === 'created_at' || k === 'updated_at' || k === 'updated_by') continue;  // read-only audit metadata
         const v = obj[k];
         if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
         const _meta = fieldMeta(_sch, k);
@@ -759,6 +795,7 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
             if (_curGroup !== null && _postGroupHtml[_curGroup]) {
                 h += _postGroupHtml[_curGroup];
             }
+            if (_openCollapseId) { h += '</div>'; _openCollapseId = null; }  // close prev collapse
 
             // Group header uses __group_when__ for its own visibility (not the field's show_when)
             if (_group) {
@@ -775,9 +812,21 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
                     || (_group === 'execution' ? (t('module_execution') || 'Execution') : _group));
                 const _swAttr = _gWhen ? ` data-sw-when="${escAttr(JSON.stringify(_gWhen))}"` : '';
                 const _hdrHide = _gVisible ? '' : ' style="display:none"';
-                h += `<div class="sw-field ss-section-hdr"${_swAttr}${_hdrHide}>
-                    <small class="text-muted ss-section-title">${_glabel}</small>
-                </div>`;
+                if (_groupCollapsed.includes(_group)) {
+                    // Collapsible group: header is a toggle; fields go in a .collapse
+                    // closed by default.
+                    const _cid = 'grp_' + (pathPrefix + '_' + _group).replace(/\W/g, '_');
+                    h += `<div class="sw-field ss-section-hdr"${_swAttr}${_hdrHide}>
+                        <button type="button" class="btn btn-link p-0 border-0 text-decoration-none ss-section-title text-muted d-flex align-items-center gap-1 collapsed"
+                                data-bs-toggle="collapse" data-bs-target="#${_cid}" aria-expanded="false">
+                            <i class="bi bi-chevron-right" style="font-size:.7rem;transition:transform .15s"></i>${_glabel}</button>
+                    </div><div class="collapse" id="${_cid}">`;
+                    _openCollapseId = _cid;
+                } else {
+                    h += `<div class="sw-field ss-section-hdr"${_swAttr}${_hdrHide}>
+                        <small class="text-muted ss-section-title">${_glabel}</small>
+                    </div>`;
+                }
             }
             _curGroup = _group;
         }
@@ -824,6 +873,7 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     if (_curGroup !== null && _postGroupHtml[_curGroup]) {
         h += _postGroupHtml[_curGroup];
     }
+    if (_openCollapseId) { h += '</div>'; }   // close the final collapsible group
     return h;
 }
 
@@ -855,6 +905,92 @@ function _onHostPick(itemPath, uid, target) {
         .forEach(el => { el.style.display = uid ? 'none' : ''; });
     // When unbinding, restore each field's own show_when visibility.
     if (!uid) _refreshConditionalFields(itemPath);
+}
+
+/**
+ * Multi-host picker for a __host_multiple_bind__ module (e.g. a Proxmox cluster):
+ * a check binds to SEVERAL hosts (host_uids) whose addresses form the failover
+ * list.  A checkbox per host; binding hides the inline connection fields.
+ */
+function _renderHostMultiPicker(itemPath, curUids, target) {
+    const sel = (curUids || []).map(String);
+    const hosts = hostsList();
+    // Selected hosts → removable chips (show the host NAME, store the UID).
+    const chips = sel.map(uid => {
+        const h = hosts.find(x => String(x.uid) === uid);
+        const name = h ? h.name : uid;
+        return `<span class="badge text-bg-primary d-inline-flex align-items-center gap-1 me-1 mb-1" style="font-size:.75rem">
+            ${esc(name)}
+            <button type="button" class="btn-close btn-close-white" style="font-size:.5rem"
+                title="${escAttr(t('remove') || 'Remove')}"
+                onclick="_hostMultiRemove(${jsStr(itemPath)},${jsStr(uid)},${jsStr(target)})"></button>
+        </span>`;
+    }).join('');
+    // Unselected hosts → entries of an "Add" dropdown (searchable when many).
+    const available = hosts.filter(h => !sel.includes(String(h.uid)));
+    const opts = available.map(h =>
+        `<li><button type="button" class="dropdown-item small hpm-opt"
+            data-hpm-name="${escAttr((String(h.name) + ' ' + String(h.address || '')).toLowerCase())}"
+            onclick="_hostMultiAdd(${jsStr(itemPath)},${jsStr(String(h.uid))},${jsStr(target)})">
+            ${esc(h.name)}${h.address ? ` <span class="text-muted">(${esc(h.address)})</span>` : ''}</button></li>`).join('')
+        || `<li><span class="dropdown-item-text text-muted small">${esc(t('no_items') || '—')}</span></li>`;
+    return `<div class="cfg-field-wrap mb-2" data-hp-multi="${escAttr(itemPath)}">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <label class="form-label small fw-semibold mb-0">
+                <i class="bi bi-hdd-network me-1"></i>${esc(t('host_bind_multi_label') || t('host_bind_label'))}</label>
+            <span class="badge text-bg-secondary">${sel.length}</span>
+            <div class="dropdown ms-auto">
+                <button type="button" class="btn btn-sm btn-secondary dropdown-toggle" data-bs-toggle="dropdown"
+                        data-bs-auto-close="outside" ${available.length ? '' : 'disabled'}>
+                    <i class="bi bi-plus-lg me-1"></i>${esc(t('host_add') || t('add') || 'Add')}</button>
+                <div class="dropdown-menu dropdown-menu-end p-2" style="min-width:260px">
+                    ${available.length > 6 ? `<input type="search" class="form-control form-control-sm mb-2"
+                        placeholder="${escAttr((t('search') || 'Search') + '…')}"
+                        oninput="_hostMultiOptFilter(this)" onclick="event.stopPropagation()">` : ''}
+                    <ul class="list-unstyled mb-0" style="max-height:13rem;overflow:auto">${opts}</ul>
+                </div>
+            </div>
+        </div>
+        <div class="border rounded p-2 d-flex flex-wrap align-items-center" style="min-height:2.4rem;background:var(--bs-body-bg)">
+            ${chips || `<span class="text-muted small">${esc(t('host_inline'))}</span>`}
+        </div>
+    </div>`;
+}
+
+// Filter the "Add host" dropdown entries by name/address.
+function _hostMultiOptFilter(inp) {
+    const q = String(inp.value || '').trim().toLowerCase();
+    inp.closest('.dropdown-menu')?.querySelectorAll('.hpm-opt').forEach(o => {
+        o.closest('li').style.display = (!q || (o.dataset.hpmName || '').includes(q)) ? '' : 'none';
+    });
+}
+
+function _hostMultiVals(itemPath, target) {
+    const data = target === 'config' ? configData : modulesData;
+    const it = getPath(data, itemPath.split('|'));
+    return Array.isArray(it && it.host_uids) ? it.host_uids.map(String) : [];
+}
+function _hostMultiAdd(itemPath, uid, target) {
+    const arr = _hostMultiVals(itemPath, target);
+    if (!arr.includes(String(uid))) arr.push(String(uid));
+    _hostMultiCommit(itemPath, target, arr);
+}
+function _hostMultiRemove(itemPath, uid, target) {
+    _hostMultiCommit(itemPath, target, _hostMultiVals(itemPath, target).filter(u => u !== String(uid)));
+}
+function _hostMultiCommit(itemPath, target, arr) {
+    updateField(target, itemPath + '|host_uids', arr);
+    // Binding to ≥1 host hides the inline connection fields (host owns them).
+    const bound = arr.length > 0;
+    document.querySelectorAll(`.hostprof-field[data-hp-item="${CSS.escape(itemPath)}"]`)
+        .forEach(el => { el.style.display = bound ? 'none' : ''; });
+    if (!bound) _refreshConditionalFields(itemPath);
+    // Re-render the picker in place (deferred so the current click cycle, incl.
+    // Bootstrap's dropdown handling, finishes before the node is replaced).
+    setTimeout(() => {
+        const el = document.querySelector(`[data-hp-multi="${CSS.escape(itemPath)}"]`);
+        if (el) el.outerHTML = _renderHostMultiPicker(itemPath, arr, target);
+    }, 0);
 }
 
 // ── Field-value adapter registry ────────────────────────────────────────────

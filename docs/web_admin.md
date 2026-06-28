@@ -95,10 +95,11 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Vista general (Overview)** | 12 tarjetas de resumen (Modules, Checks, Servers, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente); cada widget enlaza a su pestaña; auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin |
 | **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador; paneles colapsables por sección |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
+| **Tablas de listado unificadas** | Todos los listados (Users, Roles, Groups, Credentials, Servers, Clusters, Sessions, Audit, Events, Syslog) usan un componente común dirigido por esquema: paginación arriba/abajo, ordenación por columna, columnas reordenables (arrastrar), redimensionables (doble clic = auto-ajuste) u **ajustadas al contenido** (`resizable:false`), selector de mostrar/ocultar columnas y persistencia por usuario (columnas visibles, orden y ancho en `table_config`). Ver §[Tablas de Listado](#tablas-de-listado) |
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 46 flags granulares; activar/desactivar desde el modal |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 52 flags granulares; activar/desactivar desde el modal |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
@@ -125,16 +126,16 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos (46 flags) |
-| `editor` | Vista de todo + edición (sin borrar ni crear): `*_view` de todos los recursos, más `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `credentials_edit`, `events_edit`, `overview_edit`, `services_control` |
-| `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view` (sin `config_view`) |
+| `admin` | Todos los permisos (52 flags) |
+| `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` de los recursos correspondientes (`modules_view`, `servers_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`). No incluye permisos de `credentials_*` |
+| `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view` (sin `config_view` ni `credentials_view`) |
 
 > Los roles integrados **no pueden eliminarse** ni cambiar sus permisos via API. Sí permiten actualizar la **etiqueta** (`label`) y gestionar qué usuarios y grupos tienen ese rol asignado. La etiqueta personalizada (override de nombre/descripción) se persiste como una fila más en la tabla `roles` de la BD.
 
 ### Roles personalizados
 
 Se pueden crear roles adicionales desde la pestaña **Acceso → Roles** asignando
-cualquier combinación de los 46 permisos disponibles. Los roles personalizados se
+cualquier combinación de los 52 permisos disponibles. Los roles personalizados se
 persisten en la tabla `roles` de la BD.
 
 ```
@@ -174,7 +175,7 @@ Cada grupo tiene:
 
 ## Sistema de Permisos
 
-El sistema de control de acceso usa **46 flags granulares** por acción y recurso.
+El sistema de control de acceso usa **52 flags granulares** por acción y recurso.
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -197,6 +198,7 @@ El sistema de control de acceso usa **46 flags granulares** por acción y recurs
 | | `modules_edit` | Guardar cambios en módulos |
 | | `modules_delete` | Eliminar entradas de módulo |
 | **Servers** | `servers_view` `servers_add` `servers_edit` `servers_delete` | CRUD del registro de hosts |
+| **Clusters** | `clusters_view` `clusters_add` `clusters_edit` `clusters_delete` | CRUD de clusters (checks multi-bind: una comprobación vinculada a varios hosts) |
 | **Credenciales** | `credentials_view` `credentials_add` `credentials_edit` `credentials_delete` | CRUD de identidades SSH reutilizables |
 | **Config** | `config_view` | Leer `config.json` sin poder editarlo |
 | | `config_edit` | Guardar cambios en configuración |
@@ -214,16 +216,18 @@ El sistema de control de acceso usa **46 flags granulares** por acción y recurs
 | | `syslog_delete` | Vaciar mensajes / descartes |
 | **Servicios** | `services_view` | Ver el estado de los servicios |
 | | `services_control` | Iniciar/detener servicios |
-| **Eventos** | `events_view` | Ver reglas de notificación y el log de envíos |
+| **Eventos** | `events_view` | Ver reglas de notificación |
 | | `events_add` | Crear reglas de evento |
-| | `events_edit` | Editar reglas (y vaciar el log de envíos) |
+| | `events_edit` | Editar reglas |
 | | `events_delete` | Eliminar reglas de evento |
+| | `events_notify_view` | Ver el log de notificaciones enviadas |
+| | `events_notify_delete` | Vaciar el log de notificaciones enviadas |
 
-> Además de los 46 flags globales, cada módulo expone **permisos a nivel de módulo** dinámicos (`module.<nombre>.view`, `.add`, `.edit`, `.delete`) que permiten restringir el acceso a un módulo concreto.
+> Además de los 52 flags globales, cada módulo expone **permisos a nivel de módulo** dinámicos (`module.<nombre>.view`, `.add`, `.edit`, `.delete`) que permiten restringir el acceso a un módulo concreto. También existen permisos dinámicos por servidor (`server.<uid>.<acción>`) y por cluster (`cluster.<uid>.<acción>`).
 
 ### Implementación interna
 
-- `PERMISSIONS` — tupla con los 46 flags.
+- `PERMISSIONS` — tupla con los 52 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` para los roles integrados.
 - `_perm_required(*perms)` — factoría de decoradores: acepta si el usuario tiene **alguno** de los permisos indicados.
@@ -561,8 +565,8 @@ configurados; más el log de envíos. Ver [configuration.md → Gestor de evento
 | `PUT` | `/api/v1/event-rules/<rid>` | `events_edit` | Editar una regla |
 | `DELETE` | `/api/v1/event-rules/<rid>` | `events_delete` | Eliminar una regla |
 | `POST` | `/api/v1/event-rules/<rid>/test` | `events_edit` | Disparar la regla con un mensaje de prueba |
-| `GET` | `/api/v1/notifications/log` | `events_view`* | Listar el log de notificaciones enviadas |
-| `DELETE` | `/api/v1/notifications/log` | `events_edit` | Vaciar el log de notificaciones |
+| `GET` | `/api/v1/notifications/log` | `events_notify_view` | Listar el log de notificaciones enviadas |
+| `DELETE` | `/api/v1/notifications/log` | `events_notify_delete` | Vaciar el log de notificaciones |
 
 > \* `events_view` aquí acepta **cualquiera** de `events_view`/`events_add`/`events_edit`/`events_delete`.
 
@@ -781,7 +785,7 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 46 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 52 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |
@@ -815,6 +819,45 @@ Esto implica:
 - Sin listas de campos hardcodeadas en JS.
 - Los iconos y nombres de visualización de los módulos vienen de `info.json` y `lang/*.json`.
 - Añadir un nuevo campo a `schema.json` es suficiente para que aparezca en la UI.
+
+---
+
+## Tablas de Listado
+
+Todos los listados del panel comparten un **componente de tabla dirigido por
+esquema** (`createListTable(spec)` en `partials/core/_list_table.html`). Cada tabla
+solo declara su esquema (columnas, render de celda, acciones por fila, origen de
+datos); el componente genera el resto: tarjeta, cabecera, paginación arriba/abajo,
+ordenación, selección/acciones masivas y la fontanería de persistencia.
+
+### Comportamiento de columnas
+
+- **Ordenar**: clic en la cabecera (asc/desc).
+- **Reordenar**: arrastrar la cabecera a otra posición.
+- **Redimensionar**: arrastrar el borde derecho de la cabecera; **doble clic** la
+  auto-ajusta al contenido. El ancho se guarda por usuario.
+- **Columnas ajustadas al contenido** (`resizable: false` en el esquema): no se
+  redimensionan; ocupan solo lo que mide su contenido (`ss-th-fit`, `width:1%`).
+  Se usan para columnas cortas (estado, contadores, switches, UID, fechas…).
+- **Mostrar/ocultar columnas**: botón con icono de columnas que abre un menú con
+  un check por columna. Las columnas obligatorias (`always`) aparecen bloqueadas
+  (icono de candado). "Reset defaults" restaura columnas/orden/anchos.
+
+> **Selector de columnas — Ctrl/⌘ para marcar varias.** Por defecto, al marcar o
+> desmarcar una columna el menú se cierra (la tabla se re-renderiza). Si mantienes
+> **Ctrl** (o **⌘** en Mac) mientras haces clic, el menú **permanece abierto** para
+> elegir varias columnas seguidas; se cierra al hacer clic fuera. Implementado de
+> forma genérica en `_buildColChooser`/`_colChooserToggle` (`partials/core/_utils.html`),
+> así que aplica a todas las tablas por igual.
+
+### Persistencia por usuario
+
+Las columnas visibles, su orden, el ancho y la ordenación de cada tabla se guardan
+en el campo JSON `table_config` (dentro de `users.extra`), con `localStorage` como
+caché local. Se sincroniza con `PUT /api/v1/users/me/preferences` y se devuelve en
+`GET /api/v1/me`, de modo que la disposición se mantiene entre dispositivos y
+sesiones. Desde el modal de usuario (pestaña *Customisations*) un admin puede
+**limpiar selectivamente** la configuración guardada de cada tabla.
 
 ---
 

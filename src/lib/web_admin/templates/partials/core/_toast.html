@@ -9,7 +9,12 @@ let _confirmModalCallback = null;
 function showConfirmModal(msg, callback) {
     _confirmModalCallback = callback;
     document.getElementById('confirmModalMsg').textContent = msg;
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).show();
+    const _m = document.getElementById('confirmModal');
+    // Focus the confirm button once shown so the FIRST Enter applies (otherwise
+    // the first Enter is lost because focus isn't in the modal yet).
+    _m.addEventListener('shown.bs.modal',
+        () => document.getElementById('btnConfirmModalOk')?.focus(), { once: true });
+    bootstrap.Modal.getOrCreateInstance(_m).show();
 }
 
 function showToast(msg, type = 'success', delay = 3000) {
@@ -23,7 +28,7 @@ function showToast(msg, type = 'success', delay = 3000) {
 // ──────────────────────────── Generic info modal ──────────────────
 // Show a title + an optional lead message + a key/value table.  `data` may be a
 // plain object ({key: value}) or an array of [key, value] pairs (preserves order).
-function showInfoModal(title, data, lead) {
+function showInfoModal(title, data, lead, variant) {
     document.getElementById('infoModalTitle').textContent = title || '';
     const pairs = Array.isArray(data)
         ? data
@@ -32,7 +37,11 @@ function showInfoModal(title, data, lead) {
         `<tr><td class="text-muted" style="white-space:nowrap;width:1%">${esc(String(k))}</td>` +
         `<td class="font-monospace" style="word-break:break-all">${esc(v === null || v === undefined ? '' : String(v))}</td></tr>`
     ).join('');
-    const body = (lead ? `<p class="small text-success mb-2"><i class="bi bi-check-circle me-1"></i>${esc(lead)}</p>` : '')
+    // Lead style reflects the outcome: success (green ✓), warning (yellow △) or
+    // danger (red ✕). Defaults to success for backward compatibility.
+    const _lv = { success: 'bi-check-circle', warning: 'bi-exclamation-triangle', danger: 'bi-x-circle' };
+    const _vc = _lv[variant] ? variant : 'success';
+    const body = (lead ? `<p class="small text-${_vc} mb-2"><i class="bi ${_lv[_vc]} me-1"></i>${esc(lead)}</p>` : '')
         + (pairs.length
             ? `<table class="table table-sm table-striped align-middle mb-0" style="font-size:.82rem"><tbody>${rows}</tbody></table>`
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);

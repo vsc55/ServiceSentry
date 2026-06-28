@@ -200,15 +200,30 @@ function _renderWaitingCard(mod) {
 
 // A check's display name: its item 'label' (the stored key may be an opaque
 // UID), looked up in the live modules config, falling back to the raw key.
+// Composite keys '<item>/<metric>' (e.g. proxmox '<uid>/node/pve04') resolve the
+// leading item segment to its label and keep the metric → '<label> / node/pve04',
+// instead of leaking the opaque UID on every row.
 function _statusCheckLabel(mod, ck) {
-    for (const mk of [mod, 'watchfuls.' + mod, mod.split('.').pop()]) {
-        const mc = modulesData[mk];
-        if (!mc || typeof mc !== 'object') continue;
-        for (const [coll, items] of Object.entries(mc)) {
-            if (coll.startsWith('__') || !items || typeof items !== 'object') continue;
-            const it = items[ck];
-            if (it && typeof it === 'object' && String(it.label || '').trim()) return String(it.label);
+    const _resolve = (key) => {
+        for (const mk of [mod, 'watchfuls.' + mod, mod.split('.').pop()]) {
+            const mc = modulesData[mk];
+            if (!mc || typeof mc !== 'object') continue;
+            for (const [coll, items] of Object.entries(mc)) {
+                if (coll.startsWith('__') || !items || typeof items !== 'object') continue;
+                const it = items[key];
+                if (it && typeof it === 'object' && String(it.label || '').trim()) return String(it.label);
+            }
         }
+        return null;
+    };
+    // Whole-key match first (inline checks whose key IS the item).
+    const whole = _resolve(ck);
+    if (whole) return whole;
+    // Composite '<item>/<metric>': resolve the first segment, keep the rest.
+    const slash = ck.indexOf('/');
+    if (slash > 0) {
+        const label = _resolve(ck.slice(0, slash));
+        if (label) return `${label} / ${ck.slice(slash + 1)}`;
     }
     return ck;
 }

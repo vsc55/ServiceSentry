@@ -8,6 +8,22 @@ function _updateStickyOffset() {
     if (el) document.documentElement.style.setProperty('--ss-top-offset', el.offsetHeight + 'px');
 }
 
+// Reload that bypasses the "unsaved changes" guard. The restart/reload banner
+// signals the service was restarted, so a stale in-progress edit must not silently
+// block recovery (the auto-countdown and the manual button both use this).
+function forcePageReload() {
+    window._forcePageReload = true;
+    window.onbeforeunload = null;            // drop any legacy property-handler too
+    try { location.reload(); } catch (_) {}
+    // Belt-and-suspenders: if the reload was suppressed (cached doc / guard), force
+    // a hard same-URL navigation with a cache-buster a moment later.
+    setTimeout(() => {
+        const u = new URL(window.location.href);
+        u.searchParams.set('_r', String(Date.now()));
+        window.location.replace(u.toString());
+    }, 250);
+}
+
 let _reloadCountdownTimer = null;
 function _showReloadBanner() {
     const banner = document.getElementById('page-reload-banner');
@@ -27,7 +43,7 @@ function _showReloadBanner() {
         if (msg) msg.textContent = tf('page_reload_countdown', secs);
         if (secs <= 0) {
             clearInterval(_reloadCountdownTimer);
-            location.reload();
+            forcePageReload();
             return;
         }
         secs--;

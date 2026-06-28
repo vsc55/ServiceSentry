@@ -1,32 +1,69 @@
 {# ================================================================
-   Role modal — openNewRoleModal, _populateRoleUsersGrid,
-   _populateRoleGroupsGrid, openEditRoleModal, saveRoleModal,
-   deleteRole.
+   Role modal — openRoleModal (one modal for new/edit/clone) + the
+   openNewRoleModal/openEditRoleModal/cloneRoleModal entry wrappers,
+   _populateRoleUsersGrid, _populateRoleGroupsGrid, saveRoleModal, deleteRole.
    ================================================================ #}
 
 let _editingRole = null;  // UID of the role being edited (null = new)
 
-function openNewRoleModal() {
-    _editingRole = null;
-    document.getElementById('roleModalTitle').textContent = t('new_role');
-    document.getElementById('rmLabel').value = '';
-    document.getElementById('rmLabel').disabled = false;
-    document.getElementById('rmDescription').value = '';
+// One modal for create / edit / clone — the entry point picks the mode:
+//   'new'   → blank form, opens on General.
+//   'edit'  → load the role; opens on Permissions (built-in roles show them
+//             read-only). Editable perms only for custom roles.
+//   'clone' → load the source role's perms + description into a NEW custom role
+//             (name + copy suffix); opens on General; assignments are NOT copied.
+function openRoleModal(uid, mode = 'edit') {
+    const clone     = mode === 'clone';
+    const isNew     = mode === 'new' || clone;          // both create a new role
+    const src       = uid ? (rolesData[uid] || {}) : {};
+    const isBuiltin = !clone && !!src.builtin;          // a clone is always custom
+    _editingRole    = isNew ? null : uid;               // null → save POSTs a new role
+
+    document.getElementById('roleModalTitle').textContent =
+        clone ? (t('clone') + ': ' + (src.name || uid))
+              : (mode === 'new' ? t('new_role') : (t('edit_role_title') + ': ' + (src.name || uid)));
+    const lbl = document.getElementById('rmLabel');
+    lbl.value = mode === 'new' ? ''
+              : (src.name || uid || '') + (clone ? ' (' + t('clone_copy_suffix') + ')' : '');
+    lbl.disabled = false;
+    lbl.classList.remove('is-invalid');
+    const lblErr = document.getElementById('rmLabelError'); if (lblErr) lblErr.textContent = '';
+    document.getElementById('rmDescription').value = src.description || '';
     document.getElementById('rmDescription').disabled = false;
-    document.getElementById('rmUidRow').classList.add('d-none');
-    document.getElementById('rmUid').value = '';
+    document.getElementById('rmUidRow').classList.toggle('d-none', isNew);
+    document.getElementById('rmUid').value = isNew ? '' : uid;
     document.getElementById('rmEnabledGroup').style.display = '';
-    const rmEnabledNew = document.getElementById('rmEnabled');
-    rmEnabledNew.checked = true;
-    rmEnabledNew.disabled = false;
-    _buildPermsAccordion(new Set(), false);
-    _buildModulePermsGrid(new Set(), false);
-    _buildServerPermsGrid(new Set(), false);
-    _populateRoleUsersGrid(null, []);
-    _populateRoleGroupsGrid(null, []);
-    bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#rmTabGeneral"]')).show();
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
+    const en = document.getElementById('rmEnabled');
+    en.checked = isBuiltin || src.enabled !== false;
+    en.disabled = isBuiltin;
+    const activePerms = new Set(src.permissions || []);
+    _buildPermsAccordion(activePerms, isBuiltin);
+    _rmBuildAllResPermGrids(activePerms, isBuiltin);   // module/server/cluster sub-grids
+    ['rmUserSearch', 'rmGroupSearch'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.value = ''; delete el.dataset.bound; }
+    });
+    // Assignments belong to the source role only — none for a new/cloned role.
+    const assignUid = isNew ? null : uid;
+    _populateRoleUsersGrid(assignUid, []);
+    _populateRoleGroupsGrid(assignUid);
+    // New/clone open on General; editing always opens on Permissions.
+    const targetTab = isNew ? '#rmTabGeneral' : '#rmTabPerms';
+    _setActiveTab('roleModalTabs', 'roleModalTabContent', targetTab);   // pre-set: no flash
+    _setModalSaveButton('btnRoleModalOk', mode);
+    const modalEl = document.getElementById('roleModal');
+    _focusNameOnCreate(modalEl, 'rmLabel', mode);
+    // Re-assert the tab once the modal is visible — activating a Bootstrap tab while
+    // the modal is still hidden is unreliable (transitionend never fires).
+    modalEl.addEventListener('shown.bs.modal', () => {
+        bootstrap.Tab.getOrCreateInstance(
+            document.querySelector(`#roleModalTabs [data-bs-target="${targetTab}"]`)).show();
+    }, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
+function openNewRoleModal()    { openRoleModal(null, 'new'); }
+function openEditRoleModal(uid) { openRoleModal(uid, 'edit'); }
+function cloneRoleModal(uid)    { openRoleModal(uid, 'clone'); }
 
 function _populateRoleUsersGrid(roleUid, searchFilterUsers) {
     _buildItemsGrid('rmUsersGrid', usersData, {
@@ -66,36 +103,6 @@ function _populateRoleGroupsGrid(roleUid) {
     _bindSearch('rmGroupSearch', () => _populateRoleGroupsGrid(_editingRole), true);
 }
 
-function openEditRoleModal(uid) {
-    _editingRole = uid;
-    const rd = rolesData[uid] || {};
-    const isBuiltin = !!rd.builtin;
-    document.getElementById('roleModalTitle').textContent = t('edit_role_title') + ': ' + (rd.name || uid);
-    document.getElementById('rmLabel').value = rd.name || '';
-    document.getElementById('rmLabel').disabled = false;
-    document.getElementById('rmDescription').value = rd.description || '';
-    document.getElementById('rmDescription').disabled = false;  // description editable for all roles
-    document.getElementById('rmUidRow').classList.remove('d-none');
-    document.getElementById('rmUid').value = uid;
-    const rmEnabledGroup = document.getElementById('rmEnabledGroup');
-    rmEnabledGroup.style.display = '';
-    const rmEnabled = document.getElementById('rmEnabled');
-    rmEnabled.checked = isBuiltin || rd.enabled !== false;
-    rmEnabled.disabled = isBuiltin;
-    const activePerms = new Set(rd.permissions || []);
-    _buildPermsAccordion(activePerms, isBuiltin);
-    _buildModulePermsGrid(activePerms, isBuiltin);
-    _buildServerPermsGrid(activePerms, isBuiltin);
-    ['rmUserSearch', 'rmGroupSearch'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) { el.value = ''; delete el.dataset.bound; }
-    });
-    _populateRoleUsersGrid(uid, []);
-    _populateRoleGroupsGrid(uid);
-    const targetTab = isBuiltin ? '#rmTabAssign' : '#rmTabPerms';
-    bootstrap.Tab.getOrCreateInstance(document.querySelector(`[data-bs-target="${targetTab}"]`)).show();
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('roleModal')).show();
-}
 
 async function saveRoleModal() {
     const name        = document.getElementById('rmLabel').value.trim();
@@ -105,10 +112,18 @@ async function saveRoleModal() {
     ).map(cb => cb.value);
     const selectedUsers  = new Set(Array.from(document.querySelectorAll('#rmUsersGrid input[type=checkbox]:checked')).map(cb => cb.value));
     const selectedGroups = new Set(Array.from(document.querySelectorAll('#rmGroupsGrid input[type=checkbox]:checked')).map(cb => cb.value));
-    if (!name) { showToast(t('role_name_required'), 'warning'); return; }
-    // Duplicate name check for new roles
-    if (!_editingRole && !_isUniqueName(name, rolesData, (k, rd) => rd.name)) {
-        showToast(tf('role_already_exists', name), 'warning'); return;
+    const lbl = document.getElementById('rmLabel');
+    const lblErr = document.getElementById('rmLabelError');
+    const markInvalid = (msg) => {
+        if (lblErr) lblErr.textContent = msg;
+        lbl.classList.add('is-invalid');
+        bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#rmTabGeneral"]')).show();
+        lbl.focus();
+    };
+    if (!name) { markInvalid(t('role_name_required')); return; }
+    // Duplicate name check (ignore the role being edited so it keeps its own name).
+    if (!_isUniqueName(name, rolesData, (k, rd) => rd.name, _editingRole)) {
+        markInvalid(tf('role_already_exists', name)); return;
     }
     const rd        = rolesData[_editingRole] || {};
     const isBuiltin = !!rd.builtin;
@@ -181,7 +196,7 @@ async function saveRoleModal() {
 }
 
 async function deleteRole(uid) {
-    showConfirmModal(t('role_confirm_delete'), async () => {
+    showConfirmModal(tf('role_confirm_delete', rolesData[uid]?.name || uid), async () => {
         const r = await apiDelete('/api/v1/roles/' + encodeURIComponent(uid));
         if (r && r.status === 200 && r.data?.ok) {
             showToast(t('role_deleted'));

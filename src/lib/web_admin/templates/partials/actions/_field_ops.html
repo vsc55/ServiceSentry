@@ -56,7 +56,12 @@ function removeItem(target, parentPathStr, key) {
     const _item = getPath(_data, parentPathStr.split('|').concat(key));
     const _disp = (_item && typeof _item === 'object' && (_item.label || '').trim()) || key;
     document.getElementById('confirmDeleteItemMsg').textContent = tf('confirm_delete_item', _disp);
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmDeleteItemModal')).show();
+    const _m = document.getElementById('confirmDeleteItemModal');
+    // Focus the confirm button once shown so the FIRST Enter applies (otherwise
+    // focus isn't in the modal yet and the first Enter is lost → needed twice).
+    _m.addEventListener('shown.bs.modal',
+        () => document.getElementById('btnConfirmDeleteItemOk')?.focus(), { once: true });
+    bootstrap.Modal.getOrCreateInstance(_m).show();
 }
 
 function _doDeleteItem() {
@@ -67,10 +72,55 @@ function _doDeleteItem() {
     if (parent && key in parent) {
         delete parent[key];
         markDirty(target);
-        target === 'modules' ? renderModules() : renderConfig();
+        target === 'modules' ? _renderModulesSurface() : renderConfig();
     }
     bootstrap.Modal.getInstance(document.getElementById('confirmDeleteItemModal')).hide();
     _deleteItemCtx = null;
+}
+
+// ── Multi-select + bulk delete of collection items (Modules / Config) ─────────
+// Selection is by full item path (module|collection|key); the bulk-delete button
+// lives in each collection header and reflects how many of ITS items are picked.
+const _modItemSel = new Set();
+
+function _collItemSelCount(collPath) {
+    const pre = collPath + '|';
+    let n = 0;
+    _modItemSel.forEach(p => { if (p.startsWith(pre) && !p.slice(pre.length).includes('|')) n++; });
+    return n;
+}
+function _toggleItemSel(pathStr, checked, collPath, target) {
+    if (checked) _modItemSel.add(pathStr); else _modItemSel.delete(pathStr);
+    _updateBulkDel(collPath);
+}
+function _updateBulkDel(collPath) {
+    // The SAME collection can be on screen twice (inline card + the expand modal),
+    // so update every matching bulk-delete button, not just the first.
+    const n = _collItemSelCount(collPath);
+    document.querySelectorAll(`[data-bulkdel="${collPath}"]`)   // quoted value → no CSS.escape
+        .forEach(btn => {
+            const nEl = btn.querySelector('.bulkdel-n');
+            if (nEl) nEl.textContent = n;
+            btn.classList.toggle('d-none', n === 0);
+        });
+}
+function _bulkDeleteItems(collPath, target) {
+    const pre = collPath + '|';
+    const keys = [];
+    _modItemSel.forEach(p => { if (p.startsWith(pre) && !p.slice(pre.length).includes('|')) keys.push(p.slice(pre.length)); });
+    if (!keys.length) return;
+    showConfirmModal(tf('confirm_delete_items', keys.length), () => {
+        const data = target === 'modules' ? modulesData : configData;
+        const parent = getPath(data, collPath.split('|'));
+        if (parent) {
+            for (const k of keys) {
+                if (k in parent) delete parent[k];
+                _modItemSel.delete(pre + k);
+            }
+            markDirty(target);
+            target === 'modules' ? _renderModulesSurface() : renderConfig();
+        }
+    });
 }
 
 function cloneItem(target, parentPathStr, key) {
@@ -99,7 +149,7 @@ function cloneItem(target, parentPathStr, key) {
     markDirty(target);
     _autoExpandItemPath = parentPathStr + '|' + newKey;
     _pendingExpandMods.add(parts[0]);
-    target === 'modules' ? renderModules() : renderConfig();
+    target === 'modules' ? _renderModulesSurface() : renderConfig();
     showToast((t('item_cloned') || 'Cloned as') + ': ' + newKey);
 }
 
@@ -151,7 +201,7 @@ function _doRenameItem() {
     const _colEl = document.querySelector(`[data-sw-item-path="${CSS.escape(_oldPath)}"]`);
     if (_colEl && _colEl.classList.contains('show')) _autoExpandItemPath = parentPathStr + '|' + nk;
     markDirty(target);
-    target === 'modules' ? renderModules() : renderConfig();
+    target === 'modules' ? _renderModulesSurface() : renderConfig();
 }
 
 // Edit the editable title field (e.g. service 'label') of a dict item via the
@@ -170,7 +220,7 @@ function editItemLabel(target, pathStr, parentPathStr) {
     document.getElementById('btnHostLabelOk').onclick = () => {
         updateField(target, pathStr + '|' + titleField, input.value.trim());
         modal.hide();
-        target === 'modules' ? renderModules() : renderConfig();
+        target === 'modules' ? _renderModulesSurface() : renderConfig();
     };
     modal.show();
     setTimeout(() => input.focus(), 200);
@@ -323,7 +373,7 @@ function confirmAddItem() {
     if (target === 'modules') {
         _autoExpandItemPath = pathStr + '|' + name;
         _pendingExpandMods.add(pathStr.split('|')[0]);
-        renderModules();
+        _renderModulesSurface();
         setTimeout(() => {
             const modName = pathStr.split('|')[0];
             const card = document.getElementById('card-' + modName);

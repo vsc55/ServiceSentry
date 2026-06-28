@@ -14,26 +14,43 @@ function _persistTableConfig() {
     clearTimeout(_tcSaveTimer);
     _tcSaveTimer = setTimeout(async () => {
         const _cw = tbl => { try { return JSON.parse(localStorage.getItem(`ss_${tbl}_col_w`) || '{}'); } catch(_){ return {}; } };
-        const tc = {
-            groups:   { cols: [...(_groupsVisibleCols   || [])], order: _groupsColOrder   || [], w: _cw('groups') },
-            users:    { cols: [...(_usersVisibleCols    || [])], order: _usersColOrder    || [], w: _cw('users')  },
-            roles:    { cols: [...(_rolesVisibleCols    || [])], order: _rolesColOrder    || [], w: _cw('roles')  },
-            audit:    { cols: [...(_auditVisibleCols    || [])], order: _auditColOrder    || [], w: _cw('audit')  },
-            sessions: { cols: [...(_sessionsVisibleCols || [])], order: _sessionsColOrder || [], w: _cw('sessions'),
-                        view: (typeof _sessionsViewMode !== 'undefined' ? _sessionsViewMode : 'card') },
-            evrules:  { cols: [...(typeof _evrVisibleCols !== 'undefined' ? _evrVisibleCols : [])],
-                        order: (typeof _evrColOrder !== 'undefined' ? _evrColOrder : []), w: _cw('evrules') },
-            evlog:    { cols: [...(typeof _evlVisibleCols !== 'undefined' ? _evlVisibleCols : [])],
-                        order: (typeof _evlColOrder !== 'undefined' ? _evlColOrder : []), w: _cw('evlog') },
-            syslog:   { cols: [...(typeof _slVisibleCols !== 'undefined' ? _slVisibleCols : [])],
-                        order: (typeof _slColOrder !== 'undefined' ? _slColOrder : []), w: _cw('syslog') },
-            sldrops:  { cols: [...(typeof _sldVisibleCols !== 'undefined' ? _sldVisibleCols : [])],
-                        order: (typeof _sldColOrder !== 'undefined' ? _sldColOrder : []), w: _cw('sldrops') },
-        };
+        const tc = {};
+        // Factory-driven tables come from the registry; each migrated table drops its
+        // literal below automatically (the `lit` helper skips registered keys).
+        const _reg = new Set();
+        for (const d of _LIST_TABLE_REGISTRY) { tc[d.k] = { cols: [...(d.getVis() || [])], order: d.getOrd() || [], w: _cw(d.k) }; if (d.extra) Object.assign(tc[d.k], d.extra()); _reg.add(d.k); }
+        const lit = (k, entry) => { if (!_reg.has(k)) tc[k] = entry; };
+        lit('groups',   { cols: [...(typeof _groupsVisibleCols !== 'undefined' ? _groupsVisibleCols : [])], order: (typeof _groupsColOrder !== 'undefined' ? _groupsColOrder : []) || [], w: _cw('groups') });
+        lit('users',    { cols: [...(typeof _usersVisibleCols  !== 'undefined' ? _usersVisibleCols  : [])], order: (typeof _usersColOrder  !== 'undefined' ? _usersColOrder  : []) || [], w: _cw('users')  });
+        lit('roles',    { cols: [...(typeof _rolesVisibleCols  !== 'undefined' ? _rolesVisibleCols  : [])], order: (typeof _rolesColOrder  !== 'undefined' ? _rolesColOrder  : []) || [], w: _cw('roles')  });
+        lit('audit',    { cols: [...(typeof _auditVisibleCols  !== 'undefined' ? _auditVisibleCols  : [])], order: (typeof _auditColOrder  !== 'undefined' ? _auditColOrder  : []) || [], w: _cw('audit')  });
+        lit('sessions', { cols: [...(typeof _sessionsVisibleCols !== 'undefined' ? _sessionsVisibleCols : [])], order: (typeof _sessionsColOrder !== 'undefined' ? _sessionsColOrder : []) || [], w: _cw('sessions'),
+                          view: (typeof _sessionsViewMode !== 'undefined' ? _sessionsViewMode : 'card') });
+        lit('evrules',  { cols: [...(typeof _evrVisibleCols !== 'undefined' ? _evrVisibleCols : [])], order: (typeof _evrColOrder !== 'undefined' ? _evrColOrder : []), w: _cw('evrules') });
+        lit('evlog',    { cols: [...(typeof _evlVisibleCols !== 'undefined' ? _evlVisibleCols : [])], order: (typeof _evlColOrder !== 'undefined' ? _evlColOrder : []), w: _cw('evlog') });
+        lit('syslog',   { cols: [...(typeof _slVisibleCols  !== 'undefined' ? _slVisibleCols  : [])], order: (typeof _slColOrder  !== 'undefined' ? _slColOrder  : []), w: _cw('syslog') });
+        lit('sldrops',  { cols: [...(typeof _sldVisibleCols !== 'undefined' ? _sldVisibleCols : [])], order: (typeof _sldColOrder !== 'undefined' ? _sldColOrder : []), w: _cw('sldrops') });
         currentUser.table_config = tc;   // keep in sync so the keepalive poll won't re-render our own change
         try { await apiPut('/api/v1/users/me/preferences', { table_config: tc }); }
         finally { _tcSavePending = false; }
     }, 1500);
+}
+
+// ── Per-user modal/dialog size memory (separate from table_config so it can be
+// cleared on its own in the user Customisations tab) ──────────────────────────
+let _mcSaveTimer = null;
+function _persistModalConfig() {
+    clearTimeout(_mcSaveTimer);
+    _mcSaveTimer = setTimeout(async () => {
+        const mc = (typeof _modalSizeMem !== 'undefined') ? _modalSizeMem : {};
+        currentUser.modal_config = mc;
+        try { await apiPut('/api/v1/users/me/preferences', { modal_config: mc }); } catch (_) {}
+    }, 1500);
+}
+function _applyUserModalConfig(mc) {
+    if (typeof _modalSizeMem === 'undefined') return;
+    Object.keys(_modalSizeMem).forEach(k => delete _modalSizeMem[k]);
+    if (mc && typeof mc === 'object') Object.assign(_modalSizeMem, mc);
 }
 
 // Per-table descriptors — used to apply a saved layout OR reset to factory
@@ -41,35 +58,42 @@ function _persistTableConfig() {
 // or cleared by an admin) is reset to default and its stale localStorage dropped,
 // so a clear propagates on reload and on the live keepalive re-sync.
 function _tcTables() {
-    return [
-        { k: 'groups',   def: _GROUPS_DEFAULT_COLS,   all: _GRP_COLS,
+    // Factory-driven tables come from the registry; literals below cover the tables
+    // not yet migrated. The `lit` helper skips any key already in the registry, so a
+    // table moves from literal to registry the moment it joins the factory.
+    const out = _LIST_TABLE_REGISTRY.map(d => ({
+        k: d.k, def: d.def(), all: d.all(), getVis: d.getVis, setVis: d.setVis, setOrd: d.setOrd, ls: d.ls,
+    }));
+    const _reg = new Set(out.map(d => d.k));
+    const lit = desc => { if (!_reg.has(desc.k)) out.push(desc); };
+    lit({ k: 'groups',   def: _GROUPS_DEFAULT_COLS,   all: _GRP_COLS,
           getVis: () => _groupsVisibleCols,   setVis: s => { _groupsVisibleCols = s; },
-          setOrd: o => { _groupsColOrder = o; },     ls: ['ss_groups_cols','ss_groups_col_order','ss_groups_col_w'] },
-        { k: 'users',    def: _USERS_DEFAULT_COLS,    all: _USR_COLS,
+          setOrd: o => { _groupsColOrder = o; },     ls: ['ss_groups_cols','ss_groups_col_order','ss_groups_col_w'] });
+    lit({ k: 'users',    def: _USERS_DEFAULT_COLS,    all: _USR_COLS,
           getVis: () => _usersVisibleCols,    setVis: s => { _usersVisibleCols = s; },
-          setOrd: o => { _usersColOrder = o; },      ls: ['ss_users_cols','ss_users_col_order','ss_users_col_w'] },
-        { k: 'roles',    def: _ROLES_DEFAULT_COLS,    all: _ROL_COLS,
+          setOrd: o => { _usersColOrder = o; },      ls: ['ss_users_cols','ss_users_col_order','ss_users_col_w'] });
+    lit({ k: 'roles',    def: _ROLES_DEFAULT_COLS,    all: _ROL_COLS,
           getVis: () => _rolesVisibleCols,    setVis: s => { _rolesVisibleCols = s; },
-          setOrd: o => { _rolesColOrder = o; },      ls: ['ss_roles_cols','ss_roles_col_order','ss_roles_col_w'] },
-        { k: 'audit',    def: _AUDIT_DEFAULT_COLS,    all: _AUDIT_COLS,
+          setOrd: o => { _rolesColOrder = o; },      ls: ['ss_roles_cols','ss_roles_col_order','ss_roles_col_w'] });
+    lit({ k: 'audit',    def: _AUDIT_DEFAULT_COLS,    all: _AUDIT_COLS,
           getVis: () => _auditVisibleCols,    setVis: s => { _auditVisibleCols = s; },
-          setOrd: o => { _auditColOrder = o; },      ls: ['ss_audit_cols','ss_audit_col_order','ss_audit_col_w'] },
-        { k: 'sessions', def: _SESSIONS_DEFAULT_COLS, all: _SES_COLS,
+          setOrd: o => { _auditColOrder = o; },      ls: ['ss_audit_cols','ss_audit_col_order','ss_audit_col_w'] });
+    lit({ k: 'sessions', def: _SESSIONS_DEFAULT_COLS, all: _SES_COLS,
           getVis: () => _sessionsVisibleCols, setVis: s => { _sessionsVisibleCols = s; },
-          setOrd: o => { _sessionsColOrder = o; },   ls: ['ss_sessions_cols','ss_sessions_col_order','ss_sessions_col_w'] },
-        { k: 'evrules',  def: _EVR_DEFAULT_COLS,      all: _EVR_COLS,
+          setOrd: o => { _sessionsColOrder = o; },   ls: ['ss_sessions_cols','ss_sessions_col_order','ss_sessions_col_w'] });
+    lit({ k: 'evrules',  def: _EVR_DEFAULT_COLS,      all: _EVR_COLS,
           getVis: () => _evrVisibleCols,      setVis: s => { _evrVisibleCols = s; },
-          setOrd: o => { _evrColOrder = o; },        ls: ['ss_evrules_cols','ss_evrules_col_order','ss_evrules_col_w'] },
-        { k: 'evlog',    def: _EVL_DEFAULT_COLS,      all: _EVL_COLS,
+          setOrd: o => { _evrColOrder = o; },        ls: ['ss_evrules_cols','ss_evrules_col_order','ss_evrules_col_w'] });
+    lit({ k: 'evlog',    def: _EVL_DEFAULT_COLS,      all: _EVL_COLS,
           getVis: () => _evlVisibleCols,      setVis: s => { _evlVisibleCols = s; },
-          setOrd: o => { _evlColOrder = o; },        ls: ['ss_evlog_cols','ss_evlog_col_order','ss_evlog_col_w'] },
-        { k: 'syslog',   def: _SL_DEFAULT_COLS,       all: _SL_COLS,
+          setOrd: o => { _evlColOrder = o; },        ls: ['ss_evlog_cols','ss_evlog_col_order','ss_evlog_col_w'] });
+    lit({ k: 'syslog',   def: _SL_DEFAULT_COLS,       all: _SL_COLS,
           getVis: () => _slVisibleCols,       setVis: s => { _slVisibleCols = s; },
-          setOrd: o => { _slColOrder = o; },         ls: ['ss_syslog_cols','ss_syslog_col_order','ss_syslog_col_w'] },
-        { k: 'sldrops',  def: _SLD_DEFAULT_COLS,      all: _SLD_COLS,
+          setOrd: o => { _slColOrder = o; },         ls: ['ss_syslog_cols','ss_syslog_col_order','ss_syslog_col_w'] });
+    lit({ k: 'sldrops',  def: _SLD_DEFAULT_COLS,      all: _SLD_COLS,
           getVis: () => _sldVisibleCols,      setVis: s => { _sldVisibleCols = s; },
-          setOrd: o => { _sldColOrder = o; },        ls: ['ss_sldrops_cols','ss_sldrops_col_order','ss_sldrops_col_w'] },
-    ];
+          setOrd: o => { _sldColOrder = o; },        ls: ['ss_sldrops_cols','ss_sldrops_col_order','ss_sldrops_col_w'] });
+    return out;
 }
 
 function _applyUserTableConfig(tc) {
@@ -118,7 +142,7 @@ function _syncRemoteTableConfig(me, ep) {
     if (JSON.stringify(incoming) === JSON.stringify(currentUser.table_config || {})) return;
     currentUser.table_config = incoming;
     _applyUserTableConfig(incoming);
-    ['renderUsers', 'renderRoles', 'renderGroups', 'renderSessions', 'renderAudit', 'renderEvents', 'renderSyslog'].forEach(fn => {
+    ['renderUsers', 'renderRoles', 'renderGroups', 'renderCredentials', 'renderServers', 'renderClusters', 'renderSessions', 'renderAudit', 'renderEvents', 'renderSyslog'].forEach(fn => {
         try { if (typeof window[fn] === 'function') window[fn](); } catch (_) {}
     });
 }
@@ -132,6 +156,24 @@ function _thSortInner(label, col, currentSort, dir, fn) {
     return `<span class="ss-sort-link" style="cursor:pointer;user-select:none" onclick="${fn}('${col}')">${esc(label)}${icon}</span>`;
 }
 
+// Generically make the shared metadata columns (_LIST_FIT_COLS: uid/created_at/
+// updated_at/updated_by) size to their content and NOT be resizable — on ANY
+// table, with no per-table markup. They stay reorderable like any other column.
+function _applyFitCols(tbl) {
+    tbl.querySelectorAll('thead th[data-col]').forEach(th => {
+        if (typeof _LIST_FIT_COLS === 'undefined' || !_LIST_FIT_COLS.has(th.dataset.col)) return;
+        th.classList.remove('ss-th-resizable');
+        th.classList.add('ss-th-fit');
+        th.style.width = '1%';
+        th.style.whiteSpace = 'nowrap';
+        const idx = [...th.parentNode.children].indexOf(th);
+        tbl.querySelectorAll('tbody > tr').forEach(tr => {
+            const td = tr.children[idx];
+            if (td) td.setAttribute('data-fit', '');
+        });
+    });
+}
+
 // Generic column features: resize + dblclick auto-fit + drag-and-drop reorder.
 // tableId      — id of the <table> element
 // getOrder()   — returns the current col-order array (by reference OK)
@@ -142,7 +184,25 @@ function _thSortInner(label, col, currentSort, dir, fn) {
 function _attachColFeatures(tableId, getOrder, setOrder, saveOrder, render, saveWidth) {
     const tbl = document.getElementById(tableId);
     if (!tbl) return;
+    _applyFitCols(tbl);   // generic: metadata cols size to content + aren't resizable
     let _dragSrc = null;
+    // Reorder (drag) applies to every column with a data-col — including content-fit
+    // columns that aren't resizable. Resize is wired below, only to resizable ones.
+    tbl.querySelectorAll('thead th[data-col]').forEach(th => {
+        th.addEventListener('dragstart', e => { _dragSrc = th.dataset.col; e.dataTransfer.effectAllowed = 'move'; th.style.opacity = '0.4'; });
+        th.addEventListener('dragend',   () => { th.style.opacity = ''; _dragSrc = null; });
+        th.addEventListener('dragover',  e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.classList.add('ss-th-drag-over'); });
+        th.addEventListener('dragleave', () => th.classList.remove('ss-th-drag-over'));
+        th.addEventListener('drop',      e => {
+            e.preventDefault(); th.classList.remove('ss-th-drag-over');
+            const src = _dragSrc, dst = th.dataset.col;
+            if (!src || src === dst) return;
+            const order = getOrder(), si = order.indexOf(src), di = order.indexOf(dst);
+            if (si < 0 || di < 0) return;
+            order.splice(si, 1); order.splice(di, 0, src);
+            setOrder(order); saveOrder(); render();
+        });
+    });
     tbl.querySelectorAll('th.ss-th-resizable').forEach(th => {
         th.querySelector('.ss-resize-handle')?.remove();
         th.style.position = 'relative'; th.style.overflow = 'hidden';
@@ -187,20 +247,6 @@ function _attachColFeatures(tableId, getOrder, setOrder, saveOrder, render, save
         });
 
         th.appendChild(handle);
-
-        th.addEventListener('dragstart', e => { _dragSrc = th.dataset.col; e.dataTransfer.effectAllowed = 'move'; th.style.opacity = '0.4'; });
-        th.addEventListener('dragend',   () => { th.style.opacity = ''; _dragSrc = null; });
-        th.addEventListener('dragover',  e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.classList.add('ss-th-drag-over'); });
-        th.addEventListener('dragleave', () => th.classList.remove('ss-th-drag-over'));
-        th.addEventListener('drop',      e => {
-            e.preventDefault(); th.classList.remove('ss-th-drag-over');
-            const src = _dragSrc, dst = th.dataset.col;
-            if (!src || src === dst) return;
-            const order = getOrder(), si = order.indexOf(src), di = order.indexOf(dst);
-            if (si < 0 || di < 0) return;
-            order.splice(si, 1); order.splice(di, 0, src);
-            setOrder(order); saveOrder(); render();
-        });
     });
 }
 
@@ -248,11 +294,30 @@ if (overviewLi) overviewLi.style.display = perms.has('overview_view') ? '' : 'no
 // Modules tab
 const modulesLi = document.getElementById('tab-modules-li');
 if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
-// Servers (host registry) tab — global servers perms or any per-server override
+// Infrastructure tab (Servers + Clusters sub-tabs). The general tab shows when
+// the user can see hosts OR manage modules (clusters are multi-bind module checks).
 const hasAnyServer = ['servers_view','servers_edit','servers_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('server.'));
+// Clusters are their OWN resource: gated strictly by clusters_* (global) or any
+// cluster.{uid}.* (per-cluster). Module permissions do NOT grant the Clusters tab.
+const hasAnyCluster = ['clusters_view','clusters_add','clusters_edit','clusters_delete'].some(p => perms.has(p))
+    || [...perms].some(p => p.startsWith('cluster.'));
 const serversLi = document.getElementById('tab-servers-li');
-if (serversLi) serversLi.style.display = hasAnyServer ? '' : 'none';
+if (serversLi) serversLi.style.display = (hasAnyServer || hasAnyModule || hasAnyCluster) ? '' : 'none';
+// Sub-tabs: Servers gated by host perms, Clusters by cluster perms.
+const stSrvHosts = document.getElementById('subtab-srv-hosts-li');
+if (stSrvHosts) stSrvHosts.style.display = hasAnyServer ? '' : 'none';
+const stSrvClusters = document.getElementById('subtab-srv-clusters-li');
+if (stSrvClusters) stSrvClusters.style.display = hasAnyCluster ? '' : 'none';
+// Activate the saved infra sub-tab, or the first visible one.
+const _savedInfra = localStorage.getItem('ss_active_subtab_infra');
+const _savedInfraBtn = _savedInfra ? document.querySelector(`[data-bs-target="${_savedInfra}"]`) : null;
+const _activeInfra = (_savedInfraBtn && _savedInfraBtn.closest('li')?.style.display !== 'none')
+    ? _savedInfraBtn
+    : ['btn-subtab-srv-hosts','btn-subtab-srv-clusters']
+        .map(id => document.getElementById(id))
+        .find(btn => btn && btn.closest('li')?.style.display !== 'none');
+if (_activeInfra) bootstrap.Tab.getOrCreateInstance(_activeInfra).show();
 // (New host / Migrate buttons now live inside the JS-rendered Servers card,
 //  gated there by servers_edit — see renderServers.)
 // Config tab
@@ -309,19 +374,207 @@ if (btnClearAudit) btnClearAudit.style.display = perms.has('audit_delete') ? '' 
 // freshest backdrop to sit between the two modals.
 document.addEventListener('show.bs.modal', function(e) {
     const open = document.querySelectorAll('.modal.show');
-    if (!open.length) return;
+    if (!open.length) {
+        // No modal open yet → any leftover .modal-backdrop is an ORPHAN (Bootstrap
+        // occasionally fails to remove one when modals open/close in quick
+        // succession). Drop it so the new modal isn't trapped beneath a stale
+        // dimming layer — the random "page stuck, must reload" bug.
+        document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+        return;
+    }
     const topZ = Math.max(1055, ...[...open].map(m => parseInt(m.style.zIndex) || 1055));
     e.target.style.zIndex = topZ + 20;
 });
-document.addEventListener('shown.bs.modal', function() {
-    const backdrops  = document.querySelectorAll('.modal-backdrop');
+document.addEventListener('shown.bs.modal', function(e) {
     const openModals = [...document.querySelectorAll('.modal.show')];
-    if (backdrops.length < 1 || openModals.length < 2) return;
-    const topZ = Math.max(...openModals.map(m => parseInt(m.style.zIndex) || 1055));
-    backdrops[backdrops.length - 1].style.zIndex = topZ - 10;
+    // Drop ORPHAN backdrops: more dimming layers than open modals means a stale
+    // one survived (Bootstrap occasionally fails to remove a backdrop when modals
+    // open/close in quick succession). A stray backdrop keeps its inline z-index
+    // from a previous stack, so a fresh single modal opened at the default 1055
+    // ends up *beneath* it — the random "modal stuck behind the dark overlay" bug.
+    // Remove the oldest (DOM-order) extras, keeping the freshest backdrop(s).
+    let backdrops = [...document.querySelectorAll('.modal-backdrop')];
+    while (backdrops.length > openModals.length && backdrops.length) {
+        backdrops.shift().remove();
+    }
+    backdrops = [...document.querySelectorAll('.modal-backdrop')];
+    if (!backdrops.length) return;
+    // Guarantee the just-shown modal sits above EVERY remaining backdrop,
+    // whatever inline z-index a leftover layer may carry.
+    const maxBd = Math.max(...backdrops.map(b => parseInt(b.style.zIndex)
+                                              || parseInt(getComputedStyle(b).zIndex) || 1050));
+    const myZ = parseInt(e.target.style.zIndex)
+             || parseInt(getComputedStyle(e.target).zIndex) || 1055;
+    if (myZ <= maxBd) e.target.style.zIndex = maxBd + 10;
+    // Stacked modals: keep the freshest backdrop between the two top modals.
+    if (openModals.length >= 2) {
+        const topZ = Math.max(...openModals.map(m => parseInt(m.style.zIndex) || 1055));
+        backdrops[backdrops.length - 1].style.zIndex = topZ - 10;
+    }
 });
 document.addEventListener('hidden.bs.modal', function(e) {
     e.target.style.zIndex = '';   // clean up inline override when modal closes
+    // When the LAST modal closed, remove any stray backdrops and restore the body
+    // so a leftover dimming layer can't block the page.
+    if (!document.querySelector('.modal.show')) {
+        document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
+    }
+});
+
+// ─── Draggable modals: move ANY modal by its header ───────────────────────
+// Resize is opt-in via CSS (dialog-style modals: .modal-lg / .modal-xl); msgbox
+// modals (confirmations, yes/no) are only movable. Position resets to centre on
+// each open, but the last SIZE / maximized state is remembered per modal id and
+// restored on reopen — persisted per-user via table_config (see _modalSizeMem).
+let _modalDrag = null;   // {dlg, sx, sy, ox, oy}
+const _modalSizeMem = {};   // {modalId: {max:bool, w:string, h:string}} — saved in table_config.modals
+document.addEventListener('mousemove', e => {
+    if (!_modalDrag) return;
+    const d = _modalDrag;
+    let tx = d.ox + e.clientX - d.sx;
+    let ty = d.oy + e.clientY - d.sy;
+    // Keep the modal's visible box within the viewport (small margin). baseLeft/Top
+    // = the box position at translate 0; w/h = its size (captured at drag start).
+    const M = 4;
+    const minTx = M - d.baseLeft, maxTx = window.innerWidth  - M - d.w - d.baseLeft;
+    const minTy = M - d.baseTop,  maxTy = window.innerHeight - M - d.h - d.baseTop;
+    tx = Math.min(Math.max(tx, minTx), Math.max(minTx, maxTx));   // if bigger than the viewport, pin top-left
+    ty = Math.min(Math.max(ty, minTy), Math.max(minTy, maxTy));
+    d.dlg.style.transform = `translate(${tx}px, ${ty}px)`;
+    // Moving the (full-height, centered) dialog down makes its empty bottom overflow
+    // the .modal scroll area → a phantom scrollbar. Suppress it once moved.
+    if (d.modalEl) d.modalEl.style.overflowY = 'hidden';
+});
+document.addEventListener('mouseup', () => {
+    if (_modalDrag && _modalDrag.header) _modalDrag.header.style.cursor = 'grab';
+    _modalDrag = null;
+});
+// Nudge a moved modal back into view (it's offset via transform, so shrinking the
+// window can leave its visible box partly/entirely outside the viewport).
+function _clampModalToViewport(dlg, content) {
+    if (!dlg) return;
+    const m = new DOMMatrixReadOnly(getComputedStyle(dlg).transform);
+    if (!m.m41 && !m.m42) return;                        // untouched / centered: nothing to do
+    const cr = (content || dlg).getBoundingClientRect();
+    const M = 4, vw = window.innerWidth, vh = window.innerHeight;
+    let dx = 0, dy = 0;
+    if (cr.left < M)              dx = M - cr.left;
+    else if (cr.right > vw - M)  dx = Math.max((vw - M) - cr.right, M - cr.left);
+    if (cr.top < M)              dy = M - cr.top;
+    else if (cr.bottom > vh - M) dy = Math.max((vh - M) - cr.bottom, M - cr.top);
+    if (dx || dy) dlg.style.transform = `translate(${m.m41 + dx}px, ${m.m42 + dy}px)`;
+}
+window.addEventListener('resize', () => {
+    document.querySelectorAll('.modal.show').forEach(mEl =>
+        _clampModalToViewport(mEl.querySelector('.modal-dialog'), mEl.querySelector('.modal-content')));
+});
+// Remember each resizable modal's size + maximized state when it closes, so the
+// next open restores it (handled in show.bs.modal above).
+document.addEventListener('hide.bs.modal', function(e) {
+    if (!e.target.id) return;
+    const dlg     = e.target.querySelector('.modal-dialog');
+    const content = e.target.querySelector('.modal-content');
+    if (!dlg || !content) return;
+    if (!dlg.classList.contains('modal-lg') && !dlg.classList.contains('modal-xl')) return;
+    const maxBtn = e.target.querySelector('.modal-max-btn');
+    const max = !!(maxBtn && maxBtn.dataset.max === '1');
+    const w = content.style.width || '', h = content.style.height || '';
+    // Stash a human label (the modal's title) so the Customisations list can show
+    // something friendlier than the element id.
+    const ttl = (e.target.querySelector('.modal-title, .modal-header h5, .modal-header h6')?.textContent || '').trim();
+    if (max || w || h) _modalSizeMem[e.target.id] = { max, w, h, t: ttl };
+    else delete _modalSizeMem[e.target.id];   // back to default → don't store noise
+    _persistModalConfig();                    // persist per-user (debounced), separate from table layout
+});
+document.addEventListener('show.bs.modal', function(e) {
+    const dlg     = e.target.querySelector('.modal-dialog');
+    const content = e.target.querySelector('.modal-content');
+    const header  = e.target.querySelector('.modal-header');
+    // Reset POSITION (always re-centre) before the modal becomes visible; SIZE is
+    // restored from memory below so a maximized/resized modal reopens the same.
+    if (dlg) dlg.style.transform = '';
+    e.target.style.overflowY = '';   // undo the phantom-scrollbar suppression from a prior move
+    const _mem = _modalSizeMem[e.target.id];
+    [dlg, content].forEach(el => { if (el) { el.style.width = ''; el.style.height = ''; } });
+    // Maximize toggle (resizable dialogs only): a header icon next to the X that
+    // grows the dialog to ~95% of the work area, and back. Injected once per modal;
+    // its state + size are restored from the last time this modal was open.
+    const _resizable = dlg && (dlg.classList.contains('modal-lg') || dlg.classList.contains('modal-xl'));
+    if (_resizable && header && content) {
+        let maxBtn = header.querySelector('.modal-max-btn');
+        if (!maxBtn) {
+            maxBtn = document.createElement('button');
+            maxBtn.type = 'button';
+            maxBtn.className = 'modal-max-btn btn p-0 border-0 bg-transparent text-reset me-2 lh-1';
+            // Push the group (maximize + close) to the right and sit flush before the
+            // X: maximize takes the auto margin, the close button drops its own.
+            maxBtn.style.marginLeft = 'auto';
+            maxBtn.style.fontSize = '1.05rem';
+            maxBtn.title = (typeof t === 'function' ? t('modal_maximize') : '') || 'Maximize';
+            maxBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
+            const _toggleMax = () => {
+                const on = maxBtn.dataset.max === '1';
+                maxBtn.dataset.max = on ? '0' : '1';               // set state first: the resize
+                if (!on) dlg.style.transform = '';                 // clamp observer skips while maximized
+                content.style.width  = on ? '' : '95vw';
+                content.style.height = on ? '' : '95vh';
+                maxBtn.querySelector('i').className = on ? 'bi bi-arrows-fullscreen' : 'bi bi-fullscreen-exit';
+            };
+            maxBtn.addEventListener('click', _toggleMax);
+            // Double-click the title bar to maximize / restore (ignore controls).
+            header.addEventListener('dblclick', ev => {
+                if (ev.target.closest('button, a, input, select, textarea, .btn-close')) return;
+                _toggleMax();
+            });
+            const closeBtn = header.querySelector('.btn-close');
+            if (closeBtn) { closeBtn.style.marginLeft = '0'; header.insertBefore(maxBtn, closeBtn); }
+            else header.appendChild(maxBtn);
+        }
+        // Restore the last maximized state + size for this modal (set the max flag
+        // first so the clamp observer skips the restored maximized size).
+        const _wasMax = !!(_mem && _mem.max);
+        maxBtn.dataset.max = _wasMax ? '1' : '0';
+        maxBtn.querySelector('i').className = _wasMax ? 'bi bi-fullscreen-exit' : 'bi bi-arrows-fullscreen';
+        if (_mem) { content.style.width = _mem.w || ''; content.style.height = _mem.h || ''; }
+        // Stop the CSS resize at the viewport edge: clamp the content size to what
+        // fits given its centre (centre is stable under centering, so no oscillation).
+        // Only acts once the user has resized (inline width/height present).
+        if (!content._clampRO && 'ResizeObserver' in window) {
+            content._clampRO = new ResizeObserver(() => {
+                if (maxBtn.dataset.max === '1') return;   // don't clamp the maximized size
+                const M = 4, vw = window.innerWidth, vh = window.innerHeight;
+                const cr = content.getBoundingClientRect();
+                if (content.style.width) {
+                    const cx = cr.left + cr.width / 2, maxW = 2 * Math.min(cx - M, vw - M - cx);
+                    if (cr.width > maxW && maxW > 120) content.style.width = maxW + 'px';
+                }
+                if (content.style.height) {
+                    const cy = cr.top + cr.height / 2, maxH = 2 * Math.min(cy - M, vh - M - cy);
+                    if (cr.height > maxH && maxH > 120) content.style.height = maxH + 'px';
+                }
+            });
+            content._clampRO.observe(content);
+        }
+    }
+    if (!header || !dlg || header._dragBound) return;        // wire the drag once per modal
+    header._dragBound = true;
+    header.style.cursor = 'grab';   // draggable affordance (grab/grabbing, not 4-arrow move)
+    header.addEventListener('mousedown', ev => {
+        // Don't start a drag from an interactive control inside the header.
+        if (ev.target.closest('button, a, input, select, textarea, .btn-close')) return;
+        const m = new DOMMatrixReadOnly(getComputedStyle(dlg).transform);
+        const cr = (content || dlg).getBoundingClientRect();   // visible box geometry
+        _modalDrag = {
+            dlg, header, modalEl: dlg.closest('.modal'),
+            sx: ev.clientX, sy: ev.clientY, ox: m.m41, oy: m.m42,
+            baseLeft: cr.left - m.m41, baseTop: cr.top - m.m42, w: cr.width, h: cr.height,
+        };
+        header.style.cursor = 'grabbing';
+        ev.preventDefault();
+    });
 });
 
 // ──────────────────────────── Init ────────────────────────────────
@@ -374,7 +627,21 @@ document.getElementById('btn-tab-events')?.addEventListener('shown.bs.tab', rend
 // Re-fetch host status every time the Servers tab is shown, so the Status column
 // reflects a "Run all" or a status "clean" done from the Status tab (both leave
 // hostsData stale until reloaded).
-document.getElementById('btn-tab-servers')?.addEventListener('shown.bs.tab', reloadHosts);
+document.getElementById('btn-tab-servers')?.addEventListener('shown.bs.tab', () => {
+    reloadHosts();
+    // Refresh the Clusters sub-tab too when it is the active pane (Bootstrap does
+    // not re-fire the sub-tab's shown event when only the parent tab changes).
+    if (document.getElementById('subtab-srv-clusters')?.classList.contains('active')
+        && typeof renderClusters === 'function') renderClusters();
+});
+// Infrastructure sub-tabs: render Clusters on demand; persist the active sub-tab.
+document.getElementById('btn-subtab-srv-clusters')?.addEventListener('shown.bs.tab', () => {
+    localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-clusters');
+    renderClusters();
+});
+document.getElementById('btn-subtab-srv-hosts')?.addEventListener('shown.bs.tab', () => {
+    localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-hosts');
+});
 document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
 document.getElementById('btnResetPasswordOk').addEventListener('click', resetUserPassword);
 document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
@@ -403,8 +670,10 @@ document.getElementById('mainTabs')?.addEventListener('hide.bs.tab', e => {
     e.preventDefault();
     showUnsavedChangesModal(dirtyTarget, e.relatedTarget);
 });
-// Warn on page close / refresh if there are unsaved changes
+// Warn on page close / refresh if there are unsaved changes — unless the user (or
+// the restart/reload banner) asked for an explicit reload via forcePageReload().
 window.addEventListener('beforeunload', e => {
+    if (window._forcePageReload) return;
     if (_isDirty('modules') || _isDirty('config')) {
         e.preventDefault();
         e.returnValue = '';
@@ -421,6 +690,7 @@ window.addEventListener('beforeunload', e => {
 try {
     currentUser = await apiGet('/api/v1/me') || {};
     _applyUserTableConfig(currentUser.table_config || {});
+    _applyUserModalConfig(currentUser.modal_config || {});
     rolesData = await apiGet('/api/v1/roles') || {};
     groupsData = await apiGet('/api/v1/groups') || {};
     modulesData = await apiGet('/api/v1/modules') || {};

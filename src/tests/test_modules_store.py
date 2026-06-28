@@ -21,6 +21,23 @@ def _store():
     return ModulesStore(db), db
 
 
+def _strip_audit(modules):
+    """Drop the read-only per-item audit metadata (created_at/updated_at/
+    updated_by) that ``load_all`` enriches each item with, so a saved config can
+    be compared exactly against what was written."""
+    for mod in (modules or {}).values():
+        if not isinstance(mod, dict):
+            continue
+        for coll in mod.values():
+            if not isinstance(coll, dict):
+                continue
+            for item in coll.values():
+                if isinstance(item, dict):
+                    for k in ('created_at', 'updated_at', 'updated_by'):
+                        item.pop(k, None)
+    return modules
+
+
 def _sample():
     return {
         'cpu': {
@@ -52,7 +69,7 @@ class TestModulesStore:
     def test_roundtrip_exact(self):
         s, _ = _store()
         s.save_all(_sample())
-        assert s.load_all() == _sample()
+        assert _strip_audit(s.load_all()) == _sample()
 
     def test_promoted_columns_not_duplicated_in_data(self):
         s, db = _store()
@@ -99,7 +116,7 @@ class TestModulesStore:
             'web': {'enabled': True, 'list': {'www.example.com': True}},
         }
         s.save_all(data)
-        assert s.load_all() == data
+        assert _strip_audit(s.load_all()) == data
 
     def test_multiple_collection_keys(self):
         # Real data uses both 'list' and 'servers' (snmp) as collection keys.
@@ -108,7 +125,7 @@ class TestModulesStore:
                          'servers': {'s1': {'uid': 's1', 'label': 'SW1', 'host_uid': 'h9',
                                             'enabled': True, 'oid': '1.3.6'}}}}
         s.save_all(data)
-        assert s.load_all() == data
+        assert _strip_audit(s.load_all()) == data
         assert db.fetchone("SELECT collection FROM module_config_items WHERE uid='s1'")[0] == 'servers'
 
     def test_sync_removes_item(self):
@@ -166,7 +183,7 @@ class TestDbBackedModules:
     def test_save_read_roundtrip(self):
         fac, store, _ = _facade()
         fac.save(_sample())
-        assert DbBackedModules(store).read() == _sample()
+        assert _strip_audit(DbBackedModules(store).read()) == _sample()
 
     def test_get_conf_parity_with_configcontrol(self):
         fac, _, _ = _facade()

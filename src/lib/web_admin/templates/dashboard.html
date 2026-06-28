@@ -56,7 +56,7 @@
                 <span id="page-reload-msg" class="fw-medium"></span>
             </div>
             <button type="button" class="btn btn-sm btn-info py-0 flex-shrink-0"
-                    onclick="location.reload()">
+                    onclick="forcePageReload()">
                 <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload }}
             </button>
         </div>
@@ -82,7 +82,7 @@
         <li class="nav-item" role="presentation" id="tab-servers-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-servers" type="button"
                 id="btn-tab-servers">
-                <i class="bi bi-hdd-network me-1"></i>{{ i18n.tab_servers }}
+                <i class="bi bi-hdd-network me-1"></i>{{ i18n.tab_infrastructure }}
             </button>
         </li>
         <li class="nav-item" role="presentation" id="tab-config-li" style="display:none">
@@ -165,9 +165,29 @@
             <div id="modules-container"></div>
         </div>
 
-        <!-- ==================== Servers Tab ==================== -->
+        <!-- =============== Infrastructure Tab (Servers + Clusters) =============== -->
         <div class="tab-pane fade" id="tab-servers">
-            <div id="servers-container"></div>
+            <!-- Sub-tab nav -->
+            <ul class="nav nav-tabs mb-3" id="infraSubTabs" role="tablist">
+                <li class="nav-item" role="presentation" id="subtab-srv-hosts-li" style="display:none">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-hosts" type="button" id="btn-subtab-srv-hosts">
+                        <i class="bi bi-hdd-network me-1"></i>{{ i18n.subtab_servers }}
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation" id="subtab-srv-clusters-li" style="display:none">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-clusters" type="button" id="btn-subtab-srv-clusters">
+                        <i class="bi bi-diagram-3 me-1"></i>{{ i18n.subtab_clusters }}
+                    </button>
+                </li>
+            </ul>
+            <div class="tab-content">
+                <div class="tab-pane fade" id="subtab-srv-hosts">
+                    <div id="servers-container"></div>
+                </div>
+                <div class="tab-pane fade" id="subtab-srv-clusters">
+                    <div id="clusters-container"></div>
+                </div>
+            </div>
         </div>
 
         <!-- ==================== Config Tab ===================== -->
@@ -251,7 +271,7 @@
         <!-- ==================== Users Tab ====================== -->
         <div class="tab-pane fade" id="tab-access">
             <!-- Sub-tab nav -->
-            <ul class="nav nav-pills mb-3 gap-1 pt-1" id="accessSubTabs" role="tablist">
+            <ul class="nav nav-tabs mb-3" id="accessSubTabs" role="tablist">
                 <li class="nav-item" role="presentation" id="subtab-sessions-li" style="display:none">
                     <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-sessions" type="button" id="btn-subtab-sessions">
                         <i class="bi bi-plug me-1"></i>{{ i18n.subtab_sessions }}
@@ -279,27 +299,9 @@
                 </li>
             </ul>
             <div class="tab-content">
-                <!-- Sessions sub-tab -->
+                <!-- Sessions sub-tab (card built by the createListTable factory) -->
                 <div class="tab-pane fade" id="subtab-sessions">
-                    <div class="ss-card mb-3" id="sessions-panel">
-                        <div class="ss-accent ss-accent-slate"></div>
-                        <div class="ss-card-header">
-                            <h6 class="mb-0 me-auto"><i class="bi bi-plug me-2"></i><span id="sessions-title">{{ i18n.active_sessions }}</span></h6>
-                            <div id="sessionsBulkBar" class="d-flex align-items-center gap-1 border-start ps-2 me-1" style="display:none!important">
-                                <span id="sessionsBulkCount" class="badge bg-secondary rounded-pill">0</span>
-                                <button class="btn btn-sm btn-danger" onclick="_bulkRevokeSessions()" title="{{ i18n.revoke_session_tt }}"><i class="bi bi-x-lg me-1"></i>{{ i18n.revoke_session }}</button>
-                                <button class="btn btn-sm btn-secondary" onclick="_selectedSessions.clear();renderSessions()" title="{{ i18n.clear_filters }}"><i class="bi bi-x-lg"></i></button>
-                            </div>
-                            <span id="sessionsViewControls" class="d-flex align-items-center gap-1"></span>
-                            <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="{{ i18n.refresh_tt }}">
-                                <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}
-                            </button>
-                            <button class="btn btn-sm btn-danger ms-1" onclick="invalidateAllSessions()" title="{{ i18n.close_all_sessions_tt }}">
-                                <i class="bi bi-x-circle me-1"></i>{{ i18n.close_all_sessions }}
-                            </button>
-                        </div>
-                        <div class="p-3" id="sessions-container"></div>
-                    </div>
+                    <div id="sessions-container"></div>
                 </div>
                 <!-- Users sub-tab -->
                 <div class="tab-pane fade" id="subtab-users">
@@ -431,7 +433,9 @@
 {% include "partials/_js_account.html" %}
 {% include "partials/_js_users.html" %}
 {% include "partials/_js_servers.html" %}
+{% include "partials/_js_clusters.html" %}
 {% include "partials/_js_credentials.html" %}
+{% include "partials/_js_module_action.html" %}
 {% include "partials/_js_sessions.html" %}
 {% include "partials/_js_roles.html" %}
 {% include "partials/_js_groups.html" %}

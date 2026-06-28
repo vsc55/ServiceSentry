@@ -183,7 +183,10 @@ function renderAuditTable() {
     const pageEntries = filtered.slice((_auditPage - 1) * pageSize, _auditPage * pageSize);
 
     const isFlat         = _auditGroup === 'none';
-    const paginationTop  = _renderAuditPagination(total);
+    // Top band: "Showing …" on the left, then the column chooser immediately before
+    // the pagination controls on the right (split the parts so the chooser sits
+    // between the info text and the page buttons).
+    const pagTop         = _paginationParts(total, _auditPage, _auditPageSize, '_goAuditPage', '_changeAuditPageSize');
     const paginationBot  = _renderAuditPagination(total);
     const tableHtml      = isFlat
         ? renderFlatAudit(pageEntries, null, 'audit-table')
@@ -195,9 +198,12 @@ function renderAuditTable() {
     c.innerHTML = filterBanner + `
     <div class="ss-card">
         <div class="ss-accent ss-accent-slate"></div>
-        <div class="ss-card-band ss-card-band-top d-flex align-items-center justify-content-between">
-            ${paginationTop}
-            ${colChooser}
+        <div class="ss-card-band ss-card-band-top d-flex align-items-center justify-content-between flex-wrap gap-2">
+            ${pagTop.info}
+            <div class="d-flex align-items-center gap-2">
+                ${colChooser}
+                ${pagTop.controls}
+            </div>
         </div>
         <div>${tableHtml}</div>
         <div class="ss-card-band ss-card-band-bottom">${paginationBot}</div>

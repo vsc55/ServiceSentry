@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """UI routes: / (dashboard), /api/v1/me, /api/v1/health, /lang."""
 
-from flask import jsonify, redirect, render_template, session
+from flask import jsonify, make_response, redirect, render_template, session
 
 from lib.modules import ModuleBase
 from lib import os_detect
@@ -12,8 +12,10 @@ from lib.hosts.profiles import (
     module_host_collections,
     module_host_fields,
     module_host_multiple,
+    module_host_multi_bind,
 )
 from lib.credential_schemas import credential_schemas
+from lib.overview_widgets import overview_widgets_catalog
 
 from ..constants import SUPPORTED_LANGS
 
@@ -39,7 +41,7 @@ def register(app, wa):
     @login_required
     def dashboard():
         """Render the main dashboard."""
-        return render_template(
+        html = render_template(
             'dashboard.html',
             username=session.get('username', ''),
             display_name=session.get('display_name', ''),
@@ -50,9 +52,17 @@ def register(app, wa):
             module_host_fields=module_host_fields(wa._modules_dir),
             module_host_collections=module_host_collections(wa._modules_dir),
             module_host_multiple=module_host_multiple(wa._modules_dir),
+            module_host_multi_bind=module_host_multi_bind(wa._modules_dir),
+            module_widgets=overview_widgets_catalog(wa._modules_dir),
             host_os_options=list(os_detect.OPTIONS),
             local_os=os_detect.local_os(),
         )
+        # Never cache the dashboard: it embeds the server's startup_id (used by the
+        # reload banner) and the inlined app JS, so a reload must always fetch a
+        # fresh copy — otherwise a stale cached page keeps the banner up forever.
+        resp = make_response(html)
+        resp.headers['Cache-Control'] = 'no-store, must-revalidate'
+        return resp
 
     @app.route('/api/v1/me', methods=['GET'])
     @login_required
@@ -81,6 +91,7 @@ def register(app, wa):
             'pref_dark_mode': user_data.get('dark_mode'),
             'table_config': user_data.get('table_config', {}),
             'dashboard_layout': user_data.get('dashboard_layout', []),
+            'modal_config': user_data.get('modal_config', {}),
             'restart_pending': wa._restart_pending,
             'startup_id':      wa._startup_id,
         })

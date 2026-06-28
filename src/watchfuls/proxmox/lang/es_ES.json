@@ -1,0 +1,119 @@
+{
+    "pretty_name": "Proxmox VE",
+    "module_description": "Monitoriza un clúster o nodo Proxmox VE mediante su API REST: quórum del clúster, salud de Ceph, estado y mantenimiento de los nodos, interfaces de red físicas, almacenamiento (inactivo o con uso alto) y actualizaciones pendientes (alertando de las de seguridad).",
+    "labels": {
+        "enabled":           "Habilitado",
+        "label":             "Etiqueta",
+        "description":       "Descripción",
+        "threads":           "Hilos",
+        "alert":             "Umbral",
+        "timeout":           "Tiempo máximo (s)",
+        "host":              "Host",
+        "port":              "Puerto",
+        "vip":               "Dirección del clúster (VIP/FQDN)",
+        "verify_ssl":        "Verificar SSL",
+        "auth_method":       "Autenticación",
+        "token_id":          "ID de token",
+        "token_secret":      "Secreto del token",
+        "username":          "Usuario",
+        "password":          "Contraseña",
+        "mode":              "Modo",
+        "prov_user":         "Usuario API a crear",
+        "prov_token":        "Nombre del token",
+        "prov_role":         "Rol a crear",
+        "ssh_cred_uid":      "Credencial SSH",
+        "ssh_user":          "Usuario SSH",
+        "ssh_port":          "Puerto SSH",
+        "ssh_password":      "Contraseña SSH",
+        "ssh_key":           "Clave privada SSH (ruta)",
+        "check_cluster":     "Quórum del clúster",
+        "check_nodes":       "Nodos",
+        "check_ceph":        "Ceph",
+        "check_network":     "Interfaces de red",
+        "check_updates":     "Actualizaciones",
+        "updates_threshold": "Umbral de actualizaciones",
+        "check_storage":     "Almacenamiento",
+        "storage_threshold": "Umbral de uso (%)",
+        "check_permissions": "Permisos del token",
+        "allow_updates":     "Permitir check de actualizaciones (+Sys.Modify)"
+    },
+    "hints": {
+        "enabled":           "Habilita o deshabilita la monitorización de esta conexión Proxmox.",
+        "description":       "Notas internas sobre este clúster (opcional). No afecta a la monitorización.",
+        "threads":           "Número de conexiones Proxmox a comprobar en paralelo.",
+        "alert":             "Fallos de conexión consecutivos antes de alertar (suaviza cortes puntuales de la API).",
+        "timeout":           "Tiempo máximo por defecto de las peticiones a la API, en segundos.",
+        "host":              "Dirección(es) del nodo Proxmox. Puedes indicar varias (separadas por coma/espacio) para failover — un clúster tiene varios nodos, así el check sobrevive a la caída de uno. Consulta todo el clúster por el nodo que responda, y además auto-descubre y reintenta por las IPs de los nodos del clúster.",
+        "port":              "Puerto de la API de Proxmox (por defecto 8006).",
+        "vip":               "Dirección estable del clúster (IP virtual flotante o FQDN) por la que conectar a la API, independiente de los nodos miembros. Se intenta la primera; si no responde, se hace failover a las direcciones de los hosts y a las IPs de nodos descubiertas. Déjala vacía para usar solo los hosts miembros.",
+        "verify_ssl":        "Verificar el certificado TLS de la API. Desactivado por defecto porque Proxmox usa un certificado autofirmado.",
+        "auth_method":       "Token de API (recomendado: no guarda contraseña, permisos acotados) o usuario + contraseña.",
+        "token_id":          "ID del token de API, p. ej. monitor@pve!servicesentry. Créalo en Centro de datos → Permisos → Tokens de API con un rol de solo lectura (PVEAuditor).",
+        "token_secret":      "Secreto del token de API (UUID que se muestra una sola vez al crearlo). Se guarda cifrado.",
+        "username":          "Usuario y realm, p. ej. root@pam o monitor@pve.",
+        "password":          "Contraseña de la cuenta. Se guarda cifrada.",
+        "mode":              "Crear: crea el usuario de solo lectura, concede el rol y (re)crea el token. Renovar: solo rota el secreto del token (el usuario y el rol deben existir ya).",
+        "prov_user":         "Usuario API de solo lectura a crear (usuario@realm). Por defecto servicesentry@pve.",
+        "prov_token":        "Nombre del token API a crear bajo ese usuario.",
+        "prov_role":         "Rol personalizado de Proxmox que se crea con los privilegios mínimos que el módulo necesita (Sys.Audit) y que se asigna al usuario. Se crea/actualiza si no existe. Más acotado que el rol PVEAuditor.",
+        "ssh_cred_uid":      "Opcionalmente, reutiliza una credencial SSH guardada para el login SSH; si no, rellena usuario/contraseña SSH abajo.",
+        "ssh_user":          "Usuario SSH del nodo Proxmox para aprovisionar el token (root, o un usuario que pueda ejecutar pveum, p. ej. con sudo). Si lo dejas vacío y el check está vinculado a un host, se usa el del perfil SSH del host; si no, root. Lo sobrescribe la credencial SSH elegida.",
+        "ssh_port":          "Puerto SSH del nodo Proxmox. Si lo dejas vacío y el check está vinculado a un host, se usa el del perfil SSH del host; si no, 22.",
+        "ssh_password":      "Contraseña SSH (se usa si no eliges una credencial SSH). Se guarda cifrada.",
+        "ssh_key":           "Ruta (en el servidor de ServiceSentry) a una clave privada SSH, como alternativa a la contraseña.",
+        "check_cluster":     "Comprueba el quórum del clúster (corosync). Un nodo standalone se reporta como online sin clúster.",
+        "check_nodes":       "Comprueba cada nodo: online/offline y si está en modo mantenimiento (HA).",
+        "check_ceph":        "Comprueba la salud de Ceph (HEALTH_OK / WARN / ERR). Reporta 'no configurado' si Ceph no está instalado.",
+        "check_network":     "Comprueba las interfaces de red físicas de cada nodo: alerta si una interfaz con autoarranque está caída.",
+        "check_updates":     "Comprueba las actualizaciones apt pendientes por nodo. Alerta de las de seguridad; informa cuando la cantidad alcanza el umbral. Requiere el privilegio Sys.Modify (Proxmox protege el listado apt/update tras él) — actívalo en el aprovisionamiento del token o concédelo a mano.",
+        "updates_threshold": "Número de actualizaciones pendientes a partir del cual el check las reporta (informativo). Las de seguridad siempre alertan, independientemente de este valor.",
+        "check_storage":     "Comprueba el almacenamiento de cada nodo: alerta si un storage habilitado está inactivo (caído) o si su uso supera el umbral. Requiere el privilegio Datastore.Audit.",
+        "storage_threshold": "Porcentaje de uso a partir del cual se alerta de un almacenamiento (0 = no alertar por uso, solo por inactivo).",
+        "check_permissions": "Comprueba que el token tiene todos los privilegios que necesitan los checks activados (Sys.Audit; Datastore.Audit para almacenamiento; Sys.Modify para actualizaciones). Si falta alguno, lo marca como aviso indicando cuál.",
+        "allow_updates":     "Concede también Sys.Modify al rol aprovisionado para que el check de actualizaciones pueda leer el listado apt. Amplía el token (modificar nodos): actívalo solo si vas a usar el check de actualizaciones."
+    },
+    "option_labels": {
+        "auth_method": {
+            "token": "Token de API",
+            "password": "Usuario + contraseña"
+        },
+        "mode": {
+            "create": "Crear usuario + token",
+            "renew": "Renovar secreto del token"
+        },
+        "allow_updates": {
+            "no": "No (mínimo privilegio)",
+            "yes": "Sí (+Sys.Modify para updates)"
+        }
+    },
+    "group_labels": {
+        "general":    "Información",
+        "connection": "Conexión",
+        "auth":       "Autenticación",
+        "checks":     "Comprobaciones",
+        "alerts":     "Alertas"
+    },
+    "tab_labels": {
+        "general":    "General",
+        "hosts":      "Hosts",
+        "setup":      "Conexión",
+        "monitoring": "Monitorización",
+        "lastdata":   "Últimos datos",
+        "logs":       "Logs"
+    },
+    "action_labels": {
+        "test_connection": "Probar conexión",
+        "test_permissions": "Comprobar permisos",
+        "provision_token": "Aprovisionar token API (SSH)",
+        "list_nodes": "Listar nodos del clúster"
+    },
+    "widget": {
+        "nodes": "Nodos",
+        "quorum": "Quórum",
+        "ceph": "Ceph",
+        "clusters": "Clústeres"
+    },
+    "new_item_key_label": "Nombre:",
+    "rename_item_prompt": "Introduce el nuevo nombre:",
+    "collections": {"list": "Clústeres Proxmox"}
+}

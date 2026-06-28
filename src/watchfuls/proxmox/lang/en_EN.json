@@ -1,0 +1,119 @@
+{
+    "pretty_name": "Proxmox VE",
+    "module_description": "Monitors a Proxmox VE cluster or node through its REST API: cluster quorum, Ceph health, node status and maintenance, physical network interfaces, storage (inactive or high usage), and pending package updates (alerting on security updates).",
+    "labels": {
+        "enabled":           "Enabled",
+        "label":             "Label",
+        "description":       "Description",
+        "threads":           "Threads",
+        "alert":             "Threshold",
+        "timeout":           "Timeout (s)",
+        "host":              "Host",
+        "port":              "Port",
+        "vip":               "Cluster address (VIP/FQDN)",
+        "verify_ssl":        "Verify SSL",
+        "auth_method":       "Authentication",
+        "token_id":          "Token ID",
+        "token_secret":      "Token Secret",
+        "username":          "Username",
+        "password":          "Password",
+        "mode":              "Mode",
+        "prov_user":         "API user to create",
+        "prov_token":        "Token name",
+        "prov_role":         "Role to create",
+        "ssh_cred_uid":      "SSH credential",
+        "ssh_user":          "SSH user",
+        "ssh_port":          "SSH port",
+        "ssh_password":      "SSH password",
+        "ssh_key":           "SSH private key (path)",
+        "check_cluster":     "Cluster quorum",
+        "check_nodes":       "Nodes",
+        "check_ceph":        "Ceph",
+        "check_network":     "Network interfaces",
+        "check_updates":     "Updates",
+        "updates_threshold": "Updates threshold",
+        "check_storage":     "Storage",
+        "storage_threshold": "Usage threshold (%)",
+        "check_permissions": "Token permissions",
+        "allow_updates":     "Allow updates check (+Sys.Modify)"
+    },
+    "hints": {
+        "enabled":           "Enable or disable monitoring for this Proxmox connection.",
+        "description":       "Internal notes about this cluster (optional). Does not affect monitoring.",
+        "threads":           "Number of Proxmox connections to check in parallel.",
+        "alert":             "Consecutive connection failures before alerting (smooths transient API blips).",
+        "timeout":           "Default API request timeout in seconds.",
+        "host":              "Proxmox node address(es). List several (comma/space separated) for failover — a cluster has multiple nodes, so the check survives one going down. It queries the whole cluster through whichever node answers, and also auto-discovers and retries the cluster's node IPs.",
+        "port":              "Proxmox API port (default 8006).",
+        "vip":               "Stable cluster address (floating virtual IP or FQDN) to reach the API, independent of the member nodes. Tried first; if it does not answer, it fails over to the member host addresses and the discovered node IPs. Leave blank to use only the member hosts.",
+        "verify_ssl":        "Verify the API TLS certificate. Off by default since Proxmox uses a self-signed certificate.",
+        "auth_method":       "API token (recommended: no stored password, scoped) or username + password.",
+        "token_id":          "API token id, e.g. monitor@pve!servicesentry. Create it under Datacenter → Permissions → API Tokens with a read-only role (PVEAuditor).",
+        "token_secret":      "API token secret (UUID shown once when the token is created). Stored encrypted.",
+        "username":          "User and realm, e.g. root@pam or monitor@pve.",
+        "password":          "Account password. Stored encrypted.",
+        "mode":              "Create: create the read-only user, grant the role and (re)create the token. Renew: only rotate the token secret (the user and role must already exist).",
+        "prov_user":         "Read-only API user to create (user@realm). Default servicesentry@pve.",
+        "prov_token":        "Name of the API token to create under that user.",
+        "prov_role":         "Custom Proxmox role created with the minimum privileges the module needs (Sys.Audit) and assigned to the user. Created/updated if missing. Tighter than the built-in PVEAuditor role.",
+        "ssh_cred_uid":      "Optionally reuse a saved SSH credential for the SSH login; otherwise fill the SSH user/password below.",
+        "ssh_user":          "SSH user on the Proxmox node used to provision the token (root, or a user that can run pveum, e.g. via sudo). If left blank and the check is bound to a host, the host's SSH profile user is used; otherwise root. Overridden by the selected SSH credential.",
+        "ssh_port":          "SSH port of the Proxmox node. If left blank and the check is bound to a host, the host's SSH profile port is used; otherwise 22.",
+        "ssh_password":      "SSH password (used when no SSH credential is selected). Stored encrypted.",
+        "ssh_key":           "Path (on the ServiceSentry server) to an SSH private key, as an alternative to the password.",
+        "check_cluster":     "Check cluster quorum (corosync). A standalone node reports as online without a cluster.",
+        "check_nodes":       "Check each node: online/offline and whether it is in HA maintenance mode.",
+        "check_ceph":        "Check Ceph health (HEALTH_OK / WARN / ERR). Reports 'not configured' when Ceph is not installed.",
+        "check_network":     "Check each node's physical network interfaces: alert when an autostart interface is down.",
+        "check_updates":     "Check pending apt updates per node. Alerts on security updates; informs when the count reaches the threshold. Requires the Sys.Modify privilege (Proxmox gates the apt/update list behind it) — enable it during token provisioning or grant it manually.",
+        "updates_threshold": "Number of pending updates from which the check reports them (informational). Security updates always alert regardless of this value.",
+        "check_storage":     "Check each node's storage: alert when an enabled storage is inactive (down) or its usage exceeds the threshold. Requires the Datastore.Audit privilege.",
+        "storage_threshold": "Usage percentage above which a storage is alerted (0 = do not alert on usage, only on inactive).",
+        "check_permissions": "Verify the token holds every privilege the enabled checks need (Sys.Audit; Datastore.Audit for storage; Sys.Modify for updates). Missing ones are reported as a warning naming the privilege.",
+        "allow_updates":     "Also grant Sys.Modify to the provisioned role so the updates check can read the apt list. Broadens the token (node-modify): enable only if you'll use the updates check."
+    },
+    "option_labels": {
+        "auth_method": {
+            "token": "API Token",
+            "password": "Username + Password"
+        },
+        "allow_updates": {
+            "no": "No (least privilege)",
+            "yes": "Yes (+Sys.Modify for updates)"
+        },
+        "mode": {
+            "create": "Create user + token",
+            "renew": "Renew token secret"
+        }
+    },
+    "group_labels": {
+        "general":    "Information",
+        "connection": "Connection",
+        "auth":       "Authentication",
+        "checks":     "Checks",
+        "alerts":     "Alerts"
+    },
+    "tab_labels": {
+        "general":    "General",
+        "hosts":      "Hosts",
+        "setup":      "Connection",
+        "monitoring": "Monitoring",
+        "lastdata":   "Latest data",
+        "logs":       "Logs"
+    },
+    "action_labels": {
+        "test_connection": "Test connection",
+        "test_permissions": "Check permissions",
+        "provision_token": "Provision API token (SSH)",
+        "list_nodes": "List cluster nodes"
+    },
+    "widget": {
+        "nodes": "Nodes",
+        "quorum": "Quorum",
+        "ceph": "Ceph",
+        "clusters": "Clusters"
+    },
+    "new_item_key_label": "Name:",
+    "rename_item_prompt": "Enter new name:",
+    "collections": {"list": "Proxmox clusters"}
+}

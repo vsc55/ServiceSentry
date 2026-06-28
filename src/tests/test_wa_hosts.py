@@ -44,6 +44,169 @@ class TestApiHosts:
         # …but stored (decrypted) for the monitor to use.
         assert admin._hosts_store.get(uid)['profiles']['ssh']['ssh_password'] == 'p@ss'
 
+    def test_clone_duplicates_with_secrets(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/hosts', json=_HOST).get_json()['uid']
+        r = client.post(f'/api/v1/hosts/{src}/clone',
+                        json={'name': 'srv-1 (copia)', 'address': '10.0.0.9'})
+        assert r.status_code == 200
+        new_uid = r.get_json()['uid']
+        assert new_uid and new_uid != src
+        stored = admin._hosts_store.get(new_uid, decrypt=True)
+        # Overridden name + address…
+        assert stored['name'] == 'srv-1 (copia)' and stored['address'] == '10.0.0.9'
+        # …profiles copied AND the inline secret preserved (server-side clone of the
+        # DECRYPTED source — a client-side copy of the masked payload would lose it).
+        assert stored['profiles']['ssh']['ssh_password'] == 'p@ss'
+        assert stored['profiles']['ssh']['user'] == 'root'
+        # The source host is untouched.
+        assert admin._hosts_store.get(src, decrypt=True)['address'] == '10.0.0.5'
+
+    def test_clone_only_selected_checks(self, client, admin):
+        """When the request carries a `checks` list, only those items are cloned."""
+        _login(client)
+        src = client.post('/api/v1/hosts', json={'name': 's', 'address': '10.10.0.1'}).get_json()['uid']
+        admin._save_modules({'web': {'enabled': True, 'list': {
+            'w1': {'host_uid': src, 'enabled': True, 'url': 'http://a'},
+            'w2': {'host_uid': src, 'enabled': True, 'url': 'http://b'},
+        }}})
+        r = client.post(f'/api/v1/hosts/{src}/clone',
+                        json={'name': 's2', 'address': '10.10.0.2', 'checks': ['w1']})
+        assert r.get_json()['checks_cloned'] == 1
+        new_uid = r.get_json()['uid']
+        web = admin._load_modules()['web']['list']
+        cloned = [v for v in web.values() if v.get('host_uid') == new_uid]
+        assert len(cloned) == 1 and cloned[0]['url'] == 'http://a'   # only w1 cloned
+
+    def test_clone_empty_checks_clones_none(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/hosts', json={'name': 's', 'address': '10.11.0.1'}).get_json()['uid']
+        admin._save_modules({'web': {'enabled': True, 'list': {
+            'w1': {'host_uid': src, 'enabled': True, 'url': 'http://a'}}}})
+        r = client.post(f'/api/v1/hosts/{src}/clone',
+                        json={'name': 's2', 'address': '10.11.0.2', 'checks': []})
+        assert r.get_json()['checks_cloned'] == 0
+
+    def test_clone_defaults_name_when_blank(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/hosts', json=_HOST).get_json()['uid']
+        new_uid = client.post(f'/api/v1/hosts/{src}/clone', json={}).get_json()['uid']
+        assert admin._hosts_store.get(new_uid)['name'] == 'srv-1 (copia)'
+
+    def test_clone_missing_source_returns_404(self, client):
+        _login(client)
+        assert client.post('/api/v1/hosts/nope/clone',
+                           json={'name': 'x'}).status_code == 404
+
+    def test_delete_host_with_checks(self, client, admin):
+        """DELETE ?with_checks=1 also removes single-bind checks and unbinds the
+        host from multi-host (cluster) checks (deleting them only if it was the
+        sole member)."""
+        _login(client)
+        a = client.post('/api/v1/hosts', json={'name': 'a', 'address': '10.4.0.1'}).get_json()['uid']
+        b = client.post('/api/v1/hosts', json={'name': 'b', 'address': '10.4.0.2'}).get_json()['uid']
+        admin._save_modules({
+            'web':     {'enabled': True, 'list': {'w1': {'host_uid': a, 'enabled': True}}},
+            'proxmox': {'enabled': True, 'list': {
+                'cl_multi': {'host_uids': [a, b], 'enabled': True},   # a is one member
+                'cl_solo':  {'host_uids': [a], 'enabled': True},      # a is the only member
+            }},
+        })
+        r = client.delete(f'/api/v1/hosts/{a}?with_checks=1')
+        assert r.status_code == 200 and r.get_json()['checks_deleted'] == 3
+        mods = admin._load_modules()
+        assert 'w1' not in mods['web']['list']                 # single-bind check deleted
+        assert mods['proxmox']['list']['cl_multi']['host_uids'] == [b]   # unbound, kept
+        assert 'cl_solo' not in mods['proxmox']['list']        # sole member → deleted
+
+    def test_delete_host_without_checks_keeps_them(self, client, admin):
+        _login(client)
+        a = client.post('/api/v1/hosts', json={'name': 'a', 'address': '10.4.1.1'}).get_json()['uid']
+        admin._save_modules({'web': {'enabled': True, 'list': {'w1': {'host_uid': a, 'enabled': True}}}})
+        r = client.delete(f'/api/v1/hosts/{a}')                 # no with_checks
+        assert r.status_code == 200 and r.get_json()['checks_deleted'] == 0
+        assert 'w1' in admin._load_modules()['web']['list']     # check kept (now dangling)
+
+    def test_clone_label_uses_module_template(self, client, admin):
+        """A check whose module declares __discovery_label_template__ keeps its
+        per-item part (service) with the NEW host name — e.g. 'srv2 - nginx' —
+        instead of collapsing to just the host name."""
+        _login(client)
+        src = client.post('/api/v1/hosts', json={
+            'name': 'srv', 'address': '10.9.0.1', 'kind': 'remote'}).get_json()['uid']
+        admin._save_modules({'watchfuls.service_status': {'enabled': True, 'list': {
+            'svc1': {'host_uid': src, 'enabled': True, 'service': 'nginx', 'label': 'srv - nginx'}}}})
+        new_uid = client.post(f'/api/v1/hosts/{src}/clone',
+                              json={'name': 'srv2', 'address': '10.9.0.2'}).get_json()['uid']
+        svc = admin._load_modules()['watchfuls.service_status']['list']
+        cloned = next(v for v in svc.values() if v.get('host_uid') == new_uid)
+        assert cloned['label'] == 'srv2 - nginx'          # template: {host} - {name}
+        assert cloned['service'] == 'nginx'               # operative field preserved
+
+    def test_clone_blanks_cluster_node(self, client, admin):
+        """The cluster-node identity (profiles.proxmox.node) is unique to the
+        machine → a clone must not inherit it."""
+        _login(client)
+        src = client.post('/api/v1/hosts', json={
+            'name': 'pn', 'address': '10.8.0.1', 'kind': 'remote',
+            'profiles': {'proxmox': {'node': 'pve01', 'port': 8006}},
+        }).get_json()['uid']
+        new_uid = client.post(f'/api/v1/hosts/{src}/clone',
+                              json={'name': 'pn (copia)', 'address': '10.8.0.2'}).get_json()['uid']
+        clone = admin._hosts_store.get(new_uid, decrypt=True)
+        assert 'node' not in (clone.get('profiles', {}).get('proxmox', {}))   # blanked
+        assert clone['profiles']['proxmox']['port'] == 8006                   # rest kept
+        # source untouched
+        assert admin._hosts_store.get(src, decrypt=True)['profiles']['proxmox']['node'] == 'pve01'
+
+    def test_clone_resets_os_to_auto(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/hosts',
+                          json={'name': 'lx', 'address': '10.5.0.1', 'os': 'linux'}).get_json()['uid']
+        new_uid = client.post(f'/api/v1/hosts/{src}/clone',
+                              json={'name': 'lx (copia)', 'address': '10.5.0.2'}).get_json()['uid']
+        assert admin._hosts_store.get(new_uid)['os'] == 'auto'   # clone auto-detects
+
+    def test_clone_duplicates_bound_module_checks(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/hosts',
+                          json={'name': 's', 'address': '10.6.0.1'}).get_json()['uid']
+        admin._save_modules({'web': {'enabled': True, 'list': {
+            'w1': {'host_uid': src, 'enabled': True, 'server': 'x.example.com'},
+        }}})
+        r = client.post(f'/api/v1/hosts/{src}/clone',
+                        json={'name': 's (copia)', 'address': '10.6.0.2'})
+        assert r.status_code == 200
+        new_uid = r.get_json()['uid']
+        assert r.get_json()['checks_cloned'] == 1
+        web = admin._load_modules()['web']['list']
+        bound_new = [k for k, v in web.items() if v.get('host_uid') == new_uid]
+        bound_src = [k for k, v in web.items() if v.get('host_uid') == src]
+        assert len(bound_new) == 1 and len(bound_src) == 1       # cloned, original kept
+        assert web[bound_new[0]]['server'] == 'x.example.com'    # fields copied
+        # web declares __discovery_label_template__ "{host} - {server}" → the clone
+        # keeps its per-item part (the server) with the new host name.
+        assert web[bound_new[0]]['label'] == 's (copia) - x.example.com'
+
+    def test_clone_joins_cluster_membership(self, client, admin):
+        """Cloning a host that is a MEMBER of a multi-host (cluster) check adds the
+        clone to that check's host_uids (joins the cluster) instead of duplicating
+        the check — even if a stale host_uid also points at the source."""
+        _login(client)
+        src = client.post('/api/v1/hosts',
+                          json={'name': 'n', 'address': '10.7.0.1'}).get_json()['uid']
+        admin._save_modules({'proxmox': {'enabled': True, 'list': {
+            'cl': {'host_uid': src, 'host_uids': [src, 'other'], 'enabled': True},
+        }}})
+        r = client.post(f'/api/v1/hosts/{src}/clone',
+                        json={'name': 'n (copia)', 'address': '10.7.0.2'})
+        new_uid = r.get_json()['uid']
+        assert r.get_json()['checks_cloned'] == 1
+        prox = admin._load_modules()['proxmox']['list']
+        assert len(prox) == 1                                    # not duplicated
+        assert new_uid in prox['cl']['host_uids']                # clone joined the cluster
+        assert src in prox['cl']['host_uids']                    # original kept
+
     def test_kind_and_maintenance_persist(self, client, admin):
         _login(client)
         uid = client.post('/api/v1/hosts', json={

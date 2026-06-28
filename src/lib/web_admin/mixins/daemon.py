@@ -164,6 +164,9 @@ class _DaemonMixin:
         # Apply the global|log_level config to the shared debug each cycle so
         # changing it in the UI takes effect without a restart.
         monitor.debug.set_from_config(cfg_get(self._config_section('global'), 'global|log_level'))
+        # Re-read the effective (DB) config each cycle so live edits to the
+        # Telegram credentials / public URL take effect without a restart.
+        monitor.refresh_runtime_config()
         # _run_checks normally creates its own Monitor; bypass that by calling
         # the lower-level helpers directly on our persistent instance.
         import threading as _threading  # pylint: disable=import-outside-toplevel

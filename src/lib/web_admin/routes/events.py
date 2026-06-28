@@ -14,7 +14,51 @@ from flask import jsonify, request, session
 
 _SOURCES = ('audit', 'syslog')
 _CHANNELS = ('telegram', 'email', 'webhook')
-_MATCH_TYPES = ('any', 'contains', 'not_contains', 'starts', 'ends', 'regex')
+_MATCH_TYPES = ('any', 'equals', 'contains', 'not_contains', 'starts', 'ends', 'regex',
+                'gt', 'gte', 'lt', 'lte')
+_MATCH_FIELDS = ('message', 'host', 'app', 'severity')   # what a matcher targets
+
+
+def _clean_match_groups(data: dict) -> list:
+    """Normalise the DNF match conditions: a list of groups (OR), each a list of
+    ``{type, text}`` matchers (AND).  Drops match-all/empty matchers and empty
+    groups.  Falls back to the legacy single ``match_type``/``match_text``."""
+    out = []
+    raw = data.get('match_groups')
+    if isinstance(raw, list):
+        for g in raw:
+            if not isinstance(g, list):
+                continue
+            ms = []
+            noise = False
+            for m in g:
+                if not isinstance(m, dict):
+                    continue
+                mt = (m.get('type') or 'any').strip().lower()
+                if mt not in _MATCH_TYPES:
+                    mt = 'any'
+                fld = (m.get('field') or 'message').strip().lower()
+                if fld not in _MATCH_FIELDS:
+                    fld = 'message'
+                txt = (m.get('text') or '').strip()
+                if mt == 'any' or (not txt and mt != 'not_contains'):
+                    noise = True
+                    continue   # match-all / empty needle → no constraint, drop
+                ms.append({'field': fld, 'type': mt, 'text': txt})
+            if ms:
+                out.append(ms)
+            elif noise:
+                # A group whose every matcher is 'any'/match-all is always true; in an
+                # OR of groups that makes the whole rule match everything.
+                return []
+    if not out:   # backward-compat: synthesize from a single legacy matcher
+        mt = (data.get('match_type') or 'any').strip().lower()
+        if mt not in _MATCH_TYPES:
+            mt = 'any'
+        txt = (data.get('match_text') or '').strip()
+        if mt != 'any' and (txt or mt == 'not_contains'):
+            out = [[{'type': mt, 'text': txt}]]
+    return out
 
 
 def _clean(data: dict) -> dict:
@@ -39,24 +83,35 @@ def _clean(data: dict) -> dict:
         sev = '' if sev in (None, '') else max(0, min(7, int(sev)))
     except (TypeError, ValueError):
         sev = ''
-    match_type = (data.get('match_type') or 'any').strip().lower()
-    if match_type not in _MATCH_TYPES:
-        match_type = 'any'
+    # Free-form tags (deduped, case-insensitively) for searching/grouping rules.
+    tags, _seen = [], set()
+    for tg in (data.get('tags') or []):
+        tg = str(tg).strip()[:40]
+        if tg and tg.lower() not in _seen:
+            _seen.add(tg.lower())
+            tags.append(tg)
     return {
         'name': (data.get('name') or '').strip() or 'Rule',
         'description': (data.get('description') or '').strip()[:500],
         'enabled': bool(data.get('enabled', True)),
         'source': source,
         'events': events,
+        'tags': tags,
         'severity_max': sev,
         'host': (data.get('host') or '').strip(),
         'app': (data.get('app') or '').strip(),
-        'match_type': match_type,
-        'match_text': (data.get('match_text') or '').strip(),
+        'match_groups': _clean_match_groups(data),
         'channels': channels,
         'webhook_ids': webhook_ids,
         'cooldown': cooldown,
     }
+
+
+def _name_taken(store, name: str, exclude_id: str = None) -> bool:
+    """True if another rule already uses *name* (case-insensitive)."""
+    key = str(name).strip().lower()
+    return any(str(r.get('name', '')).strip().lower() == key and r.get('id') != exclude_id
+               for r in (store.list() or []))
 
 
 def _validate(rule: dict) -> str | None:
@@ -64,11 +119,13 @@ def _validate(rule: dict) -> str | None:
         return 'at least one channel is required'
     if rule['source'] == 'audit' and not rule['events']:
         return 'select at least one audit event'
-    if rule['match_type'] == 'regex' and rule['match_text']:
-        try:
-            re.compile(rule['match_text'])
-        except re.error:
-            return 'invalid regular expression'
+    for g in rule.get('match_groups') or []:
+        for m in g:
+            if m.get('type') == 'regex' and m.get('text'):
+                try:
+                    re.compile(m['text'])
+                except re.error:
+                    return 'invalid regular expression'
     return None
 
 
@@ -77,6 +134,8 @@ def register(app, wa):
     events_add_req = wa._perm_required('events_add')
     events_edit_req = wa._perm_required('events_edit')
     events_delete_req = wa._perm_required('events_delete')
+    notify_view_req = wa._perm_required('events_notify_view')
+    notify_delete_req = wa._perm_required('events_notify_delete')
     store = wa._event_rules_store
 
     @app.route('/api/v1/event-rules', methods=['GET'])
@@ -94,6 +153,8 @@ def register(app, wa):
         msg = _validate(rule)
         if msg:
             return jsonify({'error': msg}), 400
+        if _name_taken(store, rule['name']):
+            return jsonify({'error': wa._t('event_name_exists')}), 400
         rule['id'] = str(uuid.uuid4())
         store.upsert(rule, actor=session.get('username', ''))
         wa._events_reload()
@@ -113,6 +174,8 @@ def register(app, wa):
         msg = _validate(rule)
         if msg:
             return jsonify({'error': msg}), 400
+        if _name_taken(store, rule['name'], exclude_id=rid):
+            return jsonify({'error': wa._t('event_name_exists')}), 400
         rule['id'] = rid
         store.upsert(rule, actor=session.get('username', ''))
         wa._events_reload()
@@ -148,7 +211,7 @@ def register(app, wa):
         return jsonify({'ok': ok, 'results': {k: list(v) for k, v in results.items()}})
 
     @app.route('/api/v1/notifications/log', methods=['GET'])
-    @events_view_req
+    @notify_view_req
     def api_notification_log():
         store = getattr(wa, '_notification_log_store', None)
         if store is None:
@@ -161,7 +224,7 @@ def register(app, wa):
         return jsonify({'log': store.query(limit=limit), 'total': store.count()})
 
     @app.route('/api/v1/notifications/log', methods=['DELETE'])
-    @events_edit_req
+    @notify_delete_req
     def api_clear_notification_log():
         store = getattr(wa, '_notification_log_store', None)
         deleted = store.delete_all() if store is not None else 0

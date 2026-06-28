@@ -378,3 +378,89 @@ class TestWatchfulActions:
                 f"{mod_name}.Watchful.{action} is in WATCHFUL_ACTIONS "
                 f"but is not callable"
             )
+
+
+# ──────────────── runtime / system-wiring contract ─────────────────
+
+def _load_schema(mod_name: str) -> dict:
+    """The module's schema.json as a dict (empty when missing/invalid)."""
+    sp = os.path.join(_WATCHFULS_DIR, mod_name, "schema.json")
+    if not os.path.isfile(sp):
+        return {}
+    try:
+        with open(sp, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+class TestRealModuleRuntimeContract:
+    """Beyond static metadata: every real module must WIRE INTO the running
+    system.  Generic (discovery-driven) so a NEW module is covered automatically —
+    no per-module test to write.  This is the layer the recent regressions slipped
+    past (a module that doesn't run, or isn't exposed in a catalog)."""
+
+    @pytest.fixture(autouse=True)
+    def _monitor(self, tmp_path):
+        from lib import Monitor
+        config_dir = str(tmp_path / "config")
+        var_dir = str(tmp_path / "var")
+        os.makedirs(config_dir, exist_ok=True)
+        os.makedirs(var_dir, exist_ok=True)
+        if _SRC_DIR not in sys.path:
+            sys.path.insert(0, _SRC_DIR)
+        self.monitor = Monitor(str(tmp_path), config_dir, _WATCHFULS_DIR, var_dir)
+
+    @pytest.mark.parametrize("mod_name", _MODULE_NAMES)
+    def test_instantiates_and_check_runs_on_empty_config(self, mod_name):
+        """The system can build each module against a Monitor and run check() on
+        an EMPTY config without raising — returning the ReturnModuleCheck contract.
+        Catches modules that crash on load / init / empty-config (i.e. that the
+        monitor cannot actually execute)."""
+        from contextlib import nullcontext
+        from unittest.mock import patch
+        from lib.modules import ReturnModuleCheck
+        cls = importlib.import_module(f"watchfuls.{mod_name}").Watchful
+        # Neutralise heavy startup hooks generically (e.g. snmp MIB compilation).
+        ctx = (patch.object(cls, "_startup_compile_mibs", return_value=None)
+               if hasattr(cls, "_startup_compile_mibs") else nullcontext())
+        with ctx:
+            result = cls(self.monitor).check()
+        assert isinstance(result, ReturnModuleCheck), (
+            f"{mod_name}.check() did not return a ReturnModuleCheck"
+        )
+
+    @pytest.mark.parametrize("mod_name", _MODULE_NAMES)
+    def test_declared_credential_type_is_in_catalog(self, mod_name):
+        """A module that declares a __credential__ type must be exposed by the
+        central credential catalog (so the manager can create/edit it)."""
+        from lib.credential_schemas import credential_schemas
+        decl = _load_schema(mod_name).get("__credential__") or \
+            _load_schema(mod_name).get("__credentials__")
+        if not decl:
+            pytest.skip("module declares no credential type")
+        cat = credential_schemas(_WATCHFULS_DIR)
+        for spec in ([decl] if isinstance(decl, dict) else decl):
+            ctype = isinstance(spec, dict) and str(spec.get("type") or "").strip()
+            if ctype and ctype != "ssh":
+                assert ctype in cat, (
+                    f"{mod_name} credential type '{ctype}' missing from catalog"
+                )
+
+    @pytest.mark.parametrize("mod_name", _MODULE_NAMES)
+    def test_host_capable_module_is_exposed_in_catalogs(self, mod_name):
+        """A module that declares a __host_profile__ must be exposed by the host
+        catalogs the UI/monitor rely on: the multi-bind flag (which enumerates
+        every host-capable module) and at least one host-bindable collection.
+        (module_host_fields legitimately omits modules that hide no fields, e.g.
+        web's visible 'url', so it is NOT the right catalog to assert here.)"""
+        from lib.hosts.profiles import module_host_collections, module_host_multi_bind
+        if not _load_schema(mod_name).get("__host_profile__"):
+            pytest.skip("module is not host-capable")
+        mb = module_host_multi_bind()
+        assert mod_name in mb and isinstance(mb[mod_name], bool), (
+            f"{mod_name} missing a multi-bind flag in module_host_multi_bind()"
+        )
+        assert module_host_collections().get(mod_name), (
+            f"{mod_name} host-capable but has no host-bindable collection"
+        )

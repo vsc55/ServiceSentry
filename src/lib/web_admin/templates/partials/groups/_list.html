@@ -10,19 +10,16 @@ let _groupsSort = 'label';
 let _groupsSortDir = 'asc';
 let _selectedGroups = new Set();
 let _groupsCurrentPage = [];
-let _grpDragSrc = null;  // column being dragged
 
 // ── Column definitions ─────────────────────────────────────────────
 // id: internal key | label: display fn | sortKey: sort field (null=no sort) | always: can't hide
 const _GRP_COLS = [
-    { id: 'uid',         label: () => 'UID',                                      sortKey: 'uid',        always: false },
+    _META_COL.uid,
     { id: 'name',        label: () => t('col_group_name'),                         sortKey: 'name',       always: true  },
     { id: 'description', label: () => t('group_description'),                      sortKey: 'description', always: false },
     { id: 'roles',       label: () => t('col_group_roles'),                        sortKey: 'roles',       always: false },
-    { id: 'members',     label: () => t('col_group_members'),                      sortKey: 'members',     always: false },
-    { id: 'created_at',  label: () => t('col_created_at')||'Created',              sortKey: 'created_at',  always: false },
-    { id: 'updated_at',  label: () => t('col_updated_at')||'Last Updated',         sortKey: 'updated_at',  always: false },
-    { id: 'updated_by',  label: () => t('col_updated_by')||'Updated By',           sortKey: 'updated_by',  always: false },
+    { id: 'members',     label: () => t('col_group_members'),                      sortKey: 'members',     always: false, resizable: false },
+    ..._META_TAIL,
 ];
 const _GROUPS_ALL_COLS = _GRP_COLS.filter(c => !c.always).map(c => c.id);
 const _GROUPS_DEFAULT_COLS = new Set(['roles', 'members', 'updated_by']);
@@ -39,263 +36,92 @@ let _groupsColOrder = (() => {
     return _GRP_COLS.map(c => c.id);
 })();
 
-function _resetGroupsCols() {
-    _groupsVisibleCols = new Set(_GROUPS_DEFAULT_COLS);
-    _groupsColOrder    = _GRP_COLS.map(c => c.id);
-    localStorage.setItem('ss_groups_cols',       JSON.stringify([..._groupsVisibleCols]));
-    localStorage.setItem('ss_groups_col_order',  JSON.stringify(_groupsColOrder));
-    localStorage.removeItem('ss_groups_col_w');
-    _persistTableConfig();
-    renderGroups();
-}
-function _groupsToggleCol(col) {
-    const adding = !_groupsVisibleCols.has(col);
-    _groupsVisibleCols.has(col) ? _groupsVisibleCols.delete(col) : _groupsVisibleCols.add(col);
-    if (adding && col === 'uid') {
-        // Place UID as absolute first column
-        _groupsColOrder = ['uid', ..._groupsColOrder.filter(c => c !== 'uid')];
-        localStorage.setItem('ss_groups_col_order', JSON.stringify(_groupsColOrder));
-    }
-    localStorage.setItem('ss_groups_cols', JSON.stringify([..._groupsVisibleCols]));
-    _persistTableConfig();
-    renderGroups();
-}
-function _grpSaveOrder() {
-    localStorage.setItem('ss_groups_col_order', JSON.stringify(_groupsColOrder));
-    _persistTableConfig();
-}
-
-// ── Helpers ────────────────────────────────────────────────────────
-// _thSortInner is shared (defined in _js_init.html); _fmtDateTime in core/_utils.html.
-
-// ── Page / sort controls ───────────────────────────────────────────
-function _goGroupsPage(p) { _groupsPage = p; renderGroups(); }
-function _changeGroupsPageSize(v) { _groupsPageSize = parseInt(v,10); _groupsPage=1; renderGroups(); }
-function _sortGroups(col) {
-    if (_groupsSort === col) _groupsSortDir = _groupsSortDir === 'asc' ? 'desc' : 'asc';
-    else { _groupsSort = col; _groupsSortDir = 'asc'; }
-    renderGroups();
-}
-
-function renderGroups() {
-    const c = document.getElementById('groups-container');
-    if (!c) return;
-    const grpPerms    = new Set(currentUser.permissions || []);
-    const canEditGroup   = grpPerms.has('groups_edit');
-    const canDeleteGroup = grpPerms.has('groups_delete');
-    const showActions    = canEditGroup || canDeleteGroup;
-    if (_groupsPageSize === null) _groupsPageSize = _defaultPageSize;
-
-    // ── Sort ───────────────────────────────────────────────────────
-    const allEntries = Object.entries(groupsData).sort((a, b) => {
-        const [na, gda] = a, [nb, gdb] = b;
-        const mul = _groupsSortDir === 'asc' ? 1 : -1;
-        switch (_groupsSort) {
-            case 'name':      return mul * (gda.name||na).toLowerCase().localeCompare((gdb.name||nb).toLowerCase());
-            case 'uid':        return mul * na.localeCompare(nb);
-            case 'description':return mul * (gda.description||'').toLowerCase().localeCompare((gdb.description||'').toLowerCase());
-            case 'roles':      return mul * ((gda.roles||[]).length - (gdb.roles||[]).length);
-            case 'members':    return mul * ((gda.members||[]).length - (gdb.members||[]).length);
+createListTable({
+    key: 'groups', containerId: 'groups-container', tableId: 'groups-table',
+    accent: 'teal', icon: 'bi-people', title: () => t('group_management'),
+    columns: _GRP_COLS, defaultVisible: _GROUPS_DEFAULT_COLS,
+    thClass: { members: 'text-center ss-th-narrow' }, colChooserMinWidth: 170,
+    persist: true, clearLabelKey: 'subtab_groups',
+    rows: () => Object.keys(groupsData), rowKey: name => name,
+    record: name => groupsData[name],
+    prepare: () => {
+        const p = new Set(currentUser.permissions || []);
+        const canEdit = p.has('groups_edit'), canDelete = p.has('groups_delete'), canClone = p.has('groups_add');
+        return { canEdit, canDelete, canClone, showActions: canEdit || canDelete || canClone };
+    },
+    selectable: ctx => ctx.showActions,
+    actionsVisible: ctx => ctx.showActions,
+    sortValue: (name, sortKey) => {
+        const gd = groupsData[name];
+        switch (sortKey) {
+            case 'name':         return (gd.name || name).toLowerCase();
+            case 'uid':          return name;
+            case 'description':  return (gd.description || '').toLowerCase();
+            case 'roles':        return (gd.roles || []).length;
+            case 'members':      return (gd.members || []).length;
             case 'created_at':
-            case 'updated_at': return mul * (gda[_groupsSort]||'').localeCompare(gdb[_groupsSort]||'');
-            case 'updated_by': return mul * (gda.updated_by||'').toLowerCase().localeCompare((gdb.updated_by||'').toLowerCase());
-            default:           return 0;
+            case 'updated_at':   return gd[sortKey] || '';
+            case 'updated_by':   return (gd.updated_by || '').toLowerCase();
+            default:             return '';   // 'label' (default) → keep insertion order
         }
-    });
-
-    if (!allEntries.length) {
-        c.innerHTML = `<div class="text-center py-5 text-muted"><i class="bi bi-diagram-3" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i><span>${t('no_groups')}</span></div>`;
-        return;
-    }
-    const total = allEntries.length;
-    const ps = _groupsPageSize || total;
-    _groupsPage = Math.max(1, Math.min(_groupsPage, Math.ceil(total/ps)));
-    const entries = allEntries.slice((_groupsPage-1)*ps, _groupsPage*ps);
-    _groupsCurrentPage = entries.map(([n]) => n);
-    const _allPageSelected = _groupsCurrentPage.length > 0 && _groupsCurrentPage.every(n => _selectedGroups.has(n));
-
-    // ── Ordered visible columns ────────────────────────────────────
-    // Ensure order array contains all known columns (handles newly added cols)
-    const knownIds = new Set(_GRP_COLS.map(c => c.id));
-    _GRP_COLS.forEach(c => { if (!_groupsColOrder.includes(c.id)) _groupsColOrder.push(c.id); });
-    _groupsColOrder = _groupsColOrder.filter(id => knownIds.has(id));
-
-    const orderedCols = _groupsColOrder
-        .map(id => _GRP_COLS.find(c => c.id === id))
-        .filter(c => c && (c.always || _groupsVisibleCols.has(c.id)));
-
-    // ── Column widths ──────────────────────────────────────────────
-    const _cw = (() => { try { return JSON.parse(localStorage.getItem('ss_groups_col_w')||'{}'); } catch(_){ return {}; } })();
-    const _thW = id => _cw[id] ? ` style="width:${_cw[id]}"` : '';
-
-    // ── Build table ────────────────────────────────────────────────
-    const thRow = orderedCols.map(col => {
-        const inner = col.sortKey
-            ? _thSortInner(col.label(), col.sortKey, _groupsSort, _groupsSortDir, '_sortGroups')
-            : `<span class="small">${esc(col.label())}</span>`;
-        const isNameCol = col.id === 'name';
-        const extra = col.id === 'members' ? ' text-center ss-th-narrow' : '';
-        return `<th class="ss-th ss-th-resizable${extra}" data-col="${col.id}" draggable="true"${_thW(col.id)}>${inner}</th>`;
-    }).join('');
-
-    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table" id="groups-table">
-    <thead class="ss-thead"><tr>
-        ${showActions ? `<th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected?'checked':''} onchange="_groupsSelectAll(this.checked)"></th>` : ''}
-        ${thRow}
-        ${showActions ? `<th class="ss-th ss-th-actions">${t('col_actions')}</th>` : ''}
-    </tr></thead><tbody>`;
-
-    for (const [name, gd] of entries) {
-        const isEnabled   = gd.enabled !== false;
-        const rowStyle    = isEnabled ? '' : ' style="opacity:.55"';
-        const builtinBadge  = gd.builtin ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.6em;padding:.15em .35em">${t('group_builtin_badge')}</span>` : '';
-        const disabledBadge = isEnabled  ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
-        const roleBadges    = (gd.roles||[]).map(r => { const rd=rolesData[r]||{}; return `<span class="badge ${roleBadgeClass(r)} me-1">${esc(rd.name||r)}</span>`; }).join('');
-        const memberCount   = (gd.members||[]).length;
-        const memberHtml    = memberCount>0 ? `<span class="badge bg-secondary bg-opacity-50 rounded-pill">${memberCount}</span>` : `<span class="text-muted small">—</span>`;
-
-        const cells = orderedCols.map(col => {
-            switch (col.id) {
-                case 'name':       return `<td class="text-nowrap"><span class="fw-semibold">${esc(gd.name||name)}</span>${builtinBadge}${disabledBadge}</td>`;
-                case 'uid':        return `<td><code class="text-muted" style="font-size:.7rem">${esc(name)}</code></td>`;
-                case 'description':return `<td class="text-muted small">${esc(gd.description||'—')}</td>`;
-                case 'roles':      return `<td style="line-height:1.9">${roleBadges||'<span class="text-muted">—</span>'}</td>`;
-                case 'members':    return `<td class="text-center text-nowrap">${memberHtml}</td>`;
-                case 'created_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(gd.created_at))}</td>`;
-                case 'updated_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(gd.updated_at))}</td>`;
-                case 'updated_by': return `<td class="small text-muted">${esc(gd.updated_by||'—')}</td>`;
-                default:           return '<td></td>';
+    },
+    rowAttrs: name => groupsData[name].enabled !== false ? '' : ' style="opacity:.55"',
+    cell: (name, colId) => {
+        const gd = groupsData[name];
+        switch (colId) {
+            case 'name': {
+                const builtinBadge = gd.builtin ? ` <i class="bi bi-lock-fill text-muted ms-1" style="font-size:.8em" title="${escAttr(t('group_builtin_badge'))}"></i>` : '';
+                const disabledBadge = gd.enabled !== false ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
+                return `<td class="text-nowrap"><code>${esc(gd.name||name)}</code>${builtinBadge}${disabledBadge}</td>`;
             }
-        }).join('');
-
-        h += `<tr${rowStyle}>
-            ${showActions ? `<td><input type="checkbox" class="form-check-input" ${_selectedGroups.has(name)?'checked':''} onchange="_groupsToggleOne(${jsStr(name)}, this.checked)"></td>` : ''}
-            ${cells}
-            ${showActions ? `<td class="ss-td-actions">
-                ${canEditGroup ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditGroupModal(${jsStr(name)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : ''}
-                ${canDeleteGroup ? `<button class="btn btn-sm btn-danger py-0 px-1" ${gd.builtin?'disabled':`onclick="deleteGroup(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
-            </td>` : ''}
-        </tr>`;
-    }
-    h += `</tbody></table>`;
-
-    const pagination = _renderPagination(total, _groupsPage, _groupsPageSize, '_goGroupsPage', '_changeGroupsPageSize');
-    const _addBtn = grpPerms.has('groups_add')
-        ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewGroupModal()" title="${escAttr(t('new_group_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_group')}</button>` : '';
-    const _bulkBar = showActions && _selectedGroups.size > 0 ? `
+            case 'description':return `<td class="text-muted small text-truncate ss-td-ellipsis" title="${escAttr(gd.description||'')}">${esc(gd.description||'—')}</td>`;
+            case 'roles': {
+                const roleBadges = (gd.roles||[]).map(r => { const rd = rolesData[r]||{}; return `<span class="badge ${roleBadgeClass(r)} me-1">${esc(rd.name||r)}</span>`; }).join('');
+                return `<td style="line-height:1.9">${roleBadges||'<span class="text-muted">—</span>'}</td>`;
+            }
+            case 'members': {
+                const n = (gd.members||[]).length;
+                return `<td class="text-center text-nowrap">${n>0 ? `<span class="badge bg-secondary bg-opacity-50 rounded-pill">${n}</span>` : `<span class="text-muted small">—</span>`}</td>`;
+            }
+            default:           return '<td></td>';
+        }
+    },
+    actions: (name, ctx) => {
+        const gd = groupsData[name];
+        return `${ctx.canEdit ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditGroupModal(${jsStr(name)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : ''}
+                ${ctx.canClone ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1" onclick="cloneGroupModal(${jsStr(name)})" title="${escAttr(t('clone'))}"><i class="bi bi-copy"></i></button>` : ''}
+                ${ctx.canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" ${gd.builtin?'disabled':`onclick="deleteGroup(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}`;
+    },
+    bulkBar: (ctx, sel) => (ctx.showActions && sel.size > 0) ? `
         <div class="d-flex align-items-center gap-1 border-start ps-2 ms-1">
-            <span class="badge bg-secondary rounded-pill">${_selectedGroups.size}</span>
-            ${canEditGroup ? `<button class="btn btn-sm btn-success py-0 px-2" onclick="_bulkEnableGroups(true)" title="${escAttr(t('enable'))}"><i class="bi bi-toggle-on"></i></button>` : ''}
-            ${canEditGroup ? `<button class="btn btn-sm btn-secondary py-0 px-2" onclick="_bulkEnableGroups(false)" title="${escAttr(t('disable'))}"><i class="bi bi-toggle-off"></i></button>` : ''}
-            ${canDeleteGroup ? `<button class="btn btn-sm btn-danger py-0 px-2" onclick="_bulkDeleteGroups()" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
+            <span class="badge bg-secondary rounded-pill">${sel.size}</span>
+            ${ctx.canEdit ? `<button class="btn btn-sm btn-success py-0 px-2" onclick="_bulkEnableGroups(true)" title="${escAttr(t('enable'))}"><i class="bi bi-toggle-on"></i></button>` : ''}
+            ${ctx.canEdit ? `<button class="btn btn-sm btn-secondary py-0 px-2" onclick="_bulkEnableGroups(false)" title="${escAttr(t('disable'))}"><i class="bi bi-toggle-off"></i></button>` : ''}
+            ${ctx.canDelete ? `<button class="btn btn-sm btn-danger py-0 px-2" onclick="_bulkDeleteGroups()" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
             <button class="btn btn-sm btn-secondary py-0 px-2" onclick="_selectedGroups.clear();renderGroups()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
-        </div>` : '';
+        </div>` : '',
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`,
+    headerButtons: ctx => ctx.canClone
+        ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewGroupModal()" title="${escAttr(t('new_group_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_group')}</button>` : '',
+    emptyState: () => `<div class="text-center py-5 text-muted"><i class="bi bi-diagram-3" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i><span>${t('no_groups')}</span></div>`,
+    state: {
+        visible: { get: () => _groupsVisibleCols, set: s => { _groupsVisibleCols = s; } },
+        order:   { get: () => _groupsColOrder,    set: o => { _groupsColOrder = o; } },
+        page:    { get: () => _groupsPage,        set: p => { _groupsPage = p; } },
+        pageSize:{ get: () => _groupsPageSize,    set: v => { _groupsPageSize = v; } },
+        sort:    { get: () => _groupsSort,        set: v => { _groupsSort = v; } },
+        sortDir: { get: () => _groupsSortDir,     set: v => { _groupsSortDir = v; } },
+        selected: () => _selectedGroups,
+        currentPage: { get: () => _groupsCurrentPage, set: a => { _groupsCurrentPage = a; } },
+    },
+    globalPrefix: {
+        render: 'renderGroups', goPage: '_goGroupsPage', changePageSize: '_changeGroupsPageSize',
+        sort: '_sortGroups', toggleCol: '_groupsToggleCol', resetCols: '_resetGroupsCols',
+        saveOrder: '_grpSaveOrder', selectAll: '_groupsSelectAll', toggleOne: '_groupsToggleOne',
+        initFeatures: '_initGroupsTableFeatures',
+    },
+});
 
-    // Column chooser dropdown
-    const colChooser = _buildColChooser(_GRP_COLS, _groupsVisibleCols, '_groupsToggleCol', '_resetGroupsCols', 170);
-
-    c.innerHTML = `<div class="ss-card">
-        <div class="ss-accent ss-accent-teal"></div>
-        <div class="ss-card-header">
-            <h6 class="mb-0 me-auto"><i class="bi bi-people me-2"></i>${t('group_management')}</h6>
-            ${_bulkBar}
-            ${colChooser}
-            <button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>
-            ${_addBtn}
-        </div>
-        <div class="ss-card-band ss-card-band-top">${pagination}</div>
-        <div>${h}</div>
-        <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
-    </div>`;
-    setTimeout(_initGroupsTableFeatures, 0);
-}
-
-// ── Table features: resize + drag-and-drop reorder ─────────────────
-function _initGroupsTableFeatures() {
-    const tbl = document.getElementById('groups-table');
-    if (!tbl) return;
-    tbl.querySelectorAll('th.ss-th-resizable').forEach(th => {
-        th.querySelector('.ss-resize-handle')?.remove();
-        th.style.position = 'relative'; th.style.overflow = 'hidden';
-
-        // ── Resize handle (right edge) ──────────────────────────────
-        const handle = document.createElement('div');
-        handle.className = 'ss-resize-handle';
-        handle.style.cssText = 'position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:2;background:transparent';
-        handle.addEventListener('mousedown', e => {
-            e.preventDefault(); e.stopPropagation();
-            const startX = e.clientX, startW = th.offsetWidth, col = th.dataset.col;
-            function onMove(ev) { th.style.width = Math.max(40, startW + ev.clientX - startX) + 'px'; }
-            function onUp(ev) {
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-                const nw = Math.max(40, startW + ev.clientX - startX) + 'px';
-                const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_groups_col_w')||'{}'); } catch(_){ return {}; } })();
-                cw[col] = nw; localStorage.setItem('ss_groups_col_w', JSON.stringify(cw));
-                _persistTableConfig();
-            }
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
-        });
-        handle.addEventListener('dblclick', e => {
-            e.preventDefault(); e.stopPropagation();
-            const col = th.dataset.col;
-            const tbl = th.closest('table');
-            if (!tbl) return;
-            const colIdx = Array.from(th.closest('tr').querySelectorAll('th')).indexOf(th);
-            const tmp = document.createElement('div');
-            tmp.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden';
-            document.body.appendChild(tmp);
-            let maxW = 0;
-            const measure = cell => {
-                const clone = cell.cloneNode(true);
-                clone.querySelector?.('.ss-resize-handle')?.remove();
-                clone.style.cssText = 'display:inline-block;white-space:nowrap;width:auto;padding:2px 11px';
-                tmp.appendChild(clone);
-                maxW = Math.max(maxW, clone.scrollWidth);
-                tmp.removeChild(clone);
-            };
-            measure(th);
-            tbl.querySelectorAll('tbody tr').forEach(tr => { const td = tr.cells[colIdx]; if (td) measure(td); });
-            document.body.removeChild(tmp);
-            const newW = Math.max(40, maxW + 8) + 'px';
-            th.style.width = newW;
-            const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_groups_col_w')||'{}'); } catch(_){ return {}; } })();
-            cw[col] = newW; localStorage.setItem('ss_groups_col_w', JSON.stringify(cw));
-            _persistTableConfig();
-        });
-        th.appendChild(handle);
-
-        // ── Drag-and-drop reorder ───────────────────────────────────
-        th.addEventListener('dragstart', e => {
-            _grpDragSrc = th.dataset.col;
-            e.dataTransfer.effectAllowed = 'move';
-            th.style.opacity = '0.4';
-        });
-        th.addEventListener('dragend', () => { th.style.opacity = ''; _grpDragSrc = null; });
-        th.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.classList.add('ss-th-drag-over'); });
-        th.addEventListener('dragleave', () => th.classList.remove('ss-th-drag-over'));
-        th.addEventListener('drop', e => {
-            e.preventDefault(); th.classList.remove('ss-th-drag-over');
-            const src = _grpDragSrc, dst = th.dataset.col;
-            if (!src || src === dst) return;
-            const srcIdx = _groupsColOrder.indexOf(src), dstIdx = _groupsColOrder.indexOf(dst);
-            if (srcIdx < 0 || dstIdx < 0) return;
-            _groupsColOrder.splice(srcIdx, 1);
-            _groupsColOrder.splice(dstIdx, 0, src);
-            _grpSaveOrder();
-            renderGroups();
-        });
-    });
-}
-function _groupsSelectAll(checked) {
-    _groupsCurrentPage.forEach(n => checked ? _selectedGroups.add(n) : _selectedGroups.delete(n));
-    renderGroups();
-}
-function _groupsToggleOne(name, checked) {
-    checked ? _selectedGroups.add(name) : _selectedGroups.delete(name);
-    renderGroups();
-}
 async function _bulkEnableGroups(enabled) {
     await _bulkSetEnabled(_selectedGroups, enabled, {
         data: groupsData,

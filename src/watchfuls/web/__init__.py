@@ -87,16 +87,45 @@ class Watchful(ModuleBase):
             cache[key] = self.resolve_host(raw) if isinstance(raw, dict) else {}
         return cache[key]
 
+    @staticmethod
+    def _compose_target(server: str, port, path: str = '') -> str:
+        """Build the request target (host[:port][/path], scheme-less) from the
+        host-centric fields.  The scheme is applied separately by ``_web_request``.
+
+        * ``port`` is appended only when it is a non-standard port — 80/443 are
+          implied by the scheme and omitted, as is a blank/0 port.
+        * ``server`` may already carry a scheme (``https://…``, legacy data) or an
+          embedded ``:port`` — in either case it is used verbatim (no port added).
+        """
+        server = (server or '').strip().rstrip('/')
+        target = server
+        if server and '://' not in server:
+            try:
+                p = int(port or 0)
+            except (TypeError, ValueError):
+                p = 0
+            host_part = server.split('/', 1)[0]
+            if p and p not in (80, 443) and ':' not in host_part:
+                if '/' in server:
+                    host, rest = server.split('/', 1)
+                    target = f'{host}:{p}/{rest}'
+                else:
+                    target = f'{server}:{p}'
+        path = (path or '').strip()
+        if path:
+            target = target.rstrip('/') + '/' + path.lstrip('/')
+        return target
+
     def _web_check(self, name: str) -> None:
         it = self._resolved_item(name)
-        # Host-centric: a host's address fills 'url'; the per-check 'path' is
-        # appended to it (inline checks keep the full url in 'url' with empty path).
-        url  = (it.get('url', '') or '').strip() or name
+        # Host-centric: a host's address fills 'server'; 'port'/'path' compose the
+        # target.  Legacy items keep the address in 'url' (pre-server/port split) —
+        # honoured as a fallback so existing checks keep working until re-saved.
+        server = (it.get('server', '') or '').strip() or (it.get('url', '') or '').strip()
+        path   = (it.get('path', '') or '').strip()
+        url    = self._compose_target(server, it.get('port', 0), path) or name
         # Display name: the editable label (e.g. "NS1 - https://api…"); key is a UID.
         label = (it.get('label', '') or '').strip() or url
-        path = (it.get('path', '') or '').strip()
-        if path:
-            url = url.rstrip('/') + '/' + path.lstrip('/')
         scheme       = (it.get('scheme', '') or 'https').strip()
         verify_ssl   = bool(it.get('verify_ssl', True))
         code_exp     = it.get('code', 0) or self.get_conf('code', self._MODULE_DEFAULTS['code'])
@@ -196,11 +225,15 @@ class Watchful(ModuleBase):
         Receives the item fields from the UI form and runs a live request.
         Returns {"ok": bool, "message": str}.
         """
-        # When URL is empty, fall back to _item_key (injected by the action handler
-        # from the item's dict key — used when placeholder: "__key__" is the URL).
-        url = (config.get('url') or '').strip() or (config.get('_item_key') or '').strip()
-        if not url:
-            return {'ok': False, 'message': 'URL is required'}
+        # Compose from server/port/path (host-centric).  Fall back to legacy 'url'
+        # and then to _item_key (the item's dict key, injected by the action
+        # handler) so older configs and key-as-address checks still test.
+        server = ((config.get('server') or '').strip()
+                  or (config.get('url') or '').strip()
+                  or (config.get('_item_key') or '').strip())
+        if not server:
+            return {'ok': False, 'message': 'Server is required'}
+        url = cls._compose_target(server, config.get('port', 0), config.get('path', ''))
 
         code_exp  = int(config.get('code')    or cls._MODULE_DEFAULTS.get('code',    200))
         timeout   = int(config.get('timeout') or cls._MODULE_DEFAULTS.get('timeout', 15))

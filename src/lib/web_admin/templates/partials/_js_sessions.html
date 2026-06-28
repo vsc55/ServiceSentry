@@ -15,12 +15,12 @@ let _sessionsViewMode = (() => {
 
 // ── Table column definitions (table mode) ──────────────────────────
 const _SES_COLS = [
-    { id: 'uid',        label: () => 'UID',                               sortKey: 'uid',        always: false },
+    _META_COL.uid,
     { id: 'username',   label: () => t('col_user'),                       sortKey: 'username',   always: true  },
-    { id: 'ip',         label: () => t('col_ip'),                         sortKey: 'ip',         always: false },
+    { id: 'ip',         label: () => t('col_ip'),                         sortKey: 'ip',         always: false, resizable: false },
     { id: 'user_agent', label: () => t('col_user_agent')||'User Agent',   sortKey: null,         always: false },
-    { id: 'created',    label: () => t('col_created'),                    sortKey: 'created',    always: false },
-    { id: 'last_seen',  label: () => t('col_last_seen'),                  sortKey: 'last_seen',  always: false },
+    { id: 'created',    label: () => t('col_created'),                    sortKey: 'created',    always: false, resizable: false },
+    { id: 'last_seen',  label: () => t('col_last_seen'),                  sortKey: 'last_seen',  always: false, resizable: false },
 ];
 const _SESSIONS_DEFAULT_COLS = new Set(['ip', 'created', 'last_seen']);
 
@@ -41,112 +41,16 @@ function _setSessionsView(mode) {
     _persistTableConfig();
     renderSessions();
 }
-function _sortSessions(col) {
-    if (_sessionsSort === col) _sessionsSortDir = _sessionsSortDir === 'asc' ? 'desc' : 'asc';
-    else { _sessionsSort = col; _sessionsSortDir = col === 'last_seen' || col === 'created' ? 'desc' : 'asc'; }
-    renderSessions();
-}
-function _sessionsToggleCol(col) {
-    const adding = !_sessionsVisibleCols.has(col);
-    _sessionsVisibleCols.has(col) ? _sessionsVisibleCols.delete(col) : _sessionsVisibleCols.add(col);
-    if (adding && col === 'uid') {
-        // Place the session UID as the first column, like the other tables.
-        _sessionsColOrder = ['uid', ..._sessionsColOrder.filter(c => c !== 'uid')];
-        localStorage.setItem('ss_sessions_col_order', JSON.stringify(_sessionsColOrder));
-    }
-    localStorage.setItem('ss_sessions_cols', JSON.stringify([..._sessionsVisibleCols]));
-    _persistTableConfig();
-    renderSessions();
-}
-function _sesSaveColOrder() { localStorage.setItem('ss_sessions_col_order', JSON.stringify(_sessionsColOrder)); _persistTableConfig(); }
-function _resetSessionsCols() {
-    _sessionsVisibleCols = new Set(_SESSIONS_DEFAULT_COLS);
-    _sessionsColOrder    = _SES_COLS.map(c => c.id);
-    localStorage.setItem('ss_sessions_cols',      JSON.stringify([..._sessionsVisibleCols]));
-    localStorage.setItem('ss_sessions_col_order', JSON.stringify(_sessionsColOrder));
-    localStorage.removeItem('ss_sessions_col_w');
-    _persistTableConfig();
-    renderSessions();
-}
 function _fmtSesDt(v) {
     if (!v) return '—';
     try { return new Date(v).toLocaleString(); } catch(_) { return v; }
 }
 
-function _updateSessionsBulkBar() {
-    const bar   = document.getElementById('sessionsBulkBar');
-    const count = document.getElementById('sessionsBulkCount');
-    if (!bar) return;
-    const n = _selectedSessions.size;
-    bar.style.display = n > 0 ? '' : 'none';
-    if (count) count.textContent = n;
-}
-function _goSessionsPage(p) { _sessionsPage = p; renderSessions(); }
-function _changeSessionsPageSize(v) { _sessionsPageSize = parseInt(v, 10); _sessionsPage = 1; renderSessions(); }
-
-// ── Header controls: card/table toggle + (table) column chooser ─────
-function _renderSessionsControls() {
-    const host = document.getElementById('sessionsViewControls');
-    if (!host) return;
-    const isTable = _sessionsViewMode === 'table';
-    const colChooser = isTable ? _buildColChooser(_SES_COLS, _sessionsVisibleCols, '_sessionsToggleCol', '_resetSessionsCols') : '';
-    const toggle = `<div class="btn-group btn-group-sm" role="group" title="${escAttr(t('view_mode')||'View')}">
-        <button class="btn btn-sm ${isTable?'btn-secondary':'btn-primary'}" onclick="_setSessionsView('card')" title="${escAttr(t('view_cards')||'Cards')}"><i class="bi bi-grid-3x3-gap"></i></button>
-        <button class="btn btn-sm ${isTable?'btn-primary':'btn-secondary'}" onclick="_setSessionsView('table')" title="${escAttr(t('view_table')||'Table')}"><i class="bi bi-table"></i></button>
-    </div>`;
-    host.innerHTML = colChooser + toggle;
-}
-
-function renderSessions() {
-    const c = document.getElementById('sessions-container');
-    if (!c) return;
-    if (_sessionsPageSize === null) _sessionsPageSize = _defaultPageSize;
-    _renderSessionsControls();
-    const allEntries = Object.entries(sessionsData);
-    const title = document.getElementById('sessions-title');
-    if (title) title.textContent = t('active_sessions') + ' (' + allEntries.length + ')';
-    if (!allEntries.length) {
-        c.innerHTML = `<div class="text-center py-5 text-muted">
-            <i class="bi bi-person-slash" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
-            <span>${t('no_active_sessions')}</span>
-        </div>`;
-        _selectedSessions.clear();
-        _updateSessionsBulkBar();
-        return;
-    }
-
-    // Sort
-    allEntries.sort((a, b) => {
-        const [ka, sa] = a, [kb, sb] = b;
-        const mul = _sessionsSortDir === 'asc' ? 1 : -1;
-        switch (_sessionsSort) {
-            case 'uid':      return mul * ka.localeCompare(kb);
-            case 'username': return mul * (sa.username||'').toLowerCase().localeCompare((sb.username||'').toLowerCase());
-            case 'ip':       return mul * (sa.ip||'').localeCompare(sb.ip||'');
-            case 'created':  return mul * (sa.created||'').localeCompare(sb.created||'');
-            default:         return mul * (sa.last_seen||'').localeCompare(sb.last_seen||'');
-        }
-    });
-    const total = allEntries.length;
-    const ps = _sessionsPageSize || total;
-    _sessionsPage = Math.max(1, Math.min(_sessionsPage, Math.ceil(total / ps)));
-    const entries = allEntries.slice((_sessionsPage - 1) * ps, _sessionsPage * ps);
-    _sessionsCurrentPage = entries.map(([sid]) => sid);
-
-    const body = _sessionsViewMode === 'table'
-        ? _renderSessionsTable(entries)
-        : _renderSessionsCards(entries);
-
-    const pagination = _renderPagination(total, _sessionsPage, _sessionsPageSize, '_goSessionsPage', '_changeSessionsPageSize');
-    c.innerHTML = pagination + `<div class="ss-sessions-scroll">${body}</div>` + pagination;
-    _updateSessionsBulkBar();
-    if (_sessionsViewMode === 'table') setTimeout(_initSessionsTableFeatures, 0);
-}
-
-// ── Card view ───────────────────────────────────────────────────────
-function _renderSessionsCards(entries) {
-    let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:.7rem;margin-top:.75rem;margin-bottom:.75rem">`;
-    for (const [sid, s] of entries) {
+// Card grid (alternate body for the factory when view mode = 'card').
+function _sessionsCardsBody(sids) {
+    let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:.7rem;margin:.75rem">`;
+    for (const sid of sids) {
+        const s = sessionsData[sid];
         const isCurrent = !!s.is_current;
         const accentGrad  = isCurrent
             ? 'linear-gradient(90deg,#22c55e,#4ade80)'
@@ -188,83 +92,78 @@ function _renderSessionsCards(entries) {
     return h;
 }
 
-// ── Table view (same features as Users/Groups/Roles) ────────────────
-function _renderSessionsTable(entries) {
-    const knownIds = new Set(_SES_COLS.map(c => c.id));
-    _SES_COLS.forEach(c => { if (!_sessionsColOrder.includes(c.id)) _sessionsColOrder.push(c.id); });
-    _sessionsColOrder = _sessionsColOrder.filter(id => knownIds.has(id));
-    const orderedCols = _sessionsColOrder
-        .map(id => _SES_COLS.find(c => c.id === id))
-        .filter(c => c && (c.always || _sessionsVisibleCols.has(c.id)));
-
-    const _cw = (() => { try { return JSON.parse(localStorage.getItem('ss_sessions_col_w')||'{}'); } catch(_){ return {}; } })();
-    const _thW = id => _cw[id] ? ` style="width:${_cw[id]}"` : '';
-
-    const _allPageSelected = _sessionsCurrentPage.length > 0 && _sessionsCurrentPage.every(s => _selectedSessions.has(s));
-    const thRow = orderedCols.map(col => {
-        const inner = col.sortKey
-            ? _thSortInner(col.label(), col.sortKey, _sessionsSort, _sessionsSortDir, '_sortSessions')
-            : `<span class="small">${esc(col.label())}</span>`;
-        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${_thW(col.id)}>${inner}</th>`;
-    }).join('');
-
-    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table" id="sessions-table">
-    <thead class="ss-thead"><tr>
-        <th style="width:2rem" class="ss-th"><input type="checkbox" class="form-check-input" ${_allPageSelected?'checked':''} onchange="_sessionsSelectAll(this.checked)"></th>
-        ${thRow}
-        <th class="ss-th ss-th-actions">${t('col_actions')}</th>
-    </tr></thead><tbody>`;
-
-    for (const [sid, s] of entries) {
-        const isCurrent = !!s.is_current;
-        const cells = orderedCols.map(col => {
-            switch (col.id) {
-                case 'uid':        return `<td><code class="text-muted" style="font-size:.7rem">${esc(sid)}</code></td>`;
-                case 'username':   return `<td class="text-nowrap"><code>${esc(s.username)}</code>${isCurrent?`<span class="badge text-bg-success rounded-pill ms-1" style="font-size:.6rem">${t('current_session')}</span>`:''}</td>`;
-                case 'ip':         return `<td class="text-nowrap"><code class="text-muted" style="font-size:.78rem">${esc(s.ip)}</code></td>`;
-                case 'user_agent': return `<td class="small text-muted" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(s.user_agent||'')}">${esc(s.user_agent||'—')}</td>`;
-                case 'created':    return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.created))}</td>`;
-                case 'last_seen':  return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.last_seen))}</td>`;
-                default:           return '<td></td>';
-            }
-        }).join('');
-        h += `<tr>
-            <td><input type="checkbox" class="form-check-input" ${_selectedSessions.has(sid)?'checked':''} onchange="_sessionsToggleOne(${jsStr(sid)}, this.checked)"></td>
-            ${cells}
-            <td class="ss-td-actions"><button class="btn btn-sm btn-danger py-0 px-1" onclick="revokeSession(${jsStr(sid)})" title="${escAttr(t('revoke_session_tt'))}"><i class="bi bi-x-lg"></i></button></td>
-        </tr>`;
-    }
-    h += `</tbody></table>`;
-    return h;
-}
-
-function _initSessionsTableFeatures() {
-    _attachColFeatures('sessions-table',
-        () => _sessionsColOrder,
-        order => { _sessionsColOrder = order; },
-        _sesSaveColOrder,
-        renderSessions,
-        (col, w) => {
-            const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_sessions_col_w')||'{}'); } catch(_){ return {}; } })();
-            cw[col] = w; localStorage.setItem('ss_sessions_col_w', JSON.stringify(cw));
+createListTable({
+    key: 'sessions', containerId: 'sessions-container', tableId: 'sessions-table',
+    accent: 'slate', icon: 'bi-plug',
+    title: () => `${esc(t('active_sessions'))} (${Object.keys(sessionsData).length})`,
+    columns: _SES_COLS, defaultVisible: _SESSIONS_DEFAULT_COLS,
+    persist: true, clearLabelKey: 'subtab_sessions',
+    persistExtra: () => ({ view: _sessionsViewMode }),
+    rows: () => Object.keys(sessionsData), rowKey: sid => sid,
+    record: sid => sessionsData[sid],
+    selectable: true,
+    bodyMode: () => _sessionsViewMode === 'table' ? 'table' : 'cards',
+    showChooser: mode => mode === 'table',
+    cardsBody: (sids) => _sessionsCardsBody(sids),
+    sortValue: (sid, sortKey) => {
+        const s = sessionsData[sid];
+        switch (sortKey) {
+            case 'uid':      return sid;
+            case 'username': return (s.username || '').toLowerCase();
+            case 'ip':       return s.ip || '';
+            case 'created':  return s.created || '';
+            default:         return s.last_seen || '';
         }
-    );
-}
-
-function _sessionsSelectAll(checked) {
-    _sessionsCurrentPage.forEach(s => checked ? _selectedSessions.add(s) : _selectedSessions.delete(s));
-    renderSessions();
-}
-function _sessionsToggleOne(sid, checked) {
-    checked ? _selectedSessions.add(sid) : _selectedSessions.delete(sid);
-    _updateSessionsBulkBar();
-    // In table mode the header "select all" checkbox state may need refreshing.
-    if (_sessionsViewMode === 'table') {
-        const all = _sessionsCurrentPage.length > 0 && _sessionsCurrentPage.every(s => _selectedSessions.has(s));
-        const hdr = document.querySelector('#sessions-table thead input[type=checkbox]');
-        if (hdr) hdr.checked = all;
-    }
-}
+    },
+    cell: (sid, colId) => {
+        const s = sessionsData[sid];
+        const isCurrent = !!s.is_current;
+        switch (colId) {
+            case 'username':   return `<td class="text-nowrap"><code>${esc(s.username)}</code>${isCurrent?`<span class="badge text-bg-success rounded-pill ms-1" style="font-size:.6rem">${t('current_session')}</span>`:''}</td>`;
+            case 'ip':         return `<td class="text-nowrap"><code class="text-muted" style="font-size:.78rem">${esc(s.ip)}</code></td>`;
+            case 'user_agent': return `<td class="small text-muted" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(s.user_agent||'')}">${esc(s.user_agent||'—')}</td>`;
+            case 'created':    return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.created))}</td>`;
+            case 'last_seen':  return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.last_seen))}</td>`;
+            default:           return '<td></td>';
+        }
+    },
+    actions: sid => `<button class="btn btn-sm btn-danger py-0 px-1" onclick="revokeSession(${jsStr(sid)})" title="${escAttr(t('revoke_session_tt'))}"><i class="bi bi-x-lg"></i></button>`,
+    bulkBar: (ctx, sel) => sel.size > 0 ? `
+        <div class="d-flex align-items-center gap-1 border-start ps-2 me-1">
+            <span class="badge bg-secondary rounded-pill">${sel.size}</span>
+            <button class="btn btn-sm btn-danger" onclick="_bulkRevokeSessions()" title="${escAttr(t('revoke_session_tt'))}"><i class="bi bi-x-lg me-1"></i>${esc(t('revoke_session'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="_selectedSessions.clear();renderSessions()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
+        </div>` : '',
+    headerLead: (ctx, mode) => {
+        const isTable = mode === 'table';
+        return `<div class="btn-group btn-group-sm" role="group" title="${escAttr(t('view_mode')||'View')}">
+            <button class="btn btn-sm ${isTable?'btn-secondary':'btn-primary'}" onclick="_setSessionsView('card')" title="${escAttr(t('view_cards')||'Cards')}"><i class="bi bi-grid-3x3-gap"></i></button>
+            <button class="btn btn-sm ${isTable?'btn-primary':'btn-secondary'}" onclick="_setSessionsView('table')" title="${escAttr(t('view_table')||'Table')}"><i class="bi bi-table"></i></button>
+        </div>`;
+    },
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>`,
+    headerButtons: () => `<button class="btn btn-sm btn-danger ms-1" onclick="invalidateAllSessions()" title="${escAttr(t('close_all_sessions_tt'))}"><i class="bi bi-x-circle me-1"></i>${esc(t('close_all_sessions'))}</button>`,
+    emptyBody: () => `<div class="text-center py-5 text-muted">
+            <i class="bi bi-person-slash" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <span>${t('no_active_sessions')}</span>
+        </div>`,
+    state: {
+        visible: { get: () => _sessionsVisibleCols, set: s => { _sessionsVisibleCols = s; } },
+        order:   { get: () => _sessionsColOrder,    set: o => { _sessionsColOrder = o; } },
+        page:    { get: () => _sessionsPage,        set: p => { _sessionsPage = p; } },
+        pageSize:{ get: () => _sessionsPageSize,    set: v => { _sessionsPageSize = v; } },
+        sort:    { get: () => _sessionsSort,        set: v => { _sessionsSort = v; } },
+        sortDir: { get: () => _sessionsSortDir,     set: v => { _sessionsSortDir = v; } },
+        selected: () => _selectedSessions,
+        currentPage: { get: () => _sessionsCurrentPage, set: a => { _sessionsCurrentPage = a; } },
+    },
+    globalPrefix: {
+        render: 'renderSessions', goPage: '_goSessionsPage', changePageSize: '_changeSessionsPageSize',
+        sort: '_sortSessions', toggleCol: '_sessionsToggleCol', resetCols: '_resetSessionsCols',
+        saveOrder: '_sesSaveColOrder', selectAll: '_sessionsSelectAll', toggleOne: '_sessionsToggleOne',
+        initFeatures: '_initSessionsTableFeatures',
+    },
+});
 
 async function _bulkRevokeSessions() {
     const sids = [..._selectedSessions];

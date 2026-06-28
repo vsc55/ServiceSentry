@@ -41,6 +41,13 @@ async function testItemConnection(pathStr, url, btn, extra) {
  * result="field_picker" → opens a picker modal and writes the selected value into data-action-result-field
  */
 async function itemAction(btn) {
+    // Action that opens the module's credential-type action in the shared modal
+    // (e.g. proxmox "provision token") instead of posting the item directly.
+    const _openCred = btn.dataset.actionOpenCred;
+    if (_openCred && typeof _openCredActionFromCheck === 'function') {
+        _openCredActionFromCheck(btn, _openCred);
+        return;
+    }
     const pathStr   = btn.dataset.actionPath;
     const url       = btn.dataset.actionUrl;
     const extra     = JSON.parse(btn.dataset.actionExtra  || '{}');
@@ -113,8 +120,25 @@ async function itemAction(btn) {
     } else if (result === 'modal') {
         // On success show a modal with everything the endpoint returned
         // (res.data.info: object or [[k,v],…]); on failure fall back to a toast.
+        // res.data.variant ('success'|'warning'|'danger') styles the lead message,
+        // so an endpoint that "ran OK" but reports a problem (e.g. a permissions
+        // check with missing privileges) doesn't look like a green success.
         if (!ok) { showToast(msg, 'danger'); return; }
-        showInfoModal(btn.textContent.trim() || msg, res.data.info || {}, msg);
+        showInfoModal(btn.textContent.trim() || msg, res.data.info || {}, msg, res.data.variant);
+    } else if (result === 'fields') {
+        // Write several item fields from res.data.fields = {field: value, …}
+        // (e.g. an action that provisions credentials and fills the form).
+        if (!ok) { showToast(msg, 'danger'); return; }
+        const fields = (res.data && res.data.fields) || {};
+        const names = Object.keys(fields);
+        if (!names.length) { showToast(msg, 'secondary'); return; }
+        for (const f of names) {
+            const fpath = pathStr + '|' + f;
+            updateField('modules', fpath, fields[f]);
+            const inp = document.querySelector(`[data-field-path="${CSS.escape(fpath)}"]`);
+            if (inp && 'value' in inp) inp.value = fields[f];
+        }
+        showToast(msg, 'success');
     } else {
         showToast(msg, ok ? 'success' : 'danger');
     }
@@ -166,6 +190,7 @@ function _renderInlineActions(pathStr, actions, itemData) {
             data-action-result="${escAttr(action.result || 'toast')}"
             ${isList ? `data-action-result-id="${resultId}"` : ''}
             ${isFieldPicker ? `data-action-result-field="${escAttr(action.result_field || '')}"` : ''}
+            ${action.open_credential_action ? `data-action-open-cred="${escAttr(action.id)}"` : ''}
             ${_tt ? `title="${_tt}"` : ''}
             onclick="itemAction(this)">${icon}${label}</button>`;
 
@@ -212,6 +237,7 @@ function _renderGroupActionBtns(pathStr, actions, itemData) {
             data-action-extra="${escAttr(JSON.stringify(action.extra || {}))}"
             data-action-result="${escAttr(action.result || 'toast')}"
             ${isFieldPicker ? `data-action-result-field="${escAttr(action.result_field || '')}"` : ''}
+            ${action.open_credential_action ? `data-action-open-cred="${escAttr(action.id)}"` : ''}
             ${_tt2 ? `title="${_tt2}"` : ''}
             onclick="itemAction(this)">${icon}${label}</button>`;
         btns += `<div class="sw-field"${_swAttr} style="${_hdrDisp}${_wStyle}">${btn}</div>`;
@@ -238,6 +264,8 @@ function renderCollection(title, data, pathStr, target) {
     const _discoverUrl = _discoverAction ? `/api/${_discoverVer}/watchfuls/${_modNameCol}/${_discoverAction}` : null;
     const _unsupported = _colSchema && _colSchema['__unsupported__'] === true;
     const canAddItem = target !== 'modules' || hasModulePerm(_modNameCol, 'add');
+    const canDelColItems = target !== 'modules' || hasModulePerm(_modNameCol, 'delete');
+    const _selCount = (typeof _collItemSelCount === 'function') ? _collItemSelCount(pathStr) : 0;
     let h = `<div class="mt-3 mb-1">
     <div class="d-flex align-items-center gap-2 mb-2 pb-1" style="border-bottom:1px solid var(--bs-border-color)">
         <span class="fw-semibold text-muted" style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em">
@@ -255,10 +283,23 @@ function renderCollection(title, data, pathStr, target) {
             title="${escAttr(t('add_item_tt'))}">
             <i class="bi bi-plus-lg me-1"></i>${t('add') || 'Add'}
         </button>` : (!_unsupported && !canAddItem && !_discoverUrl ? '<span class="ms-auto"></span>' : '')}
+        ${canDelColItems ? `<button class="btn btn-sm btn-danger py-0 px-2${_selCount ? '' : ' d-none'}${(!_discoverUrl && !canAddItem) ? ' ms-auto' : ''}"
+            data-bulkdel="${escAttr(pathStr)}"
+            onclick="_bulkDeleteItems(${jsStr(pathStr)},${jsStr(target)})"
+            title="${escAttr(t('delete_selected') || 'Delete selected')}">
+            <i class="bi bi-trash3 me-1"></i><span class="bulkdel-n">${_selCount}</span>
+        </button>` : ''}
     </div>
     <div class="d-flex flex-column gap-1">`;
 
-    for (const [name, val] of Object.entries(data)) {
+    // Order items by their bound host's label (then the item label, then the key)
+    // so host-bound checks read in a predictable, alphabetical order.
+    const _hostNames = (typeof hostsList === 'function')
+        ? Object.fromEntries(hostsList().map(hh => [hh.uid, hh.name || ''])) : {};
+    const _sorted = Object.entries(data).sort((a, b) =>
+        _collSortKey(a[1], a[0], _hostNames).localeCompare(
+            _collSortKey(b[1], b[0], _hostNames), undefined, { numeric: true, sensitivity: 'base' }));
+    for (const [name, val] of _sorted) {
         h += renderCollectionItem(name, val, pathStr + '|' + name, pathStr, target);
     }
     h += `${!itemCount ? `<div class="text-center py-3 text-muted" style="font-size:.82rem">
@@ -266,6 +307,44 @@ function renderCollection(title, data, pathStr, target) {
         ${t('no_items') || 'No items'}
     </div>` : ''}</div></div>`;
     return h;
+}
+
+// Header badge telling whether a (host-capable) item is bound to a host or runs
+// inline. Bound → host icon + name (or "first +N" for a multi-host binding);
+// host-capable but unbound → a muted "inline" chip; not host-capable → nothing.
+function _itemHostBadge(val, hostCapable) {
+    const huid  = (val && typeof val === 'object') ? (val.host_uid || '') : '';
+    const huids = (val && Array.isArray(val.host_uids)) ? val.host_uids.filter(Boolean) : [];
+    // Resolve to KNOWN hosts only — a dangling uid (deleted host) must never be
+    // shown as a host, nor leak a raw uid; such an item reads as inline.
+    const _name = (u) => {
+        const h = (typeof hostsList === 'function') ? hostsList().find(x => x.uid === u) : null;
+        return (h && h.name) ? h.name : null;
+    };
+    const names = (huids.length ? huids : (huid ? [huid] : [])).map(_name).filter(Boolean);
+    if (names.length) {
+        const label = names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0];
+        return `<span class="badge rounded-pill text-bg-info flex-shrink-0 me-1" data-no-collapse="1"
+            style="font-size:.64rem"
+            title="${escAttr(t('host_bind_label'))}: ${escAttr(label)}"><i class="bi bi-hdd-network me-1"></i>${esc(label)}</span>`;
+    }
+    if (!hostCapable) return '';
+    const _inlineTxt = t('host_inline_short');
+    return `<span class="badge rounded-pill text-bg-secondary flex-shrink-0 me-1" data-no-collapse="1"
+        style="font-size:.64rem;opacity:.75"
+        title="${escAttr(t('host_inline'))}"><i class="bi bi-dash-circle me-1"></i>${esc(_inlineTxt && _inlineTxt !== 'host_inline_short' ? _inlineTxt : 'inline')}</span>`;
+}
+
+// Sort key for a collection item: the bound host's label first (host_uid or the
+// first of a multi-host host_uids), else the item's own label, else the raw key.
+function _collSortKey(val, key, hostNames) {
+    if (val && typeof val === 'object') {
+        const huid = val.host_uid || (Array.isArray(val.host_uids) ? val.host_uids[0] : '');
+        const hn = huid && hostNames[huid];
+        if (hn) return String(hn).toLowerCase();
+        if ((val.label || '').trim()) return String(val.label).toLowerCase();
+    }
+    return String(key).toLowerCase();
 }
 
 function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, target) {
@@ -446,14 +525,27 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                     title="${escAttr(t('host_status_maintenance'))}"><i class="bi bi-cone-striped me-1"></i>${esc(t('host_status_maintenance'))}</span>`;
             }
         }
+        // Host-association indicator (only for host-capable collections).
+        const _modBare = _modNameItem.replace(/^watchfuls\./, '');
+        const _collSuffix = parentPathStr.includes('|') ? parentPathStr.slice(parentPathStr.indexOf('|') + 1) : '';
+        const _hostColls = (typeof MODULE_HOST_COLLECTIONS !== 'undefined')
+            ? (MODULE_HOST_COLLECTIONS[_modBare] || MODULE_HOST_COLLECTIONS[_modNameItem]) : null;
+        const _hostCapable = !!(target === 'modules' && _hostColls && _collSuffix && _hostColls.includes(_collSuffix));
+        const _hostBadge = _itemHostBadge(itemValue, _hostCapable);
+
         const isAutoExpand = (_autoExpandItemPath === pathStr);
         if (isAutoExpand) _autoExpandItemPath = null;
         return `<div class="rounded-3 overflow-hidden border" data-item-path="${escAttr(pathStr)}" style="background:var(--ss-surface-bg,var(--bs-body-bg))${itemOpacity}">
             <div class="d-flex align-items-center gap-1 px-2 py-1"
                  style="background:var(--bs-tertiary-bg);cursor:pointer"
                  role="button" onclick="toggleCollapseFromHeader(event,'${id}')">
+                ${canDeleteItem ? `<input type="checkbox" class="form-check-input flex-shrink-0 mt-0 me-1" data-no-collapse="1"
+                    ${(typeof _modItemSel !== 'undefined' && _modItemSel.has(pathStr)) ? 'checked' : ''}
+                    onclick="event.stopPropagation()"
+                    onchange="event.stopPropagation();_toggleItemSel(${sp},this.checked,${pp},${tg})"
+                    title="${escAttr(t('select') || 'Select')}">` : ''}
                 <code class="flex-grow-1 min-w-0" style="font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}${keyBadge}</code>
-                ${_maintBadge}${sw}${testBtn}${editLabelBtn}${renameBtn}${cloneBtn}${delBtn}
+                ${_hostBadge}${_maintBadge}${sw}${testBtn}${editLabelBtn}${renameBtn}${cloneBtn}${delBtn}
                 <button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     style="background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"
@@ -470,7 +562,9 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
 }
 
 // ──────────────────────────── Pagination ──────────────────────────
-function _renderPagination(total, page, pageSize, goFn, changeFn) {
+// Build the two halves separately so callers can lay them out independently
+// (e.g. the info text on one side and the controls on the other).
+function _paginationParts(total, page, pageSize, goFn, changeFn) {
     const ps = pageSize || total;
     const totalPages = Math.max(1, Math.ceil(total / ps));
     const p = Math.min(Math.max(1, page), totalPages);
@@ -496,9 +590,8 @@ function _renderPagination(total, page, pageSize, goFn, changeFn) {
             title="${t('goto_page')}"
             onkeydown="if(event.key==='Enter'){const v=parseInt(this.value);if(v>=1&&v<=${totalPages}){${goFn}(v);}this.value='';}">`
         : '';
-    return `<div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-        <span class="text-muted small">${tf('audit_showing', start, end, total)}</span>
-        <div class="d-flex align-items-center gap-2">
+    const info = `<span class="text-muted small">${tf('audit_showing', start, end, total)}</span>`;
+    const controls = `<div class="d-flex align-items-center gap-2">
             <div class="input-group input-group-sm">
                 <span class="input-group-text" data-bs-toggle="tooltip" title="${t('per_page')}"><i class="bi bi-list-ul"></i></span>
                 <select class="form-select form-select-sm" style="width:auto" onchange="${changeFn}(this.value)">${sizeOpts}</select>
@@ -509,8 +602,12 @@ function _renderPagination(total, page, pageSize, goFn, changeFn) {
                 <li class="page-item${p >= totalPages ? ' disabled' : ''}"><a class="page-link" href="#" onclick="${goFn}(${p + 1});return false;">&raquo;</a></li>
             </ul></nav>
             ${gotoInput}
-        </div>
-    </div>`;
+        </div>`;
+    return { info, controls };
+}
+function _renderPagination(total, page, pageSize, goFn, changeFn) {
+    const { info, controls } = _paginationParts(total, page, pageSize, goFn, changeFn);
+    return `<div class="d-flex align-items-center justify-content-between flex-wrap gap-2">${info}${controls}</div>`;
 }
 
 // ──────────────────── Sortable table header cell ──────────────────

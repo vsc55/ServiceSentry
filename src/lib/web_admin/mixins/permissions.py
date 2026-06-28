@@ -8,7 +8,7 @@ from flask import session
 
 from ..constants import (
     BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS,
-    is_module_perm, is_server_perm,
+    is_module_perm, is_server_perm, is_cluster_perm,
 )
 
 _UUID_RE = re.compile(
@@ -125,7 +125,7 @@ class _PermissionsMixin:
         if custom and custom.get('enabled', True):
             return frozenset(
                 p for p in custom.get('permissions', [])
-                if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p)
+                if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p) or is_cluster_perm(p)
             )
         return frozenset()
 

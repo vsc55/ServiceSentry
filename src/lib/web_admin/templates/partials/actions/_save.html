@@ -16,7 +16,7 @@ function revertModules() {
     showConfirmModal(t('confirm_revert_modules'), () => {
         modulesData = deepClone(_savedModulesData);
         clearDirty('modules');
-        renderModules();
+        _renderModulesSurface();
         showToast(t('modules_reverted'));
     });
 }
@@ -97,7 +97,7 @@ async function reloadModules() {
     applyModuleDefaults();
     _savedModulesData = deepClone(modulesData);
     clearDirty('modules');
-    renderModules();
+    _renderModulesSurface();
     showToast(t('modules_reloaded'));
 }
 async function reloadConfig() {

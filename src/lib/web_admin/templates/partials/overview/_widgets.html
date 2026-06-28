@@ -457,8 +457,89 @@ const _DW_SEV_HEX = { danger: '#dc3545', warning: '#ffc107', info: '#0dcaf0', se
 const _DW_SEV_SUBTLE = { danger: 'rgba(220,53,69,.16)', warning: 'rgba(255,193,7,.20)',
                          info: 'rgba(13,202,240,.16)', secondary: 'rgba(108,117,125,.18)' };
 
+// ─────────────── Generic module-contributed widget renderer ───────────────
+// Driven entirely by the module's overview_widget() data (entries/aggregate with
+// module-authored labels) + the catalog (icon/title). No module specifics here.
+function _dwMwStateColors(state) {
+    if (state === 'error') return ['#dc3545', 'rgba(220,53,69,.16)'];
+    if (state === 'warn')  return ['#fd7e14', 'rgba(253,126,20,.18)'];
+    if (state === 'ok')    return ['#16a34a', 'rgba(34,197,94,.16)'];
+    return ['var(--bs-secondary-color)', 'var(--bs-secondary-bg)'];
+}
+function _dwMwBadge(state) {
+    if (state === 'ok')    return `<span class="badge text-bg-success">OK</span>`;
+    if (state === 'warn')  return `<span class="badge text-bg-warning">🛠</span>`;
+    if (state === 'error') return `<span class="badge text-bg-danger">${esc(t('host_status_error'))}</span>`;
+    return `<span class="badge text-bg-secondary">—</span>`;
+}
+function _dwMwStats(stats) {       // module key/value chips, coloured by state
+    return (stats || []).map(s => {
+        const [fg, bg] = _dwMwStateColors(s.state);
+        return `<span class="badge rounded-pill me-1" style="color:${fg};background:${bg};font-size:.72rem">${esc(s.label)}: ${esc(String(s.value))}</span>`;
+    }).join('');
+}
+function _dwMwEntryRows(entries) {       // one row per entry (all-entries view)
+    if (!entries || !entries.length)
+        return `<tr><td colspan="2" class="text-center text-muted py-3">${t('overview_no_status')}</td></tr>`;
+    return entries.map(e => `<tr>
+        <td class="text-nowrap fw-semibold align-middle">${_dwMwBadge(e.ok ? 'ok' : 'error')} ${esc(e.name)}</td>
+        <td>${_dwMwStats(e.stats)}</td></tr>`).join('');
+}
+function _dwMwDetailRows(rows) {         // one row per sub-item (single-entry view)
+    if (!rows || !rows.length)
+        return `<tr><td colspan="2" class="text-center text-muted py-3">${t('overview_no_status')}</td></tr>`;
+    return rows.map(r => {
+        const nm = esc(r.name) + (r.detail ? ` <span class="text-muted small">${esc(r.detail)}</span>` : '');
+        return `<tr><td class="text-nowrap">${nm}</td><td class="text-end">${_dwMwBadge(r.state)}</td></tr>`;
+    }).join('');
+}
+function _dwModuleWidgetContent(id, data, item) {
+    const perms = new Set(currentUser.permissions || []);
+    const def = _dwModuleDef(id) || {};
+    if (def.perm && !perms.has(def.perm))
+        return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+    const wd = (data.module_widgets || {})[def.module] || {};
+    const entries = wd.entries || [];
+    const title = _dwLabel(def);
+    const icon = def.icon || 'bi-grid-1x2';
+    const acc = 'linear-gradient(90deg,#6366f1,#8b5cf6)', bg = 'rgba(99,102,241,.12)', fg = '#6366f1';
+    const _sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+    const scope = item ? (item.mws || '')
+        : (document.querySelector(`.dw[data-wid="${_sel}"]`)?.dataset.mws || '');
+
+    if (!entries.length)
+        return _dwTableCard(acc, bg, fg, icon, title,
+            `<div class="text-center py-3 text-muted small">${t('overview_no_status')}</div>`);
+
+    if (scope === 'sum') {                              // aggregate of all entries
+        const a = wd.aggregate || {};
+        const card = `<div class="rounded-3 overflow-hidden border h-100" style="background:var(--ss-surface-bg,var(--bs-body-bg))">
+            <div style="height:3px;background:${acc}"></div>
+            <div class="p-3">
+              <div class="d-flex align-items-center gap-3 mb-2">
+                <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                      style="width:46px;height:46px;background:${bg};color:${fg};font-size:1.3rem"><i class="bi ${icon}"></i></span>
+                <div><div class="fs-2 fw-bold lh-1">${a.count ?? entries.length}</div>
+                     <div class="fw-semibold text-muted mt-1 ss-section-title">${esc(a.count_label || title)}</div></div>
+              </div>
+              <div class="d-flex flex-wrap gap-1 mt-1">${_dwMwStats(a.stats)}</div>
+            </div></div>`;
+        return card;
+    }
+    if (scope) {                                        // a specific entry → its rows
+        const e = entries.find(x => x.id === scope);
+        const table = `<table class="table table-sm table-hover align-middle mb-0">
+            <tbody>${_dwMwDetailRows(e ? e.rows : [])}</tbody></table>`;
+        return _dwTableCard(acc, bg, fg, icon, e ? e.name : title, table);
+    }
+    const table = `<table class="table table-sm table-hover align-middle mb-0">
+        <tbody>${_dwMwEntryRows(entries)}</tbody></table>`;
+    return _dwTableCard(acc, bg, fg, icon, title, table);
+}
+
 function _dwContent(id, data, item) {
     if (_dwIsSpacer(id)) return '<div class="dw-spacer-box"></div>';
+    if (_dwIsModuleWidget(id)) return _dwModuleWidgetContent(id, data, item);
     const perms   = new Set(currentUser.permissions || []);
 
     const modules  = data.modules  || [];

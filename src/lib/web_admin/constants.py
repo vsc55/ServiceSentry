@@ -11,7 +11,7 @@ __all__ = [
     'ROLES', 'PERMISSIONS', 'PERMISSION_GROUPS',
     '_BUILTIN_GROUPS', 'BUILTIN_ROLE_PERMISSIONS',
     'BUILTIN_ROLE_UIDS', 'BUILTIN_GROUP_UIDS',
-    'SYSTEM_USER', 'is_module_perm', 'is_server_perm',
+    'SYSTEM_USER', 'is_module_perm', 'is_server_perm', 'is_cluster_perm',
 ]
 
 _MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
@@ -19,6 +19,9 @@ _MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)
 # THIS specific host (not creating a host — that is the global ``servers_add``);
 # 'edit'/'delete' act on existing host-bound checks and the host record.
 _SERVER_PERM_RE = re.compile(r'^server\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
+# Per-cluster permission key (cluster.{uid}.{action}) — a cluster is a multi-bind
+# check identified by its item UID.
+_CLUSTER_PERM_RE = re.compile(r'^cluster\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
 
 
 def is_module_perm(p: str) -> bool:
@@ -29,6 +32,11 @@ def is_module_perm(p: str) -> bool:
 def is_server_perm(p: str) -> bool:
     """Return True if *p* is a valid per-server permission key (server.{uid}.{action})."""
     return bool(_SERVER_PERM_RE.match(p))
+
+
+def is_cluster_perm(p: str) -> bool:
+    """Return True if *p* is a valid per-cluster permission key (cluster.{uid}.{action})."""
+    return bool(_CLUSTER_PERM_RE.match(p))
 
 # Valid user roles ordered by privilege (highest first).
 # 'none' is a built-in role with zero permissions — user gets access only through groups.
@@ -58,6 +66,10 @@ PERMISSIONS = (
     'servers_add',     # add modules/checks to a server
     'servers_edit',    # edit servers, host-bound checks and run host tests/migration
     'servers_delete',  # delete servers from the host registry
+    'clusters_view',   # view the Clusters sub-tab (multi-bind checks)
+    'clusters_add',    # create clusters (multi-host-bound checks)
+    'clusters_edit',   # edit clusters and toggle them
+    'clusters_delete', # delete clusters
     'credentials_view',   # view the reusable credentials tab
     'credentials_add',    # create reusable credentials
     'credentials_edit',   # edit reusable credentials
@@ -78,10 +90,12 @@ PERMISSIONS = (
     'syslog_delete',   # clear stored syslog messages
     'services_view',   # view the Services dashboard (scheduler/syslog/worker/DB)
     'services_control',  # start/stop embedded services from the Services tab
-    'events_view',     # view the event-notification rules and send log
+    'events_view',     # view the event-notification rules
     'events_add',      # create event-notification rules
-    'events_edit',     # edit event-notification rules (and clear the send log)
+    'events_edit',     # edit event-notification rules
     'events_delete',   # delete event-notification rules
+    'events_notify_view',    # view the sent-notifications log
+    'events_notify_delete',  # clear the sent-notifications log
 )
 
 # Permissions grouped for the role editor UI.
@@ -92,6 +106,7 @@ PERMISSION_GROUPS = [
     ('perm_group_audit',    ['audit_view', 'audit_delete']),
     ('perm_group_modules',  ['modules_view', 'modules_add', 'modules_edit', 'modules_delete']),
     ('perm_group_servers',  ['servers_view', 'servers_add', 'servers_edit', 'servers_delete']),
+    ('perm_group_clusters', ['clusters_view', 'clusters_add', 'clusters_edit', 'clusters_delete']),
     ('perm_group_credentials', ['credentials_view', 'credentials_add', 'credentials_edit', 'credentials_delete']),
     ('perm_group_config',   ['config_view', 'config_edit']),
     ('perm_group_overview', ['overview_view', 'overview_edit', 'overview_set_default', 'overview_reset_factory']),
@@ -100,7 +115,8 @@ PERMISSION_GROUPS = [
     ('perm_group_history',  ['history_view', 'history_delete']),
     ('perm_group_syslog',   ['syslog_view', 'syslog_delete']),
     ('perm_group_services', ['services_view', 'services_control']),
-    ('perm_group_events',   ['events_view', 'events_add', 'events_edit', 'events_delete']),
+    ('perm_group_events',   ['events_view', 'events_add', 'events_edit', 'events_delete',
+                             'events_notify_view', 'events_notify_delete']),
 ]
 
 # Stable UUIDs for built-in roles and groups (never change these).
@@ -131,6 +147,7 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
     'editor': frozenset({
         'modules_view', 'modules_edit',
         'servers_view', 'servers_edit',
+        'clusters_view', 'clusters_edit',
         'config_view', 'config_edit',
         'overview_view', 'overview_edit',
         'checks_view', 'checks_run',
@@ -143,15 +160,18 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
         'syslog_view',
         'services_view', 'services_control',
         'events_view', 'events_edit',
+        'events_notify_view',
     }),  # editor edits existing rules but never adds/deletes wholesale
     'viewer': frozenset({
         'users_view', 'roles_view', 'groups_view',
         'audit_view', 'sessions_view', 'modules_view', 'checks_view', 'overview_view',
         'servers_view',
+        'clusters_view',
         'history_view',
         'syslog_view',
         'services_view',
         'events_view',
+        'events_notify_view',
     }),
     'none': frozenset(),
 }

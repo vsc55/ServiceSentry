@@ -110,6 +110,14 @@ const MODULE_HOST_FIELDS = {{ module_host_fields | default({}) | tojson }};
 const MODULE_HOST_COLLECTIONS = {{ module_host_collections | default({}) | tojson }};
 // Whether each module allows several checks bound to one host (schema __host_multiple__).
 const MODULE_HOST_MULTIPLE = {{ module_host_multiple | default({}) | tojson }};
+// Whether ONE check of each module binds to SEVERAL hosts (host_uids list, schema
+// __host_multiple_bind__, e.g. proxmox cluster). Such modules use a multi-select
+// host picker and are excluded from the per-host "Servers" enable flow.
+const MODULE_HOST_MULTI_BIND = {{ module_host_multi_bind | default({}) | tojson }};
+// Module-contributed Overview widgets (schema __overview_widget__): {module:
+// {icon, multi, perm, cols, h, label_i18n}}. The core renders them generically;
+// the data comes from the module's overview_widget() hook (module_widgets payload).
+const MODULE_WIDGETS = {{ module_widgets | default({}) | tojson }};
 // Host OS selector: selectable values (auto first) + this server's detected OS.
 const HOST_OS_OPTIONS = {{ host_os_options | default([]) | tojson }};
 const LOCAL_OS = {{ local_os | default('other') | tojson }};
@@ -272,6 +280,39 @@ function applyModuleDefaults() {
                 }
                 delete cfg[oldCol];
                 markDirty('modules');
+            }
+        }
+        // Field-level migration: a schema field declaring __migrates_from__ pulls
+        // its value from a now-removed field on each item (e.g. web 'url' → 'server').
+        // Fully generic/declarative — driven by schema meta, no module-specific code.
+        for (const schKey of Object.keys(ITEM_SCHEMAS)) {
+            if (!schKey.startsWith(name + '|')) continue;
+            const col = schKey.slice(name.length + 1);
+            if (col.includes('|') || col === '__i18n__' || col === '__module__' || col === '__history__') continue;
+            const colData = cfg[col];
+            if (!colData || typeof colData !== 'object' || Array.isArray(colData)) continue;
+            const colSch = ITEM_SCHEMAS[schKey];
+            const _fmig = [];   // [newField, oldField, isAddressField]
+            for (const [fk, fmeta] of Object.entries(colSch)) {
+                if (fk.startsWith('__') || !fmeta || typeof fmeta !== 'object') continue;
+                if (fmeta['__migrates_from__']) {
+                    _fmig.push([fk, String(fmeta['__migrates_from__']), fmeta.placeholder === '__address__']);
+                }
+            }
+            if (!_fmig.length) continue;
+            for (const item of Object.values(colData)) {
+                if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+                for (const [newF, oldF, isAddr] of _fmig) {
+                    if (!(oldF in item)) continue;
+                    const _hasNew = item[newF] != null && String(item[newF]).trim() !== '';
+                    const _bound  = item.host_uid != null && String(item.host_uid).trim() !== '';
+                    // The address field of a host-bound check is owned by the host
+                    // (it auto-fills at runtime) — drop the orphan rather than
+                    // resurrecting a stale value that would shadow the binding.
+                    if (!_hasNew && !(isAddr && _bound)) item[newF] = item[oldF];
+                    delete item[oldF];
+                    markDirty('modules');
+                }
             }
         }
         // Remove object-type keys that are no longer top-level collections in the schema.

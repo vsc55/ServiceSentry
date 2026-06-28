@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 """Module routes: /api/v1/modules (GET, PUT), /api/v1/modules/status, /api/v1/modules/overview."""
 
+import importlib
+import os
 import re
+import sys
 import uuid
 
 from flask import jsonify, session
@@ -10,6 +13,38 @@ from flask import jsonify, session
 from lib import secret_manager
 
 from ...constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS
+
+
+def _build_module_widgets(wa, status_raw: dict, modules_raw: dict, lang: str) -> dict:
+    """Generic Overview-widget data: for every module declaring
+    ``__overview_widget__``, call its ``Watchful.overview_widget(items, status,
+    lang)`` hook and collect the result.  The core stays module-agnostic — all
+    domain logic/strings come from the module."""
+    out: dict = {}
+    try:
+        from lib.overview_widgets import overview_widgets_catalog  # noqa: PLC0415
+        catalog = overview_widgets_catalog(wa._modules_dir)
+    except Exception:  # pylint: disable=broad-except
+        return out
+    if not catalog:
+        return out
+    parent = os.path.dirname(wa._modules_dir or '')
+    if parent and parent not in sys.path:
+        sys.path.insert(0, parent)
+    for mod_name in catalog:
+        try:
+            status = next((status_raw[k] for k in (f'watchfuls.{mod_name}', mod_name)
+                           if isinstance(status_raw.get(k), dict)), {})
+            cfg = next((modules_raw[k] for k in (f'watchfuls.{mod_name}', mod_name)
+                        if isinstance(modules_raw.get(k), dict)), {})
+            items = cfg.get('list') if isinstance(cfg.get('list'), dict) else {}
+            cls = getattr(importlib.import_module(f'watchfuls.{mod_name}'), 'Watchful', None)
+            fn = getattr(cls, 'overview_widget', None)
+            if callable(fn):
+                out[mod_name] = fn(items, status, lang) or {}
+        except Exception:  # pylint: disable=broad-except
+            continue
+    return out
 
 # Canonical UUID form, used to tell an opaque item key from a human-given one.
 _UUID_RE = re.compile(
@@ -35,6 +70,24 @@ def _item_host_uid(o, n) -> str:
             if hu:
                 return hu
     return ''
+
+
+def _is_cluster_item(o, n) -> bool:
+    """A cluster item is a multi-host-bound check — it carries ``host_uids`` (a
+    list), unlike an ordinary single-bound (``host_uid``) or unbound check."""
+    for it in (n, o):
+        if isinstance(it, dict) and isinstance(it.get('host_uids'), list):
+            return True
+    return False
+
+
+def _cluster_authorized(perms, action: str, uid: str = '') -> bool:
+    """True if *perms* authorize *action* (add/edit/delete) on a cluster — via the
+    global ``clusters_*`` flag or a per-cluster ``cluster.{uid}.{action}`` override."""
+    if {'add': 'clusters_add', 'edit': 'clusters_edit',
+            'delete': 'clusters_delete'}.get(action) in perms:
+        return True
+    return bool(uid) and f'cluster.{uid}.{action}' in perms
 
 
 def _server_authorized(perms, action: str, host_uid: str) -> bool:
@@ -90,6 +143,16 @@ def _authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
             if o == n:
                 continue
             saw_change = True
+            if _is_cluster_item(o, n):
+                # Multi-bind cluster check → its own clusters_* permissions (or a
+                # per-cluster cluster.{uid}.{action} override), with a distinct
+                # delete (removal) action.
+                c_action = 'add' if o is None else ('delete' if n is None else 'edit')
+                cl_uid = ((n or {}).get('uid') if isinstance(n, dict) else None) \
+                    or ((o or {}).get('uid') if isinstance(o, dict) else None) or ik
+                if not _cluster_authorized(perms, c_action, cl_uid):
+                    return False
+                continue
             hu = _item_host_uid(o, n)
             action = 'add' if o is None else 'edit'        # add new / modify|remove
             if not _server_authorized(perms, action, hu):
@@ -238,9 +301,12 @@ def register(app, wa):
         has_any_write = (
             'modules_edit' in perms or 'modules_add' in perms or 'modules_delete' in perms or
             'servers_add' in perms or 'servers_edit' in perms or
+            'clusters_add' in perms or 'clusters_edit' in perms or 'clusters_delete' in perms or
             any(p.startswith('module.') and (p.endswith('.edit') or p.endswith('.add') or p.endswith('.delete'))
                 for p in perms) or
             any(p.startswith('server.') and (p.endswith('.add') or p.endswith('.edit'))
+                for p in perms) or
+            any(p.startswith('cluster.') and (p.endswith('.add') or p.endswith('.edit') or p.endswith('.delete'))
                 for p in perms)
         )
         if not has_any_write:
@@ -306,11 +372,14 @@ def register(app, wa):
         def _mod_checks(name: str) -> dict:
             mc = status_raw.get(name, {})
             if not isinstance(mc, dict):
-                return {'total': 0, 'ok': 0, 'error': 0}
+                return {'total': 0, 'ok': 0, 'error': 0, 'warning': 0}
             tot = len(mc)
-            ok  = sum(1 for v in mc.values() if isinstance(v, dict) and v.get('status') is True)
-            err = sum(1 for v in mc.values() if isinstance(v, dict) and v.get('status') is False)
-            return {'total': tot, 'ok': ok, 'error': err}
+            ok = sum(1 for v in mc.values() if isinstance(v, dict) and v.get('status') is True)
+            warn = sum(1 for v in mc.values() if isinstance(v, dict)
+                       and v.get('status') is False and (v.get('severity') or '') == 'warning')
+            err = sum(1 for v in mc.values() if isinstance(v, dict)
+                      and v.get('status') is False and (v.get('severity') or '') != 'warning')
+            return {'total': tot, 'ok': ok, 'error': err, 'warning': warn}
 
         # Modules summary
         modules_raw = wa._load_modules()
@@ -329,9 +398,10 @@ def register(app, wa):
             })
 
         # Aggregate status counts
-        total_checks = sum(m['checks']['total'] for m in modules_list)
-        checks_ok    = sum(m['checks']['ok']    for m in modules_list)
-        checks_err   = sum(m['checks']['error'] for m in modules_list)
+        total_checks = sum(m['checks']['total']            for m in modules_list)
+        checks_ok    = sum(m['checks']['ok']               for m in modules_list)
+        checks_err   = sum(m['checks']['error']            for m in modules_list)
+        checks_warn  = sum(m['checks'].get('warning', 0)   for m in modules_list)
 
         # Sessions summary
         active_sessions = len(wa._sessions)
@@ -451,14 +521,17 @@ def register(app, wa):
                                     and _it.get('enabled') is not False):
                                 continue
                             _c = _hchecks.setdefault(
-                                _it['host_uid'], {'total': 0, 'ok': 0, 'error': 0})
+                                _it['host_uid'], {'total': 0, 'ok': 0, 'error': 0, 'warning': 0})
                             _c['total'] += 1
                             _sv = _mstatus.get(_ikey)
                             if isinstance(_sv, dict):
                                 if _sv.get('status') is True:
                                     _c['ok'] += 1
                                 elif _sv.get('status') is False:
-                                    _c['error'] += 1
+                                    if (_sv.get('severity') or '') == 'warning':
+                                        _c['warning'] += 1
+                                    else:
+                                        _c['error'] += 1
                 servers_total = len(_hosts)
                 for _h in _hosts:
                     _uid = _h.get('uid')
@@ -475,7 +548,7 @@ def register(app, wa):
                         'uid': _uid, 'name': _h.get('name', ''),
                         'maintenance': bool(_h.get('maintenance')),
                         'status': _hstatuses.get(_uid, ''),
-                        'checks': _hchecks.get(_uid, {'total': 0, 'ok': 0, 'error': 0}),
+                        'checks': _hchecks.get(_uid, {'total': 0, 'ok': 0, 'error': 0, 'warning': 0}),
                         'modules_total': len(_all_m),
                         'modules_active': sum(1 for _m in _all_m if _mods.get(_m)),
                     })
@@ -510,8 +583,15 @@ def register(app, wa):
                         continue
                     _extra = _info.get('other_data')
                     _extra = _extra if isinstance(_extra, dict) else {}
-                    _disp = _extra.get('name') or _labels.get(_ck) or _ck
-                    _huid = _hosts_of.get(_ck, '')
+                    # Composite '<item>/<metric>' keys (e.g. proxmox '<uid>/node/pve04')
+                    # resolve the leading item segment to its label and keep the
+                    # metric → '<label> / node/pve04', so no opaque UID leaks.
+                    _head = _ck.split('/', 1)[0] if '/' in _ck else _ck
+                    _disp = _extra.get('name') or _labels.get(_ck)
+                    if not _disp and '/' in _ck and _labels.get(_head):
+                        _disp = f'{_labels[_head]} / {_ck.split("/", 1)[1]}'
+                    _disp = _disp or _ck
+                    _huid = _hosts_of.get(_ck) or _hosts_of.get(_head, '')
                     failing_checks.append({
                         'module': _mn,
                         'check':  _disp,
@@ -597,14 +677,22 @@ def register(app, wa):
         except Exception:  # pylint: disable=broad-except
             events_total, events_enabled, events_by_source, notif_total = 0, 0, {}, 0
 
+        # Module-contributed Overview widgets: each declaring module computes its
+        # OWN data via Watchful.overview_widget(items, status, lang) — nothing
+        # module-specific lives in the core.  Result shape: {entries, aggregate}.
+        module_widgets = _build_module_widgets(wa, status_raw, modules_raw,
+                                               session.get('lang', wa._default_lang))
+
         return jsonify({
             'modules': modules_list,
+            'module_widgets': module_widgets,
             'syslog': {'total': syslog_total, 'recent': syslog_recent,
                        'by_severity': syslog_by_sev},
             'status': {
                 'total': total_checks,
                 'ok': checks_ok,
                 'error': checks_err,
+                'warning': checks_warn,
             },
             'servers': {
                 'total': servers_total,

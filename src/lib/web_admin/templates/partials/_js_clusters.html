@@ -1,0 +1,962 @@
+{# ================================================================
+   Clusters sub-tab — table of multi-bind module checks + edit modal.
+
+   A "cluster" is one check bound to SEVERAL hosts at once (failover):
+   any module declaring __host_multiple_bind__ (exposed as
+   MODULE_HOST_MULTI_BIND) qualifies — Proxmox today, anything tomorrow.
+   The list is a compact table with quick actions; the "Edit" button opens
+   a modal that hosts the SHARED field editor (renderScalarFields, incl. the
+   multi-host picker), so there is NO module-specific code here. Extra table
+   columns are declared per-module via the __cluster_columns__ schema meta.
+   ================================================================ #}
+
+// Modules that bind ONE check to SEVERAL hosts (a cluster), present in config.
+function _clusterModules() {
+    return Object.keys(MODULE_HOST_MULTI_BIND || {})
+        .filter(m => MODULE_HOST_MULTI_BIND[m]
+                  && modulesData[m] && typeof modulesData[m] === 'object'
+                  && !Array.isArray(modulesData[m]));
+}
+
+// Cluster permissions (view/add/edit/delete) — gated STRICTLY by the dedicated
+// clusters_* (global) and cluster.{uid}.{action} (per-cluster) keys. Module-level
+// access does NOT grant cluster access: the Clusters surface is its own resource
+// (a modules_view user still sees clusters in the Modules tab, not here).
+function _clPerm(...names) {
+    const p = currentUser.permissions || [];
+    return names.some(n => p.includes(n));
+}
+// A global cluster permission grants the action on EVERY cluster.
+function _canAddClusters()  { return _clPerm('clusters_add'); }
+// Whether the user can perform *action* (view/edit/delete) on cluster *uid*:
+// the global clusters_{action} OR a per-cluster cluster.{uid}.{action}.
+function _clCan(uid, action) {
+    const g = { view: 'clusters_view', edit: 'clusters_edit', delete: 'clusters_delete' }[action];
+    return _clPerm(g) || (!!uid && _clPerm(`cluster.${uid}.${action}`));
+}
+// Seeing a cluster row = any of view/edit/delete on it (global or scoped).
+function _clCanSee(uid) { return _clCan(uid, 'view') || _clCan(uid, 'edit') || _clCan(uid, 'delete'); }
+// Global view/edit/delete (or any per-cluster key, or add) → the surface is usable.
+function _canViewClustersAny() {
+    return _clPerm('clusters_view', 'clusters_edit', 'clusters_delete', 'clusters_add')
+        || (currentUser.permissions || []).some(x => x.startsWith('cluster.'));
+}
+
+// The collection schema for a module's cluster checks (handles the optional
+// "watchfuls." prefix the schema map carries alongside the bare name).
+function _clColSchema(mod, coll) {
+    return ITEM_SCHEMAS[mod + '|' + coll]
+        || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll]
+        || ITEM_SCHEMAS[mod.replace('watchfuls.', '') + '|' + coll] || {};
+}
+
+let _clStatus = {};   // last fetched /modules/status payload, for the Status column
+
+// Aggregate a cluster's status from its check results: a multi-bind check emits
+// several sub-results keyed "<key>" and "<key>/...". OK only if all pass; a failure
+// is a warning only when EVERY failing sub-result is warning-severity, else error.
+function _clStatusAgg(mod, key) {
+    const st = _clStatus[mod] || _clStatus['watchfuls.' + mod]
+            || _clStatus[mod.replace('watchfuls.', '')] || {};
+    const rows = Object.entries(st).filter(([k]) => k === key || k.startsWith(key + '/'));
+    if (!rows.length) return 'unknown';
+    const bad = rows.filter(([, v]) => !(v && v.status === true));
+    if (!bad.length) return 'ok';
+    return bad.every(([, v]) => v && v.severity === 'warning') ? 'warn' : 'err';
+}
+
+function _clStatusHtml(state) {
+    if (state === 'ok')   return `<span class="badge text-bg-success"><i class="bi bi-check-lg me-1"></i>${esc(t('cl_status_ok'))}</span>`;
+    if (state === 'warn') return `<span class="badge text-bg-warning"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('cl_status_warn'))}</span>`;
+    if (state === 'err')  return `<span class="badge text-bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('cl_status_err'))}</span>`;
+    return `<span class="badge text-bg-secondary">${esc(t('cl_status_unknown'))}</span>`;
+}
+
+function _clMembersHtml(item) {
+    // Only count/name members the user may view (never leak a non-viewable host UID).
+    const names = (Array.isArray(item.host_uids) ? item.host_uids : [])
+        .map(u => (hostsList().find(h => h.uid === u) || {}).name)
+        .filter(Boolean);
+    if (!names.length) return `<span class="text-muted small">${esc(t('cl_no_members'))}</span>`;
+    // Just the member count; the member names stay available as a tooltip.
+    return `<span class="badge text-bg-secondary" title="${escAttr(names.join(', '))}">${names.length}</span>`;
+}
+
+// "New cluster" control: a plain button for a single multi-bind module, or a
+// dropdown to choose the module when several qualify.
+function _clNewControl(mods) {
+    if (mods.length === 1) {
+        return `<button class="btn btn-sm btn-success" onclick="newCluster('${esc(mods[0])}')">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('cl_new'))}</button>`;
+    }
+    const items = mods.map(m =>
+        `<li><button class="dropdown-item" onclick="newCluster('${esc(m)}')">${esc(_modPrettyName(m))}</button></li>`).join('');
+    return `<div class="dropdown d-inline-block">
+        <button class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('cl_new'))}</button>
+        <ul class="dropdown-menu dropdown-menu-end">${items}</ul></div>`;
+}
+
+// ── Table columns / sort / pagination (same machinery as the Servers table) ──
+const _CL_BASE_COLS = [
+    { id: 'status',     label: () => t('cl_col_status'),                 sortKey: 'status',     always: false, resizable: false },
+    { id: 'name',       label: () => t('cl_col_name'),                   sortKey: 'name',       always: true,  resizable: false },
+    _META_COL.uid,
+    { id: 'module',     label: () => t('cl_col_module'),                 sortKey: 'module',     always: false, resizable: false },
+    { id: 'description',label: () => t('cl_col_description'),            sortKey: 'description',always: false },
+    { id: 'members',    label: () => t('cl_col_members'),                sortKey: 'members',    always: false, resizable: false },
+    { id: 'summary',    label: () => t('cl_col_summary'),                sortKey: 'summary',    always: false, resizable: false },
+    ..._META_TAIL,
+    { id: 'enabled',    label: () => t('enabled'),                       sortKey: 'enabled',    always: false, resizable: false },
+];
+// Columns available in the chooser but hidden by default (parity with Servers).
+const _CL_HIDDEN_DEFAULT = new Set(['uid', 'description', 'created_at', 'updated_at', 'updated_by']);
+// Full column set = base + declarative per-module extra columns (e.g. proxmox vip),
+// inserted right after "members" for a sensible default order.
+function _clCols(extraCols) {
+    const ex = (extraCols || []).map(c => ({
+        id: 'x_' + c.field, label: () => c.label, sortKey: 'x_' + c.field, field: c.field, always: false,
+    }));
+    const cols = _CL_BASE_COLS.slice();
+    const at = cols.findIndex(c => c.id === 'members') + 1;
+    cols.splice(at, 0, ...ex);
+    return cols;
+}
+// Compact summary of a cluster's last status: "OK/total" badge + worst message.
+function _clStatusSummary(mod, key) {
+    const st = _clStatus[mod] || _clStatus['watchfuls.' + mod]
+            || _clStatus[mod.replace('watchfuls.', '')] || {};
+    const entries = Object.entries(st).filter(([k]) => k === key || k.startsWith(key + '/'));
+    if (!entries.length) return '<span class="text-muted small">—</span>';
+    const okN = entries.filter(([, v]) => v && v.status === true).length;
+    const total = entries.length;
+    // Green if all OK; yellow if the only failures are warnings; red if any hard error.
+    const agg = _clStatusAgg(mod, key);
+    const badge = agg === 'ok' ? 'text-bg-success' : agg === 'warn' ? 'text-bg-warning' : 'text-bg-danger';
+    return `<span class="badge ${badge}">${okN}/${total}</span>`;
+}
+let _clVisibleCols = (() => { try { const s = JSON.parse(localStorage.getItem('ss_clusters_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){} return null; })();
+let _clColOrder = (() => { try { const s = JSON.parse(localStorage.getItem('ss_clusters_col_order')||'null'); if (Array.isArray(s)) return s; } catch(_){} return []; })();
+let _clSort = 'name', _clSortDir = 'asc', _clPage = 1, _clPageSize = null;
+
+// Column visibility/order/sort/page/select handlers are generated by the factory
+// (createListTable below). Sort value for a row by column id:
+function _clSortVal(row, key) {
+    switch (key) {
+        case 'status':
+        case 'summary':    return { err: 0, warn: 1, unknown: 2, ok: 3 }[_clStatusAgg(row.mod, row.key)] ?? 4;
+        case 'module':     return _modPrettyName(row.mod).toLowerCase();
+        case 'description':return String(row.item.description || '').toLowerCase();
+        case 'members':    return Array.isArray(row.item.host_uids) ? row.item.host_uids.length : 0;
+        case 'name':       return String(row.name || '').toLowerCase();
+        case 'uid':        return String(row.key || '').toLowerCase();
+        case 'enabled':    return row.item.enabled !== false ? 1 : 0;
+        case 'created_at': return String(row.item.created_at || '');
+        case 'updated_at': return String(row.item.updated_at || '');
+        case 'updated_by': return String(row.item.updated_by || '').toLowerCase();
+        default:           return key.startsWith('x_') ? String(row.item[key.slice(2)] ?? '').toLowerCase() : '';
+    }
+}
+// True if the user can write ANY cluster (global add/edit/delete or a per-cluster
+// edit/delete) — controls whether the "Save" button is shown.
+function _canWriteAnyCluster() {
+    return _clPerm('clusters_add', 'clusters_edit', 'clusters_delete')
+        || (currentUser.permissions || []).some(x => /^cluster\..+\.(edit|delete)$/.test(x));
+}
+createListTable({
+    key: 'clusters', containerId: 'clusters-container', tableId: 'clusters-table',
+    cardClass: 'ss-card mb-3', accent: 'slate', icon: 'bi-diagram-3', title: () => esc(t('clusters_title')),
+    columns: ctx => _clCols((ctx && ctx.extraCols) || []),
+    defaultVisible: ctx => {
+        const s = new Set();
+        for (const co of _clCols((ctx && ctx.extraCols) || []))
+            if (!co.always && !_CL_HIDDEN_DEFAULT.has(co.id)) s.add(co.id);
+        return s;
+    },
+    autoRegister: true, hiddenDefault: _CL_HIDDEN_DEFAULT,
+    colChooserCols: cols => { const u = cols.find(c => c.id === 'uid'); return u ? [u, ...cols.filter(c => c.id !== 'uid')] : cols; },
+    thClass: { status: 'text-center', enabled: 'text-center' },
+    actionsLabel: () => esc(t('cl_col_actions')),
+    persist: true, clearLabelKey: 'subtab_clusters',
+    umCustomised: cfg => !!(cfg && ((cfg.w && Object.keys(cfg.w).length) || (Array.isArray(cfg.cols)) || (Array.isArray(cfg.order) && cfg.order.length))),
+    prepare: async () => {
+        const mods = _clusterModules();
+        try { _clStatus = await apiGet('/api/v1/modules/status') || {}; } catch (_) { _clStatus = {}; }
+        const extraCols = [];
+        const seenCol = new Set();
+        for (const mod of mods) {
+            const sch = _clColSchema(mod, _hostConnCollection(mod) || 'list');
+            for (const f of (Array.isArray(sch['__cluster_columns__']) ? sch['__cluster_columns__'] : [])) {
+                if (seenCol.has(f)) continue;
+                seenCol.add(f);
+                extraCols.push({ field: f, label: fieldLabel(f, fieldMeta(sch, f)) });
+            }
+        }
+        return { mods, extraCols, canSave: _canWriteAnyCluster() };
+    },
+    rows: ctx => {
+        const out = [];
+        for (const mod of ctx.mods) {
+            const coll = _hostConnCollection(mod) || 'list';
+            const data = modulesData[mod][coll];
+            if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
+            const titleField = _clColSchema(mod, coll)['__check_title_field__'] || 'label';
+            for (const [key, item] of Object.entries(data)) {
+                if (item && typeof item === 'object' && !Array.isArray(item) && _clCanSee(item.uid || key))
+                    out.push({ mod, coll, key, item, name: String(item[titleField] || key) });
+            }
+        }
+        return out;
+    },
+    rowKey: r => r.key,
+    record: r => r.item,
+    selectable: false,
+    sortValue: (row, sortKey) => _clSortVal(row, sortKey),
+    rowAttrs: row => ` style="opacity:${row.item.enabled !== false ? '1' : '.55'}"`,
+    cell: (row, colId) => {
+        const { mod, coll, key, item, name } = row;
+        const on = item.enabled !== false;
+        const _uid = item.uid || key;
+        switch (colId) {
+            case 'status':     return `<td class="text-center">${_clStatusHtml(_clStatusAgg(mod, key))}</td>`;
+            case 'name':       return `<td class="text-nowrap fw-semibold">${esc(name)}</td>`;
+            case 'module':     return `<td class="text-nowrap"><i class="bi bi-puzzle me-1" style="opacity:.6"></i>${esc(_modPrettyName(mod))}</td>`;
+            case 'description': { const _d = String(item.description || '').trim();
+                return `<td class="small text-truncate" style="max-width:280px" title="${escAttr(_d)}">${_d ? esc(_d) : '<span class="text-muted">—</span>'}</td>`; }
+            case 'members':    return `<td>${_clMembersHtml(item)}</td>`;
+            case 'enabled':    return `<td class="text-center align-middle"><span class="form-switch d-inline-flex align-items-center m-0" style="padding-left:0;min-height:0;line-height:1" title="${escAttr(t('enabled'))}">
+                    <input class="form-check-input m-0" type="checkbox" role="switch" style="margin-left:0;margin-top:0;float:none;vertical-align:middle;cursor:pointer" ${on ? 'checked' : ''} ${_clCan(_uid, 'edit') ? '' : 'disabled'}
+                        onchange="_clToggle('${esc(mod)}','${esc(coll)}',${jsStr(key)},this.checked,this)"></span></td>`;
+            case 'summary':    return `<td>${_clStatusSummary(mod, key)}</td>`;
+            default: {
+                const field = colId.startsWith('x_') ? colId.slice(2) : null;   // per-module extra column
+                if (!field) return '<td></td>';
+                const v = item[field];
+                return `<td class="small">${v != null && v !== '' ? esc(String(v)) : '<span class="text-muted">—</span>'}</td>`;
+            }
+        }
+    },
+    actions: row => {
+        const { mod, coll, key, item } = row;
+        const _uid = item.uid || key;
+        const canEdit = _clCan(_uid, 'edit');
+        const canDelete = _clCan(_uid, 'delete');
+        const _openBtn = `
+            <button class="btn btn-sm ${canEdit ? 'btn-primary' : 'btn-secondary'} py-0 px-1 me-1"
+                title="${escAttr(canEdit ? t('edit') : (t('cl_view') || t('host_view')))}"
+                onclick="openClusterEdit('${esc(mod)}','${esc(coll)}',${jsStr(key)})"><i class="bi ${canEdit ? 'bi-pencil' : 'bi-eye'}"></i></button>`;
+        const _delBtn = canDelete ? `
+            <button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+                onclick="removeItem('modules','${esc(mod)}|${esc(coll)}',${jsStr(key)})"><i class="bi bi-trash3"></i></button>` : '';
+        return _openBtn + _delBtn;
+    },
+    refreshButton: () => `<button class="btn btn-sm btn-secondary ms-1" onclick="renderClusters()" title="${escAttr(t('refresh_tt'))}">
+                <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>`,
+    headerButtons: ctx => `${_canAddClusters() && ctx.mods.length ? `<span class="ms-1">${_clNewControl(ctx.mods)}</span>` : ''}
+            ${ctx.canSave ? `<button class="btn btn-sm btn-success ms-1" onclick="saveModules().then(() => renderClusters())">
+                <i class="bi bi-save me-1"></i>${esc(t('save'))}</button>` : ''}`,
+    emptyBody: ctx => !ctx.mods.length
+        ? `<div class="p-3"><div class="alert alert-info mb-0">${esc(t('clusters_none_modules'))}</div></div>`
+        : `<div class="text-center py-5 text-muted">
+                 <i class="bi bi-diagram-3" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+                 <span>${esc(t('cl_empty'))}</span></div>`,
+    reset: () => {
+        _clVisibleCols = null; _clColOrder = [];
+        localStorage.removeItem('ss_clusters_cols');
+        localStorage.removeItem('ss_clusters_col_order');
+        localStorage.removeItem('ss_clusters_col_w');
+    },
+    state: {
+        visible: { get: () => _clVisibleCols, set: s => { _clVisibleCols = s; } },
+        order:   { get: () => _clColOrder,    set: o => { _clColOrder = o; } },
+        page:    { get: () => _clPage,        set: p => { _clPage = p; } },
+        pageSize:{ get: () => _clPageSize,    set: v => { _clPageSize = v; } },
+        sort:    { get: () => _clSort,        set: v => { _clSort = v; } },
+        sortDir: { get: () => _clSortDir,     set: v => { _clSortDir = v; } },
+        currentPage: { get: () => [], set: () => {} },
+    },
+    globalPrefix: {
+        render: 'renderClusters', goPage: '_goClPage', changePageSize: '_changeClPageSize',
+        sort: '_sortClusters', toggleCol: '_clToggleCol', resetCols: '_resetClCols',
+        saveOrder: '_clSaveColOrder', initFeatures: '_initClTableFeatures',
+    },
+});
+
+// Quick enable/disable from the table (no full re-render — just dim the row).
+function _clToggle(mod, coll, key, on, el) {
+    updateField('modules', mod + '|' + coll + '|' + key + '|enabled', on);
+    const tr = el && el.closest('tr');
+    if (tr) tr.style.opacity = on ? '1' : '.55';
+}
+
+// Create a fresh cluster (multi-bind check) and open its editor straight away.
+function newCluster(mod) {
+    const coll = _hostConnCollection(mod) || 'list';
+    const sch = _clColSchema(mod, coll);
+    const def = schemaDefaults(sch) || {};
+    if (!('enabled' in def)) def.enabled = true;
+    def.host_uids = Array.isArray(def.host_uids) ? def.host_uids : [];
+    if (!modulesData[mod][coll] || typeof modulesData[mod][coll] !== 'object'
+        || Array.isArray(modulesData[mod][coll])) modulesData[mod][coll] = {};
+    const key = 'cl-' + uid();          // opaque id; the human name lives in the title field
+    modulesData[mod][coll][key] = def;
+    markDirty('modules');
+    openClusterEdit(mod, coll, key, true);
+}
+
+// ── Edit modal ────────────────────────────────────────────────────────────
+let _clEditCtx = null;   // {mod, coll, key, isNew, committed, snap}
+
+// Tab label comes from the module's lang/ files (tab_labels section), never from
+// the schema — translations live in lang/, structure lives in schema.json.
+function _clTabLabel(mod, tab) {
+    const i18n = ITEM_SCHEMAS[mod + '|__i18n__'] || ITEM_SCHEMAS['watchfuls.' + mod + '|__i18n__'];
+    const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
+    const tl = (ld && ld.tab_labels) || {};
+    return tl[tab.id] || tab.id || '';
+}
+
+// Identity chrome shown on the "general" tab: editable name, read-only UID (with
+// a copy button), the enabled switch, and any "general"-group fields (e.g. a
+// description textarea) rendered inline — label first, then control, no group
+// header. Mirrors the Role modal's General tab. Kept generic (titleField + the
+// general-group fields come from the schema).
+function _clGeneralChrome(item, path, titleField, key, sch) {
+    const setTitle = `document.getElementById('clusterEditTitle').textContent=${jsStr(t('cl_edit_title') + ': ')}+this.value`;
+    const enabledSwitch = ('enabled' in item) ? `
+        <div class="mb-2">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="clEditEnabled" ${item.enabled !== false ? 'checked' : ''}
+                    onchange="updateField('modules',${jsStr(path + '|enabled')},this.checked)">
+                <label class="form-check-label small fw-semibold" for="clEditEnabled">${esc(t('enabled'))}</label>
+            </div>
+        </div>` : '';
+    // Inline "general"-group fields (description, …): a multiline string becomes a
+    // taller textarea; everything else a plain input. renderField has no multiline
+    // support, hence the direct render here.
+    let extra = '';
+    const order = (sch && (sch['__field_order__']
+        || Object.keys(sch).filter(k => !k.startsWith('__')))) || [];
+    for (const k of order) {
+        const m = fieldMeta(sch, k);
+        if (!m || m.group !== 'general' || k === titleField || k === 'enabled') continue;
+        const lbl = esc(fieldLabel(k, m));
+        const fp  = jsStr(path + '|' + k);
+        const val = String(item[k] ?? '');
+        if (m.type === 'str' && m.multiline) {
+            // Stretch the textarea to fill the remaining height of the General tab
+            // (the pane is a flex column via gm-tab-content).
+            extra += `<div class="mb-2 flex-grow-1 d-flex flex-column" style="min-height:0">
+                <label class="form-label small fw-semibold flex-shrink-0">${lbl}</label>
+                <textarea class="form-control form-control-sm flex-grow-1" style="resize:none;min-height:0"
+                    oninput="updateField('modules',${fp},this.value)">${esc(val)}</textarea>
+            </div>`;
+        } else {
+            extra += `<div class="mb-2"><label class="form-label small fw-semibold">${lbl}</label>
+                <input type="text" class="form-control form-control-sm" value="${escAttr(val)}"
+                    oninput="updateField('modules',${fp},this.value)"></div>`;
+        }
+    }
+    return `<div class="mb-2">
+        <label class="form-label small fw-semibold">${esc(t('cl_name'))}</label>
+        <input type="text" class="form-control form-control-sm" value="${escAttr(item[titleField] || '')}"
+            oninput="updateField('modules',${jsStr(path + '|' + titleField)},this.value);${setTitle}">
+    </div>
+    <div class="mb-2">
+        <label class="form-label small text-muted mb-0">${esc(t('cl_uid'))}</label>
+        <div class="input-group input-group-sm">
+            <input type="text" class="form-control form-control-sm font-monospace text-muted" value="${escAttr(key)}" readonly>
+            <button class="btn btn-sm btn-secondary" type="button" title="${escAttr(t('copy_uid') || t('cl_uid_tt'))}"
+                onclick="_copyToClipboard(${jsStr(key)})"><i class="bi bi-copy"></i></button>
+        </div>
+    </div>
+    ${enabledSwitch}
+    ${extra}`;
+}
+
+// ── "Hosts" tab: the cluster's member servers as a sortable table ───────────
+// One row per member host (host_uids): name, address, maintenance state, last
+// monitoring status, and its cluster-node assignment (stored on the HOST via the
+// hosts API). An "Add" dropdown adds members; the × removes them. Reuses the host
+// modal's node helpers (_clusterNodeOptions / _takenClusterNodes).
+let _clMemCtx = null;          // {item, mod, key, pkey, path} for the open Hosts tab
+let _clMemNodeList = [];       // last "Load nodes" result (preserved across re-render)
+let _clMemSort = 'name', _clMemSortDir = 'asc';
+
+function _clRenderMembers(item, mod, key) {
+    _clMemCtx = { item, mod, key, pkey: mod.replace(/^watchfuls\./, ''),
+                  path: mod + '|' + (_hostConnCollection(mod) || 'list') + '|' + key };
+    _clMemNodeList = [];                 // fresh per modal open
+    return `<div data-clmem-wrap>${_clMembersInner()}</div>`;
+}
+
+// Last-monitoring-status badge from the host registry status (ok/warning/error).
+function _clHostLastStatus(st) {
+    const m = { ok:      ['text-bg-success', 'bi-check-circle-fill', t('host_status_ok')      || 'OK'],
+                warning: ['text-bg-warning', 'bi-hourglass-split',   t('host_status_warning') || 'Warning'],
+                error:   ['text-bg-danger',  'bi-x-circle-fill',     t('host_status_error')   || 'Error'] }[st];
+    if (!m) return `<span class="text-muted small">—</span>`;
+    return `<span class="badge ${m[0]}"><i class="bi ${m[1]} me-1"></i>${esc(m[2])}</span>`;
+}
+
+function _clMembersInner() {
+    if (!_clMemCtx) return '';
+    const { item, pkey } = _clMemCtx;
+    const allSel = (Array.isArray(item.host_uids) ? item.host_uids : []).map(String);
+    // Only show members the user may VIEW (present in hostsData, which the hosts API
+    // already filters by per-server view) — never leak the raw UID of a host the
+    // user can't see. The Add dropdown still excludes every current member.
+    const sel = allSel.filter(uid => hostsData[uid]);
+    const canEdit = _clCan(item.uid || _clMemCtx.key, 'edit');   // per-cluster edit
+    const available = hostsList().filter(h => !allSel.includes(String(h.uid)));
+    const opts = available.map(h =>
+        `<li><button type="button" class="dropdown-item small clmem-opt"
+            data-clmem-name="${escAttr((String(h.name) + ' ' + String(h.address || '')).toLowerCase())}"
+            onclick="_clMemberAdd(${jsStr(String(h.uid))})">
+            ${esc(h.name)}${h.address ? ` <span class="text-muted">(${esc(h.address)})</span>` : ''}</button></li>`).join('')
+        || `<li><span class="dropdown-item-text text-muted small">${esc(t('no_items') || '—')}</span></li>`;
+    const toolbar = `<div class="d-flex align-items-center gap-2 mb-2">
+            <span class="badge text-bg-secondary">${sel.length}</span>
+            <span class="small text-muted">${esc(t('cl_map_hint'))}</span>
+            <div class="ms-auto d-flex gap-1">
+                <button class="btn btn-sm btn-secondary" onclick="_clLoadNodes(this)" title="${escAttr(t('host_cluster_node_load'))}">
+                    <i class="bi bi-arrow-repeat me-1"></i>${esc(t('host_cluster_node_load'))}</button>
+                ${canEdit ? `<div class="dropdown">
+                    <button class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown"
+                            data-bs-auto-close="outside" ${available.length ? '' : 'disabled'}>
+                        <i class="bi bi-plus-lg me-1"></i>${esc(t('host_add') || t('add') || 'Add')}</button>
+                    <div class="dropdown-menu dropdown-menu-end p-2" style="min-width:260px">
+                        ${available.length > 6 ? `<input type="search" class="form-control form-control-sm mb-2"
+                            placeholder="${escAttr((t('search') || 'Search') + '…')}"
+                            oninput="_clMemOptFilter(this)" onclick="event.stopPropagation()">` : ''}
+                        <ul class="list-unstyled mb-0" style="max-height:13rem;overflow:auto">${opts}</ul>
+                    </div></div>` : ''}
+            </div>
+        </div>`;
+    if (!sel.length) return toolbar + `<div class="alert alert-secondary mb-0">${esc(t('cl_map_no_members'))}</div>`;
+    const mul = _clMemSortDir === 'asc' ? 1 : -1;
+    const rows = sel.map(uid => {
+        const h = hostsData[uid] || {};
+        return { uid, h, node: ((h.profiles || {})[pkey] || {}).node || '', maint: !!h.maintenance, st: h.status || '' };
+    }).sort((a, b) => {
+        const v = r => {
+            switch (_clMemSort) {
+                case 'address': return String(r.h.address || '').toLowerCase();
+                case 'node':    return String(r.node || '').toLowerCase();
+                case 'maint':   return r.maint ? 1 : 0;
+                case 'status':  return { error: 0, warning: 1, ok: 3 }[r.st] ?? 2;
+                default:        return String(r.h.name || r.uid).toLowerCase();
+            }
+        };
+        const va = v(a), vb = v(b);
+        return (typeof va === 'number' && typeof vb === 'number') ? mul * (va - vb) : mul * String(va).localeCompare(String(vb));
+    });
+    const body = rows.map(({ uid, h, node, maint, st }) => {
+        const ro = _canEditHost(uid) ? '' : 'disabled';
+        const maintBadge = maint
+            ? `<span class="badge" style="background:#fd7e14;color:#fff"><i class="bi bi-cone-striped me-1"></i>${esc(t('host_status_maintenance') || 'Maintenance')}</span>`
+            : `<span class="badge text-bg-light border">${esc(t('cl_status_normal') || 'Normal')}</span>`;
+        return `<tr>
+            <td class="text-nowrap fw-semibold">${esc(h.name || uid)}</td>
+            <td class="text-nowrap"><code class="small">${esc(h.address || '')}</code></td>
+            <td>${maintBadge}</td>
+            <td>${_clHostLastStatus(st)}</td>
+            <td><select class="form-select form-select-sm" data-uid="${escAttr(uid)}" ${ro}
+                    onchange="_clSetNode(${jsStr(uid)},${jsStr(pkey)},this.value,this)">${
+                _clusterNodeOptions(node, _clMemNodeList, _takenClusterNodes(pkey, uid))}</select></td>
+            <td class="ss-td-actions">${canEdit
+                ? `<button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('remove') || 'Remove')}"
+                       onclick="_clMemberRemove(${jsStr(uid)})"><i class="bi bi-x-lg"></i></button>` : ''}</td>
+        </tr>`;
+    }).join('');
+    const th = (lbl, col) => `<th class="ss-th">${_thSortInner(lbl, col, _clMemSort, _clMemSortDir, '_sortClMem')}</th>`;
+    return toolbar + `<table class="table table-sm align-middle mb-0 ss-table">
+        <thead class="ss-thead"><tr>
+            ${th(t('cl_map_host'), 'name')}
+            ${th(t('col_host_address') || 'Address', 'address')}
+            ${th(t('cl_mem_state'), 'maint')}
+            ${th(t('cl_mem_laststatus'), 'status')}
+            ${th(t('cl_map_node'), 'node')}
+            <th class="ss-th ss-th-actions"></th>
+        </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function _clMemRefresh() {
+    const w = document.querySelector('[data-clmem-wrap]');
+    if (w) w.innerHTML = _clMembersInner();
+}
+function _sortClMem(col) {
+    if (_clMemSort === col) _clMemSortDir = _clMemSortDir === 'asc' ? 'desc' : 'asc';
+    else { _clMemSort = col; _clMemSortDir = 'asc'; }
+    _clMemRefresh();
+}
+function _clMemOptFilter(inp) {
+    const q = String(inp.value || '').trim().toLowerCase();
+    inp.closest('.dropdown-menu')?.querySelectorAll('.clmem-opt').forEach(o => {
+        o.closest('li').style.display = (!q || (o.dataset.clmemName || '').includes(q)) ? '' : 'none';
+    });
+}
+
+// Add/remove a member host (host_uids), then hide/show the inline connection
+// fields (which live in the Connection tab) and re-render the member table.
+function _clMemberAdd(uid) {
+    if (!_clMemCtx) return;
+    const arr = _hostMultiVals(_clMemCtx.path, 'modules');
+    if (!arr.includes(String(uid))) arr.push(String(uid));
+    _clMemberCommit(arr);
+}
+function _clMemberRemove(uid) {
+    if (!_clMemCtx) return;
+    _clMemberCommit(_hostMultiVals(_clMemCtx.path, 'modules').filter(u => u !== String(uid)));
+}
+function _clMemberCommit(arr) {
+    const path = _clMemCtx.path;
+    updateField('modules', path + '|host_uids', arr);
+    const bound = arr.length > 0;
+    document.querySelectorAll(`.hostprof-field[data-hp-item="${CSS.escape(path)}"]`)
+        .forEach(el => { el.style.display = bound ? 'none' : ''; });
+    if (!bound && typeof _refreshConditionalFields === 'function') _refreshConditionalFields(path);
+    _clMemCtx.item.host_uids = arr;
+    _clMemRefresh();
+}
+
+// Fetch the live cluster node list (one call) and refill every row's <select>.
+async function _clLoadNodes(btn) {
+    if (!_clMemCtx) return;
+    const { mod, key } = _clMemCtx;
+    const coll = _hostConnCollection(mod) || 'list';
+    const item = (modulesData[mod] || {})[coll] && modulesData[mod][coll][key];
+    if (!item) { showToast(t('connection_error'), 'danger'); return; }
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em" role="status"></span>`;
+    const res = await apiPost('/api/v1/watchfuls/' + mod + '/list_nodes',
+                              Object.assign({}, item, { _item_key: key }));
+    const data = res && res.data;
+    if (!data || !data.ok) { showToast((data && data.message) || t('connection_error'), 'danger'); _clMemRefresh(); return; }
+    _clMemNodeList = data.items || [];
+    showToast(data.message || `${_clMemNodeList.length}`);
+    _clMemRefresh();
+}
+
+// Persist a host's node assignment (profiles[pkey].node) via the hosts API.
+// Builds the body from hostsData (whose masked secrets are null markers the
+// server restores), so other host fields/secrets are preserved.
+async function _clSetNode(uid, pkey, node, sel) {
+    const h = hostsData[uid];
+    if (!h) return;
+    const profiles = JSON.parse(JSON.stringify(h.profiles || {}));
+    const prof = Object.assign({}, profiles[pkey] || {});
+    if (node) prof.node = node; else delete prof.node;
+    if (Object.keys(prof).length) profiles[pkey] = prof; else delete profiles[pkey];
+    const body = {
+        name: h.name, address: h.address || '',
+        kind: h.kind === 'remote' ? 'remote' : 'local', os: h.os || 'auto',
+        maintenance: !!h.maintenance, tags: h.tags || [], description: h.description || '',
+        profiles, modules: Array.isArray(h.modules) ? h.modules : [],
+    };
+    if (sel) sel.disabled = true;
+    const res = await apiPut('/api/v1/hosts/' + encodeURIComponent(uid), body);
+    if (sel) sel.disabled = false;
+    if (res && res.ok) {
+        h.profiles = profiles;                       // keep local cache in sync
+        showToast(t('cl_map_saved'));
+        _clMemRefresh();                             // reflect new "taken" state in other rows
+    } else {
+        showToast((res && res.error) || t('error') || 'Error', 'danger');
+        if (sel) sel.value = ((h.profiles || {})[pkey] || {}).node || '';   // revert
+    }
+}
+
+// ── "Last data" tab: latest recorded results across all member hosts ────────
+let _clLastCtx = null;     // {mod, key}
+let _clLastFilter = 'all'; // 'all' | 'issues' | 'errors'
+let _clLastRows = [];       // cached rows so the filter re-renders w/o refetch
+function _clRenderLastData(item) {
+    const mod = (_clEditCtx && _clEditCtx.mod) || '';
+    const coll = (_clEditCtx && _clEditCtx.coll) || _hostConnCollection(mod) || 'list';
+    const tf = _clColSchema(mod, coll)['__check_title_field__'] || 'label';
+    _clLastCtx = { mod, key: (_clEditCtx && _clEditCtx.key) || '',
+                   name: String(item[tf] || (_clEditCtx && _clEditCtx.key) || '') };
+    return `<div class="d-flex align-items-center mb-2" data-ro-keep="1">
+            <span class="small text-muted me-auto">${esc(t('cl_lastdata_hint'))}</span>
+            ${_latestFilterSelect('clLastFilter', _clLastFilter, '_clSetLastFilter')}
+            <button class="btn btn-sm btn-secondary" onclick="_clLoadLastData()" title="${escAttr(t('refresh'))}">
+                <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+        </div><div id="clLastBody"></div>`;
+}
+// Show the cluster CHECK's own sub-results (e.g. proxmox cluster/ceph/ha + per-node
+// updates/storage), not the members' single-bind checks — those never include the
+// multi-bind cluster check. Each sub-result maps to a member host via other_data
+// (host_uid/host_name), so it's fully generic — any cluster module can supply it.
+async function _clLoadLastData() {
+    const body = document.getElementById('clLastBody');
+    if (!body || !_clLastCtx) return;
+    const { mod, key } = _clLastCtx;
+    if (!mod || !key) { body.innerHTML = `<div class="alert alert-secondary mb-0">${esc(t('cl_map_no_members'))}</div>`; return; }
+    body.innerHTML = `<div class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>${esc(t('loading'))}</div>`;
+    let status = {};
+    try { status = await apiGet('/api/v1/modules/status') || {}; } catch (_) { status = {}; }
+    const st = status[mod] || status['watchfuls.' + mod] || status[mod.replace('watchfuls.', '')] || {};
+    const entries = Object.entries(st).filter(([k]) => k === key || k.startsWith(key + '/'));
+    if (!entries.length) { body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(t('host_latest_none'))}</div>`; return; }
+    _clLastRows = entries.map(([k, v]) => {
+        const od = (v && v.other_data) || {};
+        const host = od.host_name || (hostsData[od.host_uid] || {}).name || '';
+        const sub = (k === key) ? '' : k.slice(key.length + 1);   // suffix after "<key>/"
+        const ok = !!(v && v.status === true);
+        const sev = (v && v.severity) || '';
+        return {
+            host, check: od.name || sub || _modPrettyName(mod), ok, sev,
+            level: ok ? 'ok' : (sev === 'warning' ? 'warning' : 'error'),
+            message: (v && v.message) || '', data: od, ts: (v && v.ts) || 0,
+        };
+    }).sort((a, b) => String(a.host).localeCompare(String(b.host)) || String(a.check).localeCompare(String(b.check)));
+    _clRenderLastRows();
+}
+function _clSetLastFilter(v) { _clLastFilter = v; _clRenderLastRows(); }
+let _clLastSort = 'source', _clLastSortDir = 'asc';
+function _clLastSortBy(col) {
+    if (_clLastSort === col) _clLastSortDir = _clLastSortDir === 'asc' ? 'desc' : 'asc';
+    else { _clLastSort = col; _clLastSortDir = 'asc'; }
+    _clRenderLastRows();
+}
+function _clLastSortVal(r, col) {
+    switch (col) {
+        case 'source':  return String(r.host || (_clLastCtx && _clLastCtx.name) || '').toLowerCase();
+        case 'check':   return String(r.check || '').toLowerCase();
+        case 'status':  return { error: 0, warning: 1, ok: 2 }[r.level] ?? 3;
+        case 'message': return String(r.message || '').toLowerCase();
+        case 'when':    return r.ts || 0;
+        default:        return '';
+    }
+}
+function _clRenderLastRows() {
+    const body = document.getElementById('clLastBody');
+    if (!body) return;
+    const rows = _clLastRows.filter(r => _latestFilterPass(r.level, _clLastFilter));
+    if (!rows.length) {
+        body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(
+            _clLastRows.length ? t('latest_filter_none') : t('host_latest_none'))}</div>`;
+        return;
+    }
+    const _mul = _clLastSortDir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+        const va = _clLastSortVal(a, _clLastSort), vb = _clLastSortVal(b, _clLastSort);
+        return (typeof va === 'number' && typeof vb === 'number')
+            ? _mul * (va - vb) : _mul * String(va).localeCompare(String(vb));
+    });
+    // Persisted column widths (resizable headers, shared _attachColFeatures).
+    const _cw = (() => { try { return JSON.parse(localStorage.getItem('ss_cl_lastdata_col_w') || '{}'); } catch (_) { return {}; } })();
+    const _thW = id => _cw[id] ? ` style="width:${_cw[id]}"` : '';
+    const _cols = [['source', 'cl_lastdata_source'], ['check', 'cl_lastdata_check'],
+                   ['status', 'cl_mem_laststatus'], ['message', 'syslog_message'], ['when', 'cl_lastdata_when']];
+    const thRow = _cols.map(([id, lk]) =>
+        `<th class="ss-th ss-th-resizable${id === 'status' ? ' text-center' : ''}" data-col="${id}"${_thW(id)}>${
+            _thSortInner(t(lk), id, _clLastSort, _clLastSortDir, '_clLastSortBy')}</th>`).join('');
+    body.innerHTML = `<table class="table table-sm align-middle mb-0 ss-table" id="clLastTable">
+        <thead class="ss-thead"><tr>${thRow}</tr></thead><tbody>${rows.map(r => {
+            const badge = r.ok
+                ? `<span class="badge text-bg-success"><i class="bi bi-check-circle-fill"></i></span>`
+                : (r.sev === 'warning'
+                    ? `<span class="badge text-bg-warning"><i class="bi bi-exclamation-triangle-fill"></i></span>`
+                    : `<span class="badge text-bg-danger"><i class="bi bi-exclamation-triangle-fill"></i></span>`);
+            let when = '';
+            if (r.ts) { const d = new Date(r.ts * 1000); if (!isNaN(d.getTime())) when = d.toLocaleString(); }
+            const metrics = Object.entries(r.data || {})
+                .filter(([k, v]) => !['name', 'host_uid', 'host_name'].includes(k) && ['number', 'string', 'boolean'].includes(typeof v))
+                .map(([k, v]) => `<span class="badge bg-secondary bg-opacity-25 text-body border me-1" style="font-weight:normal">${esc(k)}: ${esc(String(v))}</span>`).join('');
+            // No host → the source is the cluster itself (cluster/ceph/ha status).
+            const source = r.host
+                ? `<span class="fw-semibold">${esc(r.host)}</span>`
+                : `<span class="text-muted"><i class="bi bi-diagram-3 me-1"></i>${esc(_clLastCtx && _clLastCtx.name || t('subtab_clusters') || 'Cluster')}</span>`;
+            return `<tr>
+                <td class="text-nowrap">${source}</td>
+                <td class="text-nowrap">${esc(r.check)}</td>
+                <td class="text-center">${badge}</td>
+                <td class="small">${r.message ? esc(r.message) : ''}${metrics ? `<div class="mt-1">${metrics}</div>` : ''}</td>
+                <td class="text-nowrap small text-muted">${esc(when || '—')}</td>
+            </tr>`;
+        }).join('')}</tbody></table>`;
+    // Column resize (no reorder — headers aren't draggable) with width persistence.
+    setTimeout(() => _attachColFeatures('clLastTable', () => [], () => {}, () => {}, _clRenderLastRows,
+        (col, w) => { const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_cl_lastdata_col_w') || '{}'); } catch (_) { return {}; } })();
+                      cw[col] = w; localStorage.setItem('ss_cl_lastdata_col_w', JSON.stringify(cw)); }), 0);
+}
+
+// ── "Logs" tab: syslog across all member hosts (one paginated query) ─────────
+let _clLogsState = null;   // {addrs, page, pageSize, severity_max, q}
+function _clRenderLogs(item) {
+    const members = (Array.isArray(item.host_uids) ? item.host_uids : [])
+        .map(u => { const h = hostsData[u] || {}; return { name: h.name || u, address: h.address || '' }; })
+        .filter(m => m.address);
+    _clLogsState = { members, addrs: members.map(m => m.address), sel: '',
+                     page: 1, pageSize: _defaultPageSize || 50, severity_max: '', q: '',
+                     since: '', until: '', auto: 0 };
+    return `<div id="clLogsWrap" data-ro-keep="1" style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column"></div>`;
+}
+function _clLogsRender() {
+    const wrap = document.getElementById('clLogsWrap');
+    if (!wrap || !_clLogsState) return;
+    const st = _clLogsState;
+    if (!st.addrs.length) { wrap.innerHTML = `<div class="alert alert-secondary mb-0">${esc(t('cl_logs_no_addr'))}</div>`; return; }
+    const sevOpts = `<option value="">${esc(t('syslog_all'))}</option>` +
+        (typeof _SYSLOG_SEV !== 'undefined' ? _SYSLOG_SEV : []).map((n, i) =>
+            `<option value="${i}"${String(st.severity_max) === String(i) ? ' selected' : ''}>${esc(n)}</option>`).join('');
+    const srvOpts = `<option value="">${esc(t('syslog_all'))}</option>` +
+        st.members.map(m => `<option value="${escAttr(m.address)}"${st.sel === m.address ? ' selected' : ''}>${esc(m.name)}</option>`).join('');
+    wrap.innerHTML = `<div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+            <div><label class="form-label small mb-1">${esc(t('cl_map_host'))}</label>
+                <select class="form-select form-select-sm" style="min-width:140px"
+                    onchange="_clLogsState.sel=this.value;_clLogsState.page=1;_clLogsFetch()">${srvOpts}</select></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_min_severity'))}</label>
+                <select class="form-select form-select-sm" style="min-width:120px"
+                    onchange="_clLogsState.severity_max=this.value;_clLogsState.page=1;_clLogsFetch()">${sevOpts}</select></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_from'))}</label>
+                <input id="cll-from" type="datetime-local" class="form-control form-control-sm" style="min-width:165px"></div>
+            <div><label class="form-label small mb-1">${esc(t('syslog_to'))}</label>
+                <input id="cll-to" type="datetime-local" class="form-control form-control-sm" style="min-width:165px"></div>
+            <div class="flex-grow-1"><label class="form-label small mb-1">${esc(t('syslog_search'))}</label>
+                <input type="search" class="form-control form-control-sm" value="${escAttr(st.q)}" placeholder="${escAttr(t('syslog_search'))}"
+                    oninput="_clLogsState.q=this.value" onkeydown="if(event.key==='Enter'){_clLogsState.page=1;_clLogsFetch();}"></div>
+            <div class="d-flex align-items-end gap-1">
+                <span id="cll-auto-refresh"></span>
+                <button class="btn btn-sm btn-secondary" onclick="_clLogsState.page=1;_clLogsFetch()" title="${escAttr(t('refresh'))}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button></div>
+        </div>
+        <div id="clLogsPagerTop" class="mb-1"></div>
+        <div class="table-responsive rounded border" style="flex:1 1 auto;min-height:0;overflow:auto">
+        <table class="table table-sm table-striped table-hover align-middle mb-0" style="font-size:.8rem">
+            <thead><tr>
+                <th class="text-nowrap">${esc(t('syslog_time'))}</th>
+                <th>${esc(t('syslog_severity'))}</th>
+                <th>${esc(t('cl_map_host'))}</th>
+                <th>${esc(t('syslog_app'))}</th>
+                <th style="width:50%">${esc(t('syslog_message'))}</th>
+            </tr></thead><tbody id="clLogsRows"></tbody></table></div>
+        <div id="clLogsEmpty" class="text-center text-muted py-3" style="display:none">${esc(t('host_logs_none'))}</div>
+        <div id="clLogsPager" class="mt-2"></div>`;
+    // Date range: restore + wire (reuses the syslog ts↔local-input helpers).
+    const fromEl = document.getElementById('cll-from'), toEl = document.getElementById('cll-to');
+    const toTs = v => (typeof _localInputToTs !== 'undefined') ? _localInputToTs(v) : '';
+    if (typeof _tsToLocalInput !== 'undefined') { fromEl.value = _tsToLocalInput(st.since); toEl.value = _tsToLocalInput(st.until); }
+    fromEl.onchange = e => { st.since = toTs(e.target.value); st.page = 1; _clLogsFetch(); };
+    toEl.onchange   = e => { st.until = toTs(e.target.value); st.page = 1; _clLogsFetch(); };
+    // Stop the auto-refresh timer when the cluster modal closes (bind once).
+    const modalEl = document.getElementById('clusterEditModal');
+    if (modalEl && !modalEl._clLogsHideBound) {
+        modalEl._clLogsHideBound = true;
+        modalEl.addEventListener('hidden.bs.modal', _clLogsStopTimer);
+    }
+    _clLogsRenderAutoRefresh();
+    _clLogsApplyTimer();
+    _clLogsFetch();
+    _applyClusterModalPerms();   // lazy tab: re-enforce read-only on its controls
+}
+
+// ── Logs auto-refresh (shared _autoRefreshControl + a guarded interval) ──────
+let _clLogsTimer = null;
+function _clLogsStopTimer() { if (_clLogsTimer) { clearInterval(_clLogsTimer); _clLogsTimer = null; } }
+function _clLogsApplyTimer() {
+    _clLogsStopTimer();
+    const a = _clLogsState ? _clLogsState.auto : 0;
+    const live = a === 'live';
+    const secs = live ? (typeof _SL_LIVE_SECS !== 'undefined' ? _SL_LIVE_SECS : 2) : (parseInt(a, 10) || 0);
+    if (secs > 0) {
+        _clLogsTimer = setInterval(() => {
+            const pane = document.getElementById('clt-logs');
+            if (!pane || !document.getElementById('clLogsRows')) { _clLogsStopTimer(); return; }
+            if (pane.classList.contains('active')) _clLogsFetch();   // skip while on another tab
+        }, secs * 1000);
+    }
+}
+function setClLogsAutoRefresh(seconds) { if (_clLogsState) _clLogsState.auto = seconds; _clLogsApplyTimer(); _clLogsRenderAutoRefresh(); }
+function toggleClLogsLive() { if (_clLogsState) _clLogsState.auto = (_clLogsState.auto === 'live') ? 0 : 'live'; _clLogsApplyTimer(); _clLogsRenderAutoRefresh(); }
+function _clLogsRenderAutoRefresh() {
+    const el = document.getElementById('cll-auto-refresh');
+    if (!el || !_clLogsState) return;
+    const live = _clLogsState.auto === 'live';
+    el.innerHTML = _autoRefreshControl({
+        id: 'cllogs', interval: live ? 0 : (parseInt(_clLogsState.auto, 10) || 0),
+        setFn: 'setClLogsAutoRefresh', liveFn: 'toggleClLogsLive', liveActive: live, hideAuto: true,
+        countId: 'cll-refresh-count', fillId: 'cll-refresh-fill',
+    });
+}
+async function _clLogsFetch() {
+    const st = _clLogsState;
+    const tbody = document.getElementById('clLogsRows');
+    if (!st || !tbody) return;
+    const qs = new URLSearchParams({ limit: String(st.pageSize), offset: String((st.page - 1) * st.pageSize) });
+    // One member selected → just that host; otherwise every member (effective-host filter).
+    (st.sel ? [st.sel] : st.addrs).forEach(a => qs.append('hostname', a));
+    if (st.severity_max !== '') qs.set('severity_max', st.severity_max);
+    if (st.q) qs.set('q', st.q);
+    if (st.since) qs.set('since', st.since);
+    if (st.until) qs.set('until', st.until);
+    const data = await apiGet('/api/v1/syslog?' + qs.toString());
+    const msgs = (data && data.messages) || [];
+    const total = (data && data.total) || 0;
+    const empty = document.getElementById('clLogsEmpty');
+    if (empty) empty.style.display = msgs.length ? 'none' : '';
+    tbody.innerHTML = msgs.map(m => {
+        const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
+        const when = (m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '')).replace('T', ' ').replace('Z', '');
+        const appp = (m.app || '') + (m.procid ? `[${m.procid}]` : '');
+        return `<tr class="sl-row-${cls}">
+            <td class="text-muted text-nowrap">${esc(when)}</td>
+            <td><span class="badge bg-${cls}">${esc(m.severity_name || '')}</span></td>
+            <td class="text-nowrap small">${esc(m.hostname || m.source || '')}</td>
+            <td><code style="font-size:.78rem">${esc(appp)}</code></td>
+            <td style="word-break:break-word">${esc(m.message || '')}</td>
+        </tr>`;
+    }).join('');
+    const pager = total > 0 ? _renderPagination(total, st.page, st.pageSize, '_clLogsGoPage', '_clLogsSetPageSize') : '';
+    ['clLogsPagerTop', 'clLogsPager'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = pager; });
+}
+function _clLogsGoPage(p) { _clLogsState.page = p; _clLogsFetch(); }
+function _clLogsSetPageSize(v) { _clLogsState.pageSize = parseInt(v, 10); _clLogsState.page = 1; _clLogsFetch(); }
+
+function openClusterEdit(mod, coll, key, isNew) {
+    const item = (modulesData[mod] || {})[coll] && modulesData[mod][coll][key];
+    if (!item) return;
+    const sch = _clColSchema(mod, coll);
+    const titleField = sch['__check_title_field__'] || 'label';
+    const path = mod + '|' + coll + '|' + key;
+    // Read-only when the user can view but not edit this cluster (a new cluster is
+    // always editable — creating it required clusters_add).
+    const readonly = !isNew && !_clCan(item.uid || key, 'edit');
+    _clEditCtx = { mod, coll, key, isNew: !!isNew, committed: false, snap: deepClone(item), readonly };
+
+    document.getElementById('clusterEditTitle').textContent =
+        t('cl_edit_title') + (item[titleField] ? ': ' + item[titleField] : '');
+
+    // Tabs the user may see (a tab may declare a required permission, e.g. logs).
+    const _perms = currentUser.permissions || [];
+    const tabs = (Array.isArray(sch['__edit_tabs__']) ? sch['__edit_tabs__'] : null)
+        ?.filter(tb => !tb.perm || _perms.includes(tb.perm));
+    const exclude = ['enabled', titleField];
+    // Grouped __actions__ (provision token, test permissions…) injected inside
+    // their field group — same mechanism as the Modules collection render, kept
+    // generic (the modal reads them from the schema, knows nothing module-specific).
+    const _clActsByGroup = {};
+    for (const a of (Array.isArray(sch['__actions__']) ? sch['__actions__'] : [])) {
+        if (a.group) (_clActsByGroup[a.group] = _clActsByGroup[a.group] || []).push(a);
+    }
+    const _clPostGroupHtml = {};
+    for (const [g, acts] of Object.entries(_clActsByGroup)) {
+        _clPostGroupHtml[g] = (typeof _renderGroupActionBtns === 'function')
+            ? _renderGroupActionBtns(path, acts, item) : '';
+    }
+    let bodyHtml;
+    if (tabs && tabs.length) {
+        // Declarative tabbed layout (schema __edit_tabs__): one pane per tab,
+        // each rendering only its groups; the host/members picker lands in the
+        // tab flagged "host". Fully generic — the modal knows nothing module-specific.
+        const navs = [], panes = [];
+        tabs.forEach((tab, i) => {
+            const pid = 'clt-' + (tab.id || i);
+            const act = i === 0;
+            const ic = tab.icon ? `<i class="bi ${esc(tab.icon)} me-1"></i>` : '';
+            // Lazy-load the data-heavy tabs on first show (not on every modal open).
+            const onShow = tab.last_data ? ' onclick="_clLoadLastData()"'
+                         : tab.logs      ? ' onclick="_clLogsRender()"' : '';
+            navs.push(`<li class="nav-item"><button class="nav-link${act ? ' active' : ''}" type="button"
+                data-bs-toggle="tab" data-bs-target="#${pid}"${onShow}>${ic}${esc(_clTabLabel(mod, tab))}</button></li>`);
+            const chrome = tab.general ? _clGeneralChrome(item, path, titleField, key, sch) : '';
+            // general → fields in the chrome (no dup group header); member_table →
+            // the Hosts table; last_data/logs → aggregated panels; else field groups.
+            let fields;
+            if (tab.general) {
+                fields = '';
+            } else if (tab.member_table) {
+                // Member table + (optionally) the tab's own field groups below it.
+                fields = _clRenderMembers(item, mod, key);
+                if (Array.isArray(tab.groups) && tab.groups.length) {
+                    fields += `<div class="mt-3 pt-3 border-top">${renderScalarFields(
+                        item, path, 'modules', exclude, _clPostGroupHtml, { onlyGroups: tab.groups, skipHostPicker: true })}</div>`;
+                }
+            } else if (tab.last_data) {
+                fields = _clRenderLastData(item);
+            } else if (tab.logs) {
+                fields = _clRenderLogs(item);
+            } else {
+                fields = renderScalarFields(item, path, 'modules', exclude, _clPostGroupHtml,
+                    { onlyGroups: Array.isArray(tab.groups) ? tab.groups : [], skipHostPicker: !tab.host });
+            }
+            const fieldsHtml = chrome && fields ? `<div class="mt-3">${fields}</div>` : fields;
+            panes.push(`<div class="tab-pane fade${act ? ' show active' : ''}" id="${pid}"
+                style="overflow-y:auto;overflow-x:hidden">${chrome}${fieldsHtml}</div>`);
+        });
+        // gm-tab-content (shared with the Role modal): fixed-height flex column so
+        // the modal does NOT resize between tabs AND the active pane can stretch a
+        // flex-grow child (the description textarea) to fill the leftover space.
+        bodyHtml = `<ul class="nav nav-tabs mb-3" role="tablist">${navs.join('')}</ul>
+            <div class="tab-content gm-tab-content">${panes.join('')}</div>`;
+    } else {
+        // Fallback (module declares no tabs): flat editor.
+        bodyHtml = `<div style="max-height:60vh;overflow-y:auto;overflow-x:hidden">`
+            + _clGeneralChrome(item, path, titleField, key, sch)
+            + '<hr class="my-2">' + renderScalarFields(item, path, 'modules', exclude) + '</div>';
+    }
+    document.getElementById('clusterEditBody').innerHTML = bodyHtml;
+    _applyClusterModalPerms();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('clusterEditModal')).show();
+}
+
+// Enforce the cluster modal's read-only state (view-only access). Mirrors the host
+// modal: disable every body input/button (tab nav stays usable) and hide the
+// footer Save, leaving only Cancel. No-op when the user can edit the cluster.
+function _applyClusterModalPerms() {
+    const ro = !!(_clEditCtx && _clEditCtx.readonly);
+    const body = document.getElementById('clusterEditBody');
+    if (body) {
+        // Controls inside a [data-ro-keep] region are pure VIEW controls (Last data
+        // / Logs filters, refresh, pagination) — they stay active even read-only.
+        body.querySelectorAll('input, select, textarea').forEach(el => {
+            el.disabled = ro && !el.closest('[data-ro-keep]');
+        });
+        body.querySelectorAll('button').forEach(b => {
+            if (b.getAttribute('data-bs-toggle') === 'tab') return;   // keep tab navigation
+            b.disabled = ro && !b.closest('[data-ro-keep]');
+        });
+    }
+    const save = document.getElementById('btnClusterEditSave');
+    if (save) save.classList.toggle('d-none', ro);
+    const title = document.getElementById('clusterEditTitle');
+    if (title && ro) title.textContent = t('cl_view') || t('host_view');
+}
+
+async function saveClusterEdit() {
+    if (!_clEditCtx || _clEditCtx.readonly) return;
+    _clEditCtx.committed = true;
+    await saveModules();
+    bootstrap.Modal.getInstance(document.getElementById('clusterEditModal'))?.hide();
+    renderClusters();
+}
+
+// Cancel/close without saving restores the snapshot (or drops a brand-new draft),
+// then recomputes the modules dirty flag against the last saved state.
+document.getElementById('clusterEditModal')?.addEventListener('hidden.bs.modal', () => {
+    if (_clEditCtx && !_clEditCtx.committed) {
+        const { mod, coll, key, isNew, snap } = _clEditCtx;
+        if (modulesData[mod] && modulesData[mod][coll]) {
+            if (isNew) delete modulesData[mod][coll][key];
+            else modulesData[mod][coll][key] = snap;
+        }
+        if (typeof _savedModulesData !== 'undefined' && _savedModulesData
+            && JSON.stringify(modulesData) === JSON.stringify(_savedModulesData)) {
+            clearDirty('modules');
+        }
+        renderClusters();
+    }
+    _clEditCtx = null;
+});
+
+// Re-render whichever module surface is active, keeping the Modules tab and the
+// Clusters sub-tab in sync after a shared item mutation (add/delete/rename/…).
+function _renderModulesSurface() {
+    const clEl = document.getElementById('subtab-srv-clusters');
+    const clustersActive = clEl && clEl.classList.contains('active')
+                        && document.getElementById('clusters-container');
+    renderModules();
+    if (clustersActive) renderClusters();
+}

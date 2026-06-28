@@ -80,11 +80,14 @@ class Monitor(ObjectBase):
         self._injected_config = config
 
         self._read_config()
-        self._init_telegram()
         self._db = self._init_db()
         # Fold the editable DB config layer under the read-only config.json now
         # that the shared connector exists (config.json/env stay read-only on top).
         self._apply_db_config()
+        # Telegram MUST be initialised after _apply_db_config: the token/chat_id
+        # are editable config that live in the DB, not config.json — initialising
+        # before the DB layer is folded in would read them empty.
+        self._init_telegram()
         # Module configuration lives in the DB; needs the connector + fernet, so
         # it is wired here rather than in _read_config.
         self.config_modules = self._init_modules()
@@ -445,18 +448,52 @@ class Monitor(ObjectBase):
         self.status.save()
 
     def _init_telegram(self):
-        """ Initialize the Telegram object if the configuration is available. """
-        if self.config:
-            self.tg = Telegram(
-                self.config.get_conf(['telegram', 'token'], ''),
-                self.config.get_conf(['telegram', 'chat_id'], '')
-            )
-            self.tg.group_messages = self.config.get_conf(['telegram', 'group_messages'], cfg_default('telegram|group_messages'))
-            self.debug.print(
-                f"> Monitor >> Telegram {'configured' if self.config.get_conf(['telegram', 'token'], '') else 'not configured'}"
-                f" (group_messages={self.tg.group_messages})", DebugLevel.info)
-        else:
+        """ Initialize (or refresh) the Telegram object from the config.
+
+        The token/chat_id are editable config that live in the DB, so this MUST
+        run after :meth:`_apply_db_config` (the effective config is folded in).
+        When a Telegram instance already exists (live refresh from the daemon),
+        the credentials are updated in place — the background sender thread reads
+        them at send time — so changing them in the UI takes effect without a
+        restart and without churning the sender thread.
+        """
+        if not self.config:
             self.tg = None
+            return
+        token   = self.config.get_conf(['telegram', 'token'], '')
+        chat_id = self.config.get_conf(['telegram', 'chat_id'], '')
+        group   = self.config.get_conf(['telegram', 'group_messages'],
+                                       cfg_default('telegram|group_messages'))
+        if getattr(self, 'tg', None) is not None:
+            self.tg.token = token
+            self.tg.chat_id = chat_id
+            self.tg.group_messages = group
+        else:
+            self.tg = Telegram(token, chat_id)
+            self.tg.group_messages = group
+        self.debug.print(
+            f"> Monitor >> Telegram {'configured' if token else 'not configured'}"
+            f" (group_messages={self.tg.group_messages})", DebugLevel.info)
+
+    def refresh_runtime_config(self):
+        """Re-read the effective (DB+file) config and re-apply the bits that may
+        change live: the Telegram credentials and the public URL.  Called by the
+        persistent daemon each cycle so UI config edits take effect without a
+        restart (the Telegram sender thread is updated in place, not recreated)."""
+        self._apply_db_config()
+        self._init_telegram()
+        # Re-read the module config from the DB each cycle.  The persistent daemon
+        # monitor holds its OWN ModulesStore whose version() counter is bumped only
+        # by its own writes — it never sees the web admin's edits (a separate store
+        # instance) — so a conditional reload would never fire.  Read unconditionally
+        # so checks added/edited in the UI (e.g. a new Proxmox cluster) are picked
+        # up without restarting the daemon.  State (streaks) lives elsewhere.
+        cm = getattr(self, 'config_modules', None)
+        if cm is not None and getattr(cm, '_store', None) is not None:
+            try:
+                cm.read()
+            except Exception:  # pylint: disable=broad-except
+                pass
 
     @property
     def dir_base(self):
@@ -539,11 +576,14 @@ class Monitor(ObjectBase):
             tmp_message = result_data.get_message(key)
             tmp_send = result_data.get_send(key)
             tmp_other_data = result_data.get_other_data(key)
+            tmp_severity = result_data.get_severity(key)
 
-            # Working state lives in self.status (DB-backed); other_data and the
-            # message are refreshed every cycle so the UI/latest-data stay current.
+            # Working state lives in self.status (DB-backed); other_data, the
+            # message and the severity are refreshed every cycle so the UI/latest-data
+            # stay current.
             self.status.set_conf([module_name, key, 'other_data'], tmp_other_data)
             self.status.set_conf([module_name, key, 'message'], tmp_message)
+            self.status.set_conf([module_name, key, 'severity'], tmp_severity)
 
             if self.check_status(tmp_status, module_name, key):
                 self.status.set_conf([module_name, key, 'status'], tmp_status)

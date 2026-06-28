@@ -116,7 +116,7 @@ async function renderServices() {
         }));
     }
 
-    // Database
+    // Database (system)
     if (s.database) {
         const d = s.database;
         cards.push(_svcCard({
@@ -125,7 +125,24 @@ async function renderServices() {
             rows: [
                 _svcRow(t('svc_driver'), esc(d.driver || '—')),
                 _svcRow(t('svc_host'), esc(d.host || '—')),
+                _svcRow(t('svc_db_name'), esc(d.name || '—')),
             ],
+        }));
+    }
+
+    // Dedicated syslog database (only present when syslog uses its own DB)
+    if (s.database_syslog) {
+        const d = s.database_syslog;
+        const rows = [
+            _svcRow(t('svc_driver'), esc(d.driver || '—')),
+            _svcRow(t('svc_host'), esc(d.host || '—')),
+            _svcRow(t('svc_db_name'), esc(d.name || '—')),
+        ];
+        if (d.fell_back) rows.push(_svcRow(t('svc_status'), esc(t('svc_db_fell_back'))));
+        cards.push(_svcCard({
+            key: 'database_syslog', icon: 'bi-database-fill-gear', title: t('svc_database_syslog'),
+            state: d.state, running: false, controllable: false, embedded: false,
+            rows,
         }));
     }
 

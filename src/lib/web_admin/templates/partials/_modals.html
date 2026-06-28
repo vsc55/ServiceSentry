@@ -48,7 +48,9 @@
                         <div class="row g-3 mb-2 flex-shrink-0">
                             <div class="col-sm-6">
                                 <label class="form-label small fw-semibold">{{ i18n.username }}</label>
-                                <input type="text" class="form-control form-control-sm" id="umUsername" autocomplete="off">
+                                <input type="text" class="form-control form-control-sm" id="umUsername" autocomplete="off"
+                                    oninput="this.classList.remove('is-invalid')">
+                                <div class="invalid-feedback" id="umUsernameError"></div>
                             </div>
                             <div class="col-sm-6">
                                 <label class="form-label small fw-semibold">{{ i18n.display_name }}</label>
@@ -81,8 +83,20 @@
                         <div class="row g-3 mb-2 flex-shrink-0" id="umPasswordGroup">
                             <div class="col-sm-6">
                                 <label class="form-label small fw-semibold">{{ i18n.password }}</label>
-                                <input type="password" class="form-control form-control-sm" id="umPassword" autocomplete="new-password"
-                                    oninput="_updatePasswordStrength('umPassword','umPwStrengthBar','umPwStrengthLabel')">
+                                <div class="input-group input-group-sm">
+                                    <input type="password" class="form-control form-control-sm" id="umPassword" autocomplete="new-password"
+                                        oninput="_updatePasswordStrength('umPassword','umPwStrengthBar','umPwStrengthLabel')">
+                                    <button class="btn btn-secondary" type="button" id="umPwToggleBtn"
+                                        title="{{ i18n.pw_show_hide }}"
+                                        onclick="_togglePwVisibility('umPassword','umPwToggleBtn')">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button class="btn btn-secondary" type="button" id="umGenPwBtn"
+                                        title="{{ i18n.pw_generate }}"
+                                        onclick="_fillGeneratedPassword('umPassword','umPwStrengthBar','umPwStrengthLabel');_syncPwToggleIcon('umPassword','umPwToggleBtn')">
+                                        <i class="bi bi-shuffle"></i>
+                                    </button>
+                                </div>
                                 <div class="progress mt-1" style="height:4px" id="umPwStrengthBar"><div class="progress-bar" role="progressbar"></div></div>
                                 <div class="text-muted small mt-1" id="umPwStrengthLabel" style="min-height:1.1em"></div>
                             </div>
@@ -128,6 +142,11 @@
                             <input class="form-check-input" type="checkbox" id="umClearDashboard">
                             <label class="form-check-label small fw-semibold" for="umClearDashboard"><i class="bi bi-grid-1x2 me-1"></i>{{ i18n.user_clear_dashboard }}</label>
                         </div>
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox" id="umClearAllModals" onchange="_umToggleAllModals(this.checked)">
+                            <label class="form-check-label small fw-semibold" for="umClearAllModals"><i class="bi bi-window-stack me-1"></i>{{ i18n.user_clear_modals }}</label>
+                        </div>
+                        <div class="row g-1 ms-4" id="umClearModalsGrid"></div>
                     </div>
                 </div>
             </div>
@@ -225,6 +244,25 @@
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
                 <button class="btn btn-sm btn-primary" id="btnAddItemOk" title="{{ i18n.add_item_tt }}">
                     <i class="bi bi-plus-lg me-1"></i>{{ i18n.add }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Cluster edit modal — hosts the shared field editor for one multi-bind check #}
+<div class="modal fade" id="clusterEditModal" tabindex="-1">
+    <div class="modal-dialog cl-modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-diagram-3 me-1"></i><span id="clusterEditTitle">{{ i18n.cl_edit_title }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="clusterEditBody"></div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnClusterEditSave" onclick="saveClusterEdit()" title="{{ i18n.save }}">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
                 </button>
             </div>
         </div>
@@ -356,7 +394,7 @@
                 </h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
-            <div class="modal-body" id="addModuleModalBody" style="max-height:65vh;overflow-y:auto">
+            <div class="modal-body" id="addModuleModalBody">
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
@@ -393,7 +431,7 @@
                 </h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
-            <div class="modal-body" id="auditDetailModalBody" style="max-height:70vh;overflow-y:auto;">
+            <div class="modal-body" id="auditDetailModalBody">
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
@@ -572,7 +610,9 @@
                         <div class="mb-2 flex-shrink-0">
                             <label class="form-label small fw-semibold">{{ i18n.role_name }}</label>
                             <input type="text" class="form-control form-control-sm" id="rmLabel" autocomplete="off"
-                                placeholder="e.g. Operations Viewer">
+                                placeholder="e.g. Operations Viewer"
+                                oninput="this.classList.remove('is-invalid')">
+                            <div class="invalid-feedback" id="rmLabelError"></div>
                         </div>
 {{ uid_field('rm') }}
                         <div class="mb-2 flex-shrink-0" id="rmEnabledGroup" style="display:none">
@@ -782,7 +822,7 @@
 
 {# New/Edit host (server) modal — body is built dynamically by saveHostModal/openEditHostModal. #}
 <div class="modal fade" id="hostModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-xl" style="max-width:min(1500px, 96vw)">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title"><i class="bi bi-hdd-network me-1"></i><span id="hostModalTitle">{{ i18n.host_new }}</span></h6>
@@ -805,6 +845,51 @@
                 <button type="button" class="btn btn-sm btn-primary" id="btnHostModalOk" onclick="saveHostModal(true)">
                     <i class="bi bi-save2 me-1"></i>{{ i18n.save_and_close }}
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Clone-host modal: ask name + new address, then create the duplicate. #}
+<div class="modal fade" id="hostCloneModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-copy me-1"></i>{{ i18n.host_clone_title }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div class="mb-2">
+                    <label class="form-label form-label-sm mb-1">{{ i18n.host_name }}</label>
+                    <input type="text" class="form-control form-control-sm" id="hostCloneName" autocomplete="off"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();_cloneHostSubmit(true);}">
+                </div>
+                <div class="mb-1">
+                    <label class="form-label form-label-sm mb-1">{{ i18n.host_address }}</label>
+                    <input type="text" class="form-control form-control-sm" id="hostCloneAddress" autocomplete="off"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();_cloneHostSubmit(true);}">
+                </div>
+                {# Bound module checks to clone (all selected by default). Hidden when none. #}
+                <div id="hostCloneChecksWrap" class="mt-3 d-none">
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <label class="form-label form-label-sm mb-0">{{ i18n.host_clone_checks }}</label>
+                        <span class="badge bg-secondary" id="hostCloneChecksCount" style="font-size:.7rem"></span>
+                        <button type="button" class="btn btn-sm btn-secondary py-0 px-2 ms-auto"
+                                onclick="_cloneChecksToggleAll(true)">{{ i18n.select_all }}</button>
+                        <button type="button" class="btn btn-sm btn-secondary py-0 px-2"
+                                onclick="_cloneChecksToggleAll(false)">{{ i18n.select_none }}</button>
+                    </div>
+                    <div id="hostCloneChecks" class="border rounded p-2"
+                         style="max-height:14rem;overflow:auto;background:var(--bs-body-bg)"></div>
+                </div>
+                <div class="text-danger small mt-2" id="hostCloneError"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="_cloneHostSubmit(false)">
+                    <i class="bi bi-save me-1"></i>{{ i18n.save }}</button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="_cloneHostSubmit(true)">
+                    <i class="bi bi-save2 me-1"></i>{{ i18n.host_clone_save_edit }}</button>
             </div>
         </div>
     </div>
@@ -847,6 +932,28 @@
     </div>
 </div>
 
+<!-- ============ Generic module-action modal ============ -->
+<!-- A reusable, module-AGNOSTIC modal: openModuleActionModal() fills the title,
+     body (the action's inputs) and behaviour entirely from the module's action
+     spec. No module-specific markup here. -->
+<div class="modal fade" id="moduleActionModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-lightning-charge me-1"></i><span id="moduleActionModalTitle"></span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="moduleActionModalBody"></div>
+            <div class="modal-footer py-2">
+                <div class="me-auto" id="moduleActionModalStatus"></div>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button type="button" class="btn btn-sm btn-primary" id="moduleActionRunBtn" onclick="_maRun()">
+                    <i class="bi bi-play-fill me-1"></i>{{ i18n.cred_action_run }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ==================== Credential modal ===================== -->
 <div class="modal fade" id="credModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
@@ -870,7 +977,7 @@
 
 <!-- ==================== Event rule modal ===================== -->
 <div class="modal fade" id="eventRuleModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title"><i class="bi bi-bell me-1"></i><span id="eventRuleModalTitle">{{ i18n.event_add }}</span></h6>
@@ -880,7 +987,7 @@
             <div class="modal-footer py-2">
                 <span class="text-danger small me-auto" id="eventRuleModalError"></span>
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button type="button" class="btn btn-success btn-sm" onclick="_eventModalSave()"><i class="bi bi-check-lg me-1"></i>{{ i18n.event_save }}</button>
+                <button type="button" class="btn btn-success btn-sm" id="btnEventRuleSave" onclick="_eventModalSave()"><i class="bi bi-check-lg me-1"></i>{{ i18n.event_save }}</button>
             </div>
         </div>
     </div>

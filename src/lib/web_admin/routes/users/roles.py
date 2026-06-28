@@ -9,7 +9,7 @@ from flask import jsonify, session
 
 from ...constants import (
     BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, ROLES,
-    SYSTEM_USER, is_module_perm, is_server_perm,
+    SYSTEM_USER, is_module_perm, is_server_perm, is_cluster_perm,
 )
 from .._helpers import touch_entity, track_change
 
@@ -94,7 +94,7 @@ def register(app, wa):
         name        = data.get('name', '').strip()
         description = data.get('description', '').strip()
         perms       = [p for p in data.get('permissions', [])
-                       if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p)]
+                       if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p) or is_cluster_perm(p)]
         if not _check_perms_escalation(perms):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         if not name:
@@ -183,7 +183,7 @@ def register(app, wa):
             if 'permissions' in data:
                 new_perms = sorted(
                     p for p in data['permissions']
-                    if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p)
+                    if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p) or is_cluster_perm(p)
                 )
                 if not _check_perms_escalation(new_perms):
                     return jsonify({'error': wa._t('insufficient_permissions')}), 403

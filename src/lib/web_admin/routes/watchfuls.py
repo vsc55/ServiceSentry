@@ -47,6 +47,11 @@ def _resolve_host_ctx(wa, config):
 
     store = getattr(wa, '_hosts_store', None)
     uid = str(config.get('host_uid') or '').strip()
+    if not uid:
+        # Multi-host (cluster) check: provision against the primary bound host.
+        uids = config.get('host_uids')
+        if isinstance(uids, list):
+            uid = next((str(u).strip() for u in uids if str(u).strip()), '')
     stored = store.get(uid, decrypt=True) if (store and uid) else None
     draft = config.get('_host') if isinstance(config.get('_host'), dict) else None
 
@@ -94,20 +99,31 @@ def _restore_action_secrets(wa, module, config):
 
 
 def _apply_cred_to_config(wa, config):
-    """Overlay a referenced credential's fields onto an action's *config*, so a
-    web action (test_connection…) on a check that uses a named credential
-    authenticates with the credential — not the stored inline secret.  Mirrors
-    ModuleBase.resolve_host; runs last so the credential wins."""
-    uid = str(config.get('cred_uid') or '').strip()
-    if not uid:
-        return
+    """Overlay every referenced credential's fields onto an action's *config*, so
+    a web action (test_connection, provision_token…) authenticates with the
+    stored credential — not an inline secret.  Applies the primary ``cred_uid``
+    plus any secondary ``*_cred_uid`` (e.g. a credential-editor action's
+    ``ssh_cred_uid``).  Mirrors ModuleBase.resolve_host; runs last so the
+    credential wins."""
     cstore = getattr(wa, '_credentials_store', None)
-    cred = cstore.get(uid) if cstore is not None else None
-    if not cred or cred.get('enabled') is False:
+    if cstore is None:
         return
-    for k, v in (cred.get('data') or {}).items():
-        if v not in (None, ''):
-            config[k] = v
+    # Primary cred_uid first, then secondaries (ssh_cred_uid, …).
+    uids = sorted((k for k in config if k == 'cred_uid' or k.endswith('_cred_uid')),
+                  key=lambda k: k != 'cred_uid')
+    for key in uids:
+        uid = str(config.get(key) or '').strip()
+        if not uid:
+            continue
+        try:
+            cred = cstore.get(uid)
+        except Exception:  # pylint: disable=broad-except
+            continue
+        if not cred or cred.get('enabled') is False:
+            continue
+        for k, v in (cred.get('data') or {}).items():
+            if v not in (None, ''):
+                config[k] = v
 
 
 def _merge_host_conn(wa, module, config, host_ctx):

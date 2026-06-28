@@ -97,7 +97,35 @@ def _i18n_for(lang_data: dict, section: str, key: str) -> dict:
 
 # Structural attributes copied verbatim from a field declaration to its catalog
 # entry (everything except the derived ``kind`` and the translations).
-_FIELD_PASS_THROUGH = ('options', 'show_when', 'default', 'placeholder', 'rows', 'autocomplete')
+_FIELD_PASS_THROUGH = ('options', 'show_when', 'default', 'placeholder', 'rows',
+                       'autocomplete', 'credential_type')
+
+
+def _resolve_option_labels(entry: dict, name: str, lang_data: dict) -> None:
+    """Attach per-option ``label_i18n`` from the module's ``option_labels`` section.
+
+    ``option_labels`` maps ``{field_name: {value: text}}`` per language.  A plain
+    string option ``"create"`` becomes ``{value, label_i18n}`` so the credential
+    editor / action modal can show the translated label."""
+    opts = entry.get('options')
+    if not isinstance(opts, list):
+        return
+    new = []
+    for o in opts:
+        val = o.get('value') if isinstance(o, dict) else o
+        li = {}
+        for lang, data in lang_data.items():
+            sec = data.get('option_labels') if isinstance(data, dict) else None
+            fmap = sec.get(name) if isinstance(sec, dict) else None
+            if isinstance(fmap, dict) and isinstance(fmap.get(val), str) and fmap[val]:
+                li[lang] = fmap[val]
+        if li:
+            merged = dict(o) if isinstance(o, dict) else {'value': val}
+            merged['label_i18n'] = li
+            new.append(merged)
+        else:
+            new.append(o)
+    entry['options'] = new
 
 
 def _field_out(decl: dict, label_i18n: dict | None = None, hint_i18n: dict | None = None) -> dict:
@@ -182,17 +210,50 @@ def credential_schemas(watchfuls_dir: str | None = None) -> dict:
                 if 'name' not in d:
                     d = {**d, 'name': name}
                 lkey = d.get('label') or name
-                field_entries.append(_field_out(
+                fe = _field_out(
                     d,
                     label_i18n=_i18n_for(lang_data, 'labels', lkey) or {'en_EN': name},
                     hint_i18n=_i18n_for(lang_data, 'hints', lkey) or None,
-                ))
+                )
+                _resolve_option_labels(fe, name, lang_data)
+                field_entries.append(fe)
             if not field_entries:
                 continue
+            # Optional module-contributed actions for the credential editor (a
+            # button + a small inputs sub-form, e.g. proxmox "provision token via
+            # SSH").  Inputs share the field vocabulary; a kind:"credential" input
+            # carries a ``credential_type`` so the editor renders a credential
+            # picker of that type.
+            action_entries = []
+            for a in (spec.get('actions') or []):
+                if not isinstance(a, dict) or not a.get('id') or not a.get('url'):
+                    continue
+                aid = str(a['id'])
+                inputs = []
+                for f in (a.get('inputs') or []):
+                    if not isinstance(f, dict) or not f.get('name'):
+                        continue
+                    lkey = f.get('label') or f['name']
+                    ie = _field_out(
+                        f,
+                        label_i18n=_i18n_for(lang_data, 'labels', lkey) or {'en_EN': f['name']},
+                        hint_i18n=_i18n_for(lang_data, 'hints', lkey) or None,
+                    )
+                    _resolve_option_labels(ie, f['name'], lang_data)
+                    inputs.append(ie)
+                action_entries.append({
+                    'id':         aid,
+                    'url':        str(a['url']),
+                    'icon':       str(a.get('icon') or 'bi-lightning'),
+                    'result':     str(a.get('result') or 'toast'),
+                    'label_i18n': _i18n_for(lang_data, 'action_labels', aid) or {'en_EN': aid},
+                    'inputs':     inputs,
+                })
             catalog[ctype] = {
                 'module':     entry,
                 'label_i18n': type_label or {'en_EN': ctype},
                 'fields':     field_entries,
+                'actions':    action_entries,
             }
     return catalog
 

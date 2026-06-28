@@ -132,14 +132,14 @@ class TestPerModuleProfiles:
         assert out['db_type'] == 'postgres'
 
     def test_web_inherits_only_address(self):
-        # The host provides only the address (→ url); scheme/auth/etc. are
+        # The host provides only the address (→ server); scheme/auth/etc. are
         # per-check now, so the check's own values are kept.
         mm = create_mock_monitor({'watchfuls.web': {}})
         mm._hosts_store = _FakeStore({'h1': _HOST})
         out = web.Watchful(mm).resolve_host(
             {'host_uid': 'h1', 'path': '/health', 'method': 'GET',
              'scheme': 'http', 'auth_user': 'me'})
-        assert out['url'] == '10.0.0.9'          # address → url
+        assert out['server'] == '10.0.0.9'       # address → server
         assert out['scheme'] == 'http'           # NOT overridden by the host
         assert out['auth_user'] == 'me'
         assert out['path'] == '/health' and out['method'] == 'GET'
@@ -242,3 +242,66 @@ class TestDatastoreResolvedItem:
         mm._hosts_store = _FakeStore({'h1': _HOST})
         dw = datastore.Watchful(mm)
         assert dw._resolved_item('db2')['host'] == 'inline.local'
+
+
+class TestMultiHostBinding:
+    """A __host_multiple_bind__ module (proxmox) binds to several hosts via
+    host_uids; the address field becomes the space-joined failover list, and the
+    first host is primary (profile fields / OS / maintenance)."""
+
+    _NODES = {
+        'n1': {'uid': 'n1', 'address': '10.0.0.1', 'kind': 'remote',
+               'profiles': {'proxmox': {'port': 8006}}},
+        'n2': {'uid': 'n2', 'address': '10.0.0.2', 'kind': 'remote', 'profiles': {}},
+        'n3': {'uid': 'n3', 'address': '10.0.0.3', 'kind': 'remote', 'profiles': {}},
+    }
+
+    def _pve(self, hosts=None):
+        from watchfuls.proxmox import Watchful
+        mm = create_mock_monitor({'watchfuls.proxmox': {}})
+        mm._hosts_store = _FakeStore(hosts if hosts is not None else self._NODES)
+        return Watchful(mm)
+
+    def test_addresses_joined_for_failover(self):
+        out = self._pve().resolve_host(
+            {'host_uids': ['n1', 'n2', 'n3'], 'host': '', 'enabled': True})
+        assert out['host'] == '10.0.0.1 10.0.0.2 10.0.0.3'
+        assert out['port'] == 8006            # from the primary's proxmox profile
+        assert out['enabled'] is True
+
+    def test_missing_hosts_skipped(self):
+        out = self._pve().resolve_host({'host_uids': ['n1', 'nope'], 'host': ''})
+        assert out['host'] == '10.0.0.1'
+
+    def test_empty_host_uids_inline(self):
+        item = {'host_uids': [], 'host': '1.2.3.4', 'enabled': True}
+        assert self._pve({}).resolve_host(item) == item
+
+    def test_single_host_uid_unaffected(self):
+        out = self._pve().resolve_host({'host_uid': 'n1', 'host': ''})
+        assert out['host'] == '10.0.0.1'
+        assert out['port'] == 8006
+
+    def test_exposes_cluster_members_roster(self):
+        """Multi-host binding exposes the member roster (uid/name/address/node/
+        maintenance) so the module can map API nodes to hosts; a member in
+        maintenance does NOT disable the whole check."""
+        hosts = {
+            'n1': {'uid': 'n1', 'name': 'srv-1', 'address': '10.0.0.1', 'kind': 'remote',
+                   'maintenance': False, 'profiles': {'proxmox': {'port': 8006, 'node': 'pve01'}}},
+            'n2': {'uid': 'n2', 'name': 'srv-2', 'address': '10.0.0.2', 'kind': 'remote',
+                   'maintenance': True, 'profiles': {'proxmox': {'node': 'pve02'}}},
+        }
+        out = self._pve(hosts).resolve_host(
+            {'host_uids': ['n1', 'n2'], 'host': '', 'enabled': True})
+        members = out['__cluster_members__']
+        assert [m['node'] for m in members] == ['pve01', 'pve02']
+        assert [m['name'] for m in members] == ['srv-1', 'srv-2']
+        assert [m['maintenance'] for m in members] == [False, True]
+        assert out['enabled'] is True            # member maintenance does NOT disable
+
+    def test_single_host_maintenance_still_disables(self):
+        hosts = {'n1': {'uid': 'n1', 'name': 's', 'address': '10.0.0.1', 'kind': 'remote',
+                        'maintenance': True, 'profiles': {}}}
+        out = self._pve(hosts).resolve_host({'host_uid': 'n1', 'host': ''})
+        assert out['enabled'] is False           # single-host maintenance disables

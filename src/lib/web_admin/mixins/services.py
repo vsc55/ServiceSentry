@@ -33,12 +33,17 @@ class _ServicesMixin:
     # ── aggregate status ──────────────────────────────────────────────────────
     def _services_status_dict(self) -> dict:
         """Serialisable snapshot of every service for the Services dashboard."""
-        return {
+        out = {
             'scheduler': self._service_scheduler_status(),
             'syslog':    self._service_syslog_status(),
             'worker':    self._service_worker_status(),
             'database':  self._service_database_status(),
         }
+        # Only present when syslog uses its OWN database (else it shares 'database').
+        syslog_db = self._service_syslog_database_status()
+        if syslog_db is not None:
+            out['database_syslog'] = syslog_db
+        return out
 
     def _service_scheduler_status(self) -> dict:
         d = self._daemon_status_dict()
@@ -119,6 +124,42 @@ class _ServicesMixin:
             'embedded':     False,
             'driver':       driver,
             'host':         db_cfg.get('host') if driver != 'sqlite' else None,
+            'name':         db_cfg.get('name') if driver != 'sqlite'
+                            else (db_cfg.get('path') or 'data.db'),
+        }
+
+    def _service_syslog_database_status(self) -> dict | None:
+        """Status of the DEDICATED syslog database, or None when syslog shares the
+        system DB.  ``build_syslog_connector`` only builds a separate connector when
+        ``syslog_db.enabled`` — otherwise it returns the main one, so there is no
+        second connection to report."""
+        from lib.config.manager import overlay_section_env  # noqa: PLC0415
+        sdb = overlay_section_env('syslog_db', self._config_section('syslog_db')) or {}
+        if not sdb.get('enabled'):
+            return None
+        driver = (sdb.get('driver') or 'sqlite').lower()
+        conn = getattr(self, '_syslog_db_connector', None)
+        main = getattr(self, '_db_connector', None)
+        # A dedicated config that fell back to the main connector (build error) is
+        # NOT actually using its own database — surface that as an error.
+        fell_back = conn is not None and conn is main
+        ok = False
+        if not fell_back:
+            try:
+                if conn is not None:
+                    conn.fetchone('SELECT 1')
+                    ok = True
+            except Exception:  # pylint: disable=broad-except
+                ok = False
+        return {
+            'state':        'running' if ok else 'error',
+            'controllable': False,
+            'embedded':     False,
+            'driver':       driver,
+            'host':         sdb.get('host') if driver != 'sqlite' else None,
+            'name':         sdb.get('name') if driver != 'sqlite'
+                            else (sdb.get('path') or 'syslog.db'),
+            'fell_back':    fell_back,
         }
 
     # ── control (embedded services only) ──────────────────────────────────────

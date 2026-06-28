@@ -59,11 +59,22 @@ _SCHEMA = TableSpec(
         Column('other_data',     'TEXT'),
         Column('fail_count',     'INTEGER', nullable=False, default='0'),
         Column('last_change_ts', 'REAL', nullable=False, default='0'),
+        # Severity of a non-OK status: '' (OK), 'error' (default for status=0) or
+        # 'warning'. Lets the UI show avisos (yellow) distinctly from errors (red).
+        Column('severity',       'TEXT', nullable=False, default="''"),
     ),
     composite_pk=('module', 'key', 'metric'),
 )
 
 _T = _SCHEMA.name  # table name — single source of truth
+
+
+def _norm_severity(severity, status) -> str:
+    """Normalise a check's severity: OK → ''; a non-OK status defaults to 'error'
+    unless the module explicitly marks it 'warning'."""
+    if status:
+        return ''
+    return 'warning' if str(severity).lower() == 'warning' else 'error'
 
 
 def _load_json(raw):
@@ -114,7 +125,7 @@ class CheckStateStore:
         try:
             rows = self._db.fetchall(
                 'SELECT uid, module, key, item_uid, metric, status, message, '
-                f'other_data, fail_count, last_change_ts FROM {_T}'
+                f'other_data, fail_count, last_change_ts, severity FROM {_T}'
             )
             for r in rows:
                 out[(r[1], r[2], r[4] or '')] = {
@@ -126,6 +137,7 @@ class CheckStateStore:
                     'other_data':     _load_json(r[7]),
                     'fail_count':     int(r[8] or 0),
                     'last_change_ts': r[9],
+                    'severity':       r[10] or '',
                 }
         except Exception:  # pylint: disable=broad-except
             pass
@@ -141,6 +153,7 @@ class CheckStateStore:
             result_key = f'{key}_{metric}' if metric else key
             out.setdefault(module, {})[result_key] = {
                 'status':     rec['status'],
+                'severity':   rec.get('severity', ''),
                 'other_data': rec['other_data'],
                 'fail_count': rec['fail_count'],
                 'message':    rec['message'] or '',
@@ -157,9 +170,10 @@ class CheckStateStore:
         """Insert or replace the current state of one check (portable upsert).
 
         Keyword args: ``message``, ``item_uid``, ``metric``, ``other_data``,
-        ``fail_count``, ``ts``.  The row's own ``uid`` is preserved.
+        ``fail_count``, ``ts``, ``severity``.  The row's own ``uid`` is preserved.
         """
         metric = kw.get('metric') or ''
+        severity = _norm_severity(kw.get('severity'), status)
         try:
             existing = self._db.fetchone(
                 f'SELECT uid FROM {_T} WHERE module=? AND key=? AND metric=?',
@@ -174,8 +188,8 @@ class CheckStateStore:
                 )
                 self._db.execute(
                     f'INSERT INTO {_T}(uid, module, key, item_uid, metric, '
-                    'status, message, other_data, fail_count, last_change_ts) '
-                    'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    'status, message, other_data, fail_count, last_change_ts, severity) '
+                    'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     (
                         row_uid, module, key, kw.get('item_uid'), metric,
                         1 if status else 0,
@@ -183,6 +197,7 @@ class CheckStateStore:
                         json.dumps(kw.get('other_data') or {}, ensure_ascii=False),
                         int(kw.get('fail_count') or 0),
                         kw.get('ts') if kw.get('ts') is not None else time.time(),
+                        severity,
                     ),
                 )
             return True
@@ -225,6 +240,7 @@ class CheckStateStore:
                     json.dumps(rec.get('other_data') or {}, ensure_ascii=False),
                     int(rec.get('fail_count') or 0),
                     ts,
+                    _norm_severity(rec.get('severity'), status),
                 ))
         try:
             with self._db.transaction():
@@ -232,8 +248,8 @@ class CheckStateStore:
                 if rows:
                     self._db.executemany(
                         f'INSERT INTO {_T}(uid, module, key, item_uid, metric, '
-                        'status, message, other_data, fail_count, last_change_ts) '
-                        'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        'status, message, other_data, fail_count, last_change_ts, severity) '
+                        'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                         rows,
                     )
             return True

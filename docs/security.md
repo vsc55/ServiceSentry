@@ -193,7 +193,7 @@ El cliente JS detecta el 401 mediante un poll de `/api/v1/me` cada 20 segundos y
 
 ### Sistema de permisos granulares
 
-El sistema usa **46 flags de permiso por acción** en lugar de roles monolíticos.
+El sistema usa **52 flags de permiso por acción** en lugar de roles monolíticos.
 Cada endpoint está protegido por el permiso exacto que necesita:
 
 | Recurso | Permiso |
@@ -240,9 +240,9 @@ Cada endpoint está protegido por el permiso exacto que necesita:
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos (46 flags) |
-| `editor` | Todos los `*_view` + edición (sin borrar/crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `credentials_edit`, `events_edit`, `overview_edit`, `services_control` |
-| `viewer` | Solo lectura: todos los `*_view` excepto `config_view` |
+| `admin` | Todos (52 flags) |
+| `editor` | Edición (sin borrar/crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` correspondientes (incluido `events_notify_view`). Sin permisos `credentials_*` |
+| `viewer` | Solo lectura: los `*_view` (incluido `events_notify_view`) excepto `config_view` y `credentials_view` |
 
 Los roles integrados **no pueden eliminarse** ni cambiar sus permisos. Sí se puede actualizar su **etiqueta** (`label`) vía `PUT /api/v1/roles/<name>`. Cualquier campo `permissions` en el cuerpo de la petición es ignorado silenciosamente. La etiqueta personalizada del rol integrado se persiste como una fila en la tabla `roles` de la base de datos (usando el UID del rol integrado).
 

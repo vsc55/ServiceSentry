@@ -178,6 +178,34 @@ class TestApiOverview:
         assert status["ok"] == 1
         assert status["error"] == 0
 
+    def test_overview_module_widget_section(self, client, admin):
+        """The overview payload carries generic module-widget data: each module
+        declaring __overview_widget__ contributes its own {entries, aggregate}
+        via its overview_widget() hook (here: proxmox aggregates cluster/ceph/node
+        status). The core stays module-agnostic."""
+        _login(client)
+        admin._save_modules({'watchfuls.proxmox': {'enabled': True, 'list': {
+            'cl1': {'label': 'Lab', 'enabled': True}}}})
+        admin._check_state_store.persist_status({'watchfuls.proxmox': {
+            'cl1/cluster':     {'status': True, 'other_data': {'quorate': True, 'nodes_online': 2}},
+            'cl1/ceph':        {'status': True, 'other_data': {'health': 'HEALTH_OK'}},
+            'cl1/node/pve01':  {'status': True, 'other_data': {'host_name': 'srv-1'}},
+            'cl1/node/pve02':  {'status': False, 'other_data': {}},
+        }})
+        mw = client.get('/api/v1/modules/overview').get_json()['module_widgets']
+        prox = mw['proxmox']
+        assert len(prox['entries']) == 1
+        e = prox['entries'][0]
+        assert e['id'] == 'cl1' and e['name'] == 'Lab'
+        assert e['ok'] is False                       # one node in error
+        assert len(e['rows']) == 2                    # one row per node
+        n1 = next(r for r in e['rows'] if r['name'].startswith('pve01'))
+        assert n1['state'] == 'ok' and 'srv-1' in n1['name']
+        assert any(r['state'] == 'error' for r in e['rows'])
+        assert prox['aggregate']['count'] == 1
+        # stats carry module-authored labels + values (e.g. nodes 1/2)
+        assert any(s['value'] == '1/2' for s in e['stats'])
+
     def test_status_without_var_dir(self, config_dir):
         """No var_dir → zero status counts."""
         wa = WebAdmin(config_dir, "admin", "pass", var_dir=None)
@@ -185,7 +213,7 @@ class TestApiOverview:
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
         status = c.get("/api/v1/modules/overview").get_json()["status"]
-        assert status == {"total": 0, "ok": 0, "error": 0}
+        assert status == {"total": 0, "ok": 0, "error": 0, "warning": 0}
 
     def test_sessions_contains_current(self, client):
         """After login, at least 1 active session listed."""
@@ -308,8 +336,8 @@ class TestApiOverview:
             m["name"]: m["checks"]
             for m in client.get("/api/v1/modules/overview").get_json()["modules"]
         }
-        assert modules["ping"] == {"total": 1, "ok": 1, "error": 0}
-        assert modules["web"] == {"total": 0, "ok": 0, "error": 0}
+        assert modules["ping"] == {"total": 1, "ok": 1, "error": 0, "warning": 0}
+        assert modules["web"] == {"total": 0, "ok": 0, "error": 0, "warning": 0}
 
     def test_module_checks_with_error(self, config_dir, tmp_path):
         """A failing check increments the error counter."""
@@ -334,6 +362,27 @@ class TestApiOverview:
         assert modules["ping"]["ok"] == 1
         assert modules["ping"]["error"] == 1
 
+    def test_module_checks_with_warning(self, config_dir, tmp_path):
+        """A non-OK check marked severity='warning' counts as warning, not error."""
+        var = tmp_path / "var3"
+        var.mkdir()
+        wa = WebAdmin(config_dir, "admin", "pass", var_dir=str(var))
+        wa._save_modules(_SAMPLE_MODULES)
+        wa._check_state_store.persist_status({
+            "ping": {
+                "192.168.1.1": {"status": False, "severity": "warning"},
+                "192.168.1.2": {"status": True},
+            }
+        })
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        c.post("/login", data={"username": "admin", "password": "pass"})
+        data = c.get("/api/v1/modules/overview").get_json()
+        ping = {m["name"]: m["checks"] for m in data["modules"]}["ping"]
+        assert ping == {"total": 2, "ok": 1, "error": 0, "warning": 1}
+        # Aggregate status reflects the warning bucket too.
+        assert data["status"]["warning"] >= 1
+
     def test_module_checks_without_var_dir(self, config_dir):
         """No var_dir → all module checks are zero."""
         wa = WebAdmin(config_dir, "admin", "pass", var_dir=None)
@@ -342,7 +391,7 @@ class TestApiOverview:
         c.post("/login", data={"username": "admin", "password": "pass"})
         modules = c.get("/api/v1/modules/overview").get_json()["modules"]
         for m in modules:
-            assert m["checks"] == {"total": 0, "ok": 0, "error": 0}
+            assert m["checks"] == {"total": 0, "ok": 0, "error": 0, "warning": 0}
 
     def test_status_aggregated_from_module_checks(self, client):
         """Top-level status counts equal the sum of per-module check counts."""
@@ -372,15 +421,16 @@ class TestModuleItemSchemas:
 
     # ---- per-module checks ----
     def test_web_list_schema_has_code(self):
-        """web|list schema includes the 'code' and 'url' fields with rich metadata."""
+        """web|list schema includes the 'code', 'server' and 'port' fields."""
         schema = self.schemas.get('web|list')
         assert schema is not None
         assert 'code' in schema
         assert schema['code']['default'] == 0
         assert schema['code']['type'] == 'int'
         assert 'enabled' in schema
-        assert 'url' in schema
-        assert schema['url']['type'] == 'str'
+        assert 'url' not in schema
+        assert schema['server']['type'] == 'str'
+        assert schema['port']['type'] == 'int'
 
     def test_ping_list_schema_fields(self):
         """ping|list schema has enabled, label, host, timeout, attempt, alert."""

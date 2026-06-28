@@ -115,19 +115,36 @@ def register(app, wa):
 
         def _check_label(mod: str, key: str, item_uid: str) -> str:
             """The item's display 'label' from the module configuration — the series key may
-            be an opaque UID, so show the friendly name instead."""
-            for mk in (mod, f'watchfuls.{mod}', mod.split('.')[-1]):
-                mc = modules_cfg.get(mk)
-                if not isinstance(mc, dict):
-                    continue
-                for coll, items in mc.items():
-                    if coll.startswith('__') or not isinstance(items, dict):
+            be an opaque UID, so show the friendly name instead.  Composite keys
+            ``<item>/<metric>`` (e.g. proxmox ``<uid>/node/pve04``) resolve the leading
+            item segment to its label and keep the metric → ``<label> / node/pve04``."""
+            def _lookup(cand: str) -> str:
+                if not cand:
+                    return ''
+                for mk in (mod, f'watchfuls.{mod}', mod.split('.')[-1]):
+                    mc = modules_cfg.get(mk)
+                    if not isinstance(mc, dict):
                         continue
-                    for cand in (key, item_uid):
-                        it = items.get(cand) if cand else None
+                    for coll, items in mc.items():
+                        if coll.startswith('__') or not isinstance(items, dict):
+                            continue
+                        it = items.get(cand)
                         if isinstance(it, dict) and str(it.get('label') or '').strip():
                             return str(it['label'])
-            return ''
+                return ''
+
+            # Whole-key match first (inline checks whose key IS the item).
+            whole = _lookup(key)
+            if whole:
+                return whole
+            # Composite '<item>/<metric>': resolve the leading segment, keep the rest.
+            if key and '/' in key:
+                head, rest = key.split('/', 1)
+                head_label = _lookup(head)
+                if head_label:
+                    return f'{head_label} / {rest}'
+            # Fall back to the bare item UID (non-composite derived keys).
+            return _lookup(item_uid)
 
         # Cache per-module data to avoid repeated file reads
         _name_cache:    dict[str, str]  = {}

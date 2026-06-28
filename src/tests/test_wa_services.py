@@ -25,7 +25,10 @@ class TestServicesStatus:
         r = client.get('/api/v1/services')
         assert r.status_code == 200
         s = r.get_json()['services']
-        assert set(s) == {'scheduler', 'syslog', 'worker', 'database'}
+        # The core services are always present; 'database_syslog' appears only when
+        # syslog uses a dedicated DB (absent here — sqlite shared).
+        assert {'scheduler', 'syslog', 'worker', 'database'} <= set(s)
+        assert 'database_syslog' not in s
         # each carries a state + the control/embedded flags the UI relies on
         for svc in s.values():
             assert 'state' in svc and 'controllable' in svc and 'embedded' in svc

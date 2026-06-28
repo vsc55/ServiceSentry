@@ -8,7 +8,13 @@ let _eventSearch = '';
 let _eventLog = [];
 let _eventAuditFilter = '';   // filter text for the audit-events multiselect
 
-const _EV_MATCH_TYPES = ['any', 'contains', 'not_contains', 'starts', 'ends', 'regex'];
+const _EV_MATCH_TYPES = ['any', 'equals', 'contains', 'not_contains', 'starts', 'ends', 'regex',
+                         'gt', 'gte', 'lt', 'lte'];
+// Operators offered per field: text fields get the string operators; the numeric
+// "severity" field gets equality + comparisons only.
+const _EV_TEXT_OPS = ['any', 'equals', 'contains', 'not_contains', 'starts', 'ends', 'regex'];
+const _EV_NUM_OPS  = ['any', 'equals', 'gte', 'gt', 'lte', 'lt'];
+function _evOpsForField(field) { return field === 'severity' ? _EV_NUM_OPS : _EV_TEXT_OPS; }
 
 // ── Column infrastructure (shared with the users/groups/roles tables) ─────────
 const _EVR_COLS = [
@@ -16,6 +22,7 @@ const _EVR_COLS = [
     { id: 'name',        label: () => t('event_name'),        sortKey: 'name',        always: true  },
     { id: 'description', label: () => t('event_description'), sortKey: 'description', always: false },
     { id: 'source',      label: () => t('event_source'),      sortKey: 'source',      always: false },
+    { id: 'tags',        label: () => t('event_tags'),        sortKey: null,          always: false },
     { id: 'match',       label: () => t('event_match'),       sortKey: null,          always: false },
     { id: 'channels',    label: () => t('event_channels'),    sortKey: null,          always: false },
     { id: 'last_notif',  label: () => t('event_last_notif'),  sortKey: 'last_fired',  always: false },
@@ -25,6 +32,10 @@ const _EVR_COLS = [
     { id: 'updated_by',  label: () => t('col_updated_by') || 'Updated By',  sortKey: 'updated_by', always: false },
 ];
 const _EVR_DEFAULT_COLS = new Set(['source', 'match', 'channels', 'last_notif', 'enabled']);
+// Columns that size to their content (not resizable). Everything else
+// (Name/Description/Tags) flexes and is resizable via percentage widths.
+const _EVR_FIT = new Set(['uid', 'source', 'match', 'channels', 'last_notif',
+                          'enabled', 'created_at', 'updated_at', 'updated_by']);
 const _EVL_COLS = [
     { id: 'ts',        label: () => t('event_log_time'),     sortKey: 'ts',        always: true  },
     { id: 'rule_name', label: () => t('event_name'),         sortKey: 'rule_name', always: false },
@@ -33,6 +44,8 @@ const _EVL_COLS = [
     { id: 'status',    label: () => t('event_log_status'),   sortKey: 'ok',        always: false },
     { id: 'detail',    label: () => t('event_log_detail'),   sortKey: null,        always: false },
 ];
+// Content-sized (non-resizable) log columns; rule_name/detail flex.
+const _EVL_FIT = new Set(['ts', 'source', 'channels', 'status']);
 const _EVL_DEFAULT_COLS = new Set(['rule_name', 'source', 'channels', 'status', 'detail']);
 
 function _evLoadCols(key, def) {
@@ -48,9 +61,11 @@ function _evCW(key) { try { return JSON.parse(localStorage.getItem(key) || '{}')
 let _evrVisibleCols = _evLoadCols('ss_evrules_cols', _EVR_DEFAULT_COLS);
 let _evrColOrder    = _evLoadOrder('ss_evrules_col_order', _EVR_COLS);
 let _evrSort = 'name', _evrSortDir = 'asc';
+let _evrPage = 1, _evrPageSize = null;
 let _evlVisibleCols = _evLoadCols('ss_evlog_cols', _EVL_DEFAULT_COLS);
 let _evlColOrder    = _evLoadOrder('ss_evlog_col_order', _EVL_COLS);
 let _evlSort = 'ts', _evlSortDir = 'desc';
+let _evlPage = 1, _evlPageSize = null, _evlSearch = '';
 
 function _evrToggleCol(col) {
     const adding = !_evrVisibleCols.has(col);
@@ -75,6 +90,8 @@ function _sortEventRules(col) {
     else { _evrSort = col; _evrSortDir = 'asc'; }
     _eventRulesBody();
 }
+function _goEvrPage(p) { _evrPage = p; _eventRulesBody(); }
+function _changeEvrPageSize(v) { _evrPageSize = parseInt(v, 10); _evrPage = 1; _eventRulesBody(); }
 function _evlToggleCol(col) {
     _evlVisibleCols.has(col) ? _evlVisibleCols.delete(col) : _evlVisibleCols.add(col);
     localStorage.setItem('ss_evlog_cols', JSON.stringify([..._evlVisibleCols]));
@@ -88,6 +105,8 @@ function _resetEvlCols() {
     _persistTableConfig(); _renderEventLog();
 }
 function _evlSaveColOrder() { localStorage.setItem('ss_evlog_col_order', JSON.stringify(_evlColOrder)); _persistTableConfig(); }
+function _goEvlPage(p) { _evlPage = p; _renderEventLog(); }
+function _changeEvlPageSize(v) { _evlPageSize = parseInt(v, 10); _evlPage = 1; _renderEventLog(); }
 function _sortEventLog(col) {
     if (_evlSort === col) _evlSortDir = _evlSortDir === 'asc' ? 'desc' : 'asc';
     else { _evlSort = col; _evlSortDir = 'asc'; }
@@ -103,13 +122,13 @@ function _evOrdered(cols, order, visible) {
 
 // ── Percentage column widths (CSS-native, never overflows) ────────────────────
 // Default relative weights; normalised at render to fill the available width.
-const _EVR_DEFW = { uid: 14, name: 12, description: 14, source: 9, match: 22,
+const _EVR_DEFW = { uid: 14, name: 12, description: 14, source: 9, tags: 10, match: 22,
                     channels: 7, last_notif: 11, enabled: 6, created_at: 10, updated_at: 10, updated_by: 9 };
 let _evrPct = _evCW('ss_evrules_col_w');   // {id: percent} — reuses the server-persisted key
 
-// width% per visible id so they fill (100 - reserve)%, where `reserve` is the
-// fixed actions column. With table-layout:fixed;width:100% the browser keeps the
-// table exactly at container width on load and live — no JS clamp, no h-scroll.
+// width% per visible id, normalised to fill 100% among the flexible columns only.
+// The table uses table-layout:auto so _EVR_FIT columns shrink to their content
+// (width:1% + nowrap) while the flexible ones share the remaining width.
 function _evPctMap(ids, pctMap, defW, reserve) {
     ids.forEach(id => { if (typeof pctMap[id] !== 'number') pctMap[id] = defW[id] || 10; });
     Object.keys(pctMap).forEach(id => { if (!ids.includes(id)) delete pctMap[id]; });
@@ -134,9 +153,10 @@ function _evAttachPctCols(tableId, getOrder, setOrder, saveOrder, render, pctMap
         list.forEach(t => { t.style.width = (t.dataset.col === col ? np : start[t.dataset.col] * scale).toFixed(3) + '%'; });
         list.forEach(t => { pctMap[t.dataset.col] = parseFloat(t.style.width); });
     };
-    ths().forEach(th => {
-        th.querySelector('.ss-resize-handle')?.remove();
-        th.style.position = 'relative'; th.style.overflow = 'hidden';
+    // Reorder (drag) applies to EVERY column — including the content-fit ones that
+    // aren't resizable. Resize (handle + dbl-click auto-fit) is added below only to
+    // the flexible columns.
+    [...tbl.querySelectorAll('thead th[data-col]')].forEach(th => {
         th.addEventListener('dragstart', e => { dragSrc = th.dataset.col; e.dataTransfer.effectAllowed = 'move'; th.style.opacity = '0.4'; });
         th.addEventListener('dragend',   () => { th.style.opacity = ''; dragSrc = null; });
         th.addEventListener('dragover',  e => { e.preventDefault(); th.classList.add('ss-th-drag-over'); });
@@ -149,6 +169,10 @@ function _evAttachPctCols(tableId, getOrder, setOrder, saveOrder, render, pctMap
             if (si < 0 || di < 0) return;
             o.splice(si, 1); o.splice(di, 0, src); setOrder(o); saveOrder(); render();
         });
+    });
+    ths().forEach(th => {
+        th.querySelector('.ss-resize-handle')?.remove();
+        th.style.position = 'relative'; th.style.overflow = 'hidden';
         const handle = document.createElement('div');
         handle.className = 'ss-resize-handle';
         handle.style.cssText = 'position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:2;background:transparent';
@@ -201,10 +225,12 @@ function _evWhen(ts) {
     return isNaN(d) ? '—' : d.toLocaleString();
 }
 
+function _evCanRules() { return ['events_view', 'events_add', 'events_edit', 'events_delete'].some(p => _evCan(p)); }
 async function renderEvents() {
+    // Only fetch what the user is allowed to see (avoids 403s and empty errors).
     const [rules, log] = await Promise.all([
-        apiGet('/api/v1/event-rules'),
-        apiGet('/api/v1/notifications/log?limit=200'),
+        _evCanRules() ? apiGet('/api/v1/event-rules') : Promise.resolve(null),
+        _evCan('events_notify_view') ? apiGet('/api/v1/notifications/log?limit=200') : Promise.resolve(null),
     ]);
     _eventRules = (rules && rules.rules) || [];
     _eventLog = (log && log.log) || [];
@@ -215,28 +241,65 @@ function _eventsRender() {
     const c = document.getElementById('events-container');
     if (!c) return;
     const canAdd = _evCan('events_add');
-    const canEdit = _evCan('events_edit');
+    const canNotifyDelete = _evCan('events_notify_delete');
+    const canRules = _evCanRules();
+    const canNotify = _evCan('events_notify_view');
     const rulesChooser = _buildColChooser(_EVR_COLS, _evrVisibleCols, '_evrToggleCol', '_resetEvrCols');
+    const logChooser = _eventLog.length ? _buildColChooser(_EVL_COLS, _evlVisibleCols, '_evlToggleCol', '_resetEvlCols') : '';
+    // Each sub-tab (and its pane) only renders if the user may see it; the first
+    // visible one is active.
+    const rulesActive = canRules;
     c.innerHTML = `
-        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <h5 class="mb-0 me-auto"><i class="bi bi-bell me-2"></i>${esc(t('tab_events'))}</h5>
-            <input id="ev-search" type="search" class="form-control form-control-sm" style="max-width:240px"
-                placeholder="${escAttr(t('event_search'))}" value="${escAttr(_eventSearch)}"
-                oninput="_eventSearch=this.value;_eventRulesBody()">
-            ${rulesChooser}
-            <button class="btn btn-secondary btn-sm" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
-            ${canAdd ? `<button class="btn btn-primary btn-sm" onclick="openEventRuleModal(null)"><i class="bi bi-plus-lg me-1"></i>${esc(t('event_add'))}</button>` : ''}
-        </div>
-        <p class="text-muted small">${esc(t('event_hint'))}</p>
-        <div id="ev-rules-wrap" class="mb-4"></div>
-        <div class="d-flex align-items-center gap-2 mb-2">
-            <h6 class="mb-0 me-auto"><i class="bi bi-clock-history me-2"></i>${esc(t('event_log_title'))}</h6>
-            <span id="ev-log-chooser"></span>
-            ${canEdit ? `<button class="btn btn-danger btn-sm" onclick="_eventClearLog()"><i class="bi bi-trash me-1"></i>${esc(t('event_log_clear'))}</button>` : ''}
-        </div>
-        <div id="ev-log"></div>`;
-    _eventRulesBody();
-    _renderEventLog();
+        <ul class="nav nav-tabs mb-3" role="tablist">
+            ${canRules ? `<li class="nav-item" role="presentation">
+                <button class="nav-link${rulesActive ? ' active' : ''}" data-bs-toggle="tab" data-bs-target="#ev-pane-rules" type="button" role="tab">
+                    <i class="bi bi-bell me-1"></i>${esc(t('event_subtab_rules'))}</button></li>` : ''}
+            ${canNotify ? `<li class="nav-item" role="presentation">
+                <button class="nav-link${rulesActive ? '' : ' active'}" data-bs-toggle="tab" data-bs-target="#ev-pane-log" type="button" role="tab">
+                    <i class="bi bi-clock-history me-1"></i>${esc(t('event_subtab_log'))}</button></li>` : ''}
+        </ul>
+        <div class="tab-content">
+            ${canRules ? `<div class="tab-pane fade${rulesActive ? ' show active' : ''}" id="ev-pane-rules" role="tabpanel">
+                ${sessionStorage.getItem('ss_ev_hint_dismissed') === '1' ? '' : `<div class="alert alert-info d-flex align-items-center py-2 px-3 small mb-3" role="alert">
+                    <i class="bi bi-info-circle me-2"></i>${esc(t('event_hint'))}
+                    <button type="button" class="btn-close ms-auto" style="font-size:.65rem" data-bs-dismiss="alert"
+                        onclick="sessionStorage.setItem('ss_ev_hint_dismissed','1')" aria-label="${escAttr(t('close') || 'Close')}"></button></div>`}
+                <div class="ss-card ev-card">
+                    <div class="ss-accent ss-accent-purple"></div>
+                    <div class="ss-card-header">
+                        <h6 class="mb-0 me-auto"><i class="bi bi-bell me-2"></i>${esc(t('event_subtab_rules'))}</h6>
+                        <input id="ev-search" type="search" class="form-control form-control-sm" style="max-width:240px"
+                            placeholder="${escAttr(t('event_search'))}" value="${escAttr(_eventSearch)}"
+                            oninput="_eventSearch=this.value;_evrPage=1;_eventRulesBody()">
+                        ${rulesChooser}
+                        <button class="btn btn-sm btn-secondary" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+                        ${canAdd ? `<button class="btn btn-sm btn-success" onclick="openEventRuleModal(null)"><i class="bi bi-plus-lg me-1"></i>${esc(t('event_add'))}</button>` : ''}
+                    </div>
+                    <div class="ss-card-band ss-card-band-top" id="ev-rules-pager-top"></div>
+                    <div id="ev-rules-table-wrap"></div>
+                    <div class="ss-card-band ss-card-band-bottom" id="ev-rules-pager-bottom"></div>
+                </div>
+            </div>` : ''}
+            ${canNotify ? `<div class="tab-pane fade${rulesActive ? '' : ' show active'}" id="ev-pane-log" role="tabpanel">
+                <div class="ss-card ev-card">
+                    <div class="ss-accent ss-accent-slate"></div>
+                    <div class="ss-card-header">
+                        <h6 class="mb-0 me-auto"><i class="bi bi-clock-history me-2"></i>${esc(t('event_log_title'))}</h6>
+                        <input id="ev-log-search" type="search" class="form-control form-control-sm" style="max-width:240px"
+                            placeholder="${escAttr(t('event_search'))}" value="${escAttr(_evlSearch)}"
+                            oninput="_evlSearch=this.value;_evlPage=1;_renderEventLog()">
+                        ${logChooser}
+                        <button class="btn btn-sm btn-secondary" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+                        ${canNotifyDelete ? `<button class="btn btn-sm btn-danger" onclick="_eventClearLog()"><i class="bi bi-trash me-1"></i>${esc(t('event_log_clear'))}</button>` : ''}
+                    </div>
+                    <div class="ss-card-band ss-card-band-top" id="ev-log-pager-top"></div>
+                    <div id="ev-log-table-wrap"></div>
+                    <div class="ss-card-band ss-card-band-bottom" id="ev-log-pager-bottom"></div>
+                </div>
+            </div>` : ''}
+        </div>`;
+    if (canRules) _eventRulesBody();
+    if (canNotify) _renderEventLog();
 }
 
 function _evrSortVal(r, key) {
@@ -259,15 +322,18 @@ function _evrCell(r, colId, canEdit, cw) {
     // column width comes from the resizable <th> and .text-truncate clips here).
     const _ell = (cls, txt) => `<td class="${cls} text-truncate" title="${escAttr(txt)}">${esc(txt)}</td>`;
     switch (colId) {
-        case 'name':       return `<td class="fw-semibold text-truncate" title="${escAttr(r.name || '')}">${esc(r.name || '')}</td>`;
+        case 'name':       return `<td class="text-nowrap"><code>${esc(r.name || '')}</code></td>`;
         case 'source':     return `<td><span class="badge bg-secondary">${esc(t('event_src_' + (r.source || 'audit')))}</span></td>`;
+        case 'tags':       return `<td class="text-truncate" title="${escAttr((r.tags || []).join(', '))}">${(r.tags || []).length
+            ? (r.tags || []).map(tg => `<span class="badge text-bg-secondary me-1 fw-normal">${esc(tg)}</span>`).join('')
+            : '<span class="text-muted">—</span>'}</td>`;
         case 'match':      return _ell('small text-muted', _eventMatchSummary(r));
         case 'channels':   return `<td>${_eventChannelsBadges(r)}</td>`;
         case 'last_notif': return `<td class="small text-nowrap">${r.last_fired
             ? `<span class="badge bg-${r.last_ok ? 'success' : 'danger'} me-1">${r.last_ok ? esc(t('event_ok')) : esc(t('event_err'))}</span>${esc(_evWhen(r.last_fired))}`
             : '<span class="text-muted">—</span>'}</td>`;
-        case 'enabled':    return `<td class="text-center align-middle"><span class="form-switch d-inline-block" style="padding-left:0;min-height:0">
-            <input class="form-check-input m-0" type="checkbox" role="switch" style="margin-left:0;float:none;cursor:pointer"${r.enabled ? ' checked' : ''}${canEdit ? '' : ' disabled'}
+        case 'enabled':    return `<td class="text-center align-middle"><span class="form-switch d-inline-flex align-items-center m-0" style="padding-left:0;min-height:0;line-height:1">
+            <input class="form-check-input m-0" type="checkbox" role="switch" style="margin-left:0;margin-top:0;float:none;vertical-align:middle;cursor:pointer"${r.enabled ? ' checked' : ''}${canEdit ? '' : ' disabled'}
                 onchange="_eventToggleEnabled('${r.id}',this.checked)"></span></td>`;
         case 'description':return _ell('small text-muted', r.description || '', '18rem');
         case 'uid':        return `<td class="text-truncate" title="${escAttr(r.id || '')}"><code class="text-muted" style="font-size:.7rem">${esc(r.id || '')}</code></td>`;
@@ -278,44 +344,68 @@ function _evrCell(r, colId, canEdit, cw) {
     }
 }
 function _eventRulesBody() {
-    const wrap = document.getElementById('ev-rules-wrap');
-    if (!wrap) return;
+    const tableWrap = document.getElementById('ev-rules-table-wrap');
+    if (!tableWrap) return;
+    const pagerTopEl = document.getElementById('ev-rules-pager-top');
+    const pagerBotEl = document.getElementById('ev-rules-pager-bottom');
     const q = _eventSearch.trim().toLowerCase();
     const canEdit = _evCan('events_edit');
     const canDelete = _evCan('events_delete');
-    const showActions = canEdit || canDelete;
+    const canClone = _evCan('events_add');
+    const showActions = canEdit || canDelete || canClone;
     let rows = _eventRules.filter(r => !q || (r.name || '').toLowerCase().includes(q)
-        || (r.source || '').toLowerCase().includes(q));
+        || (r.source || '').toLowerCase().includes(q)
+        || (r.tags || []).some(tg => tg.toLowerCase().includes(q)));
     rows = rows.slice().sort((a, b) => {
         const va = _evrSortVal(a, _evrSort), vb = _evrSortVal(b, _evrSort);
         const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
         return _evrSortDir === 'asc' ? c : -c;
     });
+    if (_evrPageSize === null) _evrPageSize = _defaultPageSize;
+    const total = rows.length;
+    const ps = _evrPageSize || total || 1;
+    _evrPage = Math.max(1, Math.min(_evrPage, Math.ceil((total || 1) / ps)));
+    const pageRows = rows.slice((_evrPage - 1) * ps, _evrPage * ps);
     const ordered = _evOrdered(_EVR_COLS, _evrColOrder, _evrVisibleCols);
     _evrPct = _evCW('ss_evrules_col_w');   // refresh from storage (remote sync may have changed it)
-    const wpct = _evPctMap(ordered.map(c => c.id), _evrPct, _EVR_DEFW, showActions ? 6 : 0);
+    // Only the flexible columns get percentage widths; _EVR_FIT ones size to content.
+    const flexIds = ordered.filter(c => !_EVR_FIT.has(c.id)).map(c => c.id);
+    const wpct = _evPctMap(flexIds, _evrPct, _EVR_DEFW, 0);
     const thRow = ordered.map(col => {
         const inner = col.sortKey ? _thSortInner(col.label(), col.sortKey, _evrSort, _evrSortDir, '_sortEventRules')
             : `<span class="small">${esc(col.label())}</span>`;
-        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true" style="width:${wpct[col.id].toFixed(3)}%">${inner}</th>`;
+        return _EVR_FIT.has(col.id)
+            ? `<th class="ss-th ss-th-fit" data-col="${col.id}" draggable="true" style="width:1%;white-space:nowrap">${inner}</th>`
+            : `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true" style="width:${wpct[col.id].toFixed(3)}%">${inner}</th>`;
     }).join('');
-    const body = !rows.length
+    const body = !total
         ? `<tr><td colspan="${ordered.length + (showActions ? 1 : 0)}" class="text-center text-muted py-3">${esc(t('event_none'))}</td></tr>`
-        : rows.map(r => `<tr>
-            ${ordered.map(col => _evrCell(r, col.id, canEdit)).join('')}
-            ${showActions ? `<td class="text-nowrap text-end ss-td-actions">
+        : pageRows.map(r => `<tr class="align-middle">
+            ${ordered.map(col => { const c = _evrCell(r, col.id, canEdit); return _EVR_FIT.has(col.id) ? c.replace('<td', '<td data-fit') : c; }).join('')}
+            ${showActions ? `<td data-fit class="text-nowrap text-end ss-td-actions">
                 ${canEdit ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('event_test'))}" onclick="_eventTestRule('${r.id}')"><i class="bi bi-send"></i></button>
                 <button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('edit'))}" onclick="openEventRuleModal('${r.id}')"><i class="bi bi-pencil"></i></button>` : ''}
+                ${canClone ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('clone'))}" onclick="cloneEventRuleModal('${r.id}')"><i class="bi bi-copy"></i></button>` : ''}
                 ${canDelete ? `<button class="btn btn-sm btn-link text-danger p-0" title="${escAttr(t('event_delete'))}" onclick="_eventDeleteRule('${r.id}')"><i class="bi bi-trash"></i></button>` : ''}
             </td>` : ''}
         </tr>`).join('');
-    wrap.innerHTML = `<div class="table-responsive rounded border" style="background:var(--ss-pagination-bg,var(--bs-secondary-bg))">
-        <table class="table table-sm table-striped table-hover align-middle mb-0 ss-table" id="ev-rules-table" style="font-size:.85rem;table-layout:fixed;width:100%">
-            <thead class="ss-thead"><tr>${thRow}${showActions ? `<th class="ss-th ss-th-actions" style="width:6%">${esc(t('col_actions'))}</th>` : ''}</tr></thead>
+    const pagerHtml = total ? _renderPagination(total, _evrPage, _evrPageSize, '_goEvrPage', '_changeEvrPageSize') : '';
+    tableWrap.innerHTML = `<table class="table table-sm table-striped table-hover align-middle mb-0 ss-table" id="ev-rules-table" style="font-size:.85rem;table-layout:auto;width:100%">
+            <thead class="ss-thead"><tr>${thRow}${showActions ? `<th class="ss-th ss-th-fit text-end" style="width:1%;white-space:nowrap">${esc(t('col_actions'))}</th>` : ''}</tr></thead>
             <tbody>${body}</tbody>
-        </table></div>`;
+        </table>`;
+    if (pagerTopEl) pagerTopEl.innerHTML = pagerHtml;
+    if (pagerBotEl) pagerBotEl.innerHTML = pagerHtml;
     setTimeout(() => _evAttachPctCols('ev-rules-table',
         () => _evrColOrder, o => { _evrColOrder = o; }, _evrSaveColOrder, _eventRulesBody, _evrPct, 'ss_evrules_col_w'), 0);
+}
+
+// Total number of matchers across all OR-groups (legacy single matcher = 1).
+function _evMatchersCount(r) {
+    if (Array.isArray(r.match_groups) && r.match_groups.length)
+        return r.match_groups.reduce((n, g) => n + (Array.isArray(g) ? g.length : 0), 0);
+    return (r.match_type && r.match_type !== 'any'
+            && (r.match_text || r.match_type === 'not_contains')) ? 1 : 0;
 }
 
 function _eventMatchSummary(r) {
@@ -326,9 +416,136 @@ function _eventMatchSummary(r) {
         bits.push('≤ ' + ((typeof _SYSLOG_SEV !== 'undefined' && _SYSLOG_SEV[r.severity_max]) || r.severity_max));
     if (r.host) bits.push('host=' + r.host);
     if (r.app) bits.push('app=' + r.app);
-    if (r.match_type && r.match_type !== 'any' && r.match_text)
-        bits.push(t('event_mt_' + r.match_type) + ' "' + r.match_text + '"');
+    const n = _evMatchersCount(r);
+    if (n) bits.push(tf('event_n_matchers', n));
     return bits.join(', ') || t('all');
+}
+
+// Ensure the draft has a normalised match_groups (OR-of-ANDs). Synthesises from a
+// legacy single match_type/match_text, and guarantees at least one group/matcher.
+// Conditions are STORED as match_groups (OR-of-ANDs / DNF), which is complete for
+// any boolean combination. The editor works on a FLAT list where each condition
+// after the first carries a join (AND/OR) to the previous one — more natural to
+// build. AND binds tighter than OR: a run of AND-joined matchers = one group, an
+// OR join starts a new group. We convert flat⇄DNF on load/save so the backend
+// (which evaluates match_groups) is untouched.
+function _evGroupsToFlat(groups) {
+    const flat = [];
+    (Array.isArray(groups) ? groups : []).forEach(g => {
+        (Array.isArray(g) ? g : []).forEach((m, mi) => {
+            if (!m || typeof m !== 'object') return;
+            flat.push({ field: m.field || 'message', type: m.type || 'contains', text: m.text || '',
+                        join: flat.length === 0 ? '' : (mi === 0 ? 'or' : 'and') });
+        });
+    });
+    return flat;
+}
+function _evFlatToGroups(flat) {
+    const groups = []; let cur = null;
+    (Array.isArray(flat) ? flat : []).forEach((m, i) => {
+        const matcher = { field: m.field || 'message', type: m.type || 'contains', text: m.text || '' };
+        if (i === 0 || m.join === 'or' || !cur) { cur = [matcher]; groups.push(cur); }   // OR → new group
+        else cur.push(matcher);                                                            // AND → same group
+    });
+    return groups;
+}
+function _evEnsureConditions(d) {
+    let groups = (Array.isArray(d.match_groups) ? d.match_groups : [])
+        .filter(Array.isArray)
+        .map(g => g.filter(m => m && typeof m === 'object')
+                   .map(m => ({ field: m.field || 'message', type: m.type || 'contains', text: m.text || '' })))
+        .filter(g => g.length);
+    // Legacy single matcher (rules saved before the conditions editor).
+    if (!groups.length && d.match_type && d.match_type !== 'any' && (d.match_text || d.match_type === 'not_contains'))
+        groups = [[{ field: 'message', type: d.match_type, text: d.match_text || '' }]];
+    // Migrate the OLD top-level filters (which were global AND preconditions) into
+    // every group as conditions, then drop them: host/app → 'equals', and the
+    // "min severity" threshold → 'severity ≤ N' (its original semantics).
+    const pre = [];
+    if (d.severity_max !== '' && d.severity_max != null)
+        pre.push({ field: 'severity', type: 'lte', text: String(d.severity_max) });
+    if (d.host) pre.push({ field: 'host', type: 'equals', text: String(d.host) });
+    if (d.app)  pre.push({ field: 'app',  type: 'equals', text: String(d.app) });
+    if (pre.length) {
+        groups = (groups.length ? groups : [[]]).map(g => [...pre.map(p => ({ ...p })), ...g]);
+        d.host = ''; d.app = ''; d.severity_max = '';
+    }
+    let flat = _evGroupsToFlat(groups);
+    if (!flat.length) flat = [{ field: 'message', type: 'contains', text: '', join: '' }];
+    flat[0].join = '';
+    d.conditions = flat;
+    delete d.match_type; delete d.match_text;
+}
+
+// ── Conditions editor (flat list with AND/OR connectors) ────────────────────
+function _evConditionsEditorHtml() {
+    const conds = _eventDraft.conditions || [];
+    // Operator options depend on the field (text vs numeric severity).
+    const mtOpts = (sel, fld) => _evOpsForField(fld).map(m =>
+        `<option value="${m}"${sel === m ? ' selected' : ''}>${esc(t('event_mt_' + m))}</option>`).join('');
+    const fldOpts = sel => ['message', 'host', 'app', 'severity'].map(f =>
+        `<option value="${f}"${sel === f ? ' selected' : ''}>${esc(t('event_field_' + f))}</option>`).join('');
+    // Value control: 'any' needs no value; severity → a level dropdown (0..7 with
+    // names); else free text.
+    const valueCtl = (m, i) => {
+        if (m.type === 'any')
+            return `<input class="form-control form-control-sm" disabled placeholder="${escAttr(t('event_any_no_value'))}">`;
+        if (m.field === 'severity') {
+            const opts = `<option value="">${esc(t('event_select') || '—')}</option>` +
+                (typeof _SYSLOG_SEV !== 'undefined' ? _SYSLOG_SEV : []).map((n, s) =>
+                    `<option value="${s}"${String(m.text) === String(s) ? ' selected' : ''}>${s} — ${esc(t('event_sevname_' + s) || n)}</option>`).join('');
+            return `<select class="form-select form-select-sm ev-sevsel" onchange="_evCondSet(${i},'text',this.value)">${opts}</select>`;
+        }
+        return `<input class="form-control form-control-sm" value="${escAttr(m.text || '')}" placeholder="${escAttr(t('event_match_text_ph'))}"
+                oninput="_evCondSet(${i},'text',this.value)">`;
+    };
+    const joinOpts = sel => [['and', t('event_and')], ['or', t('event_or')]].map(([v, l]) =>
+        `<option value="${v}"${sel === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
+    // Same <select> box as the connectors below, just hidden — so the first row's
+    // field/type/text align exactly with the rows that have an AND/OR connector.
+    const _joinStyle = 'width:4.5rem;flex:0 0 4.5rem;padding-left:.4rem;padding-right:1rem';
+    const leadSpacer = `<select class="form-select form-select-sm" style="${_joinStyle};visibility:hidden" tabindex="-1"><option>${esc(t('event_or'))}</option></select>`;
+    const rows = conds.map((m, i) => {
+        const lead = i === 0 ? leadSpacer
+            : `<select class="form-select form-select-sm fw-bold" style="${_joinStyle}" onchange="_evCondSet(${i},'join',this.value)">${joinOpts(m.join || 'and')}</select>`;
+        return `<div class="d-flex gap-1 mb-1 align-items-center">
+            ${lead}
+            <select class="form-select form-select-sm" style="max-width:8rem" onchange="_evCondSet(${i},'field',this.value)">${fldOpts(m.field || 'message')}</select>
+            <select class="form-select form-select-sm" style="max-width:10rem" onchange="_evCondSet(${i},'type',this.value)">${mtOpts(m.type, m.field || 'message')}</select>
+            ${valueCtl(m, i)}
+            <button class="btn btn-sm btn-danger" type="button" title="${escAttr(t('delete'))}"${conds.length <= 1 ? ' disabled' : ''}
+                onclick="_evCondRemove(${i})"><i class="bi bi-x-lg"></i></button>
+        </div>`;
+    }).join('');
+    return rows + `<button class="btn btn-sm btn-secondary mt-1" type="button" onclick="_evCondAdd()">
+        <i class="bi bi-plus-lg me-1"></i>${esc(t('event_add_cond'))}</button>`;
+}
+function _evRerenderMatch() {
+    const el = document.getElementById('evm-match-wrap');
+    if (el) el.innerHTML = _evConditionsEditorHtml();
+}
+function _evCondSet(i, field, value) {
+    const c = _eventDraft.conditions[i];
+    if (!c) return;
+    c[field] = value;
+    if (field === 'field') {
+        // Field changed: keep the operator if still valid, else a sensible default;
+        // a severity value must be a level number.
+        const ops = _evOpsForField(value);
+        if (!ops.includes(c.type)) c.type = (value === 'severity') ? 'lte' : 'contains';
+        if (value === 'severity' && !/^[0-7]$/.test(String(c.text))) c.text = '';
+        _evRerenderMatch();
+    } else if (field === 'type') {
+        _evRerenderMatch();   // the value control may change (any → none, severity → dropdown)
+    }
+    // text / join: the control already holds its value, no re-render needed
+}
+function _evCondAdd() { _eventDraft.conditions.push({ field: 'message', type: 'contains', text: '', join: 'and' }); _evRerenderMatch(); }
+function _evCondRemove(i) {
+    _eventDraft.conditions.splice(i, 1);
+    if (!_eventDraft.conditions.length) _eventDraft.conditions = [{ field: 'message', type: 'contains', text: '', join: '' }];
+    _eventDraft.conditions[0].join = '';   // the first row never has a connector
+    _evRerenderMatch();
 }
 
 function _eventChannelsBadges(r) {
@@ -340,17 +557,75 @@ function _eventChannelsBadges(r) {
     }).join('') || '<span class="text-muted">—</span>';
 }
 
+// Focus the Name field once the modal is shown — caret at the START, no selection.
+function _evFocusName() {
+    document.getElementById('eventRuleModal').addEventListener('shown.bs.modal', () => {
+        const n = document.getElementById('evm-name');
+        if (n) { n.focus(); try { n.setSelectionRange(0, 0); } catch (_) {} }
+    }, { once: true });
+}
+
 // ── Modal (add/edit) ────────────────────────────────────────────────────────
 function openEventRuleModal(rid) {
     const found = rid ? _eventRules.find(r => r.id === rid) : null;
     _eventDraft = found ? JSON.parse(JSON.stringify(found))
         : { id: null, name: '', description: '', enabled: true, source: 'audit', events: [],
-            severity_max: '', host: '', app: '', match_type: 'any', match_text: '',
+            severity_max: '', host: '', app: '', match_groups: [], tags: [],
             channels: [], webhook_ids: [], cooldown: null };
+    _evEnsureConditions(_eventDraft);
     _eventAuditFilter = '';
-    document.getElementById('eventRuleModalTitle').textContent = found ? t('event_edit') : t('event_add');
+    document.getElementById('eventRuleModalTitle').textContent =
+        found ? (t('event_edit') + ': ' + (found.name || '')) : t('event_add');
+    _setModalSaveButton('btnEventRuleSave', found ? 'edit' : 'new');
     document.getElementById('eventRuleModalError').textContent = '';
     document.getElementById('eventRuleModalBody').innerHTML = _eventModalForm();
+    _evFocusName();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('eventRuleModal')).show();
+}
+
+// ── Tags chips (type + Enter to add; × to remove) ───────────────────────────
+function _evTagsHtml() {
+    const tags = _eventDraft.tags || [];
+    const chips = tags.map(tg =>
+        `<span class="badge text-bg-secondary d-inline-flex align-items-center gap-1" style="font-weight:400">
+            ${esc(tg)}<button type="button" class="btn-close btn-close-white" style="font-size:.5rem"
+                aria-label="${escAttr(t('remove'))}" title="${escAttr(t('remove'))}" onclick="event.stopPropagation();_evRemoveTag(${jsStr(tg)})"></button></span>`).join('');
+    return chips + `<input class="border-0 bg-transparent flex-grow-1 p-0" style="min-width:8rem;outline:none;color:inherit"
+        placeholder="${escAttr(t('event_tags_ph'))}" onkeydown="if(event.key==='Enter'){event.preventDefault();_evAddTag(this);}" onblur="_evAddTag(this)">`;
+}
+function _evTagsRerender() {
+    const el = document.getElementById('evm-tags');
+    if (el) { el.innerHTML = _evTagsHtml(); el.querySelector('input')?.focus(); }
+}
+function _evAddTag(inp) {
+    const added = String(inp.value || '').split(',').map(s => s.trim()).filter(Boolean);
+    inp.value = '';
+    if (!added.length) return;
+    const set = _eventDraft.tags || (_eventDraft.tags = []);
+    const seen = new Set(set.map(x => x.toLowerCase()));
+    added.forEach(tg => { if (!seen.has(tg.toLowerCase())) { seen.add(tg.toLowerCase()); set.push(tg.slice(0, 40)); } });
+    _evTagsRerender();
+}
+function _evRemoveTag(tag) {
+    _eventDraft.tags = (_eventDraft.tags || []).filter(x => x.toLowerCase() !== String(tag).toLowerCase());
+    _evTagsRerender();
+}
+
+// Clone a rule: open the modal pre-filled from the source as a NEW rule (id=null,
+// name + copy suffix). Save POSTs it. Conditions/channels/etc. are all copied.
+function cloneEventRuleModal(rid) {
+    const src = rid ? _eventRules.find(r => r.id === rid) : null;
+    if (!src) return;
+    _eventDraft = JSON.parse(JSON.stringify(src));
+    _eventDraft.id = null;                                         // → save will POST a new rule
+    _eventDraft.name = (src.name || '') + ' (' + t('clone_copy_suffix') + ')';
+    _evEnsureConditions(_eventDraft);
+    _eventAuditFilter = '';
+    document.getElementById('eventRuleModalTitle').textContent = t('clone') + ': ' + (src.name || '');
+    _setModalSaveButton('btnEventRuleSave', 'clone');
+    document.getElementById('eventRuleModalError').textContent = '';
+    document.getElementById('eventRuleModalBody').innerHTML = _eventModalForm();
+    _evFocusName();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('eventRuleModal')).show();
 }
 
@@ -385,29 +660,17 @@ function _eventConditionsHtml() {
     if (d.source === 'audit') {
         // Fill the modal's tab area: a flex column where the list grows to take
         // all remaining height (label/filter/hint keep their natural size).
-        return `<div class="d-flex flex-column" style="height:22rem">
-            <label class="form-label small mb-1">${esc(t('event_audit_events'))}${_evHelp('event_audit_events_hint')}</label>
-            <input type="search" class="form-control form-control-sm mb-1" placeholder="${escAttr(t('event_audit_filter'))}"
+        return `<div class="d-flex flex-column" style="flex:1 1 auto;min-height:18rem">
+            <label class="form-label small mb-1 flex-shrink-0">${esc(t('event_audit_events'))}${_evHelp('event_audit_events_hint')}</label>
+            <input type="search" class="form-control form-control-sm mb-1 flex-shrink-0" placeholder="${escAttr(t('event_audit_filter'))}"
                 value="${escAttr(_eventAuditFilter)}" oninput="_eventAuditFilterInput(this.value)">
             <select id="evm-events" multiple class="form-select form-select-sm" style="flex:1 1 auto;min-height:0"
                 onchange="_eventAuditOnChange(this)">${_eventAuditOptionsHtml()}</select>
-            <div class="form-text mb-0">${esc(t('event_audit_hint'))}</div></div>`;
+            <div class="form-text mb-0 flex-shrink-0">${esc(t('event_audit_hint'))}</div></div>`;
     }
-    const sevOpts = `<option value="">${esc(t('syslog_all'))}</option>` +
-        (typeof _SYSLOG_SEV !== 'undefined' ? _SYSLOG_SEV : [])
-            .map((n, s) => `<option value="${s}"${String(d.severity_max) === String(s) ? ' selected' : ''}>${esc(n)}</option>`).join('');
-    const mtOpts = _EV_MATCH_TYPES.map(m => `<option value="${m}"${d.match_type === m ? ' selected' : ''}>${esc(t('event_mt_' + m))}</option>`).join('');
     return `<div class="row g-2">
-            <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('syslog_min_severity'))}${_evHelp('event_sev_hint')}</label>
-                <select class="form-select form-select-sm" onchange="_eventDraft.severity_max=this.value">${sevOpts}</select></div>
-            <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('syslog_host'))}${_evHelp('event_host_hint')}</label>
-                <input class="form-control form-control-sm" value="${escAttr(d.host || '')}" oninput="_eventDraft.host=this.value"></div>
-            <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('syslog_app'))}${_evHelp('event_app_hint')}</label>
-                <input class="form-control form-control-sm" value="${escAttr(d.app || '')}" oninput="_eventDraft.app=this.value"></div>
-            <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('event_match_type'))}${_evHelp('event_match_type_hint')}</label>
-                <select class="form-select form-select-sm" onchange="_eventDraft.match_type=this.value">${mtOpts}</select></div>
-            <div class="col-12"><label class="form-label small mb-1">${esc(t('event_match_text'))}${_evHelp('event_match_text_hint')}</label>
-                <input class="form-control form-control-sm" value="${escAttr(d.match_text || '')}" oninput="_eventDraft.match_text=this.value" placeholder="${escAttr(t('event_match_text_ph'))}"></div>
+            <div class="col-12"><label class="form-label small mb-1">${esc(t('event_conditions'))}${_evHelp('event_conditions_hint')}</label>
+                <div id="evm-match-wrap">${_evConditionsEditorHtml()}</div></div>
         </div>`;
 }
 
@@ -446,17 +709,21 @@ function _eventModalForm() {
     const tab = (id, label, active) => `<li class="nav-item" role="presentation">
         <button class="nav-link${active ? ' active' : ''} py-1 px-3" data-bs-toggle="tab"
             data-bs-target="#evm-pane-${id}" type="button" role="tab">${esc(label)}</button></li>`;
+    const showSent = d.id && _evCan('events_notify_view');
     return `
-        <ul class="nav nav-tabs mb-3" role="tablist">
+        <ul class="nav nav-tabs mb-3 evm-tabs" role="tablist">
             ${tab('general', t('event_tab_general'), true)}
             ${tab('cond', t('event_tab_conditions'), false)}
             ${tab('notify', t('event_tab_notify'), false)}
+            ${showSent ? tab('sent', t('event_tab_sent'), false) : ''}
         </ul>
-        <div class="tab-content" style="min-height:24rem">
+        <div class="tab-content evm-content">
             <div class="tab-pane fade show active" id="evm-pane-general" role="tabpanel">
                 <div class="row g-2 mb-2">
                     <div class="col-sm-6"><label class="form-label small mb-1">${esc(t('event_name'))}${_evHelp('event_name_hint')}</label>
-                        <input class="form-control form-control-sm" value="${escAttr(d.name || '')}" oninput="_eventDraft.name=this.value"></div>
+                        <input id="evm-name" class="form-control form-control-sm" value="${escAttr(d.name || '')}"
+                            oninput="_eventDraft.name=this.value;this.classList.remove('is-invalid')">
+                        <div class="invalid-feedback" id="evm-name-error"></div></div>
                     <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('event_source'))}${_evHelp('event_source_hint')}</label>
                         <select class="form-select form-select-sm" onchange="_eventDraft.source=this.value;document.getElementById('evm-pane-cond').innerHTML=_eventConditionsHtml()">
                             <option value="audit"${d.source === 'audit' ? ' selected' : ''}>${esc(t('event_src_audit'))}</option>
@@ -470,15 +737,44 @@ function _eventModalForm() {
                 </div>
                 ${d.id ? `<div class="mb-2"><label class="form-label small mb-1 text-muted">${esc(t('event_uid'))}${_evHelp('event_uid_hint')}</label>
                     <input class="form-control form-control-sm font-monospace text-muted" value="${escAttr(d.id)}" readonly onclick="this.select()"></div>` : ''}
-                <div class="mb-2"><label class="form-label small mb-1">${esc(t('event_description'))}${_evHelp('event_description_hint')}</label>
-                    <textarea class="form-control form-control-sm" rows="8" oninput="_eventDraft.description=this.value" placeholder="${escAttr(t('event_description_ph'))}">${esc(d.description || '')}</textarea></div>
-                <div class="form-check form-switch mb-2">
+                <div class="mb-2 flex-shrink-0"><label class="form-label small mb-1">${esc(t('event_tags'))}${_evHelp('event_tags_hint')}</label>
+                    <div class="form-control form-control-sm d-flex flex-wrap align-items-center gap-1" id="evm-tags" style="height:auto;min-height:31px;cursor:text"
+                        onclick="this.querySelector('input')&&this.querySelector('input').focus()">${_evTagsHtml()}</div></div>
+                <div class="mb-2 d-flex flex-column flex-grow-1" style="min-height:0"><label class="form-label small mb-1 flex-shrink-0">${esc(t('event_description'))}${_evHelp('event_description_hint')}</label>
+                    <textarea class="form-control form-control-sm flex-grow-1" style="resize:none;min-height:6rem" oninput="_eventDraft.description=this.value" placeholder="${escAttr(t('event_description_ph'))}">${esc(d.description || '')}</textarea></div>
+                <div class="form-check form-switch mb-2 flex-shrink-0">
                     <input class="form-check-input" type="checkbox" id="evm-enabled"${d.enabled ? ' checked' : ''} onchange="_eventDraft.enabled=this.checked">
                     <label class="form-check-label small" for="evm-enabled">${esc(t('event_enabled'))}${_evHelp('event_enabled_hint')}</label></div>
             </div>
             <div class="tab-pane fade" id="evm-pane-cond" role="tabpanel">${_eventConditionsHtml()}</div>
             <div class="tab-pane fade" id="evm-pane-notify" role="tabpanel">${_eventNotifyHtml()}</div>
+            ${showSent ? `<div class="tab-pane fade" id="evm-pane-sent" role="tabpanel">${_eventSentHtml()}</div>` : ''}
         </div>`;
+}
+
+// List of notifications this rule has already sent (from the recent log, matched
+// by rule name). Read-only — shown only when the user can view notifications.
+function _eventSentHtml() {
+    const d = _eventDraft;
+    // Relate by rule UID (stable), not name — the name can change over time.
+    const rows = (_eventLog || []).filter(e => (e.rule_id || '') === (d.id || ''));
+    if (!rows.length)
+        return `<div class="text-muted small py-4 text-center">${esc(t('event_sent_none'))}</div>`;
+    const body = rows.map(e => `<tr>
+        <td class="text-nowrap text-muted small">${esc(_evWhen(e.ts))}</td>
+        <td><span class="badge bg-${e.ok ? 'success' : 'danger'}">${e.ok ? esc(t('event_ok')) : esc(t('event_err'))}</span></td>
+        <td class="small text-nowrap">${esc(e.channels || '')}</td>
+        <td class="small text-break">${esc(e.message || '')}</td>
+    </tr>`).join('');
+    return `<div class="form-text mb-2">${esc(t('event_sent_hint'))}</div>
+        <div class="table-responsive" style="max-height:48vh;overflow:auto">
+        <table class="table table-sm table-striped ss-table mb-0" style="font-size:.82rem">
+            <thead class="ss-thead"><tr>
+                <th class="ss-th">${esc(t('event_log_time'))}</th>
+                <th class="ss-th">${esc(t('event_log_status'))}</th>
+                <th class="ss-th">${esc(t('event_channels'))}</th>
+                <th class="ss-th">${esc(t('event_log_detail'))}</th>
+            </tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function _eventDraftToggleChannel(name, on) {
@@ -497,11 +793,33 @@ function _eventToggleWebhookId(id, on) {
     _eventDraft.webhook_ids = [...set];
 }
 
+// Mark the Name field invalid with an inline message under it (like the user/role/
+// group modals): switch to the General tab and focus the input.
+function _evNameInvalid(msg) {
+    const inp = document.getElementById('evm-name');
+    const err = document.getElementById('evm-name-error');
+    if (err) err.textContent = msg;
+    if (inp) inp.classList.add('is-invalid');
+    const genTab = document.querySelector('#eventRuleModal [data-bs-target="#evm-pane-general"]');
+    if (genTab) bootstrap.Tab.getOrCreateInstance(genTab).show();
+    if (inp) inp.focus();
+}
+
 async function _eventModalSave() {
     const d = _eventDraft;
     if (!d) return;
+    // Duplicate-name check (case-insensitive, ignoring this rule) — shown inline.
+    const name = (d.name || '').trim();
+    if (name && _eventRules.some(r => r.id !== d.id
+            && String(r.name || '').trim().toLowerCase() === name.toLowerCase())) {
+        _evNameInvalid(t('event_name_exists'));
+        return;
+    }
+    // Build the stored DNF (match_groups) from the flat conditions editor.
+    const payload = { ...d, match_groups: _evFlatToGroups(d.conditions) };
+    delete payload.conditions;
     const url = d.id ? '/api/v1/event-rules/' + encodeURIComponent(d.id) : '/api/v1/event-rules';
-    const resp = d.id ? await apiPut(url, d) : await apiPost(url, d);
+    const resp = d.id ? await apiPut(url, payload) : await apiPost(url, payload);
     const ok = d.id ? (resp && resp.ok) : (resp && resp.status === 200 && resp.data && resp.data.ok);
     if (ok) {
         bootstrap.Modal.getOrCreateInstance(document.getElementById('eventRuleModal')).hide();
@@ -509,7 +827,9 @@ async function _eventModalSave() {
         renderEvents();
     } else {
         const err = (resp && (resp.error || (resp.data && resp.data.error))) || t('error');
-        document.getElementById('eventRuleModalError').textContent = err;
+        // The backend's name-clash (rare race) also shows inline; anything else in the footer.
+        if (err === t('event_name_exists')) _evNameInvalid(err);
+        else document.getElementById('eventRuleModalError').textContent = err;
     }
 }
 
@@ -521,7 +841,8 @@ async function _eventToggleEnabled(rid, on) {
     if (resp && resp.ok) { r.enabled = on; } else { showToast(t('error'), 'danger'); renderEvents(); }
 }
 function _eventDeleteRule(rid) {
-    showConfirmModal(t('event_delete_confirm'), async () => {
+    const r = _eventRules.find(x => x.id === rid);
+    showConfirmModal(tf('event_delete_confirm', (r && r.name) || rid), async () => {
         const resp = await apiDelete('/api/v1/event-rules/' + encodeURIComponent(rid));
         if (resp && resp.data && resp.data.ok) { showToast(t('event_deleted'), 'success'); renderEvents(); }
         else showToast(t('error'), 'danger');
@@ -548,7 +869,7 @@ function _evlSortVal(e, key) {
 function _evlCell(e, colId) {
     switch (colId) {
         case 'ts':        return `<td class="text-muted text-nowrap">${esc(_evWhen(e.ts))}</td>`;
-        case 'rule_name': return `<td>${esc(e.rule_name || '')}</td>`;
+        case 'rule_name': return `<td class="text-nowrap"><code>${esc(e.rule_name || '')}</code></td>`;
         case 'source':    return `<td><span class="badge bg-secondary">${esc(t('event_src_' + (e.source || 'audit')))}</span></td>`;
         case 'channels':  return `<td class="small">${esc(e.channels || '')}</td>`;
         case 'status':    return `<td><span class="badge bg-${e.ok ? 'success' : 'danger'}">${e.ok ? esc(t('event_ok')) : esc(t('event_err'))}</span></td>`;
@@ -557,30 +878,48 @@ function _evlCell(e, colId) {
     }
 }
 function _renderEventLog() {
-    const chooserEl = document.getElementById('ev-log-chooser');
-    if (chooserEl) chooserEl.innerHTML = _eventLog.length
-        ? _buildColChooser(_EVL_COLS, _evlVisibleCols, '_evlToggleCol', '_resetEvlCols') : '';
-    const el = document.getElementById('ev-log');
-    if (!el) return;
-    if (!_eventLog.length) { el.innerHTML = `<p class="text-muted small">${esc(t('event_log_empty'))}</p>`; return; }
-    const rows = _eventLog.slice().sort((a, b) => {
-        const va = _evlSortVal(a, _evlSort), vb = _evlSortVal(b, _evlSort);
-        const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
-        return _evlSortDir === 'asc' ? c : -c;
-    });
+    const tableWrap = document.getElementById('ev-log-table-wrap');
+    if (!tableWrap) return;
+    const pagerTopEl = document.getElementById('ev-log-pager-top');
+    const pagerBotEl = document.getElementById('ev-log-pager-bottom');
+    const q = _evlSearch.trim().toLowerCase();
+    const rows = _eventLog.filter(e => !q
+            || (e.rule_name || '').toLowerCase().includes(q)
+            || (e.source || '').toLowerCase().includes(q)
+            || (e.channels || '').toLowerCase().includes(q)
+            || (e.message || '').toLowerCase().includes(q))
+        .slice().sort((a, b) => {
+            const va = _evlSortVal(a, _evlSort), vb = _evlSortVal(b, _evlSort);
+            const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
+            return _evlSortDir === 'asc' ? c : -c;
+        });
+    if (_evlPageSize === null) _evlPageSize = _defaultPageSize;
+    const total = rows.length;
+    const ps = _evlPageSize || total || 1;
+    _evlPage = Math.max(1, Math.min(_evlPage, Math.ceil((total || 1) / ps)));
+    const pageRows = rows.slice((_evlPage - 1) * ps, _evlPage * ps);
     const ordered = _evOrdered(_EVL_COLS, _evlColOrder, _evlVisibleCols);
     const cw = _evCW('ss_evlog_col_w');
     const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';
     const thRow = ordered.map(col => {
         const inner = col.sortKey ? _thSortInner(col.label(), col.sortKey, _evlSort, _evlSortDir, '_sortEventLog')
             : `<span class="small">${esc(col.label())}</span>`;
-        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${thW(col.id)}>${inner}</th>`;
+        return _EVL_FIT.has(col.id)
+            ? `<th class="ss-th ss-th-fit" data-col="${col.id}" draggable="true" style="width:1%;white-space:nowrap">${inner}</th>`
+            : `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${thW(col.id)}>${inner}</th>`;
     }).join('');
-    el.innerHTML = `<div class="table-responsive rounded border" style="background:var(--ss-pagination-bg,var(--bs-secondary-bg));max-height:320px;overflow:auto">
-        <table class="table table-sm table-striped align-middle mb-0 ss-table" id="ev-log-table" style="font-size:.82rem">
+    const body = !total
+        ? `<tr><td colspan="${ordered.length}" class="text-center text-muted py-3">${esc(_eventLog.length ? t('event_none') : t('event_log_empty'))}</td></tr>`
+        : pageRows.map(e => `<tr>${ordered.map(col => {
+            const c = _evlCell(e, col.id); return _EVL_FIT.has(col.id) ? c.replace('<td', '<td data-fit') : c;
+        }).join('')}</tr>`).join('');
+    const pagerHtml = total ? _renderPagination(total, _evlPage, _evlPageSize, '_goEvlPage', '_changeEvlPageSize') : '';
+    tableWrap.innerHTML = `<table class="table table-sm table-striped align-middle mb-0 ss-table" id="ev-log-table" style="font-size:.82rem;table-layout:auto;width:100%">
             <thead class="ss-thead"><tr>${thRow}</tr></thead>
-            <tbody>${rows.map(e => `<tr>${ordered.map(col => _evlCell(e, col.id)).join('')}</tr>`).join('')}</tbody>
-        </table></div>`;
+            <tbody>${body}</tbody>
+        </table>`;
+    if (pagerTopEl) { pagerTopEl.innerHTML = pagerHtml; pagerTopEl.style.display = total ? '' : 'none'; }
+    if (pagerBotEl) { pagerBotEl.innerHTML = pagerHtml; pagerBotEl.style.display = total ? '' : 'none'; }
     setTimeout(() => _attachColFeatures('ev-log-table',
         () => _evlColOrder, o => { _evlColOrder = o; }, _evlSaveColOrder, _renderEventLog,
         (col, w) => { const m = _evCW('ss_evlog_col_w'); m[col] = w; localStorage.setItem('ss_evlog_col_w', JSON.stringify(m)); }), 0);

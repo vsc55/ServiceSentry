@@ -70,18 +70,21 @@ class ReturnModuleCheck:
             status: bool = True,
             message='',
             send_msg: bool = True,
-            other_data: dict = None
+            other_data: dict = None,
+            severity: str = None
         ) -> bool:
         """
         Create a new return and update it if it already exists.
 
         :param key: Key of the return
-        :param status: True if the status is OK, False if the status is Error/Warning/Etc.. 
+        :param status: True if the status is OK, False if the status is Error/Warning/Etc..
                        anything that is not OK.
         :param message: Message to be sent via telegram.
         :param send_msg: True if the message should be sent, False if the message should not
                          be sent.
         :param other_data: Dictionary with other data.
+        :param severity: Severity of a non-OK status: 'warning' for an aviso or 'error'
+                         (the default for any non-OK status). OK results carry ''.
         :return: True if saved successfully, False if something went wrong.
         """
         if key:
@@ -92,8 +95,16 @@ class ReturnModuleCheck:
             self._dict_return[key]['message'] = message
             self._dict_return[key]['send'] = send_msg
             self._dict_return[key]['other_data'] = other_data
+            self._dict_return[key]['severity'] = self._norm_severity(severity, status)
             return self.is_exist(key)
         return False
+
+    @staticmethod
+    def _norm_severity(severity, status) -> str:
+        """OK → ''; a non-OK status defaults to 'error' unless marked 'warning'."""
+        if status:
+            return ''
+        return 'warning' if str(severity).lower() == 'warning' else 'error'
 
     def update(self, key: str, option: str, value) -> bool:
         """
@@ -110,7 +121,8 @@ class ReturnModuleCheck:
                 "status",
                 "message",
                 "send",
-                "other_data"
+                "other_data",
+                "severity"
                 }:
                 if self.is_exist(key):
                     self._dict_return[key][option] = value
@@ -145,6 +157,10 @@ class ReturnModuleCheck:
     def get_status(self, key: str) -> bool:
         """ Get the status of the specified key. """
         return self.get(key).get('status', False)
+
+    def get_severity(self, key: str) -> str:
+        """ Get the severity ('', 'warning' or 'error') of the specified key. """
+        return self.get(key).get('severity', '')
 
     def get_message(self, key: str) -> str:
         """ Get the message of the specified key. """

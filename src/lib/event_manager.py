@@ -110,18 +110,52 @@ class _EventsMixin:
             app = str(rule.get('app') or '').strip()
             if app and app != (ctx.get('app') or ''):
                 return False
-            return _EventsMixin._text_matches(
-                rule.get('match_type') or 'any',
-                str(rule.get('match_text') or ''),
-                ctx.get('message') or '')
+            return _EventsMixin._conditions_match(rule, ctx)
         return False
 
     @staticmethod
+    def _ctx_field(ctx: dict, field: str) -> str:
+        """Resolve a matcher's target field from the syslog context: a matcher can
+        check the message (default), the host or the app — not only the message."""
+        if field == 'host':
+            return str(ctx.get('hostname') or ctx.get('source') or '')
+        if field == 'app':
+            return str(ctx.get('app') or '')
+        if field == 'severity':
+            sev = ctx.get('severity')
+            return '' if sev in (None, '') else str(sev)   # numeric 0..7, for </<=/> etc.
+        return str(ctx.get('message') or '')
+
+    @staticmethod
+    def _conditions_match(rule: dict, ctx: dict) -> bool:
+        """Match the rule's conditions against the event context.
+
+        New model: ``match_groups`` is OR-of-ANDs (DNF) — a list of groups, each a
+        list of ``{field, type, text}`` matchers (field = message/host/app). Matches
+        when ANY group fully matches (all its matchers AND).  No/empty groups → match
+        all.  Falls back to the legacy single ``match_type``/``match_text``."""
+        groups = rule.get('match_groups')
+        if isinstance(groups, list) and groups:
+            for g in groups:
+                if isinstance(g, list) and g and all(
+                    _EventsMixin._text_matches(
+                        str(m.get('type') or 'any'), str(m.get('text') or ''),
+                        _EventsMixin._ctx_field(ctx, str(m.get('field') or 'message')))
+                    for m in g if isinstance(m, dict)):
+                    return True
+            return False
+        return _EventsMixin._text_matches(
+            rule.get('match_type') or 'any', str(rule.get('match_text') or ''),
+            str(ctx.get('message') or ''))
+
+    @staticmethod
     def _text_matches(match_type: str, needle: str, text: str) -> bool:
-        """Apply a message match (contains/not_contains/starts/ends/regex). An
-        empty needle or 'any' matches everything."""
+        """Apply a match (equals/contains/not_contains/starts/ends/regex). An empty
+        needle or 'any' matches everything."""
         if match_type in ('', 'any') or (needle == '' and match_type != 'not_contains'):
             return True
+        if match_type == 'equals':
+            return text == needle
         if match_type == 'contains':
             return needle in text
         if match_type == 'not_contains':
@@ -135,6 +169,18 @@ class _EventsMixin:
                 return re.search(needle, text) is not None
             except re.error:
                 return False
+        if match_type in ('gt', 'gte', 'lt', 'lte'):
+            try:
+                a, b = float(text), float(needle)
+            except (TypeError, ValueError):
+                return False        # non-numeric value/needle → no numeric match
+            if match_type == 'gt':
+                return a > b
+            if match_type == 'gte':
+                return a >= b
+            if match_type == 'lt':
+                return a < b
+            return a <= b           # lte
         return True
 
     @staticmethod

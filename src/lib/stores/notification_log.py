@@ -8,8 +8,8 @@ row limit (newest kept) so it never grows unbounded.
 
 Schema::
 
-    notification_log(id PK AUTOINCREMENT, ts REAL, rule_id, rule_name, source,
-                     channels, ok INTEGER, message)
+    event_rules_notifications(id PK AUTOINCREMENT, ts REAL, rule_id, rule_name,
+                              source, channels, ok INTEGER, message)
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
 
 _SCHEMA = TableSpec(
-    name='notification_log',
+    name='event_rules_notifications',
     columns=(
         Column('id',        'AUTOINCREMENT', primary_key=True),
         Column('ts',        'REAL',    nullable=False, default='0'),

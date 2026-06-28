@@ -81,6 +81,7 @@ def register(app, wa):
                 # checkbox only when that table was actually customised.
                 'table_config': udata.get('table_config') if isinstance(udata.get('table_config'), dict) else {},
                 'has_dashboard_layout': bool(udata.get('dashboard_layout')),
+                'modal_config': udata.get('modal_config') if isinstance(udata.get('modal_config'), dict) else {},
             }
         return jsonify(safe)
 
@@ -128,10 +129,11 @@ def register(app, wa):
         role_uid   = wa._role_name_to_uid(role) or role_uid_candidate
         group_uids = list(user_groups_raw)  # already uids after the check above
         import uuid as _uuid
+        _new_uid = str(_uuid.uuid4())
         _now = datetime.now(timezone.utc).isoformat()
         _requester = session.get('username', SYSTEM_USER)
         wa._users[uname] = {
-            'uid':           str(_uuid.uuid4()),
+            'uid':           _new_uid,
             'password_hash': generate_password_hash(pw),
             'role':          role_uid,
             'display_name':  dname,
@@ -153,7 +155,7 @@ def register(app, wa):
             'display_name': dname,
             'groups': list(user_groups_raw),
         })
-        return jsonify({'ok': True}), 201
+        return jsonify({'ok': True, 'uid': _new_uid}), 201
 
     @app.route('/api/v1/users/<username>', methods=['PUT'])
     @users_edit_req
@@ -274,6 +276,11 @@ def register(app, wa):
                 changes.append({'field': 'table_config', 'old': sorted(removed), 'new': 'cleared'})
         if data.get('clear_dashboard_layout') and user.pop('dashboard_layout', None):
             changes.append({'field': 'dashboard_layout', 'old': 'custom', 'new': 'cleared'})
+        clear_mkeys = data.get('clear_modal_keys')
+        if isinstance(clear_mkeys, list) and isinstance(user.get('modal_config'), dict):
+            removed_m = [k for k in clear_mkeys if user['modal_config'].pop(str(k), None) is not None]
+            if removed_m:
+                changes.append({'field': 'modal_config', 'old': sorted(removed_m), 'new': 'cleared'})
         touch_entity(user)
         wa._persist_users()
         if changes:
@@ -362,6 +369,10 @@ def register(app, wa):
             tc = data['table_config']
             if isinstance(tc, dict):
                 user['table_config'] = tc
+        if 'modal_config' in data:
+            mc = data['modal_config']
+            if isinstance(mc, dict):
+                user['modal_config'] = mc
         if 'dashboard_layout' in data:
             dl = data['dashboard_layout']
             if isinstance(dl, list):

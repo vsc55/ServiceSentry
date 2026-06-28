@@ -1,0 +1,7 @@
+{
+    "name": "proxmox",
+    "version": "1.0.0",
+    "description": "Proxmox VE monitoring via the REST API — cluster quorum, Ceph, nodes (maintenance), network and pending updates.",
+    "icon": "🖥️",
+    "dependencies": []
+}

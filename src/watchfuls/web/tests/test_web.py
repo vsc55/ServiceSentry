@@ -33,13 +33,17 @@ class TestWebInit:
         # curl is no longer used — native urllib is used instead
         assert w.paths.find('curl') == ''
 
-    def test_schema_has_url(self):
-        """ITEM_SCHEMA includes 'url' field."""
+    def test_schema_has_server_and_port(self):
+        """ITEM_SCHEMA splits the address into 'server' + 'port' (url retired)."""
         from watchfuls.web import Watchful
         schema = Watchful.ITEM_SCHEMA['list']
-        assert 'url' in schema
-        assert schema['url']['default'] == ''
-        assert schema['url']['type'] == 'str'
+        assert 'url' not in schema
+        assert schema['server']['default'] == ''
+        assert schema['server']['type'] == 'str'
+        assert schema['port']['default'] == 0
+        assert schema['port']['type'] == 'int'
+        # The host's address fills 'server' now.
+        assert Watchful.ITEM_SCHEMA['__host_profile__']['address_field'] == 'server'
 
 
 class TestWebCheck:
@@ -241,6 +245,67 @@ class TestWebUrl:
         w = self.Watchful(create_mock_monitor(config))
         with patch.object(w, '_web_request', return_value=(200, 'HTTP 200')):
             assert 'Blog' in w.check().list['uid-blog']['message']
+
+    def test_server_field_used_for_request(self):
+        """The new 'server' field supplies the host."""
+        config = {'watchfuls.web': {'list': {
+            'uid': {'enabled': True, 'server': 'api.example.com'}}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with patch.object(w, '_web_request', return_value=(200, 'HTTP 200')) as mock_ret:
+            w.check()
+            assert mock_ret.call_args[0][0] == 'api.example.com'
+
+    def test_non_standard_port_appended(self):
+        """A non-standard port is appended to the host (host:8006)."""
+        config = {'watchfuls.web': {'list': {
+            'uid': {'enabled': True, 'server': 'pve.example.com', 'port': 8006}}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with patch.object(w, '_web_request', return_value=(200, 'HTTP 200')) as mock_ret:
+            w.check()
+            assert mock_ret.call_args[0][0] == 'pve.example.com:8006'
+
+    def test_standard_ports_omitted(self):
+        """Ports 80/443 are implied by the scheme and dropped from the target."""
+        for port in (80, 443):
+            config = {'watchfuls.web': {'list': {
+                'uid': {'enabled': True, 'server': 'example.com', 'port': port}}}}
+            w = self.Watchful(create_mock_monitor(config))
+            with patch.object(w, '_web_request', return_value=(200, 'HTTP 200')) as mock_ret:
+                w.check()
+                assert mock_ret.call_args[0][0] == 'example.com'
+
+    def test_server_with_port_and_path(self):
+        """server + port + path compose host:port/path."""
+        config = {'watchfuls.web': {'list': {
+            'uid': {'enabled': True, 'server': 'example.com', 'port': 8080, 'path': '/health'}}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with patch.object(w, '_web_request', return_value=(200, 'HTTP 200')) as mock_ret:
+            w.check()
+            assert mock_ret.call_args[0][0] == 'example.com:8080/health'
+
+    def test_server_preferred_over_legacy_url(self):
+        """When both exist, the new 'server' wins over the legacy 'url'."""
+        config = {'watchfuls.web': {'list': {
+            'uid': {'enabled': True, 'server': 'new.example.com', 'url': 'old.example.com'}}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with patch.object(w, '_web_request', return_value=(200, 'HTTP 200')) as mock_ret:
+            w.check()
+            assert mock_ret.call_args[0][0] == 'new.example.com'
+
+    def test_compose_target_helper(self):
+        """Direct coverage of the URL composer."""
+        from watchfuls.web import Watchful
+        c = Watchful._compose_target
+        assert c('example.com', 0, '') == 'example.com'
+        assert c('example.com', 443, '') == 'example.com'
+        assert c('example.com', 80, '') == 'example.com'
+        assert c('example.com', 8006, '') == 'example.com:8006'
+        assert c('example.com', 8080, '/health') == 'example.com:8080/health'
+        assert c('example.com', 0, 'status') == 'example.com/status'
+        # A server that already carries a scheme is used verbatim (legacy/explicit).
+        assert c('https://example.com:9000', 8006, '') == 'https://example.com:9000'
+        # A server that already embeds a port is not double-ported.
+        assert c('example.com:1234', 8006, '') == 'example.com:1234'
 
 
 class TestWebScheme:

@@ -12,15 +12,159 @@ the stored value when the client omits them on write — the same scheme as
 the module configuration.
 """
 
+import copy
+import json
+import os
 import re
+import uuid
 
 from flask import jsonify, request, session
+
+
+def _coll_meta(modules_dir: str, mod: str, coll: str) -> dict:
+    """The collection's schema meta (``__discovery_label_template__`` etc.) read
+    from the module's schema.json, or ``{}``."""
+    from lib.credential_schemas import _watchfuls_dir  # noqa: PLC0415
+    bare = str(mod).replace('watchfuls.', '')
+    sp = os.path.join(_watchfuls_dir(modules_dir), bare, 'schema.json')
+    try:
+        with open(sp, encoding='utf-8') as fh:
+            c = json.load(fh).get(coll)
+        return c if isinstance(c, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _format_item_label(tpl: str, host_name: str, item: dict, disc_field: str) -> str:
+    """Format a check's label from the module's discovery template (e.g.
+    ``"{host} - {name}"``): ``{host}`` = the (new) host name, ``{name}`` = the
+    item's operative field (``__discovery_field__``, e.g. service/partition),
+    ``{other}`` = any item field.  Mirrors the frontend ``_discoveryLabel``."""
+    base = {'host': host_name or '', 'name': str(item.get(disc_field) or '') if disc_field else '',
+            'display_name': '', 'type': ''}
+
+    def _repl(m):
+        k = m.group(1)
+        if k in base:
+            return base[k]
+        v = item.get(k)
+        return str(v) if v is not None else ''
+    s = re.sub(r'\{(\w+)\}', _repl, tpl)
+    s = re.sub(r'\s*-\s*$', '', s)
+    s = re.sub(r'^\s*-\s*', '', s)
+    return s.strip()
 
 from lib import secret_manager, ssh_client
 from lib.hosts import probe as host_probe
 from lib.hosts.migrate import apply_to_modules, build_migration_plan
 
 SYSTEM_USER = 'system'
+
+
+def _delete_host_checks(wa, uid: str) -> int:
+    """Delete every module check bound to host *uid*.  Single-bind items
+    (``host_uid``) are removed; for a multi-host (cluster) check the host is just
+    removed from ``host_uids`` (the check is deleted only if it had no other
+    member).  Returns how many checks were deleted or unbound."""
+    try:
+        modules = wa._load_modules()
+    except Exception:  # pylint: disable=broad-except
+        return 0
+    count = 0
+    for mod, mcfg in modules.items():
+        if str(mod).startswith('__') or not isinstance(mcfg, dict):
+            continue
+        for coll, items in list(mcfg.items()):
+            if str(coll).startswith('__') or not isinstance(items, dict):
+                continue
+            for key in list(items.keys()):
+                item = items[key]
+                if not isinstance(item, dict):
+                    continue
+                hu = item.get('host_uids')
+                if isinstance(hu, list) and any(str(x).strip() for x in hu):
+                    remaining = [x for x in hu if str(x).strip() != str(uid)]
+                    if len(remaining) != len(hu):
+                        if remaining:
+                            item['host_uids'] = remaining      # still a member of the cluster
+                        else:
+                            del items[key]                     # last member → drop the check
+                        count += 1
+                    continue
+                if str(item.get('host_uid') or '') == str(uid):
+                    del items[key]
+                    count += 1
+    if count:
+        wa._save_modules(modules)
+    return count
+
+
+def _clone_host_checks(wa, src_uid: str, new_uid: str, label: str = '',
+                       only_keys: set | None = None) -> int:
+    """Duplicate every module check item bound to *src_uid* onto *new_uid*.
+
+    When *only_keys* is given, only items whose key is in it are cloned/joined
+    (the user picked them); ``None`` clones all bound checks.
+
+    For each item whose ``host_uid`` is the source host, a deep copy is inserted
+    under a fresh item UID pointing at the clone, so the new server inherits the
+    same monitoring.  The clone's ``label`` is set to *label* (the new host's
+    name) so checks read sensibly instead of falling back to the opaque item UID.
+
+    For a multi-host (cluster) check the source is one MEMBER of, the clone's uid
+    is ADDED to that same check's ``host_uids`` (the clone joins the cluster) —
+    the check is not duplicated.
+
+    Items are loaded decrypted and saved re-encrypted, so inline secrets survive.
+    Returns the number of checks the clone was wired into.
+    """
+    try:
+        modules = wa._load_modules()
+    except Exception:  # pylint: disable=broad-except
+        return 0
+    count = 0
+    for mod, mcfg in modules.items():
+        if str(mod).startswith('__') or not isinstance(mcfg, dict):
+            continue
+        for coll, items in list(mcfg.items()):
+            if str(coll).startswith('__') or not isinstance(items, dict):
+                continue
+            # The collection's label template (e.g. service_status "{host} - {name}")
+            # lets the clone keep its per-item part (service/partition) with the NEW
+            # host name; without one we just use the host name.
+            _meta = _coll_meta(wa._modules_dir, mod, coll)
+            _tpl = _meta.get('__discovery_label_template__')
+            _disc = _meta.get('__discovery_field__')
+            for ikey, item in list(items.items()):
+                if not isinstance(item, dict):
+                    continue
+                if only_keys is not None and str(ikey) not in only_keys:
+                    continue                       # the user did not pick this check
+                # Multi-host (cluster) binding: the host is one member of a shared
+                # check.  Don't duplicate the check — add the clone as a NEW member
+                # of the SAME check so it joins the cluster (even if a stale
+                # host_uid also matches).
+                hu = item.get('host_uids')
+                if isinstance(hu, list) and any(str(x).strip() for x in hu):
+                    members = [str(x).strip() for x in hu]
+                    if str(src_uid) in members and str(new_uid) not in members:
+                        hu.append(new_uid)
+                        count += 1
+                    continue
+                if str(item.get('host_uid') or '') != str(src_uid):
+                    continue
+                clone = copy.deepcopy(item)
+                clone['host_uid'] = new_uid
+                clone.pop('uid', None)
+                # Re-format the label with the new host name (+ the item's own
+                # operative field via the template), else just the host name.
+                clone['label'] = (_format_item_label(_tpl, label, clone, _disc)
+                                  if _tpl else label)
+                items[str(uuid.uuid4())] = clone
+                count += 1
+    if count:
+        wa._save_modules(modules)
+    return count
 
 _MOD_RE = re.compile(r'^[a-z][a-z0-9_]*$')
 
@@ -138,27 +282,31 @@ def _host_statuses(wa):
     """Return ``{host_uid: 'ok'|'error'|'warning'}`` derived from the daemon's
     status file and the host_uid binding of each check in the module configuration.
 
-    The check status is binary (True = OK), so a host is:
-      * ``error``   — at least one of its enabled checks reports not-OK;
-      * ``warning`` — it has enabled checks but none has a status yet (the
-                      daemon hasn't evaluated them — newly added / pending);
+    The check status is binary (True = OK) but a non-OK result carries a severity
+    ('warning' for an aviso, else 'error'), so a host is:
+      * ``error``   — at least one enabled check reports a hard (error) failure;
+      * ``warning`` — no hard errors, but at least one check is a warning-severity
+                      failure, OR it has enabled checks none of which has a status
+                      yet (the daemon hasn't evaluated them — newly added / pending);
       * ``ok``      — it has enabled checks and every evaluated one is OK.
     Hosts with no enabled checks are absent (the column shows a neutral dash).
     Maintenance is NOT folded in here — the UI shows it as an override.
     """
     status_raw = wa._read_check_status()
 
-    def _check_state(mod_key, check_key):
-        """The recorded status for a check, trying full and bare module keys."""
+    def _check_info(mod_key, check_key):
+        """The recorded (status, severity) for a check, trying full and bare keys."""
         for mk in (mod_key, _bare(mod_key)):
             mod = status_raw.get(mk)
             if isinstance(mod, dict) and check_key in mod:
                 info = mod.get(check_key)
-                return info.get('status') if isinstance(info, dict) else None
-        return '__absent__'
+                if isinstance(info, dict):
+                    return info.get('status'), (info.get('severity') or '')
+                return None, ''
+        return '__absent__', ''
 
     modules = wa._load_modules()
-    agg = {}   # uid -> {'has_error': bool, 'known': int, 'total': int}
+    agg = {}   # uid -> {'has_error', 'has_warn', 'known', 'total'}
     for mod_key, mod_cfg in modules.items():
         if not isinstance(mod_cfg, dict):
             continue
@@ -171,14 +319,18 @@ def _host_statuses(wa):
                 uid = item.get('host_uid')
                 if not uid or item.get('enabled') is False:
                     continue
-                a = agg.setdefault(uid, {'has_error': False, 'known': 0, 'total': 0})
+                a = agg.setdefault(uid, {'has_error': False, 'has_warn': False,
+                                         'known': 0, 'total': 0})
                 a['total'] += 1
-                st = _check_state(mod_key, check_key)
+                st, sev = _check_info(mod_key, check_key)
                 if st == '__absent__':
                     continue
                 a['known'] += 1
                 if st is not True:
-                    a['has_error'] = True
+                    if sev == 'warning':
+                        a['has_warn'] = True
+                    else:
+                        a['has_error'] = True
 
     out = {}
     for uid, a in agg.items():
@@ -186,7 +338,7 @@ def _host_statuses(wa):
             continue
         if a['has_error']:
             out[uid] = 'error'
-        elif a['known'] == 0:
+        elif a['has_warn'] or a['known'] == 0:
             out[uid] = 'warning'
         else:
             out[uid] = 'ok'
@@ -330,9 +482,12 @@ def register(app, wa):
                         continue
                     data = info.get('other_data') if isinstance(info.get('other_data'), dict) else {}
                     name = str(data.get('name') or '').strip() or keys.get(base) or skey
+                    ok = info.get('status') is True
+                    sev = (info.get('severity') or '').lower()
                     results.append({
                         'module': bare, 'key': skey, 'name': name,
-                        'ok': info.get('status') is True,
+                        'ok': ok,
+                        'level': 'ok' if ok else ('warning' if sev == 'warning' else 'error'),
                         'message': info.get('message', ''),
                         'data': data, 'ts': info.get('ts', ''),
                         'source': 'live',
@@ -348,9 +503,11 @@ def register(app, wa):
                     continue
                 data = s.get('last_data') if isinstance(s.get('last_data'), dict) else {}
                 name = str(data.get('name') or '').strip() or keys.get(base) or skey
+                _ok = s.get('last_status') is True
                 results.append({
                     'module': bare, 'key': skey, 'name': name,
-                    'ok': s.get('last_status') is True,
+                    'ok': _ok,
+                    'level': 'ok' if _ok else 'error',   # history keeps no severity
                     'message': data.get('message', '') if isinstance(data, dict) else '',
                     'data': data, 'ts': s.get('last_ts', ''),
                     'source': 'history',
@@ -385,6 +542,57 @@ def register(app, wa):
             'profiles': sorted((data.get('profiles') or {}).keys()),
         })
         return jsonify({'ok': True, 'uid': uid})
+
+    @app.route('/api/v1/hosts/<uid>/clone', methods=['POST'])
+    @login_required
+    def api_clone_host(uid):
+        """Clone a host: duplicate the stored host (all profiles + secrets) under a
+        NEW uid, overriding name/address from the request.  The source is read
+        DECRYPTED and re-created, so inline profile secrets (ssh_password,
+        ssh_key_string…) are preserved (and re-encrypted) instead of being lost as
+        they would in a client-side copy of the masked data."""
+        if 'servers_edit' not in wa._get_session_permissions():
+            return jsonify({'error': wa._t('access_denied')}), 403
+        store = _store()
+        if store is None:
+            return jsonify({'error': wa._t('save_file_error')}), 500
+        src = store.get(uid, decrypt=True)
+        if src is None:
+            return jsonify({'error': wa._t('host_not_found')}), 404
+        body, err = wa._require_json()
+        if err:
+            return err
+        data = copy.deepcopy(src)              # deep copy: we mutate nested profiles
+        data.pop('uid', None)
+        data['name'] = str((body or {}).get('name') or '').strip() \
+            or f"{src.get('name', '')} (copia)"
+        if 'address' in (body or {}):
+            data['address'] = str(body.get('address') or '').strip()
+        # A clone is a DIFFERENT machine → let the OS auto-detect rather than
+        # inheriting the source's (possibly wrong) value.
+        data['os'] = 'auto'
+        # The cluster-node identity (which Proxmox node this host IS) is unique to
+        # the machine — a clone is a different node, so blank it.
+        for _prof in (data.get('profiles') or {}).values():
+            if isinstance(_prof, dict):
+                _prof.pop('node', None)
+        if not data['name']:
+            return jsonify({'error': wa._t('invalid_modules_data')}), 400
+        new_uid = store.create(data, actor=session.get('username', SYSTEM_USER))
+        if not new_uid:
+            return jsonify({'error': wa._t('invalid_modules_data')}), 400
+        # Duplicate the source host's module checks onto the clone.  When the
+        # client sends a ``checks`` list, only those item keys are cloned (the
+        # user picked them in the modal); absent → clone all.
+        _sel = (body or {}).get('checks')
+        only_keys = set(str(k) for k in _sel) if isinstance(_sel, list) else None
+        checks_cloned = _clone_host_checks(wa, uid, new_uid, label=data['name'],
+                                           only_keys=only_keys)
+        wa._audit('host_cloned', detail={
+            'uid': new_uid, 'source_uid': uid, 'name': data['name'],
+            'address': data.get('address', ''), 'checks_cloned': checks_cloned,
+        })
+        return jsonify({'ok': True, 'uid': new_uid, 'checks_cloned': checks_cloned})
 
     @app.route('/api/v1/hosts/<uid>', methods=['PUT'])
     @login_required
@@ -621,10 +829,16 @@ def register(app, wa):
         old = store.get(uid, decrypt=False)
         if old is None or not store.delete(uid):
             return jsonify({'error': wa._t('host_not_found')}), 404
+        # Optionally also delete the module checks bound to this host (the client
+        # asks the user). Otherwise they are left (and read as inline).
+        checks_deleted = 0
+        if str(request.args.get('with_checks') or '').lower() in ('1', 'true', 'yes'):
+            checks_deleted = _delete_host_checks(wa, uid)
         wa._audit('host_deleted', detail={
             'uid': uid, 'name': old.get('name', ''), 'address': old.get('address', ''),
+            'checks_deleted': checks_deleted,
         })
-        return jsonify({'ok': True})
+        return jsonify({'ok': True, 'checks_deleted': checks_deleted})
 
     # ── Assisted migration: detect inline connections repeated across modules
     #    and propose collapsing them into shared hosts. ───────────────────────

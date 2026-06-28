@@ -179,7 +179,7 @@ ServiceSentry/
 │   │   │   └── enum_config_options.py   # Enum opciones de config comunes
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
 │   │       ├── app.py                   # Clase WebAdmin (hereda de los 11 mixins)
-│   │       ├── constants.py             # PERMISSIONS (46), BUILTIN_ROLE_UIDS/GROUP_UIDS, SYSTEM_USER
+│   │       ├── constants.py             # PERMISSIONS (52), BUILTIN_ROLE_UIDS/GROUP_UIDS, SYSTEM_USER
 │   │       ├── i18n.py                  # Cargador de traducciones
 │   │       ├── email_notify.py          # Envío de email (SMTP / Microsoft 365 / Gmail)
 │   │       ├── email_templates.py       # Motor de plantillas HTML de email

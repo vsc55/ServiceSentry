@@ -3,6 +3,7 @@
 """Tests for Monitor._get_enabled_modules and check_module."""
 
 import os
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -271,3 +272,158 @@ class TestFailStreak:
         finally:
             sys.path = [p for p in sys.path if p != monitor.dir_modules]
             sys.modules.pop("streaky", None)
+
+
+class TestTelegramConfigFromDB:
+    """Regression: the Telegram credentials are editable config that live in the
+    DB (config migration), not config.json — the monitor must initialise/refresh
+    Telegram from the EFFECTIVE config (after _apply_db_config), not the bare
+    file.  A wrong init order left token/chat_id empty → no notifications."""
+
+    def _write_db_telegram(self, monitor, token, chat_id):
+        from lib.stores.config import ConfigStore
+        from lib.config import config_path
+        from lib.config.manager import ConfigManager
+        mgr = ConfigManager(ConfigStore(monitor._db), config_path(monitor.dir_config),
+                            fernet=monitor._fernet)
+        mgr.write({'telegram': {'token': token, 'chat_id': chat_id}})
+
+    def test_fresh_monitor_reads_telegram_from_db(self, monitor):
+        # config.json is empty; the credentials only exist in the DB layer.
+        self._write_db_telegram(monitor, 'TKN-1', 'CHT-1')
+        m2 = Monitor(monitor.dir_base, monitor.dir_config,
+                     monitor.dir_modules, monitor.dir_var)
+        assert m2.tg.token == 'TKN-1'
+        assert m2.tg.chat_id == 'CHT-1'
+
+    def test_refresh_runtime_config_updates_in_place(self, monitor):
+        # Starts empty (no telegram anywhere)…
+        assert monitor.tg.token == ''
+        tg_before = monitor.tg
+        self._write_db_telegram(monitor, 'TKN-2', 'CHT-2')
+        monitor.refresh_runtime_config()
+        # …picks up the DB values live, updating the SAME sender object.
+        assert monitor.tg is tg_before        # not recreated (no thread churn)
+        assert monitor.tg.token == 'TKN-2'
+        assert monitor.tg.chat_id == 'CHT-2'
+
+
+class TestDaemonModuleConfigRefresh:
+    """Regression: the persistent daemon monitor holds its own ModulesStore whose
+    version() counter never reflects the web admin's writes (a separate store
+    instance). refresh_runtime_config() must re-read module config from the DB so
+    checks added in the UI (e.g. a new Proxmox cluster) actually run — otherwise
+    they never reach status / history / Telegram."""
+
+    def test_refresh_picks_up_web_added_check(self, monitor):
+        from lib.stores.modules import ModulesStore, DbBackedModules
+        # Simulate the web admin adding a Proxmox check via its OWN store instance.
+        web_cm = DbBackedModules(ModulesStore(monitor._db), fernet=monitor._fernet)
+        web_cm.read()
+        data = web_cm.data
+        data.setdefault('watchfuls.proxmox', {}).setdefault('list', {})['pve'] = {
+            'enabled': True, 'label': 'Lab'}
+        web_cm.save(data)
+
+        # The persistent monitor is stale until it re-reads.
+        before = monitor.config_modules.get_conf(
+            ['watchfuls.proxmox', 'list', 'pve', 'label'], '')
+        assert before == ''
+        monitor.refresh_runtime_config()
+        after = monitor.config_modules.get_conf(
+            ['watchfuls.proxmox', 'list', 'pve', 'label'], '')
+        assert after == 'Lab'
+
+
+class TestDaemonCycleIntegration:
+    """End-to-end wiring of one daemon cycle on the PERSISTENT monitor:
+
+    a check added in the web (via separate DB store instances) must, after the
+    per-cycle ``refresh_runtime_config()``, actually run and land in ALL three
+    surfaces — current status, history, and an attempted Telegram send with the
+    DB-stored credentials.  This covers the seams three real regressions slipped
+    through: stale module config, Telegram initialised before the DB layer, and
+    the config→run→notify path as a whole.
+    """
+
+    def _make_listing_module(self, modules_dir, name):
+        """A module that emits one *notifying* OK result per configured list item
+        (so whether the monitor SEES the config actually matters)."""
+        mod_dir = os.path.join(modules_dir, name)
+        os.makedirs(mod_dir, exist_ok=True)
+        with open(os.path.join(mod_dir, '__init__.py'), 'w', encoding='utf-8') as fh:
+            fh.write(
+                "from lib.modules import ModuleBase, ReturnModuleCheck\n\n"
+                "class Watchful(ModuleBase):\n"
+                "    ITEM_SCHEMA = {'list': {'enabled': {'type': 'bool', 'default': True},\n"
+                "                            'label': {'type': 'str', 'default': ''}}}\n"
+                "    def __init__(self, monitor):\n"
+                "        super().__init__(monitor, __package__)\n"
+                "    def check(self):\n"
+                "        r = ReturnModuleCheck()\n"
+                "        for k, v in (self.get_conf('list', {}) or {}).items():\n"
+                "            if isinstance(v, dict) and v.get('enabled', True):\n"
+                "                r.set(k + '/state', True, f'{k} ok', True)\n"
+                "        return r\n"
+            )
+
+    def test_added_check_reaches_status_history_telegram(self, monitor):
+        import sys
+        import time
+        name = 'clustermod'
+        self._make_listing_module(monitor.dir_modules, name)
+        if monitor.dir_modules not in sys.path:
+            sys.path.insert(0, monitor.dir_modules)
+
+        # The web admin writes BOTH the Telegram creds and the new check to the DB
+        # through its own store instances — invisible to the persistent monitor.
+        from lib.stores.config import ConfigStore
+        from lib.config import config_path
+        from lib.config.manager import ConfigManager
+        from lib.stores.modules import ModulesStore, DbBackedModules
+        ConfigManager(ConfigStore(monitor._db), config_path(monitor.dir_config),
+                      fernet=monitor._fernet).write(
+            {'telegram': {'token': 'TKN-9', 'chat_id': 'CHT-9'}})
+        web_cm = DbBackedModules(ModulesStore(monitor._db), fernet=monitor._fernet)
+        web_cm.read()
+        web_cm.data.setdefault(name, {}).setdefault('list', {})['pve'] = {
+            'enabled': True, 'label': 'Lab'}
+        web_cm.save(web_cm.data)
+
+        try:
+            # BEFORE the refresh the persistent monitor is blind to the new check.
+            assert 'pve/state' not in monitor.check_module(name)[2].list
+
+            # The per-cycle refresh the daemon now performs.
+            monitor.refresh_runtime_config()
+            monitor.tg.group_messages = False        # deterministic immediate send
+
+            import lib.telegram as telegram_mod
+            with patch.object(telegram_mod, 'requests') as req:
+                req.RequestException = Exception
+                req.post.return_value = MagicMock(status_code=200)
+
+                # Run the cycle exactly like the daemon: check → process → history.
+                ok, mname, data = monitor.check_module(name)
+                assert ok and data is not None and 'pve/state' in data.list
+                monitor._process_module_result(mname, data)
+                for key in data.list:
+                    monitor._history.record(mname, key, data.get_status(key),
+                                            data.get_other_data(key))
+                monitor.tg.queue_msg.join()          # drain the sender
+
+            # 1) STATUS — the live result is recorded.
+            assert monitor.status.get_conf([name, 'pve/state', 'status']) is True
+
+            # 2) HISTORY — a sample landed and is queryable.
+            pts = monitor._history.query(name, 'pve/state', 0, time.time() + 1)
+            assert len(pts) == 1
+
+            # 3) TELEGRAM — a send was attempted with the DB credentials (proving
+            #    token/chat_id were NOT null — the original bug).
+            assert req.post.called
+            assert 'TKN-9' in req.post.call_args.args[0]
+            assert req.post.call_args.kwargs['data']['chat_id'] == 'CHT-9'
+        finally:
+            sys.path = [p for p in sys.path if p != monitor.dir_modules]
+            sys.modules.pop(name, None)
