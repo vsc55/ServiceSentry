@@ -519,6 +519,9 @@ LANG = {
     # Pestaña Servicios
     'svc_scheduler':       'Planificador',
     'svc_syslog':          'Receptor syslog',
+    'svc_events':          'Procesador de eventos',
+    'svc_poll':            'Sondeo',
+    'svc_rules':           'Reglas (activas/total)',
     'svc_worker':          'Worker',
     'svc_database':        'Base de datos',
     'svc_interval':        'Intervalo',
@@ -976,6 +979,8 @@ LANG = {
         'daemon_stopped':        'Scheduler: Detenido',
         'syslog_started':        'Syslog: Iniciado',
         'syslog_stopped':        'Syslog: Detenido',
+        'events_worker_started': 'Procesador de eventos: Iniciado',
+        'events_worker_stopped': 'Procesador de eventos: Detenido',
         'syslog_cleared':        'Syslog: Vaciado',
         'syslog_drops_cleared':  'Syslog: Descartes vaciados',
         'event_rule_created':    'Regla de evento creada',
@@ -1443,6 +1448,8 @@ LANG = {
         'syslog|max_rows':        'Número máximo de mensajes syslog conservados; los más antiguos se purgan al superarlo (0 = sin límite). Un tope de seguridad para que la tabla no crezca sin control.',
         # Reglas de eventos
         'events|cooldown':        'Segundos mínimos por defecto entre notificaciones de una misma regla de evento (0 = notificar en cada coincidencia). Lo heredan las reglas que dejan su campo Cooldown en blanco; una regla puede sobreescribirlo (incluido 0 para sin cooldown).',
+        'events|mode':            'Dónde corre el procesador de eventos (evalúa las reglas y notifica): «embedded» = un hilo dentro del panel web (por defecto); «external» = lo gestiona un proceso/contenedor aparte (pon SS_EVENTS_EMBEDDED=0 en el web); «off» = sin evaluación de reglas. El procesado está desacoplado de la recepción: lee por cursor los mensajes/eventos ya guardados, así una avalancha de syslog nunca bloquea la ingesta.',
+        'events|poll_secs':       'Cada cuántos segundos el procesador busca mensajes syslog y eventos de auditoría nuevos para evaluar las reglas (1–3600). Más bajo = alertas más inmediatas; más alto = menos carga de BD.',
         # Base de datos dedicada de syslog
         'syslog_db|enabled':      'Almacena los mensajes syslog en una base de datos aparte en vez de la del sistema — útil para aislar un flujo de alto volumen. Si está desactivado, syslog comparte la base de datos del sistema. Surte efecto tras reiniciar. Los campos de conexión de abajo replican los de la Base de datos del sistema (la contraseña se cifra en reposo).',
         'syslog_db|driver':       'Motor de base de datos para el almacén dedicado de syslog: SQLite (un fichero local) o un servidor de red (PostgreSQL / MySQL / MariaDB).',

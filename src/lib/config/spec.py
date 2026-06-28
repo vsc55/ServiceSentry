@@ -298,6 +298,12 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # Global default cooldown (s) inherited by any event rule that leaves its own
     # Cooldown field blank.  0 = notify on every match.
     Cfg('events|cooldown',        int, 0, min=0, max=86400),
+    # Decoupled event worker: where it runs and how often it polls the source tables.
+    # mode: 'embedded' = a worker thread inside the web admin (default); 'external' =
+    # a separate process/container owns it (web admin does not run it); 'off' = no
+    # rule evaluation. poll_secs: how often the worker drains new syslog/audit rows.
+    Cfg('events|mode',            str, 'embedded', no_rule=True),
+    Cfg('events|poll_secs',       int, 2, min=1, max=3600),
 
     # ── Syslog dedicated database (optional) ──────────────────────────────────
     # When enabled, syslog messages are stored in their own database (isolating

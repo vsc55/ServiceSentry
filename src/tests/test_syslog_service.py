@@ -107,21 +107,17 @@ def _add_syslog_rule(service, **over):
 
 
 class TestAlert:
-    """Syslog→notification now runs through the Event-rules manager, evaluated
-    by the standalone service against the same shared rules."""
+    """Rule evaluation is decoupled from the standalone listener: it only stores
+    messages; the event worker (embedded web admin, or a dedicated events process)
+    evaluates them. So the listener itself never dispatches a notification."""
 
-    def test_alert_dispatched(self, service):
+    def test_listener_does_not_dispatch(self, service):
         _add_syslog_rule(service)
         with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
-            service._on_message({'severity': 2, 'severity_name': 'crit', 'source': '9.9.9.9',
-                                 'message': 'kernel panic', 'hostname': 'h', 'received_at': ''})
-        assert disp.called and disp.call_args.kwargs['kind'] == 'event'
-
-    def test_no_alert_below_threshold(self, service):
-        _add_syslog_rule(service)
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
-            service._on_message({'severity': 6, 'source': '9.9.9.8', 'message': 'fine',
-                                 'hostname': 'h', 'received_at': ''})
+            service._syslog_store.add({
+                'ts': 0.0, 'received_at': '', 'source': '9.9.9.9', 'hostname': 'h',
+                'app': '', 'procid': '', 'severity': 2, 'facility': 1, 'msgid': '',
+                'message': 'kernel panic', 'raw': ''})
         assert not disp.called
 
     def test_cooldown_suppresses_second(self, service):
@@ -129,13 +125,13 @@ class TestAlert:
         rec = {'severity': 1, 'severity_name': 'alert', 'source': '9.9.9.7',
                'message': 'down', 'hostname': 'h', 'received_at': ''}
         with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
-            service._on_message(dict(rec))
-            service._on_message(dict(rec))
+            service._eval_event('syslog',dict(rec))
+            service._eval_event('syslog',dict(rec))
         assert disp.call_count == 1            # second within cooldown is dropped
 
     def test_no_rule_no_dispatch(self, service):
         with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
-            service._on_message({'severity': 1, 'source': '9.9.9.6', 'message': 'x',
+            service._eval_event('syslog',{'severity': 1, 'source': '9.9.9.6', 'message': 'x',
                                  'hostname': 'h', 'received_at': ''})
         assert not disp.called                 # nothing configured → nothing sent
 
@@ -263,6 +259,6 @@ class TestTraceability:
         self._trace_on(service)
         _add_syslog_rule(service)
         with mock.patch('lib.web_admin.notification_dispatcher.dispatch'):
-            service._on_message({'severity': 1, 'severity_name': 'alert', 'source': '7.7.7.7',
+            service._eval_event('syslog',{'severity': 1, 'severity_name': 'alert', 'source': '7.7.7.7',
                                  'message': 'boom', 'hostname': 'h', 'received_at': ''})
         assert 'matched' in capsys.readouterr().out

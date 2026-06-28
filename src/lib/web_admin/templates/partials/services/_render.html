@@ -96,9 +96,25 @@ async function renderServices() {
             key: 'syslog', icon: 'bi-hdd-stack', title: t('svc_syslog'),
             state: d.state, running: d.running, controllable: d.controllable, embedded: d.embedded,
             rows: [
+                _svcRow(t('svc_mode'), d.embedded ? t('svc_mode_embedded') : t('svc_mode_container')),
                 _svcRow(t('svc_ports'), `UDP ${d.udp_port||'—'} · TCP ${d.tcp_port||'—'} · TLS ${d.tls_port||'—'}`),
                 _svcRow(t('svc_messages'), d.count),
-                _svcRow(t('svc_mode'), d.embedded ? t('svc_mode_embedded') : t('svc_mode_container')),
+            ],
+        }));
+    }
+
+    // Event worker (decoupled rule evaluation: drains syslog/audit by cursor)
+    if (s.events) {
+        const d = s.events;
+        const modeLabel = d.mode === 'external' ? t('svc_mode_container')
+            : (d.mode === 'off' ? _svcStateLabel('disabled') : t('svc_mode_embedded'));
+        cards.push(_svcCard({
+            key: 'events', icon: 'bi-bell', title: t('svc_events'),
+            state: d.state, running: d.running, controllable: d.controllable, embedded: d.embedded,
+            rows: [
+                _svcRow(t('svc_mode'), esc(modeLabel)),
+                _svcRow(t('svc_poll'), (d.poll_secs || 2) + ' s'),
+                _svcRow(t('svc_rules'), `${d.rules_enabled}/${d.rules}`),
             ],
         }));
     }

@@ -88,10 +88,9 @@ class _AuditMixin:
                 event=event, user=user, ip=ip, detail=detail,
                 max_entries=self._AUDIT_MAX_ENTRIES,
             )
-            # Event-rules manager: notify on matching audit events.
-            _eval = getattr(self, '_eval_event', None)
-            if callable(_eval):
-                _eval('audit', {'event': event, 'user': user, 'detail': detail})
+            # Event-rule evaluation is decoupled: the background event worker reads
+            # new audit rows by cursor and notifies on matching rules, so writing an
+            # audit entry never blocks on a (possibly slow) notification channel.
         except Exception as exc:  # pylint: disable=broad-except
             conn = getattr(self, '_db_connector', None)
             if conn is not None:

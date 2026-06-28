@@ -6,14 +6,16 @@ Se ofrecen tres topologías a partir de la misma imagen; elige una:
   `servicesentry`: el panel web con su scheduler embebido activado
   (`SS_AUTOSTART=true`), que ejecuta los checks periódicos en el propio proceso.
   La opción más simple.
-- **Microservicios** (`docker/docker-compose.microservices.yml`) — cinco
+- **Microservicios** (`docker/docker-compose.microservices.yml`) — seis
   contenedores y **dos** MariaDB: `servicesentry-db` (BD principal: config,
   usuarios, historial, reglas de eventos, log de notificaciones…),
   `servicesentry-syslog-db` (BD dedicada para los mensajes syslog, de alto
   volumen, aislados de la principal), `servicesentry-web` (panel Flask, `--web`),
-  `servicesentry-worker` (daemon de monitorización, `--daemon`) y
-  `servicesentry-syslog` (receptor syslog independiente, `--syslog`). Separa cada
-  responsabilidad: el monitoreo sobrevive a reinicios del web, y el receptor
+  `servicesentry-worker` (daemon de monitorización, `--daemon`),
+  `servicesentry-syslog` (receptor syslog independiente, `--syslog`) y
+  `servicesentry-events` (procesador de eventos desacoplado, `--events`: lee por
+  cursor los mensajes/eventos almacenados, evalúa las reglas y notifica). Separa
+  cada responsabilidad: el monitoreo sobrevive a reinicios del web, y el receptor
   syslog (que liga puertos de red y procesa entrada no confiable) queda aislado
   del panel.
 - **Microservicios + Traefik** (`docker/docker-compose.microservices-traefik.yml`)
@@ -28,8 +30,10 @@ Se ofrecen tres topologías a partir de la misma imagen; elige una:
 La conexión a la BD principal se inyecta por env `SS_DB_*` y la de syslog por
 `SS_SYSLOG_DB_*` (ver [configuration.md](configuration.md) → *Sección `database`*);
 el `web` arranca con `SS_SYSLOG_EMBEDDED=0` para **no** ligar los puertos syslog
-(los gestiona el contenedor `syslog`). Los contenedores comparten los volúmenes con
-nombre y las bases de datos, por lo que leen y escriben el mismo estado.
+(los gestiona el contenedor `syslog`) y con `SS_EVENTS_EMBEDDED=0` para **no**
+evaluar reglas en el panel (lo hace el contenedor `events`). Los contenedores
+comparten los volúmenes con nombre y las bases de datos, por lo que leen y escriben
+el mismo estado.
 
 Ambas topologías de microservicios definen dos **redes** (ver
 [Redes](#redes)): `backend` (tráfico interno servicio↔servicio y bases de datos —
@@ -67,6 +71,7 @@ docker logs -f servicesentry            # monolítica
 docker logs -f servicesentry-web        # microservicios
 docker logs -f servicesentry-worker     # microservicios
 docker logs -f servicesentry-syslog     # microservicios (receptor syslog)
+docker logs -f servicesentry-events     # microservicios (procesador de eventos)
 docker logs -f servicesentry-traefik    # topología Traefik (proxy/TLS)
 
 # Parar

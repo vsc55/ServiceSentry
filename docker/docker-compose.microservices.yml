@@ -129,6 +129,9 @@ services:
       SS_AUTOSTART: "false"
       # The syslog container owns the listener; the web only shows stored data.
       SS_SYSLOG_EMBEDDED: "0"
+      # The events container owns rule evaluation; keep it out of the web process.
+      # (Pair with events|mode=external in config for a fully separate worker.)
+      SS_EVENTS_EMBEDDED: "0"
     depends_on:
       db:
         condition: service_healthy
@@ -195,6 +198,36 @@ services:
     environment:
       <<: [*db-env, *syslog-db-env]
       SS_SERVICE_ROLE: syslog
+    depends_on:
+      db:
+        condition: service_healthy
+      syslog-db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+  # ── Standalone event processor ──────────────────────────────────────────────
+  # Decoupled rule evaluation: reads new syslog/audit rows by cursor, evaluates the
+  # rules edited in the web UI and dispatches notifications.  No ingress ports — it
+  # only talks to the databases (audit/rules on the main DB, syslog on its own).
+  # Pairs with SS_EVENTS_EMBEDDED=0 on the web service so a single worker owns it.
+  events:
+    image: servicesentry:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: servicesentry-events
+    restart: unless-stopped
+    networks:
+      - backend
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    env_file:
+      - .env
+    environment:
+      <<: [*db-env, *syslog-db-env]
+      SS_SERVICE_ROLE: events
     depends_on:
       db:
         condition: service_healthy

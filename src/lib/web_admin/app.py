@@ -247,6 +247,18 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._init_syslog()
         # Event→notification rules manager (audit/syslog hooks).
         self._init_events()
+        # Decoupled event worker: persisted cooldown/cursor + a background consumer that
+        # drains syslog/audit off the ingestion path (so a flood of messages never
+        # blocks reception). events|mode = embedded (default) | external (a separate
+        # process/container owns it) | off (no evaluation).
+        self._attach_event_state(getattr(self, '_event_state_store', None))
+        _emode = str((self._config_section('events') or {}).get('mode') or 'embedded').lower()
+        # SS_EVENTS_EMBEDDED=0 lets the worker run as its own process/container
+        # (events|mode=external) and keeps it out of the test harness.
+        _ev_env = os.environ.get('SS_EVENTS_EMBEDDED', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+        if _emode == 'embedded' and _ev_env:
+            _poll = (self._config_section('events') or {}).get('poll_secs')
+            self._start_event_worker(int(_poll) if _poll not in (None, '') else 2)
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -466,6 +478,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._event_rules_store = EventRulesStore(self._db_connector)
         from lib.stores.notification_log import NotificationLogStore  # noqa: PLC0415
         self._notification_log_store = NotificationLogStore(self._db_connector)
+        # Persisted cooldown + per-source cursor for the decoupled event worker.
+        from lib.stores.event_state import EventStateStore  # noqa: PLC0415
+        self._event_state_store = EventStateStore(self._db_connector)
         # Watchful module/item configuration (DB-backed, shared with the monitor
         # through the same database).
         from lib.stores.modules import (  # noqa: PLC0415

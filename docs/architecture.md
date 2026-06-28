@@ -61,7 +61,7 @@ ObjectBase (lib/object_base.py)
 │   ├── _DaemonMixin     (lib/web_admin/mixins/daemon.py)
 │   ├── _SyslogMixin     (lib/web_admin/mixins/syslog.py)     ← receptor syslog + registro de descartes
 │   ├── _ServicesMixin   (lib/web_admin/mixins/services.py)   ← estado/control de servicios
-│   └── _EventsMixin     (lib/event_manager.py, reexportado por mixins/events.py; SIN Flask, lo comparte el servicio syslog)
+│   └── _EventsMixin     (lib/event_manager.py, reexportado por mixins/events.py; SIN Flask) ← evalúa reglas + worker desacoplado (cursor syslog/audit); compartido por WebAdmin y los servicios standalone (syslog/events)
 ├── BaseConnector (lib/db/base.py)              ← capa de BD pluggable
 │   ├── SQLiteConnector       (lib/db/sqlite.py)      [por defecto]
 │   ├── MySQLConnector        (lib/db/mysql.py)
@@ -81,6 +81,7 @@ ObjectBase (lib/object_base.py)
 │   ├── WebhooksStore   (lib/stores/webhooks.py)     → tabla webhooks (destinos HTTP salientes)
 │   ├── EventRulesStore (lib/stores/event_rules.py)  → tabla event_rules (reglas de notificación)
 │   ├── NotificationLogStore (lib/stores/notification_log.py) → tabla notification_log (log de envíos)
+│   ├── EventStateStore (lib/stores/event_state.py)   → tablas event_cooldowns + event_cursor (estado del worker de eventos)
 │   ├── SyslogStore     (lib/stores/syslog.py)        → tabla syslog (mensajes; puede ir en BD dedicada)
 │   └── SyslogDropsStore(lib/stores/syslog_drops.py)  → tabla syslog_drops (orígenes descartados por la allowlist)
 └── ModuleBase (lib/modules/module_base.py)
@@ -138,13 +139,16 @@ ServiceSentry/
 │   │   │   ├── webhooks.py              # WebhooksStore   → tabla webhooks (destinos HTTP salientes)
 │   │   │   ├── event_rules.py           # EventRulesStore → tabla event_rules (reglas de notificación)
 │   │   │   ├── notification_log.py      # NotificationLogStore → tabla notification_log (log de envíos)
+│   │   │   ├── event_state.py           # EventStateStore → tablas event_cooldowns + event_cursor (estado del worker de eventos)
 │   │   │   ├── syslog.py                # SyslogStore     → tabla syslog (mensajes; BD dedicada opcional)
 │   │   │   └── syslog_drops.py          # SyslogDropsStore→ tabla syslog_drops (orígenes descartados)
-│   │   ├── event_manager.py            # _EventsMixin (sin Flask): evalúa reglas y despacha notificaciones; compartido por WebAdmin y el servicio syslog
+│   │   ├── event_manager.py            # _EventsMixin (sin Flask): evalúa reglas + worker desacoplado (cursor sobre syslog/audit); compartido por WebAdmin y los servicios standalone
+│   │   ├── events/                      # Procesador de eventos standalone (worker desacoplado)
+│   │   │   └── service.py               # EventService (sin Flask): consume syslog/audit por cursor, evalúa y despacha (main.py --events)
 │   │   ├── syslog/                      # Receptor syslog (RFC 3164/5424)
 │   │   │   ├── parser.py                # Parser de mensajes RFC 3164/5424
 │   │   │   ├── server.py                # Listener UDP/TCP/TLS multi-bind (IPv4/IPv6) + allowlist + registro de descartes
-│   │   │   └── service.py               # Servicio standalone (recibe→almacena→evento→purga), sin Flask
+│   │   │   └── service.py               # Servicio standalone (solo recibe→almacena→purga; la evaluación de reglas está desacoplada), sin Flask
 │   │   ├── hosts/                       # Dominio de hosts (no la tabla; eso es stores/hosts.py)
 │   │   │   ├── profiles.py              # Catálogo protocolo→campos (de __host_profile__)
 │   │   │   ├── runner.py                # Ejecución de comandos local/SSH (run, is_remote)
@@ -333,6 +337,119 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 
 ---
 
+## Procesamiento de Eventos (notificaciones)
+
+Las **reglas de notificación** (audit/syslog → Telegram/Email/Webhook) las evalúa
+`_EventsMixin` (`lib/event_manager.py`, **sin Flask**, compartido por el WebAdmin y
+los servicios standalone). El diseño está **desacoplado de la ingesta**: los
+productores y el consumidor no se llaman en línea, sino que se comunican a través de
+las **propias tablas de la BD** (la cola es la tabla de origen).
+
+```mermaid
+flowchart LR
+    SL["Listener syslog"] -->|almacena| ST[("tabla syslog")]
+    AW["audit · _audit_write()"] -->|almacena| AT[("tabla audit")]
+
+    ST -.->|"query_since(cursor)"| TICK
+    AT -.->|"query_since(cursor)"| TICK
+
+    subgraph TICK["event worker · _event_worker_tick() · cada poll_secs"]
+      direction TB
+      E["_eval_event(source, fila)"] --> M["match<br/>severidad / host / app / condiciones"]
+      M --> C{"cooldown?"}
+      C -->|"fuera de ventana"| D["_dispatch_event()"]
+      C -->|"en ventana"| X["descarta"]
+    end
+
+    D --> ND["notification_dispatcher"]
+    ND --> TG["Telegram"]
+    ND --> EM["Email"]
+    ND --> WH["Webhook"]
+    D --> NL[("notification_log")]
+    TICK -->|"avanza last_id"| CU[("event_cursor")]
+    C -.->|"persiste last_fire"| CD[("event_cooldowns")]
+```
+
+Los **productores** (listener syslog, `_audit_write`) solo escriben en sus tablas;
+el **worker** las drena por cursor. La "cola" es la propia tabla de origen.
+
+**Principios de diseño:**
+
+- **La ingesta nunca se bloquea.** El listener syslog y `_audit_write` **solo
+  almacenan**; el envío de notificaciones (I/O de red, posiblemente lento) ocurre
+  fuera de ese camino. Una avalancha de syslog no descarta paquetes por estar
+  notificando — primero se persiste, luego el worker drena a su ritmo.
+- **Cursor por fuente** (`event_cursor`): el worker lee solo filas nuevas
+  (`id > last_id`). En el **primer arranque** el cursor se sitúa en la cola
+  (`max_id`) para no reprocesar el histórico; después avanza tras cada lote.
+- **Cooldown persistido** (`event_cooldowns`): el antirebote vive en BD (no en
+  memoria), por lo que una regla no vuelve a dispararse tras un reinicio y vale para
+  más de una instancia.
+- **Embebido o externo** (`events.mode`), mismo núcleo:
+  - *embedded* (por defecto): un hilo dentro del WebAdmin
+    (`_start_event_worker`, gate de entorno `SS_EVENTS_EMBEDDED`).
+  - *external*: un proceso/contenedor propio — `EventService`
+    (`lib/events/service.py`, `main.py --events`, `SS_SERVICE_ROLE=events`) que abre
+    la BD compartida y corre el mismo `_event_worker_loop`. El WebAdmin se lanza con
+    `SS_EVENTS_EMBEDDED=0`.
+  - *off*: sin evaluación.
+- **Controlable** desde la pestaña Services (start/stop/estado) cuando es embebido.
+
+### ¿Qué proceso corre el worker en cada topología?
+
+| | Monolítico / **embebido** | Microservicios / **externo** |
+|---|---|---|
+| Worker de eventos | hilo dentro del contenedor **web** | contenedor **`events`** dedicado |
+| `events.mode` | `embedded` (por defecto) | `external` |
+| Entorno | `SS_EVENTS_EMBEDDED=1` (por defecto) | web: `SS_EVENTS_EMBEDDED=0` · events: `SS_SERVICE_ROLE=events` |
+| Entrypoint | interno (`_start_event_worker`) | `main.py --events` → `EventService` |
+| Control en Services | start / stop | solo lectura (otro proceso) |
+| Base de datos | compartida (principal + syslog) | la misma BD compartida |
+
+```mermaid
+flowchart TB
+    subgraph MONO["Monolítico — un proceso"]
+      WEBm["web<br/>Flask + scheduler + listener syslog + event worker"]
+    end
+    subgraph MICRO["Microservicios — un proceso por rol"]
+      WEBx["web<br/>Flask"]
+      WRK["worker<br/>scheduler"]
+      SYS["syslog<br/>listener"]
+      EVT["events<br/>event worker"]
+    end
+    WEBm --- DBm[("BD compartida")]
+
+    WEBx --- DB[("BD principal")]
+    WEBx --- SDB[("BD syslog")]
+    WRK --- DB
+    SYS --- DB
+    SYS --- SDB
+    EVT --- DB
+    EVT --- SDB
+```
+
+**Accesos a BD por rol** (en microservicios, cuando `syslog_db.enabled`):
+
+| Rol | BD principal (config, audit, reglas, log, historial…) | BD syslog (mensajes + descartes) |
+|---|---|---|
+| **web** | ✔ (todo el panel) | ✔ (lee y muestra los mensajes) |
+| **worker** (scheduler) | ✔ | — |
+| **syslog** (listener) | ✔ (lee su config de la sección `syslog`) | ✔ (escribe los mensajes) |
+| **events** (worker) | ✔ (reglas, audit, cooldown, cursor) | ✔ (lee los mensajes por cursor) |
+
+> Todos comparten la **misma** BD principal (y la misma BD de syslog cuando está
+> separada); cada rol abre solo los conectores que necesita. La config (incl. la del
+> syslog) vive siempre en la BD principal, por eso todos los roles la abren.
+
+En ambos casos el núcleo es el mismo (`_event_worker_tick` / `_event_worker_loop`);
+solo cambia **quién** lo hospeda y **cuándo** se arranca.
+
+> Esto **sustituye** la evaluación en línea anterior (el hook por mensaje del
+> listener y el `_eval_event` dentro de `_audit_write`), que acoplaba el envío de
+> notificaciones a la recepción y era un cuello de botella a alto caudal de syslog.
+
+---
+
 ## Modelo de Concurrencia
 
 | Capa | Mecanismo |
@@ -349,7 +466,7 @@ La capa de datos del core (`lib/db/`) abstrae el motor mediante `BaseConnector`,
 con implementaciones para **SQLite** (por defecto), **MySQL/MariaDB** y
 **PostgreSQL**. Todos los stores de `lib/stores/` (`users`, `groups`, `roles`,
 `sessions`, `audit`, `check_state`, `credentials`, `history`, `hosts`, `modules`,
-`config`, `webhooks`, `event_rules`, `notification_log`, `syslog`, `syslog_drops`)
+`config`, `webhooks`, `event_rules`, `notification_log`, `event_cooldowns`, `event_cursor`, `syslog`, `syslog_drops`)
 reciben un conector inyectado y no hablan nunca con un driver concreto. Se crea **un único conector
 compartido por proceso**: los stores lo reciben inyectado (no abren conexiones
 propias).

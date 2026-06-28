@@ -167,7 +167,9 @@ class SyslogService(_EventsMixin):
                       DebugLevel.info)
             srv = build_server(
                 cfg, sink=self._syslog_store.add_many,
-                on_message=self._on_message,
+                # No per-message hook: rule evaluation is decoupled — the event worker
+                # drains stored rows by cursor (embedded in the web admin, or a
+                # dedicated events process). This listener only stores.
                 dbg=lambda m: self._dbg(m, DebugLevel.info),
                 dbg_warn=lambda m: self._dbg(m, DebugLevel.warning),
                 on_drop=self._record_drop)
@@ -181,11 +183,6 @@ class SyslogService(_EventsMixin):
                           DebugLevel.error)
             self._server = srv
             return problems
-
-    def _on_message(self, rec: dict) -> None:
-        # Route each received message through the Event-rules manager (the same
-        # rules edited in the web UI, read from the shared DB).
-        self._eval_event('syslog', rec)
 
     def _record_drop(self, source: str, transport: str, delta: int) -> None:
         """Persist allowlist drops (shared DB → visible in the web Syslog tab)."""

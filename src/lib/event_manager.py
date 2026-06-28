@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 
 from lib.debug import DebugLevel
@@ -34,8 +35,20 @@ from lib.debug import DebugLevel
 class _EventsMixin:
 
     def _init_events(self) -> None:
-        self._event_last: dict[str, float] = {}   # rule uid -> last fire ts (cooldown)
+        self._event_last: dict[str, float] = {}   # rule uid -> last fire ts (cooldown cache)
         self._event_rules_cache: list | None = None
+        self._event_state = None                  # EventStateStore (persisted cooldown + cursor)
+        self._event_worker_stop = None            # threading.Event while the worker runs
+
+    # ── persistent state (cooldown + cursor) ──────────────────────────────────────
+    def _attach_event_state(self, store) -> None:
+        """Wire the persistent cooldown/cursor store and warm the cooldown cache so a
+        rule does not re-fire after a restart."""
+        self._event_state = store
+        try:
+            self._event_last = store.cooldowns()
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     # ── rule cache ──────────────────────────────────────────────────────────────
     def _events_reload(self) -> None:
@@ -57,6 +70,78 @@ class _EventsMixin:
             return max(0, int(v)) if v not in (None, '') else 0
         except Exception:  # pylint: disable=broad-except
             return 0
+
+    # ── worker (cursor over the source tables) ────────────────────────────────────
+    def _event_sources(self) -> list:
+        """[(source, store)] the worker consumes — only stores that are present and
+        expose the cursor API (query_since/max_id)."""
+        out = []
+        for source, attr in (('syslog', '_syslog_store'), ('audit', '_audit_store')):
+            store = getattr(self, attr, None)
+            if store is not None and hasattr(store, 'query_since') and hasattr(store, 'max_id'):
+                out.append((source, store))
+        return out
+
+    def _event_worker_tick(self) -> int:
+        """Consume every new syslog/audit row since the cursor and evaluate the rules.
+
+        Returns the number of records processed.  Never raises.  This is the path
+        that replaces the former inline evaluation, so a flood of incoming messages
+        no longer blocks ingestion — the worker drains the backlog at its own pace."""
+        st = self._event_state
+        if st is None:
+            return 0
+        processed = 0
+        for source, store in self._event_sources():
+            try:
+                last = st.cursor(source)
+                if last is None:                 # first run → start at the tail (no replay)
+                    last = store.max_id()
+                    st.set_cursor(source, last)
+                id_key = '_id' if source == 'audit' else 'id'
+                while True:
+                    rows = store.query_since(last, limit=500)
+                    if not rows:
+                        break
+                    for rec in rows:
+                        self._eval_event(source, rec)
+                        processed += 1
+                    last = rows[-1].get(id_key, last)
+                    st.set_cursor(source, last)
+                    if len(rows) < 500:
+                        break
+            except Exception as exc:  # pylint: disable=broad-except
+                self._dbg(f"> Events >> worker tick ({source}) failed: {exc}", DebugLevel.error)
+        return processed
+
+    def _event_worker_loop(self, stop_event, poll_secs: float = 2.0) -> None:
+        """Run ticks every *poll_secs* seconds until *stop_event* is set."""
+        self._dbg("> Events >> worker started", DebugLevel.info)
+        poll = max(0.2, float(poll_secs or 2.0))
+        while not stop_event.is_set():
+            self._event_worker_tick()
+            if stop_event.wait(poll):
+                break
+        self._dbg("> Events >> worker stopped", DebugLevel.info)
+
+    def _start_event_worker(self, poll_secs: float = 2.0) -> None:
+        """Start the background event worker thread (idempotent; no-op without state)."""
+        if self._event_state is None or self._event_worker_stop is not None:
+            return
+        stop = threading.Event()
+        self._event_worker_stop = stop
+        threading.Thread(target=self._event_worker_loop, args=(stop, poll_secs),
+                         name='event-worker', daemon=True).start()
+
+    def _stop_event_worker(self) -> None:
+        """Signal the worker loop to exit."""
+        stop = self._event_worker_stop
+        if stop is not None:
+            stop.set()
+            self._event_worker_stop = None
+
+    def _event_worker_running(self) -> bool:
+        return self._event_worker_stop is not None
 
     # ── evaluation ──────────────────────────────────────────────────────────────
     def _eval_event(self, source: str, ctx: dict) -> None:
@@ -87,6 +172,12 @@ class _EventsMixin:
                 if cd and (now - self._event_last.get(uid, 0)) < cd:
                     continue
                 self._event_last[uid] = now
+                st = self._event_state
+                if st is not None:
+                    try:
+                        st.set_cooldown(uid, now)        # persist so it survives restarts
+                    except Exception:  # pylint: disable=broad-except
+                        pass
                 self._dispatch_event(source, r, ctx)
         except Exception as exc:  # pylint: disable=broad-except
             self._dbg(f"> Events >> eval failed: {exc}", DebugLevel.error)

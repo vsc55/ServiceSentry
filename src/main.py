@@ -375,6 +375,26 @@ def start_syslog(args) -> int:
     return SyslogService(config_dir, var_dir).run()
 
 
+def start_events(args) -> int:
+    """Run the standalone event worker (shares the DB with the rest of the app).
+
+    Decoupled rule evaluation: reads new syslog/audit rows by cursor, evaluates the
+    same rules edited in the web UI, and dispatches notifications — so a flood of
+    messages never blocks ingestion.  Set ``events|mode=external`` and
+    ``SS_EVENTS_EMBEDDED=0`` on the web admin so this owns evaluation.
+    """
+    from lib.events.service import EventService  # noqa: WPS433 – conditional import
+
+    config_dir, var_dir = _resolve_app_dirs(args)
+
+    print("ServiceSentry Event Processor")
+    print(f"  Config: {config_dir}")
+    print("  Pulsa Ctrl+C para detener")
+    print()
+
+    return EventService(config_dir, var_dir).run()
+
+
 def arg_check_dir_path(path):
     """
     Check if the provided path is a valid directory path.
@@ -537,6 +557,16 @@ def args_init() -> argparse.Namespace:
         dest="syslog_mode",
         help="run only the standalone syslog receiver (no web/monitor) (env: SS_SYSLOG)",
     )
+
+    # Event processor (standalone) — run only the decoupled event worker.
+    events_group = ap.add_argument_group('event processor')
+    events_group.add_argument(
+        '--events',
+        default=_env_bool('SS_EVENTS', False),
+        action="store_true",
+        dest="events_mode",
+        help="run only the standalone event worker (no web/monitor/listener) (env: SS_EVENTS)",
+    )
     return ap.parse_args()
 
 if __name__ == "__main__":
@@ -548,6 +578,8 @@ if __name__ == "__main__":
         start_web(_args)
     elif getattr(_args, 'syslog_mode', False):
         sys.exit(start_syslog(_args))
+    elif getattr(_args, 'events_mode', False):
+        sys.exit(start_events(_args))
     else:
         main = Main(_args)
         start_code = main.start()

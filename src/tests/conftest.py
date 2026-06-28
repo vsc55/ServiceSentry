@@ -8,6 +8,11 @@ import unittest.mock
 
 import pytest
 
+# Keep the background event worker out of the test harness: tests drive evaluation
+# directly (``_eval_event`` / ``_event_worker_tick``) so a polling thread never
+# interferes with mocked-dispatch assertions.
+os.environ.setdefault('SS_EVENTS_EMBEDDED', '0')
+
 try:
     from lib.web_admin import WebAdmin
     _HAS_FLASK = True

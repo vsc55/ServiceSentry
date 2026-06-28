@@ -568,6 +568,24 @@ El modal de edición se organiza en tres pestañas:
 entre notificaciones de una misma regla; dejar el campo de la regla en blanco hace
 que **herede** el global (el placeholder muestra el valor heredado).
 
+**Procesador de eventos (desacoplado).** La evaluación de las reglas **no** ocurre
+en línea con la recepción: un **worker** lee por cursor los mensajes syslog y los
+eventos de auditoría **ya almacenados** (tablas `syslog`/`audit`, cada una con su
+posición en `event_cursor`), evalúa las reglas y despacha. Así una avalancha de
+syslog nunca bloquea la ingesta — primero se guarda, luego se evalúa al ritmo del
+worker. El *cooldown* se persiste en BD (`event_cooldowns`), de modo que una regla
+no vuelve a dispararse tras un reinicio. Configuración (Configuration → Notifications):
+
+| Clave | Por defecto | Descripción |
+|-------|-------------|-------------|
+| `events.mode` | `embedded` | Dónde corre el worker: `embedded` (un hilo dentro del panel web), `external` (lo gestiona un proceso/contenedor aparte) u `off` (sin evaluación). |
+| `events.poll_secs` | `2` | Cada cuántos segundos busca filas nuevas que evaluar (1–3600). |
+
+En modo `external` se ejecuta como contenedor propio (`SS_SERVICE_ROLE=events` →
+`main.py --events`) y el panel web arranca con `SS_EVENTS_EMBEDDED=0` para que un
+único worker sea el dueño de la evaluación. Se ve y se controla (start/stop/estado)
+desde la pestaña **Services**.
+
 La pestaña incluye además el **log de notificaciones** (qué regla disparó, canales,
 resultado y mensaje), con el mismo sistema de columnas (orden/mostrar-ocultar/
 reordenar/redimensionar, persistido por usuario) que el resto de tablas. En el
@@ -587,6 +605,7 @@ proceso web:
 |----------|--------|---------|
 | **Scheduler** (monitor embebido) | running / stopped | start / stop |
 | **Receptor syslog** | running / stopped / disabled / external | start / stop (si embebido y activo) |
+| **Procesador de eventos** | running / stopped / external / disabled | start / stop (si embebido) |
 | **Worker** (monitor externo) | active / stale / unknown | solo lectura (vive en otro proceso) |
 | **Base de datos** | running / error (sonda `SELECT 1`) | solo lectura |
 

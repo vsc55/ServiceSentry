@@ -514,6 +514,9 @@ LANG = {
     # Services tab
     'svc_scheduler':       'Scheduler',
     'svc_syslog':          'Syslog receiver',
+    'svc_events':          'Event processor',
+    'svc_poll':            'Poll',
+    'svc_rules':           'Rules (enabled/total)',
     'svc_worker':          'Worker',
     'svc_database':        'Database',
     'svc_interval':        'Interval',
@@ -969,6 +972,8 @@ LANG = {
         'daemon_stopped':        'Scheduler: Stopped',
         'syslog_started':        'Syslog: Started',
         'syslog_stopped':        'Syslog: Stopped',
+        'events_worker_started': 'Event worker: Started',
+        'events_worker_stopped': 'Event worker: Stopped',
         'syslog_cleared':        'Syslog: Cleared',
         'syslog_drops_cleared':  'Syslog: Drops cleared',
         'event_rule_created':    'Event rule created',
@@ -1442,6 +1447,8 @@ LANG = {
         'syslog|max_rows':        'Maximum number of syslog messages kept; the oldest are pruned once this is exceeded (0 = unlimited). A safety cap so the table cannot grow without bound.',
         # Event rules
         'events|cooldown':        'Default minimum seconds between notifications for the same event rule (0 = notify on every match). Inherited by any rule that leaves its own Cooldown field blank; a rule can override it (including 0 for no cooldown).',
+        'events|mode':            'Where the event processor runs (it evaluates rules and notifies): "embedded" = a thread inside the web admin (default); "external" = a separate process/container owns it (set SS_EVENTS_EMBEDDED=0 on the web); "off" = no rule evaluation. Processing is decoupled from ingestion: it reads already-stored messages/events by cursor, so a flood of syslog never blocks reception.',
+        'events|poll_secs':       'How often (seconds) the processor checks for new syslog messages and audit events to evaluate rules (1–3600). Lower = more immediate alerts; higher = less DB load.',
         # Syslog dedicated database
         'syslog_db|enabled':      'Store syslog messages in a separate database instead of the system one — useful to isolate a high-volume feed. When off, syslog shares the system database. Takes effect after a restart. The connection fields below mirror the system Database settings (the password is encrypted at rest).',
         'syslog_db|driver':       'Database engine for the dedicated syslog store: SQLite (a local file) or a network server (PostgreSQL / MySQL / MariaDB).',

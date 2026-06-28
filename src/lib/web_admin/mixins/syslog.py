@@ -96,7 +96,9 @@ class _SyslogMixin:
             srv = build_server(
                 cfg,
                 sink=self._syslog_store.add_many,
-                on_message=self._syslog_alert,
+                # No per-message hook: event-rule evaluation is decoupled — the
+                # background event worker drains stored rows by cursor, so a flood of
+                # messages never blocks the listener on a slow notification channel.
                 dbg=lambda m: self._dbg(m, DebugLevel.info),
                 dbg_warn=lambda m: self._dbg(m, DebugLevel.warning),
                 on_drop=self._syslog_record_drop,
@@ -138,14 +140,6 @@ class _SyslogMixin:
                 store.record(source, transport, delta, time.time())
             except Exception:  # pylint: disable=broad-except
                 pass
-
-    # ── per-message hook ─────────────────────────────────────────────────────────
-    def _syslog_alert(self, rec: dict) -> None:
-        """Evaluate the Event-rules manager against each received message; matching
-        rules notify their chosen channels (severity/host/app/match + cooldown)."""
-        _eval = getattr(self, '_eval_event', None)
-        if callable(_eval):
-            _eval('syslog', rec)
 
     # ── retention ────────────────────────────────────────────────────────────────
     def _syslog_retention_loop(self) -> None:

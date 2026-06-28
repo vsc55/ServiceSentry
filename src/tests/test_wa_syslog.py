@@ -196,14 +196,14 @@ class TestSyslogDrops:
 
 
 class TestSyslogAlert:
-    """The legacy built-in syslog alert was removed; the per-message hook now
-    delegates to the Event-rules manager (see test_wa_events for match coverage).
-    Here we only assert the hook forwards each message to `_eval_event`."""
+    """Syslog rule evaluation is decoupled: the listener only stores messages; the
+    background event worker drains new rows by cursor and evaluates them (the match
+    coverage lives in test_wa_events)."""
 
-    def test_hook_delegates_to_event_manager(self, admin):
-        rec = {'severity': 2, 'severity_name': 'crit', 'source': '1.1.1.1',
-               'message': 'kernel panic', 'hostname': 'h', 'received_at': ''}
+    def test_worker_evaluates_stored_messages(self, admin):
+        admin._event_state.set_cursor('syslog', 0)        # process from the start
+        _seed(admin, severity=2, message='kernel panic')
         with mock.patch.object(admin, '_eval_event') as ev:
-            admin._syslog_alert(rec)
-        assert ev.call_count == 1
-        assert ev.call_args.args[0] == 'syslog' and ev.call_args.args[1] is rec
+            admin._event_worker_tick()
+        assert ev.call_count >= 1
+        assert any(c.args[0] == 'syslog' for c in ev.call_args_list)

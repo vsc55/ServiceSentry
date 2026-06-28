@@ -89,8 +89,8 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Servers (hosts)** | Define un servidor una vez (dirección + perfiles de conexión por protocolo: ssh/snmp/db/http/tls…) y vincúlalo desde los checks de cualquier módulo, que heredan dirección + credenciales. Asistente "Detectar duplicados" que agrupa conexiones inline repetidas en hosts compartidos. Secretos cifrados en la BD general. Ver §[Servers (registro de hosts)](#servers-registro-de-hosts) |
 | **Credenciales** | Identidades SSH reutilizables (usuario + clave) referenciables desde hosts y checks, en vez de duplicar secretos; clonado y vista de uso. Secretos cifrados en la BD. Permisos `credentials_*`. |
 | **Receptor Syslog** | Servidor syslog integrado (RFC 3164/5424, UDP/TCP/TLS): pestaña Syslog con mensajes filtrables (severidad/host/app/búsqueda), allowlist de orígenes y **registro de descartes**; retención por antigüedad/filas; BD dedicada opcional; puede correr embebido o como contenedor aparte. Permisos `syslog_view`/`syslog_delete`. Ver §[Syslog](#syslog) |
-| **Gestor de eventos** | Reglas que observan eventos de auditoría o syslog y notifican por los canales configurados (Telegram/Email/webhooks concretos); cooldown global con herencia por regla; **log de notificaciones** enviadas. Permisos `events_*`. Ver §[Eventos (reglas de notificación)](#eventos-reglas-de-notificación) |
-| **Servicios** | Pestaña Services: estado y **control (start/stop)** de los servicios de fondo (scheduler embebido, receptor syslog, worker, base de datos). Permisos `services_view`/`services_control`. Ver §[Servicios](#servicios) |
+| **Gestor de eventos** | Reglas que observan eventos de auditoría o syslog y notifican por los canales configurados (Telegram/Email/webhooks concretos); cooldown global con herencia por regla; **log de notificaciones** enviadas. La evaluación está **desacoplada de la ingesta**: un *procesador de eventos* lee por cursor los mensajes/eventos ya guardados (cooldown persistido), embebido o como contenedor propio. Permisos `events_*`. Ver §[Eventos (reglas de notificación)](#eventos-reglas-de-notificación) |
+| **Servicios** | Pestaña Services: estado y **control (start/stop)** de los servicios de fondo (scheduler embebido, receptor syslog, **procesador de eventos**, worker, base de datos). Permisos `services_view`/`services_control`. Ver §[Servicios](#servicios) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | 12 tarjetas de resumen (Modules, Checks, Servers, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente); cada widget enlaza a su pestaña; auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin |
 | **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador; paneles colapsables por sección |
@@ -572,12 +572,15 @@ configurados; más el log de envíos. Ver [configuration.md → Gestor de evento
 
 ### Servicios
 
-Estado y control de los servicios de fondo (scheduler, receptor syslog…).
+Estado y control de los servicios de fondo (scheduler, receptor syslog, **procesador
+de eventos**…). El procesador de eventos es controlable (`name=events`) cuando corre
+embebido (`events.mode=embedded` y `SS_EVENTS_EMBEDDED` no está a 0); en modo
+`external` se reporta en solo lectura.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/services` | `services_view` | Estado de todos los servicios |
-| `POST` | `/api/v1/services/<name>/<action>` | `services_control` | `start`/`stop` de un servicio controlable |
+| `GET` | `/api/v1/services` | `services_view` | Estado de todos los servicios (incl. `events`: mode, poll, reglas activas/total) |
+| `POST` | `/api/v1/services/<name>/<action>` | `services_control` | `start`/`stop` de un servicio controlable (`scheduler`, `syslog`, `events`) |
 
 ### Salud
 
@@ -923,6 +926,7 @@ Todos los eventos auditados:
 | `syslog_cleared` | Vaciado de los mensajes syslog |
 | `syslog_drops_cleared` | Vaciado del registro de descartes de syslog |
 | `syslog_started` / `syslog_stopped` | Arranque/parada del receptor syslog desde la pestaña Services |
+| `events_worker_started` / `events_worker_stopped` | Arranque/parada del procesador de eventos desde la pestaña Services |
 | `host_created` / `host_updated` / `host_deleted` | CRUD del registro de servidores |
 | `host_ssh_tested` / `host_test_check` / `host_tested` | Pruebas de conexión/check contra un host |
 | `hosts_migrated` | Migración de conexiones inline a hosts compartidos |

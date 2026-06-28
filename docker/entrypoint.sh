@@ -20,8 +20,11 @@ case "${SS_SERVICE_ROLE}" in
   syslog)
     set -- --syslog
     ;;
+  events)
+    set -- --events
+    ;;
   *)
-    echo "ERROR: SS_SERVICE_ROLE must be 'web', 'worker' or 'syslog' (got: '${SS_SERVICE_ROLE}')" >&2
+    echo "ERROR: SS_SERVICE_ROLE must be 'web', 'worker', 'syslog' or 'events' (got: '${SS_SERVICE_ROLE}')" >&2
     exit 1
     ;;
 esac

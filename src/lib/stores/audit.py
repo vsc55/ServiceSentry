@@ -105,6 +105,21 @@ class AuditStore:
         )
         return [_row_to_dict(r) for r in rows]
 
+    def query_since(self, last_id: int, limit: int = 500) -> list[dict]:
+        """Entries with id > *last_id*, oldest first — for the event worker cursor.
+
+        Each dict carries ``_id`` (the row id) so the worker can advance the cursor."""
+        rows = self._db.fetchall(
+            f'SELECT id, ts, event, user, ip, detail FROM {_T} '
+            'WHERE id > ? ORDER BY id ASC LIMIT ?',
+            (int(last_id), max(1, min(5000, int(limit)))))
+        return [_row_to_dict(r) for r in rows]
+
+    def max_id(self) -> int:
+        """Highest row id (0 when empty) — used to seed the worker cursor at the tail."""
+        row = self._db.fetchone(f'SELECT MAX(id) FROM {_T}')
+        return int(row[0]) if row and row[0] is not None else 0
+
     def count(self) -> int:
         row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
         return row[0] if row else 0
