@@ -10,7 +10,9 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from flask import jsonify, request, session
+from flask import jsonify, session
+
+from . import notifications
 
 _SOURCES = ('audit', 'syslog')
 _CHANNELS = ('telegram', 'email', 'webhook')
@@ -134,9 +136,8 @@ def register(app, wa):
     events_add_req = wa._perm_required('events_add')
     events_edit_req = wa._perm_required('events_edit')
     events_delete_req = wa._perm_required('events_delete')
-    notify_view_req = wa._perm_required('events_notify_view')
-    notify_delete_req = wa._perm_required('events_notify_delete')
     store = wa._event_rules_store
+    notifications.register(app, wa)
 
     @app.route('/api/v1/event-rules', methods=['GET'])
     @events_view_req
@@ -209,24 +210,3 @@ def register(app, wa):
         wa._record_notification(rule, rule.get('source', 'audit'), 'TEST', results or {})
         wa._audit('event_rule_test', detail={'id': rid, 'ok': ok})
         return jsonify({'ok': ok, 'results': {k: list(v) for k, v in results.items()}})
-
-    @app.route('/api/v1/notifications/log', methods=['GET'])
-    @notify_view_req
-    def api_notification_log():
-        store = getattr(wa, '_notification_log_store', None)
-        if store is None:
-            return jsonify({'log': [], 'total': 0})
-        limit = request.args.get('limit', '100')
-        try:
-            limit = max(1, min(2000, int(limit)))
-        except (TypeError, ValueError):
-            limit = 100
-        return jsonify({'log': store.query(limit=limit), 'total': store.count()})
-
-    @app.route('/api/v1/notifications/log', methods=['DELETE'])
-    @notify_delete_req
-    def api_clear_notification_log():
-        store = getattr(wa, '_notification_log_store', None)
-        deleted = store.delete_all() if store is not None else 0
-        wa._audit('notification_log_cleared', detail={'deleted': deleted})
-        return jsonify({'ok': True, 'deleted': deleted})

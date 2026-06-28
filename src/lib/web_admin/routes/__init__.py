@@ -9,7 +9,7 @@ from .notify.telegram import register as _telegram
 from .notify.email import register as _email
 from .notify.webhook import register as _webhook
 from .notify.templates import register as _notif_templates
-from .webhooks import register as _webhooks
+from .notify.webhooks import register as _webhooks
 from .modules import register as _modules
 from .modules.checks import register as _checks
 from .users import register as _users
