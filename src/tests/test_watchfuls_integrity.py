@@ -434,7 +434,7 @@ class TestRealModuleRuntimeContract:
     def test_declared_credential_type_is_in_catalog(self, mod_name):
         """A module that declares a __credential__ type must be exposed by the
         central credential catalog (so the manager can create/edit it)."""
-        from lib.credential_schemas import credential_schemas
+        from lib.modules.credential_schemas import credential_schemas
         decl = _load_schema(mod_name).get("__credential__") or \
             _load_schema(mod_name).get("__credentials__")
         if not decl:

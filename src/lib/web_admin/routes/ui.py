@@ -5,7 +5,7 @@
 from flask import jsonify, make_response, redirect, render_template, session
 
 from lib.modules import ModuleBase
-from lib import os_detect
+from lib.util import os_detect
 from lib.debug import DebugLevel
 from lib.hosts.profiles import (
     host_profiles_catalog,
@@ -14,8 +14,8 @@ from lib.hosts.profiles import (
     module_host_multiple,
     module_host_multi_bind,
 )
-from lib.credential_schemas import credential_schemas
-from lib.overview_widgets import overview_widgets_catalog
+from lib.modules.credential_schemas import credential_schemas
+from lib.modules.overview_widgets import overview_widgets_catalog
 
 from ..constants import SUPPORTED_LANGS
 

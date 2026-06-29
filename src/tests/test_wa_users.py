@@ -401,7 +401,7 @@ class TestRolePermissions:
         wa = self._make_multiuser_admin(config_dir, var_dir)
         c = wa.app.test_client()
         c.post("/login", data={"username": "dev", "password": "devpass"})
-        resp = c.put("/api/v1/config", json={"daemon": {"timer_check": 60}})
+        resp = c.put("/api/v1/config", json={"monitoring": {"timer_check": 60}})
         assert resp.status_code == 200
 
     def test_editor_cannot_create_or_delete_users(self, config_dir, var_dir):

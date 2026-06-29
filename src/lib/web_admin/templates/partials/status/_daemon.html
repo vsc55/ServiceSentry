@@ -79,7 +79,6 @@ function _daemonApply(st) {
     const toggleBtn = document.getElementById('daemonToggleBtn');
     const reloadBtn = document.getElementById('daemonReloadBtn');
     const interval  = document.getElementById('daemonIntervalInput');
-    const autostart = document.getElementById('daemonAutostart');
     if (!badge) return;
 
     const running = st.running;
@@ -90,7 +89,7 @@ function _daemonApply(st) {
     // Sync interval input from server (skip if user is actively editing)
     if (interval && document.activeElement !== interval)
         interval.value = st.interval ?? 300;
-    // Fields fixed by an env var (SS_CHECK_INTERVAL / SS_AUTOSTART) are read-only —
+    // Fields fixed by an env var (SS_CHECK_INTERVAL) are read-only —
     // disable the control and reveal the lock icon (tooltip explains the source).
     if (interval) {
         interval.disabled = !!st.interval_locked;
@@ -143,17 +142,6 @@ function _daemonApply(st) {
             nextLbl.textContent = '';
             _startSchedulerCountdown(null);
         }
-    }
-
-    // Autostart: always sync from server so Config tab changes are reflected here.
-    // Only skip if the user is actively clicking the toggle.
-    if (autostart && document.activeElement !== autostart) {
-        autostart.checked = st.web_autostart ?? false;
-    }
-    if (autostart) {
-        autostart.disabled = !!st.web_autostart_locked;
-        const al = document.getElementById('daemonAutostartLock');
-        if (al) al.style.display = st.web_autostart_locked ? '' : 'none';
     }
 }
 
@@ -215,14 +203,14 @@ async function _daemonPersistInterval(secs) {
     }
     // Sync in-memory configData
     if (window.configData) {
-        if (!configData.daemon) configData.daemon = {};
-        configData.daemon.timer_check = secs;
+        if (!configData.monitoring) configData.monitoring = {};
+        configData.monitoring.timer_check = secs;
     }
     // Sync the Status tab input (in case called from Restart)
     const inp = document.getElementById('daemonIntervalInput');
     if (inp) inp.value = secs;
     // Sync the Config tab input directly (it won't re-render on its own)
-    const cfgInp = document.querySelector('[data-cfg-path="daemon|timer_check"] input');
+    const cfgInp = document.querySelector('[data-cfg-path="monitoring|timer_check"] input');
     if (cfgInp) cfgInp.value = secs;
     showToast(`${t('daemon_interval')} → ${secs}${t('daemon_interval_s')}`, 'success');
     return true;
@@ -238,14 +226,6 @@ async function _daemonSaveInterval(val) {
         await _daemonReload(false);  // false = don't re-save, already saved above
     } else {
         _daemonRefresh();
-    }
-}
-
-async function _daemonSaveAutostart(checked) {
-    await apiPut('/api/v1/daemon/config', {web_autostart: checked});
-    if (window.configData) {
-        if (!configData.daemon) configData.daemon = {};
-        configData.daemon.web_autostart = checked;
     }
 }
 

@@ -379,7 +379,7 @@ class TestImportFromGithub:
         cfg = {'__var_dir__': str(tmp_path),
                'url': 'https://github.com/o/r/tree/master/mibs', **extra}
         with patch('urllib.request.urlopen', side_effect=self._fake_urlopen), \
-             patch('lib.net_guard.validate_external_url', return_value=None):
+             patch('lib.security.net_guard.validate_external_url', return_value=None):
             return Watchful.import_mib_from_github(cfg)
 
     def test_recursive_import(self, tmp_path):
@@ -401,7 +401,7 @@ class TestImportFromGithub:
         # advance 1/total, 2/total — never report a count without a total.
         calls = []
         with patch('urllib.request.urlopen', side_effect=self._fake_urlopen), \
-             patch('lib.net_guard.validate_external_url', return_value=None):
+             patch('lib.security.net_guard.validate_external_url', return_value=None):
             res = snmp._run_github_import(
                 str(tmp_path), 'https://github.com/o/r/tree/master/mibs', True,
                 lambda done, total, failed, cur: calls.append((done, total)))
@@ -413,7 +413,7 @@ class TestImportFromGithub:
         assert {c[1] for c in calls} == {2}
 
     def test_missing_var_dir(self):
-        with patch('lib.net_guard.validate_external_url', return_value=None):
+        with patch('lib.security.net_guard.validate_external_url', return_value=None):
             res = Watchful.import_mib_from_github(
                 {'url': 'https://github.com/o/r/tree/master/mibs'})
         assert res['ok'] is False
@@ -446,7 +446,7 @@ class TestImportFromGithub:
             return m
 
         with patch('urllib.request.urlopen', side_effect=fake), \
-             patch('lib.net_guard.validate_external_url', return_value=None):
+             patch('lib.security.net_guard.validate_external_url', return_value=None):
             res = Watchful.import_mib_from_github(
                 {'__var_dir__': str(tmp_path),
                  'url': 'https://github.com/o/r/tree/master/mibs', 'recursive': False})
@@ -496,7 +496,7 @@ class TestImportFromGithubAsync:
         cfg = {'__var_dir__': str(tmp_path),
                'url': 'https://github.com/o/r/tree/master/mibs', 'recursive': True}
         with patch('urllib.request.urlopen', side_effect=self._fake_urlopen), \
-             patch('lib.net_guard.validate_external_url', return_value=None):
+             patch('lib.security.net_guard.validate_external_url', return_value=None):
             start = Watchful.import_mib_from_github_start(cfg)
             assert start['ok'] is True and start['done'] is False
             job_id = start['job_id']
@@ -574,7 +574,7 @@ class TestImportFromGithubAsync:
 
         snmp._github_jobs.clear()
         with patch('urllib.request.urlopen', side_effect=fake), \
-             patch('lib.net_guard.validate_external_url', return_value=None):
+             patch('lib.security.net_guard.validate_external_url', return_value=None):
             start = Watchful.import_mib_from_github_start(
                 {'__var_dir__': str(tmp_path),
                  'url': 'https://github.com/o/r/tree/master/mibs', 'recursive': False})

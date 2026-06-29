@@ -1,8 +1,10 @@
 # ServiceSentry — monolithic topology
 # ====================================
-# A single container: the web admin panel with its embedded scheduler enabled
-# (SS_AUTOSTART=true), so the periodic monitoring loop runs in-process — no
-# separate worker. Simplest setup; ideal for small/single-host deployments.
+# A single container: the web admin panel hosts every service embedded (the
+# monitoring scheduler, the syslog receiver and the event processor all run
+# in-process) — no separate workers.  That is the image default (the *_EMBEDDED
+# gates are all on unless set to 0), so no extra env is needed here.  Simplest
+# setup; ideal for small/single-host deployments.
 #
 #   cp docker/env.example docker/.env      # then edit docker/.env (at least SS_PASSWORD)
 #   docker compose -f docker/docker-compose.monolithic.yml up -d
@@ -38,8 +40,10 @@ services:
       - SS_SERVICE_ROLE=web
       - SS_WEB_HOST=0.0.0.0
       - SS_WEB_PORT=8080
-      # Run the periodic checks in this same process (monolithic mode).
-      - SS_AUTOSTART=true
+      # The monitoring scheduler, syslog receiver and event worker all run embedded
+      # by default (no *_EMBEDDED=0 here).  Whether each one starts running at boot
+      # and is enabled is controlled from the web UI (Configuration → its tab) and
+      # the Services tab — enabled (master) + autostart (launch at boot).
 
     healthcheck:
       test: ["CMD-SHELL", "curl -f -s http://localhost:${SS_WEB_PORT:-8080}/"]

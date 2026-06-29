@@ -2364,7 +2364,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_null_field_uses_registry_default` | Null field uses registry default |
 | `test_drops_requires_auth` | Drops requires auth |
 | `test_drops_endpoint` | Drops endpoint |
-| `test_hook_delegates_to_event_manager` | Hook delegates to event manager |
+| `test_worker_evaluates_stored_messages` | The event worker drains stored syslog rows by cursor and evaluates them (listener no longer evaluates inline) |
 
 ## 61. Panel Web — Gestor de eventos
 

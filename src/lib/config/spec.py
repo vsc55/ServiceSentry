@@ -23,7 +23,7 @@ Two distinct things are centralised here:
   it.
 
 This module is intentionally dependency-free (no Flask, no web_admin imports)
-so it can be imported from the core (``lib.monitor``, ``lib.db.*``) without any
+so it can be imported from the core (``lib.core.monitor``, ``lib.db.*``) without any
 circular-import or heavyweight side effects.
 
 Notes
@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 # Default UI language.  Inlined (not imported from web_admin) to keep this
-# module dependency-free; web_admin.i18n.DEFAULT_LANG carries the same value.
+# module dependency-free; lib.i18n.DEFAULT_LANG carries the same value.
 _DEFAULT_LANG = 'en_EN'
 
 
@@ -149,9 +149,18 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('telegram|group_messages', bool, False, env='SS_TELEGRAM_GROUP_MESSAGES',
         no_rule=True),
 
-    # ══ daemon scheduler ═════════════════════════════════════════════════════
-    Cfg('daemon|timer_check', int, 300, min=10, max=86400, env='SS_CHECK_INTERVAL'),
-    Cfg('daemon|web_autostart', bool, False, env='SS_AUTOSTART'),
+    # ══ monitoring (the service monitor) ═════════════════════════════════════
+    # Like syslog: a simple on/off ``enabled`` flag; whether this process hosts it
+    # (embedded) or a standalone ``--monitor`` process / worker container owns it
+    # is decided by the SS_MONITORING_EMBEDDED env, not a config field.
+    # ``enabled`` is the master switch (off ⇒ the service is off, not even
+    # startable); ``autostart`` decides whether the EMBEDDED monitor launches
+    # automatically when the web admin process boots — a standalone ``--monitor``
+    # process ignores it (it always runs when enabled).  enabled=on + autostart=off
+    # ⇒ boots stopped but startable from the Services tab.
+    Cfg('monitoring|enabled', bool, True, env='SS_MONITORING_ENABLED'),
+    Cfg('monitoring|autostart', bool, True, env='SS_MONITORING_AUTOSTART'),
+    Cfg('monitoring|timer_check', int, 300, min=10, max=86400, env='SS_CHECK_INTERVAL'),
 
     # ══ modules: global defaults inherited by every watchful module ══════════
     # Last link of the item → module → global resolution chain.  'threads' also
@@ -282,6 +291,10 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # Built-in syslog server: receive RFC 3164/5424 events from external hosts
     # over UDP/TCP(+TLS), store them (lib/stores/syslog.py) and optionally alert.
     Cfg('syslog|enabled',         bool, False, admin_only=True),
+    # autostart: launch the EMBEDDED listener at web-admin boot (a standalone
+    # ``--syslog`` process ignores it).  enabled=on + autostart=off ⇒ boots stopped
+    # but startable from the Services tab.
+    Cfg('syslog|autostart',       bool, True, admin_only=True, env='SS_SYSLOG_AUTOSTART'),
     Cfg('syslog|bind_host',       str, '0.0.0.0, ::', admin_only=True),  # all IPv4 + IPv6
     Cfg('syslog|udp_port',        int, 514, min=0, max=65535, admin_only=True, nullable=True),
     Cfg('syslog|tcp_port',        int, 514, min=0, max=65535, admin_only=True, nullable=True),
@@ -303,6 +316,10 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # a separate process/container owns it (web admin does not run it); 'off' = no
     # rule evaluation. poll_secs: how often the worker drains new syslog/audit rows.
     Cfg('events|mode',            str, 'embedded', no_rule=True),
+    # autostart: launch the EMBEDDED worker at web-admin boot (only meaningful when
+    # mode='embedded'; a standalone ``--events`` process ignores it).  mode=embedded
+    # + autostart=off ⇒ boots stopped but startable from the Services tab.
+    Cfg('events|autostart',       bool, True, env='SS_EVENTS_AUTOSTART'),
     Cfg('events|poll_secs',       int, 2, min=1, max=3600),
 
     # ── Syslog dedicated database (optional) ──────────────────────────────────

@@ -43,9 +43,12 @@ ENV SS_PUBLIC_STATUS=false \
 # Web admin — audit log
 ENV SS_AUDIT_MAX_ENTRIES=500
 
-# Embedded scheduler (monolithic mode: run the checks in-process instead of a
-# separate worker container). Leave false when running a worker.
-ENV SS_AUTOSTART=false
+# Service hosting: by default the web admin hosts every service embedded (the
+# monitoring scheduler, syslog receiver and event worker).  In the microservices
+# topology the web container sets SS_MONITORING_EMBEDDED / SS_SYSLOG_EMBEDDED /
+# SS_EVENTS_EMBEDDED to 0 so dedicated containers own each one.  Whether each
+# embedded service starts at boot is the per-service ``autostart`` config flag
+# (enabled + autostart), edited in the web UI — not an image default.
 
 # Monitoring interval in seconds (worker + embedded scheduler period)
 ENV SS_CHECK_INTERVAL=300

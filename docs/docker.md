@@ -3,15 +3,17 @@
 Se ofrecen tres topologías a partir de la misma imagen; elige una:
 
 - **Monolítica** (`docker/docker-compose.monolithic.yml`) — un solo contenedor
-  `servicesentry`: el panel web con su scheduler embebido activado
-  (`SS_AUTOSTART=true`), que ejecuta los checks periódicos en el propio proceso.
-  La opción más simple.
+  `servicesentry`: el panel web hospeda **todos los servicios embebidos** (el
+  monitor periódico, el receptor syslog y el procesador de eventos corren en el
+  propio proceso). Es el comportamiento por defecto de la imagen (los gates
+  `*_EMBEDDED` están activos salvo que se pongan a `0`), así que no necesita env
+  extra. La opción más simple.
 - **Microservicios** (`docker/docker-compose.microservices.yml`) — seis
   contenedores y **dos** MariaDB: `servicesentry-db` (BD principal: config,
   usuarios, historial, reglas de eventos, log de notificaciones…),
   `servicesentry-syslog-db` (BD dedicada para los mensajes syslog, de alto
   volumen, aislados de la principal), `servicesentry-web` (panel Flask, `--web`),
-  `servicesentry-worker` (daemon de monitorización, `--daemon`),
+  `servicesentry-worker` (monitor de servicios independiente, `--monitor`),
   `servicesentry-syslog` (receptor syslog independiente, `--syslog`) y
   `servicesentry-events` (procesador de eventos desacoplado, `--events`: lee por
   cursor los mensajes/eventos almacenados, evalúa las reglas y notifica). Separa
@@ -29,9 +31,10 @@ Se ofrecen tres topologías a partir de la misma imagen; elige una:
 
 La conexión a la BD principal se inyecta por env `SS_DB_*` y la de syslog por
 `SS_SYSLOG_DB_*` (ver [configuration.md](configuration.md) → *Sección `database`*);
-el `web` arranca con `SS_SYSLOG_EMBEDDED=0` para **no** ligar los puertos syslog
-(los gestiona el contenedor `syslog`) y con `SS_EVENTS_EMBEDDED=0` para **no**
-evaluar reglas en el panel (lo hace el contenedor `events`). Los contenedores
+el `web` arranca con `SS_MONITORING_EMBEDDED=0` para **no** ejecutar el monitor
+(lo hace el contenedor `worker`), `SS_SYSLOG_EMBEDDED=0` para **no** ligar los
+puertos syslog (los gestiona el contenedor `syslog`) y `SS_EVENTS_EMBEDDED=0` para
+**no** evaluar reglas en el panel (lo hace el contenedor `events`). Los contenedores
 comparten los volúmenes con nombre y las bases de datos, por lo que leen y escriben
 el mismo estado.
 
@@ -40,9 +43,119 @@ Ambas topologías de microservicios definen dos **redes** (ver
 las BD viven **solo** aquí) y `frontend` (plano externo: el panel web y, en la
 variante Traefik, el proxy↔web).
 
-> **No mezcles las dos.** No actives `SS_AUTOSTART` en el `web` a la vez que
-> corres el `worker`: son procesos distintos sin lock compartido y duplicarían
-> cada check (histórico doble y tormenta de notificaciones).
+> **No mezcles las dos.** En la topología de microservicios el `web` lleva
+> `SS_MONITORING_EMBEDDED=0` precisamente para que **no** corra el monitor a la vez
+> que el `worker`: serían dos procesos sin lock compartido y duplicarían cada check
+> (histórico doble y tormenta de notificaciones). En monolítica corre solo el
+> monitor embebido del `web`, sin `worker`.
+
+## Diagramas de arquitectura
+
+### Monolítica
+
+Un único contenedor: el `web` hospeda todos los servicios embebidos y guarda el
+estado en SQLite. Sencillo de operar; un solo proceso lo hace todo.
+
+```mermaid
+flowchart LR
+    user(["Navegador"]) -->|"8080"| web
+    hosts(["Hosts externos"]) -.->|"syslog UDP/TCP 514"| web
+    targets(["Servicios monitorizados"])
+
+    subgraph cont["contenedor · servicesentry"]
+      web["web · --web<br/>monitor + syslog + eventos<br/>(todo embebido)"]
+      db[("SQLite · data.db<br/>(+ syslog en la misma BD)")]
+      web --- db
+    end
+
+    web -.->|"checks salientes"| targets
+```
+
+### Microservicios
+
+Cada responsabilidad en su propio contenedor: el `web` solo sirve el panel (con
+los gates `*_EMBEDDED=0`), y `worker` / `syslog` / `events` poseen el monitor, el
+receptor y el procesador de reglas. Dos MariaDB (principal + syslog) y dos redes
+(`backend` interna, `frontend` expuesta).
+
+```mermaid
+flowchart TB
+    user(["Navegador"]) -->|"8080"| web
+    sources(["Hosts externos"]) -.->|"syslog 514 / 6514"| syslog
+    targets(["Servicios monitorizados"])
+
+    subgraph frontend["red · frontend"]
+      web["web · --web<br/>SS_MONITORING_EMBEDDED=0<br/>SS_SYSLOG_EMBEDDED=0<br/>SS_EVENTS_EMBEDDED=0"]
+    end
+
+    subgraph backend["red · backend (BD solo aquí)"]
+      worker["worker · --monitor"]
+      syslog["syslog · --syslog"]
+      events["events · --events"]
+      db[("db · MariaDB principal<br/>config · usuarios · historial<br/>reglas · log notif.")]
+      sdb[("syslog-db · MariaDB<br/>mensajes syslog")]
+    end
+
+    web --- db
+    web -. "lee para la UI" .- sdb
+    worker --- db
+    syslog --- sdb
+    syslog -. "config + reglas" .- db
+    events --- db
+    events -. "lee filas syslog" .- sdb
+    worker -.->|"checks salientes"| targets
+```
+
+### Microservicios + Traefik
+
+Idéntica a la anterior **más** un `traefik` como proxy inverso que publica por
+HTTPS (Let's Encrypt) en los puertos `80`/`443`; el `web` ya no expone el `8080`
+(solo es alcanzable por el proxy en la red `frontend`).
+
+```mermaid
+flowchart TB
+    internet(["Internet"]) -->|"80 / 443 (HTTPS)"| traefik
+
+    subgraph frontend["red · ss_frontend"]
+      traefik["traefik<br/>TLS Let's Encrypt<br/>HTTP→HTTPS"]
+      web["web · --web<br/>(sin publicar 8080)"]
+    end
+
+    subgraph backend["red · ss_backend (BD solo aquí)"]
+      worker["worker · --monitor"]
+      syslog["syslog · --syslog"]
+      events["events · --events"]
+      db[("db · MariaDB principal")]
+      sdb[("syslog-db · MariaDB")]
+    end
+
+    traefik -->|"8080"| web
+    web --- db
+    web -. "lee para la UI" .- sdb
+    worker --- db
+    syslog --- sdb
+    syslog -. "config + reglas" .- db
+    events --- db
+    events -. "lee filas syslog" .- sdb
+```
+
+### Control de un servicio (embebido)
+
+Para cada servicio embebido, dos ejes deciden si corre: el gate de entorno
+`*_EMBEDDED` (¿lo hospeda el `web`?) y, dentro del panel, `enabled` (interruptor
+maestro) + `autostart` (¿arrancar al iniciar la web?). `autostart` solo aplica al
+modo embebido; un proceso dedicado lo ignora.
+
+```mermaid
+flowchart TB
+    boot(["Arranca el panel web"]) --> emb{"SS_*_EMBEDDED = 1?"}
+    emb -->|"no"| ext["No lo hospeda el web<br/>(lo posee un contenedor dedicado)"]
+    emb -->|"sí"| en{"enabled?"}
+    en -->|"no"| off["Apagado · no arrancable<br/>(Servicios: «disabled»)"]
+    en -->|"sí"| au{"autostart?"}
+    au -->|"sí"| run["Arranca corriendo<br/>(Servicios: «Stop»)"]
+    au -->|"no"| stop["Arranca parado · iniciable a mano<br/>(Servicios: «Start»)"]
+```
 
 ## Inicio rápido
 
@@ -83,9 +196,9 @@ docker compose -f docker/docker-compose.monolithic.yml down
 La configuración se pasa como variables de entorno. Los secretos y ajustes
 custom viven en `docker/.env` (copia de `docker/env.example`, gitignored), que
 ambos compose cargan con `env_file`; en los compose solo quedan los valores que
-dependen del servicio/topología (`SS_SERVICE_ROLE`, `SS_WEB_HOST`/`SS_WEB_PORT`,
-`SS_AUTOSTART`). Los valores de `environment:` del compose tienen prioridad sobre
-los del `.env`.
+dependen del servicio/topología (`SS_SERVICE_ROLE`, `SS_WEB_HOST`/`SS_WEB_PORT`, y
+los gates `SS_MONITORING_EMBEDDED`/`SS_SYSLOG_EMBEDDED`/`SS_EVENTS_EMBEDDED`). Los
+valores de `environment:` del compose tienen prioridad sobre los del `.env`.
 El script de arranque `entrypoint.sh` solo traduce `SS_SERVICE_ROLE`, `SS_WEB_HOST`,
 `SS_WEB_PORT` y `SS_VERBOSE` a flags del CLI; el resto de variables (config.json,
 `SS_*`) las aplica en runtime el proceso Python y **nunca
@@ -97,7 +210,7 @@ el panel web sobreviven a los reinicios del contenedor.
 
 | Variable | Valor por defecto | Descripción |
 | -------- | ----------------- | ----------- |
-| `SS_SERVICE_ROLE` | *(obligatorio)* | `web`, `worker` o `syslog` |
+| `SS_SERVICE_ROLE` | *(obligatorio)* | `web`, `worker`, `syslog` o `events` |
 | `TZ` | `UTC` | Zona horaria del contenedor |
 | **Base de datos** (microservicios) | | |
 | `SS_DB_DRIVER` | `sqlite` | Motor: `sqlite` / `mysql` / `postgresql` (`mariadb` = alias de `mysql`) |
@@ -121,7 +234,9 @@ el panel web sobreviven a los reinicios del contenedor.
 | `SS_ACME_EMAIL` | *(obligatorio)* | Email para el registro del certificado Let's Encrypt |
 | **Servidor web** | | |
 | `SS_WEB_HOST` | `0.0.0.0` | Dirección a la que se enlaza el panel web |
+| `SS_MONITORING_EMBEDDED` | `1` | `0` para que el web **no** ejecute el monitor de servicios (lo hace el contenedor `worker`). Se pone a `0` en el `web` de microservicios |
 | `SS_SYSLOG_EMBEDDED` | `1` | `0` para que el web **no** ligue los puertos syslog (los gestiona el contenedor `syslog`) |
+| `SS_EVENTS_EMBEDDED` | `1` | `0` para que el web **no** evalúe las reglas de eventos (lo hace el contenedor `events`) |
 | `SS_WEB_PORT` | `8080` | Puerto en el que escucha el panel web (argumento `--web-port`). Tiene prioridad sobre `SS_PORT` y el valor guardado en `config.json` |
 | `SS_PORT` | `8080` | Override en runtime del puerto web (`web_admin` → `port`); equivalente al campo **Puerto web** en Configuración → Acceso Externo. Si además se define `SS_WEB_PORT`, manda **`SS_WEB_PORT`** (prioridad: `SS_WEB_PORT` > `SS_PORT` > `config.json`) |
 | **Credenciales** | | |
@@ -144,8 +259,7 @@ el panel web sobreviven a los reinicios del contenedor.
 | `SS_STATUS_LANG` | *(vacío)* | Idioma específico para la página de estado; por defecto usa `SS_LANG` |
 | **Log de auditoría** | | |
 | `SS_AUDIT_MAX_ENTRIES` | `500` | Número máximo de entradas a conservar en el log de auditoría |
-| **Planificador / Worker** | | |
-| `SS_AUTOSTART` | `false` | Arrancar el scheduler embebido del panel web (ejecuta los checks en el propio proceso). `true` en la topología monolítica; déjalo en `false` si corres un `worker` aparte |
+| **Monitor / Worker** | | |
 | `SS_CHECK_INTERVAL` | `300` | Segundos entre comprobaciones (periodo del worker y del scheduler embebido) |
 | **Telegram** | | |
 | `SS_TELEGRAM_TOKEN` | *(no definido)* | Token del bot de Telegram |
@@ -162,6 +276,21 @@ el panel web sobreviven a los reinicios del contenedor.
 > sin pasar por el entrypoint — ver [configuration.md](configuration.md#variables-de-entorno).
 > Los campos de `config.json` (variables `SS_*` como `SS_LANG`, `SS_CHECK_INTERVAL`,
 > `SS_TELEGRAM_TOKEN`) se aplican en runtime por el proceso Python y nunca se escriben a disco.
+
+#### Servicios embebidos vs. dedicados
+
+Cada servicio (monitor, syslog, eventos) tiene **dos ejes** independientes: dónde
+corre y cómo se controla.
+
+- **Dónde corre** lo deciden los gates de entorno `SS_MONITORING_EMBEDDED` /
+  `SS_SYSLOG_EMBEDDED` / `SS_EVENTS_EMBEDDED` (`1` = lo hospeda el `web`; `0` = lo
+  posee un contenedor dedicado `worker`/`syslog`/`events`). Es decisión de
+  topología y vive en el compose.
+- **Cómo se controla** son ajustes de config editables en el panel (Configuración
+  → pestaña del servicio + pestaña Servicios): `enabled` (interruptor maestro) y
+  `autostart` (¿arrancar al iniciar el panel web?). `autostart` **solo aplica al
+  modo embebido**; un proceso dedicado (`--monitor` / `--syslog` / `--events`) lo
+  ignora y corre siempre que el servicio esté `enabled`.
 
 ### Variables sensibles
 
@@ -283,6 +412,31 @@ networks:
 > `websecure` y `letsencrypt` son los nombres de entrypoint y certresolver
 > habituales en una instalación estándar de Traefik. Ajústalos si los tuyos tienen
 > nombres distintos.
+
+#### Syslog y Traefik (por qué va directo)
+
+En la topología Traefik, **Traefik frontea solo el `web` (HTTP/TLS)**; el contenedor
+`syslog` publica sus puertos (`514/udp`, `514/tcp`, `6514/tcp`) **directamente en el
+host**. Es deliberado: Traefik es un proxy que reabre la conexión hacia el backend,
+así que el receptor syslog vería **la IP de Traefik** como origen de *todos* los
+mensajes en vez de la del emisor real. Eso rompería:
+
+- el allowlist **`allowed_sources`** (filtrado por IP/CIDR),
+- el campo **"source"** de la pestaña Syslog,
+- el **matching por host** de las reglas de eventos.
+
+UDP no puede preservar la IP en absoluto; TCP solo con PROXY protocol, que el listener
+no interpreta. Por eso mantener los puertos directos en el `syslog` conserva la IP de
+origen, que es lo que esas funciones necesitan.
+
+**Enrutarlo igualmente por Traefik (single-ingress).** Si priorizas un único punto de
+entrada y **no** usas filtrado/atribución por IP, Traefik v3 sí puede frontear syslog
+con routers **TCP y UDP**. El compose `docker-compose.microservices-traefik.yml` lleva
+un **bloque `OPCIONAL` comentado** con la receta exacta (entrypoints `syslog-udp`/
+`syslog-tcp`/`syslog-tls`, mover el `ports:` del `syslog` al `traefik`, conectar
+`syslog` a la red `frontend` y sus labels de router con `HostSNI(\`*\`)` para TCP y
+`tls.passthrough=true` para el 6514). Recuerda el trade-off: con esa variante **se
+pierde la IP de origen** y el allowlist por IP deja de ser fiable.
 
 ### Nginx Proxy Manager (NPM)
 

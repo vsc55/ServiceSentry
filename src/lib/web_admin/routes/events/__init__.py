@@ -199,7 +199,7 @@ def register(app, wa):
         rule = store.get(rid)
         if rule is None:
             return jsonify({'error': 'Not found'}), 404
-        from lib.web_admin.notification_dispatcher import dispatch  # noqa: PLC0415
+        from lib.notify.notification_dispatcher import dispatch  # noqa: PLC0415
         ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         results = dispatch(wa, kind='event', module=rule.get('source', 'audit'),
                            item=rule.get('name', ''), status='TEST',

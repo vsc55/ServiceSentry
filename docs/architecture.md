@@ -15,7 +15,7 @@ jerarquía de clases, estructura de directorios y flujo de ejecución.
                        │
                        ▼
 ┌─────────────────────────────────────────────────────┐
-│                  lib/monitor.py                     │
+│                  lib/core/monitor.py                     │
 │  (Motor principal: carga módulos, ThreadPool,       │
 │   gestión de estado, despacho de notificaciones)    │
 └───────┬──────────┬──────────┬───────────────────────┘
@@ -23,14 +23,14 @@ jerarquía de clases, estructura de directorios y flujo de ejecución.
         ▼          ▼          ▼
 ┌──────────┐ ┌──────────────┐ ┌──────────────┐
 │ Telegram │ │ Estado checks │ │  Watchfuls   │
-│ (lib/)   │ │ (tabla BD     │ │  (packages)  │
+│(lib/core)│ │ (tabla BD     │ │  (packages)  │
 │          │ │  check_state) │ │              │
 └──────────┘ └──────────────┘ └──────┬───────┘
                                  │
                     ┌────────────┼────────────┐
                     ▼            ▼            ▼
-              ModuleBase    lib/exe.py   lib/linux/
-              (herencia)    (local/SSH)  (RAID, sensores térmicos)
+              ModuleBase  lib/system/exe  lib/system/linux/
+              (herencia)   (local/SSH)    (RAID, sensores térmicos)
 ```
 
 ---
@@ -42,8 +42,8 @@ ObjectBase (lib/object_base.py)
 ├── debug: Debug  ← instancia compartida por TODAS las clases
 │
 ├── Main (main.py)
-├── Monitor (lib/monitor.py)
-├── Telegram (lib/telegram.py)
+├── Monitor (lib/core/monitor.py)
+├── Telegram (lib/core/telegram.py)
 ├── ConfigManager (lib/config/manager.py)         ← ÚNICO dueño de la E/S de config (read/write/migrate)
 │   ├── ConfigStore-BD (lib/stores/config.py)      ← capa editable: tabla `config` (una fila por sección|campo)
 │   ├── ConfigControl (lib/config/config_control.py)  ← I/O JSON de config.json (solo arranque + pins)
@@ -61,7 +61,7 @@ ObjectBase (lib/object_base.py)
 │   ├── _DaemonMixin     (lib/web_admin/mixins/daemon.py)
 │   ├── _SyslogMixin     (lib/web_admin/mixins/syslog.py)     ← receptor syslog + registro de descartes
 │   ├── _ServicesMixin   (lib/web_admin/mixins/services.py)   ← estado/control de servicios
-│   └── _EventsMixin     (lib/event_manager.py, reexportado por mixins/events.py; SIN Flask) ← evalúa reglas + worker desacoplado (cursor syslog/audit); compartido por WebAdmin y los servicios standalone (syslog/events)
+│   └── _EventsMixin     (lib/events/manager.py, reexportado por mixins/events.py; SIN Flask) ← evalúa reglas + worker desacoplado (cursor syslog/audit); compartido por WebAdmin y los servicios standalone (syslog/events)
 ├── BaseConnector (lib/db/base.py)              ← capa de BD pluggable
 │   ├── SQLiteConnector       (lib/db/sqlite.py)      [por defecto]
 │   ├── MySQLConnector        (lib/db/mysql.py)
@@ -112,39 +112,40 @@ ServiceSentry/
 │   ├── pytest.ini                       # Configuración pytest (testpaths = tests watchfuls)
 │   ├── lib/
 │   │   ├── __init__.py                  # Exports: ObjectBase, DictFilesPath, Monitor, Telegram, Exec, ExecResult, Mem, MemInfo
-│   │   ├── object_base.py               # Clase base con Debug compartido
-│   │   ├── monitor.py                   # Motor de monitorización
-│   │   ├── telegram.py                  # Envío de mensajes Telegram
-│   │   ├── exe.py                       # Ejecución de comandos local/remoto
-│   │   ├── ssh_client.py               # Cliente SSH (paramiko) compartido
-│   │   ├── os_detect.py                # Detección de SO del host (local/remoto)
-│   │   ├── mem.py                       # Lectura de RAM/SWAP (multiplataforma vía psutil)
-│   │   ├── mem_info.py                  # Dataclass MemInfo (total, free, used, percent)
-│   │   ├── secret_manager.py            # Cifrado Fernet de valores sensibles (enc: prefix)
-│   │   ├── credential_schemas.py        # Esquemas de tipos de credencial reutilizable
-│   │   ├── net_guard.py                 # validate_external_url(): protección SSRF para URLs de usuario
-│   │   ├── tools.py                     # Utilidades (bytes2human)
+│   │   ├── object_base.py               # Clase base con Debug compartido (única primitiva que queda en la raíz)
+│   │   ├── core/                        # Runtime núcleo: monitor.py (motor de monitorización) + telegram.py (cliente de alertas del monitor)
+│   │   ├── i18n/                        # Traducciones de toda la app (UI web + emails): __init__.py (loader) + lang/ (en_EN.py, es_ES.py)
+│   │   ├── util/                        # Helpers puros sin estado: tools.py (bytes2human) + os_detect.py (detección de SO local/remoto)
+│   │   ├── security/                    # Primitivas de seguridad: secret_manager.py (cifrado Fernet, enc: prefix, ENCRYPT_KEYS) + net_guard.py (validate_external_url, guard SSRF)
+│   │   ├── system/                      # Capa de acceso al host: ejecución (exe/ssh_client) + colectores de métricas (mem, linux/)
+│   │   │   ├── exe.py                   # Ejecución de comandos local/remoto (Exec, ExecResult)
+│   │   │   ├── ssh_client.py            # Cliente SSH (paramiko) compartido
+│   │   │   ├── mem.py                   # Lectura de RAM/SWAP (multiplataforma vía psutil)
+│   │   │   ├── mem_info.py              # Dataclass MemInfo (total, free, used, percent)
+│   │   │   ├── linux/                   # Colectores específicos de Linux (RAID, térmico)
+│   │   │   │   ├── thermal_base.py      # Clase base para datos térmicos
+│   │   │   │   ├── thermal_node.py      # Nodo individual de sensor térmico
+│   │   │   │   ├── thermal_info_collection.py   # Sensores térmicos /sys/class/thermal
+│   │   │   │   └── raid_mdstat.py       # Parser /proc/mdstat (RAID)
+│   │   │   └── windows/                 # Específico de Windows: ports.py (rangos TCP reservados vía netsh excludedportrange)
 │   │   ├── stores/                      # Repositorios DB-backed, uno por entidad (cada uno declara su TableSpec)
 │   │   │   ├── users.py                 # UsersStore      → tablas users, users_groups
 │   │   │   ├── groups.py                # GroupsStore     → tablas groups, groups_roles
 │   │   │   ├── roles.py                 # RolesStore      → tabla roles
 │   │   │   ├── sessions.py              # SessionsStore   → tabla sessions
 │   │   │   ├── audit.py                 # AuditStore      → tabla audit
-│   │   │   ├── check_state.py           # CheckStateStore → tabla check_state (estado vivo de checks)
+│   │   │   ├── check_state/             # paquete: store.py (CheckStateStore, tabla check_state) + facade.py (DbBackedStatus)
 │   │   │   ├── credentials.py           # CredentialsStore→ tabla credentials (identidades SSH reutilizables)
 │   │   │   ├── history.py               # HistoryStore    → tabla history (series temporales)
 │   │   │   ├── hosts.py                 # HostsStore      → tabla hosts (servidores + perfiles)
-│   │   │   ├── modules.py               # ModulesStore    → tablas module_config, module_config_items (config de módulos/ítems)
+│   │   │   ├── modules/                 # paquete: store.py (ModulesStore, tablas module_config[_items]) + facade.py (DbBackedModules)
 │   │   │   ├── config.py                # ConfigStore     → tabla config (capa editable: una fila por sección|campo)
 │   │   │   ├── webhooks.py              # WebhooksStore   → tabla webhooks (destinos HTTP salientes)
-│   │   │   ├── event_rules.py           # EventRulesStore → tabla event_rules (reglas de notificación)
-│   │   │   ├── notification_log.py      # NotificationLogStore → tabla notification_log (log de envíos)
-│   │   │   ├── event_state.py           # EventStateStore → tablas event_cooldowns + event_cursor (estado del worker de eventos)
-│   │   │   ├── syslog.py                # SyslogStore     → tabla syslog (mensajes; BD dedicada opcional)
-│   │   │   └── syslog_drops.py          # SyslogDropsStore→ tabla syslog_drops (orígenes descartados)
-│   │   ├── event_manager.py            # _EventsMixin (sin Flask): evalúa reglas + worker desacoplado (cursor sobre syslog/audit); compartido por WebAdmin y los servicios standalone
-│   │   ├── events/                      # Procesador de eventos standalone (worker desacoplado)
-│   │   │   └── service.py               # EventService (sin Flask): consume syslog/audit por cursor, evalúa y despacha (main.py --events)
+│   │   │   ├── event/                   # paquete: rules.py (EventRulesStore) + state.py (EventStateStore: event_cooldowns/event_cursor) + log.py (NotificationLogStore)
+│   │   │   └── syslog/                  # paquete: messages.py (SyslogStore; BD dedicada opcional) + drops.py (SyslogDropsStore). Distinto de lib.syslog (el receptor)
+│   │   ├── events/                      # Subsistema de eventos (sin Flask)
+│   │   │   ├── manager.py               # _EventsMixin: evalúa reglas + worker desacoplado (cursor sobre syslog/audit); compartido por WebAdmin y servicios standalone
+│   │   │   └── service.py               # EventService: worker standalone (consume syslog/audit por cursor, evalúa y despacha; main.py --events)
 │   │   ├── syslog/                      # Receptor syslog (RFC 3164/5424)
 │   │   │   ├── parser.py                # Parser de mensajes RFC 3164/5424
 │   │   │   ├── server.py                # Listener UDP/TCP/TLS multi-bind (IPv4/IPv6) + allowlist + registro de descartes
@@ -171,25 +172,22 @@ ServiceSentry/
 │   │   ├── debug/
 │   │   │   ├── debug.py                 # Sistema de debug con niveles
 │   │   │   └── debug_level.py           # Enum: null, debug, info, warning, error, emergency
-│   │   ├── linux/
-│   │   │   ├── thermal_base.py          # Clase base para datos térmicos
-│   │   │   ├── thermal_node.py          # Nodo individual de sensor térmico
-│   │   │   ├── thermal_info_collection.py   # Sensores térmicos /sys/class/thermal
-│   │   │   └── raid_mdstat.py           # Parser /proc/mdstat (RAID)
 │   │   ├── modules/
 │   │   │   ├── module_base.py           # Clase base para todos los watchfuls
+│   │   │   ├── credential_schemas.py    # Catálogo de tipos de credencial (escanea watchfuls + i18n)
+│   │   │   ├── overview_widgets.py      # Catálogo de widgets de Overview (escanea watchfuls; reutiliza helpers de credential_schemas)
 │   │   │   ├── dict_files_path.py       # Diccionario de rutas de archivos
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck
 │   │   │   └── enum_config_options.py   # Enum opciones de config comunes
+│   │   ├── notify/                      # Subsistema de notificación (sin Flask; lo usan web, monitor y daemons syslog/events)
+│   │   │   ├── notification_dispatcher.py  # dispatch(): enruta cada evento a Telegram/Email/Webhook
+│   │   │   ├── telegram_notify.py       # Canal Telegram
+│   │   │   ├── email_notify.py          # Canal email (SMTP / Microsoft 365 / Gmail)
+│   │   │   ├── email_templates.py       # Plantillas HTML de email (i18n vía lib.i18n)
+│   │   │   └── webhook_notify.py        # Canal webhooks (HMAC opcional)
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
 │   │       ├── app.py                   # Clase WebAdmin (hereda de los 11 mixins)
 │   │       ├── constants.py             # PERMISSIONS (52), BUILTIN_ROLE_UIDS/GROUP_UIDS, SYSTEM_USER
-│   │       ├── i18n.py                  # Cargador de traducciones
-│   │       ├── email_notify.py          # Envío de email (SMTP / Microsoft 365 / Gmail)
-│   │       ├── email_templates.py       # Motor de plantillas HTML de email
-│   │       ├── notification_dispatcher.py  # Enruta eventos a Telegram/Email/Webhook
-│   │       ├── webhook_notify.py        # Envío de webhooks (HMAC opcional)
-│   │       ├── lang/                    # Ficheros de idioma globales (en_EN.py, es_ES.py)
 │   │       ├── templates/               # Plantillas Jinja2 (+ partials JS por feature)
 │   │       ├── auth/                    # Autenticación externa (opcional)
 │   │       │   ├── ldap_auth.py         # LDAP/AD (ldap3)
@@ -201,7 +199,7 @@ ServiceSentry/
 │   │       │   ├── daemon.py            # _DaemonMixin: planificador en segundo plano
 │   │       │   ├── syslog.py            # _SyslogMixin: receptor syslog + descartes
 │   │       │   ├── services.py          # _ServicesMixin: estado/control de servicios
-│   │       │   └── events.py            # reexporta _EventsMixin de lib/event_manager.py
+│   │       │   └── events.py            # reexporta _EventsMixin de lib/events/manager.py
 │   │       └── routes/                  # Registradores de rutas Flask (ver web_admin.md)
 │   │           ├── __init__.py          # register_all(app, wa)
 │   │           ├── auth/                # /login, /logout, /api/v1/auth/ldap|entra/*
@@ -340,7 +338,7 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 ## Procesamiento de Eventos (notificaciones)
 
 Las **reglas de notificación** (audit/syslog → Telegram/Email/Webhook) las evalúa
-`_EventsMixin` (`lib/event_manager.py`, **sin Flask**, compartido por el WebAdmin y
+`_EventsMixin` (`lib/events/manager.py`, **sin Flask**, compartido por el WebAdmin y
 los servicios standalone). El diseño está **desacoplado de la ingesta**: los
 productores y el consumidor no se llaman en línea, sino que se comunican a través de
 las **propias tablas de la BD** (la cola es la tabla de origen).

@@ -10,7 +10,7 @@ port and host-key policy stay on the host/check; a credential only carries the
 
 Backed by the shared :class:`lib.db.BaseConnector`, like the other stores.  The
 secret fields (``ssh_password``/``ssh_key_string``) inside ``data`` are
-encrypted at rest with :mod:`lib.secret_manager` (the same value-level Fernet
+encrypted at rest with :mod:`lib.security.secret_manager` (the same value-level Fernet
 scheme as the host profiles).  ``get``/``list`` return decrypted data so the
 monitor can connect; the API route masks secrets before sending them out.
 
@@ -28,7 +28,7 @@ import json
 import time
 import uuid
 
-from lib import secret_manager
+from lib.security import secret_manager
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
 

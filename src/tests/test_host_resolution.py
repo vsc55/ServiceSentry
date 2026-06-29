@@ -188,7 +188,7 @@ class TestHostKindAndMaintenance:
         assert out['host_os'] == 'windows'
 
     def test_host_os_auto_local_resolves_to_platform(self):
-        from lib import os_detect
+        from lib.util import os_detect
         local = {**_HOST, 'kind': 'local', 'os': 'auto'}
         w = _ping()
         w._monitor._hosts_store = _FakeStore({'h1': local})

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the core SSH helper (lib/ssh_client.py).
+"""Tests for the core SSH helper (lib/system/ssh_client.py).
 
 SSH reachability is a host-level (core) concern reused by modules; these cover
 inline-key parsing and that test_connection never raises (reports failures).
@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lib import ssh_client
+from lib.system import ssh_client
 
 
 @pytest.mark.skipif(not ssh_client.HAS_PARAMIKO, reason='paramiko not installed')
@@ -120,5 +120,5 @@ class TestDetectOs:
 
 
 def test_local_os_is_canonical():
-    from lib import os_detect
+    from lib.util import os_detect
     assert os_detect.local_os() in os_detect.CANONICAL

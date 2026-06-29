@@ -17,7 +17,7 @@ from lib.config.spec import (
     CFG_BY_PATH, int_rules, bool_rules, json_dict_fields, admin_only_fields,
     normalize_url, cfg_validate,
 )
-from lib import secret_manager
+from lib.security import secret_manager
 
 # Public schema for validated config fields, derived from the central registry
 # (``lib.config.spec``).  Any route or module can import these to validate or
@@ -319,10 +319,28 @@ def register(app, wa):
             # Re-apply log level immediately so a verbosity change in the UI
             # takes effect for request tracing without waiting for a restart.
             wa._apply_log_level()
-            # Restart the syslog listener when any syslog setting changed.
+            # Re-apply the syslog listener when any syslog setting changed, but only
+            # when it is currently running — a config edit must not start a listener
+            # the user (or autostart=off) has left stopped.  Starting is a Services
+            # tab action; editing only updates a live listener (or stops it on
+            # disable).
             if any(p.startswith('syslog|') for p in to_apply) and hasattr(wa, '_syslog_apply_config'):
                 wa._invalidate_config_cache()
-                wa._syslog_apply_config()
+                if getattr(wa, '_syslog_server', None) is not None:
+                    wa._syslog_apply_config()
+            # Master switch: disabling a service from its config tab stops it when
+            # running (disabled ⇒ off).  Enabling does NOT auto-start — that is an
+            # autostart (boot) / Services-tab action.  (Syslog is covered above: its
+            # re-apply stops the listener when it is running and now disabled.)
+            if 'monitoring|enabled' in to_apply and hasattr(wa, '_monitoring_stop'):
+                wa._invalidate_config_cache()
+                if not wa._monitoring_enabled() and wa._monitoring_running:
+                    wa._monitoring_stop()
+            if 'events|mode' in to_apply and hasattr(wa, '_stop_event_worker'):
+                wa._invalidate_config_cache()
+                _mode = str((wa._config_section('events') or {}).get('mode') or 'embedded').lower()
+                if _mode != 'embedded' and wa._event_worker_running():
+                    wa._stop_event_worker()
             # Apply web_admin.lang at runtime if changed
             new_lang = (new_data.get('web_admin') or {}).get('lang', '')
             wa._default_lang = coerce_lang(new_lang, wa._default_lang)

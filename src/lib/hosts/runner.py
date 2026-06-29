@@ -17,7 +17,7 @@ Never raises — failures come back as ``('', <error>, -1)``.
 
 from __future__ import annotations
 
-from lib import ssh_client
+from lib.system import ssh_client
 
 
 def run(host: dict | None, cmd: str, timeout: int = 15) -> tuple:
@@ -44,7 +44,7 @@ def run(host: dict | None, cmd: str, timeout: int = 15) -> tuple:
                 except Exception:  # pylint: disable=broad-except
                     pass
     # Local (local host or no host context).
-    from lib.exe import Exec  # noqa: PLC0415
+    from lib.system.exe import Exec  # noqa: PLC0415
     result = Exec.execute(command=cmd)
     return (result.out or ''), (result.err or ''), result.code
 

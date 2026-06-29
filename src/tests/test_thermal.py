@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for lib/linux/thermal_info_collection.py — ThermalNode and ThermalInfoCollection."""
+"""Tests for lib/system/linux/thermal_info_collection.py — ThermalNode and ThermalInfoCollection."""
 
 import os
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
-from lib.linux.thermal_info_collection import (ThermalInfoCollection,
+from lib.system.linux.thermal_info_collection import (ThermalInfoCollection,
                                                ThermalNode)
 
 # --- ThermalNode tests ---
@@ -124,7 +124,7 @@ class TestThermalInfoCollectionInit:
         assert t.nodes == []
         assert t.count == 0
 
-    @patch('lib.linux.thermal_info_collection.glob.glob', return_value=[])
+    @patch('lib.system.linux.thermal_info_collection.glob.glob', return_value=[])
     def test_init_autodetect_no_sensors(self, mock_glob):
         t = ThermalInfoCollection(autodetect=True)
         assert t.count == 0
@@ -185,7 +185,7 @@ class TestThermalInfoCollectionAddSensor:
 
 class TestThermalInfoCollectionDetect:
 
-    @patch('lib.linux.thermal_info_collection.glob.glob')
+    @patch('lib.system.linux.thermal_info_collection.glob.glob')
     def test_detect_finds_zones(self, mock_glob):
         mock_glob.return_value = [
             '/sys/class/thermal/thermal_zone0',
@@ -199,14 +199,14 @@ class TestThermalInfoCollectionDetect:
         assert t.nodes[1].dev == 'thermal_zone1'
         assert t.nodes[2].dev == 'thermal_zone2'
 
-    @patch('lib.linux.thermal_info_collection.glob.glob')
+    @patch('lib.system.linux.thermal_info_collection.glob.glob')
     def test_detect_no_zones(self, mock_glob):
         mock_glob.return_value = []
         t = ThermalInfoCollection()
         t.detect()
         assert t.count == 0
 
-    @patch('lib.linux.thermal_info_collection.glob.glob')
+    @patch('lib.system.linux.thermal_info_collection.glob.glob')
     def test_detect_clears_previous(self, mock_glob):
         """detect() clears existing nodes before adding new ones."""
         t = ThermalInfoCollection()
@@ -218,7 +218,7 @@ class TestThermalInfoCollectionDetect:
         assert t.count == 1
         assert t.nodes[0].dev == 'thermal_zone0'
 
-    @patch('lib.linux.thermal_info_collection.glob.glob')
+    @patch('lib.system.linux.thermal_info_collection.glob.glob')
     def test_detect_uses_correct_pattern(self, mock_glob):
         """detect() should glob for thermal_zone* only."""
         mock_glob.return_value = []

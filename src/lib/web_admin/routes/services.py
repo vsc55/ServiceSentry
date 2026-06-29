@@ -8,7 +8,7 @@ POST /api/v1/services/<name>/<action>  → start|stop an embedded service.
 
 from flask import jsonify
 
-_CONTROLLABLE = {'scheduler', 'syslog'}
+_CONTROLLABLE = {'monitoring', 'syslog', 'events'}
 _ACTIONS = {'start', 'stop'}
 
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for lib/mem.py — MemInfo dataclass and Mem class."""
+"""Tests for lib/system/mem.py — MemInfo dataclass and Mem class."""
 
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from lib.mem import Mem, MemInfo
+from lib.system.mem import Mem, MemInfo
 
 # --- MemInfo dataclass tests ---
 
@@ -58,7 +58,7 @@ class TestMemInfo:
 
 class TestMemRam:
 
-    @patch('lib.mem.psutil')
+    @patch('lib.system.mem.psutil')
     def test_ram_values(self, mock_psutil):
         """total and available converted from bytes to kB."""
         mock_psutil.virtual_memory.return_value = SimpleNamespace(
@@ -69,7 +69,7 @@ class TestMemRam:
         assert ram.total == 16_777_216_000 // 1024
         assert ram.free == 8_388_608_000 // 1024
 
-    @patch('lib.mem.psutil')
+    @patch('lib.system.mem.psutil')
     def test_ram_used(self, mock_psutil):
         mock_psutil.virtual_memory.return_value = SimpleNamespace(
             total=16_000_000_000, available=6_000_000_000,
@@ -77,7 +77,7 @@ class TestMemRam:
         ram = Mem().ram
         assert ram.used == (16_000_000_000 - 6_000_000_000) // 1024
 
-    @patch('lib.mem.psutil')
+    @patch('lib.system.mem.psutil')
     def test_ram_used_percent(self, mock_psutil):
         mock_psutil.virtual_memory.return_value = SimpleNamespace(
             total=10_000_000_000, available=4_000_000_000,
@@ -86,7 +86,7 @@ class TestMemRam:
         expected = ((10_000_000_000 - 4_000_000_000) / 10_000_000_000) * 100.0
         assert ram.used_percent == pytest.approx(expected)
 
-    @patch('lib.mem.psutil')
+    @patch('lib.system.mem.psutil')
     def test_ram_all_free(self, mock_psutil):
         """Edge case: all memory available."""
         mock_psutil.virtual_memory.return_value = SimpleNamespace(
@@ -101,7 +101,7 @@ class TestMemRam:
 
 class TestMemSwap:
 
-    @patch('lib.mem.psutil')
+    @patch('lib.system.mem.psutil')
     def test_swap_values(self, mock_psutil):
         """total and free converted from bytes to kB."""
         mock_psutil.swap_memory.return_value = SimpleNamespace(
@@ -112,7 +112,7 @@ class TestMemSwap:
         assert swap.total == 4_294_967_296 // 1024
         assert swap.free == (4_294_967_296 - 104_857_600) // 1024
 
-    @patch('lib.mem.psutil')
+    @patch('lib.system.mem.psutil')
     def test_swap_used(self, mock_psutil):
         mock_psutil.swap_memory.return_value = SimpleNamespace(
             total=4_000_000_000, used=500_000_000,
@@ -122,7 +122,7 @@ class TestMemSwap:
         expected_free = (4_000_000_000 - 500_000_000) // 1024
         assert swap.used == expected_total - expected_free
 
-    @patch('lib.mem.psutil')
+    @patch('lib.system.mem.psutil')
     def test_swap_zero(self, mock_psutil):
         """System with no swap configured."""
         mock_psutil.swap_memory.return_value = SimpleNamespace(
@@ -133,7 +133,7 @@ class TestMemSwap:
         assert swap.free == 0
         assert swap.used_percent == 0.0
 
-    @patch('lib.mem.psutil')
+    @patch('lib.system.mem.psutil')
     def test_swap_fully_used(self, mock_psutil):
         """Edge case: all swap used."""
         mock_psutil.swap_memory.return_value = SimpleNamespace(

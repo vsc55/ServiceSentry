@@ -6,7 +6,7 @@ from .permissions import _PermissionsMixin
 from .sessions import _SessionsMixin
 from .audit import _AuditMixin
 from .checks import _ChecksMixin
-from .daemon import _DaemonMixin
+from .monitoring import _MonitoringMixin
 from .syslog import _SyslogMixin
 from .services import _ServicesMixin
 from .events import _EventsMixin
@@ -19,7 +19,7 @@ __all__ = [
     '_SessionsMixin',
     '_AuditMixin',
     '_ChecksMixin',
-    '_DaemonMixin',
+    '_MonitoringMixin',
     '_SyslogMixin',
     '_ServicesMixin',
     '_EventsMixin',

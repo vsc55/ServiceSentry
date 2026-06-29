@@ -398,7 +398,7 @@ class TestDaemonCycleIntegration:
             monitor.refresh_runtime_config()
             monitor.tg.group_messages = False        # deterministic immediate send
 
-            import lib.telegram as telegram_mod
+            import lib.core.telegram as telegram_mod
             with patch.object(telegram_mod, 'requests') as req:
                 req.RequestException = Exception
                 req.post.return_value = MagicMock(status_code=200)

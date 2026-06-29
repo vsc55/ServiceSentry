@@ -13,7 +13,7 @@ from conftest import create_mock_monitor
 
 from lib.db import get_connector
 from lib.stores.credentials import CredentialsStore, apply_credential
-from lib.credential_schemas import credential_schemas, credential_secret_fields
+from lib.modules.credential_schemas import credential_schemas, credential_secret_fields
 
 import watchfuls.process as process
 
@@ -267,8 +267,8 @@ class TestApiCredentials:
         huid = admin._hosts_store.create(
             {'name': 'srv-x', 'address': '10.0.0.9', 'kind': 'remote',
              'profiles': {'ssh': {'ssh_user': 'olduser', 'ssh_password': 'storedpw'}}}, actor='admin')
-        with patch('lib.ssh_client.HAS_PARAMIKO', True), \
-             patch('lib.ssh_client.test_connection', return_value=(True, 'ok', 'linux')) as tc:
+        with patch('lib.system.ssh_client.HAS_PARAMIKO', True), \
+             patch('lib.system.ssh_client.test_connection', return_value=(True, 'ok', 'linux')) as tc:
             r = client.post('/api/v1/hosts/test_ssh', json={
                 'address': '10.0.0.9', 'uid': huid,
                 'profiles': {'ssh': {'cred_uid': cuid}}})
@@ -323,7 +323,7 @@ class TestApiCredentials:
     def test_test_endpoint_uses_stored_secret(self, client, admin):
         _login(client)
         uid = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']
-        with patch('lib.ssh_client.test_connection', return_value=(True, 'ok')) as tc:
+        with patch('lib.system.ssh_client.test_connection', return_value=(True, 'ok')) as tc:
             r = client.post('/api/v1/credentials/test',
                             json={'cred_uid': uid, 'address': '10.0.0.5'})
         assert r.get_json()['ok'] is True

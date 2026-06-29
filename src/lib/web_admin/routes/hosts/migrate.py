@@ -8,7 +8,7 @@ into shared hosts; on apply, create the hosts and rewrite the checks.
 
 from flask import jsonify, session
 
-from lib import secret_manager
+from lib.security import secret_manager
 from lib.hosts.migrate import apply_to_modules, build_migration_plan
 
 from ._helpers import SYSTEM_USER, _create_unique_host

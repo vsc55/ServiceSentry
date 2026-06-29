@@ -6,7 +6,8 @@
 import main
 
 _SS_VARS = ['SS_WEB', 'SS_WEB_PORT', 'SS_WEB_HOST', 'SS_VERBOSE', 'SS_NOCOLOR',
-            'SS_DAEMON', 'SS_TIMER', 'SS_CONFIG_DIR', 'NO_COLOR']
+            'SS_MONITOR', 'SS_TIMER', 'SS_CONFIG_DIR', 'SS_LANG', 'SS_LOG_LEVEL',
+            'SS_SYSLOG_HOST', 'SS_SYSLOG_PORT', 'NO_COLOR']
 
 
 def _clear_env(monkeypatch):
@@ -23,7 +24,7 @@ def test_defaults_without_env(monkeypatch):
     assert a.web_host is None
     assert a.verbose is False
     assert a.nocolor is False
-    assert a.daemon_mode is False
+    assert a.monitor_mode is False
     assert a.timer_check is None
     assert a.path is None
 
@@ -34,14 +35,14 @@ def test_env_maps_to_args(monkeypatch):
     monkeypatch.setenv('SS_WEB_PORT', '9090')
     monkeypatch.setenv('SS_WEB_HOST', '127.0.0.1')
     monkeypatch.setenv('SS_VERBOSE', '1')
-    monkeypatch.setenv('SS_DAEMON', 'yes')
+    monkeypatch.setenv('SS_MONITOR', 'yes')
     monkeypatch.setenv('SS_TIMER', '120')
     a = main.args_init()
     assert a.web_mode is True
     assert a.web_port == 9090 and isinstance(a.web_port, int)
     assert a.web_host == '127.0.0.1'
     assert a.verbose is True
-    assert a.daemon_mode is True
+    assert a.monitor_mode is True
     assert a.timer_check == 120
 
 

@@ -555,7 +555,7 @@ class Watchful(ModuleBase):
         auth it logs in to obtain a ticket. Raises ``PveError`` on failure."""
         base = f'https://{host}:{port}/api2/json'
         # SSRF guard (blocks link-local/metadata; private hosts allowed) like web.
-        from lib.net_guard import validate_external_url  # noqa: PLC0415
+        from lib.security.net_guard import validate_external_url  # noqa: PLC0415
         reason = validate_external_url(f'https://{host}:{port}')
         if reason:
             raise PveError(0, f'Bloqueado: {reason}')
@@ -881,8 +881,8 @@ class Watchful(ModuleBase):
         Returns {"ok": bool, "message": str, "fields": {auth_method, token_id,
         token_secret}}.
         """
-        from lib import ssh_client  # noqa: PLC0415
-        from lib.net_guard import validate_external_url  # noqa: PLC0415
+        from lib.system import ssh_client  # noqa: PLC0415
+        from lib.security.net_guard import validate_external_url  # noqa: PLC0415
 
         # When the check is bound to a host, the route injects the resolved host
         # context (__host__): address + the host's SSH profile (user/port/secret,

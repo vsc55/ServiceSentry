@@ -219,7 +219,7 @@ def _run_github_import(var_dir: str, url: str, recursive: bool, progress_cb=None
     60 req/h); a ``truncated`` flag signals when a cap was hit.
     """
     import urllib.request  # noqa: PLC0415
-    from lib.net_guard import validate_external_url  # noqa: PLC0415
+    from lib.security.net_guard import validate_external_url  # noqa: PLC0415
 
     parsed = _parse_github_folder(url)
     if not parsed:
@@ -1145,7 +1145,7 @@ class Watchful(ModuleBase):
         )
 
         # SSRF guard: block non-HTTP(S) schemes and link-local/metadata targets.
-        from lib.net_guard import validate_external_url  # noqa: PLC0415
+        from lib.security.net_guard import validate_external_url  # noqa: PLC0415
         _reason = validate_external_url(url)
         if _reason:
             return {'ok': False, 'message': f'Blocked: {_reason}'}

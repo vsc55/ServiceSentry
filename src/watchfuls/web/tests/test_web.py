@@ -5,7 +5,7 @@
 The per-item request helper is ``_web_request(url, timeout, verify_ssl, scheme,
 method, check_content, content_contains, auth_user, auth_password)`` and returns
 a ``(status_code, detail)`` tuple.  It also runs the SSRF guard
-(``lib.net_guard.validate_external_url``) before the request — neutralised here
+(``lib.security.net_guard.validate_external_url``) before the request — neutralised here
 so tests stay hermetic (no DNS).
 """
 
@@ -19,7 +19,7 @@ from conftest import create_mock_monitor
 @pytest.fixture(autouse=True)
 def _no_ssrf_guard():
     """Neutralise the SSRF guard so direct _web_request tests don't hit DNS."""
-    with patch('lib.net_guard.validate_external_url', return_value=None):
+    with patch('lib.security.net_guard.validate_external_url', return_value=None):
         yield
 
 
@@ -176,7 +176,7 @@ class TestWebRequest:
     def test_blocked_by_ssrf_guard_returns_zero(self):
         """A URL rejected by the SSRF guard returns code 0 without a request."""
         w = self._make_watchful()
-        with patch('lib.net_guard.validate_external_url',
+        with patch('lib.security.net_guard.validate_external_url',
                    return_value='link-local / metadata address blocked'), \
              patch('urllib.request.urlopen') as mock_open:
             code, detail = w._web_request('http://169.254.169.254/')

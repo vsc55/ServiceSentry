@@ -74,17 +74,17 @@ async function renderServices() {
 
     const cards = [];
 
-    // Scheduler (embedded monitoring loop)
-    if (s.scheduler) {
-        const d = s.scheduler;
+    // Monitor (the service monitor; like syslog: enabled flag + embedded/external)
+    if (s.monitoring) {
+        const d = s.monitoring;
         cards.push(_svcCard({
-            key: 'scheduler', icon: 'bi-arrow-repeat', title: t('svc_scheduler'),
+            key: 'monitoring', icon: 'bi-arrow-repeat', title: t('svc_monitor'),
             state: d.state, running: d.running, controllable: d.controllable, embedded: d.embedded,
             rows: [
+                _svcRow(t('svc_mode'), d.embedded ? t('svc_mode_embedded') : t('svc_mode_container')),
                 _svcRow(t('svc_interval'), d.interval != null ? d.interval + ' s' : '—'),
                 _svcRow(t('svc_next_run'), d.running ? _svcIn(d.next_in) : '—'),
                 _svcRow(t('svc_last_run'), _svcAgo(d.last_run)),
-                _svcRow(t('svc_autostart'), d.autostart ? t('svc_yes') : t('svc_no')),
             ],
         }));
     }

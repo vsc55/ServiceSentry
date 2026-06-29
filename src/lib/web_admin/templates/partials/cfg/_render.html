@@ -131,7 +131,7 @@ function renderConfig() {
     if (!('force_reload_secs'            in wa)) wa.force_reload_secs            = 10;
 
     const _cfgSectionAccent = {
-        cfgcol_daemon:     'linear-gradient(90deg,#6366f1,#8b5cf6)',
+        cfgcol_monitoring:     'linear-gradient(90deg,#6366f1,#8b5cf6)',
         cfgcol_global:     'linear-gradient(90deg,#0ea5e9,#38bdf8)',
         cfgcol_telegram:   'linear-gradient(90deg,#0ea5e9,#22d3ee)',
         cfgcol_web_admin:  'linear-gradient(90deg,#f59e0b,#fbbf24)',
@@ -192,7 +192,7 @@ function renderConfig() {
             }
         }
     }
-    ['ldap', 'oidc', 'email', 'notifications', 'syslog', 'syslog_db', 'events'].forEach(_seedSection);
+    ['monitoring', 'ldap', 'oidc', 'email', 'notifications', 'syslog', 'syslog_db', 'events'].forEach(_seedSection);
 
     // Dynamic defaults the static registry can't express: the "no access" role's
     // uid depends on the live roles list.
@@ -231,7 +231,7 @@ function renderConfig() {
     const AUTH_SECS  = new Set(['ldap', 'oidc', 'saml2']);
     const NOTIF_SECS = new Set(['telegram', 'events']);
 
-    const order = ['daemon', 'modules', 'global', 'telegram', 'web_admin', 'email', 'webhooks', 'notifications', 'events', 'syslog', 'syslog_db', 'ldap', 'oidc', 'saml2'];
+    const order = ['monitoring', 'modules', 'global', 'telegram', 'web_admin', 'email', 'webhooks', 'notifications', 'events', 'syslog', 'syslog_db', 'ldap', 'oidc', 'saml2'];
     // Top-level keys carried in config.json that are feature state, not editable
     // config (own UIs handle them) — never rendered as generic config cards.
     const FEATURE_NONCONFIG_KEYS = new Set(['overview', 'notif_templates', 'notif_html_templates']);
@@ -240,7 +240,7 @@ function renderConfig() {
         return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
     });
 
-    let hGeneral = '', hServer = '', hAuthExt = '', hNotifs = '', hInterface = '', hSyslog = '';
+    let hGeneral = '', hServer = '', hAuthExt = '', hNotifs = '', hInterface = '', hSyslog = '', hMonitoring = '';
 
     for (const sec of sections) {
         const data = configData[sec];
@@ -272,11 +272,16 @@ function renderConfig() {
             continue;
         }
 
-        if (sec === 'daemon') {
-            // Server tab: daemon process settings
-            hServer += cfgCardOpen(cfgId, '<i class="bi bi-cpu me-1"></i>', lbl);
-            hServer += renderScalarFields(data, sec, 'config', []);
-            hServer += cfgCardClose;
+        if (sec === 'monitoring') {
+            // Own "Monitoring" tab: an enabled toggle + check interval, like syslog
+            // (embedded vs external is the SS_MONITORING_EMBEDDED env, not a field).
+            // Pick only the registry fields so a stale row (e.g. a removed 'mode')
+            // is never rendered as a stray input.
+            hMonitoring += cfgCardOpen(cfgId, '<i class="bi bi-activity me-1"></i>', lbl);
+            const _mon = Object.fromEntries(
+                ['enabled', 'autostart', 'timer_check'].filter(f => f in data).map(f => [f, data[f]]));
+            hMonitoring += renderScalarFields(_mon, sec, 'config', []);
+            hMonitoring += cfgCardClose;
             continue;
         }
 
@@ -302,7 +307,7 @@ function renderConfig() {
             const _pick = (fields) => Object.fromEntries(fields.filter(f => f in data).map(f => [f, data[f]]));
             // Connection: enable + bind + listener ports.
             hSyslog += cfgCardOpen('cfgcol_syslog_conn', '<i class="bi bi-ethernet me-1"></i>', t('syslog_sec_connection'));
-            hSyslog += renderScalarFields(_pick(['enabled', 'bind_host', 'udp_port', 'tcp_port', 'tls_port']), sec, 'config', []);
+            hSyslog += renderScalarFields(_pick(['enabled', 'autostart', 'bind_host', 'udp_port', 'tcp_port', 'tls_port']), sec, 'config', []);
             hSyslog += cfgCardClose;
             // Security: TLS material + sender allowlist.
             hSyslog += cfgCardOpen('cfgcol_syslog_security', '<i class="bi bi-shield-lock me-1"></i>', t('syslog_sec_security'));
@@ -515,6 +520,7 @@ function renderConfig() {
     const _cfgTabs = [
         { id: 'cfg-tab-general',   label: t('cfg_tab_general'),       icon: 'bi-sliders',      html: hGeneral   },
         { id: 'cfg-tab-server',    label: t('cfg_tab_server'),        icon: 'bi-hdd-network',  html: hServer    },
+        { id: 'cfg-tab-monitoring',label: t('cfg_tab_monitoring'),    icon: 'bi-activity',     html: hMonitoring},
         { id: 'cfg-tab-auth',      label: t('cfg_tab_auth'),          icon: 'bi-person-lock',  html: hAuth      },
         { id: 'cfg-tab-notifs',    label: t('cfg_tab_notifications'), icon: 'bi-bell',         html: hNotifs    },
         { id: 'cfg-tab-syslog',    label: t('cfg_tab_syslog'),        icon: 'bi-hdd-stack',    html: hSyslog    },

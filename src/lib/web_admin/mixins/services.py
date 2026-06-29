@@ -5,7 +5,7 @@
 One place to see how the moving parts are doing and (for the ones this process
 hosts) operate them:
 
-* **scheduler** — the embedded monitoring loop (``_DaemonMixin``); start/stop here.
+* **scheduler** — the embedded monitoring loop (``_MonitoringMixin``); start/stop here.
 * **syslog** — the embedded syslog listener (``_SyslogMixin``); start/stop here
   when it runs in-process.  When a dedicated container owns it
   (``SS_SYSLOG_EMBEDDED=0``) it is shown read-only.
@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import time
 
+from lib.debug import DebugLevel
 from lib.web_admin.mixins.syslog import _embedded_listener_enabled
 
 
@@ -46,7 +47,7 @@ class _ServicesMixin:
     def _services_status_dict(self) -> dict:
         """Serialisable snapshot of every service for the Services dashboard."""
         out = {
-            'scheduler': self._service_scheduler_status(),
+            'monitoring': self._service_monitoring_status(),
             'syslog':    self._service_syslog_status(),
             'events':    self._service_events_status(),
             'worker':    self._service_worker_status(),
@@ -58,17 +59,60 @@ class _ServicesMixin:
             out['database_syslog'] = syslog_db
         return out
 
-    def _service_scheduler_status(self) -> dict:
-        d = self._daemon_status_dict()
+    # ── startup log ───────────────────────────────────────────────────────────
+    def _log_services_startup(self) -> None:
+        """Log a one-line startup state for each background service this process is
+        responsible for — so the boot log shows what came up *and* what came up
+        stopped/disabled/external, not only the services that started running."""
+        mon = self._service_monitoring_status()
+        syl = self._service_syslog_status()
+        evt = self._service_events_status()
+
+        def _ports(st: dict) -> str:
+            parts = [f'{lbl}:{st.get(key)}' for lbl, key in
+                     (('udp', 'udp_port'), ('tcp', 'tcp_port'), ('tls', 'tls_port'))
+                     if st.get(key)]
+            return f" ({', '.join(parts)})" if parts else ''
+
+        def _line(name: str, st: dict, extra: str = '') -> None:
+            state = st.get('state')
+            text = {
+                'running':  f'running{extra}',
+                'stopped':  'stopped',
+                'disabled': 'disabled (off in config)',
+                'external': 'external (a dedicated process/container owns it)',
+            }.get(state, str(state))
+            self._dbg(f'> Services >> {name}: {text}', DebugLevel.info)
+
+        _line('monitor', mon,
+              f" (interval={mon.get('interval')}s)" if mon.get('state') == 'running' else '')
+        _line('syslog', syl, _ports(syl) if syl.get('state') == 'running' else '')
+        _line('events', evt,
+              f" (poll={evt.get('poll_secs')}s)" if evt.get('state') == 'running' else '')
+
+    def _service_monitoring_status(self) -> dict:
+        """The service monitor — mirrors syslog: an ``enabled`` flag, with embedded
+        (this process hosts it) vs external (a standalone ``--monitor`` process /
+        worker container owns it) decided by the SS_MONITORING_EMBEDDED env."""
+        d = self._monitoring_status_dict()
+        enabled = bool(d.get('enabled'))
+        embedded = self._embedded_monitor_enabled()
+        running = bool(d.get('running'))
+        if not embedded:
+            state = 'external'               # a dedicated --monitor process owns it
+        elif not enabled:
+            state = 'disabled'               # off in config
+        else:
+            state = 'running' if running else 'stopped'
         return {
-            'state':        'running' if d.get('running') else 'stopped',
-            'running':      bool(d.get('running')),
-            'controllable': True,            # always start/stop-able in-process
-            'embedded':     True,
+            'state':        state,
+            'running':      running,
+            'enabled':      enabled,
+            'embedded':     embedded,
+            'controllable': embedded and enabled,
             'interval':     d.get('interval'),
             'next_in':      d.get('next_in'),
             'last_run':     d.get('last_run'),
-            'autostart':    d.get('web_autostart'),
         }
 
     def _service_syslog_status(self) -> dict:
@@ -103,7 +147,10 @@ class _ServicesMixin:
         mode = str((self._config_section('events') or {}).get('mode') or 'embedded').lower()
         env_on = _embedded_event_worker_enabled()
         running = bool(self._event_worker_running())
-        embedded = mode == 'embedded' and env_on
+        # See _service_monitoring_status: "embedded" = can be hosted here (off is a
+        # plain Disabled), "controllable" = actually hosted here (embedded mode).
+        embedded = env_on and mode != 'external'
+        controllable = env_on and mode == 'embedded'
         if mode == 'external':
             state = 'external'               # a dedicated process/container owns it
         elif mode == 'off':
@@ -115,7 +162,7 @@ class _ServicesMixin:
             'state':         state,
             'running':       running,
             'embedded':      embedded,
-            'controllable':  embedded,       # start/stop only when hosted here
+            'controllable':  controllable,
             'mode':          mode,
             'poll_secs':     int((self._config_section('events') or {}).get('poll_secs') or 2),
             'rules':         len(rules),
@@ -125,10 +172,10 @@ class _ServicesMixin:
     def _service_worker_status(self) -> dict:
         hist = getattr(self, '_history', None)
         latest = hist.latest_ts() if hist is not None else None
-        interval = self._daemon_interval or 300
+        interval = self._monitoring_interval or 300
         fresh_window = max(interval * _WORKER_FRESH_INTERVALS, _WORKER_FRESH_FLOOR)
         fresh = latest is not None and (time.time() - latest) <= fresh_window
-        if self._daemon_running:
+        if self._monitoring_running:
             state = 'embedded'               # this process is the one checking
         elif fresh:
             state = 'active'                 # a separate worker is producing checks
@@ -210,9 +257,17 @@ class _ServicesMixin:
         if action not in ('start', 'stop'):
             return False, 'bad_action'
 
-        if name == 'scheduler':
-            ok = self._daemon_start() if action == 'start' else self._daemon_stop()
-            return (ok, '' if ok else 'already')
+        if name == 'monitoring':
+            if not self._embedded_monitor_enabled():
+                return False, 'not_controllable'
+            if action == 'stop':
+                ok = self._monitoring_stop()
+                return ok, '' if ok else 'already'
+            # start: only meaningful when enabled in config
+            if not self._monitoring_enabled():
+                return False, 'disabled'
+            ok = self._monitoring_start()
+            return ok, '' if ok else 'already'
 
         if name == 'syslog':
             if not _embedded_listener_enabled():

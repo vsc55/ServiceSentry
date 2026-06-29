@@ -14,7 +14,7 @@ ServiceSentry.  This class wires the few collaborators the listener needs:
   ``notifications`` config is read from the very same place as everywhere else;
 * a :class:`lib.stores.webhooks.WebhooksStore` and a minimal context surface
   (``_read_config_file`` / ``_config_section`` / ``_load_webhooks`` / ``_dbg``)
-  so alert routing through :mod:`lib.web_admin.notification_dispatcher` works
+  so alert routing through :mod:`lib.notify.notification_dispatcher` works
   without a running web server.
 
 It deliberately does NOT start Flask, the monitor, or any HTTP endpoint: just
@@ -33,14 +33,12 @@ from lib.config.manager import ConfigManager, bootstrap_database_cfg, read_confi
 from lib.db import get_connector
 from lib.debug import Debug, DebugLevel
 from lib.stores.config import ConfigStore
-from lib.stores.event_rules import EventRulesStore
-from lib.stores.notification_log import NotificationLogStore
-from lib.stores.syslog import SyslogStore
-from lib.stores.syslog_drops import SyslogDropsStore
+from lib.stores.event import EventRulesStore, NotificationLogStore
+from lib.stores.syslog import SyslogStore, SyslogDropsStore
 from lib.stores.webhooks import WebhooksStore
 from lib.syslog.server import build_server
-from lib.event_manager import _EventsMixin
-from lib import secret_manager
+from lib.events.manager import _EventsMixin
+from lib.security import secret_manager
 
 _RETENTION_EVERY = 300          # prune sweep interval (s)
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for syslog config changes (s)
@@ -55,9 +53,17 @@ class SyslogService(_EventsMixin):
 
     _CONFIG_FILE = CONFIG_FILENAME
 
-    def __init__(self, config_dir: str, var_dir: str | None = None):
+    def __init__(self, config_dir: str, var_dir: str | None = None,
+                 host_override: str | None = None, port_override: int | None = None,
+                 log_level: str | None = None):
         self._config_dir = config_dir
         self._var_dir = var_dir or config_dir
+        # CLI/env overrides (--syslog-host / --syslog-port): when set they win over
+        # the stored config.  A single port overrides both UDP and TCP (the usual
+        # syslog pair); TLS keeps its configured port.
+        self._host_override = host_override or None
+        self._port_override = port_override
+        self._log_level_override = log_level or None
         self._secret_key_path = os.path.join(config_dir, '.flask_secret')
         self._fernet = secret_manager.fernet_from_secret_file(self._secret_key_path)
         self._secret_keys = secret_manager.ENCRYPT_KEYS
@@ -92,7 +98,8 @@ class SyslogService(_EventsMixin):
 
         self._debug = Debug()
         self._debug.set_from_config(
-            self._config_section('global').get('log_level') or 'info')
+            self._log_level_override
+            or self._config_section('global').get('log_level') or 'info')
         self._server = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -126,8 +133,15 @@ class SyslogService(_EventsMixin):
         saved = self._config_section('syslog') or {}
         # A null (blank) value means "use the registry default" → skip nulls so the
         # merged default underneath wins.
-        return {**section_defaults('syslog'),
-                **{k: v for k, v in saved.items() if v is not None}}
+        cfg = {**section_defaults('syslog'),
+               **{k: v for k, v in saved.items() if v is not None}}
+        # CLI/env overrides win over the stored config.
+        if self._host_override:
+            cfg['bind_host'] = self._host_override
+        if self._port_override is not None:
+            cfg['udp_port'] = self._port_override
+            cfg['tcp_port'] = self._port_override
+        return cfg
 
     @staticmethod
     def _config_summary(cfg: dict) -> str:

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lib.exe import EnumLocationExec, Exec, ExecConfig, ExecResult
+from lib.system.exe import EnumLocationExec, Exec, ExecConfig, ExecResult
 
 
 class TestExecResult:
@@ -172,7 +172,7 @@ class TestExecEmptyResult:
 
 class TestExecLocal:
 
-    @patch('lib.exe.subprocess.run')
+    @patch('lib.system.exe.subprocess.run')
     def test_execute_local_with_python(self, mock_run):
         """Ejecutar un comando que retorna stdout."""
         mock_run.return_value = MagicMock(stdout="42\n", stderr="", returncode=0)
@@ -183,7 +183,7 @@ class TestExecLocal:
         assert result.code == 0
         mock_run.assert_called_once()
 
-    @patch('lib.exe.subprocess.run')
+    @patch('lib.system.exe.subprocess.run')
     def test_execute_local_stderr(self, mock_run):
         """Verificar que se captura stderr."""
         mock_run.return_value = MagicMock(stdout="", stderr="error\n", returncode=0)
@@ -191,7 +191,7 @@ class TestExecLocal:
         assert result.exception is None
         assert "error" in result.err
 
-    @patch('lib.exe.subprocess.run')
+    @patch('lib.system.exe.subprocess.run')
     def test_execute_local_exit_code(self, mock_run):
         """Verificar exit code no-cero."""
         mock_run.return_value = MagicMock(stdout="", stderr="", returncode=1)
@@ -213,7 +213,7 @@ class TestExecLocal:
 
 class TestExecStaticMethod:
 
-    @patch('lib.exe.subprocess.run')
+    @patch('lib.system.exe.subprocess.run')
     def test_static_execute_local(self, mock_run):
         """execute() estático sin host usa ejecución local."""
         mock_run.return_value = MagicMock(stdout="hello\n", stderr="", returncode=0)
@@ -221,14 +221,14 @@ class TestExecStaticMethod:
         assert "hello" in result.out
         assert result.code == 0
 
-    @patch('lib.exe.Exec.start')
+    @patch('lib.system.exe.Exec.start')
     def test_static_execute_with_host_sets_remote(self, mock_start):
         """execute() con host configura modo remoto."""
         mock_start.return_value = ExecResult(out="out", err="err", code=0)
         Exec.execute(command="ls", host="server1", port=22, user="root", password="pass")
         mock_start.assert_called_once()
 
-    @patch('lib.exe.Exec.start')
+    @patch('lib.system.exe.Exec.start')
     def test_static_execute_with_key_file(self, mock_start):
         """execute() with key_file sets it in remote config."""
         mock_start.return_value = ExecResult(out="out", err="err", code=0)
@@ -236,7 +236,7 @@ class TestExecStaticMethod:
                      key_file="/home/user/.ssh/id_rsa")
         mock_start.assert_called_once()
 
-    @patch('lib.exe.subprocess.run')
+    @patch('lib.system.exe.subprocess.run')
     def test_static_execute_local_with_timeout(self, mock_run):
         """execute() local sin host pero con timeout lo aplica."""
         mock_run.return_value = MagicMock(stdout="ok\n", stderr="", returncode=0)
@@ -255,7 +255,7 @@ class TestExecStart:
         assert result.err is None
         assert result.code is None
 
-    @patch('lib.exe.subprocess.run')
+    @patch('lib.system.exe.subprocess.run')
     def test_start_local(self, mock_run):
         mock_run.return_value = MagicMock(stdout="99\n", stderr="", returncode=0)
         e = Exec(command='echo 99')

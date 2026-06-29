@@ -140,18 +140,6 @@ async function renderStatus() {
                     title="${escAttr(t('daemon_reload') || 'Restart scheduler')}">
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
-            <div class="ms-auto d-flex align-items-center gap-2">
-                <i id="daemonAutostartLock" class="bi bi-lock-fill text-warning" style="display:none;font-size:.72rem"
-                   title="${escAttr(t('env_locked_tooltip'))}"></i>
-                <label class="form-check-label text-muted" style="font-size:.78rem"
-                       title="${escAttr(t('daemon_autostart_tt'))}" for="daemonAutostart">
-                    ${t('daemon_autostart')}
-                </label>
-                <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox" id="daemonAutostart"
-                           onchange="_daemonSaveAutostart(this.checked)">
-                </div>
-            </div>
         </div>`;
     }
 

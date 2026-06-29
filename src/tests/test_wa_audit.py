@@ -88,10 +88,10 @@ class TestAuditLog:
     def test_config_save_audited(self, admin, client):
         """Saving config logs the specific field changes."""
         _login(client)
-        client.put("/api/v1/config", json={"daemon": {"timer_check": 60}})
+        client.put("/api/v1/config", json={"monitoring": {"timer_check": 60}})
         entry = [e for e in admin._audit_log if e['event'] == 'config_saved'][-1]
         assert isinstance(entry['detail'], list)
-        assert any(c['field'] == 'daemon.timer_check' for c in entry['detail'])
+        assert any(c['field'] == 'monitoring.timer_check' for c in entry['detail'])
 
     def test_user_create_audited(self, admin, client):
         """Creating a user logs username, role and display_name."""
@@ -232,10 +232,10 @@ class TestAuditLog:
     def test_config_save_records_old_and_new(self, admin, client):
         """Config change detail includes old and new values."""
         _login(client)
-        client.put("/api/v1/config", json={"daemon": {"timer_check": 99}})
+        client.put("/api/v1/config", json={"monitoring": {"timer_check": 99}})
         entry = [e for e in admin._audit_log if e['event'] == 'config_saved'][-1]
         change = [c for c in entry['detail']
-                  if c['field'] == 'daemon.timer_check'][0]
+                  if c['field'] == 'monitoring.timer_check'][0]
         assert change['old'] == 300  # original fixture value
         assert change['new'] == 99
 
@@ -243,7 +243,7 @@ class TestAuditLog:
         """Sensitive fields (token, password) are masked in config audit."""
         _login(client)
         client.put("/api/v1/config", json={
-            "daemon": {"timer_check": 300},
+            "monitoring": {"timer_check": 300},
             "global": {"log_level": "off"},
             "telegram": {
                 "token": "CHANGED-TOKEN",

@@ -304,7 +304,7 @@ class TestConfigSensitiveSections:
     def test_non_admin_can_modify_non_sensitive_section(self, admin):
         """config_edit users CAN modify non-sensitive sections (e.g. daemon)."""
         c = _user_with_perm(admin, "cfg_editor_ok", ["config_edit"])
-        resp = c.put("/api/v1/config", json={"daemon": {"timer_check": 60}})
+        resp = c.put("/api/v1/config", json={"monitoring": {"timer_check": 60}})
         assert resp.status_code == 200
 
     def test_admin_can_modify_ldap_section(self, admin):

@@ -8,6 +8,8 @@ exposes a Store class:
     check_state  — CheckStateStore / DbBackedStatus (per-check live state)
     config       — ConfigStore (editable configuration; one row per section|field)
     credentials  — CredentialsStore (reusable named SSH identities)
+    event/       — package: EventRulesStore + EventStateStore (cooldown/cursor) +
+                   NotificationLogStore (the event-notification subsystem)
     groups       — GroupsStore (tables: groups, groups_roles)
     history      — HistoryStore (time-series of check results)
     hosts        — HostsStore (host registry + per-protocol encrypted profiles)
@@ -15,7 +17,8 @@ exposes a Store class:
                    tables: module_config, module_config_items)
     roles        — RolesStore
     sessions     — SessionsStore
-    syslog       — SyslogStore (received syslog messages; time+row retention)
+    syslog/      — package: SyslogStore (received messages; time+row retention) +
+                   SyslogDropsStore (allowlist drops). Distinto de lib.syslog (el receptor).
     users        — UsersStore (tables: users, users_groups)
     webhooks     — WebhooksStore (outgoing notification webhooks)
 """

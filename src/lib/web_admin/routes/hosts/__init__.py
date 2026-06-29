@@ -18,7 +18,7 @@ import uuid
 
 from flask import jsonify, request, session
 
-from lib import secret_manager
+from lib.security import secret_manager
 
 from . import tests, migrate
 from ._helpers import (

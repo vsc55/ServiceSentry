@@ -23,7 +23,7 @@
 Host-centric: each ``list`` item binds to a host (``host_uid``).  The Linux
 ``/proc/mdstat`` is read on that host via :meth:`ModuleBase.host_exec` — locally
 for a *local* host, or over the host's SSH connection for a *remote* host — and
-parsed with :meth:`lib.linux.RaidMdstat.parse_lines`.  To watch the monitor's
+parsed with :meth:`lib.system.linux.RaidMdstat.parse_lines`.  To watch the monitor's
 own machine, add a host of kind *local*.
 """
 
@@ -32,7 +32,7 @@ import os
 import shlex
 
 from lib.debug import DebugLevel
-from lib.linux import RaidMdstat
+from lib.system.linux import RaidMdstat
 from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))

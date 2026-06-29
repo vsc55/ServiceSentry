@@ -47,8 +47,7 @@ class _SyslogMixin:
             return
         try:
             from lib.db import build_syslog_connector  # noqa: PLC0415
-            from lib.stores.syslog import SyslogStore  # noqa: PLC0415
-            from lib.stores.syslog_drops import SyslogDropsStore  # noqa: PLC0415
+            from lib.stores.syslog import SyslogStore, SyslogDropsStore  # noqa: PLC0415
             from lib.config.manager import overlay_section_env  # noqa: PLC0415
             var = getattr(self, '_var_dir', None) or getattr(self, '_config_dir', '')
             sdb = overlay_section_env('syslog_db', self._config_section('syslog_db'))
@@ -59,9 +58,22 @@ class _SyslogMixin:
             self._syslog_drops_store = SyslogDropsStore(self._syslog_db_connector)
         except Exception:  # pylint: disable=broad-except
             return
-        self._syslog_apply_config()
+        # autostart gates only the boot start: enabled + autostart ⇒ bind now;
+        # enabled + autostart=off ⇒ boot stopped but startable from the Services
+        # tab.  A standalone --syslog process ignores autostart (handled there).
+        if self._syslog_autostart():
+            self._syslog_apply_config()
+        else:
+            self._dbg('> Syslog >> autostart off: listener not started at boot '
+                      '(start it from the Services tab)', DebugLevel.info)
         threading.Thread(target=self._syslog_retention_loop,
                          name='syslog-retention', daemon=True).start()
+
+    def _syslog_autostart(self) -> bool:
+        """Whether the embedded listener starts at web-admin boot (master ``enabled``
+        gates usability; this gates the automatic launch)."""
+        from lib.config.spec import cfg_get  # noqa: PLC0415
+        return bool(cfg_get(self._config_section('syslog'), 'syslog|autostart'))
 
     def _syslog_cfg(self) -> dict:
         # Merge registry defaults underneath the saved values: defaults are lazy

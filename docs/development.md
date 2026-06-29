@@ -215,8 +215,8 @@ Siempre necesarias, independientemente de qué módulos estén activos:
 | ------- | ------- | --------- |
 | `Flask` | >=3.0 | Interfaz web de administración |
 | `werkzeug` | >=3.0 | Hashing de contraseñas, utilidades de request |
-| `cryptography` | >=41.0 | Cifrado Fernet de valores sensibles en disco (`lib/secret_manager.py`) |
-| `requests` | >=2.28 | Llamadas HTTP a la API de Telegram (`lib/telegram.py`) |
+| `cryptography` | >=41.0 | Cifrado Fernet de valores sensibles en disco (`lib/security/secret_manager.py`) |
+| `requests` | >=2.28 | Llamadas HTTP a la API de Telegram (`lib/core/telegram.py`) |
 | `psutil` | >=5.9 | Información del sistema: RAM, disco, temperatura, servicios Windows |
 
 ### Dependencias por módulo

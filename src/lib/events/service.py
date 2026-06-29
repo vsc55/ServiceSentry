@@ -4,7 +4,7 @@
 process/container.
 
 The web admin hosts the worker in-process by default (``events|mode=embedded``,
-see :class:`lib.event_manager._EventsMixin`), but the same evaluation loop can run
+see :class:`lib.events.manager._EventsMixin`), but the same evaluation loop can run
 on its own host/container, sharing the database with the rest of ServiceSentry.
 Set ``events|mode=external`` (and ``SS_EVENTS_EMBEDDED=0`` on the web admin) so a
 single worker owns rule evaluation.
@@ -26,15 +26,13 @@ from lib.config.manager import (
     ConfigManager, bootstrap_database_cfg, overlay_section_env, read_config_raw)
 from lib.db import build_syslog_connector, get_connector
 from lib.debug import Debug, DebugLevel
-from lib.event_manager import _EventsMixin
+from .manager import _EventsMixin
 from lib.stores.audit import AuditStore
 from lib.stores.config import ConfigStore
-from lib.stores.event_rules import EventRulesStore
-from lib.stores.event_state import EventStateStore
-from lib.stores.notification_log import NotificationLogStore
+from lib.stores.event import EventRulesStore, EventStateStore, NotificationLogStore
 from lib.stores.syslog import SyslogStore
 from lib.stores.webhooks import WebhooksStore
-from lib import secret_manager
+from lib.security import secret_manager
 
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for rule/config changes (s)
 
@@ -44,9 +42,11 @@ class EventService(_EventsMixin):
 
     _CONFIG_FILE = CONFIG_FILENAME
 
-    def __init__(self, config_dir: str, var_dir: str | None = None):
+    def __init__(self, config_dir: str, var_dir: str | None = None,
+                 log_level: str | None = None):
         self._config_dir = config_dir
         self._var_dir = var_dir or config_dir
+        self._log_level_override = log_level or None
         self._secret_key_path = os.path.join(config_dir, '.flask_secret')
         self._fernet = secret_manager.fernet_from_secret_file(self._secret_key_path)
         self._secret_keys = secret_manager.ENCRYPT_KEYS
@@ -84,7 +84,8 @@ class EventService(_EventsMixin):
 
         self._debug = Debug()
         self._debug.set_from_config(
-            self._config_section('global').get('log_level') or 'info')
+            self._log_level_override
+            or self._config_section('global').get('log_level') or 'info')
         self._stop = threading.Event()
 
         backend = (db_cfg or {}).get('engine') or (db_cfg or {}).get('type') or 'sqlite'

@@ -17,9 +17,7 @@ lib/web_admin/
 │   ├── ldap_auth.py          # autenticación LDAP/AD (requiere ldap3)
 │   ├── oidc_auth.py          # SSO OIDC/OAuth2, rutas /auth/oidc/* (requiere authlib)
 │   └── saml_auth.py          # SSO SAML2, rutas /auth/saml2/* (requiere pysaml2) [alpha]
-├── email_notify.py           # envío de notificaciones por email (SMTP / MS365 / Gmail)
-├── email_templates.py        # motor de plantillas HTML para email (test, alert, summary)
-├── notification_dispatcher.py# despachador central de notificaciones (Telegram, Email, Webhook)
+│                             # (notificación: ver lib/notify/ — subsistema sin Flask reutilizable por daemons)
 ├── mixins/
 │   ├── users.py              # _UsersMixin
 │   ├── roles.py              # _RolesMixin
@@ -31,7 +29,7 @@ lib/web_admin/
 │   ├── daemon.py             # _DaemonMixin (planificador en segundo plano)
 │   ├── syslog.py             # _SyslogMixin (receptor syslog + registro de descartes)
 │   ├── services.py           # _ServicesMixin (estado/control de servicios)
-│   └── events.py             # reexporta _EventsMixin de lib/event_manager.py (sin Flask)
+│   └── events.py             # reexporta _EventsMixin de lib/events/manager.py (sin Flask)
 └── routes/
     ├── __init__.py           # register_all(app, wa)
     ├── auth/
@@ -781,7 +779,7 @@ Los ficheros de idioma están en dos lugares:
 
 | Ubicación | Propósito |
 |-----------|-----------|
-| `src/lib/web_admin/lang/en_EN.py` / `es_ES.py` | Cadenas globales de la UI (navegación, botones, mensajes, etiquetas de permisos y grupos) |
+| `src/lib/i18n/lang/en_EN.py` / `es_ES.py` | Cadenas globales de la UI (navegación, botones, mensajes, etiquetas de permisos y grupos) |
 | `src/watchfuls/<modulo>/lang/en_EN.json` / `es_ES.json` | Etiquetas de campos por módulo y nombre de visualización |
 
 Las claves de i18n relacionadas con el sistema de permisos son:
@@ -808,7 +806,7 @@ Las claves de i18n para páginas de error son:
 | `err_500_title` / `err_500_desc` | Título y descripción del error 500 |
 | `err_generic_title` / `err_generic_desc` | Fallback para errores sin clave específica |
 
-Para añadir un nuevo idioma, basta con crear un nuevo fichero `.py` en `lib/web_admin/lang/`. Se auto-descubre vía `pkgutil`.
+Para añadir un nuevo idioma, basta con crear un nuevo fichero `.py` en `lib/i18n/lang/`. Se auto-descubre vía `pkgutil`.
 
 ---
 

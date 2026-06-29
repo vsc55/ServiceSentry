@@ -27,7 +27,7 @@ class TestServicesStatus:
         s = r.get_json()['services']
         # The core services are always present; 'database_syslog' appears only when
         # syslog uses a dedicated DB (absent here — sqlite shared).
-        assert {'scheduler', 'syslog', 'worker', 'database'} <= set(s)
+        assert {'monitoring', 'syslog', 'worker', 'database'} <= set(s)
         assert 'database_syslog' not in s
         # each carries a state + the control/embedded flags the UI relies on
         for svc in s.values():
@@ -48,16 +48,19 @@ class TestServicesStatus:
         assert st['controllable'] is False
 
 
-class TestSchedulerControl:
+class TestMonitoringControl:
 
-    def test_start_then_stop(self, admin, client):
+    def test_start_then_stop(self, admin, client, monkeypatch):
         _login(client)
-        r = client.post('/api/v1/services/scheduler/start')
+        # The monitor is start/stop-able only when hosted embedded here; the test
+        # harness disables that by default (SS_MONITORING_EMBEDDED=0), so enable it.
+        monkeypatch.setenv('SS_MONITORING_EMBEDDED', '1')
+        r = client.post('/api/v1/services/monitoring/start')
         assert r.status_code == 200 and r.get_json()['ok'] is True
-        assert admin._daemon_running is True
-        r = client.post('/api/v1/services/scheduler/stop')
+        assert admin._monitoring_running is True
+        r = client.post('/api/v1/services/monitoring/stop')
         assert r.status_code == 200 and r.get_json()['ok'] is True
-        assert admin._daemon_running is False
+        assert admin._monitoring_running is False
 
     def test_unknown_service_404(self, client):
         _login(client)
@@ -65,7 +68,7 @@ class TestSchedulerControl:
 
     def test_bad_action_400(self, client):
         _login(client)
-        assert client.post('/api/v1/services/scheduler/frobnicate').status_code == 400
+        assert client.post('/api/v1/services/monitoring/frobnicate').status_code == 400
 
 
 class TestSyslogControl:
@@ -104,6 +107,6 @@ class TestPermissions:
         def _no_control():
             return frozenset(p for p in orig() if p != 'services_control')
         monkeypatch.setattr(admin, '_get_session_permissions', _no_control)
-        assert client.post('/api/v1/services/scheduler/start').status_code == 403
+        assert client.post('/api/v1/services/monitoring/start').status_code == 403
         # …but viewing is still allowed (services_view retained)
         assert client.get('/api/v1/services').status_code == 200

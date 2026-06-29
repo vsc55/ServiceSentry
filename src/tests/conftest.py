@@ -12,6 +12,7 @@ import pytest
 # directly (``_eval_event`` / ``_event_worker_tick``) so a polling thread never
 # interferes with mocked-dispatch assertions.
 os.environ.setdefault('SS_EVENTS_EMBEDDED', '0')
+os.environ.setdefault('SS_MONITORING_EMBEDDED', '0')
 
 try:
     from lib.web_admin import WebAdmin
@@ -58,7 +59,7 @@ _SAMPLE_MODULES = {
 def config_dir(tmp_path):
     """Temporary config directory with a sample config.json."""
     config = {
-        "daemon": {"timer_check": 300},
+        "monitoring": {"timer_check": 300},
         "global": {"log_level": "off"},
         "telegram": {
             "token": "test-token-123",

@@ -113,7 +113,7 @@ class TestAlert:
 
     def test_listener_does_not_dispatch(self, service):
         _add_syslog_rule(service)
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
+        with mock.patch('lib.notify.notification_dispatcher.dispatch') as disp:
             service._syslog_store.add({
                 'ts': 0.0, 'received_at': '', 'source': '9.9.9.9', 'hostname': 'h',
                 'app': '', 'procid': '', 'severity': 2, 'facility': 1, 'msgid': '',
@@ -124,13 +124,13 @@ class TestAlert:
         _add_syslog_rule(service, cooldown=60)
         rec = {'severity': 1, 'severity_name': 'alert', 'source': '9.9.9.7',
                'message': 'down', 'hostname': 'h', 'received_at': ''}
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
+        with mock.patch('lib.notify.notification_dispatcher.dispatch') as disp:
             service._eval_event('syslog',dict(rec))
             service._eval_event('syslog',dict(rec))
         assert disp.call_count == 1            # second within cooldown is dropped
 
     def test_no_rule_no_dispatch(self, service):
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch') as disp:
+        with mock.patch('lib.notify.notification_dispatcher.dispatch') as disp:
             service._eval_event('syslog',{'severity': 1, 'source': '9.9.9.6', 'message': 'x',
                                  'hostname': 'h', 'received_at': ''})
         assert not disp.called                 # nothing configured → nothing sent
@@ -258,7 +258,7 @@ class TestTraceability:
     def test_event_rule_match_is_logged(self, service, capsys):
         self._trace_on(service)
         _add_syslog_rule(service)
-        with mock.patch('lib.web_admin.notification_dispatcher.dispatch'):
+        with mock.patch('lib.notify.notification_dispatcher.dispatch'):
             service._eval_event('syslog',{'severity': 1, 'severity_name': 'alert', 'source': '7.7.7.7',
                                  'message': 'boom', 'hostname': 'h', 'received_at': ''})
         assert 'matched' in capsys.readouterr().out

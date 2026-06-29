@@ -16,7 +16,7 @@ from tests.conftest import _login
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
-_DISP = 'lib.web_admin.notification_dispatcher.dispatch'
+_DISP = 'lib.notify.notification_dispatcher.dispatch'
 
 
 class TestEventRulesApi:
@@ -223,8 +223,8 @@ class TestDispatcherChannels:
 
     def test_channels_override_targets_only_those(self, admin):
         # channels override ignores the notifications matrix
-        from lib.web_admin import telegram_notify, webhook_notify
-        from lib.web_admin.notification_dispatcher import dispatch
+        from lib.notify import telegram_notify, webhook_notify
+        from lib.notify.notification_dispatcher import dispatch
         with mock.patch.object(telegram_notify, '_dispatch', return_value=(True, 'ok')) as tg, \
              mock.patch.object(webhook_notify, 'send_all', return_value=(True, 'ok')) as wh:
             res = dispatch(admin, kind='event', channels=['telegram'])
@@ -233,8 +233,8 @@ class TestDispatcherChannels:
 
     def test_webhook_ids_restrict_destinations(self, admin):
         # A non-empty webhook_ids only notifies the matching enabled webhooks.
-        from lib.web_admin import webhook_notify
-        from lib.web_admin.notification_dispatcher import dispatch
+        from lib.notify import webhook_notify
+        from lib.notify.notification_dispatcher import dispatch
         hooks = [{'id': 'w1', 'name': 'one', 'url': 'http://a', 'enabled': True},
                  {'id': 'w2', 'name': 'two', 'url': 'http://b', 'enabled': True}]
         sent = []
@@ -245,8 +245,8 @@ class TestDispatcherChannels:
         assert sent == ['w2']
 
     def test_empty_webhook_ids_targets_all(self, admin):
-        from lib.web_admin import webhook_notify
-        from lib.web_admin.notification_dispatcher import dispatch
+        from lib.notify import webhook_notify
+        from lib.notify.notification_dispatcher import dispatch
         hooks = [{'id': 'w1', 'name': 'one', 'url': 'http://a', 'enabled': True},
                  {'id': 'w2', 'name': 'two', 'url': 'http://b', 'enabled': True}]
         sent = []

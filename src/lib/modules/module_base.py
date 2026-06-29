@@ -27,8 +27,9 @@ import os
 import sys
 from enum import Enum
 
-import lib.tools
-from lib import os_detect
+import lib
+from lib.util import os_detect
+from lib.hosts.resolve import host_profile_specs, resolve_os
 from lib.config import ConfigTypeReturn
 from lib.debug import DebugLevel
 from lib.modules.dict_files_path import DictFilesPath
@@ -469,10 +470,9 @@ class ModuleBase(ObjectBase):
             return item
         primary = hosts[0]
 
-        specs = (getattr(self, 'ITEM_SCHEMA', None) or {}).get('__host_profile__')
-        if isinstance(specs, dict):
-            specs = [specs]
-        if not isinstance(specs, list):
+        specs = host_profile_specs(
+            (getattr(self, 'ITEM_SCHEMA', None) or {}).get('__host_profile__'))
+        if not specs:
             return item
 
         # Failover address list across every bound host (a cluster spans nodes).
@@ -524,10 +524,9 @@ class ModuleBase(ObjectBase):
         # branch on it.  'auto' on a LOCAL host resolves to this process's
         # platform; on a remote host it stays 'auto' (resolved over SSH by the
         # consumer when needed).
-        host_os = str(primary.get('os') or 'auto').strip().lower()
-        if host_os == 'auto' and not is_remote:
-            host_os = os_detect.local_os()
-        resolved['host_os'] = host_os
+        # 'auto' on a local host resolves to this process's platform; on a remote
+        # host it stays 'auto' (resolved over SSH by the consumer when needed).
+        resolved['host_os'] = resolve_os(primary.get('os'), is_remote)
         resolved['host_kind'] = 'remote' if is_remote else 'local'
         if multi:
             # Cluster roster: each member's identity + its manually-assigned node
@@ -604,7 +603,7 @@ class ModuleBase(ObjectBase):
         if not isinstance(item, dict) or not cmd:
             return '', 'invalid item or command', -1
         if str(item.get('host_kind') or '').strip().lower() == 'remote':
-            from lib import ssh_client  # noqa: PLC0415
+            from lib.system import ssh_client  # noqa: PLC0415
             if not ssh_client.HAS_PARAMIKO:
                 return '', 'paramiko is not installed', -1
             address = str(item.get('ssh_host') or '').strip()

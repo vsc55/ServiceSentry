@@ -21,7 +21,7 @@ import copy
 import os
 import threading
 
-from lib import secret_manager
+from lib.security import secret_manager
 from lib.config.config_control import ConfigControl
 from lib.config.resolve import (
     resolve_config, file_leaves, FILE_ONLY_SECTIONS, CRED_PATHS,
@@ -113,7 +113,7 @@ def overlay_section_env(section_name: str, section_cfg: dict | None) -> dict:
 
 def _decrypt_db_values(db_vals: dict, fernet) -> dict:
     """DB values store ciphertext for secrets; decrypt them by field name (reusing
-    the nested key-matching of :mod:`lib.secret_manager`)."""
+    the nested key-matching of :mod:`lib.security.secret_manager`)."""
     if not (fernet and db_vals):
         return db_vals
     nested: dict = {}

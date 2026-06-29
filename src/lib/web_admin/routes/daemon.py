@@ -12,7 +12,7 @@ def register(app, wa):
     @checks_run_req
     def api_daemon_status():
         """Return current scheduler state."""
-        return jsonify(wa._daemon_status_dict())
+        return jsonify(wa._monitoring_status_dict())
 
     @app.route('/api/v1/daemon/start', methods=['POST'])
     @checks_run_req
@@ -20,21 +20,21 @@ def register(app, wa):
         """Start the background scheduler."""
         data   = wa._optional_json()
         run_now = bool(data.get('run_now', False))
-        started = wa._daemon_start(run_now=run_now)
+        started = wa._monitoring_start(run_now=run_now)
         if started:
             wa._audit('daemon_started', detail={'run_now': run_now})
         return jsonify({'ok': True, 'started': started,
-                        'status': wa._daemon_status_dict()})
+                        'status': wa._monitoring_status_dict()})
 
     @app.route('/api/v1/daemon/stop', methods=['POST'])
     @checks_run_req
     def api_daemon_stop():
         """Stop the background scheduler."""
-        stopped = wa._daemon_stop()
+        stopped = wa._monitoring_stop()
         if stopped:
             wa._audit('daemon_stopped')
         return jsonify({'ok': True, 'stopped': stopped,
-                        'status': wa._daemon_status_dict()})
+                        'status': wa._monitoring_status_dict()})
 
     @app.route('/api/v1/daemon/config', methods=['PUT'])
     @checks_run_req
@@ -47,31 +47,32 @@ def register(app, wa):
         """
         data = wa._optional_json()
         raw = wa._read_config_file(wa._CONFIG_FILE) or {}
-        daemon_cfg = dict(raw.get('daemon', {}))
+        mon_cfg = dict(raw.get('monitoring', {}))
 
         changed = False
-        # Fields fixed by an env var (SS_CHECK_INTERVAL / SS_AUTOSTART) or pinned
-        # in config.json are read-only and cannot be changed from the UI — ignore
-        # them silently here too.
+        # Fields fixed by an env var (SS_CHECK_INTERVAL) or pinned in config.json
+        # are read-only and cannot be changed from the UI — ignore them silently.
         _locked = set(wa._env_locked) | set(getattr(wa, '_file_locked', frozenset()))
-        if 'timer_check' in data and 'daemon|timer_check' not in _locked:
+        if 'timer_check' in data and 'monitoring|timer_check' not in _locked:
             try:
                 secs = max(10, min(86400, int(data['timer_check'])))
             except (TypeError, ValueError):
                 return jsonify({'error': 'Invalid interval'}), 400
-            daemon_cfg['timer_check'] = secs
+            mon_cfg['timer_check'] = secs
             changed = True
 
-        if 'web_autostart' in data and 'daemon|web_autostart' not in _locked:
-            daemon_cfg['web_autostart'] = bool(data['web_autostart'])
+        # The on/off ``enabled`` flag is edited from the Monitoring config tab via
+        # the generic /api/v1/config endpoint; this route only handles the interval.
+        if 'enabled' in data and 'monitoring|enabled' not in _locked:
+            mon_cfg['enabled'] = bool(data['enabled'])
             changed = True
 
         if changed:
-            raw['daemon'] = daemon_cfg
+            raw['monitoring'] = mon_cfg
             wa._write_config(raw, actor=session.get('username', ''))
             wa._audit('daemon_config_changed', detail={
-                k: daemon_cfg.get(k) for k in ('timer_check', 'web_autostart') if k in data
+                k: mon_cfg.get(k) for k in ('timer_check', 'enabled') if k in mon_cfg
             })
 
-        return jsonify({'ok': True, 'daemon': daemon_cfg,
-                        'status': wa._daemon_status_dict()})
+        return jsonify({'ok': True, 'monitoring': mon_cfg,
+                        'status': wa._monitoring_status_dict()})

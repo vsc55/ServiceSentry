@@ -15,7 +15,8 @@ the same scheme as the host profiles.
 
 from flask import jsonify, session
 
-from lib import secret_manager, ssh_client
+from lib.security import secret_manager
+from lib.system import ssh_client
 
 SYSTEM_USER = 'system'
 

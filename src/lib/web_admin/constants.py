@@ -4,7 +4,7 @@
 
 import re
 
-from .i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang
+from lib.i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang
 
 __all__ = [
     'DEFAULT_LANG', 'SUPPORTED_LANGS', 'TRANSLATIONS', 'coerce_lang',

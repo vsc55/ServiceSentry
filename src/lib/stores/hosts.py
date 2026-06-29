@@ -11,7 +11,7 @@ Backed by a pluggable :class:`lib.db.BaseConnector` (SQLite by default;
 PostgreSQL/MySQL through the same interface), like the other entity stores.
 
 Secret values inside the per-protocol ``profiles`` (ssh/db passwords, SNMPv3
-keys, tokens…) are encrypted at rest with :mod:`lib.secret_manager` using the
+keys, tokens…) are encrypted at rest with :mod:`lib.security.secret_manager` using the
 same value-level Fernet scheme as the module config / ``config.json``.  ``get``
 and ``list`` return decrypted profiles (so the monitor can connect); the API
 route is responsible for masking secrets before sending them to the client.
@@ -29,7 +29,7 @@ import json
 import time
 import uuid
 
-from lib import secret_manager
+from lib.security import secret_manager
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
 
@@ -134,7 +134,7 @@ class HostsStore:
 
     @staticmethod
     def _norm_os(value) -> str:
-        from lib.os_detect import OPTIONS  # noqa: PLC0415
+        from lib.util.os_detect import OPTIONS  # noqa: PLC0415
         v = str(value or 'auto').strip().lower()
         return v if v in OPTIONS else 'auto'
 

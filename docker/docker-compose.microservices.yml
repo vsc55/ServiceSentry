@@ -26,8 +26,9 @@
 # and syslog containers both point at ``syslog-db``; the worker doesn't touch
 # syslog so it only gets the main DB env.
 #
-# Do NOT enable SS_AUTOSTART on the web service: the worker owns monitoring, and
-# two schedulers with no shared lock would double every check.
+# The web service runs with SS_MONITORING_EMBEDDED=0: the worker container owns the
+# monitoring scheduler, and two schedulers with no shared lock would double every
+# check. (Same embedded-off pattern as SS_SYSLOG_EMBEDDED / SS_EVENTS_EMBEDDED.)
 
 # Main database connection env — overlaid onto the (empty) config.json
 # ``database`` section at bootstrap by every ServiceSentry process (SS_DB_*).
@@ -125,8 +126,9 @@ services:
       SS_SERVICE_ROLE: web
       SS_WEB_HOST: 0.0.0.0
       SS_WEB_PORT: "8080"
-      # Keep false: the worker container does the monitoring.
-      SS_AUTOSTART: "false"
+      # The worker container owns the monitoring scheduler; keep it out of the web
+      # process (otherwise both would schedule and double every check).
+      SS_MONITORING_EMBEDDED: "0"
       # The syslog container owns the listener; the web only shows stored data.
       SS_SYSLOG_EMBEDDED: "0"
       # The events container owns rule evaluation; keep it out of the web process.

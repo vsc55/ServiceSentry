@@ -2,15 +2,18 @@
 # -*- coding: utf-8 -*-
 """ Lib package. """
 
+__version__ = '1.0.0'
+
 from lib.modules.dict_files_path import DictFilesPath
-from lib.exe import Exec, ExecResult
-from lib.mem import Mem
-from lib.mem_info import MemInfo
-from lib.monitor import Monitor
+from lib.system.exe import Exec, ExecResult
+from lib.system.mem import Mem
+from lib.system.mem_info import MemInfo
+from lib.core.monitor import Monitor
 from lib.object_base import ObjectBase
-from lib.telegram import Telegram
+from lib.core.telegram import Telegram
 
 __all__ = [
+    '__version__',
     'ObjectBase',
     'DictFilesPath',
     'Monitor',

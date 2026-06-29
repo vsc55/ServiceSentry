@@ -183,7 +183,7 @@ class Watchful(ModuleBase):
         target = url if '://' in url else f'{scheme}://{url}'
         # SSRF guard: block non-HTTP(S) schemes and link-local/metadata targets.
         # Private/internal hosts are intentionally allowed (legitimate monitoring).
-        from lib.net_guard import validate_external_url  # noqa: PLC0415
+        from lib.security.net_guard import validate_external_url  # noqa: PLC0415
         _reason = validate_external_url(target)
         if _reason:
             return 0, f'Blocked: {_reason}'

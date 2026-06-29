@@ -151,7 +151,7 @@ class TestDerivedRuleDicts:
     def test_env_field_specs(self):
         e = env_field_specs()
         assert e['SS_PORT'] == ('web_admin|port', int)
-        assert e['SS_CHECK_INTERVAL'] == ('daemon|timer_check', int)
+        assert e['SS_CHECK_INTERVAL'] == ('monitoring|timer_check', int)
 
     def test_admin_only_fields(self):
         a = admin_only_fields()
@@ -163,12 +163,12 @@ class TestDerivedRuleDicts:
 class TestCoerceLang:
 
     def test_valid_kept(self):
-        from lib.web_admin.i18n import coerce_lang, SUPPORTED_LANGS
+        from lib.i18n import coerce_lang, SUPPORTED_LANGS
         lang = SUPPORTED_LANGS[0]
         assert coerce_lang(lang, 'en_EN') == lang
 
     def test_invalid_falls_back(self):
-        from lib.web_admin.i18n import coerce_lang
+        from lib.i18n import coerce_lang
         assert coerce_lang('zz_ZZ', 'en_EN') == 'en_EN'
         assert coerce_lang('', '') == ''
         assert coerce_lang('zz', 'keep') == 'keep'   # keep-if-valid semantics

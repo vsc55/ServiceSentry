@@ -387,7 +387,7 @@ class TestWatchfulSecretFieldsProtected:
 
     def test_core_does_not_hardcode_module_secrets(self):
         """Module-specific secret field names must NOT be baked into core."""
-        from lib.secret_manager import ENCRYPT_KEYS
+        from lib.security.secret_manager import ENCRYPT_KEYS
         for field in ('snmpv3_auth_key', 'snmpv3_priv_key', 'auth_password'):
             assert field not in ENCRYPT_KEYS
 
@@ -402,7 +402,7 @@ class TestWatchfulSecretFieldsProtected:
     def test_discovered_secrets_masked(self):
         """mask_sensitive with the discovered key set blanks the module secrets."""
         from lib.modules import ModuleBase
-        from lib.secret_manager import ENCRYPT_KEYS, mask_sensitive
+        from lib.security.secret_manager import ENCRYPT_KEYS, mask_sensitive
         keys = ENCRYPT_KEYS | ModuleBase.discover_secret_fields(_WATCHFULS_DIR)
         masked = mask_sensitive({
             'snmpv3_auth_key': 'topsecret',
@@ -433,20 +433,20 @@ class TestSsrfGuard:
     """User-supplied URLs fetched server-side reject dangerous schemes/targets."""
 
     def test_file_scheme_blocked(self):
-        from lib.net_guard import validate_external_url
+        from lib.security.net_guard import validate_external_url
         assert validate_external_url('file:///etc/passwd') is not None
 
     def test_metadata_ip_blocked(self):
-        from lib.net_guard import validate_external_url
+        from lib.security.net_guard import validate_external_url
         assert validate_external_url('http://169.254.169.254/latest/meta-data/') is not None
 
     def test_normal_http_allowed(self):
-        from lib.net_guard import validate_external_url
+        from lib.security.net_guard import validate_external_url
         # A public hostname resolves and is not link-local → allowed (None).
         assert validate_external_url('https://example.com/mib.txt') is None
 
     def test_private_host_allowed_for_monitoring(self):
-        from lib.net_guard import validate_external_url
+        from lib.security.net_guard import validate_external_url
         # Internal monitoring is the tool's purpose — RFC1918 is NOT blocked.
         assert validate_external_url('http://192.168.1.10/status') is None
 

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from flask import jsonify, session
-from lib import secret_manager
+from lib.security import secret_manager
 
 
 def _validate(data: dict) -> str | None:
@@ -148,7 +148,7 @@ def register(app, wa):
     @app.route('/api/v1/webhooks/<wh_id>/test', methods=['POST'])
     @config_edit_req
     def api_test_webhook_by_id(wh_id):
-        from lib.web_admin import webhook_notify
+        from lib.notify import webhook_notify
         stored = store.get(wh_id)
         if stored is None:
             return jsonify({'error': 'Not found'}), 404

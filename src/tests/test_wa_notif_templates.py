@@ -13,7 +13,7 @@ Covers:
 import pytest
 
 try:
-    from lib.web_admin import email_templates
+    from lib.notify import email_templates
     from lib.web_admin import WebAdmin
     _HAS_FLASK = True
 except ImportError:
@@ -408,7 +408,7 @@ class TestTestEmailUsesOverrides:
                    json={'test_title': 'My Custom Title'})
 
         captured = {}
-        from lib.web_admin import email_notify
+        from lib.notify import email_notify
 
         def _fake_dispatch(cfg, subject, body_html, recipients=None):
             captured['subject'] = subject

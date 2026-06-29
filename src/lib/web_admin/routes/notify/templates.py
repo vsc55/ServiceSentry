@@ -62,7 +62,7 @@ def register(app, wa):
     @config_view_req
     def api_get_notif_templates():
         """Return default strings and stored per-language overrides."""
-        from lib.web_admin import email_templates
+        from lib.notify import email_templates
         from lib.web_admin.constants import SUPPORTED_LANGS
 
         cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
@@ -82,7 +82,7 @@ def register(app, wa):
     @config_edit_req
     def api_save_notif_template_lang(lang):
         """Save custom string overrides for one language."""
-        from lib.web_admin import email_templates
+        from lib.notify import email_templates
         from lib.web_admin.constants import SUPPORTED_LANGS
 
         valid_langs = set(SUPPORTED_LANGS) | {'en_EN'}
@@ -139,7 +139,7 @@ def register(app, wa):
     @config_view_req
     def api_get_html_templates():
         """Return all stored custom HTML bodies."""
-        from lib.web_admin import email_templates
+        from lib.notify import email_templates
         cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
         stored = cfg.get('notif_html_templates') or {}
         return jsonify({
@@ -159,7 +159,7 @@ def register(app, wa):
         """
         if tpl_type not in _VALID_HTML_TYPES:
             return jsonify({'error': f'Unknown type: {tpl_type}'}), 400
-        from lib.web_admin import email_templates
+        from lib.notify import email_templates
         from flask import request as _req
 
         lang = (_req.args.get('lang') or '').strip()
@@ -207,7 +207,7 @@ def register(app, wa):
         """
         if tpl_type not in _VALID_HTML_TYPES:
             return jsonify({'error': f'Unknown type: {tpl_type}'}), 400
-        from lib.web_admin import email_templates
+        from lib.notify import email_templates
 
         body = request.get_json(force=True, silent=True) or {}
         html_tpl = body.get('html', '')

@@ -9,6 +9,8 @@ import sys
 
 from flask import jsonify, request
 
+from lib.hosts.resolve import host_profile_specs, resolve_os
+
 
 def _resolve_host_ctx(wa, config):
     """Build a host-context dict for host-aware discovery, or None.
@@ -18,8 +20,6 @@ def _resolve_host_ctx(wa, config):
     (unsaved) host may instead pass a ``_host`` draft, whose masked secrets are
     restored from the stored host when a ``host_uid`` is also given.
     """
-    from lib import os_detect  # noqa: PLC0415
-
     def _apply_ssh_cred(ssh):
         """Overlay a named SSH credential (ssh profile ``cred_uid``) — the host
         may reference the credential manager instead of inline secrets, so
@@ -39,9 +39,9 @@ def _resolve_host_ctx(wa, config):
         return apply_credential(ssh, cred)
 
     def _ctx(address, kind, os_, ssh):
-        os_ = str(os_ or 'auto').strip().lower()
-        if os_ == 'auto':
-            os_ = os_detect.local_os() if kind != 'remote' else 'linux'
+        is_remote = str(kind or 'local').strip().lower() == 'remote'
+        # Web discovery can't probe a remote OS here → assume 'linux' for 'auto'.
+        os_ = resolve_os(os_, is_remote, remote_auto='linux')
         return {'address': address or '', 'kind': kind or 'local', 'os': os_,
                 'ssh': _apply_ssh_cred(ssh)}
 
@@ -80,7 +80,7 @@ def _restore_action_secrets(wa, module, config):
     if not key:
         return
     try:
-        from lib import secret_manager  # noqa: PLC0415
+        from lib.security import secret_manager  # noqa: PLC0415
         modules = wa._load_modules()
     except Exception:  # pylint: disable=broad-except
         return
@@ -143,7 +143,7 @@ def _merge_host_conn(wa, module, config, host_ctx):
             hp = _json.load(fh).get('__host_profile__')
     except Exception:  # pylint: disable=broad-except
         return
-    specs = [hp] if isinstance(hp, dict) else (hp or [])
+    specs = host_profile_specs(hp)
     address = host_ctx.get('address') or ''
     ssh = host_ctx.get('ssh') or {}
     for spec in specs:

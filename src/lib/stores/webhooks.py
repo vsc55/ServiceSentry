@@ -6,7 +6,7 @@ A *webhook* is one HTTP endpoint ServiceSentry POSTs to on status changes.  Each
 is an independent record (url, method, headers, body template, signing secret),
 so — like hosts/credentials/modules — they live in their **own** DB table, not in
 ``config.json``.  The ``secret`` field inside ``data`` is encrypted at rest with
-:mod:`lib.secret_manager`; ``list``/``get`` return decrypted data so the
+:mod:`lib.security.secret_manager`; ``list``/``get`` return decrypted data so the
 dispatcher can sign requests, and the API route masks it before sending out.
 
 Schema::
@@ -22,7 +22,7 @@ import json
 import time
 import uuid
 
-from lib import secret_manager
+from lib.security import secret_manager
 from lib.db import BaseConnector
 from lib.db.schema import Column, TableSpec
 

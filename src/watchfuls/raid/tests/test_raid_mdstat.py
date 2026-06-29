@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests para lib/linux/raid_mdstat.py — RaidMdstat."""
+"""Tests para lib/system/linux/raid_mdstat.py — RaidMdstat."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lib.exe import ExecResult
-from lib.linux.raid_mdstat import RaidMdstat
+from lib.system.exe import ExecResult
+from lib.system.linux.raid_mdstat import RaidMdstat
 
 # Contenido típico de /proc/mdstat con un RAID saludable
 MDSTAT_OK = """\
@@ -106,13 +106,13 @@ class TestRaidMdstatValidateRemote:
 
 class TestRaidMdstatIsExistLocal:
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=True)
     def test_exist_local(self, mock_isfile):
         r = RaidMdstat(mdstat='/proc/mdstat')
         assert r.is_exist is True
         mock_isfile.assert_called_once_with('/proc/mdstat')
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=False)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=False)
     def test_not_exist_local(self, mock_isfile):
         r = RaidMdstat(mdstat='/proc/mdstat')
         assert r.is_exist is False
@@ -145,7 +145,7 @@ class TestRaidMdstatIsExistRemote:
 
 class TestRaidMdstatReadStatusLocal:
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=True)
     @patch('builtins.open')
     def test_read_ok(self, mock_open, mock_isfile):
         mock_open.return_value.__enter__ = lambda s: s
@@ -156,7 +156,7 @@ class TestRaidMdstatReadStatusLocal:
         assert 'md0' in result
         assert result['md0']['update'] == RaidMdstat.UpdateStatus.ok
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=True)
     @patch('builtins.open')
     def test_read_degraded(self, mock_open, mock_isfile):
         mock_open.return_value.__enter__ = lambda s: s
@@ -167,7 +167,7 @@ class TestRaidMdstatReadStatusLocal:
         assert 'md0' in result
         assert result['md0']['update'] == RaidMdstat.UpdateStatus.error
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=True)
     @patch('builtins.open')
     def test_read_recovery(self, mock_open, mock_isfile):
         mock_open.return_value.__enter__ = lambda s: s
@@ -179,13 +179,13 @@ class TestRaidMdstatReadStatusLocal:
         assert result['md0']['update'] == RaidMdstat.UpdateStatus.recovery
         assert result['md0']['recovery']['percent'] == 5.2
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=False)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=False)
     def test_read_not_exist(self, mock_isfile):
         r = RaidMdstat(mdstat='/proc/mdstat')
         result = r.read_status()
         assert result == {}
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=True)
     @patch('builtins.open')
     def test_read_empty(self, mock_open, mock_isfile):
         mock_open.return_value.__enter__ = lambda s: s
@@ -195,7 +195,7 @@ class TestRaidMdstatReadStatusLocal:
         result = r.read_status()
         assert result == {}
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=True)
     @patch('builtins.open')
     def test_read_multiple_raids(self, mock_open, mock_isfile):
         mock_open.return_value.__enter__ = lambda s: s
@@ -252,7 +252,7 @@ class TestUpdateStatusEnum:
 
 class TestRaidMdstatReadLines:
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=True)
     @patch('builtins.open')
     def test_read_lines_local(self, mock_open, mock_isfile):
         mock_open.return_value.__enter__ = lambda s: s
@@ -313,7 +313,7 @@ class TestRaidMdstatRemoteStderrRaises:
 
 class TestRaidMdstatRecoveryParsing:
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=True)
     @patch('builtins.open')
     def test_recovery_details(self, mock_open, mock_isfile):
         mock_open.return_value.__enter__ = lambda s: s
@@ -327,7 +327,7 @@ class TestRaidMdstatRecoveryParsing:
         assert recovery['speed'] == '150000K/sec'
         assert isinstance(recovery['blocks'], list)
 
-    @patch('lib.linux.raid_mdstat.os.path.isfile', return_value=True)
+    @patch('lib.system.linux.raid_mdstat.os.path.isfile', return_value=True)
     @patch('builtins.open')
     def test_recovery_malformed_falls_back_empty(self, mock_open, mock_isfile):
         """Malformed recovery line returns empty recovery dict."""

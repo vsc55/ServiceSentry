@@ -27,8 +27,9 @@
 #                ONLY here, never on the public plane.
 #   • frontend — Traefik ↔ web. Only Traefik publishes ports to the host.
 #
-# Do NOT enable SS_AUTOSTART on the web service: the worker owns monitoring, and
-# two schedulers with no shared lock would double every check.
+# The web service runs with SS_MONITORING_EMBEDDED=0: the worker container owns the
+# monitoring scheduler, and two schedulers with no shared lock would double every
+# check. (Same embedded-off pattern as SS_SYSLOG_EMBEDDED / SS_EVENTS_EMBEDDED.)
 
 # Main database connection env (SS_DB_*) — overlaid onto the config.json
 # ``database`` section at bootstrap by every ServiceSentry process.
@@ -159,8 +160,9 @@ services:
       SS_SERVICE_ROLE: web
       SS_WEB_HOST: 0.0.0.0
       SS_WEB_PORT: "8080"
-      # Keep false: the worker container does the monitoring.
-      SS_AUTOSTART: "false"
+      # The worker container owns the monitoring scheduler; keep it out of the web
+      # process (otherwise both would schedule and double every check).
+      SS_MONITORING_EMBEDDED: "0"
       # The syslog container owns the listener; the web only shows stored data.
       SS_SYSLOG_EMBEDDED: "0"
       # The events container owns rule evaluation; keep it out of the web process.
@@ -219,6 +221,48 @@ services:
       web:
         condition: service_healthy
 
+  # ── (OPCIONAL) Enrutar syslog también por Traefik ───────────────────────────
+  # Por defecto el contenedor `syslog` publica sus puertos DIRECTAMENTE en el host
+  # (ver el `ports:` de abajo) para preservar la IP de origen del emisor. Traefik
+  # PUEDE frontear syslog con routers TCP/UDP, pero al reabrir la conexión el
+  # receptor vería la IP de TRAEFIK como origen de TODOS los mensajes — rompe el
+  # allowlist `allowed_sources` (filtrado por IP/CIDR), el campo "source" de la
+  # pestaña Syslog y el matching por host de las reglas de eventos. UDP no puede
+  # preservar la IP en absoluto; TCP solo con PROXY protocol (que el listener no
+  # parsea). Úsalo SOLO si priorizas un único punto de ingreso y NO usas filtrado
+  # por IP. Para activarlo:
+  #
+  #  1) Añade estos entrypoints al `command:` del servicio `traefik`:
+  #       - "--entrypoints.syslog-udp.address=:514/udp"
+  #       - "--entrypoints.syslog-tcp.address=:514/tcp"
+  #       - "--entrypoints.syslog-tls.address=:6514/tcp"
+  #  2) Mueve el bloque `ports:` del servicio `syslog` (abajo) al servicio
+  #     `traefik` (y QUÍTALO de `syslog`):
+  #       ports:
+  #         - "514:514/udp"
+  #         - "514:514/tcp"
+  #         - "6514:6514/tcp"
+  #  3) Conecta `syslog` a la red `frontend` y añádele las labels de router:
+  #       networks: [backend, frontend]
+  #       labels:
+  #         - "traefik.enable=true"
+  #         - "traefik.docker.network=ss_frontend"
+  #         # UDP (sin regla: UDP no tiene SNI/Host)
+  #         - "traefik.udp.routers.ss-syslog-udp.entrypoints=syslog-udp"
+  #         - "traefik.udp.routers.ss-syslog-udp.service=ss-syslog-udp"
+  #         - "traefik.udp.services.ss-syslog-udp.loadbalancer.server.port=514"
+  #         # TCP plano (HostSNI(`*`) es obligatorio en routers TCP no-TLS)
+  #         - "traefik.tcp.routers.ss-syslog-tcp.entrypoints=syslog-tcp"
+  #         - "traefik.tcp.routers.ss-syslog-tcp.rule=HostSNI(`*`)"
+  #         - "traefik.tcp.routers.ss-syslog-tcp.service=ss-syslog-tcp"
+  #         - "traefik.tcp.services.ss-syslog-tcp.loadbalancer.server.port=514"
+  #         # TLS passthrough (el cert lo sigue sirviendo el syslog, NO Let's Encrypt)
+  #         - "traefik.tcp.routers.ss-syslog-tls.entrypoints=syslog-tls"
+  #         - "traefik.tcp.routers.ss-syslog-tls.rule=HostSNI(`*`)"
+  #         - "traefik.tcp.routers.ss-syslog-tls.tls.passthrough=true"
+  #         - "traefik.tcp.routers.ss-syslog-tls.service=ss-syslog-tls"
+  #         - "traefik.tcp.services.ss-syslog-tls.loadbalancer.server.port=6514"
+
   # ── Standalone syslog receiver ──────────────────────────────────────────────
   syslog:
     image: servicesentry:latest
@@ -229,7 +273,9 @@ services:
     restart: unless-stopped
     networks:
       # backend only: the DBs. Raw syslog ingress is the host port mapping below
-      # (UDP/TCP) — Traefik only proxies HTTP(S), so it does not front syslog.
+      # (UDP/TCP) — Traefik does NOT front syslog by default, so the receiver keeps
+      # the sender's real source IP (allowlist + per-host rules). See the OPTIONAL
+      # block above to route it through Traefik (and the source-IP trade-off).
       - backend
     # Syslog listener ports. Defaults: UDP 514, TCP 514, TLS 6514 (TLS off until
     # tls_cert/tls_key are configured). Adjust the host side if 514 is taken.

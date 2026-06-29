@@ -4,6 +4,7 @@
 
 import functools
 import os
+import sys
 import threading
 import time
 import uuid
@@ -19,7 +20,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from lib.config import CONFIG_FILENAME
 from lib.debug import DebugLevel
 from lib.object_base import ObjectBase
-from lib import secret_manager
+from lib.security import secret_manager
 from .constants import (
     DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang,
     PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
@@ -27,7 +28,7 @@ from .constants import (
     ROLES,
 )
 from lib.config.spec import (
-    CFG_BY_PATH, cfg_validate, env_field_specs, normalize_url, registry_defaults)
+    CFG_BY_PATH, cfg_get, cfg_validate, env_field_specs, normalize_url, registry_defaults)
 from .auth import ldap_auth as _ldap_auth
 from .auth import oidc_auth as _oidc_auth
 from .auth import saml_auth as _saml_auth
@@ -49,7 +50,7 @@ def _cfg_default(path: str):
     return CFG_BY_PATH[path].default
 from .mixins import (
     _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-    _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin, _SyslogMixin,
+    _SessionsMixin, _AuditMixin, _ChecksMixin, _MonitoringMixin, _SyslogMixin,
     _ServicesMixin, _EventsMixin,
 )
 
@@ -57,7 +58,7 @@ __all__ = ['WebAdmin']
 
 
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-               _SessionsMixin, _AuditMixin, _ChecksMixin, _DaemonMixin, _SyslogMixin,
+               _SessionsMixin, _AuditMixin, _ChecksMixin, _MonitoringMixin, _SyslogMixin,
                _ServicesMixin, _EventsMixin):
     """Web administration server for ServiceSentry configuration.
 
@@ -172,7 +173,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Secret fields declared by credential-type schemas (built-in ssh +
         # module __credential__), so reusable credentials encrypt/mask them too.
         try:
-            from lib.credential_schemas import credential_secret_fields  # noqa: PLC0415
+            from lib.modules.credential_schemas import credential_secret_fields  # noqa: PLC0415
             _cred_secrets = credential_secret_fields(modules_dir)
         except Exception:  # pylint: disable=broad-except
             _cred_secrets = set()
@@ -241,8 +242,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         except Exception:  # pylint: disable=broad-except
             pass
 
-        # Start the background scheduler if auto-start is configured.
-        self._daemon_init()
+        # Embedded service monitor: start the scheduler when monitoring is enabled
+        # AND this process may host it (SS_MONITORING_EMBEDDED) — mirroring the
+        # events worker below.  When the env gate is off a standalone --monitor
+        # process / worker container owns the loop (monitoring "external").
+        self._monitoring_init_state()
+        if (self._monitoring_enabled() and self._embedded_monitor_enabled()
+                and self._monitoring_autostart()):
+            self._monitoring_start(run_now=True)
         # Start the syslog receiver if enabled (own listener threads + retention).
         self._init_syslog()
         # Event→notification rules manager (audit/syslog hooks).
@@ -256,9 +263,17 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # SS_EVENTS_EMBEDDED=0 lets the worker run as its own process/container
         # (events|mode=external) and keeps it out of the test harness.
         _ev_env = os.environ.get('SS_EVENTS_EMBEDDED', '1').strip().lower() not in ('0', 'false', 'no', 'off')
-        if _emode == 'embedded' and _ev_env:
+        # autostart gates only the embedded boot; the worker stays startable from
+        # the Services tab when mode='embedded' but autostart is off.
+        _ev_autostart = bool(cfg_get(self._config_section('events'), 'events|autostart'))
+        if _emode == 'embedded' and _ev_env and _ev_autostart:
             _poll = (self._config_section('events') or {}).get('poll_secs')
             self._start_event_worker(int(_poll) if _poll not in (None, '') else 2)
+
+        # Announce the startup state of every background service (running, stopped,
+        # disabled or external) so the boot log reflects them all — not only the
+        # ones that started running.
+        self._log_services_startup()
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -392,8 +407,15 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         return url_for(fallback)
 
     def _t(self, key: str, *args: str) -> str:
-        """Return the translated string for *key* in the session language."""
-        lang = session.get('lang', self._default_lang)
+        """Return the translated string for *key* in the session language.
+
+        Falls back to the configured default language outside a request context
+        (e.g. startup/console messages), where the session proxy is unavailable.
+        """
+        try:
+            lang = session.get('lang', self._default_lang)
+        except RuntimeError:           # working outside of request context
+            lang = self._default_lang
         trans = TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG])
         text = trans.get(key, key)
         for arg in args:
@@ -473,13 +495,12 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
-        # Event→notification rules (their own table, like webhooks).
-        from lib.stores.event_rules import EventRulesStore  # noqa: PLC0415
+        # Event→notification subsystem stores (rules, sent-log, worker state).
+        from lib.stores.event import (  # noqa: PLC0415
+            EventRulesStore, EventStateStore, NotificationLogStore)
         self._event_rules_store = EventRulesStore(self._db_connector)
-        from lib.stores.notification_log import NotificationLogStore  # noqa: PLC0415
         self._notification_log_store = NotificationLogStore(self._db_connector)
         # Persisted cooldown + per-source cursor for the decoupled event worker.
-        from lib.stores.event_state import EventStateStore  # noqa: PLC0415
         self._event_state_store = EventStateStore(self._db_connector)
         # Watchful module/item configuration (DB-backed, shared with the monitor
         # through the same database).
@@ -1035,16 +1056,143 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
 
     def run(self, host: str | None = None, port: int | None = None,
             debug: bool = False):
-        """Start the web administration server.
+        """Start the web administration server, binding one or more interfaces.
+
+        *host* may name several interfaces (comma/space separated); each is bound
+        independently.  Binding is **fail-soft per interface but fail-hard
+        overall**:
+
+        * if some — but not all — interfaces fail to bind, the failures are
+          logged as warnings and the server runs on those that succeeded;
+        * if **no** interface can be bound (e.g. the port is already in use), an
+          error is logged and the process exits non-zero — it never reports a
+          running server when nothing is actually listening.
 
         Args:
-            host: Network interface to bind to (default ``0.0.0.0``).
+            host: Interface(s) to bind (default ``0.0.0.0``).  Accepts a list as
+                a comma/space separated string, e.g. ``"10.0.0.1, 10.0.0.2"``.
             port: TCP port to listen on (default ``8080``).
-            debug: Enable Flask debug mode (interactive debugger + verbose errors).
+            debug: Enable the interactive debugger and verbose errors.
         """
-        host = host or self.DEFAULT_HOST
-        port = port or self.DEFAULT_PORT
-        # use_reloader=False: __init__ already binds the syslog ports and starts
-        # the scheduler, so Werkzeug's reloader (which re-runs __init__ in a child)
-        # would double-bind. Dev reloads are handled externally by dev_watch.py.
-        self._app.run(host=host, port=port, debug=debug, use_reloader=False)
+        port = int(port or self.DEFAULT_PORT)
+        hosts = str(host or self.DEFAULT_HOST).replace(',', ' ').split() \
+            or [self.DEFAULT_HOST]
+
+        # No reloader: __init__ already bound the syslog ports and started the
+        # scheduler/event worker, so Werkzeug's reloader (which re-runs __init__ in
+        # a child) would double-bind. Dev reloads are handled by dev_watch.py.
+        self._app.debug = debug
+        wsgi_app = self._app
+        if debug:
+            from werkzeug.debug import DebuggedApplication  # noqa: PLC0415
+            wsgi_app = DebuggedApplication(self._app, evalex=True)
+
+        servers, failed = self._bind_web_servers(hosts, port, wsgi_app)
+
+        # Startup bind status goes to stdout/stderr directly (not the debug log,
+        # whose default level is 'off') so it is always visible — like main.py's
+        # startup banner.
+        for _h, exc in failed:
+            print('  ⚠  ' + self._t('web_bind_fail', _h, port, exc), file=sys.stderr)
+
+        if not servers:
+            # Nothing is listening: fail loudly and exit instead of leaving the
+            # daemon threads running and faking a started server.  os._exit (not
+            # sys.exit) because a plain SystemExit would block on the non-daemon
+            # threads some background services spawn (e.g. the scheduler's
+            # ThreadPoolExecutor) — the process would hang instead of closing.
+            print('  ✖  ' + self._t('web_bind_none', port), file=sys.stderr)
+            # On Windows a 10013 is often a reserved (winnat/Hyper-V/WSL/Docker)
+            # range, not a process: point the user straight at the cause + remedy.
+            from lib.system.windows import port_excluded  # noqa: PLC0415
+            rng = port_excluded(port)
+            if rng:
+                print('     ↳ ' + self._t('web_bind_reserved', port, rng[0], rng[1]),
+                      file=sys.stderr)
+            sys.stderr.flush()
+            sys.stdout.flush()
+            os._exit(1)
+
+        shown = set()
+        for _h, srv in servers:
+            # A wildcard bind (0.0.0.0 / ::) listens on every interface — list the
+            # concrete reachable addresses too, as Werkzeug's dev server used to.
+            for disp in self._display_hosts(_h):
+                if disp not in shown:
+                    shown.add(disp)
+                    print('  ' + self._t('web_listening', disp, port))
+        if failed:
+            print('  ' + self._t('web_bind_partial', len(servers), len(hosts), len(failed)))
+        print()   # blank line between the startup banner and the request logs
+
+        threads = []
+        for _h, srv in servers:
+            t = threading.Thread(target=srv.serve_forever,
+                                 name=f"web-{_h}:{port}", daemon=True)
+            t.start()
+            threads.append(t)
+
+        try:
+            while any(t.is_alive() for t in threads):
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            print('  ' + self._t('web_stop_requested'))
+        finally:
+            for _h, srv in servers:
+                try:
+                    srv.shutdown()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+
+    @staticmethod
+    def _display_hosts(host):
+        """Addresses to advertise for *host* in the startup banner.
+
+        A wildcard bind (``0.0.0.0`` / ``::``) actually listens on every
+        interface, so list the machine's concrete addresses too (like Werkzeug's
+        dev server did) — the literal wildcard first, then the resolved IPs."""
+        if host not in ('0.0.0.0', '::', '*', ''):
+            return [host]
+        out = [host or '0.0.0.0']
+        try:
+            import socket  # noqa: PLC0415
+            for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+                if ip not in out:
+                    out.append(ip)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        return out
+
+    @staticmethod
+    def _bind_web_servers(hosts, port: int, wsgi_app):
+        """Try to bind *wsgi_app* on each host at *port*.
+
+        Returns ``(servers, failed)`` where ``servers`` is a list of
+        ``(host, werkzeug_server)`` successfully bound and ``failed`` a list of
+        ``(host, OSError)``.  Binding happens here (sockets are opened) but no
+        request is served yet — so the caller decides whether enough interfaces
+        came up before serving.  Kept separate (and side-effect-light) so the
+        bind policy is unit-testable without starting the server loop.
+        """
+        import contextlib  # noqa: PLC0415
+        import io  # noqa: PLC0415
+        from werkzeug.serving import make_server  # noqa: PLC0415
+        servers, failed = [], []
+        for _h in hosts:
+            try:
+                # Werkzeug prints the raw OS strerror to stderr on a bind failure
+                # (then sys.exit(1)).  Swallow that uncontrolled, OS-localised line
+                # so only our own i18n message is shown — the OSError detail still
+                # reaches it via the exception.
+                with contextlib.redirect_stderr(io.StringIO()):
+                    srv = make_server(_h, port, wsgi_app, threaded=True)
+                servers.append((_h, srv))
+            except OSError as exc:
+                failed.append((_h, exc))
+            except SystemExit as exc:
+                # make_server calls sys.exit(1) instead of propagating OSError;
+                # catch it so one unbindable interface doesn't abort the whole
+                # process, recovering the underlying OSError (its __context__).
+                cause = exc.__context__ if isinstance(exc.__context__, OSError) else None
+                failed.append((_h, cause or OSError(f'bind {_h}:{port} failed')))
+        return servers, failed

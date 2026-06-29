@@ -17,7 +17,7 @@ def register(app, wa):
         Accepts an optional ``id`` field: when present and ``secret`` is null,
         the stored secret for that webhook ID is merged in automatically.
         """
-        from lib.web_admin import webhook_notify
+        from lib.notify import webhook_notify
         data = wa._optional_json() or {}
         wh_id = data.pop('id', None)
 

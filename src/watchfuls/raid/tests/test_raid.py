@@ -10,7 +10,7 @@ real against canned mdstat text.
 
 from unittest.mock import patch
 
-from lib.linux.raid_mdstat import RaidMdstat
+from lib.system.linux.raid_mdstat import RaidMdstat
 from conftest import create_mock_monitor
 
 

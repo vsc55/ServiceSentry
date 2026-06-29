@@ -16,7 +16,7 @@ import os
 import sys
 
 from lib.config import ConfigControl
-from lib.monitor import Monitor
+from lib.core.monitor import Monitor
 
 
 class ProbeHostsStore:

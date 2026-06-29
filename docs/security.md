@@ -562,7 +562,7 @@ Las funciones afectadas son `upload_mib`, `delete_mib`, `get_mib_details`, `get_
 
 Las URLs proporcionadas por el usuario que el servidor descarga (p. ej.
 `import_mib_from_url` del módulo SNMP, o cualquier integración futura que haga
-peticiones salientes) se validan con `lib.net_guard.validate_external_url()`
+peticiones salientes) se validan con `lib.security.net_guard.validate_external_url()`
 antes de la petición.
 
 **Bloquea:**

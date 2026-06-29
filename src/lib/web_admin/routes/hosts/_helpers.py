@@ -24,7 +24,7 @@ from flask import jsonify, request, session
 def _coll_meta(modules_dir: str, mod: str, coll: str) -> dict:
     """The collection's schema meta (``__discovery_label_template__`` etc.) read
     from the module's schema.json, or ``{}``."""
-    from lib.credential_schemas import _watchfuls_dir  # noqa: PLC0415
+    from lib.modules.credential_schemas import _watchfuls_dir  # noqa: PLC0415
     bare = str(mod).replace('watchfuls.', '')
     sp = os.path.join(_watchfuls_dir(modules_dir), bare, 'schema.json')
     try:
@@ -54,7 +54,8 @@ def _format_item_label(tpl: str, host_name: str, item: dict, disc_field: str) ->
     s = re.sub(r'^\s*-\s*', '', s)
     return s.strip()
 
-from lib import secret_manager, ssh_client
+from lib.security import secret_manager
+from lib.system import ssh_client
 from lib.hosts import probe as host_probe
 from lib.hosts.migrate import apply_to_modules, build_migration_plan
 

@@ -18,7 +18,7 @@ from conftest import create_mock_monitor
 
 @pytest.fixture(autouse=True)
 def _no_ssrf_guard():
-    with patch('lib.net_guard.validate_external_url', return_value=None):
+    with patch('lib.security.net_guard.validate_external_url', return_value=None):
         yield
 
 
@@ -433,9 +433,9 @@ class TestProxmoxProvision:
     def _ssh(self, out='', err='', code=0, raise_exc=None):
         """Patch ssh_client so connect() yields a fake client and run_command()
         returns (out, err, code).  Yields (connect_mock, run_mock)."""
-        with patch('lib.ssh_client.HAS_PARAMIKO', True), \
-             patch('lib.ssh_client.connect') as conn, \
-             patch('lib.ssh_client.run_command', return_value=(out, err, code)) as run:
+        with patch('lib.system.ssh_client.HAS_PARAMIKO', True), \
+             patch('lib.system.ssh_client.connect') as conn, \
+             patch('lib.system.ssh_client.run_command', return_value=(out, err, code)) as run:
             if raise_exc is not None:
                 conn.side_effect = raise_exc
             else:
@@ -594,7 +594,7 @@ class TestProxmoxCredentialManager:
     def test_catalog_exposes_provision_action(self):
         """credential_schemas() exposes the proxmox_auth credential-editor action
         with an embedded ssh credential picker input."""
-        from lib.credential_schemas import credential_schemas
+        from lib.modules.credential_schemas import credential_schemas
         cat = credential_schemas('watchfuls')
         actions = cat['proxmox_auth'].get('actions') or []
         prov = next((a for a in actions if a['id'] == 'provision_token'), None)

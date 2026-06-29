@@ -10,7 +10,7 @@ import secrets
 
 import pytest
 
-from lib.secret_manager import (
+from lib.security.secret_manager import (
     ENCRYPT_KEYS,
     ENC_PREFIX,
     decrypt_all,

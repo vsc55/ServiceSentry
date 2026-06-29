@@ -57,7 +57,7 @@ class TestApiConfigGet:
     def test_get_includes_config_values(self, client):
         _login(client)
         data = client.get("/api/v1/config").get_json()["config"]
-        assert data["daemon"]["timer_check"] == 300
+        assert data["monitoring"]["timer_check"] == 300
         # Sensitive fields are masked (returned as null) — never sent to the client
         assert data["telegram"]["token"] is None
 
@@ -69,10 +69,10 @@ class TestApiConfigPutBasic:
 
     def test_put_saves_data(self, client, admin):
         _login(client)
-        resp = client.put("/api/v1/config", json={"daemon": {"timer_check": 600}})
+        resp = client.put("/api/v1/config", json={"monitoring": {"timer_check": 600}})
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
-        assert _effective(admin)["daemon"]["timer_check"] == 600
+        assert _effective(admin)["monitoring"]["timer_check"] == 600
 
     def test_put_empty_object_saves(self, client):
         _login(client)
@@ -527,7 +527,7 @@ class TestApiConfigPutWebAdminKey:
 
     def test_web_admin_absent_is_graceful(self, client):
         _login(client)
-        resp = client.put("/api/v1/config", json={"daemon": {"timer_check": 300}})
+        resp = client.put("/api/v1/config", json={"monitoring": {"timer_check": 300}})
         assert resp.status_code == 200
 
     def test_web_admin_null_leaves_runtime_state_unchanged(self, client, admin):

@@ -16,7 +16,7 @@ def register(app, wa):
         An optional ``test_to`` field in the request body overrides the
         configured recipients for this test send only.
         """
-        from lib.web_admin import email_notify, email_templates
+        from lib.notify import email_notify, email_templates
         data = wa._optional_json() or {}
         full_cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
         stored = full_cfg.get('email') or {}

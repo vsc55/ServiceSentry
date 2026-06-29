@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests para lib/tools.py — bytes2human."""
+"""Tests para lib/util/tools.py — bytes2human."""
 
-from lib.tools import bytes2human
+from lib.util.tools import bytes2human
 
 
 class TestBytes2Human:

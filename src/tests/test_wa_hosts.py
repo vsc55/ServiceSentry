@@ -320,7 +320,7 @@ class TestTestSsh:
 
     def test_probe_uses_submitted_fields(self, client):
         _login(client)
-        with patch('lib.ssh_client.test_connection',
+        with patch('lib.system.ssh_client.test_connection',
                    return_value=(True, 'SSH connection successful', 'linux')) as probe:
             r = client.post('/api/v1/hosts/test_ssh', json={
                 'address': '10.0.0.9',
@@ -342,7 +342,7 @@ class TestTestSsh:
             'profiles': {'ssh': {'ssh_user': 'root', 'ssh_password': 'storedpw'}},
         }).get_json()['uid']
         # Client sends the secret masked (null) — route restores it from storage.
-        with patch('lib.ssh_client.test_connection',
+        with patch('lib.system.ssh_client.test_connection',
                    return_value=(True, 'ok', '')) as probe:
             client.post('/api/v1/hosts/test_ssh', json={
                 'uid': uid, 'address': '10.0.0.9',
@@ -566,7 +566,7 @@ class TestServerTest:
 
     def _mock_check(self):
         # The check path uses host_exec → ssh_client.connect_host + run_command.
-        from lib import ssh_client
+        from lib.system import ssh_client
         return [
             patch.object(ssh_client, 'HAS_PARAMIKO', True),
             patch.object(ssh_client, 'connect_host', return_value=object()),
@@ -594,7 +594,7 @@ class TestServerTest:
         assert d['results'][0]['key'] == 'web'
 
     def test_full_test_ssh_and_checks(self, client, admin):
-        from lib import ssh_client
+        from lib.system import ssh_client
         _login(client)
         ctx = self._mock_check() + [
             patch.object(ssh_client, 'test_connection', return_value=(True, 'ok', 'linux')),
@@ -624,7 +624,7 @@ class TestServerTest:
 
     def test_module_test_no_ssh_skips_ssh(self, client):
         """A module-scoped test (no_ssh) runs the checks but not the SSH probe."""
-        from lib import ssh_client
+        from lib.system import ssh_client
         _login(client)
         ctx = self._mock_check() + [
             patch.object(ssh_client, 'test_connection', return_value=(True, 'ok', 'linux')),

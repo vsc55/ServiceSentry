@@ -733,13 +733,13 @@ class TestGranularPermissions:
     def test_config_edit_allows_put(self, admin):
         self._make_user_with_perms(admin, "c_edit", ["config_edit"])
         c = self._client_as(admin, "c_edit")
-        resp = c.put("/api/v1/config", json={"daemon": {"timer_check": 60}})
+        resp = c.put("/api/v1/config", json={"monitoring": {"timer_check": 60}})
         assert resp.status_code == 200
 
     def test_without_config_edit_put_403(self, admin):
         self._make_user_with_perms(admin, "no_cedit", [])
         c = self._client_as(admin, "no_cedit")
-        resp = c.put("/api/v1/config", json={"daemon": {"timer_check": 60}})
+        resp = c.put("/api/v1/config", json={"monitoring": {"timer_check": 60}})
         assert resp.status_code == 403
 
     def test_config_edit_allows_telegram_test(self, admin):
@@ -848,5 +848,5 @@ class TestGranularPermissions:
         client.get("/logout")
 
         _login(client, "modonly_user", "testpass")
-        resp = client.put("/api/v1/config", json={"daemon": {"timer_check": 60}})
+        resp = client.put("/api/v1/config", json={"monitoring": {"timer_check": 60}})
         assert resp.status_code == 403
