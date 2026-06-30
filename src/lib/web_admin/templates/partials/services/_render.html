@@ -36,6 +36,20 @@ function _svcRow(label, value) {
         <span class="text-muted">${esc(label)}</span><span>${value}</span></div>`;
 }
 
+// Render one detail row from its backend descriptor. Each service emits its own
+// rows in status().detail = [{label_key, value | value_key, fmt?}], so this stays
+// fully generic — a new service's rows show up with no change here:
+//   value_key → an i18n value (e.g. "Embedded"); fmt 'ago'/'in' → relative time;
+//   otherwise the value is shown verbatim (escaped).
+function _svcDetailRow(r) {
+    let v;
+    if (r.value_key)        v = esc(t(r.value_key));
+    else if (r.fmt === 'ago') v = _svcAgo(r.value);
+    else if (r.fmt === 'in')  v = _svcIn(r.value);
+    else                    v = esc(r.value == null ? '—' : String(r.value));
+    return _svcRow(t(r.label_key), v);
+}
+
 // Render one service card. `meta` = {key, icon, title, rows[], canControl, running}
 function _svcCard(meta) {
     const cls = _SVC_STATE_CLS[meta.state] || 'secondary';
@@ -72,95 +86,19 @@ async function renderServices() {
     const resp = await apiGet('/api/v1/services');
     const s = (resp && resp.services) || {};
 
-    const cards = [];
-
-    // Monitor (the service monitor; like syslog: enabled flag + embedded/external)
-    if (s.monitoring) {
-        const d = s.monitoring;
-        cards.push(_svcCard({
-            key: 'monitoring', icon: 'bi-arrow-repeat', title: t('svc_monitor'),
-            state: d.state, running: d.running, controllable: d.controllable, embedded: d.embedded,
-            rows: [
-                _svcRow(t('svc_mode'), d.embedded ? t('svc_mode_embedded') : t('svc_mode_container')),
-                _svcRow(t('svc_interval'), d.interval != null ? d.interval + ' s' : '—'),
-                _svcRow(t('svc_next_run'), d.running ? _svcIn(d.next_in) : '—'),
-                _svcRow(t('svc_last_run'), _svcAgo(d.last_run)),
-            ],
-        }));
-    }
-
-    // Syslog receiver
-    if (s.syslog) {
-        const d = s.syslog;
-        cards.push(_svcCard({
-            key: 'syslog', icon: 'bi-hdd-stack', title: t('svc_syslog'),
-            state: d.state, running: d.running, controllable: d.controllable, embedded: d.embedded,
-            rows: [
-                _svcRow(t('svc_mode'), d.embedded ? t('svc_mode_embedded') : t('svc_mode_container')),
-                _svcRow(t('svc_ports'), `UDP ${d.udp_port||'—'} · TCP ${d.tcp_port||'—'} · TLS ${d.tls_port||'—'}`),
-                _svcRow(t('svc_messages'), d.count),
-            ],
-        }));
-    }
-
-    // Event worker (decoupled rule evaluation: drains syslog/audit by cursor)
-    if (s.events) {
-        const d = s.events;
-        const modeLabel = d.mode === 'external' ? t('svc_mode_container')
-            : (d.mode === 'off' ? _svcStateLabel('disabled') : t('svc_mode_embedded'));
-        cards.push(_svcCard({
-            key: 'events', icon: 'bi-bell', title: t('svc_events'),
-            state: d.state, running: d.running, controllable: d.controllable, embedded: d.embedded,
-            rows: [
-                _svcRow(t('svc_mode'), esc(modeLabel)),
-                _svcRow(t('svc_poll'), (d.poll_secs || 2) + ' s'),
-                _svcRow(t('svc_rules'), `${d.rules_enabled}/${d.rules}`),
-            ],
-        }));
-    }
-
-    // Worker (external monitoring process)
-    if (s.worker) {
-        const d = s.worker;
-        cards.push(_svcCard({
-            key: 'worker', icon: 'bi-cpu', title: t('svc_worker'),
-            state: d.state, running: false, controllable: false, embedded: false,
-            rows: [
-                _svcRow(t('svc_last_activity'), _svcAgo(d.last_activity)),
-                _svcRow(t('svc_recent_checks'), d.fresh ? t('svc_yes') : t('svc_no')),
-            ],
-        }));
-    }
-
-    // Database (system)
-    if (s.database) {
-        const d = s.database;
-        cards.push(_svcCard({
-            key: 'database', icon: 'bi-database', title: t('svc_database'),
-            state: d.state, running: false, controllable: false, embedded: false,
-            rows: [
-                _svcRow(t('svc_driver'), esc(d.driver || '—')),
-                _svcRow(t('svc_host'), esc(d.host || '—')),
-                _svcRow(t('svc_db_name'), esc(d.name || '—')),
-            ],
-        }));
-    }
-
-    // Dedicated syslog database (only present when syslog uses its own DB)
-    if (s.database_syslog) {
-        const d = s.database_syslog;
-        const rows = [
-            _svcRow(t('svc_driver'), esc(d.driver || '—')),
-            _svcRow(t('svc_host'), esc(d.host || '—')),
-            _svcRow(t('svc_db_name'), esc(d.name || '—')),
-        ];
-        if (d.fell_back) rows.push(_svcRow(t('svc_status'), esc(t('svc_db_fell_back'))));
-        cards.push(_svcCard({
-            key: 'database_syslog', icon: 'bi-database-fill-gear', title: t('svc_database_syslog'),
-            state: d.state, running: false, controllable: false, embedded: false,
-            rows,
-        }));
-    }
+    // Render one card per registered service, in registry order. Identity
+    // (title/icon) + state/controllability come from the backend entry; the
+    // service-specific detail rows from _SVC_DETAIL (or none for an unknown key).
+    const cards = Object.entries(s).map(([key, d]) => _svcCard({
+        key,
+        icon: d.icon || 'bi-gear',
+        title: d.label_key ? t(d.label_key) : key,
+        state: d.state,
+        running: !!d.running,
+        controllable: !!d.controllable,
+        embedded: !!d.embedded,
+        rows: (d.detail || []).map(_svcDetailRow),
+    }));
 
     const refreshBtn = `<button class="btn btn-secondary btn-sm" onclick="renderServices()">
         <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('svc_refresh'))}</button>`;

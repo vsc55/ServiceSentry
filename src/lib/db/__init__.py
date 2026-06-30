@@ -47,7 +47,7 @@ def get_connector(
     cfg    = config or {}
     driver = cfg_get(cfg, 'database|driver').lower()
 
-    from lib.object_base import ObjectBase  # noqa: PLC0415
+    from lib.core.object_base import ObjectBase  # noqa: PLC0415
     from lib.debug import DebugLevel  # noqa: PLC0415
 
     if driver == 'sqlite':
@@ -89,7 +89,7 @@ def build_syslog_connector(syslog_db_cfg: dict | None, *, main_connector,
     sdb = syslog_db_cfg or {}
     if not sdb.get('enabled'):
         return main_connector
-    from lib.object_base import ObjectBase  # noqa: PLC0415
+    from lib.core.object_base import ObjectBase  # noqa: PLC0415
     from lib.debug import DebugLevel  # noqa: PLC0415
     try:
         cfg = {

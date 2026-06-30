@@ -25,11 +25,10 @@ lib/web_admin/
 │   ├── permissions.py        # _PermissionsMixin
 │   ├── sessions.py           # _SessionsMixin (sesiones + clave secreta Flask)
 │   ├── audit.py              # _AuditMixin
-│   ├── checks.py             # _ChecksMixin
-│   ├── monitoring.py         # reexporta _MonitoringMixin de lib/monitor/manager.py (scheduler, sin Flask)
-│   ├── syslog.py             # _SyslogMixin (receptor syslog + registro de descartes)
-│   ├── services.py           # _ServicesMixin (estado/control de servicios)
-│   └── events.py             # reexporta _EventsMixin de lib/events/manager.py (sin Flask)
+│   ├── checks.py             # _ChecksMixin (checks on-demand; ejecutor compartido)
+│   └── services.py           # _ServicesMixin (descubre + controla los servicios embebidos)
+│   # monitoring/syslog/events NO son mixins: el WebAdmin COMPONE un objeto por
+│   # servicio (lib/services/*/embedded.py), en self._embedded_services
 └── routes/
     ├── __init__.py           # register_all(app, wa)
     ├── auth/
@@ -527,7 +526,7 @@ Series temporales de resultados de checks (almacenadas por `HistoryStore`, ver [
 ### Monitor (planificador)
 
 Controla el monitor en segundo plano que ejecuta los checks periódicamente
-(`_MonitoringMixin`, en `lib/monitor/manager.py`). Las rutas conservan el prefijo
+(`_MonitoringMixin`, en `lib/services/monitoring/manager.py`). Las rutas conservan el prefijo
 `/api/v1/daemon` por compatibilidad.
 
 | Método | Ruta | Permiso | Descripción |
@@ -572,15 +571,29 @@ configurados; más el log de envíos. Ver [configuration.md → Gestor de evento
 
 ### Servicios
 
-Estado y control de los servicios de fondo (monitor, receptor syslog, **procesador
-de eventos**…). El procesador de eventos es controlable (`name=events`) cuando corre
-embebido (`events.mode=embedded` y `SS_EVENTS_EMBEDDED` no está a 0); en modo
-`external` se reporta en solo lectura.
+Estado y control de los servicios de fondo (monitor, receptor syslog, procesador de
+eventos…) + las vistas de solo lectura `worker` (proceso de monitor externo) y
+`database`. **No hay ramas por-servicio**: el WebAdmin compone un objeto embebido
+por servicio (`lib/services/*/embedded.py`, en `self._embedded_services`), que se
+**autodescubren** vía el `ServiceRegistry`; los endpoints, el card y el log de
+arranque **iteran el registro**. Cada entrada de `/api/v1/services` es
+auto-descriptiva: trae `label_key`, `icon` y una lista `detail` de filas
+(`{label_key, value | value_key, fmt}`) que el frontend pinta genéricamente — un
+servicio nuevo aparece solo, sin tocar el panel.
+
+Controlabilidad: un servicio es controlable cuando corre **embebido aquí** (su gate
+`SS_*_EMBEDDED` activo) y está activo en config (`enabled`/`mode=embedded`); en modo
+`external`/contenedor dedicado se reporta en solo lectura.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/services` | `services_view` | Estado de todos los servicios (incl. `events`: mode, poll, reglas activas/total) |
-| `POST` | `/api/v1/services/<name>/<action>` | `services_control` | `start`/`stop` de un servicio controlable (`monitoring`, `syslog`, `events`) |
+| `GET` | `/api/v1/services` | `services_view` | Estado de cada servicio registrado (label/icon/estado + filas `detail`) |
+| `POST` | `/api/v1/services/<name>/<action>` | `services_control` | `start`/`stop` de un servicio controlable; validado vía el registro (`unknown_service`/`not_controllable`/`disabled`) |
+
+> El registro también es el punto de **reacción a config**: al guardar
+> `/api/v1/config`, el WebAdmin recorre `self._embedded_services` llamando a
+> `on_config_changed(changed)` de cada uno (syslog re-aplica el listener, el monitor
+> para si lo deshabilitas, events para al salir de modo embebido).
 
 ### Salud
 

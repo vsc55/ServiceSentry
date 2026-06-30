@@ -1,4 +1,9 @@
-"""Mixin classes for WebAdmin — internal use only."""
+"""Mixin classes for WebAdmin — internal use only.
+
+The background services (monitoring / syslog / events) are no longer mixins: the
+WebAdmin composes one embedded object per service (``lib.services.*.embedded``),
+discovered and controlled by :class:`_ServicesMixin`.
+"""
 from .users import _UsersMixin
 from .roles import _RolesMixin
 from .groups import _GroupsMixin
@@ -6,10 +11,7 @@ from .permissions import _PermissionsMixin
 from .sessions import _SessionsMixin
 from .audit import _AuditMixin
 from .checks import _ChecksMixin
-from .monitoring import _MonitoringMixin
-from .syslog import _SyslogMixin
 from .services import _ServicesMixin
-from .events import _EventsMixin
 
 __all__ = [
     '_UsersMixin',
@@ -19,8 +21,5 @@ __all__ = [
     '_SessionsMixin',
     '_AuditMixin',
     '_ChecksMixin',
-    '_MonitoringMixin',
-    '_SyslogMixin',
     '_ServicesMixin',
-    '_EventsMixin',
 ]

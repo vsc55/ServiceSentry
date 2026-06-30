@@ -8,11 +8,15 @@ from flask import jsonify, session
 def register(app, wa):
     checks_run_req = wa._perm_required('checks_run')
 
+    def _mon():
+        """The embedded monitor service object (composition)."""
+        return wa._embedded_services['monitoring']
+
     @app.route('/api/v1/daemon/status', methods=['GET'])
     @checks_run_req
     def api_daemon_status():
         """Return current scheduler state."""
-        return jsonify(wa._monitoring_status_dict())
+        return jsonify(_mon().status_dict())
 
     @app.route('/api/v1/daemon/start', methods=['POST'])
     @checks_run_req
@@ -20,21 +24,21 @@ def register(app, wa):
         """Start the background scheduler."""
         data   = wa._optional_json()
         run_now = bool(data.get('run_now', False))
-        started = wa._monitoring_start(run_now=run_now)
+        started = _mon().start(run_now=run_now)
         if started:
             wa._audit('daemon_started', detail={'run_now': run_now})
         return jsonify({'ok': True, 'started': started,
-                        'status': wa._monitoring_status_dict()})
+                        'status': _mon().status_dict()})
 
     @app.route('/api/v1/daemon/stop', methods=['POST'])
     @checks_run_req
     def api_daemon_stop():
         """Stop the background scheduler."""
-        stopped = wa._monitoring_stop()
+        stopped = _mon().stop()
         if stopped:
             wa._audit('daemon_stopped')
         return jsonify({'ok': True, 'stopped': stopped,
-                        'status': wa._monitoring_status_dict()})
+                        'status': _mon().status_dict()})
 
     @app.route('/api/v1/daemon/config', methods=['PUT'])
     @checks_run_req
@@ -75,4 +79,4 @@ def register(app, wa):
             })
 
         return jsonify({'ok': True, 'monitoring': mon_cfg,
-                        'status': wa._monitoring_status_dict()})
+                        'status': _mon().status_dict()})

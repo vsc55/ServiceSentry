@@ -86,7 +86,7 @@ class TestApiConfigPutBasic:
         resp = client.put("/api/v1/config", json={"syslog": {"udp_port": None}})
         assert resp.status_code == 200 and resp.get_json()["ok"] is True
         # and it resolves to the registry default, not an error
-        assert int(admin._syslog_cfg()["udp_port"]) == 514
+        assert int(admin._embedded_services['syslog']._syslog_cfg()["udp_port"]) == 514
 
     def test_put_invalid_json(self, client):
         _login(client)

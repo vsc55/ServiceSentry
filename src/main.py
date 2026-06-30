@@ -207,7 +207,7 @@ def start_syslog(args) -> int:
     Resolves config/var dirs exactly like :func:`start_web` so the same
     ``config.json`` and database are used, then blocks on the listener.
     """
-    from lib.syslog.service import \
+    from lib.services.syslog.service import \
         SyslogService  # noqa: WPS433 – conditional import
 
     config_dir, var_dir = _resolve_app_dirs(args)
@@ -234,7 +234,7 @@ def start_events(args) -> int:
     messages never blocks ingestion.  Set ``events|mode=external`` and
     ``SS_EVENTS_EMBEDDED=0`` on the web admin so this owns evaluation.
     """
-    from lib.events.service import \
+    from lib.services.events.service import \
         EventService  # noqa: WPS433 – conditional import
 
     config_dir, var_dir = _resolve_app_dirs(args)
@@ -259,7 +259,7 @@ def start_monitor(args) -> int:
     owns the checks.  ``--monitor -t 0`` runs a single pass and exits; otherwise it
     runs continuously at the configured interval (``--timer`` / ``SS_TIMER`` win).
     """
-    from lib.monitor.service import \
+    from lib.services.monitoring.service import \
         MonitorService  # noqa: WPS433 – conditional import
 
     config_dir, var_dir = _resolve_app_dirs(args)

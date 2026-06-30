@@ -15,7 +15,7 @@ jerarquía de clases, estructura de directorios y flujo de ejecución.
                        │
                        ▼
 ┌─────────────────────────────────────────────────────┐
-│                  lib/core/monitor.py                     │
+│                  lib/services/monitoring/monitor.py                     │
 │  (Motor principal: carga módulos, ThreadPool,       │
 │   gestión de estado, despacho de notificaciones)    │
 └───────┬──────────┬──────────┬───────────────────────┘
@@ -38,11 +38,11 @@ jerarquía de clases, estructura de directorios y flujo de ejecución.
 ## Jerarquía de Clases
 
 ```text
-ObjectBase (lib/object_base.py)
+ObjectBase (lib/core/object_base.py)
 ├── debug: Debug  ← instancia compartida por TODAS las clases
 │
 ├── Main (main.py)
-├── Monitor (lib/core/monitor.py)
+├── Monitor (lib/services/monitoring/monitor.py)
 ├── Telegram (lib/core/telegram.py)
 ├── ConfigManager (lib/config/manager.py)         ← ÚNICO dueño de la E/S de config (read/write/migrate)
 │   ├── ConfigStore-BD (lib/stores/config.py)      ← capa editable: tabla `config` (una fila por sección|campo)
@@ -58,11 +58,14 @@ ObjectBase (lib/object_base.py)
 │   ├── _PermissionsMixin(lib/web_admin/mixins/permissions.py)
 │   ├── _SessionsMixin   (lib/web_admin/mixins/sessions.py)
 │   ├── _AuditMixin      (lib/web_admin/mixins/audit.py)
-│   ├── _ChecksMixin     (lib/web_admin/mixins/checks.py)
-│   ├── _MonitoringMixin (lib/monitor/manager.py, reexportado por mixins/monitoring.py; SIN Flask) ← scheduler compartido por WebAdmin y el servicio standalone --monitor
-│   ├── _SyslogMixin     (lib/web_admin/mixins/syslog.py)     ← receptor syslog + registro de descartes
-│   ├── _ServicesMixin   (lib/web_admin/mixins/services.py)   ← estado/control de servicios
-│   └── _EventsMixin     (lib/events/manager.py, reexportado por mixins/events.py; SIN Flask) ← evalúa reglas + worker desacoplado (cursor syslog/audit); compartido por WebAdmin y los servicios standalone (syslog/events)
+│   ├── _ChecksMixin     (lib/web_admin/mixins/checks.py)   ← checks on-demand (UI); usan el ejecutor compartido
+│   └── _ServicesMixin   (lib/web_admin/mixins/services.py) ← descubre + controla los servicios embebidos
+│   # Los servicios NO se heredan: WebAdmin COMPONE un objeto embebido por servicio
+│   # (self._embedded_services), construido en __init__:
+│   ├─ EmbeddedMonitor  (lib/services/monitoring/embedded.py)  ← _MonitoringMixin + contexto del host
+│   ├─ EmbeddedSyslog   (lib/services/syslog/embedded.py)      ← _SyslogMixin + gate SS_SYSLOG_EMBEDDED/autostart
+│   └─ EmbeddedEvents   (lib/services/events/embedded.py)      ← _EventsMixin + worker desacoplado
+│       (cada objeto comparte su lógica con el servicio standalone del mismo paquete)
 ├── BaseConnector (lib/db/base.py)              ← capa de BD pluggable
 │   ├── SQLiteConnector       (lib/db/sqlite.py)      [por defecto]
 │   ├── MySQLConnector        (lib/db/mysql.py)
@@ -113,8 +116,9 @@ ServiceSentry/
 │   ├── pytest.ini                       # Configuración pytest (testpaths = tests watchfuls)
 │   ├── lib/
 │   │   ├── __init__.py                  # Exports: ObjectBase, DictFilesPath, Monitor, Telegram, Exec, ExecResult, Mem, MemInfo
-│   │   ├── object_base.py               # Clase base con Debug compartido (única primitiva que queda en la raíz)
-│   │   ├── core/                        # Runtime núcleo: monitor.py (motor de monitorización) + telegram.py (cliente de alertas del monitor)
+│   │   ├── core/                        # Primitivas compartidas del núcleo
+│   │   │   ├── object_base.py           # Clase base con el Debug compartido por TODAS las clases
+│   │   │   └── telegram.py              # Cliente de alertas (cola), usado por el monitor y por lib/notify
 │   │   ├── i18n/                        # Traducciones de toda la app (UI web + emails): __init__.py (loader) + lang/ (en_EN.py, es_ES.py)
 │   │   ├── util/                        # Helpers puros sin estado: tools.py (bytes2human) + os_detect.py (detección de SO local/remoto)
 │   │   ├── security/                    # Primitivas de seguridad: secret_manager.py (cifrado Fernet, enc: prefix, ENCRYPT_KEYS) + net_guard.py (validate_external_url, guard SSRF)
@@ -143,14 +147,28 @@ ServiceSentry/
 │   │   │   ├── config.py                # ConfigStore     → tabla config (capa editable: una fila por sección|campo)
 │   │   │   ├── webhooks.py              # WebhooksStore   → tabla webhooks (destinos HTTP salientes)
 │   │   │   ├── event/                   # paquete: rules.py (EventRulesStore) + state.py (EventStateStore: event_cooldowns/event_cursor) + log.py (NotificationLogStore)
-│   │   │   └── syslog/                  # paquete: messages.py (SyslogStore; BD dedicada opcional) + drops.py (SyslogDropsStore). Distinto de lib.syslog (el receptor)
-│   │   ├── events/                      # Subsistema de eventos (sin Flask)
-│   │   │   ├── manager.py               # _EventsMixin: evalúa reglas + worker desacoplado (cursor sobre syslog/audit); compartido por WebAdmin y servicios standalone
-│   │   │   └── service.py               # EventService: worker standalone (consume syslog/audit por cursor, evalúa y despacha; main.py --events)
-│   │   ├── syslog/                      # Receptor syslog (RFC 3164/5424)
-│   │   │   ├── parser.py                # Parser de mensajes RFC 3164/5424
-│   │   │   ├── server.py                # Listener UDP/TCP/TLS multi-bind (IPv4/IPv6) + allowlist + registro de descartes
-│   │   │   └── service.py               # Servicio standalone (solo recibe→almacena→purga; la evaluación de reglas está desacoplada), sin Flask
+│   │   │   └── syslog/                  # paquete: messages.py (SyslogStore; BD dedicada opcional) + drops.py (SyslogDropsStore). Distinto de lib.services.syslog (el receptor)
+│   │   ├── services/                    # Servicios de fondo (embebidos o standalone) + el controlador central
+│   │   │   ├── __init__.py              # discover_embedded_services(): escanea los paquetes y recoge su EMBEDDED_SERVICE (auto-descubrimiento)
+│   │   │   ├── base.py                  # ServiceDescriptor: contrato de un servicio (key/label/icon/status/control)
+│   │   │   ├── registry.py              # ServiceRegistry: controlador central que la pestaña Services recorre
+│   │   │   ├── embedded.py              # _EmbeddedBase: contexto delegado al host para los Embedded<X>
+│   │   │   ├── monitoring/              # Monitor de servicios
+│   │   │   │   ├── monitor.py           # Monitor: motor (carga módulos, check_module, estado, despacha notificaciones)
+│   │   │   │   ├── executor.py          # run_checks(): ejecutor compartido (ThreadPool) — on-demand UI + ciclo del scheduler
+│   │   │   │   ├── manager.py           # _MonitoringMixin: scheduler (sin Flask); compartido por WebAdmin y el standalone
+│   │   │   │   ├── embedded.py          # EmbeddedMonitor: el monitor embebido en el web admin (composición)
+│   │   │   │   └── service.py           # MonitorService: monitor standalone (main.py --monitor)
+│   │   │   ├── syslog/                  # Receptor syslog (RFC 3164/5424)
+│   │   │   │   ├── parser.py            # Parser de mensajes RFC 3164/5424
+│   │   │   │   ├── server.py            # Listener UDP/TCP/TLS multi-bind (IPv4/IPv6) + allowlist + descartes
+│   │   │   │   ├── manager.py           # _SyslogMixin: ciclo de vida del listener (cfg/apply/drops/retención); compartido web/standalone
+│   │   │   │   ├── embedded.py          # EmbeddedSyslog: listener embebido (gate SS_SYSLOG_EMBEDDED + autostart)
+│   │   │   │   └── service.py           # SyslogService: standalone (recibe→almacena→purga; reglas desacopladas), sin Flask
+│   │   │   └── events/                  # Procesador de eventos desacoplado (sin Flask)
+│   │   │       ├── manager.py           # _EventsMixin: evalúa reglas + worker por cursor (syslog/audit); compartido web/standalone
+│   │   │       ├── embedded.py          # EmbeddedEvents: worker embebido (mode/autostart; stores delegados al host)
+│   │   │       └── service.py           # EventService: worker standalone (main.py --events)
 │   │   ├── hosts/                       # Dominio de hosts (no la tabla; eso es stores/hosts.py)
 │   │   │   ├── profiles.py              # Catálogo protocolo→campos (de __host_profile__)
 │   │   │   ├── runner.py                # Ejecución de comandos local/SSH (run, is_remote)
@@ -196,13 +214,10 @@ ServiceSentry/
 │   │       │   ├── ldap_auth.py         # LDAP/AD (ldap3)
 │   │       │   ├── oidc_auth.py         # OIDC/OAuth2 SSO (authlib)
 │   │       │   └── saml_auth.py         # SAML2 SSO (python3-saml) [alpha]
-│   │       ├── mixins/                  # Lógica de negocio por dominio (11 mixins)
+│   │       ├── mixins/                  # Lógica de negocio por dominio (8 mixins; los servicios NO son mixins)
 │   │       │   ├── users.py roles.py groups.py permissions.py
 │   │       │   ├── sessions.py audit.py checks.py
-│   │       │   ├── monitoring.py        # reexporta _MonitoringMixin de lib/monitor/manager.py (scheduler)
-│   │       │   ├── syslog.py            # _SyslogMixin: receptor syslog + descartes
-│   │       │   ├── services.py          # _ServicesMixin: estado/control de servicios
-│   │       │   └── events.py            # reexporta _EventsMixin de lib/events/manager.py
+│   │       │   └── services.py          # _ServicesMixin: descubre + controla los servicios embebidos (composición, lib/services/*/embedded.py)
 │   │       └── routes/                  # Registradores de rutas Flask (ver web_admin.md)
 │   │           ├── __init__.py          # register_all(app, wa)
 │   │           ├── auth/                # /login, /logout, /api/v1/auth/ldap|entra/*
@@ -339,10 +354,91 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 
 ---
 
+## Servicios de fondo: registro, descubrimiento y composición
+
+Los tres servicios de larga vida (monitor, syslog, eventos) viven en `lib/services/`
+y cada uno corre en **dos modos** con el **mismo código**: **embebido** en el panel
+web o **standalone** como su propio proceso (`--monitor`/`--syslog`/`--events`). La
+lógica del ciclo de vida está en el mixin compartido del paquete (`manager.py`); solo
+cambia el *host* que aporta el contexto (config, stores, debug).
+
+### Mismo código, dos hosts (embebido vs standalone)
+
+```mermaid
+flowchart LR
+    mgr["manager.py · _MonitoringMixin<br/>(scheduler, sin Flask)"]
+    eng["monitor.py · Monitor<br/>(motor de checks)"]
+    mgr -->|usa| eng
+    mgr --> emb["embedded.py · EmbeddedMonitor<br/>contexto = WebAdmin (delegado)"]
+    mgr --> svc["service.py · MonitorService<br/>contexto = propio (conector/config)"]
+    emb --> web(["panel web · embebido"])
+    svc --> proc(["proceso/contenedor dedicado · --monitor"])
+```
+
+> syslog y events siguen el mismo patrón (`manager.py` compartido + `embedded.py` +
+> `service.py`).  El gate `SS_*_EMBEDDED` decide si el panel lo hospeda (`embedded.py`)
+> o lo posee un proceso dedicado (`service.py`).
+
+### Arranque del panel web: descubrir → componer → arrancar
+
+El WebAdmin **no hereda** los servicios: los **compone**.  Cada paquete se
+autodescribe (`EMBEDDED_SERVICE`), el registro los descubre, y el panel construye un
+objeto embebido por servicio que se arranca a sí mismo según su gating.
+
+```mermaid
+flowchart TB
+    init["WebAdmin.__init__"] --> disc["lib.services.discover_embedded_services()<br/>escanea los paquetes de lib/services/"]
+    disc --> meta["EMBEDDED_SERVICE de cada paquete<br/>{key, label, icon, order, controllable}"]
+    meta --> build["build_embedded_services(host)<br/>llama make_embedded(host) por paquete"]
+    build --> objs["self._embedded_services<br/>{monitoring, syslog, events}"]
+    objs --> boot["for svc: svc.start_at_boot()<br/>(cada uno decide enabled+embedded+autostart)"]
+    objs --> reg["_ServicesMixin._service_registry()<br/>ServiceDescriptor(status, control) por objeto"]
+    reg --> tab(["pestaña Services<br/>label · icon · estado · detalle · start/stop"])
+```
+
+### Pestaña Services: estado y control (iterando el registro)
+
+```mermaid
+flowchart TB
+    g["GET /api/v1/services"] --> agg["_services_status_dict()<br/>itera el registro: {key: obj.status()}"]
+    agg --> dyn["cada entry es auto-descriptiva:<br/>label_key · icon · detail[]"]
+    dyn --> card(["card genérico (sin ramas por-servicio)"])
+
+    p["POST /api/v1/services/&lt;key&gt;/&lt;action&gt;"] --> ctl["_service_control()<br/>registry.get(key).control(action)"]
+    ctl --> obj["Embedded&lt;X&gt;.control()<br/>guards + start/stop + auditoría"]
+
+    cfg["PUT /api/v1/config (guardar)"] --> inval["_write_config + invalidate"]
+    inval --> react["for svc in _embedded_services:<br/>svc.on_config_changed(changed)"]
+    react --> rule(["cada servicio reacciona: reload / stop"])
+```
+
+### Ejecución de checks: un único ejecutor
+
+El botón **"comprobar ahora"** (on-demand) y cada **ciclo del scheduler** comparten el
+mismo ejecutor (`executor.py::run_checks`); solo difieren en qué Monitor usan y qué
+módulos/timeout pasan.
+
+```mermaid
+flowchart TB
+    od["UI · _run_checks<br/>(Monitor transitorio, módulos pedidos, 45s)"] --> ex
+    sc["scheduler · _monitoring_run_one_cycle<br/>(Monitor persistente, todos, 120s)"] --> ex["run_checks(monitor, módulos, timeout, history)<br/>executor.py · ThreadPoolExecutor"]
+    ex --> per["por módulo: monitor.check_module()"]
+    per --> proc2["_process_module_result + status.save"]
+    per --> h["history.record (secuencial)"]
+    ex --> res(["(results, errors)"])
+```
+
+> Añadir un servicio nuevo a la pestaña = soltar un paquete en `lib/services/` con su
+> `EMBEDDED_SERVICE` + `embedded.py` (que aporta `status`/`control`/`start_at_boot` y,
+> opcionalmente, `on_config_changed`).  Aparece solo en la API, el card, el log de
+> arranque y el control — **cero ediciones** en el panel ni el frontend.
+
+---
+
 ## Procesamiento de Eventos (notificaciones)
 
 Las **reglas de notificación** (audit/syslog → Telegram/Email/Webhook) las evalúa
-`_EventsMixin` (`lib/events/manager.py`, **sin Flask**, compartido por el WebAdmin y
+`_EventsMixin` (`lib/services/events/manager.py`, **sin Flask**, compartido por el WebAdmin y
 los servicios standalone). El diseño está **desacoplado de la ingesta**: los
 productores y el consumidor no se llaman en línea, sino que se comunican a través de
 las **propias tablas de la BD** (la cola es la tabla de origen).
@@ -391,7 +487,7 @@ el **worker** las drena por cursor. La "cola" es la propia tabla de origen.
   - *embedded* (por defecto): un hilo dentro del WebAdmin
     (`_start_event_worker`, gate de entorno `SS_EVENTS_EMBEDDED`).
   - *external*: un proceso/contenedor propio — `EventService`
-    (`lib/events/service.py`, `main.py --events`, `SS_SERVICE_ROLE=events`) que abre
+    (`lib/services/events/service.py`, `main.py --events`, `SS_SERVICE_ROLE=events`) que abre
     la BD compartida y corre el mismo `_event_worker_loop`. El WebAdmin se lanza con
     `SS_EVENTS_EMBEDDED=0`.
   - *off*: sin evaluación.

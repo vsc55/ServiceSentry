@@ -57,10 +57,10 @@ class TestMonitoringControl:
         monkeypatch.setenv('SS_MONITORING_EMBEDDED', '1')
         r = client.post('/api/v1/services/monitoring/start')
         assert r.status_code == 200 and r.get_json()['ok'] is True
-        assert admin._monitoring_running is True
+        assert admin._embedded_services['monitoring'].running is True
         r = client.post('/api/v1/services/monitoring/stop')
         assert r.status_code == 200 and r.get_json()['ok'] is True
-        assert admin._monitoring_running is False
+        assert admin._embedded_services['monitoring'].running is False
 
     def test_unknown_service_404(self, client):
         _login(client)

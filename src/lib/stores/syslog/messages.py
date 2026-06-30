@@ -17,7 +17,7 @@ import time
 
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
-from lib.syslog.parser import SEVERITIES, FACILITIES
+from lib.services.syslog.parser import SEVERITIES, FACILITIES
 
 _SCHEMA = TableSpec(
     name='syslog',

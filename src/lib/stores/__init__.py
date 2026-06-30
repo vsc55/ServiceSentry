@@ -18,7 +18,7 @@ exposes a Store class:
     roles        — RolesStore
     sessions     — SessionsStore
     syslog/      — package: SyslogStore (received messages; time+row retention) +
-                   SyslogDropsStore (allowlist drops). Distinto de lib.syslog (el receptor).
+                   SyslogDropsStore (allowlist drops). Distinto de lib.services.syslog (el receptor).
     users        — UsersStore (tables: users, users_groups)
     webhooks     — WebhooksStore (outgoing notification webhooks)
 """

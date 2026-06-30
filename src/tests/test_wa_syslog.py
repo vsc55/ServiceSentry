@@ -167,7 +167,7 @@ class TestSyslogCfgDefaults:
         # explicit 0 is preserved (e.g. disable a transport).
         admin._write_config({'syslog': {'enabled': True, 'udp_port': None, 'tcp_port': 0}})
         admin._invalidate_config_cache()
-        cfg = admin._syslog_cfg()
+        cfg = admin._embedded_services['syslog']._syslog_cfg()
         assert int(cfg['udp_port']) == 514     # null → default
         assert int(cfg['tcp_port']) == 0       # explicit 0 kept
 
@@ -201,9 +201,9 @@ class TestSyslogAlert:
     coverage lives in test_wa_events)."""
 
     def test_worker_evaluates_stored_messages(self, admin):
-        admin._event_state.set_cursor('syslog', 0)        # process from the start
+        admin._embedded_services['events']._event_state.set_cursor('syslog', 0)        # process from the start
         _seed(admin, severity=2, message='kernel panic')
-        with mock.patch.object(admin, '_eval_event') as ev:
-            admin._event_worker_tick()
+        with mock.patch.object(admin._embedded_services['events'], '_eval_event') as ev:
+            admin._embedded_services['events']._event_worker_tick()
         assert ev.call_count >= 1
         assert any(c.args[0] == 'syslog' for c in ev.call_args_list)

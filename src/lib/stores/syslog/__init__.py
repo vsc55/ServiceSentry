@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Syslog persistence (distinta de ``lib.syslog``, el receptor):
+"""Syslog persistence (distinta de ``lib.services.syslog``, el receptor):
 
 * ``messages`` — :class:`SyslogStore`       (mensajes recibidos; retención por antigüedad/filas)
 * ``drops``    — :class:`SyslogDropsStore`  (orígenes descartados por la allowlist)

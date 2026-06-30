@@ -15,7 +15,7 @@ import json as _json
 
 from lib.config.spec import cfg_get
 from lib.debug import DebugLevel
-from lib.object_base import ObjectBase
+from lib.core.object_base import ObjectBase
 
 try:
     import requests as _req

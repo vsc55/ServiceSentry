@@ -4,7 +4,7 @@
 process/container.
 
 The web admin hosts the worker in-process by default (``events|mode=embedded``,
-see :class:`lib.events.manager._EventsMixin`), but the same evaluation loop can run
+see :class:`lib.services.events.manager._EventsMixin`), but the same evaluation loop can run
 on its own host/container, sharing the database with the rest of ServiceSentry.
 Set ``events|mode=external`` (and ``SS_EVENTS_EMBEDDED=0`` on the web admin) so a
 single worker owns rule evaluation.

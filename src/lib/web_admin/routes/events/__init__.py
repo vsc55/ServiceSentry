@@ -158,7 +158,7 @@ def register(app, wa):
             return jsonify({'error': wa._t('event_name_exists')}), 400
         rule['id'] = str(uuid.uuid4())
         store.upsert(rule, actor=session.get('username', ''))
-        wa._events_reload()
+        wa._embedded_services['events']._events_reload()
         wa._audit('event_rule_created', detail={'name': rule['name'], 'id': rule['id'],
                                                 'source': rule['source']})
         return jsonify({'ok': True, 'rule': rule})
@@ -179,7 +179,7 @@ def register(app, wa):
             return jsonify({'error': wa._t('event_name_exists')}), 400
         rule['id'] = rid
         store.upsert(rule, actor=session.get('username', ''))
-        wa._events_reload()
+        wa._embedded_services['events']._events_reload()
         wa._audit('event_rule_updated', detail={'name': rule['name'], 'id': rid})
         return jsonify({'ok': True, 'rule': rule})
 
@@ -189,7 +189,7 @@ def register(app, wa):
         stored = store.get(rid)
         if stored is None or not store.delete(rid):
             return jsonify({'error': 'Not found'}), 404
-        wa._events_reload()
+        wa._embedded_services['events']._events_reload()
         wa._audit('event_rule_deleted', detail={'id': rid, 'name': stored.get('name', '')})
         return jsonify({'ok': True})
 
@@ -207,6 +207,6 @@ def register(app, wa):
                            timestamp=ts, channels=rule.get('channels') or [],
                            webhook_ids=rule.get('webhook_ids') or [])
         ok = bool(results) and all(r[0] for r in results.values())
-        wa._record_notification(rule, rule.get('source', 'audit'), 'TEST', results or {})
+        wa._embedded_services['events']._record_notification(rule, rule.get('source', 'audit'), 'TEST', results or {})
         wa._audit('event_rule_test', detail={'id': rid, 'ok': ok})
         return jsonify({'ok': ok, 'results': {k: list(v) for k, v in results.items()}})

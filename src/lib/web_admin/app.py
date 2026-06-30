@@ -19,7 +19,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib.config import CONFIG_FILENAME
 from lib.debug import DebugLevel
-from lib.object_base import ObjectBase
+from lib.core.object_base import ObjectBase
 from lib.security import secret_manager
 from .constants import (
     DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang,
@@ -28,7 +28,7 @@ from .constants import (
     ROLES,
 )
 from lib.config.spec import (
-    CFG_BY_PATH, cfg_get, cfg_validate, env_field_specs, normalize_url, registry_defaults)
+    CFG_BY_PATH, cfg_validate, env_field_specs, normalize_url, registry_defaults)
 from .auth import ldap_auth as _ldap_auth
 from .auth import oidc_auth as _oidc_auth
 from .auth import saml_auth as _saml_auth
@@ -50,16 +50,18 @@ def _cfg_default(path: str):
     return CFG_BY_PATH[path].default
 from .mixins import (
     _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-    _SessionsMixin, _AuditMixin, _ChecksMixin, _MonitoringMixin, _SyslogMixin,
-    _ServicesMixin, _EventsMixin,
+    _SessionsMixin, _AuditMixin, _ChecksMixin, _ServicesMixin,
 )
 
 __all__ = ['WebAdmin']
 
 
+# The background services (monitoring / syslog / events) are NOT inherited: the
+# WebAdmin composes one embedded object per service (lib.services.*.embedded),
+# built in __init__ and exposed via ``self._embedded_services``.  _ServicesMixin
+# discovers + controls them.
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-               _SessionsMixin, _AuditMixin, _ChecksMixin, _MonitoringMixin, _SyslogMixin,
-               _ServicesMixin, _EventsMixin):
+               _SessionsMixin, _AuditMixin, _ChecksMixin, _ServicesMixin):
     """Web administration server for ServiceSentry configuration.
 
     Provides a browser-based UI for editing the configuration and managing
@@ -242,33 +244,17 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         except Exception:  # pylint: disable=broad-except
             pass
 
-        # Embedded service monitor: start the scheduler when monitoring is enabled
-        # AND this process may host it (SS_MONITORING_EMBEDDED) — mirroring the
-        # events worker below.  When the env gate is off a standalone --monitor
-        # process / worker container owns the loop (monitoring "external").
-        self._monitoring_init_state()
-        if (self._monitoring_enabled() and self._embedded_monitor_enabled()
-                and self._monitoring_autostart()):
-            self._monitoring_start(run_now=True)
-        # Start the syslog receiver if enabled (own listener threads + retention).
-        self._init_syslog()
-        # Event→notification rules manager (audit/syslog hooks).
-        self._init_events()
-        # Decoupled event worker: persisted cooldown/cursor + a background consumer that
-        # drains syslog/audit off the ingestion path (so a flood of messages never
-        # blocks reception). events|mode = embedded (default) | external (a separate
-        # process/container owns it) | off (no evaluation).
-        self._attach_event_state(getattr(self, '_event_state_store', None))
-        _emode = str((self._config_section('events') or {}).get('mode') or 'embedded').lower()
-        # SS_EVENTS_EMBEDDED=0 lets the worker run as its own process/container
-        # (events|mode=external) and keeps it out of the test harness.
-        _ev_env = os.environ.get('SS_EVENTS_EMBEDDED', '1').strip().lower() not in ('0', 'false', 'no', 'off')
-        # autostart gates only the embedded boot; the worker stays startable from
-        # the Services tab when mode='embedded' but autostart is off.
-        _ev_autostart = bool(cfg_get(self._config_section('events'), 'events|autostart'))
-        if _emode == 'embedded' and _ev_env and _ev_autostart:
-            _poll = (self._config_section('events') or {}).get('poll_secs')
-            self._start_event_worker(int(_poll) if _poll not in (None, '') else 2)
+        # Background services (composition, not inheritance): create the shared
+        # syslog stores (the listener writes them, the events worker + Syslog tab
+        # read them), then build each discovered service's embedded object and let
+        # it start itself per its own gating (enabled/embedded/autostart).  Whether
+        # a service runs embedded here or in a dedicated process is the SS_*_EMBEDDED
+        # env, decided inside each object.
+        self._init_syslog_stores()
+        from lib.services import build_embedded_services  # noqa: PLC0415
+        self._embedded_services = build_embedded_services(self)
+        for _svc in self._embedded_services.values():
+            _svc.start_at_boot()
 
         # Announce the startup state of every background service (running, stopped,
         # disabled or external) so the boot log reflects them all — not only the
@@ -563,6 +549,32 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             )
         except Exception:  # pylint: disable=broad-except
             return None
+
+    def _init_syslog_stores(self) -> None:
+        """Create the shared syslog DB connector + stores.
+
+        They are host infrastructure shared by the embedded listener, the decoupled
+        event worker and the Syslog tab; the listener *server* lifecycle lives in
+        the embedded syslog service object (``lib.services.syslog.embedded``)."""
+        self._syslog_store = None
+        self._syslog_drops_store = None
+        self._syslog_db_connector = None
+        connector = getattr(self, '_db_connector', None)
+        if connector is None:
+            return
+        try:
+            from lib.db import build_syslog_connector  # noqa: PLC0415
+            from lib.stores.syslog import SyslogStore, SyslogDropsStore  # noqa: PLC0415
+            from lib.config.manager import overlay_section_env  # noqa: PLC0415
+            var = self._var_dir or self._config_dir or ''
+            sdb = overlay_section_env('syslog_db', self._config_section('syslog_db'))
+            self._syslog_db_connector = build_syslog_connector(
+                sdb, main_connector=connector,
+                default_sqlite_path=os.path.join(var, 'syslog.db'))
+            self._syslog_store = SyslogStore(self._syslog_db_connector)
+            self._syslog_drops_store = SyslogDropsStore(self._syslog_db_connector)
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     def _read_check_status(self) -> dict:
         """Return the current check state as the nested ``{module: {key: {...}}}``

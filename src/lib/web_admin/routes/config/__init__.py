@@ -319,28 +319,14 @@ def register(app, wa):
             # Re-apply log level immediately so a verbosity change in the UI
             # takes effect for request tracing without waiting for a restart.
             wa._apply_log_level()
-            # Re-apply the syslog listener when any syslog setting changed, but only
-            # when it is currently running — a config edit must not start a listener
-            # the user (or autostart=off) has left stopped.  Starting is a Services
-            # tab action; editing only updates a live listener (or stops it on
-            # disable).
-            if any(p.startswith('syslog|') for p in to_apply) and hasattr(wa, '_syslog_apply_config'):
-                wa._invalidate_config_cache()
-                if getattr(wa, '_syslog_server', None) is not None:
-                    wa._syslog_apply_config()
-            # Master switch: disabling a service from its config tab stops it when
-            # running (disabled ⇒ off).  Enabling does NOT auto-start — that is an
-            # autostart (boot) / Services-tab action.  (Syslog is covered above: its
-            # re-apply stops the listener when it is running and now disabled.)
-            if 'monitoring|enabled' in to_apply and hasattr(wa, '_monitoring_stop'):
-                wa._invalidate_config_cache()
-                if not wa._monitoring_enabled() and wa._monitoring_running:
-                    wa._monitoring_stop()
-            if 'events|mode' in to_apply and hasattr(wa, '_stop_event_worker'):
-                wa._invalidate_config_cache()
-                _mode = str((wa._config_section('events') or {}).get('mode') or 'embedded').lower()
-                if _mode != 'embedded' and wa._event_worker_running():
-                    wa._stop_event_worker()
+            # Let every background service react to the config change — each owns
+            # its own rule (a running syslog listener re-applies new ports/allowlist
+            # or stops on disable; a disabled monitor stops; events leaving embedded
+            # mode stops the worker).  Iterating the registry keeps this generic, so
+            # a new service reacts without touching this route.
+            wa._invalidate_config_cache()
+            for _svc in getattr(wa, '_embedded_services', {}).values():
+                _svc.on_config_changed(to_apply)
             # Apply web_admin.lang at runtime if changed
             new_lang = (new_data.get('web_admin') or {}).get('lang', '')
             wa._default_lang = coerce_lang(new_lang, wa._default_lang)

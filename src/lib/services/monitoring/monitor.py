@@ -39,7 +39,7 @@ from lib.config import ConfigControl, load_config
 from lib.config.spec import cfg_default, normalize_url
 from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
-from lib.object_base import ObjectBase
+from lib.core.object_base import ObjectBase
 from lib.core.telegram import Telegram
 from lib.security import secret_manager
 

@@ -4,7 +4,7 @@
 
 The web admin hosts the scheduler in-process by default (``monitoring|enabled``,
 subject to ``SS_MONITORING_EMBEDDED``, see
-:class:`lib.monitor.manager._MonitoringMixin`), but the same loop can run on its
+:class:`lib.services.monitoring.manager._MonitoringMixin`), but the same loop can run on its
 own host/container, sharing the database with the rest of ServiceSentry.  Set
 ``SS_MONITORING_EMBEDDED=0`` on the web admin so a single ``--monitor`` worker
 owns the checks.
@@ -13,7 +13,7 @@ It wires the collaborators the scheduler needs and nothing else (no Flask, no
 listener): a DB connector + :class:`ConfigManager` (the very same effective config
 edited in the web UI) and a :class:`HistoryStore` for the check history.  Rule
 evaluation is **not** here — that is the decoupled event worker's job
-(:class:`lib.events.service.EventService`); this process only runs the checks.
+(:class:`lib.services.events.service.EventService`); this process only runs the checks.
 """
 
 from __future__ import annotations

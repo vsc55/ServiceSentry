@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from lib.syslog.server import SyslogServer, _parse_binds
+from lib.services.syslog.server import SyslogServer, _parse_binds
 
 
 class TestParseBinds:

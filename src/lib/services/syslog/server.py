@@ -26,7 +26,7 @@ import ssl
 import threading
 import time
 
-from lib.syslog.parser import parse_message
+from lib.services.syslog.parser import parse_message
 
 _MAX_DATAGRAM = 65535          # UDP theoretical max
 _FLUSH_SECS = 1.0              # writer batch interval

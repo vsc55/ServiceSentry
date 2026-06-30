@@ -23,7 +23,7 @@ Two distinct things are centralised here:
   it.
 
 This module is intentionally dependency-free (no Flask, no web_admin imports)
-so it can be imported from the core (``lib.core.monitor``, ``lib.db.*``) without any
+so it can be imported from the core (``lib.services.monitoring.monitor``, ``lib.db.*``) without any
 circular-import or heavyweight side effects.
 
 Notes

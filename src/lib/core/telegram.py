@@ -29,7 +29,7 @@ import threading
 import requests
 
 from lib.debug import DebugLevel
-from lib.object_base import ObjectBase
+from lib.core.object_base import ObjectBase
 
 __all__ = ['Telegram', 'send_telegram']
 

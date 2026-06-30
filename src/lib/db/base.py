@@ -112,7 +112,7 @@ class BaseConnector(ABC):
         Logs the statement only — NEVER the params, which may carry secrets,
         password hashes or other sensitive values.
         """
-        from lib.object_base import ObjectBase  # noqa: PLC0415
+        from lib.core.object_base import ObjectBase  # noqa: PLC0415
         if not ObjectBase.debug.enabled:
             return
         from lib.debug import DebugLevel  # noqa: PLC0415

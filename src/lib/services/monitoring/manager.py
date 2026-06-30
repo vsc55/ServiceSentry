@@ -9,7 +9,7 @@ audits failures.
 
 This module is intentionally Flask-free so it can be mixed into both the WebAdmin
 (embedded, ``SS_MONITORING_EMBEDDED`` decides whether this process hosts it) and
-the standalone :class:`lib.monitor.service.MonitorService` (a separate
+the standalone :class:`lib.services.monitoring.service.MonitorService` (a separate
 ``--monitor`` process / Docker worker) — exactly like :class:`_EventsMixin` is
 shared by the WebAdmin and the events/syslog services.
 
@@ -197,129 +197,32 @@ class _MonitoringMixin:
         return self._monitoring_monitor
 
     def _monitoring_run_one_cycle(self) -> tuple[dict, list]:
-        """Run all checks using the persistent Monitor.
-
-        Delegates to _run_checks but ensures the same Monitor instance is
-        reused so state-change detection works correctly across cycles.
+        """Run all enabled checks for one scheduler cycle on the *persistent*
+        Monitor (so change-detection state carries across cycles).  The per-module
+        run is delegated to the shared
+        :func:`lib.services.monitoring.executor.run_checks` (the same executor the
+        on-demand UI checks use); only the cycle setup + logging live here.
         """
-        monitor = self._monitoring_get_monitor()
-        # Apply the global|log_level config to the shared debug each cycle so
-        # changing it in the UI takes effect without a restart.
-        monitor.debug.set_from_config(cfg_get(self._config_section('global'), 'global|log_level'))
-        # Re-read the effective (DB) config each cycle so live edits to the
-        # Telegram credentials / public URL take effect without a restart.
-        monitor.refresh_runtime_config()
-        # _run_checks normally creates its own Monitor; bypass that by calling
-        # the lower-level helpers directly on our persistent instance.
-        import threading as _threading  # pylint: disable=import-outside-toplevel
-        _save_lock    = _threading.Lock()
-        _hist_lock    = _threading.Lock()
-        _hist_records: list = []
-        results: dict = {}
-        errors: list[str] = []
+        from lib.services.monitoring.executor import run_checks  # noqa: PLC0415
 
-        # Drop stale live status for hosts now in maintenance before running.
+        monitor = self._monitoring_get_monitor()
+        # Apply global|log_level + re-read the effective (DB) config each cycle so
+        # live edits to verbosity / Telegram / public URL take effect without a
+        # restart; then drop stale live status for hosts now in maintenance.
+        monitor.debug.set_from_config(cfg_get(self._config_section('global'), 'global|log_level'))
+        monitor.refresh_runtime_config()
         monitor.purge_maintenance_states()
 
         module_names = monitor._get_enabled_modules()
         if not module_names:
             monitor.debug.print("> Daemon >> Cycle skipped: no enabled modules",
                                  DebugLevel.info)
-            return results, errors
+            return {}, []
         monitor.debug.print(
             f"> Daemon >> Cycle start: {len(module_names)} module(s)", DebugLevel.info)
 
-        import concurrent.futures  # pylint: disable=import-outside-toplevel
-        _enabled_set = set(module_names)
-
-        def _has_items(mod_name: str) -> bool:
-            cfg = monitor.config_modules.get_conf([mod_name]) or {}
-            if not isinstance(cfg, dict):
-                return False
-            for val in cfg.values():
-                if isinstance(val, dict) and val:
-                    return True
-            return False
-
-        def _run_one(mod_name: str):
-            try:
-                success, result_name, result_data = monitor.check_module(mod_name)
-                if success and result_data is not None:
-                    with _save_lock:
-                        monitor._process_module_result(result_name, result_data)
-                        monitor.status.save()
-                    with _hist_lock:
-                        for _key in result_data.list:
-                            _hist_records.append((
-                                result_name,
-                                _key,
-                                result_data.get_status(_key),
-                                result_data.get_other_data(_key),
-                            ))
-                    items = {
-                        key: {
-                            'status':  result_data.get_status(key),
-                            'message': result_data.get_message(key),
-                        }
-                        for key in result_data.list
-                    }
-                    _failed = sum(1 for k in items if items[k]['status'] is not True)
-                    monitor.debug.print(
-                        f"> Daemon > {mod_name} >> {len(items)} item(s), {_failed} not OK",
-                        DebugLevel.debug)
-                    return mod_name, items, None
-                if mod_name in _enabled_set and not _has_items(mod_name):
-                    return mod_name, {}, None
-                monitor.debug.print(f"> Daemon > {mod_name} >> check failed",
-                                    DebugLevel.warning)
-                return mod_name, None, f'{mod_name}: check failed'
-            except Exception as exc:  # pylint: disable=broad-except
-                if mod_name in _enabled_set and not _has_items(mod_name):
-                    return mod_name, {}, None
-                monitor.debug.print(
-                    f"> Daemon > {mod_name} >> {type(exc).__name__}: {exc}",
-                    DebugLevel.error)
-                return mod_name, None, f'{mod_name}: {type(exc).__name__}: {exc}'
-
-        # Warm imports sequentially first so the dns module's dnspython load (which
-        # transiently removes watchfuls/ from sys.path) can't race with concurrent
-        # bare-name imports of the other modules.
-        for _m in module_names:
-            try:
-                monitor._import_watchful(_m)
-            except Exception:  # pylint: disable=broad-except
-                pass
-
-        workers = min(len(module_names), 16)
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
-        try:
-            future_to_mod = {executor.submit(_run_one, m): m for m in module_names}
-            done, not_done = concurrent.futures.wait(
-                future_to_mod.keys(), timeout=120,
-            )
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
-
-        for future in done:
-            mod = future_to_mod[future]
-            try:
-                name, items, err = future.result()
-                if items is not None:
-                    results[name] = items
-                else:
-                    errors.append(err or name)
-            except Exception as exc:  # pylint: disable=broad-except
-                errors.append(f'{mod}: {exc}')
-
-        for future in not_done:
-            errors.append(f'{future_to_mod[future]}: timeout')
-
-        # Write history sequentially from the daemon thread — no concurrent
-        # lock contention on the SQLite file.
-        _history = getattr(self, '_history', None)
-        if _history and _hist_records:
-            for _mod, _key, _status, _data in _hist_records:
-                _history.record(_mod, _key, _status, _data)
+        results, errors = run_checks(monitor, module_names, timeout=120,
+                                     history=getattr(self, '_history', None))
 
         if errors:
             monitor.debug.print(

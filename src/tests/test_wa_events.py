@@ -85,7 +85,7 @@ class TestEventMatching:
             'name': 'r', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']})
         with mock.patch(_DISP) as disp:
-            admin._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {'user': 'bob'}})
+            admin._embedded_services['events']._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {'user': 'bob'}})
         assert disp.called
         assert disp.call_args.kwargs['kind'] == 'event'
         assert disp.call_args.kwargs['channels'] == ['telegram']
@@ -96,7 +96,7 @@ class TestEventMatching:
             'name': 'r', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']})
         with mock.patch(_DISP) as disp:
-            admin._eval_event('audit', {'event': 'login_ok', 'user': 'system', 'detail': {}})
+            admin._embedded_services['events']._eval_event('audit', {'event': 'login_ok', 'user': 'system', 'detail': {}})
         assert not disp.called
 
     def test_disabled_rule_does_not_fire(self, admin, client):
@@ -105,7 +105,7 @@ class TestEventMatching:
             'name': 'r', 'enabled': False, 'source': 'audit',
             'events': ['login_failed'], 'channels': ['telegram']})
         with mock.patch(_DISP) as disp:
-            admin._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
+            admin._embedded_services['events']._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
         assert not disp.called
 
     def test_syslog_rule_matches_by_severity(self, admin, client):
@@ -117,10 +117,10 @@ class TestEventMatching:
                    'source': '1.1.1.1', 'app': 'x', 'message': 'boom', 'received_at': ''}
         rec_info = {**rec_err, 'severity': 6, 'message': 'fine'}
         with mock.patch(_DISP) as disp:
-            admin._eval_event('syslog',rec_err)
+            admin._embedded_services['events']._eval_event('syslog',rec_err)
             assert disp.called and disp.call_args.kwargs['channels'] == ['webhook']
         with mock.patch(_DISP) as disp:
-            admin._eval_event('syslog',rec_info)        # severity 6 > 3 → no match
+            admin._embedded_services['events']._eval_event('syslog',rec_info)        # severity 6 > 3 → no match
             assert not disp.called
 
     def test_cooldown_suppresses_second(self, admin, client):
@@ -129,8 +129,8 @@ class TestEventMatching:
             'name': 'r', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram'], 'cooldown': 60})
         with mock.patch(_DISP) as disp:
-            admin._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
-            admin._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
+            admin._embedded_services['events']._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
+            admin._embedded_services['events']._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
         assert disp.call_count == 1
 
     def test_blank_cooldown_inherits_global(self, admin, client):
@@ -141,8 +141,8 @@ class TestEventMatching:
             'name': 'g', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']})
         with mock.patch(_DISP) as disp:
-            admin._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
-            admin._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
+            admin._embedded_services['events']._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
+            admin._embedded_services['events']._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
         assert disp.call_count == 1                     # global cooldown suppresses the 2nd
 
     def test_explicit_zero_overrides_global(self, admin, client):
@@ -153,8 +153,8 @@ class TestEventMatching:
             'name': 'z', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram'], 'cooldown': 0})
         with mock.patch(_DISP) as disp:
-            admin._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
-            admin._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
+            admin._embedded_services['events']._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
+            admin._embedded_services['events']._eval_event('audit', {'event': 'login_failed', 'user': 'system', 'detail': {}})
         assert disp.call_count == 2                     # 0 overrides the global default
 
 
@@ -184,7 +184,7 @@ class TestMatchTypes:
         rec = {'severity': 5, 'severity_name': 'notice', 'hostname': 'h',
                'source': '1.1.1.1', 'app': 'x', 'message': text, 'received_at': ''}
         with mock.patch(_DISP) as disp:
-            admin._eval_event('syslog',rec)
+            admin._embedded_services['events']._eval_event('syslog',rec)
         assert disp.called is should_fire
 
 
@@ -266,13 +266,13 @@ class TestEventWorker:
         client.post('/api/v1/event-rules', json={
             'name': 'w', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']})
-        admin._event_state.set_cursor('audit', 0)        # process from the start
+        admin._embedded_services['events']._event_state.set_cursor('audit', 0)        # process from the start
         admin._audit_system('login_failed', detail={})   # decoupled: only stores a row
         with mock.patch(_DISP) as disp:
-            processed = admin._event_worker_tick()
+            processed = admin._embedded_services['events']._event_worker_tick()
         assert processed >= 1
         assert disp.called                                # the worker fired the rule
 
     def test_cooldown_is_persisted(self, admin):
-        admin._event_state.set_cooldown('rule-x', 123.0)
-        assert admin._event_state.cooldowns().get('rule-x') == 123.0
+        admin._embedded_services['events']._event_state.set_cooldown('rule-x', 123.0)
+        assert admin._embedded_services['events']._event_state.cooldowns().get('rule-x') == 123.0

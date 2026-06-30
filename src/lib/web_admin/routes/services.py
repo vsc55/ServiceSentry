@@ -8,8 +8,10 @@ POST /api/v1/services/<name>/<action>  → start|stop an embedded service.
 
 from flask import jsonify
 
-_CONTROLLABLE = {'monitoring', 'syslog', 'events'}
-_ACTIONS = {'start', 'stop'}
+# Validation + dispatch are driven by the central ServiceRegistry (wa._service_control),
+# so there is no per-service list to keep in sync here.
+_HTTP_FOR_REASON = {'unknown_service': 404, 'bad_action': 400,
+                    'not_controllable': 409, 'disabled': 409}
 
 
 def register(app, wa):
@@ -19,20 +21,16 @@ def register(app, wa):
     @app.route('/api/v1/services', methods=['GET'])
     @services_view_req
     def api_services_status():
-        """Status snapshot of scheduler / syslog / worker / database."""
+        """Status snapshot of every registered service."""
         return jsonify({'services': wa._services_status_dict()})
 
     @app.route('/api/v1/services/<name>/<action>', methods=['POST'])
     @services_control_req
     def api_services_control(name, action):
-        """Start or stop an embedded service (scheduler / syslog)."""
-        if name not in _CONTROLLABLE:
-            return jsonify({'error': 'unknown_service'}), 404
-        if action not in _ACTIONS:
-            return jsonify({'error': 'bad_action'}), 400
+        """Start or stop a controllable service (validated via the registry)."""
         ok, reason = wa._service_control(name, action)
         status = wa._services_status_dict()
-        if not ok and reason in ('not_controllable', 'disabled'):
+        if not ok and reason in _HTTP_FOR_REASON:
             return jsonify({'ok': False, 'reason': reason,
-                            'services': status}), 409
+                            'services': status}), _HTTP_FOR_REASON[reason]
         return jsonify({'ok': ok, 'reason': reason, 'services': status})

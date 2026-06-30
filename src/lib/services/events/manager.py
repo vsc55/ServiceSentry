@@ -8,7 +8,7 @@ chose (via lib.notify.notification_dispatcher, channels override).
 
 This module is intentionally Flask-free (the dispatcher is imported lazily only
 when a rule actually fires) so it can be mixed into both the WebAdmin and the
-standalone :class:`lib.syslog.service.SyslogService`.
+standalone :class:`lib.services.syslog.service.SyslogService`.
 
 Sources:
 * ``audit``  — every audit-log entry (login_failed, daemon/syslog started/stopped,

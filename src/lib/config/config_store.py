@@ -30,7 +30,7 @@ import threading
 import time
 
 from lib.debug import DebugLevel
-from lib.object_base import ObjectBase
+from lib.core.object_base import ObjectBase
 
 # Module-level lock serialises concurrent writes from multiple threads in the
 # same process (e.g. parallel watchful checks each calling status.save()).

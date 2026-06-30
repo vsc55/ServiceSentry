@@ -8,8 +8,8 @@ from lib.modules.dict_files_path import DictFilesPath
 from lib.system.exe import Exec, ExecResult
 from lib.system.mem import Mem
 from lib.system.mem_info import MemInfo
-from lib.core.monitor import Monitor
-from lib.object_base import ObjectBase
+from lib.services.monitoring.monitor import Monitor
+from lib.core.object_base import ObjectBase
 from lib.core.telegram import Telegram
 
 __all__ = [

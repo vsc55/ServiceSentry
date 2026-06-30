@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the standalone syslog receiver (``lib.syslog.service.SyslogService``).
+"""Tests for the standalone syslog receiver (``lib.services.syslog.service.SyslogService``).
 
 The service shares the database and config with the rest of the app, so the
 ``admin`` fixture is reused to lay down the config dir, secret key and DB; the
@@ -15,7 +15,7 @@ import pytest
 
 try:
     from lib.web_admin import WebAdmin  # noqa: F401
-    from lib.syslog.service import SyslogService
+    from lib.services.syslog.service import SyslogService
     _HAS_FLASK = True
 except ImportError:
     _HAS_FLASK = False
@@ -66,8 +66,8 @@ class TestReceive:
         admin._write_config({'syslog': {'enabled': True, 'bind_host': '127.0.0.1',
                                         'udp_port': port}})
         admin._invalidate_config_cache()
-        problems = service._apply_config()
-        assert problems == [] and service._server is not None
+        problems = service._syslog_apply_config()
+        assert problems == [] and service._syslog_server is not None
         c = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         c.sendto(b'<34>Oct 11 22:14:15 myhost su: failed login', ('127.0.0.1', port))
         c.close()
@@ -81,8 +81,8 @@ class TestReceive:
     def test_disabled_does_not_bind(self, admin, service):
         admin._write_config({'syslog': {'enabled': False}})
         admin._invalidate_config_cache()
-        assert service._apply_config() == []
-        assert service._server is None
+        assert service._syslog_apply_config() == []
+        assert service._syslog_server is None
 
     def test_enable_only_still_has_default_ports(self, admin, service):
         # Regression: saving just ``enabled`` must not drop the ports — the
@@ -179,7 +179,7 @@ class TestRun:
         t.start()
         t.join(timeout=1.0)
         assert t.is_alive()                    # still running, not exited
-        assert service._server is None         # nothing bound while disabled
+        assert service._syslog_server is None         # nothing bound while disabled
         service.stop()
         t.join(timeout=3.0)
         assert not t.is_alive() and rc == [0]
@@ -195,14 +195,14 @@ class TestRun:
         t.start()
         try:
             t.join(timeout=0.5)
-            assert service._server is None
+            assert service._syslog_server is None
             admin._write_config({'syslog': {'enabled': True, 'bind_host': '127.0.0.1',
                                             'udp_port': port}})
             admin._invalidate_config_cache()
             # force an immediate reload rather than waiting for the poll interval
             service._config_mgr.invalidate()
-            service._apply_config()
-            assert service._server is not None and service._server.running
+            service._syslog_apply_config()
+            assert service._syslog_server is not None and service._syslog_server.running
         finally:
             service.stop()
             t.join(timeout=3.0)
@@ -235,7 +235,7 @@ class TestTraceability:
         admin._write_config({'syslog': {'enabled': True, 'bind_host': '127.0.0.1',
                                         'udp_port': port}})
         admin._invalidate_config_cache()
-        service._apply_config()
+        service._syslog_apply_config()
         service.stop()
         out = capsys.readouterr().out
         assert 'starting listener' in out

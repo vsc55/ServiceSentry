@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Tests for the syslog message parser (RFC 3164 + RFC 5424)."""
 
-from lib.syslog.parser import parse_message, SEVERITIES, FACILITIES
+from lib.services.syslog.parser import parse_message, SEVERITIES, FACILITIES
 
 
 class TestPri:
