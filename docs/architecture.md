@@ -10,7 +10,7 @@ jerarquía de clases, estructura de directorios y flujo de ejecución.
 ```text
 ┌─────────────────────────────────────────────────────┐
 │                     main.py                         │
-│  (CLI, argparse, daemon loop, config init)          │
+│  (CLI, argparse, dispatch de modos: web/monitor/…)  │
 └──────────────────────┬──────────────────────────────┘
                        │
                        ▼
@@ -48,7 +48,8 @@ ObjectBase (lib/object_base.py)
 │   ├── ConfigStore-BD (lib/stores/config.py)      ← capa editable: tabla `config` (una fila por sección|campo)
 │   ├── ConfigControl (lib/config/config_control.py)  ← I/O JSON de config.json (solo arranque + pins)
 │   └── lib/config/resolve.py: resolve_config() fusiona env > config.json > BD > default;
-│       migrate_config_to_db() migración única; FILE_ONLY_SECTIONS = {database, webhooks}
+│       migrate_config_to_db() migración única; FILE_ONLY_SECTIONS = {database}
+│       (webhooks NO: tienen su propia tabla, lib/stores/webhooks.py)
 │       (lib/config/spec.py: registro central de defaults; load_config() ya NO siembra a disco)
 ├── WebAdmin (lib/web_admin/app.py)
 │   ├── _UsersMixin      (lib/web_admin/mixins/users.py)
@@ -58,7 +59,7 @@ ObjectBase (lib/object_base.py)
 │   ├── _SessionsMixin   (lib/web_admin/mixins/sessions.py)
 │   ├── _AuditMixin      (lib/web_admin/mixins/audit.py)
 │   ├── _ChecksMixin     (lib/web_admin/mixins/checks.py)
-│   ├── _DaemonMixin     (lib/web_admin/mixins/daemon.py)
+│   ├── _MonitoringMixin (lib/monitor/manager.py, reexportado por mixins/monitoring.py; SIN Flask) ← scheduler compartido por WebAdmin y el servicio standalone --monitor
 │   ├── _SyslogMixin     (lib/web_admin/mixins/syslog.py)     ← receptor syslog + registro de descartes
 │   ├── _ServicesMixin   (lib/web_admin/mixins/services.py)   ← estado/control de servicios
 │   └── _EventsMixin     (lib/events/manager.py, reexportado por mixins/events.py; SIN Flask) ← evalúa reglas + worker desacoplado (cursor syslog/audit); compartido por WebAdmin y los servicios standalone (syslog/events)
@@ -72,18 +73,18 @@ ObjectBase (lib/object_base.py)
 │   ├── RolesStore      (lib/stores/roles.py)        → tabla roles
 │   ├── SessionsStore   (lib/stores/sessions.py)     → tabla sessions
 │   ├── AuditStore      (lib/stores/audit.py)        → tabla audit
-│   ├── CheckStateStore (lib/stores/check_state.py)  → tabla check_state (estado vivo de checks)
+│   ├── CheckStateStore (lib/stores/check_state/store.py)  → tabla check_state (estado vivo de checks)
 │   ├── CredentialsStore(lib/stores/credentials.py)  → tabla credentials (identidades SSH reutilizables)
 │   ├── HistoryStore    (lib/stores/history.py)      → tabla history (series temporales)
 │   ├── HostsStore      (lib/stores/hosts.py)        → tabla hosts (servidores + perfiles de conexión)
-│   ├── ModulesStore    (lib/stores/modules.py)      → tablas module_config, module_config_items (config de módulos/ítems)
+│   ├── ModulesStore    (lib/stores/modules/store.py)  → tablas module_config, module_config_items (config de módulos/ítems)
 │   ├── ConfigStore     (lib/stores/config.py)       → tabla config (capa editable: una fila por sección|campo)
 │   ├── WebhooksStore   (lib/stores/webhooks.py)     → tabla webhooks (destinos HTTP salientes)
-│   ├── EventRulesStore (lib/stores/event_rules.py)  → tabla event_rules (reglas de notificación)
-│   ├── NotificationLogStore (lib/stores/notification_log.py) → tabla notification_log (log de envíos)
-│   ├── EventStateStore (lib/stores/event_state.py)   → tablas event_cooldowns + event_cursor (estado del worker de eventos)
-│   ├── SyslogStore     (lib/stores/syslog.py)        → tabla syslog (mensajes; puede ir en BD dedicada)
-│   └── SyslogDropsStore(lib/stores/syslog_drops.py)  → tabla syslog_drops (orígenes descartados por la allowlist)
+│   ├── EventRulesStore (lib/stores/event/rules.py)  → tabla event_rules (reglas de notificación)
+│   ├── NotificationLogStore (lib/stores/event/log.py) → tabla notification_log (log de envíos)
+│   ├── EventStateStore (lib/stores/event/state.py)   → tablas event_cooldowns + event_cursor (estado del worker de eventos)
+│   ├── SyslogStore     (lib/stores/syslog/messages.py)  → tabla syslog (mensajes; puede ir en BD dedicada)
+│   └── SyslogDropsStore(lib/stores/syslog/drops.py)     → tabla syslog_drops (orígenes descartados por la allowlist)
 └── ModuleBase (lib/modules/module_base.py)
     ├── watchfuls.datastore::Watchful         🌐 (multiplataforma)
     ├── watchfuls.filesystemusage::Watchful  🌐 (multiplataforma)
@@ -164,8 +165,10 @@ ServiceSentry/
 │   │   │   ├── postgresql.py            # PostgreSQLConnector (psycopg2)
 │   │   │   └── module_tables.py         # Tablas declaradas por módulos (reconciliadas en la BD general)
 │   │   ├── config/
-│   │   │   ├── __init__.py              # load_config(): lee config.json y siembra defaults; CONFIG_FILENAME
-│   │   │   ├── spec.py                  # Registro central de defaults/reglas/overrides por env (cfg_default, ensure_config_defaults)
+│   │   │   ├── __init__.py              # load_config(): SOLO lee config.json (nunca siembra a disco); CONFIG_FILENAME
+│   │   │   ├── spec.py                  # Registro central de defaults/reglas/overrides por env (cfg_default, registry_defaults)
+│   │   │   ├── manager.py               # ConfigManager: ÚNICO dueño de la E/S de config (read/write/migrate)
+│   │   │   ├── resolve.py               # resolve_config(): fusiona env > config.json > BD > default; FILE_ONLY_SECTIONS
 │   │   │   ├── config_store.py          # I/O JSON (lectura/escritura)
 │   │   │   ├── config_control.py        # Operaciones sobre config (get/set/exist)
 │   │   │   └── config_type_return.py    # Enum tipos de retorno
@@ -196,7 +199,7 @@ ServiceSentry/
 │   │       ├── mixins/                  # Lógica de negocio por dominio (11 mixins)
 │   │       │   ├── users.py roles.py groups.py permissions.py
 │   │       │   ├── sessions.py audit.py checks.py
-│   │       │   ├── daemon.py            # _DaemonMixin: planificador en segundo plano
+│   │       │   ├── monitoring.py        # reexporta _MonitoringMixin de lib/monitor/manager.py (scheduler)
 │   │       │   ├── syslog.py            # _SyslogMixin: receptor syslog + descartes
 │   │       │   ├── services.py          # _ServicesMixin: estado/control de servicios
 │   │       │   └── events.py            # reexporta _EventsMixin de lib/events/manager.py
@@ -207,8 +210,9 @@ ServiceSentry/
 │   │           ├── sessions/            # /api/v1/sessions, /api/v1/audit
 │   │           ├── modules/             # /api/v1/modules, status, overview, checks/run
 │   │           ├── notify/              # /api/v1/notify/* (telegram, email, webhook, templates)
-│   │           ├── config.py webhooks.py watchfuls.py history.py daemon.py
-│   │           ├── hosts.py credentials.py syslog.py events.py services.py
+│   │           ├── config/ (paquete)  events/ (paquete)  hosts/ (paquete)  syslog/ (paquete)
+│   │           ├── watchfuls.py history.py daemon.py credentials.py services.py
+│   │           ├── notify/webhooks.py  (webhooks bajo notify/)
 │   │           ├── status.py ui.py errors.py
 │   │           └── …                    # (inventario completo de endpoints en web_admin.md)
 │   ├── watchfuls/                       # Módulos de monitorización (packages)
@@ -271,23 +275,23 @@ ServiceSentry/
 ### Inicio
 
 ```text
-1. main.py: argparse procesa argumentos CLI
-2. Main.__init__():
-   ├── Inicializa atributos defensivamente
-   ├── Añade watchfuls/ al sys.path
-   ├── _args_set() → aplica argumentos (path, verbose, timer, daemon)
-   ├── _init_config() → lee config.json, aplica defaults, lee valores
-   ├── _init_monitor() → crea Monitor(dir_base, dir_config, dir_modules, dir_var)
-   │   └── Monitor.__init__():
-   │       ├── Reutiliza la config ya cargada (o la lee si no se inyecta)
-   │       ├── Inicializa Telegram (token + chat_id)
-   │       ├── Abre el conector de BD (sección database; SQLite data.db por defecto)
-   │       ├── _apply_db_config() → fusiona la config editable de la BD bajo config.json
-   │       └── Crea los stores: check_state, history, hosts, credentials, audit
-   └── _args_cmd() → ejecuta comandos (ej: clear_status)
-3. Main.start():
-   ├── Modo single: monitor.check() una vez
-   └── Modo daemon: loop infinito con sleep(timer_check)
+1. main.py: args_init() (argparse) procesa los flags CLI y los envs SS_* de arranque
+2. Dispatch por modo en __main__ (mutuamente excluyentes; SIN flag → panel web):
+   ├── --monitor → start_monitor() → MonitorService(...).run(once = (-t 0))
+   ├── --syslog  → start_syslog()  → SyslogService(...).run()
+   ├── --events  → start_events()  → EventService(...).run()
+   └── (default) / --web → start_web() → WebAdmin(...).run(host, port)
+3. Cada servicio standalone (lib/{monitor,syslog,events}/service.py):
+   ├── Resuelve config_dir/var_dir (compute_app_dirs)
+   ├── Abre el conector de BD (sección database; SQLite data.db por defecto) + ConfigManager
+   ├── Crea sus stores; el monitor mantiene UN Monitor persistente
+   │   └── Monitor.__init__(): Telegram, conector de BD, _apply_db_config()
+   │       (fusiona la config editable de la BD bajo config.json), stores
+   └── run(): bucle propio hasta SIGINT/SIGTERM
+       (MonitorService = scheduler de checks; SyslogService = listener; EventService = worker por cursor)
+4. start_web (WebAdmin) hospeda además los servicios EMBEBIDOS según los gates
+   SS_MONITORING_EMBEDDED / SS_SYSLOG_EMBEDDED / SS_EVENTS_EMBEDDED, arrancando cada
+   uno si está enabled + autostart (reutilizando los mismos mixins/_*Service).
 ```
 
 ### Ciclo de Check
@@ -480,7 +484,7 @@ sigue en la BD principal. La topología `docker-compose.microservices.yml` levan
 dos MariaDB y enruta syslog a la dedicada vía `SS_SYSLOG_DB_*` (ver
 [configuration.md](configuration.md) y [docker.md](docker.md)).
 
-El **store de módulos** (`lib/stores/modules.py`) guarda la configuración de
+El **store de módulos** (`lib/stores/modules/store.py`) guarda la configuración de
 watchfuls, en dos tablas: `module_config` (una
 fila por módulo: campos a nivel de módulo —`enabled`, `alert`, `interval`, meta
 `__*__`— como JSON) y `module_config_items` (una fila por ítem: `host_uid`/`label`/

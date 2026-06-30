@@ -1035,7 +1035,7 @@ class TestSchema:
 ### Thermal sensors
 
 ```python
-from lib.linux import ThermalInfoCollection  # requires SUPPORTED_PLATFORMS = ('linux',)
+from lib.system.linux import ThermalInfoCollection  # requires SUPPORTED_PLATFORMS = ('linux',)
 
 col = ThermalInfoCollection(autodetect=True)
 for node in col.nodes:
@@ -1047,7 +1047,7 @@ for node in col.nodes:
 ### RAID arrays (`/proc/mdstat`)
 
 ```python
-from lib.linux import RaidMdstat  # requires SUPPORTED_PLATFORMS = ('linux',)
+from lib.system.linux import RaidMdstat  # requires SUPPORTED_PLATFORMS = ('linux',)
 
 md = RaidMdstat()                          # local
 md = RaidMdstat(host='h', port=22, user='root', key_file='/path/key')  # remote

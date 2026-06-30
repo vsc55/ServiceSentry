@@ -37,11 +37,14 @@ pip install -r requirements-dev.txt
 ```bash
 cd src
 
-# Ejecución única
-python3 main.py
+# Una sola pasada de monitorización
+python3 main.py --monitor -t 0
 
-# Modo daemon, comprobación cada 5 minutos
-python3 main.py -d -t 300
+# Monitor continuo, comprobación cada 5 minutos
+python3 main.py --monitor -t 300
+
+# Panel web (modo por defecto si no se pasa ningún flag)
+python3 main.py --web
 
 # Salida detallada
 python3 main.py -v
@@ -56,7 +59,7 @@ En modo desarrollo (cuando `src` está en la ruta), los archivos de configuraci�
 
 ## Tests
 
-El proyecto tiene **1400 tests** usando `pytest`, con ejecución paralela automática via `pytest-xdist`.
+El proyecto tiene **más de 2700 tests** usando `pytest`, con ejecución paralela automática via `pytest-xdist`.
 
 ### Ejecutar todos los tests
 

@@ -1,8 +1,8 @@
 # ServiceSentry — microservices topology behind Traefik (public/Internet)
 # =======================================================================
-# Same five-container, two-database split as docker-compose.microservices.yml,
+# Same six-container, two-database split as docker-compose.microservices.yml,
 # but published to the Internet through a Traefik reverse proxy with automatic
-# Let's Encrypt TLS. Six containers, two MariaDB databases:
+# Let's Encrypt TLS. Seven containers, two MariaDB databases:
 #   • traefik    — reverse proxy: terminates TLS, redirects HTTP→HTTPS, routes
 #                  your domain to the web container (the ONLY service publishing
 #                  80/443 to the host).
@@ -13,6 +13,7 @@
 #   • worker     — the periodic monitoring loop (owns scheduling).
 #   • syslog     — the standalone syslog receiver (binds the UDP/TCP/TLS ports
 #                  directly on the host; raw syslog is NOT proxied by Traefik).
+#   • events     — the decoupled event processor (evaluates notification rules).
 #
 #   cp docker/env.example docker/.env     # then edit. REQUIRED here, on top of
 #                                         #  the microservices vars:

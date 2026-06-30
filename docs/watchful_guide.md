@@ -925,7 +925,7 @@ output = result.out or ''
 #### API orientada a objetos (para múltiples comandos al mismo host)
 
 ```python
-from lib.exe import Exec
+from lib.system.exe import Exec   # (o `from lib import Exec`)
 
 runner = Exec()
 runner.set_remote(
@@ -956,7 +956,7 @@ r2 = runner.start()
 
 ---
 
-## 5c. Utilidades Linux (`lib/linux/`)
+## 5c. Utilidades Linux (`lib/system/linux/`)
 
 Utilidades para módulos que monitorizan hardware Linux específico. Solo disponibles en plataformas Linux.
 
@@ -965,7 +965,7 @@ Utilidades para módulos que monitorizan hardware Linux específico. Solo dispon
 Lee los sensores de `/sys/class/thermal/thermal_zone*`.
 
 ```python
-from lib.linux import ThermalInfoCollection
+from lib.system.linux import ThermalInfoCollection
 
 # Detectar automáticamente todos los sensores
 col = ThermalInfoCollection(autodetect=True)
@@ -997,7 +997,7 @@ Cada `ThermalNode` expone:
 Parsea `/proc/mdstat` local o remoto (vía SSH).
 
 ```python
-from lib.linux import RaidMdstat
+from lib.system.linux import RaidMdstat
 
 # ── Local ──────────────────────────────────────────────────
 md = RaidMdstat()

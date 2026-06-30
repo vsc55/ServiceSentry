@@ -163,7 +163,7 @@ flowchart TB
 # Monolítica (un contenedor)
 docker compose -f docker/docker-compose.monolithic.yml up -d
 
-# Microservicios (web + worker + syslog, 2 BD)
+# Microservicios (web + worker + syslog + events, 2 BD)
 docker compose -f docker/docker-compose.microservices.yml up -d
 
 # Microservicios + Traefik (publicado a Internet por HTTPS)
@@ -199,8 +199,9 @@ ambos compose cargan con `env_file`; en los compose solo quedan los valores que
 dependen del servicio/topología (`SS_SERVICE_ROLE`, `SS_WEB_HOST`/`SS_WEB_PORT`, y
 los gates `SS_MONITORING_EMBEDDED`/`SS_SYSLOG_EMBEDDED`/`SS_EVENTS_EMBEDDED`). Los
 valores de `environment:` del compose tienen prioridad sobre los del `.env`.
-El script de arranque `entrypoint.sh` solo traduce `SS_SERVICE_ROLE`, `SS_WEB_HOST`,
-`SS_WEB_PORT` y `SS_VERBOSE` a flags del CLI; el resto de variables (config.json,
+El script de arranque `entrypoint.sh` solo traduce a flags del CLI `SS_SERVICE_ROLE`,
+`SS_WEB_HOST`, `SS_WEB_PORT`, `SS_VERBOSE`, `SS_LOG_LEVEL` y `SS_SYSLOG_HOST`/
+`SS_SYSLOG_PORT`; el resto de variables (config.json,
 `SS_*`) las aplica en runtime el proceso Python y **nunca
 se escriben a `config.json`**. Las variables que no estén definidas dejan el valor
 de configuración existente sin modificar, por lo que los cambios realizados desde
@@ -239,6 +240,9 @@ el panel web sobreviven a los reinicios del contenedor.
 | `SS_EVENTS_EMBEDDED` | `1` | `0` para que el web **no** evalúe las reglas de eventos (lo hace el contenedor `events`) |
 | `SS_WEB_PORT` | `8080` | Puerto en el que escucha el panel web (argumento `--web-port`). Tiene prioridad sobre `SS_PORT` y el valor guardado en `config.json` |
 | `SS_PORT` | `8080` | Override en runtime del puerto web (`web_admin` → `port`); equivalente al campo **Puerto web** en Configuración → Acceso Externo. Si además se define `SS_WEB_PORT`, manda **`SS_WEB_PORT`** (prioridad: `SS_WEB_PORT` > `SS_PORT` > `config.json`) |
+| **Receptor syslog** (rol `syslog`) | | |
+| `SS_SYSLOG_HOST` | *(vacío)* | Override del host de escucha del receptor (`--syslog-host`); vacío = valor de config |
+| `SS_SYSLOG_PORT` | *(vacío)* | Override del puerto UDP **y** TCP del receptor (`--syslog-port`); TLS conserva su puerto |
 | **Credenciales** | | |
 | `SS_USERNAME` | *(obligatorio)* | Usuario del panel de administración |
 | `SS_PASSWORD` | *(obligatorio)* | Contraseña del panel de administración |
@@ -266,7 +270,8 @@ el panel web sobreviven a los reinicios del contenedor.
 | `SS_TELEGRAM_CHAT_ID` | *(no definido)* | ID del chat o grupo de Telegram |
 | `SS_TELEGRAM_GROUP_MESSAGES` | `false` | Agrupar varias alertas en un único mensaje |
 | **Varios** | | |
-| `SS_VERBOSE` | `false` | Activar salida detallada / debug (fuerza el nivel máximo, equivale a `--verbose`). Para un nivel concreto usa `global.log_level` desde el panel (**Configuración → Interfaz**) |
+| `SS_VERBOSE` | `false` | Activar salida detallada / debug (fuerza el nivel máximo, equivale a `--verbose`). Para un nivel concreto usa `SS_LOG_LEVEL` o `global.log_level` desde el panel (**Configuración → Interfaz**) |
+| `SS_LOG_LEVEL` | *(vacío)* | Nivel de log para cualquier rol (`off`/`debug`/`info`/`warning`/`error`); sobreescribe el valor guardado. `SS_VERBOSE`/`-v` siguen forzando debug. Vacío = usa el valor guardado |
 | `NO_COLOR` | *(no definido)* | Si se define (cualquier valor), desactiva los colores ANSI del debug. Los logs de Docker no son un TTY, así que el color ya se desactiva solo |
 
 > **Nota:** las variables `SS_WEB_HOST`, `SS_WEB_PORT` y `SS_VERBOSE` las traduce el

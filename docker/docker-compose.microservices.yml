@@ -1,6 +1,6 @@
 # ServiceSentry — microservices topology (MariaDB-backed)
 # ========================================================
-# Five containers, two MariaDB databases:
+# Six containers, two MariaDB databases:
 #   • db        — main MariaDB datastore (config, users, history, module tables,
 #                 event rules, notification log …).
 #   • syslog-db — dedicated MariaDB for the (high-volume) syslog messages, kept
@@ -9,6 +9,7 @@
 #   • web       — the admin panel / UI (on-demand checks only; does NOT schedule).
 #   • worker    — the periodic monitoring loop (owns scheduling).
 #   • syslog    — the standalone syslog receiver (binds the UDP/TCP/TLS ports).
+#   • events    — the decoupled event processor (evaluates notification rules).
 #
 #   cp docker/env.example docker/.env     # then edit (at least SS_PASSWORD + SS_DB_*
 #                                         #  + SS_SYSLOG_DB_PASSWORD)

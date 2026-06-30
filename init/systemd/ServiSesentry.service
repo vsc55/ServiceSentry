@@ -4,4 +4,6 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py
+# Single monitoring pass (the .timer drives the period). ``--monitor -t 0`` runs
+# one check cycle and exits; bare ``main.py`` now starts the web panel instead.
+ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py --monitor -t 0

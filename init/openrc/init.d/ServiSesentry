@@ -4,7 +4,7 @@
 
 : "${SS_PYTHON:=/usr/bin/python3}"
 : "${SS_APP:=/opt/ServiSesentry/main.py}"
-: "${SS_ARGS:=-d -c}"
+: "${SS_ARGS:=--monitor -c}"
 
 command="${SS_PYTHON}"
 command_args="${SS_APP} ${SS_ARGS}"

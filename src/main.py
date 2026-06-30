@@ -430,7 +430,8 @@ def args_init() -> argparse.Namespace:
         help=_h('cli_path'),
     )
 
-    # Monitor (the default mode) — service monitoring; -d makes it a daemon loop.
+    # Service monitor — run with --monitor (continuous; -t 0 = a single pass). The
+    # default mode when no role flag is given is the web panel (see the dispatch).
     monitor_group = ap.add_argument_group(_h('cli_group_monitor'))
     monitor_group.add_argument(
         '--monitor',

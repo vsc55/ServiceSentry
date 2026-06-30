@@ -39,13 +39,13 @@ source .venv/bin/activate        # Linux / macOS
 # Install dependencies
 pip install -r requirements.txt
 
-# Run a single check
-python3 main.py
+# Run a single monitoring pass
+python3 main.py --monitor -t 0
 
-# Run as daemon (check every 5 minutes)
-python3 main.py -d -t 300
+# Run the monitor continuously (check every 5 minutes)
+python3 main.py --monitor -t 300
 
-# Start the web admin panel
+# Start the web admin panel (the default mode when no flag is given)
 python3 main.py --web
 ```
 
@@ -130,14 +130,21 @@ sudo rc-update add ServiSesentry-web default && sudo rc-service ServiSesentry-we
 
 | Option | Description |
 | ------ | ----------- |
-| `-d`, `--daemon` | Continuous daemon mode |
-| `-t N`, `--timer N` | Seconds between checks (requires `--daemon`) |
+| *(no flag)* | Start the web admin panel (the default mode) |
+| `--monitor` | Run the service monitor continuously (`-t 0` = a single pass) |
+| `--syslog` | Run the standalone syslog receiver |
+| `--events` | Run the standalone event processor |
+| `-t N`, `--timer N` | Seconds between monitor checks (`0` = one pass and exit) |
 | `-v`, `--verbose` | Verbose / debug output |
+| `--log-level LEVEL` | Log level: `off`/`debug`/`info`/`warning`/`error` |
+| `-l`, `--lang LANG` | Interface language (`en_EN` / `es_ES`) |
+| `-V`, `--version` | Print the version and exit |
 | `-p PATH`, `--path PATH` | Custom config directory |
-| `-c`, `--clear` | Clear saved state before running |
-| `--web` | Start the web admin interface |
+| `-c`, `--clear` | Clear saved check state before running |
+| `--web` | Start the web admin panel (explicit; it is also the default) |
 | `--web-host HOST` | Address to bind (default: `0.0.0.0`) |
 | `--web-port N` | Port to listen on (default: `8080`) |
+| `--syslog-host HOST` / `--syslog-port N` | Override the syslog listener bind |
 
 ---
 

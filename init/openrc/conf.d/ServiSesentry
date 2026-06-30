@@ -8,7 +8,7 @@ SS_PYTHON="/usr/bin/python3"
 SS_APP="/opt/ServiSesentry/main.py"
 
 # Startup arguments
-# -d  daemon mode (run continuously)
-# -c  clear status file on start
-# -t <seconds>  override check interval from config.json (e.g. -t 120)
-SS_ARGS="-d -c"
+# --monitor      run the service monitor continuously (-t 0 = a single pass)
+# -c             clear the saved check status on start
+# -t <seconds>   override the check interval from config.json (e.g. -t 120)
+SS_ARGS="--monitor -c"

@@ -63,7 +63,9 @@ solo-lectura/arranque.
 
 ```json
 {
-    "daemon": {
+    "monitoring": {
+        "enabled": true,
+        "autostart": true,
         "timer_check": 300
     },
     "global": {
@@ -104,12 +106,18 @@ solo-lectura/arranque.
 }
 ```
 
-### Sección `daemon`
+### Sección `monitoring`
+
+El monitor de servicios. `enabled` es el interruptor maestro y `autostart` decide si
+el monitor **embebido** arranca al iniciar el panel web (un proceso `--monitor`
+independiente ignora `autostart`). Si el panel hospeda el monitor lo decide el env
+`SS_MONITORING_EMBEDDED` (`0` = lo posee un contenedor/proceso dedicado), no un campo.
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `daemon.timer_check` | int | 300 | Segundos entre cada ciclo de comprobación en modo daemon (env `SS_CHECK_INTERVAL`) |
-| `daemon.web_autostart` | bool | `false` | Arrancar el scheduler embebido del panel web (env `SS_AUTOSTART`). `true` en monolítico; `false` si corre un worker aparte |
+| `monitoring.enabled` | bool | `true` | Interruptor maestro (env `SS_MONITORING_ENABLED`). Desactivado = el monitor se apaga (y se detiene si corría) y no es arrancable desde la pestaña Servicios |
+| `monitoring.autostart` | bool | `true` | Arrancar el monitor embebido al iniciar el panel web (env `SS_MONITORING_AUTOSTART`). Off = arranca **parado** pero iniciable a mano desde Servicios. Solo aplica al modo embebido |
+| `monitoring.timer_check` | int | 300 | Segundos entre ciclos de comprobación (rango 10–86400; env `SS_CHECK_INTERVAL`) |
 
 ### Sección `global`
 
@@ -507,7 +515,8 @@ solo-admin). Campos:
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `enabled` | bool | false | Activa el receptor. |
+| `enabled` | bool | false | Interruptor maestro del receptor. Desactivado = apagado (y se detiene si corría); no arrancable desde Servicios. |
+| `autostart` | bool | true | Arrancar el listener embebido al iniciar el panel web (env `SS_SYSLOG_AUTOSTART`). Off = arranca parado pero iniciable desde Servicios. Solo modo embebido (un `--syslog` lo ignora). |
 | `bind_host` | str | `0.0.0.0, ::` | Interfaces de escucha (lista de IPs IPv4/IPv6, coma/espacio). Validadas como IP. Vacío = todas las IPv4 (`0.0.0.0`). |
 | `udp_port` | int | 514 | Puerto UDP (0 = desactivado). <1024 requiere privilegios. Vacío = default. |
 | `tcp_port` | int | 514 | Puerto TCP (0 = desactivado). |
@@ -579,6 +588,8 @@ no vuelve a dispararse tras un reinicio. Configuración (Configuration → Notif
 | Clave | Por defecto | Descripción |
 |-------|-------------|-------------|
 | `events.mode` | `embedded` | Dónde corre el worker: `embedded` (un hilo dentro del panel web), `external` (lo gestiona un proceso/contenedor aparte) u `off` (sin evaluación). |
+| `events.autostart` | `true` | Arrancar el worker embebido al iniciar el panel web (env `SS_EVENTS_AUTOSTART`); solo cuando `mode=embedded`. Off = arranca parado pero iniciable desde Servicios (un `--events` lo ignora). |
+| `events.cooldown` | `0` | *Cooldown* global por defecto (segundos) que heredan las reglas sin `cooldown` propio; `0` = notificar en cada coincidencia (0–86400). |
 | `events.poll_secs` | `2` | Cada cuántos segundos busca filas nuevas que evaluar (1–3600). |
 
 En modo `external` se ejecuta como contenedor propio (`SS_SERVICE_ROLE=events` →
@@ -635,22 +646,30 @@ y forzar la re-notificación en el siguiente ciclo.
 python3 main.py [opciones]
 ```
 
-### Monitorización
+> **Modo por defecto:** sin ningún flag de rol, `main.py` arranca el **panel web**.
+> Los modos alternativos son `--monitor`, `--syslog` y `--events` (mutuamente
+> excluyentes).
+
+### Monitor y opciones generales
 
 | Opción | Env var | Descripción |
 |--------|---------|-------------|
-| `-d`, `--daemon` | `SS_DAEMON` | Modo daemon (ejecución continua) |
-| `-t N`, `--timer N` | `SS_TIMER` | Intervalo entre comprobaciones en segundos (requiere `--daemon`) |
+| `--monitor` | `SS_MONITOR` | Ejecuta el monitor de servicios (continuo; `-t 0` = una sola pasada y salir) |
+| `--events` | `SS_EVENTS` | Ejecuta **solo** el procesador de eventos independiente (sin web ni monitor) |
+| `-t N`, `--timer N` | `SS_TIMER` | Segundos entre comprobaciones del monitor (`0` = una pasada y salir). Por defecto = `monitoring.timer_check` |
+| `-c`, `--clear` | `SS_CLEAR` | Limpia el estado de los checks antes de ejecutar |
 | `-v`, `--verbose` | `SS_VERBOSE` | Modo verbose (debug ON, nivel `null` → muestra todo). Tiene prioridad sobre `global.log_level`. |
+| `--log-level LEVEL` | `SS_LOG_LEVEL` | Nivel de log: `off`/`debug`/`info`/`warning`/`error`. Sobreescribe `global.log_level` (`-v` sigue forzando debug). |
+| `-l`, `--lang LANG` | `SS_LANG` | Idioma de la interfaz/banners (`en_EN` / `es_ES`) |
+| `-V`, `--version` | — | Imprime la versión y sale |
 | `--nocolor`, `--no-color` | `SS_NOCOLOR` / `NO_COLOR` | Desactiva los colores ANSI del debug (útil al redirigir a fichero). Los colores también se desactivan solos si la salida no es un terminal. |
 | `-p PATH`, `--path PATH` | `SS_CONFIG_DIR` | Ruta personalizada al directorio de configuración |
-| `-c`, `--clear` | `SS_CLEAR` | Limpia el estado de los checks antes de ejecutar |
 
 ### Panel web (`--web`)
 
 | Opción | Env var | Descripción |
 |--------|---------|-------------|
-| `--web` | `SS_WEB` | Arranca el panel de administración web en lugar del modo monitorización |
+| `--web` | `SS_WEB` | Arranca el panel de administración web (explícito; es además el modo por defecto cuando no se pasa ningún flag de rol) |
 | `--web-host HOST` | `SS_WEB_HOST` | IP/hostname donde escucha Flask (por defecto `0.0.0.0`) |
 | `--web-port PORT` | `SS_WEB_PORT` | Puerto TCP del panel web (por defecto `8080` o el valor de `config.json`) |
 
@@ -660,11 +679,14 @@ python3 main.py [opciones]
 
 | Opción | Env var | Descripción |
 |--------|---------|-------------|
-| `--syslog` | `SS_SYSLOG` / `SS_SERVICE_ROLE=syslog` | Arranca **solo** el receptor syslog independiente (sin web ni monitor), compartiendo la BD |
+| `--syslog` | `SS_SYSLOG` | Arranca **solo** el receptor syslog independiente (sin web ni monitor), compartiendo la BD |
+| `--syslog-host HOST` | `SS_SYSLOG_HOST` | Override del host de escucha del receptor (vacío = valor de config) |
+| `--syslog-port PORT` | `SS_SYSLOG_PORT` | Override del puerto UDP **y** TCP del receptor (TLS conserva su puerto) |
 
-> En Docker se selecciona el rol con `SS_SERVICE_ROLE` (`web` / `worker` / `syslog`).
-> El panel web que delega los puertos a este contenedor debe arrancar con
-> `SS_SYSLOG_EMBEDDED=0`.
+> En Docker el rol se elige con `SS_SERVICE_ROLE` (`web` / `worker` / `syslog` /
+> `events`), que **el `entrypoint.sh` traduce** al flag correspondiente (`worker`
+> → `--monitor`); `main.py` en sí no lee `SS_SERVICE_ROLE`. El panel web que
+> delega los puertos a este contenedor debe arrancar con `SS_SYSLOG_EMBEDDED=0`.
 
 ### Variables de entorno
 
@@ -675,22 +697,22 @@ Cada argumento del CLI puede darse también por **variable de entorno** `SS_*` (
 SS_WEB=true SS_WEB_PORT=9090 SS_VERBOSE=1 python3 main.py
 ```
 
-Esto es independiente de las variables de entorno que sobreescriben **campos de `config.json`** (`WA_*`, `SS_CHECK_INTERVAL`, `TELEGRAM_*`) — ver [docker.md](docker.md). Aquellas configuran valores en runtime; las `SS_*` controlan cómo se lanza el proceso.
+Esto es independiente de las variables de entorno que sobreescriben **campos de `config.json`** (todas con prefijo `SS_*`, p. ej. `SS_CHECK_INTERVAL`, `SS_TELEGRAM_TOKEN`, `SS_MONITORING_ENABLED`) — ver [docker.md](docker.md). Aquellas fijan valores de configuración en runtime; las `SS_*` de arranque controlan cómo se lanza el proceso.
 
 ### Ejemplos
 
 ```bash
-# Ejecución única (monitorización)
-python3 main.py
+# Una sola pasada de monitorización
+python3 main.py --monitor -t 0
 
-# Daemon, comprobación cada 5 minutos
-python3 main.py -d -t 300
+# Monitor continuo, comprobación cada 5 minutos
+python3 main.py --monitor -t 300
 
 # Salida detallada + ruta de config personalizada
 python3 main.py -v -p /opt/myconfig/
 
-# Limpiar estado y ejecutar en modo daemon
-python3 main.py -c -d -t 60
+# Limpiar estado y arrancar el monitor continuo
+python3 main.py --monitor -c -t 60
 
 # Panel web en el puerto por defecto
 python3 main.py --web
@@ -759,7 +781,7 @@ ExecResult(
 ### Uso directo (estático)
 
 ```python
-from lib.exe import Exec
+from lib.system.exe import Exec   # (o `from lib import Exec`)
 
 # Comando local
 result = Exec.execute("ls -la")

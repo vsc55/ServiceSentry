@@ -26,7 +26,7 @@ lib/web_admin/
 │   ├── sessions.py           # _SessionsMixin (sesiones + clave secreta Flask)
 │   ├── audit.py              # _AuditMixin
 │   ├── checks.py             # _ChecksMixin
-│   ├── daemon.py             # _DaemonMixin (planificador en segundo plano)
+│   ├── monitoring.py         # reexporta _MonitoringMixin de lib/monitor/manager.py (scheduler, sin Flask)
 │   ├── syslog.py             # _SyslogMixin (receptor syslog + registro de descartes)
 │   ├── services.py           # _ServicesMixin (estado/control de servicios)
 │   └── events.py             # reexporta _EventsMixin de lib/events/manager.py (sin Flask)
@@ -61,7 +61,7 @@ lib/web_admin/
     ├── services.py           # /api/v1/services (estado + start/stop)
     ├── watchfuls.py          # /api/v1/watchfuls/<module>/<action>
     ├── history.py            # /api/v1/history (índice, consulta, borrado, diagnóstico)
-    ├── daemon.py             # /api/v1/daemon (estado, start, stop, config del planificador)
+    ├── daemon.py             # /api/v1/daemon (estado/start/stop/config del monitor; delega en _monitoring_*)
     ├── status.py             # /status (página pública de estado)
     ├── errors.py             # handlers 400, 403, 404, 405, 500
     └── ui.py                 # /, /api/v1/me, /api/v1/health, /lang, /theme
@@ -88,10 +88,10 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Credenciales** | Identidades SSH reutilizables (usuario + clave) referenciables desde hosts y checks, en vez de duplicar secretos; clonado y vista de uso. Secretos cifrados en la BD. Permisos `credentials_*`. |
 | **Receptor Syslog** | Servidor syslog integrado (RFC 3164/5424, UDP/TCP/TLS): pestaña Syslog con mensajes filtrables (severidad/host/app/búsqueda), allowlist de orígenes y **registro de descartes**; retención por antigüedad/filas; BD dedicada opcional; puede correr embebido o como contenedor aparte. Permisos `syslog_view`/`syslog_delete`. Ver §[Syslog](#syslog) |
 | **Gestor de eventos** | Reglas que observan eventos de auditoría o syslog y notifican por los canales configurados (Telegram/Email/webhooks concretos); cooldown global con herencia por regla; **log de notificaciones** enviadas. La evaluación está **desacoplada de la ingesta**: un *procesador de eventos* lee por cursor los mensajes/eventos ya guardados (cooldown persistido), embebido o como contenedor propio. Permisos `events_*`. Ver §[Eventos (reglas de notificación)](#eventos-reglas-de-notificación) |
-| **Servicios** | Pestaña Services: estado y **control (start/stop)** de los servicios de fondo (scheduler embebido, receptor syslog, **procesador de eventos**, worker, base de datos). Permisos `services_view`/`services_control`. Ver §[Servicios](#servicios) |
+| **Servicios** | Pestaña Services: estado y **control (start/stop)** de los servicios de fondo (monitor embebido, receptor syslog, **procesador de eventos**, worker, base de datos). Permisos `services_view`/`services_control`. Ver §[Servicios](#servicios) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | 12 tarjetas de resumen (Modules, Checks, Servers, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente); cada widget enlaza a su pestaña; auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin |
-| **Pestaña de configuración** | Editar `config.json` (Telegram, daemon, idioma) directamente desde el navegador; paneles colapsables por sección |
+| **Pestaña de configuración** | Editar la configuración (Telegram, monitorización, idioma, …) directamente desde el navegador; paneles colapsables por sección |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
 | **Tablas de listado unificadas** | Todos los listados (Users, Roles, Groups, Credentials, Servers, Clusters, Sessions, Audit, Events, Syslog) usan un componente común dirigido por esquema: paginación arriba/abajo, ordenación por columna, columnas reordenables (arrastrar), redimensionables (doble clic = auto-ajuste) u **ajustadas al contenido** (`resizable:false`), selector de mostrar/ocultar columnas y persistencia por usuario (columnas visibles, orden y ancho en `table_config`). Ver §[Tablas de Listado](#tablas-de-listado) |
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
@@ -234,7 +234,7 @@ El sistema de control de acceso usa **52 flags granulares** por acción y recurs
 
 ### Restricción de roles en la UI
 
-La función JS `applyRoleRestrictions()` (en `_js_init.html`) oculta o muestra
+La función JS `applyRoleRestrictions()` (en `partials/init/_wiring.html`) oculta o muestra
 botones y pestañas según los permisos del usuario actual obtenidos de `/api/v1/me`:
 
 - Pestaña Usuarios: visible si tiene cualquier permiso `users_*`.
@@ -362,7 +362,7 @@ la BD y se enmascaran en lectura.
 | `PUT` | `/api/v1/config` | `config_edit` | Guardar `config.json` (guardado parcial versionado con detección de conflictos) |
 | `GET` | `/api/v1/config/schema` | `config_view` o `config_edit` | Obtener el schema de validación de los campos de configuración del web admin |
 
-Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `routes/config.py`):
+Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `routes/config/__init__.py`):
 
 | Clave (`config.json`) | Atributo | Mín | Máx |
 |----------------------|----------|-----|-----|
@@ -524,16 +524,18 @@ Series temporales de resultados de checks (almacenadas por `HistoryStore`, ver [
 | `POST` | `/api/v1/history/test-write` | `history_delete` | Escribir datos de prueba para verificar el almacenamiento |
 | `GET` | `/api/v1/history/diag` | `history_delete` | Diagnóstico del almacenamiento de historial |
 
-### Daemon / Planificador
+### Monitor (planificador)
 
-Controla el planificador en segundo plano que ejecuta los checks periódicamente (`_DaemonMixin`).
+Controla el monitor en segundo plano que ejecuta los checks periódicamente
+(`_MonitoringMixin`, en `lib/monitor/manager.py`). Las rutas conservan el prefijo
+`/api/v1/daemon` por compatibilidad.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
 | `GET` | `/api/v1/daemon/status` | `checks_run` | Estado actual del planificador |
 | `POST` | `/api/v1/daemon/start` | `checks_run` | Arrancar el planificador (opcionalmente ejecuta ya) |
 | `POST` | `/api/v1/daemon/stop` | `checks_run` | Detener el planificador |
-| `PUT` | `/api/v1/daemon/config` | `checks_run` | Actualizar intervalo (`timer_check`) y autoarranque |
+| `PUT` | `/api/v1/daemon/config` | `checks_run` | Actualizar el intervalo (`timer_check`) y el interruptor maestro (`enabled`). El `autostart` se edita en Configuración → Monitoring |
 
 ### Syslog
 
@@ -570,7 +572,7 @@ configurados; más el log de envíos. Ver [configuration.md → Gestor de evento
 
 ### Servicios
 
-Estado y control de los servicios de fondo (scheduler, receptor syslog, **procesador
+Estado y control de los servicios de fondo (monitor, receptor syslog, **procesador
 de eventos**…). El procesador de eventos es controlable (`name=events`) cuando corre
 embebido (`events.mode=embedded` y `SS_EVENTS_EMBEDDED` no está a 0); en modo
 `external` se reporta en solo lectura.
@@ -578,7 +580,7 @@ embebido (`events.mode=embedded` y `SS_EVENTS_EMBEDDED` no está a 0); en modo
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
 | `GET` | `/api/v1/services` | `services_view` | Estado de todos los servicios (incl. `events`: mode, poll, reglas activas/total) |
-| `POST` | `/api/v1/services/<name>/<action>` | `services_control` | `start`/`stop` de un servicio controlable (`scheduler`, `syslog`, `events`) |
+| `POST` | `/api/v1/services/<name>/<action>` | `services_control` | `start`/`stop` de un servicio controlable (`monitoring`, `syslog`, `events`) |
 
 ### Salud
 
@@ -930,7 +932,7 @@ Todos los eventos auditados:
 | `hosts_migrated` | Migración de conexiones inline a hosts compartidos |
 | `credential_created` / `credential_cloned` / `credential_updated` / `credential_deleted` | CRUD de credenciales reutilizables |
 | `daemon_started` / `daemon_stopped` | Arranque/parada del scheduler embebido |
-| `daemon_config_changed` | Cambio de intervalo/autoarranque del scheduler |
+| `daemon_config_changed` | Cambio de intervalo (`timer_check`) o del interruptor `enabled` del monitor |
 | `daemon_checks_run` / `daemon_error` | Ciclo de checks del scheduler / error del scheduler |
 | `status_cleared` | Vaciado de la tabla `check_state` |
 | `overview_default_layout_set` | Un admin fija el layout global por defecto del Overview |
