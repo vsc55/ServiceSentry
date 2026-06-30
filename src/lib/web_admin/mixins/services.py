@@ -19,6 +19,7 @@ process is reported but never operated from here.
 
 from __future__ import annotations
 
+import threading
 import time
 
 from lib.debug import DebugLevel
@@ -26,6 +27,10 @@ from lib.debug import DebugLevel
 # A worker is "active" if a check landed within this many scheduler intervals.
 _WORKER_FRESH_INTERVALS = 3
 _WORKER_FRESH_FLOOR = 120          # …but at least this many seconds
+
+# A heartbeat instance is "alive" if seen within this window (a few beats of the
+# ~10 s heartbeat); running-but-older = stale, stopped-but-older = down.
+_HB_ALIVE_WINDOW = 35
 
 
 class _ServicesMixin:
@@ -67,15 +72,75 @@ class _ServicesMixin:
         self._svc_registry = reg
         return reg
 
+    # ── live instances (heartbeat) ──────────────────────────────────────────────
+    def _derive_instance_state(self, row: dict, now: float) -> str:
+        """alive / stale / stopped / down / unknown from a heartbeat row."""
+        last = row.get('last_seen')
+        if not last:
+            return 'unknown'
+        recent = (now - last) <= _HB_ALIVE_WINDOW
+        if row.get('running'):
+            return 'alive' if recent else 'stale'
+        return 'stopped' if recent else 'down'
+
+    def _service_instances_list(self, service_key: str | None = None) -> list[dict]:
+        """Heartbeat rows (optionally for one service), each enriched with a derived
+        ``state``, ``age`` (seconds since last seen) and ``is_self`` (this process).
+        Empty when the registry table is absent — so it degrades gracefully."""
+        store = getattr(self, '_service_instances_store', None)
+        if store is None:
+            return []
+        try:
+            rows = (store.list_for(service_key) if service_key
+                    else store.list_instances())
+        except Exception:  # pylint: disable=broad-except
+            return []
+        from lib.services.heartbeat import hostname  # noqa: PLC0415
+        import os  # noqa: PLC0415
+        me_host, me_pid = hostname(), os.getpid()
+        # Authoritative leader per service (the live lease), so the badge reflects
+        # who holds it NOW — not the frozen `leader` flag a since-dead row carries.
+        leaders: dict = {}
+        lstore = getattr(self, '_service_leader_store', None)
+        if lstore is not None:
+            try:
+                leaders = {l['service_key']: l.get('instance_id')
+                           for l in lstore.list_leaders()}
+            except Exception:  # pylint: disable=broad-except
+                leaders = {}
+        now = time.time()
+        out = []
+        for r in rows:
+            last = r.get('last_seen')
+            det = r.get('detail')
+            if isinstance(det, dict) and 'leader' in det:   # leader-gated service
+                det = {**det,
+                       'leader': leaders.get(r.get('service_key')) == r.get('instance_id')}
+            out.append({
+                **r, 'detail': det,
+                'derived_state': self._derive_instance_state(r, now),
+                'age': (now - last) if last else None,
+                'is_self': r.get('host') == me_host and r.get('pid') == me_pid,
+            })
+        return out
+
     # ── aggregate status ──────────────────────────────────────────────────────
     def _services_status_dict(self) -> dict:
         """Serialisable snapshot of every registered service for the dashboard.
 
         Each entry carries its own identity (``label_key`` / ``icon``) from the
-        registry, so the Services tab renders it generically."""
+        registry, so the Services tab renders it generically.  Each controllable
+        service also carries ``instances`` — its live heartbeat rows, so the UI can
+        show the real state of remote (non-embedded) instances in another pod."""
         out = {}
+        instances_by_key: dict = {}
+        for inst in self._service_instances_list():
+            instances_by_key.setdefault(inst.get('service_key'), []).append(inst)
         for d in self._service_registry():
-            out[d.key] = {**d.status(), 'label_key': d.label_key, 'icon': d.icon}
+            entry = {**d.status(), 'label_key': d.label_key, 'icon': d.icon}
+            if d.key in instances_by_key:
+                entry['instances'] = instances_by_key[d.key]
+            out[d.key] = entry
         # Only present when syslog uses its OWN database (else it shares 'database').
         # Not a registered service (it is a conditional facet of the syslog one).
         syslog_db = self._service_syslog_database_status()
@@ -126,10 +191,27 @@ class _ServicesMixin:
         embedded_running = bool(mon is not None and mon.running)
         fresh_window = max(interval * _WORKER_FRESH_INTERVALS, _WORKER_FRESH_FLOOR)
         fresh = latest is not None and (time.time() - latest) <= fresh_window
+
+        # Prefer the real heartbeat: a separate monitoring instance (another
+        # process/pod) that is alive is an authoritative "active worker" signal,
+        # more reliable than inferring from check freshness.  Fall back to the
+        # history heuristic when no heartbeat row exists (e.g. a pre-upgrade worker).
+        remote = [i for i in self._service_instances_list('monitoring')
+                  if not i.get('is_self')]
+        remote_alive = [i for i in remote if i.get('derived_state') == 'alive']
         if embedded_running:
             state = 'embedded'               # this process is the one checking
+        elif remote_alive:
+            state = 'active'                 # a separate worker is alive (heartbeat)
+            cyc = [i.get('last_cycle_at') or i.get('last_seen') for i in remote_alive]
+            cyc = [c for c in cyc if c]
+            if cyc:
+                latest = max(latest or 0, max(cyc)) or latest
+            fresh = True
         elif fresh:
             state = 'active'                 # a separate worker is producing checks
+        elif remote:
+            state = 'stale'                  # a worker was seen but is not alive now
         elif latest is not None:
             state = 'stale'                  # checks exist but none recently
         else:
@@ -236,3 +318,91 @@ class _ServicesMixin:
         if d.control is None:
             return False, 'not_controllable'   # a read-only service (worker/database)
         return d.control(action)
+
+    # ── imperative commands (run-now / reload / clear) ──────────────────────────
+    _SERVICE_COMMAND_ACTIONS = frozenset({'run_now', 'clear_status', 'reload', 'prune'})
+
+    def _service_command(self, name: str, action: str, *, actor: str = '') -> tuple[bool, str]:
+        """Enqueue a one-shot command for a service; the hosting instance (embedded
+        here or a remote pod) claims + runs it.  When this process hosts the service
+        embedded, drain it synchronously so the action takes effect immediately
+        instead of waiting for the next heartbeat tick.
+
+        ``reason`` is ``''`` on success (and the message carries the queued id) or a
+        short code (``bad_action`` / ``unknown_service`` / ``not_controllable`` /
+        ``no_queue``)."""
+        if action not in self._SERVICE_COMMAND_ACTIONS:
+            return False, 'bad_action'
+        d = self._service_registry().get(name)
+        if d is None:
+            return False, 'unknown_service'
+        if d.control is None:
+            return False, 'not_controllable'   # read-only services take no commands
+        store = getattr(self, '_service_commands_store', None)
+        if store is None:
+            return False, 'no_queue'
+        cmd_id = store.enqueue(name, action, created_by=actor)
+        # Local fast path: if we host this service embedded, run the queue now;
+        # otherwise a dedicated container owns it — poke its instances so they drain
+        # immediately instead of waiting for the next heartbeat tick.
+        obj = self._embedded_services.get(name)
+        hosted_here = False
+        try:
+            if obj is not None and obj.status().get('state') != 'external':
+                obj._drain_commands()
+                hosted_here = True
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if not hosted_here:
+            self._poke_service_instances(name)
+        return True, str(cmd_id)
+
+    # ── HTTP poke (the accelerator; desired state still lives in the DB) ─────────
+    def _poke_one(self, url: str, token: str) -> None:
+        import urllib.request  # noqa: PLC0415
+        try:
+            req = urllib.request.Request(
+                url, data=b'', method='POST',
+                headers={'Authorization': f'Bearer {token}'})
+            urllib.request.urlopen(req, timeout=2).read()  # nosec B310 (fixed scheme)
+        except Exception:  # pylint: disable=broad-except
+            pass            # best-effort: the periodic reconcile converges anyway
+
+    def _poke_service_instances(self, service_key: str) -> None:
+        """Best-effort ``POST /control/reconcile`` to every reachable remote instance
+        of *service_key*, so a desired-state change / queued command takes effect
+        now.  No-op when no control token is set (poke disabled) — the periodic
+        reconcile still converges."""
+        try:
+            from lib.services.control_server import control_token  # noqa: PLC0415
+            token = control_token()
+            if not token:
+                return
+            for inst in self._service_instances_list(service_key):
+                url = inst.get('control_url')
+                if (not url or inst.get('is_self')
+                        or inst.get('derived_state') not in ('alive', 'stale')):
+                    continue
+                threading.Thread(
+                    target=self._poke_one,
+                    args=(url.rstrip('/') + '/control/reconcile', token),
+                    daemon=True).start()
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    def _poke_services_for_config(self, changed) -> None:
+        """After a config save, poke the external instances of every service whose
+        section changed, so a desired-state edit (e.g. ``monitoring|enabled``)
+        converges immediately on the remote worker."""
+        if not changed:
+            return
+        keys = set(self._embedded_services.keys())
+        affected = set()
+        for path in changed:
+            section = str(path).split('|', 1)[0]
+            if section in keys:
+                affected.add(section)
+            elif section == 'syslog_db':
+                affected.add('syslog')
+        for key in affected:
+            self._poke_service_instances(key)

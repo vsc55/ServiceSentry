@@ -265,6 +265,11 @@ el panel web sobreviven a los reinicios del contenedor.
 | `SS_AUDIT_MAX_ENTRIES` | `500` | Número máximo de entradas a conservar en el log de auditoría |
 | **Monitor / Worker** | | |
 | `SS_CHECK_INTERVAL` | `300` | Segundos entre comprobaciones (periodo del worker y del scheduler embebido) |
+| **Plano de control distribuido** (microservicios) | | |
+| `SS_CONTROL_TOKEN` | *(vacío)* | Token Bearer compartido para el *poke* HTTP entre el `web` y los servicios dedicados. **Sin token, el poke se desactiva** y el control se propaga por el reconcile periódico (≤15 s). Ponlo igual en todos los contenedores |
+| `SS_CONTROL_PORT` | `8765` | Puerto del listener de control (`/control/health`, `/control/reconcile`) en los roles `worker`/`syslog`/`events` |
+| `SS_CONTROL_BIND` | `0.0.0.0` | Dirección de enlace del listener de control |
+| `SS_CONTROL_ADVERTISE` | *(nombre del host/pod)* | Dirección que el servicio publica como `control_url` para que el `web` sepa dónde hacer el poke (p. ej. el nombre del servicio en compose: `worker`) |
 | **Telegram** | | |
 | `SS_TELEGRAM_TOKEN` | *(no definido)* | Token del bot de Telegram |
 | `SS_TELEGRAM_CHAT_ID` | *(no definido)* | ID del chat o grupo de Telegram |
@@ -296,6 +301,17 @@ corre y cómo se controla.
   `autostart` (¿arrancar al iniciar el panel web?). `autostart` **solo aplica al
   modo embebido**; un proceso dedicado (`--monitor` / `--syslog` / `--events`) lo
   ignora y corre siempre que el servicio esté `enabled`.
+
+Cuando un servicio es **dedicado** (`SS_*_EMBEDDED=0`), el panel y el proceso
+coordinan por la **base de datos compartida**: el panel escribe el *desired-state*
+(`enabled`, intervalo) y encola comandos; el proceso **reconcilia** hacia él y
+**publica un latido** (tabla `service_instances`) que el panel muestra en la
+pestaña **Servicios** (instancias vivas/stale/caídas, con su último ciclo y
+versión). Para que un cambio se aplique **al instante** en vez de esperar al
+reconcile periódico, define `SS_CONTROL_TOKEN` (igual en todos los contenedores):
+el panel hará un *poke* `POST /control/reconcile` al servicio. Es un acelerador
+opcional — sin token, todo sigue funcionando por el reconcile. Ver
+[architecture.md → Plano de control distribuido](architecture.md#plano-de-control-distribuido-servicios-en-otros-procesos--pods).
 
 ### Variables sensibles
 

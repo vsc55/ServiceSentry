@@ -18,6 +18,8 @@ from lib.services.events.manager import _EventsMixin
 
 class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
 
+    _LEADER_GATED = True       # single-owner: only the lease holder advances the cursor
+
     def __init__(self, host):
         _EmbeddedBase.__init__(self, host)
         self._init_events()

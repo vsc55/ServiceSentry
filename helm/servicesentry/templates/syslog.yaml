@@ -1,0 +1,126 @@
+{{- if .Values.syslog.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "servicesentry.fullname" . }}-syslog
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+    app.kubernetes.io/component: syslog
+spec:
+  # Active-active: behind the ingress Service the load balancer splits messages
+  # across replicas (each packet lands on one pod), so it scales out for ingest.
+  replicas: {{ .Values.syslog.replicas }}
+  selector:
+    matchLabels:
+      {{- include "servicesentry.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: syslog
+  template:
+    metadata:
+      labels:
+        {{- include "servicesentry.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: syslog
+      {{- with .Values.syslog.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "servicesentry.serviceAccountName" . }}
+      containers:
+        - name: syslog
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            {{- include "servicesentry.envFrom" . | nindent 12 }}
+          env:
+            - { name: SS_SERVICE_ROLE, value: syslog }
+            {{- include "servicesentry.controlEnv" (dict "ctx" $ "role" "syslog") | nindent 12 }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            {{- if .Values.control.enabled }}
+            - { name: control, containerPort: {{ .Values.control.port }} }
+            {{- end }}
+            - { name: syslog-udp, containerPort: {{ .Values.syslog.ports.udp }}, protocol: UDP }
+            - { name: syslog-tcp, containerPort: {{ .Values.syslog.ports.tcp }}, protocol: TCP }
+            {{- if .Values.syslog.ingress.tls }}
+            - { name: syslog-tls, containerPort: {{ .Values.syslog.ports.tls }}, protocol: TCP }
+            {{- end }}
+          {{- if .Values.control.enabled }}
+          readinessProbe:
+            httpGet: { path: /control/health, port: control }
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: { path: /control/health, port: control }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          {{- end }}
+          {{- with .Values.syslog.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- include "servicesentry.volumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "servicesentry.volumes" . | nindent 8 }}
+      {{- with .Values.syslog.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.syslog.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.syslog.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if .Values.control.enabled }}
+---
+# Control Service (the web's poke target).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "servicesentry.fullname" . }}-syslog
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+    app.kubernetes.io/component: syslog
+spec:
+  selector:
+    {{- include "servicesentry.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: syslog
+  ports:
+    - { name: control, port: {{ .Values.control.port }}, targetPort: control }
+{{- end }}
+{{- if .Values.syslog.ingress.enabled }}
+---
+# Ingress Service for the raw syslog ports (UDP/TCP). A mixed-protocol
+# LoadBalancer needs a cluster that supports it; otherwise split into two Services.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "servicesentry.fullname" . }}-syslog-ingress
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+    app.kubernetes.io/component: syslog
+  {{- with .Values.syslog.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.syslog.ingress.type }}
+  selector:
+    {{- include "servicesentry.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: syslog
+  ports:
+    - { name: syslog-udp, port: {{ .Values.syslog.ports.udp }}, targetPort: syslog-udp, protocol: UDP }
+    - { name: syslog-tcp, port: {{ .Values.syslog.ports.tcp }}, targetPort: syslog-tcp, protocol: TCP }
+    {{- if .Values.syslog.ingress.tls }}
+    - { name: syslog-tls, port: {{ .Values.syslog.ports.tls }}, targetPort: syslog-tls, protocol: TCP }
+    {{- end }}
+{{- end }}
+{{- end }}

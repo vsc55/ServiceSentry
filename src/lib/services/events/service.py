@@ -27,9 +27,14 @@ from lib.config.manager import (
 from lib.db import build_syslog_connector, get_connector
 from lib.debug import Debug, DebugLevel
 from .manager import _EventsMixin
+from lib.services.heartbeat import _HeartbeatMixin
+from lib.services.control_server import start_control_server
 from lib.stores.audit import AuditStore
 from lib.stores.config import ConfigStore
 from lib.stores.event import EventRulesStore, EventStateStore, NotificationLogStore
+from lib.stores.service_instances import ServiceInstancesStore
+from lib.stores.service_commands import ServiceCommandsStore
+from lib.stores.service_leader import ServiceLeaderStore
 from lib.stores.syslog import SyslogStore
 from lib.stores.webhooks import WebhooksStore
 from lib.security import secret_manager
@@ -37,10 +42,19 @@ from lib.security import secret_manager
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for rule/config changes (s)
 
 
-class EventService(_EventsMixin):
+class EventService(_HeartbeatMixin, _EventsMixin):
     """Own the decoupled event worker as a self-contained, DB-sharing daemon."""
 
     _CONFIG_FILE = CONFIG_FILENAME
+    _HB_KEY = 'events'
+    _LEADER_GATED = True       # single-owner: only the lease holder advances the cursor
+
+    # ── heartbeat hooks (observed state for the Services tab) ──────────────────
+    def _hb_running(self) -> bool:
+        return not self._stop.is_set()
+
+    def _hb_detail(self) -> dict:
+        return {'poll_secs': self._poll_secs()}
 
     def __init__(self, config_dir: str, var_dir: str | None = None,
                  log_level: str | None = None):
@@ -78,6 +92,12 @@ class EventService(_EventsMixin):
         self._event_rules_store = EventRulesStore(self._db_connector)
         self._notification_log_store = NotificationLogStore(self._db_connector)
         self._event_state_store = EventStateStore(self._db_connector)
+        # Liveness registry (shared DB) so the web admin sees this worker.
+        self._service_instances_store = ServiceInstancesStore(self._db_connector)
+        # Imperative command queue (run-now/reload) the heartbeat loop drains.
+        self._service_commands_store = ServiceCommandsStore(self._db_connector)
+        # Leader lease: with >1 events replica only the holder advances the cursor.
+        self._service_leader_store = ServiceLeaderStore(self._db_connector)
 
         self._init_events()
         self._attach_event_state(self._event_state_store)
@@ -117,11 +137,16 @@ class EventService(_EventsMixin):
         except (TypeError, ValueError):
             return 2
 
+    def _reconcile_once(self) -> None:
+        """Re-read config + refresh the rule cache.  Called by the periodic watch
+        loop and on demand by the control-server poke."""
+        self._config_mgr.invalidate()
+        self._events_reload()
+
     def _watch_loop(self) -> None:
         """Pick up rule edits made from the web UI (a different process)."""
         while not self._stop.wait(_CONFIG_WATCH_EVERY):
-            self._config_mgr.invalidate()
-            self._events_reload()
+            self._reconcile_once()
 
     def run(self) -> int:
         """Block running the worker loop until interrupted (SIGINT/SIGTERM)."""
@@ -136,10 +161,13 @@ class EventService(_EventsMixin):
         self._events_reload()
         threading.Thread(target=self._watch_loop, name='events-config-watch',
                          daemon=True).start()
+        self._control_server = start_control_server(self)
+        self.start_heartbeat()
         self._dbg('> Events >> standalone worker starting '
                   f'(poll={self._poll_secs()}s)', DebugLevel.info)
         # _event_worker_loop blocks until self._stop is set.
         self._event_worker_loop(self._stop, self._poll_secs())
+        self.stop_heartbeat()
         return 0
 
 

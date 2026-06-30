@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "servicesentry.fullname" . }}-worker
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  # >1 → hot standby: a DB leader lease ensures only one runs the check cycles.
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "servicesentry.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "servicesentry.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+      {{- with .Values.worker.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "servicesentry.serviceAccountName" . }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "servicesentry.netRaw" . | nindent 10 }}
+          envFrom:
+            {{- include "servicesentry.envFrom" . | nindent 12 }}
+          env:
+            - { name: SS_SERVICE_ROLE, value: worker }
+            {{- include "servicesentry.controlEnv" (dict "ctx" $ "role" "worker") | nindent 12 }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.control.enabled }}
+          ports:
+            - { name: control, containerPort: {{ .Values.control.port }} }
+          readinessProbe:
+            httpGet: { path: /control/health, port: control }
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: { path: /control/health, port: control }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          {{- end }}
+          {{- with .Values.worker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- include "servicesentry.volumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "servicesentry.volumes" . | nindent 8 }}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if .Values.control.enabled }}
+---
+# Control Service: its name = SS_CONTROL_ADVERTISE so the web's poke
+# (POST /control/reconcile) resolves to these pods by cluster DNS.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "servicesentry.fullname" . }}-worker
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  selector:
+    {{- include "servicesentry.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+  ports:
+    - { name: control, port: {{ .Values.control.port }}, targetPort: control }
+{{- end }}

@@ -327,6 +327,12 @@ def register(app, wa):
             wa._invalidate_config_cache()
             for _svc in getattr(wa, '_embedded_services', {}).values():
                 _svc.on_config_changed(to_apply)
+            # Accelerate convergence on services owned by a dedicated container:
+            # poke their instances so a desired-state edit applies now (the periodic
+            # reconcile would catch up anyway).
+            poke = getattr(wa, '_poke_services_for_config', None)
+            if poke is not None:
+                poke(to_apply)
             # Apply web_admin.lang at runtime if changed
             new_lang = (new_data.get('web_admin') or {}).get('lang', '')
             wa._default_lang = coerce_lang(new_lang, wa._default_lang)

@@ -37,8 +37,12 @@ from lib.db import get_connector
 from lib.debug import Debug, DebugLevel
 from lib.stores.config import ConfigStore
 from lib.stores.event import EventRulesStore, NotificationLogStore
+from lib.stores.service_instances import ServiceInstancesStore
+from lib.stores.service_commands import ServiceCommandsStore
 from lib.stores.syslog import SyslogStore, SyslogDropsStore
 from lib.stores.webhooks import WebhooksStore
+from lib.services.heartbeat import _HeartbeatMixin
+from lib.services.control_server import start_control_server
 from lib.services.syslog.manager import _SyslogMixin
 from lib.services.events.manager import _EventsMixin
 from lib.security import secret_manager
@@ -46,7 +50,7 @@ from lib.security import secret_manager
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for syslog config changes (s)
 
 
-class SyslogService(_EventsMixin, _SyslogMixin):
+class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
     """Own the syslog listener as a self-contained, DB-sharing daemon.
 
     The listener lifecycle comes from :class:`_SyslogMixin`; syslog→notification
@@ -55,6 +59,19 @@ class SyslogService(_EventsMixin, _SyslogMixin):
     receivers behave identically and write to the same notification log."""
 
     _CONFIG_FILE = CONFIG_FILENAME
+    _HB_KEY = 'syslog'
+
+    # ── heartbeat hooks (observed state for the Services tab) ──────────────────
+    def _hb_running(self) -> bool:
+        return self._syslog_server is not None
+
+    def _hb_detail(self) -> dict:
+        try:
+            cfg = self._syslog_cfg() or {}
+        except Exception:  # pylint: disable=broad-except
+            return {}
+        return {k: cfg.get(k) for k in ('udp_port', 'tcp_port', 'tls_port')
+                if cfg.get(k)}
 
     def __init__(self, config_dir: str, var_dir: str | None = None,
                  host_override: str | None = None, port_override: int | None = None,
@@ -97,6 +114,10 @@ class SyslogService(_EventsMixin, _SyslogMixin):
         # Event-rules manager (shared DB): syslog→notification routing + send log.
         self._event_rules_store = EventRulesStore(self._db_connector)
         self._notification_log_store = NotificationLogStore(self._db_connector)
+        # Liveness registry (shared DB) so the web admin sees this listener.
+        self._service_instances_store = ServiceInstancesStore(self._db_connector)
+        # Imperative command queue (reload/prune) the heartbeat loop drains.
+        self._service_commands_store = ServiceCommandsStore(self._db_connector)
         self._init_events()
 
         self._debug = Debug()
@@ -139,22 +160,27 @@ class SyslogService(_EventsMixin, _SyslogMixin):
         cfg = self._syslog_cfg()
         return '|'.join(f'{k}={cfg.get(k)!r}' for k in sorted(cfg))
 
+    def _reconcile_once(self) -> None:
+        """Re-read config; reload the listener when the syslog config changed.
+        Called by the periodic watch loop and on demand by the control-server poke."""
+        self._config_mgr.invalidate()                # drop the cache, read fresh DB
+        self._events_reload()                        # pick up event-rule edits too
+        new = self._config_signature()
+        if new != getattr(self, '_syslog_sig', None):
+            self._syslog_sig = new
+            self._dbg('> Syslog >> config changed; reloading listener',
+                      DebugLevel.info)
+            self._syslog_apply_config()
+
     def _watch_loop(self) -> None:
         """Re-apply the listener when the syslog config changes in the shared DB.
 
         The config is edited from the web UI (a different process), so the
         standalone container polls for changes and reloads — enabling/disabling
         or changing ports/allowlist takes effect without a container restart."""
-        sig = self._config_signature()
+        self._syslog_sig = self._config_signature()
         while not self._stop.wait(_CONFIG_WATCH_EVERY):
-            self._config_mgr.invalidate()            # drop the cache, read fresh DB
-            self._events_reload()                    # pick up event-rule edits too
-            new = self._config_signature()
-            if new != sig:
-                sig = new
-                self._dbg('> Syslog >> config changed; reloading listener',
-                          DebugLevel.info)
-                self._syslog_apply_config()
+            self._reconcile_once()
 
     def stop(self, *_args) -> None:
         if not self._stop.is_set():
@@ -195,7 +221,10 @@ class SyslogService(_EventsMixin, _SyslogMixin):
         else:
             self._dbg('> Syslog >> standalone receiver running (Ctrl+C to stop)',
                       DebugLevel.info)
+        self._control_server = start_control_server(self)
+        self.start_heartbeat()
         self._stop.wait()
+        self.stop_heartbeat()
         self._dbg('> Syslog >> receiver stopped; exiting', DebugLevel.info)
         return 0
 

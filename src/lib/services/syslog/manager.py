@@ -131,6 +131,25 @@ class _SyslogMixin:
             except Exception:  # pylint: disable=broad-except
                 pass
 
+    # ── Imperative commands (reload / prune) ───────────────────────────────────
+    def _apply_command(self, action: str, args: dict | None = None) -> tuple[bool, str]:
+        """Execute a one-shot command from the service-command queue on the
+        instance hosting the listener (embedded here or a remote receiver)."""
+        if action == 'reload':
+            mgr = getattr(self, '_config_mgr', None)
+            if mgr is not None:
+                try:
+                    mgr.invalidate()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+            problems = self._syslog_apply_config()
+            return (not problems), ('listener reloaded' if not problems
+                                    else '; '.join(problems))
+        if action in ('prune', 'clear_status'):
+            self._syslog_prune_once()
+            return True, 'retention sweep run'
+        return False, 'unknown_action'
+
     def _syslog_prune_once(self) -> None:
         """One retention sweep (time + row caps).  Each host drives it from its own
         loop/timer."""

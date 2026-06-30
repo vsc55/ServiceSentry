@@ -16,6 +16,8 @@ from lib.services.monitoring.manager import _MonitoringMixin
 
 class EmbeddedMonitor(_EmbeddedBase, _MonitoringMixin):
 
+    _LEADER_GATED = True       # single-owner: only the lease holder runs cycles
+
     def __init__(self, host):
         _EmbeddedBase.__init__(self, host)
         self._monitoring_init_state()

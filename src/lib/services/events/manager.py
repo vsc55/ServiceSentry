@@ -71,6 +71,27 @@ class _EventsMixin:
         except Exception:  # pylint: disable=broad-except
             return 0
 
+    # ── Imperative commands (run-now / reload) ─────────────────────────────────
+    def _apply_command(self, action: str, args: dict | None = None) -> tuple[bool, str]:
+        """Execute a one-shot command from the service-command queue on the
+        instance hosting the event worker (embedded here or a remote worker)."""
+        if action == 'run_now':
+            try:
+                n = self._event_worker_tick()
+                return True, f'{n} record(s) processed'
+            except Exception as exc:  # pylint: disable=broad-except
+                return False, str(exc)
+        if action == 'reload':
+            try:
+                mgr = getattr(self, '_config_mgr', None)
+                if mgr is not None:
+                    mgr.invalidate()
+                self._events_reload()
+                return True, 'rules reloaded'
+            except Exception as exc:  # pylint: disable=broad-except
+                return False, str(exc)
+        return False, 'unknown_action'
+
     # ── worker (cursor over the source tables) ────────────────────────────────────
     def _event_sources(self) -> list:
         """[(source, store)] the worker consumes — only stores that are present and
@@ -90,6 +111,10 @@ class _EventsMixin:
         no longer blocks ingestion — the worker drains the backlog at its own pace."""
         st = self._event_state
         if st is None:
+            return 0
+        # Hot standby: with leader gating, only the lease holder advances the cursor
+        # and dispatches — other replicas idle, so notifications never double-fire.
+        if hasattr(self, '_work_allowed') and not self._work_allowed():
             return 0
         processed = 0
         for source, store in self._event_sources():

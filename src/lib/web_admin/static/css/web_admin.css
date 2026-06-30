@@ -702,10 +702,37 @@
    with a state-coloured accent strip on top. */
 .svc-card {
     background: var(--ss-card-header-bg, var(--bs-secondary-bg));
-    overflow: hidden;
+    /* No overflow:hidden — it would clip the "⋯" command dropdown. The accent's
+       top corners are rounded instead so the card keeps its rounded top. */
 }
 .svc-card .card-body { background: transparent; }
-.svc-card-accent { height: 4px; }
+.svc-card-accent {
+    height: 4px;
+    border-top-left-radius: var(--bs-card-inner-border-radius, .375rem);
+    border-top-right-radius: var(--bs-card-inner-border-radius, .375rem);
+}
+/* Spin feedback for the per-card refresh icon while it fetches. */
+@keyframes ss-spin { to { transform: rotate(360deg); } }
+.ss-spin { animation: ss-spin .6s linear infinite; }
+
+/* Instances block set apart from the service-info rows: a full-bleed divider
+   (spans the card padding) + an uppercase section label. */
+.svc-instances {
+    border-top: 1px solid var(--bs-border-color);
+    margin-left: calc(-1 * var(--bs-card-spacer-x, 1rem));
+    margin-right: calc(-1 * var(--bs-card-spacer-x, 1rem));
+    padding-left: var(--bs-card-spacer-x, 1rem);
+    padding-right: var(--bs-card-spacer-x, 1rem);
+}
+.svc-section-label {
+    font-size: .68rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    font-weight: 600;
+    color: var(--bs-secondary-color);
+    margin-bottom: .35rem;
+}
+.svc-instances .border-top:first-of-type { border-top: 0 !important; }
 
 /* Clickable syslog breakdown bars (click to filter) */
 .sl-bar-row { cursor: pointer; transition: background-color .12s; }

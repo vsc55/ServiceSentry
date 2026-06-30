@@ -1,0 +1,28 @@
+{{- if and .Values.networkPolicy.enabled .Values.control.enabled }}
+# Restrict the control listener (:{{ .Values.control.port }}) so ONLY the web pods
+# can poke worker/events. Not applied to syslog — it must keep its UDP/TCP ingress
+# open (a NetworkPolicy is an allowlist; selecting syslog here would block it).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "servicesentry.fullname" . }}-control
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "servicesentry.selectorLabels" . | nindent 6 }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["worker", "events"]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "servicesentry.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: web
+      ports:
+        - { port: control, protocol: TCP }
+{{- end }}

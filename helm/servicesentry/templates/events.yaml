@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "servicesentry.fullname" . }}-events
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+    app.kubernetes.io/component: events
+spec:
+  # >1 → hot standby: a DB leader lease ensures only one advances the cursor.
+  replicas: {{ .Values.events.replicas }}
+  selector:
+    matchLabels:
+      {{- include "servicesentry.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: events
+  template:
+    metadata:
+      labels:
+        {{- include "servicesentry.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: events
+      {{- with .Values.events.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "servicesentry.serviceAccountName" . }}
+      containers:
+        - name: events
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            {{- include "servicesentry.envFrom" . | nindent 12 }}
+          env:
+            - { name: SS_SERVICE_ROLE, value: events }
+            {{- include "servicesentry.controlEnv" (dict "ctx" $ "role" "events") | nindent 12 }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.control.enabled }}
+          ports:
+            - { name: control, containerPort: {{ .Values.control.port }} }
+          readinessProbe:
+            httpGet: { path: /control/health, port: control }
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: { path: /control/health, port: control }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          {{- end }}
+          {{- with .Values.events.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- include "servicesentry.volumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "servicesentry.volumes" . | nindent 8 }}
+      {{- with .Values.events.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.events.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.events.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if .Values.control.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "servicesentry.fullname" . }}-events
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+    app.kubernetes.io/component: events
+spec:
+  selector:
+    {{- include "servicesentry.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: events
+  ports:
+    - { name: control, port: {{ .Values.control.port }}, targetPort: control }
+{{- end }}

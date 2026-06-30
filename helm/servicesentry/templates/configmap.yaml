@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "servicesentry.fullname" . }}-env
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+data:
+  # ── Shared database ──────────────────────────────────────────────────────────
+  SS_DB_DRIVER: {{ .Values.database.driver | quote }}
+  {{- if ne .Values.database.driver "sqlite" }}
+  SS_DB_HOST: {{ required "database.host is required for mysql/postgresql" .Values.database.host | quote }}
+  SS_DB_PORT: {{ .Values.database.port | quote }}
+  {{- end }}
+  SS_DB_NAME: {{ .Values.database.name | quote }}
+  SS_DB_USER: {{ .Values.database.user | quote }}
+  {{- if .Values.syslogDatabase.enabled }}
+  # ── Dedicated syslog database ───────────────────────────────────────────────
+  SS_SYSLOG_DB_ENABLED: "1"
+  SS_SYSLOG_DB_DRIVER: {{ .Values.syslogDatabase.driver | quote }}
+  SS_SYSLOG_DB_HOST: {{ required "syslogDatabase.host is required when enabled" .Values.syslogDatabase.host | quote }}
+  SS_SYSLOG_DB_PORT: {{ .Values.syslogDatabase.port | quote }}
+  SS_SYSLOG_DB_NAME: {{ .Values.syslogDatabase.name | quote }}
+  SS_SYSLOG_DB_USER: {{ .Values.syslogDatabase.user | quote }}
+  {{- end }}
+  {{- if .Values.control.enabled }}
+  # ── Distributed control plane ───────────────────────────────────────────────
+  SS_CONTROL_PORT: {{ .Values.control.port | quote }}
+  {{- end }}
+  # ── App settings ────────────────────────────────────────────────────────────
+  SS_LANG: {{ .Values.config.lang | quote }}
+  SS_DARK_MODE: {{ .Values.config.darkMode | quote }}
+  SS_CHECK_INTERVAL: {{ .Values.config.checkInterval | quote }}
+  SS_PROXY_COUNT: {{ .Values.config.proxyCount | quote }}
+  SS_SECURE_COOKIES: {{ .Values.config.secureCookies | quote }}
+  SS_FORCE_HTTPS: {{ .Values.config.forceHttps | quote }}
+  SS_FORCE_FQDN: {{ .Values.config.forceFqdn | quote }}
+  SS_PUBLIC_STATUS: {{ .Values.config.publicStatus | quote }}
+  {{- with .Values.config.publicUrl }}
+  SS_PUBLIC_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.logLevel }}
+  SS_LOG_LEVEL: {{ . | quote }}
+  {{- end }}

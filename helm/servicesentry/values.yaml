@@ -1,0 +1,147 @@
+# Default values for ServiceSentry.
+# -----------------------------------------------------------------------------
+# Topology: one Deployment per role sharing a database. See docs/kubernetes.md.
+#   web    — admin panel / UI (does NOT host the services: *_EMBEDDED=0)
+#   worker — monitoring scheduler   (leader-gated → replicas>1 = hot standby)
+#   events — event/notification worker (leader-gated → replicas>1 = hot standby)
+#   syslog — syslog receiver         (active-active → replicas>1 = scale out)
+
+image:
+  repository: servicesentry
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Admin panel credentials created on first run. REQUIRED (or use existingSecret).
+auth:
+  username: admin
+  password: ""
+
+# -- Provide all SS_* secret keys via an existing Secret instead of generating one.
+#    When set, the chart does NOT create a Secret; this name is used in envFrom.
+#    Expected keys: SS_PASSWORD, SS_DB_PASSWORD, SS_CONTROL_TOKEN (+ optional
+#    SS_SYSLOG_DB_PASSWORD, SS_TELEGRAM_TOKEN, SS_TELEGRAM_CHAT_ID).
+existingSecret: ""
+
+# -- Encryption key (.flask_secret) SHARED by every pod. ServiceSentry encrypts
+#    stored secrets (credentials, tokens) with a key derived from this; all roles
+#    MUST use the same one or they can't decrypt each other's data. 64 hex chars.
+#    Leave empty to auto-generate a stable one (reused across upgrades via lookup).
+#    Generate manually with:  openssl rand -hex 32
+secretKey: ""
+
+# -- Shared database. External by default — point at a managed MySQL/PostgreSQL.
+#    (driver: sqlite is only meaningful for a single all-in-one pod, not this split.)
+database:
+  driver: mysql            # sqlite | mysql | postgresql  (mariadb = alias of mysql)
+  host: ""                 # REQUIRED for mysql/postgresql
+  port: "3306"
+  name: servicesentry
+  user: servicesentry
+  password: ""             # stored in the generated Secret (ignored if existingSecret)
+
+# -- Optional dedicated database for (high-volume) syslog messages.
+syslogDatabase:
+  enabled: false
+  driver: mysql
+  host: ""
+  port: "3306"
+  name: servicesentry_syslog
+  user: servicesentry
+  password: ""
+
+# -- Distributed control plane. A shared token enables the instant HTTP poke
+#    (POST /control/reconcile) and the per-role control Services; without it,
+#    control still propagates via the periodic reconcile.
+control:
+  enabled: true
+  token: ""                # set a long random token, e.g. `openssl rand -hex 32`
+  port: 8765
+
+# -- Non-secret app settings → ConfigMap (SS_*). Empty = leave the saved value.
+config:
+  lang: en_EN
+  darkMode: false
+  checkInterval: 300       # seconds between monitoring cycles
+  publicUrl: ""            # public host[:port] behind a proxy
+  forceHttps: false
+  forceFqdn: false
+  proxyCount: 0
+  secureCookies: false
+  publicStatus: false
+  logLevel: ""             # off | debug | info | warning | error  (empty = saved)
+
+# -- Telegram notifications (optional; written to the Secret when set).
+telegram:
+  token: ""
+  chatId: ""
+
+# -- Arbitrary extra environment variables applied to every role.
+extraEnv: []
+#  - name: SS_REMEMBER_ME_DAYS
+#    value: "30"
+
+# -- Grant CAP_NET_RAW (needed by the ping watchful module's raw ICMP sockets).
+netRaw: true
+
+# ── Per-role settings ─────────────────────────────────────────────────────────
+web:
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 80
+    # nodePort: 30080      # when type: NodePort
+  resources: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+worker:
+  # >1 → hot standby with automatic failover (only the leader runs cycles).
+  replicas: 1
+  resources: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+events:
+  # >1 → hot standby with automatic failover (only the leader advances the cursor).
+  replicas: 1
+  resources: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+syslog:
+  enabled: true
+  # active-active: behind the ingress Service the load balancer splits messages.
+  replicas: 1
+  ports:
+    udp: 514
+    tcp: 514
+    tls: 6514
+  ingress:
+    enabled: true
+    type: LoadBalancer     # LoadBalancer | NodePort | ClusterIP
+    annotations: {}
+    # tls: false           # set true once tls_cert/tls_key are configured in the UI
+  resources: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -- Restrict the control listener so ONLY the web pods can reach :8765.
+networkPolicy:
+  enabled: false
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}

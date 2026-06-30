@@ -1,0 +1,42 @@
+ServiceSentry deployed as release "{{ .Release.Name }}".
+
+Roles:
+  web     × {{ .Values.web.replicas }}    (admin panel / UI)
+  worker  × {{ .Values.worker.replicas }}    (monitoring scheduler{{ if gt (int .Values.worker.replicas) 1 }} — leader + hot standby{{ end }})
+  events  × {{ .Values.events.replicas }}    (event/notification worker{{ if gt (int .Values.events.replicas) 1 }} — leader + hot standby{{ end }})
+{{- if .Values.syslog.enabled }}
+  syslog  × {{ .Values.syslog.replicas }}    (syslog receiver — active-active)
+{{- end }}
+
+1. Open the web panel:
+
+{{- if eq .Values.web.service.type "LoadBalancer" }}
+   kubectl get svc {{ include "servicesentry.fullname" . }}-web -n {{ .Release.Namespace }} -w
+   # then browse to the EXTERNAL-IP on port {{ .Values.web.service.port }}
+{{- else if eq .Values.web.service.type "NodePort" }}
+   kubectl get svc {{ include "servicesentry.fullname" . }}-web -n {{ .Release.Namespace }}
+{{- else }}
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "servicesentry.fullname" . }}-web 8080:{{ .Values.web.service.port }}
+   # then browse to http://localhost:8080
+{{- end }}
+
+   Login: {{ .Values.auth.username }} / (the password you set in .Values.auth.password)
+
+{{- if not .Values.control.enabled }}
+
+2. The distributed control poke is DISABLED (control.enabled=false): service control
+   propagates via the periodic DB reconcile (no instant poke). Set control.token to
+   enable it.
+{{- else if not .Values.control.token }}
+
+2. WARNING: control.enabled=true but no control.token is set — the HTTP poke is OFF
+   (no token, no listener). Set control.token (e.g. `openssl rand -hex 32`) so the
+   web can poke the dedicated services for instant control.
+{{- end }}
+
+{{- if and (ne .Values.database.driver "sqlite") (not .Values.database.host) }}
+
+WARNING: database.host is empty. Point it at your MySQL/PostgreSQL.
+{{- end }}
+
+Docs: see docs/kubernetes.md and docs/architecture.md (distributed control plane).

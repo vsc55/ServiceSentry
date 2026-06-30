@@ -28,16 +28,34 @@ from lib.config.manager import (
 from lib.db import get_connector
 from lib.debug import Debug, DebugLevel
 from lib.stores.config import ConfigStore
+from lib.stores.service_instances import ServiceInstancesStore
+from lib.stores.service_commands import ServiceCommandsStore
+from lib.stores.service_leader import ServiceLeaderStore
 from lib.security import secret_manager
+from lib.services.heartbeat import _HeartbeatMixin
+from lib.services.control_server import start_control_server
 from .manager import _MonitoringMixin
 
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for monitoring config changes (s)
 
 
-class MonitorService(_MonitoringMixin):
+class MonitorService(_HeartbeatMixin, _MonitoringMixin):
     """Own the service-monitor scheduler as a self-contained, DB-sharing daemon."""
 
     _CONFIG_FILE = CONFIG_FILENAME
+    _HB_KEY = 'monitoring'
+    _LEADER_GATED = True       # single-owner: only the lease holder runs cycles
+
+    # ── heartbeat hooks (observed state for the Services tab) ──────────────────
+    def _hb_running(self) -> bool:
+        return self._monitoring_running
+
+    def _hb_detail(self) -> dict:
+        return {'interval': self._monitoring_interval,
+                'next_in': self._monitoring_seconds_until_next}
+
+    def _hb_last_cycle(self):
+        return self._monitoring_last_run_ts
 
     def __init__(self, config_dir: str, var_dir: str | None = None,
                  modules_dir: str | None = None, *,
@@ -74,6 +92,14 @@ class MonitorService(_MonitoringMixin):
         self._config_mgr = ConfigManager(
             self._config_store, config_path(config_dir),
             fernet=self._fernet, secret_keys=self._secret_keys)
+
+        # Liveness registry (shared DB) so the web admin sees this worker even
+        # though it runs in a different process/container.
+        self._service_instances_store = ServiceInstancesStore(self._db_connector)
+        # Imperative command queue (run-now/clear/reload) the heartbeat loop drains.
+        self._service_commands_store = ServiceCommandsStore(self._db_connector)
+        # Leader lease: with >1 monitor replica only the holder runs cycles.
+        self._service_leader_store = ServiceLeaderStore(self._db_connector)
 
         # Check history on the shared connector (same table the web admin reads).
         try:
@@ -119,23 +145,28 @@ class MonitorService(_MonitoringMixin):
             self._dbg(f'> Monitor >> clear status failed: {exc}', DebugLevel.error)
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
+    def _reconcile_once(self) -> None:
+        """Converge to the desired state: re-read config and start/stop the
+        scheduler when the ``enabled`` flag is toggled.  Called both by the periodic
+        watch loop and on demand by the control-server poke."""
+        self._config_mgr.invalidate()                    # drop the cache, read fresh DB
+        enabled = self._monitoring_enabled()
+        running = self._monitoring_running
+        if enabled and not running:
+            self._dbg('> Monitor >> enabled in config; starting scheduler',
+                      DebugLevel.info)
+            self._monitoring_start(run_now=True)
+        elif not enabled and running:
+            self._dbg('> Monitor >> disabled in config; stopping scheduler',
+                      DebugLevel.info)
+            self._monitoring_stop()
+
     def _watch_loop(self) -> None:
         """Pick up monitoring config edits made from the web UI (a different
-        process): refresh the cached config and start/stop the scheduler when the
-        ``enabled`` flag is toggled — so the standalone worker reacts to the web
-        Services tab without a container restart (like the syslog receiver)."""
+        process): start/stop the scheduler when ``enabled`` is toggled — so the
+        standalone worker reacts to the web Services tab without a restart."""
         while not self._stop.wait(_CONFIG_WATCH_EVERY):
-            self._config_mgr.invalidate()                # drop the cache, read fresh DB
-            enabled = self._monitoring_enabled()
-            running = self._monitoring_running
-            if enabled and not running:
-                self._dbg('> Monitor >> enabled in config; starting scheduler',
-                          DebugLevel.info)
-                self._monitoring_start(run_now=True)
-            elif not enabled and running:
-                self._dbg('> Monitor >> disabled in config; stopping scheduler',
-                          DebugLevel.info)
-                self._monitoring_stop()
+            self._reconcile_once()
 
     def run(self, once: bool = False) -> int:
         """Run the scheduler and block until stopped (SIGINT/SIGTERM).
@@ -170,9 +201,12 @@ class MonitorService(_MonitoringMixin):
                       'to be enabled from the web UI (Ctrl+C to stop)', DebugLevel.warning)
         threading.Thread(target=self._watch_loop, name='monitor-config-watch',
                          daemon=True).start()
+        self._control_server = start_control_server(self)
+        self.start_heartbeat()
         self._dbg(f'> Monitor >> config watch every {_CONFIG_WATCH_EVERY}s', DebugLevel.info)
         self._stop.wait()
         self._monitoring_stop()
+        self.stop_heartbeat()
         self._dbg('> Monitor >> scheduler stopped; exiting', DebugLevel.info)
         return 0
 

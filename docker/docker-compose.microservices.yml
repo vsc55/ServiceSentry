@@ -169,6 +169,10 @@ services:
     environment:
       <<: *db-env
       SS_SERVICE_ROLE: worker
+      # Address the web pokes for instant control (reachable on the backend net).
+      # SS_CONTROL_TOKEN comes from .env (shared by every container); empty token =
+      # poke off, control still propagates via the periodic reconcile.
+      SS_CONTROL_ADVERTISE: worker
     depends_on:
       db:
         condition: service_healthy
@@ -201,6 +205,7 @@ services:
     environment:
       <<: [*db-env, *syslog-db-env]
       SS_SERVICE_ROLE: syslog
+      SS_CONTROL_ADVERTISE: syslog     # address the web pokes for instant control
     depends_on:
       db:
         condition: service_healthy
@@ -231,6 +236,7 @@ services:
     environment:
       <<: [*db-env, *syslog-db-env]
       SS_SERVICE_ROLE: events
+      SS_CONTROL_ADVERTISE: events     # address the web pokes for instant control
     depends_on:
       db:
         condition: service_healthy

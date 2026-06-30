@@ -216,6 +216,9 @@ services:
     environment:
       <<: *db-env
       SS_SERVICE_ROLE: worker
+      # Address the web pokes for instant control (backend net). SS_CONTROL_TOKEN
+      # from .env enables it; empty = poke off, periodic reconcile still works.
+      SS_CONTROL_ADVERTISE: worker
     depends_on:
       db:
         condition: service_healthy
@@ -292,6 +295,7 @@ services:
     environment:
       <<: [*db-env, *syslog-db-env]
       SS_SERVICE_ROLE: syslog
+      SS_CONTROL_ADVERTISE: syslog     # address the web pokes for instant control
     depends_on:
       db:
         condition: service_healthy
@@ -321,6 +325,7 @@ services:
     environment:
       <<: [*db-env, *syslog-db-env]
       SS_SERVICE_ROLE: events
+      SS_CONTROL_ADVERTISE: events     # address the web pokes for instant control
     depends_on:
       db:
         condition: service_healthy

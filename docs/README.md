@@ -12,6 +12,7 @@
 | --------- | --------- |
 | [deployment.md](deployment.md) | Resumen de métodos de despliegue: install.sh, systemd y OpenRC |
 | [docker.md](docker.md) | Despliegue con Docker: 3 topologías (monolítica, microservicios con 2 BD, microservicios + Traefik), variables de entorno, volúmenes, redes, actualización y proxy inverso |
+| [kubernetes.md](kubernetes.md) | Despliegue en Kubernetes: un Deployment por rol, Secret/ConfigMap, plano de control distribuido (poke `/control`), Services, probes y NetworkPolicy |
 | [architecture.md](architecture.md) | Diagrama de componentes, jerarquía de clases, estructura de directorios, flujo de ejecución, modelo de concurrencia |
 | [configuration.md](configuration.md) | config.json (database, syslog, syslog_db, ldap, oidc, saml2, email, notifications, webhooks, modules…), receptor syslog, gestor de eventos, configuración de módulos en BD (tablas `module_config`/`module_config_items`), estado de checks, opciones CLI, variables de entorno (`SS_*`), sistema de debug |
 | [modules.md](modules.md) | Los 16 módulos integrados: referencia de configuración, campos y flujo de cada uno |

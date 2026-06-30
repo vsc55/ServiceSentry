@@ -1,0 +1,20 @@
+apiVersion: v2
+name: servicesentry
+description: |
+  ServiceSentry — monitorización de servicios con panel web. Despliegue por roles
+  (web / worker / events / syslog) sobre una BD compartida, con plano de control
+  distribuido (heartbeat + cola de comandos + poke HTTP) y elección de líder para
+  alta disponibilidad de los servicios single-owner (monitor, events).
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - monitoring
+  - syslog
+  - snmp
+  - notifications
+home: https://github.com/
+sources:
+  - https://github.com/
+maintainers:
+  - name: ServiceSentry

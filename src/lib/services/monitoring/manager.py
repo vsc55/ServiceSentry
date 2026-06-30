@@ -167,6 +167,36 @@ class _MonitoringMixin:
         self._monitoring_audit('daemon_stopped', {})
         return True
 
+    # ── Imperative commands (run-now / clear / reload) ─────────────────────────
+    def _apply_command(self, action: str, args: dict | None = None) -> tuple[bool, str]:
+        """Execute a one-shot command from the service-command queue.  Runs on the
+        instance that hosts the monitor (embedded here or a remote worker), so the
+        UI can trigger it regardless of where monitoring lives."""
+        if action == 'run_now':
+            # Don't overlap with the scheduler / an on-demand check.
+            if not self._check_lock.acquire(blocking=False):
+                return False, 'busy'
+            try:
+                results, errors = self._monitoring_run_one_cycle()
+                return True, f'{len(results)} ok, {len(errors)} error(s)'
+            finally:
+                self._check_lock.release()
+        if action == 'clear_status':
+            try:
+                self._monitoring_get_monitor().clear_status()
+                return True, 'status cleared'
+            except Exception as exc:  # pylint: disable=broad-except
+                return False, str(exc)
+        if action == 'reload':
+            mgr = getattr(self, '_config_mgr', None)
+            if mgr is not None:
+                try:
+                    mgr.invalidate()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+            return True, 'config reloaded'
+        return False, 'unknown_action'
+
     # ── Internal: persistent monitor ──────────────────────────────────────────
 
     def _monitoring_get_monitor(self):
@@ -247,10 +277,15 @@ class _MonitoringMixin:
 
         while not self._monitoring_stop_event.is_set():
             self._monitoring_next_run_ts = 0.0
-            self._monitoring_last_run_ts = time.time()  # wall-clock epoch for the UI
+            # Hot standby: with leader gating, only the lease holder runs cycles —
+            # other replicas keep the scheduler alive but idle (no double checks /
+            # alerts). _work_allowed() is always true for non-gated / single owner.
+            _allowed = self._work_allowed() if hasattr(self, '_work_allowed') else True
+            if _allowed:
+                self._monitoring_last_run_ts = time.time()  # wall-clock epoch for the UI
             try:
-                # Skip cycle if an on-demand check is already running
-                if self._check_lock.acquire(blocking=False):
+                # Skip cycle if not the leader, or if an on-demand check is running.
+                if _allowed and self._check_lock.acquire(blocking=False):
                     try:
                         results, errors = self._monitoring_run_one_cycle()
                         # Only audit when there are errors — successful runs are

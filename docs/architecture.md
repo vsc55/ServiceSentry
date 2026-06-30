@@ -421,6 +421,92 @@ flowchart TB
 > opcionalmente, `on_config_changed`).  Aparece solo en la API, el card, el log de
 > arranque y el control — **cero ediciones** en el panel ni el frontend.
 
+### Plano de control distribuido (servicios en otros procesos / pods)
+
+Cuando un servicio corre **embebido**, el panel lo controla con una llamada en
+proceso (`Embedded<X>.control()`).  Cuando corre en **otro contenedor/pod**
+(`SS_*_EMBEDDED=0`), no hay objeto local que llamar — la coordinación va por la
+**base de datos compartida**, que es la **fuente de verdad**.  Se separan tres
+conceptos en tres sitios distintos:
+
+| Concepto | Qué es | Dónde vive |
+|---|---|---|
+| **Desired state** | lo que el operador quiere (`enabled`, intervalo…) | tabla `config` (declarativo, editable en el panel) |
+| **Observed state** | qué está realmente vivo (latido, último ciclo, versión, `control_url`) | tabla `service_instances` ([`ServiceInstancesStore`]) |
+| **Comandos** | acciones one-shot (`run_now`/`reload`/`clear_status`/`prune`) | tabla `service_commands` ([`ServiceCommandsStore`], claim atómico) |
+| **Liderazgo** | quién es el dueño activo de un servicio single-owner | tabla `service_leader` ([`ServiceLeaderStore`], lease con TTL) |
+
+Cada servicio **reconcilia** hacia el desired-state y **publica su latido**; el panel
+**lee** el estado observado y, para acelerar, **hace un poke HTTP** opcional. El poke
+es solo un acelerador: si se pierde, el reconcile periódico converge igual.
+
+```mermaid
+sequenceDiagram
+    participant UI as web_admin
+    participant DB as BD compartida
+    participant SVC as servicio (pod)
+    UI->>DB: 1. escribe desired-state / encola comando
+    UI--)SVC: 2. POST /control/reconcile (best-effort, token)
+    SVC->>DB: 3. lee desired-state + reclama comandos
+    SVC->>SVC: 4. reconcile (start/stop) + ejecuta comando + ack
+    SVC--)DB: 5. heartbeat (last_seen, running, last_cycle, control_url)
+    DB-->>UI: 6. lee estado observado (no sondea pods)
+    Note over UI,SVC: si el poke (2) se pierde → el reconcile periódico converge igual
+```
+
+Piezas:
+- **`_HeartbeatMixin`** (`lib/services/heartbeat.py`): hilo de latido (~10 s) que
+  escribe `service_instances`, **drena la cola de comandos** del servicio y expone
+  `_control_reconcile()` (el objetivo del poke).  Lo mezclan tanto los `Embedded<X>`
+  como los `*Service` standalone.
+- **`_reconcile_once()`** por servicio: re-lee config y aplica el desired-state
+  (start/stop, reload de listener…).  Lo invocan el timer **y** el poke.
+- **`control_server.py`**: `ThreadingHTTPServer` (stdlib, sin Flask) que cada
+  servicio standalone levanta si hay `SS_CONTROL_TOKEN`.  Endpoints
+  `GET /control/health` (probes) y `POST /control/reconcile` (Bearer token).
+- **Poke desde el panel**: `_poke_service_instances(key)` → `POST /control/reconcile`
+  a las instancias externas vivas (descubiertas por `control_url` del heartbeat).
+  Se dispara al **encolar un comando** para un servicio externo y al **guardar
+  config** que afecte a un servicio (`_poke_services_for_config`).
+
+Variables de entorno del poke (mapean a un Secret de k8s): `SS_CONTROL_TOKEN`
+(sin token → listener apagado, solo reconcile periódico), `SS_CONTROL_PORT`
+(8765), `SS_CONTROL_BIND` (0.0.0.0), `SS_CONTROL_ADVERTISE` (dirección que se
+publica como `control_url`).
+
+> **Principio**: el panel nunca *manda* a un proceso remoto; **declara desired-state**
+> y los servicios reconcilian.  Robusto ante reinicios (el estado vive en la BD, no en
+> la orden) y particiones de red (el poke es opcional).
+
+#### Alta disponibilidad: lease de líder + hot-standby
+
+Algunos servicios **no pueden** correr en más de una instancia a la vez: dos
+schedulers de monitor duplicarían cada check (y cada alerta); dos workers de
+eventos avanzarían el mismo cursor y duplicarían cada notificación.  Para permitir
+**varias réplicas** sin duplicar trabajo, esos servicios usan un **lease de líder**
+en BD ([`ServiceLeaderStore`], tabla `service_leader`):
+
+- Cada réplica intenta **adquirir/renovar** el lease en su loop de heartbeat
+  (`_renew_leadership`); el `try_acquire` es *race-safe* (UPDATE condicional
+  `WHERE holder=<viejo> OR expires_at<now`).
+- **Solo el líder hace el trabajo**: `_work_allowed()` gatea el ciclo del monitor
+  (`_monitoring_loop`) y el tick de eventos (`_event_worker_tick`).  Las demás
+  réplicas quedan en **hot-standby** (vivas pero ociosas).
+- Si el líder cae y deja de renovar, el lease **caduca** (TTL ~30 s) y otra réplica
+  lo toma → *failover* automático en segundos.  Un cierre limpio hace `release()`
+  para un relevo instantáneo.
+- `_LEADER_GATED=True` lo activa por servicio: **monitor** y **events** sí;
+  **syslog** no (es **active-active** — tras un balanceador cada mensaje llega a una
+  réplica, sin duplicar).  La pestaña Servicios marca cada instancia **Líder/En
+  espera**.
+
+> Acciones explícitas (check on-demand, comando `run_now`) **no** están gateadas por
+> líder: las ejecuta cualquier réplica (el claim de la cola garantiza "una sola vez").
+
+[`ServiceInstancesStore`]: ../src/lib/stores/service_instances.py
+[`ServiceCommandsStore`]: ../src/lib/stores/service_commands.py
+[`ServiceLeaderStore`]: ../src/lib/stores/service_leader.py
+
 ---
 
 ## Procesamiento de Eventos (notificaciones)

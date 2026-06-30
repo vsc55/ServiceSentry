@@ -253,7 +253,22 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._init_syslog_stores()
         from lib.services import build_embedded_services  # noqa: PLC0415
         self._embedded_services = build_embedded_services(self)
-        for _svc in self._embedded_services.values():
+        for _key, _svc in self._embedded_services.items():
+            # Stamp identity on every embedded object (so command-draining knows its
+            # key even when its heartbeat thread is gated off because a dedicated
+            # container owns the running service).
+            _svc._HB_KEY = _key
+            _svc._HB_MODE = 'embedded'
+            # Start the heartbeat FIRST when we host the service, so its leader lease
+            # is acquired before start_at_boot launches the scheduler/worker — else a
+            # leader-gated first cycle could be skipped (not yet leader).  Only when
+            # this process actually hosts it (state != 'external'; a dedicated
+            # container owns the external ones).  Best-effort; never fatal.
+            try:
+                if _svc.status().get('state') != 'external':
+                    _svc.start_heartbeat()
+            except Exception:  # pylint: disable=broad-except
+                pass
             _svc.start_at_boot()
 
         # Announce the startup state of every background service (running, stopped,
@@ -488,6 +503,20 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._notification_log_store = NotificationLogStore(self._db_connector)
         # Persisted cooldown + per-source cursor for the decoupled event worker.
         self._event_state_store = EventStateStore(self._db_connector)
+        # Observed-state registry for background services (the heartbeat): every
+        # instance — embedded here or in another pod — upserts its liveness row;
+        # the Services tab reads them. Shared connector, so a --monitor worker and
+        # this process see the same rows.
+        from lib.stores.service_instances import ServiceInstancesStore  # noqa: PLC0415
+        self._service_instances_store = ServiceInstancesStore(self._db_connector)
+        # Imperative one-shot command queue (run-now/reload/clear): the UI enqueues,
+        # the hosting instance (embedded here or a remote pod) claims + runs it.
+        from lib.stores.service_commands import ServiceCommandsStore  # noqa: PLC0415
+        self._service_commands_store = ServiceCommandsStore(self._db_connector)
+        # Leader lease for single-owner services (monitor/events): only the holder
+        # does the work, extra replicas are hot standby with TTL failover.
+        from lib.stores.service_leader import ServiceLeaderStore  # noqa: PLC0415
+        self._service_leader_store = ServiceLeaderStore(self._db_connector)
         # Watchful module/item configuration (DB-backed, shared with the monitor
         # through the same database).
         from lib.stores.modules import (  # noqa: PLC0415

@@ -5,9 +5,18 @@
 
 // state → Bootstrap colour for the status badge / dot.
 const _SVC_STATE_CLS = {
-    running:  'success', active:   'success', embedded: 'info',
+    running:  'success', active:   'success', alive:    'success', embedded: 'info',
     stopped:  'secondary', disabled: 'secondary', external: 'info',
-    stale:    'warning', unknown:  'secondary', error:    'danger',
+    stale:    'warning', unknown:  'secondary', down:     'danger', error: 'danger',
+};
+
+// Imperative commands offered per service (shown with the services_control perm).
+// These work whether the service is hosted here or in a dedicated container —
+// the queue is drained by whichever instance owns the service.
+const _SVC_COMMANDS = {
+    monitoring: ['run_now', 'reload', 'clear_status'],
+    events:     ['run_now', 'reload'],
+    syslog:     ['reload', 'prune'],
 };
 
 let _svcPollTimer = null;
@@ -50,21 +59,100 @@ function _svcDetailRow(r) {
     return _svcRow(t(r.label_key), v);
 }
 
-// Render one service card. `meta` = {key, icon, title, rows[], canControl, running}
+// One live instance (heartbeat), two lines: state + host (+ leader) on top, a muted
+// meta line (this process · mode · version · age) below. Shows remote replicas in
+// another pod, not only the one this process hosts.
+function _svcInstanceRow(inst) {
+    const cls   = _SVC_STATE_CLS[inst.derived_state] || 'secondary';
+    const host  = esc(inst.host || '—');
+    const modeK = inst.mode === 'embedded' ? 'svc_mode_embedded' : 'svc_mode_container';
+    const when  = inst.last_cycle_at ? _svcAgo(inst.last_cycle_at) : _svcAgo(inst.last_seen);
+    // Leader / standby badge for single-owner services (the heartbeat detail
+    // carries `leader` only for leader-gated services; absent for active-active).
+    let lead = '';
+    const lv = inst.detail && inst.detail.leader;
+    if (typeof lv === 'boolean') {
+        lead = lv
+            ? `<span class="badge bg-primary"><i class="bi bi-star-fill me-1"></i>${esc(t('svc_leader'))}</span>`
+            : `<span class="badge bg-secondary">${esc(t('svc_standby'))}</span>`;
+    }
+    // Muted meta line parts.
+    const parts = [];
+    if (inst.is_self) parts.push(esc(t('svc_self_tag')));
+    parts.push(esc(t(modeK)));
+    if (inst.version) parts.push(esc(inst.version));
+    parts.push(when);
+    return `<div class="py-1 border-top">
+        <div class="d-flex justify-content-between align-items-center gap-2">
+            <span class="text-truncate" title="${host}">
+                <span class="badge bg-${cls} me-1">${esc(_svcStateLabel(inst.derived_state))}</span><span class="fw-semibold">${host}</span></span>
+            ${lead}
+        </div>
+        <div class="text-muted small">${parts.join(' · ')}</div>
+    </div>`;
+}
+
+// Render one service card. `meta` carries the backend entry verbatim.
 function _svcCard(meta) {
     const cls = _SVC_STATE_CLS[meta.state] || 'secondary';
     const canCtl = currentUser.permissions?.includes('services_control');
-    let actions = '';
+
+    // Primary action: start/stop (only for services this process hosts embedded).
+    let primary = '';
     if (meta.controllable && canCtl) {
-        actions = meta.running
+        primary = meta.running
             ? `<button class="btn btn-warning btn-sm" onclick="servicesControl('${meta.key}','stop')">
                    <i class="bi bi-stop-fill me-1"></i>${esc(t('svc_stop'))}</button>`
             : `<button class="btn btn-success btn-sm" onclick="servicesControl('${meta.key}','start')">
                    <i class="bi bi-play-fill me-1"></i>${esc(t('svc_start'))}</button>`;
-    } else if (!meta.embedded) {
-        actions = `<span class="small text-muted fst-italic">${esc(t('svc_external_managed'))}</span>`;
     }
-    return `<div class="col-md-6 col-xl-3 mb-3">
+    // Hint for services a dedicated container owns (no start/stop from here).
+    const hint = (!meta.embedded)
+        ? `<span class="small text-muted fst-italic">${esc(t('svc_external_managed'))}</span>` : '';
+
+    // Imperative commands behind a "⋯" menu — queued for whichever instance hosts
+    // the service (here or a remote pod), so they declutter the card.
+    let cmdMenu = '';
+    const cmds = _SVC_COMMANDS[meta.key];
+    if (cmds && canCtl) {
+        const items = cmds.map(a =>
+            `<li><button class="dropdown-item" onclick="servicesCommand('${meta.key}','${a}')">
+                 ${esc(t('svc_cmd_' + a))}</button></li>`).join('');
+        cmdMenu = `<div class="dropdown">
+            <button class="btn btn-secondary btn-sm" type="button" data-bs-toggle="dropdown"
+                    aria-expanded="false" title="${esc(t('svc_commands'))}">
+                <i class="bi bi-three-dots"></i></button>
+            <ul class="dropdown-menu dropdown-menu-end">${items}</ul>
+        </div>`;
+    }
+
+    // Live instances (heartbeat) — set apart from the service-info rows above by a
+    // stronger divider + an uppercase section label.
+    let instancesHtml = '';
+    if (Array.isArray(meta.instances) && meta.instances.length) {
+        instancesHtml = `<div class="svc-instances mt-3 pt-2">
+            <div class="svc-section-label">
+                <i class="bi bi-hdd-stack me-1"></i>${esc(t('svc_instances'))} (${meta.instances.length})</div>
+            ${meta.instances.map(_svcInstanceRow).join('')}</div>`;
+    }
+
+    // Per-card refresh (bottom-left) — only for the actual services; the database
+    // views are static, so refreshing one card makes no sense there.
+    const showRefresh = !String(meta.key).startsWith('database');
+    const refreshBtn = showRefresh
+        ? `<button class="btn btn-secondary btn-sm" title="${esc(t('svc_refresh'))}"
+               onclick="refreshServiceCard('${meta.key}', this)"><i class="bi bi-arrow-clockwise"></i></button>`
+        : '';
+    const left = `${refreshBtn}${hint ? `<span class="ms-1">${hint}</span>` : ''}`;
+    const right = `${cmdMenu}${primary}`;
+    const footer = (left || right)
+        ? `<div class="mt-2 d-flex justify-content-between align-items-center gap-2"
+                style="min-height:2rem">
+                <span class="d-flex align-items-center gap-2">${left}</span>
+                <span class="d-flex gap-2 ms-auto">${right}</span></div>`
+        : '';
+
+    return `<div class="col-md-6 col-xl-3 mb-3" id="svc-card-${meta.key}">
         <div class="card h-100 shadow-sm svc-card border-${cls}">
             <div class="svc-card-accent bg-${cls}"></div>
             <div class="card-body d-flex flex-column">
@@ -73,11 +161,39 @@ function _svcCard(meta) {
                     <h6 class="mb-0 flex-grow-1">${esc(meta.title)}</h6>
                     <span class="badge bg-${cls}">${esc(_svcStateLabel(meta.state))}</span>
                 </div>
-                <div class="flex-grow-1">${meta.rows.join('')}</div>
-                <div class="mt-2 d-flex justify-content-end" style="min-height:2rem">${actions}</div>
+                <div class="flex-grow-1">${meta.rows.join('')}${instancesHtml}</div>
+                ${footer}
             </div>
         </div>
     </div>`;
+}
+
+// Build the _svcCard meta from a backend service entry (shared by the full render
+// and the per-card refresh).
+function _svcMeta(key, d) {
+    return {
+        key,
+        icon: d.icon || 'bi-gear',
+        title: d.label_key ? t(d.label_key) : key,
+        state: d.state,
+        running: !!d.running,
+        controllable: !!d.controllable,
+        embedded: !!d.embedded,
+        rows: (d.detail || []).map(_svcDetailRow),
+        instances: d.instances || [],
+    };
+}
+
+// Force-refresh ONLY one card: fetch fresh data now and replace just that node.
+async function refreshServiceCard(key, btn) {
+    const ico = btn && btn.querySelector('i');
+    if (ico) ico.classList.add('ss-spin');
+    const resp = await apiGet('/api/v1/services');
+    const s = (resp && resp.services) || {};
+    const el = document.getElementById('svc-card-' + key);
+    if (!(key in s)) { if (el) el.remove(); return; }     // service gone → drop card
+    const html = _svcCard(_svcMeta(key, s[key]));
+    if (el) { el.outerHTML = html; } else { renderServices(); }
 }
 
 async function renderServices() {
@@ -98,6 +214,7 @@ async function renderServices() {
         controllable: !!d.controllable,
         embedded: !!d.embedded,
         rows: (d.detail || []).map(_svcDetailRow),
+        instances: d.instances || [],
     }));
 
     const refreshBtn = `<button class="btn btn-secondary btn-sm" onclick="renderServices()">
@@ -123,6 +240,17 @@ async function servicesControl(name, action) {
     } else {
         const reason = r?.data?.reason;
         showToast(reason ? (t('svc_err_' + reason) || reason) : t('svc_action_error'), 'warning');
+    }
+    renderServices();
+}
+
+async function servicesCommand(name, action) {
+    const r = await apiPost(`/api/v1/services/${name}/command/${action}`, {});
+    if (r && (r.status === 200) && r.data?.ok) {
+        showToast(t('svc_command_ok'), 'success');
+    } else {
+        const reason = r?.data?.reason;
+        showToast(reason ? (t('svc_err_' + reason) || reason) : t('svc_command_error'), 'warning');
     }
     renderServices();
 }

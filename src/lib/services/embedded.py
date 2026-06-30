@@ -18,10 +18,13 @@ metadata; the host provides nothing service-specific.
 from __future__ import annotations
 
 from lib.debug import DebugLevel
+from lib.services.heartbeat import _HeartbeatMixin
 
 
-class _EmbeddedBase:
+class _EmbeddedBase(_HeartbeatMixin):
     """Delegate the context surface the service mixins expect to the host."""
+
+    _HB_MODE = 'embedded'
 
     def __init__(self, host):
         self._host = host
@@ -66,6 +69,21 @@ class _EmbeddedBase:
     @property
     def _history(self):
         return getattr(self._host, '_history', None)
+
+    @property
+    def _service_instances_store(self):
+        # Observed-state registry the heartbeat mixin writes to (lives on the host).
+        return getattr(self._host, '_service_instances_store', None)
+
+    @property
+    def _service_commands_store(self):
+        # Imperative command queue the heartbeat loop drains (lives on the host).
+        return getattr(self._host, '_service_commands_store', None)
+
+    @property
+    def _service_leader_store(self):
+        # Leader lease for single-owner services (lives on the host).
+        return getattr(self._host, '_service_leader_store', None)
 
     @property
     def _check_lock(self):
