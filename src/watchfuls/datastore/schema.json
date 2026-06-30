@@ -1,4 +1,5 @@
 {
+    "__icon__": "bi-database",
     "__module__": {
         "enabled":           {"type": "bool", "default": true},
         "alert_connections": {"type": "int",  "default": 0, "min": 0, "max": 1000000},

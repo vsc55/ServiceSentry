@@ -175,3 +175,17 @@ class MonitorService(_MonitoringMixin):
         self._monitoring_stop()
         self._dbg('> Monitor >> scheduler stopped; exiting', DebugLevel.info)
         return 0
+
+
+def run_standalone(args, config_dir: str, var_dir: str, modules_dir: str) -> int:
+    """Build + run the monitor as a standalone process (``main.py --monitor``).
+
+    ``-t 0`` runs a single pass and exits; otherwise it runs continuously at the
+    configured interval (``--timer`` / ``SS_TIMER`` win)."""
+    timer = getattr(args, 'timer_check', None)
+    svc = MonitorService(config_dir, var_dir, modules_dir,
+                         interval_override=(timer if timer else None),
+                         log_level=getattr(args, 'log_level', None))
+    if getattr(args, 'clear_status', False):
+        svc.clear_status()
+    return svc.run(once=(timer == 0))

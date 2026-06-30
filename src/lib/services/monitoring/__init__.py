@@ -19,3 +19,7 @@ EMBEDDED_SERVICE = {
     'key': 'monitoring', 'label_key': 'svc_monitor', 'icon': 'bi-arrow-repeat',
     'order': 10, 'controllable': True,
 }
+
+# Standalone launch (main.py --monitor): discover_standalone_services() maps the CLI
+# mode flag to ``service.run_standalone``; ``order`` resolves a tie if two were set.
+STANDALONE = {'key': 'monitoring', 'dest': 'monitor_mode', 'banner': 'banner_monitor', 'order': 10}

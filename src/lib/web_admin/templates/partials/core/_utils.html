@@ -345,11 +345,22 @@ function modulePrettyName(name, cfg) {
  * Priority: user config icon > schema __i18n__ > generic fallback.
  */
 function moduleIcon(name, cfg) {
-    if (cfg && typeof cfg.icon === 'string' && cfg.icon.trim()) return cfg.icon.trim();
+    // Resolve the module's icon and return RENDERABLE content (inserted raw): a
+    // Bootstrap class ('bi-…', the canonical ``__icon__`` declaration) becomes an
+    // <i class="bi …">; an emoji/literal passes through. Same source the public
+    // status page uses, so the panel and /status show the same icon.
+    const wrap = v => (v && v.startsWith('bi-')) ? `<i class="bi ${v}"></i>` : v;
+    // The module's declarative icon (``__icon__`` in schema.json) is canonical and
+    // wins first, so the panel shows the SAME icon as the public /status page
+    // (which reads __icon__ straight from the schema). cfg.icon only applies as an
+    // override for modules that don't declare one.
+    const declared = ITEM_SCHEMAS[name + '|__icon__'];   // language-agnostic module icon
+    if (typeof declared === 'string' && declared.trim()) return wrap(declared.trim());
+    if (cfg && typeof cfg.icon === 'string' && cfg.icon.trim()) return wrap(cfg.icon.trim());
     const i18n = ITEM_SCHEMAS[name + '|__i18n__'];
     if (i18n) {
         const d = i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG];
-        if (d && typeof d.icon === 'string' && d.icon.trim()) return d.icon.trim();
+        if (d && typeof d.icon === 'string' && d.icon.trim()) return wrap(d.icon.trim());
     }
     return '\u{1F4E6}';
 }

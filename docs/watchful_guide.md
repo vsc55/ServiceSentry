@@ -6,20 +6,19 @@ Guía paso a paso para crear un módulo de monitorización desde cero en Service
 
 ## 1. Arquitectura general
 
-```text
-main.py -> Monitor
-              |-- Descubre módulos en watchfuls/ (packages o archivos *.py)
-              |-- Lee la configuración (BD, vía config_modules) para comprobar si están habilitados
-              |-- Instancia Watchful(monitor) por cada módulo
-              +-- Ejecuta module.check() en paralelo
-                       |
-                       v
-              Watchful(ModuleBase)
-                  |-- Lee su configuración (almacenada en la BD)
-                  |-- Ejecuta la lógica de monitorización
-                  |-- Almacena resultados en dict_return
-                  |-- Detecta cambios de estado (check_status)
-                  +-- Envía notificaciones por Telegram (send_message)
+```mermaid
+flowchart TD
+    main["main.py → Monitor"]
+    main --> d1["Descubre módulos en watchfuls/<br/><small>packages o archivos *.py</small>"]
+    main --> d2["Lee la configuración<br/><small>BD, vía config_modules: comprueba si están habilitados</small>"]
+    main --> d3["Instancia Watchful(monitor) por cada módulo"]
+    main --> d4["Ejecuta module.check() en paralelo"]
+    d4 --> w["Watchful(ModuleBase)"]
+    w --> w1["Lee su configuración (almacenada en la BD)"]
+    w1 --> w2["Ejecuta la lógica de monitorización"]
+    w2 --> w3["Almacena resultados en dict_return"]
+    w3 --> w4["Detecta cambios de estado (check_status)"]
+    w4 --> w5["Envía notificaciones por Telegram (send_message)"]
 ```
 
 ### Jerarquía de clases

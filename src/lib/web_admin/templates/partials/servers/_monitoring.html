@@ -354,14 +354,14 @@ function openHostAddModule() {
             const icon = moduleIcon(name, {});
             const pname = modulePrettyName(name, {});
             const hue = _moduleHue(name);
-            const avBg = `hsla(${hue},65%,55%,.14)`, avColor = `hsl(${hue},60%,42%)`, accent = `hsl(${hue},65%,55%)`;
+            const accent = `hsl(${hue},65%,55%)`;
             h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
                        style="cursor:pointer;background:var(--ss-surface-bg,var(--bs-body-bg));transition:box-shadow .15s,border-color .15s"
                        onclick="_hostAddModulePick(${jsStr(name)})"
                        onmouseover="this.style.boxShadow='0 4px 14px rgba(0,0,0,.13)';this.style.borderColor='${accent}'"
                        onmouseout="this.style.boxShadow='';this.style.borderColor=''">
-                <span class="rounded-2 d-flex align-items-center justify-content-center"
-                      style="width:46px;height:46px;background:${avBg};color:${avColor};font-size:1.35rem">${icon}</span>
+                <span class="ss-mod-av rounded-2 d-flex align-items-center justify-content-center"
+                      style="--mh:${hue};width:46px;height:46px;font-size:1.35rem">${icon}</span>
                 <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${esc(pname)}</div>
                 <code class="text-muted" style="font-size:.7rem">${esc(name)}</code>
             </div>`;

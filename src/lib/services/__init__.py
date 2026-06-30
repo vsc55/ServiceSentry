@@ -53,6 +53,31 @@ def discover_embedded_services() -> list[dict]:
     return found
 
 
+def discover_standalone_services() -> list[dict]:
+    """Discover each service package's ``STANDALONE`` descriptor (CLI mode → runner).
+
+    Same package scan as :func:`discover_embedded_services`; used by ``main.py`` to
+    dispatch ``--monitor`` / ``--syslog`` / ``--events`` to
+    ``lib.services.<key>.service.run_standalone`` without a per-service branch.
+    Ordered by the optional ``order`` key (a tie-break if two modes were set)."""
+    import importlib  # noqa: PLC0415
+    import pkgutil    # noqa: PLC0415
+
+    found: list[dict] = []
+    for mod in pkgutil.iter_modules(__path__):
+        if not mod.ispkg:
+            continue
+        try:
+            sub = importlib.import_module(f'{__name__}.{mod.name}')
+        except Exception:  # pylint: disable=broad-except
+            continue
+        meta = getattr(sub, 'STANDALONE', None)
+        if isinstance(meta, dict) and meta.get('dest'):
+            found.append(meta)
+    found.sort(key=lambda m: m.get('order', 999))
+    return found
+
+
 def build_embedded_services(host) -> dict:
     """Instantiate every discovered service's ``Embedded<X>`` object, bound to the
     *host* WebAdmin (composition).  Returns ``{key: object}`` in discovery order.

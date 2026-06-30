@@ -1057,6 +1057,24 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     border-left-color: #198754;
 }
 
+/* ── Module avatar tint (hue-based, theme-aware) ────────────────────────────
+   Each module avatar passes only its hue via --mh; the lightness is chosen by
+   the active theme so the icon keeps enough contrast in both modes (a fixed
+   42%-lightness icon reads fine on the light tint but muddy on the dark one). */
+.ss-mod-av {
+    --mh: 210;
+    background: hsla(var(--mh), 65%, 55%, .14);
+    color: hsl(var(--mh), 55%, 40%);
+}
+[data-bs-theme="dark"] .ss-mod-av {
+    background: hsla(var(--mh), 60%, 62%, .22);
+    color: hsl(var(--mh), 75%, 70%);
+}
+.ss-mod-av.off {
+    background: var(--bs-secondary-bg);
+    color: var(--bs-secondary-color);
+}
+
 .toast-container {
     z-index: 9999;
 }

@@ -201,84 +201,28 @@ def start_web(args):
     admin.run(host=str(host), port=int(port), debug=getattr(args, 'verbose', False))
 
 
-def start_syslog(args) -> int:
-    """Run the standalone syslog receiver (shares the DB with the rest of the app).
+def _run_standalone(desc, args) -> int:
+    """Launch a standalone service (``--monitor`` / ``--syslog`` / ``--events``).
 
-    Resolves config/var dirs exactly like :func:`start_web` so the same
-    ``config.json`` and database are used, then blocks on the listener.
+    Resolves the config/var dirs like :func:`start_web`, prints the service banner,
+    then hands off to the package's ``run_standalone`` (discovered via
+    :func:`lib.services.discover_standalone_services`) — so adding a standalone
+    service needs no edit here, only its package's ``STANDALONE`` descriptor +
+    ``service.run_standalone``.
     """
-    from lib.services.syslog.service import \
-        SyslogService  # noqa: WPS433 – conditional import
-
-    config_dir, var_dir = _resolve_app_dirs(args)
-
+    import importlib  # noqa: WPS433
     from lib.i18n import translate  # noqa: WPS433
-    lang = _banner_lang(config_dir, getattr(args, 'lang', None))
-    print(translate(lang, 'banner_syslog'))
-    print(f"  {translate(lang, 'banner_config')} {config_dir}")
-    print("  " + translate(lang, 'web_press_ctrlc'))
-    print()
-
-    return SyslogService(
-        config_dir, var_dir,
-        host_override=getattr(args, 'syslog_host', None),
-        port_override=getattr(args, 'syslog_port', None),
-        log_level=getattr(args, 'log_level', None)).run()
-
-
-def start_events(args) -> int:
-    """Run the standalone event worker (shares the DB with the rest of the app).
-
-    Decoupled rule evaluation: reads new syslog/audit rows by cursor, evaluates the
-    same rules edited in the web UI, and dispatches notifications — so a flood of
-    messages never blocks ingestion.  Set ``events|mode=external`` and
-    ``SS_EVENTS_EMBEDDED=0`` on the web admin so this owns evaluation.
-    """
-    from lib.services.events.service import \
-        EventService  # noqa: WPS433 – conditional import
-
-    config_dir, var_dir = _resolve_app_dirs(args)
-
-    from lib.i18n import translate  # noqa: WPS433
-    lang = _banner_lang(config_dir, getattr(args, 'lang', None))
-    print(translate(lang, 'banner_events'))
-    print(f"  {translate(lang, 'banner_config')} {config_dir}")
-    print("  " + translate(lang, 'web_press_ctrlc'))
-    print()
-
-    return EventService(config_dir, var_dir,
-                        log_level=getattr(args, 'log_level', None)).run()
-
-
-def start_monitor(args) -> int:
-    """Run the standalone service monitor (shares the DB with the rest of the app).
-
-    The check scheduler as its own process/container — the same loop the web admin
-    hosts embedded (a single persistent Monitor, change-detection continuity,
-    history pruning).  Set ``SS_MONITORING_EMBEDDED=0`` on the web admin so this
-    owns the checks.  ``--monitor -t 0`` runs a single pass and exits; otherwise it
-    runs continuously at the configured interval (``--timer`` / ``SS_TIMER`` win).
-    """
-    from lib.services.monitoring.service import \
-        MonitorService  # noqa: WPS433 – conditional import
 
     config_dir, var_dir = _resolve_app_dirs(args)
     modules_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'watchfuls')
-
-    from lib.i18n import translate  # noqa: WPS433
     lang = _banner_lang(config_dir, getattr(args, 'lang', None))
-    print(translate(lang, 'banner_monitor'))
+    print(translate(lang, desc['banner']))
     print(f"  {translate(lang, 'banner_config')} {config_dir}")
     print("  " + translate(lang, 'web_press_ctrlc'))
     print()
 
-    timer = getattr(args, 'timer_check', None)
-    svc = MonitorService(config_dir, var_dir, modules_dir,
-                         interval_override=(timer if timer else None),
-                         log_level=getattr(args, 'log_level', None))
-    if getattr(args, 'clear_status', False):
-        svc.clear_status()
-    return svc.run(once=(timer == 0))
+    runner = importlib.import_module(f"lib.services.{desc['key']}.service").run_standalone
+    return runner(args, config_dir, var_dir, modules_dir)
 
 
 def arg_check_dir_path(path):
@@ -522,14 +466,11 @@ if __name__ == "__main__":
     if getattr(_args, 'nocolor', False):
         from lib.debug import Debug as _Debug
         _Debug.set_color(False)
-    if getattr(_args, 'monitor_mode', False):
-        # The service monitor as its own DB-sharing process (continuous; -t 0 runs
-        # a single pass) — same scheduler the web admin hosts embedded.
-        sys.exit(start_monitor(_args))
-    elif getattr(_args, 'syslog_mode', False):
-        sys.exit(start_syslog(_args))
-    elif getattr(_args, 'events_mode', False):
-        sys.exit(start_events(_args))
-    else:
-        # Default mode: the web administration panel (also explicit via --web).
-        start_web(_args)
+    # Standalone service modes (--monitor/--syslog/--events), discovered from the
+    # service packages so there is no per-service branch here; mutually exclusive,
+    # and the default (no mode flag) is the web administration panel.
+    from lib.services import discover_standalone_services  # noqa: WPS433
+    for _desc in discover_standalone_services():
+        if getattr(_args, _desc['dest'], False):
+            sys.exit(_run_standalone(_desc, _args))
+    start_web(_args)

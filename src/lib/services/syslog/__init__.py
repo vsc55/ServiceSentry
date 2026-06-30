@@ -19,3 +19,6 @@ EMBEDDED_SERVICE = {
     'key': 'syslog', 'label_key': 'svc_syslog', 'icon': 'bi-hdd-stack',
     'order': 20, 'controllable': True,
 }
+
+# Standalone launch (main.py --syslog) — see discover_standalone_services().
+STANDALONE = {'key': 'syslog', 'dest': 'syslog_mode', 'banner': 'banner_syslog', 'order': 20}

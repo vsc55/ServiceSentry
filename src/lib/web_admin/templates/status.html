@@ -10,18 +10,6 @@
 </head>
 <body class="{{ 'st-ok' if overall_ok else 'st-down' }}">
 
-{% set mod_icons = {
-    'ping':           'bi-broadcast',
-    'web':            'bi-globe',
-    'mysql':          'bi-database',
-    'service_status': 'bi-gear-fill',
-    'filesystemusage':'bi-hdd-fill',
-    'ram_swap':       'bi-memory',
-    'temperature':    'bi-thermometer-half',
-    'hddtemp':        'bi-thermometer',
-    'raid':           'bi-shield-shaded',
-} %}
-
 {% set ns = namespace(ok_mods=0, err_mods=0) %}
 {% for mod in modules %}
   {% if mod.all_ok %}{% set ns.ok_mods = ns.ok_mods + 1 %}
@@ -100,7 +88,7 @@
          {% if show_detail %}onclick="toggleMod('{{ mod.name }}')"{% endif %}>
 
       <div class="mod-avatar {% if mod.all_ok %}av-ok{% else %}av-err{% endif %}">
-        <i class="bi {{ mod_icons.get(mod.name, 'bi-puzzle-fill') }}"></i>
+        <i class="bi {{ mod.icon }}"></i>
       </div>
 
       <div class="mod-info">

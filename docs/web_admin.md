@@ -833,7 +833,12 @@ La interfaz web genera automáticamente los formularios de configuración de mó
 
 Esto implica:
 - Sin listas de campos hardcodeadas en JS.
-- Los iconos y nombres de visualización de los módulos vienen de `info.json` y `lang/*.json`.
+- Los **iconos** de los módulos los declara cada `schema.json` con `__icon__`
+  (clase `bi-*`); los **nombres de visualización** salen de `lang/*.json` (`__i18n__`).
+  El mismo icono lo usan el panel (`moduleIcon`) y la página `/status` — ver
+  [schema.md → `__icon__`](schema.md#__icon__) e [i18n.md](i18n.md#resolución-de-etiquetas-en-el-navegador).
+  El avatar que lo envuelve (`.ss-mod-av`) ajusta su luminosidad al tema activo
+  (claro/oscuro) para conservar contraste.
 - Añadir un nuevo campo a `schema.json` es suficiente para que aparezca en la UI.
 
 ---

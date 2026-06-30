@@ -17,3 +17,6 @@ EMBEDDED_SERVICE = {
     'key': 'events', 'label_key': 'svc_events', 'icon': 'bi-bell',
     'order': 30, 'controllable': True,
 }
+
+# Standalone launch (main.py --events) — see discover_standalone_services().
+STANDALONE = {'key': 'events', 'dest': 'events_mode', 'banner': 'banner_events', 'order': 30}

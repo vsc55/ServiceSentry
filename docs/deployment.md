@@ -124,15 +124,18 @@ sudo bash uninstall.sh -a    # elimina todo, incluida la configuración
 
 | Unidad | Tipo | Función |
 | ------ | ---- | ------- |
-| `ServiSesentry.service` | oneshot | Ejecuta una pasada de comprobación de monitorización |
-| `ServiSesentry.timer` | timer | Lanza `ServiSesentry.service` cada 5 minutos |
+| `ServiSesentry.service` | simple | Servicio de monitorización long-running (`--monitor`, bucle continuo) |
 | `ServiSesentry-web.service` | simple | Ejecuta el panel web de administración de forma continua |
+
+> El monitor ya es un servicio continuo propio (programa sus ciclos internamente),
+> así que **no hace falta un `.timer` de systemd**. Las versiones antiguas usaban
+> `ServiSesentry.timer` para lanzar pasadas oneshot cada 5 min; ya no se instala
+> (los scripts `uninstall.sh`/`update.sh` lo limpian si existe de instalaciones previas).
 
 ### Instalación
 
 ```bash
 sudo cp init/systemd/ServiSesentry.service     /lib/systemd/system/
-sudo cp init/systemd/ServiSesentry.timer       /lib/systemd/system/
 sudo cp init/systemd/ServiSesentry-web.service /lib/systemd/system/
 sudo systemctl daemon-reload
 ```
@@ -140,12 +143,12 @@ sudo systemctl daemon-reload
 ### Habilitar monitorización
 
 ```bash
-sudo systemctl enable --now ServiSesentry.timer
+sudo systemctl enable --now ServiSesentry.service
 ```
 
-El temporizador se activa cada 5 minutos (`OnCalendar=*:0/5`). Para cambiar el
-intervalo, edita `/lib/systemd/system/ServiSesentry.timer` y ejecuta
-`systemctl daemon-reload`.
+El servicio ejecuta el monitor en bucle continuo. El **intervalo entre ciclos** se
+configura en el panel (Configuration → `monitoring.timer_check`, por defecto 300 s),
+no en el unit de systemd.
 
 ### Habilitar el panel web
 
@@ -164,18 +167,18 @@ ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py --web --web-host 0.0.0.0 -
 
 ```bash
 # Estado
-systemctl status ServiSesentry.timer
+systemctl status ServiSesentry.service
 systemctl status ServiSesentry-web
 
 # Logs
 journalctl -u ServiSesentry.service -f
 journalctl -u ServiSesentry-web.service -f
 
-# Forzar una comprobación ahora
-systemctl start ServiSesentry.service
+# Reiniciar el monitor (p. ej. tras cambiar el intervalo)
+systemctl restart ServiSesentry.service
 
 # Parar / deshabilitar
-systemctl disable --now ServiSesentry.timer
+systemctl disable --now ServiSesentry.service
 systemctl disable --now ServiSesentry-web
 ```
 
@@ -267,8 +270,10 @@ ServiceSentry puede ejecutarse detrás de un proxy inverso que termine las
 conexiones HTTPS. El proxy recibe las peticiones del cliente en HTTPS y las
 reenvía a la aplicación en HTTP:
 
-```text
-Cliente ──HTTPS──► Proxy inverso ──HTTP:8080──► ServiceSentry
+```mermaid
+flowchart LR
+    client["Cliente"] -- HTTPS --> proxy["Proxy inverso"]
+    proxy -- "HTTP:8080" --> app["ServiceSentry"]
 ```
 
 Dado que la aplicación solo ve HTTP, hay que indicarle explícitamente que

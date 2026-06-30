@@ -7,30 +7,25 @@ jerarquía de clases, estructura de directorios y flujo de ejecución.
 
 ## Diagrama de Componentes
 
-```text
-┌─────────────────────────────────────────────────────┐
-│                     main.py                         │
-│  (CLI, argparse, dispatch de modos: web/monitor/…)  │
-└──────────────────────┬──────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│                  lib/services/monitoring/monitor.py                     │
-│  (Motor principal: carga módulos, ThreadPool,       │
-│   gestión de estado, despacho de notificaciones)    │
-└───────┬──────────┬──────────┬───────────────────────┘
-        │          │          │
-        ▼          ▼          ▼
-┌──────────┐ ┌──────────────┐ ┌──────────────┐
-│ Telegram │ │ Estado checks │ │  Watchfuls   │
-│(lib/core)│ │ (tabla BD     │ │  (packages)  │
-│          │ │  check_state) │ │              │
-└──────────┘ └──────────────┘ └──────┬───────┘
-                                 │
-                    ┌────────────┼────────────┐
-                    ▼            ▼            ▼
-              ModuleBase  lib/system/exe  lib/system/linux/
-              (herencia)   (local/SSH)    (RAID, sensores térmicos)
+```mermaid
+flowchart TD
+    main["main.py<br/><small>CLI, argparse, dispatch de modos: web/monitor/…</small>"]
+    monitor["lib/services/monitoring/monitor.py<br/><small>Motor principal: carga módulos, ThreadPool,<br/>gestión de estado, despacho de notificaciones</small>"]
+    main --> monitor
+
+    telegram["Telegram<br/><small>lib/core</small>"]
+    state["Estado checks<br/><small>tabla BD check_state</small>"]
+    watchfuls["Watchfuls<br/><small>packages</small>"]
+    monitor --> telegram
+    monitor --> state
+    monitor --> watchfuls
+
+    modbase["ModuleBase<br/><small>herencia</small>"]
+    exe["lib/system/exe<br/><small>local/SSH</small>"]
+    linux["lib/system/linux/<br/><small>RAID, sensores térmicos</small>"]
+    watchfuls --> modbase
+    watchfuls --> exe
+    watchfuls --> linux
 ```
 
 ---
@@ -289,55 +284,48 @@ ServiceSentry/
 
 ### Inicio
 
-```text
-1. main.py: args_init() (argparse) procesa los flags CLI y los envs SS_* de arranque
-2. Dispatch por modo en __main__ (mutuamente excluyentes; SIN flag → panel web):
-   ├── --monitor → start_monitor() → MonitorService(...).run(once = (-t 0))
-   ├── --syslog  → start_syslog()  → SyslogService(...).run()
-   ├── --events  → start_events()  → EventService(...).run()
-   └── (default) / --web → start_web() → WebAdmin(...).run(host, port)
-3. Cada servicio standalone (lib/{monitor,syslog,events}/service.py):
-   ├── Resuelve config_dir/var_dir (compute_app_dirs)
-   ├── Abre el conector de BD (sección database; SQLite data.db por defecto) + ConfigManager
-   ├── Crea sus stores; el monitor mantiene UN Monitor persistente
-   │   └── Monitor.__init__(): Telegram, conector de BD, _apply_db_config()
-   │       (fusiona la config editable de la BD bajo config.json), stores
-   └── run(): bucle propio hasta SIGINT/SIGTERM
-       (MonitorService = scheduler de checks; SyslogService = listener; EventService = worker por cursor)
-4. start_web (WebAdmin) hospeda además los servicios EMBEBIDOS según los gates
-   SS_MONITORING_EMBEDDED / SS_SYSLOG_EMBEDDED / SS_EVENTS_EMBEDDED, arrancando cada
-   uno si está enabled + autostart (reutilizando los mismos mixins/_*Service).
+```mermaid
+flowchart TD
+    A["1. main.py · args_init() (argparse)<br/><small>procesa flags CLI + envs SS_* de arranque</small>"]
+    A --> B{"2. Dispatch por modo en __main__<br/><small>DESCUBIERTO: discover_standalone_services() itera el<br/>STANDALONE de cada paquete; sin ramas por-servicio.<br/>Modos mutuamente excluyentes; sin flag → panel web</small>"}
+
+    B -->|"--monitor / --syslog / --events"| C["_run_standalone(desc)<br/><small>resuelve dirs + banner →<br/>lib.services.&lt;key&gt;.service.run_standalone(args, …)</small>"]
+    B -->|"(default) / --web"| D["start_web() → WebAdmin(...).run(host, port)"]
+
+    C --> E["3. Servicio standalone<br/><small>lib/services/{monitoring,syslog,events}/service.py</small>"]
+    E --> E1["compute_app_dirs → conector BD<br/><small>sección database; SQLite data.db por defecto</small> + ConfigManager"]
+    E1 --> E2["Crea sus stores; el monitor mantiene UN Monitor persistente<br/><small>Monitor.__init__(): Telegram, conector BD, _apply_db_config()<br/>(fusiona config editable de la BD bajo config.json), stores</small>"]
+    E2 --> E3["run(): bucle propio hasta SIGINT/SIGTERM<br/><small>MonitorService = scheduler · SyslogService = listener · EventService = worker por cursor</small>"]
+
+    D --> F["4. WebAdmin hospeda además los servicios EMBEBIDOS<br/><small>según gates SS_MONITORING_EMBEDDED / SS_SYSLOG_EMBEDDED / SS_EVENTS_EMBEDDED;<br/>arranca cada uno si enabled + autostart (mismos mixins/_*Service)</small>"]
 ```
 
 ### Ciclo de Check
 
-```text
-Monitor.check():
-│
-├── 1. Escanea watchfuls/ (packages con __init__.py y archivos *.py heredados)
-├── 2. Filtra por módulos habilitados (config de módulos en la BD: tablas module_config/module_config_items, vía Monitor.config_modules)
-├── 3. Lee el estado anterior (tabla check_state)
-├── 4. Crea ThreadPoolExecutor(max_workers=threads)
-│
-├── 5. Para CADA módulo (en paralelo):
-│   └── check_module(nombre):
-│       ├── importlib.import_module(nombre)
-│       ├── Watchful(self) ← le pasa el Monitor
-│       ├── module.check() → ReturnModuleCheck
-│       │   └── (opcional) self.resolve_host(item): si el ítem tiene host_uid,
-│       │       fusiona dirección + perfil del host (Monitor._hosts_store) sobre
-│       │       la conexión antes de comprobar. Ver guía de módulos §4d.
-│       │
-│       └── Para CADA resultado en ReturnModuleCheck:
-│           ├── Guarda other_data en check_state
-│           ├── ¿Ha CAMBIADO el status? (check_status)
-│           │   ├── SÍ → Actualiza status + envía Telegram (si send=True)
-│           │   └── NO → No hace nada (evita spam)
-│           └── return True (hubo cambios)
-│
-├── 6. Si hubo cambios → persiste en check_state
-├── 7. send_message_end() → resumen Telegram
-└── 8. Fin del ciclo
+```mermaid
+flowchart TD
+    start["Monitor.check()"]
+    scan["1. Escanea watchfuls/<br/><small>packages con __init__.py + *.py heredados</small>"]
+    filter["2. Filtra por módulos habilitados<br/><small>tablas module_config / module_config_items (Monitor.config_modules)</small>"]
+    prev["3. Lee el estado anterior<br/><small>tabla check_state</small>"]
+    pool["4. ThreadPoolExecutor(max_workers=threads)"]
+    start --> scan --> filter --> prev --> pool
+
+    pool --> mod["5. Para CADA módulo (en paralelo): check_module(nombre)"]
+    mod --> imp["importlib.import_module(nombre)<br/>Watchful(self) ← le pasa el Monitor"]
+    imp --> chk["module.check() → ReturnModuleCheck"]
+    chk --> host["(opcional) resolve_host(item)<br/><small>si el ítem tiene host_uid: fusiona dirección + perfil<br/>del host (Monitor._hosts_store). Ver guía de módulos §4d</small>"]
+
+    host --> each["Para CADA resultado en ReturnModuleCheck"]
+    each --> save["Guarda other_data en check_state"]
+    save --> changed{"¿Ha CAMBIADO el status?<br/><small>check_status</small>"}
+    changed -->|Sí| upd["Actualiza status + envía Telegram (si send=True)"]
+    changed -->|No| noop["No hace nada (evita spam)"]
+
+    upd --> persist["6. Si hubo cambios → persiste en check_state"]
+    noop --> persist
+    persist --> summary["7. send_message_end() → resumen Telegram"]
+    summary --> done["8. Fin del ciclo"]
 ```
 
 ### Detección de Cambio de Estado

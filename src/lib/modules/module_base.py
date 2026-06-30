@@ -189,7 +189,7 @@ class ModuleBase(ObjectBase):
             partial_deps  = list(getattr(watchful_cls, 'PARTIAL_DEPS',  None) or [])
 
             for collection, fields in item_schema.items():
-                if collection in ('__i18n__', '__host_profile__', '__host_multiple__',
+                if collection in ('__i18n__', '__icon__', '__host_profile__', '__host_multiple__',
                                    '__host_multiple_bind__', '__overview_widget__',
                                    '__credential__', '__credentials__'):
                     # __i18n__ handled separately; __host_profile__/__host_multiple__
@@ -298,6 +298,13 @@ class ModuleBase(ObjectBase):
                 schemas[_module_key]['__toolbar__'] = [
                     {k: str(v) for k, v in btn.items()} for btn in _toolbar
                 ]
+
+            # Module icon (``__icon__``, a Bootstrap class) — language-agnostic, so
+            # exposed as its own entry; consumed by moduleIcon() in the panel AND by
+            # the public status page, so both show the module's declared icon.
+            _decl_icon = item_schema.get('__icon__')
+            if isinstance(_decl_icon, str) and _decl_icon.strip():
+                schemas[f'{mod_name}|__icon__'] = _decl_icon.strip()
 
             # Build __i18n__ entry.
             if info or lang_data:

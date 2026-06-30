@@ -1,9 +1,17 @@
 [Unit]
-Description=ServiSesentry monitoring check
+Description=ServiSesentry monitoring service
 After=network.target
+Wants=network-online.target
 
 [Service]
-Type=oneshot
-# Single monitoring pass (the .timer drives the period). ``--monitor -t 0`` runs
-# one check cycle and exits; bare ``main.py`` now starts the web panel instead.
-ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py --monitor -t 0
+Type=simple
+# Long-running monitoring service: ``--monitor`` runs the scheduler continuously
+# at the interval configured in the panel (monitoring → timer_check). No systemd
+# .timer is needed; the service loops on its own. (``--monitor -t 0`` would run a
+# single pass and exit, but that mode is not used here.)
+ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py --monitor
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

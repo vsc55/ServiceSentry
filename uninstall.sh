@@ -45,11 +45,13 @@ case "${INIT_SYSTEM}" in
     SYSTEMD_DIR=/lib/systemd/system
 
     echo "Stopping and disabling systemd units..."
-    systemctl stop    ServiSesentry.timer       2>/dev/null || true
-    systemctl disable ServiSesentry.timer       2>/dev/null || true
     systemctl stop    ServiSesentry.service     2>/dev/null || true
+    systemctl disable ServiSesentry.service     2>/dev/null || true
     systemctl stop    ServiSesentry-web.service 2>/dev/null || true
     systemctl disable ServiSesentry-web.service 2>/dev/null || true
+    # Legacy cleanup: older installs used a .timer to drive monitoring.
+    systemctl stop    ServiSesentry.timer       2>/dev/null || true
+    systemctl disable ServiSesentry.timer       2>/dev/null || true
 
     rm -f "${SYSTEMD_DIR}/ServiSesentry.service"
     rm -f "${SYSTEMD_DIR}/ServiSesentry.timer"

@@ -68,10 +68,9 @@ function _dwBuildModuleRows(modules) {
         const hue    = _moduleHue(m.name);
         const _modSch = ITEM_SCHEMAS[m.name + '|__module__'] || null;
         const _unsupported = _modSch && _modSch['__unsupported__'] === true;
-        const avBg   = (!_unsupported && m.enabled) ? `hsla(${hue},65%,55%,.14)` : 'var(--bs-secondary-bg)';
-        const avClr  = (!_unsupported && m.enabled) ? `hsl(${hue},60%,42%)`       : 'var(--bs-secondary-color)';
-        const nameCell = `<span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
-            style="width:26px;height:26px;background:${avBg};color:${avClr};font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
+        const _avOn  = !_unsupported && m.enabled;
+        const nameCell = `<span class="ss-mod-av${_avOn ? '' : ' off'} rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+            style="--mh:${hue};width:26px;height:26px;font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
         const active = _unsupported
             ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.72rem"
                    title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
@@ -330,8 +329,8 @@ function _dwBuildIncidentRows(items) {
         const pname = modulePrettyName(it.module, modulesData[it.module] || {});
         const icon  = moduleIcon(it.module, modulesData[it.module] || {});
         const hue   = _moduleHue(it.module);
-        const modCell = `<span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
-            style="width:26px;height:26px;background:hsla(${hue},65%,55%,.14);color:hsl(${hue},60%,42%);font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
+        const modCell = `<span class="ss-mod-av rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+            style="--mh:${hue};width:26px;height:26px;font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
         const chkCell = `<span class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc(it.check || '')}</span>`;
         const hostCell = it.host ? `<code style="font-size:.8rem">${esc(it.host)}</code>` : '<span class="text-muted small">—</span>';
         return `<tr><td>${modCell}</td><td>${chkCell}</td><td>${hostCell}</td></tr>`;

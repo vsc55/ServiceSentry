@@ -71,14 +71,13 @@ case "${INIT_SYSTEM}" in
 
     echo "Installing systemd units..."
     cp init/systemd/ServiSesentry.service     "${SYSTEMD_DIR}/"
-    cp init/systemd/ServiSesentry.timer       "${SYSTEMD_DIR}/"
     cp init/systemd/ServiSesentry-web.service "${SYSTEMD_DIR}/"
 
     systemctl daemon-reload
 
-    echo "Enabling and starting monitoring timer..."
-    systemctl enable ServiSesentry.timer
-    systemctl start  ServiSesentry.timer
+    echo "Enabling and starting monitoring service..."
+    systemctl enable ServiSesentry.service
+    systemctl start  ServiSesentry.service
 
     echo ""
     echo "Done. To also start the web admin panel:"

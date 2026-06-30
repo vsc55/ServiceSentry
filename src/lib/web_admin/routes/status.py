@@ -35,6 +35,23 @@ def _module_pretty_name(modules_dir: str | None, mod_name: str, lang: str) -> st
     return None
 
 
+def _module_icon(modules_dir: str | None, mod_name: str) -> str:
+    """Return the module's declared Bootstrap icon (``__icon__`` in its
+    ``schema.json``), or a generic fallback.  Read straight from the module's own
+    schema so the public status page honours each module's declaration — no
+    hardcoded module→icon map."""
+    default = 'bi-puzzle-fill'
+    if not modules_dir:
+        return default
+    path = os.path.join(modules_dir, mod_name.split('.')[-1], 'schema.json')
+    try:
+        with open(path, encoding='utf-8') as fh:
+            icon = json.load(fh).get('__icon__')
+        return str(icon) if icon else default
+    except (OSError, ValueError):
+        return default
+
+
 def _check_labels(mod_cfg) -> dict:
     """Map ``{item_key: label}`` for a module's checks, so the status page can
     show a friendly label even when the key is an opaque UID."""
@@ -127,6 +144,7 @@ def register(app, wa):
             modules.append({
                 'name': mod_name,
                 'label': label,
+                'icon': _module_icon(wa._modules_dir, mod_name),
                 'checks': items,
                 'ok': mod_ok,
                 'total': n,

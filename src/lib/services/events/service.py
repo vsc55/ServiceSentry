@@ -141,3 +141,9 @@ class EventService(_EventsMixin):
         # _event_worker_loop blocks until self._stop is set.
         self._event_worker_loop(self._stop, self._poll_secs())
         return 0
+
+
+def run_standalone(args, config_dir: str, var_dir: str, modules_dir=None) -> int:
+    """Build + run the event worker as a standalone process (``main.py --events``)."""
+    return EventService(config_dir, var_dir,
+                        log_level=getattr(args, 'log_level', None)).run()

@@ -27,9 +27,12 @@ echo "Detected init system: ${INIT_SYSTEM}"
 echo "Stopping services..."
 case "${INIT_SYSTEM}" in
   systemd)
-    systemctl stop ServiSesentry.timer       2>/dev/null || true
     systemctl stop ServiSesentry.service     2>/dev/null || true
     systemctl stop ServiSesentry-web.service 2>/dev/null || true
+    # Legacy cleanup: older installs drove monitoring with a .timer.
+    systemctl stop    ServiSesentry.timer    2>/dev/null || true
+    systemctl disable ServiSesentry.timer    2>/dev/null || true
+    rm -f /lib/systemd/system/ServiSesentry.timer
     ;;
   openrc)
     rc-service ServiSesentry     stop 2>/dev/null || true
@@ -74,12 +77,11 @@ case "${INIT_SYSTEM}" in
     SYSTEMD_DIR=/lib/systemd/system
 
     cp init/systemd/ServiSesentry.service     "${SYSTEMD_DIR}/"
-    cp init/systemd/ServiSesentry.timer       "${SYSTEMD_DIR}/"
     cp init/systemd/ServiSesentry-web.service "${SYSTEMD_DIR}/"
 
     systemctl daemon-reload
-    systemctl enable ServiSesentry.timer
-    systemctl start  ServiSesentry.timer
+    systemctl enable ServiSesentry.service
+    systemctl start  ServiSesentry.service
 
     # Restart web service only if it was already enabled
     if systemctl is-enabled ServiSesentry-web.service > /dev/null 2>&1; then

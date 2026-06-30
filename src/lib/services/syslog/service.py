@@ -198,3 +198,12 @@ class SyslogService(_EventsMixin, _SyslogMixin):
         self._stop.wait()
         self._dbg('> Syslog >> receiver stopped; exiting', DebugLevel.info)
         return 0
+
+
+def run_standalone(args, config_dir: str, var_dir: str, modules_dir=None) -> int:
+    """Build + run the syslog receiver as a standalone process (``main.py --syslog``)."""
+    return SyslogService(
+        config_dir, var_dir,
+        host_override=getattr(args, 'syslog_host', None),
+        port_override=getattr(args, 'syslog_port', None),
+        log_level=getattr(args, 'log_level', None)).run()

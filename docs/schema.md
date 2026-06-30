@@ -660,6 +660,39 @@ las gráficas de historial). `{"field": "temp", "unit": "°C", "label": "Tempera
 o `{"fields": {nombre: {unit, label}}}` para varios; `{"field": null}` para módulos
 solo-estado. Lo lee `routes/history.py`.
 
+### `__icon__`
+
+Icono Bootstrap del módulo (string, p. ej. `"bi-broadcast"`), a nivel raíz del
+`schema.json`. Lo declara el módulo una sola vez y lo consumen **los dos**: la
+pestaña **Modules** del panel (`moduleIcon()`, que renderiza la clase `bi-*` como
+`<i class="bi …">`) y la **página de estado pública** (`/status`) — sin ningún mapa
+nombre→icono hardcodeado en el core. `discover_schemas` lo expone como
+`"<modulo>|__icon__"`. Fallbacks si se omite: `📦` en el panel, `bi-puzzle-fill` en
+`/status`.
+
+```json
+"__icon__": "bi-broadcast"
+```
+
+**Flujo de resolución** — una declaración en el `schema.json`, dos consumidores
+(panel y `/status`), tinte adaptado al tema:
+
+```mermaid
+flowchart TD
+    A["schema.json<br/>__icon__: bi-broadcast"] --> B["discover_schemas()<br/>expone 'mod|__icon__'"]
+    A --> C["routes/status.py<br/>_module_icon()"]
+    B --> D["moduleIcon(name, cfg)<br/>panel (Modules / Overview / Servers)"]
+    C --> E["/status (página pública)"]
+    D --> F["&lt;i class='bi bi-broadcast'&gt;<br/>dentro de .ss-mod-av (--mh: hue)"]
+    E --> F
+    F --> G{"tema activo<br/>(data-bs-theme)"}
+    G -->|claro| H["color hsl(hue,55%,40%)"]
+    G -->|oscuro| I["color hsl(hue,75%,70%)"]
+```
+
+Prioridad completa de `moduleIcon` (con `config.icon` y fallback `__i18n__`/emoji)
+en [i18n.md → Resolución de etiquetas](i18n.md#resolución-de-etiquetas-en-el-navegador).
+
 ### `__host_profile__`
 
 Declara los campos de conexión que un check puede **heredar de un host vinculado**

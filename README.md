@@ -102,11 +102,10 @@ sudo bash uninstall.sh -a    # uninstall and remove all config
 
 ```bash
 sudo cp init/systemd/ServiSesentry.service     /lib/systemd/system/
-sudo cp init/systemd/ServiSesentry.timer       /lib/systemd/system/
 sudo cp init/systemd/ServiSesentry-web.service /lib/systemd/system/
 sudo systemctl daemon-reload
 
-sudo systemctl enable --now ServiSesentry.timer   # monitoring (every 5 min)
+sudo systemctl enable --now ServiSesentry.service  # monitoring (continuous; interval = monitoring.timer_check)
 sudo systemctl enable --now ServiSesentry-web      # web admin panel (optional)
 ```
 

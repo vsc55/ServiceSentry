@@ -1,4 +1,5 @@
 {
+    "__icon__": "bi-cpu",
     "__module__": {
         "__field_order__": ["enabled", "alert", "threads", "timeout", "interval"],
         "enabled":  {"type": "bool",  "default": true},
