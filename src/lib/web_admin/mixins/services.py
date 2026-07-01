@@ -140,6 +140,11 @@ class _ServicesMixin:
             entry = {**d.status(), 'label_key': d.label_key, 'icon': d.icon}
             if d.key in instances_by_key:
                 entry['instances'] = instances_by_key[d.key]
+                # For a service owned by a dedicated container, the web's own status()
+                # is an idle stub (Next/Last run always '—'), so overlay the live
+                # runtime from its leader instance's heartbeat.
+                if entry.get('state') == 'external':
+                    self._overlay_external_runtime(entry, instances_by_key[d.key])
             out[d.key] = entry
         # Only present when syslog uses its OWN database (else it shares 'database').
         # Not a registered service (it is a conditional facet of the syslog one).
@@ -149,6 +154,29 @@ class _ServicesMixin:
                                       'label_key': 'svc_database_syslog',
                                       'icon': 'bi-database-fill-gear'}
         return out
+
+    def _overlay_external_runtime(self, entry: dict, insts: list) -> None:
+        """Fill an external service's summary from its leader instance's heartbeat.
+
+        The web hosts none of it, so its own next-run/last-run are empty; take them
+        from the instance that holds the lease (or the sole instance) — its heartbeat
+        detail carries ``next_in``/``interval`` and the row carries ``last_cycle_at``.
+        Also reflect that the remote is actually running."""
+        leader = next((i for i in insts if (i.get('detail') or {}).get('leader')), None)
+        if leader is None and len(insts) == 1:
+            leader = insts[0]
+        if leader is None:
+            return
+        det = leader.get('detail') or {}
+        patch = {'svc_next_run': det.get('next_in'),
+                 'svc_last_run': leader.get('last_cycle_at')}
+        for row in entry.get('detail', []):
+            lk = row.get('label_key')
+            if lk in patch and patch[lk] is not None:
+                row['value'] = patch[lk]
+        # The remote leader is alive+running → surface that as the running flag.
+        if leader.get('derived_state') == 'alive':
+            entry['running'] = True
 
     # ── startup log ───────────────────────────────────────────────────────────
     def _log_services_startup(self) -> None:
@@ -309,7 +337,9 @@ class _ServicesMixin:
         ``reason`` is ``''`` on success or a short machine code on refusal
         (``unknown_service`` / ``bad_action`` / ``not_controllable`` /
         ``already`` / ``disabled``).  Per-service guards/audit live in the
-        ``_control_*`` methods the descriptors point at."""
+        service's own ``control`` callable (the descriptor points at it) — including
+        the external case: a service a dedicated container owns edits the shared
+        desired-state it reconciles instead of flipping a local thread."""
         if action not in ('start', 'stop'):
             return False, 'bad_action'
         d = self._service_registry().get(name)

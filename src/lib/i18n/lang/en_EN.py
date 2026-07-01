@@ -1032,6 +1032,8 @@ LANG = {
         'entra_app_provision_failed': 'Entra ID: App Provision Failed',
         'daemon_started':        'Scheduler: Started',
         'daemon_stopped':        'Scheduler: Stopped',
+        'service_started':       'Service: Started (external)',
+        'service_stopped':       'Service: Stopped (external)',
         'syslog_started':        'Syslog: Started',
         'syslog_stopped':        'Syslog: Stopped',
         'events_worker_started': 'Event worker: Started',

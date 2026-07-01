@@ -1,0 +1,169 @@
+# ServiceSentry — HA TEST: multiple replicas per service (leader lease / hot standby)
+# ==============================================================================
+# Like docker-compose.microservices-test.yml but runs 2 replicas of worker, events
+# and syslog so you can watch the distributed control plane pick a leader:
+#   • worker / events are leader-gated → ONE replica becomes Leader and does the
+#     work; the other(s) are hot standby (kill the leader and a standby takes over
+#     within ~30s).
+#   • syslog is active-active → every replica is Alive (no leader).
+# The Services tab shows all replicas per service, with Leader / Standby badges.
+#
+#   docker compose -f docker/docker-compose.ha-test.yml up --build
+#   # open http://localhost:8080 (admin/admin) → Services tab
+#
+# Scale differently on the fly:
+#   docker compose -f docker/docker-compose.ha-test.yml up --build \
+#     --scale worker=3 --scale events=2 --scale syslog=3
+#
+# Prove failover: find the worker Leader in the Services tab, then
+#   docker kill <that worker container>   # a standby becomes Leader in ~30s
+#
+# No host ports are published for the scaled services (they'd collide across
+# replicas); this stack is about the control plane, not syslog ingestion. Test
+# passwords are inlined — do NOT use in production.
+
+x-db-env: &db-env
+  SS_DB_DRIVER: mysql
+  SS_DB_HOST: db
+  SS_DB_PORT: "3306"
+  SS_DB_NAME: servicesentry
+  SS_DB_USER: servicesentry
+  SS_DB_PASSWORD: testpass
+
+x-app-build: &app-build
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: servicesentry:test
+
+x-app-env: &app-env
+  TZ: Europe/Madrid
+  SS_USERNAME: admin
+  SS_PASSWORD: admin
+  SS_LANG: en_EN
+  SS_DARK_MODE: "1"            # dark theme as the default for the test panel
+  SS_LOG_LEVEL: debug          # verbose logs across every role (we want to see it all)
+  SS_CHECK_INTERVAL: "30"
+  SS_CONTROL_TOKEN: test-control-token
+
+services:
+
+  db:
+    image: mariadb:11
+    container_name: ss-ha-db
+    restart: unless-stopped
+    networks: [ss]
+    environment:
+      MARIADB_DATABASE: servicesentry
+      MARIADB_USER: servicesentry
+      MARIADB_PASSWORD: testpass
+      MARIADB_ROOT_PASSWORD: testrootpass
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  web:
+    <<: *app-build
+    container_name: ss-ha-web
+    restart: unless-stopped
+    networks: [ss]
+    ports:
+      - "8080:8080"
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    cap_add: [NET_RAW]
+    environment:
+      <<: [*db-env, *app-env]
+      SS_SERVICE_ROLE: web
+      SS_WEB_HOST: 0.0.0.0
+      SS_WEB_PORT: "8080"
+      SS_MONITORING_EMBEDDED: "0"
+      SS_SYSLOG_EMBEDDED: "0"
+      SS_EVENTS_EMBEDDED: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -s http://localhost:8080/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Monitoring worker × 2 (leader-gated: 1 Leader + 1 Standby) ──────────────
+  worker:
+    <<: *app-build
+    # no container_name → scalable
+    restart: unless-stopped
+    networks: [ss]
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    cap_add: [NET_RAW]
+    deploy:
+      replicas: 2
+    environment:
+      <<: [*db-env, *app-env]
+      SS_SERVICE_ROLE: worker
+      SS_CONTROL_ADVERTISE: worker
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+  # ── Event processor × 2 (leader-gated: 1 Leader + 1 Standby) ────────────────
+  events:
+    <<: *app-build
+    restart: unless-stopped
+    networks: [ss]
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    deploy:
+      replicas: 2
+    environment:
+      <<: [*db-env, *app-env]
+      SS_SERVICE_ROLE: events
+      SS_CONTROL_ADVERTISE: events
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+  # ── Syslog receiver × 2 (active-active: both Alive, no leader) ──────────────
+  # No host ports published (they'd collide across replicas); this stack tests the
+  # control plane, not ingestion.
+  syslog:
+    <<: *app-build
+    restart: unless-stopped
+    networks: [ss]
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    deploy:
+      replicas: 2
+    environment:
+      <<: [*db-env, *app-env]
+      SS_SERVICE_ROLE: syslog
+      SS_CONTROL_ADVERTISE: syslog
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+volumes:
+  config:
+  vardata:
+  dbdata:
+
+networks:
+  ss:

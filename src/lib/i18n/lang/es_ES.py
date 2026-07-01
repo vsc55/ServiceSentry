@@ -1039,6 +1039,8 @@ LANG = {
         'entra_app_provision_failed': 'Entra ID: Aprovisionamiento Fallido',
         'daemon_started':        'Scheduler: Iniciado',
         'daemon_stopped':        'Scheduler: Detenido',
+        'service_started':       'Servicio: Iniciado (externo)',
+        'service_stopped':       'Servicio: Detenido (externo)',
         'syslog_started':        'Syslog: Iniciado',
         'syslog_stopped':        'Syslog: Detenido',
         'events_worker_started': 'Procesador de eventos: Iniciado',

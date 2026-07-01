@@ -61,6 +61,18 @@ class _EventsMixin:
             self._events_reload()
         return self._event_rules_cache or []
 
+    def _events_mode(self) -> str:
+        """The desired ``events|mode`` (``embedded`` / ``external`` / ``off``).
+
+        ``off`` is the universal stop switch: the worker keeps running (to react to
+        a later reconcile) but processes nothing — so a Services-tab stop of an
+        external worker takes effect without killing the container."""
+        try:
+            cfg = self._read_config_file(getattr(self, '_CONFIG_FILE', None)) or {}
+            return str((cfg.get('events') or {}).get('mode') or 'embedded').lower()
+        except Exception:  # pylint: disable=broad-except
+            return 'embedded'
+
     def _event_default_cooldown(self) -> int:
         """Global default cooldown (s) from config (``events|cooldown``), used by
         rules that leave their own Cooldown blank.  0 on any problem."""
@@ -115,6 +127,10 @@ class _EventsMixin:
         # Hot standby: with leader gating, only the lease holder advances the cursor
         # and dispatches — other replicas idle, so notifications never double-fire.
         if hasattr(self, '_work_allowed') and not self._work_allowed():
+            return 0
+        # Desired-state stop: events|mode=off idles the worker everywhere (embedded
+        # and external) without killing it, so a Services-tab stop takes effect.
+        if self._events_mode() == 'off':
             return 0
         processed = 0
         for source, store in self._event_sources():

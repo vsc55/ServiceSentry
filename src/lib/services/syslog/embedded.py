@@ -31,6 +31,9 @@ def _embedded_listener_enabled() -> bool:
 
 class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
 
+    # Desired-state knob a dedicated --syslog container reconciles (start/stop).
+    _EXTERNAL_KNOB = ('syslog|enabled', True, False)
+
     def __init__(self, host):
         _EmbeddedBase.__init__(self, host)
         # The syslog stores are shared host infrastructure (the listener writes
@@ -99,7 +102,9 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
         count = self._syslog_store.count() if self._syslog_store else 0
         return {
             'state': state, 'running': running, 'enabled': enabled,
-            'embedded': embedded, 'controllable': embedded and enabled,
+            # Controllable when hosted here + enabled, OR when a dedicated container
+            # owns it (start/stop then edits the shared desired-state it reconciles).
+            'embedded': embedded, 'controllable': (not embedded) or enabled,
             'udp_port': udp, 'tcp_port': tcp, 'tls_port': tls, 'count': count,
             'detail': [
                 {'label_key': 'svc_mode',
@@ -112,7 +117,7 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
 
     def control(self, action: str) -> tuple:
         if not _embedded_listener_enabled():
-            return False, 'not_controllable'
+            return self._control_external(action)   # a dedicated container owns it
         if action == 'stop':
             self.listener_stop()
             self._audit_system('syslog_stopped', {})

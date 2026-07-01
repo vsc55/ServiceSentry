@@ -26,9 +26,47 @@ class _EmbeddedBase(_HeartbeatMixin):
 
     _HB_MODE = 'embedded'
 
+    # Desired-state knob a dedicated container reconciles, declared by services that
+    # can be operated while a separate process owns them: ``(section|field, on, off)``.
+    # ``None`` → not externally controllable (only when hosted here).
+    _EXTERNAL_KNOB: tuple | None = None
+
     def __init__(self, host):
         self._host = host
         self._CONFIG_FILE = host._CONFIG_FILE
+
+    # ── external control (a dedicated container owns the running service) ─────
+    def _control_external(self, action: str) -> tuple:
+        """Start/stop this service while a dedicated container owns it, by editing
+        the shared desired-state it reconciles — the same knob the Config tab writes,
+        pushed with a poke so the remote converges now instead of at its next watch
+        tick.  ``action`` is ``start``/``stop``.
+
+        Returns ``(True, '')``: writing desired-state is authoritative even when no
+        remote instance is currently reachable (the periodic reconcile catches up).
+        ``(False, 'not_controllable')`` for a service that declares no knob."""
+        knob = self._EXTERNAL_KNOB
+        if knob is None:
+            return False, 'not_controllable'
+        path, on_val, off_val = knob
+        section, field = path.split('|', 1)
+        value = on_val if action == 'start' else off_val
+        host = self._host
+        host._write_config({section: {field: value}})
+        host._invalidate_config_cache()
+        # Let every embedded twin react (a no-op for a service a container owns) and
+        # push the change to the remote instances so it applies immediately.
+        for svc in getattr(host, '_embedded_services', {}).values():
+            try:
+                svc.on_config_changed({path})
+            except Exception:  # pylint: disable=broad-except
+                pass
+        poke = getattr(host, '_poke_service_instances', None)
+        if poke is not None and self._HB_KEY:
+            poke(self._HB_KEY)
+        self._audit_system('service_started' if action == 'start' else 'service_stopped',
+                           {'service': self._HB_KEY, path: value})
+        return True, ''
 
     # ── config / debug / dispatch context ─────────────────────────────────────
     def _read_config_file(self, filename=None):

@@ -47,6 +47,56 @@ class TestServicesStatus:
         assert st['state'] in ('unknown', 'stale', 'active', 'embedded')
         assert st['controllable'] is False
 
+    def test_external_runtime_overlaid_from_leader(self, admin):
+        # An external service's card takes its live next/last-run from the leader
+        # instance's heartbeat, not the web's idle stub.
+        entry = {'state': 'external', 'running': False, 'detail': [
+            {'label_key': 'svc_next_run', 'value': None, 'fmt': 'in'},
+            {'label_key': 'svc_last_run', 'value': None, 'fmt': 'ago'},
+        ]}
+        insts = [{'detail': {'leader': True, 'next_in': 12},
+                  'last_cycle_at': 1000.0, 'derived_state': 'alive'}]
+        admin._overlay_external_runtime(entry, insts)
+        rows = {r['label_key']: r['value'] for r in entry['detail']}
+        assert rows['svc_next_run'] == 12
+        assert rows['svc_last_run'] == 1000.0
+        assert entry['running'] is True
+
+
+class TestExternalControl:
+    """A service owned by a dedicated container (SS_*_EMBEDDED=0) is controllable
+    from the Services tab: start/stop edits the shared desired-state it reconciles,
+    not a local thread."""
+
+    def test_external_monitoring_is_controllable(self, admin):
+        # Harness default: SS_MONITORING_EMBEDDED=0 → monitoring is external.
+        st = admin._services_status_dict()['monitoring']
+        assert st['state'] == 'external'
+        assert st['controllable'] is True and st['embedded'] is False
+
+    def test_external_start_stop_writes_enabled(self, admin):
+        # stop → monitoring|enabled False; start → True (desired-state knob).
+        ok, reason = admin._service_control('monitoring', 'stop')
+        assert ok is True and reason == ''
+        assert admin._config_section('monitoring').get('enabled') is False
+        ok, reason = admin._service_control('monitoring', 'start')
+        assert ok is True and reason == ''
+        assert admin._config_section('monitoring').get('enabled') is True
+
+    def test_external_events_stop_sets_mode_off(self, admin):
+        # Harness default: SS_EVENTS_EMBEDDED=0 → events is external; stop → mode off.
+        ok, reason = admin._service_control('events', 'stop')
+        assert ok is True and reason == ''
+        assert admin._config_section('events').get('mode') == 'off'
+        # And the worker idles on mode=off even when it holds the lease.
+        evsvc = admin._embedded_services['events']
+        evsvc._is_leader = True
+        assert evsvc._event_worker_tick() == 0
+        # start → mode external, worker no longer gated by the mode switch.
+        ok, reason = admin._service_control('events', 'start')
+        assert ok is True and reason == ''
+        assert admin._config_section('events').get('mode') == 'external'
+
 
 class TestMonitoringControl:
 

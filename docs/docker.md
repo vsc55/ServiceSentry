@@ -172,6 +172,15 @@ docker compose -f docker/docker-compose.microservices-traefik.yml up -d
 # Pruebas locales: microservicios con MariaDB, sin Traefik, autocontenido
 # (construye desde el Dockerfile; login admin/admin; plano de control activado)
 docker compose -f docker/docker-compose.microservices-test.yml up --build
+
+# Pruebas de HA: 2 réplicas de worker/events/syslog → ver Líder/En espera y failover
+docker compose -f docker/docker-compose.ha-test.yml up --build
+#   (o escala en caliente: … up --build --scale worker=3 --scale events=2 --scale syslog=3)
+
+# Atajo para ambas pilas (proyectos aislados, sigue los logs desde el arranque):
+./docker/make_test.sh          # pila de test (microservicios, MariaDB)
+./docker/make_test.sh ha       # pila de HA (2 réplicas → Líder/En espera)
+#   Añade el comando tras `ha`: make_test.sh ha logs | ps | down | clean | rebuild
 ```
 
 El panel web de administración queda disponible en `http://tu-servidor:8080`

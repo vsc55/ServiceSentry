@@ -51,7 +51,9 @@ class EventService(_HeartbeatMixin, _EventsMixin):
 
     # ── heartbeat hooks (observed state for the Services tab) ──────────────────
     def _hb_running(self) -> bool:
-        return not self._stop.is_set()
+        # Report "running" only while actually processing: events|mode=off idles the
+        # worker (a Services-tab stop), so the web card shows it stopped, not running.
+        return not self._stop.is_set() and self._events_mode() != 'off'
 
     def _hb_detail(self) -> dict:
         return {'poll_secs': self._poll_secs()}

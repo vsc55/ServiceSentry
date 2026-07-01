@@ -201,9 +201,11 @@ class TestSyslogAlert:
     coverage lives in test_wa_events)."""
 
     def test_worker_evaluates_stored_messages(self, admin):
-        admin._embedded_services['events']._event_state.set_cursor('syslog', 0)        # process from the start
+        evsvc = admin._embedded_services['events']
+        evsvc._is_leader = True   # act as the active worker (tick is leader-gated)
+        evsvc._event_state.set_cursor('syslog', 0)        # process from the start
         _seed(admin, severity=2, message='kernel panic')
-        with mock.patch.object(admin._embedded_services['events'], '_eval_event') as ev:
-            admin._embedded_services['events']._event_worker_tick()
+        with mock.patch.object(evsvc, '_eval_event') as ev:
+            evsvc._event_worker_tick()
         assert ev.call_count >= 1
         assert any(c.args[0] == 'syslog' for c in ev.call_args_list)

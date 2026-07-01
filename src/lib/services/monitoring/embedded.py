@@ -17,6 +17,8 @@ from lib.services.monitoring.manager import _MonitoringMixin
 class EmbeddedMonitor(_EmbeddedBase, _MonitoringMixin):
 
     _LEADER_GATED = True       # single-owner: only the lease holder runs cycles
+    # Desired-state knob a dedicated --monitor container reconciles (start/stop).
+    _EXTERNAL_KNOB = ('monitoring|enabled', True, False)
 
     def __init__(self, host):
         _EmbeddedBase.__init__(self, host)
@@ -46,7 +48,9 @@ class EmbeddedMonitor(_EmbeddedBase, _MonitoringMixin):
             state = 'running' if running else 'stopped'
         return {
             'state': state, 'running': running, 'enabled': enabled,
-            'embedded': embedded, 'controllable': embedded and enabled,
+            # Controllable when hosted here + enabled, OR when a dedicated container
+            # owns it (start/stop then edits the shared desired-state it reconciles).
+            'embedded': embedded, 'controllable': (not embedded) or enabled,
             'interval': d.get('interval'), 'next_in': d.get('next_in'),
             'last_run': d.get('last_run'),
             'detail': [
@@ -61,7 +65,7 @@ class EmbeddedMonitor(_EmbeddedBase, _MonitoringMixin):
 
     def control(self, action: str) -> tuple:
         if not self._embedded_monitor_enabled():
-            return False, 'not_controllable'
+            return self._control_external(action)   # a dedicated container owns it
         if action == 'stop':
             ok = self._monitoring_stop()
             return ok, '' if ok else 'already'
