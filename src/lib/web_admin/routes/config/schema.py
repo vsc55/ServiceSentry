@@ -45,10 +45,6 @@ def register(app, wa):
             'options': ['off', 'debug', 'info', 'warning', 'error'],
             'default': cfg_default('global|log_level'),
         }
-        # Event processor: where the decoupled worker runs (embedded in the web
-        # admin / a separate process / off = no evaluation).
-        schema['events|mode'] = {**cfg_meta('events|mode'),
-                                 'options': ['embedded', 'external', 'off']}
         # modules section: not web_admin-instance-backed, so expose its registry
         # metadata (type/default/min/max) here so the UI knows the source-of-truth
         # defaults and ranges (no hardcoded values in the frontend).

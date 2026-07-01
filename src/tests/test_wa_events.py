@@ -19,6 +19,38 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 _DISP = 'lib.notify.notification_dispatcher.dispatch'
 
 
+class TestEventsEnabled:
+    """events|enabled is the on/off master switch (uniform with monitoring/syslog);
+    the legacy events|mode is honoured for backward compat."""
+
+    def test_enabled_default_true(self, admin):
+        assert admin._embedded_services['events']._events_enabled() is True
+
+    def test_disabled_idles_and_stops(self, admin):
+        ev = admin._embedded_services['events']
+        admin._write_config({'events': {'enabled': False}})
+        admin._invalidate_config_cache()
+        assert ev._events_enabled() is False
+        ev._is_leader = True
+        assert ev._event_worker_tick() == 0        # disabled → processes nothing
+
+    def test_legacy_mode_off_maps_to_disabled(self, admin):
+        # An old config carrying events|mode='off' (no events|enabled) reads disabled.
+        admin._write_config({'events': {'mode': 'off'}})
+        admin._invalidate_config_cache()
+        assert admin._embedded_services['events']._events_enabled() is False
+
+    def test_legacy_mode_embedded_maps_to_enabled(self, admin):
+        admin._write_config({'events': {'mode': 'embedded'}})
+        admin._invalidate_config_cache()
+        assert admin._embedded_services['events']._events_enabled() is True
+
+    def test_explicit_enabled_wins_over_legacy_mode(self, admin):
+        admin._write_config({'events': {'enabled': True, 'mode': 'off'}})
+        admin._invalidate_config_cache()
+        assert admin._embedded_services['events']._events_enabled() is True
+
+
 class TestEventRulesApi:
 
     def test_requires_auth(self, client):

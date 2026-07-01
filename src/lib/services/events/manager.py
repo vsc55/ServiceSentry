@@ -61,17 +61,27 @@ class _EventsMixin:
             self._events_reload()
         return self._event_rules_cache or []
 
-    def _events_mode(self) -> str:
-        """The desired ``events|mode`` (``embedded`` / ``external`` / ``off``).
+    def _events_enabled(self) -> bool:
+        """Whether rule evaluation is enabled — the on/off master switch, uniform
+        with monitoring/syslog (embedded-vs-external is the SS_EVENTS_EMBEDDED env,
+        not a config field).  Disabling it idles the worker everywhere (it keeps
+        running to react to a later reconcile) — so a Services-tab stop of an
+        external worker takes effect without killing the container.
 
-        ``off`` is the universal stop switch: the worker keeps running (to react to
-        a later reconcile) but processes nothing — so a Services-tab stop of an
-        external worker takes effect without killing the container."""
+        Backward compat: an explicit ``events|enabled`` wins; else the legacy
+        ``events|mode`` is honoured (``off`` ⇒ disabled, any other value ⇒ enabled)."""
         try:
-            cfg = self._read_config_file(getattr(self, '_CONFIG_FILE', None)) or {}
-            return str((cfg.get('events') or {}).get('mode') or 'embedded').lower()
+            ev = (self._read_config_file(getattr(self, '_CONFIG_FILE', None))
+                  or {}).get('events') or {}
         except Exception:  # pylint: disable=broad-except
-            return 'embedded'
+            return True
+        val = ev.get('enabled')
+        if val is not None:
+            return bool(val)
+        legacy = ev.get('mode')
+        if legacy is not None:
+            return str(legacy).lower() != 'off'
+        return True
 
     def _event_default_cooldown(self) -> int:
         """Global default cooldown (s) from config (``events|cooldown``), used by
@@ -128,9 +138,10 @@ class _EventsMixin:
         # and dispatches — other replicas idle, so notifications never double-fire.
         if hasattr(self, '_work_allowed') and not self._work_allowed():
             return 0
-        # Desired-state stop: events|mode=off idles the worker everywhere (embedded
-        # and external) without killing it, so a Services-tab stop takes effect.
-        if self._events_mode() == 'off':
+        # Desired-state stop: events|enabled=false idles the worker everywhere
+        # (embedded and external) without killing it, so a Services-tab stop takes
+        # effect on a dedicated container too.
+        if not self._events_enabled():
             return 0
         processed = 0
         for source, store in self._event_sources():

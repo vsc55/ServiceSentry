@@ -587,8 +587,8 @@ no vuelve a dispararse tras un reinicio. Configuración (Configuration → Notif
 
 | Clave | Por defecto | Descripción |
 |-------|-------------|-------------|
-| `events.mode` | `embedded` | Dónde corre el worker: `embedded` (un hilo dentro del panel web), `external` (lo gestiona un proceso/contenedor aparte) u `off` (sin evaluación). |
-| `events.autostart` | `true` | Arrancar el worker embebido al iniciar el panel web (env `SS_EVENTS_AUTOSTART`); solo cuando `mode=embedded`. Off = arranca parado pero iniciable desde Servicios (un `--events` lo ignora). |
+| `events.enabled` | `true` | Interruptor on/off del procesador de eventos (evalúa reglas y notifica). Que corra dentro del panel web o en un contenedor `--events` dedicado lo decide el env `SS_EVENTS_EMBEDDED` (0 = contenedor aparte), no esta clave. |
+| `events.autostart` | `true` | Arrancar el worker embebido al iniciar el panel web (env `SS_EVENTS_AUTOSTART`); un `--events` aparte lo ignora. Off = arranca parado pero iniciable desde Servicios. |
 | `events.cooldown` | `0` | *Cooldown* global por defecto (segundos) que heredan las reglas sin `cooldown` propio; `0` = notificar en cada coincidencia (0–86400). |
 | `events.poll_secs` | `2` | Cada cuántos segundos busca filas nuevas que evaluar (1–3600). |
 

@@ -19,8 +19,8 @@ from lib.services.events.manager import _EventsMixin
 class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
 
     _LEADER_GATED = True       # single-owner: only the lease holder advances the cursor
-    # Desired-state knob a dedicated events container reconciles (start→external/stop→off).
-    _EXTERNAL_KNOB = ('events|mode', 'external', 'off')
+    # Desired-state knob a dedicated events container reconciles (start/stop).
+    _EXTERNAL_KNOB = ('events|enabled', True, False)
 
     def __init__(self, host):
         _EmbeddedBase.__init__(self, host)
@@ -50,9 +50,6 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
         v = os.environ.get('SS_EVENTS_EMBEDDED', '1').strip().lower()
         return v not in ('0', 'false', 'no', 'off')
 
-    def _mode(self) -> str:
-        return str((self._config_section('events') or {}).get('mode') or 'embedded').lower()
-
     def _autostart(self) -> bool:
         from lib.config.spec import cfg_get  # noqa: PLC0415
         return bool(cfg_get(self._config_section('events'), 'events|autostart'))
@@ -63,55 +60,50 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
 
     # ── boot ──────────────────────────────────────────────────────────────────
     def start_at_boot(self) -> None:
-        if self._mode() == 'embedded' and self._env_on() and self._autostart():
+        """Start the worker at boot when enabled + hosted here + autostart (mirror
+        of the monitor's gating)."""
+        if self._env_on() and self._events_enabled() and self._autostart():
             self._start_event_worker(self._poll())
 
     # ── ServiceDescriptor surface (Services tab) ──────────────────────────────
     def status(self) -> dict:
-        mode = self._mode()
-        env_on = self._env_on()
+        """Uniform with the monitor/syslog: an ``enabled`` flag; embedded vs external
+        decided by the SS_EVENTS_EMBEDDED env (a dedicated container owns it when 0)."""
+        enabled = self._events_enabled()
+        embedded = self._env_on()
         running = bool(self._event_worker_running())
-        embedded = env_on and mode != 'external'
-        # A dedicated container owns it when SS_EVENTS_EMBEDDED=0 OR events|mode is
-        # external — either way this process must NOT publish a heartbeat or take the
-        # leader lease (else it would win it without running the worker). Mirror the
-        # monitor/syslog gate so the app-boot check (state != 'external') skips it.
-        external = (not env_on) or mode == 'external'
-        # Controllable when hosted here in embedded mode, OR when a dedicated
-        # container owns it (start/stop then edits events|mode external/off).
-        controllable = external or (env_on and mode == 'embedded')
-        if external:
+        if not embedded:
             state = 'external'
-        elif mode == 'off':
+        elif not enabled:
             state = 'disabled'
         else:
             state = 'running' if running else 'stopped'
         rules = self._events_rules() or []
         rules_enabled = sum(1 for r in rules if r.get('enabled'))
-        mode_key = ('svc_mode_container' if external
-                    else 'svc_state_disabled' if mode == 'off'
-                    else 'svc_mode_embedded')
         return {
-            'state': state, 'running': running, 'embedded': embedded,
-            'controllable': controllable, 'mode': mode, 'poll_secs': self._poll(),
+            'state': state, 'running': running, 'enabled': enabled,
+            # Controllable when hosted here + enabled, OR when a dedicated container
+            # owns it (start/stop then edits the shared desired-state it reconciles).
+            'embedded': embedded, 'controllable': (not embedded) or enabled,
+            'poll_secs': self._poll(),
             'rules': len(rules), 'rules_enabled': rules_enabled,
             'detail': [
-                {'label_key': 'svc_mode', 'value_key': mode_key},
+                {'label_key': 'svc_mode',
+                 'value_key': 'svc_mode_embedded' if embedded else 'svc_mode_container'},
                 {'label_key': 'svc_poll', 'value': f"{self._poll()} s"},
                 {'label_key': 'svc_rules', 'value': f"{rules_enabled}/{len(rules)}"},
             ],
         }
 
     def control(self, action: str) -> tuple:
-        mode, env_on = self._mode(), self._env_on()
-        if (not env_on) or mode == 'external':
+        if not self._env_on():
             return self._control_external(action)   # a dedicated container owns it
-        if mode != 'embedded':                       # env_on + mode 'off' → disabled
-            return False, 'not_controllable'
         if action == 'stop':
             self._stop_event_worker()
             self._audit_system('events_worker_stopped', {})
             return True, ''
+        if not self._events_enabled():              # start needs enabled in config
+            return False, 'disabled'
         self._start_event_worker(self._poll())
         ok = bool(self._event_worker_running())
         if ok:
@@ -127,8 +119,9 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
         self._stop_event_worker()
 
     def on_config_changed(self, changed) -> None:
-        # Leaving embedded mode (→ external/off) stops the running worker.
-        if 'events|mode' in changed and self.running and self._mode() != 'embedded':
+        # Master switch: disabling events from the config tab stops a running worker
+        # (enabling does NOT auto-start — that is autostart/Services).
+        if 'events|enabled' in changed and not self._events_enabled() and self.running:
             self.stop_worker()
 
 

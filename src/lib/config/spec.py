@@ -311,14 +311,16 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # Global default cooldown (s) inherited by any event rule that leaves its own
     # Cooldown field blank.  0 = notify on every match.
     Cfg('events|cooldown',        int, 0, min=0, max=86400),
-    # Decoupled event worker: where it runs and how often it polls the source tables.
-    # mode: 'embedded' = a worker thread inside the web admin (default); 'external' =
-    # a separate process/container owns it (web admin does not run it); 'off' = no
-    # rule evaluation. poll_secs: how often the worker drains new syslog/audit rows.
-    Cfg('events|mode',            str, 'embedded', no_rule=True),
-    # autostart: launch the EMBEDDED worker at web-admin boot (only meaningful when
-    # mode='embedded'; a standalone ``--events`` process ignores it).  mode=embedded
-    # + autostart=off ⇒ boots stopped but startable from the Services tab.
+    # Decoupled event worker (rule evaluation). Uniform with monitoring/syslog:
+    # ``enabled`` is the on/off master switch; whether it runs HERE (embedded) or a
+    # dedicated ``--events`` container owns it is the SS_EVENTS_EMBEDDED env, not a
+    # config field.  poll_secs: how often the worker drains new syslog/audit rows.
+    # (Legacy ``events|mode`` — embedded/external/off — is read for backward compat
+    # in _EventsMixin._events_enabled: off ⇒ disabled, else enabled.)
+    Cfg('events|enabled',         bool, True),
+    # autostart: launch the EMBEDDED worker at web-admin boot (a standalone
+    # ``--events`` process ignores it).  enabled + autostart=off ⇒ boots stopped but
+    # startable from the Services tab.
     Cfg('events|autostart',       bool, True, env='SS_EVENTS_AUTOSTART'),
     Cfg('events|poll_secs',       int, 2, min=1, max=3600),
 

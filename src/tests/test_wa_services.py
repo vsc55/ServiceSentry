@@ -95,19 +95,19 @@ class TestExternalControl:
         assert ok is True and reason == ''
         assert admin._config_section('monitoring').get('enabled') is True
 
-    def test_external_events_stop_sets_mode_off(self, admin):
-        # Harness default: SS_EVENTS_EMBEDDED=0 → events is external; stop → mode off.
+    def test_external_events_stop_sets_enabled_false(self, admin):
+        # Harness default: SS_EVENTS_EMBEDDED=0 → events is external; stop → enabled false.
         ok, reason = admin._service_control('events', 'stop')
         assert ok is True and reason == ''
-        assert admin._config_section('events').get('mode') == 'off'
-        # And the worker idles on mode=off even when it holds the lease.
+        assert admin._config_section('events').get('enabled') is False
+        # And the worker idles when disabled, even when it holds the lease.
         evsvc = admin._embedded_services['events']
         evsvc._is_leader = True
         assert evsvc._event_worker_tick() == 0
-        # start → mode external, worker no longer gated by the mode switch.
+        # start → enabled true, worker no longer gated by the master switch.
         ok, reason = admin._service_control('events', 'start')
         assert ok is True and reason == ''
-        assert admin._config_section('events').get('mode') == 'external'
+        assert admin._config_section('events').get('enabled') is True
 
 
 class TestMonitoringControl:

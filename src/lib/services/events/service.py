@@ -3,11 +3,12 @@
 """Standalone event-processing service — run the decoupled event worker as its own
 process/container.
 
-The web admin hosts the worker in-process by default (``events|mode=embedded``,
-see :class:`lib.services.events.manager._EventsMixin`), but the same evaluation loop can run
+The web admin hosts the worker in-process by default, see
+:class:`lib.services.events.manager._EventsMixin`, but the same evaluation loop can run
 on its own host/container, sharing the database with the rest of ServiceSentry.
-Set ``events|mode=external`` (and ``SS_EVENTS_EMBEDDED=0`` on the web admin) so a
-single worker owns rule evaluation.
+Set ``SS_EVENTS_EMBEDDED=0`` on the web admin so a single dedicated ``--events``
+worker owns rule evaluation (``events|enabled`` is the on/off switch, uniform with
+the monitor/syslog).
 
 It wires the collaborators the worker needs and nothing else (no Flask, no
 listener): read new syslog/audit rows by cursor → evaluate rules → dispatch →
@@ -51,9 +52,9 @@ class EventService(_HeartbeatMixin, _EventsMixin):
 
     # ── heartbeat hooks (observed state for the Services tab) ──────────────────
     def _hb_running(self) -> bool:
-        # Report "running" only while actually processing: events|mode=off idles the
-        # worker (a Services-tab stop), so the web card shows it stopped, not running.
-        return not self._stop.is_set() and self._events_mode() != 'off'
+        # Report "running" only while actually processing: events|enabled=false idles
+        # the worker (a Services-tab stop), so the web card shows it stopped.
+        return not self._stop.is_set() and self._events_enabled()
 
     def _hb_detail(self) -> dict:
         return {'poll_secs': self._poll_secs()}

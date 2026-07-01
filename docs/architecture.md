@@ -559,25 +559,29 @@ el **worker** las drena por cursor. La "cola" es la propia tabla de origen.
 - **Cooldown persistido** (`event_cooldowns`): el antirebote vive en BD (no en
   memoria), por lo que una regla no vuelve a dispararse tras un reinicio y vale para
   más de una instancia.
-- **Embebido o externo** (`events.mode`), mismo núcleo:
-  - *embedded* (por defecto): un hilo dentro del WebAdmin
-    (`_start_event_worker`, gate de entorno `SS_EVENTS_EMBEDDED`).
-  - *external*: un proceso/contenedor propio — `EventService`
-    (`lib/services/events/service.py`, `main.py --events`, `SS_SERVICE_ROLE=events`) que abre
-    la BD compartida y corre el mismo `_event_worker_loop`. El WebAdmin se lanza con
-    `SS_EVENTS_EMBEDDED=0`.
-  - *off*: sin evaluación.
-- **Controlable** desde la pestaña Services (start/stop/estado) cuando es embebido.
+- **Embebido o externo** (env `SS_EVENTS_EMBEDDED`), mismo núcleo — uniforme con
+  monitor/syslog: `events.enabled` es el interruptor on/off; el hosting lo decide el
+  entorno, no un campo de config:
+  - *embebido* (por defecto, `SS_EVENTS_EMBEDDED=1`): un hilo dentro del WebAdmin
+    (`_start_event_worker`).
+  - *externo* (`SS_EVENTS_EMBEDDED=0` en el web): un proceso/contenedor propio —
+    `EventService` (`lib/services/events/service.py`, `main.py --events`,
+    `SS_SERVICE_ROLE=events`) que abre la BD compartida y corre el mismo
+    `_event_worker_loop`.
+  - `events.enabled=false`: sin evaluación (el worker sigue vivo pero no procesa).
+- **Controlable** desde la pestaña Services (start/stop/estado) tanto embebido como
+  externo: en externo el start/stop edita el estado deseado (`events.enabled`) que el
+  contenedor reconcilia.
 
 ### ¿Qué proceso corre el worker en cada topología?
 
 | | Monolítico / **embebido** | Microservicios / **externo** |
 |---|---|---|
 | Worker de eventos | hilo dentro del contenedor **web** | contenedor **`events`** dedicado |
-| `events.mode` | `embedded` (por defecto) | `external` |
-| Entorno | `SS_EVENTS_EMBEDDED=1` (por defecto) | web: `SS_EVENTS_EMBEDDED=0` · events: `SS_SERVICE_ROLE=events` |
+| Hosting | `SS_EVENTS_EMBEDDED=1` (por defecto) | web: `SS_EVENTS_EMBEDDED=0` · events: `SS_SERVICE_ROLE=events` |
+| `events.enabled` | `true` (on/off) | `true` (on/off) |
 | Entrypoint | interno (`_start_event_worker`) | `main.py --events` → `EventService` |
-| Control en Services | start / stop | solo lectura (otro proceso) |
+| Control en Services | start / stop | start / stop (edita `events.enabled`) |
 | Base de datos | compartida (principal + syslog) | la misma BD compartida |
 
 ```mermaid
