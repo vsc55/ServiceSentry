@@ -52,7 +52,15 @@ class _EmbeddedBase(_HeartbeatMixin):
         section, field = path.split('|', 1)
         value = on_val if action == 'start' else off_val
         host = self._host
-        host._write_config({section: {field: value}})
+        # Round-trip the FULL effective config with only this one field changed.
+        # ConfigManager.write treats its argument as the complete config and prunes
+        # every DB row absent from it — so a partial dict here would wipe all other
+        # settings (monitoring/events enabled, syslog ports, …).
+        cfg = host._read_config_file(self._CONFIG_FILE) or {}
+        section_cfg = dict(cfg.get(section) or {})
+        section_cfg[field] = value
+        cfg = {**cfg, section: section_cfg}
+        host._write_config(cfg)
         host._invalidate_config_cache()
         # Let every embedded twin react (a no-op for a service a container owns) and
         # push the change to the remote instances so it applies immediately.

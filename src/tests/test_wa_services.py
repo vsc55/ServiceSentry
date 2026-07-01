@@ -122,6 +122,22 @@ class TestExternalControl:
         assert ok is True and reason == ''
         assert admin._config_section('monitoring').get('enabled') is True
 
+    def test_external_control_preserves_other_config(self, admin):
+        # Regression: external start/stop round-trips the FULL config; it must NOT
+        # wipe other settings (ConfigManager.write prunes DB rows absent from its
+        # argument, so a partial write would delete everything else).
+        admin._write_config({**(admin._read_config_file(admin._CONFIG_FILE) or {}),
+                             'events': {'enabled': True},
+                             'syslog': {'enabled': True, 'udp_port': 5514}})
+        admin._invalidate_config_cache()
+        admin._service_control('monitoring', 'stop')   # external (SS_MONITORING_EMBEDDED=0)
+        admin._invalidate_config_cache()
+        assert admin._config_section('monitoring').get('enabled') is False
+        # untouched sections survive the round-trip
+        assert admin._config_section('events').get('enabled') is True
+        assert admin._config_section('syslog').get('enabled') is True
+        assert admin._config_section('syslog').get('udp_port') == 5514
+
     def test_external_events_stop_sets_enabled_false(self, admin):
         # Harness default: SS_EVENTS_EMBEDDED=0 → events is external; stop → enabled false.
         ok, reason = admin._service_control('events', 'stop')

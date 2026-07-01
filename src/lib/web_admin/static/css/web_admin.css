@@ -1228,6 +1228,14 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     width: 100%;
     max-width: 400px;
 }
+/* Dark mode: a plain .card shares the deep body bg (#181818), so its edge vanishes.
+   Lift it onto a raised surface with a crisp border + real drop shadow so the login
+   panel reads as a distinct card floating over the page. */
+[data-bs-theme="dark"] .login-card {
+    background-color: var(--bs-secondary-bg);
+    border-color: rgba(255, 255, 255, .14);
+    box-shadow: 0 .75rem 2rem rgba(0, 0, 0, .55) !important;
+}
 
 
 /* ════════════════ Error page ════════════════ */
