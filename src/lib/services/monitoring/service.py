@@ -124,7 +124,8 @@ class MonitorService(_HeartbeatMixin, _MonitoringMixin):
         self._stop = threading.Event()
         self._monitoring_init_state()
 
-        backend = (db_cfg or {}).get('engine') or (db_cfg or {}).get('type') or 'sqlite'
+        backend = ((db_cfg or {}).get('driver') or (db_cfg or {}).get('engine')
+                   or (db_cfg or {}).get('type') or 'sqlite')
         self._dbg(f'> Monitor >> service init: config={config_dir} var={self._var_dir} '
                   f'db={backend}', DebugLevel.info)
 

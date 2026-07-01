@@ -54,6 +54,12 @@ class BaseConnector(ABC):
     # prefix length, so it overrides this to a bounded VARCHAR.
     DDL_TEXT_KEY:      str = 'TEXT'
 
+    # Server-based engines (MySQL/PostgreSQL) keep a per-thread network connection;
+    # a short-lived thread (a check-pool worker) that abandons it logs a server-side
+    # "aborted connection" warning.  Those override this to True so such threads can
+    # close their connection cleanly (send QUIT).  SQLite is serverless → False.
+    NEEDS_THREAD_CLEANUP: bool = False
+
     # ── Schema management ────────────────────────────────────────────────────
 
     @abstractmethod
@@ -368,6 +374,18 @@ class BaseConnector(ABC):
     @abstractmethod
     def close(self) -> None:
         """Close the current thread's connection."""
+
+    def close_thread_if_needed(self) -> None:
+        """Close this thread's connection cleanly, but only for server-based engines
+        (``NEEDS_THREAD_CLEANUP``).  Call it at the end of a short-lived thread (a
+        check-pool worker) so its network connection sends QUIT instead of being
+        GC'd — which MySQL/MariaDB would log as an 'aborted connection'.  A no-op
+        for SQLite."""
+        if self.NEEDS_THREAD_CLEANUP:
+            try:
+                self.close()
+            except Exception:  # pylint: disable=broad-except
+                pass
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 

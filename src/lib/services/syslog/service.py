@@ -138,7 +138,8 @@ class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
         self._syslog_lock = threading.Lock()
         self._stop = threading.Event()
 
-        backend = (db_cfg or {}).get('engine') or (db_cfg or {}).get('type') or 'sqlite'
+        backend = ((db_cfg or {}).get('driver') or (db_cfg or {}).get('engine')
+                   or (db_cfg or {}).get('type') or 'sqlite')
         self._dbg(f'> Syslog >> service init: config={config_dir} var={self._var_dir} '
                   f'db={backend}', DebugLevel.info)
 

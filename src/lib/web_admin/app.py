@@ -961,6 +961,18 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'module_web_modals': self._module_web_modals,
             }
 
+        # The dev server is threaded=True (a new thread per request), so each
+        # request's per-thread DB connection would be abandoned when the thread
+        # ends — MySQL/MariaDB logs that as an 'aborted connection'. Close it
+        # cleanly at teardown (no-op for SQLite; no reuse lost since the thread is
+        # short-lived anyway).
+        @app.teardown_request
+        def _close_thread_db(_exc=None):  # noqa: ANN001
+            for _c in (getattr(self, '_db_connector', None),
+                       getattr(self, '_syslog_db_connector', None)):
+                if _c is not None:
+                    _c.close_thread_if_needed()
+
         self._register_routes(app)
         return app
 

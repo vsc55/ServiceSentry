@@ -109,7 +109,7 @@ spec:
             - { name: SS_EVENTS_EMBEDDED,     value: "0" }
           ports: [{ containerPort: 8080 }]
           readinessProbe:
-            httpGet: { path: /, port: 8080 }
+            httpGet: { path: /api/v1/health, port: 8080 }
             initialDelaySeconds: 15
 ---
 apiVersion: v1

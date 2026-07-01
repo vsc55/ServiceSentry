@@ -3,7 +3,9 @@
 # Builds the image from the Dockerfile and runs the split topology
 # (web + worker + syslog + events) on a shared MariaDB, no Traefik.
 #
-#   ./docker/make_test.sh            # build + start (detached)
+#   ./docker/make_test.sh            # build + start, then follow logs from the
+#                                    #   beginning (Ctrl+C detaches; stack keeps running)
+#   ./docker/make_test.sh start      # build + start detached, don't follow logs
 #   ./docker/make_test.sh logs       # follow logs
 #   ./docker/make_test.sh ps         # container status
 #   ./docker/make_test.sh down       # stop + remove containers
@@ -42,11 +44,25 @@ EOF
 }
 
 case "${1:-up}" in
-  up)      "${DC[@]}" -f "$FILE" up --build -d && info ;;
-  logs)    "${DC[@]}" -f "$FILE" logs -f ;;
-  ps)      "${DC[@]}" -f "$FILE" ps ;;
+  up)
+    # Build + start detached, then follow logs FROM THE START (so you don't miss
+    # the build/startup output). Ctrl+C only detaches the logs; the stack stays up.
+    "${DC[@]}" -f "$FILE" up --build -d
+    info
+    echo "── Following logs (Ctrl+C detaches; the stack keeps running) ──────────"
+    "${DC[@]}" -f "$FILE" logs -f
+    ;;
+  start)   "${DC[@]}" -f "$FILE" up --build -d && info ;;
+  logs)
+    if [ -z "$("${DC[@]}" -f "$FILE" ps -aq)" ]; then
+      echo "No containers for this stack yet. Start it first:" >&2
+      echo "  ./docker/make_test.sh up" >&2
+      exit 0
+    fi
+    "${DC[@]}" -f "$FILE" logs -f ;;
+  ps)      "${DC[@]}" -f "$FILE" ps -a ;;
   down)    "${DC[@]}" -f "$FILE" down ;;
   clean)   "${DC[@]}" -f "$FILE" down -v --remove-orphans ;;
   rebuild) "${DC[@]}" -f "$FILE" up --build -d --force-recreate && info ;;
-  *) echo "Usage: $0 [up|logs|ps|down|clean|rebuild]" >&2; exit 1 ;;
+  *) echo "Usage: $0 [up|start|logs|ps|down|clean|rebuild]" >&2; exit 1 ;;
 esac

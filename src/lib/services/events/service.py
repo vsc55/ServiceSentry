@@ -117,7 +117,8 @@ class EventService(_HeartbeatMixin, _EventsMixin):
             or self._config_section('global').get('log_level') or 'info')
         self._stop = threading.Event()
 
-        backend = (db_cfg or {}).get('engine') or (db_cfg or {}).get('type') or 'sqlite'
+        backend = ((db_cfg or {}).get('driver') or (db_cfg or {}).get('engine')
+                   or (db_cfg or {}).get('type') or 'sqlite')
         self._dbg(f'> Events >> service init: config={config_dir} var={self._var_dir} '
                   f'db={backend}', DebugLevel.info)
 

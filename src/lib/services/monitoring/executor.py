@@ -91,6 +91,13 @@ def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[di
             monitor.debug.print(
                 f"> Check > {mod_name} >> {type(exc).__name__}: {exc}", DebugLevel.error)
             return mod_name, None, f'{mod_name}: {type(exc).__name__}: {exc}'
+        finally:
+            # This runs in a short-lived pool worker thread; close its per-thread DB
+            # connection cleanly (server engines only) so it isn't logged as an
+            # 'aborted connection' when the thread ends.
+            _db = getattr(monitor, '_db', None)
+            if _db is not None:
+                _db.close_thread_if_needed()
 
     # Warm module imports sequentially before the concurrent phase: a module that
     # mutates sys.path during its check (dns loads dnspython, whose package shadows

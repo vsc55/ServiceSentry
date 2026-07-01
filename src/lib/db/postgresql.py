@@ -31,6 +31,7 @@ class PostgreSQLConnector(BaseConnector):
     DDL_REAL          = 'DOUBLE PRECISION'
     DDL_TEXT          = 'TEXT'
     DDL_INTEGER       = 'INTEGER'
+    NEEDS_THREAD_CLEANUP = True    # per-thread network connection → close on thread exit
 
     def __init__(self, config: dict) -> None:
         if not _HAS_PSYCOPG2:
