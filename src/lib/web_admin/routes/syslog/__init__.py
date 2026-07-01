@@ -62,7 +62,11 @@ def register(app, wa):
         """Listener status: enabled flag, running, configured ports, stored count."""
         store = getattr(wa, '_syslog_store', None)
         srv = getattr(wa, '_syslog_server', None)
-        cfg = wa._config_section('syslog')
+        # Effective config (registry defaults merged), not the raw stored section —
+        # so an unset field reports its default (e.g. enabled/ports) exactly as the
+        # listener would use it, instead of a misleading None/0.
+        sy = wa._embedded_services.get('syslog')
+        cfg = sy._syslog_cfg() if sy else (wa._config_section('syslog') or {})
         return jsonify({
             'enabled': bool(cfg.get('enabled')),
             'running': bool(srv and srv.running),

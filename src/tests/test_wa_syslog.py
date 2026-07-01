@@ -135,7 +135,8 @@ class TestSyslogApi:
     def test_status(self, client):
         _login(client)
         st = client.get('/api/v1/syslog/status').get_json()
-        assert st['enabled'] is False and st['running'] is False and 'count' in st
+        # enabled by default now; not running here (autostart off in the harness)
+        assert st['enabled'] is True and st['running'] is False and 'count' in st
 
     def test_stats(self, client, admin):
         _login(client)

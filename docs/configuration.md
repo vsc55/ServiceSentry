@@ -515,7 +515,7 @@ solo-admin). Campos:
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
-| `enabled` | bool | false | Interruptor maestro del receptor. Desactivado = apagado (y se detiene si corría); no arrancable desde Servicios. |
+| `enabled` | bool | true | Interruptor maestro del receptor. Desactivado = apagado (y se detiene si corría); no arrancable desde Servicios. |
 | `autostart` | bool | true | Arrancar el listener embebido al iniciar el panel web (env `SS_SYSLOG_AUTOSTART`). Off = arranca parado pero iniciable desde Servicios. Solo modo embebido (un `--syslog` lo ignora). |
 | `bind_host` | str | `0.0.0.0, ::` | Interfaces de escucha (lista de IPs IPv4/IPv6, coma/espacio). Validadas como IP. Vacío = todas las IPv4 (`0.0.0.0`). |
 | `udp_port` | int | 514 | Puerto UDP (0 = desactivado). <1024 requiere privilegios. Vacío = default. |

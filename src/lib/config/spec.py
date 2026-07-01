@@ -290,7 +290,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ Syslog receiver ═════════════════════════════════════════════════════
     # Built-in syslog server: receive RFC 3164/5424 events from external hosts
     # over UDP/TCP(+TLS), store them (lib/stores/syslog.py) and optionally alert.
-    Cfg('syslog|enabled',         bool, False, admin_only=True),
+    Cfg('syslog|enabled',         bool, True, admin_only=True),
     # autostart: launch the EMBEDDED listener at web-admin boot (a standalone
     # ``--syslog`` process ignores it).  enabled=on + autostart=off ⇒ boots stopped
     # but startable from the Services tab.

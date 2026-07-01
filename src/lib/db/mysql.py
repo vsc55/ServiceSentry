@@ -56,6 +56,14 @@ class MySQLConnector(BaseConnector):
             'password': cfg.get('password', ''),
             'charset': 'utf8mb4',
             'autocommit': False,
+            # InnoDB defaults to REPEATABLE READ: a long-lived read-only connection
+            # (e.g. a service's config-watch thread) pins its snapshot at the first
+            # SELECT and never sees another process's committed writes — so a config
+            # change made in the web pod is invisible to the worker/syslog/events
+            # pods until they reconnect (it made an external syslog start flip back to
+            # stopped). This control plane shares one DB across processes, so every
+            # reader must see the latest committed state: use READ COMMITTED.
+            'init_command': 'SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED',
         }
 
     def _conn(self):

@@ -13,6 +13,10 @@ import pytest
 # interferes with mocked-dispatch assertions.
 os.environ.setdefault('SS_EVENTS_EMBEDDED', '0')
 os.environ.setdefault('SS_MONITORING_EMBEDDED', '0')
+# syslog is enabled by default now, so keep its listener from binding privileged
+# port 514 at fixture boot (xdist runs many workers → 514 conflicts). Tests that
+# exercise the listener start it explicitly on a free port.
+os.environ.setdefault('SS_SYSLOG_AUTOSTART', '0')
 
 try:
     from lib.web_admin import WebAdmin
