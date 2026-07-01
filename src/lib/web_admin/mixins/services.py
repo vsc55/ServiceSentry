@@ -156,26 +156,32 @@ class _ServicesMixin:
         return out
 
     def _overlay_external_runtime(self, entry: dict, insts: list) -> None:
-        """Fill an external service's summary from its leader instance's heartbeat.
+        """Fill an external service's summary from its running instance's heartbeat.
 
         The web hosts none of it, so its own next-run/last-run are empty; take them
-        from the instance that holds the lease (or the sole instance) — its heartbeat
-        detail carries ``next_in``/``interval`` and the row carries ``last_cycle_at``.
-        Also reflect that the remote is actually running."""
-        leader = next((i for i in insts if (i.get('detail') or {}).get('leader')), None)
-        if leader is None and len(insts) == 1:
-            leader = insts[0]
-        if leader is None:
+        from the representative instance — the lease holder for a leader-gated service
+        (monitor/events), or any live instance for an active-active one (syslog, which
+        has no leader).  Its heartbeat detail carries ``next_in``/``interval`` and the
+        row carries ``last_cycle_at``.  Also reflect that the remote is running."""
+        # Prefer the leader (leader-gated); else any alive instance (active-active);
+        # else the sole/first one — so the card's running flag and Start/Stop button
+        # reflect a syslog receiver with no leader, not just leader-gated services.
+        rep = next((i for i in insts if (i.get('detail') or {}).get('leader')), None)
+        if rep is None:
+            rep = next((i for i in insts if i.get('derived_state') == 'alive'), None)
+        if rep is None:
+            rep = insts[0] if insts else None
+        if rep is None:
             return
-        det = leader.get('detail') or {}
+        det = rep.get('detail') or {}
         patch = {'svc_next_run': det.get('next_in'),
-                 'svc_last_run': leader.get('last_cycle_at')}
+                 'svc_last_run': rep.get('last_cycle_at')}
         for row in entry.get('detail', []):
             lk = row.get('label_key')
             if lk in patch and patch[lk] is not None:
                 row['value'] = patch[lk]
-        # The remote leader is alive+running → surface that as the running flag.
-        if leader.get('derived_state') == 'alive':
+        # The representative instance is alive+running → surface that as running.
+        if rep.get('derived_state') == 'alive':
             entry['running'] = True
 
     # ── startup log ───────────────────────────────────────────────────────────

@@ -62,6 +62,22 @@ class TestServicesStatus:
         assert rows['svc_last_run'] == 1000.0
         assert entry['running'] is True
 
+    def test_external_running_for_active_active_without_leader(self, admin):
+        # An active-active service (syslog) has no leader: running must reflect ANY
+        # alive instance, so the card shows Stop, not Start.
+        entry = {'state': 'external', 'running': False, 'detail': []}
+        insts = [{'detail': {}, 'derived_state': 'alive'},
+                 {'detail': {}, 'derived_state': 'alive'}]
+        admin._overlay_external_runtime(entry, insts)
+        assert entry['running'] is True
+
+    def test_external_not_running_when_all_stopped(self, admin):
+        entry = {'state': 'external', 'running': False, 'detail': []}
+        insts = [{'detail': {}, 'derived_state': 'stopped'},
+                 {'detail': {}, 'derived_state': 'stopped'}]
+        admin._overlay_external_runtime(entry, insts)
+        assert entry['running'] is False
+
 
 class TestPoke:
 
