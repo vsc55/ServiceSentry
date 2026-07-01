@@ -266,10 +266,12 @@ class TestEventWorker:
         client.post('/api/v1/event-rules', json={
             'name': 'w', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']})
-        admin._embedded_services['events']._event_state.set_cursor('audit', 0)        # process from the start
+        ev = admin._embedded_services['events']
+        ev._is_leader = True   # act as the active worker (tick is leader-gated)
+        ev._event_state.set_cursor('audit', 0)        # process from the start
         admin._audit_system('login_failed', detail={})   # decoupled: only stores a row
         with mock.patch(_DISP) as disp:
-            processed = admin._embedded_services['events']._event_worker_tick()
+            processed = ev._event_worker_tick()
         assert processed >= 1
         assert disp.called                                # the worker fired the rule
 

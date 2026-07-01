@@ -71,7 +71,11 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
         running = bool(self._event_worker_running())
         embedded = env_on and mode != 'external'
         controllable = env_on and mode == 'embedded'
-        if mode == 'external':
+        # A dedicated container owns it when SS_EVENTS_EMBEDDED=0 OR events|mode is
+        # external — either way this process must NOT publish a heartbeat or take the
+        # leader lease (else it would win it without running the worker). Mirror the
+        # monitor/syslog gate so the app-boot check (state != 'external') skips it.
+        if not env_on or mode == 'external':
             state = 'external'
         elif mode == 'off':
             state = 'disabled'
@@ -79,7 +83,7 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
             state = 'running' if running else 'stopped'
         rules = self._events_rules() or []
         rules_enabled = sum(1 for r in rules if r.get('enabled'))
-        mode_key = ('svc_mode_container' if mode == 'external'
+        mode_key = ('svc_mode_container' if (not env_on or mode == 'external')
                     else 'svc_state_disabled' if mode == 'off'
                     else 'svc_mode_embedded')
         return {
