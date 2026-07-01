@@ -41,7 +41,7 @@ from lib.stores.service_instances import ServiceInstancesStore
 from lib.stores.service_commands import ServiceCommandsStore
 from lib.stores.syslog import SyslogStore, SyslogDropsStore
 from lib.stores.webhooks import WebhooksStore
-from lib.services.heartbeat import _HeartbeatMixin
+from lib.services.heartbeat import _HeartbeatMixin, db_summary
 from lib.services.control_server import start_control_server
 from lib.services.syslog.manager import _SyslogMixin
 from lib.services.events.manager import _EventsMixin
@@ -72,6 +72,12 @@ class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
             return {}
         return {k: cfg.get(k) for k in ('udp_port', 'tcp_port', 'tls_port')
                 if cfg.get(k)}
+
+    def _hb_db_info(self) -> dict:
+        info = {'main': self._hb_db_main}
+        if self._hb_db_syslog:
+            info['syslog'] = self._hb_db_syslog
+        return info
 
     def __init__(self, config_dir: str, var_dir: str | None = None,
                  host_override: str | None = None, port_override: int | None = None,
@@ -109,6 +115,9 @@ class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
             default_sqlite_path=os.path.join(self._var_dir, 'syslog.db'))
         self._syslog_store = SyslogStore(self._syslog_db_connector)
         self._syslog_drops_store = SyslogDropsStore(self._syslog_db_connector)
+        self._hb_db_main = db_summary(db_cfg, os.path.basename(db_path))
+        self._hb_db_syslog = (db_summary(_sdb, 'syslog.db')
+                              if (_sdb or {}).get('enabled') else None)
         self._webhooks_store = WebhooksStore(
             self._db_connector, fernet=self._fernet, secret_keys=self._secret_keys)
         # Event-rules manager (shared DB): syslog→notification routing + send log.

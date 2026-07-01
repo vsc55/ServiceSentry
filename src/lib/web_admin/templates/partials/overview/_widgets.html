@@ -72,7 +72,7 @@ function _dwBuildModuleRows(modules) {
         const nameCell = `<span class="ss-mod-av${_avOn ? '' : ' off'} rounded-2 d-inline-flex align-items-center justify-content-center me-2"
             style="--mh:${hue};width:26px;height:26px;font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
         const active = _unsupported
-            ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.72rem"
+            ? `<span class="badge rounded-pill bg-secondary bg-opacity-50 ss-fs-2"
                    title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
                    <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
                </span>`
@@ -432,7 +432,7 @@ function _dwTableCard(accent, avBg, avColor, icon, title, tableHtml) {
             <span class="rounded-2 d-flex align-items-center justify-content-center"
                   style="width:30px;height:30px;background:${avBg};color:${avColor};font-size:.95rem">
                 <i class="bi ${icon}"></i></span>
-            <span class="fw-semibold" style="font-size:.92rem">${title}</span>
+            <span class="fw-semibold ss-fs-4">${title}</span>
         </div>
         <div style="overflow-y:auto;flex:1;font-size:.875rem">${tableHtml}</div>
     </div>`;
@@ -590,7 +590,7 @@ function _dwContent(id, data, item) {
         case 'sessions': {
             const byRole = sessions.by_role || {};
             const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${_roleBadge(r)}" style="font-size:.72rem">${n} ${esc(_roleName(r))}</span>`)
+                .map(([r, n]) => `<span class="badge ${_roleBadge(r)} ss-fs-2">${n} ${esc(_roleName(r))}</span>`)
                 .join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#06b6d4,#3b82f6)', 'rgba(6,182,212,.12)', '#06b6d4',
                 'bi-plug-fill', sessions.active || 0, 'overview_sessions', sub);
@@ -599,7 +599,7 @@ function _dwContent(id, data, item) {
         case 'users': {
             const byRole = users.by_role || {};
             const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${_roleBadge(r)}" style="font-size:.72rem">${n} ${esc(_roleName(r))}</span>`)
+                .map(([r, n]) => `<span class="badge ${_roleBadge(r)} ss-fs-2">${n} ${esc(_roleName(r))}</span>`)
                 .join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#f59e0b,#f97316)', 'rgba(245,158,11,.12)', '#f59e0b',
                 'bi-person-fill', users.total || 0, 'overview_users', sub);
@@ -608,7 +608,7 @@ function _dwContent(id, data, item) {
         case 'groups': {
             const byRole = groups.by_role || {};
             const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${_roleBadge(r)}" style="font-size:.72rem">${n} ${esc(_roleName(r))}</span>`)
+                .map(([r, n]) => `<span class="badge ${_roleBadge(r)} ss-fs-2">${n} ${esc(_roleName(r))}</span>`)
                 .join('')
                 || (groups.members ? `<span class="text-muted small">${tf('overview_members', groups.members)}</span>` : '<span class="text-muted small">—</span>');
             return _dwStatCard('linear-gradient(90deg,#10b981,#14b8a6)', 'rgba(16,185,129,.12)', '#10b981',
@@ -656,9 +656,9 @@ function _dwContent(id, data, item) {
             };
             const sub = [
                 ...Object.entries(byType).map(([ct, n]) =>
-                    `<span class="badge ${_credBadge(ct)}" style="font-size:.72rem">${n} ${esc(_credTypeLabel(ct))}</span>`),
+                    `<span class="badge ${_credBadge(ct)} ss-fs-2">${n} ${esc(_credTypeLabel(ct))}</span>`),
                 disabled > 0
-                    ? `<span class="badge text-bg-light text-muted" style="font-size:.72rem">${tf('overview_credentials_disabled', disabled)}</span>`
+                    ? `<span class="badge text-bg-light text-muted ss-fs-2">${tf('overview_credentials_disabled', disabled)}</span>`
                     : '',
             ].filter(Boolean).join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#14b8a6,#0ea5e9)', 'rgba(20,184,166,.12)', '#14b8a6',
@@ -808,7 +808,7 @@ function _dwContent(id, data, item) {
                 .filter(s => s.count)
                 .map(s => {
                     const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[s.value]) || 'secondary';
-                    return `<span class="badge bg-${cls}" style="font-size:.72rem">${s.count} ${esc(s.name)}</span>`;
+                    return `<span class="badge bg-${cls} ss-fs-2">${s.count} ${esc(s.name)}</span>`;
                 }).join('') || '<span class="text-muted small">—</span>';
             return _dwStatCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
                 'bi-card-list', sl.total || 0, 'overview_syslog_stats', sub);

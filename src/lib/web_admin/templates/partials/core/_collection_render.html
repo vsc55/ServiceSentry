@@ -100,7 +100,7 @@ async function itemAction(btn) {
         panel.style.display = 'block';
         panel.innerHTML = `<div class="border rounded px-2 py-1 mt-1" style="background:var(--bs-body-bg)">
             <div class="d-flex flex-wrap gap-1">
-                ${items.map(d => `<span class="badge bg-secondary bg-opacity-50 text-body" style="font-size:.75rem">${esc(d)}</span>`).join('')}
+                ${items.map(d => `<span class="badge bg-secondary bg-opacity-50 text-body ss-fs-2">${esc(d)}</span>`).join('')}
             </div></div>`;
     } else if (result === 'field_picker') {
         if (!ok) { showToast(msg, 'danger'); return; }
@@ -271,8 +271,8 @@ function renderCollection(title, data, pathStr, target) {
         <span class="fw-semibold text-muted" style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em">
             <i class="bi bi-list-ul me-1"></i>${lbl}
         </span>
-        ${itemCount > 0 ? `<span class="badge rounded-pill bg-secondary bg-opacity-50" style="font-size:.68rem">${itemCount}</span>` : ''}
-        ${_unsupported ? `<span class="ms-auto badge bg-secondary bg-opacity-50" style="font-size:.68rem" title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}"><i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}</span>` : ''}
+        ${itemCount > 0 ? `<span class="badge rounded-pill bg-secondary bg-opacity-50 ss-fs-2">${itemCount}</span>` : ''}
+        ${_unsupported ? `<span class="ms-auto badge bg-secondary bg-opacity-50 ss-fs-2" title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}"><i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}</span>` : ''}
         ${!_unsupported && canAddItem && _discoverUrl ? `<button class="btn btn-sm btn-info ms-auto py-0 px-2"
             onclick="openDiscoverModal(${jsStr(pathStr)},${jsStr(_discoverUrl)})"
             title="${escAttr(t('discover'))}">
@@ -302,7 +302,7 @@ function renderCollection(title, data, pathStr, target) {
     for (const [name, val] of _sorted) {
         h += renderCollectionItem(name, val, pathStr + '|' + name, pathStr, target);
     }
-    h += `${!itemCount ? `<div class="text-center py-3 text-muted" style="font-size:.82rem">
+    h += `${!itemCount ? `<div class="text-center py-3 text-muted ss-fs-3">
         <i class="bi bi-inbox" style="opacity:.35;display:block;font-size:1.4rem;margin-bottom:.4rem"></i>
         ${t('no_items') || 'No items'}
     </div>` : ''}</div></div>`;
@@ -418,11 +418,11 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     if (typeof itemValue === 'boolean') {
         const boolBg = itemValue ? 'rgba(34,197,94,.09)' : 'var(--bs-secondary-bg)';
         const boolIcon = itemValue
-            ? '<i class="bi bi-check-circle-fill text-success flex-shrink-0" style="font-size:.88rem"></i>'
-            : '<i class="bi bi-circle text-secondary flex-shrink-0" style="font-size:.88rem"></i>';
+            ? '<i class="bi bi-check-circle-fill text-success flex-shrink-0 ss-fs-4"></i>'
+            : '<i class="bi bi-circle text-secondary flex-shrink-0 ss-fs-4"></i>';
         return `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border" style="background:${boolBg}">
             ${boolIcon}
-            <code class="me-auto" style="font-size:.82rem">${esc(displayName)}</code>
+            <code class="me-auto ss-fs-3">${esc(displayName)}</code>
             <div class="form-check form-switch mb-0 me-1">
                 <input class="form-check-input" type="checkbox" ${itemValue ? 'checked' : ''}
                     onchange="updateField(${tg},${sp},this.checked)">
@@ -433,8 +433,8 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     // --- number item ---
     if (typeof itemValue === 'number') {
         return `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border" style="background:var(--bs-body-bg)">
-            <i class="bi bi-hash text-muted flex-shrink-0" style="font-size:.88rem"></i>
-            <code class="me-auto" style="font-size:.82rem">${esc(displayName)}</code>
+            <i class="bi bi-hash text-muted flex-shrink-0 ss-fs-4"></i>
+            <code class="me-auto ss-fs-3">${esc(displayName)}</code>
             <input type="number" class="form-control form-control-sm"
                 style="max-width:90px" value="${itemValue}"
                 onkeydown="blockNonNumericKey(event,false)"
@@ -461,7 +461,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         // Show the raw key as a badge only when it is meaningful — not for opaque
         // UID keys whose display name is the editable title.
         const keyBadge = (displayName !== itemName && !_titleEditable)
-            ? `<span class="badge bg-secondary bg-opacity-25 ms-2 fw-normal" style="font-size:.68rem">${esc(itemName)}</span>`
+            ? `<span class="badge bg-secondary bg-opacity-25 ms-2 fw-normal ss-fs-2">${esc(itemName)}</span>`
             : '';
         const _colSchema    = ITEM_SCHEMAS[_schemaKeyOf(parentPathStr)] || null;
         const _testUrl      = _colSchema && _colSchema['__test__'] ? _colSchema['__test__'] : null;

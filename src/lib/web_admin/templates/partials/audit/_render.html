@@ -73,10 +73,10 @@ function renderFlatAudit(entries, hideCol = null, tableId = null) {
     for (const e of entries) {
         const cells = orderedCols.map(col => {
             switch (col.id) {
-                case 'time':   return `<td class="text-nowrap text-muted" style="font-size:.8rem">${esc(new Date(e.ts).toLocaleString())}</td>`;
+                case 'time':   return `<td class="text-nowrap text-muted ss-fs-3">${esc(new Date(e.ts).toLocaleString())}</td>`;
                 case 'event':  return `<td>${_auditEventBadge(e.event)}</td>`;
                 case 'user':   return `<td><code style="font-size:.82rem">${esc(e.user)}</code></td>`;
-                case 'ip':     return `<td class="text-muted" style="font-size:.8rem">${esc(e.ip)}</td>`;
+                case 'ip':     return `<td class="text-muted ss-fs-3">${esc(e.ip)}</td>`;
                 case 'detail': return `<td style="font-size:.82rem">${auditSummaryHtml(e._idx, e.detail)}</td>`;
                 default:       return '<td></td>';
             }
@@ -107,9 +107,9 @@ function renderGroupedAudit(entries) {
     for (const [key, items] of groups) {
         h += `<div class="px-3 pt-3 pb-1">
             <div class="d-flex align-items-center gap-2 mb-2 pb-1" style="border-bottom:2px solid var(--bs-border-color)">
-                <i class="bi bi-collection text-muted" style="font-size:.9rem"></i>
-                <span class="fw-semibold" style="font-size:.9rem">${esc(key)}</span>
-                <span class="badge bg-secondary bg-opacity-50 rounded-pill ms-1" style="font-size:.7rem">${items.length}</span>
+                <i class="bi bi-collection text-muted ss-fs-4"></i>
+                <span class="fw-semibold ss-fs-4">${esc(key)}</span>
+                <span class="badge bg-secondary bg-opacity-50 rounded-pill ms-1 ss-fs-2">${items.length}</span>
             </div>
             <div class="rounded overflow-hidden border">${renderFlatAudit(items, hideCol)}</div>
         </div>`;
@@ -171,7 +171,7 @@ function renderAuditTable() {
 
     if (!filtered.length) {
         c.innerHTML = filterBanner + `<div class="text-center py-5 text-muted">
-            <i class="bi bi-funnel" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <i class="bi bi-funnel ss-empty-icon"></i>
             <span>${t('no_audit_entries')}</span></div>`;
         return;
     }
@@ -237,7 +237,7 @@ async function renderAudit() {
     _auditEntries = raw.map((e, i) => ({ ...e, _idx: i, _origIdx: raw.length - 1 - i }));
     if (!_auditEntries.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
-            <i class="bi bi-journal-x" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <i class="bi bi-journal-x ss-empty-icon"></i>
             <span>${t('no_audit_entries')}</span></div>`;
         return;
     }

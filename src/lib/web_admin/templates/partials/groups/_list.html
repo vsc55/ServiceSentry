@@ -71,7 +71,7 @@ createListTable({
         switch (colId) {
             case 'name': {
                 const builtinBadge = gd.builtin ? ` <i class="bi bi-lock-fill text-muted ms-1" style="font-size:.8em" title="${escAttr(t('group_builtin_badge'))}"></i>` : '';
-                const disabledBadge = gd.enabled !== false ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
+                const disabledBadge = gd.enabled !== false ? '' : ` <span class="badge bg-secondary fw-normal ms-1 ss-fs-1">${t('status_disabled')}</span>`;
                 return `<td class="text-nowrap"><code>${esc(gd.name||name)}</code>${builtinBadge}${disabledBadge}</td>`;
             }
             case 'description':return `<td class="text-muted small text-truncate ss-td-ellipsis" title="${escAttr(gd.description||'')}">${esc(gd.description||'—')}</td>`;
@@ -103,7 +103,7 @@ createListTable({
     refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`,
     headerButtons: ctx => ctx.canClone
         ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewGroupModal()" title="${escAttr(t('new_group_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_group')}</button>` : '',
-    emptyState: () => `<div class="text-center py-5 text-muted"><i class="bi bi-diagram-3" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i><span>${t('no_groups')}</span></div>`,
+    emptyState: () => `<div class="text-center py-5 text-muted"><i class="bi bi-diagram-3 ss-empty-icon"></i><span>${t('no_groups')}</span></div>`,
     state: {
         visible: { get: () => _groupsVisibleCols, set: s => { _groupsVisibleCols = s; } },
         order:   { get: () => _groupsColOrder,    set: o => { _groupsColOrder = o; } },
@@ -171,7 +171,7 @@ function _umPopulateGroups(searchVal) {
             const label = gd.name || gname;
             const id = 'umgrp_' + gname;
             const isDisabled = gd.enabled === false;
-            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('status_disabled'))}</span>` : '';
             return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${escAttr(id)}" value="${escAttr(gname)}" ${_umSelectedGroups.has(gname) ? 'checked' : ''}>
             <label class="form-check-label small" for="${escAttr(id)}">${esc(label)}${badge}</label>

@@ -1,0 +1,169 @@
+# ServiceSentry — microservices topology for LOCAL TESTING (MySQL/MariaDB, no Traefik)
+# ==============================================================================
+# A self-contained way to exercise the split topology (web + worker + syslog +
+# events) and the distributed control plane on a shared MariaDB, built straight
+# from the Dockerfile. No reverse proxy and no .env file needed — test values are
+# inlined below.
+#
+#   docker compose -f docker/docker-compose.microservices-test.yml up --build
+#   # open http://localhost:8080   (login: admin / admin)
+#
+# How it works:
+#   • db — a MariaDB the four roles share; that shared DB is how the services
+#     publish their heartbeat and read desired-state/commands.
+#   • The web runs with SS_*_EMBEDDED=0 so the dedicated containers own each service.
+#   • The encryption key (.flask_secret) is shared via the ``config`` volume so all
+#     containers decrypt the same secrets; syslog messages go to the main DB here
+#     (SS_SYSLOG_DB_ENABLED left off — one DB keeps the test simple).
+#   • SS_CONTROL_TOKEN is preset, so the instant HTTP poke (POST /control/reconcile)
+#     works between web and the workers over the internal network.
+#
+# For production use docker-compose.microservices.yml (2 MariaDBs, secrets via .env)
+# or the Helm chart. This file bakes in test passwords on purpose — do not expose it.
+
+# Main database connection env — overlaid onto the config.json ``database`` section
+# by every ServiceSentry process (SS_DB_*).
+x-db-env: &db-env
+  SS_DB_DRIVER: mysql
+  SS_DB_HOST: db
+  SS_DB_PORT: "3306"
+  SS_DB_NAME: servicesentry
+  SS_DB_USER: servicesentry
+  SS_DB_PASSWORD: testpass
+
+# Shared, non-secret app settings applied to every role.
+x-app-env: &app-env
+  TZ: UTC
+  SS_USERNAME: admin
+  SS_PASSWORD: admin
+  SS_LANG: en_EN
+  SS_CHECK_INTERVAL: "30"          # short cycle so activity shows up quickly
+  SS_CONTROL_TOKEN: test-control-token   # enables the control poke between containers
+
+services:
+
+  # ── Shared database ─────────────────────────────────────────────────────────
+  db:
+    image: mariadb:11
+    container_name: ss-test-db
+    restart: unless-stopped
+    networks: [ss]
+    environment:
+      MARIADB_DATABASE: servicesentry
+      MARIADB_USER: servicesentry
+      MARIADB_PASSWORD: testpass
+      MARIADB_ROOT_PASSWORD: testrootpass
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Web admin panel ─────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: servicesentry:test
+    container_name: ss-test-web
+    restart: unless-stopped
+    networks: [ss]
+    ports:
+      - "8080:8080"
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    cap_add:
+      - NET_RAW              # ping module (raw ICMP); remove if unused
+    environment:
+      <<: [*db-env, *app-env]
+      SS_SERVICE_ROLE: web
+      SS_WEB_HOST: 0.0.0.0
+      SS_WEB_PORT: "8080"
+      # Dedicated containers own these — keep them out of the web process.
+      SS_MONITORING_EMBEDDED: "0"
+      SS_SYSLOG_EMBEDDED: "0"
+      SS_EVENTS_EMBEDDED: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -s http://localhost:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Monitoring worker ───────────────────────────────────────────────────────
+  worker:
+    image: servicesentry:test
+    container_name: ss-test-worker
+    restart: unless-stopped
+    networks: [ss]
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    cap_add:
+      - NET_RAW
+    environment:
+      <<: [*db-env, *app-env]
+      SS_SERVICE_ROLE: worker
+      SS_CONTROL_ADVERTISE: worker      # the web pokes http://worker:8765
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy      # web seeds the DB + .flask_secret first
+
+  # ── Syslog receiver ─────────────────────────────────────────────────────────
+  syslog:
+    image: servicesentry:test
+    container_name: ss-test-syslog
+    restart: unless-stopped
+    networks: [ss]
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+      - "6514:6514/tcp"
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    environment:
+      <<: [*db-env, *app-env]
+      SS_SERVICE_ROLE: syslog
+      SS_CONTROL_ADVERTISE: syslog
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+  # ── Event processor ─────────────────────────────────────────────────────────
+  events:
+    image: servicesentry:test
+    container_name: ss-test-events
+    restart: unless-stopped
+    networks: [ss]
+    volumes:
+      - config:/etc/ServiSesentry
+      - vardata:/var/lib/ServiSesentry
+    environment:
+      <<: [*db-env, *app-env]
+      SS_SERVICE_ROLE: events
+      SS_CONTROL_ADVERTISE: events
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+volumes:
+  config:
+  vardata:
+  dbdata:
+
+networks:
+  ss:

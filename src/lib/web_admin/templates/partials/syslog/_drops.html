@@ -30,7 +30,7 @@ function _sldSortVal(x, key) {
 function _sldCell(x, colId) {
     const _dt = ts => esc(ts ? new Date(ts * 1000).toLocaleString() : '');
     switch (colId) {
-        case 'uid':       return `<td><code class="text-muted" style="font-size:.7rem">${esc(x.uid || '')}</code></td>`;
+        case 'uid':       return `<td><code class="text-muted ss-fs-2">${esc(x.uid || '')}</code></td>`;
         case 'source':    return `<td><code>${esc(x.source || '')}</code></td>`;
         case 'transport': return `<td>${esc(x.transport || '')}</td>`;
         case 'count':     return `<td class="text-end">${esc(String(x.count))}</td>`;
@@ -98,7 +98,7 @@ function _renderSyslogDrops(d) {
     const chooser = _buildColChooser(_SLD_COLS, _sldVisibleCols, '_sldToggleCol', '_resetSldCols');
     el.innerHTML = `<div class="alert alert-warning py-2 px-3 mb-0">
         <div class="d-flex align-items-center gap-2 mb-1">
-            <span role="button" style="cursor:pointer" class="d-flex align-items-center gap-2 me-auto" onclick="_syslogToggleDrops()">
+            <span role="button" class="d-flex align-items-center gap-2 me-auto ss-pointer" onclick="_syslogToggleDrops()">
                 <i id="sl-drops-chevron" class="bi ${collapsed ? 'bi-chevron-right' : 'bi-chevron-down'} text-muted"></i>
                 <i class="bi bi-shield-exclamation"></i>
                 <strong>${esc(t('syslog_drops_title'))}</strong>

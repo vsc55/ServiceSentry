@@ -164,7 +164,7 @@ function _historyRenderLegend() {
             <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s.color};flex-shrink:0"></span>
             <span class="text-truncate" style="max-width:220px">${esc(s.pretty)} / ${esc(s.label)}</span>
             <span class="text-muted">${lastTxt}</span>
-            <button type="button" class="btn-close btn-close-sm ms-1" style="font-size:.5rem"
+            <button type="button" class="btn-close btn-close-sm ms-1 ss-fs-1"
                 title="${escAttr(t('remove'))}"
                 onclick="_historyRemoveCompareMember(${jsStr(s.module)}, ${jsStr(s.key)})"></button>
         </span>`;

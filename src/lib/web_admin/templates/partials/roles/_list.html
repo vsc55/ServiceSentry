@@ -81,7 +81,7 @@ createListTable({
                 const builtinBadge = rd.builtin
                     ? ` <i class="bi bi-lock-fill text-muted ms-1" style="font-size:.8em" title="${escAttr(t('role_builtin_badge'))}"></i>` : '';
                 const disabledBadge = (!rd.builtin && rd.enabled === false)
-                    ? ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>` : '';
+                    ? ` <span class="badge bg-secondary fw-normal ms-1 ss-fs-1">${t('status_disabled')}</span>` : '';
                 return `<td class="text-nowrap"><code>${esc(rd.name || name)}</code>${builtinBadge}${disabledBadge}</td>`;
             }
             case 'perm_count':  return `<td class="text-center"><span class="badge bg-secondary rounded-pill">${(rd.permissions || []).length}</span></td>`;
@@ -110,7 +110,7 @@ createListTable({
     headerButtons: ctx => ctx.canClone
         ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewRoleModal()" title="${escAttr(t('new_role_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_role')}</button>` : '',
     emptyState: () => `<div class="text-center py-5 text-muted">
-            <i class="bi bi-shield" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <i class="bi bi-shield ss-empty-icon"></i>
             <span>${t('no_roles')}</span></div>`,
     state: {
         visible: { get: () => _rolesVisibleCols, set: s => { _rolesVisibleCols = s; } },

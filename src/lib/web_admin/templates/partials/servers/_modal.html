@@ -45,10 +45,10 @@ function _renderCloneChecks(uid) {
     if (!checks.length) { wrap.classList.add('d-none'); box.innerHTML = ''; return; }
     wrap.classList.remove('d-none');
     box.innerHTML = checks.map(c =>
-        `<label class="form-check d-flex align-items-center gap-2 mb-1" style="cursor:pointer">
+        `<label class="form-check d-flex align-items-center gap-2 mb-1 ss-pointer">
             <input class="form-check-input mt-0" type="checkbox" checked value="${escAttr(c.key)}" data-clone-check
                    onchange="_cloneChecksCount()">
-            <span class="text-truncate"><span class="badge bg-secondary me-1" style="font-size:.62rem">${esc(_modPrettyName(c.module, modulesData[c.module] || {}))}</span>${esc(c.label)}</span>
+            <span class="text-truncate"><span class="badge bg-secondary me-1 ss-fs-1">${esc(_modPrettyName(c.module, modulesData[c.module] || {}))}</span>${esc(c.label)}</span>
         </label>`).join('');
     _cloneChecksCount();
 }
@@ -489,7 +489,7 @@ function _renderHostTestResults(d) {
             <i class="bi ${r.ok ? 'bi-check-circle-fill text-success' : 'bi-exclamation-triangle-fill text-warning'} flex-shrink-0 mt-1"></i>
             <div class="flex-grow-1 min-w-0">
                 <div class="small fw-semibold">${esc(r.label)}</div>
-                ${r.sub ? `<div class="text-muted font-monospace text-break" style="font-size:.68rem">${esc(r.sub)}</div>` : ''}
+                ${r.sub ? `<div class="text-muted font-monospace text-break ss-fs-2">${esc(r.sub)}</div>` : ''}
                 <div class="small text-muted text-break">${esc(r.message || '')}</div>
             </div></div>`).join('')
         : `<div class="text-center py-4 text-muted">${esc(t('host_test_none'))}</div>`;

@@ -448,7 +448,7 @@ function _notifHtmlRefresh() {
                         <div class="fw-semibold mb-2 small">${esc(t('notif_html_var_runtime_section'))} — ${esc(t('notif_html_tpl_type_' + _notifHtmlState.type))}</div>
                         <table class="w-100 small" style="border-collapse:collapse">
                             ${runtimeVars.map(v => `<tr>
-                                <td class="py-1 pe-3 font-monospace text-warning" style="white-space:nowrap">${esc(v)}</td>
+                                <td class="py-1 pe-3 font-monospace text-warning text-nowrap">${esc(v)}</td>
                                 <td class="text-muted">${esc(t(_HTML_VAR_DESC_KEYS[v] || v))}</td>
                             </tr>`).join('')}
                         </table>
@@ -459,7 +459,7 @@ function _notifHtmlRefresh() {
                             <div class="fw-semibold mt-2 mb-1" style="font-size:.75rem;color:var(--bs-secondary-color)">${esc(t(g.key))}</div>
                             <table class="w-100 small" style="border-collapse:collapse">
                                 ${g.entries.map(e => `<tr>
-                                    <td class="py-1 pe-3 font-monospace" style="white-space:nowrap">{${esc(e.key)}}</td>
+                                    <td class="py-1 pe-3 font-monospace text-nowrap">{${esc(e.key)}}</td>
                                     <td class="text-muted">${esc(t(e.labelKey))}${e.vars ? ` <span class="opacity-50 font-monospace small">${esc(e.vars)}</span>` : ''}</td>
                                 </tr>`).join('')}
                             </table>`).join('')}
@@ -468,7 +468,7 @@ function _notifHtmlRefresh() {
             </div>
         </div>
         <div class="collapse" id="notifHtmlShortcuts">
-            <div class="px-2 py-2 small rounded border mt-1 cfg-toolbar-bg" style="font-size:.8rem">
+            <div class="px-2 py-2 small rounded border mt-1 cfg-toolbar-bg ss-fs-3">
                 <div class="fw-semibold mb-2 small">Keyboard shortcuts</div>
                 <table class="w-100 small" style="border-collapse:collapse">
                     <tr><td class="py-1 pe-3"><kbd>Ctrl+Space</kbd></td><td class="text-muted">Autocomplete</td></tr>

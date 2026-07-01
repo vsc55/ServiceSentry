@@ -20,7 +20,7 @@ function _renderNotificationsMatrix(cfgCardOpen, cfgCardClose) {
     let h = cfgCardOpen('cfgcol_notifications', '<i class="bi bi-grid-3x3-gap me-1"></i>', SECTION_LABELS['notifications'] || 'Notification Routing');
 
     h += `<div class="cfg-field-wrap pt-1">
-        <table class="table table-sm table-bordered mb-1" style="font-size:.875rem">
+        <table class="table table-sm table-bordered mb-1 ss-fs-4">
             <thead><tr>
                 <th style="width:40%;font-weight:600;color:var(--bs-secondary-color)">${esc(t('notif_event'))}</th>`;
     for (const ch of channels) {

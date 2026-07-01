@@ -462,8 +462,10 @@ Piezas:
 - **`_reconcile_once()`** por servicio: re-lee config y aplica el desired-state
   (start/stop, reload de listener…).  Lo invocan el timer **y** el poke.
 - **`control_server.py`**: `ThreadingHTTPServer` (stdlib, sin Flask) que cada
-  servicio standalone levanta si hay `SS_CONTROL_TOKEN`.  Endpoints
-  `GET /control/health` (probes) y `POST /control/reconcile` (Bearer token).
+  servicio standalone levanta si hay `SS_CONTROL_TOKEN`.  Endpoints:
+  `GET /control/health` (sin auth, probes — `{ok, key, version}`, sin datos
+  sensibles), `GET /control/info` (Bearer token — snapshot vivo: status, BD,
+  líder, versión…) y `POST /control/reconcile` (Bearer token — reconcile + drain).
 - **Poke desde el panel**: `_poke_service_instances(key)` → `POST /control/reconcile`
   a las instancias externas vivas (descubiertas por `control_url` del heartbeat).
   Se dispara al **encolar un comando** para un servicio externo y al **guardar

@@ -73,7 +73,7 @@ function _populateRoleUsersGrid(roleUid, searchFilterUsers) {
             const id = 'rmuser_' + uname;
             const checked = roleUid && ud.role === roleUid;
             const isDisabled = ud.enabled === false;
-            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('status_disabled'))}</span>` : '';
             return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(uname)}" ${checked ? 'checked' : ''}>
             <label class="form-check-label small" for="${id}">${esc(uname)}${badge}</label>
@@ -92,7 +92,7 @@ function _populateRoleGroupsGrid(roleUid) {
             const id = 'rmgroup_' + gname;
             const checked = roleUid && (gd.roles || []).includes(roleUid);
             const isDisabled = gd.enabled === false;
-            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('status_disabled'))}</span>` : '';
             return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${id}" value="${escAttr(gname)}" ${checked ? 'checked' : ''}>
             <label class="form-check-label small" for="${id}">${esc(gd.name || gname)}${badge}</label>

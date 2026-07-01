@@ -92,9 +92,9 @@ createListTable({
                 const isSelf = (uname === currentUser.username);
                 const _ssoLabels = { ldap: 'LDAP', oidc: 'OIDC', saml2: 'SAML2' };
                 const authBadge = _ssoLabels[u.auth_source || 'local']
-                    ? ` <span class="badge text-bg-secondary fw-normal ms-1" style="font-size:.62rem">${_ssoLabels[u.auth_source || 'local']}</span>` : '';
-                const disabledBadge = u.enabled !== false ? '' : ` <span class="badge bg-secondary fw-normal ms-1" style="font-size:.62rem">${t('status_disabled')}</span>`;
-                return `<td class="text-nowrap"><code>${esc(uname)}</code>${isSelf?`<span class="badge text-bg-info fw-normal ms-1" style="font-size:.62rem">${t('you_badge')}</span>`:''}${authBadge}${disabledBadge}</td>`;
+                    ? ` <span class="badge text-bg-secondary fw-normal ms-1 ss-fs-1">${_ssoLabels[u.auth_source || 'local']}</span>` : '';
+                const disabledBadge = u.enabled !== false ? '' : ` <span class="badge bg-secondary fw-normal ms-1 ss-fs-1">${t('status_disabled')}</span>`;
+                return `<td class="text-nowrap"><code>${esc(uname)}</code>${isSelf?`<span class="badge text-bg-info fw-normal ms-1 ss-fs-1">${t('you_badge')}</span>`:''}${authBadge}${disabledBadge}</td>`;
             }
             case 'display_name': return `<td class="text-muted small">${esc(u.display_name || uname)}</td>`;
             case 'role': {
@@ -136,7 +136,7 @@ createListTable({
     headerButtons: ctx => (ctx.canEdit || ctx.canClone)
         ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewUserModal()" title="${escAttr(t('new_user_tt'))}"><i class="bi bi-plus-lg me-1"></i>${t('new_user')}</button>` : '',
     emptyState: () => `<div class="text-center py-5 text-muted">
-            <i class="bi bi-people" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <i class="bi bi-people ss-empty-icon"></i>
             <span>${t('no_users')}</span></div>`,
     state: {
         visible: { get: () => _usersVisibleCols, set: s => { _usersVisibleCols = s; } },
@@ -188,7 +188,7 @@ function _umRenderSessions(username) {
         return _umSessionsSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
     });
     const s = _umSessionsSort, d = _umSessionsSortDir;
-    let h = `<table class="table table-sm align-middle mb-0" style="font-size:.8rem">
+    let h = `<table class="table table-sm align-middle mb-0 ss-fs-3">
         <thead class="ss-thead"><tr>
             ${_thSort(t('col_ip'),        'ip',        s, d, '_umSortSessions')}
             ${_thSort(t('col_created'),   'created',   s, d, '_umSortSessions')}
@@ -198,7 +198,7 @@ function _umRenderSessions(username) {
         const created  = new Date(sess.created).toLocaleString();
         const lastSeen = new Date(sess.last_seen).toLocaleString();
         const cur = sess.is_current
-            ? `<span class="badge text-bg-success rounded-pill ms-1" style="font-size:.6rem">${t('current_session')}</span>` : '';
+            ? `<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${t('current_session')}</span>` : '';
         h += `<tr>
             <td class="text-nowrap"><code>${esc(sess.ip)}</code>${cur}</td>
             <td class="text-nowrap text-muted">${esc(created)}</td>

@@ -64,7 +64,7 @@ function formatHostTestDetail(d) {
             const label = r.name ? `${modName} — ${r.name}` : (modName || r.key || '');
             const icon = r.ok ? '<span class="text-success">✅</span>' : '<span class="text-warning">⚠️</span>';
             const sub = (r.key && r.key !== r.name)
-                ? `<div class="text-muted font-monospace" style="font-size:.68rem">${esc(r.key)}</div>` : '';
+                ? `<div class="text-muted font-monospace ss-fs-2">${esc(r.key)}</div>` : '';
             return `<tr>
                 <td class="text-nowrap pe-2 align-top">${icon}</td>
                 <td class="pe-3 align-top"><strong>${esc(label)}</strong>${sub}</td>

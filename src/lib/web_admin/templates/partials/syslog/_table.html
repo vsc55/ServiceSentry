@@ -78,7 +78,7 @@ function _slCellHtml(m, colId) {
     switch (colId) {
         case 'time': {
             const when = m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '');
-            return `<td class="text-muted" style="white-space:nowrap">${esc(when.replace('T', ' ').replace('Z', ''))}</td>`;
+            return `<td class="text-muted text-nowrap">${esc(when.replace('T', ' ').replace('Z', ''))}</td>`;
         }
         case 'host':     return `<td>${esc(m.hostname || m.source || '')}</td>`;
         case 'severity': return `<td><span class="badge bg-${cls}">${esc(m.severity_name)}</span></td>`;

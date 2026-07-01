@@ -60,10 +60,10 @@ function _renderFieldPickerList() {
         h += `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border${isSelected ? ' border-primary' : ''}"
                    style="background:var(--bs-body-bg);cursor:pointer"
                    onclick="${act}">
-            <i class="bi ${icon} flex-shrink-0" style="font-size:.9rem"></i>
-            <code class="flex-grow-1 text-truncate" style="font-size:.82rem">${esc(item)}</code>
+            <i class="bi ${icon} flex-shrink-0 ss-fs-4"></i>
+            <code class="flex-grow-1 text-truncate ss-fs-3">${esc(item)}</code>
             ${(!_fpMulti && isSelected)
-                ? `<span class="badge bg-primary flex-shrink-0" style="font-size:.65rem">${esc(t('selected') || 'Selected')}</span>`
+                ? `<span class="badge bg-primary flex-shrink-0 ss-fs-1">${esc(t('selected') || 'Selected')}</span>`
                 : (!_fpMulti ? `<i class="bi bi-arrow-right-circle text-success flex-shrink-0"></i>` : '')}
         </div>`;
     }

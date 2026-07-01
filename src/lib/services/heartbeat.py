@@ -30,13 +30,36 @@ def hostname() -> str:
             or socket.gethostname() or 'unknown')
 
 
+def app_version() -> str | None:
+    """Version this instance advertises — the code's own ``lib.__version__``, so it
+    reflects exactly what is baked into this image (a different build/image reports
+    its own version).  Deliberately NOT overridable by env, to avoid advertising a
+    value that doesn't match the running code."""
+    try:
+        from lib import __version__  # noqa: PLC0415
+        return __version__
+    except Exception:  # pylint: disable=broad-except
+        return None
+
+
+def db_summary(db_cfg: dict | None, default_name: str = 'data.db') -> dict:
+    """Compact ``{driver, host, name}`` of a database config, matching what the
+    web admin's Database card shows — so a remote service can advertise which DB it
+    points at (its own container may target a different one)."""
+    cfg = db_cfg or {}
+    driver = (cfg.get('driver') or cfg.get('engine') or cfg.get('type') or 'sqlite').lower()
+    if driver == 'sqlite':
+        path = cfg.get('path') or default_name
+        return {'driver': 'sqlite', 'host': None, 'name': os.path.basename(str(path)) or default_name}
+    return {'driver': driver, 'host': cfg.get('host'), 'name': cfg.get('name')}
+
+
 class _HeartbeatMixin:
     """Publish a periodic liveness row for one service instance."""
 
     _HB_KEY: str | None = None      # service key ('monitoring'/'syslog'/'events')
     _HB_MODE: str = 'standalone'    # 'embedded' (web process) or 'standalone'
     _HB_EVERY: int = 10             # seconds between beats
-    _HB_VERSION: str | None = None  # optional code version string
     _HB_DEAD_AFTER: int = 150       # drop instances unseen this long (crashed pods)
 
     # Single-owner services (monitor, events) set this so only the lease holder
@@ -84,6 +107,12 @@ class _HeartbeatMixin:
         # Set by start_control_server() when the HTTP poke listener is enabled.
         return getattr(self, '_control_url', None)
 
+    def _hb_db_info(self) -> dict | None:
+        # Which database(s) THIS instance points at. None for embedded services
+        # (same DB as the web admin — shown by its own Database card); the standalone
+        # services override this so a remote instance advertises its own target.
+        return None
+
     # ── poke target: run a reconcile + drain now (called by the control server) ─
     def _control_reconcile(self) -> dict:
         """Converge immediately: re-run the service's config reconcile (if it has
@@ -99,6 +128,30 @@ class _HeartbeatMixin:
         self._drain_commands()
         self._heartbeat_write()
         return {'ok': True, 'key': self._hb_key(), 'running': self._hb_running()}
+
+    def _control_info(self) -> dict:
+        """Full live snapshot of this instance for the authenticated /control/info
+        endpoint: identity, version, mode, running, leader and DB target(s) — the
+        same data the heartbeat publishes, but fetched live over HTTP."""
+        info = {
+            'ok': True,
+            'instance_id': self._hb_instance_id(),
+            'key': self._hb_key(),
+            'version': app_version(),
+            'mode': self._HB_MODE,
+            'host': hostname(),
+            'pid': os.getpid(),
+            'running': self._hb_running(),
+            'control_url': self._hb_control_url(),
+            'last_cycle_at': self._hb_last_cycle(),
+            'detail': self._hb_detail(),
+        }
+        if self._LEADER_GATED:
+            info['leader'] = bool(getattr(self, '_is_leader', False))
+        db = self._hb_db_info()
+        if db:
+            info['db'] = db
+        return info
 
     # ── imperative commands (drained from the shared queue) ────────────────────
     _HB_DRAIN_MAX = 20      # commands handled per tick (backstop against a flood)
@@ -165,10 +218,13 @@ class _HeartbeatMixin:
         detail = self._hb_detail()
         if self._LEADER_GATED:
             detail = {**detail, 'leader': bool(getattr(self, '_is_leader', False))}
+        db = self._hb_db_info()
+        if db:
+            detail = {**detail, 'db': db}
         store.heartbeat(
             self._hb_instance_id(), key,
             mode=self._HB_MODE, running=self._hb_running(),
-            host=hostname(), pid=os.getpid(), version=self._HB_VERSION,
+            host=hostname(), pid=os.getpid(), version=app_version(),
             control_url=self._hb_control_url(), last_cycle_at=self._hb_last_cycle(),
             detail=detail)
 

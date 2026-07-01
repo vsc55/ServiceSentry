@@ -48,7 +48,7 @@ async function _softRefreshStatus() {
     area.innerHTML = Object.keys(data).length
         ? _renderStatusCards(data)
         : `<div class="text-center py-5 text-muted">
-            <i class="bi bi-inbox" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <i class="bi bi-inbox ss-empty-icon"></i>
             <span>${t('status_empty')}</span>
           </div>`;
     _startStatusCountdown(_statusTimer?._interval || 0);
@@ -121,15 +121,15 @@ async function renderStatus() {
         h += `<div id="daemonWidget" class="d-flex flex-wrap align-items-center gap-2 mb-3 px-3 py-2 rounded-3 border"
                    style="background:var(--bs-tertiary-bg)">
             <i class="bi bi-clock-history text-muted flex-shrink-0"></i>
-            <span class="fw-semibold" style="font-size:.85rem">${t('daemon_scheduler')}</span>
-            <span id="daemonBadge" class="badge rounded-pill" style="font-size:.72rem"></span>
-            <span id="daemonNextLabel" class="text-muted" style="font-size:.78rem"></span>
+            <span class="fw-semibold ss-fs-4">${t('daemon_scheduler')}</span>
+            <span id="daemonBadge" class="badge rounded-pill ss-fs-2"></span>
+            <span id="daemonNextLabel" class="text-muted ss-fs-3"></span>
             <div class="vr mx-1"></div>
-            <span class="text-muted" style="font-size:.78rem">${t('daemon_interval')}:</span>
+            <span class="text-muted ss-fs-3">${t('daemon_interval')}:</span>
             <input type="number" id="daemonIntervalInput" class="form-control form-control-sm"
                    min="10" max="86400" step="1" style="width:80px"
                    onchange="_daemonSaveInterval(this.value)">
-            <span class="text-muted" style="font-size:.78rem">${t('daemon_interval_s')}</span>
+            <span class="text-muted ss-fs-3">${t('daemon_interval_s')}</span>
             <i id="daemonIntervalLock" class="bi bi-lock-fill text-warning ms-1" style="display:none;font-size:.72rem"
                title="${escAttr(t('env_locked_tooltip'))}"></i>
             <div class="vr mx-1"></div>
@@ -147,7 +147,7 @@ async function renderStatus() {
     h += `<div id="checksResultArea">`;
     if (!Object.keys(data).length) {
         h += `<div class="text-center py-5 text-muted">
-            <i class="bi bi-inbox" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <i class="bi bi-inbox ss-empty-icon"></i>
             <span>${t('status_empty')}</span>
         </div>`;
     } else {
@@ -173,7 +173,7 @@ function _renderWaitingCard(mod) {
                   style="--mh:${hue};width:38px;height:38px;font-size:1.1rem;opacity:.5">${icon}</span>
             <div class="flex-grow-1 min-w-0">
                 <div class="fw-semibold" style="font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.55">${esc(pname)}</div>
-                <div class="text-muted" style="font-size:.75rem">—</div>
+                <div class="text-muted ss-fs-2">—</div>
             </div>
             <span class="rounded-pill px-2 py-1 flex-shrink-0"
                   style="font-size:.72rem;background:var(--bs-secondary-bg);color:var(--bs-secondary-color);border:1px solid var(--bs-border-color)">
@@ -268,7 +268,7 @@ function _renderOneStatusCard(mod, checks) {
                   style="width:38px;height:38px;background:${avBg};color:${avColor};font-size:1.1rem">${icon}</span>
             <div class="flex-grow-1 min-w-0">
                 <div class="fw-semibold" style="font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(pname)}</div>
-                <div class="text-muted" style="font-size:.75rem">${total} checks &nbsp;·&nbsp; ${okCnt}/${total} OK</div>
+                <div class="text-muted ss-fs-2">${total} checks &nbsp;·&nbsp; ${okCnt}/${total} OK</div>
             </div>
             <span class="rounded-pill px-2 py-1 fw-bold flex-shrink-0"
                   style="font-size:.72rem;background:${badgeBg};color:${badgeColor}">
@@ -371,7 +371,7 @@ function _renderModuleChecklist(prefix) {
         const icon  = moduleIcon(m, modulesData[m]);
         const pname = modulePrettyName(m, modulesData[m]);
         h += `<li>
-            <label class="dropdown-item d-flex align-items-center gap-2 py-1" style="cursor:pointer">
+            <label class="dropdown-item d-flex align-items-center gap-2 py-1 ss-pointer">
               <input type="checkbox" class="form-check-input m-0 check-module-cb" value="${escAttr(m)}"
                      id="${escAttr(prefix)}-chk-${escAttr(m)}" ${_checkSelection.has(m) ? 'checked' : ''}
                      onchange="_moduleCheckChanged(this)">

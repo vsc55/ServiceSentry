@@ -177,7 +177,7 @@ createListTable({
     bulkBar: (ctx, sel) => _serversBulkBar(ctx.canDelete),
     headerButtons: ctx => _serversToolbar(ctx.canEdit),
     emptyBody: () => `<div class="text-center py-5 text-muted">
-                <i class="bi bi-hdd-network" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+                <i class="bi bi-hdd-network ss-empty-icon"></i>
                 <span>${esc(t('host_no_hosts'))}</span>
             </div>`,
     state: {

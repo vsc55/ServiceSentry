@@ -46,7 +46,7 @@ function _renderWebhooksSection(cfgCardOpen, cfgCardClose) {
     h += `<div class="cfg-field-wrap">`;
     if (webhooks.length) {
         const _whl = k => (I18N.labels || {})[k] || k;
-        h += `<table class="table table-sm table-bordered mb-2 align-middle" style="font-size:.875rem">
+        h += `<table class="table table-sm table-bordered mb-2 align-middle ss-fs-4">
             <thead><tr>
                 <th style="width:22%">${esc(_whl('webhook_name'))}</th>
                 <th>${esc(_whl('webhook_url_col'))}</th>
@@ -63,7 +63,7 @@ function _renderWebhooksSection(cfgCardOpen, cfgCardClose) {
                     <input type="checkbox" class="form-check-input"${wh.enabled ? ' checked' : ''}
                         onchange="_webhookToggleEnabled(${jsStr(wh.id)},this.checked)">
                 </td>
-                <td class="text-end align-middle" style="white-space:nowrap">
+                <td class="text-end align-middle text-nowrap">
                     <button class="btn btn-info btn-sm me-1" onclick="testWebhookById(${jsStr(wh.id)})"
                         title="${escAttr(t('webhook_test'))}"><i class="bi bi-send"></i></button>
                     <button class="btn btn-secondary btn-sm me-1" onclick="showWebhookModal(${jsStr(wh.id)})"

@@ -71,10 +71,10 @@ function _sessionsCardsBody(sids) {
                 </span>
                 <div class="flex-grow-1 min-w-0">
                     <div class="d-flex align-items-center gap-1 flex-wrap">
-                        <code class="fw-semibold" style="font-size:.88rem">${esc(s.username)}</code>
-                        ${isCurrent ? `<span class="badge text-bg-success rounded-pill" style="font-size:.6rem">${t('current_session')}</span>` : ''}
+                        <code class="fw-semibold ss-fs-4">${esc(s.username)}</code>
+                        ${isCurrent ? `<span class="badge text-bg-success rounded-pill ss-fs-1">${t('current_session')}</span>` : ''}
                     </div>
-                    <div class="text-muted" style="font-size:.72rem"><i class="bi bi-geo-alt me-1"></i>${esc(s.ip)}</div>
+                    <div class="text-muted ss-fs-2"><i class="bi bi-geo-alt me-1"></i>${esc(s.ip)}</div>
                 </div>
                 <button class="btn btn-sm btn-danger py-0 px-2 flex-shrink-0"
                     onclick="revokeSession(${jsStr(sid)})" title="${escAttr(t('revoke_session_tt'))}">
@@ -119,8 +119,8 @@ createListTable({
         const s = sessionsData[sid];
         const isCurrent = !!s.is_current;
         switch (colId) {
-            case 'username':   return `<td class="text-nowrap"><code>${esc(s.username)}</code>${isCurrent?`<span class="badge text-bg-success rounded-pill ms-1" style="font-size:.6rem">${t('current_session')}</span>`:''}</td>`;
-            case 'ip':         return `<td class="text-nowrap"><code class="text-muted" style="font-size:.78rem">${esc(s.ip)}</code></td>`;
+            case 'username':   return `<td class="text-nowrap"><code>${esc(s.username)}</code>${isCurrent?`<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${t('current_session')}</span>`:''}</td>`;
+            case 'ip':         return `<td class="text-nowrap"><code class="text-muted ss-fs-3">${esc(s.ip)}</code></td>`;
             case 'user_agent': return `<td class="small text-muted" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(s.user_agent||'')}">${esc(s.user_agent||'—')}</td>`;
             case 'created':    return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.created))}</td>`;
             case 'last_seen':  return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.last_seen))}</td>`;
@@ -144,7 +144,7 @@ createListTable({
     refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>`,
     headerButtons: () => `<button class="btn btn-sm btn-danger ms-1" onclick="invalidateAllSessions()" title="${escAttr(t('close_all_sessions_tt'))}"><i class="bi bi-x-circle me-1"></i>${esc(t('close_all_sessions'))}</button>`,
     emptyBody: () => `<div class="text-center py-5 text-muted">
-            <i class="bi bi-person-slash" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <i class="bi bi-person-slash ss-empty-icon"></i>
             <span>${t('no_active_sessions')}</span>
         </div>`,
     state: {

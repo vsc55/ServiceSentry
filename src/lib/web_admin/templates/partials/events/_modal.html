@@ -20,7 +20,7 @@ function _evTagsHtml() {
     const tags = _eventDraft.tags || [];
     const chips = tags.map(tg =>
         `<span class="badge text-bg-secondary d-inline-flex align-items-center gap-1" style="font-weight:400">
-            ${esc(tg)}<button type="button" class="btn-close btn-close-white" style="font-size:.5rem"
+            ${esc(tg)}<button type="button" class="btn-close btn-close-white ss-fs-1"
                 aria-label="${escAttr(t('remove'))}" title="${escAttr(t('remove'))}" onclick="event.stopPropagation();_evRemoveTag(${jsStr(tg)})"></button></span>`).join('');
     return chips + `<input class="border-0 bg-transparent flex-grow-1 p-0" style="min-width:8rem;outline:none;color:inherit"
         placeholder="${escAttr(t('event_tags_ph'))}" onkeydown="if(event.key==='Enter'){event.preventDefault();_evAddTag(this);}" onblur="_evAddTag(this)">`;
@@ -200,7 +200,7 @@ function _eventSentHtml() {
     </tr>`).join('');
     return `<div class="form-text mb-2">${esc(t('event_sent_hint'))}</div>
         <div class="table-responsive" style="max-height:48vh;overflow:auto">
-        <table class="table table-sm table-striped ss-table mb-0" style="font-size:.82rem">
+        <table class="table table-sm table-striped ss-table mb-0 ss-fs-3">
             <thead class="ss-thead"><tr>
                 <th class="ss-th">${esc(t('event_log_time'))}</th>
                 <th class="ss-th">${esc(t('event_log_status'))}</th>

@@ -43,7 +43,7 @@ function showInfoModal(title, data, lead, variant) {
     const _vc = _lv[variant] ? variant : 'success';
     const body = (lead ? `<p class="small text-${_vc} mb-2"><i class="bi ${_lv[_vc]} me-1"></i>${esc(lead)}</p>` : '')
         + (pairs.length
-            ? `<table class="table table-sm table-striped align-middle mb-0" style="font-size:.82rem"><tbody>${rows}</tbody></table>`
+            ? `<table class="table table-sm table-striped align-middle mb-0 ss-fs-3"><tbody>${rows}</tbody></table>`
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
     document.getElementById('infoModalBody').innerHTML = body;
     bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();

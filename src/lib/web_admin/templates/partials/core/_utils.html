@@ -111,7 +111,7 @@ function _buildColChooser(cols, visibleSet, toggleFn, resetFn, minWidth = 160) {
                    ${col.always || visibleSet.has(col.id) ? 'checked' : ''}
                    ${col.always ? 'disabled' : ''}>
             <span class="small">${esc(col.label())}</span>
-            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto" style="font-size:.65rem"></i>' : ''}
+            ${col.always ? '<i class="bi bi-lock-fill text-muted ms-auto ss-fs-1"></i>' : ''}
           </label></li>`).join('')}
         <li><hr class="dropdown-divider my-1"></li>
         <li><button class="dropdown-item small py-1 text-muted" onclick="${resetFn}()">

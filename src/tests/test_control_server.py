@@ -22,6 +22,10 @@ class _FakeService:
         self.reconciled += 1
         return {'ok': True, 'key': self._HB_KEY, 'running': True}
 
+    def _control_info(self):
+        return {'ok': True, 'key': self._HB_KEY, 'version': '1.2.3',
+                'running': True, 'db': {'main': {'driver': 'sqlite', 'name': 'data.db'}}}
+
 
 @pytest.fixture()
 def server():
@@ -40,6 +44,12 @@ def _post(port, path, token=None):
     return urllib.request.urlopen(req, timeout=2)
 
 
+def _get(port, path, token=None):
+    headers = {'Authorization': f'Bearer {token}'} if token else {}
+    req = urllib.request.Request(f'http://127.0.0.1:{port}{path}', headers=headers)
+    return urllib.request.urlopen(req, timeout=2)
+
+
 class TestControlServer:
 
     def test_health_no_auth(self, server):
@@ -49,6 +59,9 @@ class TestControlServer:
         assert resp.status == 200
         body = json.loads(resp.read())
         assert body['ok'] is True and body['key'] == 'monitoring'
+        # Version is advertised too (falls back to lib.__version__).
+        from lib import __version__
+        assert body['version'] == __version__
 
     def test_reconcile_requires_token(self, server):
         _svc, port = server
@@ -76,6 +89,21 @@ class TestControlServer:
         with pytest.raises(urllib.error.HTTPError) as exc:
             _post(port, '/control/nope', token='s3cret')
         assert exc.value.code == 404
+
+    def test_info_requires_token(self, server):
+        _svc, port = server
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _get(port, '/control/info')
+        assert exc.value.code == 401
+
+    def test_info_returns_snapshot_with_token(self, server):
+        _svc, port = server
+        resp = _get(port, '/control/info', token='s3cret')
+        assert resp.status == 200
+        body = json.loads(resp.read())
+        assert body['ok'] is True and body['key'] == 'monitoring'
+        assert body['version'] == '1.2.3'
+        assert body['db']['main']['driver'] == 'sqlite'
 
 
 class TestStartControlServer:

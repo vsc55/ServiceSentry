@@ -45,7 +45,7 @@ function _gmPopulateRoles(searchVal) {
             const desc  = rd.description || '';
             const id = 'grole_' + rname;
             const isDisabled = !rd.builtin && rd.enabled === false;
-            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('status_disabled'))}</span>` : '';
             return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${escAttr(id)}" value="${escAttr(rname)}" ${_gmSelectedRoles.has(rname) ? 'checked' : ''} ${dis}>
             <label class="form-check-label small" for="${escAttr(id)}">
@@ -66,7 +66,7 @@ function _gmPopulateMembers(searchVal) {
             const display = ud.display_name || '';
             const id = 'gmember_' + uname;
             const isDisabled = ud.enabled === false;
-            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+            const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('status_disabled'))}</span>` : '';
             return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="checkbox" id="${escAttr(id)}" value="${escAttr(uname)}" ${_gmSelectedMembers.has(uname) ? 'checked' : ''}>
             <label class="form-check-label small" for="${escAttr(id)}">${esc(uname)}${display ? ` <span class="text-muted">(${esc(display)})</span>` : ''}${badge}</label>

@@ -258,7 +258,7 @@ createListTable({
     emptyBody: ctx => !ctx.mods.length
         ? `<div class="p-3"><div class="alert alert-info mb-0">${esc(t('clusters_none_modules'))}</div></div>`
         : `<div class="text-center py-5 text-muted">
-                 <i class="bi bi-diagram-3" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+                 <i class="bi bi-diagram-3 ss-empty-icon"></i>
                  <span>${esc(t('cl_empty'))}</span></div>`,
     reset: () => {
         _clVisibleCols = null; _clColOrder = [];

@@ -60,7 +60,7 @@ function renderModules() {
     const _savedAutoExpand = _autoExpandItemPath; // capture before HTML generation consumes it
     if (!moduleKeys.length) {
         c.innerHTML = `<div class="text-center py-5 text-muted">
-            <i class="bi bi-puzzle" style="font-size:2.5rem;opacity:.3;display:block;margin-bottom:.75rem"></i>
+            <i class="bi bi-puzzle ss-empty-icon"></i>
             <span>${t('no_modules') || 'No modules configured'}</span>
         </div>`;
         return;
@@ -114,7 +114,7 @@ function renderModules() {
                       style="--mh:${hue};width:40px;height:40px;font-size:1.15rem">${icon}</span>
                 <div class="flex-grow-1 min-w-0">
                     <div class="fw-semibold" style="font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(pname)}</div>
-                    <code class="text-muted" style="font-size:.73rem">${esc(name)}</code>
+                    <code class="text-muted ss-fs-2">${esc(name)}</code>
                 </div>
                 ${totalItems > 0 ? `
                 <span class="badge rounded-pill flex-shrink-0" id="modcount-${esc(name)}"
@@ -135,7 +135,7 @@ function renderModules() {
                                onclick="event.stopPropagation();openDepInstallModal(${JSON.stringify(missingDeps).replace(/"/g, '&quot;')})">
                                <i class="bi bi-box-seam me-1"></i>${esc(t('missing_dep'))}
                            </button>`
-                        : `<span class="badge bg-secondary bg-opacity-50 flex-shrink-0" style="font-size:.68rem"
+                        : `<span class="badge bg-secondary bg-opacity-50 flex-shrink-0 ss-fs-2"
                                title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
                                <i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}
                            </span>`)
@@ -159,7 +159,7 @@ function renderModules() {
                     style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     onclick="event.stopPropagation();openModuleExpandModal(${jsStr(name)})"
                     title="${escAttr(t('module_expand') || 'Expand')}">
-                    <i class="bi bi-fullscreen" style="font-size:.8rem"></i>
+                    <i class="bi bi-fullscreen ss-fs-3"></i>
                 </button>` : ''}
                 ${!moduleUnavailable ? `<button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
@@ -283,14 +283,14 @@ function openNewModuleModal() {
                 <span class="ss-mod-av rounded-2 d-flex align-items-center justify-content-center"
                       style="--mh:${hue};width:46px;height:46px;font-size:1.35rem">${icon}</span>
                 <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${esc(pname)}</div>
-                <code class="text-muted" style="font-size:.7rem">${esc(name)}</code>
+                <code class="text-muted ss-fs-2">${esc(name)}</code>
                 ${_pickerMissingDeps
                     ? `<button type="button" class="badge bg-warning bg-opacity-75 text-dark border-0" style="font-size:.65rem;cursor:pointer"
                            onclick="event.stopPropagation();openDepInstallModal(${JSON.stringify(_pickerMissingDeps).replace(/"/g, '&quot;')})">
                            <i class="bi bi-box-seam me-1"></i>${esc(t('missing_dep'))}
                        </button>`
                     : (_pickerUnsupported
-                        ? `<span class="badge bg-secondary bg-opacity-50" style="font-size:.65rem"
+                        ? `<span class="badge bg-secondary bg-opacity-50 ss-fs-1"
                                title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
                                <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
                            </span>`
@@ -315,7 +315,7 @@ function openNewModuleModal() {
                 const pname = modulePrettyName(name, modulesData[name] || {});
                 h += `<div class="rounded-3 border d-flex align-items-center gap-2 px-2 py-1" style="background:var(--bs-secondary-bg)">
                     <span style="font-size:1.05rem">${icon}</span>
-                    <span class="text-muted text-truncate" style="font-size:.8rem">${esc(pname)}</span>
+                    <span class="text-muted text-truncate ss-fs-3">${esc(pname)}</span>
                 </div>`;
             }
             h += `</div>`;

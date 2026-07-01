@@ -34,7 +34,7 @@ const _META_COL = {
 };
 const _META_TAIL = [_META_COL.created_at, _META_COL.updated_at, _META_COL.updated_by];
 const _META_CELL = {
-    uid:        (rec, row, spec) => `<td><code class="text-muted" style="font-size:.7rem">${esc((spec.uidOf ? spec.uidOf(row) : spec.rowKey(row)) || '')}</code></td>`,
+    uid:        (rec, row, spec) => `<td><code class="text-muted ss-fs-2">${esc((spec.uidOf ? spec.uidOf(row) : spec.rowKey(row)) || '')}</code></td>`,
     created_at: (rec) => `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(rec.created_at))}</td>`,
     updated_at: (rec) => `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(rec.updated_at))}</td>`,
     updated_by: (rec) => `<td class="small text-muted">${esc(rec.updated_by || '—')}</td>`,

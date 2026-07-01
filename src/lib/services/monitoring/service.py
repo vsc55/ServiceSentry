@@ -32,7 +32,7 @@ from lib.stores.service_instances import ServiceInstancesStore
 from lib.stores.service_commands import ServiceCommandsStore
 from lib.stores.service_leader import ServiceLeaderStore
 from lib.security import secret_manager
-from lib.services.heartbeat import _HeartbeatMixin
+from lib.services.heartbeat import _HeartbeatMixin, db_summary
 from lib.services.control_server import start_control_server
 from .manager import _MonitoringMixin
 
@@ -56,6 +56,9 @@ class MonitorService(_HeartbeatMixin, _MonitoringMixin):
 
     def _hb_last_cycle(self):
         return self._monitoring_last_run_ts
+
+    def _hb_db_info(self) -> dict:
+        return {'main': getattr(self, '_hb_db_main', None)}
 
     def __init__(self, config_dir: str, var_dir: str | None = None,
                  modules_dir: str | None = None, *,
@@ -87,6 +90,7 @@ class MonitorService(_HeartbeatMixin, _MonitoringMixin):
         db_cfg = bootstrap_database_cfg(read_config_raw(config_path(config_dir), self._fernet))
         db_path = os.path.join(self._var_dir, 'data.db')
         self._db_connector = get_connector(db_cfg or None, default_sqlite_path=db_path)
+        self._hb_db_main = db_summary(db_cfg, os.path.basename(db_path))
 
         self._config_store = ConfigStore(self._db_connector)
         self._config_mgr = ConfigManager(

@@ -711,9 +711,37 @@
     border-top-left-radius: var(--bs-card-inner-border-radius, .375rem);
     border-top-right-radius: var(--bs-card-inner-border-radius, .375rem);
 }
-/* Spin feedback for the per-card refresh icon while it fetches. */
-@keyframes ss-spin { to { transform: rotate(360deg); } }
-.ss-spin { animation: ss-spin .6s linear infinite; }
+/* ── Shared static utilities (moved out of inline styles) ───────────────────
+   Font-size scale (normalised — sub-pixel deltas from the old scattered values),
+   plus a couple of one-liners with no Bootstrap equivalent. */
+.ss-fs-1 { font-size: .625rem; }
+.ss-fs-2 { font-size: .72rem; }
+.ss-fs-3 { font-size: .8rem; }
+.ss-fs-4 { font-size: .875rem; }
+.ss-fs-5 { font-size: 1rem; }
+.ss-fs-6 { font-size: 1.3rem; }
+.ss-fs-7 { font-size: 1.6rem; }
+.ss-fs-8 { font-size: 2rem; }
+.ss-fs-9 { font-size: 2.5rem; }
+.ss-pointer { cursor: pointer; }
+.ss-empty-icon { font-size: 2.5rem; opacity: .3; display: block; margin-bottom: .75rem; }
+
+/* Services tab: static styling in CSS — only the colours stay dynamic in the
+   markup (bg-<state>/text-<state>). */
+.ss-svc-av {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    font-size: 1.05rem;
+    border-radius: var(--bs-border-radius);
+}
+.ss-svc-av-lg { width: 42px; height: 42px; font-size: 1.35rem; }
+.ss-svc-dot   { width: .5rem; height: .5rem; }
+.ss-svc-meta  { font-size: .8rem; }
+.ss-svc-footer { min-height: 2rem; }
 
 /* Instances block set apart from the service-info rows: a full-bleed divider
    (spans the card padding) + an uppercase section label. */

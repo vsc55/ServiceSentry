@@ -51,8 +51,7 @@ function _buildPermsAccordion(activePerms, isBuiltin) {
     for (const f of _sfDefs) {
         const on = _rmSearchFilters[f.key];
         h += `<button id="rmSF_${f.key}" type="button"
-            class="btn btn-sm py-0 px-2 ${on ? 'btn-primary' : 'btn-secondary'}"
-            style="font-size:.72rem"
+            class="btn btn-sm py-0 px-2 ${on ? 'btn-primary' : 'btn-secondary'} ss-fs-2"
             onclick="_togglePermFilter('${f.key}')">${esc(t(f.lkey))}</button>`;
     }
     h += `</div></div>`;
@@ -131,7 +130,7 @@ function _permsBulkToolbar(isBuiltin) {
                     data-bs-toggle="dropdown" aria-expanded="false">
                 <i class="bi bi-check2-square me-1"></i>${esc(t('perm_mark'))}
             </button>
-            <ul class="dropdown-menu p-1" style="font-size:.85rem">
+            <ul class="dropdown-menu p-1 ss-fs-4">
                 <li><h6 class="dropdown-header py-1">${esc(t('perm_mark_by_action'))}</h6></li>
                 <li><button type="button" class="dropdown-item" onclick="_permsSelectAction('view', true)">${esc(t('module_perm_view'))}</button></li>
                 <li><button type="button" class="dropdown-item" onclick="_permsSelectAction('add', true)">${esc(t('module_perm_add'))}</button></li>

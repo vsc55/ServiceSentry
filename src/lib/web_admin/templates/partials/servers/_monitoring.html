@@ -49,15 +49,15 @@ function _renderHostLatest() {
             if (!isNaN(d.getTime())) when = d.toLocaleString();
         }
         const srcBadge = isHist
-            ? `<span class="badge text-bg-secondary" style="font-size:.65rem"><i class="bi bi-clock-history me-1"></i>${esc(t('host_latest_historic'))}</span>`
-            : `<span class="badge text-bg-success" style="font-size:.65rem"><i class="bi bi-broadcast-pin me-1"></i>${esc(t('host_latest_live'))}</span>`;
+            ? `<span class="badge text-bg-secondary ss-fs-1"><i class="bi bi-clock-history me-1"></i>${esc(t('host_latest_historic'))}</span>`
+            : `<span class="badge text-bg-success ss-fs-1"><i class="bi bi-broadcast-pin me-1"></i>${esc(t('host_latest_live'))}</span>`;
         const clickable = canHistory
             ? ` role="button" style="background:var(--bs-body-bg);cursor:pointer"
                 onclick="_goToHistory(${jsStr(r.module)},${jsStr(r.key)})"
                 title="${escAttr(t('host_latest_view_history'))}"`
             : ` style="background:var(--bs-body-bg)"`;
         const histIcon = canHistory
-            ? `<i class="bi bi-graph-up text-muted flex-shrink-0 mt-1" style="font-size:.85rem"></i>` : '';
+            ? `<i class="bi bi-graph-up text-muted flex-shrink-0 mt-1 ss-fs-4"></i>` : '';
         return `<div class="d-flex align-items-start gap-2 px-2 py-2 border rounded mb-1"${clickable}>
             <i class="bi ${icon} flex-shrink-0 mt-1"></i>
             <div class="flex-grow-1 min-w-0">
@@ -363,7 +363,7 @@ function openHostAddModule() {
                 <span class="ss-mod-av rounded-2 d-flex align-items-center justify-content-center"
                       style="--mh:${hue};width:46px;height:46px;font-size:1.35rem">${icon}</span>
                 <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${esc(pname)}</div>
-                <code class="text-muted" style="font-size:.7rem">${esc(name)}</code>
+                <code class="text-muted ss-fs-2">${esc(name)}</code>
             </div>`;
         }
         h += `</div>`;
@@ -375,7 +375,7 @@ function openHostAddModule() {
             for (const name of configured) {
                 h += `<div class="rounded-3 border d-flex align-items-center gap-2 px-2 py-1" style="background:var(--bs-secondary-bg)">
                     <span style="font-size:1.05rem">${moduleIcon(name, {})}</span>
-                    <span class="text-muted text-truncate" style="font-size:.8rem">${esc(modulePrettyName(name, {}))}</span></div>`;
+                    <span class="text-muted text-truncate ss-fs-3">${esc(modulePrettyName(name, {}))}</span></div>`;
             }
             h += `</div>`;
         }

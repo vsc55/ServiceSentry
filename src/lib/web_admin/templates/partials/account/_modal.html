@@ -39,7 +39,7 @@ function _umPopulateRoles(searchVal) {
         if (q && !uid.toLowerCase().includes(q) && !label.toLowerCase().includes(q) && !desc.toLowerCase().includes(q)) return '';
         const id = 'umrole_' + uid;
         const isDisabled = !rd.builtin && rd.enabled === false;
-        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal" style="font-size:.6rem">${esc(t('status_disabled'))}</span>` : '';
+        const badge = isDisabled ? ` <span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('status_disabled'))}</span>` : '';
         return `<div class="form-check${isDisabled ? '" style="opacity:.6' : ''}">
             <input class="form-check-input" type="radio" name="umRoleRadio" id="${escAttr(id)}" value="${escAttr(uid)}" ${uid === _umSelectedRole ? 'checked' : ''}>
             <label class="form-check-label small" for="${escAttr(id)}">

@@ -27,7 +27,7 @@ from lib.config.manager import (
 from lib.db import build_syslog_connector, get_connector
 from lib.debug import Debug, DebugLevel
 from .manager import _EventsMixin
-from lib.services.heartbeat import _HeartbeatMixin
+from lib.services.heartbeat import _HeartbeatMixin, db_summary
 from lib.services.control_server import start_control_server
 from lib.stores.audit import AuditStore
 from lib.stores.config import ConfigStore
@@ -56,6 +56,12 @@ class EventService(_HeartbeatMixin, _EventsMixin):
     def _hb_detail(self) -> dict:
         return {'poll_secs': self._poll_secs()}
 
+    def _hb_db_info(self) -> dict:
+        info = {'main': self._hb_db_main}
+        if self._hb_db_syslog:
+            info['syslog'] = self._hb_db_syslog
+        return info
+
     def __init__(self, config_dir: str, var_dir: str | None = None,
                  log_level: str | None = None):
         self._config_dir = config_dir
@@ -82,6 +88,9 @@ class EventService(_HeartbeatMixin, _EventsMixin):
         self._syslog_db_connector = build_syslog_connector(
             _sdb, main_connector=self._db_connector,
             default_sqlite_path=os.path.join(self._var_dir, 'syslog.db'))
+        self._hb_db_main = db_summary(db_cfg, os.path.basename(db_path))
+        self._hb_db_syslog = (db_summary(_sdb, 'syslog.db')
+                              if (_sdb or {}).get('enabled') else None)
 
         # Sources the worker consumes (audit on the main DB, syslog on its own).
         self._audit_store = AuditStore(self._db_connector)

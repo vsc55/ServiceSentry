@@ -14,7 +14,10 @@ optimisation, never the contract.
 No Flask: a stdlib :class:`http.server.ThreadingHTTPServer` in a daemon thread,
 guarded by a bearer token.  Endpoints:
 
-* ``GET  /control/health``    → ``{"ok": true, ...}`` (no auth — for k8s probes).
+* ``GET  /control/health``    → ``{"ok", "key", "version"}`` (no auth — for k8s
+  probes; minimal, no sensitive data).
+* ``GET  /control/info``      → full live snapshot (status, DB target(s), leader,
+  mode…).  Requires ``Authorization: Bearer <token>``.
 * ``POST /control/reconcile`` → run a reconcile + drain commands now; returns a
   small status snapshot.  Requires ``Authorization: Bearer <token>``.
 
@@ -36,7 +39,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from lib.debug import DebugLevel
-from lib.services.heartbeat import hostname
+from lib.services.heartbeat import app_version, hostname
 
 _DEFAULT_PORT = 8765
 
@@ -87,11 +90,28 @@ class _Handler(BaseHTTPRequestHandler):
         return hmac.compare_digest(hdr[len(prefix):].strip(), self._token or '')
 
     def do_GET(self):  # noqa: N802
-        if self.path.rstrip('/') == '/control/health':
+        path = self.path.rstrip('/')
+        if path == '/control/health':
+            # Unauthenticated liveness/readiness (for k8s probes): minimal, no
+            # sensitive data — ok, which service, and the running version.
             svc = self._service
-            self._send(200, {'ok': True, 'key': getattr(svc, '_HB_KEY', None)})
-        else:
-            self._send(404, {'ok': False, 'error': 'not_found'})
+            self._send(200, {
+                'ok': True,
+                'key': getattr(svc, '_HB_KEY', None),
+                'version': app_version(),
+            })
+            return
+        if path == '/control/info':
+            # Authenticated: the full live snapshot (status, DB target(s), leader…).
+            if not self._authed():
+                self._send(401, {'ok': False, 'error': 'unauthorized'})
+                return
+            try:
+                self._send(200, self._service._control_info())
+            except Exception as exc:  # pylint: disable=broad-except
+                self._send(500, {'ok': False, 'error': str(exc)})
+            return
+        self._send(404, {'ok': False, 'error': 'not_found'})
 
     def do_POST(self):  # noqa: N802
         if self.path.rstrip('/') != '/control/reconcile':
