@@ -410,8 +410,13 @@ class _ServicesMixin:
                 return
             for inst in self._service_instances_list(service_key):
                 url = inst.get('control_url')
+                # Poke every REACHABLE instance — one recently heard from, whatever its
+                # run state. Crucially this includes 'stopped' (heartbeating but not
+                # running): that is exactly the instance a Services-tab *start* must
+                # wake to bind/spin up now, instead of waiting for its watch tick. Only
+                # 'down'/'unknown' (not seen recently) are skipped as unreachable.
                 if (not url or inst.get('is_self')
-                        or inst.get('derived_state') not in ('alive', 'stale')):
+                        or inst.get('derived_state') not in ('alive', 'stale', 'stopped')):
                     continue
                 threading.Thread(
                     target=self._poke_one,

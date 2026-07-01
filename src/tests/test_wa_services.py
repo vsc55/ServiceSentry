@@ -63,6 +63,33 @@ class TestServicesStatus:
         assert entry['running'] is True
 
 
+class TestPoke:
+
+    def test_poke_reaches_stopped_instance(self, admin, monkeypatch):
+        # Regression: a Services-tab start of a STOPPED external instance (heartbeating,
+        # control server up) must poke it now — the old filter skipped 'stopped' and
+        # only the 15s watch tick would eventually apply it.
+        import lib.web_admin.mixins.services as svcmod
+
+        class _Immediate:                      # run the poke thread synchronously
+            def __init__(self, target, args=(), daemon=None):
+                self._t, self._a = target, args
+
+            def start(self):
+                self._t(*self._a)
+        monkeypatch.setattr(svcmod.threading, 'Thread', _Immediate)
+        monkeypatch.setenv('SS_CONTROL_TOKEN', 'tok')
+        poked = []
+        monkeypatch.setattr(admin, '_poke_one', lambda url, token: poked.append(url))
+        monkeypatch.setattr(admin, '_service_instances_list', lambda key=None: [
+            {'control_url': 'http://syslog:8765', 'is_self': False, 'derived_state': 'stopped'},
+            {'control_url': 'http://dead:8765', 'is_self': False, 'derived_state': 'down'},
+        ])
+        admin._poke_service_instances('syslog')
+        # the stopped (reachable) instance is poked; the down (unreachable) one is not
+        assert poked == ['http://syslog:8765/control/reconcile']
+
+
 class TestDebugAccessor:
 
     def test_debug_property_applies_log_level(self, admin):

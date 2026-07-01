@@ -50,7 +50,7 @@ x-app-env: &app-env
   SS_PASSWORD: admin
   SS_LANG: en_EN
   SS_DARK_MODE: "1"                # dark theme as the default for the test panel
-  SS_LOG_LEVEL: debug              # verbose logs across every role (we want to see it all)
+  SS_LOG_LEVEL: info               # readable logs across every role (debug is too noisy)
   SS_CHECK_INTERVAL: "30"          # short cycle so activity shows up quickly
   SS_CONTROL_TOKEN: test-control-token   # enables the control poke between containers
 
