@@ -20,14 +20,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
-# Stack selector: `ha` as the first arg switches to the HA stack (isolated project
-# name so the two stacks don't share volumes/containers).
+# Stack selector: `ha` as the first arg switches to the HA stack. Each compose file
+# declares its own `name:` (ss-test / ss-test-ha), so the raw `docker compose`
+# commands and this script share the same isolated project — no `-p` needed here.
 STACK="test"
 if [ "${1:-}" = "ha" ]; then STACK="ha"; shift; fi
 if [ "$STACK" = "ha" ]; then
-  FILE="docker/docker-compose.ha-test.yml"; PROJECT="ss-ha"
+  FILE="docker/docker-compose.ha-test.yml"
 else
-  FILE="docker/docker-compose.microservices-test.yml"; PROJECT="ss-test"
+  FILE="docker/docker-compose.microservices-test.yml"
 fi
 
 # Prefer Docker Compose v2 (`docker compose`), fall back to v1 (`docker-compose`).
@@ -39,7 +40,7 @@ else
   echo "ERROR: Docker Compose not found (need 'docker compose' or 'docker-compose')." >&2
   exit 1
 fi
-DC+=(-p "$PROJECT" -f "$FILE")
+DC+=(-f "$FILE")
 
 info() {
   cat <<EOF

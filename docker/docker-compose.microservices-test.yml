@@ -21,6 +21,10 @@
 # For production use docker-compose.microservices.yml (2 MariaDBs, secrets via .env)
 # or the Helm chart. This file bakes in test passwords on purpose — do not expose it.
 
+# Fixed project name so the raw `docker compose -f …` commands and make_test.sh
+# agree (and stay isolated from the ss-ha stack's volumes/containers).
+name: ss-test
+
 # Main database connection env — overlaid onto the config.json ``database`` section
 # by every ServiceSentry process (SS_DB_*).
 x-db-env: &db-env

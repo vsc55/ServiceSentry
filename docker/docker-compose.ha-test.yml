@@ -22,6 +22,10 @@
 # replicas); this stack is about the control plane, not syslog ingestion. Test
 # passwords are inlined — do NOT use in production.
 
+# Fixed project name so the raw `docker compose -f …` commands and make_test.sh
+# agree (and stay isolated from the ss-test stack's volumes/containers).
+name: ss-test-ha
+
 x-db-env: &db-env
   SS_DB_DRIVER: mysql
   SS_DB_HOST: db
