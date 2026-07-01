@@ -126,9 +126,12 @@ class ConfigStore(ObjectBase):
                 self.debug.exception(e)
 
         else:
+            # A missing config.json is normal now: config lives in the DB and the
+            # file is only an optional read-only bootstrap. Debug, not warning, so
+            # it doesn't spam the logs on every (frequent) config read.
             self.debug.print(
-                f"Config >> Warning: File ({self.file}) not exist!!!",
-                DebugLevel.warning
+                f"Config >> File ({self.file}) not present; using DB/defaults",
+                DebugLevel.debug
             )
 
         return return_date
