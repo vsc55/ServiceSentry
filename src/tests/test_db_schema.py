@@ -11,7 +11,8 @@ and diff, differing only in introspection.
 import pytest
 
 from lib.db.schema import (
-    Column, Index, TableSpec, canonical_default, canonical_type, diff_table,
+    Column, Index, TableSpec, canonical_default, canonical_type, create_table_ddl,
+    diff_table,
 )
 from lib.db.sqlite import SQLiteConnector
 
@@ -222,6 +223,34 @@ def test_canonical_type(raw, expected):
 ])
 def test_canonical_default(raw, expected):
     assert canonical_default(raw) == expected
+
+
+def test_keyed_text_uses_varchar_on_mysql():
+    """MySQL can't index a TEXT column: a TEXT column that is a key/index must be
+    emitted as its bounded VARCHAR (TEXT_KEY), while non-keyed TEXT stays TEXT.
+    SQLite/PostgreSQL keep TEXT everywhere (TEXT_KEY == TEXT)."""
+    spec = TableSpec(
+        name='u',
+        columns=(
+            Column('username', 'TEXT', primary_key=True),  # PK
+            Column('email', 'TEXT', unique=True),           # UNIQUE
+            Column('gid', 'TEXT'),                          # via index below
+            Column('bio', 'TEXT'),                          # not keyed
+        ),
+        indexes=(Index('idx_gid', ('gid',)),),
+    )
+    q = lambda n: f'`{n}`'  # noqa: E731
+    mysql_map = {'TEXT': 'TEXT', 'TEXT_KEY': 'VARCHAR(255)', 'INTEGER': 'INT',
+                 'REAL': 'DOUBLE', 'AUTOINCREMENT': 'INT AUTO_INCREMENT PRIMARY KEY'}
+    ddl = create_table_ddl(spec, mysql_map, q)
+    assert '`username` VARCHAR(255) PRIMARY KEY' in ddl
+    assert '`email` VARCHAR(255) UNIQUE' in ddl
+    assert '`gid` VARCHAR(255)' in ddl
+    assert '`bio` TEXT' in ddl          # non-keyed TEXT untouched
+    # SQLite maps TEXT_KEY == TEXT → everything stays TEXT.
+    sqlite_map = {**mysql_map, 'TEXT_KEY': 'TEXT'}
+    ddl2 = create_table_ddl(spec, sqlite_map, q)
+    assert 'VARCHAR' not in ddl2 and '`username` TEXT PRIMARY KEY' in ddl2
 
 
 def test_diff_table_pure_function():

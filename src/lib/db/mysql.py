@@ -30,6 +30,10 @@ class MySQLConnector(BaseConnector):
     DDL_REAL          = 'DOUBLE'
     DDL_TEXT          = 'TEXT'
     DDL_INTEGER       = 'INT'
+    # MySQL/MariaDB can't index a TEXT/BLOB column without a prefix length, so a
+    # TEXT column that is a key/index gets a bounded VARCHAR instead (utf8mb4
+    # VARCHAR(255) = 1020 bytes, within InnoDB's index-prefix limit).
+    DDL_TEXT_KEY      = 'VARCHAR(255)'
 
     def __init__(self, config: dict) -> None:
         if not _HAS_PYMYSQL:

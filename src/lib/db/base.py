@@ -49,6 +49,10 @@ class BaseConnector(ABC):
     DDL_REAL:          str = 'REAL'
     DDL_TEXT:          str = 'TEXT'
     DDL_INTEGER:       str = 'INTEGER'
+    # Type for a TEXT column that is part of a key/index.  SQLite/PostgreSQL index
+    # TEXT fine, so this defaults to TEXT; MySQL/MariaDB can't index TEXT without a
+    # prefix length, so it overrides this to a bounded VARCHAR.
+    DDL_TEXT_KEY:      str = 'TEXT'
 
     # ── Schema management ────────────────────────────────────────────────────
 
@@ -187,6 +191,7 @@ class BaseConnector(ABC):
         """Map symbolic spec types to this backend's native DDL tokens."""
         return {
             'TEXT':          self.DDL_TEXT,
+            'TEXT_KEY':      self.DDL_TEXT_KEY,
             'INTEGER':       self.DDL_INTEGER,
             'REAL':          self.DDL_REAL,
             'AUTOINCREMENT': self.DDL_AUTOINCREMENT,

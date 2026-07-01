@@ -1,0 +1,80 @@
+name: DB backends
+
+# Boot the app against SQLite, MySQL/MariaDB and PostgreSQL and confirm the whole
+# schema reconciles on each engine (catches cross-engine DDL bugs the SQLite-only
+# unit tests miss). Uses lightweight service containers, not the full compose stack.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  db-backends:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: sqlite
+          - engine: mysql
+            driver: mysql
+            port: "3306"
+          - engine: postgresql
+            driver: postgresql
+            port: "5432"
+
+    # Both databases run for every matrix leg; the smoke connects only to the one
+    # selected by SS_DB_DRIVER (SQLite ignores them).
+    services:
+      mysql:
+        image: mariadb:11
+        env:
+          MARIADB_DATABASE: servicesentry
+          MARIADB_USER: servicesentry
+          MARIADB_PASSWORD: testpass
+          MARIADB_ROOT_PASSWORD: testrootpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: servicesentry
+          POSTGRES_USER: servicesentry
+          POSTGRES_PASSWORD: testpass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U servicesentry -d servicesentry"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: src/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r src/requirements.txt
+
+      - name: Schema smoke — ${{ matrix.engine }}
+        working-directory: src
+        env:
+          SS_DB_DRIVER: ${{ matrix.driver || 'sqlite' }}
+          SS_DB_HOST: 127.0.0.1
+          SS_DB_PORT: ${{ matrix.port }}
+          SS_DB_NAME: servicesentry
+          SS_DB_USER: servicesentry
+          SS_DB_PASSWORD: testpass
+          # Keep it a pure schema/boot check — no background service threads.
+          SS_MONITORING_EMBEDDED: "0"
+          SS_SYSLOG_EMBEDDED: "0"
+          SS_EVENTS_EMBEDDED: "0"
+        run: python tools/db_smoke.py

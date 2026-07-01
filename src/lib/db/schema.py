@@ -262,11 +262,19 @@ def diff_table(
 
 # ── DDL construction (parameterised by the connector) ───────────────────────
 
-def _column_ddl(col: Column, type_map: dict, quote) -> str:
-    """Build a single column definition for CREATE TABLE."""
+def _column_ddl(col: Column, type_map: dict, quote, keyed: bool = False) -> str:
+    """Build a single column definition for CREATE TABLE.
+
+    *keyed* marks a column that participates in a key/index: a TEXT column then
+    uses the backend's ``TEXT_KEY`` type (a bounded VARCHAR on MySQL, which can't
+    index plain TEXT; plain TEXT elsewhere)."""
     if col.type.upper() == 'AUTOINCREMENT':
         return f'{quote(col.name)} {type_map["AUTOINCREMENT"]}'
-    native = type_map.get(col.type.upper(), col.type)
+    token = col.type.upper()
+    if keyed and token == 'TEXT' and 'TEXT_KEY' in type_map:
+        native = type_map['TEXT_KEY']
+    else:
+        native = type_map.get(token, col.type)
     parts = [f'{quote(col.name)} {native}']
     if col.primary_key:
         parts.append('PRIMARY KEY')
@@ -300,7 +308,16 @@ def create_table_ddl(
     ``extra_columns`` are appended after the spec columns (preserved on rebuild).
     """
     table = name or spec.name
-    defs = [_column_ddl(c, type_map, quote) for c in spec.columns]
+    # Columns that take part in a key/index — their TEXT type must be indexable
+    # (VARCHAR on MySQL). Covers the PK, composite PK, UNIQUE columns/constraints
+    # and every index.
+    keyed: set = set(spec.pk_columns)
+    keyed.update(c.name for c in spec.columns if c.primary_key or c.unique)
+    for uc in spec.unique_constraints:
+        keyed.update(uc)
+    for idx in spec.indexes:
+        keyed.update(_index_key_cols(idx.columns))
+    defs = [_column_ddl(c, type_map, quote, keyed=(c.name in keyed)) for c in spec.columns]
     for info in (extra_columns or []):
         defs.append(_colinfo_ddl(info, quote))
     if spec.composite_pk:
