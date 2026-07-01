@@ -1048,6 +1048,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         """
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
 
+    @property
+    def debug(self):
+        """The shared debug printer (class-level ``ObjectBase.debug``) surfaced on
+        the instance, mirroring the standalone services' ``_debug`` — so the CLI
+        entry point can apply a ``--log-level`` override (``admin.debug.set_from_config``)
+        the same way it does for the monitor/events services."""
+        return ObjectBase.debug
+
     def _apply_log_level(self) -> None:
         """Apply ``global|log_level`` to the shared debug printer so web_admin
         debug output honours the configured verbosity."""

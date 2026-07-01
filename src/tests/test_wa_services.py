@@ -63,6 +63,18 @@ class TestServicesStatus:
         assert entry['running'] is True
 
 
+class TestDebugAccessor:
+
+    def test_debug_property_applies_log_level(self, admin):
+        # Regression: main.py --log-level (SS_LOG_LEVEL) does
+        # ``admin.debug.set_from_config(level)``; the property must exist and work
+        # (it was missing, so any non-empty SS_LOG_LEVEL crashed the web at boot).
+        admin.debug.set_from_config('debug')
+        assert admin.debug.enabled is True
+        admin.debug.set_from_config('off')
+        assert admin.debug.enabled is False
+
+
 class TestExternalControl:
     """A service owned by a dedicated container (SS_*_EMBEDDED=0) is controllable
     from the Services tab: start/stop edits the shared desired-state it reconciles,
