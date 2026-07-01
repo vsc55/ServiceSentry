@@ -31,6 +31,14 @@ x-db-env: &db-env
   SS_DB_USER: servicesentry
   SS_DB_PASSWORD: testpass
 
+# Same image for every app role: built once from the Dockerfile, reused by all
+# (so Compose doesn't try to PULL servicesentry:test for the non-web services).
+x-app-build: &app-build
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: servicesentry:test
+
 # Shared, non-secret app settings applied to every role.
 x-app-env: &app-env
   TZ: UTC
@@ -64,10 +72,7 @@ services:
 
   # ── Web admin panel ─────────────────────────────────────────────────────────
   web:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    image: servicesentry:test
+    <<: *app-build
     container_name: ss-test-web
     restart: unless-stopped
     networks: [ss]
@@ -99,7 +104,7 @@ services:
 
   # ── Monitoring worker ───────────────────────────────────────────────────────
   worker:
-    image: servicesentry:test
+    <<: *app-build
     container_name: ss-test-worker
     restart: unless-stopped
     networks: [ss]
@@ -120,7 +125,7 @@ services:
 
   # ── Syslog receiver ─────────────────────────────────────────────────────────
   syslog:
-    image: servicesentry:test
+    <<: *app-build
     container_name: ss-test-syslog
     restart: unless-stopped
     networks: [ss]
@@ -143,7 +148,7 @@ services:
 
   # ── Event processor ─────────────────────────────────────────────────────────
   events:
-    image: servicesentry:test
+    <<: *app-build
     container_name: ss-test-events
     restart: unless-stopped
     networks: [ss]

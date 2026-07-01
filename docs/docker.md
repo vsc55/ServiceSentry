@@ -168,6 +168,10 @@ docker compose -f docker/docker-compose.microservices.yml up -d
 
 # Microservicios + Traefik (publicado a Internet por HTTPS)
 docker compose -f docker/docker-compose.microservices-traefik.yml up -d
+
+# Pruebas locales: microservicios con MariaDB, sin Traefik, autocontenido
+# (construye desde el Dockerfile; login admin/admin; plano de control activado)
+docker compose -f docker/docker-compose.microservices-test.yml up --build
 ```
 
 El panel web de administración queda disponible en `http://tu-servidor:8080`
