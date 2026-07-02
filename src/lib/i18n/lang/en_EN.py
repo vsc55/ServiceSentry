@@ -1720,6 +1720,13 @@ LANG = {
     'tables_section':      'Tables',
     'live_update_section':    'Live Updates',
     'login_security_section': 'Login Security',
+    # Advanced tools — localStorage inspector (Interface tab)
+    'cfg_advanced_section':   'Advanced',
+    'cfg_advanced_toggle':    'Advanced tools',
+    'cfg_advanced_hint':      'Shows the interface state this browser keeps in localStorage (view modes, columns, active tabs…). Affects this browser only.',
+    'cfg_reset_ui':           'Reset UI preferences',
+    'cfg_reset_ui_confirm':   'Clear all interface preferences from this browser (ss_* keys) and reload?',
+    'cfg_ls_empty':           'No localStorage entries.',
     'status_lang_default': '— Use web panel default —',
     # Role labels
     'role_labels': {

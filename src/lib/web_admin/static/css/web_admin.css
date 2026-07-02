@@ -223,39 +223,29 @@
     flex-direction: column;
     min-height: 0;
 }
-/* Each section's primary container grows to fill its pane.  Toolbars/headers
-   rendered before the container keep their natural height (flexbox handles it). */
-/* .ss-fill-card = any createListTable container (added by the factory); the
-   remaining ids are the non-factory sections (custom layouts). */
+/* Vertical-fill — ONE generic mechanism for every fillable section/table, applied
+   via class= in the markup (no per-id or per-table rules).
+   .ss-vfill   : become a flex column that grows to fill its flex parent — chain it
+                 from the section container down to the card that should grow.
+   .ss-vscroll : grow to fill AND scroll your own vertical overflow (the table/body).
+   The .ss-card-band pagination strips keep their natural height, so they pin
+   top/bottom while the .ss-vscroll body between them scrolls. */
+.ss-vfill   { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.ss-vscroll { flex: 1 1 auto; overflow: auto; min-height: 0; }
+/* Non-table custom sections fill via their container id (no single card to tag). */
 #overview-container, #modules-container, #config-container, #status-container,
-#history-container, #audit-container, #events-container,
-.ss-fill-card {
+#history-container {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
 }
-/* Events tab has nested sub-tabs (Rules / Notifications): fill the viewport so the
-   active sub-tab's card stretches and its bottom pagination pins to the bottom. */
+/* Events wraps its sub-tabs in #events-container, so the generic
+   .tab-pane.active > .tab-content chain doesn't reach them: the nested sub-tab
+   content still needs an explicit rule to become a flex column.  The cards and
+   table bodies inside use .ss-vfill / .ss-vscroll like every other table. */
 #events-container > .tab-content,
-#events-container > .tab-content > .tab-pane.active,
-#events-container .tab-pane > .ss-card {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-#events-container .ss-card > #ev-rules-table-wrap,
-#events-container .ss-card > #ev-log-table-wrap {
-    flex: 1 1 auto;
-    overflow: auto;
-    min-height: 0;
-}
-/* List/panel cards fill their container; the table/body area grows and scrolls
-   while the pagination bands stay pinned top/bottom. */
-#audit-container  > .ss-card,
-#history-container > .ss-card,
-.ss-fill-card > .ss-card {
+#events-container > .tab-content > .tab-pane.active {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
@@ -297,12 +287,6 @@
 .min-w-0 { min-width: 0 !important; }
 /* The chart toolbar sits as a band above the drawing zone (distinct bg). */
 #history-toolbar.ss-card-band { flex-shrink: 0; }
-#audit-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
-.ss-fill-card > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band) {
-    flex: 1 1 auto;
-    overflow: auto;
-    min-height: 0;
-}
 
 /* ================================================================
    SS Table
@@ -1146,6 +1130,9 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
    striped/hover vars (e.g. the colour-coded syslog severity rows). */
 .ss-table { --bs-table-hover-bg: rgba(0,0,0,.10); font-size: .85rem; }
 [data-bs-theme="dark"] .ss-table { --bs-table-hover-bg: rgba(255,255,255,.10); }
+/* Denser table variant — smaller type so more rows fit in the same space (used by
+   the syslog log table; reusable on any table/section that wants a compact read). */
+.ss-table-dense { font-size: .82rem; }
 .ss-table > tbody > tr:nth-of-type(odd) > * { --bs-table-bg-type: var(--bs-table-striped-bg); }
 .ss-table > tbody > tr:hover > * { --bs-table-bg-state: var(--bs-table-hover-bg); }
 /* Compact, uniform rows across every list table (Users/Groups/Roles/Credentials/

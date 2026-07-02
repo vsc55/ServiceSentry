@@ -13,7 +13,6 @@ async function _loadSyslog() {
         _loadSyslogStats(),
         _loadSyslogDrops(),
     ]);
-    const empty = document.getElementById('sl-empty');
     const total = (data && data.total) || 0;
     if (st) {
         const state = st.enabled ? (st.running ? t('syslog_running') : t('syslog_stopped')) : t('syslog_disabled');
@@ -24,7 +23,6 @@ async function _loadSyslog() {
     }
     _syslogRenderActiveFilters();
     const msgs = (data && data.messages) || [];
-    if (empty) empty.style.display = msgs.length ? 'none' : '';
     // Clamp the page if a filter shrank the result set, then re-fetch once.
     if (!all) {
         const pages = Math.max(1, Math.ceil(total / _syslogPageSize));

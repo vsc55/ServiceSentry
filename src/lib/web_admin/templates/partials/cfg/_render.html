@@ -4,6 +4,85 @@ let _cfgSearchInHints = true;
 let _activeCfgTab    = localStorage.getItem('cfg_active_tab')    || 'cfg-tab-general';
 let _activeNotifSubTab = localStorage.getItem('cfg_notif_subtab') || 'cfg-notif-routing';
 
+// ── Advanced tools: localStorage inspector (Interface tab, behind a toggle) ──
+// Pure client-side: this browser's UI state lives in localStorage (view modes,
+// column prefs, active tabs…). The card shows it as a tree; per-key delete works
+// on any key, and "Reset UI preferences" clears just the app's ss_* keys.
+let _cfgLsFilterTerm = '';
+function _cfgAdvancedEnabled() {
+    try { return localStorage.getItem('ss_cfg_advanced') === '1'; } catch (_) { return false; }
+}
+function _toggleCfgAdvanced(on) {
+    try { localStorage.setItem('ss_cfg_advanced', on ? '1' : '0'); } catch (_) {}
+    renderConfig();
+}
+function _cfgLsFilter(v) {
+    _cfgLsFilterTerm = (v || '').toLowerCase();
+    const el = document.getElementById('cfg-ls-tree');
+    if (el) el.innerHTML = _cfgRenderLsTree();
+}
+function _cfgRenderLsTree() {
+    let keys = [];
+    try { keys = Object.keys(localStorage).sort(); } catch (_) {}
+    const q = _cfgLsFilterTerm;
+    const rows = keys.filter(k => !q || k.toLowerCase().includes(q)).map(k => {
+        let raw = ''; try { raw = localStorage.getItem(k) || ''; } catch (_) {}
+        let pretty = raw;
+        try { pretty = JSON.stringify(JSON.parse(raw), null, 2); } catch (_) {}
+        const id = 'ls-' + k.replace(/[^A-Za-z0-9_-]/g, '_');
+        return `<div class="border rounded mb-1">
+            <div class="d-flex align-items-center gap-2 px-2 py-1" style="cursor:pointer"
+                 data-bs-toggle="collapse" data-bs-target="#${id}">
+                <i class="bi bi-key text-muted"></i>
+                <code class="flex-grow-1 text-truncate ss-fs-3">${esc(k)}</code>
+                <span class="badge bg-body-secondary text-body-secondary ss-fs-1">${raw.length} B</span>
+                <button class="btn btn-sm btn-danger py-0 px-1"
+                        onclick="event.stopPropagation();_cfgDeleteLsKey(${jsStr(k)})"
+                        title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>
+            </div>
+            <div class="collapse" id="${id}"><pre class="mb-0 p-2 ss-fs-2"
+                 style="white-space:pre-wrap;word-break:break-all;background:var(--bs-body-bg)">${esc(pretty)}</pre></div>
+        </div>`;
+    }).join('');
+    return rows || `<p class="text-muted small m-2 mb-0">${esc(t('cfg_ls_empty'))}</p>`;
+}
+function _cfgDeleteLsKey(k) {
+    try { localStorage.removeItem(k); } catch (_) {}
+    const el = document.getElementById('cfg-ls-tree');
+    if (el) el.innerHTML = _cfgRenderLsTree();
+}
+function _cfgResetUiPrefs() {
+    showConfirmModal(t('cfg_reset_ui_confirm'), () => {
+        try {
+            Object.keys(localStorage).filter(k => k.indexOf('ss_') === 0)
+                .forEach(k => localStorage.removeItem(k));
+        } catch (_) {}
+        forcePageReload();
+    });
+}
+function _cfgRenderAdvancedBody() {
+    const on = _cfgAdvancedEnabled();
+    let h = `<div class="cfg-field-wrap">
+        <div class="form-check form-switch mb-1">
+            <input class="form-check-input" type="checkbox" role="switch" id="cfgAdvancedToggle"
+                   ${on ? 'checked' : ''} onchange="_toggleCfgAdvanced(this.checked)">
+            <label class="form-check-label fw-semibold" for="cfgAdvancedToggle">${esc(t('cfg_advanced_toggle'))}</label>
+        </div>
+        <div class="small text-muted">${esc(t('cfg_advanced_hint'))}</div>
+    </div>`;
+    if (on) {
+        h += `<hr class="my-2">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <input type="search" class="form-control form-control-sm" style="max-width:280px"
+                   placeholder="${escAttr(t('search'))}" oninput="_cfgLsFilter(this.value)">
+            <button class="btn btn-sm btn-warning ms-auto" onclick="_cfgResetUiPrefs()">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('cfg_reset_ui'))}</button>
+        </div>
+        <div id="cfg-ls-tree">${_cfgRenderLsTree()}</div>`;
+    }
+    return h;
+}
+
 function _toggleCfgSearchHints() {
     _cfgSearchInHints = !_cfgSearchInHints;
     const btn = document.getElementById('cfgSearchHintsToggle');
@@ -523,6 +602,11 @@ function renderConfig() {
             ${renderField('force_reload_secs', wa.force_reload_secs, 'web_admin|force_reload_secs', 'config')}
         </div></div>`;
     _cardHtml['live_update'] += cfgCardClose;
+
+    // Advanced card — localStorage inspector, behind its own toggle (Interface tab)
+    _cardHtml['advanced'] = cfgCardOpen('cfgcol_advanced', '<i class="bi bi-tools me-1"></i>', t('cfg_advanced_section'))
+        + _cfgRenderAdvancedBody()
+        + cfgCardClose;
 
     // ── Assemble the sub-tabs from the central layout (CONFIG_LAYOUT, injected
     // server-side from lib.config.layout — single source of truth, no duplicated

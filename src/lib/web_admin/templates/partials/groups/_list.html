@@ -36,6 +36,39 @@ let _groupsColOrder = (() => {
     return _GRP_COLS.map(c => c.id);
 })();
 
+// Row/card action buttons (shared by the table actions column and the card view).
+function _groupsRowActions(name, ctx) {
+    const gd = groupsData[name];
+    return `${ctx.canEdit ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditGroupModal(${jsStr(name)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : ''}
+            ${ctx.canClone ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1" onclick="cloneGroupModal(${jsStr(name)})" title="${escAttr(t('clone'))}"><i class="bi bi-copy"></i></button>` : ''}
+            ${ctx.canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" ${gd.builtin?'disabled':`onclick="deleteGroup(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}`;
+}
+
+// List/card view toggle (persisted per browser).
+let _groupsViewMode = _loadViewMode('ss_groups_view');
+function _setGroupsView(mode) { _groupsViewMode = mode === 'card' ? 'card' : 'table'; localStorage.setItem('ss_groups_view', _groupsViewMode); renderGroups(); }
+function _groupsCardsBody(names, ctx) {
+    return _cardGrid(names.map(name => {
+        const gd = groupsData[name];
+        const badges = [
+            gd.builtin ? `<i class="bi bi-lock-fill text-muted" style="font-size:.8em" title="${escAttr(t('group_builtin_badge'))}"></i>` : '',
+            gd.enabled === false ? `<span class="badge bg-secondary fw-normal ss-fs-1">${t('status_disabled')}</span>` : '',
+        ].join('');
+        const roleChips = (gd.roles || []).map(r => { const rd = rolesData[r] || {}; return `<span class="badge ${roleBadgeClass(r)}">${esc(rd.name || r)}</span>`; }).join('');
+        const memberChip = `<span class="badge bg-secondary bg-opacity-50 rounded-pill"><i class="bi bi-person me-1"></i>${(gd.members || []).length}</span>`;
+        return _entityCard({
+            icon: 'bi-diagram-3', accent: 'linear-gradient(90deg,#14b8a6,#2dd4bf)',
+            selected: _selectedGroups.has(name),
+            toggle: ctx.showActions ? `_groupsToggleOne(${jsStr(name)}, this.checked)` : '',
+            title: `<code class="fw-semibold ss-fs-4">${esc(gd.name || name)}</code>`, badges,
+            subtitle: gd.description ? esc(gd.description) : '',
+            chips: roleChips + memberChip,
+            actions: ctx.showActions ? _groupsRowActions(name, ctx) : '',
+            dimmed: gd.enabled === false,
+        });
+    }).join(''));
+}
+
 createListTable({
     key: 'groups', containerId: 'groups-container', tableId: 'groups-table',
     accent: 'teal', icon: 'bi-people', title: () => t('group_management'),
@@ -86,12 +119,12 @@ createListTable({
             default:           return '<td></td>';
         }
     },
-    actions: (name, ctx) => {
-        const gd = groupsData[name];
-        return `${ctx.canEdit ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditGroupModal(${jsStr(name)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : ''}
-                ${ctx.canClone ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1" onclick="cloneGroupModal(${jsStr(name)})" title="${escAttr(t('clone'))}"><i class="bi bi-copy"></i></button>` : ''}
-                ${ctx.canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" ${gd.builtin?'disabled':`onclick="deleteGroup(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}`;
-    },
+    actions: (name, ctx) => _groupsRowActions(name, ctx),
+    // List/card view toggle (like the Sessions table).
+    bodyMode: () => _groupsViewMode === 'table' ? 'table' : 'cards',
+    showChooser: mode => mode === 'table',
+    cardsBody: (names, ctx) => _groupsCardsBody(names, ctx),
+    headerLead: (ctx, mode) => _viewToggleLead(mode, '_setGroupsView'),
     bulkBar: (ctx, sel) => (ctx.showActions && sel.size > 0) ? `
         <div class="d-flex align-items-center gap-1 border-start ps-2 ms-1">
             <span class="badge bg-secondary rounded-pill">${sel.size}</span>

@@ -101,6 +101,17 @@ function _slCellHtml(m, colId) {
 function _slRenderTable() {
     const wrap = document.getElementById('sl-table-wrap');
     if (!wrap) return;
+    const pagerTop = document.getElementById('sl-pager-top');
+    const pagerBot = document.getElementById('sl-pager');
+    // No rows → centered empty-state, not a bare table with only column headers.
+    if (!_slRowsData.length) {
+        wrap.innerHTML = `<div class="text-center text-muted py-5">
+            <i class="bi bi-card-list ss-empty-icon"></i>
+            <span>${esc(t('syslog_empty'))}</span></div>`;
+        for (const el of [pagerTop, pagerBot]) if (el) el.style.display = 'none';
+        return;
+    }
+    for (const el of [pagerTop, pagerBot]) if (el) el.style.display = '';
     const ordered = _slOrdered();
     const cw = _slCW();
     const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';
@@ -110,8 +121,8 @@ function _slRenderTable() {
         return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${thW(col.id)}>${inner}</th>`;
     }).join('');
     const body = _slRowsData.map(m => `<tr class="sl-row-${_SYSLOG_SEV_CLS[m.severity] || 'secondary'}">${ordered.map(col => _slCellHtml(m, col.id)).join('')}</tr>`).join('');
-    wrap.innerHTML = `<div class="table-responsive rounded border" style="background:var(--ss-pagination-bg, var(--bs-secondary-bg))">
-        <table class="table table-sm table-striped table-hover align-middle mb-0 ss-table" id="sl-table" style="font-size:.82rem;--bs-table-bg:transparent">
+    wrap.innerHTML = `<div class="table-responsive">
+        <table class="table table-sm table-striped table-hover align-middle mb-0 ss-table ss-table-dense" id="sl-table">
             <thead class="ss-thead"><tr>${thRow}</tr></thead>
             <tbody id="sl-rows">${body}</tbody>
         </table></div>`;

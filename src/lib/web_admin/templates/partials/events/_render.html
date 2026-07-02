@@ -42,7 +42,7 @@ function _eventsRender() {
                     <i class="bi bi-info-circle me-2"></i>${esc(t('event_hint'))}
                     <button type="button" class="btn-close ms-auto ss-fs-1" data-bs-dismiss="alert"
                         onclick="sessionStorage.setItem('ss_ev_hint_dismissed','1')" aria-label="${escAttr(t('close') || 'Close')}"></button></div>`}
-                <div class="ss-card ev-card">
+                <div class="ss-card ev-card ss-vfill">
                     <div class="ss-accent ss-accent-purple"></div>
                     <div class="ss-card-header">
                         <h6 class="mb-0 me-auto"><i class="bi bi-bell me-2"></i>${esc(t('event_subtab_rules'))}</h6>
@@ -54,12 +54,12 @@ function _eventsRender() {
                         ${canAdd ? `<button class="btn btn-sm btn-success" onclick="openEventRuleModal(null)"><i class="bi bi-plus-lg me-1"></i>${esc(t('event_add'))}</button>` : ''}
                     </div>
                     <div class="ss-card-band ss-card-band-top" id="ev-rules-pager-top"></div>
-                    <div id="ev-rules-table-wrap"></div>
+                    <div id="ev-rules-table-wrap" class="ss-vscroll"></div>
                     <div class="ss-card-band ss-card-band-bottom" id="ev-rules-pager-bottom"></div>
                 </div>
             </div>` : ''}
             ${canNotify ? `<div class="tab-pane fade${rulesActive ? '' : ' show active'}" id="ev-pane-log" role="tabpanel">
-                <div class="ss-card ev-card">
+                <div class="ss-card ev-card ss-vfill">
                     <div class="ss-accent ss-accent-slate"></div>
                     <div class="ss-card-header">
                         <h6 class="mb-0 me-auto"><i class="bi bi-clock-history me-2"></i>${esc(t('event_log_title'))}</h6>
@@ -71,7 +71,7 @@ function _eventsRender() {
                         ${canNotifyDelete ? `<button class="btn btn-sm btn-danger" onclick="_eventClearLog()"><i class="bi bi-trash me-1"></i>${esc(t('event_log_clear'))}</button>` : ''}
                     </div>
                     <div class="ss-card-band ss-card-band-top" id="ev-log-pager-top"></div>
-                    <div id="ev-log-table-wrap"></div>
+                    <div id="ev-log-table-wrap" class="ss-vscroll"></div>
                     <div class="ss-card-band ss-card-band-bottom" id="ev-log-pager-bottom"></div>
                 </div>
             </div>` : ''}

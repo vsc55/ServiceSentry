@@ -47,6 +47,38 @@ let _rolesSortDir = 'asc';
 let _selectedRoles = new Set();
 let _rolesCurrentPage = [];
 
+// Row/card action buttons (shared by the table actions column and the card view).
+function _rolesRowActions(name, ctx) {
+    const rd = rolesData[name];
+    return `${ctx.canEdit ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditRoleModal(${jsStr(name)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : ''}
+            ${ctx.canClone ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1" onclick="cloneRoleModal(${jsStr(name)})" title="${escAttr(t('clone'))}"><i class="bi bi-copy"></i></button>` : ''}
+            ${ctx.canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" ${rd.builtin?'disabled':`onclick="deleteRole(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}`;
+}
+
+// List/card view toggle (persisted per browser).
+let _rolesViewMode = _loadViewMode('ss_roles_view');
+function _setRolesView(mode) { _rolesViewMode = mode === 'card' ? 'card' : 'table'; localStorage.setItem('ss_roles_view', _rolesViewMode); renderRoles(); }
+function _rolesCardsBody(names, ctx) {
+    return _cardGrid(names.map(name => {
+        const rd = rolesData[name];
+        const badges = [
+            rd.builtin ? `<i class="bi bi-lock-fill text-muted" style="font-size:.8em" title="${escAttr(t('role_builtin_badge'))}"></i>` : '',
+            (!rd.builtin && rd.enabled === false) ? `<span class="badge bg-secondary fw-normal ss-fs-1">${t('status_disabled')}</span>` : '',
+        ].join('');
+        const permChip = `<span class="badge bg-secondary rounded-pill"><i class="bi bi-key me-1"></i>${(rd.permissions || []).length}</span>`;
+        return _entityCard({
+            icon: 'bi-shield-lock', accent: 'linear-gradient(90deg,#7c3aed,#a855f7)',
+            selected: _selectedRoles.has(name),
+            toggle: (ctx.showActions && !rd.builtin) ? `_rolesToggleOne(${jsStr(name)}, this.checked)` : '',
+            title: `<code class="fw-semibold ss-fs-4">${esc(rd.name || name)}</code>`, badges,
+            subtitle: rd.description ? esc(rd.description) : '',
+            chips: permChip,
+            actions: ctx.showActions ? _rolesRowActions(name, ctx) : '',
+            dimmed: !rd.builtin && rd.enabled === false,
+        });
+    }).join(''));
+}
+
 createListTable({
     key: 'roles', containerId: 'roles-container', tableId: 'roles-table',
     accent: 'purple', icon: 'bi-shield-lock', title: () => t('role_management'),
@@ -89,12 +121,12 @@ createListTable({
             default:            return '<td></td>';
         }
     },
-    actions: (name, ctx) => {
-        const rd = rolesData[name];
-        return `${ctx.canEdit ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditRoleModal(${jsStr(name)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : ''}
-                ${ctx.canClone ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1" onclick="cloneRoleModal(${jsStr(name)})" title="${escAttr(t('clone'))}"><i class="bi bi-copy"></i></button>` : ''}
-                ${ctx.canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" ${rd.builtin?'disabled':`onclick="deleteRole(${jsStr(name)})"`} title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}`;
-    },
+    actions: (name, ctx) => _rolesRowActions(name, ctx),
+    // List/card view toggle (like the Sessions table).
+    bodyMode: () => _rolesViewMode === 'table' ? 'table' : 'cards',
+    showChooser: mode => mode === 'table',
+    cardsBody: (names, ctx) => _rolesCardsBody(names, ctx),
+    headerLead: (ctx, mode) => _viewToggleLead(mode, '_setRolesView'),
     bulkBar: (ctx, sel) => {
         const _nonBuiltinSelected = [...sel].filter(n => !rolesData[n]?.builtin).length;
         return (ctx.showActions && sel.size > 0) ? `

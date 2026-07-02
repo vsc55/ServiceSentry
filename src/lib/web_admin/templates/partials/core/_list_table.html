@@ -113,11 +113,11 @@ function createListTable(spec) {
     async function render() {
         const c = document.getElementById(spec.containerId);
         if (!c) return;
-        // Full-height layout: every createListTable container fills its pane so its
-        // card stretches to the viewport and the table body scrolls (see the
-        // `.ss-fill-card` rules in web_admin.css). Marked here so a new list table
-        // inherits it without touching CSS — no per-section id lists.
-        c.classList.add('ss-fill-card');
+        // Full-height layout: the container fills its pane (.ss-vfill), the card
+        // inside it stretches (.ss-vfill) and the table body scrolls (.ss-vscroll) —
+        // the same generic classes every table uses (see web_admin.css). Marked here
+        // so a new list table inherits it without touching CSS — no per-section ids.
+        c.classList.add('ss-vfill');
         try {
         // Materialise dynamic state synchronously (before any await) so getVis()/
         // getOrd() never return null (e.g. clusters' "use defaults" sentinel).
@@ -247,11 +247,11 @@ function createListTable(spec) {
         }
 
         const pagination = _renderPagination(total, page, st.pageSize.get(), gp.goPage, gp.changePageSize);
-        c.innerHTML = `<div class="${cardClass}">
+        c.innerHTML = `<div class="${cardClass} ss-vfill">
         ${accentDiv}
         ${headerHtml}
         <div class="ss-card-band ss-card-band-top">${pagination}</div>
-        <div>${h}</div>
+        <div class="ss-vscroll">${h}</div>
         <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
     </div>`;
         if (mode !== 'cards') setTimeout(initFeatures, 0);

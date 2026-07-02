@@ -105,6 +105,8 @@ CARDS: tuple[dict, ...] = (
      'renderer': 'tables'},
     {'tab': 'interface', 'id': 'live_update', 'title_key': 'live_update_section', 'icon': 'bi-arrow-repeat',
      'renderer': 'live_update'},
+    {'tab': 'interface', 'id': 'advanced', 'title_key': 'cfg_advanced_section', 'icon': 'bi-tools',
+     'renderer': 'advanced'},
 )
 
 

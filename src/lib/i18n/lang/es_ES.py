@@ -1721,6 +1721,13 @@ LANG = {
     'tables_section':      'Tablas',
     'live_update_section':    'Actualizaciones en Vivo',
     'login_security_section': 'Seguridad de Login',
+    # Herramientas avanzadas — inspector de localStorage (pestaña Interfaz)
+    'cfg_advanced_section':   'Avanzado',
+    'cfg_advanced_toggle':    'Herramientas avanzadas',
+    'cfg_advanced_hint':      'Muestra el estado de interfaz que este navegador guarda en localStorage (modos de vista, columnas, pestañas activas…). Solo afecta a este navegador.',
+    'cfg_reset_ui':           'Restablecer preferencias de UI',
+    'cfg_reset_ui_confirm':   '¿Borrar todas las preferencias de interfaz de este navegador (claves ss_*) y recargar?',
+    'cfg_ls_empty':           'Sin entradas en localStorage.',
     'status_lang_default': '— Usar idioma por defecto —',
     # Etiquetas de roles
     'role_labels': {

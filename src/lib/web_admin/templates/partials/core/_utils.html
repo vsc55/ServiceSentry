@@ -273,6 +273,43 @@ function escAttr(s) {
  * surrounding double-quotes so they don't terminate the HTML attribute. */
 function jsStr(s) { return escAttr(JSON.stringify(s)); }
 
+// ── List/card view toggle (createListTable tables that offer both views) ─────
+function _loadViewMode(key, def = 'table') { try { return localStorage.getItem(key) || def; } catch (_) { return def; } }
+// The list/card switch, placed via the table's headerLead. `setter` = the name of
+// the table's _set<T>View function.
+function _viewToggleLead(mode, setter) {
+    const isTable = mode === 'table';
+    return `<div class="btn-group btn-group-sm" role="group" title="${escAttr(t('view_mode') || 'View')}">
+        <button class="btn btn-sm ${isTable ? 'btn-secondary' : 'btn-primary'}" onclick="${setter}('card')" title="${escAttr(t('view_cards') || 'Cards')}"><i class="bi bi-grid-3x3-gap"></i></button>
+        <button class="btn btn-sm ${isTable ? 'btn-primary' : 'btn-secondary'}" onclick="${setter}('table')" title="${escAttr(t('view_table') || 'Table')}"><i class="bi bi-table"></i></button>
+    </div>`;
+}
+// Responsive card grid wrapper (shared by every card-mode table).
+function _cardGrid(inner) {
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:.7rem;margin:.75rem">${inner}</div>`;
+}
+// Reusable entity card (matches the sessions card style): accent strip, optional
+// select checkbox, avatar, title + badges, subtitle, chips row, actions.
+//   o = {icon, iconBg, iconColor, accent, selected, toggle, title, badges,
+//        subtitle, chips, actions, dimmed}
+function _entityCard(o) {
+    const acc = o.accent || 'linear-gradient(90deg,var(--bs-primary),#60a5fa)';
+    return `<div class="rounded-3 overflow-hidden border" style="background:var(--bs-tertiary-bg);box-shadow:0 2px 6px rgba(0,0,0,.06)${o.dimmed ? ';opacity:.55' : ''}">
+        <div style="height:3px;background:${acc}"></div>
+        <div class="d-flex align-items-center gap-2 px-3 py-2">
+            ${o.toggle ? `<input type="checkbox" class="form-check-input flex-shrink-0" ${o.selected ? 'checked' : ''} onchange="${o.toggle}">` : ''}
+            <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                  style="width:36px;height:36px;background:${o.iconBg || 'var(--bs-secondary-bg)'};color:${o.iconColor || 'var(--bs-secondary-color)'};font-size:1rem"><i class="bi ${o.icon}"></i></span>
+            <div class="flex-grow-1 min-w-0">
+                <div class="d-flex align-items-center gap-1 flex-wrap">${o.title}${o.badges || ''}</div>
+                ${o.subtitle ? `<div class="text-muted ss-fs-2 text-truncate">${o.subtitle}</div>` : ''}
+            </div>
+            ${o.actions ? `<div class="d-flex flex-shrink-0 align-items-start">${o.actions}</div>` : ''}
+        </div>
+        ${o.chips ? `<div class="d-flex flex-wrap gap-1 px-3 pb-2 pt-0">${o.chips}</div>` : ''}
+    </div>`;
+}
+
 /** In-app error/empty panel mirroring the server-rendered error.html page
  * (404/500/403…). Reusable for any "access denied" / error state shown inside
  * the SPA. Pass code='' to omit the big number (e.g. a plain empty state). */

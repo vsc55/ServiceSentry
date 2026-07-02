@@ -2,9 +2,10 @@ async function renderSyslog() {
     const c = document.getElementById('syslog-container');
     if (!c) return;
     c.innerHTML = `
-      <div class="card">
-        <div class="card-body">
-          <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+      <!-- Filters -->
+      <div class="ss-card mb-3">
+        <div class="card-body py-2 px-3">
+          <div class="d-flex flex-wrap align-items-end gap-2">
             <div><label class="form-label small mb-1">${esc(t('syslog_host'))}</label>
               <select id="sl-host" class="form-select form-select-sm" style="min-width:140px"></select></div>
             <div><label class="form-label small mb-1">${esc(t('syslog_min_severity'))}</label>
@@ -17,24 +18,33 @@ async function renderSyslog() {
               <input id="sl-to" type="datetime-local" class="form-control form-control-sm" style="min-width:175px"></div>
             <div class="flex-grow-1"><label class="form-label small mb-1">${esc(t('syslog_search'))}</label>
               <input id="sl-q" type="search" class="form-control form-control-sm" placeholder="${escAttr(t('syslog_search'))}"></div>
-            <div class="d-flex gap-2 align-items-center">
-              ${_buildColChooser(_SL_COLS, _slVisibleCols, '_slToggleCol', '_resetSlCols')}
-              <button class="btn btn-secondary btn-sm" onclick="_syslogReload()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
-              <span id="sl-auto-refresh"></span>
-              ${_syslogCanDelete() ? `<button class="btn btn-danger btn-sm" onclick="_syslogClear()"><i class="bi bi-trash me-1"></i>${esc(t('syslog_clear'))}</button>` : ''}
-            </div>
+            <button class="btn btn-secondary btn-sm" onclick="_syslogClearAllFilters()"><i class="bi bi-funnel me-1"></i>${esc(t('syslog_clear_filters'))}</button>
           </div>
-          <div id="sl-stats" class="mb-3"></div>
-          <div id="sl-active-filters" class="mb-2 d-flex flex-wrap align-items-center gap-1"></div>
-          <div id="sl-status" class="small text-muted mb-2"></div>
-          <div id="sl-drops" class="mb-2"></div>
-          <div id="sl-pager-top" class="mb-2"></div>
-          <div id="sl-table-wrap"></div>
-          <div id="sl-empty" class="text-center text-muted py-5" style="display:none">
-              <i class="bi bi-card-list ss-empty-icon"></i>
-              <span>${esc(t('syslog_empty'))}</span></div>
-          <div id="sl-pager" class="mt-2"></div>
+          <div id="sl-active-filters" class="mt-2 d-flex flex-wrap align-items-center gap-1"></div>
         </div>
+      </div>
+
+      <!-- Statistics -->
+      <div class="ss-card mb-3">
+        <div class="card-body py-2 px-3">
+          <div id="sl-stats"></div>
+        </div>
+      </div>
+
+      <!-- Messages list (same chrome as the Events table) -->
+      <div class="ss-card ss-vfill">
+        <div class="ss-accent ss-accent-teal"></div>
+        <div class="ss-card-header">
+          <span id="sl-status" class="me-auto small mb-0"></span>
+          ${_buildColChooser(_SL_COLS, _slVisibleCols, '_slToggleCol', '_resetSlCols')}
+          <button class="btn btn-secondary btn-sm" onclick="_syslogReload()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+          <span id="sl-auto-refresh"></span>
+          ${_syslogCanDelete() ? `<button class="btn btn-danger btn-sm" onclick="_syslogClear()"><i class="bi bi-trash me-1"></i>${esc(t('syslog_clear'))}</button>` : ''}
+        </div>
+        <div id="sl-drops" class="px-3"></div>
+        <div class="ss-card-band ss-card-band-top" id="sl-pager-top"></div>
+        <div id="sl-table-wrap" class="ss-vscroll"></div>
+        <div class="ss-card-band ss-card-band-bottom" id="sl-pager"></div>
       </div>`;
     // severity select options (0..7, max-inclusive)
     const sev = document.getElementById('sl-sev');
@@ -122,7 +132,7 @@ async function _loadSyslogStats() {
     let collapsed = false;
     try { collapsed = localStorage.getItem(_SL_STATS_KEY) === '1'; } catch (e) {}
     el.innerHTML = `
-        <div class="d-flex align-items-center gap-2 mb-2 pb-1 border-bottom" role="button"
+        <div id="sl-stats-header" class="d-flex align-items-center gap-2${collapsed ? '' : ' mb-2 pb-1 border-bottom'}" role="button"
              style="cursor:pointer" onclick="_syslogToggleStats()">
             <i id="sl-stats-chevron" class="bi ${collapsed ? 'bi-chevron-right' : 'bi-chevron-down'} text-muted"></i>
             <span class="fw-semibold">${esc(t('syslog_stats'))}</span>
@@ -140,10 +150,13 @@ async function _loadSyslogStats() {
 function _syslogToggleStats() {
     const body = document.getElementById('sl-stats-body');
     const chev = document.getElementById('sl-stats-chevron');
+    const hdr  = document.getElementById('sl-stats-header');
     if (!body) return;
     const nowCollapsed = body.style.display !== 'none';
     body.style.display = nowCollapsed ? 'none' : '';
     if (chev) chev.className = 'bi ' + (nowCollapsed ? 'bi-chevron-right' : 'bi-chevron-down') + ' text-muted';
+    // Collapsed → drop the title/panels separator (border-bottom + its spacing) too.
+    if (hdr) ['mb-2', 'pb-1', 'border-bottom'].forEach(cls => hdr.classList.toggle(cls, !nowCollapsed));
     try { localStorage.setItem(_SL_STATS_KEY, nowCollapsed ? '1' : '0'); } catch (e) {}
 }
 

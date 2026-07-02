@@ -196,7 +196,7 @@ function renderAuditTable() {
     const colChooser = _buildColChooser(_AUDIT_COLS, _auditVisibleCols, '_auditToggleCol', '_resetAuditCols', 150);
 
     c.innerHTML = filterBanner + `
-    <div class="ss-card">
+    <div class="ss-card ss-vfill">
         <div class="ss-accent ss-accent-slate"></div>
         <div class="ss-card-band ss-card-band-top d-flex align-items-center justify-content-between flex-wrap gap-2">
             ${pagTop.info}
@@ -205,7 +205,7 @@ function renderAuditTable() {
                 ${pagTop.controls}
             </div>
         </div>
-        <div>${tableHtml}</div>
+        <div class="ss-vscroll">${tableHtml}</div>
         <div class="ss-card-band ss-card-band-bottom">${paginationBot}</div>
     </div>`;
 
