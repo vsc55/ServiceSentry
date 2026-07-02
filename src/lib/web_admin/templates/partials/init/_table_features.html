@@ -110,7 +110,7 @@ const hasAnyCredential = ['credentials_view','credentials_add','credentials_edit
     .some(p => perms.has(p));
 const hasAnyModule  = ['modules_view','modules_add','modules_edit'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('module.'));
-const hasAnyAccess  = hasAnyUser || hasAnyRole || hasAnyGroup || hasAnySessions || hasAnyCredential;
+const hasAnyAccess  = hasAnyUser || hasAnyRole || hasAnyGroup || hasAnySessions;
 // Main access tab
 const accessLi = document.getElementById('tab-access-li');
 if (accessLi) accessLi.style.display = hasAnyAccess ? '' : 'none';
@@ -123,16 +123,15 @@ const stGroups = document.getElementById('subtab-groups-li');
 if (stGroups) stGroups.style.display = hasAnyGroup ? '' : 'none';
 const stRoles = document.getElementById('subtab-roles-li');
 if (stRoles) stRoles.style.display = hasAnyRole ? '' : 'none';
-const stCredentials = document.getElementById('subtab-credentials-li');
-if (stCredentials) stCredentials.style.display = hasAnyCredential ? '' : 'none';
-// Activate saved sub-tab (or fall back to first visible)
+// Activate saved sub-tab (or fall back to first visible). Credentials moved to
+// Infrastructure, so it is no longer part of the Access sub-tab set.
 const _savedSubtabTarget = localStorage.getItem('ss_active_subtab_access');
 const _savedSubtabBtn = _savedSubtabTarget
     ? document.querySelector(`[data-bs-target="${_savedSubtabTarget}"]`) : null;
 const _activeSubtab = (
     _savedSubtabBtn && _savedSubtabBtn.closest('li')?.style.display !== 'none'
         ? _savedSubtabBtn
-        : ['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-credentials']
+        : ['btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-sessions']
             .map(id => document.getElementById(id))
             .find(btn => btn && btn.closest('li')?.style.display !== 'none')
 );
@@ -143,8 +142,9 @@ if (overviewLi) overviewLi.style.display = perms.has('overview_view') ? '' : 'no
 // Modules tab
 const modulesLi = document.getElementById('tab-modules-li');
 if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
-// Infrastructure tab (Servers + Clusters sub-tabs). The general tab shows when
-// the user can see hosts OR manage modules (clusters are multi-bind module checks).
+// Infrastructure tab (Servers + Clusters + Credentials sub-tabs). Shows when the
+// user can see hosts OR manage modules (clusters are multi-bind module checks) OR
+// manage credentials (reusable SSH identities — an infrastructure concern).
 const hasAnyServer = ['servers_view','servers_edit','servers_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('server.'));
 // Clusters are their OWN resource: gated strictly by clusters_* (global) or any
@@ -152,18 +152,21 @@ const hasAnyServer = ['servers_view','servers_edit','servers_delete'].some(p => 
 const hasAnyCluster = ['clusters_view','clusters_add','clusters_edit','clusters_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('cluster.'));
 const serversLi = document.getElementById('tab-servers-li');
-if (serversLi) serversLi.style.display = (hasAnyServer || hasAnyModule || hasAnyCluster) ? '' : 'none';
-// Sub-tabs: Servers gated by host perms, Clusters by cluster perms.
+if (serversLi) serversLi.style.display = (hasAnyServer || hasAnyModule || hasAnyCluster || hasAnyCredential) ? '' : 'none';
+// Sub-tabs: Servers gated by host perms, Clusters by cluster perms, Credentials by
+// credential perms.
 const stSrvHosts = document.getElementById('subtab-srv-hosts-li');
 if (stSrvHosts) stSrvHosts.style.display = hasAnyServer ? '' : 'none';
 const stSrvClusters = document.getElementById('subtab-srv-clusters-li');
 if (stSrvClusters) stSrvClusters.style.display = hasAnyCluster ? '' : 'none';
+const stCredentials = document.getElementById('subtab-credentials-li');
+if (stCredentials) stCredentials.style.display = hasAnyCredential ? '' : 'none';
 // Activate the saved infra sub-tab, or the first visible one.
 const _savedInfra = localStorage.getItem('ss_active_subtab_infra');
 const _savedInfraBtn = _savedInfra ? document.querySelector(`[data-bs-target="${_savedInfra}"]`) : null;
 const _activeInfra = (_savedInfraBtn && _savedInfraBtn.closest('li')?.style.display !== 'none')
     ? _savedInfraBtn
-    : ['btn-subtab-srv-hosts','btn-subtab-srv-clusters']
+    : ['btn-subtab-srv-hosts','btn-subtab-srv-clusters','btn-subtab-credentials']
         .map(id => document.getElementById(id))
         .find(btn => btn && btn.closest('li')?.style.display !== 'none');
 if (_activeInfra) bootstrap.Tab.getOrCreateInstance(_activeInfra).show();

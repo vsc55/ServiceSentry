@@ -29,6 +29,7 @@ from .constants import (
 )
 from lib.config.spec import (
     CFG_BY_PATH, cfg_validate, env_field_specs, normalize_url, registry_defaults)
+from lib.config.layout import config_layout
 from .auth import ldap_auth as _ldap_auth
 from .auth import oidc_auth as _oidc_auth
 from .auth import saml_auth as _saml_auth
@@ -937,6 +938,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_startup_id':  self._startup_id,
                 'wa_default_dark_mode': self._default_dark_mode,
                 'config_registry_defaults': registry_defaults(),
+                'config_layout': config_layout(),
                 'ldap_enabled':       _ldap_auth.is_available()  and bool(_ldap_cfg.get('enabled')),
                 'ldap_button_label':  (_ldap_cfg.get('button_label')  or '').strip(),
                 'oidc_enabled':       _oidc_auth.is_available()  and bool(_oidc_cfg.get('enabled')),

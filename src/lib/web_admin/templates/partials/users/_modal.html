@@ -209,8 +209,13 @@ async function openUserModal(username, mode = 'edit') {
     en.checked  = (mode === 'new') ? true : u.enabled !== false;   // clone copies the source state
     en.disabled = isSelf;                           // can't disable your own account
 
-    document.getElementById('umUidRow').classList.toggle('d-none', isNew);
-    document.getElementById('umUid').value = isNew ? '' : (u.uid || '');
+    // The modal has no UID field; guard so a missing element never throws and
+    // aborts the rest of this function (which hides Active Sessions for new users).
+    const _umUidRow = document.getElementById('umUidRow');
+    if (_umUidRow) _umUidRow.classList.toggle('d-none', isNew);
+    const _umUid = document.getElementById('umUid');
+    if (_umUid) _umUid.value = isNew ? '' : (u.uid || '');
+    _umIsNew = isNew;   // Active-sessions render is suppressed while creating a user
 
     // Active sessions + Preferences (Customisations) tab only exist for a real user.
     if (isNew) {

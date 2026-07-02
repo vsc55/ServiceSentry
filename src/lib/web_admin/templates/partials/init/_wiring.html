@@ -49,12 +49,14 @@ document.getElementById('btn-tab-events')?.addEventListener('shown.bs.tab', rend
 // hostsData stale until reloaded).
 document.getElementById('btn-tab-servers')?.addEventListener('shown.bs.tab', () => {
     reloadHosts();
-    // Refresh the Clusters sub-tab too when it is the active pane (Bootstrap does
-    // not re-fire the sub-tab's shown event when only the parent tab changes).
+    // Refresh the active sub-tab too when the parent Infrastructure tab is shown
+    // (Bootstrap does not re-fire a sub-tab's shown event on a parent tab change).
     if (document.getElementById('subtab-srv-clusters')?.classList.contains('active')
         && typeof renderClusters === 'function') renderClusters();
+    if (document.getElementById('subtab-credentials')?.classList.contains('active')
+        && typeof renderCredentials === 'function') renderCredentials();
 });
-// Infrastructure sub-tabs: render Clusters on demand; persist the active sub-tab.
+// Infrastructure sub-tabs: render on demand; persist the active sub-tab.
 document.getElementById('btn-subtab-srv-clusters')?.addEventListener('shown.bs.tab', () => {
     localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-clusters');
     renderClusters();
@@ -68,7 +70,11 @@ document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModa
 document.getElementById('btnGroupModalOk').addEventListener('click', saveGroupModal);
 
 document.getElementById('btn-tab-overview')?.addEventListener('shown.bs.tab', renderOverview);
-document.getElementById('btn-subtab-credentials')?.addEventListener('shown.bs.tab', renderCredentials);
+// Credentials now lives under Infrastructure: render + persist under the infra key.
+document.getElementById('btn-subtab-credentials')?.addEventListener('shown.bs.tab', () => {
+    localStorage.setItem('ss_active_subtab_infra', '#subtab-credentials');
+    renderCredentials();
+});
 document.getElementById('mainTabs')?.addEventListener('shown.bs.tab', e => {
     localStorage.setItem('ss_active_tab', e.target.dataset.bsTarget);
 });
@@ -100,7 +106,7 @@ window.addEventListener('beforeunload', e => {
     }
 });
 // Persist the active Access sub-tab across reloads
-['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-credentials'].forEach(id => {
+['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles'].forEach(id => {
     document.getElementById(id)?.addEventListener('shown.bs.tab', e => {
         localStorage.setItem('ss_active_subtab_access', e.target.dataset.bsTarget);
     });

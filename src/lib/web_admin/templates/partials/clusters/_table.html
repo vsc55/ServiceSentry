@@ -10,12 +10,19 @@
    columns are declared per-module via the __cluster_columns__ schema meta.
    ================================================================ #}
 
-// Modules that bind ONE check to SEVERAL hosts (a cluster), present in config.
+// Modules that bind ONE check to SEVERAL hosts (a cluster), present in config
+// (these drive the rows/columns — they must exist in modulesData).
 function _clusterModules() {
     return Object.keys(MODULE_HOST_MULTI_BIND || {})
         .filter(m => MODULE_HOST_MULTI_BIND[m]
                   && modulesData[m] && typeof modulesData[m] === 'object'
                   && !Array.isArray(modulesData[m]));
+}
+// Cluster-capable module TYPES available in this build (declare __host_multiple_bind__),
+// regardless of whether any is configured yet — used for the "New cluster" chooser so
+// the first cluster can be created from scratch (newCluster bootstraps the entry).
+function _clusterAddableModules() {
+    return Object.keys(MODULE_HOST_MULTI_BIND || {}).filter(m => MODULE_HOST_MULTI_BIND[m]);
 }
 
 // Cluster permissions (view/add/edit/delete) — gated STRICTLY by the dedicated
@@ -82,19 +89,52 @@ function _clMembersHtml(item) {
     return `<span class="badge text-bg-secondary" title="${escAttr(names.join(', '))}">${names.length}</span>`;
 }
 
-// "New cluster" control: a plain button for a single multi-bind module, or a
-// dropdown to choose the module when several qualify.
-function _clNewControl(mods) {
-    if (mods.length === 1) {
-        return `<button class="btn btn-sm btn-success" onclick="newCluster('${esc(mods[0])}')">
-            <i class="bi bi-plus-lg me-1"></i>${esc(t('cl_new'))}</button>`;
+// "New cluster" control: a single button that opens a picker modal listing the
+// cluster-capable module types (same style as "Add Module"), so the user chooses
+// the type — Proxmox today, anything declaring __host_multiple_bind__ tomorrow.
+function _clNewControl() {
+    return `<button class="btn btn-sm btn-success" onclick="openNewClusterModal()">
+        <i class="bi bi-plus-lg me-1"></i>${esc(t('cl_new'))}</button>`;
+}
+
+// Modal picker of the available cluster-capable module types (mirrors the Add
+// Module modal: a grid of icon + name cards, one per type).
+function openNewClusterModal() {
+    const mods = _clusterAddableModules();
+    const titleEl = document.getElementById('newClusterModalTitle');
+    if (titleEl) titleEl.textContent = t('cl_new') + (mods.length ? ` (${mods.length})` : '');
+    const body = document.getElementById('newClusterModalBody');
+    if (!body) return;
+    if (!mods.length) {
+        body.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-diagram-3" style="font-size:2rem;opacity:.3;display:block;margin-bottom:.5rem"></i>
+            <span>${esc(t('clusters_none_modules'))}</span></div>`;
+    } else {
+        let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.65rem">`;
+        for (const name of mods) {
+            const icon = moduleIcon(name, {});
+            const pname = modulePrettyName(name, {});
+            const hue = _moduleHue(name);
+            const accentColor = `hsl(${hue},65%,55%)`;
+            h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
+                       style="cursor:pointer;background:var(--ss-surface-bg,var(--bs-body-bg));transition:box-shadow .15s,border-color .15s"
+                       onclick="newClusterFromPicker(${jsStr(name)})"
+                       onmouseover="this.style.boxShadow='0 4px 14px rgba(0,0,0,.13)';this.style.borderColor='${accentColor}'"
+                       onmouseout="this.style.boxShadow='';this.style.borderColor=''">
+                <span class="ss-mod-av rounded-2 d-flex align-items-center justify-content-center"
+                      style="--mh:${hue};width:46px;height:46px;font-size:1.35rem">${icon}</span>
+                <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${esc(pname)}</div>
+                <code class="text-muted ss-fs-2">${esc(name)}</code>
+            </div>`;
+        }
+        body.innerHTML = h + `</div>`;
     }
-    const items = mods.map(m =>
-        `<li><button class="dropdown-item" onclick="newCluster('${esc(m)}')">${esc(_modPrettyName(m))}</button></li>`).join('');
-    return `<div class="dropdown d-inline-block">
-        <button class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown">
-            <i class="bi bi-plus-lg me-1"></i>${esc(t('cl_new'))}</button>
-        <ul class="dropdown-menu dropdown-menu-end">${items}</ul></div>`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('newClusterModal')).show();
+}
+
+function newClusterFromPicker(mod) {
+    bootstrap.Modal.getInstance(document.getElementById('newClusterModal'))?.hide();
+    newCluster(mod);
 }
 
 // ── Table columns / sort / pagination (same machinery as the Servers table) ──
@@ -165,7 +205,7 @@ function _canWriteAnyCluster() {
 }
 createListTable({
     key: 'clusters', containerId: 'clusters-container', tableId: 'clusters-table',
-    cardClass: 'ss-card mb-3', accent: 'slate', icon: 'bi-diagram-3', title: () => esc(t('clusters_title')),
+    cardClass: 'ss-card', accent: 'slate', icon: 'bi-diagram-3', title: () => esc(t('clusters_title')),
     columns: ctx => _clCols((ctx && ctx.extraCols) || []),
     defaultVisible: ctx => {
         const s = new Set();
@@ -192,7 +232,7 @@ createListTable({
                 extraCols.push({ field: f, label: fieldLabel(f, fieldMeta(sch, f)) });
             }
         }
-        return { mods, extraCols, canSave: _canWriteAnyCluster() };
+        return { mods, extraCols, addable: _clusterAddableModules(), canSave: _canWriteAnyCluster() };
     },
     rows: ctx => {
         const out = [];
@@ -252,11 +292,13 @@ createListTable({
     },
     refreshButton: () => `<button class="btn btn-sm btn-secondary ms-1" onclick="renderClusters()" title="${escAttr(t('refresh_tt'))}">
                 <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>`,
-    headerButtons: ctx => `${_canAddClusters() && ctx.mods.length ? `<span class="ms-1">${_clNewControl(ctx.mods)}</span>` : ''}
+    headerButtons: ctx => `${_canAddClusters() && (ctx.addable || []).length ? `<span class="ms-1">${_clNewControl()}</span>` : ''}
             ${ctx.canSave ? `<button class="btn btn-sm btn-success ms-1" onclick="saveModules().then(() => renderClusters())">
                 <i class="bi bi-save me-1"></i>${esc(t('save'))}</button>` : ''}`,
-    emptyBody: ctx => !ctx.mods.length
-        ? `<div class="p-3"><div class="alert alert-info mb-0">${esc(t('clusters_none_modules'))}</div></div>`
+    emptyBody: ctx => !((ctx && ctx.addable || []).length)
+        ? `<div class="text-center py-5 text-muted">
+                 <i class="bi bi-diagram-3 ss-empty-icon"></i>
+                 <span>${esc(t('clusters_none_modules'))}</span></div>`
         : `<div class="text-center py-5 text-muted">
                  <i class="bi bi-diagram-3 ss-empty-icon"></i>
                  <span>${esc(t('cl_empty'))}</span></div>`,
@@ -296,9 +338,13 @@ function newCluster(mod) {
     const def = schemaDefaults(sch) || {};
     if (!('enabled' in def)) def.enabled = true;
     def.host_uids = Array.isArray(def.host_uids) ? def.host_uids : [];
+    // Bootstrap the module entry so the FIRST cluster can be created before the
+    // module has any config (the "New cluster" chooser offers available types).
+    if (!modulesData[mod] || typeof modulesData[mod] !== 'object' || Array.isArray(modulesData[mod]))
+        modulesData[mod] = {};
     if (!modulesData[mod][coll] || typeof modulesData[mod][coll] !== 'object'
         || Array.isArray(modulesData[mod][coll])) modulesData[mod][coll] = {};
-    const key = 'cl-' + uid();          // opaque id; the human name lives in the title field
+    const key = _genUuid();             // opaque, globally-unique id (like hosts); the human name lives in the title field
     modulesData[mod][coll][key] = def;
     markDirty('modules');
     openClusterEdit(mod, coll, key, true);

@@ -12,7 +12,10 @@ let _umSelectedGroups = new Set();
 // exists, otherwise the built-in 'none' role (mirrors the backend fallback).
 function _defaultUserRole() {
     const want = (configData && configData.users) ? configData.users.default_role : '';
-    return (want && rolesData && rolesData[want]) ? want : 'none';
+    // Fall back to the built-in 'none' role's UID (roles are keyed by stable UID, so
+    // the literal 'none' matches nothing) — mirrors _defaultGroupRole so a new user
+    // preselects the configured/default role just like a new group does.
+    return (want && rolesData && rolesData[want]) ? want : _noneRoleUid();
 }
 
 // Bind search inputs and event delegation once (after DOM ready)
@@ -160,6 +163,7 @@ createListTable({
 let _umSessionsSort = 'last_seen';
 let _umSessionsSortDir = 'desc';
 let _umSessionsUsername = null;
+let _umIsNew = false;   // true while the user modal is creating (new/clone) — no sessions
 
 function _umSortSessions(col) {
     if (_umSessionsSort === col) _umSessionsSortDir = _umSessionsSortDir === 'asc' ? 'desc' : 'asc';
@@ -173,6 +177,9 @@ function _umRenderSessions(username) {
     const table   = document.getElementById('umSessionsTable');
     const countEl = document.getElementById('umSessionsCount');
     if (!group || !table) return;
+    // Never show sessions while creating a user (a new user has none, and a stale
+    // username from a prior edit must not leak the current user's sessions here).
+    if (_umIsNew) { group.style.display = 'none'; return; }
     const entries = Object.values(sessionsData).filter(s => s.username === username);
     countEl.textContent = entries.length || '';
     if (!entries.length) {

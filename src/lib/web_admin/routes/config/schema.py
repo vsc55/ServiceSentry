@@ -6,10 +6,19 @@ from flask import jsonify
 
 from ...constants import SUPPORTED_LANGS
 from lib.config.spec import cfg_default, cfg_meta, frontend_schema
+from lib.config.layout import config_layout
 
 
 def register(app, wa):
     config_view_req = wa._perm_required('config_view', 'config_edit')
+
+    @app.route('/api/v1/config/layout', methods=['GET'])
+    @config_view_req
+    def api_get_config_layout():
+        """The config UI layout (sub-tabs → cards) from the central registry
+        (``lib.config.layout``) — so the web admin renders the config screen from
+        this single source of truth instead of hardcoding the structure."""
+        return jsonify(config_layout())
 
     @app.route('/api/v1/config/schema', methods=['GET'])
     @config_view_req

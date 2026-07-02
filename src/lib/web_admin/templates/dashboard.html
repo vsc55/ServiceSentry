@@ -85,11 +85,6 @@
                 <i class="bi bi-hdd-network me-1"></i>{{ i18n.tab_infrastructure }}
             </button>
         </li>
-        <li class="nav-item" role="presentation" id="tab-config-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-config" type="button">
-                <i class="bi bi-gear me-1"></i>{{ i18n.tab_config }}
-            </button>
-        </li>
         <li class="nav-item" role="presentation" id="tab-status-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-status" type="button"
                 id="btn-tab-status">
@@ -100,6 +95,12 @@
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-history" type="button"
                 id="btn-tab-history">
                 <i class="bi bi-graph-up me-1"></i>{{ i18n.tab_history }}
+            </button>
+        </li>
+        <li class="nav-item" role="presentation" id="tab-events-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-events" type="button"
+                id="btn-tab-events">
+                <i class="bi bi-bell me-1"></i>{{ i18n.tab_events }}
             </button>
         </li>
         <li class="nav-item" role="presentation" id="tab-syslog-li" style="display:none">
@@ -114,15 +115,15 @@
                 <i class="bi bi-hdd-rack me-1"></i>{{ i18n.tab_services }}
             </button>
         </li>
-        <li class="nav-item" role="presentation" id="tab-events-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-events" type="button"
-                id="btn-tab-events">
-                <i class="bi bi-bell me-1"></i>{{ i18n.tab_events }}
+        <li class="nav-item" role="presentation" id="tab-config-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-config" type="button"
+                id="btn-tab-config">
+                <i class="bi bi-gear me-1"></i>{{ i18n.tab_config }}
             </button>
         </li>
         <li class="nav-item" role="presentation" id="tab-access-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-access" type="button" id="btn-tab-access">
-                <i class="bi bi-person-lock me-1"></i>{{ i18n.tab_users }}
+                <i class="bi bi-person-lock me-1"></i>{{ i18n.tab_access }}
             </button>
         </li>
         <li class="nav-item" role="presentation" id="tab-audit-li" style="display:none">
@@ -179,6 +180,13 @@
                         <i class="bi bi-diagram-3 me-1"></i>{{ i18n.subtab_clusters }}
                     </button>
                 </li>
+                <!-- Credentials: reusable SSH identities referenced by hosts/checks — an
+                     infrastructure concern, so it lives here (not under Access/RBAC). -->
+                <li class="nav-item" role="presentation" id="subtab-credentials-li" style="display:none">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-credentials" type="button" id="btn-subtab-credentials">
+                        <i class="bi bi-key me-1"></i>{{ i18n.tab_credentials }}
+                    </button>
+                </li>
             </ul>
             <div class="tab-content">
                 <div class="tab-pane fade" id="subtab-srv-hosts">
@@ -186,6 +194,52 @@
                 </div>
                 <div class="tab-pane fade" id="subtab-srv-clusters">
                     <div id="clusters-container"></div>
+                </div>
+                <div class="tab-pane fade" id="subtab-credentials">
+                    <div id="credentials-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Status Tab ===================== -->
+        <div class="tab-pane fade" id="tab-status">
+            <div id="status-container">
+                <p class="text-muted">{{ i18n.status_placeholder }}</p>
+            </div>
+        </div>
+
+        <!-- ==================== History Tab ==================== -->
+        <div class="tab-pane fade" id="tab-history">
+            <div id="history-container">
+                <div class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Events Tab ===================== -->
+        <div class="tab-pane fade" id="tab-events">
+            <div id="events-container">
+                <div class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Syslog Tab ===================== -->
+        <div class="tab-pane fade" id="tab-syslog">
+            <div id="syslog-container">
+                <div class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Services Tab ===================== -->
+        <div class="tab-pane fade" id="tab-services">
+            <div id="services-container">
+                <div class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm"></div>
                 </div>
             </div>
         </div>
@@ -225,58 +279,10 @@
             <div id="config-container"></div>
         </div>
 
-        <!-- ==================== Status Tab ===================== -->
-        <div class="tab-pane fade" id="tab-status">
-            <div id="status-container">
-                <p class="text-muted">{{ i18n.status_placeholder }}</p>
-            </div>
-        </div>
-
-        <!-- ==================== History Tab ==================== -->
-        <div class="tab-pane fade" id="tab-history">
-            <div id="history-container">
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ==================== Syslog Tab ===================== -->
-        <div class="tab-pane fade" id="tab-syslog">
-            <div id="syslog-container">
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ==================== Services Tab ===================== -->
-        <div class="tab-pane fade" id="tab-services">
-            <div id="services-container">
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ==================== Events Tab ===================== -->
-        <div class="tab-pane fade" id="tab-events">
-            <div id="events-container">
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ==================== Users Tab ====================== -->
+        <!-- ==================== Access Tab ===================== -->
         <div class="tab-pane fade" id="tab-access">
             <!-- Sub-tab nav -->
             <ul class="nav nav-tabs mb-3" id="accessSubTabs" role="tablist">
-                <li class="nav-item" role="presentation" id="subtab-sessions-li" style="display:none">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-sessions" type="button" id="btn-subtab-sessions">
-                        <i class="bi bi-plug me-1"></i>{{ i18n.subtab_sessions }}
-                    </button>
-                </li>
                 <li class="nav-item" role="presentation" id="subtab-users-li" style="display:none">
                     <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-users" type="button" id="btn-subtab-users">
                         <i class="bi bi-person me-1"></i>{{ i18n.subtab_users }}
@@ -292,17 +298,13 @@
                         <i class="bi bi-shield-lock me-1"></i>{{ i18n.subtab_roles }}
                     </button>
                 </li>
-                <li class="nav-item" role="presentation" id="subtab-credentials-li" style="display:none">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-credentials" type="button" id="btn-subtab-credentials">
-                        <i class="bi bi-key me-1"></i>{{ i18n.tab_credentials }}
+                <li class="nav-item" role="presentation" id="subtab-sessions-li" style="display:none">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-sessions" type="button" id="btn-subtab-sessions">
+                        <i class="bi bi-plug me-1"></i>{{ i18n.subtab_sessions }}
                     </button>
                 </li>
             </ul>
             <div class="tab-content">
-                <!-- Sessions sub-tab (card built by the createListTable factory) -->
-                <div class="tab-pane fade" id="subtab-sessions">
-                    <div id="sessions-container"></div>
-                </div>
                 <!-- Users sub-tab -->
                 <div class="tab-pane fade" id="subtab-users">
                     <div id="users-container"></div>
@@ -315,9 +317,9 @@
                 <div class="tab-pane fade" id="subtab-roles">
                     <div id="roles-container"></div>
                 </div>
-                <!-- Credentials sub-tab -->
-                <div class="tab-pane fade" id="subtab-credentials">
-                    <div id="credentials-container"></div>
+                <!-- Sessions sub-tab (card built by the createListTable factory) -->
+                <div class="tab-pane fade" id="subtab-sessions">
+                    <div id="sessions-container"></div>
                 </div>
             </div>
         </div>

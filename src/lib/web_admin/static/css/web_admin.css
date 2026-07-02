@@ -213,15 +213,11 @@
     flex-direction: column;
     min-height: 0;
 }
-/* Nested Access sub-tabs (Sessions/Users/Groups/Roles) fill their parent pane;
-   the sub-tab nav keeps its height and the sub-pane fills the rest. */
-#tab-access > .tab-content {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-#tab-access > .tab-content > .tab-pane.active {
+/* Any top-level tab that hosts a nested sub-tab bar (Access, Infrastructure, …)
+   fills its pane so the active sub-pane's card stretches — generic, no per-tab ids:
+   the sub-tab nav keeps its height, the active sub-pane fills the rest. */
+.container-fluid > .tab-content > .tab-pane.active > .tab-content,
+.container-fluid > .tab-content > .tab-pane.active > .tab-content > .tab-pane.active {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
@@ -229,9 +225,11 @@
 }
 /* Each section's primary container grows to fill its pane.  Toolbars/headers
    rendered before the container keep their natural height (flexbox handles it). */
+/* .ss-fill-card = any createListTable container (added by the factory); the
+   remaining ids are the non-factory sections (custom layouts). */
 #overview-container, #modules-container, #config-container, #status-container,
-#history-container, #users-container, #groups-container, #roles-container,
-#audit-container, #sessions-container, #credentials-container, #events-container {
+#history-container, #audit-container, #events-container,
+.ss-fill-card {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
@@ -255,13 +253,9 @@
 }
 /* List/panel cards fill their container; the table/body area grows and scrolls
    while the pagination bands stay pinned top/bottom. */
-#users-container  > .ss-card,
-#groups-container > .ss-card,
-#roles-container  > .ss-card,
 #audit-container  > .ss-card,
-#credentials-container > .ss-card,
-#sessions-container > .ss-card,
-#history-container > .ss-card {
+#history-container > .ss-card,
+.ss-fill-card > .ss-card {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
@@ -303,12 +297,8 @@
 .min-w-0 { min-width: 0 !important; }
 /* The chart toolbar sits as a band above the drawing zone (distinct bg). */
 #history-toolbar.ss-card-band { flex-shrink: 0; }
-#users-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
-#groups-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
-#roles-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
-#credentials-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
-#sessions-container > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
-#audit-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band) {
+#audit-container  > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band),
+.ss-fill-card > .ss-card > div:not(.ss-accent):not(.ss-card-header):not(.ss-card-band) {
     flex: 1 1 auto;
     overflow: auto;
     min-height: 0;

@@ -55,14 +55,14 @@ function _clGeneralChrome(item, path, titleField, key, sch) {
         <input type="text" class="form-control form-control-sm" value="${escAttr(item[titleField] || '')}"
             oninput="updateField('modules',${jsStr(path + '|' + titleField)},this.value);${setTitle}">
     </div>
-    <div class="mb-2">
+    ${(_clEditCtx && _clEditCtx.isNew) ? '' : `<div class="mb-2">
         <label class="form-label small text-muted mb-0">${esc(t('cl_uid'))}</label>
         <div class="input-group input-group-sm">
             <input type="text" class="form-control form-control-sm font-monospace text-muted" value="${escAttr(key)}" readonly>
             <button class="btn btn-sm btn-secondary" type="button" title="${escAttr(t('copy_uid') || t('cl_uid_tt'))}"
                 onclick="_copyToClipboard(${jsStr(key)})"><i class="bi bi-copy"></i></button>
         </div>
-    </div>
+    </div>`}
     ${enabledSwitch}
     ${extra}`;
 }

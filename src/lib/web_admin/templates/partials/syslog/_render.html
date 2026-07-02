@@ -30,7 +30,9 @@ async function renderSyslog() {
           <div id="sl-drops" class="mb-2"></div>
           <div id="sl-pager-top" class="mb-2"></div>
           <div id="sl-table-wrap"></div>
-          <div id="sl-empty" class="text-center text-muted py-4" style="display:none">${esc(t('syslog_empty'))}</div>
+          <div id="sl-empty" class="text-center text-muted py-5" style="display:none">
+              <i class="bi bi-card-list ss-empty-icon"></i>
+              <span>${esc(t('syslog_empty'))}</span></div>
           <div id="sl-pager" class="mt-2"></div>
         </div>
       </div>`;

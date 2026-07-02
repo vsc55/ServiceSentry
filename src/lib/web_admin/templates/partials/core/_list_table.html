@@ -113,6 +113,12 @@ function createListTable(spec) {
     async function render() {
         const c = document.getElementById(spec.containerId);
         if (!c) return;
+        // Full-height layout: every createListTable container fills its pane so its
+        // card stretches to the viewport and the table body scrolls (see the
+        // `.ss-fill-card` rules in web_admin.css). Marked here so a new list table
+        // inherits it without touching CSS — no per-section id lists.
+        c.classList.add('ss-fill-card');
+        try {
         // Materialise dynamic state synchronously (before any await) so getVis()/
         // getOrd() never return null (e.g. clusters' "use defaults" sentinel).
         if (st.visible.get() == null) st.visible.set(new Set());
@@ -249,6 +255,13 @@ function createListTable(spec) {
         <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
     </div>`;
         if (mode !== 'cards') setTimeout(initFeatures, 0);
+        } catch (err) {
+            // Never leave the tab blank on a render/prepare error: log it and show a
+            // minimal empty state (e.g. a table whose emptyBody/prepare threw).
+            console.error(`list-table[${spec.key}] render failed:`, err);
+            if (!c.innerHTML.trim())
+                c.innerHTML = `<div class="${spec.cardClass || 'ss-card'} p-4 text-center text-muted">${esc(t('no_items') || 'No items')}</div>`;
+        }
     }
 
     // ── Publish legacy global names ─────────────────────────────────────────

@@ -192,7 +192,13 @@ function renderConfig() {
             }
         }
     }
-    ['monitoring', 'ldap', 'oidc', 'email', 'notifications', 'syslog', 'syslog_db', 'events'].forEach(_seedSection);
+    // Seed EVERY section in the registry so 100% of the options are always visible
+    // (each shown with its default until saved) — derived from the source of truth,
+    // never a hardcoded subset. Webhooks is a list (CRUD-managed), not a scalar
+    // section, so it is excluded (seeded as [] below).
+    [...new Set(Object.keys(CONFIG_REGISTRY_DEFAULTS).map(p => p.slice(0, p.indexOf('|'))))]
+        .filter(s => s && s !== 'webhooks')
+        .forEach(_seedSection);
 
     // Dynamic defaults the static registry can't express: the "no access" role's
     // uid depends on the live roles list.
@@ -240,7 +246,11 @@ function renderConfig() {
         return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
     });
 
-    let hGeneral = '', hServer = '', hAuthExt = '', hNotifs = '', hInterface = '', hSyslog = '', hMonitoring = '';
+    // Each card's HTML is captured by its layout id; the layout (CONFIG_LAYOUT)
+    // then decides which sub-tab it lands in and in what order — so placement has
+    // a single source of truth in lib.config.layout, not hardcoded buckets here.
+    const _cardHtml = {};
+    let hNotifs = '';   // telegram + events cards accumulate here for the Notifications tab
 
     for (const sec of sections) {
         const data = configData[sec];
@@ -257,7 +267,7 @@ function renderConfig() {
         if (FEATURE_NONCONFIG_KEYS.has(sec)) continue;
 
         if (AUTH_SECS.has(sec)) {
-            hAuthExt += _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose);
+            _cardHtml[sec] = _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose);
             continue;
         }
 
@@ -273,80 +283,78 @@ function renderConfig() {
         }
 
         if (sec === 'monitoring') {
-            // Own "Monitoring" tab: an enabled toggle + check interval, like syslog
-            // (embedded vs external is the SS_MONITORING_EMBEDDED env, not a field).
-            // Pick only the registry fields so a stale row (e.g. a removed 'mode')
-            // is never rendered as a stray input.
-            hMonitoring += cfgCardOpen(cfgId, '<i class="bi bi-activity me-1"></i>', lbl);
+            // Scheduler card: enabled toggle + check interval (embedded vs external
+            // is the SS_MONITORING_EMBEDDED env, not a field). Pick only the registry
+            // fields so a stale row (e.g. a removed 'mode') is never a stray input.
             const _mon = Object.fromEntries(
                 ['enabled', 'autostart', 'timer_check'].filter(f => f in data).map(f => [f, data[f]]));
-            hMonitoring += renderScalarFields(_mon, sec, 'config', []);
-            hMonitoring += cfgCardClose;
+            _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-activity me-1"></i>', lbl)
+                + renderScalarFields(_mon, sec, 'config', [])
+                + cfgCardClose;
             continue;
         }
 
         if (sec === 'modules') {
-            // Server tab: global module defaults (threads/timeout inherited by
-            // every module when its own value is blank).
-            hServer += cfgCardOpen(cfgId, '<i class="bi bi-grid-3x3-gap-fill me-1"></i>', lbl);
-            hServer += renderScalarFields(data, sec, 'config', []);
-            hServer += cfgCardClose;
+            // Global module-execution defaults (threads/timeout inherited by every
+            // module when its own value is blank) — part of the monitoring engine.
+            _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-grid-3x3-gap-fill me-1"></i>', lbl)
+                + renderScalarFields(data, sec, 'config', [])
+                + cfgCardClose;
             continue;
         }
 
         if (sec === 'database') {
-            // General tab: DB engine selector + only the chosen engine's settings.
-            hGeneral += cfgCardOpen(cfgId, '<i class="bi bi-database me-1"></i>', lbl);
-            hGeneral += _renderDatabaseSection(data);
-            hGeneral += cfgCardClose;
+            // DB engine selector + only the chosen engine's settings.
+            _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-database me-1"></i>', lbl)
+                + _renderDatabaseSection(data)
+                + cfgCardClose;
             continue;
         }
 
         if (sec === 'syslog') {
-            // Its own tab, split into focused sections instead of one long card.
+            // Split into focused cards instead of one long card.
             const _pick = (fields) => Object.fromEntries(fields.filter(f => f in data).map(f => [f, data[f]]));
             // Connection: enable + bind + listener ports.
-            hSyslog += cfgCardOpen('cfgcol_syslog_conn', '<i class="bi bi-ethernet me-1"></i>', t('syslog_sec_connection'));
-            hSyslog += renderScalarFields(_pick(['enabled', 'autostart', 'bind_host', 'udp_port', 'tcp_port', 'tls_port']), sec, 'config', []);
-            hSyslog += cfgCardClose;
+            _cardHtml['syslog_conn'] = cfgCardOpen('cfgcol_syslog_conn', '<i class="bi bi-ethernet me-1"></i>', t('syslog_sec_connection'))
+                + renderScalarFields(_pick(['enabled', 'autostart', 'bind_host', 'udp_port', 'tcp_port', 'tls_port']), sec, 'config', [])
+                + cfgCardClose;
             // Security: TLS material + sender allowlist.
-            hSyslog += cfgCardOpen('cfgcol_syslog_security', '<i class="bi bi-shield-lock me-1"></i>', t('syslog_sec_security'));
-            hSyslog += renderScalarFields(_pick(['tls_cert', 'tls_key', 'allowed_sources']), sec, 'config', []);
-            hSyslog += cfgCardClose;
+            _cardHtml['syslog_security'] = cfgCardOpen('cfgcol_syslog_security', '<i class="bi bi-shield-lock me-1"></i>', t('syslog_sec_security'))
+                + renderScalarFields(_pick(['tls_cert', 'tls_key', 'allowed_sources']), sec, 'config', [])
+                + cfgCardClose;
             // Retention / storage limits.
-            hSyslog += cfgCardOpen('cfgcol_syslog_retention', '<i class="bi bi-archive me-1"></i>', t('syslog_sec_retention'));
-            hSyslog += renderScalarFields(_pick(['retention_days', 'max_rows']), sec, 'config', []);
-            hSyslog += cfgCardClose;
+            _cardHtml['syslog_retention'] = cfgCardOpen('cfgcol_syslog_retention', '<i class="bi bi-archive me-1"></i>', t('syslog_sec_retention'))
+                + renderScalarFields(_pick(['retention_days', 'max_rows']), sec, 'config', [])
+                + cfgCardClose;
             continue;
         }
 
         if (sec === 'syslog_db') {
             // Optional dedicated database for high-volume syslog storage. The
             // connection fields apply only when "enabled" is on (used at startup).
-            hSyslog += cfgCardOpen(cfgId, '<i class="bi bi-database-gear me-1"></i>', lbl);
-            hSyslog += renderField('enabled', data.enabled === true, 'syslog_db|enabled', 'config');
-            hSyslog += _renderDatabaseSection(data, 'syslog_db');
-            hSyslog += cfgCardClose;
+            _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-database-gear me-1"></i>', lbl)
+                + renderField('enabled', data.enabled === true, 'syslog_db|enabled', 'config')
+                + _renderDatabaseSection(data, 'syslog_db')
+                + cfgCardClose;
             continue;
         }
 
-        // General tab: global, web_admin (main fields only)
-        hGeneral += cfgCardOpen(cfgId, '<i class="bi bi-gear me-1"></i>', lbl);
-        hGeneral += renderScalarFields(data, sec, 'config', sec === 'web_admin' ? WA_EXCLUDE : []);
-        hGeneral += cfgCardClose;
+        // Generic scalar section (global, web_admin main fields, users, groups, …)
+        _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-gear me-1"></i>', lbl)
+            + renderScalarFields(data, sec, 'config', sec === 'web_admin' ? WA_EXCLUDE : [])
+            + cfgCardClose;
     }
 
-    // ── Authentication tab: pw_policy + login_security + ldap/oidc/saml2
+    // ── Authentication cards: pw_policy + login_security (ldap/oidc/saml2 already
+    //    captured into _cardHtml during the loop above)
     const pwFields = ['pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol'];
-    let hAuth = '';
-    hAuth += cfgCardOpen('cfgcol_pw_policy', '<i class="bi bi-shield-lock me-1"></i>', t('pw_policy_section'));
-    hAuth += renderScalarFields(Object.fromEntries(pwFields.map(f => [f, wa[f]])), 'web_admin', 'config', []);
-    hAuth += cfgCardClose;
-    hAuth += cfgCardOpen('cfgcol_login_security', '<i class="bi bi-shield-exclamation me-1"></i>', t('login_security_section'));
-    hAuth += renderField('lockout_max_attempts', wa.lockout_max_attempts, 'web_admin|lockout_max_attempts', 'config');
-    hAuth += renderField('lockout_duration_secs', wa.lockout_duration_secs, 'web_admin|lockout_duration_secs', 'config');
-    hAuth += cfgCardClose;
-    hAuth += hAuthExt;
+    _cardHtml['pw_policy'] = cfgCardOpen('cfgcol_pw_policy', '<i class="bi bi-shield-lock me-1"></i>', t('pw_policy_section'))
+        + renderScalarFields(Object.fromEntries(pwFields.map(f => [f, wa[f]])), 'web_admin', 'config', [])
+        + cfgCardClose;
+    _cardHtml['login_security'] = cfgCardOpen('cfgcol_login_security', '<i class="bi bi-shield-exclamation me-1"></i>', t('login_security_section'))
+        + renderField('lockout_max_attempts', wa.lockout_max_attempts, 'web_admin|lockout_max_attempts', 'config')
+        + renderField('lockout_duration_secs', wa.lockout_duration_secs, 'web_admin|lockout_duration_secs', 'config')
+        + cfgCardClose;
 
     // ── Notifications tab: three sub-tabs — Routing | Providers | Templates
     const hNotifRouting   = _renderNotificationsMatrix(cfgCardOpen, cfgCardClose);
@@ -372,7 +380,7 @@ function renderConfig() {
             </button></li>`;
         _nContent += `<div class="tab-pane fade${active ? ' show active' : ''}" id="${st.id}" role="tabpanel">${st.html}</div>`;
     }
-    hNotifs = _nNav + `</ul>` + _nContent + `</div>`;
+    _cardHtml['notifications'] = _nNav + `</ul>` + _nContent + `</div>`;
     // Auto-load templates data if that sub-tab is already active when the config renders
     if (_activeNotifSubTab === 'cfg-notif-templates') {
         setTimeout(_notifTplLoad, 0);
@@ -400,15 +408,15 @@ function renderConfig() {
                 </div>
             </div>
         </div></div>`;
-    // External access card (network/connectivity — lives in Server tab)
-    hServer += cfgCardOpen('cfgcol_proxy', '<i class="bi bi-diagram-3 me-1"></i>', t('proxy_section'));
-    hServer += renderScalarFields({ port: wa.port, proxy_count: wa.proxy_count, public_url: wa.public_url, force_https: wa.force_https, force_fqdn: wa.force_fqdn }, 'web_admin', 'config', []);
-    hServer += cfgCardClose;
+    // External access card (network/connectivity — web deployment)
+    _cardHtml['proxy'] = cfgCardOpen('cfgcol_proxy', '<i class="bi bi-diagram-3 me-1"></i>', t('proxy_section'))
+        + renderScalarFields({ port: wa.port, proxy_count: wa.proxy_count, public_url: wa.public_url, force_https: wa.force_https, force_fqdn: wa.force_fqdn }, 'web_admin', 'config', [])
+        + cfgCardClose;
 
-    hInterface += cfgCardOpen('cfgcol_pub_status', '<i class="bi bi-globe me-1"></i>', t('public_status_section'));
-    hInterface += renderScalarFields(Object.fromEntries(psFields.map(f => [f, wa[f]])), 'web_admin', 'config', []);
-    hInterface += _statusLinkRow;
-    hInterface += cfgCardClose;
+    _cardHtml['pub_status'] = cfgCardOpen('cfgcol_pub_status', '<i class="bi bi-globe me-1"></i>', t('public_status_section'))
+        + renderScalarFields(Object.fromEntries(psFields.map(f => [f, wa[f]])), 'web_admin', 'config', [])
+        + _statusLinkRow
+        + cfgCardClose;
 
     // Audit card — audit_sort + audit_sort_dir rendered with custom selects
     const _auditSortPath = 'web_admin|audit_sort';
@@ -448,8 +456,8 @@ function renderConfig() {
     const auditDirOpts = [['desc', t('sort_desc')], ['asc', t('sort_asc')]]
         .map(([v, lbl]) => `<option value="${v}" ${auditSortDir === v ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
 
-    hInterface += cfgCardOpen('cfgcol_audit', '<i class="bi bi-journal-text me-1"></i>', t('tab_audit'));
-    hInterface += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+    _cardHtml['audit'] = cfgCardOpen('cfgcol_audit', '<i class="bi bi-journal-text me-1"></i>', t('tab_audit'));
+    _cardHtml['audit'] += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort'))}${_auditInfoIcon}</label>
         <div class="col-sm-8"><div class="input-group input-group-sm">
             <select class="form-select"
@@ -458,7 +466,7 @@ function renderConfig() {
             </select>${_auditResetBtn}
         </div>${_auditHintPanel}</div>
     </div></div>`;
-    hInterface += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+    _cardHtml['audit'] += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort_dir'))}${_auditDirInfoIcon}</label>
         <div class="col-sm-8"><div class="input-group input-group-sm">
             <select class="form-select"
@@ -467,7 +475,7 @@ function renderConfig() {
             </select>${_auditDirResetBtn}
         </div>${_auditDirHintPanel}</div>
     </div></div>`;
-    hInterface += cfgCardClose;
+    _cardHtml['audit'] += cfgCardClose;
 
     // Tables card — default_page_size select + page_sizes text input
     const _psPath = 'web_admin|page_sizes';
@@ -487,9 +495,9 @@ function renderConfig() {
         title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
     const psLabel = esc(LABELS['page_sizes'] || t('page_sizes'));
     const psValue = escAttr((wa.page_sizes || _PAGE_SIZES).join(', '));
-    hInterface += cfgCardOpen('cfgcol_tables', '<i class="bi bi-table me-1"></i>', t('tables_section'));
-    hInterface += renderField('default_page_size', wa.default_page_size, 'web_admin|default_page_size', 'config');
-    hInterface += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+    _cardHtml['tables'] = cfgCardOpen('cfgcol_tables', '<i class="bi bi-table me-1"></i>', t('tables_section'));
+    _cardHtml['tables'] += renderField('default_page_size', wa.default_page_size, 'web_admin|default_page_size', 'config');
+    _cardHtml['tables'] += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
         <label class="col-sm-4 col-form-label col-form-label-sm">${psLabel}${_psInfoIcon}</label>
         <div class="col-sm-8"><div class="input-group input-group-sm">
             <input type="text" class="form-control"
@@ -497,35 +505,39 @@ function renderConfig() {
                 onchange="updateIntArray('config','${_psPath}',this.value)">${_psResetBtn}
         </div>${_psHintPanel}</div>
     </div></div>`;
-    hInterface += cfgCardClose;
+    _cardHtml['tables'] += cfgCardClose;
 
     // Live updates card — poll intervals + session timers
-    hInterface += cfgCardOpen('cfgcol_live_update', '<i class="bi bi-arrow-repeat me-1"></i>', t('live_update_section'));
-    hInterface += renderField('config_poll_secs', wa.config_poll_secs, 'web_admin|config_poll_secs', 'config');
-    hInterface += renderField('config_update_banner_secs', wa.config_update_banner_secs, 'web_admin|config_update_banner_secs', 'config');
-    hInterface += renderField('session_check_secs', wa.session_check_secs, 'web_admin|session_check_secs', 'config');
-    hInterface += renderField('session_revoke_redirect_secs', wa.session_revoke_redirect_secs, 'web_admin|session_revoke_redirect_secs', 'config');
-    hInterface += renderField('access_poll_secs', wa.access_poll_secs, 'web_admin|access_poll_secs', 'config');
+    _cardHtml['live_update'] = cfgCardOpen('cfgcol_live_update', '<i class="bi bi-arrow-repeat me-1"></i>', t('live_update_section'));
+    _cardHtml['live_update'] += renderField('config_poll_secs', wa.config_poll_secs, 'web_admin|config_poll_secs', 'config');
+    _cardHtml['live_update'] += renderField('config_update_banner_secs', wa.config_update_banner_secs, 'web_admin|config_update_banner_secs', 'config');
+    _cardHtml['live_update'] += renderField('session_check_secs', wa.session_check_secs, 'web_admin|session_check_secs', 'config');
+    _cardHtml['live_update'] += renderField('session_revoke_redirect_secs', wa.session_revoke_redirect_secs, 'web_admin|session_revoke_redirect_secs', 'config');
+    _cardHtml['live_update'] += renderField('access_poll_secs', wa.access_poll_secs, 'web_admin|access_poll_secs', 'config');
     // Force-reload-on-update: toggle (off → banner only, as today) + the seconds
     // field, which only shows when the toggle is on (data-sw-when, evaluated by
     // _refreshConditionalFields against configData.web_admin).
-    hInterface += renderField('force_reload_on_update', wa.force_reload_on_update, 'web_admin|force_reload_on_update', 'config');
-    hInterface += `<div data-sw-item-path="web_admin">
+    _cardHtml['live_update'] += renderField('force_reload_on_update', wa.force_reload_on_update, 'web_admin|force_reload_on_update', 'config');
+    _cardHtml['live_update'] += `<div data-sw-item-path="web_admin">
         <div class="sw-field" data-sw-when='{"force_reload_on_update":[true]}'>
             ${renderField('force_reload_secs', wa.force_reload_secs, 'web_admin|force_reload_secs', 'config')}
         </div></div>`;
-    hInterface += cfgCardClose;
+    _cardHtml['live_update'] += cfgCardClose;
 
-    // ── Assemble Bootstrap tabs
-    const _cfgTabs = [
-        { id: 'cfg-tab-general',   label: t('cfg_tab_general'),       icon: 'bi-sliders',      html: hGeneral   },
-        { id: 'cfg-tab-server',    label: t('cfg_tab_server'),        icon: 'bi-hdd-network',  html: hServer    },
-        { id: 'cfg-tab-monitoring',label: t('cfg_tab_monitoring'),    icon: 'bi-activity',     html: hMonitoring},
-        { id: 'cfg-tab-auth',      label: t('cfg_tab_auth'),          icon: 'bi-person-lock',  html: hAuth      },
-        { id: 'cfg-tab-notifs',    label: t('cfg_tab_notifications'), icon: 'bi-bell',         html: hNotifs    },
-        { id: 'cfg-tab-syslog',    label: t('cfg_tab_syslog'),        icon: 'bi-hdd-stack',    html: hSyslog    },
-        { id: 'cfg-tab-interface', label: t('cfg_tab_interface'),     icon: 'bi-layout-wtf',   html: hInterface },
-    ];
+    // ── Assemble the sub-tabs from the central layout (CONFIG_LAYOUT, injected
+    // server-side from lib.config.layout — single source of truth, no duplicated
+    // copy here): each card's HTML (captured above by its id) lands in the tab the
+    // layout assigns it, in the layout's order.
+    const _lay = (CONFIG_LAYOUT && Array.isArray(CONFIG_LAYOUT.tabs) && CONFIG_LAYOUT.tabs.length)
+        ? CONFIG_LAYOUT : { tabs: [], cards: [] };
+    const _byTab = {};
+    for (const card of _lay.cards)
+        _byTab[card.tab] = (_byTab[card.tab] || '') + (_cardHtml[card.id] || '');
+    const _cfgTabs = _lay.tabs.map(tab => ({
+        id: 'cfg-tab-' + tab.id, label: t(tab.label_key), icon: tab.icon, html: _byTab[tab.id] || '',
+    }));
+    // A stale saved active tab (e.g. the removed "Server") → fall back to the first.
+    if (!_cfgTabs.some(tab => tab.id === _activeCfgTab)) _activeCfgTab = _cfgTabs[0].id;
     let tabNav = `<ul class="nav nav-tabs mb-3" id="cfg-tab-nav" role="tablist">`;
     let tabContent = `<div class="tab-content">`;
     _cfgTabs.forEach(tab => {

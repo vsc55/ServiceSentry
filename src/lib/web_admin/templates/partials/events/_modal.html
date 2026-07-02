@@ -330,6 +330,13 @@ function _renderEventLog() {
     const ps = _evlPageSize || total || 1;
     _evlPage = Math.max(1, Math.min(_evlPage, Math.ceil((total || 1) / ps)));
     const pageRows = rows.slice((_evlPage - 1) * ps, _evlPage * ps);
+    if (!total) {   // same centered empty-state as the other list tables (no bare table)
+        tableWrap.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-send ss-empty-icon"></i>
+            <span>${esc(t('event_log_empty'))}</span></div>`;
+        for (const el of [pagerTopEl, pagerBotEl]) if (el) { el.innerHTML = ''; el.style.display = 'none'; }
+        return;
+    }
     const ordered = _evOrdered(_EVL_COLS, _evlColOrder, _evlVisibleCols);
     const cw = _evCW('ss_evlog_col_w');
     const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';
@@ -340,9 +347,7 @@ function _renderEventLog() {
             ? `<th class="ss-th ss-th-fit" data-col="${col.id}" draggable="true" style="width:1%;white-space:nowrap">${inner}</th>`
             : `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${thW(col.id)}>${inner}</th>`;
     }).join('');
-    const body = !total
-        ? `<tr><td colspan="${ordered.length}" class="text-center text-muted py-3">${esc(_eventLog.length ? t('event_none') : t('event_log_empty'))}</td></tr>`
-        : pageRows.map(e => `<tr>${ordered.map(col => {
+    const body = pageRows.map(e => `<tr>${ordered.map(col => {
             const c = _evlCell(e, col.id); return _EVL_FIT.has(col.id) ? c.replace('<td', '<td data-fit') : c;
         }).join('')}</tr>`).join('');
     const pagerHtml = total ? _renderPagination(total, _evlPage, _evlPageSize, '_goEvlPage', '_changeEvlPageSize') : '';

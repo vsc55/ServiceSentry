@@ -18,16 +18,22 @@ function _eventsRender() {
     const canNotify = _evCan('events_notify_view');
     const rulesChooser = _buildColChooser(_EVR_COLS, _evrVisibleCols, '_evrToggleCol', '_resetEvrCols');
     const logChooser = _eventLog.length ? _buildColChooser(_EVL_COLS, _evlVisibleCols, '_evlToggleCol', '_resetEvlCols') : '';
-    // Each sub-tab (and its pane) only renders if the user may see it; the first
-    // visible one is active.
-    const rulesActive = canRules;
+    // Each sub-tab (and its pane) only renders if the user may see it. Honour the
+    // saved active sub-tab across reloads (like the Infrastructure sub-tabs); fall
+    // back to the first visible one.
+    const _savedSub = localStorage.getItem('ss_active_subtab_events');
+    const rulesActive = (_savedSub === 'log' && canNotify) ? false
+        : (_savedSub === 'rules' && canRules) ? true
+        : canRules;
     c.innerHTML = `
         <ul class="nav nav-tabs mb-3" role="tablist">
             ${canRules ? `<li class="nav-item" role="presentation">
-                <button class="nav-link${rulesActive ? ' active' : ''}" data-bs-toggle="tab" data-bs-target="#ev-pane-rules" type="button" role="tab">
+                <button class="nav-link${rulesActive ? ' active' : ''}" data-bs-toggle="tab" data-bs-target="#ev-pane-rules" type="button" role="tab"
+                    onclick="localStorage.setItem('ss_active_subtab_events','rules')">
                     <i class="bi bi-bell me-1"></i>${esc(t('event_subtab_rules'))}</button></li>` : ''}
             ${canNotify ? `<li class="nav-item" role="presentation">
-                <button class="nav-link${rulesActive ? '' : ' active'}" data-bs-toggle="tab" data-bs-target="#ev-pane-log" type="button" role="tab">
+                <button class="nav-link${rulesActive ? '' : ' active'}" data-bs-toggle="tab" data-bs-target="#ev-pane-log" type="button" role="tab"
+                    onclick="localStorage.setItem('ss_active_subtab_events','log')">
                     <i class="bi bi-clock-history me-1"></i>${esc(t('event_subtab_log'))}</button></li>` : ''}
         </ul>
         <div class="tab-content">
@@ -138,6 +144,13 @@ function _eventRulesBody() {
     const ps = _evrPageSize || total || 1;
     _evrPage = Math.max(1, Math.min(_evrPage, Math.ceil((total || 1) / ps)));
     const pageRows = rows.slice((_evrPage - 1) * ps, _evrPage * ps);
+    if (!total) {   // same centered empty-state as the other list tables (no bare table)
+        tableWrap.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-bell ss-empty-icon"></i>
+            <span>${esc(t('event_none'))}</span></div>`;
+        for (const el of [pagerTopEl, pagerBotEl]) if (el) { el.innerHTML = ''; el.style.display = 'none'; }
+        return;
+    }
     const ordered = _evOrdered(_EVR_COLS, _evrColOrder, _evrVisibleCols);
     _evrPct = _evCW('ss_evrules_col_w');   // refresh from storage (remote sync may have changed it)
     // Only the flexible columns get percentage widths; _EVR_FIT ones size to content.
@@ -150,9 +163,7 @@ function _eventRulesBody() {
             ? `<th class="ss-th ss-th-fit" data-col="${col.id}" draggable="true" style="width:1%;white-space:nowrap">${inner}</th>`
             : `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true" style="width:${wpct[col.id].toFixed(3)}%">${inner}</th>`;
     }).join('');
-    const body = !total
-        ? `<tr><td colspan="${ordered.length + (showActions ? 1 : 0)}" class="text-center text-muted py-3">${esc(t('event_none'))}</td></tr>`
-        : pageRows.map(r => `<tr class="align-middle">
+    const body = pageRows.map(r => `<tr class="align-middle">
             ${ordered.map(col => { const c = _evrCell(r, col.id, canEdit); return _EVR_FIT.has(col.id) ? c.replace('<td', '<td data-fit') : c; }).join('')}
             ${showActions ? `<td data-fit class="text-nowrap text-end ss-td-actions">
                 ${canEdit ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('event_test'))}" onclick="_eventTestRule('${r.id}')"><i class="bi bi-send"></i></button>
@@ -166,8 +177,8 @@ function _eventRulesBody() {
             <thead class="ss-thead"><tr>${thRow}${showActions ? `<th class="ss-th ss-th-fit text-end" style="width:1%;white-space:nowrap">${esc(t('col_actions'))}</th>` : ''}</tr></thead>
             <tbody>${body}</tbody>
         </table>`;
-    if (pagerTopEl) pagerTopEl.innerHTML = pagerHtml;
-    if (pagerBotEl) pagerBotEl.innerHTML = pagerHtml;
+    if (pagerTopEl) { pagerTopEl.innerHTML = pagerHtml; pagerTopEl.style.display = ''; }
+    if (pagerBotEl) { pagerBotEl.innerHTML = pagerHtml; pagerBotEl.style.display = ''; }
     setTimeout(() => _evAttachPctCols('ev-rules-table',
         () => _evrColOrder, o => { _evrColOrder = o; }, _evrSaveColOrder, _eventRulesBody, _evrPct, 'ss_evrules_col_w'), 0);
 }

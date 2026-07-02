@@ -162,3 +162,4 @@ cython_debug/
 /data/snmp_mibs/*
 /data/data.*
 /data/syslog.*
+/data/*
