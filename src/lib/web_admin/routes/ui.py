@@ -13,6 +13,7 @@ from lib.hosts.profiles import (
     module_host_fields,
     module_host_multiple,
     module_host_multi_bind,
+    module_status_render,
 )
 from lib.modules.credential_schemas import credential_schemas
 from lib.modules.overview_widgets import overview_widgets_catalog
@@ -54,6 +55,7 @@ def register(app, wa):
             module_host_multiple=module_host_multiple(wa._modules_dir),
             module_host_multi_bind=module_host_multi_bind(wa._modules_dir),
             module_widgets=overview_widgets_catalog(wa._modules_dir),
+            module_status_render=module_status_render(wa._modules_dir),
             host_os_options=list(os_detect.OPTIONS),
             local_os=os_detect.local_os(),
         )

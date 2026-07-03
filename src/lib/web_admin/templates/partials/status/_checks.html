@@ -288,6 +288,10 @@ function _renderOneStatusCard(mod, checks) {
         </div>`;
 
         // Check rows (collapsible body)
+        // Per-module Status decorations (usage bar / badge), declared in the module
+        // schema (__status_render__) and rendered generically — no other_data key
+        // names are hardcoded in the core.
+        const _srDir = MODULE_STATUS_RENDER[mod.split('.').pop()] || MODULE_STATUS_RENDER[mod] || [];
         h += `<div class="ss-card-checks"${collapsed ? ' style="display:none"' : ''}>`;
         for (const [ck, info] of rows) {
             const st = info?.status;
@@ -305,21 +309,31 @@ function _renderOneStatusCard(mod, checks) {
             const cbColor = ok ? '#15803d' : !unknown ? '#b91c1c' : 'var(--bs-secondary-color)';
             const cbTxt   = ok ? t('status_ok') : !unknown ? t('status_error') : '—';
 
-            // Extra info: usage bar or HTTP code
+            // Extra info: schema-declared decorations (__status_render__) applied
+            // to other_data — first matching directive wins. Generic: a "bar"
+            // (percentage + threshold) or a "badge" (prefixed field value).
             let extraHtml = '';
-            if (extra.used !== undefined && extra.used !== null) {
-                const usedPct = Math.min(parseFloat(extra.used) || 0, 100);
-                const alert   = parseFloat(extra.alert) || 80;
-                const barColor = usedPct >= alert ? '#ef4444' : usedPct >= alert * 0.75 ? '#f59e0b' : '#22c55e';
-                extraHtml = `<span class="d-flex align-items-center gap-1 text-muted" style="font-size:.74rem;flex-shrink:0">
-                    <span style="width:48px;height:5px;background:var(--bs-border-color);border-radius:3px;display:inline-block;overflow:hidden;vertical-align:middle">
-                        <span style="display:block;height:100%;width:${usedPct}%;background:${barColor}"></span>
-                    </span>
-                    ${parseFloat(extra.used).toFixed(1)}%
-                    ${extra.alert ? `<span style="opacity:.55">/ ${extra.alert}%</span>` : ''}
-                </span>`;
-            } else if (extra.code) {
-                extraHtml = `<code style="font-size:.72rem;flex-shrink:0;opacity:.75">HTTP ${esc(String(extra.code))}</code>`;
+            for (const d of _srDir) {
+                if (d.type === 'bar' && extra[d.value] !== undefined && extra[d.value] !== null) {
+                    const usedPct = Math.min(parseFloat(extra[d.value]) || 0, 100);
+                    const thr = parseFloat(extra[d.threshold]) || d.default_threshold || 80;
+                    const unit = d.unit || '%';
+                    const barColor = usedPct >= thr ? '#ef4444' : usedPct >= thr * 0.75 ? '#f59e0b' : '#22c55e';
+                    const thrShown = (d.threshold && extra[d.threshold] !== undefined && extra[d.threshold] !== null)
+                        ? `<span style="opacity:.55">/ ${esc(String(extra[d.threshold]))}${unit}</span>` : '';
+                    extraHtml = `<span class="d-flex align-items-center gap-1 text-muted" style="font-size:.74rem;flex-shrink:0">
+                        <span style="width:48px;height:5px;background:var(--bs-border-color);border-radius:3px;display:inline-block;overflow:hidden;vertical-align:middle">
+                            <span style="display:block;height:100%;width:${usedPct}%;background:${barColor}"></span>
+                        </span>
+                        ${(parseFloat(extra[d.value]) || 0).toFixed(1)}${unit}
+                        ${thrShown}
+                    </span>`;
+                    break;
+                }
+                if (d.type === 'badge' && extra[d.field] !== undefined && extra[d.field] !== null && extra[d.field] !== '') {
+                    extraHtml = `<code style="font-size:.72rem;flex-shrink:0;opacity:.75">${esc((d.prefix || '') + String(extra[d.field]))}</code>`;
+                    break;
+                }
             }
 
             h += `<div class="d-flex align-items-center gap-2 px-3 py-2" style="border-top:1px solid var(--bs-border-color);font-size:.865rem">

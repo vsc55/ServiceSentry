@@ -191,11 +191,12 @@ class ModuleBase(ObjectBase):
             for collection, fields in item_schema.items():
                 if collection in ('__i18n__', '__icon__', '__host_profile__', '__host_multiple__',
                                    '__host_multiple_bind__', '__overview_widget__',
-                                   '__credential__', '__credentials__'):
+                                   '__credential__', '__credentials__', '__status_render__'):
                     # __i18n__ handled separately; __host_profile__/__host_multiple__
                     # are host-binding metadata; __credential__ is consumed by the
                     # central credentials catalog (credential_schemas reads it from
-                    # schema.json directly) — none of these are renderable
+                    # schema.json directly); __status_render__ is read by
+                    # module_status_render() — none of these are renderable
                     # collections, so keep them out of ITEM_SCHEMAS.
                     continue
                 col_fields = dict(fields)
@@ -536,22 +537,33 @@ class ModuleBase(ObjectBase):
         resolved['host_os'] = resolve_os(primary.get('os'), is_remote)
         resolved['host_kind'] = 'remote' if is_remote else 'local'
         if multi:
-            # Cluster roster: each member's identity + its manually-assigned node
-            # name (host profile of the module's address-bearing key, e.g.
-            # proxmox → profiles.proxmox.node).  Lets the module correlate API
-            # nodes with hosts (maintenance-by-host, host name in status, …).
-            addr_key = next((s.get('key') for s in specs
-                             if isinstance(s, dict) and s.get('address_field')), None)
+            # Cluster roster: each member's identity + its per-node datum, read from
+            # THIS module's host profile (``profiles[<module>]`` — the key the UI
+            # writes to).  The datum is either the legacy ``node`` name (proxmox,
+            # correlating API nodes with hosts) or the schema-declared
+            # ``__member_field__`` value (e.g. keepalived's ``priority``); both are
+            # exposed on the roster so a module reads its member value without a
+            # second resolve.  No module-specific field name is assumed.
+            pkey = (self.name_module or '').split('.')[-1]
+            mf_key = None
+            for _coll in (getattr(self, 'ITEM_SCHEMA', None) or {}).values():
+                if isinstance(_coll, dict) and isinstance(_coll.get('__member_field__'), dict):
+                    mf_key = _coll['__member_field__'].get('key')
+                    break
             members = []
             for h in hosts:
-                hp = (h.get('profiles') or {}).get(addr_key) or {} if addr_key else {}
-                members.append({
+                hp = (h.get('profiles') or {}).get(pkey) or {}
+                hp = hp if isinstance(hp, dict) else {}
+                member = {
                     'host_uid':    h.get('uid', ''),
                     'name':        h.get('name', ''),
                     'address':     h.get('address', ''),
                     'maintenance': bool(h.get('maintenance')),
-                    'node':        str((hp.get('node') if isinstance(hp, dict) else '') or '').strip(),
-                })
+                    'node':        str(hp.get('node') or '').strip(),
+                }
+                if mf_key:
+                    member[mf_key] = hp.get(mf_key)
+                members.append(member)
             resolved['__cluster_members__'] = members
             # A member in maintenance must NOT disable the whole cluster check —
             # the module skips just that node (via the roster).

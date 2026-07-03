@@ -217,6 +217,67 @@ def module_host_multi_bind(watchfuls_dir: str | None = None) -> dict:
     return out
 
 
+def module_member_fields(watchfuls_dir: str | None = None) -> dict:
+    """Return ``{module: field_key}`` — the per-node member field a multi-bind
+    module declares (``__member_field__.key`` in a collection schema, e.g.
+    keepalived's ``priority``).  This per-machine datum is stored on the host
+    profile (``profiles[module][field_key]``); the web admin uses it to render the
+    per-node control and to blank it when cloning a host (a clone is a different
+    node).  Module-agnostic — no field name is assumed."""
+    base = _watchfuls_dir(watchfuls_dir)
+    out: dict = {}
+    if not os.path.isdir(base):
+        return out
+    for entry in sorted(os.listdir(base)):
+        if entry.startswith('_'):
+            continue
+        sp = os.path.join(base, entry, 'schema.json')
+        if not os.path.isfile(sp):
+            continue
+        try:
+            with open(sp, encoding='utf-8') as fh:
+                schema = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        for coll in schema.values():
+            if isinstance(coll, dict) and isinstance(coll.get('__member_field__'), dict):
+                key = coll['__member_field__'].get('key')
+                if key:
+                    out[entry] = key
+                break
+    return out
+
+
+def module_status_render(watchfuls_dir: str | None = None) -> dict:
+    """Return ``{module: [directive, …]}`` — how the Status card should decorate a
+    check's ``other_data`` for that module (``__status_render__`` in the schema).
+
+    Each directive is opaque to the core and rendered generically, e.g.
+    ``{"type": "bar", "value": "used", "threshold": "alert", "default_threshold": 80}``
+    (a usage bar) or ``{"type": "badge", "field": "code", "prefix": "HTTP "}``.
+    Keeps the Status enrichment module-agnostic — no ``other_data`` key names are
+    hardcoded in the core."""
+    base = _watchfuls_dir(watchfuls_dir)
+    out: dict = {}
+    if not os.path.isdir(base):
+        return out
+    for entry in sorted(os.listdir(base)):
+        if entry.startswith('_'):
+            continue
+        sp = os.path.join(base, entry, 'schema.json')
+        if not os.path.isfile(sp):
+            continue
+        try:
+            with open(sp, encoding='utf-8') as fh:
+                schema = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        directives = schema.get('__status_render__')
+        if isinstance(directives, list) and directives:
+            out[entry] = directives
+    return out
+
+
 def module_host_specs(watchfuls_dir: str | None = None) -> dict:
     """Return ``{bare_module: [(protocol, address_field, [field names])]}`` read
     straight from each module's ``__host_profile__`` declaration.

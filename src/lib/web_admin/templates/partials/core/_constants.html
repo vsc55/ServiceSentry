@@ -118,6 +118,10 @@ const MODULE_HOST_MULTI_BIND = {{ module_host_multi_bind | default({}) | tojson 
 // {icon, multi, perm, cols, h, label_i18n}}. The core renders them generically;
 // the data comes from the module's overview_widget() hook (module_widgets payload).
 const MODULE_WIDGETS = {{ module_widgets | default({}) | tojson }};
+// {module: [directive]} — how the Status card decorates a check's other_data
+// (usage bar / badge). Declared per-module via __status_render__; the core renders
+// each directive generically, so no other_data key names are hardcoded in core.
+const MODULE_STATUS_RENDER = {{ module_status_render | default({}) | tojson }};
 // Host OS selector: selectable values (auto first) + this server's detected OS.
 const HOST_OS_OPTIONS = {{ host_os_options | default([]) | tojson }};
 const LOCAL_OS = {{ local_os | default('other') | tojson }};
@@ -264,7 +268,7 @@ function applyModuleDefaults() {
         for (const schKey of Object.keys(ITEM_SCHEMAS)) {
             if (!schKey.startsWith(name + '|')) continue;
             const col = schKey.slice(name.length + 1);
-            if (col === '__i18n__' || col === '__module__' || col === '__history__') continue;
+            if (col.startsWith('__')) continue;  // metadata entry (__icon__/__i18n__/__module__/…), not a collection
             if (col.includes('|')) continue;  // sub-collection schema — not a top-level config key
             const _colSch = ITEM_SCHEMAS[schKey];
             if (_colSch && _colSch['__migrates_from__']) {
@@ -293,7 +297,7 @@ function applyModuleDefaults() {
         for (const schKey of Object.keys(ITEM_SCHEMAS)) {
             if (!schKey.startsWith(name + '|')) continue;
             const col = schKey.slice(name.length + 1);
-            if (col.includes('|') || col === '__i18n__' || col === '__module__' || col === '__history__') continue;
+            if (col.includes('|') || col.startsWith('__')) continue;
             const colData = cfg[col];
             if (!colData || typeof colData !== 'object' || Array.isArray(colData)) continue;
             const colSch = ITEM_SCHEMAS[schKey];
@@ -327,7 +331,7 @@ function applyModuleDefaults() {
             Object.keys(ITEM_SCHEMAS)
                 .filter(k => k.startsWith(name + '|'))
                 .map(k => k.slice(name.length + 1))
-                .filter(c => !c.includes('|') && c !== '__i18n__' && c !== '__module__' && c !== '__history__')
+                .filter(c => !c.includes('|') && !c.startsWith('__'))
         );
         for (const _ck of Object.keys(cfg)) {
             if (typeof cfg[_ck] !== 'object' || cfg[_ck] === null || Array.isArray(cfg[_ck])) continue;

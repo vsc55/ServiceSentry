@@ -9,6 +9,7 @@
         "timeout": {"type": "int",  "default": 15,   "min": 0, "inherit_blank": true, "max": 300}
     },
     "__history__": {"field": null, "unit": null, "label": "HTTP Check"},
+    "__status_render__": [{"type": "badge", "field": "code", "prefix": "HTTP "}],
     "__host_profile__": {"key": "http", "address_field": "server", "fields": []},
     "__credential__": {
         "type": "web_auth",

@@ -101,6 +101,23 @@ class TestCatalog:
         assert m.get('ping') is False       # single-host check
         assert m.get('datastore') is False  # several checks per host, but one host each
 
+    def test_module_member_fields(self):
+        # A multi-bind module may declare a per-node member field (__member_field__).
+        from lib.hosts.profiles import module_member_fields
+        m = module_member_fields()
+        assert m.get('keepalived') == 'priority'   # keepalived's per-node weight
+        assert 'proxmox' not in m                  # proxmox uses the node <select>
+        assert 'ping' not in m
+
+    def test_module_status_render(self):
+        # Status-card decorations are opt-in via __status_render__ (discovered).
+        from lib.hosts.profiles import module_status_render
+        m = module_status_render()
+        assert m.get('web') == [{'type': 'badge', 'field': 'code', 'prefix': 'HTTP '}]
+        fs = m.get('filesystemusage')
+        assert fs and fs[0]['type'] == 'bar' and fs[0]['value'] == 'used'
+        assert 'ping' not in m                     # no decoration declared
+
     def test_module_host_collections(self):
         m = module_host_collections()
         # Every host-centric module exposes a host-capable item collection, so the

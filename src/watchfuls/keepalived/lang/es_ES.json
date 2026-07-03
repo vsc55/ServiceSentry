@@ -1,0 +1,48 @@
+{
+    "pretty_name": "Keepalived (VIP)",
+    "module_description": "Monitoriza una IP virtual (VIP) gestionada por Keepalived/VRRP en un clúster de alta disponibilidad: estado del servicio en cada nodo, qué nodo tiene la VIP en cada momento, detección de split-brain (la VIP en varios nodos a la vez) y comprobación de prioridad (peso) — avisando si la VIP no está en el nodo de mayor prioridad activo.",
+    "labels": {
+        "enabled":        "Habilitado",
+        "label":          "Etiqueta",
+        "description":    "Descripción",
+        "threads":        "Hilos",
+        "alert":          "Umbral",
+        "timeout":        "Tiempo máximo (s)",
+        "vip":            "IP virtual (VIP)",
+        "router_id":      "ID de router virtual (VRID)",
+        "priority":       "Prioridad (peso)",
+        "check_service":  "Servicio keepalived",
+        "check_vip":      "Titular de la VIP",
+        "check_priority": "Prioridad del titular"
+    },
+    "hints": {
+        "enabled":        "Habilita o deshabilita la monitorización de esta VIP.",
+        "description":    "Notas internas sobre este clúster (opcional). No afecta a la monitorización.",
+        "threads":        "Número de VIP a comprobar en paralelo.",
+        "alert":          "Fallos consecutivos antes de alertar (suaviza cortes puntuales).",
+        "timeout":        "Tiempo máximo por defecto de cada comprobación en un nodo, en segundos.",
+        "vip":            "Dirección IP virtual flotante que gestiona keepalived (p. ej. 192.168.1.50). Es la que se comprueba en cada nodo (en cualquier interfaz) para saber quién la tiene. Puedes indicarla con o sin máscara (192.168.1.50 o 192.168.1.50/24).",
+        "router_id":      "Identificador de la instancia VRRP (virtual_router_id), de 1 a 255. Debe ser el mismo en todos los nodos del grupo y único por segmento de red. Informativo/documental; déjalo vacío si no aplica.",
+        "priority":       "Prioridad VRRP (peso) de este nodo. El nodo con mayor prioridad activo debería ser el MASTER que sostiene la VIP. Se configura por host en la pestaña Hosts.",
+        "check_service":  "Comprueba que el servicio keepalived esté activo (systemctl is-active) en cada nodo miembro.",
+        "check_vip":      "Comprueba que exactamente un nodo tenga la VIP. Ninguno = VIP caída (error); varios = split-brain (aviso).",
+        "check_priority": "Avisa si la VIP la sostiene un nodo con prioridad menor que otro nodo activo (posible failover no óptimo o prioridades mal configuradas)."
+    },
+    "group_labels": {
+        "general":    "General",
+        "connection": "VIP",
+        "checks":     "Comprobaciones",
+        "alerts":     "Alertas"
+    },
+    "tab_labels": {
+        "general":    "General",
+        "setup":      "VIP",
+        "hosts":      "Hosts",
+        "monitoring": "Monitorización",
+        "lastdata":   "Últimos datos",
+        "logs":       "Logs"
+    },
+    "new_item_key_label": "Nombre:",
+    "rename_item_prompt": "Introduce el nuevo nombre:",
+    "collections": {"list": "VIP de Keepalived"}
+}

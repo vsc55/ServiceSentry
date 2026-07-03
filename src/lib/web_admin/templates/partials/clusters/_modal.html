@@ -77,8 +77,13 @@ let _clMemNodeList = [];       // last "Load nodes" result (preserved across re-
 let _clMemSort = 'name', _clMemSortDir = 'asc';
 
 function _clRenderMembers(item, mod, key) {
-    _clMemCtx = { item, mod, key, pkey: mod.replace(/^watchfuls\./, ''),
-                  path: mod + '|' + (_hostConnCollection(mod) || 'list') + '|' + key };
+    const coll = _hostConnCollection(mod) || 'list';
+    // Per-member control: a module may declare a schema-driven per-node field
+    // (__member_field__ — e.g. a numeric priority/weight). When absent
+    // the table falls back to the cluster-node <select> (proxmox), so both coexist.
+    const mf = (_clColSchema(mod, coll) || {})['__member_field__'] || null;
+    _clMemCtx = { item, mod, key, coll, mf, pkey: mod.replace(/^watchfuls\./, ''),
+                  path: mod + '|' + coll + '|' + key };
     _clMemNodeList = [];                 // fresh per modal open
     return `<div data-clmem-wrap>${_clMembersInner()}</div>`;
 }
@@ -94,7 +99,7 @@ function _clHostLastStatus(st) {
 
 function _clMembersInner() {
     if (!_clMemCtx) return '';
-    const { item, pkey } = _clMemCtx;
+    const { item, pkey, mf } = _clMemCtx;
     const allSel = (Array.isArray(item.host_uids) ? item.host_uids : []).map(String);
     // Only show members the user may VIEW (present in hostsData, which the hosts API
     // already filters by per-server view) — never leak the raw UID of a host the
@@ -112,8 +117,8 @@ function _clMembersInner() {
             <span class="badge text-bg-secondary">${sel.length}</span>
             <span class="small text-muted">${esc(t('cl_map_hint'))}</span>
             <div class="ms-auto d-flex gap-1">
-                <button class="btn btn-sm btn-secondary" onclick="_clLoadNodes(this)" title="${escAttr(t('host_cluster_node_load'))}">
-                    <i class="bi bi-arrow-repeat me-1"></i>${esc(t('host_cluster_node_load'))}</button>
+                ${mf ? '' : `<button class="btn btn-sm btn-secondary" onclick="_clLoadNodes(this)" title="${escAttr(t('host_cluster_node_load'))}">
+                    <i class="bi bi-arrow-repeat me-1"></i>${esc(t('host_cluster_node_load'))}</button>`}
                 ${canEdit ? `<div class="dropdown">
                     <button class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown"
                             data-bs-auto-close="outside" ${available.length ? '' : 'disabled'}>
@@ -130,12 +135,14 @@ function _clMembersInner() {
     const mul = _clMemSortDir === 'asc' ? 1 : -1;
     const rows = sel.map(uid => {
         const h = hostsData[uid] || {};
-        return { uid, h, node: ((h.profiles || {})[pkey] || {}).node || '', maint: !!h.maintenance, st: h.status || '' };
+        const prof = (h.profiles || {})[pkey] || {};
+        const val = mf ? (prof[mf.key] != null ? String(prof[mf.key]) : '') : (prof.node || '');
+        return { uid, h, node: val, maint: !!h.maintenance, st: h.status || '' };
     }).sort((a, b) => {
         const v = r => {
             switch (_clMemSort) {
                 case 'address': return String(r.h.address || '').toLowerCase();
-                case 'node':    return String(r.node || '').toLowerCase();
+                case 'node':    return mf ? (Number(r.node) || 0) : String(r.node || '').toLowerCase();
                 case 'maint':   return r.maint ? 1 : 0;
                 case 'status':  return { error: 0, warning: 1, ok: 3 }[r.st] ?? 2;
                 default:        return String(r.h.name || r.uid).toLowerCase();
@@ -154,9 +161,14 @@ function _clMembersInner() {
             <td class="text-nowrap"><code class="small">${esc(h.address || '')}</code></td>
             <td>${maintBadge}</td>
             <td>${_clHostLastStatus(st)}</td>
-            <td><select class="form-select form-select-sm" data-uid="${escAttr(uid)}" ${ro}
+            <td>${mf
+                ? `<input type="number" class="form-control form-control-sm" style="max-width:8rem" data-uid="${escAttr(uid)}" ${ro}
+                    value="${escAttr(node)}" placeholder="${escAttr(mf.placeholder || '')}"${
+                    mf.min != null ? ` min="${mf.min}"` : ''}${mf.max != null ? ` max="${mf.max}"` : ''}
+                    onchange="_clSetMemberField(${jsStr(uid)},${jsStr(pkey)},${jsStr(mf.key)},this.value,this)">`
+                : `<select class="form-select form-select-sm" data-uid="${escAttr(uid)}" ${ro}
                     onchange="_clSetNode(${jsStr(uid)},${jsStr(pkey)},this.value,this)">${
-                _clusterNodeOptions(node, _clMemNodeList, _takenClusterNodes(pkey, uid))}</select></td>
+                    _clusterNodeOptions(node, _clMemNodeList, _takenClusterNodes(pkey, uid))}</select>`}</td>
             <td class="ss-td-actions">${canEdit
                 ? `<button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('remove') || 'Remove')}"
                        onclick="_clMemberRemove(${jsStr(uid)})"><i class="bi bi-x-lg"></i></button>` : ''}</td>
@@ -169,7 +181,7 @@ function _clMembersInner() {
             ${th(t('col_host_address') || 'Address', 'address')}
             ${th(t('cl_mem_state'), 'maint')}
             ${th(t('cl_mem_laststatus'), 'status')}
-            ${th(t('cl_map_node'), 'node')}
+            ${th(mf ? (t(mf.label) || mf.key) : t('cl_map_node'), 'node')}
             <th class="ss-th ss-th-actions"></th>
         </tr></thead><tbody>${body}</tbody></table>`;
 }
@@ -231,6 +243,35 @@ async function _clLoadNodes(btn) {
     _clMemRefresh();
 }
 
+// Persist a schema-driven per-member field (profiles[pkey][field], e.g.
+// a numeric priority/weight) via the hosts API. Generalises _clSetNode for
+// modules that declare a __member_field__ instead of the cluster-node select.
+async function _clSetMemberField(uid, pkey, field, value, el) {
+    const h = hostsData[uid];
+    if (!h) return;
+    const profiles = JSON.parse(JSON.stringify(h.profiles || {}));
+    const prof = Object.assign({}, profiles[pkey] || {});
+    const v = String(value).trim();
+    if (v === '') delete prof[field]; else prof[field] = v;
+    if (Object.keys(prof).length) profiles[pkey] = prof; else delete profiles[pkey];
+    const body = {
+        name: h.name, address: h.address || '',
+        kind: h.kind === 'remote' ? 'remote' : 'local', os: h.os || 'auto',
+        maintenance: !!h.maintenance, tags: h.tags || [], description: h.description || '',
+        profiles, modules: Array.isArray(h.modules) ? h.modules : [],
+    };
+    if (el) el.disabled = true;
+    const res = await apiPut('/api/v1/hosts/' + encodeURIComponent(uid), body);
+    if (el) el.disabled = false;
+    if (res && res.ok) {
+        h.profiles = profiles;                       // keep local cache in sync
+        showToast(t('cl_map_saved'));
+    } else {
+        showToast((res && res.error) || t('error') || 'Error', 'danger');
+        if (el) el.value = ((h.profiles || {})[pkey] || {})[field] ?? '';   // revert
+    }
+}
+
 // Persist a host's node assignment (profiles[pkey].node) via the hosts API.
 // Builds the body from hostsData (whose masked secrets are null markers the
 // server restores), so other host fields/secrets are preserved.
@@ -268,9 +309,33 @@ function _clRenderLastData(item) {
     const mod = (_clEditCtx && _clEditCtx.mod) || '';
     const coll = (_clEditCtx && _clEditCtx.coll) || _hostConnCollection(mod) || 'list';
     const tf = _clColSchema(mod, coll)['__check_title_field__'] || 'label';
+    // Provisioned-host banner (generic, schema-driven via __provision_host__): a
+    // module item may auto-provision a host from an address field (a stable/floating
+    // endpoint). Point the user at that host so they can attach checks (ping/web/cert…)
+    // whose results then show below. Nothing here is module-specific.
+    const _pdecl = (_clColSchema(mod, coll) || {})['__provision_host__'] || null;
+    const _linkF = _pdecl && _pdecl.link_field, _addrF = _pdecl && _pdecl.address_field;
+    const provUid = (_linkF ? String(item[_linkF] || '') : '').trim();
+    const provAddr = (_addrF ? String(item[_addrF] || '') : '').trim();
     _clLastCtx = { mod, key: (_clEditCtx && _clEditCtx.key) || '',
-                   name: String(item[tf] || (_clEditCtx && _clEditCtx.key) || '') };
-    return `<div class="d-flex align-items-center mb-2" data-ro-keep="1">
+                   name: String(item[tf] || (_clEditCtx && _clEditCtx.key) || ''),
+                   provHostUid: provUid };
+    let provBanner = '';
+    if (_pdecl && provAddr) {
+        if (provUid && hostsData[provUid]) {
+            const vh = hostsData[provUid];
+            provBanner = `<div class="alert alert-secondary d-flex align-items-center gap-2 py-2 mb-2" data-ro-keep="1">
+                <i class="bi bi-hdd-network"></i>
+                <div class="small">${esc(t('cl_prov_host_hint'))}
+                    <strong>${esc(vh.name || '')}</strong> <code>${esc(vh.address || provAddr)}</code></div>
+                <button class="btn btn-sm btn-secondary ms-auto" onclick="openEditHostModal(${jsStr(provUid)})">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('cl_prov_open_host'))}</button>
+            </div>`;
+        } else {
+            provBanner = `<div class="alert alert-secondary py-2 mb-2 small" data-ro-keep="1">${esc(t('cl_prov_host_pending'))}</div>`;
+        }
+    }
+    return provBanner + `<div class="d-flex align-items-center mb-2" data-ro-keep="1">
             <span class="small text-muted me-auto">${esc(t('cl_lastdata_hint'))}</span>
             ${_latestFilterSelect('clLastFilter', _clLastFilter, '_clSetLastFilter')}
             <button class="btn btn-sm btn-secondary" onclick="_clLoadLastData()" title="${escAttr(t('refresh'))}">
@@ -284,15 +349,14 @@ function _clRenderLastData(item) {
 async function _clLoadLastData() {
     const body = document.getElementById('clLastBody');
     if (!body || !_clLastCtx) return;
-    const { mod, key } = _clLastCtx;
+    const { mod, key, provHostUid } = _clLastCtx;
     if (!mod || !key) { body.innerHTML = `<div class="alert alert-secondary mb-0">${esc(t('cl_map_no_members'))}</div>`; return; }
     body.innerHTML = `<div class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>${esc(t('loading'))}</div>`;
     let status = {};
     try { status = await apiGet('/api/v1/modules/status') || {}; } catch (_) { status = {}; }
     const st = status[mod] || status['watchfuls.' + mod] || status[mod.replace('watchfuls.', '')] || {};
     const entries = Object.entries(st).filter(([k]) => k === key || k.startsWith(key + '/'));
-    if (!entries.length) { body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(t('host_latest_none'))}</div>`; return; }
-    _clLastRows = entries.map(([k, v]) => {
+    const rows = entries.map(([k, v]) => {
         const od = (v && v.other_data) || {};
         const host = od.host_name || (hostsData[od.host_uid] || {}).name || '';
         const sub = (k === key) ? '' : k.slice(key.length + 1);   // suffix after "<key>/"
@@ -303,7 +367,25 @@ async function _clLoadLastData() {
             level: ok ? 'ok' : (sev === 'warning' ? 'warning' : 'error'),
             message: (v && v.message) || '', data: od, ts: (v && v.ts) || 0,
         };
-    }).sort((a, b) => String(a.host).localeCompare(String(b.host)) || String(a.check).localeCompare(String(b.check)));
+    });
+    // The provisioned endpoint is modelled as a host; pull the checks bound to it
+    // (ping/web/ssl_cert…) so the endpoint's health shows alongside the cluster's
+    // own results. Generic — driven by the discovered __provision_host__ link.
+    if (provHostUid) {
+        const provName = (hostsData[provHostUid] || {}).name || '';
+        let hs = null;
+        try { hs = await apiGet('/api/v1/hosts/' + encodeURIComponent(provHostUid) + '/status'); } catch (_) { hs = null; }
+        for (const r of ((hs && hs.results) || [])) {
+            const lvl = r.level || (r.ok ? 'ok' : 'error');
+            rows.push({
+                host: provName, check: r.name || r.key || _modPrettyName(r.module || ''),
+                ok: !!r.ok, sev: lvl === 'warning' ? 'warning' : (r.ok ? '' : 'error'), level: lvl,
+                message: r.message || '', data: r.data || {}, ts: r.ts || 0,
+            });
+        }
+    }
+    if (!rows.length) { body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(t('host_latest_none'))}</div>`; return; }
+    _clLastRows = rows.sort((a, b) => String(a.host).localeCompare(String(b.host)) || String(a.check).localeCompare(String(b.check)));
     _clRenderLastRows();
 }
 function _clSetLastFilter(v) { _clLastFilter = v; _clRenderLastRows(); }

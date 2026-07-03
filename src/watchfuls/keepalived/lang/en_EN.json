@@ -1,0 +1,48 @@
+{
+    "pretty_name": "Keepalived (VIP)",
+    "module_description": "Monitors a virtual IP (VIP) managed by Keepalived/VRRP across a high-availability cluster: per-node service state, which node currently holds the VIP, split-brain detection (the VIP up on several nodes at once) and priority (weight) checks — warning when the VIP is not on the highest-priority live node.",
+    "labels": {
+        "enabled":        "Enabled",
+        "label":          "Label",
+        "description":    "Description",
+        "threads":        "Threads",
+        "alert":          "Threshold",
+        "timeout":        "Timeout (s)",
+        "vip":            "Virtual IP (VIP)",
+        "router_id":      "Virtual router id (VRID)",
+        "priority":       "Priority (weight)",
+        "check_service":  "keepalived service",
+        "check_vip":      "VIP holder",
+        "check_priority": "Holder priority"
+    },
+    "hints": {
+        "enabled":        "Enable or disable monitoring of this VIP.",
+        "description":    "Internal notes about this cluster (optional). Does not affect monitoring.",
+        "threads":        "Number of VIPs to check in parallel.",
+        "alert":          "Consecutive failures before alerting (smooths transient blips).",
+        "timeout":        "Default timeout for each per-node check, in seconds.",
+        "vip":            "The floating virtual IP address keepalived manages (e.g. 192.168.1.50). It is what each node is probed for (on any interface) to find which one holds it. You may give it with or without a mask (192.168.1.50 or 192.168.1.50/24).",
+        "router_id":      "The VRRP instance id (virtual_router_id), 1-255. It must match on every node of the group and be unique per network segment. Informational/documentation; leave empty if not applicable.",
+        "priority":       "This node's VRRP priority (weight). The highest-priority live node should be the MASTER holding the VIP. Configured per host in the Hosts tab.",
+        "check_service":  "Check that the keepalived service is active (systemctl is-active) on each member node.",
+        "check_vip":      "Check that exactly one node holds the VIP. None = VIP down (error); several = split-brain (warning).",
+        "check_priority": "Warn when the VIP is held by a node with a lower priority than another live node (suboptimal failover or mis-set priorities)."
+    },
+    "group_labels": {
+        "general":    "General",
+        "connection": "VIP",
+        "checks":     "Checks",
+        "alerts":     "Alerts"
+    },
+    "tab_labels": {
+        "general":    "General",
+        "setup":      "VIP",
+        "hosts":      "Hosts",
+        "monitoring": "Monitoring",
+        "lastdata":   "Last data",
+        "logs":       "Logs"
+    },
+    "new_item_key_label": "Name:",
+    "rename_item_prompt": "Enter the new name:",
+    "collections": {"list": "Keepalived VIPs"}
+}

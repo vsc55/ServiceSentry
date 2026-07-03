@@ -46,7 +46,7 @@ function _refreshModuleCount(name) {
     const el = document.getElementById('modcount-' + name);
     if (!cfg || typeof cfg !== 'object' || !el) return;
     const colKeys = Object.keys(cfg).filter(
-        k => typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
+        k => !k.startsWith('__') && typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
     const total = colKeys.reduce((s, k) => s + Object.keys(cfg[k]).length, 0);
     const active = colKeys.reduce((s, k) => s + Object.values(cfg[k]).filter(
         v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
@@ -91,7 +91,7 @@ function renderModules() {
         const pname = modulePrettyName(name, cfg);
 
         // Count items across all collections
-        const colKeys = Object.keys(cfg).filter(k => typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
+        const colKeys = Object.keys(cfg).filter(k => !k.startsWith('__') && typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
         const totalItems  = colKeys.reduce((s, k) => s + Object.keys(cfg[k]).length, 0);
         const activeItems = colKeys.reduce((s, k) =>
             s + Object.values(cfg[k]).filter(v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
@@ -237,7 +237,7 @@ function _discoveredModuleNames() {
         const sep = key.indexOf('|');
         if (sep < 0) continue;
         const col = key.slice(sep + 1);
-        if (!['__i18n__', '__module__', '__history__', '__credential__', '__credentials__'].includes(col)) names.add(key.slice(0, sep));
+        if (!col.startsWith('__')) names.add(key.slice(0, sep));
     }
     return [...names].sort();
 }
@@ -331,7 +331,7 @@ function addModuleFromPicker(name) {
     for (const key of Object.keys(ITEM_SCHEMAS)) {
         if (!key.startsWith(name + '|')) continue;
         const col = key.slice(name.length + 1);
-        if (['__i18n__', '__module__', '__history__', '__credential__', '__credentials__'].includes(col)) continue;
+        if (col.startsWith('__')) continue;
         cfg[col] = {};
     }
     const modDefaults = schemaDefaults(moduleSchema(name));
@@ -437,7 +437,7 @@ h += `<div class="row mb-2 align-items-center">
 // Identify collection keys (dicts that aren't list items)
 const colKeys = [];
 for (const [k, v] of Object.entries(cfg)) {
-if (typeof v === 'object' && v !== null && !Array.isArray(v)) colKeys.push(k);
+if (!k.startsWith('__') && typeof v === 'object' && v !== null && !Array.isArray(v)) colKeys.push(k);
 }
 // Module-level fields below the display name: ungrouped ones are the per-check
 // "Defaults"; threads/timeout (and any field with an explicit group) render under

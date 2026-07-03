@@ -7,11 +7,18 @@ async function _loadSyslog() {
     qs.set('offset', String(offset));
     qs.set('sort', _slSort);
     qs.set('order', _slSortDir);
+    // Show a spinner in the table area on the FIRST load (no rows yet) so the tab
+    // never looks hung; on refresh/pagination we keep the current rows (no flicker).
+    const _wrap = document.getElementById('sl-table-wrap');
+    if (_wrap && !_slRowsData.length) {
+        _wrap.innerHTML = `<div class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm me-2"></div>${esc(t('loading') || 'Loading…')}</div>`;
+    }
+    // Table + listener status first — these are fast (indexed) so rows appear
+    // immediately.  The heavier stats (GROUP BY) and drops run in the background
+    // below, so they never block the message list.
     const [data, st] = await Promise.all([
         apiGet('/api/v1/syslog?' + qs.toString()),
         apiGet('/api/v1/syslog/status'),
-        _loadSyslogStats(),
-        _loadSyslogDrops(),
     ]);
     const total = (data && data.total) || 0;
     if (st) {
@@ -38,6 +45,11 @@ async function _loadSyslog() {
     }
     _slRowsData = msgs;
     _slRenderTable();
+    // Background (non-blocking): the statistics panels (GROUP BY across host/app/
+    // severity/facility) and the dropped-senders list. They fill in when ready
+    // with their own spinners, so a slow aggregate never delays the message list.
+    _loadSyslogStats();
+    _loadSyslogDrops();
 }
 
 // ── Auto-refresh + Live ───────────────────────────────────────────────────────

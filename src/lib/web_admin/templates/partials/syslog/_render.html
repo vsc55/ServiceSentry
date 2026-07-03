@@ -65,7 +65,9 @@ async function renderSyslog() {
         clearTimeout(_qTimer);
         _qTimer = setTimeout(() => { _syslogFilters.q = e.target.value.trim(); _syslogFilterChanged(); }, 350);
     };
-    await _loadSyslogFacets();
+    // Facets (DISTINCT host/app) fill the filter dropdowns; load them in the
+    // background so a slow DISTINCT never blocks the message list from showing.
+    _loadSyslogFacets();
     await _loadSyslog();
     _syslogInitAutoRefresh();
 }
@@ -119,8 +121,13 @@ function _syslogQS() {
 async function _loadSyslogStats() {
     const el = document.getElementById('sl-stats');
     if (!el) return;
+    // Spinner on first load only (the aggregate GROUP BY can be slow on big tables).
+    if (!el.dataset.loaded) {
+        el.innerHTML = `<div class="text-center text-muted py-2"><div class="spinner-border spinner-border-sm me-2"></div>${esc(t('loading') || 'Loading…')}</div>`;
+    }
     const s = await apiGet('/api/v1/syslog/stats?' + _syslogQS().toString());
     if (!s) { el.innerHTML = ''; return; }
+    el.dataset.loaded = '1';
     const host = (s.by_host || []).map(x => ({ label: x.value || '—', count: x.count, cls: 'info', fk: x.value ? 'hostname' : '', fv: x.value }));
     const appl = (s.by_app || []).map(x => ({ label: x.value || '—', count: x.count, cls: 'primary', fk: x.value ? 'app' : '', fv: x.value }));
     const sev  = (s.by_severity || []).map(x => ({ label: x.name, count: x.count, cls: _SYSLOG_SEV_CLS[x.value] || 'secondary', fk: 'severity', fv: x.value }));

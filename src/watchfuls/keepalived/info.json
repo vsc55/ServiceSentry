@@ -1,0 +1,7 @@
+{
+    "name": "keepalived",
+    "version": "1.0.0",
+    "description": "Keepalived VRRP virtual-IP (VIP) monitoring across an HA cluster — per-node service state, which node holds the VIP, split-brain detection and priority (weight) checks.",
+    "icon": "🌐",
+    "dependencies": []
+}

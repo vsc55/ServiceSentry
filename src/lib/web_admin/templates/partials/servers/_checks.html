@@ -19,24 +19,42 @@ function _hostClusterMemberships(uid) {
 }
 
 // Read-only cards: "this host is a node of cluster check X (managed in Modules)".
+// The per-node control is schema-driven: a module may declare __member_field__
+// (e.g. a numeric priority/weight, stored on profiles[pkey][field]); otherwise it
+// falls back to the cluster-node <select>. Same generic mechanism as the cluster
+// modal's member table, so both surfaces stay in sync — no module-specific code.
 function _renderClusterMembershipCards(memberships) {
     if (!memberships || !memberships.length) return '';
     const ro = _hostModalReadonly ? 'disabled' : '';
     return memberships.map(m => {
-        // The node name maps THIS host to its node in the cluster's API output.
-        // Stored on the host's module profile (proxmox → profiles.proxmox.node),
-        // read back by the module to correlate API nodes with hosts.
         const pkey = m.mod.replace(/^watchfuls\./, '');
-        const node = ((_hostDraft.profiles || {})[pkey] || {}).node || '';
-        const selId = 'hcNode_' + (pkey + '_' + m.key).replace(/\W/g, '_');
-        return `<div class="card mb-2"><div class="card-body py-2 px-3">
-            <div class="d-flex align-items-center gap-2 flex-wrap">
+        const coll = _hostConnCollection(m.mod) || 'list';
+        const sch = (typeof ITEM_SCHEMAS !== 'undefined' && ITEM_SCHEMAS[m.mod + '|' + coll]) || {};
+        const mf = sch['__member_field__'] || null;
+        const prof = (_hostDraft.profiles || {})[pkey] || {};
+        const head = `<div class="d-flex align-items-center gap-2 flex-wrap">
                 <i class="bi bi-diagram-3"></i>
                 <span class="fw-semibold">${esc(_modPrettyName(m.mod))}</span>
                 <span class="badge bg-secondary">${esc(t('host_cluster_member'))}</span>
                 <span class="text-muted small ms-auto">${esc(m.label)} · ${m.count} ${esc(t('host_cluster_nodes'))}</span>
-            </div>
-            <div class="mt-2">
+            </div>`;
+        let control;
+        if (mf) {
+            // Schema-declared per-node field (e.g. keepalived priority/weight).
+            const val = prof[mf.key] != null ? String(prof[mf.key]) : '';
+            control = `<div class="mt-2">
+                <label class="form-label form-label-sm mb-1">${esc(t(mf.label) || mf.key)}</label>
+                <input type="number" class="form-control form-control-sm" style="max-width:10rem" ${ro}
+                    value="${escAttr(val)}" placeholder="${escAttr(mf.placeholder || '')}"${
+                    mf.min != null ? ` min="${mf.min}"` : ''}${mf.max != null ? ` max="${mf.max}"` : ''}
+                    onchange="_setProfileField(${jsStr(pkey)}, ${jsStr(mf.key)}, this.value)">
+                <div class="small text-muted mt-1">${esc(t('host_cluster_member_field_hint'))}</div>
+            </div>`;
+        } else {
+            // Fallback: cluster-node <select> (maps this host to a node in the API).
+            const node = prof.node || '';
+            const selId = 'hcNode_' + (pkey + '_' + m.key).replace(/\W/g, '_');
+            control = `<div class="mt-2">
                 <label class="form-label form-label-sm mb-1">${esc(t('host_cluster_node'))}</label>
                 <div class="input-group input-group-sm">
                     <select class="form-select form-select-sm" id="${selId}" ${ro}
@@ -47,8 +65,9 @@ function _renderClusterMembershipCards(memberships) {
                         <i class="bi bi-arrow-repeat"></i></button>
                 </div>
                 <div class="small text-muted mt-1">${esc(t('host_cluster_node_hint'))}</div>
-            </div>
-        </div></div>`;
+            </div>`;
+        }
+        return `<div class="card mb-2"><div class="card-body py-2 px-3">${head}${control}</div></div>`;
     }).join('');
 }
 

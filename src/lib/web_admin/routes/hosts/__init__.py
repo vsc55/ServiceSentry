@@ -209,11 +209,16 @@ def register(app, wa):
         # A clone is a DIFFERENT machine → let the OS auto-detect rather than
         # inheriting the source's (possibly wrong) value.
         data['os'] = 'auto'
-        # The cluster-node identity (which Proxmox node this host IS) is unique to
-        # the machine — a clone is a different node, so blank it.
+        # The per-node cluster identity (which node this host IS — proxmox's node
+        # name, keepalived's priority, …) is unique to the machine; a clone is a
+        # different node, so blank it. Strip the legacy 'node' plus every module's
+        # declared per-node field (__member_field__), discovered — not hardcoded.
+        from lib.hosts.profiles import module_member_fields  # noqa: PLC0415
+        _strip = {'node'} | set(module_member_fields(wa._modules_dir).values())
         for _prof in (data.get('profiles') or {}).values():
             if isinstance(_prof, dict):
-                _prof.pop('node', None)
+                for _k in _strip:
+                    _prof.pop(_k, None)
         if not data['name']:
             return jsonify({'error': wa._t('invalid_modules_data')}), 400
         new_uid = store.create(data, actor=session.get('username', SYSTEM_USER))

@@ -3,6 +3,7 @@
 """Module routes: /api/v1/modules (GET, PUT), /api/v1/modules/status, /api/v1/modules/overview."""
 
 import importlib
+import json
 import os
 import re
 import sys
@@ -225,6 +226,112 @@ def _rekey_items_by_uid(data: dict) -> None:
                 module_cfg[coll_name] = _rekey_collection(coll)
 
 
+def _provision_host_decl(modules_dir, module_name: str) -> dict | None:
+    """A module's ``__provision_host__`` declaration, if any (from schema.json).
+
+    Generic, module-agnostic: a module may declare — in a collection's schema —
+    that each item provisions a linked host from one of its address fields::
+
+        "__provision_host__": {"address_field": "endpoint", "link_field": "endpoint_host_uid",
+                               "name_template": "Endpoint: {label}", "collection": "list"}
+
+    The core reads this by discovery; nothing here is specific to any module."""
+    if not modules_dir or not module_name:
+        return None
+    try:
+        path = os.path.join(modules_dir, module_name, 'schema.json')
+        with open(path, encoding='utf-8') as fh:
+            schema = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    for coll in schema.values():
+        if isinstance(coll, dict) and isinstance(coll.get('__provision_host__'), dict):
+            decl = dict(coll['__provision_host__'])
+            decl.setdefault('collection', 'list')
+            return decl
+    return None
+
+
+def _sync_provisioned_hosts(wa, data: dict, actor: str) -> list:
+    """Auto-provision/link a host for every item that declares one (in place).
+
+    Fully generic: driven by each module's ``__provision_host__`` schema
+    declaration (see :func:`_provision_host_decl`) — the core knows nothing about
+    any specific module.  A module declares that its items provision a host from
+    one of their address fields (a stable/floating endpoint address); this
+    ensures a linked host (``address == that field``) and stamps its uid on the
+    item's ``link_field``, syncing the address when it changes.  Modelling the
+    endpoint as a host lets any address module (ping/web/ssl_cert…) monitor it via
+    the normal host binding.
+
+    Idempotent: an item already linked (``link_field`` set) is reused by uid; an
+    unlinked item first tries to ADOPT an existing host with the same deterministic
+    name before creating one — so re-saving (before the new link round-trips to the
+    client) never spawns duplicate hosts.
+
+    Returns the list of links established this call
+    (``[{module, collection, item, field, uid}]``) so the caller can round-trip
+    them to the client (which holds no ``link_field`` for a just-created host).
+
+    Runs server-side with system rights, so a user who may edit the item but not
+    servers can still provision it.  Best-effort: failures are swallowed so they
+    never block saving the config.
+    """
+    store = getattr(wa, '_hosts_store', None)
+    modules_dir = getattr(wa, '_modules_dir', None)
+    if store is None or not modules_dir:
+        return []
+    from ..hosts._helpers import _create_unique_host  # noqa: PLC0415
+    assignments: list = []
+    for mod_key, mod_cfg in data.items():
+        if not isinstance(mod_cfg, dict):
+            continue
+        decl = _provision_host_decl(modules_dir, str(mod_key).split('.')[-1])
+        if not decl:
+            continue
+        addr_f, link_f = decl.get('address_field'), decl.get('link_field')
+        coll = decl.get('collection') or 'list'
+        items = mod_cfg.get(coll)
+        if not (addr_f and link_f and isinstance(items, dict)):
+            continue
+        name_tpl = decl.get('name_template') or (str(addr_f) + ': {label}')
+        for key, item in items.items():
+            if not isinstance(item, dict):
+                continue
+            addr = str(item.get(addr_f) or '').strip()
+            if not addr:
+                continue
+            uid = str(item.get(link_f) or '').strip()
+            try:
+                host = store.get(uid) if uid else None
+                if host:
+                    if str(host.get('address') or '').strip() != addr:
+                        store.update(uid, {**host, 'address': addr}, actor=actor)
+                    continue
+                hostname = name_tpl.format(label=item.get('label') or key, key=key)
+                # Adopt an existing host with this deterministic name instead of
+                # creating a duplicate (idempotent across re-saves / stale clients).
+                existing = None
+                try:
+                    existing = store.get_by_name(hostname)
+                except Exception:  # pylint: disable=broad-except
+                    existing = None
+                if existing and existing.get('uid'):
+                    new_uid = existing['uid']
+                    if str(existing.get('address') or '').strip() != addr:
+                        store.update(new_uid, {**existing, 'address': addr}, actor=actor)
+                else:
+                    new_uid = _create_unique_host(
+                        store, hostname, {'address': addr, 'profiles': {}}, actor)
+                if new_uid:
+                    item[link_f] = new_uid
+                    assignments.append({'module': mod_key, 'collection': coll,
+                                        'item': key, 'field': link_f, 'uid': new_uid})
+            except Exception:  # pylint: disable=broad-except
+                continue
+    return assignments
+
+
 def _strip_credential_fields(wa, data):
     """For items that reference a credential (``cred_uid``), drop the module's
     inline credential fields (e.g. web's auth_user/auth_password) so a stale
@@ -329,12 +436,18 @@ def register(app, wa):
                     return jsonify({'error': wa._t('access_denied')}), 403
         _ensure_item_uids(data)     # generate stable UIDs for new items
         _rekey_items_by_uid(data)   # keep each item's dict key == its UID
+        # Generic: provision/link a host for any item that declares one
+        # (__provision_host__ in its schema) — so address modules (ping/web/
+        # ssl_cert) can monitor that endpoint. Module-agnostic (discovery-driven).
+        provisioned = _sync_provisioned_hosts(wa, data, session.get('username', 'system'))
         if wa._save_modules(data):
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._sensitive_fields,
             )
             wa._audit('modules_saved', detail=changes or '')
-            return jsonify({'ok': True})
+            # Round-trip any new host links so the client persists them (a later
+            # save in this session then reuses the host instead of re-creating it).
+            return jsonify({'ok': True, 'provisioned': provisioned})
         return jsonify({'error': wa._t('save_file_error')}), 500
 
     # --- API: check state (read-only) -----------------------------

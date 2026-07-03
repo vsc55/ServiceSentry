@@ -39,6 +39,10 @@ _SCHEMA = TableSpec(
         Index('idx_syslog_ts',       ('ts',)),
         Index('idx_syslog_sev_ts',   ('severity', 'ts')),
         Index('idx_syslog_host_ts',  ('hostname', 'ts')),
+        # Speed the facets DISTINCT + stats GROUP BY on app/facility (were full
+        # table scans — the main cause of the slow Syslog tab load).
+        Index('idx_syslog_app_ts',   ('app', 'ts')),
+        Index('idx_syslog_fac_ts',   ('facility', 'ts')),
     ),
 )
 

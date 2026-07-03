@@ -283,18 +283,22 @@ class Monitor(ObjectBase):
     def _get_item_uid(self, module_name: str, key: str) -> str | None:
         """Return the stable item UID for a result *key* within *module_name*.
 
-        Result keys may be *derived* from the item key — e.g. ram_swap emits
-        ``"<item>_ram"`` / ``"<item>_swap"`` for a single item — so when the
-        exact key isn't a configured item we fall back to its base key (the
-        part before the last ``_``). The exact key is always tried first, so an
-        item whose own key contains an underscore is matched correctly.
+        Result keys may be *derived* from the item key by either convention:
+        a ``/`` composite (``"<item>/<metric>"`` — e.g. a cluster's
+        ``"<uid>/node/pve04"`` or ``"<uid>/vip"``), or a ``_`` suffix
+        (``"<item>_ram"`` / ``"<item>_swap"``). The exact key is always tried
+        first, then the part before the first ``/``, then the part before the
+        last ``_`` — so an item whose own key contains those characters is still
+        matched correctly.
         """
         module_cfg = self.config_modules.get_conf([module_name])
         if not isinstance(module_cfg, dict):
             return None
         candidates = [key]
-        base = key.rsplit('_', 1)[0]
-        if base and base != key:
+        if '/' in key:                       # composite '<item>/<metric>'
+            candidates.append(key.split('/', 1)[0])
+        base = key.rsplit('_', 1)[0]         # derived '<item>_ram' / '<item>_swap'
+        if base and base != key and base not in candidates:
             candidates.append(base)
         for cand in candidates:
             for section_val in module_cfg.values():

@@ -174,7 +174,9 @@ function createListTable(spec) {
         const cardClass = spec.cardClass || 'ss-card';
         if (!total) {
             // emptyBody → card + header + body; emptyState → bare (no card).
-            if (spec.emptyBody) c.innerHTML = `<div class="${cardClass}">${accentDiv}${headerHtml}${spec.emptyBody(ctx)}</div>`;
+            // The empty card still fills its pane (.ss-vfill + .ss-vscroll body) so an
+            // empty table stretches exactly like a populated one — no short card.
+            if (spec.emptyBody) c.innerHTML = `<div class="${cardClass} ss-vfill">${accentDiv}${headerHtml}<div class="ss-vscroll">${spec.emptyBody(ctx)}</div></div>`;
             else c.innerHTML = spec.emptyState ? spec.emptyState(ctx) : '';
             return;
         }

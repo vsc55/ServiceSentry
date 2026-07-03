@@ -427,3 +427,33 @@ class TestDaemonCycleIntegration:
         finally:
             sys.path = [p for p in sys.path if p != monitor.dir_modules]
             sys.modules.pop(name, None)
+
+
+# ──────────────────── _get_item_uid (result key → item) ───────────────
+
+
+class TestGetItemUid:
+    """Result keys map back to their configured item UID, across the two derived
+    conventions: '/'-composite (cluster sub-results) and '_'-suffix."""
+
+    def test_exact_key(self, monitor):
+        cfg = {'list': {'u-123': {'uid': 'u-123'}}}
+        with patch.object(monitor.config_modules, 'get_conf', return_value=cfg):
+            assert monitor._get_item_uid('watchfuls.x', 'u-123') == 'u-123'
+
+    def test_slash_composite_key(self, monitor):
+        # Cluster sub-results: '<uid>/vip', '<uid>/node/pve04' → the item uid.
+        cfg = {'list': {'u-123': {'uid': 'u-123'}}}
+        with patch.object(monitor.config_modules, 'get_conf', return_value=cfg):
+            assert monitor._get_item_uid('watchfuls.x', 'u-123/vip') == 'u-123'
+            assert monitor._get_item_uid('watchfuls.x', 'u-123/node/pve04') == 'u-123'
+
+    def test_underscore_derived_key(self, monitor):
+        cfg = {'list': {'u-9': {'uid': 'u-9'}}}
+        with patch.object(monitor.config_modules, 'get_conf', return_value=cfg):
+            assert monitor._get_item_uid('watchfuls.x', 'u-9_ram') == 'u-9'
+
+    def test_unknown_key_returns_none(self, monitor):
+        cfg = {'list': {'u-1': {'uid': 'u-1'}}}
+        with patch.object(monitor.config_modules, 'get_conf', return_value=cfg):
+            assert monitor._get_item_uid('watchfuls.x', 'nope/vip') is None

@@ -1,0 +1,61 @@
+{
+    "__icon__": "bi-hdd-network",
+    "__module__": {
+        "api_ver": "v1",
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "alert":   {"type": "int",  "default": 3,  "min": 1, "max": 20},
+        "timeout": {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 300}
+    },
+    "__history__": {"field": null, "unit": null, "label": "Keepalived VIP"},
+    "__host_profile__": [
+        {"key": "ssh", "address_field": "ssh_host",
+         "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
+                    "ssh_key", "ssh_key_string", "ssh_verify_host"]},
+        {"key": "keepalived", "fields": ["priority"]}
+    ],
+    "__host_multiple__": false,
+    "__host_multiple_bind__": true,
+    "list": {
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__cluster_columns__": ["vip"],
+        "__member_field__": {"key": "priority", "type": "int", "label": "cl_map_weight",
+                             "default": 100, "min": 0, "max": 255, "placeholder": "100"},
+        "__provision_host__": {"address_field": "vip", "link_field": "vip_host_uid",
+                               "name_template": "VIP: {label}"},
+        "__edit_tabs__": [
+            {"id": "general", "general": true,      "icon": "bi-info-circle",   "groups": ["general"]},
+            {"id": "setup",                         "icon": "bi-hdd-network",   "groups": ["connection"]},
+            {"id": "hosts",   "member_table": true, "icon": "bi-hdd-stack",     "groups": []},
+            {"id": "monitoring",                    "icon": "bi-activity",      "groups": ["checks", "alerts"]},
+            {"id": "lastdata", "last_data": true,   "icon": "bi-clock-history", "groups": []},
+            {"id": "logs",     "logs": true, "perm": "syslog_view", "icon": "bi-card-list", "groups": []}
+        ],
+        "__new_item_fields__": ["label", "vip"],
+        "__field_order__": [
+            "enabled", "label", "description",
+            "vip", "router_id", "timeout",
+            "check_service", "check_vip", "check_priority",
+            "alert"
+        ],
+
+        "enabled":       {"type": "bool", "default": true},
+        "label":         {"type": "str",  "default": ""},
+        "description":   {"type": "str",  "default": "", "multiline": true, "group": "general"},
+
+        "vip":           {"type": "str",  "default": "", "placeholder": "192.168.1.50", "group": "connection"},
+        "router_id":     {"type": "int",  "default": 0, "min": 0, "max": 255,
+                          "zero_as_blank": true, "placeholder": "51", "group": "connection"},
+        "vip_host_uid":  {"type": "str",  "default": "", "hidden": true},
+        "timeout":       {"type": "int",  "default": 0, "min": 0, "max": 300,
+                          "zero_as_blank": true, "placeholder_module": "timeout", "group": "connection"},
+
+        "check_service":  {"type": "bool", "default": true,  "group": "checks"},
+        "check_vip":      {"type": "bool", "default": true,  "group": "checks"},
+        "check_priority": {"type": "bool", "default": false, "group": "checks"},
+
+        "alert":         {"type": "int",  "default": 0, "min": 0, "max": 20,
+                          "zero_as_blank": true, "placeholder_module": "alert", "group": "alerts"}
+    }
+}
