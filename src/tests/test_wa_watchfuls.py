@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the generic watchful action endpoint: GET|POST /api/watchfuls/<module>/<action>."""
+"""Tests for the generic watchful action endpoint: GET|POST /api/v1/watchfuls/<module>/<action>."""
 
 import os
 import pathlib

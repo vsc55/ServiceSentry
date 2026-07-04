@@ -64,9 +64,9 @@ _BUILTIN_SSH = {
 def _watchfuls_dir(watchfuls_dir: str | None) -> str:
     if watchfuls_dir:
         return watchfuls_dir
-    # this file is lib/modules/credential_schemas.py → climb two levels to the src root.
+    # this file is lib/modules/discovery/credential_schemas.py → climb three levels to src.
     return os.path.normpath(os.path.join(
-        os.path.dirname(__file__), os.pardir, os.pardir, 'watchfuls'))
+        os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, 'watchfuls'))
 
 
 def _module_i18n(module_dir: str) -> dict:
@@ -242,19 +242,47 @@ def credential_schemas(watchfuls_dir: str | None = None) -> dict:
                     )
                     _resolve_option_labels(ie, f['name'], lang_data)
                     inputs.append(ie)
-                action_entries.append({
+                entry_action = {
                     'id':         aid,
                     'url':        str(a['url']),
                     'icon':       str(a.get('icon') or 'bi-lightning'),
                     'result':     str(a.get('result') or 'toast'),
                     'label_i18n': _i18n_for(lang_data, 'action_labels', aid) or {'en_EN': aid},
                     'inputs':     inputs,
+                }
+                # A device-code provisioning action carries a `provision` object
+                # (opaque pass-through). Whatever extras the module's provisioning
+                # declaration contributes (app name, permissions, …) are merged in
+                # by the provisioning layer — the catalog stays permission-agnostic.
+                if isinstance(a.get('provision'), dict):
+                    _prov = dict(a['provision'])
+                    from lib.providers.entraid import entraid_provision_extras  # noqa: PLC0415
+                    for _k, _v in entraid_provision_extras(schema).items():
+                        _prov.setdefault(_k, _v)
+                    entry_action['provision'] = _prov
+                action_entries.append(entry_action)
+            # Optional deep-links (schema __credential__.links): a button that opens
+            # an external URL built from the credential's own field values — shown
+            # only once its ``require`` fields are filled (e.g. "open this app in
+            # Entra ID" once client_id exists). Generic: opaque url template + label.
+            link_entries = []
+            for lnk in (spec.get('links') or []):
+                if not isinstance(lnk, dict) or not lnk.get('id') or not lnk.get('url'):
+                    continue
+                lid = str(lnk['id'])
+                link_entries.append({
+                    'id':         lid,
+                    'url':        str(lnk['url']),
+                    'icon':       str(lnk.get('icon') or 'bi-box-arrow-up-right'),
+                    'require':    [str(x) for x in (lnk.get('require') or []) if isinstance(x, str)],
+                    'label_i18n': _i18n_for(lang_data, 'action_labels', lid) or {'en_EN': lid},
                 })
             catalog[ctype] = {
                 'module':     entry,
                 'label_i18n': type_label or {'en_EN': ctype},
                 'fields':     field_entries,
                 'actions':    action_entries,
+                'links':      link_entries,
             }
     return catalog
 

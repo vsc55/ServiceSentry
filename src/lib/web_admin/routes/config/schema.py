@@ -97,4 +97,12 @@ def register(app, wa):
         schema['web_admin|host'] = {**cfg_meta('web_admin|host'), 'ipkind': 'ip'}
         schema['telegram|chat_id'] = {'numericString': True}
         schema['web_admin|role_modal_scrollable'] = {'type': 'bool', 'default': True}
+        # SAML2 certificate / private-key fields render as multiline textareas so a
+        # PEM block pastes with its line breaks intact (a single-line input would
+        # mangle it).
+        for _pem, _ph in (('saml2|sp_cert',  '-----BEGIN CERTIFICATE-----'),
+                          ('saml2|sp_key',   '-----BEGIN PRIVATE KEY-----'),
+                          ('saml2|idp_cert', '-----BEGIN CERTIFICATE-----')):
+            schema[_pem] = {**schema.get(_pem, {}),
+                            'textarea': True, 'rows': 6, 'placeholder': _ph}
         return jsonify(schema)

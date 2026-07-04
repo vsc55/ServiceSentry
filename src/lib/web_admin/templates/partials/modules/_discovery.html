@@ -193,7 +193,22 @@ async function openDiscoverModalForField(fieldPathStr, url) {
     const filterEl = document.getElementById('discoverFilter');
     if (filterEl) filterEl.value = '';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('discoverModal')).show();
-    const data = await apiGet(url);
+    // POST the item config when the collection asks for it (__discovery_method__),
+    // so the action can authenticate with the item's own credential / inline
+    // fields (e.g. m365 listing SharePoint sites); otherwise a plain GET.
+    const _colSch = ITEM_SCHEMAS[_schemaKeyOf(_discoverPathStr)] || null;
+    let data;
+    if (_colSch && _colSch['__discovery_method__'] === 'POST') {
+        const _itemParts = fieldPathStr.split('|').slice(0, -1);
+        const _itemCfg = Object.assign({},
+            getPath(modulesData, _itemParts) || getPath(configData, _itemParts) || {});
+        const _itemKey = _itemParts[_itemParts.length - 1];
+        if (_itemKey) _itemCfg['_item_key'] = _itemKey;   // lets the route restore masked secrets
+        const res = await apiPost(url, _itemCfg);
+        data = res && Array.isArray(res.data) ? res.data : null;
+    } else {
+        data = await apiGet(url);
+    }
     if (!Array.isArray(data)) {
         if (body) body.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${esc(_modUiStr(modName, 'discover_error', t('error') || '?'))}</div>`;
         return;
@@ -272,6 +287,9 @@ function _renderDiscoverList() {
     }
 
     const _fieldMode = !!_discoverFieldPathStr;
+    // Opt-in (schema __discovery_allow_none__): field mode gets a "no selection"
+    // row that blanks the field, and clicking the current value toggles it off.
+    const _allowNone = _fieldMode && !!(_colSch && _colSch['__discovery_allow_none__']);
     let _currentFieldVal = '';
     if (_fieldMode) {
         const _fVal = getPath(modulesData, _discoverFieldPathStr.split('|'));
@@ -279,6 +297,21 @@ function _renderDiscoverList() {
     }
 
     let h = '<div class="d-flex flex-column gap-1">';
+    // "No selection" row (leave the field blank) — filtered out when searching.
+    if (_allowNone && !filter) {
+        const _dmod = _discoverFieldPathStr.split('|')[0];
+        const _noneLabel = _modUiStr(_dmod, 'discover_none', t('discover_none') || '— None —');
+        const _noneSel = !_currentFieldVal;
+        h += `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border${_noneSel ? ' border-primary' : ''}"
+                   style="background:var(--bs-body-bg);cursor:pointer"
+                   onclick="_clearDiscoveredFieldValue()">
+            <i class="bi bi-slash-circle flex-shrink-0 text-muted" style="font-size:.9rem"></i>
+            <div class="flex-grow-1 min-w-0"><em class="text-muted ss-fs-3">${esc(_noneLabel)}</em></div>
+            ${_noneSel
+                ? `<i class="bi bi-check-circle-fill text-success flex-shrink-0"></i>`
+                : `<i class="bi bi-circle text-muted opacity-50 flex-shrink-0"></i>`}
+        </div>`;
+    }
     for (const svc of filtered) {
         const _svcName   = svc.name || '';
         const _svcLower  = _svcName.toLowerCase();
@@ -322,13 +355,17 @@ function _renderDiscoverList() {
             ? `<span class="d-block text-truncate" style="font-size:.7rem;color:var(--bs-info-text-emphasis)" title="${escAttr(_subtitle)}">${esc(_subtitle)}</span>`
             : '';
 
+        // Clicking the already-selected value toggles it off (clears the field)
+        // when the collection allows a blank selection; otherwise re-selects it.
         const _clickAttr  = isAdded ? '' : (_fieldMode
-            ? `onclick="_selectDiscoveredServiceForField(${jsStr(_svcName)})"`
+            ? ((_isCurrent && _allowNone)
+                ? `onclick="_clearDiscoveredFieldValue()"`
+                : `onclick="_selectDiscoveredServiceForField(${jsStr(_svcName)})"`)
             : `onclick="_addDiscoveredService(${jsStr(_svcName)},${jsStr(_cat)},${jsStr(svc[_typeField]||'')},${jsStr(svc.fill_value||'')},${jsStr(svc.display_name||'')})"`);
         const _trailIcon  = isAdded
             ? `<span class="badge bg-secondary flex-shrink-0 ss-fs-1">${esc(t('already_added'))}</span>`
             : _isCurrent
-                ? `<i class="bi bi-check-circle-fill text-success flex-shrink-0"></i>`
+                ? `<i class="bi bi-check-circle-fill text-success flex-shrink-0"${_allowNone ? ` title="${escAttr(t('clear'))}"` : ''}></i>`
                 : `<i class="bi ${_fieldMode ? 'bi-circle text-muted opacity-50' : 'bi-plus-circle text-success'} flex-shrink-0"></i>`;
 
         h += `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border${isAdded ? ' opacity-50' : ''}"
@@ -493,6 +530,19 @@ function _selectDiscoveredServiceForField(serviceName) {
     updateField(target, _discoverFieldPathStr, serviceName);
     const inp = document.querySelector(`input[data-field-path="${CSS.escape(_discoverFieldPathStr)}"]`);
     if (inp) inp.value = serviceName;
+    bootstrap.Modal.getInstance(document.getElementById('discoverModal'))?.hide();
+    _discoverFieldPathStr = null;
+}
+
+/** Clear the field being picked (blank value) and close the modal — the "no
+ *  selection" row and toggling-off the current value both route here. */
+function _clearDiscoveredFieldValue() {
+    if (!_discoverFieldPathStr) return;
+    const parts = _discoverFieldPathStr.split('|');
+    const target = parts[0] in modulesData ? 'modules' : 'config';
+    updateField(target, _discoverFieldPathStr, '');
+    const inp = document.querySelector(`input[data-field-path="${CSS.escape(_discoverFieldPathStr)}"]`);
+    if (inp) inp.value = '';
     bootstrap.Modal.getInstance(document.getElementById('discoverModal'))?.hide();
     _discoverFieldPathStr = null;
 }

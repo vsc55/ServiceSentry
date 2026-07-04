@@ -1,0 +1,58 @@
+{
+    "pretty_name": "Microsoft 365",
+    "module_description": "Monitoriza servicios de Microsoft 365 mediante la API de Microsoft Graph (autenticación app-only). De momento: almacenamiento de SharePoint — cuota por sitio (porcentaje usado y espacio libre) y tendencia de uso del tenant. Requiere registrar una app en Azure AD/Entra ID con los permisos de aplicación Sites.Read.All y Reports.Read.All (con consentimiento de administrador).",
+    "labels": {
+        "enabled":            "Habilitado",
+        "label":              "Etiqueta",
+        "threads":            "Hilos",
+        "alert":              "Umbral",
+        "timeout":            "Tiempo máximo (s)",
+        "tenant_id":          "Tenant (ID o dominio)",
+        "client_id":          "ID de aplicación (client_id)",
+        "client_secret":      "Secreto de cliente",
+        "check_site":         "Almacenamiento del sitio",
+        "site":               "Sitio de SharePoint",
+        "usage_pct":          "Alerta al % usado",
+        "free_min":           "Alerta si el libre baja de",
+        "free_unit":          "Unidad (libre)",
+        "check_tenant_usage": "Uso del tenant (informes)",
+        "tenant_max":         "Alerta si el uso supera",
+        "tenant_unit":        "Unidad (tenant)"
+    },
+    "hints": {
+        "enabled":            "Habilita o deshabilita esta conexión de Microsoft 365.",
+        "threads":            "Número de conexiones de Microsoft 365 a comprobar en paralelo.",
+        "alert":              "Fallos de autenticación consecutivos antes de alertar (suaviza cortes puntuales).",
+        "timeout":            "Tiempo máximo por defecto de las peticiones a Graph, en segundos.",
+        "tenant_id":          "Identificador del tenant (GUID) o dominio, p. ej. contoso.onmicrosoft.com.",
+        "client_id":          "ID de aplicación (cliente) del registro de app en Azure AD/Entra ID.",
+        "client_secret":      "Secreto de cliente de la app. Se guarda cifrado. La app necesita los permisos de aplicación Sites.Read.All y Reports.Read.All con consentimiento de administrador. Puedes crearla automáticamente con el botón de abajo (inicias sesión como admin y das consentimiento; no hace falta secreto previo).",
+        "check_site":         "Comprueba la cuota de almacenamiento de un sitio de SharePoint (total, usado y libre).",
+        "site":               "URL del sitio de SharePoint a vigilar, p. ej. contoso.sharepoint.com/sites/Marketing. Déjalo vacío para usar el sitio raíz del tenant.",
+        "usage_pct":          "Avisa cuando el porcentaje usado del sitio alcanza este valor (1–100). En un ítem, déjalo vacío para heredar el valor por defecto del módulo; ponlo a 0 en el módulo para desactivarlo.",
+        "free_min":           "Avisa cuando el espacio libre del sitio baja de esta cantidad. En un ítem, déjalo vacío para heredar el valor por defecto del módulo; ponlo a 0 en el módulo para desactivarlo.",
+        "free_unit":          "Unidad de la cantidad de espacio libre (MB, GB o TB).",
+        "check_tenant_usage": "Almacenamiento total USADO de SharePoint en el tenant, vía la API de informes. Graph no expone la cuota total agrupada, así que la alerta es por cantidad usada.",
+        "tenant_max":         "Avisa cuando el uso total de SharePoint del tenant supera esta cantidad. 0 = solo informativo.",
+        "tenant_unit":        "Unidad del límite del tenant (GB o TB)."
+    },
+    "group_labels": {
+        "general": "General",
+        "auth":    "Autenticación",
+        "checks":  "Comprobaciones",
+        "alerts":  "Alertas"
+    },
+    "action_labels": {
+        "test_connection": "Probar conexión",
+        "provision_app":   "Crear app en Azure (inicio de sesión)",
+        "open_app":        "Ver la app en Entra ID"
+    },
+    "ui": {
+        "discover_title": "Sitios de SharePoint",
+        "discover_error": "No se pudieron obtener los sitios. Revisa las credenciales y los permisos (Sites.Read.All).",
+        "discover_none": "— Sin selección (sitio raíz del tenant) —"
+    },
+    "new_item_key_label": "Nombre:",
+    "rename_item_prompt": "Introduce el nuevo nombre:",
+    "collections": {"list": "Conexiones de Microsoft 365"}
+}

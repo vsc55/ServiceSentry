@@ -30,6 +30,10 @@ from .constants import (
 from lib.config.spec import (
     CFG_BY_PATH, cfg_validate, env_field_specs, normalize_url, registry_defaults)
 from lib.config.layout import config_layout
+from lib.providers.entraid.declarations import (
+    DEFAULT_APP_NAME as _ENTRA_APP_DEFAULT,
+    OIDC_APP_NAME as _ENTRA_APP_OIDC,
+    SAML2_APP_NAME as _ENTRA_APP_SAML2)
 from .auth import ldap_auth as _ldap_auth
 from .auth import oidc_auth as _oidc_auth
 from .auth import saml_auth as _saml_auth
@@ -176,7 +180,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Secret fields declared by credential-type schemas (built-in ssh +
         # module __credential__), so reusable credentials encrypt/mask them too.
         try:
-            from lib.modules.credential_schemas import credential_secret_fields  # noqa: PLC0415
+            from lib.modules.discovery.credential_schemas import credential_secret_fields  # noqa: PLC0415
             _cred_secrets = credential_secret_fields(modules_dir)
         except Exception:  # pylint: disable=broad-except
             _cred_secrets = set()
@@ -958,6 +962,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'ldap_available':  _ldap_auth.is_available(),
                 'oidc_available':  _oidc_auth.is_available(),
                 'saml2_available': _saml_auth.is_available(),
+                # Default Entra ID app display names (single source: providers.entraid),
+                # injected into the JS wizards via core/_constants.html.
+                'entra_app_name_default': _ENTRA_APP_DEFAULT,
+                'entra_app_name_oidc':    _ENTRA_APP_OIDC,
+                'entra_app_name_saml2':   _ENTRA_APP_SAML2,
                 'module_web_styles': self._module_web_styles,
                 'module_web_ui':     self._module_web_ui,
                 'module_web_modals': self._module_web_modals,

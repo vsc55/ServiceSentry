@@ -1,8 +1,19 @@
 {# ================================================================
    Config — Auth tab: _renderAuthSection, _renderDefaultRoleField,
    _drPickRole, _applyLdapPreset, _applyOidcPreset, _applySaml2Preset,
-   and testLdap.
+   testLdap, and the OIDC "Register in Azure" glue (showEntraWizard /
+   _entraRedirectUri / _entraApply — it drives the shared generic wizard).
    ================================================================ #}
+
+// "Open in Entra ID" deep-link button for an already-registered app (by its
+// appId/client id). Empty until an app exists (OIDC client_id / SAML2 sp_app_id).
+function _entraAppLink(appId) {
+    appId = (appId || '').trim();
+    if (!appId) return '';
+    const url = 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/' + encodeURIComponent(appId);
+    return `<a class="btn btn-secondary btn-sm ms-2" href="${escAttr(url)}" target="_blank" rel="noopener">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('entra_open_app'))}</a>`;
+}
 
 // ──────────────────────── External auth section renderer ──────────────────
 function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
@@ -40,7 +51,7 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
             <div class="col-sm-8">
                 <button class="btn btn-primary btn-sm" onclick="showEntraWizard()" type="button">
                     <i class="bi bi-microsoft me-1"></i>${esc(t('entra_wizard_btn'))}
-                </button>
+                </button>${_entraAppLink(data.client_id)}
             </div>
         </div></div>`;
     }
@@ -89,9 +100,19 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
             <div class="col-sm-8">
                 <button class="btn btn-primary btn-sm" onclick="showEntraSaml2Wizard()" type="button">
                     <i class="bi bi-microsoft me-1"></i>${esc(t('entra_saml2_wizard_btn'))}
-                </button>
+                </button>${_entraSaml2SsoLink(data)}${(data.sp_app_id || '').trim() ? `<button class="btn btn-secondary btn-sm ms-2" onclick="_entraSaml2AddSecret()" type="button"><i class="bi bi-key me-1"></i>${esc(t('entra_saml2_add_secret_btn'))}</button>` : ''}
             </div>
         </div></div>`;
+        // Read-only reference: the exact values the admin must paste into Azure's
+        // "Basic SAML Configuration" (Entra has no Graph API for it).
+        const _s2Ent = (data.sp_entity_id || '').trim(), _s2Acs = (data.sp_acs_url || '').trim();
+        if (_s2Ent || _s2Acs) {
+            h += `<div class="cfg-field-wrap mb-2"><div class="alert alert-secondary py-2 mb-0 small">
+                <div class="fw-semibold mb-2">${esc(t('entra_saml2_azure_values'))}</div>
+                ${_s2CopyRow(t('entra_saml2_entity_id_label'), _s2Ent)}
+                ${_s2CopyRow(t('entra_saml2_acs_url_label'), _s2Acs)}
+            </div></div>`;
+        }
     }
 
     // Inject field order so renderScalarFields respects logical grouping
@@ -391,4 +412,53 @@ async function testLdap() {
     html += '</div>';
     if (resultBody) resultBody.innerHTML = html;
     if (resultDiv)  resultDiv.style.display = '';
+}
+
+// ── OIDC "Register in Azure" ────────────────────────────────────────────────
+// The button reuses the shared generic provisioning wizard: the OIDC app is just
+// a provisioning profile (a user sign-in / web app with the groups claim, only
+// assigned users, and openid/email/profile/User.Read + Group.Read.All). On
+// completion the created app's tenant/client/secret + the OIDC claim mapping are
+// written to the oidc config.
+function _entraRedirectUri() {
+    let pu = ((configData.web_admin || {}).public_url || '').trim().replace(/\/$/, '');
+    if (!pu) return window.location.origin + '/auth/oidc/callback';
+    // public_url is stored without scheme — add https:// (required by Entra ID)
+    if (!/^https?:\/\//i.test(pu)) pu = 'https://' + pu;
+    return pu + '/auth/oidc/callback';
+}
+
+function showEntraWizard() {
+    showEntraIdProvisionWizard({
+        url: '/api/v1/auth/entraid/provision/device-code',
+        provision: {
+            app_name: ENTRA_APP_NAME_OIDC,
+            app_roles: ['Group.Read.All'],
+            scopes: ['openid', 'email', 'profile', 'User.Read'],
+            redirect_uris: [_entraRedirectUri()],
+            group_claims: true,
+            require_assignment: true,
+        },
+    }, (fields) => {
+        _entraApply(fields || {});
+        if (typeof saveConfig === 'function') saveConfig();
+    });
+}
+
+function _entraApply(d) {
+    const patch = {
+        username_claim: 'preferred_username',
+        email_claim: 'email', name_claim: 'name', groups_claim: 'groups',
+        scopes: 'openid email profile',
+        button_label: 'Microsoft Entra ID',
+    };
+    if (d.provider_url)  patch.provider_url  = d.provider_url;
+    else if (d.tenant_id) patch.provider_url = `https://login.microsoftonline.com/${d.tenant_id}/v2.0`;
+    if (d.client_id)     patch.client_id     = d.client_id;
+    if (d.client_secret) patch.client_secret = d.client_secret;
+    // updateField registers each path in _dirtyFields so saveConfig() picks them up
+    for (const [field, value] of Object.entries(patch)) {
+        updateField('config', `oidc|${field}`, value);
+    }
+    renderConfig();
 }

@@ -1,22 +1,26 @@
 {# ================================================================
    Config — Auth tab: SAML2 Entra ID wizard.
+
+   Only the SAML2-specific pieces live here; the modal, device-code flow,
+   poll loop, tabs and copy plumbing are the SHARED generic wizard
+   (partials/credentials/_provision_wizard.html :: showEntraIdProvisionWizard).
+   showEntraSaml2Wizard just parameterises it (endpoints, cert-aware manual
+   scripts, ACS/entity info) and supplies onResult to apply the saml2| config.
+
    _entraSaml2CertEnd, _entraSaml2AzCliScript, _entraSaml2Ps1Script,
-   _entraSaml2BaseUrl, showEntraSaml2Wizard, _entraSaml2Tab,
-   _entraSaml2UpdateScripts, _entraSaml2Start, _entraSaml2Poll,
-   _entraSaml2Apply, _entraSaml2Retry, _entraSaml2Cleanup.
+   _entraSaml2BaseUrl, showEntraSaml2Wizard, _entraSaml2Success, _entraSaml2Apply.
    ================================================================ #}
 
-// ── SAML2 Entra ID wizard ──────────────────────────────────────────────────────
-let _s2EntraFlowToken  = null;
-let _s2EntraPolling    = null;
-let _s2EntraDeviceCode = '';
+// ── SAML2 Entra ID wizard (delegates to the generic provisioning wizard) ────────
+// The default app name (ENTRA_APP_NAME_SAML2) is injected from Python
+// (providers.entraid SAML2_APP_NAME) via core/_constants.html — no local literal.
 
 function _entraSaml2CertEnd() {
     // addTokenSigningCertificate max = now + 3 years
     return new Date(Date.now() + 3 * 365 * 24 * 3600 * 1000).toISOString().slice(0, 19) + 'Z';
 }
 
-function _entraSaml2AzCliScript(acsUrl, entityId, appName = 'ServiceSentry') {
+function _entraSaml2AzCliScript(acsUrl, entityId, appName = ENTRA_APP_NAME_SAML2) {
     const certEnd = _entraSaml2CertEnd();
     return `#!/bin/bash
 # ${t('entra_script_requires')}: az CLI  (https://docs.microsoft.com/cli/azure/install-azure-cli)
@@ -51,7 +55,13 @@ SP_ID=$(echo "$SP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id
 az rest --method PATCH \\
   --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID" \\
   --headers "Content-Type=application/json" \\
-  --body '{"preferredSingleSignOnMode":"saml","replyUrls":["'"$ACS_URL"'"]}'
+  --body '{"preferredSingleSignOnMode":"saml"}'
+
+# 2b — ${t('entra_saml2_step2b')}
+az rest --method PATCH \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"replyUrls":["'"$ACS_URL"'"]}'
 
 # 3 — ${t('entra_saml2_step3')}
 CERT_JSON=$(az rest --method POST \\
@@ -81,7 +91,7 @@ echo "IdP Certificate (paste in idp_cert field):"
 echo "$IDP_CERT_PEM"`;
 }
 
-function _entraSaml2Ps1Script(acsUrl, entityId, appName = 'ServiceSentry') {
+function _entraSaml2Ps1Script(acsUrl, entityId, appName = ENTRA_APP_NAME_SAML2) {
     const certEnd = _entraSaml2CertEnd();
     return `# ${t('entra_script_requires')}: Install-Module Microsoft.Graph -Scope CurrentUser
 Connect-MgGraph -Scopes "Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All"
@@ -109,7 +119,13 @@ $sp = New-MgServicePrincipal -AppId $app.AppId \`
 
 Invoke-MgGraphRequest -Method PATCH \`
     -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.Id)" \`
-    -Body @{ preferredSingleSignOnMode = "saml"; replyUrls = @($acsUrl) } \`
+    -Body @{ preferredSingleSignOnMode = "saml" } \`
+    -ContentType "application/json"
+
+# ${t('entra_saml2_step2b')}
+Invoke-MgGraphRequest -Method PATCH \`
+    -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.Id)" \`
+    -Body @{ replyUrls = @($acsUrl) } \`
     -ContentType "application/json"
 
 # ${t('entra_saml2_step3')}
@@ -145,203 +161,110 @@ function _entraSaml2BaseUrl() {
 }
 
 function showEntraSaml2Wizard() {
-    const _base  = _entraSaml2BaseUrl();
+    const _base    = _entraSaml2BaseUrl();
     const acsUrl   = (configData?.saml2?.sp_acs_url   || '').trim() || (_base + '/auth/saml2/acs');
     const entityId = (configData?.saml2?.sp_entity_id || '').trim() || _base;
-    document.getElementById('modalEntraSaml2Wizard')?.remove();
-    document.body.insertAdjacentHTML('beforeend', `
-<div class="modal fade" id="modalEntraSaml2Wizard" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-microsoft me-2"></i>${esc(t('entra_saml2_wizard_title'))}</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="_entraSaml2Cleanup()"></button>
-      </div>
-      <div class="modal-body">
-        <ul class="nav nav-tabs mb-3">
-          <li class="nav-item"><button class="nav-link active" id="entraSaml2NavAuto" onclick="_entraSaml2Tab('auto')" type="button">
-            <i class="bi bi-magic me-1"></i>${esc(t('entra_tab_auto'))}</button></li>
-          <li class="nav-item"><button class="nav-link" id="entraSaml2NavScript" onclick="_entraSaml2Tab('script')" type="button">
-            <i class="bi bi-terminal me-1"></i>${esc(t('entra_tab_script'))}</button></li>
-        </ul>
-        <div id="entraSaml2ContentScript" style="display:none">
-          <div class="mb-2">
-            <label class="form-label small fw-semibold text-muted">${esc(t('entra_saml2_acs_url_label'))}</label>
-            <div class="input-group input-group-sm">
-              <input type="text" class="form-control font-monospace" readonly id="entraSaml2AcsInput" value="${escAttr(acsUrl)}">
-              <button class="btn btn-secondary" onclick="_copyToClipboard(document.getElementById('entraSaml2AcsInput').value)">
-                <i class="bi bi-clipboard"></i>
-              </button>
-            </div>
+    // Read-only ACS URL + Entity ID shown above the manual scripts (SP details the
+    // admin needs when registering the app by hand).
+    const _row = (label, id, val) => `
+        <div class="mb-2">
+          <label class="form-label small fw-semibold text-muted">${esc(label)}</label>
+          <div class="input-group input-group-sm">
+            <input type="text" class="form-control font-monospace" readonly id="${id}" value="${escAttr(val)}">
+            <button class="btn btn-secondary" type="button" onclick="_copyToClipboard(document.getElementById('${id}').value)"><i class="bi bi-clipboard"></i></button>
           </div>
-          <div class="mb-3">
-            <label class="form-label small fw-semibold text-muted">${esc(t('entra_saml2_entity_id_label'))}</label>
-            <div class="input-group input-group-sm">
-              <input type="text" class="form-control font-monospace" readonly id="entraSaml2EntityInput" value="${escAttr(entityId)}">
-              <button class="btn btn-secondary" onclick="_copyToClipboard(document.getElementById('entraSaml2EntityInput').value)">
-                <i class="bi bi-clipboard"></i>
-              </button>
-            </div>
-          </div>
-          <p class="small text-muted">${esc(t('entra_saml2_script_note'))}</p>
-          <div class="mb-3">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-              <span class="fw-semibold small">Azure CLI</span>
-              <button class="btn btn-secondary btn-sm" onclick="_copyToClipboard(document.getElementById('entraSaml2AzCli').textContent)">
-                <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}</button>
-            </div>
-            <pre class="bg-body-secondary rounded p-3 overflow-auto" id="entraSaml2AzCli" style="max-height:180px;font-size:.76em">${esc(_entraSaml2AzCliScript(acsUrl, entityId))}</pre>
-          </div>
-          <div>
-            <div class="d-flex justify-content-between align-items-center mb-1">
-              <span class="fw-semibold small">PowerShell <span class="text-muted">(Microsoft.Graph)</span></span>
-              <button class="btn btn-secondary btn-sm" onclick="_copyToClipboard(document.getElementById('entraSaml2Ps1').textContent)">
-                <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}</button>
-            </div>
-            <pre class="bg-body-secondary rounded p-3 overflow-auto" id="entraSaml2Ps1" style="max-height:180px;font-size:.76em">${esc(_entraSaml2Ps1Script(acsUrl, entityId))}</pre>
-          </div>
-        </div>
-        <div id="entraSaml2ContentAuto">
-          <div id="entraSaml2StateIdle">
-            <p class="small text-muted mb-3">${esc(t('entra_saml2_auto_intro'))}</p>
-            <div class="mb-3">
-              <label class="form-label small fw-semibold text-muted" for="entraSaml2AppName">${esc(t('entra_saml2_app_name_label'))}</label>
-              <input type="text" class="form-control form-control-sm" id="entraSaml2AppName"
-                     value="ServiceSentry" autocomplete="off"
-                     oninput="_entraSaml2UpdateScripts(this.value)">
-            </div>
-            <button class="btn btn-primary" onclick="_entraSaml2Start()" type="button">
-              <i class="bi bi-play-fill me-1"></i>${esc(t('entra_auto_start'))}</button>
-          </div>
-          <div id="entraSaml2StateWaiting" style="display:none">
-            <p class="small text-muted mb-3">${esc(t('entra_auto_open_browser'))}</p>
-            <div class="mb-2">
-              <div class="small text-muted mb-1">${esc(t('entra_auto_code_label'))}</div>
-              <div class="input-group">
-                <input type="text" class="form-control font-monospace fs-4 fw-bold text-center bg-body-secondary"
-                       readonly id="entraSaml2UserCode" value="—">
-                <button class="btn btn-secondary" type="button"
-                  onclick="_copyToClipboard(document.getElementById('entraSaml2UserCode').value)">
-                  <i class="bi bi-clipboard me-1"></i>${esc(t('copy'))}
-                </button>
-              </div>
-            </div>
-            <div class="mb-3">
-              <a id="entraSaml2VerifLink" href="#" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
-                <i class="bi bi-box-arrow-up-right me-1"></i>microsoft.com/devicelogin
-              </a>
-            </div>
-            <div class="d-flex align-items-center gap-2 text-muted small">
-              <span class="spinner-border spinner-border-sm"></span>${esc(t('entra_auto_waiting'))}</div>
-          </div>
-          <div id="entraSaml2StateSuccess" style="display:none">
-            <div class="alert alert-success mb-2">
-              <i class="bi bi-check-circle-fill me-2"></i>${esc(t('entra_saml2_auto_success'))}</div>
-            <div id="entraSaml2SpError" style="display:none" class="alert alert-warning mb-2 py-2 small">
-              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSaml2SpErrorMsg"></span></div>
-            <div id="entraSaml2CertError" style="display:none" class="alert alert-warning mb-2 py-2 small">
-              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSaml2CertErrorMsg"></span></div>
-            <div id="entraSaml2SamlModeError" style="display:none" class="alert alert-warning mb-2 py-2 small">
-              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSaml2SamlModeErrorMsg"></span></div>
-            <div id="entraSaml2EntityIdWarning" style="display:none" class="alert alert-warning mb-2 py-2 small">
-              <i class="bi bi-exclamation-triangle me-1"></i><span id="entraSaml2EntityIdWarningMsg"></span></div>
-            <div id="entraSaml2ConsentOk" style="display:none" class="alert alert-success mb-0 py-2 small">
-              <i class="bi bi-shield-check me-1"></i>${esc(t('entra_consent_granted'))}</div>
-            <div id="entraSaml2ConsentPending" style="display:none" class="alert alert-warning mb-0 py-2 small">
-              <i class="bi bi-exclamation-triangle me-1"></i>${esc(t('entra_consent_pending'))}</div>
-          </div>
-          <div id="entraSaml2StateError" style="display:none">
-            <div class="alert alert-danger mb-2">
-              <i class="bi bi-x-circle-fill me-2"></i><span id="entraSaml2ErrorMsg"></span></div>
-            <button class="btn btn-secondary btn-sm" onclick="_entraSaml2Retry()" type="button">
-              <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('retry'))}</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>`);
-    const modal = new bootstrap.Modal(document.getElementById('modalEntraSaml2Wizard'));
-    modal.show();
+        </div>`;
+    showEntraIdProvisionWizard({
+        url:      '/api/v1/auth/entra/saml2/device-code',
+        pollUrl:  '/api/v1/auth/entra/saml2/device-poll',
+        title:    t('entra_saml2_wizard_title'),
+        intro:    t('entra_saml2_auto_intro'),
+        provision: { app_name: ENTRA_APP_NAME_SAML2 },
+        scripts: {
+            ps1:   (name) => _entraSaml2Ps1Script(acsUrl, entityId, name),
+            azcli: (name) => _entraSaml2AzCliScript(acsUrl, entityId, name),
+        },
+        manualExtraHtml: _row(t('entra_saml2_acs_url_label'),   'entraSaml2AcsInput',    acsUrl)
+                       + _row(t('entra_saml2_entity_id_label'), 'entraSaml2EntityInput', entityId),
+        onResult: _entraSaml2Success,
+    });
 }
 
-function _entraSaml2Tab(tab) {
-    document.getElementById('entraSaml2ContentScript').style.display = tab === 'script' ? '' : 'none';
-    document.getElementById('entraSaml2ContentAuto').style.display   = tab === 'auto'   ? '' : 'none';
-    document.getElementById('entraSaml2NavScript').classList.toggle('active', tab === 'script');
-    document.getElementById('entraSaml2NavAuto').classList.toggle('active',   tab === 'auto');
+// Deep link to the app's SAML SSO blade in the Entra portal (needs the SP objectId
+// AND the appId).
+function _entraSaml2SsoUrl(spObjectId, appId) {
+    spObjectId = (spObjectId || '').trim(); appId = (appId || '').trim();
+    if (!spObjectId || !appId) return '';
+    return 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/SignOn/objectId/'
+        + encodeURIComponent(spObjectId) + '/appId/' + encodeURIComponent(appId);
 }
 
-function _entraSaml2UpdateScripts(name) {
-    const appName  = name.trim() || 'ServiceSentry';
-    const acsUrl   = document.getElementById('entraSaml2AcsInput')?.value   || '';
-    const entityId = document.getElementById('entraSaml2EntityInput')?.value || '';
-    const azCliEl  = document.getElementById('entraSaml2AzCli');
-    const ps1El    = document.getElementById('entraSaml2Ps1');
-    if (azCliEl) azCliEl.textContent = _entraSaml2AzCliScript(acsUrl, entityId, appName);
-    if (ps1El)   ps1El.textContent   = _entraSaml2Ps1Script(acsUrl, entityId, appName);
+// A read-only, copyable label:value row (values the admin must paste into Azure).
+function _s2CopyRow(label, val) {
+    val = (val || '').trim();
+    if (!val) return '';
+    return `<div class="input-group input-group-sm mb-1">
+        <span class="input-group-text" style="min-width:8.5rem">${esc(label)}</span>
+        <input type="text" class="form-control font-monospace" readonly value="${escAttr(val)}">
+        <button class="btn btn-secondary" type="button" onclick="_copyToClipboard(this.previousElementSibling.value)"><i class="bi bi-clipboard"></i></button>
+    </div>`;
 }
 
-async function _entraSaml2Start() {
-    document.getElementById('entraSaml2StateIdle').style.display = 'none';
-    const appName = (document.getElementById('entraSaml2AppName')?.value || '').trim() || 'ServiceSentry';
-    const r = await apiPost('/api/v1/auth/entra/saml2/device-code', { app_name: appName });
-    if (!r?.data || r.data.error) {
-        document.getElementById('entraSaml2StateIdle').style.display = '';
-        showToast((r?.data?.error) || t('entra_device_code_error'), 'danger');
-        return;
-    }
-    const d = r.data;
-    _s2EntraFlowToken  = d.flow_token;
-    _s2EntraDeviceCode = d.user_code;
-    document.getElementById('entraSaml2UserCode').value = d.user_code;
-    const lnk = document.getElementById('entraSaml2VerifLink');
-    lnk.href = d.verification_uri;
-    document.getElementById('entraSaml2StateWaiting').style.display = '';
-    _copyToClipboard(d.user_code);
-    window.open(d.verification_uri, '_blank', 'noopener');
-    _s2EntraPolling = setTimeout(() => _entraSaml2Poll(d.interval || 5), (d.interval || 5) * 1000);
+// "Open in Entra ID" button for the SAML2 app → straight to its SSO blade (falls
+// back to the app-registration link if we only have the appId).
+function _entraSaml2SsoLink(data) {
+    const url = _entraSaml2SsoUrl(data.sp_object_id, data.sp_app_id);
+    if (!url) return (typeof _entraAppLink === 'function') ? _entraAppLink(data.sp_app_id) : '';
+    return `<a class="btn btn-secondary btn-sm ms-2" href="${escAttr(url)}" target="_blank" rel="noopener">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('entra_open_app'))}</a>`;
 }
 
-async function _entraSaml2Poll(interval) {
-    if (!_s2EntraFlowToken) return;
-    const r = await apiPost('/api/v1/auth/entra/saml2/device-poll', { flow_token: _s2EntraFlowToken });
-    if (!r?.data) return;
-    const d = r.data;
-    if (d.status === 'pending') {
-        const next = d.interval || interval;
-        _s2EntraPolling = setTimeout(() => _entraSaml2Poll(next), next * 1000);
-        return;
-    }
-    document.getElementById('entraSaml2StateWaiting').style.display = 'none';
-    _s2EntraFlowToken = null;
-    if (d.status === 'complete') {
-        _entraSaml2Apply(d);
-        document.getElementById('entraSaml2StateSuccess').style.display = '';
-        const spOk = d.sp_created !== false;
-        document.getElementById('entraSaml2SpError').style.display = spOk ? 'none' : '';
-        if (!spOk) document.getElementById('entraSaml2SpErrorMsg').textContent =
-            t('entra_sp_error') + (d.sp_error ? ` (${d.sp_error})` : '');
-        document.getElementById('entraSaml2CertError').style.display = d.cert_error ? '' : 'none';
-        if (d.cert_error) document.getElementById('entraSaml2CertErrorMsg').textContent =
-            t('entra_saml2_cert_error') + ` (${d.cert_error})`;
-        const _saml2AppName = d.app_name || 'ServiceSentry';
-        document.getElementById('entraSaml2SamlModeError').style.display = d.saml_patch_error ? '' : 'none';
-        if (d.saml_patch_error) document.getElementById('entraSaml2SamlModeErrorMsg').textContent =
-            t('entra_saml2_saml_mode_error').replace('{error}', d.saml_patch_error).replace('{app_name}', _saml2AppName);
-        document.getElementById('entraSaml2EntityIdWarning').style.display = d.entity_id_warning ? '' : 'none';
-        if (d.entity_id_warning) document.getElementById('entraSaml2EntityIdWarningMsg').textContent =
-            t('entra_saml2_entity_id_warning').replace('{id}', d.entity_id_warning).replace('{app_name}', _saml2AppName);
-        document.getElementById('entraSaml2ConsentOk').style.display      = (spOk && d.consent_granted)  ? '' : 'none';
-        document.getElementById('entraSaml2ConsentPending').style.display  = (spOk && !d.consent_granted) ? '' : 'none';
-        saveConfig().then(() => {
-            if (spOk && d.consent_granted && !d.cert_error && !d.entity_id_warning && !d.saml_patch_error)
-                setTimeout(() => bootstrap.Modal.getInstance(document.getElementById('modalEntraSaml2Wizard'))?.hide(), 2000);
-        });
-    } else {
-        document.getElementById('entraSaml2ErrorMsg').textContent = d.message || t('entra_auto_error');
-        document.getElementById('entraSaml2StateError').style.display = '';
-    }
+// Back-fill the Graph client secret on an EXISTING SAML2 app (registered before
+// secrets were provisioned) so the group→role mapping can read directory groups.
+// Reuses the generic wizard in "simple" mode (just a device-code sign-in).
+function _entraSaml2AddSecret() {
+    showEntraIdProvisionWizard({
+        url:     '/api/v1/auth/entra/saml2/secret/device-code',
+        pollUrl: '/api/v1/auth/entra/saml2/device-poll',
+        title:   t('entra_saml2_add_secret_title'),
+        intro:   t('entra_saml2_add_secret_intro'),
+        simple:  true,
+        onResult: (d) => {
+            if (d.graph_secret) {
+                updateField('config', 'saml2|graph_secret', d.graph_secret);
+                saveConfig();
+            }
+            return { html: `<div class="alert alert-success mb-0 py-2 small"><i class="bi bi-check-circle-fill me-1"></i>${esc(t('entra_saml2_add_secret_done'))}</div>`,
+                     autoClose: true };
+        },
+    });
+}
+
+// Called by the generic wizard on a completed SAML2 flow: apply the discovered IdP
+// settings to the saml2| config and render the success panel.  The "Basic SAML
+// Configuration" (Identifier + Reply URL) has no Graph API, so the panel guides the
+// admin to the app's SSO blade with the exact values to paste, and opens it.
+function _entraSaml2Success(d) {
+    _entraSaml2Apply(d);
+    const appName = d.app_name || ENTRA_APP_NAME_SAML2;
+    const spOk    = d.sp_created !== false;
+    const ssoUrl  = _entraSaml2SsoUrl(d.sp_object_id, d.client_id);
+    const warn = (msg) => `<div class="alert alert-warning mb-2 py-2 small"><i class="bi bi-exclamation-triangle me-1"></i>${esc(msg)}</div>`;
+    let html = `<div class="alert alert-success mb-2"><i class="bi bi-check-circle-fill me-2"></i>${esc(t('entra_saml2_auto_success'))}</div>`;
+    // Manual last step: Entra has no API for the Basic SAML Configuration.
+    html += `<div class="alert alert-primary mb-2 py-2 small">
+        <div class="fw-semibold mb-2"><i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('entra_saml2_finish_hint'))}</div>
+        ${_s2CopyRow(t('entra_saml2_entity_id_label'), d.sp_entity_id)}
+        ${_s2CopyRow(t('entra_saml2_acs_url_label'), d.sp_acs_url)}
+        ${ssoUrl ? `<a class="btn btn-primary btn-sm mt-2" href="${escAttr(ssoUrl)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('entra_saml2_finish_btn'))}</a>` : ''}
+    </div>`;
+    if (!spOk)               html += warn(t('entra_sp_error') + (d.sp_error ? ` (${d.sp_error})` : ''));
+    if (d.cert_error)        html += warn(t('entra_saml2_cert_error') + ` (${d.cert_error})`);
+    if (spOk && d.consent_granted)  html += `<div class="alert alert-success mb-0 py-2 small"><i class="bi bi-shield-check me-1"></i>${esc(t('entra_consent_granted'))}</div>`;
+    if (spOk && !d.consent_granted) html += warn(t('entra_consent_pending'));
+    saveConfig();
+    if (ssoUrl) window.open(ssoUrl, '_blank', 'noopener');   // jump to the SSO blade to finish
+    return { html, autoClose: false };
 }
 
 function _entraSaml2Apply(d) {
@@ -354,22 +277,17 @@ function _entraSaml2Apply(d) {
         name_attr:     'http://schemas.microsoft.com/identity/claims/displayname',
         groups_attr:   'http://schemas.microsoft.com/ws/2008/06/identity/claims/groups',
     };
-    if (d.idp_cert)    patch.idp_cert    = d.idp_cert;
-    if (d.sp_entity_id && !(configData?.saml2?.sp_entity_id || '').trim()) patch.sp_entity_id = d.sp_entity_id;
+    if (d.idp_cert)      patch.idp_cert      = d.idp_cert;
+    if (d.client_id)     patch.sp_app_id     = d.client_id;      // "open in Entra ID" link (appId)
+    if (d.sp_object_id)  patch.sp_object_id  = d.sp_object_id;   // deep link to the app's SSO blade
+    if (d.graph_secret)  patch.graph_secret  = d.graph_secret;   // Graph reads for the group→role mapping
+    // Authoritative Entity ID: whatever Entra actually registered (the requested one,
+    // or the api://{appId} fallback when the domain wasn't verifiable). ServiceSentry
+    // must send exactly this as its SAML Issuer, so overwrite the configured value.
+    if (d.sp_entity_id) patch.sp_entity_id = d.sp_entity_id;
     if (d.sp_acs_url   && !(configData?.saml2?.sp_acs_url   || '').trim()) patch.sp_acs_url   = d.sp_acs_url;
     for (const [field, value] of Object.entries(patch)) {
         updateField('config', `saml2|${field}`, value);
     }
     renderConfig();
-}
-
-function _entraSaml2Retry() {
-    document.getElementById('entraSaml2StateError').style.display = 'none';
-    document.getElementById('entraSaml2StateIdle').style.display  = '';
-    _s2EntraFlowToken = null;
-}
-
-function _entraSaml2Cleanup() {
-    clearTimeout(_s2EntraPolling);
-    _s2EntraFlowToken = null;
 }

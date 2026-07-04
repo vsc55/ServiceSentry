@@ -112,37 +112,17 @@ def _send_ms365(cfg: dict, subject: str, body_html: str,
     from_email    = (cfg.get('from_email') or '').strip()
     if not all([tenant_id, client_id, client_secret, from_email]):
         return False, 'Microsoft 365 requires tenant_id, client_id, client_secret and from_email'
+    # The Graph client (token + sendMail) lives in the Entra ID provider — no direct
+    # Microsoft calls from here. Imported after the requests guard above.
+    from lib.providers.entraid import auth, mail  # noqa: PLC0415
     try:
-        token_r = _req.post(
-            f'https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token',
-            data={
-                'grant_type':    'client_credentials',
-                'client_id':     client_id,
-                'client_secret': client_secret,
-                'scope':         'https://graph.microsoft.com/.default',
-            },
-            timeout=10,
-        )
-        token_r.raise_for_status()
-        token = token_r.json()['access_token']
-        send_r = _req.post(
-            f'https://graph.microsoft.com/v1.0/users/{from_email}/sendMail',
-            json={
-                'message': {
-                    'subject': subject,
-                    'body': {'contentType': 'HTML', 'content': body_html},
-                    'toRecipients': [
-                        {'emailAddress': {'address': r}} for r in recipients
-                    ],
-                },
-                'saveToSentItems': False,
-            },
-            headers={'Authorization': f'Bearer {token}'},
-            timeout=15,
-        )
-        if send_r.status_code == 202:
-            return True, 'Email sent via Microsoft 365'
-        return False, f'Graph API error ({send_r.status_code}): {send_r.text[:200]}'
+        token = auth.app_token(tenant_id, client_id, client_secret)
+        mail.send_mail(token, from_email, {
+            'subject': subject,
+            'body': {'contentType': 'HTML', 'content': body_html},
+            'toRecipients': [{'emailAddress': {'address': r}} for r in recipients],
+        })
+        return True, 'Email sent via Microsoft 365'
     except Exception as exc:
         return False, str(exc)
 

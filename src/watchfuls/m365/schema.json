@@ -1,0 +1,101 @@
+{
+    "__icon__": "bi-microsoft",
+    "__module__": {
+        "api_ver": "v1",
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "alert":   {"type": "int",  "default": 3,  "min": 1, "max": 20},
+        "timeout": {"type": "int",  "default": 15, "min": 0, "inherit_blank": true, "max": 300},
+        "usage_pct": {"type": "int", "default": 90, "min": 0, "inherit_blank": true, "max": 100},
+        "free_min":  {"type": "int", "default": 0,  "min": 0, "inherit_blank": true, "max": 9999999},
+        "free_unit": {"type": "str", "default": "GB", "options": ["MB", "GB", "TB"]}
+    },
+    "__history__": {"field": "used", "unit": "%", "label": "Microsoft 365"},
+    "__status_render__": [{"type": "bar", "value": "used", "threshold": "alert", "default_threshold": 100, "unit": "%"}],
+    "__entraid_provision__": {
+        "app_roles": ["Sites.Read.All", "Reports.Read.All"],
+        "app_name": "ServiceSentry M365 Monitor"
+    },
+    "__credential__": {
+        "type": "m365_app",
+        "fields": [
+            {"name": "tenant_id",     "kind": "text",     "label": "tenant_id"},
+            {"name": "client_id",     "kind": "text",     "label": "client_id"},
+            {"name": "client_secret", "kind": "password", "secret": true, "label": "client_secret"}
+        ],
+        "actions": [
+            {
+                "id": "provision_app",
+                "url": "/api/v1/auth/entraid/provision/device-code",
+                "icon": "bi-microsoft",
+                "result": "device_code",
+                "provision": {"profile": "m365"}
+            }
+        ],
+        "links": [
+            {
+                "id": "open_app",
+                "icon": "bi-box-arrow-up-right",
+                "url": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/{client_id}",
+                "require": ["client_id"]
+            }
+        ]
+    },
+    "list": {
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__new_item_fields__": ["label"],
+        "__field_order__": [
+            "enabled", "label",
+            "tenant_id", "client_id", "client_secret", "timeout",
+            "check_site", "site", "usage_pct", "free_min", "free_unit",
+            "check_tenant_usage", "tenant_max", "tenant_unit",
+            "alert"
+        ],
+        "__test__": "/api/v1/watchfuls/m365/test_connection",
+        "__discovery_field__": "site",
+        "__discovery_field_action__": "list_sites",
+        "__discovery_method__": "POST",
+        "__discovery_type_field__": "kind",
+        "__discovery_allow_none__": true,
+        "__actions__": [
+            {
+                "id": "provision_app",
+                "open_credential_action": true,
+                "icon": "bi-microsoft",
+                "variant": "secondary",
+                "full_width": true,
+                "hide_when_cred_bound": true,
+                "group": "auth"
+            }
+        ],
+
+        "enabled":      {"type": "bool", "default": true},
+        "label":        {"type": "str",  "default": ""},
+
+        "tenant_id":     {"type": "str", "default": "", "placeholder": "contoso.onmicrosoft.com", "group": "auth"},
+        "client_id":     {"type": "str", "default": "", "placeholder": "00000000-0000-0000-0000-000000000000", "group": "auth"},
+        "client_secret": {"type": "str", "default": "", "sensitive": true, "group": "auth"},
+        "timeout":       {"type": "int", "default": 0, "min": 0, "max": 300,
+                          "zero_as_blank": true, "placeholder_module": "timeout", "group": "auth"},
+
+        "check_site":    {"type": "bool", "default": true, "group": "checks"},
+        "site":          {"type": "str",  "default": "", "placeholder": "contoso.sharepoint.com/sites/Marketing",
+                          "show_when": {"check_site": [true]}, "group": "checks"},
+        "usage_pct":     {"type": "int",  "default": 0, "min": 0, "max": 100, "zero_as_blank": true,
+                          "placeholder_module": "usage_pct", "show_when": {"check_site": [true]}, "group": "checks"},
+        "free_min":      {"type": "int",  "default": 0, "min": 0, "max": 9999999, "zero_as_blank": true,
+                          "placeholder_module": "free_min", "show_when": {"check_site": [true]}, "group": "checks"},
+        "free_unit":     {"type": "str",  "default": "GB", "options": ["MB", "GB", "TB"],
+                          "show_when": {"check_site": [true]}, "group": "checks"},
+
+        "check_tenant_usage": {"type": "bool", "default": false, "group": "checks"},
+        "tenant_max":    {"type": "int",  "default": 0, "min": 0, "max": 9999999,
+                          "show_when": {"check_tenant_usage": [true]}, "group": "checks"},
+        "tenant_unit":   {"type": "str",  "default": "TB", "options": ["GB", "TB"],
+                          "show_when": {"check_tenant_usage": [true]}, "group": "checks"},
+
+        "alert":         {"type": "int",  "default": 0, "min": 0, "max": 20,
+                          "zero_as_blank": true, "placeholder_module": "alert", "group": "alerts"}
+    }
+}

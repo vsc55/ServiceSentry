@@ -8,7 +8,7 @@ running one or every bound check once, returning the live results.
 
 from flask import jsonify, request
 
-from lib.system import ssh_client
+from lib.hosts import ssh_client
 from lib.hosts import probe as host_probe
 
 from ._helpers import (

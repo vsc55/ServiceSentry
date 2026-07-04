@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~2582 tests** | Todos deben pasar con `pytest` para que el build sea válido. Los 6 tests de RAID local se saltan en Windows/macOS (`skipif sys.platform != 'linux'`).
+**Total: ~2918 tests** | Todos deben pasar con `pytest` para que el build sea válido. Los 6 tests de RAID local se saltan en Windows/macOS (`skipif sys.platform != 'linux'`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -77,12 +77,28 @@
 60. [Panel Web — Syslog](#60-panel-web--syslog)
 61. [Panel Web — Gestor de eventos](#61-panel-web--gestor-de-eventos)
 62. [Panel Web — Servicios](#62-panel-web--servicios)
+63. [Watchful: keepalived](#63-watchful-keepalived)
+64. [Watchful: m365](#64-watchful-m365)
+65. [Watchful: proxmox](#65-watchful-proxmox)
+66. [Watchful: snmp](#66-watchful-snmp)
+67. [Watchful: ping — get_conf_in_list](#67-watchful-ping--get_conf_in_list-tipos-de-clave)
+68. [Servicios — Cola de comandos (ServiceCommandsStore)](#68-servicios--cola-de-comandos-servicecommandsstore)
+69. [Servicios — Registro de heartbeat (ServiceInstancesStore)](#69-servicios--registro-de-heartbeat--estado-serviceinstancesstore)
+70. [Servicios — Lease de líder HA (ServiceLeaderStore)](#70-servicios--lease-de-líder-único-ha-serviceleaderstore)
+71. [Panel Web — API de comandos de servicio](#71-panel-web--api-de-comandos-de-servicio)
+72. [Servicios — Listener de control (ControlServer)](#72-servicios--listener-http-de-control-controlserver)
+73. [Servicios — Helpers de heartbeat](#73-servicios--helpers-de-heartbeat-db_summary--app_version)
+74. [Panel Web — Layout de la config UI](#74-panel-web--layout-de-la-config-ui-registry-driven)
+75. [Providers — Provisioning Entra ID](#75-providers--provisioning-de-apps-entra-id-graph)
+76. [Hosts — Primitivas de resolución](#76-hosts--primitivas-de-resolución-libhostsresolvepy)
+77. [Hosts — Hook de hosts aprovisionados](#77-hosts--hook-de-hosts-aprovisionados)
+78. [Panel Web — Política de bind del servidor web](#78-panel-web--política-de-bind-del-servidor-web)
 
 ---
 
 ## 1. Core — Configuración
 
-**Archivo:** `tests/test_config.py`
+**Archivo:** `tests/test_config_file.py`
 
 ### `TestConfigStore` — Almacenamiento de archivos JSON
 
@@ -1889,7 +1905,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 42. Hosts — Ejecución local/SSH
 
-**Archivo:** `tests/test_host_exec.py` — 11 tests
+**Archivo:** `tests/test_hosts_exec.py` — 11 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -1907,7 +1923,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 43. Hosts — Perfiles de protocolo
 
-**Archivo:** `tests/test_host_profiles.py` — 9 tests
+**Archivo:** `tests/test_hosts_profiles.py` — 9 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -1923,7 +1939,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 44. Hosts — Resolución host→check
 
-**Archivo:** `tests/test_host_resolution.py` — 20 tests
+**Archivo:** `tests/test_hosts_config_resolution.py` — 20 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -1950,7 +1966,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 45. Hosts — Sonda de check único
 
-**Archivo:** `tests/test_host_probe.py` — 4 tests
+**Archivo:** `tests/test_hosts_probe.py` — 4 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -1961,7 +1977,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 46. Hosts — Asistente de migración
 
-**Archivo:** `tests/test_host_migrate.py` — 7 tests
+**Archivo:** `tests/test_hosts_migrate.py` — 7 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2407,3 +2423,429 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_start_stop_when_enabled` | Start stop when enabled |
 | `test_control_requires_services_control` | Control requires services control |
 
+
+---
+
+## 63. Watchful: keepalived
+
+**Archivo:** `watchfuls/keepalived/tests/test_keepalived.py` — 13 tests
+
+### `TestKeepalivedBasics`, `TestVipRollup`, `TestPriority`, `TestVipConfig`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_init` | El módulo se inicializa con el nombre correcto | `name_module == 'watchfuls.keepalived'` | nombre distinto |
+| `test_schema_is_cluster` | El esquema declara binding multi-host de cluster (columnas VIP, campo miembro `priority`) | flags de cluster presentes | flags ausentes |
+| `test_declares_vip_provision_host` | El VIP se auto-aprovisiona como host vía `__provision_host__` (vip → vip_host_uid) | declaración con `address_field`/`link_field`/`name_template` | declaración incorrecta |
+| `test_healthy_single_master` | Cluster sano con un único MASTER que sostiene el VIP | VIP OK, nodo master con `holds_vip=True`, resto `False` | roll-up incorrecto |
+| `test_vip_down_no_holder` | Ningún nodo sostiene el VIP | VIP en fallo con severidad dura (no warning) | VIP marcado OK o warning |
+| `test_split_brain_is_warning` | Dos nodos sostienen el VIP a la vez (split-brain) | VIP en fallo, severidad `warning`, `holders==2` | no detecta split-brain |
+| `test_service_down_node_fails` | Un nodo con servicio inactivo | nodo en fallo pero VIP OK (otro lo sostiene) | VIP afectado erróneamente |
+| `test_unreachable_node` | Un miembro inalcanzable por host_exec | nodo en fallo | nodo marcado OK |
+| `test_maintenance_member_skipped` | Miembro en mantenimiento | nodo omitido (no en resultados) y VIP OK | nodo evaluado/fallado |
+| `test_priority_ok_on_highest` | El VIP lo sostiene el nodo de mayor prioridad | check priority OK | fallo |
+| `test_priority_warns_when_lower_holds_vip` | Un nodo de menor prioridad sostiene el VIP | priority en fallo, `warning`, `top_priority==150` | no avisa |
+| `test_missing_vip_warns` | Item sin VIP configurado | VIP en fallo con `warning` | error duro o OK |
+| `test_no_members_warns` | Item sin miembros vinculados | item en fallo con `warning` | error duro o OK |
+
+---
+
+## 64. Watchful: m365
+
+**Archivo:** `watchfuls/m365/tests/test_m365.py` — 26 tests
+
+### `TestHelpers`, `TestSite`, `TestTenant`, `TestModule`, `TestListSites`, `TestCredentialAndProvision`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_fmt_bytes` | Formateo humano de bytes (`_fmt_bytes`) | `0 B`, `1.0 GB`, `1.5 GB` | formato distinto |
+| `test_to_bytes` | Conversión unidad→bytes (`_to_bytes`), vacío = 0 | valores correctos GB/TB | conversión errónea |
+| `test_csv_max` | Máximo de una columna de un CSV (`_csv_max`), vacío = 0 | devuelve 3000 | valor incorrecto |
+| `test_ok_under_thresholds` | Uso bajo umbrales de % y espacio libre | site OK, `used=50.0`, `alert=90` publicado | fallo indebido |
+| `test_over_percentage_warns` | Uso por encima del % configurado | site en fallo, `warning`, `used=95.0` | no avisa |
+| `test_low_free_warns` | Espacio libre por debajo del mínimo (regla de free-space) | site en fallo con `warning` | no avisa |
+| `test_percentage_off_when_module_default_zero` | Umbral % en 0 a nivel item y módulo | site OK, sin `alert` en other_data (barra neutra) | umbral falso publicado |
+| `test_usage_pct_inherits_module_default` | Item con `usage_pct` en blanco hereda default de módulo (80) | site en fallo, `alert=80` heredado | no hereda |
+| `test_free_min_inherits_module_default` | Item con `free_min` en blanco hereda default (10 GB) | site en fallo con `warning` | no hereda |
+| `test_item_value_overrides_module_default` | `usage_pct` explícito de item gana sobre default de módulo | site OK con `alert=95` | usa default |
+| `test_missing_credentials_warns` | Faltan credenciales (client_secret vacío) | item en fallo con `warning` | error duro o OK |
+| `test_auth_failure_smoothed_then_alerts` | Fallo de auth con `alert=1` (sin ventana de suavizado) | item en fallo, mensaje con 'auth' | no alerta |
+| `test_auth_failure_first_is_smoothed` | Fallo de auth con `alert=3`: primer fallo se suaviza | item reportado OK | alerta prematura |
+| `test_tenant_usage_ok` | Uso de tenant bajo el máximo | tenant OK | fallo |
+| `test_tenant_usage_over_warns` | Uso de tenant sobre el máximo | tenant en fallo con `warning` | no avisa |
+| `test_init` | Inicialización del módulo | `name_module == 'watchfuls.m365'` | nombre distinto |
+| `test_schema` | Esquema: secret sensible, unidades, `__status_render__` | flags correctos | esquema incorrecto |
+| `test_test_connection` | Acción test_connection con token/site/drive mockeados | `ok=True`, mensaje con `25.0%` | fallo |
+| `test_test_connection_missing_creds` | test_connection sin credenciales completas | `ok=False` | `ok=True` |
+| `test_lists_sites_stripped_and_sorted` | Listado de sites (URL sin esquema, ordenado por display_name) | nombres ordenados, `kind='SharePoint'` | orden/formato erróneo |
+| `test_list_sites_missing_creds_is_empty` | list_sites sin credenciales | lista vacía | no vacía |
+| `test_list_sites_auth_error_is_empty` | list_sites con error de auth | lista vacía | excepción propagada |
+| `test_list_sites_declared_in_actions` | list_sites en acciones y read-only; campo de descubrimiento con opción vacía | declaraciones presentes | ausentes |
+| `test_declares_credential_type` | Credencial `m365_app` con campos tenant/client/secret (secret secreto) | declaración correcta | incorrecta |
+| `test_credential_action_is_device_code` | Acción `provision_app` = wizard device-code (perfil m365), fuera de WATCHFUL_ACTIONS | declaración correcta | incorrecta |
+| `test_declares_entraid_provision_roles` | Roles Entra ID declarados (`Sites.Read.All`, `Reports.Read.All`) | roles correctos | roles distintos |
+
+---
+
+## 65. Watchful: proxmox
+
+**Archivo:** `watchfuls/proxmox/tests/test_proxmox.py` — 43 tests
+
+### `TestProxmoxInit`, `TestProxmoxCheck`, `TestProxmoxAction`, `TestProxmoxProvision`, `TestProxmoxCredentialManager`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_init` | Inicialización del módulo | `name_module == 'watchfuls.proxmox'` | nombre distinto |
+| `test_schema` | Esquema: host, auth_method (token/password), puerto 8006, verify_ssl | defaults correctos | esquema incorrecto |
+| `test_empty_list` | Lista vacía no produce items | 0 items | items generados |
+| `test_disabled_item` | Item deshabilitado | 0 resultados | evaluado |
+| `test_cluster_quorate_ok` | Cluster con quórum y nodos online | cluster OK, `nodes_online==2` | fallo |
+| `test_cluster_quorum_lost` | Cluster sin quórum | cluster en fallo | OK |
+| `test_cluster_standalone` | Nodo único sin cluster | cluster OK, `standalone=True` | fallo |
+| `test_cluster_caches_node_ips` | Cachea las IPs de los nodos del cluster | `node_ips` con ambas IPs | no cacheadas |
+| `test_connection_failover_between_nodes` | Failover al siguiente nodo si el primero está caído | cluster OK vía 2º nodo | fallo total |
+| `test_nodes_online_offline_maintenance` | Estados de nodo: online/offline/maintenance | n1 OK, n2 fallo (offline), n3 OK (maintenance) | clasificación errónea |
+| `test_nodes_without_ha` | Nodos sin HA configurado (error al leer HA) | nodo OK, no marcado maintenance | fallo por error HA |
+| `test_ceph_ok` | Ceph HEALTH_OK | ceph OK | fallo |
+| `test_ceph_warn` | Ceph HEALTH_WARN | ceph en fallo | OK |
+| `test_ceph_not_configured` | Ceph no instalado (rados_connect falla) | ceph OK/info | fallo |
+| `test_network_iface_down` | Interfaz con autostart pero sin `active` | net en fallo, `eth1` en `down` | no detecta |
+| `test_network_all_up` | Todas las interfaces activas | net OK | fallo |
+| `test_updates_security_alerts` | Actualizaciones de seguridad presentes | updates en fallo, `security==1` | no alerta |
+| `test_updates_count_informational` | Actualizaciones sin seguridad | updates OK, `total==2` (informativo) | fallo |
+| `test_updates_up_to_date` | Sistema al día | updates OK, `total==0` | fallo |
+| `test_storage_inactive_alerts` | Storage habilitado pero inactivo (deshabilitado ignorado) | storage en fallo, `down==['nfs1']` | no detecta |
+| `test_storage_usage_over_threshold` | Uso de storage sobre umbral (used/total) | storage en fallo, `full==['local 95%']` | no avisa |
+| `test_storage_all_ok` | Storage activo y bajo umbral | storage OK | fallo |
+| `test_storage_threshold_zero_ignores_usage` | Umbral 0 → solo alerta por inactivo, nunca por uso | storage OK con uso 99% | fallo por uso |
+| `test_maintenance_skips_per_node_checks` | Nodo cuyo host mapeado está en mantenimiento omite checks per-node | `pve/net/pve02` ausente, pve01 OK | evaluado/fallado |
+| `test_member_host_maintenance_skips_node` | Nodo offline con host en mantenimiento se reporta como maintenance | nodo OK, `maintenance=True`, `host_name='srv-2'` | offline-error |
+| `test_member_host_name_annotates_node` | Nodo online mapeado a host muestra el nombre del host | nodo OK, `host_name='srv-1'` en mensaje | sin anotación |
+| `test_vip_used_when_no_host` | Solo VIP configurado (sin host miembro) conecta y ejecuta | cluster OK | no conecta |
+| `test_list_nodes_returns_member_names` | list_nodes devuelve nombres de nodos ordenados/dedup | `ok=True`, `['pve01','pve02']` | lista incorrecta |
+| `test_connection_error_threshold` | Fallo de conexión con `alert=2`: primer fallo aún efectivo | item presente, `error='timeout'` | alerta prematura |
+| `test_test_connection_token` | test_connection con token (versión+cluster+ceph) | `ok=True`, mensaje con 'quórum OK' | fallo |
+| `test_test_connection_password_ticket` | test_connection con password: login POST + GET con cookie | `ok=True`, mensaje 'standalone' | flujo de ticket erróneo |
+| `test_provision_creates_token` | Provisión least-privilege: rol custom + usuario + ACL + token | `ok=True`, campos token, comandos pveum correctos | comandos ausentes |
+| `test_provision_renew_rotates_secret_only` | mode=renew solo rota el secret (sin user/ACL) | token nuevo, remove+add token, sin role/user/acl | recrea todo |
+| `test_provision_uses_bound_host_ssh_profile` | Provisión reutiliza el perfil SSH del host vinculado (`__host__`) | conn con address/port/user/password del host | ignora perfil |
+| `test_provision_explicit_overrides_host_profile` | Valor explícito del modal gana sobre el perfil SSH del host | conn con datos explícitos | usa perfil host |
+| `test_provision_verify_host_default_autoadd` | verify_host por defecto False salvo `ssh_verify_host` del perfil | False por defecto, True si activado | valor incorrecto |
+| `test_provision_requires_ssh_credentials` | Provisión sin credenciales SSH | `ok=False`, mensaje con 'ssh' | continúa |
+| `test_provision_ssh_error` | Error de conexión SSH | `ok=False`, mensaje 'auth failed' | excepción propagada |
+| `test_provision_no_token_in_output` | Comando falla sin producir token | `ok=False`, mensaje 'permission denied' | falso éxito |
+| `test_credential_overlays_token` | Credencial reutilizable (proxmox_auth) se superpone al item | resolved con token de la credencial | no aplicado |
+| `test_schema_declares_credential` | Esquema declara credencial `proxmox_auth` | tipo y campos token/password presentes | ausentes |
+| `test_catalog_exposes_provision_action` | credential_schemas expone acción provision_token con picker SSH y selector mode | inputs y opciones create/renew con labels i18n | declaración incompleta |
+| `test_secondary_ssh_cred_overlay` | La ruta de acción superpone un `ssh_cred_uid` guardado sobre la config | `ssh_user`/`ssh_password` aplicados | no aplicado |
+
+---
+
+## 66. Watchful: snmp
+
+**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 63 tests
+
+### `TestEvaluate`, `TestActions`, `TestCheckFlow`, `TestAlertDebounce`, `TestCompileResultClassification`, `TestGetCategory`, `TestHttpFetchTimeout`, `TestGithubFolderParse`, `TestLooksLikeMib`, `TestLoadMibSources`, `TestKnownRepos`, `TestRepoTemplates`, `TestImportFromGithub`, `TestImportFromGithubAsync`, `TestMibCatalog`, `TestCompilePhase`, `TestCompileCancel`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_operators` | Operadores de evaluación de valor (any/contains/regex/eq/ne/gt/lt/gte/lte, fallback string, no-numérico, desconocido) — parametrizado | cada caso devuelve el booleano esperado | evaluación errónea |
+| `test_actions_declared` | `discover` declarada; read-only ⊆ todas las acciones | subconjunto válido | inconsistente |
+| `test_disabled_module_returns_empty` | Módulo deshabilitado | 0 items | items generados |
+| `test_disabled_server_skipped` | Servidor deshabilitado | 0 items | evaluado |
+| `test_disabled_check_skipped` | Check deshabilitado | 0 items | evaluado |
+| `test_no_host_fails_gracefully` | Check sin host | item en fallo | excepción |
+| `test_value_evaluated_on_success` | Se evalúa el valor obtenido (gt 42>10 OK, 5>10 fallo) | status correcto según valor | evaluación errónea |
+| `test_threshold_requires_consecutive_failures` | Umbral `alert=3` requiere 3 ciclos consecutivos de fallo | OK 1/3, 2/3; DOWN en 3/3 y sigue DOWN | flip prematuro |
+| `test_alert_one_fails_immediately` | `alert=1` falla al primer ciclo | item en fallo inmediato | suavizado |
+| `test_success_resets_counter` | Un éxito resetea el contador de fallos | contador 2 → 0 tras recuperación | no resetea |
+| `test_streak_survives_new_process` | La racha persiste entre procesos (mismo status.json) | fail 1/2 y luego 2/2 tras nuevo monitor | reinicia racha |
+| `test_counter_change_marks_status_dirty` | Incremento de racha sin flip marca status dirty | `_status_counts_dirty=True` | no guarda |
+| `test_all_compiled` | Clasificación pysmi: todo compilado | `ok=True`, `compiled=True`, `partial=False` | clasificación errónea |
+| `test_failed_status_is_reported` | Regresión: un MIB 'failed' se reporta como fallo | `ok=False`, `failed==['A']` | reportado éxito |
+| `test_missing_and_unprocessed_are_failures` | Estados missing/unprocessed son fallos | `ok=False` | `ok=True` |
+| `test_partial_success` | Éxito parcial (uno compila, otro falla) | `ok=True`, `partial=True`, mensaje '1 compiled' | no marca parcial |
+| `test_untouched_is_up_to_date` | Estado untouched = al día | `ok=True`, `compiled=False` | fallo |
+| `test_borrowed_not_a_failure` | Estado borrowed no es fallo | `ok=True`, sin `failed` | reportado fallo |
+| `test_category` | Mapeo tipo SNMP → categoría (numeric/string/ip/oid/unknown) — parametrizado | categoría correcta | mapeo erróneo |
+| `test_http_reader_injects_timeout` | El lector HTTP pysmi inyecta timeout | `timeout==7` capturado | timeout ausente |
+| `test_parse_ok` | Parseo de URL de carpeta GitHub (owner/repo/branch/subpath) — parametrizado | tupla esperada | parseo erróneo |
+| `test_parse_rejects_non_github` | Rechaza URLs no-GitHub / inválidas — parametrizado | `None` | acepta |
+| `test_looks_like` | Detección de nombre de fichero MIB — parametrizado | booleano esperado | detección errónea |
+| `test_loads_and_orders` | Carga fuentes MIB de *.json ordenadas por `order` (clave interna eliminada) | `['Alpha','Beta']`, sin `order` | orden/limpieza erróneos |
+| `test_scalar_dep_template_coerced_to_list` | `dep_templates` escalar se coacciona a lista | lista de un elemento | no coacciona |
+| `test_skips_malformed_and_invalid` | Salta JSON roto / sin folder / URL no-GitHub | solo carga 'Good' | rompe import |
+| `test_missing_directory_is_empty` | Directorio inexistente | lista vacía | error |
+| `test_real_sources_dir_loads` | mib_sources/ enviado carga los repos conocidos | count == `_KNOWN_MIB_REPOS` ≥ 1 | discrepancia |
+| `test_structure` | Cada repo conocido: folder parseable y dep_templates con `@mib@` | estructura válida | inválida |
+| `test_extensions_covered` | Cada repo ofrece variante plana y sufijada de plantilla | ambas presentes | falta una |
+| `test_splits_newline_and_comma` | `_repo_templates` divide por newline y coma | 3 plantillas | división errónea |
+| `test_empty` | `_repo_templates` con vacío/espacios | lista vacía | no vacía |
+| `test_recursive_import` | Import recursivo BFS (salta README/notes.md, recurre en sub/) | `ok=True`, `['BAR-MIB','FOO-MIB.txt']`, `count=2` | import erróneo |
+| `test_non_recursive_skips_subfolders` | Import no recursivo omite subcarpetas | solo `['FOO-MIB.txt']`, `total=1` | recurre |
+| `test_progress_reports_total_then_xy` | El callback aprende el total por adelantado y avanza X/total | primera llamada (0,2), última (2,2), total constante | reporta sin total |
+| `test_missing_var_dir` | Import sin `__var_dir__` | `ok=False` | continúa |
+| `test_bad_url` | Import con URL no-GitHub | `ok=False` | continúa |
+| `test_concurrent_download_aggregates_counts` | Descargas concurrentes agregan bien (un fallo no corrompe) | `total=12`, `count=11`, un failed = 'MIB-3.txt' | agregación errónea |
+| `test_import_action_requires_edit` | Acciones de import son escrituras (no read-only) | en WATCHFUL_ACTIONS y no en READ_ONLY | mal clasificadas |
+| `test_start_poll_done` | Job async: start → poll → done con conteo | `imported=2`, `total=2`, `failed=0`, `result_ok=True`; job recolectado | flujo async roto |
+| `test_start_rejects_bad_url` | start con URL no-GitHub | `ok=False` | continúa |
+| `test_start_missing_var_dir` | start sin var_dir | `ok=False` | continúa |
+| `test_status_unknown_job` | status de job desconocido | `ok=False` | `ok=True` |
+| `test_status_poll_suppressed_in_audit` | Poll de job en curso no audita; poll final sí | None en curso, no-None al terminar | auditoría errónea |
+| `test_start_audit_suppressed` | El arranque no se audita | `None` | audita |
+| `test_audit_reports_counts_and_failed_names` | La auditoría reporta conteos y nombres fallidos | imported/failed/failed_names y nombres en `name` | datos ausentes |
+| `test_start_run_keeps_failed_names` | El job retiene qué ficheros fallaron | `imported=2`, `failed=1`, `failed_names==['BAD-MIB.txt']` | pierde nombres |
+| `test_write_read_roundtrip` | Roundtrip escribir/leer catálogo SQLite | escribe 2, lee idéntico | discrepancia |
+| `test_read_caches_by_mtime` | Lectura cacheada por mtime | mismo objeto en 2ª lectura | recarga |
+| `test_write_replaces_not_appends` | Escribir reemplaza, no añade | queda 1 símbolo (sysDescr) | acumula |
+| `test_missing_catalog_reads_empty` | Catálogo inexistente | lista vacía | error |
+| `test_needs_rebuild_when_missing` | Necesita rebuild si falta; no si nada más nuevo | True sin catálogo, False tras escribir | lógica errónea |
+| `test_needs_rebuild_when_compiled_newer` | Rebuild si un compilado es más nuevo que la DB | `True` | `False` |
+| `test_get_all_symbols_reads_catalog` | get_all_symbols sirve del catálogo cacheado | `ok=True`, símbolos sysDescr/ifOperStatus | recarga pysnmp |
+| `test_get_all_symbols_no_var_dir` | get_all_symbols sin var_dir | `symbols==[]` | error |
+| `test_delete_compiled_discards_without_rebuild` | Borrar MIB compilado descarta el catálogo sin reconstruir inline | catálogo eliminado, sin rebuild | reconstruye |
+| `test_initial_phase_is_compiling` | El job de compilación arranca en fase 'compiling' | `phase=='compiling'` | fase distinta |
+| `test_phase_transitions_to_indexing` | Transición de fase a 'indexing' | fase 'indexing' observable | no transiciona |
+| `test_action_registered_and_not_read_only` | `compile_mibs_cancel` registrada y no read-only | presente y no read-only | mal clasificada |
+| `test_cancel_sets_job_event` | Cancelar activa el evento del job | `ok=True`, `cancelling=True`, event set | no cancela |
+| `test_cancel_unknown_job` | Cancelar job desconocido | `ok=True`, `cancelling=False` | error |
+| `test_status_omits_cancel_event` | El `threading.Event` no llega al JSON de status | `_cancel` ausente, `phase` presente | fuga del event |
+| `test_should_cancel_stops_resolver_loop` | should_cancel True corta el bucle antes de compilar | `cancelled=True`, `compiled=False` | compila igual |
+
+---
+
+## 67. Watchful: ping — get_conf_in_list (tipos de clave)
+
+**Archivo:** `watchfuls/ping/tests/test_get_conf_in_list.py` — 12 tests
+
+### `TestGetConfInListTypes`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_opt_find_enum` | IntEnum usa `.name` como clave de búsqueda | devuelve `'MyDevice'` | valor incorrecto |
+| `test_opt_find_str` | str se usa directamente como clave | devuelve `'MyDevice'` | valor incorrecto |
+| `test_opt_find_list` | list se usa como ruta de claves | devuelve `'MyDevice'` | valor incorrecto |
+| `test_opt_find_int` | int se convierte a str | devuelve `'found_it'` | valor incorrecto |
+| `test_opt_find_float` | float se convierte a str | devuelve `'pi_value'` | valor incorrecto |
+| `test_opt_find_tuple` | tuple se convierte a list | devuelve `'MyDevice'` | valor incorrecto |
+| `test_opt_find_invalid_type_raises_type_error` | Tipo no soportado (set) lanza TypeError | `TypeError` con 'opt_find is not valid type' | no lanza |
+| `test_opt_find_none_raises_type_error` | None lanza TypeError | `TypeError` | no lanza |
+| `test_opt_find_bytes_raises_type_error` | bytes lanza TypeError | `TypeError` | no lanza |
+| `test_opt_find_enum_not_found_returns_default` | Enum inexistente en config retorna default | devuelve `'fallback'` | otro valor |
+| `test_opt_find_str_not_found_returns_default` | str inexistente en config retorna default | devuelve `'fallback'` | otro valor |
+| `test_opt_find_bool_matches_int_branch` | bool (subclase de int) cae en la rama int → str | devuelve `'bool_as_key'` | rama incorrecta |
+
+---
+
+## 68. Servicios — Cola de comandos (ServiceCommandsStore)
+
+**Archivo:** `tests/test_service_commands_store.py` — 6 tests
+
+### `TestServiceCommandsStore`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_enqueue_and_list` | Encolar un comando y recuperarlo con `list_recent` | Devuelve id > 0 y la fila con action/args/created_by correctos y claimed_at/done_at a None | Id inválido o campos no persistidos |
+| `test_claim_is_exclusive` | La reclamación de un comando es exclusiva entre instancias | El primer `claim_next` obtiene la fila; el segundo devuelve None | Dos reclamadores obtienen la misma fila |
+| `test_claim_filters_by_service` | `claim_next` solo devuelve comandos de su propio servicio | Reclamar 'monitoring' da None y 'syslog' sí obtiene la fila | Reclama comando de otro servicio |
+| `test_complete_records_outcome` | `complete` registra resultado y marca de fin | ok=True, result guardado y done_at no nulo | Resultado o done_at no persistidos |
+| `test_fifo_order` | Los comandos se reclaman en orden FIFO | Se obtiene 'reload' antes que 'run_now' | Orden alterado |
+| `test_prune_drops_finished` | `prune` elimina comandos finalizados antiguos y conserva los recientes/pendientes | Elimina 1 (el antiguo) y mantiene 'run_now' | Poda pendientes o recientes |
+
+---
+
+## 69. Servicios — Registro de heartbeat / estado (ServiceInstancesStore)
+
+**Archivo:** `tests/test_service_instances_store.py` — 6 tests
+
+### `TestServiceInstancesStore`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_empty` | Registro vacío inicialmente | `list_instances` y `list_for` devuelven listas vacías | Devuelve filas inexistentes |
+| `test_heartbeat_insert_then_update` | Primer heartbeat inserta y el segundo hace upsert de la misma fila | Campos persistidos; segundo heartbeat actualiza running/detail y mantiene started_at estable | started_at cambia o se duplica la fila |
+| `test_list_for_filters_by_service` | `list_for` filtra instancias por service_key | Devuelve solo las instancias del servicio pedido | Incluye instancias de otro servicio |
+| `test_mark_down` | `mark_down` marca una instancia como caída | La instancia queda con running=False | Sigue marcada como activa |
+| `test_clear_others_removes_same_host_restarts` | `clear_others` elimina reinicios previos del mismo proceso embebido en el host | Elimina 2 (PIDs viejos) y conserva la actual, la réplica de otro host y otro servicio | Borra réplicas ajenas o la instancia vigente |
+| `test_prune_drops_stale_rows` | `prune` elimina instancias con last_seen caducado | Elimina 1 (la antigua) y conserva 'new' | Poda la reciente o conserva la obsoleta |
+
+---
+
+## 70. Servicios — Lease de líder único HA (ServiceLeaderStore)
+
+**Archivo:** `tests/test_service_leader_store.py` — 8 tests
+
+### `TestServiceLeaderStore`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_empty_has_no_leader` | Sin lease no hay líder | `current_leader` es None y `list_leaders` vacío | Devuelve líder inexistente |
+| `test_acquire_then_others_blocked` | Adquirido el lease, otros contendientes quedan bloqueados | A adquiere; B recibe False y A sigue siendo líder | B roba un lease vivo |
+| `test_holder_can_renew` | El poseedor puede renovar su propio lease | Reintento de A devuelve True (renovación idempotente) | La renovación falla |
+| `test_failover_after_expiry` | Tras expirar el lease, otro puede tomar el relevo | Sin líder vivo; B adquiere y pasa a ser líder | El lease caducado sigue bloqueando |
+| `test_only_one_wins_an_expired_lease` | Solo uno gana un lease expirado en competencia | B obtiene True y C False; B queda de líder | Ambos ganan o gana el equivocado |
+| `test_release_enables_immediate_failover` | `release` libera y permite relevo inmediato | Tras liberar A no hay líder y B adquiere | El lease sigue retenido |
+| `test_release_by_non_holder_is_noop` | Liberar sin ser poseedor no tiene efecto | A sigue siendo líder tras el release de B | B libera un lease ajeno |
+| `test_keys_are_independent` | Los leases por service_key son independientes | A adquiere 'monitoring' y 'events' por separado | Un lease interfiere con otro |
+
+---
+
+## 71. Panel Web — API de comandos de servicio
+
+**Archivo:** `tests/test_wa_service_commands.py` — 6 tests
+
+### `TestServiceCommands`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_requires_auth` | El endpoint exige autenticación | Responde 401 sin sesión | Permite acceso anónimo |
+| `test_bad_action_400` | Rechaza acciones no válidas | 400 con reason 'bad_action' | Acepta acción desconocida |
+| `test_unknown_service_404` | Rechaza servicios inexistentes | 404 con reason 'unknown_service' | Acepta servicio inexistente |
+| `test_read_only_service_rejected` | Un servicio de solo lectura no admite comandos | 409 con reason 'not_controllable' | Encola comando sobre servicio no controlable |
+| `test_reload_enqueues_and_runs_when_embedded` | Con el monitor embebido el comando se ejecuta sincrónicamente | 200, ok=True, command_id; fila reclamada y completada (done_at, ok) | Comando no drenado en el proceso local |
+| `test_enqueued_only_when_external` | Con worker externo el comando solo se encola | 200, ok=True; fila con claimed_at y done_at a None | El proceso web ejecuta un comando ajeno |
+
+---
+
+## 72. Servicios — Listener HTTP de control (ControlServer)
+
+**Archivo:** `tests/test_control_server.py` — 9 tests
+
+### `TestControlServer`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_health_no_auth` | `/control/health` responde sin token | 200 con ok/key correctos y version desde lib.__version__ | Exige token o versión errónea |
+| `test_reconcile_requires_token` | `/control/reconcile` exige token | 401 sin Authorization | Ejecuta sin token |
+| `test_reconcile_wrong_token` | Rechaza token incorrecto en reconcile | 401 y no se ejecuta la reconciliación | Acepta token inválido |
+| `test_reconcile_runs_with_token` | Reconcile válido dispara la reconciliación | 200, running=True y contador reconciled=1 | No reconcilia con token correcto |
+| `test_unknown_path_404` | Ruta desconocida devuelve 404 | 404 en `/control/nope` | Responde otra cosa |
+| `test_info_requires_token` | `/control/info` exige token | 401 sin Authorization | Devuelve snapshot sin token |
+| `test_info_returns_snapshot_with_token` | Info válida devuelve snapshot del servicio | 200 con key, version '1.2.3' y datos de db | Snapshot incompleto o sin auth |
+
+### `TestStartControlServer`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_no_token_means_disabled` | Sin SS_CONTROL_TOKEN el servidor no arranca | `start_control_server` devuelve None | Arranca sin token |
+| `test_started_when_token_set` | Con token definido el servidor arranca y publica su URL | Devuelve instancia y fija `_control_url` para el heartbeat | No arranca o no anuncia la URL |
+
+---
+
+## 73. Servicios — Helpers de heartbeat (db_summary / app_version)
+
+**Archivo:** `tests/test_heartbeat_helpers.py` — 6 tests
+
+### `TestDbSummary`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_sqlite_uses_basename` | SQLite resume la ruta a su basename | Devuelve driver sqlite, host None y name 'data.db' | Conserva ruta completa |
+| `test_sqlite_default_name` | Nombre por defecto cuando falta config | name 'data.db' con None y respeta el fallback pasado ('syslog.db') | No aplica el nombre por defecto |
+| `test_mysql_keeps_host_and_name` | MySQL conserva host y name | Devuelve driver/host/name intactos | Altera host o name |
+| `test_engine_and_type_aliases` | Acepta alias 'engine' y 'type' para el driver | driver resuelto a 'postgresql' y 'mariadb' | Ignora los alias |
+
+### `TestAppVersion`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_uses_lib_version` | La versión proviene de lib.__version__ | `app_version` coincide con __version__ | Devuelve otra versión |
+| `test_not_overridable_by_env` | La versión no es sobreescribible por entorno | Ignora SS_VERSION y refleja el código en ejecución | El env sobrescribe la versión |
+
+---
+
+## 74. Panel Web — Layout de la config UI (registry-driven)
+
+**Archivo:** `tests/test_config_layout.py` — 8 tests
+
+### `TestLayoutCoherence` — Coherencia layout ↔ registro
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_tabs_and_cards_present` | `config_layout()` devuelve tabs y cards, cada tab con `id`/`label_key`/`icon` | Ambas listas no vacías y tabs completos | Si falta alguna lista o clave |
+| `test_every_card_targets_a_real_tab` | Cada card apunta a un `tab` existente en `TABS` | Todos los `card['tab']` están en los ids de tabs | Si una card referencia un tab desconocido |
+| `test_card_is_generic_xor_bespoke` | Cada card tiene exactamente uno de `fields` (genérica) o `renderer` (a medida) | XOR se cumple en todas las cards | Si una card tiene ambos o ninguno |
+| `test_generic_fields_exist_in_registry` | Los `fields` de cada card existen en `registry_defaults()` | Todo campo está registrado | Si un campo no está en el registro |
+| `test_no_field_placed_in_two_cards` | Ningún campo aparece en dos cards | Cada campo en una sola card | Si un campo se repite entre cards |
+| `test_card_ids_unique` | Los `id` de card no se repiten | Todos únicos | Si hay ids duplicados |
+
+### `TestLayoutEndpoint` — Endpoint `/api/v1/config/layout` (skip si no hay Flask)
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_requires_auth` | El endpoint exige autenticación | Sin sesión responde 401 | Si devuelve otro código |
+| `test_returns_layout` | Autenticado devuelve el layout | 200 con tabs `general`/`monitoring`/`auth` y alguna card con `renderer='database'` | Si falta algún tab o la card database |
+
+---
+
+## 75. Providers — Provisioning de apps Entra ID (Graph)
+
+**Archivo:** `tests/test_entraid_provision.py` — 9 tests
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_provisions_app_with_requested_roles` | `provision_module_app` crea app app-only con solo los roles Graph pedidos y consentimiento admin | Devuelve tenant/client_id/secret; app declara `r-sites`+`r-reports` y `appRoleAssignments` para ambos sobre `graph-sp` | Si incluye roles no pedidos o falta consentimiento |
+| `test_reused_for_a_different_app_and_roles` | El mismo helper genérico reutilizado con otro nombre y otro set de roles (estilo Intune) sin tocar código | App creada con el `displayName` dado y exactamente `r-device`+`r-user`, consentidos | Si el nombre o los roles no coinciden |
+| `test_provision_entra_app_multi_resource_roles_and_scopes` | `provision_entra_app` con varias APIs, mezclando roles de aplicación y scopes delegados | `requiredResourceAccess` declara ambos recursos con tipos Role/Scope; `appRoleAssignments` por SP correcto; `oauth2PermissionGrant` del scope sobre `graph-sp` | Si falta un recurso, tipo, assignment o grant |
+| `test_provision_entra_app_sso_style_options` | Opciones SSO-OIDC declarativas: redirect URIs web, claim de grupos y `require_assignment` | App declara `redirectUris`, `groupMembershipClaims='SecurityGroup'` y claim `groups`; PATCH de `appRoleAssignmentRequired=True` en el SP nuevo | Si falta alguna opción o el PATCH |
+| `test_app_only_stays_minimal_without_sso_options` | Omitir opciones SSO deja una app app-only mínima | Sin `web`/`groupMembershipClaims` y sin PATCH | Si añade web/claims o hace PATCH |
+| `test_provision_endpoint_accepts_inline_spec` | El endpoint device-code acepta un spec inline (sin `profile` de módulo) e inicia el flujo | 200 con `flow_token` y sin `error` | Si rechaza o no arranca el flujo |
+| `test_provision_endpoint_rejects_empty_spec` | Endpoint sin profile ni permisos | 400 con `error` | Si arranca un flujo igualmente |
+| `test_module_entraid_provision_discovers_declarations` | `module_entraid_provision()` descubre declaraciones de app de los módulos | `m365` declara `app_roles` esperados; `ping` no aparece | Si falta m365 o aparece un módulo sin provisioning |
+| `test_missing_role_raises` | Rol inexistente en el SP de Graph | Lanza `RuntimeError` mencionando el rol (`Nope.Read`) | Si no lanza o el mensaje no lo cita |
+
+---
+
+## 76. Hosts — Primitivas de resolución (lib/hosts/resolve.py)
+
+**Archivo:** `tests/test_hosts_resolve.py` — 7 tests
+
+### `TestHostProfileSpecs` — Normalización de specs de perfil
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_dict_becomes_single_element_list` | Un dict se envuelve en lista de un elemento | Devuelve `[spec]` | Si no lo envuelve |
+| `test_list_is_kept_dropping_non_dicts` | Una lista se conserva descartando los no-dict | Solo quedan los dicts (`a`, `b`) | Si mantiene `'nope'`/`None` o descarta dicts |
+| `test_none_and_other_types_give_empty` | `None` y tipos no soportados | Devuelven `[]` | Si devuelven algo distinto de lista vacía |
+
+### `TestResolveOs` — Resolución del SO
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_concrete_value_is_lowercased` | Un valor concreto de SO se pasa a minúsculas | `'Linux'`→`linux`, `'WINDOWS'`→`windows` | Si no normaliza |
+| `test_auto_local_resolves_to_platform` | `auto`/vacío/`None` en local resuelven al SO de la plataforma | Devuelve `local_os()` | Si no resuelve al SO local |
+| `test_auto_remote_keeps_auto_by_default` | `auto` remoto se mantiene para resolver luego por SSH | Devuelve `'auto'` | Si lo resuelve antes de tiempo |
+| `test_auto_remote_honours_remote_default` | `auto` remoto con `remote_auto` dado (flujo de descubrimiento web) | Devuelve el default (`'linux'`) | Si ignora `remote_auto` |
+
+---
+
+## 77. Hosts — Hook de hosts aprovisionados
+
+**Archivo:** `tests/test_provisioned_hosts.py` — 7 tests
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_creates_and_links_host` | El hook crea un host desde el `address_field` y estampa su uid en el `link_field` | Host con `address` correcto, `name` según `name_template` y `kind='local'` (sin perfil ssh) | Si no crea/vincula o usa nombre/kind erróneos |
+| `test_idempotent` | Re-ejecutar con los mismos datos no duplica | Mismo uid y un solo host | Si crea un host duplicado |
+| `test_syncs_address_on_change` | Cambiar el address del item sincroniza el host vinculado | El host actualiza su `address`, sin duplicar | Si no sincroniza o duplica |
+| `test_no_address_no_host` | Item sin address | No crea host ni añade `link_field` | Si crea host o estampa uid |
+| `test_module_without_declaration_is_noop` | Módulo cuyo schema no declara `__provision_host__` | Se salta, no crea hosts | Si crea algún host |
+| `test_adopts_existing_host_by_name` | Item sin link adopta un host existente con el nombre determinista (anti-duplicación) | Reutiliza el uid existente, un solo host, address sincronizado | Si crea un duplicado |
+| `test_returns_assignments_for_roundtrip` | El hook devuelve los links establecidos para round-trip; re-run no repite | Devuelve una asignación (`field`/`item`/`uid`); segunda ejecución devuelve `[]` | Si no devuelve la asignación o repite en la segunda pasada |
+
+---
+
+## 78. Panel Web — Política de bind del servidor web
+
+**Archivo:** `tests/test_wa_server.py` — 7 tests
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_bind_all_ok` | Una interfaz alcanzable bindea sin fallos | `servers=['127.0.0.1']`, `failed=[]` | Si reporta fallos o no bindea |
+| `test_bind_skips_unbindable_and_keeps_good` | Fallo parcial: la interfaz mala se reporta, la buena sigue bindeando | Buena en `servers`, mala en `failed` con un `OSError` | Si tumba el bind bueno o no reporta el malo |
+| `test_run_aborts_when_no_interface_binds` | Fallo total: `run()` hace hard-exit (`os._exit`) en vez de fingir servir | `SystemExit` con código 1 | Si no aborta o el código no es 1 |
+| `test_parse_excluded_ranges_reads_data_rows_only` | `parse_excluded_ranges` sobre salida `netsh` ignora cabeceras/guiones/`*` | Devuelve solo los pares de enteros | Si incluye ruido o pierde rangos |
+| `test_port_excluded_matches_range` | `port_excluded` detecta si un puerto cae en un rango reservado | 8080→`(8054,8153)`; 18080→`None` | Si no detecta o falsea el rango |
+| `test_run_abort_hints_windows_reserved_range` | Un bind fallido en puerto reservado explica la causa Windows | stderr contiene `Windows`, `winnat` y `config.json` | Si falta la pista en el mensaje |
+| `test_default_port_windows_reserved_state_is_visible` | (Solo Windows, informativo) si el puerto web por defecto cae en un rango reservado vivo | Skip con diagnóstico si está reservado; sigue si no | Es no-fatal: nunca falla, solo salta |

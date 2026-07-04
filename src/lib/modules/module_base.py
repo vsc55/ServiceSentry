@@ -32,7 +32,7 @@ from lib.util import os_detect
 from lib.hosts.resolve import host_profile_specs, resolve_os
 from lib.config import ConfigTypeReturn
 from lib.debug import DebugLevel
-from lib.modules.dict_files_path import DictFilesPath
+from lib.util.dict_files_path import DictFilesPath
 from lib.modules import ReturnModuleCheck
 from lib.core.object_base import ObjectBase
 
@@ -42,9 +42,25 @@ __all__ = ['ModuleBase']
 class ModuleBase(ObjectBase):
     """ Base class for modules. """
 
-    # Number of threads that will be used in the modules for parallel processing as default value.
-    _DEFAULT_THREADS = 5
-    _DEFAULT_ENABLED = True
+    # Fields ModuleBase injects into every watchful's module-level config, declared
+    # schema.json-style — one entry per field with its fallback default and (for
+    # the ones shown on the config pane) the collapsible section it groups under.
+    # ``module_default()``/``is_enabled()`` read ``default``; ``discover_schemas``
+    # stamps ``group``. A module's own schema value always wins.
+    _MODULE_FIELDS = {
+        'enabled': {'default': True},
+        'threads': {'default': 5, 'group': 'execution'},
+        'timeout': {'group': 'execution'},          # default is module-specific
+    }
+    # Config-pane section → i18n label key (like a lang file's group_labels). The
+    # 'defaults' section is the UI catch-all for a module's own ungrouped fields.
+    _MODULE_SECTION_LABELS = {'execution': 'module_execution', 'defaults': 'module_defaults'}
+
+    @classmethod
+    def module_field_default(cls, name, fallback=None):
+        """Fallback default for a ModuleBase-injected field — the single source is
+        :attr:`_MODULE_FIELDS` (no derived copies)."""
+        return cls._MODULE_FIELDS.get(name, {}).get('default', fallback)
 
     # Per-item field schema for the module's collections.
     # Override in subclasses to declare which fields each item supports.
@@ -191,7 +207,8 @@ class ModuleBase(ObjectBase):
             for collection, fields in item_schema.items():
                 if collection in ('__i18n__', '__icon__', '__host_profile__', '__host_multiple__',
                                    '__host_multiple_bind__', '__overview_widget__',
-                                   '__credential__', '__credentials__', '__status_render__'):
+                                   '__credential__', '__credentials__', '__status_render__',
+                                   '__entraid_provision__'):
                     # __i18n__ handled separately; __host_profile__/__host_multiple__
                     # are host-binding metadata; __credential__ is consumed by the
                     # central credentials catalog (credential_schemas reads it from
@@ -200,6 +217,15 @@ class ModuleBase(ObjectBase):
                     # collections, so keep them out of ITEM_SCHEMAS.
                     continue
                 col_fields = dict(fields)
+                # Stamp each ModuleBase field's section `group` (e.g. threads/
+                # timeout → 'execution') so schemas don't repeat it and the UI
+                # stays generic. A field's own explicit `group` always wins.
+                if collection == '__module__':
+                    for _ifk, _ifspec in cls._MODULE_FIELDS.items():
+                        _grp = _ifspec.get('group')
+                        _ifm = col_fields.get(_ifk)
+                        if _grp and isinstance(_ifm, dict) and not _ifm.get('group'):
+                            col_fields[_ifk] = {**_ifm, 'group': _grp}
                 # Merge label_i18n from lang files.
                 # Sub-collection fields (type='sub_collection') are rendered as
                 # nested collections, not as scalar form fields, so they do not
@@ -319,6 +345,13 @@ class ModuleBase(ObjectBase):
                     }
                     for lc, ld in lang_data.items()
                 }
+                # Supply the labels for ModuleBase's own module-pane sections
+                # (Execution / Defaults) via the same group_labels channel the UI
+                # already reads; a module's own group_labels for the same key win.
+                from lib.i18n import translate as _tr  # local import: avoid cycle
+                for lc, entry in i18n.items():
+                    _core_gl = {g: _tr(lc, key) for g, key in cls._MODULE_SECTION_LABELS.items()}
+                    entry['group_labels'] = {**_core_gl, **(entry.get('group_labels') or {})}
                 if i18n:
                     schemas[f'{mod_name}|__i18n__'] = i18n
 
@@ -382,7 +415,7 @@ class ModuleBase(ObjectBase):
         module's ``threads`` setting.  Shared by the watchfuls whose check loop
         follows the ``submit(fn, key, value)`` contract.
         """
-        workers = max(1, self.module_default('threads', self._DEFAULT_THREADS))
+        workers = max(1, self.module_default('threads', self.module_field_default('threads')))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {executor.submit(check_fn, k, v): k for k, v in items}
             for future in concurrent.futures.as_completed(futures):
@@ -622,7 +655,7 @@ class ModuleBase(ObjectBase):
         if not isinstance(item, dict) or not cmd:
             return '', 'invalid item or command', -1
         if str(item.get('host_kind') or '').strip().lower() == 'remote':
-            from lib.system import ssh_client  # noqa: PLC0415
+            from lib.hosts import ssh_client  # noqa: PLC0415
             if not ssh_client.HAS_PARAMIKO:
                 return '', 'paramiko is not installed', -1
             address = str(item.get('ssh_host') or '').strip()
@@ -655,7 +688,7 @@ class ModuleBase(ObjectBase):
     @property
     def _default_threads(self) -> int:
         """ Default number of threads for parallel processing. """
-        return self._DEFAULT_THREADS
+        return self.module_field_default('threads')
 
     def _module_schema_defaults(self) -> dict:
         """``__module__`` schema defaults for THIS module (cached per instance).
@@ -718,7 +751,7 @@ class ModuleBase(ObjectBase):
     @property
     def is_enabled(self) -> bool:
         """ Check if the module is enabled in the configuration. """
-        return self.get_conf('enabled', self._DEFAULT_ENABLED)
+        return self.get_conf('enabled', self.module_field_default('enabled'))
 
     def send_message(self, message, status=None):
         """

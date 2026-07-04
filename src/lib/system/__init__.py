@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Host/OS interaction layer.
+"""Local OS introspection layer.
 
-Everything that touches the machine being monitored, split in two concerns:
+Everything that reads the local machine, split in two concerns:
 
-* **execution / transport** — *how* a command runs: :mod:`lib.system.exe`
-  (local/remote dispatch) and :mod:`lib.system.ssh_client` (SSH transport);
+* **execution** — *how* a command runs locally: :mod:`lib.system.exe`
+  (local/remote dispatch; the SSH transport itself lives in
+  :mod:`lib.hosts.ssh_client`);
 * **metric collectors** — *what* is read from the host: :mod:`lib.system.mem`
   / :mod:`lib.system.mem_info` (cross-platform RAM/SWAP via psutil) and the
   OS-specific collectors under :mod:`lib.system.linux` (RAID, thermal).

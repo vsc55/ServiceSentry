@@ -4,10 +4,10 @@
 
 from .auth import register as _auth
 from .auth.ldap import register as _ldap
-from .auth.entra import register as _entra
+from .auth.entraid import register as _entraid
 from .notify.telegram import register as _telegram
 from .notify.email import register as _email
-from .notify.webhook import register as _webhook
+from .notify.webhook_test import register as _webhook
 from .notify.templates import register as _notif_templates
 from .notify.webhooks import register as _webhooks
 from .modules import register as _modules
@@ -46,7 +46,7 @@ def register_all(app, wa):
     _webhook(app, wa)
     _notif_templates(app, wa)
     _webhooks(app, wa)
-    _entra(app, wa)
+    _entraid(app, wa)
     _users(app, wa)
     _sessions(app, wa)
     _audit(app, wa)

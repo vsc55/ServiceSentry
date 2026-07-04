@@ -359,8 +359,11 @@ Requiere el paquete opcional `python3-saml` (`pip install python3-saml`). **[alp
 | `saml2.group_display_names` | dict | `{}` | Cache `{grupo: nombre visible}` (autocompletado del mapeo) |
 | `saml2.default_role` | string | `""` | Rol por defecto para usuarios SAML sin mapeo de grupo (vacío = `none`) |
 | `saml2.auto_create_users` | bool | `true` | Crear el usuario en el primer login |
+| `saml2.sp_app_id` | string | `""` | AppId (client id) de la app registrada en Entra ID — para el enlace "Abrir en Entra ID" |
+| `saml2.sp_object_id` | string | `""` | ObjectId del servicePrincipal en Entra — para el deep-link a la sección SSO del portal |
+| `saml2.graph_secret` | string | `""` | Client secret **propio** de la app SAML2 (cifrado) para leer grupos vía Graph en el mapeo Grupos→Rol. Lo crea el asistente; ver [sso-entra.md](sso-entra.md) |
 
-Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/metadata` (metadatos SP para registrar en el IdP). Los usuarios se sincronizan con `auth_source: "saml2"`.
+Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/metadata` (metadatos SP para registrar en el IdP). Los usuarios se sincronizan con `auth_source: "saml2"`. El registro asistido de la app en Entra ID y sus limitaciones están en [sso-entra.md](sso-entra.md).
 
 ### Sección `email`
 
@@ -698,6 +701,8 @@ SS_WEB=true SS_WEB_PORT=9090 SS_VERBOSE=1 python3 main.py
 ```
 
 Esto es independiente de las variables de entorno que sobreescriben **campos de `config.json`** (todas con prefijo `SS_*`, p. ej. `SS_CHECK_INTERVAL`, `SS_TELEGRAM_TOKEN`, `SS_MONITORING_ENABLED`) — ver [docker.md](docker.md). Aquellas fijan valores de configuración en runtime; las `SS_*` de arranque controlan cómo se lanza el proceso.
+
+**Plano de control distribuido (despliegues multi-proceso/HA):** el listener de control HTTP se activa con `SS_CONTROL_TOKEN` (`SS_CONTROL_PORT`/`SS_CONTROL_BIND`/`SS_CONTROL_ADVERTISE` ajustan puerto/bind/URL anunciada). Permite el *poke* `/control/reconcile` entre roles (web ↔ workers) para aplicar cambios de config sin esperar al poll. Detalles en [architecture.md](architecture.md), [docker.md](docker.md) y [kubernetes.md](kubernetes.md).
 
 ### Ejemplos
 

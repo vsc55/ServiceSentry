@@ -1,6 +1,7 @@
 {# ================================================================
    Utility functions: uid, deepClone, escaping, path helpers,
-   collapse toggle, humanizeKey, fieldLabel, modulePrettyName, moduleIcon.
+   collapse toggle, humanizeKey, fieldLabel, modulePrettyName, moduleIcon,
+   copyToClipboard.
    ================================================================ #}
 
 // ──────────────────────────── Utilities ───────────────────────────
@@ -400,4 +401,30 @@ function moduleIcon(name, cfg) {
         if (d && typeof d.icon === 'string' && d.icon.trim()) return wrap(d.icon.trim());
     }
     return '\u{1F4E6}';
+}
+
+// Copy text to the clipboard, modal-safe. Appends a hidden textarea inside the
+// ACTIVE modal (the topmost — LAST — .modal.show, so a stacked wizard's own body
+// wins over one behind it) to dodge Bootstrap's focus trap, then execCommand
+// (works on non-secure origins). Falls back to the async Clipboard API.
+function _copyToClipboard(text) {
+    const _bodies = document.querySelectorAll('.modal.show .modal-body');
+    const container = _bodies[_bodies.length - 1] || document.body;
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+    container.appendChild(ta);
+    ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch(_) {}
+    container.removeChild(ta);
+    if (ok) { showToast(t('copied'), 'success'); return; }
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text)
+            .then(() => showToast(t('copied'), 'success'))
+            .catch(() => showToast('Copy failed', 'danger'));
+    } else {
+        showToast('Copy failed', 'danger');
+    }
 }

@@ -3,7 +3,7 @@
 """Tests para la clase DictFilesPath."""
 
 import pytest
-from lib.modules.dict_files_path import DictFilesPath
+from lib.util.dict_files_path import DictFilesPath
 
 
 class TestDictFilesPath:

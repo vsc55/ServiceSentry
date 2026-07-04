@@ -228,6 +228,15 @@ function _renderGroupActionBtns(pathStr, actions, itemData) {
         }
         const _hdrDisp = _visible ? '' : 'display:none;';
         const _wStyle  = isFullWidth ? 'flex-basis:100%;' : 'flex-shrink:0;';
+        // A "provision inline credentials" action (e.g. m365's Create app in
+        // Azure) only makes sense when NOT using a saved credential — hook it to
+        // the same .credprof-field toggle as the inline auth fields so selecting a
+        // credential hides it (and clearing brings it back), driven by _onCredPick.
+        const _hideCred  = action.hide_when_cred_bound === true;
+        const _credBound = _hideCred && !!(itemData && itemData.cred_uid);
+        const _credCls   = _hideCred ? ' credprof-field' : '';
+        const _credAttr  = _hideCred ? ` data-cp-item="${escAttr(pathStr)}"` : '';
+        const _credDisp  = _credBound ? 'display:none;' : '';
         const _swAttr  = action.show_when
             ? ` data-sw-when="${escAttr(JSON.stringify(action.show_when))}"` : '';
         const _tt2 = escAttr(_al[action.id + '_tt'] || '');
@@ -240,7 +249,7 @@ function _renderGroupActionBtns(pathStr, actions, itemData) {
             ${action.open_credential_action ? `data-action-open-cred="${escAttr(action.id)}"` : ''}
             ${_tt2 ? `title="${_tt2}"` : ''}
             onclick="itemAction(this)">${icon}${label}</button>`;
-        btns += `<div class="sw-field"${_swAttr} style="${_hdrDisp}${_wStyle}">${btn}</div>`;
+        btns += `<div class="sw-field${_credCls}"${_swAttr}${_credAttr} style="${_hdrDisp}${_credDisp}${_wStyle}">${btn}</div>`;
     }
     return `<div class="d-flex flex-wrap gap-2 mt-1" style="padding-top:.3rem;border-top:1px dashed var(--bs-border-color)">${btns}</div>`;
 }

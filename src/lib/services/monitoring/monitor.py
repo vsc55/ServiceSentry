@@ -40,7 +40,7 @@ from lib.config.spec import cfg_default, normalize_url
 from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
 from lib.core.object_base import ObjectBase
-from lib.core.telegram import Telegram
+from lib.providers.telegram import Telegram
 from lib.security import secret_manager
 
 __all__ = ['Monitor']
@@ -180,7 +180,7 @@ class Monitor(ObjectBase):
             from lib.stores.credentials import CredentialsStore   # noqa: PLC0415
             from lib.security import secret_manager                        # noqa: PLC0415
             from lib.modules import ModuleBase                    # noqa: PLC0415
-            from lib.modules.credential_schemas import credential_secret_fields  # noqa: PLC0415
+            from lib.modules.discovery.credential_schemas import credential_secret_fields  # noqa: PLC0415
             secret_keys = (secret_manager.ENCRYPT_KEYS
                            | ModuleBase.discover_secret_fields(self.dir_modules)
                            | credential_secret_fields(self.dir_modules))

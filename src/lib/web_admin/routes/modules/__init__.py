@@ -23,7 +23,7 @@ def _build_module_widgets(wa, status_raw: dict, modules_raw: dict, lang: str) ->
     domain logic/strings come from the module."""
     out: dict = {}
     try:
-        from lib.modules.overview_widgets import overview_widgets_catalog  # noqa: PLC0415
+        from lib.modules.discovery.overview_widgets import overview_widgets_catalog  # noqa: PLC0415
         catalog = overview_widgets_catalog(wa._modules_dir)
     except Exception:  # pylint: disable=broad-except
         return out
@@ -337,7 +337,7 @@ def _strip_credential_fields(wa, data):
     inline credential fields (e.g. web's auth_user/auth_password) so a stale
     user/secret can't linger — the credential supplies them at runtime."""
     try:
-        from lib.modules.credential_schemas import credential_schemas  # noqa: PLC0415
+        from lib.modules.discovery.credential_schemas import credential_schemas  # noqa: PLC0415
         cat = credential_schemas(wa._modules_dir)
     except Exception:  # pylint: disable=broad-except
         return

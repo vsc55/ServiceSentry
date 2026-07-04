@@ -4,11 +4,9 @@
 
 * :mod:`lib.core.object_base` — :class:`ObjectBase`, the base class carrying the
   shared :class:`~lib.debug.Debug` instance every class uses.
-* :mod:`lib.core.telegram` — :class:`Telegram`, the queued sender used both by the
-  monitoring engine (for its own run alerts) and by the notification subsystem
-  (:mod:`lib.notify`).
 
-Both are re-exported from the package root :mod:`lib` (``ObjectBase`` /
-``Telegram``) so existing call-sites are unaffected.  The monitoring engine
-(:class:`Monitor`) lives in :mod:`lib.services.monitoring.monitor`.
+Re-exported from the package root :mod:`lib` (``ObjectBase``) so existing
+call-sites are unaffected.  The monitoring engine (:class:`Monitor`) lives in
+:mod:`lib.services.monitoring.monitor`; the Telegram client (:class:`Telegram`)
+lives in :mod:`lib.providers.telegram`.
 """

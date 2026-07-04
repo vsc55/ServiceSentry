@@ -96,8 +96,8 @@ src/
 │   ├── #       test_secret_manager.py, test_ssh_client.py
 │   ├── # BD/esquema: test_db_schema.py, test_db_module_tables.py,
 │   ├── #            test_modules_store.py, test_hosts_store.py, test_credentials.py
-│   ├── # Hosts: test_host_exec.py, test_host_migrate.py, test_host_probe.py,
-│   ├── #        test_host_profiles.py, test_host_resolution.py
+│   ├── # Hosts: test_hosts_exec.py, test_hosts_migrate.py, test_hosts_probe.py,
+│   ├── #        test_hosts_profiles.py, test_hosts_config_resolution.py, test_hosts_resolve.py
 │   ├── # Monitor: test_monitor.py, test_watchfuls_integrity.py
 │   ├── # Syslog: test_syslog_parser.py, test_syslog_server.py,
 │   ├── #         test_syslog_service.py, test_syslog_store.py
@@ -219,7 +219,7 @@ Siempre necesarias, independientemente de qué módulos estén activos:
 | `Flask` | >=3.0 | Interfaz web de administración |
 | `werkzeug` | >=3.0 | Hashing de contraseñas, utilidades de request |
 | `cryptography` | >=41.0 | Cifrado Fernet de valores sensibles en disco (`lib/security/secret_manager.py`) |
-| `requests` | >=2.28 | Llamadas HTTP a la API de Telegram (`lib/core/telegram.py`) |
+| `requests` | >=2.28 | Llamadas HTTP a la API de Telegram (`lib/providers/telegram.py`) y a Microsoft Graph (`lib/providers/entraid/`) |
 | `psutil` | >=5.9 | Información del sistema: RAM, disco, temperatura, servicios Windows |
 
 ### Dependencias por módulo

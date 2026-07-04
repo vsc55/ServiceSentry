@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Watchful-module utility routes: /api/watchfuls/<module_name>/<action>."""
+"""Watchful-module utility routes: /api/v1/watchfuls/<module_name>/<action>."""
 
 import importlib
 import os

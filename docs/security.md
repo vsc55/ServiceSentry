@@ -83,7 +83,11 @@ Los campos `_failed_attempts` y `_locked_until` se almacenan con el registro del
 
 ---
 
-## Autenticación Externa (LDAP / OIDC)
+## Autenticación Externa (LDAP / OIDC / SAML2)
+
+> Esta sección describe el **flujo de login**. Para el **registro asistido de la app en
+> Microsoft Entra ID** (asistente "Registrar en Azure", provisioning por Graph, mapeo
+> Grupos→Rol y **limitaciones**), ver [sso-entra.md](sso-entra.md).
 
 ### LDAP / Active Directory
 
@@ -233,8 +237,16 @@ Cada endpoint está protegido por el permiso exacto que necesita:
 | Ver / controlar servicios | `services_view` / `services_control` |
 | CRUD de reglas de evento (edit incluye vaciar el log) | `events_view/add/edit/delete` |
 
-> Además, cada módulo expone permisos dinámicos a nivel de módulo
-> (`module.<nombre>.view`, `.add`, `.edit`, `.delete`).
+> Además existen **tres familias de permisos dinámicos**, cada una con acciones
+> `.view` / `.add` / `.edit` / `.delete`, otorgables por entidad concreta desde el
+> editor de roles:
+> - `module.<nombre>.*` — por módulo watchful.
+> - `server.<uid>.*` — por host/servidor concreto del registro (`is_server_perm`).
+> - `cluster.<uid>.*` — por cluster multi-bind concreto (`is_cluster_perm`).
+>
+> La autorización por-servidor/cluster se resuelve en `routes/modules` a partir del
+> `host_uid`/`host_uids` del ítem; las globales (`servers_*`, `clusters_*`) conceden
+> acceso a todos. Definidas en `lib/web_admin/constants.py`.
 
 ### Roles integrados
 
@@ -795,4 +807,4 @@ GET  /api/v1/notify/templates   GET /api/v1/notify/html-templates
 Hay dos rutas de ejecución remota, con políticas de host distintas:
 
 - La clase `Exec` (`lib/system/exe.py`) usa `paramiko.RejectPolicy`: los hosts que no estén en `~/.ssh/known_hosts` son rechazados (no se aceptan hosts desconocidos).
-- La ejecución **host-aware de los módulos** (`ModuleBase.host_exec` → `lib/system/ssh_client.py::connect_host`) es configurable **por host** mediante `ssh_verify_host`: con `True` carga `known_hosts` y aplica `RejectPolicy`; con `False` (**por defecto**) usa `AutoAddPolicy`, es decir **acepta hosts desconocidos** (añade su clave en el primer contacto). Para entornos sensibles, activa `ssh_verify_host` en el perfil del host.
+- La ejecución **host-aware de los módulos** (`ModuleBase.host_exec` → `lib/hosts/ssh_client.py::connect_host`) es configurable **por host** mediante `ssh_verify_host`: con `True` carga `known_hosts` y aplica `RejectPolicy`; con `False` (**por defecto**) usa `AutoAddPolicy`, es decir **acepta hosts desconocidos** (añade su clave en el primer contacto). Para entornos sensibles, activa `ssh_verify_host` en el perfil del host.

@@ -15,9 +15,10 @@
 | [kubernetes.md](kubernetes.md) | Despliegue en Kubernetes: un Deployment por rol, Secret/ConfigMap, plano de control distribuido (poke `/control`), Services, probes y NetworkPolicy |
 | [architecture.md](architecture.md) | Diagrama de componentes, jerarquía de clases, estructura de directorios, flujo de ejecución, modelo de concurrencia |
 | [configuration.md](configuration.md) | config.json (database, syslog, syslog_db, ldap, oidc, saml2, email, notifications, webhooks, modules…), receptor syslog, gestor de eventos, configuración de módulos en BD (tablas `module_config`/`module_config_items`), estado de checks, opciones CLI, variables de entorno (`SS_*`), sistema de debug |
-| [modules.md](modules.md) | Los 16 módulos integrados: referencia de configuración, campos y flujo de cada uno |
+| [modules.md](modules.md) | Los 19 módulos integrados: referencia de configuración, campos y flujo de cada uno |
 | [web_admin.md](web_admin.md) | Interfaz web Flask: características, roles (52 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
 | [security.md](security.md) | Autenticación (local/LDAP/OIDC/SAML2), RBAC, sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |
+| [sso-entra.md](sso-entra.md) | SSO con Microsoft Entra ID (OIDC y SAML2): asistente de registro automático, flujo, campos de config y **limitaciones** de Graph (config básica de SAML manual, dominios no verificados, `instantiate`, `servicePrincipalNames`) + resolución de problemas |
 | [ssh-hardening.md](ssh-hardening.md) | Endurecer los hosts monitorizados: cuenta dedicada, comando forzado + envoltorio con allowlist ([ssentry-wrap](ssentry-wrap)), sudoers mínimo para remediación |
 | [development.md](development.md) | Setup local, tests, pytest, depuración en VS Code, convenciones de código, dependencias |
 | [watchful_guide.md](watchful_guide.md) | Guía paso a paso para crear un nuevo módulo de monitorización |
@@ -42,7 +43,7 @@ ServiceSentry es una herramienta de monitorización para sistemas que:
 - Ejecuta los módulos en **paralelo** usando `ThreadPoolExecutor`.
 - Arquitectura de **plugins**: cada módulo es un package independiente en `watchfuls/`.
 - Usa `match/case` nativo de Python 3.10+.
-- 13 de los 16 módulos son **multiplataforma** 🌐 (Linux / Windows / macOS).
+- 15 de los 19 módulos son **multiplataforma** 🌐 (Linux / Windows / macOS).
 
 ---
 
@@ -55,9 +56,12 @@ ServiceSentry es una herramienta de monitorización para sistemas que:
 | `dns` 🌐 | Linux / Win / macOS | Resolución DNS con validación de IP esperada |
 | `filesystemusage` 🌐 | Linux / Win / macOS | Uso de particiones (psutil) |
 | `hddtemp` | Linux | Temperatura de discos (demonio hddtemp) |
+| `keepalived` | Linux | Cluster keepalived VRRP: servicio por nodo, titular de la VIP, split-brain y prioridad |
+| `m365` 🌐 | Linux / Win / macOS | Microsoft 365 vía Graph: almacenamiento SharePoint por sitio + uso del tenant |
 | `ntp` 🌐 | Linux / Win / macOS | Offset de sincronización NTP (UDP nativo) |
 | `ping` 🌐 | Linux / macOS / Windows\* | Disponibilidad de hosts (`pythonping` o ICMP raw socket) |
 | `process` 🌐 | Linux / Win / macOS | Procesos en ejecución con mínimo de instancias (psutil) |
+| `proxmox` 🌐 | Linux / Win / macOS | Proxmox VE vía REST: quorum, Ceph, nodos, red, actualizaciones |
 | `raid` | Linux | Estado RAID mdstat (local + SSH remoto) |
 | `ram_swap` 🌐 | Linux / Win / macOS | Uso de RAM y SWAP (psutil) |
 | `service_status` 🌐 | Linux / Windows | Estado de servicios (systemd / OpenRC / SysV / Windows SCM) |

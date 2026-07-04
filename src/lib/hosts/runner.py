@@ -17,7 +17,7 @@ Never raises — failures come back as ``('', <error>, -1)``.
 
 from __future__ import annotations
 
-from lib.system import ssh_client
+from lib.hosts import ssh_client
 
 
 def run(host: dict | None, cmd: str, timeout: int = 15) -> tuple:

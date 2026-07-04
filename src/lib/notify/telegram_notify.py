@@ -5,13 +5,13 @@
 Mirrors email_notify / webhook_notify: a module-level ``_dispatch(cfg, **kwargs)``
 that sends one message and returns ``(ok, message)``.  The dispatcher chooses
 *whether* to call this (routing matrix or an event rule's channels); here we just
-send.  (The monitor uses the queued ``lib.core.telegram.Telegram`` for its own runs;
+send.  (The monitor uses the queued ``lib.providers.telegram.Telegram`` for its own runs;
 this is the simple one-shot path for web-admin/event notifications.)
 """
 
 from __future__ import annotations
 
-from lib.core.telegram import send_telegram
+from lib.providers.telegram import send_telegram
 
 
 def _format(kind: str, module: str, item: str, status: str,

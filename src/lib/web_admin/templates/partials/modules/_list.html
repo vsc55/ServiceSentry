@@ -439,26 +439,10 @@ const colKeys = [];
 for (const [k, v] of Object.entries(cfg)) {
 if (!k.startsWith('__') && typeof v === 'object' && v !== null && !Array.isArray(v)) colKeys.push(k);
 }
-// Module-level fields below the display name: ungrouped ones are the per-check
-// "Defaults"; threads/timeout (and any field with an explicit group) render under
-// their own group header (e.g. Execution) inside renderScalarFields.  Show the
-// "Defaults" title only when there are actually ungrouped fields.
-const _modScalars = renderScalarFields(cfg, name, 'modules', ['enabled', 'pretty_name', ...colKeys]);
-const _exclSet = new Set(['enabled', 'pretty_name', ...colKeys]);
-const _hasUngrouped = !!(_modSch && Object.keys(cfg).some(k => {
-    if (k.startsWith('__') || _exclSet.has(k)) return false;
-    const m = _modSch[k];
-    if (!m || typeof m !== 'object') return false;
-    if (m.group) return false;                              // explicit group
-    if (k === 'threads' || k === 'timeout') return false;   // auto "Execution"
-    return true;
-}));
-if (_modScalars.trim() && _hasUngrouped) {
-    h += `<div class="sw-field ss-section-hdr">
-        <small class="text-muted ss-section-title">${esc(t('module_defaults'))}</small>
-    </div>`;
-}
-h += _modScalars;
+// Module-level fields below the display name render as collapsible sections
+// inside renderScalarFields: ungrouped ones form "Defaults", threads/timeout an
+// "Execution" group, and any field with an explicit `group` its own section.
+h += renderScalarFields(cfg, name, 'modules', ['enabled', 'pretty_name', ...colKeys]);
 for (const k of colKeys) h += renderCollection(k, cfg[k], name + '|' + k, 'modules');
 return h;
 }

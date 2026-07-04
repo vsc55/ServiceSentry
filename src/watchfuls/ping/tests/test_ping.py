@@ -172,7 +172,7 @@ class TestPingConfigOptions:
         assert hasattr(ConfigOptions, 'attempt')
 
     def test_alert_uses_base_enum_value(self):
-        """alert == 2 matches EnumConfigOptions.alert from the base."""
+        """alert maps to config-option value 2 (enabled=1, alert=2, label=3)."""
         from watchfuls.ping import ConfigOptions
         assert ConfigOptions.alert == 2
 

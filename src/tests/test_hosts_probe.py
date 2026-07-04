@@ -7,7 +7,7 @@ Monitor stand-in)."""
 from contextlib import contextmanager
 from unittest.mock import patch
 
-from lib.system import ssh_client
+from lib.hosts import ssh_client
 from lib.hosts import probe as host_probe
 
 

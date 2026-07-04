@@ -235,6 +235,9 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('saml2|group_display_names', dict),
     Cfg('saml2|sp_entity_id', str, '', no_rule=True),
     Cfg('saml2|sp_acs_url', str, '', no_rule=True),
+    Cfg('saml2|sp_app_id', str, '', no_rule=True),      # Entra app (client) id, for the "open in Entra ID" link
+    Cfg('saml2|sp_object_id', str, '', no_rule=True),   # Entra servicePrincipal objectId, for the SSO-blade deep link
+    Cfg('saml2|graph_secret', str, '', no_rule=True),   # client secret for the group→role mapping (Graph reads)
     Cfg('saml2|sp_cert', str, '', no_rule=True),
     Cfg('saml2|sp_key', str, '', no_rule=True),
     Cfg('saml2|idp_entity_id', str, '', no_rule=True),

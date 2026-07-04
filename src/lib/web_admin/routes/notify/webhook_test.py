@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Webhook routes: /api/v1/notify/webhook/test (arbitrary config test)."""
+"""Webhook *test* route: /api/v1/notify/webhook/test — fires one webhook from an
+arbitrary inline config (the modal's "Send test").  The webhook CRUD lives in the
+sibling :mod:`.webhooks` module."""
 
 from datetime import datetime, timezone
 from flask import jsonify

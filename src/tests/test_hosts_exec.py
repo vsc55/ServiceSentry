@@ -12,7 +12,7 @@ from unittest.mock import patch, MagicMock
 from conftest import create_mock_monitor
 
 import watchfuls.ping as ping
-from lib.system import ssh_client
+from lib.hosts import ssh_client
 
 
 def _w():

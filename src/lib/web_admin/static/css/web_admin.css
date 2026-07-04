@@ -817,6 +817,9 @@
     text-transform: uppercase;
     letter-spacing: .06em;
 }
+/* Collapsible section caret: points down when open, right when collapsed. */
+.ss-section-caret { transition: transform .15s; }
+.ss-section-title.collapsed .ss-section-caret { transform: rotate(-90deg); }
 
 /* ── Notification template toolbar buttons ──────────────────────────── */
 .notif-tpl-btn { font-size: .75rem; }

@@ -34,7 +34,7 @@ lib/web_admin/
     ├── auth/
     │   ├── __init__.py       # /login, /logout (integra LDAP + OIDC + SAML2)
     │   ├── ldap.py           # /api/v1/auth/ldap/* (test, groups, group_lookup)
-    │   └── entra.py          # /api/v1/auth/entra/* (wizard Device Code, groups, group_lookup)
+    │   └── entraid.py        # /api/v1/auth/entra/* (groups, group_lookup, saml2) + /api/v1/auth/entraid/provision/* (wizard genérico Device Code)
     ├── modules/
     │   ├── __init__.py       # /api/v1/modules, /api/v1/modules/status, /api/v1/modules/overview
     │   └── checks.py         # /api/v1/modules/checks/run
@@ -84,6 +84,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 |---------------|-------------|
 | **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas; barra de herramientas con **Añadir**, **Recargar** (descarta cambios y recarga desde el servidor) y **Deshacer** (revierte cambios no guardados al último estado guardado) |
 | **Servers (hosts)** | Define un servidor una vez (dirección + perfiles de conexión por protocolo: ssh/snmp/db/http/tls…) y vincúlalo desde los checks de cualquier módulo, que heredan dirección + credenciales. Asistente "Detectar duplicados" que agrupa conexiones inline repetidas en hosts compartidos. Secretos cifrados en la BD general. Ver §[Servers (registro de hosts)](#servers-registro-de-hosts) |
+| **Clusters** | Pestaña Clusters: checks **multi-bind** (una comprobación vinculada a varios hosts vía `host_uids`), p. ej. `keepalived` VRRP. Modal de creación/edición con hosts miembros; se persisten como ítems de módulo (`PUT /api/v1/modules`). Permisos `clusters_*` + `cluster.{uid}.{acción}`. Ver §[Clusters (checks multi-bind)](#clusters-checks-multi-bind) |
 | **Credenciales** | Identidades SSH reutilizables (usuario + clave) referenciables desde hosts y checks, en vez de duplicar secretos; clonado y vista de uso. Secretos cifrados en la BD. Permisos `credentials_*`. |
 | **Receptor Syslog** | Servidor syslog integrado (RFC 3164/5424, UDP/TCP/TLS): pestaña Syslog con mensajes filtrables (severidad/host/app/búsqueda), allowlist de orígenes y **registro de descartes**; retención por antigüedad/filas; BD dedicada opcional; puede correr embebido o como contenedor aparte. Permisos `syslog_view`/`syslog_delete`. Ver §[Syslog](#syslog) |
 | **Gestor de eventos** | Reglas que observan eventos de auditoría o syslog y notifican por los canales configurados (Telegram/Email/webhooks concretos); cooldown global con herencia por regla; **log de notificaciones** enviadas. La evaluación está **desacoplada de la ingesta**: un *procesador de eventos* lee por cursor los mensajes/eventos ya guardados (cooldown persistido), embebido o como contenedor propio. Permisos `events_*`. Ver §[Eventos (reglas de notificación)](#eventos-reglas-de-notificación) |
@@ -311,6 +312,7 @@ se enmascaran en lectura y se restauran al guardar (igual que la configuración 
 | `POST` | `/api/v1/hosts` | `modules_edit` | Crear un host `{name, address, tags, description, profiles}` |
 | `PUT` | `/api/v1/hosts/<uid>` | `modules_edit` | Actualizar un host (secretos omitidos se conservan) |
 | `DELETE` | `/api/v1/hosts/<uid>` | `modules_edit` | Eliminar un host |
+| `POST` | `/api/v1/hosts/<uid>/clone` | `servers_add` | Clonar un host (dirección + perfiles) con nuevo uid/nombre |
 | `GET` | `/api/v1/hosts/<uid>/status` | `servers_view` | Últimos resultados de cada check vinculado al host |
 | `POST` | `/api/v1/hosts/test_ssh` | `servers_edit` | Probar conectividad SSH a un host |
 | `POST` | `/api/v1/hosts/test_check` | `servers_edit` | Probar un check concreto contra un host |
@@ -336,6 +338,22 @@ cifradas) y reescribe los checks con `host_uid`, quitando los campos de conexió
 ya poseídos por el host. Es opt-in y reversible por revisión (coexistencia con
 los checks inline existentes).
 
+### Clusters (checks multi-bind)
+
+Un **cluster** es un único check vinculado a **varios hosts** a la vez — el ítem lleva
+un array `host_uids` (en vez de un solo `host_uid`) y el módulo evalúa el conjunto y
+agrega el estado. El ejemplo canónico es **`keepalived`** (VRRP multi-nodo: servicio por
+nodo, titular de la VIP, split-brain, prioridad — ver [modules.md](modules.md), sección keepalived).
+
+- Pestaña **Clusters** propia (`templates/partials/clusters/`): tabla + modal de
+  creación/edición con selección de los hosts miembros y sus columnas dinámicas.
+- **No tiene CRUD dedicado**: los clusters se persisten como ítems de módulo vía
+  `PUT /api/v1/modules` (igual que cualquier check), y su estado sale de
+  `/api/v1/modules/status`.
+- Autorización: permisos globales `clusters_view/add/edit/delete` **+** permisos
+  dinámicos por-cluster `cluster.{uid}.{view|add|edit|delete}` (resueltos en
+  `routes/modules` por el `host_uids` del ítem). Ver §[Permisos](#permisos).
+
 ### Credenciales
 
 Identidades SSH reutilizables (usuario + clave/clave-privada) que los hosts y
@@ -360,6 +378,7 @@ la BD y se enmascaran en lectura.
 | `GET` | `/api/v1/config/versions` | `config_view` o `config_edit` | Poll ligero: devuelve solo los tokens de versión (detección de conflictos) |
 | `PUT` | `/api/v1/config` | `config_edit` | Guardar `config.json` (guardado parcial versionado con detección de conflictos) |
 | `GET` | `/api/v1/config/schema` | `config_view` o `config_edit` | Obtener el schema de validación de los campos de configuración del web admin |
+| `GET` | `/api/v1/config/layout` | `config_view` o `config_edit` | Layout de la pantalla de config (tabs → cards) desde el registro central (`lib.config.layout`); el frontend renderiza la config desde esta fuente única |
 
 Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `routes/config/__init__.py`):
 
@@ -589,6 +608,7 @@ Controlabilidad: un servicio es controlable cuando corre **embebido aquí** (su 
 |--------|------|---------|-------------|
 | `GET` | `/api/v1/services` | `services_view` | Estado de cada servicio registrado (label/icon/estado + filas `detail`) |
 | `POST` | `/api/v1/services/<name>/<action>` | `services_control` | `start`/`stop` de un servicio controlable; validado vía el registro (`unknown_service`/`not_controllable`/`disabled`) |
+| `POST` | `/api/v1/services/<name>/command/<action>` | `services_control` | Comando one-shot (`run_now`/`reload`/`clear_status`/`prune`): se ejecuta en el acto si el servicio corre embebido aquí, o se **encola** (`ServiceCommandsStore`) para que lo drene el worker externo (plano de control distribuido) |
 
 > El registro también es el punto de **reacción a config**: al guardar
 > `/api/v1/config`, el WebAdmin recorre `self._embedded_services` llamando a
@@ -617,12 +637,13 @@ Wizard interactivo de registro de aplicación en Microsoft Entra ID (Azure AD).
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `POST` | `/api/v1/auth/entra/device-code` | `config_edit` | Inicia el flujo Device Code; devuelve `user_code` para autenticar en el navegador |
-| `POST` | `/api/v1/auth/entra/device-poll` | `config_edit` | Sondea el estado del flujo; al completarse crea la app, el service principal y el consentimiento de admin, y devuelve `client_id`, `client_secret`, `tenant_id` y `provider_url` |
-| `POST` | `/api/v1/auth/entra/groups` | `config_edit` | Obtiene todos los grupos del tenant mediante las credenciales OIDC guardadas (client credentials flow) |
-| `POST` | `/api/v1/auth/entra/group_lookup` | `config_edit` | Resolver el nombre visible de un grupo de Entra ID por su Object ID (usado para auto-completar el mapeo) |
+| `POST` | `/api/v1/auth/entraid/provision/device-code` | `config_edit` | Inicia el wizard genérico de registro de app (Device Code); acepta un `profile` de módulo o una spec inline (roles/scopes/redirect_uris…) y devuelve `user_code` para autenticar en el navegador |
+| `POST` | `/api/v1/auth/entraid/provision/device-poll` | `config_edit` | Sondea el estado del flujo; al completarse crea la app, el service principal y el consentimiento de admin, y devuelve `client_id`, `client_secret`, `tenant_id` y `provider_url` |
+| `POST` | `/api/v1/auth/entra/groups` | `config_edit` | Lista todos los grupos del tenant (client credentials). Parámetro `sec` = `oidc` o `saml2`: usa las credenciales de esa app (SAML2 con su propio `graph_secret`) |
+| `POST` | `/api/v1/auth/entra/group_lookup` | `config_edit` | Resolver el nombre visible de un grupo por su Object ID (auto-completar el mapeo); también acepta `sec` |
 | `POST` | `/api/v1/auth/entra/saml2/device-code` | `config_edit` | Inicia el wizard de registro de la app **SAML2** en Entra ID (Device Code) |
-| `POST` | `/api/v1/auth/entra/saml2/device-poll` | `config_edit` | Sondea el registro SAML2; al completarse crea la app y devuelve sus metadatos |
+| `POST` | `/api/v1/auth/entra/saml2/device-poll` | `config_edit` | Sondea el registro SAML2; al completarse crea la app (template + cert + modo SAML + `graph_secret`) y devuelve sus metadatos |
+| `POST` | `/api/v1/auth/entra/saml2/secret/device-code` | `config_edit` | "Añadir credencial de grupos": añade un `graph_secret` a la app SAML2 **existente** (sin recrearla), para el mapeo Grupos→Rol |
 
 ### Watchfuls (acciones dinámicas)
 

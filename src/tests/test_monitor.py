@@ -248,6 +248,36 @@ class TestCheckStatePersistence:
         row = monitor._check_state_store.get_all()[('mod', 'item_1', '')]
         assert row['item_uid'] == 'item_1' and row['metric'] == ''
 
+    def test_slash_composite_keys_are_distinct_metrics(self, monitor):
+        # Regression: one item (with a uid) emitting two '/'-composite result keys
+        # (m365 '<item>/site' + '<item>/tenant') must persist as TWO rows keyed by
+        # uid + a distinct '/'-metric — NOT collapse to (uid, '') and trip the
+        # UNIQUE PK, which aborted the whole persist and left the module empty.
+        monitor.config_modules.data = {'m365': {'list': {'item_1': {'uid': 'U-1'}}}}
+        monitor._process_module_result('m365', self._result('item_1/site', True, 'ok'))
+        monitor._process_module_result('m365', self._result('item_1/tenant', False, 'hi'))
+        monitor.status.save()
+        states = monitor._check_state_store.get_all()
+        assert states[('m365', 'U-1', '/site')]['item_uid'] == 'U-1'
+        assert states[('m365', 'U-1', '/tenant')]['item_uid'] == 'U-1'
+        # The keys reconstruct verbatim (with '/'), so the UI/label resolver and
+        # the monitor's change detection see the same key the module emits.
+        assert monitor._check_state_store.as_status_dict()['m365'].keys() == {
+            'U-1/site', 'U-1/tenant'}
+
+    def test_stale_bare_key_does_not_abort_persist(self, monitor):
+        # A stale bare '<item>' (e.g. from an earlier missing-credentials run)
+        # sitting next to a fresh '<item>/site' must not collide: both resolve to
+        # the item uid but with different metrics, and the persist must not abort.
+        monitor.config_modules.data = {'m365': {'list': {'item_1': {'uid': 'U-1'}}}}
+        monitor.status.data = {'m365': {
+            'item_1':      {'status': False, 'message': 'missing creds', 'other_data': {}},
+            'item_1/site': {'status': True,  'message': 'ok',            'other_data': {}},
+        }}
+        assert monitor.status.save() is True
+        out = monitor._check_state_store.as_status_dict()['m365']
+        assert 'U-1' in out and 'U-1/site' in out
+
 
 class TestFailStreak:
     """ModuleBase.fail_streak persists in the monitor status store and flags
@@ -398,7 +428,7 @@ class TestDaemonCycleIntegration:
             monitor.refresh_runtime_config()
             monitor.tg.group_messages = False        # deterministic immediate send
 
-            import lib.core.telegram as telegram_mod
+            import lib.providers.telegram as telegram_mod
             with patch.object(telegram_mod, 'requests') as req:
                 req.RequestException = Exception
                 req.post.return_value = MagicMock(status_code=200)

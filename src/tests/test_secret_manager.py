@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Unit tests for lib/secret_manager.py.
+"""Unit tests for lib/security/secret_manager.py.
 
 Covers: fernet_from_secret_file, decrypt_all, encrypt_sensitive, and
 enc:-prefix injection attack scenarios.

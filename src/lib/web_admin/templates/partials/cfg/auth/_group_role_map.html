@@ -6,7 +6,8 @@
    _grmAddRow, _grmRemoveRow, _grmBuildNames, _grmUpdate,
    _grmUpdateNamesOnly, _saveDisplayNames, _ldapFetchGroups,
    _grmAutoResolveNames, _grmBindFilter, _grmFilter,
-   _ldapPickGroup, _oidcFetchGroups, _oidcPickGroup).
+   _ldapPickGroup, _entraFetchGroups, _entraPickGroup — the last two
+   shared by OIDC and SAML2).
    ================================================================ #}
 
 /**
@@ -29,7 +30,7 @@ function _renderGroupRoleMap(sec, rawValue) {
         ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_hint)}</div></div>`
         : '';
 
-    const hasNames = (sec === 'oidc' || sec === 'ldap');
+    const hasNames = (sec === 'oidc' || sec === 'ldap' || sec === 'saml2');
     let displayNames = {};
     if (hasNames) {
         try { displayNames = JSON.parse(configData[sec]?.group_display_names || '{}'); } catch (_) {}
@@ -104,8 +105,8 @@ function _renderGroupRoleMap(sec, rawValue) {
                     id="btnFetchLdapGroups" onclick="_ldapFetchGroups()">
                     <i class="bi bi-cloud-download me-1"></i>${esc(t('grm_fetch_groups'))}
                 </button>` : ''}
-                ${sec === 'oidc' ? `<button type="button" class="btn btn-sm btn-secondary"
-                    id="btnFetchEntraGroups" onclick="_oidcFetchGroups()">
+                ${(sec === 'oidc' || sec === 'saml2') ? `<button type="button" class="btn btn-sm btn-secondary"
+                    id="btnFetchEntraGroups_${escAttr(sec)}" onclick="_entraFetchGroups('${escAttr(sec)}')">
                     <i class="bi bi-microsoft me-1"></i>${esc(t('entra_fetch_groups'))}
                 </button>` : ''}
                 ${hasNames && entries.length ? `<button type="button" class="btn btn-sm btn-secondary"
@@ -119,11 +120,11 @@ function _renderGroupRoleMap(sec, rawValue) {
                     placeholder="${escAttr(t('grm_filter_placeholder'))}">
                 <div id="ldapGroupList" class="border rounded" style="max-height:160px;overflow-y:auto;font-size:.8rem"></div>
             </div>` : ''}
-            ${sec === 'oidc' ? `<div id="oidcGroupPicker" class="mt-2" style="display:none">
+            ${(sec === 'oidc' || sec === 'saml2') ? `<div id="${escAttr(sec)}GroupPicker" class="mt-2" style="display:none">
                 <div class="small text-muted mb-1"><i class="bi bi-info-circle me-1"></i>${esc(t('entra_groups_pick_hint'))}</div>
-                <input type="search" class="form-control form-control-sm mb-1" id="oidcGroupFilter"
+                <input type="search" class="form-control form-control-sm mb-1" id="${escAttr(sec)}GroupFilter"
                     placeholder="${escAttr(t('grm_filter_placeholder'))}">
-                <div id="oidcGroupList" class="border rounded" style="max-height:200px;overflow-y:auto;font-size:.8rem"></div>
+                <div id="${escAttr(sec)}GroupList" class="border rounded" style="max-height:200px;overflow-y:auto;font-size:.8rem"></div>
             </div>` : ''}
             ${_hintPanel}
         </div>
@@ -140,7 +141,7 @@ function _grmRoleOpts(sel) {
     }).join('');
 }
 
-const _grmNameCache = { ldap: {}, oidc: {} };
+const _grmNameCache = { ldap: {}, oidc: {}, saml2: {} };
 
 async function _grmFetchDisplayNames(sec, refreshAll) {
     const tbl = document.getElementById(`grm_${sec}`);
@@ -228,8 +229,8 @@ async function _lookupGroupName(sec, id) {
         if (sec === 'ldap') {
             const r = await apiPost('/api/v1/auth/ldap/group_lookup', { dn: id });
             if (r?.data?.ok && r.data.found) return r.data.name || null;
-        } else if (sec === 'oidc') {
-            const r = await apiPost('/api/v1/auth/entra/group_lookup', { group_id: id });
+        } else if (sec === 'oidc' || sec === 'saml2') {
+            const r = await apiPost('/api/v1/auth/entra/group_lookup', { group_id: id, sec });
             if (r?.data?.ok && r.data.found) return r.data.name || null;
         }
     } catch (_) {}
@@ -300,7 +301,7 @@ function _grmAddRow(sec, prefill, label) {
     const tr = document.createElement('tr');
     tr.dataset.grmIdx = i;
     if (label) tr.dataset.grmName = label;
-    const hasNames = (sec === 'oidc' || sec === 'ldap');
+    const hasNames = (sec === 'oidc' || sec === 'ldap' || sec === 'saml2');
     const _inputOnChange = hasNames
         ? `_grmRowIdChanged(this,'${escAttr(sec)}')`
         : `_grmUpdate('${escAttr(sec)}')`;
@@ -503,39 +504,45 @@ function _ldapPickGroup(dn, name) {
     _grmAddRow('ldap', dn, name);
 }
 
-async function _oidcFetchGroups() {
-    const cfg = configData.oidc || {};
-    // client_secret is masked (null) after page load; it is plaintext immediately
-    // after the wizard fills it in. Always send it if present so Fetch Groups works
-    // right after the wizard without requiring a page refresh.
-    if (!cfg.provider_url || !cfg.client_id) {
-        showToast(t('entra_groups_missing_creds'), 'warning');
+// Fetch the tenant's groups via Graph for the OIDC or SAML2 section.  The SAML2 app
+// (registered by the wizard) has its own client secret in graph_secret; both use the
+// same /entra/groups endpoint (the backend resolves creds by `sec`).
+async function _entraFetchGroups(sec) {
+    const cfg = configData[sec] || {};
+    const clientId = sec === 'saml2' ? cfg.sp_app_id    : cfg.client_id;
+    const secret   = sec === 'saml2' ? cfg.graph_secret : cfg.client_secret;
+    const provider = sec === 'saml2' ? cfg.idp_sso_url  : cfg.provider_url;
+    // Each section uses its OWN app credentials. For SAML2 that means the app must
+    // have been registered by the wizard (which stores sp_app_id + graph_secret).
+    if (!provider || !clientId) {
+        showToast(t(sec === 'saml2' ? 'entra_saml2_groups_no_app' : 'entra_groups_missing_creds'), 'warning');
         return;
     }
-    const btn    = document.getElementById('btnFetchEntraGroups');
-    const picker = document.getElementById('oidcGroupPicker');
-    const list   = document.getElementById('oidcGroupList');
+    const btn    = document.getElementById('btnFetchEntraGroups_' + sec);
+    const picker = document.getElementById(sec + 'GroupPicker');
+    const list   = document.getElementById(sec + 'GroupList');
     if (btn)    { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('entra_fetch_groups')); }
     if (picker) picker.style.display = 'none';
-    _grmMarkSearching('oidc');
+    _grmMarkSearching(sec);
 
-    const body = { provider_url: cfg.provider_url, client_id: cfg.client_id };
-    // Send the secret only when it is a real value (not masked null from server)
-    if (cfg.client_secret) body.client_secret = cfg.client_secret;
+    // Secret is masked (null) after page load; the backend reads it from config in that
+    // case. Send it only when plaintext (right after the wizard, before a refresh).
+    const body = { sec, provider_url: provider, client_id: clientId };
+    if (secret) body.client_secret = secret;
 
     const r = await apiPost('/api/v1/auth/entra/groups', body);
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-microsoft me-1"></i>' + esc(t('entra_fetch_groups')); }
 
     if (!r || !r.data || !r.data.ok) {
-        _grmMarkNotFound('oidc');
-        await _saveDisplayNames('oidc');
+        _grmMarkNotFound(sec);
+        await _saveDisplayNames(sec);
         showToast((r && r.data && r.data.message) || t('ldap_test_error'), 'danger');
         return;
     }
     const groups = r.data.groups || [];
     if (!groups.length) {
-        _grmMarkNotFound('oidc');
-        await _saveDisplayNames('oidc');
+        _grmMarkNotFound(sec);
+        await _saveDisplayNames(sec);
         showToast(t('grm_no_groups'), 'info');
         return;
     }
@@ -545,23 +552,23 @@ async function _oidcFetchGroups() {
                 data-grm-name="${escAttr((g.name || '').toLowerCase())}"
                 style="cursor:pointer"
                 onmouseover="this.style.background='var(--bs-tertiary-bg,#f0f0f0)'" onmouseout="this.style.background=''"
-                onclick="_oidcPickGroup(${jsStr(g.id)},${jsStr(g.name)})">
+                onclick="_entraPickGroup('${escAttr(sec)}',${jsStr(g.id)},${jsStr(g.name)})">
                 <div class="fw-medium small">${esc(g.name)}</div>
                 <div class="font-monospace text-muted" style="font-size:.7rem;user-select:all">${esc(g.id)}</div>
             </div>`
         ).join('');
-        _grmBindFilter('oidc');
-        const _oidcNameMap = {};
-        groups.forEach(g => { if (g.id) { _oidcNameMap[g.id] = g.name; _grmNameCache.oidc[g.id.toLowerCase()] = g.name; } });
-        _grmAutoResolveNames('oidc', _oidcNameMap);
-        _grmMarkNotFound('oidc');
-        await _saveDisplayNames('oidc');
+        _grmBindFilter(sec);
+        const _nameMap = {};
+        groups.forEach(g => { if (g.id) { _nameMap[g.id] = g.name; _grmNameCache[sec][g.id.toLowerCase()] = g.name; } });
+        _grmAutoResolveNames(sec, _nameMap);
+        _grmMarkNotFound(sec);
+        await _saveDisplayNames(sec);
     }
     if (picker) picker.style.display = '';
 }
 
-function _oidcPickGroup(id, name) {
+function _entraPickGroup(sec, id, name) {
     // Store the Object ID as the map key (Entra ID sends Object IDs in the groups claim).
     // Pass the display name as the label so the input shows something readable.
-    _grmAddRow('oidc', id, name);
+    _grmAddRow(sec, id, name);
 }

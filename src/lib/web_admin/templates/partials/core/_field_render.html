@@ -143,10 +143,13 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         const _maxA = meta.max != null ? ` max="${meta.max}"` : '';
         const _minV = meta.min != null ? meta.min : 'null';
         const _maxV = meta.max != null ? meta.max : 'null';
-        // Global value: from the live config if present, else the spec default
-        // (so the placeholder shows even before config.json gets the section).
+        // Inherited value shown as the placeholder: the live global config value,
+        // else the registered global spec default, else the field's OWN schema
+        // default — so a module-only default (no Configuration > Modules entry,
+        // e.g. m365 usage_pct) still shows its default instead of an empty box.
         let _gv = (typeof configData !== 'undefined' && configData.modules) ? configData.modules[key] : null;
         if (_gv == null || _gv === '') _gv = CONFIG_FIELD_DEFAULTS['modules|' + key];
+        if (_gv == null || _gv === '') _gv = (meta.default != null ? meta.default : null);
         const _gph = (_gv != null && _gv !== '') ? ` placeholder="${escAttr(String(_gv))}"` : '';
         const _dispV = (value == null || value === '') ? '' : value;
         return _fieldRow(lblHtml, fieldCtl({kind: 'number',
@@ -417,6 +420,15 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 onChange: `updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})`,
                 trailing: _actionBtn}), _hintHtml);
         }
+        // Multiline PEM text (SAML2 SP/IdP certificates + private key) — declared
+        // via schema meta.textarea. A monospace textarea preserves the line breaks
+        // so keys and certs paste intact (a single-line <input> would mangle them).
+        if (meta && meta.textarea) {
+            return _fieldRow(lblHtml, fieldCtl({kind: 'textarea', rows: meta.rows || 6,
+                placeholder: (meta.placeholder != null ? String(meta.placeholder) : ''),
+                textareaVal: esc(value == null ? '' : String(value)),
+                onChange: `updateField(${tg},${sp},this.value)`}), _hintHtml);
+        }
         // Multi-value string (removable chips) — declared via schema meta.multi
         // (e.g. the syslog sender allowlist). Stored as a comma-joined string;
         // whitespace/newline separators are normalised into chips too.
@@ -522,10 +534,13 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 trailing: `<button class="btn btn-secondary" type="button" title="${_pickTitle}" onclick="${_pickClick}"><i class="bi bi-chevron-expand"></i></button>${_actionBtn}`}), _hintHtml);
         }
         // Inline discover button for __discovery_field__ string fields.
-        // URL is built from the action name (__discovery__) and the API version
-        // declared in the module's __module__ schema (api_ver, defaults to "v1").
-        const _discoverFieldAction = (sch && sch['__discovery_field__'] === key && sch['__discovery__'])
-            ? sch['__discovery__'] : null;
+        // URL is built from the action name and the API version declared in the
+        // module's __module__ schema (api_ver, defaults to "v1").  A field-only
+        // action (__discovery_field_action__) drives the picker WITHOUT adding a
+        // collection-level "Discover" button (that one keys off __discovery__);
+        // it falls back to __discovery__ for modules that share one action.
+        const _discoverFieldAction = (sch && sch['__discovery_field__'] === key)
+            ? (sch['__discovery_field_action__'] || sch['__discovery__'] || null) : null;
         const _discoverFieldMod = pathStr.split('|')[0];
         const _discoverFieldVer = (ITEM_SCHEMAS[`${_discoverFieldMod}|__module__`] || {})['api_ver'] || 'v1';
         const _discoverFieldUrl = _discoverFieldAction
@@ -696,11 +711,15 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     // even without an explicit schema `group` — only on the module-level pane
     // (pathPrefix has no '|'), never on item fields.
     const _isModuleLevel = target === 'modules' && !pathPrefix.includes('|');
+    // Module-level pane → collapsible sections. A field's `group` (its own, or the
+    // "execution" that ModuleBase.discover_schemas stamps on threads/timeout) is
+    // authoritative; every remaining ungrouped module field forms the "Defaults"
+    // section. Section labels come from group_labels (ModuleBase supplies the
+    // Execution/Defaults ones). Item/config panes get no auto-group.
     const _effGroup = (k) => {
         const m = fieldMeta(_sch, k);
         if (m && m.group) return m.group;
-        if (_isModuleLevel && (k === 'threads' || k === 'timeout')) return 'execution';
-        return null;
+        return _isModuleLevel ? 'defaults' : null;
     };
 
     // Sort keys: follow schema definition order when available, else enabled-first + alpha.
@@ -785,8 +804,7 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
             ? _rawFHtml.replace(/^<div /, '<div data-env-locked="1" ')
             : _rawFHtml;
 
-        const _group = (_meta && _meta.group) ? _meta.group
-            : (_isModuleLevel && (k === 'threads' || k === 'timeout') ? 'execution' : null);
+        const _group = _effGroup(k);
         const _showWhen = _meta && _meta.show_when && typeof _meta.show_when === 'object'
             ? _meta.show_when : null;
 
@@ -808,19 +826,22 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
                         }
                     }
                 }
-                const _glabel = esc(_groupLabels[_group]
-                    || (_group === 'execution' ? (t('module_execution') || 'Execution') : _group));
+                const _glabel = esc(_groupLabels[_group] || _group);
                 const _swAttr = _gWhen ? ` data-sw-when="${escAttr(JSON.stringify(_gWhen))}"` : '';
                 const _hdrHide = _gVisible ? '' : ' style="display:none"';
-                if (_groupCollapsed.includes(_group)) {
-                    // Collapsible group: header is a toggle; fields go in a .collapse
-                    // closed by default.
+                // Collapsible when the schema declares it (__group_collapsed__) or
+                // on the module pane. Every module-level section (Defaults /
+                // Execution / any explicit group) starts COLLAPSED so the module
+                // view is compact; expand on click. Item groups stay plain unless
+                // declared collapsed.
+                const _startClosed = _groupCollapsed.includes(_group) || _isModuleLevel;
+                if (_startClosed || _isModuleLevel) {
                     const _cid = 'grp_' + (pathPrefix + '_' + _group).replace(/\W/g, '_');
                     h += `<div class="sw-field ss-section-hdr"${_swAttr}${_hdrHide}>
-                        <button type="button" class="btn btn-link p-0 border-0 text-decoration-none ss-section-title text-muted d-flex align-items-center gap-1 collapsed"
-                                data-bs-toggle="collapse" data-bs-target="#${_cid}" aria-expanded="false">
-                            <i class="bi bi-chevron-right" style="font-size:.7rem;transition:transform .15s"></i>${_glabel}</button>
-                    </div><div class="collapse" id="${_cid}">`;
+                        <button type="button" class="btn btn-link p-0 border-0 text-decoration-none ss-section-title text-muted d-flex align-items-center gap-1${_startClosed ? ' collapsed' : ''}"
+                                data-bs-toggle="collapse" data-bs-target="#${_cid}" aria-expanded="${_startClosed ? 'false' : 'true'}">
+                            <i class="bi bi-chevron-down ss-section-caret" style="font-size:.7rem;transition:transform .15s"></i>${_glabel}</button>
+                    </div><div class="collapse${_startClosed ? '' : ' show'}" id="${_cid}">`;
                     _openCollapseId = _cid;
                 } else {
                     h += `<div class="sw-field ss-section-hdr"${_swAttr}${_hdrHide}>

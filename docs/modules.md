@@ -970,3 +970,87 @@ Comprueba que las URLs responden con el código HTTP esperado.
 Es **host-aware** (el ítem puede vincularse a un host del registro; admite `__credential__` `web_auth` reutilizable).
 
 **Flujo:** `urllib.request` (stdlib de Python) → compara el código HTTP real con el esperado (y opcionalmente el contenido). Soporta HTTP y HTTPS sin dependencias externas.
+
+---
+
+## 🖥️ proxmox — Proxmox VE (REST API)
+
+Monitoriza un cluster **Proxmox VE** vía su REST API: **quorum** del cluster, **Ceph**,
+**nodos** (incluye modo mantenimiento), **red** y **actualizaciones** pendientes. Se
+autentica con una credencial **`proxmox_auth`** reutilizable (API token o usuario/contraseña).
+
+**Plataforma:** Multiplataforma 🌐 (HTTP a la API)
+
+| Clave | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `list.*.host` | string | `""` | Host/IP del nodo Proxmox (puede vincularse a un host del registro) |
+| `list.*.port` | int | 8006 | Puerto de la API |
+| `list.*.verify_ssl` | bool | false | Verificar el certificado TLS |
+| `list.*.auth_method` | string | `token` | `token` (API token) o `password` (usuario/contraseña) |
+| `list.*.token_id` / `token_secret` | string | `""` | Credenciales de API token (si `auth_method=token`) |
+| `list.*.username` / `password` | string | `""` | Usuario/contraseña (si `auth_method=password`; **cifrada**) |
+| `list.*.check_cluster` | bool | true | Comprobar quorum del cluster |
+| `list.*.check_nodes` | bool | true | Estado de los nodos (online/mantenimiento) |
+| `list.*.check_ceph` | bool | false | Salud de Ceph |
+| `list.*.check_network` | bool | false | Estado de red de los nodos |
+| `list.*.check_updates` | bool | true | Actualizaciones pendientes (umbral `updates_threshold`) |
+| `list.*.check_storage` | bool | false | Uso de almacenamiento (umbral `storage_threshold` %) |
+| `list.*.check_permissions` | bool | true | Verificar que el token tiene permisos suficientes |
+| `list.*.timeout` / `alert` | int | 0 | Timeout / reintentos por ítem (`0` hereda el global) |
+
+Admite provisioning asistido de la credencial vía SSH (`provision_token`).
+
+**Flujo:** login (token o ticket) → consultas a `/cluster`, `/nodes`, `/ceph`… → evalúa cada check activado → alerta si alguno falla o supera su umbral.
+
+---
+
+## 🌐 keepalived — VIP VRRP (alta disponibilidad)
+
+Monitoriza un cluster **keepalived (VRRP)**: estado del **servicio** por nodo, **qué nodo
+tiene la VIP**, detección de **split-brain** y **prioridad** (weight). Es un módulo
+**multi-bind** (multi-nodo): un ítem = un cluster, con varios nodos (cada uno un host del
+registro) y su peso VRRP.
+
+**Plataforma:** Linux (los nodos se consultan por SSH)
+
+| Clave | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `list.*.vip` | string | `""` | IP virtual (VIP) a vigilar |
+| `list.*.router_id` | int | 0 | `virtual_router_id` VRRP del grupo |
+| `list.*.vip_host_uid` | string | `""` | Host desde el que verificar quién tiene la VIP |
+| `list.*.__member_field__` | int | 100 | Prioridad (weight) VRRP declarada por nodo miembro |
+| `list.*.check_service` | bool | true | Servicio keepalived activo en cada nodo |
+| `list.*.check_vip` | bool | true | Exactamente un nodo tiene la VIP (detecta split-brain) |
+| `list.*.check_priority` | bool | false | La prioridad efectiva coincide con la declarada |
+| `list.*.timeout` / `alert` | int | 0 | Timeout / reintentos por ítem (`0` hereda el global) |
+
+**Flujo:** por cada nodo (SSH) comprueba el servicio y la posesión de la VIP → agrega el
+estado del cluster → alerta ante servicio caído, 0 o >1 titulares de la VIP (split-brain)
+o prioridad inesperada.
+
+---
+
+## ☁️ m365 — Microsoft 365 (Microsoft Graph)
+
+Monitoriza **Microsoft 365** vía la **Microsoft Graph API** (app-only): almacenamiento de
+**SharePoint** por sitio (cuota del drive: % usado / espacio libre) y **tendencia de uso**
+del tenant. Se autentica con una credencial **`m365_app`** (tenant/client/secret), que el
+**asistente de Entra ID** puede aprovisionar (ver [sso-entra.md](sso-entra.md) para el motor
+de provisioning compartido).
+
+**Plataforma:** Multiplataforma 🌐 (HTTP a Graph)
+
+| Clave | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `tenant_id` / `client_id` / `client_secret` | string | `""` | Credenciales de la app (o una credencial `m365_app` reutilizable) |
+| `list.*.check_site` | bool | true | Medir el almacenamiento de un sitio de SharePoint |
+| `list.*.site` | string | `""` | Sitio a medir (vacío = raíz/tenant); botón **discover** (`list_sites`) para elegirlo |
+| `usage_pct` | int | 90 | % de cuota usada para alertar (nivel Defaults del módulo; heredado por ítems) |
+| `free_min` + `free_unit` | int / string | 0 / `GB` | Alertar si el espacio libre baja de X |
+| `list.*.check_tenant_usage` | bool | false | Comprobar la tendencia de uso del tenant |
+| `tenant_max` + `tenant_unit` | int / string | 0 / `TB` | Umbral de uso del tenant |
+| `list.*.timeout` / `alert` | int | 0 | Timeout / reintentos por ítem (`0` hereda el global) |
+
+**Flujo:** token *client-credentials* (`.default` de Graph) → consultas a
+`/sites/{id}/drive` y a los informes de uso → compara con `usage_pct` / `free_min` /
+`tenant_max` → alerta al superarlos.

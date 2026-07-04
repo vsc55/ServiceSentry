@@ -1,0 +1,7 @@
+{
+    "name": "m365",
+    "version": "1.0.0",
+    "description": "Microsoft 365 monitoring via the Microsoft Graph API (app-only). SharePoint storage: per-site drive quota (used % / free) and tenant usage trend.",
+    "icon": "☁️",
+    "dependencies": []
+}

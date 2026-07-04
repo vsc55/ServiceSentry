@@ -38,7 +38,7 @@ ObjectBase (lib/core/object_base.py)
 │
 ├── Main (main.py)
 ├── Monitor (lib/services/monitoring/monitor.py)
-├── Telegram (lib/core/telegram.py)
+├── Telegram (lib/providers/telegram.py)
 ├── ConfigManager (lib/config/manager.py)         ← ÚNICO dueño de la E/S de config (read/write/migrate)
 │   ├── ConfigStore-BD (lib/stores/config.py)      ← capa editable: tabla `config` (una fila por sección|campo)
 │   ├── ConfigControl (lib/config/config_control.py)  ← I/O JSON de config.json (solo arranque + pins)
@@ -84,15 +84,24 @@ ObjectBase (lib/core/object_base.py)
 │   ├── SyslogStore     (lib/stores/syslog/messages.py)  → tabla syslog (mensajes; puede ir en BD dedicada)
 │   └── SyslogDropsStore(lib/stores/syslog/drops.py)     → tabla syslog_drops (orígenes descartados por la allowlist)
 └── ModuleBase (lib/modules/module_base.py)
-    ├── watchfuls.datastore::Watchful         🌐 (multiplataforma)
+    ├── watchfuls.cpu::Watchful               🌐 (multiplataforma)
+    ├── watchfuls.datastore::Watchful         🌐 (multiplataforma; MySQL/PostgreSQL/MSSQL/Mongo/Redis/Influx/Elastic)
+    ├── watchfuls.dns::Watchful               🌐 (multiplataforma)
     ├── watchfuls.filesystemusage::Watchful  🌐 (multiplataforma)
     ├── watchfuls.hddtemp::Watchful
+    ├── watchfuls.keepalived::Watchful        (Linux; cluster VRRP multi-nodo)
+    ├── watchfuls.m365::Watchful              🌐 (multiplataforma; Microsoft Graph / SharePoint)
+    ├── watchfuls.ntp::Watchful               🌐 (multiplataforma)
     ├── watchfuls.ping::Watchful              🌐 (multiplataforma)
+    ├── watchfuls.process::Watchful           🌐 (multiplataforma)
+    ├── watchfuls.proxmox::Watchful           🌐 (multiplataforma; Proxmox VE REST)
     ├── watchfuls.raid::Watchful
     ├── watchfuls.ram_swap::Watchful          🌐 (multiplataforma)
     ├── watchfuls.service_status::Watchful   🌐 (multiplataforma)
     ├── watchfuls.snmp::Watchful             🌐 (multiplataforma; SNMPv1/v2c/v3 + gestión de MIBs)
+    ├── watchfuls.ssl_cert::Watchful          🌐 (multiplataforma)
     ├── watchfuls.temperature::Watchful
+    ├── watchfuls.ups::Watchful               🌐 (multiplataforma; NUT)
     └── watchfuls.web::Watchful              🌐 (multiplataforma)
 ```
 
@@ -167,6 +176,8 @@ ServiceSentry/
 │   │   ├── hosts/                       # Dominio de hosts (no la tabla; eso es stores/hosts.py)
 │   │   │   ├── profiles.py              # Catálogo protocolo→campos (de __host_profile__)
 │   │   │   ├── runner.py                # Ejecución de comandos local/SSH (run, is_remote)
+│   │   │   ├── ssh_client.py            # Transporte SSH (paramiko: connect/run_command/test_connection)
+│   │   │   ├── resolve.py               # Primitivas de resolución host (host_profile_specs, resolve_os)
 │   │   │   ├── probe.py                 # Ejecuta un check de un módulo una sola vez (asistente)
 │   │   │   └── migrate.py               # Asistente: agrupar conexiones inline en hosts
 │   │   ├── db/                          # Capa de BD pluggable (SQLite/MySQL/PostgreSQL)
@@ -190,15 +201,23 @@ ServiceSentry/
 │   │   │   └── debug_level.py           # Enum: null, debug, info, warning, error, emergency
 │   │   ├── modules/
 │   │   │   ├── module_base.py           # Clase base para todos los watchfuls
-│   │   │   ├── credential_schemas.py    # Catálogo de tipos de credencial (escanea watchfuls + i18n)
-│   │   │   ├── overview_widgets.py      # Catálogo de widgets de Overview (escanea watchfuls; reutiliza helpers de credential_schemas)
-│   │   │   ├── dict_files_path.py       # Diccionario de rutas de archivos
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck
-│   │   │   └── enum_config_options.py   # Enum opciones de config comunes
+│   │   │   └── discovery/               # Descubrimiento por escaneo de watchfuls
+│   │   │       ├── credential_schemas.py  # Catálogo de tipos de credencial (escanea watchfuls + i18n)
+│   │   │       └── overview_widgets.py    # Catálogo de widgets de Overview (reutiliza helpers de credential_schemas)
+│   │   ├── providers/                   # Integraciones externas (identidad/cloud); capa baja, sin Flask
+│   │   │   ├── telegram.py              # Cliente de la Bot API de Telegram (Telegram + send_telegram)
+│   │   │   └── entraid/                 # Microsoft Entra ID / Graph (paquete)
+│   │   │       ├── client.py            # Constantes Graph/authority + graph_error()
+│   │   │       ├── auth.py              # Tenant/token app-only + device-code (start/poll)
+│   │   │       ├── directory.py         # Grupos de Entra (fetch_groups, lookup_group)
+│   │   │       ├── mail.py              # Envío de correo vía Graph (Microsoft 365)
+│   │   │       ├── provisioning.py      # Alta de apps (roles/scopes/consent/SSO)
+│   │   │       └── declarations.py      # Descubrimiento de __entraid_provision__ en watchfuls
 │   │   ├── notify/                      # Subsistema de notificación (sin Flask; lo usan web, monitor y daemons syslog/events)
 │   │   │   ├── notification_dispatcher.py  # dispatch(): enruta cada evento a Telegram/Email/Webhook
-│   │   │   ├── telegram_notify.py       # Canal Telegram
-│   │   │   ├── email_notify.py          # Canal email (SMTP / Microsoft 365 / Gmail)
+│   │   │   ├── telegram_notify.py       # Canal Telegram (envuelve lib/providers/telegram.py)
+│   │   │   ├── email_notify.py          # Canal email (SMTP / Microsoft 365 vía providers/entraid / Gmail)
 │   │   │   ├── email_templates.py       # Plantillas HTML de email (i18n vía lib.i18n)
 │   │   │   └── webhook_notify.py        # Canal webhooks (HMAC opcional)
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
@@ -215,7 +234,7 @@ ServiceSentry/
 │   │       │   └── services.py          # _ServicesMixin: descubre + controla los servicios embebidos (composición, lib/services/*/embedded.py)
 │   │       └── routes/                  # Registradores de rutas Flask (ver web_admin.md)
 │   │           ├── __init__.py          # register_all(app, wa)
-│   │           ├── auth/                # /login, /logout, /api/v1/auth/ldap|entra/*
+│   │           ├── auth/                # /login, /logout, /api/v1/auth/ldap|entraid/*
 │   │           ├── users/               # /api/v1/users, /me, roles, groups
 │   │           ├── sessions/            # /api/v1/sessions, /api/v1/audit
 │   │           ├── modules/             # /api/v1/modules, status, overview, checks/run
@@ -245,7 +264,7 @@ ServiceSentry/
 │   │   └── web/
 │   └── tests/                           # Tests de core y web admin
 │       ├── conftest.py                  # Fixtures: config_dir, var_dir, admin, client
-│       ├── test_config.py
+│       ├── test_config_file.py
 │       ├── test_debug.py
 │       ├── test_dict_files_path.py
 │       ├── test_dict_return_check.py

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests para ConfigStore y ConfigControl."""
+"""Tests para la capa de configuración basada en fichero: ConfigStore
+(lib/config/config_store.py), ConfigControl y ConfigTypeReturn.
+
+La ConfigStore respaldada por BD (lib/stores/config.py) se prueba aparte en
+test_config_store.py."""
 
 import json
 import os

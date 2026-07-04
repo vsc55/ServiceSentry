@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Host registry routes: /api/v1/hosts (GET, POST), /api/v1/hosts/<uid> (PUT, DELETE).
+"""Shared helpers for the host registry routes (the endpoints live in
+``routes/hosts/__init__.py``).
 
-A host carries an address plus per-protocol connection profiles (ssh, snmp, db,
-http…) that watchful modules reuse, so a server's connection is defined once.
-
-Access is gated by the dedicated ``servers_view`` / ``servers_edit`` /
-``servers_delete`` permissions (the Servers tab).  Secret values inside the
-profiles are masked on read and restored from
-the stored value when the client omits them on write — the same scheme as
-the module configuration.
+Covers the check-fan-out bookkeeping a host change implies: cloning/deleting a
+host's bound checks, building per-host status summaries, host-record probing and
+masking/restoring the secret values inside connection profiles (the same scheme
+as the module configuration).
 """
 
 import copy
@@ -24,7 +21,7 @@ from flask import jsonify, request, session
 def _coll_meta(modules_dir: str, mod: str, coll: str) -> dict:
     """The collection's schema meta (``__discovery_label_template__`` etc.) read
     from the module's schema.json, or ``{}``."""
-    from lib.modules.credential_schemas import _watchfuls_dir  # noqa: PLC0415
+    from lib.modules.discovery.credential_schemas import _watchfuls_dir  # noqa: PLC0415
     bare = str(mod).replace('watchfuls.', '')
     sp = os.path.join(_watchfuls_dir(modules_dir), bare, 'schema.json')
     try:
@@ -55,7 +52,7 @@ def _format_item_label(tpl: str, host_name: str, item: dict, disc_field: str) ->
     return s.strip()
 
 from lib.security import secret_manager
-from lib.system import ssh_client
+from lib.hosts import ssh_client
 from lib.hosts import probe as host_probe
 from lib.hosts.migrate import apply_to_modules, build_migration_plan
 

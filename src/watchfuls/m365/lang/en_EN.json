@@ -1,0 +1,58 @@
+{
+    "pretty_name": "Microsoft 365",
+    "module_description": "Monitors Microsoft 365 services via the Microsoft Graph API (app-only authentication). For now: SharePoint storage — per-site drive quota (used % and free space) and tenant usage trend. Requires an app registered in Azure AD/Entra ID with the application permissions Sites.Read.All and Reports.Read.All (admin consent granted).",
+    "labels": {
+        "enabled":            "Enabled",
+        "label":              "Label",
+        "threads":            "Threads",
+        "alert":              "Threshold",
+        "timeout":            "Timeout (s)",
+        "tenant_id":          "Tenant (id or domain)",
+        "client_id":          "Application id (client_id)",
+        "client_secret":      "Client secret",
+        "check_site":         "Site storage",
+        "site":               "SharePoint site",
+        "usage_pct":          "Alert at % used",
+        "free_min":           "Alert if free drops below",
+        "free_unit":          "Unit (free)",
+        "check_tenant_usage": "Tenant usage (reports)",
+        "tenant_max":         "Alert if usage exceeds",
+        "tenant_unit":        "Unit (tenant)"
+    },
+    "hints": {
+        "enabled":            "Enable or disable this Microsoft 365 connection.",
+        "threads":            "Number of Microsoft 365 connections to check in parallel.",
+        "alert":              "Consecutive authentication failures before alerting (smooths transient blips).",
+        "timeout":            "Default timeout for Graph requests, in seconds.",
+        "tenant_id":          "The tenant id (GUID) or domain, e.g. contoso.onmicrosoft.com.",
+        "client_id":          "The application (client) id of the Azure AD/Entra ID app registration.",
+        "client_secret":      "The app's client secret. Stored encrypted. The app needs the application permissions Sites.Read.All and Reports.Read.All with admin consent. You can create it automatically with the button below (sign in as an admin and consent; no existing secret needed).",
+        "check_site":         "Check a SharePoint site's drive storage quota (total, used and free).",
+        "site":               "URL of the SharePoint site to watch, e.g. contoso.sharepoint.com/sites/Marketing. Leave empty to use the tenant root site.",
+        "usage_pct":          "Warn when the site's used percentage reaches this value (1–100). On an item, leave it blank to inherit the module default; set the module value to 0 to disable it.",
+        "free_min":           "Warn when the site's free space drops below this amount. On an item, leave it blank to inherit the module default; set the module value to 0 to disable it.",
+        "free_unit":          "Unit for the free-space amount (MB, GB or TB).",
+        "check_tenant_usage": "Total SharePoint storage USED across the tenant, via the reports API. Graph exposes no pooled total, so the alert is on used amount.",
+        "tenant_max":         "Warn when the tenant's total SharePoint usage exceeds this amount. 0 = informational only.",
+        "tenant_unit":        "Unit for the tenant limit (GB or TB)."
+    },
+    "group_labels": {
+        "general": "General",
+        "auth":    "Authentication",
+        "checks":  "Checks",
+        "alerts":  "Alerts"
+    },
+    "action_labels": {
+        "test_connection": "Test connection",
+        "provision_app":   "Create app in Azure (sign in)",
+        "open_app":        "Open app in Entra ID"
+    },
+    "ui": {
+        "discover_title": "SharePoint sites",
+        "discover_error": "Could not fetch the sites. Check the credentials and permissions (Sites.Read.All).",
+        "discover_none": "— No selection (tenant root site) —"
+    },
+    "new_item_key_label": "Name:",
+    "rename_item_prompt": "Enter the new name:",
+    "collections": {"list": "Microsoft 365 connections"}
+}

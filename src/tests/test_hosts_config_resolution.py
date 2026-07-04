@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for host-centric config resolution (Phase 2).
+"""Tests for host-centric config resolution end-to-end via ``ModuleBase.resolve_host``.
+
+(The low-level resolution primitives in lib/hosts/resolve.py are tested apart in
+test_hosts_resolve.py; this file exercises the full merge over a mock monitor.)
 
 A check (or, for SNMP, a server) may carry a ``host_uid`` instead of inline
 connection fields; ``ModuleBase.resolve_host`` merges the referenced host's

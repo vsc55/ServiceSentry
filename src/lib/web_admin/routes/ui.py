@@ -15,8 +15,8 @@ from lib.hosts.profiles import (
     module_host_multi_bind,
     module_status_render,
 )
-from lib.modules.credential_schemas import credential_schemas
-from lib.modules.overview_widgets import overview_widgets_catalog
+from lib.modules.discovery.credential_schemas import credential_schemas
+from lib.modules.discovery.overview_widgets import overview_widgets_catalog
 
 from ..constants import SUPPORTED_LANGS
 

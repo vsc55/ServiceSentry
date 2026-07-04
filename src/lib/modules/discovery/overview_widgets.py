@@ -22,7 +22,7 @@ import json
 import os
 
 # Reuse the credential-catalog helpers (watchfuls dir resolution + lang loader).
-from lib.modules.credential_schemas import _watchfuls_dir, _module_i18n
+from lib.modules.discovery.credential_schemas import _watchfuls_dir, _module_i18n
 
 
 def overview_widgets_catalog(watchfuls_dir: str | None = None) -> dict:

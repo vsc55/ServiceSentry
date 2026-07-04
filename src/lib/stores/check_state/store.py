@@ -90,20 +90,48 @@ def _load_json(raw):
 def _split_key(module, result_key, resolver):
     """Split a watchful *result_key* into ``(key, metric, item_uid)``.
 
-    A 1-to-many check emits ``<item_uid>_<metric>`` (e.g. ``<uid>_ram``); we
-    store the clean item UID in ``key`` and the suffix in ``metric``.  The split
-    only applies when *resolver* ``(module, key) -> uid`` is given and stripping
-    the trailing ``_<suffix>`` still resolves to the SAME item — so an item key
-    that merely contains ``_`` is never split.  Without a resolver (direct
-    seeds) the key is kept verbatim.
+    A 1-to-many check derives several result keys from one item by either
+    convention, and we store the clean item UID in ``key`` + the derived part in
+    ``metric`` (so the composite PK ``module+key+metric`` keeps them apart):
+
+    * ``/``-composite ``<item>/<metric>`` (e.g. m365 ``<item>/site`` /
+      ``<item>/tenant``, or a cluster ``<uid>/node/pve04``) — the metric may hold
+      further ``/``.  Stored WITH its leading ``/`` so it reconstructs with ``/``.
+    * ``_``-suffix ``<item>_<metric>`` (e.g. ``<uid>_ram`` / ``<uid>_swap``) —
+      stored bare (the ``_`` is re-added on reconstruction).
+
+    The split only applies when *resolver* ``(module, key) -> uid`` is given and
+    the item part still resolves to the SAME item — so an item key that merely
+    contains ``/`` or ``_`` is never split.  Without a resolver (direct seeds)
+    the key is kept verbatim.
     """
     full = resolver(module, result_key) if resolver else None
     if not full:
         return result_key, '', None
+    # '/'-composite: the item is the part before the first '/'; the rest (which
+    # may contain more '/') is the metric, kept with its leading '/'.
+    if '/' in result_key:
+        head, _, tail = result_key.partition('/')
+        if tail and resolver(module, head) == full:
+            return full, '/' + tail, full
+    # '_'-suffix: the item is everything before the last '_'; the suffix is the
+    # metric, stored bare.
     base = result_key.rsplit('_', 1)[0]
     if base != result_key and resolver(module, base) == full:
         return full, result_key.rsplit('_', 1)[1], full
     return full, '', full
+
+
+def _join_key(key, metric):
+    """Reconstruct a watchful result key from stored ``key`` + ``metric``.
+
+    Inverse of :func:`_split_key`: a metric with a leading ``/`` came from a
+    ``/``-composite key (re-joined verbatim), any other non-empty metric is an
+    ``_``-suffix, and an empty metric is a plain 1-to-1 key.
+    """
+    if not metric:
+        return key
+    return f'{key}{metric}' if metric.startswith('/') else f'{key}_{metric}'
 
 
 class CheckStateStore:
@@ -150,7 +178,7 @@ class CheckStateStore:
         sub-metric), so modules and change detection see the same key they emit."""
         out: dict = {}
         for (module, key, metric), rec in self.get_all().items():
-            result_key = f'{key}_{metric}' if metric else key
+            result_key = _join_key(key, metric)
             out.setdefault(module, {})[result_key] = {
                 'status':     rec['status'],
                 'severity':   rec.get('severity', ''),
@@ -214,7 +242,11 @@ class CheckStateStore:
         """
         existing = self.get_all()
         now = time.time()
-        rows = []
+        # Keyed by the composite PK (module, key, metric) so two result keys that
+        # resolve to the same row (e.g. a stale bare '<item>' left next to a fresh
+        # '<item>/site') collapse to one entry — last write wins — instead of
+        # tripping the UNIQUE constraint and aborting the whole table write.
+        rows: dict = {}
         # Snapshot to avoid "dict changed size during iteration" if a worker
         # thread mutates the live status dict while we persist.
         for module, checks in list(data.items()):
@@ -233,7 +265,7 @@ class CheckStateStore:
                 else:
                     ts = rec.get('last_change_ts') or now
                 row_uid = (ex.get('uid') if ex else None) or str(uuid.uuid4())
-                rows.append((
+                rows[(module, key, metric)] = (
                     row_uid, module, key, item_uid, metric,
                     1 if status else 0,
                     rec.get('message'),
@@ -241,7 +273,7 @@ class CheckStateStore:
                     int(rec.get('fail_count') or 0),
                     ts,
                     _norm_severity(rec.get('severity'), status),
-                ))
+                )
         try:
             with self._db.transaction():
                 self._db.execute(f'DELETE FROM {_T}')
@@ -250,7 +282,7 @@ class CheckStateStore:
                         f'INSERT INTO {_T}(uid, module, key, item_uid, metric, '
                         'status, message, other_data, fail_count, last_change_ts, severity) '
                         'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                        rows,
+                        list(rows.values()),
                     )
             return True
         except Exception as exc:  # pylint: disable=broad-except
