@@ -52,6 +52,7 @@ function _groupsCardsBody(names, ctx) {
         const gd = groupsData[name];
         const badges = [
             gd.builtin ? `<i class="bi bi-lock-fill text-muted" style="font-size:.8em" title="${escAttr(t('group_builtin_badge'))}"></i>` : '',
+            gd.source === 'scim' ? `<span class="badge bg-info fw-normal ss-fs-1" title="${escAttr(t('group_scim_badge'))}">SCIM</span>` : '',
             gd.enabled === false ? `<span class="badge bg-secondary fw-normal ss-fs-1">${t('status_disabled')}</span>` : '',
         ].join('');
         const roleChips = (gd.roles || []).map(r => { const rd = rolesData[r] || {}; return `<span class="badge ${roleBadgeClass(r)}">${esc(rd.name || r)}</span>`; }).join('');
@@ -104,8 +105,9 @@ createListTable({
         switch (colId) {
             case 'name': {
                 const builtinBadge = gd.builtin ? ` <i class="bi bi-lock-fill text-muted ms-1" style="font-size:.8em" title="${escAttr(t('group_builtin_badge'))}"></i>` : '';
+                const scimBadge = gd.source === 'scim' ? ` <span class="badge bg-info fw-normal ms-1 ss-fs-1" title="${escAttr(t('group_scim_badge'))}">SCIM</span>` : '';
                 const disabledBadge = gd.enabled !== false ? '' : ` <span class="badge bg-secondary fw-normal ms-1 ss-fs-1">${t('status_disabled')}</span>`;
-                return `<td class="text-nowrap"><code>${esc(gd.name||name)}</code>${builtinBadge}${disabledBadge}</td>`;
+                return `<td class="text-nowrap"><code>${esc(gd.name||name)}</code>${builtinBadge}${scimBadge}${disabledBadge}</td>`;
             }
             case 'description':return `<td class="text-muted small text-truncate ss-td-ellipsis" title="${escAttr(gd.description||'')}">${esc(gd.description||'—')}</td>`;
             case 'roles': {

@@ -60,13 +60,13 @@ def app_token(tenant: str, client_id: str, client_secret: str,
     return access_token
 
 
-def device_code_start(scope: str = PROVISION_SCOPE) -> dict:
+def device_code_start(scope: str = PROVISION_SCOPE, client_id: str = DCF_CLIENT_ID) -> dict:
     """Begin the Device Code Flow; returns the raw devicecode response
     (``device_code``, ``user_code``, ``verification_uri``,
     ``verification_uri_complete``, ``expires_in``, ``interval``).  Raises
     ``RuntimeError`` with the provider message on failure."""
     resp = _req.post(f'{AUTHORITY}/common/oauth2/v2.0/devicecode',
-                     data={'client_id': DCF_CLIENT_ID, 'scope': scope}, timeout=15)
+                     data={'client_id': client_id, 'scope': scope}, timeout=15)
     if not resp.ok:
         b = resp.json() if resp.content else {}
         # May be empty — the web layer supplies its own i18n fallback message.
@@ -74,11 +74,12 @@ def device_code_start(scope: str = PROVISION_SCOPE) -> dict:
     return resp.json()
 
 
-def device_code_poll(device_code: str) -> dict:
+def device_code_poll(device_code: str, client_id: str = DCF_CLIENT_ID) -> dict:
     """Poll the token endpoint for a pending device-code flow; returns the raw
-    token body (the caller inspects ``error`` / ``access_token``)."""
+    token body (the caller inspects ``error`` / ``access_token``).  ``client_id``
+    MUST match the one used to start the flow."""
     return _req.post(
         f'{AUTHORITY}/common/oauth2/v2.0/token',
-        data={'client_id': DCF_CLIENT_ID,
+        data={'client_id': client_id,
               'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
               'device_code': device_code}, timeout=15).json()

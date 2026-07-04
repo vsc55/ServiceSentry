@@ -28,6 +28,7 @@ GRAPH_APP_ID = '00000003-0000-0000-c000-000000000000'
 DEFAULT_APP_NAME = 'ServiceSentry Monitor'   # app-only monitoring / module apps
 OIDC_APP_NAME = 'ServiceSentry - OIDC'       # OIDC SSO app
 SAML2_APP_NAME = 'ServiceSentry - SAML2'     # SAML2 SSO app
+SCIM_APP_NAME = 'ServiceSentry - SCIM'       # SCIM provisioning enterprise app
 
 
 def _watchfuls_dir(watchfuls_dir: str | None) -> str:

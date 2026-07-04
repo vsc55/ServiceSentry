@@ -1,8 +1,8 @@
 {# ================================================================
    Config — Auth tab: _renderAuthSection, _renderDefaultRoleField,
    _drPickRole, _applyLdapPreset, _applyOidcPreset, _applySaml2Preset,
-   testLdap, and the OIDC "Register in Azure" glue (showEntraWizard /
-   _entraRedirectUri / _entraApply — it drives the shared generic wizard).
+   testLdap, and the shared "Open in Entra ID" deep-link helper _entraAppLink.
+   The per-protocol "Register in Azure" wizards live in _wizard_{oidc,saml,scim}.html.
    ================================================================ #}
 
 // "Open in Entra ID" deep-link button for an already-registered app (by its
@@ -54,6 +54,10 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
                 </button>${_entraAppLink(data.client_id)}
             </div>
         </div></div>`;
+        // Read-only redirect URI (callback) derived from the public URL — the value the
+        // admin registers in the IdP (Entra/Google/Keycloak) as an allowed redirect URI.
+        h += roCopyRow(t('oidc_callback_label'), publicBaseUrl() + '/auth/oidc/callback',
+                       t('oidc_callback_hint'));
     }
 
     // LDAP quick-setup preset buttons
@@ -103,16 +107,14 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
                 </button>${_entraSaml2SsoLink(data)}${(data.sp_app_id || '').trim() ? `<button class="btn btn-secondary btn-sm ms-2" onclick="_entraSaml2AddSecret()" type="button"><i class="bi bi-key me-1"></i>${esc(t('entra_saml2_add_secret_btn'))}</button>` : ''}
             </div>
         </div></div>`;
-        // Read-only reference: the exact values the admin must paste into Azure's
-        // "Basic SAML Configuration" (Entra has no Graph API for it).
-        const _s2Ent = (data.sp_entity_id || '').trim(), _s2Acs = (data.sp_acs_url || '').trim();
-        if (_s2Ent || _s2Acs) {
-            h += `<div class="cfg-field-wrap mb-2"><div class="alert alert-secondary py-2 mb-0 small">
-                <div class="fw-semibold mb-2">${esc(t('entra_saml2_azure_values'))}</div>
-                ${_s2CopyRow(t('entra_saml2_entity_id_label'), _s2Ent)}
-                ${_s2CopyRow(t('entra_saml2_acs_url_label'), _s2Acs)}
-            </div></div>`;
-        }
+        // SP identity — ServiceSentry's own Entity ID + ACS URL. These are FIXED
+        // (derived from the public URL / set by the wizard as api://{appId}), never
+        // hand-edited: shown read-only with a copy button so the admin pastes them
+        // into the IdP. Excluded from the editable fields below (no duplicate).
+        const _spEnt = (data.sp_entity_id || '').trim() || publicBaseUrl();
+        const _spAcs = (data.sp_acs_url || '').trim() || (publicBaseUrl() + '/auth/saml2/acs');
+        h += roCopyRow(fieldLabel('sp_entity_id'), _spEnt);
+        h += roCopyRow(fieldLabel('sp_acs_url'), _spAcs);
     }
 
     // Inject field order so renderScalarFields respects logical grouping
@@ -134,7 +136,7 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
         saml2: [
             'enabled', 'button_label',
             'idp_entity_id', 'idp_sso_url', 'idp_cert',
-            'sp_entity_id', 'sp_acs_url', 'sp_key', 'sp_cert',
+            'sp_key', 'sp_cert',   // sp_entity_id / sp_acs_url shown read-only above
             'username_attr', 'email_attr', 'name_attr', 'groups_attr',
             'auto_create_users',
         ],
@@ -149,8 +151,12 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
         data = { ...data, button_label: '' };
     }
 
-    // Render all scalar fields except group_role_map and default_role (rendered manually below)
-    h += renderScalarFields(data, sec, 'config', ['group_role_map', 'default_role']);
+    // Render all scalar fields except group_role_map and default_role (rendered manually
+    // below). For SAML2, sp_entity_id / sp_acs_url are shown read-only above (fixed SP
+    // identity), so exclude them from the editable fields too.
+    const _scalarExcl = ['group_role_map', 'default_role'];
+    if (sec === 'saml2') _scalarExcl.push('sp_entity_id', 'sp_acs_url');
+    h += renderScalarFields(data, sec, 'config', _scalarExcl);
 
     // Default role for unmatched users
     h += _renderDefaultRoleField(sec, data.default_role || 'none');
@@ -414,51 +420,5 @@ async function testLdap() {
     if (resultDiv)  resultDiv.style.display = '';
 }
 
-// ── OIDC "Register in Azure" ────────────────────────────────────────────────
-// The button reuses the shared generic provisioning wizard: the OIDC app is just
-// a provisioning profile (a user sign-in / web app with the groups claim, only
-// assigned users, and openid/email/profile/User.Read + Group.Read.All). On
-// completion the created app's tenant/client/secret + the OIDC claim mapping are
-// written to the oidc config.
-function _entraRedirectUri() {
-    let pu = ((configData.web_admin || {}).public_url || '').trim().replace(/\/$/, '');
-    if (!pu) return window.location.origin + '/auth/oidc/callback';
-    // public_url is stored without scheme — add https:// (required by Entra ID)
-    if (!/^https?:\/\//i.test(pu)) pu = 'https://' + pu;
-    return pu + '/auth/oidc/callback';
-}
-
-function showEntraWizard() {
-    showEntraIdProvisionWizard({
-        url: '/api/v1/auth/entraid/provision/device-code',
-        provision: {
-            app_name: ENTRA_APP_NAME_OIDC,
-            app_roles: ['Group.Read.All'],
-            scopes: ['openid', 'email', 'profile', 'User.Read'],
-            redirect_uris: [_entraRedirectUri()],
-            group_claims: true,
-            require_assignment: true,
-        },
-    }, (fields) => {
-        _entraApply(fields || {});
-        if (typeof saveConfig === 'function') saveConfig();
-    });
-}
-
-function _entraApply(d) {
-    const patch = {
-        username_claim: 'preferred_username',
-        email_claim: 'email', name_claim: 'name', groups_claim: 'groups',
-        scopes: 'openid email profile',
-        button_label: 'Microsoft Entra ID',
-    };
-    if (d.provider_url)  patch.provider_url  = d.provider_url;
-    else if (d.tenant_id) patch.provider_url = `https://login.microsoftonline.com/${d.tenant_id}/v2.0`;
-    if (d.client_id)     patch.client_id     = d.client_id;
-    if (d.client_secret) patch.client_secret = d.client_secret;
-    // updateField registers each path in _dirtyFields so saveConfig() picks them up
-    for (const [field, value] of Object.entries(patch)) {
-        updateField('config', `oidc|${field}`, value);
-    }
-    renderConfig();
-}
+// The OIDC "Register in Azure" glue (showEntraWizard / _entraApply /
+// _entraRedirectUri) lives in _wizard_oidc.html, alongside the SAML2/SCIM wizards.

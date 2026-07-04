@@ -76,15 +76,22 @@ def _prepare_flask_request(req) -> dict:
     }
 
 
-def _build_saml_settings(cfg: dict) -> dict:
-    """Build the onelogin-python-saml settings dict from our config section."""
+def _build_saml_settings(cfg: dict, base_url: str = '') -> dict:
+    """Build the onelogin-python-saml settings dict from our config section.
+
+    The SP identity (``sp_entity_id`` / ``sp_acs_url``) is ServiceSentry's own and is
+    NOT hand-edited: when unset it derives from ``base_url`` (the public base URL),
+    matching the read-only values shown in the config UI."""
+    base = (base_url or '').rstrip('/')
+    sp_entity = (cfg.get('sp_entity_id') or '').strip() or base
+    sp_acs    = (cfg.get('sp_acs_url') or '').strip() or (f'{base}/auth/saml2/acs' if base else '')
     return {
         'strict': True,
         'debug':  False,
         'sp': {
-            'entityId': cfg.get('sp_entity_id', '') or '',
+            'entityId': sp_entity,
             'assertionConsumerService': {
-                'url':     cfg.get('sp_acs_url', '') or '',
+                'url':     sp_acs,
                 'binding': 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST',
             },
             'nameIdFormat': 'urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified',
@@ -111,7 +118,8 @@ def get_auth(wa, req):
     cfg = _get_config(wa)
     if not cfg.get('enabled'):
         return None
-    settings     = _build_saml_settings(cfg)
+    base_url = wa.public_base_url() if hasattr(wa, 'public_base_url') else ''
+    settings     = _build_saml_settings(cfg, base_url)
     request_data = _prepare_flask_request(req)
     return OneLogin_Saml2_Auth(request_data, settings)
 

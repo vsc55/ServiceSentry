@@ -249,6 +249,14 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('saml2|groups_attr', str, 'groups', no_rule=True),
     Cfg('saml2|default_role', str, '', no_rule=True),
 
+    # ══ SCIM 2.0 (aprovisionamiento proactivo desde el IdP) ═══════════════════
+    Cfg('scim|enabled', bool, False),
+    Cfg('scim|token', str, '', no_rule=True),          # bearer token que envía el IdP (cifrado)
+    Cfg('scim|default_role', str, '', no_rule=True),   # rol para usuarios aprovisionados (vacío = none)
+    Cfg('scim|auto_disable', bool, True),              # active=false del IdP → deshabilita el usuario
+    Cfg('scim|sp_app_id', str, '', no_rule=True),      # appId de la app SCIM en Entra (deep link)
+    Cfg('scim|sp_object_id', str, '', no_rule=True),   # objectId del SP (deep link a Provisioning)
+
     # ══ Email ════════════════════════════════════════════════════════════════
     Cfg('email|enabled', bool, False),
     Cfg('email|smtp_use_tls', bool, True),

@@ -18,45 +18,25 @@ import time
 
 from flask import jsonify
 
-from lib.config.spec import normalize_url
 from lib.providers.entraid import auth, directory, provisioning
+from lib.providers.entraid.client import GRAPH_CLI_CLIENT_ID, SCIM_PROVISION_SCOPE
 
 
 def _public_base(wa) -> str:
     """The server's public base URL (scheme + host, no trailing slash) — used to
-    expand a ``{public_url}`` token in a profile's redirect URIs."""
-    base = normalize_url(getattr(wa, '_public_url', '') or '')
-    if not base:
-        return f'http://localhost:{getattr(wa, "_WEB_PORT", 80)}'
-    if '://' not in base:
-        base = f'https://{base}'
-    return base.rstrip('/')
+    expand a ``{public_url}`` token in a profile's redirect URIs.  Single source:
+    :meth:`WebAdmin.public_base_url` (config override → proxy-aware auto-detect)."""
+    return wa.public_base_url()
 
 
 def _saml_acs_uri(wa) -> str:
-    cfg = wa._config_section('saml2')
-    acs = cfg.get('sp_acs_url', '').strip()
-    if acs:
-        return acs
-    base = normalize_url(getattr(wa, '_public_url', ''))
-    if not base:
-        return f'http://localhost:{wa._WEB_PORT}/auth/saml2/acs'
-    if '://' not in base:
-        base = f'https://{base}'
-    return f'{base}/auth/saml2/acs'
+    acs = wa._config_section('saml2').get('sp_acs_url', '').strip()
+    return acs or f'{_public_base(wa)}/auth/saml2/acs'
 
 
 def _saml_entity_id(wa) -> str:
-    cfg = wa._config_section('saml2')
-    eid = cfg.get('sp_entity_id', '').strip()
-    if eid:
-        return eid
-    base = normalize_url(getattr(wa, '_public_url', ''))
-    if not base:
-        return f'http://localhost:{wa._WEB_PORT}'
-    if '://' not in base:
-        base = f'https://{base}'
-    return base
+    eid = wa._config_section('saml2').get('sp_entity_id', '').strip()
+    return eid or _public_base(wa)
 
 
 def register(app, wa):
@@ -262,6 +242,125 @@ def register(app, wa):
             'tenant_id': tenant_id,
             'client_id': result.get('client_id', ''),
         })
+        return jsonify({'status': 'complete', **result})
+
+    # ── SCIM provisioning app (device-code) ────────────────────────────────
+    # "Register SCIM in Azure": create an enterprise app wired to ServiceSentry's
+    # own /scim/v2 endpoint (SCIM sync job + BaseAddress/SecretToken), so Entra can
+    # push users/groups.  The bearer token comes from the request (the value in the
+    # config form, possibly just generated and unsaved) and falls back to the stored
+    # scim|token.  The base URL is derived from the server's public URL.
+    def _scim_base_url(wa_):
+        base = _public_base(wa_)
+        return f'{base.rstrip("/")}/scim/v2'
+
+    @app.route('/api/v1/auth/entra/scim/device-code', methods=['POST'])
+    @config_edit_req
+    def api_entra_scim_device_code():
+        body = wa._optional_json() or {}
+        app_name = (body.get('app_name') or provisioning.SCIM_APP_NAME).strip() or provisioning.SCIM_APP_NAME
+        # The bearer token is read from config only — it never travels in the request
+        # (the UI persists it first). The frontend just tells us "is it set".
+        token = (wa._config_section('scim').get('token') or '').strip()
+        if not token:
+            return jsonify({'error': wa._t('scim_token_empty')}), 400
+        base = (body.get('scim_base') or '').strip() or _scim_base_url(wa)
+        # When an app is already registered, re-sync mode: re-push the (new) token to
+        # the EXISTING app instead of creating another one (keeps both sides in sync).
+        sp_object_id = (body.get('sp_object_id') or '').strip()
+        try:
+            # SCIM needs Synchronization.ReadWrite.All → use the Graph CLI client
+            # (Azure PowerShell isn't preauthorized for it: AADSTS65002).
+            d = auth.device_code_start(scope=SCIM_PROVISION_SCOPE, client_id=GRAPH_CLI_CLIENT_ID)
+        except Exception as exc:  # pylint: disable=broad-except
+            return jsonify({'error': str(exc) or wa._t('entra_device_code_error')}), 502
+        flow_token = secrets.token_urlsafe(16)
+        wa._entra_flows[flow_token] = {
+            'device_code':  d['device_code'],
+            'expires_at':   time.time() + int(d.get('expires_in', 900)),
+            'interval':     int(d.get('interval', 5)),
+            'kind':         'scim',
+            'app_name':     app_name,
+            'scim_base':    base,
+            'scim_token':   token,
+            'sp_object_id': sp_object_id or None,   # set → re-sync existing app
+            'client_id':    GRAPH_CLI_CLIENT_ID,     # poll must use the same client
+        }
+        return jsonify({
+            'flow_token':       flow_token,
+            'user_code':        d['user_code'],
+            'verification_uri': d['verification_uri'],
+            'verification_uri_complete': d.get('verification_uri_complete', ''),
+            'expires_in':       d.get('expires_in', 900),
+            'interval':         d.get('interval', 5),
+            'scim_base':        base,
+        })
+
+    @app.route('/api/v1/auth/entra/scim/device-poll', methods=['POST'])
+    @config_edit_req
+    def api_entra_scim_device_poll():
+        data, err = wa._require_json()
+        if err:
+            return err
+        flow_token = data.get('flow_token')
+        flow = wa._entra_flows.get(flow_token)
+        if not flow or flow.get('kind') != 'scim':
+            return jsonify({'status': 'expired'})
+        if time.time() > flow['expires_at']:
+            wa._entra_flows.pop(flow_token, None)
+            return jsonify({'status': 'expired'})
+
+        body = auth.device_code_poll(flow['device_code'],
+                                     client_id=flow.get('client_id') or GRAPH_CLI_CLIENT_ID)
+        error = body.get('error', '')
+        if error == 'authorization_pending':
+            return jsonify({'status': 'pending'})
+        if error == 'slow_down':
+            flow['interval'] = min(flow['interval'] + 5, 30)
+            return jsonify({'status': 'pending', 'interval': flow['interval']})
+        if error:
+            wa._entra_flows.pop(flow_token, None)
+            return jsonify({'status': 'error', 'message': body.get('error_description', error)})
+
+        tenant_id = auth.extract_tenant_id(body)
+        if not tenant_id:
+            wa._entra_flows.pop(flow_token, None)
+            return jsonify({'status': 'error',
+                            'message': 'Could not determine tenant ID from token.'})
+
+        # Re-sync mode: an app already exists → just re-push the token to it.
+        if flow.get('sp_object_id'):
+            try:
+                result = provisioning.update_scim_secrets(
+                    body['access_token'], flow['sp_object_id'],
+                    flow['scim_base'], flow['scim_token'])
+            except Exception as exc:  # pylint: disable=broad-except
+                wa._entra_flows.pop(flow_token, None)
+                wa._audit('entra_scim_resync_failed', detail={
+                    'sp_object_id': flow['sp_object_id'], 'error': str(exc)})
+                return jsonify({'status': 'error', 'message': str(exc)})
+            wa._entra_flows.pop(flow_token, None)
+            wa._audit('entra_scim_resync', detail={'sp_object_id': flow['sp_object_id']})
+            result.pop('secret_token', None)   # the token never travels back to the client
+            return jsonify({'status': 'complete', 'resync': True, **result})
+
+        try:
+            result = provisioning.provision_scim_app(
+                body['access_token'], tenant_id, flow['scim_base'], flow['scim_token'],
+                app_name=flow.get('app_name', provisioning.SCIM_APP_NAME))
+        except Exception as exc:  # pylint: disable=broad-except
+            wa._entra_flows.pop(flow_token, None)
+            wa._audit('entra_scim_app_provision_failed', detail={
+                'app_name': flow.get('app_name', ''), 'tenant_id': tenant_id, 'error': str(exc)})
+            return jsonify({'status': 'error', 'message': str(exc)})
+
+        wa._entra_flows.pop(flow_token, None)
+        wa._audit('entra_scim_app_provisioned', detail={
+            'app_name':  flow.get('app_name', ''),
+            'tenant_id': tenant_id,
+            'client_id': result.get('client_id', ''),
+            'job_id':    result.get('job_id', '')})
+        result.pop('secret_token', None)   # the token never travels back to the client
         return jsonify({'status': 'complete', **result})
 
     # ── Generic module-credential app provisioning (device-code) ───────────

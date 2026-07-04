@@ -132,11 +132,29 @@ Cuando `saml2.enabled = true` y el paquete `pysaml2` está instalado, el flujo e
 - Los usuarios SAML2 reciben `auth_source: "saml2"` y no tienen `password_hash`.
 - El mapeo grupo → rol funciona igual que en LDAP/OIDC.
 
+### SCIM 2.0 (aprovisionamiento proactivo)
+
+LDAP/OIDC/SAML2 crean el usuario **al primer login** (JIT). Con `scim.enabled` ServiceSentry
+expone además `/scim/v2/*` para que el IdP **empuje** altas/cambios/bajas **antes** de que
+entren (y baje al retirar la asignación). Detalles del flujo/endpoints en
+[sso-entra.md](sso-entra.md) y [web_admin.md](web_admin.md).
+
+**Seguridad:**
+
+- Autenticación por **bearer token** (`scim.token`, cifrado en disco), comparado en
+  **tiempo constante** (`hmac.compare_digest`); **independiente de la sesión web** (llamada
+  servidor-a-servidor). SCIM desactivado o token no coincidente → **401**.
+- Los usuarios se crean con `auth_source: "scim"` y sin `password_hash`; `active:false` los
+  deshabilita (si `auto_disable`). Los grupos SCIM se mapean a grupos de ServiceSentry.
+- Toda operación se **audita** (`scim_user_created/updated/deleted`,
+  `scim_group_created/updated/deleted`).
+
 ### Tests de autenticación externa
 
 | Archivo | Qué cubre |
 | ------- | --------- |
 | `test_wa_ldap.py` | Autenticación LDAP correcta, credenciales incorrectas, servidor caído, fallback a local, sincronización de usuario, mapeo de grupos, `allow_email_login` |
+| `test_wa_scim.py` | Bearer token (desactivado/ausente/erróneo → 401), CRUD de usuarios SCIM (crear/filtrar/leer/PATCH active/borrar), grupos SCIM (crear con miembros, quitar miembro, borrar desvincula) |
 | `test_wa_oidc.py` | Callback OIDC correcto, `state` inválido, `auto_create_users=false`, sincronización de usuario, mapeo de claims |
 | `test_wa_saml.py` | Callback ACS SAML2 correcto, sincronización de usuario, mapeo de grupos, firma inválida → rechazado |
 

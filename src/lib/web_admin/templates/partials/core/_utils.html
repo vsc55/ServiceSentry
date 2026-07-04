@@ -342,6 +342,64 @@ function getPath(obj, parts) {
     return cur;
 }
 
+// Fetch a cryptographically-strong random token from the server (single source:
+// lib.util.generate_token). Generic — reuse for any secret/bearer token. Returns
+// the hex token, or '' on failure.
+async function generateToken(nBytes = 32) {
+    try {
+        // apiGet returns the parsed JSON directly (not wrapped in .data).
+        const r = await apiGet(`/api/v1/util/token?bytes=${encodeURIComponent(nBytes)}`);
+        return (r && r.token) || '';
+    } catch (_) {
+        return '';
+    }
+}
+
+// The effective public base URL (scheme://host, no trailing slash). Single source
+// for every user-facing URL the JS builds (SSO redirect URIs, SCIM endpoint…).
+// A live edit of web_admin|public_url in the config form wins (so the UI updates as
+// you type); otherwise the value the server resolved (config override → proxy-aware
+// auto-detect, see WebAdmin.public_base_url) — never window.location, which is wrong
+// behind a reverse proxy.
+function publicBaseUrl() {
+    const wa = ((typeof configData !== 'undefined' && configData.web_admin) || {});
+    let pu = (wa.public_url || '').trim().replace(/\/$/, '');
+    if (pu) {
+        if (!/^https?:\/\//i.test(pu)) pu = (wa.force_https ? 'https://' : 'http://') + pu;
+        return pu;
+    }
+    return (typeof SERVER_BASE_URL !== 'undefined' && SERVER_BASE_URL)
+        || (typeof window !== 'undefined' ? window.location.origin : '');
+}
+
+// Read-only, copyable config row (col-4 label + col-8 input-group), VISUALLY marked
+// as non-editable: a lock icon by the label, a muted input background and a "read-only"
+// tooltip, plus a copy button. For derived/fixed values the admin copies elsewhere
+// (SCIM base URL, SAML SP Entity ID / ACS URL). Optional collapsible hint like the
+// normal fields.
+function roCopyRow(label, value, hint = '') {
+    const hid  = 'rohint_' + String(label).replace(/\W+/g, '_');
+    // Prominent read-only marker: a badge by the label + a lock addon on the input.
+    const badge = ` <span class="badge text-bg-secondary fw-normal ss-fs-1 align-middle"
+            data-bs-toggle="tooltip" title="${escAttr(t('read_only'))}"><i class="bi bi-lock-fill me-1"></i>${esc(t('read_only_short'))}</span>`;
+    const info = hint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+                data-bs-toggle="collapse" data-bs-target="#${hid}"
+                aria-expanded="false" aria-controls="${hid}"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const panel = hint
+        ? `<div class="collapse" id="${hid}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(hint)}</div></div>`
+        : '';
+    const inner = `<div class="input-group input-group-sm">
+        <span class="input-group-text" data-bs-toggle="tooltip" title="${escAttr(t('read_only'))}"><i class="bi bi-lock-fill text-secondary"></i></span>
+        <input type="text" class="form-control font-monospace" readonly value="${escAttr(value)}"
+            title="${escAttr(t('read_only'))}" style="background:var(--bs-tertiary-bg);cursor:default">
+        <button class="btn btn-secondary" type="button" title="${escAttr(t('copy'))}"
+            onclick="_copyToClipboard(this.previousElementSibling.value)"><i class="bi bi-clipboard"></i></button>
+    </div>`;
+    return `<div class="cfg-field-wrap mb-2">${_fieldRow(esc(label) + badge + info, inner, panel)}</div>`;
+}
+
 function toggleCollapseFromHeader(event, collapseId) {
     // Ignore clicks from controls that must not toggle collapse.
     if (event.target.closest('[data-no-collapse="1"]')) return;
@@ -413,9 +471,11 @@ function _copyToClipboard(text) {
     const ta = document.createElement('textarea');
     ta.value = text;
     ta.setAttribute('readonly', '');
-    ta.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+    // Anchor to the current scroll offset (not top:0) and focus WITHOUT scrolling, so
+    // copying never jumps the page to the top.
+    ta.style.cssText = `position:absolute;top:${window.scrollY || 0}px;left:0;width:1px;height:1px;opacity:0;pointer-events:none`;
     container.appendChild(ta);
-    ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+    ta.focus({ preventScroll: true }); ta.select(); ta.setSelectionRange(0, ta.value.length);
     let ok = false;
     try { ok = document.execCommand('copy'); } catch(_) {}
     container.removeChild(ta);

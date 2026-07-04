@@ -92,6 +92,8 @@ CARDS: tuple[dict, ...] = (
     {'tab': 'auth', 'id': 'ldap', 'section': 'ldap', 'icon': 'bi-person-badge', 'renderer': 'auth'},
     {'tab': 'auth', 'id': 'oidc', 'section': 'oidc', 'icon': 'bi-box-arrow-in-right', 'renderer': 'auth'},
     {'tab': 'auth', 'id': 'saml2', 'section': 'saml2', 'icon': 'bi-shield-check', 'renderer': 'auth'},
+    {'tab': 'auth', 'id': 'scim', 'section': 'scim', 'title_key': 'scim_section', 'icon': 'bi-arrow-down-up',
+     'fields': ['scim|enabled', 'scim|token', 'scim|default_role', 'scim|auto_disable']},
 
     # ══ Interface & web deployment ══════════════════════════════════════════
     {'tab': 'interface', 'id': 'proxy', 'title_key': 'proxy_section', 'icon': 'bi-diagram-3',

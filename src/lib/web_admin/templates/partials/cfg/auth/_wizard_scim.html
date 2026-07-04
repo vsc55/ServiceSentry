@@ -1,0 +1,218 @@
+{# ================================================================
+   Config — Auth tab: SCIM provisioning Entra ID wizard.
+
+   "Register SCIM in Azure" creates an enterprise app wired to ServiceSentry's
+   own /scim/v2 endpoint (SCIM sync job + BaseAddress/SecretToken).  Only the
+   SCIM-specific pieces live here; the modal, device-code flow, poll loop, tabs
+   and copy plumbing are the SHARED generic wizard
+   (partials/credentials/_provision_wizard.html :: showEntraIdProvisionWizard).
+
+   The default app name (ENTRA_APP_NAME_SCIM) is injected from Python
+   (providers.entraid SCIM_APP_NAME) via core/_constants.html — no local literal.
+
+   showEntraScimWizard, _entraScimScripts, _entraScimSuccess, _entraScimApply,
+   _entraScimProvUrl, _entraScimLink.
+   ================================================================ #}
+
+// SCIM base URL (public_url + /scim/v2) and the bearer token currently in the
+// form (falls back to the saved config token).
+function _entraScimBaseUrl() {
+    return publicBaseUrl() + '/scim/v2';   // shared helper (core/_utils.html)
+}
+// Token state for the wizard. A saved secret is masked (null) after a reload — it is
+// never echoed back — so distinguish "configured but masked" from "not set at all":
+//   value      = the known plaintext (typed/generated this session), else ''
+//   configured = a token exists (value present OR a masked one on the server)
+// When only masked, the backend re-uses the stored token, so the wizard still runs.
+function _entraScimTokenState() {
+    const inputTok = (document.getElementById('scimTokenInput')?.value || '').trim();
+    const cfgTok = (configData.scim || {}).token;   // string=plaintext · null=set-masked · ''/undef=unset
+    const value = inputTok || (typeof cfgTok === 'string' ? cfgTok.trim() : '');
+    return { value, configured: !!value || cfgTok === null };
+}
+
+function _entraScimPs1Script(baseAddress, secretToken, appName = ENTRA_APP_NAME_SCIM) {
+    return `# ${t('entra_script_requires')}: Install-Module Microsoft.Graph -Scope CurrentUser
+Connect-MgGraph -Scopes "Application.ReadWrite.All", "Synchronization.ReadWrite.All"
+
+$appName      = "${appName}"
+$baseAddress  = "${baseAddress}"
+$secretToken  = "${secretToken}"
+
+# 1 - Instantiate the customappsso template (app + service principal)
+$inst = Invoke-MgGraphRequest -Method POST \`
+    -Uri "https://graph.microsoft.com/v1.0/applicationTemplates/8adf8e6e-67b2-4cf2-a259-e3dc5476c621/instantiate" \`
+    -Body @{ displayName = $appName } -ContentType "application/json"
+$spId = $inst.servicePrincipal.id
+Start-Sleep -Seconds 20
+
+# 2 - Create the SCIM synchronization job
+$job = Invoke-MgGraphRequest -Method POST \`
+    -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/synchronization/jobs" \`
+    -Body @{ templateId = "scim" } -ContentType "application/json"
+
+# 3 - Store the SCIM endpoint (BaseAddress) + bearer token (SecretToken)
+Invoke-MgGraphRequest -Method PUT \`
+    -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/synchronization/secrets" \`
+    -Body @{ value = @(
+        @{ key = "BaseAddress"; value = $baseAddress },
+        @{ key = "SecretToken"; value = $secretToken }
+    ) } -ContentType "application/json"
+
+Write-Host "Service Principal: $spId"
+Write-Host "Assign users/groups to the app and Start provisioning in the portal."`;
+}
+
+function _entraScimAzCliScript(baseAddress, secretToken, appName = ENTRA_APP_NAME_SCIM) {
+    return `#!/bin/bash
+# ${t('entra_script_requires')}: az CLI  ·  ${t('entra_script_run_first')}: az login
+APP_NAME="${appName}"
+BASE_ADDRESS="${baseAddress}"
+SECRET_TOKEN="${secretToken}"
+
+# 1 - Instantiate the customappsso template (app + service principal)
+INST=$(az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/applicationTemplates/8adf8e6e-67b2-4cf2-a259-e3dc5476c621/instantiate" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"displayName":"'"$APP_NAME"'"}')
+SP_ID=$(echo "$INST" | python3 -c "import sys,json; print(json.load(sys.stdin)['servicePrincipal']['id'])")
+sleep 20
+
+# 2 - Create the SCIM synchronization job
+az rest --method POST \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID/synchronization/jobs" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"templateId":"scim"}'
+
+# 3 - Store the SCIM endpoint (BaseAddress) + bearer token (SecretToken)
+az rest --method PUT \\
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID/synchronization/secrets" \\
+  --headers "Content-Type=application/json" \\
+  --body '{"value":[{"key":"BaseAddress","value":"'"$BASE_ADDRESS"'"},{"key":"SecretToken","value":"'"$SECRET_TOKEN"'"}]}'
+
+echo "Service Principal: $SP_ID"
+echo "Assign users/groups to the app and Start provisioning in the portal."`;
+}
+
+async function showEntraScimWizard() {
+    let { value, configured } = _entraScimTokenState();
+    // No token yet → generate one (server-side) and drop it into the field, so the
+    // registration always has a token to push to Entra (saved just below).
+    if (!configured) {
+        const tok = await generateToken(32);
+        if (!tok) { showToast(t('scim_token_gen_error') || 'Error', 'danger'); return; }
+        const inp = document.getElementById('scimTokenInput');
+        if (inp) { inp.value = tok; inp.type = 'text'; }
+        updateField('config', 'scim|token', tok);
+        value = tok; configured = true;
+        showToast(t('scim_token_autogen'), 'info');
+    }
+    // Persist an unsaved token first so the backend reads it from config — the token
+    // is never sent in the device-code request.
+    if (typeof _dirtyFields !== 'undefined' && _dirtyFields.has('scim|token')) await saveConfig();
+    const base = _entraScimBaseUrl();
+    // Manual scripts embed the token if we have its value; otherwise a placeholder
+    // (the auto flow uses the token stored server-side, which stays masked here).
+    const scriptTok = value || '<SECRET_TOKEN>';
+    // Read-only SCIM base URL shown above the manual scripts (what the admin needs
+    // as the Tenant URL when configuring provisioning by hand).
+    const _row = (label, id, val) => `
+        <div class="mb-2">
+          <label class="form-label small fw-semibold text-muted">${esc(label)}</label>
+          <div class="input-group input-group-sm">
+            <input type="text" class="form-control font-monospace" readonly id="${id}" value="${escAttr(val)}">
+            <button class="btn btn-secondary" type="button" onclick="_copyToClipboard(document.getElementById('${id}').value)"><i class="bi bi-clipboard"></i></button>
+          </div>
+        </div>`;
+    showEntraIdProvisionWizard({
+        url:      '/api/v1/auth/entra/scim/device-code',
+        pollUrl:  '/api/v1/auth/entra/scim/device-poll',
+        title:    t('scim_wizard_title'),
+        intro:    t('scim_wizard_intro'),
+        // No token in the request — the backend reads it from config (persisted above).
+        provision: { app_name: ENTRA_APP_NAME_SCIM, scim_base: base },
+        scripts: {
+            ps1:   (name) => _entraScimPs1Script(base, scriptTok, name),
+            azcli: (name) => _entraScimAzCliScript(base, scriptTok, name),
+        },
+        manualExtraHtml: _row(t('scim_url_label'), 'entraScimBaseInput', base),
+        onResult: _entraScimSuccess,
+    });
+}
+
+// Re-sync the (regenerated) token to the ALREADY-registered app, reusing it (no new
+// app). Launched automatically after regenerating the token when an app exists, so
+// ServiceSentry and Entra never drift. Just a device-code sign-in + a secrets PUT.
+async function showEntraScimResyncWizard() {
+    const sp = (configData.scim || {}).sp_object_id;
+    if (!sp) return;
+    // Persist the new token first so the backend reads it from config (never sent).
+    if (typeof _dirtyFields !== 'undefined' && _dirtyFields.has('scim|token')) await saveConfig();
+    const base = _entraScimBaseUrl();
+    showEntraIdProvisionWizard({
+        url:      '/api/v1/auth/entra/scim/device-code',
+        pollUrl:  '/api/v1/auth/entra/scim/device-poll',
+        title:    t('scim_resync_title'),
+        intro:    t('scim_resync_intro'),
+        simple:   true,   // just sign in + re-push (no app-name, no manual scripts)
+        provision: { scim_base: base, sp_object_id: sp },   // no token in the request
+        onResult: (d) => {
+            _entraScimApply(d);       // persist the app ids to the config
+            saveConfig();
+            if (d.secrets_error) {
+                return { html: `<div class="alert alert-warning mb-0 py-2 small"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('scim_secrets_error'))} (${esc(d.secrets_error)})</div>`,
+                         autoClose: false };
+            }
+            return { html: `<div class="alert alert-success mb-0 py-2 small"><i class="bi bi-check-circle-fill me-1"></i>${esc(t('scim_resync_done'))}</div>`,
+                     autoClose: true };
+        },
+    });
+}
+
+// Deep link to the enterprise app's Provisioning blade in the Entra portal (needs
+// the SP objectId AND the appId).  Falls back to the app-registration link.
+function _entraScimProvUrl(spObjectId, appId) {
+    spObjectId = (spObjectId || '').trim(); appId = (appId || '').trim();
+    if (!spObjectId || !appId) return '';
+    return 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Provisioning/objectId/'
+        + encodeURIComponent(spObjectId) + '/appId/' + encodeURIComponent(appId);
+}
+
+// "Open in Entra ID" button for the SCIM app → straight to its Provisioning blade.
+function _entraScimLink(data) {
+    const url = _entraScimProvUrl(data.sp_object_id, data.sp_app_id);
+    if (!url) return (typeof _entraAppLink === 'function') ? _entraAppLink(data.sp_app_id) : '';
+    return `<a class="btn btn-secondary btn-sm ms-2" href="${escAttr(url)}" target="_blank" rel="noopener">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('entra_open_app'))}</a>`;
+}
+
+// Called by the generic wizard on a completed SCIM flow: save the app ids + token,
+// enable SCIM and guide the admin to assign users and Start provisioning (SCIM only
+// pushes assigned principals, so the last step is manual in the portal).
+function _entraScimSuccess(d) {
+    _entraScimApply(d);
+    const provUrl = _entraScimProvUrl(d.sp_object_id, d.client_id);
+    const warn = (msg) => `<div class="alert alert-warning mb-2 py-2 small"><i class="bi bi-exclamation-triangle me-1"></i>${esc(msg)}</div>`;
+    let html = `<div class="alert alert-success mb-2"><i class="bi bi-check-circle-fill me-2"></i>${esc(t('scim_success'))}</div>`;
+    html += `<div class="alert alert-primary mb-2 py-2 small">
+        <div class="fw-semibold mb-2"><i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('scim_finish_hint'))}</div>
+        ${provUrl ? `<a class="btn btn-primary btn-sm mt-1" href="${escAttr(provUrl)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('scim_finish_btn'))}</a>` : ''}
+    </div>`;
+    if (d.job_error)     html += warn(t('scim_job_error') + ` (${d.job_error})`);
+    if (d.secrets_error) html += warn(t('scim_secrets_error') + ` (${d.secrets_error})`);
+    saveConfig();
+    // No auto-open — the "Open Provisioning in Entra ID" button in the panel is enough.
+    return { html, autoClose: false };
+}
+
+function _entraScimApply(d) {
+    // The token is already persisted (saved before the wizard) and never returned by
+    // the backend — only the app ids + enabled flag are applied here.
+    const patch = { enabled: true };
+    if (d.client_id)    patch.sp_app_id      = d.client_id;      // "open in Entra ID" link (appId)
+    if (d.sp_object_id) patch.sp_object_id   = d.sp_object_id;   // deep link to the Provisioning blade
+    for (const [field, value] of Object.entries(patch)) {
+        updateField('config', `scim|${field}`, value);
+    }
+    renderConfig();
+}

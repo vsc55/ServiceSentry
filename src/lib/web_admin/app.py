@@ -11,7 +11,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from flask import Flask, g, jsonify, redirect, request, session, url_for
+from flask import (Flask, g, has_request_context, jsonify, redirect, request,
+                   session, url_for)
 from jinja2 import ChoiceLoader, FileSystemLoader
 
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -33,7 +34,8 @@ from lib.config.layout import config_layout
 from lib.providers.entraid.declarations import (
     DEFAULT_APP_NAME as _ENTRA_APP_DEFAULT,
     OIDC_APP_NAME as _ENTRA_APP_OIDC,
-    SAML2_APP_NAME as _ENTRA_APP_SAML2)
+    SAML2_APP_NAME as _ENTRA_APP_SAML2,
+    SCIM_APP_NAME as _ENTRA_APP_SCIM)
 from .auth import ldap_auth as _ldap_auth
 from .auth import oidc_auth as _oidc_auth
 from .auth import saml_auth as _saml_auth
@@ -937,6 +939,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_file_locked_fields': sorted(getattr(self, '_file_locked', frozenset())),
                 'wa_proxy_count': self._proxy_count,
                 'wa_public_url': self._public_url,
+                # Effective base URL (config override → else proxy-aware auto-detect),
+                # injected so the JS never re-derives it. See public_base_url().
+                'wa_base_url': self.public_base_url(),
                 'wa_force_https': self._force_https,
                 'wa_force_fqdn':  self._force_fqdn,
                 'wa_startup_id':  self._startup_id,
@@ -967,6 +972,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'entra_app_name_default': _ENTRA_APP_DEFAULT,
                 'entra_app_name_oidc':    _ENTRA_APP_OIDC,
                 'entra_app_name_saml2':   _ENTRA_APP_SAML2,
+                'entra_app_name_scim':    _ENTRA_APP_SCIM,
                 'module_web_styles': self._module_web_styles,
                 'module_web_ui':     self._module_web_ui,
                 'module_web_modals': self._module_web_modals,
@@ -1058,6 +1064,33 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         pattern repeated across auth/email/webhook/notify modules.
         """
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
+
+    def public_base_url(self) -> str:
+        """The effective public base URL (``scheme://host``, no trailing slash).
+
+        Single source for every "where do users reach me" URL (SSO redirect URIs,
+        SCIM endpoint, deep links…).  Resolution order:
+
+        1. The configured ``web_admin|public_url`` — the manual override for proxied
+           setups (e.g. served on ``10.0.1.20:8080`` but public as ``ss.dominio.com``).
+        2. Auto-detected from the current request (proxy-aware: ``ProxyFix`` honours
+           ``X-Forwarded-Host/Proto`` when ``proxy_count`` > 0), so no config is needed
+           for a correctly-forwarded reverse proxy.
+        3. ``http://localhost:<port>`` outside a request context (last resort)."""
+        base = normalize_url(self._public_url or '')
+        if base:
+            if '://' not in base:           # public_url is stored without scheme
+                base = f'{"https" if self._force_https else "http"}://{base}'
+            return base.rstrip('/')
+        try:
+            if has_request_context() and request.host_url:
+                url = request.host_url.rstrip('/')
+                if self._force_https and url.startswith('http://'):
+                    url = 'https://' + url[len('http://'):]
+                return url
+        except Exception:  # pylint: disable=broad-except
+            pass
+        return f'http://localhost:{getattr(self, "_WEB_PORT", 80)}'
 
     @property
     def debug(self):

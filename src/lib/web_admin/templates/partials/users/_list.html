@@ -76,7 +76,7 @@ function _usersRowActions(uname, ctx) {
 let _usersViewMode = _loadViewMode('ss_users_view');
 function _setUsersView(mode) { _usersViewMode = mode === 'card' ? 'card' : 'table'; localStorage.setItem('ss_users_view', _usersViewMode); renderUsers(); }
 function _usersCardsBody(unames, ctx) {
-    const _sso = { ldap: 'LDAP', oidc: 'OIDC', saml2: 'SAML2' };
+    const _sso = { ldap: 'LDAP', oidc: 'OIDC', saml2: 'SAML2', scim: 'SCIM' };
     return _cardGrid(unames.map(uname => {
         const u = usersData[uname];
         const isSelf = uname === currentUser.username;
@@ -141,7 +141,7 @@ createListTable({
         switch (colId) {
             case 'username': {
                 const isSelf = (uname === currentUser.username);
-                const _ssoLabels = { ldap: 'LDAP', oidc: 'OIDC', saml2: 'SAML2' };
+                const _ssoLabels = { ldap: 'LDAP', oidc: 'OIDC', saml2: 'SAML2', scim: 'SCIM' };
                 const authBadge = _ssoLabels[u.auth_source || 'local']
                     ? ` <span class="badge text-bg-secondary fw-normal ms-1 ss-fs-1">${_ssoLabels[u.auth_source || 'local']}</span>` : '';
                 const disabledBadge = u.enabled !== false ? '' : ` <span class="badge bg-secondary fw-normal ms-1 ss-fs-1">${t('status_disabled')}</span>`;

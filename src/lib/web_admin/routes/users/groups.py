@@ -56,6 +56,7 @@ def register(app, wa):
                 'roles':       role_uids,
                 'members':     members_by_group.get(group_uid, []),
                 'builtin':     group_uid in _BUILTIN_GROUPS,
+                'source':      gdata.get('source', 'local'),   # 'local' | 'scim'
                 'enabled':     gdata.get('enabled', True),
                 'created_at':  gdata.get('created_at', ''),
                 'updated_at':  gdata.get('updated_at', ''),

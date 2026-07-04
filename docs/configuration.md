@@ -256,7 +256,7 @@ Esta matriz es configurable desde la pestaña **Configuración → Notifications
 | `web_admin.port` | int | `8080` | Puerto TCP del servidor web. Puede sobreescribirse con `--web-port`. |
 | `web_admin.host` | string | `"0.0.0.0"` | Dirección IP (IPv4/IPv6) donde escucha el servidor. Puede sobreescribirse con `--web-host`. Validada como IP. |
 | `web_admin.public_status_detail` | bool | `false` | Mostrar el detalle por ítem en la página pública `/status` |
-| `web_admin.public_url` | string | `""` | Host público (sin esquema) cuando se sirve tras un proxy; usado para enlaces absolutos y la página de estado |
+| `web_admin.public_url` | string | `""` | Host público (sin esquema) cuando se sirve tras un proxy; **override** de la URL base efectiva. Vacío → se **auto-detecta** de la petición (proxy-aware vía `ProxyFix`/`proxy_count`). Fuente única: `WebAdmin.public_base_url()`, inyectada al front como `SERVER_BASE_URL` y usada por `publicBaseUrl()` (redirect URIs OIDC, ACS SAML2, URL SCIM, deep links) |
 | `web_admin.force_https` | bool | `false` | Generar URLs `https://` (proxy con terminación TLS) |
 | `web_admin.force_fqdn` | bool | `false` | Redirigir a `public_url` si se accede por IP u otro host (requiere `public_url`) |
 | `web_admin.default_page_size` | int | `25` | Tamaño de página por defecto en los listados (0 = "Todos") (0–200) |
@@ -364,6 +364,19 @@ Requiere el paquete opcional `python3-saml` (`pip install python3-saml`). **[alp
 | `saml2.graph_secret` | string | `""` | Client secret **propio** de la app SAML2 (cifrado) para leer grupos vía Graph en el mapeo Grupos→Rol. Lo crea el asistente; ver [sso-entra.md](sso-entra.md) |
 
 Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/metadata` (metadatos SP para registrar en el IdP). Los usuarios se sincronizan con `auth_source: "saml2"`. El registro asistido de la app en Entra ID y sus limitaciones están en [sso-entra.md](sso-entra.md).
+
+### Sección `scim`
+
+Aprovisionamiento **proactivo** por SCIM 2.0: el IdP (Entra ID, Okta…) empuja altas/cambios/bajas de usuarios y grupos a `/scim/v2/*` **antes** del primer login (complementa el JIT). Se configura en *Config → Autenticación → SCIM provisioning*.
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `scim.enabled` | bool | `false` | Exponer `/scim/v2` (si off, devuelve 401) |
+| `scim.token` | string | `""` | Bearer token que envía el IdP (cifrado). En el IdP: URL de Tenant = `https://<public_url>/scim/v2`, Secret Token = este valor |
+| `scim.default_role` | string | `""` | Rol de los usuarios aprovisionados (nombre o uid; vacío = `none`) |
+| `scim.auto_disable` | bool | `true` | `active:false` del IdP → deshabilita el usuario (en vez de ignorarlo) |
+
+Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos de ServiceSentry. Ver [sso-entra.md](sso-entra.md) (§Provisioning proactivo) y [web_admin.md](web_admin.md) (endpoints).
 
 ### Sección `email`
 

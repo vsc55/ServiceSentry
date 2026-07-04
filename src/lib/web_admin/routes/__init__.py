@@ -26,6 +26,8 @@ from .history import register as _history
 from .syslog import register as _syslog
 from .services import register as _services
 from .events import register as _events
+from .scim import register as _scim
+from .util import register as _util
 from .ui import register as _ui
 from .status import register as _status
 from .errors import register as _errors
@@ -59,3 +61,5 @@ def register_all(app, wa):
     _syslog(app, wa)
     _services(app, wa)
     _events(app, wa)
+    _scim(app, wa)
+    _util(app, wa)

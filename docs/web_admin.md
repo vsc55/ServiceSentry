@@ -286,6 +286,8 @@ El permiso requerido se indica entre paréntesis.
 | `GET` | `/auth/saml2/login` | Inicia flujo SAML2; redirige al IdP (requiere `saml2.enabled = true` y `pysaml2`) |
 | `POST` | `/auth/saml2/acs` | Assertion Consumer Service: procesa la respuesta SAML del IdP y crea sesión |
 | `GET` | `/auth/saml2/metadata` | Devuelve el XML de metadatos de la aplicación para registrarla en el IdP |
+| `POST` | `/api/v1/auth/entra/scim/device-code` · `…/device-poll` | Registro/​re-sync de la app SCIM en Entra (Device Code Flow, cliente Graph CLI); el token se lee de config, no viaja en la petición |
+| `GET` | `/api/v1/util/token` | Genera un token aleatorio fuerte (`lib/util/generate_token`, `?bytes=` 16–128) para los botones "Generar token"; requiere `config_edit` |
 
 ### Módulos
 
@@ -644,6 +646,18 @@ Wizard interactivo de registro de aplicación en Microsoft Entra ID (Azure AD).
 | `POST` | `/api/v1/auth/entra/saml2/device-code` | `config_edit` | Inicia el wizard de registro de la app **SAML2** en Entra ID (Device Code) |
 | `POST` | `/api/v1/auth/entra/saml2/device-poll` | `config_edit` | Sondea el registro SAML2; al completarse crea la app (template + cert + modo SAML + `graph_secret`) y devuelve sus metadatos |
 | `POST` | `/api/v1/auth/entra/saml2/secret/device-code` | `config_edit` | "Añadir credencial de grupos": añade un `graph_secret` a la app SAML2 **existente** (sin recrearla), para el mapeo Grupos→Rol |
+
+### SCIM 2.0 (aprovisionamiento proactivo)
+
+Endpoints `/scim/v2/*` que un IdP (Entra ID, Okta…) usa para **empujar** altas/cambios/bajas de usuarios y grupos (a diferencia del JIT, que espera al primer login). **No usan la sesión web**: se autentican con el **bearer token** `scim.token` (comparación en tiempo constante); si SCIM está desactivado o el token no coincide, responden **401**. Usuarios creados con `auth_source: "scim"`; los grupos SCIM ↔ grupos de ServiceSentry (los miembros heredan los roles del grupo). Config en *Autenticación → SCIM provisioning*; ver [sso-entra.md](sso-entra.md).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/scim/v2/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | Documentos de capacidad SCIM (discovery del IdP) |
+| `GET` | `/scim/v2/Users` | Listar / filtrar (`?filter=userName eq "x"` — probe de existencia del IdP) con paginación |
+| `POST` / `GET` / `PUT` / `PATCH` / `DELETE` | `/scim/v2/Users[/<id>]` | Crear / leer / reemplazar / actualizar (incl. `active:false` → deshabilitar) / borrar un usuario |
+| `GET` | `/scim/v2/Groups` | Listar / filtrar (`?filter=displayName eq "x"`) |
+| `POST` / `GET` / `PUT` / `PATCH` / `DELETE` | `/scim/v2/Groups[/<id>]` | Crear / leer / reemplazar / actualizar miembros (`add`/`remove`/`replace`) / borrar un grupo |
 
 ### Watchfuls (acciones dinámicas)
 

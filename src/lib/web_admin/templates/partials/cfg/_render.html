@@ -130,11 +130,7 @@ function _filterConfig(term) {
 }
 
 function _refreshStatusLink() {
-    const wa = configData.web_admin || {};
-    const base = wa.public_url
-        ? ((wa.force_https ? 'https://' : 'http://') + wa.public_url)
-        : window.location.origin;
-    const url = base + '/status';
+    const url = publicBaseUrl() + '/status';   // shared helper (core/_utils.html)
     const a   = document.getElementById('cfg-status-link');
     const btn = document.getElementById('cfg-status-copy-btn');
     if (a)   { a.textContent = url; a.title = url; a.href = url; }
@@ -143,6 +139,33 @@ function _refreshStatusLink() {
 // Database card: a driver dropdown plus only the fields the chosen engine needs.
 // Uses the standard sw-field conditional mechanism keyed on the 'driver' value
 // (the driver <select> onChange already calls _refreshConditionalFields).
+// Generate a strong random SCIM bearer token and drop it into the input group. Only the
+// input + dirty state change — no re-render (so the page keeps its scroll position) and no
+// clipboard (the COPY button does that). Nothing persists until the admin clicks Save.
+async function _scimGenerateToken() {
+    const inp = document.getElementById('scimTokenInput');
+    if (!inp) return;
+    const tok = await generateToken(32);   // server-side generator (lib.util.generate_token)
+    if (!tok) { showToast(t('scim_token_gen_error') || 'Error', 'danger'); return; }
+    inp.value = tok;
+    inp.type = 'text';
+    updateField('config', 'scim|token', tok);
+    // If a SCIM app is already registered, re-push the new token to Entra so the two
+    // sides never drift (a stale Entra token → 401 on provisioning). Needs an admin
+    // device-code sign-in, so it launches the re-sync wizard.
+    if ((configData.scim || {}).sp_object_id && typeof showEntraScimResyncWizard === 'function') {
+        showToast(t('scim_resync_needed'), 'info');
+        showEntraScimResyncWizard();   // saves the new token first, then re-pushes
+    }
+}
+
+// Copy whatever is currently in the token input group to the clipboard.
+function _scimCopyToken() {
+    const inp = document.getElementById('scimTokenInput');
+    if (inp && inp.value) _copyToClipboard(inp.value);
+    else showToast(t('scim_token_empty'), 'warning');
+}
+
 function _renderDatabaseSection(db, prefix = 'database') {
     db = db || {};
     const driver = db.driver || 'sqlite';
@@ -418,6 +441,60 @@ function renderConfig() {
             continue;
         }
 
+        if (sec === 'scim') {
+            // SCIM provisioning card: the IdP-facing base URL (read-only, to paste into
+            // the IdP's provisioning tab) + a generate-token button, around the fields.
+            const _scimUrl = publicBaseUrl() + '/scim/v2';   // shared helper (core/_utils.html)
+            // Same label + collapsible info-icon pattern the generic fields use, so the
+            // hint sits behind the (i) button instead of being printed inline.
+            const _scimInfo = (id, hint) => ({
+                icon: ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+                        data-bs-toggle="collapse" data-bs-target="#${id}"
+                        aria-expanded="false" aria-controls="${id}"><i class="bi bi-info-circle"></i></button>`,
+                panel: `<div class="collapse" id="${id}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(hint)}</div></div>`,
+            });
+            // Read-only base URL (marked non-editable) with a copy button.
+            const _urlRow = roCopyRow(t('scim_url_label'), _scimUrl, t('scim_url_hint'));
+            // Token as a self-contained input-group: type/paste, GENERATE (fills the
+            // input, no re-render, no clipboard → no scroll jump) and COPY. Nothing is
+            // persisted until the admin clicks Save. Rendered empty (the stored secret
+            // is never echoed back); leaving it blank on save keeps the current token.
+            const _tInfo = _scimInfo('fhint_scim_token', t('scim_token_hint'));
+            const _tokRow = `<div class="cfg-field-wrap">${_fieldRow(esc(t('scim_token_label')) + _tInfo.icon,
+                `<div class="input-group input-group-sm">
+                    <input type="text" class="form-control font-monospace" id="scimTokenInput"
+                        data-field-path="scim|token" autocomplete="off"
+                        placeholder="${escAttr(data.token === null ? t('scim_token_configured') : t('scim_token_placeholder'))}"
+                        oninput="updateField('config','scim|token',this.value)">
+                    <button class="btn btn-secondary" type="button" title="${escAttr(t('scim_generate_token'))}"
+                        onclick="_scimGenerateToken()"><i class="bi bi-key"></i></button>
+                    <button class="btn btn-secondary" type="button" title="${escAttr(t('copy'))}"
+                        onclick="_scimCopyToken()"><i class="bi bi-clipboard"></i></button>
+                </div>`, _tInfo.panel)}</div>`;
+            // "Register SCIM in Azure" (creates the enterprise app wired to this
+            // endpoint) + "Open in Entra ID" (deep link once an app exists).
+            const _btnRow = `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+                <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">Entra ID</small></div>
+                <div class="col-sm-8">
+                    <button class="btn btn-primary btn-sm" type="button" onclick="showEntraScimWizard()">
+                        <i class="bi bi-microsoft me-1"></i>${esc(t('scim_register_btn'))}
+                    </button>${_entraScimLink(data)}
+                </div>
+            </div></div>`;
+            // Entra buttons first, then the read-only base URL (above enabled, like the
+            // OIDC callback URL), then enabled, token and the rest.  sp_app_id /
+            // sp_object_id are internal (deep-link only).
+            const _hide = ['token', 'sp_app_id', 'sp_object_id'];
+            _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-arrow-down-up me-1"></i>', lbl)
+                + _btnRow
+                + _urlRow
+                + renderScalarFields(data, sec, 'config', [..._hide, 'default_role', 'auto_disable'])
+                + _tokRow
+                + renderScalarFields(data, sec, 'config', [..._hide, 'enabled'])
+                + cfgCardClose;
+            continue;
+        }
+
         // Generic scalar section (global, web_admin main fields, users, groups, …)
         _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-gear me-1"></i>', lbl)
             + renderScalarFields(data, sec, 'config', sec === 'web_admin' ? WA_EXCLUDE : [])
@@ -468,10 +545,7 @@ function renderConfig() {
     // ── Interface tab: pub_status + proxy + audit + tables + live_update
     // Public status card
     const psFields = ['public_status', 'public_status_detail', 'status_refresh_secs', 'status_lang'];
-    const _statusBase = wa.public_url
-        ? (wa.force_https ? 'https://' : 'http://') + wa.public_url
-        : window.location.origin;
-    const _statusUrl = _statusBase + '/status';
+    const _statusUrl = publicBaseUrl() + '/status';   // shared helper (core/_utils.html)
     const _statusLinkRow = `<hr class="my-2">
         <div class="cfg-field-wrap"><div class="row mb-1 align-items-center">
             <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('status_page_link'))}</label>

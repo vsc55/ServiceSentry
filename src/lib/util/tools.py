@@ -23,6 +23,21 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """ Tools for the project. """
 
+import secrets as _secrets
+
+
+def generate_token(nbytes=32):
+    """Generate a cryptographically-strong random token as a hex string
+    (``nbytes`` of entropy → ``2·nbytes`` hex chars).  Generic: reuse for any
+    bearer/secret token (SCIM, API keys, one-off secrets…)."""
+    try:
+        nbytes = int(nbytes)
+    except (TypeError, ValueError):
+        nbytes = 32
+    nbytes = max(16, min(nbytes, 128))     # clamp to a sane range
+    return _secrets.token_hex(nbytes)
+
+
 def bytes2human(n):
     """ Convert bytes to human readable format. """
     # http://code.activestate.com/recipes/577972-disk-usage/

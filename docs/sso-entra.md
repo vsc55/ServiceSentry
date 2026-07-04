@@ -53,17 +53,75 @@ a partir de los claims de la aserción/token — controlado por el campo `auto_c
 - En el primer login se crea la cuenta (email, nombre) y se le asigna rol según el **mapeo
   Grupos→Rol** (o `default_role` si no casa ningún grupo). En logins posteriores se
   actualizan datos/rol.
-- **No hay SCIM**: Entra ID *no* da de alta/baja usuarios de forma proactiva (la pestaña
-  "Aprovisionamiento" de Azure requeriría un endpoint SCIM 2.0 que ServiceSentry no expone).
-  El aprovisionamiento es siempre al login (JIT).
+### Provisioning proactivo (SCIM 2.0)
+
+Además del JIT, ServiceSentry expone un **endpoint SCIM 2.0** (`/scim/v2/*`) para que el
+IdP dé de alta/actualice/baja usuarios y grupos **antes** de que entren (la pestaña
+**"Aprovisionamiento"** de Azure). Se activa en **Config → Autenticación → SCIM
+provisioning**:
+
+- **Enabled** + un **token** (bearer secreto, cifrado). La card muestra la **URL base SCIM**
+  (`https://<tu public_url>/scim/v2`) como fila **solo-lectura** (candado + copiar; derivada de
+  la URL pública, ver [configuration.md](configuration.md) `public_url`) y un input-group de
+  token con botón **Generar** (pide un token aleatorio fuerte al servidor — `lib/util/generate_token`
+  vía `GET /api/v1/util/token` — y lo pone en el campo; no se guarda hasta pulsar Guardar) y botón
+  **Copiar**. En la pestaña de aprovisionamiento del IdP: *Tenant/SCIM URL* = esa URL,
+  *Secret Token* = el token. Como todo secreto, el token **nunca se re-emite al navegador** tras
+  guardarse (se muestra enmascarado con un placeholder "token configurado").
+- **Registrar SCIM en Azure** (botón, análogo a OIDC/SAML2): por Device Code Flow crea una
+  **app empresarial** con un **trabajo de sincronización SCIM** (plantilla *customappsso*) ya
+  apuntado a la URL base + token de ServiceSentry (`BaseAddress`/`SecretToken`). El último
+  paso es manual en el portal: **asignar** los usuarios/grupos y pulsar **Iniciar
+  aprovisionamiento** (SCIM solo empuja principales asignados). Junto al botón, **Abrir en
+  Entra ID** enlaza a la hoja *Aprovisionamiento* de la app. Guarda `sp_app_id`/`sp_object_id`
+  para el deep link. También hay pestaña **Manual** con los scripts PowerShell/Azure CLI
+  equivalentes.
+  - **Sin token previo**: si al pulsar el botón no hay ningún token (ni en el campo ni
+    guardado), se **genera uno automáticamente** (server-side) y se **guarda** antes de
+    lanzar el registro, para que el flujo funcione de un tirón sin generarlo a mano.
+  - **Cliente Graph CLI**: el flujo SCIM usa *Microsoft Graph Command Line Tools*
+    (`14d82eec-…`) en vez de Azure PowerShell, porque el scope `Synchronization.ReadWrite.All`
+    (necesario para el sync job/secrets) no está preautorizado en Azure PowerShell → daría
+    `AADSTS65002`. OIDC/SAML2 siguen con el cliente por defecto.
+  - **El token no viaja en la petición**: el backend lo lee de config (`_config_section('scim')`)
+    y no lo acepta ni lo devuelve; el frontend solo sabe *si está seteado* y, si hay un token sin
+    guardar, lo **persiste primero** antes de registrar.
+- **Re-sincronización del token** (evita el desajuste ServiceSentry↔Entra que causa 401 en el
+  *Test Connection*): al **Generar** un token con una app ya registrada, se re-empuja
+  automáticamente a la app **existente** (`provisioning.update_scim_secrets`, reusa
+  `sp_object_id`, sin crear otra) — un device-code ligero (login + PUT de secrets).
+- **default_role** para los usuarios aprovisionados; **auto_disable** = `active:false`
+  (asignación retirada) deshabilita el usuario.
+- Usuarios creados con `auth_source: 'scim'` — muestran un **badge SCIM** en la lista de
+  Usuarios (junto a OIDC/SAML2/LDAP). Los **grupos SCIM** se mapean a grupos de ServiceSentry
+  (asigna roles a esos grupos y los miembros los heredan); llevan `source: 'scim'` y un **badge
+  SCIM** en la pestaña Grupos (frente a los `local`).
+- Endpoints: `Users`, `Groups`, `ServiceProviderConfig`, `ResourceTypes`, `Schemas`
+  (GET/POST/PUT/PATCH/DELETE) — ver [web_admin.md](web_admin.md) y `routes/scim.py`.
+
+| | JIT (login) | SCIM (push) |
+|---|:---:|:---:|
+| Cuándo se crea el usuario | Al primer login SSO | Cuando el IdP sincroniza (aunque no haya entrado) |
+| Baja automática | No | Sí (`active:false` → deshabilita si `auto_disable`) |
+| Requiere | `auto_create_users` | Endpoint SCIM activo + token |
+
+Los dos modos coexisten: puedes usar SCIM para altas/bajas centralizadas y el JIT como
+respaldo al primer login.
 
 Código relevante:
 - Provider: `lib/providers/entraid/` (`auth`, `provisioning`, `directory`, `client`).
 - Rutas: `lib/web_admin/routes/auth/entraid.py`.
 - Wizard genérico (JS): `partials/credentials/_provision_wizard.html`
   (`showEntraIdProvisionWizard`).
-- Glue por protocolo: `partials/cfg/auth/_renderers.html` (OIDC) y
-  `partials/cfg/auth/_wizard_saml.html` (SAML2).
+- Glue por protocolo: `partials/cfg/auth/_renderers.html` (OIDC),
+  `partials/cfg/auth/_wizard_saml.html` (SAML2) y `partials/cfg/auth/_wizard_scim.html` (SCIM).
+- SCIM: backend `provisioning.provision_scim_app` (crear) + `provisioning.update_scim_secrets`
+  (re-sync) + rutas `entra/scim/device-code|device-poll` en `entraid.py` (cliente
+  `GRAPH_CLI_CLIENT_ID`); endpoint SCIM `routes/scim.py`; generador de token
+  `lib/util/generate_token` expuesto en `routes/util.py` (`GET /api/v1/util/token`).
+- URL pública única: `WebAdmin.public_base_url()` (override por `public_url` → auto-detección
+  proxy-aware), inyectada como `SERVER_BASE_URL` y usada por `publicBaseUrl()`/`roCopyRow` en el
+  front (redirect URI OIDC, ACS/Entity ID SAML2 read-only, URL base SCIM).
 
 ---
 
@@ -86,6 +144,11 @@ Código relevante:
 Al terminar, escribe en la config `oidc|*`: `provider_url`, `client_id`, `client_secret`
 y el mapeo de claims (`username_claim=preferred_username`, `email_claim=email`,
 `name_claim=name`, `groups_claim=groups`).
+
+La card OIDC muestra la **Redirect URI (callback)** como fila **solo-lectura** (derivada de la
+URL pública, con botón de copiar) — es el valor que se registra como *redirect URI* permitida
+en el IdP (Entra/Google/Keycloak). Para un IdP no-Entra se usan los **presets** (Entra ID /
+Google / Keycloak) que rellenan `provider_url` + claims.
 
 ### Flujo de login
 
@@ -136,6 +199,12 @@ cert de firma), `sp_entity_id` (tu URL pública), `sp_acs_url`, y para los enlac
 portal `sp_app_id` (appId) + `sp_object_id` (objectId del SP).
 
 Nombre por defecto: **`ServiceSentry - SAML2`** (`declarations.py::SAML2_APP_NAME`).
+
+El **SP Entity ID** y la **SP ACS URL** son la identidad del propio ServiceSentry: se muestran
+en la card como filas **solo-lectura** (candado + copiar), **no editables** — derivan de la URL
+pública (o del valor `api://{appId}` que fije el asistente cuando el dominio no está verificado).
+El backend (`saml_auth._build_saml_settings`) también los deriva de `public_base_url()` si están
+vacíos, así que no hay que teclearlos.
 
 ### El paso manual (Configuración básica de SAML)
 

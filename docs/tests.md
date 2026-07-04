@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~2918 tests** | Todos deben pasar con `pytest` para que el build sea válido. Los 6 tests de RAID local se saltan en Windows/macOS (`skipif sys.platform != 'linux'`).
+**Total: ~2931 tests** | Todos deben pasar con `pytest` para que el build sea válido. Los 6 tests de RAID local se saltan en Windows/macOS (`skipif sys.platform != 'linux'`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -93,6 +93,7 @@
 76. [Hosts — Primitivas de resolución](#76-hosts--primitivas-de-resolución-libhostsresolvepy)
 77. [Hosts — Hook de hosts aprovisionados](#77-hosts--hook-de-hosts-aprovisionados)
 78. [Panel Web — Política de bind del servidor web](#78-panel-web--política-de-bind-del-servidor-web)
+79. [Panel Web — SCIM 2.0 (aprovisionamiento)](#79-panel-web--scim-20-aprovisionamiento)
 
 ---
 
@@ -2849,3 +2850,59 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_port_excluded_matches_range` | `port_excluded` detecta si un puerto cae en un rango reservado | 8080→`(8054,8153)`; 18080→`None` | Si no detecta o falsea el rango |
 | `test_run_abort_hints_windows_reserved_range` | Un bind fallido en puerto reservado explica la causa Windows | stderr contiene `Windows`, `winnat` y `config.json` | Si falta la pista en el mensaje |
 | `test_default_port_windows_reserved_state_is_visible` | (Solo Windows, informativo) si el puerto web por defecto cae en un rango reservado vivo | Skip con diagnóstico si está reservado; sigue si no | Es no-fatal: nunca falla, solo salta |
+
+---
+
+## 79. Panel Web — SCIM 2.0 (aprovisionamiento)
+
+**Archivo:** `tests/test_wa_scim.py` — 13 tests
+
+### `TestScimAuth`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_disabled_rejected` | SCIM desactivado | 401 aun con token válido | Responde el recurso |
+| `test_no_token_rejected` | Petición sin Authorization | 401 | Deja pasar |
+| `test_wrong_token_rejected` | Bearer token incorrecto | 401 | Acepta el token |
+| `test_spconfig_ok` | ServiceProviderConfig con token válido | 200, `patch.supported=true` | Otro código/capacidad |
+
+### `TestScimUsers`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_create_user` | POST /Users crea usuario | 201; usuario con `auth_source='scim'`, email/externalId/enabled | No crea o campos erróneos |
+| `test_duplicate_conflicts` | userName ya existente | 409 en el segundo POST | Duplica |
+| `test_filter_by_username` | `filter=userName eq "x"` (probe del IdP) | ListResponse con 1; desconocido → totalResults 0 (no 404) | Filtro incorrecto |
+| `test_get_and_patch_deactivate` | GET/{id} y PATCH `active:false` | 200; usuario `enabled=False` | No desactiva |
+| `test_delete_user` | DELETE /Users/{id} | 204; usuario eliminado del store | No borra |
+| `test_missing_username_400` | POST sin userName | 400 | Crea igualmente |
+
+### `TestScimGroups`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_create_group_with_members` | POST /Groups con miembros | 201; grupo con `source='scim'` (persiste tras recarga) y uid en `user.groups`; miembros en el GET | No crea, no vincula o no marca `source` |
+| `test_patch_remove_member` | PATCH `remove` de un miembro | 200; grupo fuera de `user.groups` | No lo quita |
+| `test_delete_group_unlinks_members` | DELETE /Groups/{id} | 204; grupo borrado y desvinculado de los miembros | No desvincula |
+
+## 80. Panel Web — Utilidades genéricas (`/api/v1/util/*`)
+
+**Archivo:** `tests/test_wa_util.py` — 7 tests
+
+### `TestUtilToken` — `GET /api/v1/util/token`
+
+| Test | Qué prueba | Espera | Falla si |
+|------|-----------|--------|----------|
+| `test_requires_auth` | Sin sesión | 401 | Deja pasar |
+| `test_returns_hex_token` | Token por defecto | 200; 64 chars hex (32 bytes) | Longitud/formato erróneo |
+| `test_respects_bytes_and_is_random` | `?bytes=16` dos veces | 32 chars cada uno y distintos | No respeta tamaño o repite |
+| `test_bytes_clamped` | `bytes=1` y `bytes=9999` | Clamp a 16 (32 chars) y 128 (256 chars) | No aplica el clamp |
+
+### `TestPublicBaseUrl` — `WebAdmin.public_base_url()`
+
+| Test | Qué prueba | Espera | Falla si |
+|------|-----------|--------|----------|
+| `test_config_override_wins` | `public_url` fijado (proxy) | `https://ss.dominio.com` aunque se sirva por IP | Usa el host de la petición |
+| `test_config_override_respects_force_https` | Override con `force_https=false` | `http://…` | Fuerza https |
+| `test_autodetect_from_request` | Sin override, con petición | Deriva de `request.host_url` (proxy-aware) | No auto-detecta |
+| `test_fallback_outside_request` | Sin override ni contexto | `http://localhost:<port>` | Otro fallback |

@@ -8,7 +8,7 @@
    scripts, ACS/entity info) and supplies onResult to apply the saml2| config.
 
    _entraSaml2CertEnd, _entraSaml2AzCliScript, _entraSaml2Ps1Script,
-   _entraSaml2BaseUrl, showEntraSaml2Wizard, _entraSaml2Success, _entraSaml2Apply.
+   showEntraSaml2Wizard, _entraSaml2Success, _entraSaml2Apply.
    ================================================================ #}
 
 // ── SAML2 Entra ID wizard (delegates to the generic provisioning wizard) ────────
@@ -153,15 +153,8 @@ Write-Host "IdP Certificate (paste in idp_cert field):"
 Write-Host $idpCert`;
 }
 
-function _entraSaml2BaseUrl() {
-    let pu = ((configData.web_admin || {}).public_url || '').trim().replace(/\/$/, '');
-    if (!pu) return window.location.origin;
-    if (!/^https?:\/\//i.test(pu)) pu = 'https://' + pu;
-    return pu;
-}
-
 function showEntraSaml2Wizard() {
-    const _base    = _entraSaml2BaseUrl();
+    const _base    = publicBaseUrl();   // shared helper (core/_utils.html)
     const acsUrl   = (configData?.saml2?.sp_acs_url   || '').trim() || (_base + '/auth/saml2/acs');
     const entityId = (configData?.saml2?.sp_entity_id || '').trim() || _base;
     // Read-only ACS URL + Entity ID shown above the manual scripts (SP details the
