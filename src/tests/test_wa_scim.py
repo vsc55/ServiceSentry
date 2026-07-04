@@ -108,6 +108,26 @@ class TestScimUsers:
         client = self._c(admin, config_dir)
         assert client.post('/scim/v2/Users', headers=_AUTH, json={'active': True}).status_code == 400
 
+    def test_update_audits_before_after(self, admin, config_dir):
+        client = self._c(admin, config_dir)
+        uid = client.post('/scim/v2/Users', headers=_AUTH,
+                          json={'userName': 'aud', 'active': True}).get_json()['id']
+        client.patch(f'/scim/v2/Users/{uid}', headers=_AUTH, json={
+            'schemas': ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+            'Operations': [{'op': 'replace', 'value': {'active': False}}]})
+        # The update is audited with before/after of ONLY the changed field (enabled),
+        # not the whole snapshot (email/display_name/… are unchanged → absent).
+        entry = next(e for e in reversed(admin._audit_log) if e['event'] == 'scim_user_updated')
+        assert entry['detail']['before'] == {'enabled': True}
+        assert entry['detail']['after'] == {'enabled': False}
+        # A no-op update (same values) records no further scim_user_updated entry.
+        n_before = sum(1 for e in admin._audit_log if e['event'] == 'scim_user_updated')
+        client.patch(f'/scim/v2/Users/{uid}', headers=_AUTH, json={
+            'schemas': ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+            'Operations': [{'op': 'replace', 'value': {'active': False}}]})
+        n_after = sum(1 for e in admin._audit_log if e['event'] == 'scim_user_updated')
+        assert n_after == n_before
+
 
 class TestScimGroups:
     def _c(self, admin, config_dir):

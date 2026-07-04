@@ -147,7 +147,9 @@ entren (y baje al retirar la asignación). Detalles del flujo/endpoints en
 - Los usuarios se crean con `auth_source: "scim"` y sin `password_hash`; `active:false` los
   deshabilita (si `auto_disable`). Los grupos SCIM se mapean a grupos de ServiceSentry.
 - Toda operación se **audita** (`scim_user_created/updated/deleted`,
-  `scim_group_created/updated/deleted`).
+  `scim_group_created/updated/deleted`). Las **actualizaciones** registran `detail.before`
+  y `detail.after` **solo con los campos que cambiaron** (los no-op del IdP no generan
+  entrada); crear/borrar guardan el snapshot completo del recurso.
 
 ### Tests de autenticación externa
 

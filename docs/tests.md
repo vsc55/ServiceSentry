@@ -2855,7 +2855,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 79. Panel Web — SCIM 2.0 (aprovisionamiento)
 
-**Archivo:** `tests/test_wa_scim.py` — 13 tests
+**Archivo:** `tests/test_wa_scim.py` — 14 tests
 
 ### `TestScimAuth`
 
@@ -2876,6 +2876,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_get_and_patch_deactivate` | GET/{id} y PATCH `active:false` | 200; usuario `enabled=False` | No desactiva |
 | `test_delete_user` | DELETE /Users/{id} | 204; usuario eliminado del store | No borra |
 | `test_missing_username_400` | POST sin userName | 400 | Crea igualmente |
+| `test_update_audits_before_after` | PATCH `active:false` y luego un no-op | Audita `scim_user_updated` con `before/after` **solo del campo cambiado** (`{enabled:true}`→`{enabled:false}`); el no-op no genera otra entrada | No audita, incluye campos sin cambio, o audita el no-op |
 
 ### `TestScimGroups`
 

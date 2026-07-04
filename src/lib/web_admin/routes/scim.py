@@ -91,6 +91,34 @@ def register(app, wa):
             'meta':        {'resourceType': 'Group', 'location': f"{_base()}/Groups/{uid}"},
         }
 
+    # ── audit snapshots (before/after) ──────────────────────────────────────────
+    def _user_snap(u):
+        """The audited fields of a user (order-independent, no secrets)."""
+        return {'display_name': u.get('display_name', ''), 'email': u.get('email', ''),
+                'enabled': bool(u.get('enabled', True)), 'role': u.get('role', ''),
+                'groups': sorted(u.get('groups') or []),
+                'external_id': u.get('auth_source_id', '')}
+
+    def _group_snap(gid, g):
+        """The audited fields of a group (members read live from the users store)."""
+        return {'name': g.get('name', ''), 'source': g.get('source', 'local'),
+                'members': sorted(_group_member_ids(gid))}
+
+    def _audit_change(event, ident, before=None, after=None):
+        """Record a SCIM mutation. On an update (both snapshots present) the
+        before/after keep ONLY the fields that actually changed; create/delete keep
+        the full new/removed snapshot."""
+        detail = dict(ident)
+        if before is not None and after is not None:
+            keys = [k for k in set(before) | set(after) if before.get(k) != after.get(k)]
+            detail['before'] = {k: before.get(k) for k in keys}
+            detail['after']  = {k: after.get(k) for k in keys}
+        elif before is not None:
+            detail['before'] = before
+        elif after is not None:
+            detail['after'] = after
+        wa._audit(event, detail=detail)
+
     def _list(resources, total=None, start=1):
         return jsonify({
             'schemas':      [_LIST_SCHEMA],
@@ -206,7 +234,7 @@ def register(app, wa):
         }
         wa._users[username] = user
         wa._persist_users()
-        wa._audit('scim_user_created', detail={'username': username})
+        _audit_change('scim_user_created', {'username': username}, after=_user_snap(user))
         return jsonify(_user_to_scim(username, user)), 201
 
     @app.route('/scim/v2/Users/<uid>', methods=['PUT'])
@@ -215,13 +243,16 @@ def register(app, wa):
         if not u:
             return _err(404, f'User {uid} not found')
         body = request.get_json(silent=True, force=True) or {}
+        before = _user_snap(u)
         email, name, active = _scim_user_fields(body)
         u['display_name']   = name
         u['email']          = email
         u['enabled']        = active if _cfg().get('auto_disable', True) or active else u.get('enabled', True)
         u['auth_source_id'] = body.get('externalId', u.get('auth_source_id', ''))
         wa._persist_users()
-        wa._audit('scim_user_updated', detail={'username': username})
+        after = _user_snap(u)
+        if after != before:
+            _audit_change('scim_user_updated', {'username': username}, before, after)
         return jsonify(_user_to_scim(username, u))
 
     @app.route('/scim/v2/Users/<uid>', methods=['PATCH'])
@@ -230,6 +261,7 @@ def register(app, wa):
         if not u:
             return _err(404, f'User {uid} not found')
         body = request.get_json(silent=True, force=True) or {}
+        before = _user_snap(u)
         for op in (body.get('Operations') or []):
             path = (op.get('path') or '').lower()
             val = op.get('value')
@@ -248,7 +280,9 @@ def register(app, wa):
                 elif val:
                     u['email'] = str(val)
         wa._persist_users()
-        wa._audit('scim_user_updated', detail={'username': username})
+        after = _user_snap(u)
+        if after != before:
+            _audit_change('scim_user_updated', {'username': username}, before, after)
         return jsonify(_user_to_scim(username, u))
 
     @app.route('/scim/v2/Users/<uid>', methods=['DELETE'])
@@ -256,9 +290,10 @@ def register(app, wa):
         username, u = _user_by_id(uid)
         if not u:
             return _err(404, f'User {uid} not found')
+        before = _user_snap(u)
         wa._users.pop(username, None)
         wa._persist_users()
-        wa._audit('scim_user_deleted', detail={'username': username})
+        _audit_change('scim_user_deleted', {'username': username}, before=before)
         return '', 204
 
     # ── Groups ──────────────────────────────────────────────────────────────────
@@ -305,7 +340,7 @@ def register(app, wa):
             if isinstance(m, dict) and m.get('value'):
                 _set_member(m['value'], gid, True)
         wa._persist_users()
-        wa._audit('scim_group_created', detail={'name': name})
+        _audit_change('scim_group_created', {'name': name}, after=_group_snap(gid, wa._groups[gid]))
         return jsonify(_group_to_scim(gid, wa._groups[gid])), 201
 
     @app.route('/scim/v2/Groups/<gid>', methods=['PATCH'])
@@ -314,6 +349,7 @@ def register(app, wa):
         if not g:
             return _err(404, f'Group {gid} not found')
         body = request.get_json(silent=True, force=True) or {}
+        before = _group_snap(gid, g)
         changed = False
         for op in (body.get('Operations') or []):
             action = (op.get('op') or '').lower()
@@ -337,7 +373,9 @@ def register(app, wa):
                 wa._persist_groups()
         if changed:
             wa._persist_users()
-        wa._audit('scim_group_updated', detail={'name': g.get('name', gid)})
+        after = _group_snap(gid, g)
+        if after != before:
+            _audit_change('scim_group_updated', {'name': g.get('name', gid)}, before, after)
         return jsonify(_group_to_scim(gid, g))
 
     @app.route('/scim/v2/Groups/<gid>', methods=['PUT'])
@@ -346,6 +384,7 @@ def register(app, wa):
         if not g:
             return _err(404, f'Group {gid} not found')
         body = request.get_json(silent=True, force=True) or {}
+        before = _group_snap(gid, g)
         if body.get('displayName'):
             g['name'] = body['displayName']
             wa._persist_groups()
@@ -356,7 +395,9 @@ def register(app, wa):
             if mid:
                 _set_member(mid, gid, True)
         wa._persist_users()
-        wa._audit('scim_group_updated', detail={'name': g.get('name', gid)})
+        after = _group_snap(gid, g)
+        if after != before:
+            _audit_change('scim_group_updated', {'name': g.get('name', gid)}, before, after)
         return jsonify(_group_to_scim(gid, g))
 
     @app.route('/scim/v2/Groups/<gid>', methods=['DELETE'])
@@ -364,10 +405,11 @@ def register(app, wa):
         g = wa._groups.get(gid)
         if not g:
             return _err(404, f'Group {gid} not found')
+        before = _group_snap(gid, g)
         for uid in _group_member_ids(gid):
             _set_member(uid, gid, False)
         wa._groups.pop(gid, None)
         wa._persist_groups()
         wa._persist_users()
-        wa._audit('scim_group_deleted', detail={'name': g.get('name', gid)})
+        _audit_change('scim_group_deleted', {'name': g.get('name', gid)}, before=before)
         return '', 204
