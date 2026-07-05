@@ -109,6 +109,12 @@
                 <i class="bi bi-card-list me-1"></i>{{ i18n.tab_syslog }}
             </button>
         </li>
+        <li class="nav-item" role="presentation" id="tab-ipban-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ipban" type="button"
+                id="btn-tab-ipban">
+                <i class="bi bi-slash-circle me-1"></i>{{ i18n.tab_ipban }}
+            </button>
+        </li>
         <li class="nav-item" role="presentation" id="tab-services-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-services" type="button"
                 id="btn-tab-services">
@@ -229,6 +235,15 @@
         <!-- ==================== Syslog Tab ===================== -->
         <div class="tab-pane fade" id="tab-syslog">
             <div id="syslog-container" class="ss-vfill">
+                <div class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== fail2ban Tab ===================== -->
+        <div class="tab-pane fade" id="tab-ipban">
+            <div id="ipban-container" class="ss-vfill ss-subtabs-fill">
                 <div class="text-center py-4">
                     <div class="spinner-border spinner-border-sm"></div>
                 </div>

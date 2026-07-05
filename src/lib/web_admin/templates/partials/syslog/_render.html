@@ -1,28 +1,29 @@
+// Schema for the shared, generic filter bar (partials/core/_utils.html). Syslog
+// wires its controls imperatively after render (async facet selects, ts↔local date
+// conversion, debounced search, array-valued filters), so it omits schema.onChange
+// and keeps its legacy ids — buildFilterBar only produces the markup.
+const _SYSLOG_FILTER_SCHEMA = {
+    idPrefix: 'sl',
+    onClear: '_syslogClearAllFilters',
+    clearLabel: () => t('syslog_clear_filters'),
+    footerHtml: () => `<div id="sl-active-filters" class="mt-2 d-flex flex-wrap align-items-center gap-1"></div>`,
+    fields: [
+        { id: 'sl-host', key: 'hostname',     label: () => t('syslog_host'),         type: 'select',         minWidth: '140px' },
+        { id: 'sl-sev',  key: 'severity_max', label: () => t('syslog_min_severity'), type: 'select',         minWidth: '130px' },
+        { id: 'sl-app',  key: 'app',          label: () => t('syslog_app'),          type: 'select',         minWidth: '130px' },
+        { id: 'sl-from', key: 'since',        label: () => t('syslog_from'),         type: 'datetime-local', minWidth: '175px' },
+        { id: 'sl-to',   key: 'until',        label: () => t('syslog_to'),           type: 'datetime-local', minWidth: '175px' },
+        { id: 'sl-q',    key: 'q',            label: () => t('syslog_search'),       type: 'search', grow: true,
+          placeholder: () => t('syslog_search') },
+    ],
+};
+
 async function renderSyslog() {
     const c = document.getElementById('syslog-container');
     if (!c) return;
     c.innerHTML = `
-      <!-- Filters -->
-      <div class="ss-card mb-3">
-        <div class="card-body py-2 px-3">
-          <div class="d-flex flex-wrap align-items-end gap-2">
-            <div><label class="form-label small mb-1">${esc(t('syslog_host'))}</label>
-              <select id="sl-host" class="form-select form-select-sm" style="min-width:140px"></select></div>
-            <div><label class="form-label small mb-1">${esc(t('syslog_min_severity'))}</label>
-              <select id="sl-sev" class="form-select form-select-sm" style="min-width:130px"></select></div>
-            <div><label class="form-label small mb-1">${esc(t('syslog_app'))}</label>
-              <select id="sl-app" class="form-select form-select-sm" style="min-width:130px"></select></div>
-            <div><label class="form-label small mb-1">${esc(t('syslog_from'))}</label>
-              <input id="sl-from" type="datetime-local" class="form-control form-control-sm" style="min-width:175px"></div>
-            <div><label class="form-label small mb-1">${esc(t('syslog_to'))}</label>
-              <input id="sl-to" type="datetime-local" class="form-control form-control-sm" style="min-width:175px"></div>
-            <div class="flex-grow-1"><label class="form-label small mb-1">${esc(t('syslog_search'))}</label>
-              <input id="sl-q" type="search" class="form-control form-control-sm" placeholder="${escAttr(t('syslog_search'))}"></div>
-            <button class="btn btn-secondary btn-sm" onclick="_syslogClearAllFilters()"><i class="bi bi-funnel me-1"></i>${esc(t('syslog_clear_filters'))}</button>
-          </div>
-          <div id="sl-active-filters" class="mt-2 d-flex flex-wrap align-items-center gap-1"></div>
-        </div>
-      </div>
+      <!-- Filters (schema-driven markup; controls wired imperatively below) -->
+      ${buildFilterBar(_SYSLOG_FILTER_SCHEMA)}
 
       <!-- Statistics -->
       <div class="ss-card mb-3">

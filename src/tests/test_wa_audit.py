@@ -73,7 +73,7 @@ class TestAuditLog:
     def test_logout_audited(self, admin, client):
         """Logout creates an audit entry."""
         _login(client)
-        client.get("/logout")
+        client.post("/logout")
         events = [e['event'] for e in admin._audit_log]
         assert 'logout' in events
 

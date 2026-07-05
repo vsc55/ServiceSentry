@@ -330,7 +330,7 @@ class TestStatusPageLanguage:
         _login(c)
         c.put("/api/v1/config", json={"web_admin": {"status_lang": "es_ES"}})
         # Logout so there's no user session lang
-        c.get("/logout")
+        c.post("/logout")
         html = c.get("/status").data
         assert self._get_lang_attr(html) == 'es_ES'
 

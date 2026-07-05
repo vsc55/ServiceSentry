@@ -5,7 +5,7 @@
 import json
 import os
 
-_TOK = 'testtoken'
+_TOK = 'testtoken_0123456789abcdef'   # >= 16 chars (min entropy floor)
 _AUTH = {'Authorization': f'Bearer {_TOK}'}
 
 
@@ -68,6 +68,13 @@ class TestScimUsers:
         u = admin._users['jane@corp.com']
         assert u['auth_source'] == 'scim' and u['email'] == 'jane@corp.com'
         assert u['auth_source_id'] == 'ext-1' and u['enabled'] is True
+        # Audited as an automated action: actor = system (not blank), and the full
+        # provisioned snapshot lands in detail.after (not just the email).
+        entry = next(e for e in reversed(admin._audit_log) if e['event'] == 'scim_user_created')
+        assert entry['user'] == 'system'
+        assert entry['detail']['after']['email'] == 'jane@corp.com'
+        assert entry['detail']['after']['display_name'] == 'Jane Doe'
+        assert entry['detail']['after']['external_id'] == 'ext-1'
 
     def test_duplicate_conflicts(self, admin, config_dir):
         client = self._c(admin, config_dir)
@@ -164,12 +171,68 @@ class TestScimGroups:
         assert r.status_code == 200
         assert gid not in admin._users['gm2']['groups']
 
-    def test_delete_group_unlinks_members(self, admin, config_dir):
+    def test_cannot_modify_builtin_admin_group(self, admin, config_dir):
+        """C1: SCIM must never touch the built-in Administrators group (escalation)."""
+        from lib.web_admin.constants import BUILTIN_GROUP_UIDS
+        client = self._c(admin, config_dir)
+        gid = BUILTIN_GROUP_UIDS['administrators']
+        uid = client.post('/scim/v2/Users', headers=_AUTH,
+                          json={'userName': 'evil', 'active': True}).get_json()['id']
+        # add self to admins → 403
+        r = client.patch(f'/scim/v2/Groups/{gid}', headers=_AUTH, json={
+            'Operations': [{'op': 'add', 'path': 'members', 'value': [{'value': uid}]}]})
+        assert r.status_code == 403
+        assert gid not in admin._users['evil']['groups']
+        # delete the admin group → 403
+        assert client.delete(f'/scim/v2/Groups/{gid}', headers=_AUTH).status_code == 403
+        assert gid in admin._groups
+
+    def test_cannot_modify_local_user(self, admin, config_dir):
+        """C2: SCIM must not delete/disable non-SCIM (e.g. local admin) accounts."""
+        client = self._c(admin, config_dir)
+        # the seeded local admin account
+        local = next((u for u in admin._users.values() if u.get('auth_source') != 'scim'), None)
+        assert local is not None
+        luid = local['uid']
+        assert client.delete(f'/scim/v2/Users/{luid}', headers=_AUTH).status_code == 403
+        r = client.patch(f'/scim/v2/Users/{luid}', headers=_AUTH, json={
+            'Operations': [{'op': 'replace', 'value': {'active': False}}]})
+        assert r.status_code == 403
+        assert local.get('enabled', True) is True      # untouched
+
+    def test_delete_group_soft_deletes_and_keeps_roles(self, admin, config_dir):
+        """DELETE de-provisions by DISABLING the group (not removing it), preserving
+        its role mapping + members, so a disabled group grants nothing but can be
+        restored on re-assignment."""
         client = self._c(admin, config_dir)
         uid = client.post('/scim/v2/Users', headers=_AUTH,
                           json={'userName': 'gm3', 'active': True}).get_json()['id']
-        gid = client.post('/scim/v2/Groups', headers=_AUTH,
-                          json={'displayName': 'Gone', 'members': [{'value': uid}]}).get_json()['id']
+        gid = client.post('/scim/v2/Groups', headers=_AUTH, json={
+            'displayName': 'Ops', 'externalId': 'grp-ext-9',
+            'members': [{'value': uid}]}).get_json()['id']
+        admin._groups[gid]['roles'] = [admin._role_name_to_uid('editor')]   # admin maps a role
         assert client.delete(f'/scim/v2/Groups/{gid}', headers=_AUTH).status_code == 204
-        assert gid not in admin._groups
-        assert gid not in admin._users['gm3']['groups']
+        g = admin._groups.get(gid)
+        assert g is not None and g['enabled'] is False          # kept, disabled
+        assert g['roles'] == [admin._role_name_to_uid('editor')]  # role mapping preserved
+        assert gid in admin._users['gm3']['groups']             # membership dormant (grants none)
+
+    def test_reprovision_reactivates_group_by_external_id(self, admin, config_dir):
+        """POST with a known externalId reactivates the soft-deleted group (keeps its
+        roles) instead of creating a duplicate."""
+        client = self._c(admin, config_dir)
+        gid = client.post('/scim/v2/Groups', headers=_AUTH, json={
+            'displayName': 'Team', 'externalId': 'grp-ext-42'}).get_json()['id']
+        admin._groups[gid]['roles'] = [admin._role_name_to_uid('editor')]
+        client.delete(f'/scim/v2/Groups/{gid}', headers=_AUTH)
+        assert admin._groups[gid]['enabled'] is False
+        # Re-assign in Entra → POST with the SAME externalId.
+        r = client.post('/scim/v2/Groups', headers=_AUTH,
+                        json={'displayName': 'Team', 'externalId': 'grp-ext-42'})
+        assert r.status_code == 201
+        assert r.get_json()['id'] == gid                        # same group, not a duplicate
+        assert len([x for x in admin._groups.values() if x.get('external_id') == 'grp-ext-42']) == 1
+        assert admin._groups[gid]['enabled'] is True            # reactivated
+        assert admin._groups[gid]['roles'] == [admin._role_name_to_uid('editor')]  # roles kept
+        # external_id survives a persist + reload round-trip.
+        assert admin._groups_store.load()[gid]['external_id'] == 'grp-ext-42'

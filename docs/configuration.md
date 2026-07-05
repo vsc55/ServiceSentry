@@ -264,6 +264,14 @@ Esta matriz es configurable desde la pestaña **Configuración → Notifications
 | `web_admin.config_update_banner_secs` | int | `8` | Segundos que se muestra el banner de "configuración actualizada" (0–60) |
 | `web_admin.lockout_max_attempts` | int | `5` | Intentos fallidos antes de bloquear la cuenta (0 = desactivado) (0–100) |
 | `web_admin.lockout_duration_secs` | int | `900` | Duración del bloqueo de cuenta en segundos (60–86400) |
+| `web_admin.ipban_enabled` | bool | `true` | [fail2ban interno](security.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio): interruptor maestro (`false` ⇒ nunca banea) |
+| `web_admin.ipban_auth_threshold` | int | `10` | Ofensas de la vía `auth` (login fallido, CSRF…) antes del ban (0 = off) (0–1000) |
+| `web_admin.ipban_auth_window_secs` | int | `600` | Ventana deslizante de la vía `auth` (10–86400) |
+| `web_admin.ipban_authz_threshold` | int | `30` | Ofensas de la vía `authz` (acceso sin permiso) antes del ban (0 = off) (0–1000) |
+| `web_admin.ipban_authz_window_secs` | int | `600` | Ventana deslizante de la vía `authz` (10–86400) |
+| `web_admin.ipban_durations` | string | `"900,3600,21600,86400"` | Escalera de duraciones de ban en segundos (CSV); tras el último nivel → permanente |
+| `web_admin.ipban_permanent_after` | int | `4` | Nivel de ban a partir del cual es permanente (0 = nunca) (0–100) |
+| `web_admin.ipban_whitelist` | string | `""` | IP/CIDR nunca baneados (CSV); se unen al *loopback* y a la lista blanca gestionada en la UI |
 | `web_admin.session_check_secs` | int | `20` | Intervalo del poll de keepalive de sesión (detecta revocación) (5–300) |
 | `web_admin.session_revoke_redirect_secs` | int | `3` | Segundos antes de redirigir al login tras detectar la sesión revocada (0–30) |
 | `web_admin.access_poll_secs` | int | `30` | Intervalo de auto-refresco de la pestaña Access (5–300) |

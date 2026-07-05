@@ -69,6 +69,10 @@ class Cfg:
     no_seed: bool = False             # exclude from default materialisation (creds only)
                                       # (first-run-only credentials)
     nullable: bool = False            # blank/null is valid (= "use the default")
+    card: str | None = None           # config-UI card (category) this option renders in;
+                                      # the layout groups fields by this. None = the field
+                                      # belongs to a bespoke `renderer` card (auth/db/…) that
+                                      # draws it itself, or is not shown as a scalar field.
 
 
 # ── The registry ────────────────────────────────────────────────────────────
@@ -78,56 +82,102 @@ class Cfg:
 CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ web_admin: instance-backed runtime options (feed the rule dicts) ═════
     Cfg('web_admin|lang', str, _DEFAULT_LANG, attr='_default_lang',
-        env='SS_LANG'),
+        env='SS_LANG', card='global'),           # default UI language → General card
     Cfg('web_admin|dark_mode', bool, False, attr='_default_dark_mode',
-        env='SS_DARK_MODE', no_rule=True),
-    Cfg('web_admin|secure_cookies', bool, False, attr='_secure_cookies',
-        env='SS_SECURE_COOKIES', admin_only=True, no_rule=True),
+        env='SS_DARK_MODE', no_rule=True, card='global'),   # default theme → General card
     Cfg('web_admin|remember_me_days', int, 30, attr='_REMEMBER_ME_DAYS',
         min=1, max=365, env='SS_REMEMBER_ME_DAYS', admin_only=True,
-        flask_cfg=('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v))),
+        flask_cfg=('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v)),
+        card='login_security'),
     Cfg('web_admin|audit_max_entries', int, 500, attr='_AUDIT_MAX_ENTRIES',
-        min=0, max=10000, env='SS_AUDIT_MAX_ENTRIES'),
+        min=0, max=10000, env='SS_AUDIT_MAX_ENTRIES'),   # rendered by the 'audit' card
     Cfg('web_admin|pw_min_len', int, 8, attr='_PW_MIN_LEN',
-        min=1, max=128, admin_only=True),
+        min=1, max=128, admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_max_len', int, 128, attr='_PW_MAX_LEN',
-        min=8, max=256, admin_only=True),
+        min=8, max=256, admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_require_upper', bool, True, attr='_PW_REQUIRE_UPPER',
-        admin_only=True),
+        admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_require_digit', bool, True, attr='_PW_REQUIRE_DIGIT',
-        admin_only=True),
+        admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_require_symbol', bool, False, attr='_PW_REQUIRE_SYMBOL',
-        admin_only=True),
+        admin_only=True, card='pw_policy'),
     Cfg('web_admin|public_status', bool, False, attr='_public_status',
-        env='SS_PUBLIC_STATUS', admin_only=True),
+        env='SS_PUBLIC_STATUS', admin_only=True),        # rendered by the 'pub_status' card
     Cfg('web_admin|public_status_detail', bool, False, attr='_public_status_detail',
         env='SS_PUBLIC_STATUS_DETAIL', admin_only=True),
     Cfg('web_admin|status_refresh_secs', int, 60, attr='_STATUS_REFRESH_SECS',
         min=10, max=3600, env='SS_STATUS_REFRESH_SECS'),
     Cfg('web_admin|status_lang', str, '', attr='_STATUS_LANG',
         env='SS_STATUS_LANG'),
-    Cfg('web_admin|proxy_count', int, 0, attr='_proxy_count',
-        min=0, max=10, env='SS_PROXY_COUNT', admin_only=True),
+    # ── External Access card (order = host → port → public URL → proxy → HTTPS) ──
+    Cfg('web_admin|host', str, '0.0.0.0', no_rule=True, card='proxy'),  # bind addr
     Cfg('web_admin|port', int, 8080, attr='_WEB_PORT',
-        min=1, max=65535, env='SS_PORT'),
+        min=1, max=65535, env='SS_PORT', card='proxy'),
     Cfg('web_admin|public_url', str, '', attr='_public_url',
-        env='SS_PUBLIC_URL', admin_only=True),
+        env='SS_PUBLIC_URL', admin_only=True, card='proxy'),
+    Cfg('web_admin|proxy_count', int, 0, attr='_proxy_count',
+        min=0, max=10, env='SS_PROXY_COUNT', admin_only=True, card='proxy'),
     Cfg('web_admin|force_https', bool, False, attr='_force_https',
-        env='SS_FORCE_HTTPS', admin_only=True),
+        env='SS_FORCE_HTTPS', admin_only=True, card='proxy'),
     Cfg('web_admin|force_fqdn', bool, False, attr='_force_fqdn',
-        env='SS_FORCE_FQDN', admin_only=True),
+        env='SS_FORCE_FQDN', admin_only=True, card='proxy'),
+    Cfg('web_admin|secure_cookies', bool, False, attr='_secure_cookies',
+        env='SS_SECURE_COOKIES', admin_only=True, no_rule=True, card='proxy'),
     Cfg('web_admin|default_page_size', int, 25, attr='_DEFAULT_PAGE_SIZE',
-        min=0, max=200),
+        min=0, max=200),                                 # rendered by the 'tables' card
     Cfg('web_admin|config_poll_secs', int, 30, attr='_CONFIG_POLL_SECS',
         min=10, max=300),
     Cfg('web_admin|config_update_banner_secs', int, 8, attr='_CONFIG_BANNER_SECS',
         min=0, max=60),
     Cfg('web_admin|lockout_max_attempts', int, 5, attr='_LOCKOUT_MAX_ATTEMPTS',
-        min=0, max=100, admin_only=True),
+        min=0, max=100, admin_only=True, card='login_security'),
     Cfg('web_admin|lockout_duration_secs', int, 900, attr='_LOCKOUT_DURATION_SECS',
-        min=60, max=86400, admin_only=True),
+        min=60, max=86400, admin_only=True, card='login_security'),
     Cfg('web_admin|session_check_secs', int, 20, attr='_SESSION_CHECK_SECS',
         min=5, max=300),
+    Cfg('web_admin|session_idle_minutes', int, 720, attr='_SESSION_IDLE_MINUTES',
+        min=0, max=43200, admin_only=True, card='login_security'),  # idle timeout (0=off)
+    # Brute-force throttles (per client IP). 0 = disabled.
+    Cfg('web_admin|login_ratelimit_max', int, 15, attr='_LOGIN_RL_MAX',
+        min=0, max=1000, admin_only=True, card='login_security'),
+    Cfg('web_admin|login_ratelimit_window_secs', int, 300, attr='_LOGIN_RL_WINDOW',
+        min=10, max=3600, admin_only=True, card='login_security'),
+    # Internal fail2ban — progressive per-IP jail shared by every exposed service
+    # (web + syslog). Offenses accumulate per IP; crossing a threshold jails the IP
+    # for an escalating term. Two tracks: 'auth' (anonymous/login/CSRF/SCIM/401/anon-403)
+    # and 'authz' (an authenticated session hitting forbidden sections — higher, more
+    # tolerant threshold). 0 in a threshold disables that track.
+    Cfg('web_admin|ipban_enabled', bool, True, attr='_IPBAN_ENABLED',
+        env='SS_IPBAN_ENABLED', admin_only=True, no_rule=True, card='ipban'),
+    Cfg('web_admin|ipban_auth_threshold', int, 10, attr='_IPBAN_AUTH_THRESHOLD',
+        min=0, max=1000, admin_only=True, card='ipban'),
+    Cfg('web_admin|ipban_auth_window_secs', int, 600, attr='_IPBAN_AUTH_WINDOW',
+        min=10, max=86400, admin_only=True, card='ipban'),
+    Cfg('web_admin|ipban_authz_threshold', int, 30, attr='_IPBAN_AUTHZ_THRESHOLD',
+        min=0, max=1000, admin_only=True, card='ipban'),
+    Cfg('web_admin|ipban_authz_window_secs', int, 600, attr='_IPBAN_AUTHZ_WINDOW',
+        min=10, max=86400, admin_only=True, card='ipban'),
+    Cfg('web_admin|ipban_durations', str, '900,3600,21600,86400', attr='_IPBAN_DURATIONS',
+        admin_only=True, no_rule=True, card='ipban'),   # escalating ban terms (s), CSV
+    Cfg('web_admin|ipban_permanent_after', int, 4, attr='_IPBAN_PERMANENT_AFTER',
+        min=0, max=100, admin_only=True, card='ipban'),  # ban level past which = permanent (0=never)
+    # (The per-service block action lives in the fail2ban service registry — see
+    #  lib/security/ipban_services.py — persisted in the ip_service_action table,
+    #  not as a single global config field.)
+    # Env/programmatic never-ban CSV (also an escape hatch: SS_IPBAN_WHITELIST=<ip>
+    # lets a locked-out admin whitelist their address and get back in). The UI-managed
+    # whitelist with descriptions lives in its own store and is merged on top; this
+    # field has no config-UI card.
+    Cfg('web_admin|ipban_whitelist', str, '', attr='_IPBAN_WHITELIST',
+        env='SS_IPBAN_WHITELIST', admin_only=True, no_rule=True),
+    Cfg('web_admin|scim_ratelimit_max', int, 20, attr='_SCIM_RL_MAX',
+        min=0, max=1000, admin_only=True, card='scim'),
+    Cfg('web_admin|scim_ratelimit_window_secs', int, 300, attr='_SCIM_RL_WINDOW',
+        min=10, max=3600, admin_only=True, card='scim'),
+    Cfg('web_admin|scim_min_token_len', int, 16, attr='_SCIM_MIN_TOKEN_LEN',
+        min=8, max=256, admin_only=True, card='scim'),   # bearer token entropy floor
+    Cfg('web_admin|scim_max_members', int, 2000, attr='_SCIM_MAX_MEMBERS',
+        min=1, max=100000, admin_only=True, card='scim'),  # members per group write
     Cfg('web_admin|session_revoke_redirect_secs', int, 3,
         attr='_SESSION_REVOKE_REDIRECT_SECS', min=0, max=30),
     Cfg('web_admin|access_poll_secs', int, 30, attr='_ACCESS_POLL_SECS',
@@ -138,10 +188,10 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         attr='_FORCE_RELOAD_ON_UPDATE'),
     Cfg('web_admin|force_reload_secs', int, 10, attr='_FORCE_RELOAD_SECS',
         min=1, max=300),
-    # web_admin first-run credentials + bind address (read in main.py)
+    # web_admin first-run credentials (read in main.py) — bootstrap only, NOT editable
+    # config (the admin account is managed in the Users UI), so no config-UI card.
     Cfg('web_admin|username', str, 'admin', no_rule=True, no_seed=True),
     Cfg('web_admin|password', str, 'admin', no_rule=True, no_seed=True),
-    Cfg('web_admin|host', str, '0.0.0.0', no_rule=True),
 
     # ══ telegram (env-overridable; not mirrored on the instance) ═════════════
     Cfg('telegram|token', str, '', env='SS_TELEGRAM_TOKEN', no_rule=True),
@@ -158,27 +208,30 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # automatically when the web admin process boots — a standalone ``--monitor``
     # process ignores it (it always runs when enabled).  enabled=on + autostart=off
     # ⇒ boots stopped but startable from the Services tab.
-    Cfg('monitoring|enabled', bool, True, env='SS_MONITORING_ENABLED'),
-    Cfg('monitoring|autostart', bool, True, env='SS_MONITORING_AUTOSTART'),
-    Cfg('monitoring|timer_check', int, 300, min=10, max=86400, env='SS_CHECK_INTERVAL'),
+    Cfg('monitoring|enabled', bool, True, env='SS_MONITORING_ENABLED', card='monitoring'),
+    Cfg('monitoring|autostart', bool, True, env='SS_MONITORING_AUTOSTART', card='monitoring'),
+    Cfg('monitoring|timer_check', int, 300, min=10, max=86400, env='SS_CHECK_INTERVAL',
+        card='monitoring'),
 
     # ══ modules: global defaults inherited by every watchful module ══════════
     # Last link of the item → module → global resolution chain.  'threads' also
     # sets how many modules the monitor checks in parallel.
-    Cfg('modules|threads', int, 5,  min=1, max=100),
-    Cfg('modules|timeout', int, 15, min=1, max=600),
+    Cfg('modules|threads', int, 5,  min=1, max=100, card='modules'),
+    Cfg('modules|timeout', int, 15, min=1, max=600, card='modules'),
     # Role assigned to newly-created users (a role UID). Empty means "unset" and
     # resolves to the built-in 'none' role — the consumers own that fallback
     # (web_admin uses BUILTIN_ROLE_UIDS['none']) so the canonical UID is never
     # duplicated here. Also used when the configured role was deleted.
-    Cfg('users|default_role', str, '', no_rule=True, admin_only=True),
+    # Both default-role options share one "Default roles" card in the Auth tab
+    # (role assignment is an authorization concern, not a General one).
+    Cfg('users|default_role', str, '', no_rule=True, admin_only=True, card='default_roles'),
     # Role pre-selected for newly-created groups (same scheme/fallback as users).
-    Cfg('groups|default_role', str, '', no_rule=True, admin_only=True),
+    Cfg('groups|default_role', str, '', no_rule=True, admin_only=True, card='default_roles'),
 
     # ══ global ═══════════════════════════════════════════════════════════════
     # Log verbosity: 'off' disables debug output; otherwise a DebugLevel name
     # ('debug'/'info'/'warning'/'error') used as the minimum level shown.
-    Cfg('global|log_level', str, 'off', no_rule=True),
+    Cfg('global|log_level', str, 'off', no_rule=True, card='global'),
 
     # ══ database (port is driver-specific → no single default) ═══════════════
     # Bootstrap section: read before the DB connector exists, so the env vars are
@@ -301,20 +354,28 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ Syslog receiver ═════════════════════════════════════════════════════
     # Built-in syslog server: receive RFC 3164/5424 events from external hosts
     # over UDP/TCP(+TLS), store them (lib/stores/syslog.py) and optionally alert.
-    Cfg('syslog|enabled',         bool, True, admin_only=True),
+    Cfg('syslog|enabled',         bool, True, admin_only=True, card='syslog_conn'),
     # autostart: launch the EMBEDDED listener at web-admin boot (a standalone
     # ``--syslog`` process ignores it).  enabled=on + autostart=off ⇒ boots stopped
     # but startable from the Services tab.
-    Cfg('syslog|autostart',       bool, True, admin_only=True, env='SS_SYSLOG_AUTOSTART'),
-    Cfg('syslog|bind_host',       str, '0.0.0.0, ::', admin_only=True),  # all IPv4 + IPv6
-    Cfg('syslog|udp_port',        int, 514, min=0, max=65535, admin_only=True, nullable=True),
-    Cfg('syslog|tcp_port',        int, 514, min=0, max=65535, admin_only=True, nullable=True),
-    Cfg('syslog|tls_port',        int, 0,   min=0, max=65535, admin_only=True, nullable=True),
-    Cfg('syslog|tls_cert',        str, '', admin_only=True),
-    Cfg('syslog|tls_key',         str, '', admin_only=True),
-    Cfg('syslog|allowed_sources', str, '', admin_only=True),   # comma/space/newline IPs or CIDRs
-    Cfg('syslog|retention_days',  int, 30, min=0, max=3650, admin_only=True, nullable=True),
-    Cfg('syslog|max_rows',        int, 500000, min=0, max=100000000, admin_only=True, nullable=True),
+    Cfg('syslog|autostart',       bool, True, admin_only=True, env='SS_SYSLOG_AUTOSTART',
+        card='syslog_conn'),
+    Cfg('syslog|bind_host',       str, '0.0.0.0, ::', admin_only=True, card='syslog_conn'),
+    Cfg('syslog|udp_port',        int, 514, min=0, max=65535, admin_only=True, nullable=True,
+        card='syslog_conn'),
+    Cfg('syslog|tcp_port',        int, 514, min=0, max=65535, admin_only=True, nullable=True,
+        card='syslog_conn'),
+    # Standard syslog-over-TLS port. Only actually bound when a cert + key are set
+    # (the listener stays off, silently, without them — see server.start()).
+    Cfg('syslog|tls_port',        int, 6514, min=0, max=65535, admin_only=True, nullable=True,
+        card='syslog_conn'),
+    Cfg('syslog|tls_cert',        str, '', admin_only=True, card='syslog_security'),
+    Cfg('syslog|tls_key',         str, '', admin_only=True, card='syslog_security'),
+    Cfg('syslog|allowed_sources', str, '', admin_only=True, card='syslog_security'),  # IPs/CIDRs
+    Cfg('syslog|retention_days',  int, 30, min=0, max=3650, admin_only=True, nullable=True,
+        card='syslog_retention'),
+    Cfg('syslog|max_rows',        int, 500000, min=0, max=100000000, admin_only=True,
+        nullable=True, card='syslog_retention'),
     # Syslog→notification routing is handled by the Event-rules manager (Events
     # tab), not a built-in alert here — one place owns event→notification.
 

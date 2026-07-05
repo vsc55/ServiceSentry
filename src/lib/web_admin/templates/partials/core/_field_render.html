@@ -87,9 +87,11 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
 
     // fieldLabel receives meta so it can use label_i18n (avoids inheriting global labels
     // from unrelated config sections, e.g. LDAP's "server" leaking into SNMP fields).
-    // A value-dependent term (e.g. datastore 'db' → Database/Index/Bucket) wins.
+    // A value-dependent term (e.g. datastore 'db' → Database/Index/Bucket) wins; a
+    // path-keyed label (LABELS['section|field'], like hints) disambiguates fields that
+    // share a name across sections (e.g. users vs groups 'default_role').
     const _term = _fieldTermFor(key, meta, pathStr, target);
-    const lbl = esc((_term && _term.label) || fieldLabel(key, meta));
+    const lbl = esc((_term && _term.label) || LABELS[pathStr] || fieldLabel(key, meta));
     const lblHtml = lbl + _infoIcon;
 
     // Hidden fields are stored in data but never rendered to the user.
@@ -128,6 +130,14 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
 
     // Sensitive field masked by the server (null = value is set but never transmitted)
     if (value === null && (SENSITIVE.has(key) || (meta && meta.sensitive))) {
+        // A masked multiline secret (PEM cert/key) keeps its textarea so a replacement
+        // pastes intact; empty with a "defined" placeholder (the value never leaves the
+        // server, and a blank on save keeps the stored one via restore_sensitive).
+        if (meta && meta.textarea) {
+            return _fieldRow(lblHtml, fieldCtl({kind: 'textarea', rows: meta.rows || 6,
+                placeholder: t('secret_defined') || '••••••', textareaVal: '',
+                onChange: `updateField(${tg},${sp},this.value)`}), _hintHtml);
+        }
         return _fieldRow(lblHtml, fieldCtl({kind: 'secret',
             inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="" placeholder="${escAttr(t('secret_defined') || '••••••')}"`,
             onInput: `updateField(${tg},${sp},this.value)`, trailing: _actionBtn}), _hintHtml);
@@ -405,8 +415,12 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             // options_disabled: {optionValue: 'packageName'} — injected by discover_schemas()
             const _optDis = (meta.options_disabled && typeof meta.options_disabled === 'object')
                 ? meta.options_disabled : null;
+            // Per-option i18n labels: module option_labels win, else schema-provided
+            // options_i18n ({value: {lang: label}}), else the raw value.
+            const _oi = (meta.options_i18n && typeof meta.options_i18n === 'object') ? meta.options_i18n : null;
             const opts = meta.options.map(o => {
-                const label = (_optLbls && _optLbls[o]) ? esc(_optLbls[o]) : esc(o);
+                const _oiLbl = _oi && _oi[o] && (_oi[o][CURRENT_LANG] || _oi[o][SYSTEM_DEFAULT_LANG]);
+                const label = (_optLbls && _optLbls[o]) ? esc(_optLbls[o]) : esc(_oiLbl || o);
                 if (_optDis && _optDis[o]) {
                     const pkg = _optDis[o];
                     // Keep 'selected' so the current value stays visible even if disabled

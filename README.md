@@ -20,6 +20,7 @@
 - **Cross-platform** — 12 of 15 modules run on Linux, Windows and macOS; services module supports systemd, OpenRC, SysV and Windows SCM.
 - **Remote execution** — SSH command execution via paramiko for RAID and other remote checks.
 - **Encrypted storage** — sensitive fields (passwords, tokens) are encrypted at rest: in the database for module configuration, and in `config.json` for its own secrets.
+- **Internal fail2ban** — service-level IP banning (web + syslog) on accumulated offenses (failed logins, CSRF, unauthorized access…) with escalating durations, managed whitelist, watchlist, ban history and per-service block action. DB-backed (cross-process). See [docs/security.md](docs/security.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio).
 - **Public status page** — optional `/status` endpoint (no login required) with real-time health and configurable auto-refresh.
 - **Custom error pages** — branded 400/403/404/405/500 pages that inherit dark/light theme; API routes return JSON errors.
 

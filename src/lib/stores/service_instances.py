@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
@@ -29,7 +30,8 @@ from lib.db.schema import Column, Index, TableSpec
 _SCHEMA = TableSpec(
     name='service_instances',
     columns=(
-        Column('instance_id',   'TEXT', primary_key=True),          # stable per process run
+        Column('uid',           'TEXT', primary_key=True),          # synthetic row id
+        Column('instance_id',   'TEXT', nullable=False, default="''", unique=True),  # stable per process run
         Column('service_key',   'TEXT', nullable=False, default="''"),  # monitoring/syslog/events
         Column('mode',          'TEXT', nullable=False, default="''"),  # embedded / standalone
         Column('host',          'TEXT'),                             # pod / hostname
@@ -108,11 +110,12 @@ class ServiceInstancesStore:
                          1 if running else 0, now, last_cycle_at, dj, instance_id))
                 else:
                     self._db.execute(
-                        f'INSERT INTO {_T} (instance_id, service_key, mode, host, pid, version, '
-                        'control_url, running, started_at, last_seen, last_cycle_at, detail) '
-                        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                        (instance_id, service_key, mode, host, pid, version, control_url,
-                         1 if running else 0, started_at or now, now, last_cycle_at, dj))
+                        f'INSERT INTO {_T} (uid, instance_id, service_key, mode, host, pid, '
+                        'version, control_url, running, started_at, last_seen, last_cycle_at, '
+                        'detail) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                        (str(uuid.uuid4()), instance_id, service_key, mode, host, pid, version,
+                         control_url, 1 if running else 0, started_at or now, now,
+                         last_cycle_at, dj))
         except Exception:  # pylint: disable=broad-except
             pass
 

@@ -49,7 +49,7 @@ from lib.db.schema import Column, TableSpec
 _SCHEMA = TableSpec(
     name='check_state',
     columns=(
-        Column('uid',            'TEXT'),
+        Column('uid',            'TEXT', primary_key=True),   # synthetic row id (PK)
         Column('module',         'TEXT', nullable=False),
         Column('key',            'TEXT', nullable=False),
         Column('item_uid',       'TEXT'),
@@ -63,7 +63,8 @@ _SCHEMA = TableSpec(
         # 'warning'. Lets the UI show avisos (yellow) distinctly from errors (red).
         Column('severity',       'TEXT', nullable=False, default="''"),
     ),
-    composite_pk=('module', 'key', 'metric'),
+    # The (module, key, metric) natural key stays the unique lookup for a check row.
+    unique_constraints=(('module', 'key', 'metric'),),
 )
 
 _T = _SCHEMA.name  # table name — single source of truth

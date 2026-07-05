@@ -5,15 +5,42 @@
 // ──────────────────────────── Toast ───────────────────────────────
 // ──────────────────────────── Generic confirm modal ───────────────
 let _confirmModalCallback = null;
+// When set (by showReasonModal), the confirm modal shows a required/optional reason
+// input and the callback receives its value. Reset by showConfirmModal + on confirm.
+let _confirmModalReasonOpts = null;
+
+function _confirmModalReasonToggle(show) {
+    const wrap = document.getElementById('confirmModalReasonWrap');
+    if (wrap) wrap.style.display = show ? '' : 'none';
+    const err = document.getElementById('confirmModalReasonErr');
+    if (err) err.style.display = 'none';
+}
 
 function showConfirmModal(msg, callback) {
     _confirmModalCallback = callback;
+    _confirmModalReasonOpts = null;
+    _confirmModalReasonToggle(false);
     document.getElementById('confirmModalMsg').textContent = msg;
     const _m = document.getElementById('confirmModal');
     // Focus the confirm button once shown so the FIRST Enter applies (otherwise
     // the first Enter is lost because focus isn't in the modal yet).
     _m.addEventListener('shown.bs.modal',
         () => document.getElementById('btnConfirmModalOk')?.focus(), { once: true });
+    bootstrap.Modal.getOrCreateInstance(_m).show();
+}
+
+/** Confirm modal with a reason text field. The callback receives the entered reason.
+ *  opts: { placeholder?, required=true }. Required + empty keeps the modal open. */
+function showReasonModal(msg, callback, opts = {}) {
+    _confirmModalCallback = callback;
+    _confirmModalReasonOpts = { required: opts.required !== false, placeholder: opts.placeholder || '' };
+    document.getElementById('confirmModalMsg').textContent = msg;
+    _confirmModalReasonToggle(true);
+    const input = document.getElementById('confirmModalReason');
+    if (input) { input.value = ''; input.placeholder = _confirmModalReasonOpts.placeholder; }
+    const _m = document.getElementById('confirmModal');
+    _m.addEventListener('shown.bs.modal',
+        () => document.getElementById('confirmModalReason')?.focus(), { once: true });
     bootstrap.Modal.getOrCreateInstance(_m).show();
 }
 

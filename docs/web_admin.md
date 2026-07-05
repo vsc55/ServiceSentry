@@ -89,8 +89,9 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Receptor Syslog** | Servidor syslog integrado (RFC 3164/5424, UDP/TCP/TLS): pestaña Syslog con mensajes filtrables (severidad/host/app/búsqueda), allowlist de orígenes y **registro de descartes**; retención por antigüedad/filas; BD dedicada opcional; puede correr embebido o como contenedor aparte. Permisos `syslog_view`/`syslog_delete`. Ver §[Syslog](#syslog) |
 | **Gestor de eventos** | Reglas que observan eventos de auditoría o syslog y notifican por los canales configurados (Telegram/Email/webhooks concretos); cooldown global con herencia por regla; **log de notificaciones** enviadas. La evaluación está **desacoplada de la ingesta**: un *procesador de eventos* lee por cursor los mensajes/eventos ya guardados (cooldown persistido), embebido o como contenedor propio. Permisos `events_*`. Ver §[Eventos (reglas de notificación)](#eventos-reglas-de-notificación) |
 | **Servicios** | Pestaña Services: estado y **control (start/stop)** de los servicios de fondo (monitor embebido, receptor syslog, **procesador de eventos**, worker, base de datos). Permisos `services_view`/`services_control`. Ver §[Servicios](#servicios) |
+| **fail2ban interno** | Baneo de IP a nivel de servicio (web + syslog) por ofensas acumuladas (login fallido, CSRF, acceso no autorizado…), con duraciones escaladas, lista blanca gestionada, watchlist, historial y acción de bloqueo por servicio. Sección operativa propia (IPs baneadas / Lista blanca / Historial) + ajustes en Config → fail2ban. Persistido en BD (cross-proceso). Permisos `config_view`/`config_edit`. Ver §[fail2ban](#fail2ban-bans-de-ip) y [security.md](security.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
-| **Vista general (Overview)** | 12 tarjetas de resumen (Modules, Checks, Servers, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente); cada widget enlaza a su pestaña; auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin |
+| **Vista general (Overview)** | Tarjetas de resumen (Modules, Checks, Servers, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events, **fail2ban**) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente, **IP baneadas**); cada widget enlaza a su pestaña; auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin |
 | **Pestaña de configuración** | Editar la configuración (Telegram, monitorización, idioma, …) directamente desde el navegador; paneles colapsables por sección |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
 | **Tablas de listado unificadas** | Todos los listados (Users, Roles, Groups, Credentials, Servers, Clusters, Sessions, Audit, Events, Syslog) usan un componente común dirigido por esquema: paginación arriba/abajo, ordenación por columna, columnas reordenables (arrastrar), redimensionables (doble clic = auto-ajuste) u **ajustadas al contenido** (`resizable:false`), selector de mostrar/ocultar columnas y persistencia por usuario (columnas visibles, orden y ancho en `table_config`). Ver §[Tablas de Listado](#tablas-de-listado) |
@@ -573,6 +574,27 @@ Receptor syslog: consulta de mensajes, estadísticas y el registro de descartes
 | `DELETE` | `/api/v1/syslog/drops` | `syslog_delete` | Vaciar el registro de descartes |
 | `DELETE` | `/api/v1/syslog/drops/<uid>` | `syslog_delete` | Borrar un origen descartado concreto |
 
+### fail2ban (bans de IP)
+
+[fail2ban interno](security.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio): jail de IP baneadas, watchlist (IP en camino de un ban), lista blanca, historial y acción de bloqueo por servicio. Los ajustes (umbrales/duraciones) están en Config → fail2ban; estos endpoints son la **operativa**.
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/ipbans` | `config_view`* | IP baneadas activas + watchlist + estado (`enabled`) |
+| `POST` | `/api/v1/ipbans` | `config_edit` | Banear una IP manualmente (`{ip, reason?, duration_secs?}`) |
+| `DELETE` | `/api/v1/ipbans/<ip>` | `config_edit` | Retirar un ban (requiere `?reason=` — se registra en el historial) |
+| `POST` | `/api/v1/ipbans/action` | `config_edit` | Override de acción de bloqueo por-ban (`{ip, action}`) |
+| `POST` | `/api/v1/ipbans/clear` | `config_edit` | Limpiar una IP del watchlist (borra sus contadores) |
+| `GET` | `/api/v1/ipbans/history` | `config_view`* | Historial de intentos de una IP (`?ip=`) |
+| `GET` | `/api/v1/ipbans/banlog` | `config_view`* | Historial de baneos (ban/escalado/desban), `?ip=` opcional |
+| `GET` | `/api/v1/ipbans/services` | `config_view`* | Servicios expuestos + acción de bloqueo por servicio |
+| `POST` | `/api/v1/ipbans/services/action` | `config_edit` | Fijar la acción por defecto de un servicio (`{service, action}`) |
+| `GET` | `/api/v1/ipbans/whitelist` | `config_view`* | Lista blanca gestionada (IP/CIDR + descripción + autor) |
+| `POST` | `/api/v1/ipbans/whitelist` | `config_edit` | Añadir a la lista blanca (`{value, description?}`) |
+| `DELETE` | `/api/v1/ipbans/whitelist/<uid>` | `config_edit` | Quitar una entrada de la lista blanca |
+
+> \* `config_view` acepta **cualquiera** de `config_view`/`config_edit`.
+
 ### Eventos (reglas de notificación)
 
 Reglas que observan eventos (`audit` o `syslog`) y notifican por los canales
@@ -703,6 +725,7 @@ Tarjetas de resumen (stat cards):
 | Coverage | `coverage` | % de servidores con al menos un check |
 | Syslog | `syslog_stats` | Total de mensajes y desglose por severidad |
 | Events | `events` | Reglas de evento (activas/inactivas) + notificaciones enviadas |
+| fail2ban | `fail2ban` | Estado On/Off, nº de IP baneadas (o «Sin baneos»), en vigilancia y en lista blanca |
 
 Widgets de tabla:
 
@@ -715,6 +738,9 @@ Widgets de tabla:
 | Failed Logins | `failed_logins` | Intentos de login fallidos (hora, usuario, IP, detalle) |
 | Recent Activity | `activity` | Últimos eventos de auditoría |
 | Recent Syslog | `syslog` | Mensajes syslog recientes (filtrables por severidad mínima) |
+| Banned IPs | `ipban_list` | IP baneadas por fail2ban (IP, motivo, nivel, expiración) |
+
+Los widgets `fail2ban` / `ipban_list` requieren permiso `config_view` o `config_edit` y enlazan al [tab fail2ban](#fail2ban-bans-de-ip).
 
 Todas las tablas tienen columnas ordenables. Cada widget enlaza (click) a su
 pestaña correspondiente. El **layout de fábrica** lo define `_DW_DEFS`
@@ -757,6 +783,7 @@ Para activar el modo edición, pulsa **✏ Edit Dashboard** en la barra de herra
   "coverage": { "hosts_total": 2, "hosts_monitored": 2, "pct": 100 },
   "syslog":   { "total": 0, "recent": [], "by_severity": [] },
   "events":   { "total": 0, "enabled": 0, "by_source": {}, "notifications": 0 },
+  "ipban":    { "enabled": true, "banned": 0, "watchlist": 0, "whitelist": 1, "bans": [] },
   "failing_checks": [],
   "failed_logins": [],
   "last_events": [{ "ts": "...", "event": "login_ok", "user": "admin", "ip": "..." }]
@@ -764,9 +791,10 @@ Para activar el modo edición, pulsa **✏ Edit Dashboard** en la barra de herra
 ```
 
 Los contadores de `status` se calculan como la suma de `checks.total/ok/error` de
-todos los módulos. Cada bloque (`servers`, `syslog`, `events`, `credentials`…) se
-incluye solo si el usuario tiene el permiso de vista correspondiente; en caso
-contrario llega vacío/ausente.
+todos los módulos. Cada bloque (`servers`, `syslog`, `events`, `credentials`,
+`ipban`…) se incluye solo si el usuario tiene el permiso de vista correspondiente
+(`ipban` requiere `config_view`/`config_edit`); en caso contrario llega
+vacío/ausente.
 
 ---
 

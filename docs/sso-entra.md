@@ -92,12 +92,17 @@ provisioning**:
   `sp_object_id`, sin crear otra) — un device-code ligero (login + PUT de secrets).
 - **default_role** para los usuarios aprovisionados; **auto_disable** = `active:false`
   (asignación retirada) deshabilita el usuario.
+- **Desasignar en Entra:** un **usuario** se **desactiva** (`active:false`); un **grupo** se
+  desactiva mediante **soft-delete** (Entra manda `DELETE`, pero conservamos el grupo y su
+  mapeo grupo→rol — un grupo desactivado no concede roles). Al **reasignar** el grupo, Entra
+  hace `POST` con el mismo `externalId` y el grupo se **reactiva** con sus roles intactos (sin
+  duplicar). Ver [security.md](security.md#scim-20-aprovisionamiento-proactivo).
 - Usuarios creados con `auth_source: 'scim'` — muestran un **badge SCIM** en la lista de
   Usuarios (junto a OIDC/SAML2/LDAP). Los **grupos SCIM** se mapean a grupos de ServiceSentry
   (asigna roles a esos grupos y los miembros los heredan); llevan `source: 'scim'` y un **badge
   SCIM** en la pestaña Grupos (frente a los `local`).
 - Endpoints: `Users`, `Groups`, `ServiceProviderConfig`, `ResourceTypes`, `Schemas`
-  (GET/POST/PUT/PATCH/DELETE) — ver [web_admin.md](web_admin.md) y `routes/scim.py`.
+  (GET/POST/PUT/PATCH/DELETE) — ver [web_admin.md](web_admin.md) y `routes/scim.py` (transporte) + `lib/providers/scim/` (lógica).
 
 | | JIT (login) | SCIM (push) |
 |---|:---:|:---:|
@@ -117,7 +122,7 @@ Código relevante:
   `partials/cfg/auth/_wizard_saml.html` (SAML2) y `partials/cfg/auth/_wizard_scim.html` (SCIM).
 - SCIM: backend `provisioning.provision_scim_app` (crear) + `provisioning.update_scim_secrets`
   (re-sync) + rutas `entra/scim/device-code|device-poll` en `entraid.py` (cliente
-  `GRAPH_CLI_CLIENT_ID`); endpoint SCIM `routes/scim.py`; generador de token
+  `GRAPH_CLI_CLIENT_ID`); endpoint SCIM `routes/scim.py` (transporte) + `lib/providers/scim/` (lógica); generador de token
   `lib/util/generate_token` expuesto en `routes/util.py` (`GET /api/v1/util/token`).
 - URL pública única: `WebAdmin.public_base_url()` (override por `public_url` → auto-detección
   proxy-aware), inyectada como `SERVER_BASE_URL` y usada por `publicBaseUrl()`/`roCopyRow` en el

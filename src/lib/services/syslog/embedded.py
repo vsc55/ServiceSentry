@@ -59,6 +59,16 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
     def _syslog_db_connector(self):
         return getattr(self._host, '_syslog_db_connector', None)
 
+    # The shared internal fail2ban (manager + service registry) lives on the host —
+    # so the embedded listener drops jailed IPs and registers itself as a service.
+    @property
+    def _ipban(self):
+        return getattr(self._host, '_ipban', None)
+
+    @property
+    def _ipban_services(self):
+        return getattr(self._host, '_ipban_services', None)
+
     # The web admin binds the ports only when this process hosts the listener.
     def _syslog_can_bind(self) -> bool:
         return _embedded_listener_enabled()
@@ -77,6 +87,9 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
         --syslog process ignores autostart)."""
         if self._syslog_store is None:
             return
+        # Declare the syslog service to the fail2ban registry from config, so its
+        # exposed ports show up even when autostart is off (nothing bound yet here).
+        self._register_syslog_service(self._syslog_cfg())
         if self._syslog_autostart():
             self._syslog_apply_config()
         else:

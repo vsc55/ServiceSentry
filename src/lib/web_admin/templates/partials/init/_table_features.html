@@ -187,6 +187,9 @@ if (historyLi) historyLi.style.display = perms.has('history_view') ? '' : 'none'
 // Syslog tab
 const syslogLi = document.getElementById('tab-syslog-li');
 if (syslogLi) syslogLi.style.display = perms.has('syslog_view') ? '' : 'none';
+// fail2ban tab (operational: banned IPs / watchlist / history / services / whitelist)
+const ipbanLi = document.getElementById('tab-ipban-li');
+if (ipbanLi) ipbanLi.style.display = (hasConfigEdit || hasConfigView) ? '' : 'none';
 // Services tab
 const servicesLi = document.getElementById('tab-services-li');
 if (servicesLi) servicesLi.style.display = perms.has('services_view') ? '' : 'none';

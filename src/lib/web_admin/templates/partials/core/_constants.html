@@ -141,6 +141,9 @@ const ENTRA_APP_NAME_SCIM    = {{ entra_app_name_scim    | tojson }};
 // Effective public base URL (config override → else proxy-aware auto-detect),
 // resolved server-side by WebAdmin.public_base_url(). Used by publicBaseUrl().
 const SERVER_BASE_URL = {{ wa_base_url | tojson }};
+// CSRF double-submit token — sent as X-CSRF-Token on every state-changing fetch
+// (see the fetch wrapper in core/_api.html).
+const CSRF_TOKEN = {{ csrf_token | tojson }};
 // Fields that require a service restart to take effect after being saved
 const RESTART_REQUIRED_FIELDS = new Set(['web_admin|port', 'web_admin|proxy_count',
     'syslog_db|enabled', 'syslog_db|driver', 'syslog_db|path', 'syslog_db|host',

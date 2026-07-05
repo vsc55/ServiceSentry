@@ -268,15 +268,6 @@ function renderConfig() {
     }
     const cfgCardClose = `</div></div></div>`;
 
-    const WA_EXCLUDE = [
-        'pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol',
-        'public_status', 'public_status_detail', 'status_refresh_secs', 'status_lang',
-        'port', 'proxy_count', 'public_url', 'force_https', 'force_fqdn', 'audit_sort', 'audit_sort_dir', 'default_page_size', 'page_sizes',
-        'config_poll_secs', 'config_update_banner_secs',
-        'lockout_max_attempts', 'lockout_duration_secs',
-        'session_check_secs', 'session_revoke_redirect_secs', 'access_poll_secs',
-        'force_reload_on_update', 'force_reload_secs',
-    ];
     // Pre-populate config sections from the central registry so each card
     // renders before the option has ever been saved. The values come from the
     // server's spec (CONFIG_REGISTRY_DEFAULTS) — never hardcoded here — so the
@@ -384,49 +375,10 @@ function renderConfig() {
             continue;
         }
 
-        if (sec === 'monitoring') {
-            // Scheduler card: enabled toggle + check interval (embedded vs external
-            // is the SS_MONITORING_EMBEDDED env, not a field). Pick only the registry
-            // fields so a stale row (e.g. a removed 'mode') is never a stray input.
-            const _mon = Object.fromEntries(
-                ['enabled', 'autostart', 'timer_check'].filter(f => f in data).map(f => [f, data[f]]));
-            _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-activity me-1"></i>', lbl)
-                + renderScalarFields(_mon, sec, 'config', [])
-                + cfgCardClose;
-            continue;
-        }
-
-        if (sec === 'modules') {
-            // Global module-execution defaults (threads/timeout inherited by every
-            // module when its own value is blank) — part of the monitoring engine.
-            _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-grid-3x3-gap-fill me-1"></i>', lbl)
-                + renderScalarFields(data, sec, 'config', [])
-                + cfgCardClose;
-            continue;
-        }
-
         if (sec === 'database') {
             // DB engine selector + only the chosen engine's settings.
             _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-database me-1"></i>', lbl)
                 + _renderDatabaseSection(data)
-                + cfgCardClose;
-            continue;
-        }
-
-        if (sec === 'syslog') {
-            // Split into focused cards instead of one long card.
-            const _pick = (fields) => Object.fromEntries(fields.filter(f => f in data).map(f => [f, data[f]]));
-            // Connection: enable + bind + listener ports.
-            _cardHtml['syslog_conn'] = cfgCardOpen('cfgcol_syslog_conn', '<i class="bi bi-ethernet me-1"></i>', t('syslog_sec_connection'))
-                + renderScalarFields(_pick(['enabled', 'autostart', 'bind_host', 'udp_port', 'tcp_port', 'tls_port']), sec, 'config', [])
-                + cfgCardClose;
-            // Security: TLS material + sender allowlist.
-            _cardHtml['syslog_security'] = cfgCardOpen('cfgcol_syslog_security', '<i class="bi bi-shield-lock me-1"></i>', t('syslog_sec_security'))
-                + renderScalarFields(_pick(['tls_cert', 'tls_key', 'allowed_sources']), sec, 'config', [])
-                + cfgCardClose;
-            // Retention / storage limits.
-            _cardHtml['syslog_retention'] = cfgCardOpen('cfgcol_syslog_retention', '<i class="bi bi-archive me-1"></i>', t('syslog_sec_retention'))
-                + renderScalarFields(_pick(['retention_days', 'max_rows']), sec, 'config', [])
                 + cfgCardClose;
             continue;
         }
@@ -464,6 +416,7 @@ function renderConfig() {
                 `<div class="input-group input-group-sm">
                     <input type="text" class="form-control font-monospace" id="scimTokenInput"
                         data-field-path="scim|token" autocomplete="off"
+                        value="${typeof data.token === 'string' ? escAttr(data.token) : ''}"
                         placeholder="${escAttr(data.token === null ? t('scim_token_configured') : t('scim_token_placeholder'))}"
                         oninput="updateField('config','scim|token',this.value)">
                     <button class="btn btn-secondary" type="button" title="${escAttr(t('scim_generate_token'))}"
@@ -485,32 +438,40 @@ function renderConfig() {
             // OIDC callback URL), then enabled, token and the rest.  sp_app_id /
             // sp_object_id are internal (deep-link only).
             const _hide = ['token', 'sp_app_id', 'sp_object_id'];
+            // Server-side SCIM hardening (web_admin|scim_*: rate-limit, token floor,
+            // member cap) — a subsection of this card, not a separate one (it is all SCIM).
+            const _wa = configData.web_admin || {};
+            const _limitsRow = `<hr class="my-2"><div class="small text-muted fw-semibold mb-2">${esc(t('scim_limits_section'))}</div>`
+                + renderField('scim_ratelimit_max', _wa.scim_ratelimit_max, 'web_admin|scim_ratelimit_max', 'config')
+                + renderField('scim_ratelimit_window_secs', _wa.scim_ratelimit_window_secs, 'web_admin|scim_ratelimit_window_secs', 'config')
+                + renderField('scim_min_token_len', _wa.scim_min_token_len, 'web_admin|scim_min_token_len', 'config')
+                + renderField('scim_max_members', _wa.scim_max_members, 'web_admin|scim_max_members', 'config');
             _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-arrow-down-up me-1"></i>', lbl)
                 + _btnRow
                 + _urlRow
                 + renderScalarFields(data, sec, 'config', [..._hide, 'default_role', 'auto_disable'])
                 + _tokRow
                 + renderScalarFields(data, sec, 'config', [..._hide, 'enabled'])
+                + _limitsRow
                 + cfgCardClose;
             continue;
         }
 
-        // Generic scalar section (global, web_admin main fields, users, groups, …)
-        _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-gear me-1"></i>', lbl)
-            + renderScalarFields(data, sec, 'config', sec === 'web_admin' ? WA_EXCLUDE : [])
-            + cfgCardClose;
+        // Generic scalar sections (global, web_admin, users, groups, monitoring,
+        // modules, syslog…) are built from the layout after this loop — see the
+        // _renderGenericCard loop below. Nothing to do here.
     }
 
-    // ── Authentication cards: pw_policy + login_security (ldap/oidc/saml2 already
-    //    captured into _cardHtml during the loop above)
-    const pwFields = ['pw_min_len', 'pw_max_len', 'pw_require_upper', 'pw_require_digit', 'pw_require_symbol'];
-    _cardHtml['pw_policy'] = cfgCardOpen('cfgcol_pw_policy', '<i class="bi bi-shield-lock me-1"></i>', t('pw_policy_section'))
-        + renderScalarFields(Object.fromEntries(pwFields.map(f => [f, wa[f]])), 'web_admin', 'config', [])
-        + cfgCardClose;
-    _cardHtml['login_security'] = cfgCardOpen('cfgcol_login_security', '<i class="bi bi-shield-exclamation me-1"></i>', t('login_security_section'))
-        + renderField('lockout_max_attempts', wa.lockout_max_attempts, 'web_admin|lockout_max_attempts', 'config')
-        + renderField('lockout_duration_secs', wa.lockout_duration_secs, 'web_admin|lockout_duration_secs', 'config')
-        + cfgCardClose;
+    // Auth cards pw_policy / login_security / scim_limits are generic (built from the
+    // layout by the _renderGenericCard loop). ldap/oidc/saml2/scim are bespoke (above).
+
+    // fail2ban CONFIG tab: the generic SETTINGS card (built by _renderGenericCard) plus
+    // the Exposed-services card (per-service default block action — a config concern).
+    // The operational cards (banned IPs / watchlist / history / whitelist) live in the
+    // top-level fail2ban section (renderFail2ban, partials/cfg/_ipban.html).
+    if (typeof _ipbanServicesCard === 'function') {
+        _cardHtml['ipban_services'] = _ipbanServicesCard(cfgCardOpen, cfgCardClose);
+    }
 
     // ── Notifications tab: three sub-tabs — Routing | Providers | Templates
     const hNotifRouting   = _renderNotificationsMatrix(cfgCardOpen, cfgCardClose);
@@ -561,10 +522,9 @@ function renderConfig() {
                 </div>
             </div>
         </div></div>`;
-    // External access card (network/connectivity — web deployment)
-    _cardHtml['proxy'] = cfgCardOpen('cfgcol_proxy', '<i class="bi bi-diagram-3 me-1"></i>', t('proxy_section'))
-        + renderScalarFields({ port: wa.port, proxy_count: wa.proxy_count, public_url: wa.public_url, force_https: wa.force_https, force_fqdn: wa.force_fqdn }, 'web_admin', 'config', [])
-        + cfgCardClose;
+    // 'proxy' (External Access) is generic — built from the layout by the
+    // _renderGenericCard loop (fields: port/proxy_count/public_url/force_https/
+    // force_fqdn/secure_cookies, each assigned card='proxy' in spec.py).
 
     _cardHtml['pub_status'] = cfgCardOpen('cfgcol_pub_status', '<i class="bi bi-globe me-1"></i>', t('public_status_section'))
         + renderScalarFields(Object.fromEntries(psFields.map(f => [f, wa[f]])), 'web_admin', 'config', [])
@@ -681,6 +641,26 @@ function renderConfig() {
     _cardHtml['advanced'] = cfgCardOpen('cfgcol_advanced', '<i class="bi bi-tools me-1"></i>', t('cfg_advanced_section'))
         + _cfgRenderAdvancedBody()
         + cfgCardClose;
+
+    // ── Generic cards: built 100% from the layout (title/icon + its fields,
+    // grouped by each option's `card` in spec.py). No per-card hardcoding — a
+    // bespoke card declares a `renderer` and was already built above.
+    const _renderGenericCard = (card) => {
+        const title = card.title_key ? t(card.title_key)
+            : (SECTION_LABELS[card.section] || card.section || card.id);
+        let h = cfgCardOpen('cfgcol_' + card.id, `<i class="bi ${card.icon || 'bi-gear'} me-1"></i>`, title);
+        for (const path of (card.fields || [])) {
+            const i = path.indexOf('|');
+            const section = path.slice(0, i), field = path.slice(i + 1);
+            h += renderField(field, (configData[section] || {})[field], path, 'config');
+        }
+        return h + cfgCardClose;
+    };
+    for (const _c of ((CONFIG_LAYOUT && CONFIG_LAYOUT.cards) || [])) {
+        if (Array.isArray(_c.fields) && _c.fields.length && !(_c.id in _cardHtml)) {
+            _cardHtml[_c.id] = _renderGenericCard(_c);
+        }
+    }
 
     // ── Assemble the sub-tabs from the central layout (CONFIG_LAYOUT, injected
     // server-side from lib.config.layout — single source of truth, no duplicated

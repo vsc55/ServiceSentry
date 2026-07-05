@@ -18,20 +18,26 @@ Upserts use the portable UPDATE-then-INSERT pattern.
 
 from __future__ import annotations
 
+import uuid
+
 from lib.db import BaseConnector
 from lib.db.schema import Column, TableSpec
 
+# uid is the PK (project convention); the natural key (rule_uid / source) stays the
+# meaningful lookup key, kept UNIQUE.
 _COOLDOWN = TableSpec(
     name='event_cooldowns',
     columns=(
-        Column('rule_uid',  'TEXT', primary_key=True),
+        Column('uid',       'TEXT', primary_key=True),
+        Column('rule_uid',  'TEXT', nullable=False, default="''", unique=True),
         Column('last_fire', 'REAL', nullable=False, default='0'),
     ),
 )
 _CURSOR = TableSpec(
     name='event_cursor',
     columns=(
-        Column('source',  'TEXT', primary_key=True),
+        Column('uid',     'TEXT', primary_key=True),
+        Column('source',  'TEXT', nullable=False, default="''", unique=True),
         Column('last_id', 'INTEGER', nullable=False, default='0'),
     ),
 )
@@ -59,8 +65,8 @@ class EventStateStore:
             (float(last_fire), rule_uid))
         if not n:
             self._db.execute(
-                'INSERT INTO event_cooldowns(rule_uid, last_fire) VALUES(?,?)',
-                (rule_uid, float(last_fire)))
+                'INSERT INTO event_cooldowns(uid, rule_uid, last_fire) VALUES(?,?,?)',
+                (str(uuid.uuid4()), rule_uid, float(last_fire)))
         self._db.commit()
 
     # ── cursor ────────────────────────────────────────────────────────────────
@@ -77,6 +83,6 @@ class EventStateStore:
             (int(last_id), source))
         if not n:
             self._db.execute(
-                'INSERT INTO event_cursor(source, last_id) VALUES(?,?)',
-                (source, int(last_id)))
+                'INSERT INTO event_cursor(uid, source, last_id) VALUES(?,?,?)',
+                (str(uuid.uuid4()), source, int(last_id)))
         self._db.commit()

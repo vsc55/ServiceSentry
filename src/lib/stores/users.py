@@ -24,6 +24,7 @@ Schema::
 from __future__ import annotations
 
 import json
+import uuid
 
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
@@ -39,8 +40,8 @@ _CORE = frozenset({
 _USERS_SCHEMA = TableSpec(
     name='users',
     columns=(
-        Column('uid',           'TEXT', nullable=False, default="''", unique=True),
-        Column('username',      'TEXT', primary_key=True),
+        Column('uid',           'TEXT', primary_key=True),   # stable id (all relations use it)
+        Column('username',      'TEXT', nullable=False, default="''", unique=True),
         Column('password_hash', 'TEXT', nullable=False, default="''"),
         Column('role',          'TEXT', nullable=False, default="''"),
         Column('display_name',  'TEXT', nullable=False, default="''"),
@@ -60,10 +61,12 @@ _USERS_SCHEMA = TableSpec(
 _USERS_GROUPS_SCHEMA = TableSpec(
     name='users_groups',
     columns=(
+        Column('uid',       'TEXT', primary_key=True),   # synthetic row id (PK)
         Column('user_uid',  'TEXT', nullable=False),
         Column('group_uid', 'TEXT', nullable=False),
     ),
-    composite_pk=('user_uid', 'group_uid'),
+    # The membership pair stays unique — a user belongs to a group at most once.
+    unique_constraints=(('user_uid', 'group_uid'),),
     indexes=(
         Index('idx_users_groups_user',  ('user_uid',)),
         Index('idx_users_groups_group', ('group_uid',)),
@@ -200,8 +203,9 @@ class UsersStore:
                     for grp_uid in dict.fromkeys(data.get('groups', [])):  # dedupe, keep order
                         if grp_uid:
                             self._db.execute(
-                                f'INSERT INTO {_T_USERS_GROUPS}(user_uid, group_uid) VALUES(?,?)',
-                                (uid, str(grp_uid)),
+                                f'INSERT INTO {_T_USERS_GROUPS}(uid, user_uid, group_uid) '
+                                'VALUES(?,?,?)',
+                                (str(uuid.uuid4()), uid, str(grp_uid)),
                             )
             return True
         except Exception:  # pylint: disable=broad-except
@@ -218,8 +222,9 @@ class UsersStore:
                 for grp_uid in dict.fromkeys(data.get('groups', [])):
                     if grp_uid:
                         self._db.execute(
-                            f'INSERT INTO {_T_USERS_GROUPS}(user_uid, group_uid) VALUES(?,?)',
-                            (uid, str(grp_uid)),
+                            f'INSERT INTO {_T_USERS_GROUPS}(uid, user_uid, group_uid) '
+                            'VALUES(?,?,?)',
+                            (str(uuid.uuid4()), uid, str(grp_uid)),
                         )
             return True
         except Exception:  # pylint: disable=broad-except

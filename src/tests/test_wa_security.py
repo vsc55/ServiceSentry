@@ -441,7 +441,7 @@ class TestSecurityInjection:
         self._login(c)
         with c.session_transaction() as s:
             token = s.get('session_token')
-        c.get("/logout")
+        c.post("/logout")
         # Re-inject the old token
         with c.session_transaction() as s:
             s['session_token'] = token

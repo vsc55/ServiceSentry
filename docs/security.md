@@ -14,10 +14,26 @@ Referencia completa de los mecanismos de seguridad implementados en la interfaz 
    - `auth_source: "local"` → siempre autenticación local, LDAP ignorado.
    - Si LDAP falla por error de red y `fallback_to_local = true` → intenta autenticación local.
 3. Se busca el usuario en el **almacén de usuarios de la base de datos**; si no existe o la contraseña es incorrecta → el **formulario muestra siempre "Invalid credentials"** (mensaje genérico — evita enumeración de usuarios). Si la cuenta existe pero está desactivada o bloqueada → **mismo mensaje genérico** (anti-enumeración). El motivo real se registra en el log de auditoría como `detail.reason`.
-4. La contraseña se verifica con `werkzeug.security.check_password_hash` (PBKDF2-SHA256). Cuando el usuario **no existe**, se ejecuta igualmente un `check_password_hash` contra un **hash señuelo** (`_decoy_pw_hash`, generado una vez) para **igualar el tiempo de respuesta** con el camino del usuario real — evita la enumeración de usuarios por análisis de tiempos (timing attack).
+4. La contraseña se verifica con `werkzeug.security.check_password_hash` (**scrypt** por defecto en Werkzeug 3.x). El camino de autenticación está diseñado para tener **tiempo constante** con independencia de si el usuario existe (ver [Anti-enumeración por tiempo](#anti-enumeración-por-tiempo-timing)).
 5. Si es correcta → se crea una entrada en el **registro de sesiones** del servidor (`_sessions`) con un token de 32 bytes aleatorios (64 hex) y se guarda en la cookie de sesión Flask.
 6. El evento `login_ok` o `login_failed` se escribe en el **registro de auditoría**. En caso de fallo, el campo `detail.reason` almacena la clave i18n que describe la causa real (`user_not_found`, `account_disabled`, `account_locked`, `invalid_credentials`, `ldap_invalid_credentials`, `ldap_user_not_found` o `ldap_connection_error`). Los logins LDAP/OIDC exitosos incluyen `detail.auth_source`.
 7. El login usa el patrón **POST / Redirect / GET**: en caso de fallo se usa `flash()` y se redirige al `GET /login`, evitando el diálogo de reenvío de formulario al pulsar F5.
+
+### Anti-enumeración por tiempo (timing)
+
+Un atacante no debe poder distinguir **"usuario no existe"** de **"contraseña incorrecta"** — ni por el mensaje (ya es genérico) ni por el **tiempo de respuesta**. Verificar un hash scrypt cuesta ~200 ms; si ese cálculo solo ocurriera para usuarios existentes, un usuario válido respondería mucho más lento que uno inexistente, revelando qué cuentas existen (enumeración por *timing*). `_authenticate` (`lib/web_admin/app.py`) lo evita ejecutando **siempre el mismo trabajo criptográfico**:
+
+- **Usuario inexistente** → se ejecuta igualmente `check_password_hash` contra un **hash señuelo**. El señuelo **no es un hash generado aparte** (podría llevar parámetros de coste distintos y volver a delatar), sino el `password_hash` de un **usuario local real** del almacén, de modo que el coste de verificación **coincide exactamente** con el de una cuenta existente.
+- **Cuenta deshabilitada** → también ejecuta el hash antes de devolver el motivo, para no ser más rápida que una contraseña incorrecta.
+- **Contadores de intentos fallidos en memoria** → el incremento del contador de bloqueo **no** hace escritura en base de datos por intento (`_persist_users` solo se llama al bloquear/expirar/acertar). Una escritura en BD por intento fallido añadía ~200 ms **solo** al camino del usuario existente, reintroduciendo el canal de *timing*; ahora el contador vive en memoria.
+
+Resultado medido (estado limpio): `admin` (existe) ≈ usuario inexistente, dentro del ruido (p. ej. 191.8 ms vs 194.8 ms). El mensaje mostrado es idéntico (`invalid_credentials`) para inexistente, contraseña incorrecta, cuenta deshabilitada y cuenta bloqueada; el motivo real solo va al log de auditoría.
+
+> Canal residual conocido: la primera petición sobre una cuenta con un **bloqueo ya expirado** ejecuta un `_persist_users` para limpiarlo (~200 ms). Solo afecta a cuentas recientemente bloqueadas — que el atacante ya sabe que existen (fue él quien las bloqueó) — por lo que no aporta información nueva.
+
+### Límite de intentos por IP (rate-limiting)
+
+Además del [bloqueo por cuenta](#bloqueo-de-cuenta-por-intentos-fallidos), hay un **límite por IP de origen** en `/login` (`lib/util/ratelimit.py` :: `RateLimiter`, ventana deslizante en memoria, thread-safe): tras `web_admin|login_ratelimit_max` intentos (por defecto **15**) dentro de `web_admin|login_ratelimit_window_secs` (por defecto **300 s**), la IP recibe `flash` genérico + redirección y se registra `login_throttled` en auditoría. Un login correcto **resetea** el contador de esa IP (usuarios legítimos tras un NAT no se penalizan). Esto frena el *password spraying* (una contraseña común probada contra muchos usuarios, que nunca dispara el bloqueo por-cuenta). El bloqueo por-cuenta usa **contadores en memoria** (el propio `request.remote_addr` no es falsificable salvo que `proxy_count` esté mal configurado — ver [Confianza de proxy](#confianza-de-proxy-e-ip-del-cliente-proxyfix)). Umbrales `0` = desactivado.
 
 ### Sesiones persistentes ("Remember me")
 
@@ -65,7 +81,7 @@ Configuración en `config.json → web_admin`:
 | `lockout_max_attempts`  | `5`         | Intentos fallidos antes del bloqueo. `0` desactiva el bloqueo.  |
 | `lockout_duration_secs` | `900`       | Duración del bloqueo en segundos (60–86400).                    |
 
-Los campos `_failed_attempts` y `_locked_until` se almacenan con el registro del usuario en la base de datos (en la columna `extra` de la tabla `users`) y se limpian automáticamente tras un login exitoso o cuando expira el bloqueo. Estos campos no se exponen en `GET /api/v1/users`.
+El **contador** de intentos fallidos (`_failed_attempts`) se mantiene **en memoria** — no se escribe en la base de datos en cada intento — para no reintroducir el [canal de *timing*](#anti-enumeración-por-tiempo-timing); solo se persiste `_locked_until` **al bloquear** (y se limpia al acertar o expirar). Estos campos no se exponen en `GET /api/v1/users`. Este bloqueo por-cuenta se complementa con el [límite por IP](#límite-de-intentos-por-ip-rate-limiting) contra el *password spraying*.
 
 ### Tests de bloqueo de cuenta
 
@@ -80,6 +96,79 @@ Los campos `_failed_attempts` y `_locked_until` se almacenan con el registro del
 | `test_authenticate_returns_tuple` | `_authenticate()` devuelve siempre una 2-tupla |
 | `test_authenticate_wrong_password_reason` | Contraseña incorrecta → `reason='invalid_credentials'` |
 | `test_authenticate_unknown_user_reason` | Usuario inexistente → `reason='user_not_found'` |
+
+---
+
+## fail2ban interno (bans de IP a nivel de servicio)
+
+Un **fail2ban embebido** (`lib/security/ipban.py` :: `IpBanManager`) banea IP de origen que acumulan ofensas — no solo login fallido, sino **cualquier acceso no autorizado** — y es **agnóstico al servicio**: además de la web, protege el [receptor syslog](#receptor-syslog-entrada-no-confiable) y cualquier futuro puerto expuesto. Es *thread-safe*, sin dependencias de framework, y su estado se persiste en la base de datos general (compartido entre procesos: web + syslog ven el mismo jail).
+
+### Dos vías de ofensa (tracks)
+
+Cada IP acumula ofensas en una **ventana deslizante**, en dos contadores independientes para no banear a un usuario autenticado que curiosea:
+
+| Track   | Qué cuenta                                             | Umbral | Ventana |
+|---------|--------------------------------------------------------|--------|---------|
+| `auth`  | Login fallido, CSRF inválido, syslog no permitido…     | 10     | 600 s   |
+| `authz` | Acceso a secciones sin permiso (403 de sesión válida)  | 30     | 600 s   |
+
+Al cruzar un umbral, la IP entra en el **jail** por un tiempo **escalado** con cada reincidencia:
+
+```text
+1er ban 15 min → 2º 1 h → 3º 6 h → 4º 24 h → 5º y siguientes: permanente
+```
+
+Las IP en la [lista blanca](#lista-blanca-never-ban) nunca acumulan ofensas ni se banean (se cortocircuitan en la entrada). El *loopback* está siempre exento.
+
+### Acción de bloqueo por servicio (service registry)
+
+Cada servicio declara sus puertos y las **respuestas** que soporta (`lib/security/ipban_services.py`). Para una IP baneada:
+
+| Servicio | Puertos                     | Acciones soportadas                    | Por defecto |
+|----------|-----------------------------|----------------------------------------|-------------|
+| `web`    | tcp:80/443 (tras proxy)     | `page` · `minimal` · `reject` · `json` | `reject`    |
+| `syslog` | udp/tcp:514, tcp:6514 (TLS) | `drop`                                 | `drop`      |
+
+- `page` = página de error con estilo · `minimal` = error mínimo · `reject` = 403 · `json` = error JSON · `drop` = ni acepta la conexión (para UDP/TCP crudo de syslog).
+- La acción se configura por servicio, y admite **override por-ban** (columna «Response» en la tabla de baneadas).
+
+### Lista blanca (never-ban)
+
+Tres fuentes se unen en el *allowlist* del manager: el *loopback*, la CSV programática `web_admin|ipban_whitelist` (env/config) y una **lista gestionada desde la UI** con descripción y autor, persistida en la tabla `ip_whitelist` (`lib/stores/ip_whitelist.py` — IP/CIDR normalizado, `description`, `created_at`, `created_by`). Añadir/quitar una entrada empuja el nuevo allowlist al jail en caliente.
+
+### Historial de baneos (auditoría append-only)
+
+Cada evento del ciclo de vida (`banned` / `escalated` / `unbanned`) se registra en `ip_ban_history` con motivo, categoría, nivel, intervalo, ofensas, autor y fecha — se conserva **aunque el ban expire** y desaparezca de la lista activa. Al **retirar un ban** la UI exige un **motivo**, que se guarda en el evento `unbanned`.
+
+### Persistencia
+
+Todo el estado vive en la BD general (tablas con `uid` como PK sintética, logs con `id` autoincremental):
+
+| Tabla                  | Contenido                                             |
+|------------------------|-------------------------------------------------------|
+| `ip_bans`              | Jail activo (IP baneada + motivo, nivel, expiración)  |
+| `ip_offense_counters`  | Contadores por `(ip, track)` en ventana               |
+| `ip_offense_log`       | Registro de intentos por IP (para el modal de detalle)|
+| `ip_service_action`    | Override de acción por servicio                       |
+| `ip_ban_history`       | Historial de eventos ban/escalado/desban              |
+| `ip_whitelist`         | Lista blanca gestionada (IP/CIDR + descripción)       |
+
+El conteo **persistido** (no en memoria) sobrevive a reinicios y es correcto con múltiples microservicios; una caché de jail activo (`_active_jail`, TTL 3 s) evita golpear la BD en cada request.
+
+### Configuración (`config.json → web_admin`)
+
+| Campo                       | Por defecto           | Descripción                                          |
+|-----------------------------|-----------------------|------------------------------------------------------|
+| `ipban_enabled`             | `true`                | Interruptor maestro (`false` ⇒ nunca banea/bloquea). |
+| `ipban_auth_threshold`      | `10`                  | Ofensas de la vía `auth` antes del ban (`0`=off).    |
+| `ipban_auth_window_secs`    | `600`                 | Ventana de la vía `auth`.                            |
+| `ipban_authz_threshold`     | `30`                  | Ofensas de la vía `authz` antes del ban (`0`=off).   |
+| `ipban_authz_window_secs`   | `600`                 | Ventana de la vía `authz`.                           |
+| `ipban_durations`           | `900,3600,21600,86400` | Escalera de duraciones (s), CSV.                    |
+| `ipban_permanent_after`     | `4`                   | Nivel de ban a partir del cual es permanente (`0`=nunca). |
+| `ipban_whitelist`           | `''`                  | IP/CIDR programáticos, nunca baneados (CSV).         |
+
+La UI separa **configuración** (ajustes + «Servicios expuestos», en Config → fail2ban) de la **operativa** (sección de nivel superior con sub-pestañas IPs baneadas / Lista blanca / Historial). Ver [web_admin.md → fail2ban](web_admin.md#fail2ban-bans-de-ip).
 
 ---
 
@@ -128,9 +217,10 @@ Cuando `saml2.enabled = true` y el paquete `pysaml2` está instalado, el flujo e
 
 **Seguridad:**
 
-- La firma de la aserción SAML se valida con el certificado del IdP.
-- Los usuarios SAML2 reciben `auth_source: "saml2"` y no tienen `password_hash`.
-- El mapeo grupo → rol funciona igual que en LDAP/OIDC.
+- La **firma se exige y valida siempre** contra el certificado del IdP (`idp_cert`); una respuesta sin firma se rechaza y sin certificado configurado el flujo falla cerrado. `strict: true` activa toda la batería de validaciones (esquema XML, una sola aserción, `Conditions` NotBefore/NotOnOrAfter, `Audience` = SP entityId, `Issuer`, `Destination` = ACS, SubjectConfirmation Bearer/Recipient). **XXE** cerrado (parser endurecido de python3-saml) y defensas anti-XSW.
+- **Endurecimiento de firma** (bloque `security` en `_build_saml_settings`): `wantAssertionsSigned = True` (se exige que la **aserción** esté firmada, no solo el sobre), `rejectDeprecatedAlgorithm = True` (**rechaza SHA-1**) y algoritmos fijados a **RSA-SHA256** (compatible con Entra por defecto).
+- **Anti-replay:** `saml2_login` guarda el `request_id` de la `AuthnRequest` en la sesión y `saml2_acs` valida el **`InResponseTo`** de la respuesta contra él (`process_response(request_id=...)`) — bloquea respuestas no solicitadas / *login-CSRF*. Además, cada **id de aserción** validado se registra en una caché de **un solo uso** (TTL 10 min): una `SAMLResponse` capturada no puede reutilizarse dentro de su ventana `NotOnOrAfter`.
+- Los usuarios SAML2 reciben `auth_source: "saml2"` y no tienen `password_hash`. El mapeo grupo → rol (tras validar la firma) funciona igual que en LDAP/OIDC.
 
 ### SCIM 2.0 (aprovisionamiento proactivo)
 
@@ -143,13 +233,39 @@ entren (y baje al retirar la asignación). Detalles del flujo/endpoints en
 
 - Autenticación por **bearer token** (`scim.token`, cifrado en disco), comparado en
   **tiempo constante** (`hmac.compare_digest`); **independiente de la sesión web** (llamada
-  servidor-a-servidor). SCIM desactivado o token no coincidente → **401**.
-- Los usuarios se crean con `auth_source: "scim"` y sin `password_hash`; `active:false` los
-  deshabilita (si `auto_disable`). Los grupos SCIM se mapean a grupos de ServiceSentry.
-- Toda operación se **audita** (`scim_user_created/updated/deleted`,
-  `scim_group_created/updated/deleted`). Las **actualizaciones** registran `detail.before`
-  y `detail.after` **solo con los campos que cambiaron** (los no-op del IdP no generan
-  entrada); crear/borrar guardan el snapshot completo del recurso.
+  servidor-a-servidor) y **exento de CSRF**. SCIM desactivado, token vacío/por debajo del
+  mínimo (`web_admin|scim_min_token_len`, def. 16) o no coincidente → **401** (mensaje
+  uniforme, no distingue "desactivado" de "token inválido").
+- **Rate-limiting** de la autenticación bearer por IP (`web_admin|scim_ratelimit_*`,
+  def. 20/300 s): tras N fallos → **429** + `Retry-After`, y cada fallo se **audita**
+  (`scim_auth_failed`) — SCIM no tiene bloqueo por-cuenta, así que este es el freno al
+  *guessing* del token (que además es de 256 bits al generarse).
+- **Solo toca lo que le pertenece** (evita escalada/lockout con solo el token):
+  - Las mutaciones de **usuario** (PATCH/PUT/DELETE) exigen `auth_source == "scim"` — nunca
+    puede borrar/deshabilitar cuentas locales/LDAP/OIDC/SAML2 (p. ej. el Administrator local).
+  - Las escrituras de **grupo** rechazan (`403`) los grupos **integrados** (`_BUILTIN_GROUPS`,
+    p. ej. Administrators) y cualquier grupo con `source != "scim"` — no se puede añadir un
+    miembro al grupo admin ni vaciar/borrar el grupo admin.
+  - `scim.default_role` **no puede** conceder el rol admin integrado (se degrada a *none*),
+    evitando que el IdP aprovisione administradores en masa.
+- **Límites anti-DoS:** tamaño de cuerpo (`MAX_CONTENT_LENGTH` 8 MiB), `count` acotado a 200 y
+  lista de miembros por escritura acotada a `web_admin|scim_max_members` (def. 2000).
+- Los usuarios se crean con `auth_source: "scim"` y **sin `password_hash`** (no pueden hacer
+  login local); `active:false` los deshabilita (si `auto_disable`).
+- **De-aprovisionamiento (desasignar en el IdP):**
+  - **Usuario** → el IdP envía `active:false` → se **desactiva** (`enabled=false`), la cuenta y
+    su historial se conservan.
+  - **Grupo** → el IdP envía `DELETE` (el esquema *Group* de SCIM no tiene `active`) →
+    **soft-delete**: el grupo se **desactiva** (`enabled=false`) pero se **conserva** con su
+    mapeo grupo→rol y su membresía. Un grupo desactivado **no concede ninguno de sus roles**
+    (los permisos comprueban `enabled`), así que el efecto es el mismo que una baja, sin
+    perder la configuración del admin. Al **reasignar** el grupo, el IdP hace `POST` con el
+    mismo `externalId` y el grupo se **reactiva** (mismo uid, roles intactos) en vez de crear
+    un duplicado. El admin puede aún borrarlo definitivamente desde la UI.
+- Toda operación se **audita** con actor **`system`** (acción automática, conservando la IP de
+  origen del IdP): `scim_user_created/updated/deleted`, `scim_group_created/updated/deleted`.
+  Las **actualizaciones** registran `detail.before`/`detail.after` **solo con los campos que
+  cambiaron** (los no-op del IdP no generan entrada); crear/borrar guardan el snapshot completo.
 
 ### Tests de autenticación externa
 
@@ -179,6 +295,22 @@ El servidor mantiene un diccionario `_sessions` con metadatos de cada sesión ac
 ```
 
 Las sesiones se persisten en la tabla `sessions` de la base de datos y se cargan al iniciar.
+
+### Caducidad (idle + absoluta)
+
+En **cada petición** `_check_session` valida la antigüedad de la sesión y la invalida (borra del registro + `session.clear()` + auditoría `session_expired`) si:
+
+- **Inactividad (idle):** `now - last_seen` supera `web_admin|session_idle_minutes` (por defecto **720 min = 12 h**; `0` = desactivado). `last_seen` se refresca en cada petición.
+- **Absoluta:** `now - created` supera `web_admin|remember_me_days` (por defecto 30 días).
+
+Así un token robado o una sesión olvidada **no es válido indefinidamente**, aunque la cookie Flask firmada siga intacta.
+
+### Revocación al cambiar la contraseña
+
+Cambiar o resetear la contraseña **revoca las sesiones existentes** de ese usuario (un atacante con un token robado queda expulsado aunque la víctima solo rote la contraseña):
+
+- **Reset por admin** (`PUT /api/v1/users/<u>` con `password`) → `_revoke_user_sessions(username)` (todas).
+- **Cambio propio** (`PUT /api/v1/users/me/password`) → `_revoke_user_sessions(uname, except_token=<sesión actual>)` — conserva la sesión desde la que se hace el cambio.
 
 ### Revocación
 
@@ -692,6 +824,38 @@ GET    /api/v1/sessions/invalidate → 405
 ## Redirección Abierta (Open Redirect)
 
 El parámetro `next` del formulario de login se valida contra el mismo origen — no se permite redirigir a URLs externas.
+
+---
+
+## Protección CSRF (double-submit token)
+
+Toda petición que **cambia estado** (`POST`/`PUT`/`PATCH`/`DELETE`) requiere un **token CSRF** válido, mediante el patrón *double-submit*:
+
+- Se genera un token por sesión (`session['_csrf']`, 32 bytes aleatorios) en `WebAdmin._csrf_token()` y se **inyecta** en cada página (constante JS `CSRF_TOKEN` + campo oculto `csrf_token` en el formulario de login).
+- Un `before_request` (`_csrf_protect`) exige que la petición traiga el token en la cabecera **`X-CSRF-Token`** (APIs JSON) o en el campo **`csrf_token`** (formularios), y lo compara con el de la sesión con `hmac.compare_digest` (tiempo constante). Si falta o no coincide → **403** JSON (`/api/`) o redirección con aviso (formularios), y se audita `csrf_failed`.
+- El frontend añade la cabecera de forma **transparente**: un *wrapper* global de `fetch` (`core/_api.html`) inyecta `X-CSRF-Token` en toda petición mutante *same-origin*, así que `apiPost`/`apiPut`/`apiDelete` y cualquier `fetch` ad-hoc quedan cubiertos sin cambios.
+- **`/logout` es `POST`** (antes `GET`) y también protegido → no hay *logout-CSRF*. El enlace de la UI hace `fetch('/logout',{method:'POST'})`.
+
+**Exenciones** (por diseño, autenticadas de otro modo): `/scim/` (token bearer, sin cookies) y los *callbacks* de IdP `/auth/saml2/acs` (protegido por `InResponseTo`, ver [SAML2](#saml2-alpha)) y `/auth/oidc/callback` (protegido por `state`). Combinado con `SameSite=Lax`, la superficie CSRF queda cerrada. En tests se desactiva con `wa._csrf_enabled = False`; hay tests dedicados (`test_wa_csrf.py`) que lo ejercen activado.
+
+## Cabeceras de seguridad HTTP y cookies
+
+En cada respuesta (`after_request`) se emiten cabeceras de defensa en profundidad (con `setdefault`, sin pisar las que ya ponga un proxy):
+
+| Cabecera | Valor | Protege contra |
+| --- | --- | --- |
+| `Content-Security-Policy` | `default-src 'self'`; `frame-ancestors 'none'`; `base-uri 'self'`; `form-action 'self'`; `object-src 'none'` (+ `'unsafe-inline'` en script/style que la UI usa) | XSS, *clickjacking*, secuestro de base/form |
+| `X-Frame-Options` | `DENY` | *Clickjacking* (navegadores antiguos) |
+| `X-Content-Type-Options` | `nosniff` | *MIME sniffing* |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Fuga de URLs en el `Referer` |
+| `Permissions-Policy` | `geolocation=(), microphone=(), camera=(), payment=()` | Uso no deseado de APIs del navegador |
+| `Strict-Transport-Security` | lo añade el proxy TLS (openresty) | *Downgrade* a HTTP |
+
+**Cookie de sesión:** `HttpOnly` (no accesible por JS) + `SameSite=Lax` (mitiga CSRF) + **`Secure`** cuando el despliegue es público/HTTPS (`secure_cookies` **o** `force_https` **o** `public_url` configurados), de modo que nunca viaja por HTTP plano. El desarrollo local por HTTP (sin ninguno de esos) sigue funcionando.
+
+**Límite de tamaño de cuerpo:** `MAX_CONTENT_LENGTH = 8 MiB` — un *payload* enorme no puede agotar memoria antes de parsearse (protege APIs JSON y SCIM).
+
+**Fichero de clave secreta:** `.flask_secret` se crea con permisos **`0o600`** (solo propietario). Firma las sesiones Flask **y** deriva la clave Fernet de todos los secretos cifrados, así que nunca debe ser legible por otros usuarios del host.
 
 ---
 

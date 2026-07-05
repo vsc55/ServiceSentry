@@ -251,6 +251,17 @@
     flex-direction: column;
     min-height: 0;
 }
+/* Generic: a section container that ITSELF wraps a sub-tab bar (so its
+   .tab-content is a grandchild of the active pane and the chain above can't reach
+   it — e.g. fail2ban's #ipban-container).  Tag the container .ss-subtabs-fill to
+   extend the flex chain through it; the active sub-pane's card then fills. */
+.ss-subtabs-fill > .tab-content,
+.ss-subtabs-fill > .tab-content > .tab-pane.active {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
 
 /* ── History tab: two-pane layout inside the section card ──────────────────
    Left sidebar (series list) reads as a distinct panel; the right side is the

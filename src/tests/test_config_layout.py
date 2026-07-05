@@ -5,7 +5,6 @@
 import pytest
 
 from lib.config.layout import config_layout, TABS, CARDS
-from lib.config.spec import registry_defaults
 
 try:
     from lib.web_admin import WebAdmin  # noqa: F401
@@ -27,20 +26,29 @@ class TestLayoutCoherence:
             assert c['tab'] in tab_ids, f"card {c['id']} → unknown tab {c['tab']}"
 
     def test_card_is_generic_xor_bespoke(self):
-        # Exactly one of fields (generic) / renderer (bespoke).
-        for c in CARDS:
+        # config_layout() derives `fields` for generic cards from the spec; each card
+        # ends up with exactly one of fields (generic) / renderer (bespoke).
+        for c in config_layout()['cards']:
             assert ('fields' in c) ^ ('renderer' in c), \
                 f"card {c['id']} must have exactly one of fields/renderer"
 
+    def test_generic_cards_have_fields(self):
+        # A generic card (no renderer) must resolve to at least one field, else it is
+        # an empty card (a field lost its card= assignment).
+        for c in config_layout()['cards']:
+            if 'renderer' not in c:
+                assert c.get('fields'), f"generic card {c['id']} has no fields"
+
     def test_generic_fields_exist_in_registry(self):
-        reg = set(registry_defaults())
-        for c in CARDS:
+        from lib.config.spec import CONFIG_FIELDS
+        paths = {f.path for f in CONFIG_FIELDS}
+        for c in config_layout()['cards']:
             for f in c.get('fields', []):
-                assert f in reg, f"card {c['id']}: field {f} not in the registry"
+                assert f in paths, f"card {c['id']}: field {f} not in the registry"
 
     def test_no_field_placed_in_two_cards(self):
         seen = {}
-        for c in CARDS:
+        for c in config_layout()['cards']:
             for f in c.get('fields', []):
                 assert f not in seen, f"field {f} in cards {seen[f]} and {c['id']}"
                 seen[f] = c['id']

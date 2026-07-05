@@ -33,6 +33,7 @@ _GROUPS_SCHEMA = TableSpec(
         Column('description', 'TEXT', nullable=False, default="''"),
         Column('enabled',     'INTEGER', nullable=False, default='1'),
         Column('source',      'TEXT', nullable=False, default="'local'"),
+        Column('external_id', 'TEXT', nullable=False, default="''"),
         Column('created_at',  'TEXT', nullable=False, default="''"),
         Column('updated_at',  'TEXT', nullable=False, default="''"),
         Column('updated_by',  'TEXT', nullable=False, default="''"),
@@ -92,16 +93,19 @@ class GroupsStore:
                          created_at, updated_at, updated_by}}."""
         groups: dict = {}
         for row in self._db.fetchall(
-            'SELECT uid, name, description, enabled, source, created_at, updated_at, updated_by '
+            'SELECT uid, name, description, enabled, source, external_id, '
+            'created_at, updated_at, updated_by '
             f'FROM {_T_GROUPS}'
         ):
-            uid, name, desc, enabled, source, created_at, updated_at, updated_by = row
+            (uid, name, desc, enabled, source, external_id,
+             created_at, updated_at, updated_by) = row
             groups[uid] = {
                 'uid':         uid,
                 'name':        name,
                 'description': desc,
                 'enabled':     bool(enabled),
                 'source':      source or 'local',
+                'external_id': external_id or '',
                 'roles':       [],
                 'created_at':  created_at or '',
                 'updated_at':  updated_at or '',
@@ -149,10 +153,10 @@ class GroupsStore:
                     updated_by = d.get('updated_by') if d.get('updated_by') is not None else ''
                     self._db.execute(
                         f'INSERT INTO {_T_GROUPS}(uid,name,description,enabled,source,'
-                        'created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?)',
+                        'external_id,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?)',
                         (uid, d.get('name', uid), d.get('description', ''),
                          1 if d.get('enabled', True) else 0, d.get('source') or 'local',
-                         created_at, updated_at, updated_by),
+                         d.get('external_id') or '', created_at, updated_at, updated_by),
                     )
                     for role_uid in dict.fromkeys(d.get('roles', [])):  # dedupe, keep order
                         if not role_uid:
@@ -174,19 +178,24 @@ class GroupsStore:
         now = _now()
         try:
             with self._db.transaction():
-                row = self._db.fetchone(f'SELECT created_at, source FROM {_T_GROUPS} WHERE uid = ?', (uid,))
+                row = self._db.fetchone(
+                    f'SELECT created_at, source, external_id FROM {_T_GROUPS} WHERE uid = ?', (uid,))
                 created_at = (row[0] if row else None) or data.get('created_at') or now
                 # Keep the origin (local/scim) stable across edits unless explicitly given.
                 source = data.get('source') or (row[1] if row else None) or 'local'
+                # Keep the SCIM externalId stable unless explicitly provided.
+                external_id = data.get('external_id')
+                if external_id is None:
+                    external_id = (row[2] if row else None) or ''
                 updated_at = data.get('updated_at') or now
                 updated_by = data.get('updated_by') if data.get('updated_by') is not None else ''
                 # Portable upsert: delete-then-insert the group row.
                 self._db.execute(f'DELETE FROM {_T_GROUPS} WHERE uid = ?', (uid,))
                 self._db.execute(
                     f'INSERT INTO {_T_GROUPS}(uid,name,description,enabled,source,'
-                    'created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?)',
+                    'external_id,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?)',
                     (uid, data.get('name', uid), data.get('description', ''),
-                     1 if data.get('enabled', True) else 0, source,
+                     1 if data.get('enabled', True) else 0, source, external_id,
                      created_at, updated_at, updated_by),
                 )
                 existing_roles = {

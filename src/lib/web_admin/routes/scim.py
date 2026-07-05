@@ -2,414 +2,123 @@
 # -*- coding: utf-8 -*-
 """SCIM 2.0 provisioning endpoints: /scim/v2/*.
 
-Lets an IdP (Microsoft Entra ID, Okta…) PROACTIVELY create/update/deactivate users
-and groups in ServiceSentry — unlike JIT provisioning, users appear before their
-first login and are disabled when their assignment is removed.
-
-Authenticated by a bearer token (``scim|token``, the secret the IdP is configured
-with), independent of the web session.  Users are stored with ``auth_source: 'scim'``;
-SCIM groups map to ServiceSentry groups (the admin assigns roles to those groups, and
-members inherit them via the normal group→role mechanism).
+Thin HTTP layer: it owns the bearer-auth gate + per-IP rate limiting and delegates
+every operation to :class:`lib.providers.scim.ScimService` (the Flask-independent
+provisioning logic).  An IdP (Microsoft Entra ID, Okta…) uses these routes to
+PROACTIVELY create/update/deactivate users and groups; authenticated by the
+``scim|token`` bearer, independent of the web session.
 """
-
-import hmac
-import uuid
 
 from flask import jsonify, request
 
-_USER_SCHEMA  = 'urn:ietf:params:scim:schemas:core:2.0:User'
-_GROUP_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:Group'
-_LIST_SCHEMA  = 'urn:ietf:params:scim:api:messages:2.0:ListResponse'
-_ERR_SCHEMA   = 'urn:ietf:params:scim:api:messages:2.0:Error'
-_PATCH_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:PatchOp'
+from lib.providers.scim import ScimService, ERR_SCHEMA
+from lib.security.ratelimit import RateLimiter
 
 
 def register(app, wa):
+    if not hasattr(wa, '_scim_ratelimit'):
+        wa._scim_ratelimit = RateLimiter()
 
-    # ── helpers ───────────────────────────────────────────────────────────────
-    def _cfg():
-        return wa._config_section('scim') or {}
+    def _svc():
+        """A per-request service bound to this request's public base URL."""
+        return ScimService(wa, request.host_url.rstrip('/') + '/scim/v2')
 
-    def _base():
-        return request.host_url.rstrip('/') + '/scim/v2'
+    def _finish(result):
+        """Turn a service ``(body, status)`` into a Flask response."""
+        body, status = result
+        return ('', status) if body == '' else (jsonify(body), status)
 
-    def _err(status, detail, scim_type=None):
-        body = {'schemas': [_ERR_SCHEMA], 'status': str(status), 'detail': detail}
-        if scim_type:
-            body['scimType'] = scim_type
-        return jsonify(body), status
-
-    def _authed():
-        cfg = _cfg()
-        if not cfg.get('enabled'):
-            return False
-        token = str(cfg.get('token') or '')
-        if not token:
-            return False
-        hdr = request.headers.get('Authorization', '')
-        if not hdr.startswith('Bearer '):
-            return False
-        return hmac.compare_digest(hdr[7:], token)
-
-    def _default_role_uid():
-        dr = str(_cfg().get('default_role') or '')
-        if wa._is_uid(dr):
-            return dr
-        return wa._role_name_to_uid(dr or 'none') or wa._role_name_to_uid('none')
-
-    def _user_by_id(uid):
-        """Find a user (keyed by username) by its stable SCIM id (= user uid)."""
-        for username, u in wa._users.items():
-            if u.get('uid') == uid:
-                return username, u
-        return None, None
-
-    def _group_member_ids(group_uid):
-        return [u['uid'] for u in wa._users.values()
-                if group_uid in (u.get('groups') or []) and u.get('uid')]
-
-    def _user_to_scim(username, u):
-        name = u.get('display_name', '') or ''
-        return {
-            'schemas':    [_USER_SCHEMA],
-            'id':         u.get('uid', ''),
-            'userName':   username,
-            'externalId': u.get('auth_source_id', '') or '',
-            'name':       {'formatted': name},
-            'displayName': name,
-            'emails':     ([{'value': u['email'], 'primary': True}] if u.get('email') else []),
-            'active':     bool(u.get('enabled', True)),
-            'meta':       {'resourceType': 'User', 'location': f"{_base()}/Users/{u.get('uid','')}"},
-        }
-
-    def _group_to_scim(uid, g):
-        return {
-            'schemas':     [_GROUP_SCHEMA],
-            'id':          uid,
-            'displayName': g.get('name', uid),
-            'members':     [{'value': mid} for mid in _group_member_ids(uid)],
-            'meta':        {'resourceType': 'Group', 'location': f"{_base()}/Groups/{uid}"},
-        }
-
-    # ── audit snapshots (before/after) ──────────────────────────────────────────
-    def _user_snap(u):
-        """The audited fields of a user (order-independent, no secrets)."""
-        return {'display_name': u.get('display_name', ''), 'email': u.get('email', ''),
-                'enabled': bool(u.get('enabled', True)), 'role': u.get('role', ''),
-                'groups': sorted(u.get('groups') or []),
-                'external_id': u.get('auth_source_id', '')}
-
-    def _group_snap(gid, g):
-        """The audited fields of a group (members read live from the users store)."""
-        return {'name': g.get('name', ''), 'source': g.get('source', 'local'),
-                'members': sorted(_group_member_ids(gid))}
-
-    def _audit_change(event, ident, before=None, after=None):
-        """Record a SCIM mutation. On an update (both snapshots present) the
-        before/after keep ONLY the fields that actually changed; create/delete keep
-        the full new/removed snapshot."""
-        detail = dict(ident)
-        if before is not None and after is not None:
-            keys = [k for k in set(before) | set(after) if before.get(k) != after.get(k)]
-            detail['before'] = {k: before.get(k) for k in keys}
-            detail['after']  = {k: after.get(k) for k in keys}
-        elif before is not None:
-            detail['before'] = before
-        elif after is not None:
-            detail['after'] = after
-        wa._audit(event, detail=detail)
-
-    def _list(resources, total=None, start=1):
-        return jsonify({
-            'schemas':      [_LIST_SCHEMA],
-            'totalResults': total if total is not None else len(resources),
-            'startIndex':   start,
-            'itemsPerPage': len(resources),
-            'Resources':    resources,
-        })
-
-    def _scim_user_fields(body):
-        """Extract (email, display_name, active) from a SCIM User payload."""
-        emails = body.get('emails') or []
-        email = ''
-        if isinstance(emails, list) and emails:
-            email = (next((e for e in emails if isinstance(e, dict) and e.get('primary')), emails[0])
-                     or {}).get('value', '') if isinstance(emails[0], dict) else ''
-        name = body.get('displayName') or (body.get('name') or {}).get('formatted') or ''
-        active = body.get('active', True)
-        return email, name, bool(active)
-
-    def _filter_eq(attr):
-        """Parse a simple `attr eq "value"` filter; return the value or None."""
-        f = (request.args.get('filter') or '').strip()
-        low = f.lower()
-        pre = f'{attr.lower()} eq '
-        if low.startswith(pre):
-            v = f[len(pre):].strip()
-            return v[1:-1] if len(v) >= 2 and v[0] in '"\'' else v
-        return None
-
-    # ── SCIM auth gate for every /scim route ────────────────────────────────────
+    # ── auth gate (bearer token + brute-force throttle) ─────────────────────────
     @app.before_request
     def _scim_gate():
-        if request.path.startswith('/scim/') and not _authed():
-            return _err(401, 'Unauthorized (SCIM disabled or invalid bearer token)')
-        return None
+        if not request.path.startswith('/scim/'):
+            return None
+        if _svc().bearer_ok(request.headers.get('Authorization', '')):
+            return None
+        # Failed auth: throttle per IP and audit (SCIM has no per-account lockout, so
+        # this is the only brute-force signal/limit on the bearer token).
+        ip = request.remote_addr or '?'
+        allowed, retry = wa._scim_ratelimit.hit(
+            ip, max_hits=wa._SCIM_RL_MAX, window_secs=wa._SCIM_RL_WINDOW)
+        wa._audit('scim_auth_failed', username='', ip=ip,
+                  detail={'path': request.path, 'blocked': not allowed})
+        # Feed the internal fail2ban (explicit → also counts the 429 throttle case,
+        # and suppresses the generic 401 capture so the ban reason is 'scim_auth_failed').
+        wa._ipban_offense('scim_auth_failed')
+        if not allowed:
+            resp = jsonify({'schemas': [ERR_SCHEMA], 'status': '429',
+                            'detail': 'Too many failed SCIM authentication attempts'})
+            resp.headers['Retry-After'] = str(retry)
+            return resp, 429
+        return _finish(ScimService.err(401, 'Unauthorized (SCIM disabled or invalid bearer token)'))
+
+    def _json():
+        return request.get_json(silent=True, force=True) or {}
 
     # ── Discovery / capability documents ────────────────────────────────────────
     @app.route('/scim/v2/ServiceProviderConfig', methods=['GET'])
     def scim_spconfig():
-        return jsonify({
-            'schemas': ['urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig'],
-            'patch':         {'supported': True},
-            'bulk':          {'supported': False, 'maxOperations': 0, 'maxPayloadSize': 0},
-            'filter':        {'supported': True, 'maxResults': 200},
-            'changePassword': {'supported': False},
-            'sort':          {'supported': False},
-            'etag':          {'supported': False},
-            'authenticationSchemes': [{
-                'type': 'oauthbearertoken', 'name': 'OAuth Bearer Token',
-                'description': 'Authentication via the SCIM bearer token.',
-            }],
-        })
+        return _finish(_svc().service_provider_config())
 
     @app.route('/scim/v2/ResourceTypes', methods=['GET'])
     def scim_resourcetypes():
-        return _list([
-            {'schemas': ['urn:ietf:params:scim:schemas:core:2.0:ResourceType'],
-             'id': 'User', 'name': 'User', 'endpoint': '/Users', 'schema': _USER_SCHEMA,
-             'meta': {'resourceType': 'ResourceType', 'location': f'{_base()}/ResourceTypes/User'}},
-            {'schemas': ['urn:ietf:params:scim:schemas:core:2.0:ResourceType'],
-             'id': 'Group', 'name': 'Group', 'endpoint': '/Groups', 'schema': _GROUP_SCHEMA,
-             'meta': {'resourceType': 'ResourceType', 'location': f'{_base()}/ResourceTypes/Group'}},
-        ])
+        return _finish(_svc().resource_types())
 
     @app.route('/scim/v2/Schemas', methods=['GET'])
     def scim_schemas():
-        return _list([{'id': _USER_SCHEMA, 'name': 'User'},
-                      {'id': _GROUP_SCHEMA, 'name': 'Group'}])
+        return _finish(_svc().schemas_doc())
 
     # ── Users ───────────────────────────────────────────────────────────────────
     @app.route('/scim/v2/Users', methods=['GET'])
     def scim_users_list():
-        want = _filter_eq('userName')
-        if want is not None:
-            u = wa._users.get(want)
-            return _list([_user_to_scim(want, u)] if u else [], total=1 if u else 0)
         try:
-            start = max(1, int(request.args.get('startIndex', 1)))
-            count = max(0, int(request.args.get('count', 100)))
+            start = int(request.args.get('startIndex', 1))
+            count = int(request.args.get('count', 100))
         except ValueError:
             start, count = 1, 100
-        items = [(n, u) for n, u in wa._users.items()]
-        page = items[start - 1: start - 1 + count]
-        return _list([_user_to_scim(n, u) for n, u in page], total=len(items), start=start)
+        return _finish(_svc().list_users(request.args.get('filter', ''), start, count))
 
     @app.route('/scim/v2/Users/<uid>', methods=['GET'])
     def scim_user_get(uid):
-        username, u = _user_by_id(uid)
-        if not u:
-            return _err(404, f'User {uid} not found')
-        return jsonify(_user_to_scim(username, u))
+        return _finish(_svc().get_user(uid))
 
     @app.route('/scim/v2/Users', methods=['POST'])
     def scim_user_create():
-        body = request.get_json(silent=True, force=True) or {}
-        username = (body.get('userName') or '').strip()
-        if not username:
-            return _err(400, 'userName is required', 'invalidValue')
-        if username in wa._users:
-            return _err(409, f'User {username} already exists', 'uniqueness')
-        email, name, active = _scim_user_fields(body)
-        user = {
-            'uid':            str(uuid.uuid4()),
-            'auth_source':    'scim',
-            'auth_source_id': body.get('externalId', '') or '',
-            'display_name':   name,
-            'email':          email,
-            'role':           _default_role_uid(),
-            'groups':         [],
-            'enabled':        active,
-            'lang':           '',
-        }
-        wa._users[username] = user
-        wa._persist_users()
-        _audit_change('scim_user_created', {'username': username}, after=_user_snap(user))
-        return jsonify(_user_to_scim(username, user)), 201
+        return _finish(_svc().create_user(_json()))
 
     @app.route('/scim/v2/Users/<uid>', methods=['PUT'])
     def scim_user_replace(uid):
-        username, u = _user_by_id(uid)
-        if not u:
-            return _err(404, f'User {uid} not found')
-        body = request.get_json(silent=True, force=True) or {}
-        before = _user_snap(u)
-        email, name, active = _scim_user_fields(body)
-        u['display_name']   = name
-        u['email']          = email
-        u['enabled']        = active if _cfg().get('auto_disable', True) or active else u.get('enabled', True)
-        u['auth_source_id'] = body.get('externalId', u.get('auth_source_id', ''))
-        wa._persist_users()
-        after = _user_snap(u)
-        if after != before:
-            _audit_change('scim_user_updated', {'username': username}, before, after)
-        return jsonify(_user_to_scim(username, u))
+        return _finish(_svc().replace_user(uid, _json()))
 
     @app.route('/scim/v2/Users/<uid>', methods=['PATCH'])
     def scim_user_patch(uid):
-        username, u = _user_by_id(uid)
-        if not u:
-            return _err(404, f'User {uid} not found')
-        body = request.get_json(silent=True, force=True) or {}
-        before = _user_snap(u)
-        for op in (body.get('Operations') or []):
-            path = (op.get('path') or '').lower()
-            val = op.get('value')
-            # Entra sends {"op":"replace","value":{"active":false}} or with path "active".
-            if isinstance(val, dict) and 'active' in val:
-                val, path = val.get('active'), 'active'
-            if path == 'active':
-                new_active = str(val).lower() not in ('false', '0', 'none', '')
-                if new_active or _cfg().get('auto_disable', True):
-                    u['enabled'] = new_active
-            elif path in ('displayname', 'name.formatted'):
-                u['display_name'] = str(val or '')
-            elif path.startswith('emails'):
-                if isinstance(val, list) and val:
-                    u['email'] = (val[0] or {}).get('value', '') if isinstance(val[0], dict) else str(val[0])
-                elif val:
-                    u['email'] = str(val)
-        wa._persist_users()
-        after = _user_snap(u)
-        if after != before:
-            _audit_change('scim_user_updated', {'username': username}, before, after)
-        return jsonify(_user_to_scim(username, u))
+        return _finish(_svc().patch_user(uid, _json()))
 
     @app.route('/scim/v2/Users/<uid>', methods=['DELETE'])
     def scim_user_delete(uid):
-        username, u = _user_by_id(uid)
-        if not u:
-            return _err(404, f'User {uid} not found')
-        before = _user_snap(u)
-        wa._users.pop(username, None)
-        wa._persist_users()
-        _audit_change('scim_user_deleted', {'username': username}, before=before)
-        return '', 204
+        return _finish(_svc().delete_user(uid))
 
     # ── Groups ──────────────────────────────────────────────────────────────────
-    def _set_member(user_uid, group_uid, add):
-        for u in wa._users.values():
-            if u.get('uid') == user_uid:
-                gl = list(u.get('groups') or [])
-                if add and group_uid not in gl:
-                    gl.append(group_uid)
-                elif not add and group_uid in gl:
-                    gl.remove(group_uid)
-                u['groups'] = gl
-                return True
-        return False
-
     @app.route('/scim/v2/Groups', methods=['GET'])
     def scim_groups_list():
-        want = _filter_eq('displayName')
-        res = []
-        for gid, g in wa._groups.items():
-            if want is not None and g.get('name') != want:
-                continue
-            res.append(_group_to_scim(gid, g))
-        return _list(res)
+        return _finish(_svc().list_groups(request.args.get('filter', '')))
 
     @app.route('/scim/v2/Groups/<gid>', methods=['GET'])
     def scim_group_get(gid):
-        g = wa._groups.get(gid)
-        if not g:
-            return _err(404, f'Group {gid} not found')
-        return jsonify(_group_to_scim(gid, g))
+        return _finish(_svc().get_group(gid))
 
     @app.route('/scim/v2/Groups', methods=['POST'])
     def scim_group_create():
-        body = request.get_json(silent=True, force=True) or {}
-        name = (body.get('displayName') or '').strip()
-        if not name:
-            return _err(400, 'displayName is required', 'invalidValue')
-        gid = str(uuid.uuid4())
-        wa._groups[gid] = {'uid': gid, 'name': name, 'description': 'SCIM', 'enabled': True,
-                           'source': 'scim', 'roles': []}
-        wa._persist_groups()
-        for m in (body.get('members') or []):
-            if isinstance(m, dict) and m.get('value'):
-                _set_member(m['value'], gid, True)
-        wa._persist_users()
-        _audit_change('scim_group_created', {'name': name}, after=_group_snap(gid, wa._groups[gid]))
-        return jsonify(_group_to_scim(gid, wa._groups[gid])), 201
+        return _finish(_svc().create_group(_json()))
 
     @app.route('/scim/v2/Groups/<gid>', methods=['PATCH'])
     def scim_group_patch(gid):
-        g = wa._groups.get(gid)
-        if not g:
-            return _err(404, f'Group {gid} not found')
-        body = request.get_json(silent=True, force=True) or {}
-        before = _group_snap(gid, g)
-        changed = False
-        for op in (body.get('Operations') or []):
-            action = (op.get('op') or '').lower()
-            path = (op.get('path') or '').lower()
-            val = op.get('value')
-            if path == 'members' or path.startswith('members'):
-                members = val if isinstance(val, list) else ([val] if val else [])
-                if action == 'replace':
-                    for uid in _group_member_ids(gid):
-                        _set_member(uid, gid, False)
-                for m in members:
-                    mid = m.get('value') if isinstance(m, dict) else m
-                    if mid:
-                        _set_member(mid, gid, action != 'remove')
-                changed = True
-            elif path == 'displayname' and isinstance(val, str):
-                g['name'] = val
-                wa._persist_groups()
-            elif isinstance(val, dict) and 'displayName' in val:
-                g['name'] = val['displayName']
-                wa._persist_groups()
-        if changed:
-            wa._persist_users()
-        after = _group_snap(gid, g)
-        if after != before:
-            _audit_change('scim_group_updated', {'name': g.get('name', gid)}, before, after)
-        return jsonify(_group_to_scim(gid, g))
+        return _finish(_svc().patch_group(gid, _json()))
 
     @app.route('/scim/v2/Groups/<gid>', methods=['PUT'])
     def scim_group_replace(gid):
-        g = wa._groups.get(gid)
-        if not g:
-            return _err(404, f'Group {gid} not found')
-        body = request.get_json(silent=True, force=True) or {}
-        before = _group_snap(gid, g)
-        if body.get('displayName'):
-            g['name'] = body['displayName']
-            wa._persist_groups()
-        for uid in _group_member_ids(gid):
-            _set_member(uid, gid, False)
-        for m in (body.get('members') or []):
-            mid = m.get('value') if isinstance(m, dict) else m
-            if mid:
-                _set_member(mid, gid, True)
-        wa._persist_users()
-        after = _group_snap(gid, g)
-        if after != before:
-            _audit_change('scim_group_updated', {'name': g.get('name', gid)}, before, after)
-        return jsonify(_group_to_scim(gid, g))
+        return _finish(_svc().replace_group(gid, _json()))
 
     @app.route('/scim/v2/Groups/<gid>', methods=['DELETE'])
     def scim_group_delete(gid):
-        g = wa._groups.get(gid)
-        if not g:
-            return _err(404, f'Group {gid} not found')
-        before = _group_snap(gid, g)
-        for uid in _group_member_ids(gid):
-            _set_member(uid, gid, False)
-        wa._groups.pop(gid, None)
-        wa._persist_groups()
-        wa._persist_users()
-        _audit_change('scim_group_deleted', {'name': g.get('name', gid)}, before=before)
-        return '', 204
+        return _finish(_svc().delete_group(gid))

@@ -4,6 +4,36 @@
    ================================================================ #}
 
 // ──────────────────────────── API ─────────────────────────────────
+// CSRF: transparently attach the double-submit token to every same-origin
+// state-changing fetch, so callers (apiPost/apiPut/apiDelete + any ad-hoc fetch)
+// need no changes. Cross-origin requests are left untouched.
+(function () {
+    if (window.__csrfFetchWrapped) return;
+    window.__csrfFetchWrapped = true;
+    const _origFetch = window.fetch;
+    window.fetch = function (input, init) {
+        init = init || {};
+        const method = (init.method || (typeof input === 'object' && input && input.method) || 'GET').toUpperCase();
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const sameOrigin = url.startsWith('/') || (typeof location !== 'undefined' && url.startsWith(location.origin));
+        if (sameOrigin && method !== 'GET' && method !== 'HEAD'
+            && typeof CSRF_TOKEN !== 'undefined' && CSRF_TOKEN) {
+            const h = new Headers(init.headers || {});
+            if (!h.has('X-CSRF-Token')) h.set('X-CSRF-Token', CSRF_TOKEN);
+            init = Object.assign({}, init, { headers: h });
+        }
+        return _origFetch.call(this, input, init);
+    };
+})();
+
+// Log out via POST (CSRF-protected; the fetch wrapper adds X-CSRF-Token), then
+// return to the login page regardless of the outcome.
+function _logout() {
+    fetch('/logout', { method: 'POST' })
+        .catch(() => {})
+        .finally(() => { location.href = '/login'; });
+}
+
 let _sessionTerminated = false;
 function _onSessionTerminated() {
     if (_sessionTerminated) return;

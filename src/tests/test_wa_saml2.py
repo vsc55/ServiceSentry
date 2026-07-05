@@ -66,6 +66,9 @@ def _mock_auth(name_id='jane', attrs=None, errors=None, authenticated=True):
     m.get_nameid.return_value = name_id
     m.get_attributes.return_value = attrs if attrs is not None else _make_saml_attrs(name_id)
     m.login.return_value = 'https://idp.example.com/saml2/sso?SAMLRequest=abc'
+    # Replay/InResponseTo plumbing (must be JSON-serialisable for the session).
+    m.get_last_request_id.return_value = 'req-id-123'
+    m.get_last_assertion_id.return_value = None      # None → skip the one-time cache
     return m
 
 
@@ -80,7 +83,13 @@ def saml2_admin_client(config_dir, var_dir):
         wa = WebAdmin(config_dir, 'admin', 'secret', var_dir,
                       pw_require_upper=False, pw_require_digit=False)
         wa.app.config['TESTING'] = True
-        yield wa, wa.app.test_client()
+        client = wa.app.test_client()
+        # Simulate a prior SP-initiated /auth/saml2/login: the ACS now requires a
+        # session-bound request id (rejects unsolicited responses). Consumed (pop) per
+        # ACS request; the unsolicited-rejection test clears it explicitly.
+        with client.session_transaction() as _s:
+            _s['_saml_req_id'] = 'req-id-123'
+        yield wa, client
 
 
 # ── is_available ──────────────────────────────────────────────────────────────
@@ -238,6 +247,23 @@ class TestSaml2LoginFlow:
         assert resp.status_code == 200
         assert 'carol' in wa._users
         assert wa._users['carol']['auth_source'] == 'saml2'
+
+    def test_acs_unsolicited_response_rejected(self, saml2_admin_client, config_dir):
+        """A response with no session-bound request id (unsolicited / stolen-assertion
+        replay / login-CSRF) is rejected before processing — anti-replay."""
+        wa, client = saml2_admin_client
+        _saml2_cfg(config_dir)
+        import lib.web_admin.auth.saml_auth as saml_mod
+        mock_auth = _mock_auth('mallory', _make_saml_attrs('mallory'))
+        with client.session_transaction() as s:
+            s.pop('_saml_req_id', None)       # attacker never went through /login
+        with patch.object(saml_mod, 'get_auth', return_value=mock_auth):
+            resp = client.post('/auth/saml2/acs', data={'SAMLResponse': 'stolen'},
+                               follow_redirects=True)
+        assert resp.status_code == 200
+        assert b'name="username"' in resp.data          # bounced back to login
+        assert 'mallory' not in wa._users               # never provisioned
+        mock_auth.process_response.assert_not_called()  # rejected before processing
 
     def test_acs_group_maps_to_admin_role(self, saml2_admin_client, config_dir):
         """SAML2 groups claim is mapped to the correct role on ACS."""

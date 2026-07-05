@@ -12,6 +12,11 @@ from flask import request, session
 class _SessionsMixin:
     """Flask session registry (persistent, server-side) + secret key helpers."""
 
+    # Idle timeout comes from config `web_admin|session_idle_minutes`
+    # (attr _SESSION_IDLE_MINUTES; 0 = disabled). The absolute cap is
+    # _REMEMBER_ME_DAYS (from `created`). Both are enforced on every request in
+    # _check_session, so a stolen token is not valid indefinitely.
+
     # ------------------------------------------------------------------ #
     # Secret key                                                           #
     # ------------------------------------------------------------------ #
@@ -36,11 +41,24 @@ class _SessionsMixin:
         return key
 
     def _save_secret_key(self, key: str) -> None:
-        """Write the secret key to disk."""
+        """Write the secret key to disk with owner-only permissions.
+
+        This file signs Flask sessions AND derives the Fernet key for every stored
+        secret, so it must never be world-readable."""
         try:
             os.makedirs(self._config_dir, exist_ok=True)
-            with open(self._secret_key_path, 'w', encoding='utf-8') as fh:
-                fh.write(key)
+            path = self._secret_key_path
+            # Create with 0o600 from the start (avoids a brief world-readable window).
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            fd = os.open(path, flags, 0o600)
+            try:
+                os.write(fd, key.encode('utf-8'))
+            finally:
+                os.close(fd)
+            try:
+                os.chmod(path, 0o600)      # tighten an existing file too (no-op on Windows)
+            except OSError:
+                pass
         except OSError:
             pass
 
@@ -110,6 +128,32 @@ class _SessionsMixin:
             self._sessions_store.delete(token)
             session.clear()
             return False
+        # Idle + absolute lifetime enforcement — a stolen/forgotten session must not
+        # stay valid forever.
+        now = datetime.now(timezone.utc)
+        idle = int(self._SESSION_IDLE_MINUTES or 0) * 60
+
+        def _age(field):
+            ts = entry.get(field)
+            if not ts:
+                return None
+            try:
+                return (now - datetime.fromisoformat(ts)).total_seconds()
+            except (ValueError, TypeError):
+                return None
+
+        idle_age = _age('last_seen')
+        abs_age  = _age('created')
+        max_abs  = self._REMEMBER_ME_DAYS * 86400
+        if (idle and idle_age is not None and idle_age > idle) or \
+           (abs_age is not None and abs_age > max_abs):
+            del self._sessions[token]
+            self._sessions_store.delete(token)
+            self._audit('session_expired', username=uname, ip=request.remote_addr,
+                        detail={'uid': entry.get('uid', token[:8]),
+                                'reason': 'idle' if (idle and idle_age and idle_age > idle) else 'absolute'})
+            session.clear()
+            return False
         if 'session_id' not in session:
             session['session_id'] = entry.get('uid', token[:16])
         current_ip = request.remote_addr
@@ -129,12 +173,25 @@ class _SessionsMixin:
         return True
 
     def _revoke_session(self, token: str) -> bool:
-        """Remove a single session from the registry."""
+        """Remove a single session from the registry (by its secret token)."""
         if token in self._sessions:
             del self._sessions[token]
             self._sessions_store.delete(token)
             return True
         return False
+
+    def _revoke_session_by_uid(self, uid: str) -> bool:
+        """Revoke a session by its public ``uid`` (the PK the UI knows — the token is
+        server-only). Drops the in-memory entry and deletes the row by uid."""
+        if not uid:
+            return False
+        token = next((t for t, e in self._sessions.items() if e.get('uid') == uid), None)
+        if token is not None:
+            del self._sessions[token]
+        # Delete by uid too, so a stale in-memory cache (or another process's write)
+        # is still cleaned up.
+        deleted_db = self._sessions_store.delete_by_uid(uid)
+        return token is not None or deleted_db
 
     def _uid_to_username(self, uid: str) -> tuple[str | None, dict | None]:
         """Return (username, user_dict) for a user UID, or (None, None)."""
@@ -143,18 +200,26 @@ class _SessionsMixin:
                 return uname, d
         return None, None
 
-    def _revoke_user_sessions(self, username: str) -> int:
-        """Remove all sessions belonging to *username*. Returns count."""
+    def _revoke_user_sessions(self, username: str, except_token: str | None = None) -> int:
+        """Remove all sessions belonging to *username*. Returns count.
+
+        ``except_token`` keeps one session alive (used on self password-change so the
+        user isn't logged out of the very session performing the change)."""
         user_uid = (self._users.get(username) or {}).get('uid', '')
+        if not user_uid:
+            return 0
         tokens = [
             t for t, s in self._sessions.items()
-            if s.get('user_uid') == user_uid
+            if s.get('user_uid') == user_uid and t != except_token
         ]
         for t in tokens:
             del self._sessions[t]
         if tokens:
-            # Single targeted DELETE instead of rewriting the whole table.
-            self._sessions_store.delete_by_user_uid(user_uid)
+            if except_token is None:
+                self._sessions_store.delete_by_user_uid(user_uid)   # single query
+            else:
+                for t in tokens:
+                    self._sessions_store.delete(t)
         return len(tokens)
 
     def _revoke_all_sessions(self) -> int:

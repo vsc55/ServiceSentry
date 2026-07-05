@@ -58,6 +58,10 @@ const _DW_DEFS = {
                     canShow: (p)         => p.has('audit_view') },
     syslog:       { icon: 'bi-card-list',     lkey: 'overview_syslog',           dCols: 12, dH: 200,    hasH: true,
                     canShow: (p)         => p.has('syslog_view') },
+    fail2ban:     { icon: 'bi-slash-circle',  lkey: 'overview_fail2ban',         dCols: 2,  dH: 'auto', hasH: false,
+                    canShow: (p)         => p.has('config_view') || p.has('config_edit') },
+    ipban_list:   { icon: 'bi-slash-circle',  lkey: 'overview_ipban_list',       dCols: 4,  dH: 340,    hasH: true,
+                    canShow: (p)         => p.has('config_view') || p.has('config_edit') },
 };
 
 // Click-through target for each widget → the tab (and sub-tab, if any) it
@@ -83,6 +87,8 @@ const _DW_NAV = {
     syslog:        { tab: '#tab-syslog'  },
     syslog_stats:  { tab: '#tab-syslog'  },
     events:        { tab: '#tab-events'  },
+    fail2ban:      { tab: '#tab-ipban'   },
+    ipban_list:    { tab: '#tab-ipban'   },
 };
 
 // Resolve the tab/sub-tab toggle button for a pane selector, but ONLY if it is

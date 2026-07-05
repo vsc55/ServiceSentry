@@ -1,0 +1,68 @@
+// ================================================================
+//   fail2ban — Exposed services CONFIG card (per-service default block action).
+//   This is the ONLY fail2ban piece that belongs to Config → fail2ban; it is built
+//   into the config layout by cfg/_render.html (_cardHtml['ipban_services']).
+//   The OPERATIONAL section (banned IPs / watchlist / history / whitelist) is its
+//   own top-level tab — see partials/ipban/_render.html.
+// ================================================================
+
+// ── Exposed services + per-service block action (service registry) ───────────
+function _ipbanServicesCard(cfgCardOpen, cfgCardClose) {
+    const h = `${cfgCardOpen('cfgcol_ipban_services', '<i class="bi bi-hdd-network me-1"></i>', t('ipban_svc_title'))}
+        <div class="small text-muted mb-2">${esc(t('ipban_svc_hint'))}</div>
+        <div class="ss-tablewrap">
+        <table class="ss-table table table-sm align-middle mb-0"><thead><tr>
+            <th>${esc(t('ipban_svc_col_service'))}</th>
+            <th>${esc(t('ipban_svc_col_ports'))}</th>
+            <th style="min-width:14rem">${esc(t('ipban_col_response'))}</th>
+        </tr></thead><tbody id="ipbanSvcRows">
+            <tr><td colspan="3" class="text-muted text-center py-3">…</td></tr>
+        </tbody></table></div>
+        ${cfgCardClose}`;
+    setTimeout(() => { if (document.getElementById('ipbanSvcRows')) _ipbanSvcLoad(); }, 0);
+    return h;
+}
+
+/** Format a service's endpoints, e.g. "udp:514, tcp:514, tcp:6514 (TLS)". */
+function _ipbanSvcPorts(eps) {
+    if (!eps || !eps.length) return '<span class="text-muted">—</span>';
+    return eps.map(e => `<code>${esc((e.proto || '') + ':' + e.port)}</code>${e.tls ? ' (TLS)' : ''}`).join(', ');
+}
+
+async function _ipbanSvcLoad() {
+    const r = await apiGet('/api/v1/ipbans/services');
+    const svcs = (r && r.services) || [];
+    const tb = document.getElementById('ipbanSvcRows');
+    if (!tb) return;
+    if (!svcs.length) {
+        tb.innerHTML = `<tr><td colspan="3" class="text-muted text-center py-3">${esc(t('ipban_svc_none'))}</td></tr>`;
+        return;
+    }
+    const acts = (typeof I18N !== 'undefined' && I18N.ipban_actions) || {};
+    tb.innerHTML = svcs.map(s => {
+        const name = t(s.label_key) !== s.label_key ? t(s.label_key) : s.id;
+        const supports = s.supports || [];
+        // Always a listbox limited to the service's supported actions (a single-option
+        // service like syslog just shows that one). A ≥2-option service also offers
+        // "Service default" (no explicit override).
+        const opt = (v, lbl) => `<option value="${escAttr(v)}"${s.action === v ? ' selected' : ''}>${esc(lbl)}</option>`;
+        let opts = supports.length > 1
+            ? opt('', t('ipban_action_default') + ' — ' + (acts[s.default] || s.default)) : '';
+        for (const a of supports) opts += opt(a, acts[a] || a);
+        const control = `<select class="form-select form-select-sm"${supports.length <= 1 ? ' disabled' : ''}
+            onchange="_ipbanSvcSetAction(${jsStr(s.id)},this.value)">${opts}</select>`;
+        return `<tr>
+            <td><i class="bi bi-hdd-network me-1 text-muted"></i>${esc(name)}</td>
+            <td>${_ipbanSvcPorts(s.endpoints)}</td>
+            <td>${control}</td>
+        </tr>`;
+    }).join('');
+}
+
+async function _ipbanSvcSetAction(service, action) {
+    const r = await apiPost('/api/v1/ipbans/services/action', { service: service, action: action });
+    if (!(r && r.status === 200 && r.data && r.data.ok)) {
+        showToast((r && r.data && r.data.error) || t('error'), 'danger');
+        _ipbanSvcLoad();
+    }
+}

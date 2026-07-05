@@ -120,6 +120,8 @@ def admin(config_dir, var_dir):
     """WebAdmin instance with testing config (users are stored in the DB)."""
     wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                   pw_require_upper=False, pw_require_digit=False)
+    wa._csrf_enabled = False   # CSRF is exercised by dedicated tests; off elsewhere
+                               # so the many form/JSON POSTs need no token plumbing.
     # Editable config lives in the DB (single source) — seed the sample there.
     _seed_editable_config(wa, config_dir)
     # Module config lives in the DB — seed the sample.
@@ -141,9 +143,15 @@ def client(admin):
 
 
 def _login(client, username="admin", password="secret"):
-    """Helper — POST to /login and follow redirects."""
-    return client.post(
-        "/login",
-        data={"username": username, "password": password},
-        follow_redirects=True,
-    )
+    """Helper — POST to /login and follow redirects.
+
+    CSRF-aware: GETs /login first to seed the session CSRF token and includes it, so it
+    works whether the instance has CSRF enabled (default) or disabled (the `admin`
+    fixture)."""
+    client.get("/login")
+    with client.session_transaction() as s:
+        tok = s.get("_csrf")
+    data = {"username": username, "password": password}
+    if tok:
+        data["csrf_token"] = tok
+    return client.post("/login", data=data, follow_redirects=True)

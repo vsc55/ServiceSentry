@@ -41,75 +41,82 @@ TABS: tuple[dict, ...] = (
     {'id': 'notifs',     'label_key': 'cfg_tab_notifications', 'icon': 'bi-bell'},
     {'id': 'syslog',     'label_key': 'cfg_tab_syslog',        'icon': 'bi-hdd-stack'},
     {'id': 'auth',       'label_key': 'cfg_tab_auth',          'icon': 'bi-person-lock'},
+    {'id': 'ipban',      'label_key': 'cfg_tab_ipban',         'icon': 'bi-slash-circle'},
     {'id': 'interface',  'label_key': 'cfg_tab_interface',     'icon': 'bi-layout-wtf'},
 )
 
 
-# ── Cards (order within a tab = declaration order) ───────────────────────────
-# 'fields' → generic (rendered from the schema); 'renderer' → a bespoke card.
+# ── Card registry (categories) ──────────────────────────────────────────────
+# Each card is METADATA only: its tab, title (title_key or section-label) and
+# icon.  A GENERIC card's ``fields`` are DERIVED from the schema — every option
+# whose ``Cfg.card`` equals this id, in registry order — so a field's category is
+# declared once, on the option itself (spec.py).  A card with ``renderer`` is
+# bespoke: the frontend draws it with a named function and owns its own fields.
+# Order within a tab = declaration order.
 CARDS: tuple[dict, ...] = (
     # ══ General ═════════════════════════════════════════════════════════════
-    {'tab': 'general', 'id': 'global', 'section': 'global', 'icon': 'bi-gear',
-     'fields': ['global|log_level']},
-    # web_admin "Web Panel": the core web_admin fields NOT split into the other
-    # cards below (rendered exclude-based, so username/password/host are included
-    # exactly as before) — a bespoke card.
-    {'tab': 'general', 'id': 'web_admin', 'section': 'web_admin', 'icon': 'bi-gear',
-     'renderer': 'web_panel'},
-    {'tab': 'general', 'id': 'database', 'section': 'database', 'icon': 'bi-database',
+    {'tab': 'general', 'id': 'global',    'section': 'global',    'icon': 'bi-gear'},
+    # (web_admin username/password are first-run bootstrap credentials read in main.py,
+    #  managed post-setup in the Users UI — not config-UI fields, so no card here.)
+    # External Access = server networking (port / reverse-proxy / public URL / HTTPS /
+    # cookie-Secure) — a server concern, so it lives in General next to the web panel,
+    # not in the Interface (UI presentation) tab.
+    {'tab': 'general', 'id': 'proxy',     'title_key': 'proxy_section', 'icon': 'bi-diagram-3'},
+    {'tab': 'general', 'id': 'database',  'section': 'database',  'icon': 'bi-database',
      'renderer': 'database'},
-    {'tab': 'general', 'id': 'users', 'section': 'users', 'icon': 'bi-gear',
-     'fields': ['users|default_role']},
-    {'tab': 'general', 'id': 'groups', 'section': 'groups', 'icon': 'bi-gear',
-     'fields': ['groups|default_role']},
 
     # ══ Monitoring ══════════════════════════════════════════════════════════
-    {'tab': 'monitoring', 'id': 'monitoring', 'section': 'monitoring', 'icon': 'bi-activity',
-     'fields': ['monitoring|enabled', 'monitoring|autostart', 'monitoring|timer_check']},
-    {'tab': 'monitoring', 'id': 'modules', 'section': 'modules', 'icon': 'bi-grid-3x3-gap-fill',
-     'fields': ['modules|threads', 'modules|timeout']},
+    {'tab': 'monitoring', 'id': 'monitoring', 'section': 'monitoring', 'icon': 'bi-activity'},
+    {'tab': 'monitoring', 'id': 'modules',    'section': 'modules',    'icon': 'bi-grid-3x3-gap-fill'},
 
     # ══ Notifications (bespoke: Routing / Providers / Templates sub-tabs) ════
     {'tab': 'notifs', 'id': 'notifications', 'renderer': 'notifications'},
 
     # ══ Syslog ══════════════════════════════════════════════════════════════
-    {'tab': 'syslog', 'id': 'syslog_conn', 'title_key': 'syslog_sec_connection', 'icon': 'bi-ethernet',
-     'fields': ['syslog|enabled', 'syslog|autostart', 'syslog|bind_host',
-                'syslog|udp_port', 'syslog|tcp_port', 'syslog|tls_port']},
-    {'tab': 'syslog', 'id': 'syslog_security', 'title_key': 'syslog_sec_security', 'icon': 'bi-shield-lock',
-     'fields': ['syslog|tls_cert', 'syslog|tls_key', 'syslog|allowed_sources']},
-    {'tab': 'syslog', 'id': 'syslog_retention', 'title_key': 'syslog_sec_retention', 'icon': 'bi-archive',
-     'fields': ['syslog|retention_days', 'syslog|max_rows']},
+    {'tab': 'syslog', 'id': 'syslog_conn',      'title_key': 'syslog_sec_connection', 'icon': 'bi-ethernet'},
+    {'tab': 'syslog', 'id': 'syslog_security',  'title_key': 'syslog_sec_security',   'icon': 'bi-shield-lock'},
+    {'tab': 'syslog', 'id': 'syslog_retention', 'title_key': 'syslog_sec_retention',  'icon': 'bi-archive'},
     {'tab': 'syslog', 'id': 'syslog_db', 'section': 'syslog_db', 'icon': 'bi-database-gear',
      'renderer': 'syslog_db'},
 
     # ══ Authentication ══════════════════════════════════════════════════════
-    {'tab': 'auth', 'id': 'pw_policy', 'title_key': 'pw_policy_section', 'icon': 'bi-shield-lock',
-     'fields': ['web_admin|pw_min_len', 'web_admin|pw_max_len', 'web_admin|pw_require_upper',
-                'web_admin|pw_require_digit', 'web_admin|pw_require_symbol']},
-    {'tab': 'auth', 'id': 'login_security', 'title_key': 'login_security_section', 'icon': 'bi-shield-exclamation',
-     'fields': ['web_admin|lockout_max_attempts', 'web_admin|lockout_duration_secs']},
-    {'tab': 'auth', 'id': 'ldap', 'section': 'ldap', 'icon': 'bi-person-badge', 'renderer': 'auth'},
-    {'tab': 'auth', 'id': 'oidc', 'section': 'oidc', 'icon': 'bi-box-arrow-in-right', 'renderer': 'auth'},
-    {'tab': 'auth', 'id': 'saml2', 'section': 'saml2', 'icon': 'bi-shield-check', 'renderer': 'auth'},
-    {'tab': 'auth', 'id': 'scim', 'section': 'scim', 'title_key': 'scim_section', 'icon': 'bi-arrow-down-up',
-     'fields': ['scim|enabled', 'scim|token', 'scim|default_role', 'scim|auto_disable']},
+    {'tab': 'auth', 'id': 'pw_policy',      'title_key': 'pw_policy_section',      'icon': 'bi-shield-lock'},
+    {'tab': 'auth', 'id': 'login_security', 'title_key': 'login_security_section', 'icon': 'bi-shield-exclamation'},
+    # Default roles assigned to newly-created users / groups (authorization concern).
+    {'tab': 'auth', 'id': 'default_roles', 'title_key': 'default_roles_section', 'icon': 'bi-person-check'},
+    {'tab': 'auth', 'id': 'ldap',  'section': 'ldap',  'icon': 'bi-person-badge',       'renderer': 'auth'},
+    {'tab': 'auth', 'id': 'oidc',  'section': 'oidc',  'icon': 'bi-box-arrow-in-right', 'renderer': 'auth'},
+    {'tab': 'auth', 'id': 'saml2', 'section': 'saml2', 'icon': 'bi-shield-check',       'renderer': 'auth'},
+    {'tab': 'auth', 'id': 'scim',  'section': 'scim',  'title_key': 'scim_section',
+     'icon': 'bi-arrow-down-up', 'renderer': 'scim'},   # incl. the SCIM limits subsection
 
-    # ══ Interface & web deployment ══════════════════════════════════════════
-    {'tab': 'interface', 'id': 'proxy', 'title_key': 'proxy_section', 'icon': 'bi-diagram-3',
-     'fields': ['web_admin|port', 'web_admin|proxy_count', 'web_admin|public_url',
-                'web_admin|force_https', 'web_admin|force_fqdn']},
-    {'tab': 'interface', 'id': 'pub_status', 'title_key': 'public_status_section', 'icon': 'bi-globe',
+    # ══ fail2ban (Config) ═══════════════════════════════════════════════════
+    # Configuration lives here: the SETTINGS (thresholds/durations) and the EXPOSED
+    # SERVICES card (per-service default block action — a service-config concern, not
+    # live operations). The operational surface (banned IPs, watchlist, history,
+    # whitelist) lives in the top-level 'fail2ban' section (#tab-ipban / renderFail2ban).
+    {'tab': 'ipban', 'id': 'ipban', 'title_key': 'ipban_section', 'icon': 'bi-slash-circle'},
+    {'tab': 'ipban', 'id': 'ipban_services', 'title_key': 'ipban_svc_title',
+     'icon': 'bi-hdd-network', 'renderer': 'ipban_services'},
+
+    # ══ Interface (UI presentation) ═════════════════════════════════════════
+    {'tab': 'interface', 'id': 'pub_status',  'title_key': 'public_status_section', 'icon': 'bi-globe',
      'renderer': 'pub_status'},
-    {'tab': 'interface', 'id': 'audit', 'title_key': 'tab_audit', 'icon': 'bi-journal-text',
+    {'tab': 'interface', 'id': 'audit',       'title_key': 'tab_audit',             'icon': 'bi-journal-text',
      'renderer': 'audit'},
-    {'tab': 'interface', 'id': 'tables', 'title_key': 'tables_section', 'icon': 'bi-table',
+    {'tab': 'interface', 'id': 'tables',      'title_key': 'tables_section',        'icon': 'bi-table',
      'renderer': 'tables'},
-    {'tab': 'interface', 'id': 'live_update', 'title_key': 'live_update_section', 'icon': 'bi-arrow-repeat',
-     'renderer': 'live_update'},
-    {'tab': 'interface', 'id': 'advanced', 'title_key': 'cfg_advanced_section', 'icon': 'bi-tools',
+    {'tab': 'interface', 'id': 'live_update', 'title_key': 'live_update_section',   'icon': 'bi-arrow-repeat',
+     'renderer': 'live_update'},   # bespoke: force_reload_secs is conditionally shown
+    {'tab': 'interface', 'id': 'advanced',    'title_key': 'cfg_advanced_section',  'icon': 'bi-tools',
      'renderer': 'advanced'},
 )
+
+
+def _fields_for_card(card_id: str) -> list[str]:
+    """The option paths assigned to *card_id* (``Cfg.card``), in registry order."""
+    from lib.config.spec import CONFIG_FIELDS  # local import: keep module import-light
+    return [f.path for f in CONFIG_FIELDS if f.card == card_id]
 
 
 def config_layout() -> dict:
@@ -117,9 +124,13 @@ def config_layout() -> dict:
 
     Pure structure — the browser resolves ``label_key`` / ``title_key`` /
     ``section`` labels via i18n and each field's control via the schema
-    (``cfg_meta``).  Returned verbatim from the registry so the UI can never
-    drift from this single source of truth."""
-    return {
-        'tabs': [dict(t) for t in TABS],
-        'cards': [dict(c) for c in CARDS],
-    }
+    (``cfg_meta``).  A generic card gets its ``fields`` DERIVED from the schema
+    (options with a matching ``Cfg.card``); a ``renderer`` card is drawn by a
+    named frontend function.  Single source of truth: the UI can never drift."""
+    cards = []
+    for c in CARDS:
+        d = dict(c)
+        if 'renderer' not in d:
+            d['fields'] = _fields_for_card(d['id'])
+        cards.append(d)
+    return {'tabs': [dict(t) for t in TABS], 'cards': cards}

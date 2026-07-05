@@ -90,6 +90,10 @@ class _SyslogMixin:
                     pass
                 self._syslog_server = None
             cfg = self._syslog_cfg()
+            # Declare the service to the fail2ban registry from CONFIG (its ports),
+            # regardless of whether THIS process binds the listener — so the exposed
+            # surface is visible even when a dedicated container owns the ports.
+            self._register_syslog_service(cfg)
             if not cfg.get('enabled'):
                 self._dbg('> Syslog >> disabled in config; listener not started',
                           DebugLevel.warning)
@@ -102,6 +106,11 @@ class _SyslogMixin:
                 return []
             self._dbg(f'> Syslog >> starting listener: {self._config_summary(cfg)}',
                       DebugLevel.info)
+            # Wire the shared internal fail2ban when the host provides it (the web
+            # admin does; the standalone receiver may not) — a jailed IP is dropped
+            # before parsing, and repeated allowlist violations report offenses so a
+            # noisy source gets jailed for every service, not just syslog.
+            _ipban = getattr(self, '_ipban', None)
             srv = build_server(
                 cfg, sink=self._syslog_store.add_many,
                 # No per-message hook: rule evaluation is decoupled — the event
@@ -109,7 +118,9 @@ class _SyslogMixin:
                 # blocks the listener on a slow notification channel.
                 dbg=lambda m: self._dbg(m, DebugLevel.info),
                 dbg_warn=lambda m: self._dbg(m, DebugLevel.warning),
-                on_drop=self._syslog_record_drop)
+                on_drop=self._syslog_record_drop,
+                is_banned=(_ipban.is_banned_flag if _ipban is not None else None),
+                on_offense=(_ipban.register_offense if _ipban is not None else None))
             problems = srv.start()
             for p in problems:
                 self._dbg(f'> Syslog >> bind problem: {p}', DebugLevel.error)
@@ -120,6 +131,36 @@ class _SyslogMixin:
                           DebugLevel.error)
             self._syslog_server = srv
             return problems
+
+    def _register_syslog_service(self, cfg: dict) -> None:
+        """Declare syslog to the fail2ban service registry (its bound ports + the only
+        block action a connectionless/log receiver can do: drop). No-op if the host has
+        no registry (e.g. the standalone receiver without a web admin)."""
+        reg = getattr(self, '_ipban_services', None)
+        if reg is None:
+            return
+        if not cfg.get('enabled'):
+            reg.unregister('syslog')       # disabled → drop it from the exposed surface
+            return
+        # TLS is only really exposed when a cert + key back it (a bare tls_port, e.g.
+        # the 6514 default, doesn't bind) — so only advertise it then.
+        _tls_ready = bool(str(cfg.get('tls_cert') or '') and str(cfg.get('tls_key') or ''))
+        endpoints = []
+        for key, proto, tls in (('udp_port', 'udp', False), ('tcp_port', 'tcp', False),
+                                ('tls_port', 'tcp', True)):
+            if tls and not _tls_ready:
+                continue
+            try:
+                port = int(cfg.get(key) or 0)
+            except (TypeError, ValueError):
+                port = 0
+            if port:
+                ep = {'port': port, 'proto': proto}
+                if tls:
+                    ep['tls'] = True
+                endpoints.append(ep)
+        reg.register(id='syslog', label_key='ipban_svc_syslog',
+                     supports=('drop',), default='drop', endpoints=endpoints)
 
     # ── allowlist-drop tally + retention ────────────────────────────────────────
     def _syslog_record_drop(self, source: str, transport: str, delta: int) -> None:

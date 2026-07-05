@@ -48,6 +48,10 @@
             </div>
             <div class="modal-body">
                 <p class="mb-0" id="confirmModalMsg"></p>
+                <div id="confirmModalReasonWrap" class="mt-2" style="display:none">
+                    <input id="confirmModalReason" class="form-control form-control-sm" autocomplete="off">
+                    <div id="confirmModalReasonErr" class="small text-danger mt-1" style="display:none">{{ i18n.reason_required }}</div>
+                </div>
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>

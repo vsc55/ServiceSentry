@@ -154,6 +154,79 @@ function _colChooserToggle(ev, fnName, colId) {
     }
 }
 
+// ── Generic, schema-driven filter bar ───────────────────────────────────────
+// One reusable filter-bar component for any table (Ban history, Syslog, …). A
+// caller declares a schema and the three helpers build/read/clear it, so the
+// input ids and DOM plumbing live in one place instead of being hand-written.
+//
+// Two integration styles:
+//  • Simple (Ban history): give schema.onChange + values + rely on readFilterBar/
+//    clearFilterBar — the bar reads/writes raw string values for you.
+//  • Custom wiring (Syslog): omit schema.onChange and wire each control by id after
+//    render (needed when values are transformed — ts↔local, arrays — or selects are
+//    filled asynchronously from facets). Use explicit field.id to keep legacy ids.
+//
+//   schema = {
+//     idPrefix : 'ipbanHistF',            // input id = field.id || idPrefix + Cap(key)
+//     onChange : '_fnName',               // (optional) global fn on every input/change;
+//                                         //   omit to wire handlers imperatively by id
+//     onClear  : '_fnName',               // (optional) global fn behind the clear button
+//     clearLabel : () => t('clear_filters'),   // (optional) clear-button label
+//     values   : () => ({key: val, …}),   // (optional) object or fn — seeds input values
+//     footerHtml : () => '<div …>',       // (optional) extra markup below the field row
+//     fields   : [{ key, id?, label:()=>str, type, minWidth?, width?, min?, grow?,
+//                   placeholder?:()=>str, options?: ()=>[{value,label}] }]
+//   }   // type: search|text|number|datetime-local|date|select
+const _filterFieldId = (schema, f) => f.id || (schema.idPrefix + f.key.charAt(0).toUpperCase() + f.key.slice(1));
+
+function buildFilterBar(schema) {
+    const vals = (typeof schema.values === 'function' ? schema.values() : schema.values) || {};
+    const fieldsHtml = schema.fields.map(f => {
+        const id  = _filterFieldId(schema, f);
+        const cur = vals[f.key] != null ? vals[f.key] : '';
+        const onChange = schema.onChange ? ` onchange="${schema.onChange}()"` : '';
+        const onInput  = schema.onChange ? ` oninput="${schema.onChange}()"` : '';
+        let control;
+        if (f.type === 'select') {
+            const opts = (typeof f.options === 'function' ? f.options() : f.options) || [];
+            control = `<select id="${id}" class="form-select form-select-sm"${f.minWidth ? ` style="min-width:${f.minWidth}"` : ''}${onChange}>
+                ${opts.map(o => `<option value="${escAttr(o.value)}"${String(cur) === String(o.value) ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
+        } else {
+            const style = f.width ? `width:${f.width}` : (f.minWidth ? `min-width:${f.minWidth}` : '');
+            const min = (f.type === 'number' && f.min != null) ? ` min="${f.min}"` : '';
+            const ph  = f.placeholder ? ` placeholder="${escAttr(f.placeholder())}"` : '';
+            control = `<input id="${id}" type="${f.type || 'search'}" class="form-control form-control-sm"${style ? ` style="${style}"` : ''}${min}${ph}
+                value="${escAttr(cur)}"${onInput}>`;
+        }
+        return `<div class="${f.grow ? 'flex-grow-1' : ''}"><label class="form-label small mb-1">${esc(f.label())}</label>${control}</div>`;
+    }).join('');
+    const clearBtn = schema.onClear
+        ? `<button class="btn btn-secondary btn-sm" onclick="${schema.onClear}()"><i class="bi bi-funnel me-1"></i>${esc(schema.clearLabel ? schema.clearLabel() : t('clear_filters'))}</button>`
+        : '';
+    return `<div class="ss-card mb-3"><div class="card-body py-2 px-3">
+        <div class="d-flex flex-wrap align-items-end gap-2">${fieldsHtml}${clearBtn}</div>
+        ${schema.footerHtml ? schema.footerHtml() : ''}
+    </div></div>`;
+}
+
+/** Read every field's current value from the DOM into a {key: value} object. */
+function readFilterBar(schema) {
+    const out = {};
+    for (const f of schema.fields) {
+        const el = document.getElementById(_filterFieldId(schema, f));
+        out[f.key] = el ? el.value : '';
+    }
+    return out;
+}
+
+/** Blank every field's input (leaves the caller to update its own state). */
+function clearFilterBar(schema) {
+    for (const f of schema.fields) {
+        const el = document.getElementById(_filterFieldId(schema, f));
+        if (el) el.value = '';
+    }
+}
+
 /** Bulk enable/disable over a selection of access-management entities.
  *  Confirms, then PUTs each item and flips its cached `enabled` flag.
  *  opts: { data, filter?(name)->bool, path(name)->url,

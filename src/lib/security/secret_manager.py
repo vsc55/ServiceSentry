@@ -27,6 +27,7 @@ ENCRYPT_KEYS: frozenset[str] = frozenset({
     'bind_password',        # LDAP service-account password
     'client_secret',        # OIDC client secret
     'sp_key',               # SAML2 SP private key
+    'idp_cert',             # SAML2 IdP signing certificate (masked from the UI once set)
     'smtp_password',        # Email SMTP password
     'ms365_client_secret',  # Email Microsoft 365 client secret
     'gmail_client_secret',  # Email Gmail client secret

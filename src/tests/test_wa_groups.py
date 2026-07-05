@@ -194,7 +194,7 @@ class TestGroups:
         _login(client)
         client.post("/api/v1/roles", json={"name": "no_grp_add", "label": "No Group Add", "permissions": ["users_view"]})
         client.post("/api/v1/users", json={"username": "no_grp_user", "password": "testpass", "role": "no_grp_add"})
-        client.get("/logout")
+        client.post("/logout")
         _login(client, "no_grp_user", "testpass")
         resp = client.post("/api/v1/groups", json={"name": "Forbidden", "roles": []})
         assert resp.status_code == 403
@@ -204,7 +204,7 @@ class TestGroups:
         grp_uid = _create_group(client, "Protected", roles=[])
         client.post("/api/v1/roles", json={"name": "no_grp_del", "label": "No Group Del", "permissions": ["groups_view"]})
         client.post("/api/v1/users", json={"username": "no_del_user", "password": "testpass", "role": "no_grp_del"})
-        client.get("/logout")
+        client.post("/logout")
         _login(client, "no_del_user", "testpass")
         resp = client.delete(f"/api/v1/groups/{grp_uid}")
         assert resp.status_code == 403
@@ -289,7 +289,7 @@ class TestGroupPermissions:
             "username": "viewer_in_grp", "password": "testpass", "role": "viewer",
             "groups": [grp_uid],
         })
-        client.get("/logout")
+        client.post("/logout")
         _login(client, "viewer_in_grp", "testpass")
         me = client.get("/api/v1/me").get_json()
         assert "modules_edit" in me["permissions"]
@@ -315,7 +315,7 @@ class TestGroupPermissions:
             "username": "multi_grp_user", "password": "testpass", "role": "minimal_role",
             "groups": [uid_a, uid_b],
         })
-        client.get("/logout")
+        client.post("/logout")
         _login(client, "multi_grp_user", "testpass")
         perms = set(client.get("/api/v1/me").get_json()["permissions"])
         assert "modules_edit" in perms
@@ -329,7 +329,7 @@ class TestGroupPermissions:
             "username": "editor_in_grp", "password": "testpass", "role": "editor",
             "groups": [grp_uid],
         })
-        client.get("/logout")
+        client.post("/logout")
         _login(client, "editor_in_grp", "testpass")
         perms = set(client.get("/api/v1/me").get_json()["permissions"])
         assert "modules_edit" in perms
@@ -365,7 +365,7 @@ class TestGroupPermissions:
         _login(client)
         client.post("/api/v1/roles", json={"name": "grp_viewer_role", "label": "GV", "permissions": ["groups_view"]})
         client.post("/api/v1/users", json={"username": "grp_viewer", "password": "testpass", "role": "grp_viewer_role"})
-        client.get("/logout")
+        client.post("/logout")
         _login(client, "grp_viewer", "testpass")
         resp = client.get("/api/v1/groups")
         assert resp.status_code == 200
@@ -375,7 +375,7 @@ class TestGroupPermissions:
         grp_uid = _create_group(client, "EditTarget", roles=[])
         client.post("/api/v1/roles", json={"name": "grp_editor_role", "label": "GE", "permissions": ["groups_edit"]})
         client.post("/api/v1/users", json={"username": "grp_editor", "password": "testpass", "role": "grp_editor_role"})
-        client.get("/logout")
+        client.post("/logout")
         _login(client, "grp_editor", "testpass")
         resp = client.put(f"/api/v1/groups/{grp_uid}", json={"name": "Updated"})
         assert resp.status_code == 200

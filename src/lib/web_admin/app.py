@@ -11,17 +11,17 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from flask import (Flask, g, has_request_context, jsonify, redirect, request,
-                   session, url_for)
+from flask import (Flask, flash, g, has_request_context, jsonify,
+                   redirect, request, session, url_for)
 from jinja2 import ChoiceLoader, FileSystemLoader
 
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib.config import CONFIG_FILENAME
 from lib.debug import DebugLevel
 from lib.core.object_base import ObjectBase
-from lib.security import secret_manager
+from lib.security import csrf as _csrf, secret_manager
+from lib.security.headers import apply_security_headers
 from .constants import (
     DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang,
     PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
@@ -57,7 +57,8 @@ def _cfg_default(path: str):
     return CFG_BY_PATH[path].default
 from .mixins import (
     _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-    _SessionsMixin, _AuditMixin, _ChecksMixin, _ServicesMixin,
+    _SessionsMixin, _AuditMixin, _AuthMixin, _ChecksMixin, _ServicesMixin,
+    _IpBanMixin,
 )
 
 __all__ = ['WebAdmin']
@@ -68,7 +69,8 @@ __all__ = ['WebAdmin']
 # built in __init__ and exposed via ``self._embedded_services``.  _ServicesMixin
 # discovers + controls them.
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-               _SessionsMixin, _AuditMixin, _ChecksMixin, _ServicesMixin):
+               _SessionsMixin, _AuditMixin, _AuthMixin, _ChecksMixin, _ServicesMixin,
+               _IpBanMixin):
     """Web administration server for ServiceSentry configuration.
 
     Provides a browser-based UI for editing the configuration and managing
@@ -115,6 +117,15 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _LOCKOUT_DURATION_SECS = _cfg_default('web_admin|lockout_duration_secs')  # 15 min
     # Session timers
     _SESSION_CHECK_SECS = _cfg_default('web_admin|session_check_secs')
+    _SESSION_IDLE_MINUTES = _cfg_default('web_admin|session_idle_minutes')
+    # Brute-force rate limits (per IP)
+    _LOGIN_RL_MAX = _cfg_default('web_admin|login_ratelimit_max')
+    _LOGIN_RL_WINDOW = _cfg_default('web_admin|login_ratelimit_window_secs')
+    _SCIM_RL_MAX = _cfg_default('web_admin|scim_ratelimit_max')
+    _SCIM_RL_WINDOW = _cfg_default('web_admin|scim_ratelimit_window_secs')
+    _SCIM_MIN_TOKEN_LEN = _cfg_default('web_admin|scim_min_token_len')
+    _SCIM_MAX_MEMBERS = _cfg_default('web_admin|scim_max_members')
+    # Internal fail2ban (_IPBAN_* defaults + all wiring live in _IpBanMixin)
     _SESSION_REVOKE_REDIRECT_SECS = _cfg_default('web_admin|session_revoke_redirect_secs')
     _ACCESS_POLL_SECS = _cfg_default('web_admin|access_poll_secs')
     # OIDC client lazy-init state
@@ -241,6 +252,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._apply_log_level()    # honour global|log_level for web_admin debug output
         self._init_audit_store()   # after apply_saved_config so _AUDIT_MAX_ENTRIES is final
         self._apply_env_overrides()
+        self._configure_ipban()    # re-apply after env overrides (e.g. SS_IPBAN_WHITELIST)
         self._app = self._create_app()
 
         # Forward file-write errors (e.g. status.json race on Windows) to the
@@ -349,56 +361,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             return f(*args, **kwargs)
         return wrapper
 
-    def _authenticate(self, username: str, password: str) -> tuple[dict | None, str | None]:
-        """Return ``(user, None)`` on success or ``(None, reason)`` on failure.
-
-        Reasons: ``'user_not_found'``, ``'account_disabled'``,
-        ``'account_locked'``, ``'invalid_credentials'``.
-        """
-        user = self._users.get(username)
-        if not user:
-            # Equalise timing with the real-user path so a missing username
-            # cannot be distinguished from a wrong password by response time.
-            decoy = getattr(self, '_decoy_pw_hash', None)
-            if decoy is None:
-                decoy = self._decoy_pw_hash = generate_password_hash('decoy-not-a-real-password')
-            check_password_hash(decoy, password)
-            return None, 'user_not_found'
-        if not user.get('enabled', True):
-            return None, 'account_disabled'
-
-        # Check active lockout
-        locked_until_str = user.get('_locked_until')
-        if locked_until_str:
-            locked_until = datetime.fromisoformat(locked_until_str)
-            now = datetime.now(timezone.utc)
-            if now < locked_until:
-                return None, 'account_locked'
-            # Lockout expired — clear it
-            user.pop('_locked_until', None)
-            user.pop('_failed_attempts', None)
-            self._persist_users()
-
-        if not check_password_hash(user['password_hash'], password):
-            max_attempts = self._LOCKOUT_MAX_ATTEMPTS
-            if max_attempts > 0:
-                attempts = user.get('_failed_attempts', 0) + 1
-                user['_failed_attempts'] = attempts
-                if attempts >= max_attempts:
-                    locked_until = datetime.now(timezone.utc) + timedelta(seconds=self._LOCKOUT_DURATION_SECS)
-                    user['_locked_until'] = locked_until.isoformat()
-                    self._persist_users()
-                    self._dbg(f"> Auth/Local >> account {username!r} locked after "
-                              f"{attempts} failed attempts", DebugLevel.warning)
-                    return None, 'account_locked'
-                self._persist_users()
-            return None, 'invalid_credentials'
-
-        # Success — clear any lockout state
-        if user.pop('_failed_attempts', None) is not None or user.pop('_locked_until', None) is not None:
-            self._persist_users()
-        return user, None
-
     @staticmethod
     def _safe_referrer(fallback: str = 'login') -> str:
         """Return the Referer URL only when it belongs to the same origin.
@@ -481,6 +443,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._groups_store   = GroupsStore(self._db_connector)
         self._sessions_store = SessionsStore(self._db_connector)
         self._roles_store    = RolesStore(self._db_connector)
+        # Internal fail2ban — the jail + its persistent store live on the shared
+        # connector so every in-process service (web + syslog) enforces one ban list.
+        # Internal fail2ban: shared, store-backed jail manager (persistent + consistent
+        # across processes). Wiring lives in _IpBanMixin.
+        self._init_ipban()
         # Host registry — connection profiles defined once, reused by modules.
         from lib.stores.hosts import HostsStore  # noqa: PLC0415
         self._hosts_store = HostsStore(
@@ -672,6 +639,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Public URL for external links and notifications (stored without scheme)
         if 'public_url' in wa_cfg and isinstance(wa_cfg['public_url'], str):
             self._public_url = normalize_url(wa_cfg['public_url'])
+        # fail2ban string fields + push into the live manager (wiring in _IpBanMixin).
+        self._apply_ipban_config(wa_cfg)
 
     @staticmethod
     def _parse_env_var(raw: str, cast: type) -> tuple:
@@ -762,6 +731,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 self._secure_cookies = bool(value)
             elif field == 'public_url':
                 self._public_url = normalize_url(value)
+            else:
+                # Generic fallback: any other web_admin env field with a registry attr
+                # (e.g. ipban_whitelist → _IPBAN_WHITELIST, ipban_enabled) is applied
+                # straight to that attr, so new env-overridable options need no case here.
+                from lib.config.spec import CFG_BY_PATH  # noqa: PLC0415
+                _cfg = CFG_BY_PATH.get(path)
+                if _cfg is not None and _cfg.attr:
+                    setattr(self, _cfg.attr, value)
 
         self._env_locked = frozenset(locked)
         self._env_override_values = overrides
@@ -825,7 +802,17 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         )
         app.config['SESSION_COOKIE_HTTPONLY'] = True
         app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-        app.config['SESSION_COOKIE_SECURE'] = self._secure_cookies
+        # Mark the session/remember-me cookie Secure only on an *explicit* HTTPS intent:
+        # `secure_cookies` (opt-in) or `force_https` (all traffic redirected to HTTPS).
+        # A bare `public_url` is NOT such a signal — it is just the canonical external URL
+        # for links/notifications and does not imply every request is HTTPS; forcing
+        # Secure from it would silently break login over plain HTTP (a Secure cookie is
+        # dropped by the browser on http://).
+        app.config['SESSION_COOKIE_SECURE'] = bool(
+            self._secure_cookies or self._force_https)
+        # Cap request bodies (JSON APIs + SCIM) so an oversized payload can't exhaust
+        # memory before parsing.
+        app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024   # 8 MiB
 
         if self._proxy_count > 0:
             app.wsgi_app = ProxyFix(
@@ -837,11 +824,63 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             )
 
         @app.before_request
+        def _ipban_gate():
+            # Internal fail2ban gate (must run first) — logic in _IpBanMixin.
+            return self._ipban_gate_response()
+
+        @app.before_request
         def _trace_request_start():
             g._req_start = time.perf_counter()
 
+        # CSRF (double-submit): state-changing requests must echo the session token in
+        # the X-CSRF-Token header (JSON APIs) or csrf_token field (form posts). Exempt:
+        # token-authenticated SCIM, and inbound IdP callbacks (cross-site by design,
+        # protected instead by SAML InResponseTo / OIDC state).
+        _csrf_exempt = ('/scim/', '/auth/saml2/acs', '/auth/oidc/callback')
+
+        @app.before_request
+        def _csrf_protect():
+            # Enabled in production; OFF under pytest (TESTING) so the many mutating
+            # requests in the suite need no token plumbing — unless a test opts in by
+            # setting wa._csrf_enabled = True (see test_wa_csrf.py). An explicit
+            # attribute (True/False) always wins.
+            enabled = getattr(self, '_csrf_enabled', None)
+            if enabled is None:
+                enabled = not app.config.get('TESTING', False)
+            if not enabled:
+                return None
+            if not _csrf.needs_check(request.method, request.path, _csrf_exempt):
+                return None
+            if not _csrf.is_valid(request, session):
+                # A CSRF failure with NO session cookie is the classic "Secure cookie
+                # over plain HTTP" symptom (the browser drops a Secure cookie on http://)
+                # — surface it clearly so it isn't mistaken for a bad password.
+                # Only on /login (not every bot POST): a CSRF failure with no cookies +
+                # Secure cookies on is the "Secure cookie dropped over HTTP" footgun,
+                # which otherwise looks like a silent login loop.
+                if (request.path == '/login' and not request.cookies
+                        and app.config.get('SESSION_COOKIE_SECURE')):
+                    self._dbg(
+                        f"> CSRF >> /login received no session cookie over {request.scheme} "
+                        f"while SESSION_COOKIE_SECURE is on — the browser drops a Secure "
+                        f"cookie on HTTP. Use HTTPS, or disable force_https/secure_cookies "
+                        f"for HTTP access.", DebugLevel.warning)
+                self._audit('csrf_failed', session.get('username', ''), request.remote_addr,
+                            detail={'path': request.path, 'method': request.method})
+                self._ipban_offense('csrf_failed')
+                if request.path.startswith('/api/') or request.is_json:
+                    return jsonify({'error': self._t('csrf_invalid')}), 403
+                flash(self._t('csrf_invalid'), 'danger')
+                return redirect(url_for('login'))
+            return None
+
         @app.after_request
         def _trace_request_end(response):
+            # Security headers (defense-in-depth; policy in lib.security.headers).
+            apply_security_headers(response)
+            # fail2ban: count a 401/403 as an offense for the client IP (logic in
+            # _IpBanMixin; skips gate blocks and requests that already counted).
+            self._ipban_capture(response)
             # Dynamic API responses must never be browser-cached: a stale GET
             # (e.g. /api/v1/users or /api/v1/me) would show an admin a user's
             # pre-clear table layout even after a full page reload, and would
@@ -939,6 +978,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_file_locked_fields': sorted(getattr(self, '_file_locked', frozenset())),
                 'wa_proxy_count': self._proxy_count,
                 'wa_public_url': self._public_url,
+                'csrf_token': self._csrf_token(),
                 # Effective base URL (config override → else proxy-aware auto-detect),
                 # injected so the JS never re-derives it. See public_base_url().
                 'wa_base_url': self.public_base_url(),
@@ -1064,6 +1104,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         pattern repeated across auth/email/webhook/notify modules.
         """
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
+
+    def _csrf_token(self) -> str:
+        """The per-session CSRF token (double-submit), injected into pages. Policy in
+        :mod:`lib.security.csrf`."""
+        return _csrf.issue_token(session)
 
     def public_base_url(self) -> str:
         """The effective public base URL (``scheme://host``, no trailing slash).

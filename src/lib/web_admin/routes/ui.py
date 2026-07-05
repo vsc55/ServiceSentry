@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """UI routes: / (dashboard), /api/v1/me, /api/v1/health, /lang."""
 
-from flask import jsonify, make_response, redirect, render_template, session
+from flask import jsonify, make_response, redirect, render_template, request, session
 
 from lib.modules import ModuleBase
 from lib.util import os_detect
@@ -30,12 +30,18 @@ def register(app, wa):
         if code in SUPPORTED_LANGS:
             old_lang = session.get('lang', wa._default_lang)
             session['lang'] = code
-            uname = session.get('username')
-            if uname and uname in wa._users:
-                wa._users[uname]['lang'] = code
-                wa._persist_users()
-            if old_lang != code:
-                wa._audit('language_changed', detail={'old': old_lang, 'new': code})
+            # Persist to the user profile + audit ONLY on a same-origin navigation. This
+            # GET carries no CSRF token, so a cross-site `<img src="/lang/xx">` must not
+            # silently rewrite the victim's stored preference nor spam the audit log
+            # (the session-only change is harmless and ephemeral). Header absent on older
+            # browsers → treated as same-origin, preserving the previous behaviour.
+            if request.headers.get('Sec-Fetch-Site') != 'cross-site':
+                uname = session.get('username')
+                if uname and uname in wa._users:
+                    wa._users[uname]['lang'] = code
+                    wa._persist_users()
+                if old_lang != code:
+                    wa._audit('language_changed', detail={'old': old_lang, 'new': code})
         return redirect(wa._safe_referrer('login'))
 
     @app.route('/')

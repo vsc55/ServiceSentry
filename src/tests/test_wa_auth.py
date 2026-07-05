@@ -83,7 +83,7 @@ class TestAuthentication:
 
     def test_logout(self, client):
         _login(client)
-        resp = client.get("/logout")
+        resp = client.post("/logout")
         assert resp.status_code == 302
         # After logout, dashboard must redirect to login
         resp2 = client.get("/")
@@ -222,6 +222,7 @@ class TestAccountLockout:
     def test_lockout_disabled_when_max_attempts_zero(self, admin, client):
         """With max_attempts=0 the account is never locked."""
         self._set_lockout(admin, max_attempts=0)
+        admin._LOGIN_RL_MAX = 0          # isolate: disable the orthogonal per-IP throttle
         for _ in range(20):
             _login(client, password="wrong")
         resp = _login(client, password="secret")
@@ -264,3 +265,22 @@ class TestAccountLockout:
             user, reason = admin._authenticate("nobody", "x")
             assert user is None
             assert reason == "user_not_found"
+
+    def test_authenticate_disabled_passwordless_no_error(self, admin):
+        """A disabled SSO/LDAP account (no password_hash) must not raise (regression:
+        the timing-parity decoy must be resolved safely, not via a missing attribute)."""
+        admin._users["ssodis"] = {"uid": "u-sso", "auth_source": "saml2", "enabled": False}
+        with admin.app.test_request_context():
+            user, reason = admin._authenticate("ssodis", "whatever")
+            assert user is None and reason == "account_disabled"
+
+    def test_authenticate_enabled_passwordless_no_error(self, admin):
+        """An ENABLED SSO/OIDC/SCIM account with no local password_hash must never
+        authenticate locally and must NOT raise (regression: the credential branch
+        used to index user['password_hash'] directly → KeyError/500 + an enumeration
+        channel; it now runs the timing decoy and returns invalid_credentials)."""
+        admin._LOCKOUT_MAX_ATTEMPTS = 0
+        admin._users["ssoact"] = {"uid": "u-act", "auth_source": "oidc", "enabled": True}
+        with admin.app.test_request_context():
+            user, reason = admin._authenticate("ssoact", "any-password")
+            assert user is None and reason == "invalid_credentials"

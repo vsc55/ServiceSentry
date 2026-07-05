@@ -20,7 +20,7 @@ class _AuditMixin:
     # (see _sensitive_fields()), keeping the core free of module specifics.
     _SENSITIVE_FIELDS = frozenset({
         'password', 'password_hash', 'token', 'secret', 'key_file',
-        'bind_password', 'client_secret', 'graph_secret', 'sp_key',
+        'bind_password', 'client_secret', 'graph_secret', 'sp_key', 'idp_cert',
         'smtp_password', 'ms365_client_secret',
         'gmail_client_secret', 'gmail_refresh_token',
     })

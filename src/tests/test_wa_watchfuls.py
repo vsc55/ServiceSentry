@@ -355,7 +355,7 @@ class TestApiWatchfulActionAuthorization:
         client.post("/api/v1/users", json={
             "username": "viewer1", "password": "viewerpw", "role": "viewer",
         })
-        client.get("/logout")
+        client.post("/logout")
         client.post("/login", data={"username": "viewer1", "password": "viewerpw"})
 
     def test_viewer_cannot_run_write_action(self, client_with_modules):

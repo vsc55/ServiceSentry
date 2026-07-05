@@ -37,9 +37,13 @@ _DROPS_MAX = 500              # cap distinct dropped sources tracked in memory
 
 
 def build_server(cfg: dict, *, sink, on_message=None, dbg=None,
-                 dbg_warn=None, on_drop=None) -> 'SyslogServer':
+                 dbg_warn=None, on_drop=None, is_banned=None, on_offense=None) -> 'SyslogServer':
     """Construct a :class:`SyslogServer` from a ``syslog`` config dict.  Shared by
-    the in-web-admin mixin and the standalone service so the wiring lives once."""
+    the in-web-admin mixin and the standalone service so the wiring lives once.
+
+    ``is_banned(ip) -> bool`` / ``on_offense(ip, category)`` wire the receiver into
+    the shared internal fail2ban: a jailed IP is dropped up-front, and a source that
+    keeps violating the allowlist is reported so it can be jailed across services."""
     sources = [s for s in re.split(r'[,\s]+', str(cfg.get('allowed_sources') or '')) if s]
     return SyslogServer(
         sink=sink, on_message=on_message,
@@ -49,7 +53,8 @@ def build_server(cfg: dict, *, sink, on_message=None, dbg=None,
         tls_port=int(cfg.get('tls_port') or 0),
         tls_cert=str(cfg.get('tls_cert') or ''),
         tls_key=str(cfg.get('tls_key') or ''),
-        allowed_sources=sources, dbg=dbg, dbg_warn=dbg_warn, on_drop=on_drop)
+        allowed_sources=sources, dbg=dbg, dbg_warn=dbg_warn, on_drop=on_drop,
+        is_banned=is_banned, on_offense=on_offense)
 
 
 def _parse_binds(bind_host) -> list:
@@ -94,7 +99,8 @@ class SyslogServer:
 
     def __init__(self, *, sink, on_message=None, bind_host='0.0.0.0',
                  udp_port=0, tcp_port=0, tls_port=0, tls_cert='', tls_key='',
-                 allowed_sources=None, dbg=None, dbg_warn=None, on_drop=None):
+                 allowed_sources=None, dbg=None, dbg_warn=None, on_drop=None,
+                 is_banned=None, on_offense=None):
         self._sink = sink                       # callable(list[dict]) -> None  (batch store)
         self._on_message = on_message           # optional callable(dict) per message
         self._bind = bind_host or '0.0.0.0'
@@ -108,6 +114,8 @@ class SyslogServer:
         self._dbg = dbg or (lambda *a, **k: None)
         self._dbg_warn = dbg_warn or self._dbg   # drop notices log at warning
         self._on_drop = on_drop                  # callable(source, transport, delta)
+        self._is_banned = is_banned              # callable(ip) -> bool  (shared fail2ban)
+        self._on_offense = on_offense            # callable(ip, category) — report abuse
         self._drops: dict = {}                  # ip -> {count, last_log, flushed}
         self._q: queue.Queue = queue.Queue(maxsize=200000)
         self._stop = threading.Event()
@@ -125,7 +133,10 @@ class SyslogServer:
             problems += self._start_udp(self._udp_port)
         if self._tcp_port:
             problems += self._start_tcp(self._tcp_port, tls_ctx=None)
-        if self._tls_port:
+        # TLS binds only when a port AND a cert+key are configured. A port set
+        # without a cert (e.g. the 6514 default before certs are provided) is NOT an
+        # error — TLS simply stays off silently until a cert/key is set.
+        if self._tls_port and self._tls_cert and self._tls_key:
             ctx, err = self._tls_context()
             if err:
                 problems.append(f'TLS :{self._tls_port}: {err}')
@@ -210,6 +221,26 @@ class SyslogServer:
             return None, str(e)
 
     # ── receive loops ───────────────────────────────────────────────────────────
+    def _banned(self, ip: str) -> bool:
+        """True if *ip* is jailed by the shared internal fail2ban — dropped up-front
+        regardless of the allowlist (a ban from any service applies to syslog too)."""
+        if not self._is_banned or not ip:
+            return False
+        try:
+            return bool(self._is_banned(ip))
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    def _reject(self, ip: str, transport: str) -> None:
+        """Record an allowlist drop and report it to the shared fail2ban so a source
+        that keeps violating the allowlist eventually gets jailed for every service."""
+        self._note_drop(ip, transport)
+        if self._on_offense and ip:
+            try:
+                self._on_offense(ip, 'syslog_drop')
+            except Exception:  # pylint: disable=broad-except
+                pass
+
     def _allowed(self, ip: str) -> bool:
         if not self._allow:
             return True
@@ -253,10 +284,12 @@ class SyslogServer:
             if not data:
                 continue
             ip = addr[0] if addr else ''
-            if self._allowed(ip):
+            if self._banned(ip):
+                self._note_drop(ip, 'UDP')       # jailed source → drop, no re-offense
+            elif self._allowed(ip):
                 self._enqueue(data, ip)
             else:
-                self._note_drop(ip, 'UDP')
+                self._reject(ip, 'UDP')
 
     def _tcp_accept_loop(self, sock: socket.socket, tls_ctx) -> None:
         while not self._stop.is_set():
@@ -267,8 +300,11 @@ class SyslogServer:
             except OSError:
                 break
             ip = addr[0] if addr else ''
-            if not self._allowed(ip):
-                self._note_drop(ip, 'TCP')
+            if self._banned(ip) or not self._allowed(ip):
+                if self._banned(ip):
+                    self._note_drop(ip, 'TCP')   # jailed source → drop, no re-offense
+                else:
+                    self._reject(ip, 'TCP')
                 try:
                     conn.close()
                 except OSError:

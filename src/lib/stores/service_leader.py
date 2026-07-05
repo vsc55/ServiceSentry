@@ -26,6 +26,7 @@ don't use this store.
 from __future__ import annotations
 
 import time
+import uuid
 
 from lib.db import BaseConnector
 from lib.db.schema import Column, TableSpec
@@ -33,7 +34,10 @@ from lib.db.schema import Column, TableSpec
 _SCHEMA = TableSpec(
     name='service_leader',
     columns=(
-        Column('service_key',        'TEXT', primary_key=True),
+        Column('uid',                'TEXT', primary_key=True),   # stable row id
+        # service_key stays the natural lookup key (unique) — the acquire relies on
+        # its uniqueness to make a concurrent second INSERT fail.
+        Column('service_key',        'TEXT', nullable=False, default="''", unique=True),
         Column('holder_instance_id', 'TEXT', nullable=False, default="''"),
         Column('holder_host',        'TEXT'),
         Column('acquired_at',        'REAL'),
@@ -72,10 +76,10 @@ class ServiceLeaderStore:
                 if row is None:
                     try:
                         self._db.execute(
-                            f'INSERT INTO {_T} (service_key, holder_instance_id, '
+                            f'INSERT INTO {_T} (uid, service_key, holder_instance_id, '
                             'holder_host, acquired_at, renewed_at, expires_at) '
-                            'VALUES (?,?,?,?,?,?)',
-                            (service_key, instance_id, host, now, now, exp))
+                            'VALUES (?,?,?,?,?,?,?)',
+                            (str(uuid.uuid4()), service_key, instance_id, host, now, now, exp))
                         return True
                     except Exception:  # pylint: disable=broad-except
                         row = self._db.fetchone(

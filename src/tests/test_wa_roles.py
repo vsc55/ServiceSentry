@@ -811,7 +811,7 @@ class TestGranularPermissions:
         client.post("/api/v1/users", json={
             "username": "auditor_user", "password": "testpass", "role": "auditor_role",
         })
-        client.get("/logout")
+        client.post("/logout")
 
         _login(client, "auditor_user", "testpass")
         me = client.get("/api/v1/me").get_json()
@@ -828,7 +828,7 @@ class TestGranularPermissions:
         client.post("/api/v1/users", json={
             "username": "writer_user", "password": "testpass", "role": "mod_writer",
         })
-        client.get("/logout")
+        client.post("/logout")
 
         _login(client, "writer_user", "testpass")
         resp = client.put("/api/v1/modules", json={"test": {"enabled": True}})
@@ -845,7 +845,7 @@ class TestGranularPermissions:
         client.post("/api/v1/users", json={
             "username": "modonly_user", "password": "testpass", "role": "mod_only",
         })
-        client.get("/logout")
+        client.post("/logout")
 
         _login(client, "modonly_user", "testpass")
         resp = client.put("/api/v1/config", json={"monitoring": {"timer_check": 60}})

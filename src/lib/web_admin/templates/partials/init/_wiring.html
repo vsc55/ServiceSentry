@@ -4,10 +4,23 @@ if (e.key === 'Enter') { e.preventDefault(); confirmAddItem(); }
 });
 document.getElementById('btnConfirmDeleteItemOk').addEventListener('click', _doDeleteItem);
 document.getElementById('btnConfirmModalOk').addEventListener('click', () => {
+    // Reason mode (showReasonModal): validate + hand the reason to the callback.
+    let arg;
+    if (_confirmModalReasonOpts) {
+        const input = document.getElementById('confirmModalReason');
+        arg = (input?.value || '').trim();
+        if (_confirmModalReasonOpts.required && !arg) {
+            const err = document.getElementById('confirmModalReasonErr');
+            if (err) err.style.display = '';
+            input?.focus();
+            return;   // keep the modal open until a reason is given
+        }
+    }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).hide();
     const cb = _confirmModalCallback;
     _confirmModalCallback = null;
-    if (cb) cb();
+    _confirmModalReasonOpts = null;
+    if (cb) cb(arg);
 });
 document.getElementById('btnRenameItemOk').addEventListener('click', _doRenameItem);
 document.getElementById('renameItemInput').addEventListener('keydown', e => {
@@ -42,6 +55,7 @@ renderGroups();
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
 document.getElementById('btn-tab-history')?.addEventListener('shown.bs.tab', renderHistory);
 document.getElementById('btn-tab-syslog')?.addEventListener('shown.bs.tab', renderSyslog);
+document.getElementById('btn-tab-ipban')?.addEventListener('shown.bs.tab', renderFail2ban);
 document.getElementById('btn-tab-services')?.addEventListener('shown.bs.tab', renderServices);
 document.getElementById('btn-tab-events')?.addEventListener('shown.bs.tab', renderEvents);
 // Re-fetch host status every time the Servers tab is shown, so the Status column

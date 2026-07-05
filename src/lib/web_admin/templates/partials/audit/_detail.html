@@ -35,13 +35,45 @@ function formatAuditDetailFull(detail) {
         if (detail.name)     html += `<p class="mb-1"><strong>${t('col_group_name') || 'Group'}:</strong> <code>${esc(detail.name)}</code></p>`;
         if (detail.username) html += `<p class="mb-1"><strong>${t('col_user')}:</strong> ${esc(detail.username)}</p>`;
         if (detail.role)     html += `<p class="mb-1"><strong>Role:</strong> ${esc(detail.role)}</p>`;
+        if (detail.auth_source) html += `<p class="mb-1"><strong>${t('col_auth_source') || 'Source'}:</strong> ${esc(detail.auth_source)}</p>`;
+        if (detail.remember !== undefined) html += `<p class="mb-1"><strong>${t('remember_me') || 'Remember me'}:</strong> ${detail.remember ? (t('yes') || 'yes') : (t('no') || 'no')}</p>`;
+        if (detail.uid)      html += `<p class="mb-1"><strong>${t('session') || 'Session'}:</strong> <code>${esc(detail.uid)}</code></p>`;
+        if (detail.retry_after !== undefined) html += `<p class="mb-1"><strong>Retry-After:</strong> ${esc(String(detail.retry_after))}s</p>`;
         if (detail.display_name && !detail.changes) html += `<p class="mb-1">${esc(detail.display_name)}</p>`;
         if (Array.isArray(detail.changes) && detail.changes.length) {
             html += formatAuditDetailFull(detail.changes);
         }
+        // before/after snapshots (SCIM & other create/update/delete audits): a
+        // create shows only `after`, a delete only `before`, an update both (diff).
+        if (detail.before || detail.after) {
+            html += _formatBeforeAfter(detail.before, detail.after);
+        }
         return html || renderReadable(detail);
     }
     return '<p class="mb-0">' + esc(String(detail)) + '</p>';
+}
+
+// Render before/after snapshots. Both present → a field-by-field before→after
+// diff; only one → the new (create) or removed (delete) snapshot as a table.
+function _formatBeforeAfter(before, after) {
+    const hasBefore = before && Object.keys(before).length;
+    const hasAfter  = after  && Object.keys(after).length;
+    const keys = [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])];
+    if (!keys.length) return '';
+    if (hasBefore && hasAfter) {
+        const rows = keys.map(k =>
+            `<tr><td class="text-nowrap pe-3"><strong>${esc(k)}</strong></td>
+                 <td>${auditVal((before || {})[k])}</td>
+                 <td class="px-2 text-muted">→</td>
+                 <td>${auditVal((after || {})[k])}</td></tr>`).join('');
+        return `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
+    }
+    const snap = hasAfter ? after : before;
+    const cap  = hasAfter ? (t('audit_after') || 'After') : (t('audit_before') || 'Before');
+    const rows = keys.map(k =>
+        `<tr><td class="pe-3 text-muted small text-nowrap">${esc(k)}</td><td>${auditVal(snap[k])}</td></tr>`).join('');
+    return `<p class="mb-1 text-muted small">${esc(cap)}</p>
+        <table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
 }
 
 // Host test result detail: server + each launched check (pass/fail + message).
@@ -129,16 +161,26 @@ function auditSummaryHtml(idx, detail) {
             return `<span class="text-muted small">${esc(t(detail.reason) || detail.reason)}</span>`;
         } else if (detail.username) {
             const n = Array.isArray(detail.changes) ? detail.changes.length : 0;
+            const snap = !!(detail.before || detail.after);
             label = n
                 ? esc(detail.username) + ' · ' + tf('audit_n_changes', n)
                 : esc(detail.username);
-            if (!n) return `<span class="text-muted small">${label}</span>`;
+            // Clickable (opens the full modal) when there's a snapshot/changes to show.
+            if (!n && !snap) return `<span class="text-muted small">${label}</span>`;
         } else if (detail.name) {
             const n = Array.isArray(detail.changes) ? detail.changes.length : 0;
+            const snap = !!(detail.before || detail.after);
             label = n
                 ? esc(detail.name) + ' · ' + tf('audit_n_changes', n)
                 : esc(detail.name);
-            if (!n) return `<span class="text-muted small">${label}</span>`;
+            if (!n && !snap) return `<span class="text-muted small">${label}</span>`;
+        } else if (detail.auth_source || detail.uid) {
+            // login_ok / logout: show source·role (login) or role (logout) inline;
+            // clickable badge opens the modal with remember / session id.
+            const parts = [];
+            if (detail.auth_source) parts.push(esc(detail.auth_source));
+            if (detail.role) parts.push(esc(detail.role));
+            label = parts.join(' · ') || '···';
         } else {
             label = '···';
         }

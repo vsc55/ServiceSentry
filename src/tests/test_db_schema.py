@@ -96,6 +96,26 @@ def test_add_middle_column_triggers_rebuild_and_keeps_data(db):
     assert db.fetchone("SELECT name, age FROM t") == ('x', 42)
 
 
+def test_pk_change_to_uid_keeps_data(db):
+    """Moving the PK from a natural key to a populated `uid` rebuilds and preserves
+    every row (the users/sessions migration)."""
+    old = TableSpec(name='t', columns=(
+        Column('uid', 'TEXT', nullable=False, default="''", unique=True),
+        Column('username', 'TEXT', primary_key=True),
+    ))
+    db.reconcile_table(old)
+    db.execute("INSERT INTO t (uid, username) VALUES ('u-1', 'alice')")
+    db.commit()
+    new = TableSpec(name='t', columns=(
+        Column('uid', 'TEXT', primary_key=True),
+        Column('username', 'TEXT', nullable=False, default="''", unique=True),
+    ))
+    diff = db.reconcile_table(new)
+    assert diff.pk_mismatch and diff.needs_rebuild
+    assert {c.name for c in db.describe_table('t') if c.pk} == {'uid'}
+    assert db.fetchone("SELECT uid, username FROM t") == ('u-1', 'alice')
+
+
 # ── Reordering (the user's explicit case) ───────────────────────────────────
 
 def test_reorder_columns_keeps_data(db):

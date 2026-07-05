@@ -377,6 +377,14 @@ def register(app, wa):
             new_public_url = (new_data.get('web_admin') or {}).get('public_url')
             if new_public_url is not None and isinstance(new_public_url, str):
                 wa._public_url = normalize_url(new_public_url)
+            # fail2ban string fields (no_rule) + push all settings into the live jail
+            _wa_new = new_data.get('web_admin') or {}
+            if isinstance(_wa_new.get('ipban_durations'), str):
+                wa._IPBAN_DURATIONS = _wa_new['ipban_durations']
+            if isinstance(_wa_new.get('ipban_whitelist'), str):
+                wa._IPBAN_WHITELIST = _wa_new['ipban_whitelist']
+            if hasattr(wa, '_apply_ipban_config'):
+                wa._apply_ipban_config(_wa_new)
             if isinstance(wa._app.wsgi_app, ProxyFix):
                 wa._app.wsgi_app = wa._app.wsgi_app.app
             if wa._proxy_count > 0:
@@ -388,7 +396,11 @@ def register(app, wa):
                     x_prefix=wa._proxy_count,
                 )
             changes = wa._diff_dicts(old_data, new_data, sensitive=wa._sensitive_fields)
-            wa._audit('config_saved', detail=changes or '')
+            # Only audit a save that actually changed something — a no-op save (e.g.
+            # the SCIM wizard re-saving an unchanged token) would otherwise clutter the
+            # log with blank-detail entries.
+            if changes:
+                wa._audit('config_saved', detail=changes)
             wa._config_version = str(uuid.uuid4())
             if wa._restart_pending:
                 wa._dbg("> Config PUT >> restart_pending set (port/proxy changed)", DebugLevel.debug)

@@ -64,7 +64,7 @@ def register(app, wa):
         current_uid = (wa._users.get(session.get('username', '')) or {}).get('uid', '')
         if not wa._is_admin_requester() and entry.get('user_uid') != current_uid:
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
-        if wa._revoke_session(token):
+        if wa._revoke_session_by_uid(uid):   # delete by uid (the PK), not the token
             # Resolve the session owner's username for the audit trail.
             _owner = next((u for u, d in wa._users.items()
                            if d.get('uid') == entry.get('user_uid')), '')

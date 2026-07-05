@@ -28,7 +28,35 @@ from __future__ import annotations
 import json
 import os
 
+from lib.i18n import TRANSLATIONS
 from lib.modules import ModuleBase
+
+
+def _profile_label(key: str) -> dict:
+    """Build ``{lang: text}`` for a core SSH-profile field *key* from the lang
+    files (``ssh_profile.labels``) — the profile is core-owned, so its i18n lives
+    in lib/i18n like every other translation, not inline here."""
+    out = {}
+    for lang, data in TRANSLATIONS.items():
+        txt = ((data.get('ssh_profile') or {}).get('labels') or {}).get(key)
+        if isinstance(txt, str) and txt:
+            out[lang] = txt
+    return out
+
+
+def _profile_options(keys: tuple[str, ...]) -> dict:
+    """Build ``{option: {lang: text}}`` for the SSH auth-method options from the
+    lang files (``ssh_profile.auth_options``)."""
+    out: dict = {}
+    for opt in keys:
+        m = {}
+        for lang, data in TRANSLATIONS.items():
+            txt = ((data.get('ssh_profile') or {}).get('auth_options') or {}).get(opt)
+            if isinstance(txt, str) and txt:
+                m[lang] = txt
+        if m:
+            out[opt] = m
+    return out
 
 _META_KEYS = ('type', 'options', 'options_int', 'options_deps', 'options_disabled',
               'options_i18n', 'secret', 'sensitive', 'placeholder', 'placeholder_map',
@@ -49,34 +77,27 @@ _BUILTIN_SSH = {
     'fields': [
         {'name': 'ssh_port', 'type': 'int', 'min': 1, 'max': 65535, 'placeholder': 22,
          'default': 0,
-         'label_i18n': {'en_EN': 'SSH port', 'es_ES': 'Puerto SSH'}},
+         'label_i18n': _profile_label('ssh_port')},
         {'name': 'ssh_user', 'type': 'str',
-         'label_i18n': {'en_EN': 'SSH user', 'es_ES': 'Usuario SSH'}},
+         'label_i18n': _profile_label('ssh_user')},
         # Authentication method: password, a key file (path), or inline key
         # text.  Drives which credential field shows.  Defaults to password.
         {'name': 'ssh_auth_method', 'type': 'str', 'default': 'password',
          'options': ['password', 'file', 'text'],
-         'options_i18n': {
-             'password': {'en_EN': 'Password',            'es_ES': 'Contraseña'},
-             'file':     {'en_EN': 'Key file (path)',     'es_ES': 'Clave por archivo (ruta)'},
-             'text':     {'en_EN': 'Key text (paste)',    'es_ES': 'Clave en texto (pegar)'}},
-         'label_i18n': {'en_EN': 'Authentication method',
-                        'es_ES': 'Método de autenticación'}},
+         'options_i18n': _profile_options(('password', 'file', 'text')),
+         'label_i18n': _profile_label('ssh_auth_method')},
         {'name': 'ssh_password', 'type': 'str', 'secret': True,
          'show_when': {'ssh_auth_method': ['password']},
-         'label_i18n': {'en_EN': 'SSH password', 'es_ES': 'Contraseña SSH'}},
+         'label_i18n': _profile_label('ssh_password')},
         {'name': 'ssh_key', 'type': 'str', 'placeholder': '/path/to/id_rsa',
          'show_when': {'ssh_auth_method': ['file']},
-         'label_i18n': {'en_EN': 'SSH private key (file path)',
-                        'es_ES': 'Clave privada SSH (ruta de archivo)'}},
+         'label_i18n': _profile_label('ssh_key')},
         {'name': 'ssh_key_string', 'type': 'textarea', 'secret': True, 'rows': 10,
          'placeholder': '-----BEGIN OPENSSH PRIVATE KEY-----…',
          'show_when': {'ssh_auth_method': ['text']},
-         'label_i18n': {'en_EN': 'SSH private key (text)',
-                        'es_ES': 'Clave privada SSH (texto)'}},
+         'label_i18n': _profile_label('ssh_key_string')},
         {'name': 'ssh_verify_host', 'type': 'bool', 'default': False,
-         'label_i18n': {'en_EN': 'Verify SSH host key',
-                        'es_ES': 'Verificar clave del host SSH'}},
+         'label_i18n': _profile_label('ssh_verify_host')},
     ],
 }
 

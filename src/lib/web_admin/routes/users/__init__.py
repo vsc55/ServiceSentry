@@ -288,6 +288,9 @@ def register(app, wa):
                 'username': username, 'changes': changes,
             })
         if has_password_reset:
+            # A password reset invalidates every existing session for that user
+            # (an attacker holding a live token is kicked out).
+            wa._revoke_user_sessions(username)
             wa._audit('password_reset', detail={'username': username})
         # Update session if the user edited themselves
         if username == session.get('username'):
@@ -406,5 +409,8 @@ def register(app, wa):
             return jsonify({'error': wa._t(*pw_err)}), 400
         user['password_hash'] = generate_password_hash(new_pw)
         wa._persist_users()
+        # Invalidate this user's OTHER sessions (keep the current one so they stay
+        # logged in here) — a changed password kicks out any stolen token.
+        wa._revoke_user_sessions(uname, except_token=session.get('session_token'))
         wa._audit('password_changed')
         return jsonify({'ok': True})

@@ -49,7 +49,7 @@ class TestSessionRegistry:
         """Logout removes the session from the registry."""
         _login(client)
         assert len(admin._sessions) == 1
-        client.get("/logout")
+        client.post("/logout")
         assert len(admin._sessions) == 0
 
     def test_session_invalid_after_revocation(self, admin, client):

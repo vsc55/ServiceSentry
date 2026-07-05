@@ -31,7 +31,14 @@
    ================================================================ #}
 {% include "partials/cfg/auth/_index.html" %}
 {% include "partials/cfg/notify/_index.html" %}
+{% include "partials/cfg/_ipban.html" %}
 {% include "partials/cfg/_render.html" %}
+{# ================================================================
+   fail2ban — top-level OPERATIONAL section (#tab-ipban): banned IPs,
+   watchlist, whitelist and history. Its own tab, not config (the
+   Exposed-services config card lives in partials/cfg/_ipban.html).
+   ================================================================ #}
+{% include "partials/ipban/_render.html" %}
 {# ================================================================
    Status tab — check cards and the scheduler/daemon panel.
    Thin orchestrator: includes sub-partials in order.

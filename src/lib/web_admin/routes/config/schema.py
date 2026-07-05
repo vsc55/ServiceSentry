@@ -59,6 +59,9 @@ def register(app, wa):
         # defaults and ranges (no hardcoded values in the frontend).
         schema['modules|threads'] = cfg_meta('modules|threads')
         schema['modules|timeout'] = cfg_meta('modules|timeout')
+        # Both live in one "Default roles" card; each renders with a path-specific
+        # label (labels['users|default_role'] / labels['groups|default_role'] in the
+        # lang files) so they don't both show the bare 'default_role' label.
         schema['users|default_role'] = cfg_meta('users|default_role')
         schema['groups|default_role'] = cfg_meta('groups|default_role')
         # database / syslog_db: the engine renders as a select of the supported

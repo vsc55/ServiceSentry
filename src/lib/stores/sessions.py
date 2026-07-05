@@ -24,8 +24,8 @@ from lib.db.schema import Column, Index, TableSpec
 _SCHEMA = TableSpec(
     name='sessions',
     columns=(
-        Column('uid',        'TEXT', nullable=False, default="''"),
-        Column('token',      'TEXT', primary_key=True),
+        Column('uid',        'TEXT', primary_key=True),   # stable session id
+        Column('token',      'TEXT', nullable=False, default="''", unique=True),
         Column('user_uid',   'TEXT', nullable=False, default="''"),
         Column('created',    'TEXT', nullable=False, default="''"),
         Column('last_seen',  'TEXT', nullable=False, default="''"),
@@ -120,6 +120,18 @@ class SessionsStore:
         try:
             with self._db.transaction():
                 deleted = self._db.execute(f'DELETE FROM {_T} WHERE token = ?', (token,))
+            return deleted > 0
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    def delete_by_uid(self, uid: str) -> bool:
+        """Delete a session by its uid (the PK / the public id the UI knows — the token
+        is never exposed to clients, so management operations key on uid)."""
+        if not uid:
+            return False
+        try:
+            with self._db.transaction():
+                deleted = self._db.execute(f'DELETE FROM {_T} WHERE uid = ?', (uid,))
             return deleted > 0
         except Exception:  # pylint: disable=broad-except
             return False

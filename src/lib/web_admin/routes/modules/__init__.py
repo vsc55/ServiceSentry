@@ -790,6 +790,32 @@ def register(app, wa):
         except Exception:  # pylint: disable=broad-except
             events_total, events_enabled, events_by_source, notif_total = 0, 0, {}, 0
 
+        # Internal fail2ban: master switch + banned / watchlist / whitelist counts
+        # and the current banned list (for the summary and table widgets). Gated by
+        # the same permission as the fail2ban tab (config view/edit).
+        ipban_enabled = False
+        ipban_bans: list = []
+        ipban_banned = ipban_watch = ipban_whitelist = 0
+        try:
+            _iperms = wa._get_session_permissions()
+            if 'config_view' in _iperms or 'config_edit' in _iperms:
+                _mgr = getattr(wa, '_ipban', None)
+                if _mgr is not None:
+                    ipban_enabled = bool(getattr(_mgr, '_enabled', False))
+                    _active = _mgr.list_bans(active_only=True)
+                    ipban_banned = len(_active)
+                    ipban_bans = [
+                        {'ip': b.get('ip', ''), 'reason': b.get('reason', ''),
+                         'level': b.get('level', 1), 'permanent': bool(b.get('permanent')),
+                         'retry_after': b.get('retry_after')}
+                        for b in _active[:15]]
+                    ipban_watch = len(_mgr.list_offenders())
+                    _wl = getattr(wa, '_ip_whitelist_store', None)
+                    ipban_whitelist = len(_wl.list()) if _wl is not None else 0
+        except Exception:  # pylint: disable=broad-except
+            ipban_enabled, ipban_bans, ipban_banned, ipban_watch, ipban_whitelist = \
+                False, [], 0, 0, 0
+
         # Module-contributed Overview widgets: each declaring module computes its
         # OWN data via Watchful.overview_widget(items, status, lang) — nothing
         # module-specific lives in the core.  Result shape: {entries, aggregate}.
@@ -853,6 +879,13 @@ def register(app, wa):
                 'hosts_total': servers_total,
                 'hosts_monitored': hosts_monitored,
                 'pct': coverage_pct,
+            },
+            'ipban': {
+                'enabled': ipban_enabled,
+                'banned': ipban_banned,
+                'watchlist': ipban_watch,
+                'whitelist': ipban_whitelist,
+                'bans': ipban_bans,
             },
             'failing_checks': failing_checks,
             'failed_logins': failed_logins,

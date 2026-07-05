@@ -35,7 +35,7 @@ class TestTelegramTest:
         client.post("/api/v1/users", json={
             "username": "v1", "password": "testpass", "role": "viewer",
         })
-        client.get("/logout")
+        client.post("/logout")
         _login(client, "v1", "testpass")
         resp = client.post("/api/v1/notify/telegram/test", json={
             "token": "x", "chat_id": "y",

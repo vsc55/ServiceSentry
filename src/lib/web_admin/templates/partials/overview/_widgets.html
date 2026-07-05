@@ -370,6 +370,38 @@ function _dwBuildFailedLoginRows(items) {
     }).join('');
 }
 
+// Banned-IP rows for the fail2ban table widget. Reuses the operational section's
+// _ipbanReason / _ipbanFmtDur helpers (same global JS bundle).
+function _dwBuildIpbanRows(items) {
+    const s = _dwSort['ipban_list'];
+    let rows = [...items];
+    if (s?.col) {
+        rows.sort((a, b) => {
+            let va, vb;
+            if (s.col === 'reason')       { va = (a.reason || '').toLowerCase(); vb = (b.reason || '').toLowerCase(); }
+            else if (s.col === 'level')   { va = a.level || 0; vb = b.level || 0; }
+            else if (s.col === 'expires') { va = a.permanent ? Infinity : (a.retry_after || 0);
+                                            vb = b.permanent ? Infinity : (b.retry_after || 0); }
+            else                          { va = (a.ip || ''); vb = (b.ip || ''); }
+            return va < vb ? -s.dir : va > vb ? s.dir : 0;
+        });
+    }
+    if (!rows.length)
+        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('ipban_none')}</td></tr>`;
+    const reason = (typeof _ipbanReason === 'function') ? _ipbanReason : (r => r || '');
+    const dur = (typeof _ipbanFmtDur === 'function') ? _ipbanFmtDur : (s2 => (s2 || 0) + ' s');
+    return rows.map(b => {
+        const exp = b.permanent
+            ? `<span class="badge bg-danger">${esc(t('ipban_permanent'))}</span>`
+            : `<span class="small text-muted">${esc(dur(b.retry_after || 0))}</span>`;
+        return `<tr>
+            <td><code style="font-size:.8rem">${esc(b.ip || '')}</code></td>
+            <td class="small">${esc(reason(b.reason))}</td>
+            <td class="text-center">${b.level || 1}</td>
+            <td class="text-nowrap">${exp}</td></tr>`;
+    }).join('');
+}
+
 function _dwSortTable(wid, col) {
     const cur = _dwSort[wid];
     _dwSort[wid] = (cur?.col === col) ? { col, dir: -cur.dir } : { col, dir: 1 };
@@ -402,6 +434,7 @@ function _dwTbodyHtml(wid) {
         case 'failed_logins': return _dwBuildFailedLoginRows(d.failed_logins || []);
         case 'activity':      return _dwBuildActivityRows(d.last_events || []);
         case 'syslog':        return _dwBuildSyslogRows(_dwSyslogFiltered((d.syslog || {}).recent, _dwSyslogMinSev()));
+        case 'ipban_list':    return _dwBuildIpbanRows((d.ipban || {}).bans || []);
         default:              return null;
     }
 }
@@ -862,6 +895,43 @@ function _dwContent(id, data, item) {
                 ? _dwFilterBadge('≥ ' + _slSev, _DW_SEV_HEX[_slCls] || '#6c757d', _DW_SEV_SUBTLE[_slCls] || 'rgba(108,117,125,.18)') : '');
             return _dwTableCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
                 'bi-card-list', _slTitle, table);
+        }
+
+        case 'fail2ban': {
+            if (!perms.has('config_view') && !perms.has('config_edit'))
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            const fb = data.ipban || {};
+            const on = !!fb.enabled;
+            const accent  = on ? 'linear-gradient(90deg,#f59e0b,#ef4444)' : 'linear-gradient(90deg,#94a3b8,#cbd5e1)';
+            const avBg    = on ? 'rgba(245,158,11,.12)' : 'var(--bs-secondary-bg)';
+            const avColor = on ? '#f59e0b' : 'var(--bs-secondary-color)';
+            const stateBadge = on
+                ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${t('overview_ipban_on')}</span>`
+                : `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)"><i class="bi bi-slash-circle me-1"></i>${t('overview_ipban_off')}</span>`;
+            const sub = [
+                stateBadge,
+                !fb.banned ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${t('overview_ipban_no_bans')}</span>` : '',
+                fb.watchlist ? `<span class="badge rounded-pill" style="background:rgba(245,158,11,.15);color:#d97706;font-size:.72rem"><i class="bi bi-eye me-1"></i>${tf('overview_ipban_watchlist', fb.watchlist)}</span>` : '',
+                fb.whitelist ? `<span class="badge rounded-pill" style="background:rgba(20,184,166,.15);color:#0d9488;font-size:.72rem"><i class="bi bi-shield-check me-1"></i>${tf('overview_ipban_whitelist', fb.whitelist)}</span>` : '',
+            ].filter(Boolean).join('');
+            return _dwStatCard(accent, avBg, avColor, 'bi-slash-circle', fb.banned || 0, 'overview_fail2ban', sub);
+        }
+
+        case 'ipban_list': {
+            if (!perms.has('config_view') && !perms.has('config_edit'))
+                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+            const blist = (data.ipban || {}).bans || [];
+            const table = `<table class="table table-sm table-hover align-middle mb-0">
+                ${_dwTheadRow(
+                    _dwTh('ipban_list','ip',t('ipban_col_ip')),
+                    _dwTh('ipban_list','reason',t('ipban_col_reason')),
+                    _dwTh('ipban_list','level',t('ipban_col_level')),
+                    _dwTh('ipban_list','expires',t('ipban_col_expires'))
+                )}
+                <tbody>${_dwBuildIpbanRows(blist)}</tbody>
+            </table>`;
+            return _dwTableCard('linear-gradient(90deg,#f59e0b,#ef4444)', 'rgba(245,158,11,.12)', '#f59e0b',
+                'bi-slash-circle', t('overview_ipban_list'), table);
         }
 
         default: return '';

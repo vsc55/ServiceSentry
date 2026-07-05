@@ -8,6 +8,8 @@ are not registered.
 """
 
 import json
+import threading
+import time
 import uuid
 from urllib.parse import urlparse
 
@@ -106,6 +108,17 @@ def _build_saml_settings(cfg: dict, base_url: str = '') -> dict:
             },
             'x509cert': cfg.get('idp_cert', '') or '',
         },
+        # Hardening: require the assertion itself to be signed (not just the envelope),
+        # reject deprecated SHA-1 signatures, and pin SHA-256. Entra signs the assertion
+        # with RSA-SHA256 by default, so this is compatible with the standard setup.
+        'security': {
+            'wantAssertionsSigned':     True,
+            'wantMessagesSigned':       False,
+            'wantNameId':               True,
+            'rejectDeprecatedAlgorithm': True,
+            'signatureAlgorithm': 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+            'digestAlgorithm':    'http://www.w3.org/2001/04/xmlenc#sha256',
+        },
     }
 
 
@@ -200,7 +213,7 @@ def register_routes(app, wa) -> None:
         return
 
     from flask import (flash, make_response, redirect,
-                       request, url_for)
+                       request, session, url_for)
     from ..routes.auth import _establish_session
 
     @app.route('/auth/saml2/login')
@@ -209,7 +222,11 @@ def register_routes(app, wa) -> None:
         if auth is None:
             flash(wa._t('saml2_disabled'), 'danger')
             return redirect(url_for('login'))
-        return redirect(auth.login())
+        url = auth.login()
+        # Bind this SP-initiated request to the session so the ACS can verify the
+        # response's InResponseTo → blocks replay / unsolicited-response injection.
+        session['_saml_req_id'] = auth.get_last_request_id()
+        return redirect(url)
 
     @app.route('/auth/saml2/acs', methods=['POST'])
     def saml2_acs():
@@ -218,7 +235,20 @@ def register_routes(app, wa) -> None:
             flash(wa._t('saml2_disabled'), 'danger')
             return redirect(url_for('login'))
 
-        auth.process_response()
+        # Require a pending SP-initiated request id bound to THIS session and validate
+        # the response's InResponseTo against it. Rejecting a missing id is essential:
+        # python3-saml SKIPS the InResponseTo check when request_id is None, so an
+        # attacker (who never hit /auth/saml2/login and thus has no _saml_req_id) would
+        # otherwise replay a stolen assertion or force a login (login-CSRF). SameSite=Lax
+        # lets the session cookie ride the IdP's top-level POST, so the genuine flow keeps
+        # its id. (Unsolicited / IdP-initiated responses are intentionally not accepted.)
+        req_id = session.pop('_saml_req_id', None)
+        if not req_id:
+            wa._audit('login_failed', '', request.remote_addr,
+                      detail={'reason': 'saml2_unsolicited'})
+            flash(wa._t('saml2_not_authenticated'), 'danger')
+            return redirect(url_for('login'))
+        auth.process_response(request_id=req_id)
         errors = auth.get_errors()
 
         if errors:
@@ -233,6 +263,33 @@ def register_routes(app, wa) -> None:
             wa._audit('login_failed', '', request.remote_addr,
                       detail={'reason': 'saml2_not_authenticated'})
             return redirect(url_for('login'))
+
+        # One-time-use: reject a validated assertion that was already consumed
+        # (replay within its NotOnOrAfter window). Keyed by the assertion id, kept
+        # in-memory with a short TTL (the library's own timestamp check bars it after).
+        try:
+            _aid = auth.get_last_assertion_id()
+        except Exception:  # pylint: disable=broad-except
+            _aid = None
+        if _aid:
+            _now = time.time()
+            _lock = getattr(wa, '_saml_used_lock', None)
+            if _lock is None:
+                _lock = wa._saml_used_lock = threading.Lock()
+            with _lock:                      # atomic prune → check → record (no TOCTOU race)
+                _used = getattr(wa, '_saml_used_assertions', None)
+                if _used is None:
+                    _used = wa._saml_used_assertions = {}
+                for _k in [k for k, exp in _used.items() if exp < _now]:
+                    _used.pop(_k, None)
+                _replayed = _aid in _used
+                if not _replayed:
+                    _used[_aid] = _now + 600  # 10-min window (>= typical NotOnOrAfter)
+            if _replayed:
+                flash(wa._t('saml2_not_authenticated'), 'danger')
+                wa._audit('login_failed', '', request.remote_addr,
+                          detail={'reason': 'saml2_assertion_replay'})
+                return redirect(url_for('login'))
 
         name_id    = auth.get_nameid()
         saml_attrs = auth.get_attributes()
