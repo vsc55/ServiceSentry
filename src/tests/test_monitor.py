@@ -22,7 +22,9 @@ def monitor(tmp_path):
     os.makedirs(var_dir, exist_ok=True)
     modules_dir = str(tmp_path / "watchfuls")
     os.makedirs(modules_dir, exist_ok=True)
-    return Monitor(str(tmp_path), config_dir, modules_dir, var_dir)
+    m = Monitor(str(tmp_path), config_dir, modules_dir, var_dir)
+    yield m
+    m.close()   # stop the Telegram sender thread so tests don't accumulate threads
 
 
 def _make_package_module(modules_dir, name, enabled_cfg=None):
@@ -41,6 +43,27 @@ def _make_package_module(modules_dir, name, enabled_cfg=None):
             "        return r\n"
         )
     return mod_dir
+
+
+# ──────────────────────────── close() ─────────────────────────────
+
+
+class TestClose:
+    """close() must stop the Telegram sender thread — otherwise the daemon leaks one
+    `pool_run` thread per monitor it creates on every start/stop cycle."""
+
+    def test_close_stops_telegram_thread(self, monitor):
+        tg = monitor.tg
+        assert tg is not None and tg.pool_send_msg.is_alive()
+        monitor.close()
+        tg.pool_send_msg.join(timeout=2)
+        assert not tg.pool_send_msg.is_alive()
+        assert monitor.tg is None
+
+    def test_close_is_idempotent(self, monitor):
+        monitor.close()
+        monitor.close()   # a second close must not raise
+        assert monitor.tg is None
 
 
 # ──────────────────── _get_enabled_modules ────────────────────────

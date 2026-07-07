@@ -480,6 +480,18 @@ class Monitor(ObjectBase):
             f"> Monitor >> Telegram {'configured' if token else 'not configured'}"
             f" (group_messages={self.tg.group_messages})", DebugLevel.info)
 
+    def close(self):
+        """Release background resources — stop the Telegram sender thread. The daemon
+        calls this when it disposes the persistent monitor (stop/restart) so its
+        ``pool_run`` sender thread doesn't leak one per start/stop cycle."""
+        tg = getattr(self, 'tg', None)
+        if tg is not None:
+            try:
+                tg.close()
+            except Exception:  # pylint: disable=broad-except
+                pass
+        self.tg = None
+
     def refresh_runtime_config(self):
         """Re-read the effective (DB+file) config and re-apply the bits that may
         change live: the Telegram credentials and the public URL.  Called by the

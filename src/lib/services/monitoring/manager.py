@@ -142,7 +142,7 @@ class _MonitoringMixin:
             if self._monitoring_running:
                 return False
             self._monitoring_stop_event.clear()
-            self._monitoring_monitor = None   # reset so loop creates a fresh monitor
+            self._monitoring_dispose_monitor()   # drop any prior monitor (closes its Telegram thread)
             self._monitoring_thread = threading.Thread(
                 target=self._monitoring_loop,
                 args=(run_now,),
@@ -163,7 +163,9 @@ class _MonitoringMixin:
                 return False
             self._monitoring_stop_event.set()
             self._monitoring_next_run_ts = 0.0
-            self._monitoring_monitor = None
+            # The scheduler thread disposes the monitor (and closes its Telegram thread)
+            # in its finally on exit — doing it here would race with an in-flight cycle
+            # re-creating the monitor via _monitoring_get_monitor().
         self._monitoring_audit('daemon_stopped', {})
         return True
 
@@ -226,6 +228,17 @@ class _MonitoringMixin:
         )
         return self._monitoring_monitor
 
+    def _monitoring_dispose_monitor(self) -> None:
+        """Drop the persistent Monitor, closing it first so its Telegram sender thread
+        (``pool_run``) is stopped — otherwise each start/stop cycle leaks one thread."""
+        mon = self._monitoring_monitor
+        self._monitoring_monitor = None
+        if mon is not None:
+            try:
+                mon.close()
+            except Exception:  # pylint: disable=broad-except
+                pass
+
     def _monitoring_run_one_cycle(self) -> tuple[dict, list]:
         """Run all enabled checks for one scheduler cycle on the *persistent*
         Monitor (so change-detection state carries across cycles).  The per-module
@@ -266,6 +279,14 @@ class _MonitoringMixin:
     # ── Loop ──────────────────────────────────────────────────────────────────
 
     def _monitoring_loop(self, run_now: bool) -> None:
+        """Scheduler thread entry point. Always disposes the persistent monitor on exit
+        (closing its Telegram sender thread) so start/stop cycles don't leak threads."""
+        try:
+            self._monitoring_loop_body(run_now)
+        finally:
+            self._monitoring_dispose_monitor()
+
+    def _monitoring_loop_body(self, run_now: bool) -> None:
         """Background loop — runs in a daemon thread."""
 
         if not run_now:
@@ -302,7 +323,7 @@ class _MonitoringMixin:
                 if _mon is not None and _mon.debug.enabled:
                     _mon.debug.exception(exc)
                 self._monitoring_audit('daemon_error', {'error': str(exc)})
-                self._monitoring_monitor = None   # reset on error so next cycle starts fresh
+                self._monitoring_dispose_monitor()   # reset on error (closes its Telegram thread)
 
             # Prune old history once per day.
             if time.time() - self._monitoring_last_prune_ts > 86400:

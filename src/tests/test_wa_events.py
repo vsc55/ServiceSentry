@@ -310,3 +310,21 @@ class TestEventWorker:
     def test_cooldown_is_persisted(self, admin):
         admin._embedded_services['events']._event_state.set_cooldown('rule-x', 123.0)
         assert admin._embedded_services['events']._event_state.cooldowns().get('rule-x') == 123.0
+
+
+class TestEventDetailStr:
+    """The audit detail rendered into a notification body must be empty when there is
+    no detail — an empty dict must NOT render as a literal "{}" (e.g. syslog_started
+    audits with {})."""
+
+    @pytest.mark.parametrize('detail,expected', [
+        (None, ''),
+        ('', ''),
+        ({}, ''),
+        ([], ''),
+        ('boom', 'boom'),
+        ({'deleted': 3}, '{"deleted": 3}'),
+    ])
+    def test_detail_str(self, detail, expected):
+        from lib.services.events.manager import _EventsMixin
+        assert _EventsMixin._event_detail_str(detail) == expected

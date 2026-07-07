@@ -328,7 +328,7 @@ class _EventsMixin:
 
     @staticmethod
     def _event_detail_str(detail) -> str:
-        if detail in (None, ''):
+        if not detail:            # None / '' / {} / [] → no detail to show (not "{}")
             return ''
         if isinstance(detail, str):
             return detail
