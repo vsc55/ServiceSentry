@@ -1377,7 +1377,7 @@ class Watchful(ModuleBase):
             self._debug(f'SNMP: {label} — error: {err} (fails={streak}/{t_alert})', DebugLevel.warning)
             self.dict_return.set(key, status, msg, False, {'oid': oid, 'error': err})
             if self.check_status(status, self.name_module, key):
-                self.send_message(msg, status)
+                self.send_message(msg, status, item=label)
             return
 
         self.fail_streak(key, False)
@@ -1396,7 +1396,7 @@ class Watchful(ModuleBase):
             'expected': expected,
         })
         if self.check_status(status, self.name_module, key):
-            self.send_message(msg, status)
+            self.send_message(msg, status, item=label)
 
     # ── Value evaluation ───────────────────────────────────────────────────────
 

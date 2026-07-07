@@ -160,7 +160,7 @@ class Watchful(ModuleBase):
         self.dict_return.set(name, effective, s_message, False,
                              {'code': code, 'detail': detail})
         if self.check_status(effective, self.name_module, name):
-            self.send_message(s_message, effective)
+            self.send_message(s_message, effective, item=label)
 
     # ── HTTP request (shared by check loop and test_connection) ───────────
 

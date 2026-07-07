@@ -54,6 +54,8 @@ _DEFAULT_STRINGS: dict[str, str] = {
     'summary_many':    '{n} service alerts',
     'summary_intro':   'The following service state changes were detected:',
     'summary_ts':      'Timestamp: {ts}',
+    'summary_issues':    'Issues',
+    'summary_recovered': 'Recovered',
 }
 
 
@@ -409,44 +411,66 @@ def render_summary(
     col_status = html.escape(s.get('label_status', 'Status'))
     col_detail = html.escape(s.get('label_detail', 'Detail'))
 
-    header_row = (
+    _th = ('padding:10px 14px;font-size:11px;font-weight:700;color:#6c757d;'
+           'text-transform:uppercase;letter-spacing:.4px;text-align:left;'
+           'border-bottom:2px solid #dee2e6')
+    _header_row = (
         '<tr style="background:#f8f9fa">'
-        f'<th style="padding:8px 12px;font-size:12px;font-weight:600;color:#495057;'
-        f'text-align:left;border-bottom:2px solid #dee2e6">{col_module}</th>'
-        f'<th style="padding:8px 12px;font-size:12px;font-weight:600;color:#495057;'
-        f'text-align:left;border-bottom:2px solid #dee2e6">{col_item}</th>'
-        f'<th style="padding:8px 12px;font-size:12px;font-weight:600;color:#495057;'
-        f'text-align:left;border-bottom:2px solid #dee2e6">{col_status}</th>'
-        f'<th style="padding:8px 12px;font-size:12px;font-weight:600;color:#495057;'
-        f'text-align:left;border-bottom:2px solid #dee2e6">{col_detail}</th>'
+        f'<th style="{_th};width:24%">{col_item}</th>'
+        f'<th style="{_th};width:14%">{col_module}</th>'
+        f'<th style="{_th};width:14%">{col_status}</th>'
+        f'<th style="{_th};width:48%">{col_detail}</th>'
         '</tr>'
     )
-    body_rows = ''
-    has_down = any(i.get('status', '').lower() in ('down', 'error', 'critical') for i in items)
-    has_warn = any(i.get('status', '').lower() in ('warn', 'warning') for i in items)
-    kind = 'down' if has_down else ('warn' if has_warn else 'info')
 
-    for i, entry in enumerate(items):
-        bg = '#ffffff' if i % 2 == 0 else '#f8f9fa'
-        body_rows += (
-            f'<tr style="background:{bg}">'
-            f'<td style="padding:8px 12px;font-size:13px;color:#495057;'
-            f'border-bottom:1px solid #dee2e6">{html.escape(entry.get("module",""))}</td>'
-            f'<td style="padding:8px 12px;font-size:13px;color:#212529;font-weight:500;'
-            f'border-bottom:1px solid #dee2e6">{html.escape(entry.get("item",""))}</td>'
-            f'<td style="padding:8px 12px;border-bottom:1px solid #dee2e6">'
+    def _row(entry, top_border, item_cell):
+        return (
+            '<tr>'
+            f'<td style="padding:10px 14px;font-size:13px;color:#212529;font-weight:600;'
+            f'vertical-align:top;word-break:break-word;border-top:{top_border}">{item_cell}</td>'
+            f'<td style="padding:10px 14px;font-size:12px;color:#6c757d;vertical-align:top;'
+            f'border-top:{top_border}">{html.escape(entry.get("module","") or "—")}</td>'
+            f'<td style="padding:10px 14px;vertical-align:top;border-top:{top_border}">'
             f'{_status_cell(entry.get("status","?"))}</td>'
-            f'<td style="padding:8px 12px;font-size:12px;color:#6c757d;word-break:break-word;'
-            f'border-bottom:1px solid #dee2e6">{html.escape(entry.get("message",""))}</td>'
-            f'</tr>'
+            f'<td style="padding:10px 14px;font-size:14px;line-height:1.5;color:#343a40;'
+            f'word-break:break-word;border-top:{top_border}">'
+            f'{html.escape(entry.get("message",""))}</td>'
+            '</tr>'
         )
 
-    table_html = (
-        '<table width="100%" cellpadding="0" cellspacing="0" role="presentation" '
-        'style="border:1px solid #dee2e6;border-radius:6px;border-collapse:collapse">'
-        f'{header_row}{body_rows}'
-        '</table>'
-    )
+    def _section(heading, accent, rows):
+        # Group by item (all of a host's rows together), items alphabetical.
+        rows = sorted(rows, key=lambda e: ((e.get('item', '') or '').lower(),
+                                           (e.get('module', '') or '').lower()))
+        body, last = '', None
+        for e in rows:
+            it = (e.get('item', '') or '—')
+            new = it != last
+            top = '2px solid #dee2e6' if (new and last is not None) else '1px solid #eceef1'
+            body += _row(e, top, html.escape(it) if new else '')   # item shown once per group
+            last = it
+        return (
+            f'<p style="margin:22px 0 8px;font-size:13px;font-weight:700;color:{accent}">'
+            f'{html.escape(heading)} <span style="color:#adb5bd;font-weight:600">({len(rows)})</span></p>'
+            '<table width="100%" cellpadding="0" cellspacing="0" role="presentation" '
+            'style="border:1px solid #dee2e6;border-radius:6px;border-collapse:collapse">'
+            f'{_header_row}{body}</table>'
+        )
+
+    def _bad(e):
+        return (e.get('status', '') or '').lower() in ('down', 'error', 'critical', 'warn', 'warning')
+
+    bad = [e for e in items if _bad(e)]
+    good = [e for e in items if not _bad(e)]
+    has_down = any((e.get('status', '') or '').lower() in ('down', 'error', 'critical') for e in items)
+    has_warn = any((e.get('status', '') or '').lower() in ('warn', 'warning') for e in items)
+    kind = 'down' if has_down else ('warn' if has_warn else 'info')
+
+    table_html = ''
+    if bad:
+        table_html += _section(s.get('summary_issues', 'Issues'), '#dc3545', bad)
+    if good:
+        table_html += _section(s.get('summary_recovered', 'Recovered'), '#198754', good)
 
     ts_tpl = s.get('summary_ts', 'Timestamp: {ts}')
     ts_row = (

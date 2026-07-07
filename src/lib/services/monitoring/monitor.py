@@ -30,7 +30,6 @@ import importlib
 import json
 import os
 import pprint
-import socket
 import sys
 import tempfile
 import time
@@ -40,7 +39,6 @@ from lib.config.spec import cfg_default, normalize_url
 from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
 from lib.core.object_base import ObjectBase
-from lib.providers.telegram import Telegram
 from lib.security import secret_manager
 
 __all__ = ['Monitor']
@@ -84,10 +82,11 @@ class Monitor(ObjectBase):
         # Fold the editable DB config layer under the read-only config.json now
         # that the shared connector exists (config.json/env stay read-only on top).
         self._apply_db_config()
-        # Telegram MUST be initialised after _apply_db_config: the token/chat_id
-        # are editable config that live in the DB, not config.json — initialising
-        # before the DB layer is folded in would read them empty.
-        self._init_telegram()
+        # Notifications go through an injected MonitorNotifier (multi-channel, grouped
+        # per cycle, routed by the notifications matrix). The owner (daemon) sets it
+        # after construction; None → notifications disabled (e.g. bare/CLI/test use).
+        self._notifier = None
+        self._host_name_map = None   # uid→name cache for notification item labels
         # Module configuration lives in the DB; needs the connector + fernet, so
         # it is wired here rather than in _read_config.
         self.config_modules = self._init_modules()
@@ -452,53 +451,19 @@ class Monitor(ObjectBase):
         self.status.data = {}
         self.status.save()
 
-    def _init_telegram(self):
-        """ Initialize (or refresh) the Telegram object from the config.
-
-        The token/chat_id are editable config that live in the DB, so this MUST
-        run after :meth:`_apply_db_config` (the effective config is folded in).
-        When a Telegram instance already exists (live refresh from the daemon),
-        the credentials are updated in place — the background sender thread reads
-        them at send time — so changing them in the UI takes effect without a
-        restart and without churning the sender thread.
-        """
-        if not self.config:
-            self.tg = None
-            return
-        token   = self.config.get_conf(['telegram', 'token'], '')
-        chat_id = self.config.get_conf(['telegram', 'chat_id'], '')
-        group   = self.config.get_conf(['telegram', 'group_messages'],
-                                       cfg_default('telegram|group_messages'))
-        if getattr(self, 'tg', None) is not None:
-            self.tg.token = token
-            self.tg.chat_id = chat_id
-            self.tg.group_messages = group
-        else:
-            self.tg = Telegram(token, chat_id)
-            self.tg.group_messages = group
-        self.debug.print(
-            f"> Monitor >> Telegram {'configured' if token else 'not configured'}"
-            f" (group_messages={self.tg.group_messages})", DebugLevel.info)
-
     def close(self):
-        """Release background resources — stop the Telegram sender thread. The daemon
-        calls this when it disposes the persistent monitor (stop/restart) so its
-        ``pool_run`` sender thread doesn't leak one per start/stop cycle."""
-        tg = getattr(self, 'tg', None)
-        if tg is not None:
-            try:
-                tg.close()
-            except Exception:  # pylint: disable=broad-except
-                pass
-        self.tg = None
+        """No-op retained for the daemon's dispose path. The monitor no longer owns any
+        background thread — notifications go through the injected MonitorNotifier, which
+        sends synchronously at cycle end — so there is nothing to stop; just drop it."""
+        self._notifier = None
 
     def refresh_runtime_config(self):
-        """Re-read the effective (DB+file) config and re-apply the bits that may
-        change live: the Telegram credentials and the public URL.  Called by the
-        persistent daemon each cycle so UI config edits take effect without a
-        restart (the Telegram sender thread is updated in place, not recreated)."""
+        """Re-read the effective (DB+file) config and re-apply the bits that may change
+        live (notably the public URL).  Called by the persistent daemon each cycle so UI
+        config edits (Telegram creds, routing, intervals) take effect without a restart —
+        the notifier reads the current config on every flush, so nothing to refresh here."""
         self._apply_db_config()
-        self._init_telegram()
+        self._host_name_map = None   # rebuild uid→name map so renamed/new hosts are picked up
         # Re-read the module config from the DB each cycle.  The persistent daemon
         # monitor holds its OWN ModulesStore whose version() counter is bumped only
         # by its own writes — it never sees the web admin's edits (a separate store
@@ -552,23 +517,71 @@ class Monitor(ObjectBase):
         """ Set the variable directory. """
         self._dir_var = val
 
-    def send_message(self, message, status=None) -> None:
-        """ Send a message to Telegram if the Telegram object is initialized. """
-        if message and self.tg:
-            hostname = socket.gethostname()
-            # Hay que enviar "\[" ya que solo "[" se lo come Telegram en modo "Markdown".
-            message = f"💻 \\[{hostname}]: {message}"
-            if status is True:
-                message = f"✅ {message}"
-            elif status is False:
-                message = f"❎ {message}"
-            self.tg.send_message(message)
+    @staticmethod
+    def _alert_kind(status, severity: str = '') -> str:
+        """Map a check item's (status, severity) to a routing kind: a passing check is a
+        ``recovery``, a failing one is ``warn`` when its severity is 'warning' else ``down``."""
+        if status is True:
+            return 'recovery'
+        if (severity or '') == 'warning':
+            return 'warn'
+        return 'down'
+
+    def _uid_name_map(self) -> dict:
+        """host_uid → friendly name, built once per cycle (invalidated by
+        :meth:`refresh_runtime_config`)."""
+        hmap = getattr(self, '_host_name_map', None)
+        if hmap is None:
+            hmap = {}
+            hs = getattr(self, '_hosts_store', None)
+            if hs is not None:
+                try:
+                    for h in (hs.list(decrypt=False) or []):
+                        if h.get('uid'):
+                            hmap[h['uid']] = h.get('name') or h['uid']
+                except Exception:  # pylint: disable=broad-except
+                    pass
+            self._host_name_map = hmap
+        return hmap
+
+    def _item_label(self, module: str, key: str) -> str:
+        """Readable name for a check item in notifications.
+
+        Host-centric checks key their items by an item UID and carry the bound host in the
+        item config (``host_uid``); resolve that to the host's friendly name.  Falls back to
+        the key itself (which, for host-bound base modules, may already be a host_uid)."""
+        if not key:
+            return ''
+        try:
+            mcfg = self.config_modules.get_conf([module]) or {}
+            for coll, items in mcfg.items():
+                if str(coll).startswith('__') or not isinstance(items, dict):
+                    continue
+                it = items.get(key) or items.get(str(key).split('/')[0])
+                if isinstance(it, dict) and it.get('host_uid'):
+                    name = self._uid_name_map().get(it['host_uid'])
+                    if name:
+                        return name
+                    break
+        except Exception:  # pylint: disable=broad-except
+            pass
+        return self._uid_name_map().get(key, key)
+
+    def send_message(self, message, status=None, module: str = '', item: str = '') -> None:
+        """Ad-hoc alert from a watchful module (the ModuleBase.send_message bridge).
+
+        Buffered into the current cycle's notification batch; the emoji/host formatting
+        and channel routing happen at flush time in :class:`MonitorNotifier`.  ``module``
+        (the watchful's name) and ``item`` (the module-supplied friendly name) fill the
+        digest's Module/Item columns for ad-hoc sends."""
+        if message and self._notifier is not None:
+            self._notifier.add(self._alert_kind(status), module, item or '', message)
 
     def send_message_end(self) -> None:
-        """ Send a summary message to Telegram at the end of the check. """
-        if self.tg is not None:
-            hostname = socket.gethostname()
-            self.tg.send_message_end(hostname, public_url=self._public_url)
+        """Flush the cycle's buffered alerts (grouped Telegram + digest email + per-event
+        webhooks, each with a summary), routed by the notifications matrix."""
+        if self._notifier is not None:
+            self._notifier.flush(public_url=self._public_url)
 
     def check_status(self, status, module, module_sub_key='') -> bool:
         """ Check if the status has changed for a given module and sub-key. """
@@ -609,8 +622,11 @@ class Monitor(ObjectBase):
                 # The persisted check_state row is the durable baseline: a
                 # restart with an unchanged state stays quiet, while the very
                 # first record of a check still notifies its current state.
-                if tmp_send:
-                    self.send_message(tmp_message, tmp_status)
+                if tmp_send and self._notifier is not None:
+                    # Prefer the module-supplied friendly name; else resolve the key.
+                    label = result_data.get_name(key) or self._item_label(module_name, key)
+                    self._notifier.add(self._alert_kind(tmp_status, tmp_severity),
+                                       module_name, label, tmp_message)
 
                 self.debug.print(
                     f"> Monitor > check_module >> Module: {module_name}/{key} - New Status: {tmp_status}"

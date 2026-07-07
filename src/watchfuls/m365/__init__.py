@@ -216,9 +216,10 @@ class Watchful(ModuleBase):
     def _emit(self, key: str, status: bool, message: str, other: dict = None,
               severity: str = None) -> None:
         """Record a result and notify only on a status change."""
-        self.dict_return.set(key, status, message, False, other or {}, severity)
+        name = (self.get_conf(['list', str(key).split('/')[0], 'label'], '') or '').strip()
+        self.dict_return.set(key, status, message, False, other or {}, severity, name=name)
         if self.check_status(status, self.name_module, key):
-            self.send_message(message, status)
+            self.send_message(message, status, item=name)
 
     def _check_item(self, key: str, raw: dict) -> None:
         # resolve_host applies a referenced credential (cred_uid) — no host binding

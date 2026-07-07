@@ -111,7 +111,7 @@ class Watchful(ModuleBase):
         ok = used < alert
         msg = f'CPU ({label}) used {used:.1f}%'
         msg = f'Normal {msg} ✅' if ok else f'Excessive {msg} ⚠️'
-        self.dict_return.set(key, ok, msg, other_data={'used': used, 'alert': alert})
+        self.dict_return.set(key, ok, msg, other_data={'used': used, 'alert': alert}, name=label)
 
     # ── Per-OS parsers (pure; return usage % or None) ─────────────────────────
     @classmethod

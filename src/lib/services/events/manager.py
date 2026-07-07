@@ -337,6 +337,20 @@ class _EventsMixin:
         except Exception:  # pylint: disable=broad-except
             return str(detail)[:500]
 
+    def _audit_event_label(self, event: str) -> str:
+        """Human-readable label for an audit event name in the configured language
+        (e.g. 'syslog_started' → 'Syslog: Started'), falling back to the raw name."""
+        if not event:
+            return ''
+        try:
+            from lib.i18n import TRANSLATIONS, DEFAULT_LANG  # noqa: PLC0415
+            cfg = self._read_config_file(getattr(self, '_CONFIG_FILE', None)) or {}
+            lang = (cfg.get('web_admin') or {}).get('lang') or DEFAULT_LANG
+            table = TRANSLATIONS.get(lang) or TRANSLATIONS.get(DEFAULT_LANG) or {}
+            return (table.get('audit_events') or {}).get(event, event)
+        except Exception:  # pylint: disable=broad-except
+            return event
+
     def _dispatch_event(self, source: str, rule: dict, ctx: dict) -> None:
         channels = [c for c in (rule.get('channels') or [])
                     if c in ('telegram', 'email', 'webhook')]
@@ -350,9 +364,10 @@ class _EventsMixin:
             item = ctx.get('hostname') or ctx.get('source') or name
             ts = ctx.get('received_at', '')
         else:  # audit
-            status = ctx.get('event', '')
+            event = ctx.get('event', '')
+            status = self._audit_event_label(event)   # human-readable, translated
             message = self._event_detail_str(ctx.get('detail'))
-            item = name or ctx.get('event', '')
+            item = name or status
             ts = ctx.get('ts', '')
         self._dbg(f"> Events >> rule {name!r} matched {source} → {channels}",
                   DebugLevel.info)

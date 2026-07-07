@@ -315,7 +315,7 @@ class Watchful(ModuleBase):
 
         self.dict_return.set(key, ok, s_msg, False, other)
         if self.check_status_custom(ok, key, msg):
-            self.send_message(s_msg, ok)
+            self.send_message(s_msg, ok, item=disp)
 
     def _build_cfg(self, key, db_type):
         """Collect all config fields for one item into a plain dict."""

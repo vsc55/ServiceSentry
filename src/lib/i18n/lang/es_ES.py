@@ -1766,6 +1766,8 @@ LANG = {
         'summary_many':    '{n} alertas de servicio',
         'summary_intro':   'Se detectaron los siguientes cambios de estado en los servicios:',
         'summary_ts':      'Fecha/Hora: {ts}',
+        'summary_issues':    'Con problemas',
+        'summary_recovered': 'Recuperados',
     },
     # Etiquetas de la matriz de enrutamiento de notificaciones
     'notif_event':             'Evento',

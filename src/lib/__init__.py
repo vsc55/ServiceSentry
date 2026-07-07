@@ -10,14 +10,12 @@ from lib.system.mem import Mem
 from lib.system.mem_info import MemInfo
 from lib.services.monitoring.monitor import Monitor
 from lib.core.object_base import ObjectBase
-from lib.providers.telegram import Telegram
 
 __all__ = [
     '__version__',
     'ObjectBase',
     'DictFilesPath',
     'Monitor',
-    'Telegram',
     'Exec',
     'ExecResult',
     'Mem',

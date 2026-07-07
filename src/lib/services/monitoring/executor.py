@@ -137,4 +137,14 @@ def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[di
         for _mod, _key, _status, _data in _hist_records:
             history.record(_mod, _key, _status, _data)
 
+    # Flush the cycle's buffered alerts once, grouped per channel (+ summary). All
+    # _process_module_result() calls above have finished, so the batch is complete.
+    # (The daemon path historically sent per-item alerts but never a summary.)
+    _notifier = getattr(monitor, '_notifier', None)
+    if _notifier is not None:
+        try:
+            _notifier.flush(public_url=getattr(monitor, '_public_url', ''))
+        except Exception:  # pylint: disable=broad-except
+            pass
+
     return results, errors

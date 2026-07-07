@@ -92,9 +92,10 @@ class Watchful(ModuleBase):
         """Record a result and notify only on a status change (like the other
         watchfuls). ``severity='warning'`` marks a non-OK result as an aviso
         (yellow in the UI) instead of a hard error."""
-        self.dict_return.set(key, status, message, False, other or {}, severity)
+        name = (self.get_conf(['list', str(key).split('/')[0], 'label'], '') or '').strip()
+        self.dict_return.set(key, status, message, False, other or {}, severity, name=name)
         if self.check_status(status, self.name_module, key):
-            self.send_message(message, status)
+            self.send_message(message, status, item=name)
 
     def _check_item(self, key: str, raw: dict) -> None:
         it = self.resolve_host(raw)

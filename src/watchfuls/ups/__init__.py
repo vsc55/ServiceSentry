@@ -266,7 +266,7 @@ class Watchful(ModuleBase):
         self.dict_return.set(key, ok, message, False, other_data)
 
         if self.check_status(ok, self.name_module, key):
-            self.send_message(message, ok)
+            self.send_message(message, ok, item=name)
 
     # ── Web UI — test_connection ──────────────────────────────────────
     @classmethod

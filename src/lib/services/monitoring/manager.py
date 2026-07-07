@@ -226,6 +226,11 @@ class _MonitoringMixin:
         self._monitoring_monitor = Monitor(
             dir_base, self._config_dir, self._modules_dir, self._var_dir,
         )
+        # Multi-channel notifications (telegram/email/webhook, grouped per cycle, routed by
+        # the notifications matrix). `self` is a valid dispatcher `wa` (has _read_config_file
+        # / _CONFIG_FILE / _dbg / _load_webhooks) both embedded and in a dedicated container.
+        from lib.core.notify.monitor_notifier import MonitorNotifier  # noqa: PLC0415
+        self._monitoring_monitor._notifier = MonitorNotifier(self)
         return self._monitoring_monitor
 
     def _monitoring_dispose_monitor(self) -> None:

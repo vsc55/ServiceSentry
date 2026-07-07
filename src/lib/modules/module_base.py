@@ -753,13 +753,17 @@ class ModuleBase(ObjectBase):
         """ Check if the module is enabled in the configuration. """
         return self.get_conf('enabled', self.module_field_default('enabled'))
 
-    def send_message(self, message, status=None):
+    def send_message(self, message, status=None, item=''):
         """
         Bridge function to the send_message function of the Monitor object, checking if the
         Monitor is defined and valid before sending the data.
+
+        ``item`` is the friendly name of the thing this alert is about (host/service/…);
+        it fills the notification digest's Item column for ad-hoc sends.
         """
         if self.is_monitor_exist:
-            self._monitor.send_message(message, status)
+            # Pass the watchful's name so the notification digest can fill its Module column.
+            self._monitor.send_message(message, status, module=self.name_module, item=item)
         else:
             self.debug.print(
                 f">> {self.name_module} > send_message: Error, Monitor is not defined!!",

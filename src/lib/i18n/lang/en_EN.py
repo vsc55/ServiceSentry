@@ -1765,6 +1765,8 @@ LANG = {
         'summary_many':    '{n} service alerts',
         'summary_intro':   'The following service state changes were detected:',
         'summary_ts':      'Timestamp: {ts}',
+        'summary_issues':    'Issues',
+        'summary_recovered': 'Recovered',
     },
     # Notification routing matrix labels
     'notif_event':             'Event',

@@ -152,7 +152,7 @@ class Watchful(ModuleBase):
         self.dict_return.set(name, status, s_message, False, other_data=other_data)
 
         if self.check_status(status, self.name_module, name):
-            self.send_message(s_message, status)
+            self.send_message(s_message, status, item=label)
 
     def _ping_return(self, host, timeout, attempt) -> tuple[bool, float | None]:
         """Try to ping *host* up to *attempt* times.  Returns (success, rtt_ms)."""

@@ -102,7 +102,7 @@ class Watchful(ModuleBase):
         msg = f'Normal {msg} ✅' if ok else f'Warning {msg} ⚠️'
         # Key the result by the item key (unique per check) — not by the mount
         # point, or two checks on the same partition would collide into one.
-        self.dict_return.set(key, ok, msg, other_data={'used': used, 'mount': part, 'alert': alert})
+        self.dict_return.set(key, ok, msg, other_data={'used': used, 'mount': part, 'alert': alert}, name=label)
 
     # ── Parsers (pure) ────────────────────────────────────────────────────────
     @classmethod

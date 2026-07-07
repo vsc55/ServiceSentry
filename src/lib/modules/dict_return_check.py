@@ -71,7 +71,8 @@ class ReturnModuleCheck:
             message='',
             send_msg: bool = True,
             other_data: dict = None,
-            severity: str = None
+            severity: str = None,
+            name: str = ''
         ) -> bool:
         """
         Create a new return and update it if it already exists.
@@ -96,6 +97,7 @@ class ReturnModuleCheck:
             self._dict_return[key]['send'] = send_msg
             self._dict_return[key]['other_data'] = other_data
             self._dict_return[key]['severity'] = self._norm_severity(severity, status)
+            self._dict_return[key]['name'] = name
             return self.is_exist(key)
         return False
 
@@ -165,6 +167,10 @@ class ReturnModuleCheck:
     def get_message(self, key: str) -> str:
         """ Get the message of the specified key. """
         return self.get(key).get('message', '')
+
+    def get_name(self, key: str) -> str:
+        """Friendly display name for the item (notification tables); '' → caller uses the key."""
+        return self.get(key).get('name', '')
 
     def get_send(self, key: str) -> bool:
         """ Get the send status of the specified key. """

@@ -93,7 +93,8 @@ class Watchful(ModuleBase):
         os_ = self.host_os(item)
         if os_ not in _MEM_CMDS:
             self.dict_return.set(f'{key}_ram', False,
-                                 f'Memory: {label} - *unsupported host OS: {os_}* ⚠️')
+                                 f'Memory: {label} - *unsupported host OS: {os_}* ⚠️',
+                                 name=label)
             return
         timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         outs = []
@@ -126,7 +127,8 @@ class Watchful(ModuleBase):
         # derived UID ("<item>_ram"/"_swap") — e.g. "NS1 - RAM".
         self.dict_return.set(result_key, not warning, msg,
                              other_data={'used': used, 'alert': float(alert),
-                                         'name': f'{label} - {caption}'})
+                                         'name': f'{label} - {caption}'},
+                             name=f'{label} - {caption}')
 
     # ── Per-OS parsers (pure; return (ram_pct, swap_pct|None)) ────────────────
     @classmethod

@@ -97,7 +97,8 @@ class Watchful(ModuleBase):
         msg += (f'*over temperature Warning {temp:.1f} ºC* 🔥' if warning
                 else f'temperature Ok *{temp:.1f} ºC* ✅')
         self.dict_return.set(key, not warning, msg,
-                             other_data={'type': sensor, 'temp': temp, 'alert': alert})
+                             other_data={'type': sensor, 'temp': temp, 'alert': alert},
+                             name=label)
 
     @staticmethod
     def _parse_thermal(out):

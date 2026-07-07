@@ -71,7 +71,8 @@ class Watchful(ModuleBase):
         if os_ != 'linux':
             self.dict_return.set(
                 f'{key}', False,
-                f'RAID: {label} - *mdstat only available on Linux (host OS: {os_})* ⚠️')
+                f'RAID: {label} - *mdstat only available on Linux (host OS: {os_})* ⚠️',
+                name=label)
             return
         path = self.get_conf('mdstat_path', self._MODULE_DEFAULTS['mdstat_path']) or '/proc/mdstat'
         timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
@@ -82,7 +83,7 @@ class Watchful(ModuleBase):
 
     def _md_analyze(self, list_md, key, label):
         if not list_md:
-            self.dict_return.set(f'{key}', True, f"[{label}] *No RAID's* in the system. ✅")
+            self.dict_return.set(f'{key}', True, f"[{label}] *No RAID's* in the system. ✅", name=label)
             return
         for (md, value) in list_md.items():
             other_data = {}
@@ -108,7 +109,7 @@ class Watchful(ModuleBase):
                 case _:
                     message = f"*RAID {label}/{md} Unknown Error*. ⚠️"
 
-            self.dict_return.set(f'{key}_{md}', not is_warning, message, other_data=other_data)
+            self.dict_return.set(f'{key}_{md}', not is_warning, message, other_data=other_data, name=label)
 
     def _label(self, key) -> str:
         label = (self.get_conf_in_list("label", key, '') or '').strip()

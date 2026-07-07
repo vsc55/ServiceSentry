@@ -117,7 +117,7 @@ class Watchful(ModuleBase):
                     self.dict_return.set(hdd_name, status, s_message, False, other_data)
 
                     if self.check_status(status, self.name_module, hdd_name):
-                        self.send_message(s_message, status)
+                        self.send_message(s_message, status, item=f'{hddtemp.label} - {hdd_dev}')
 
         else:
             self._debug(f"{hddtemp.label} >> Exception: {hddtemp.error}", DebugLevel.warning)
@@ -128,7 +128,7 @@ class Watchful(ModuleBase):
             self.dict_return.set(hddtemp.item_key, False, s_message, False, other_data)
 
             if self.check_status_custom(False, hddtemp.item_key, hddtemp.error):
-                self.send_message(s_message, False)
+                self.send_message(s_message, False, item=hddtemp.label)
 
     def _hddtemp_return(self, hddtemp):
         timeout = self.module_default('timeout', self._DEFAULT_TIMEOUT)

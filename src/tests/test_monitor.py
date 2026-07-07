@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from lib import Monitor
+from lib.modules import ReturnModuleCheck
 
 
 # ──────────────────────────── Fixtures ────────────────────────────
@@ -45,25 +46,65 @@ def _make_package_module(modules_dir, name, enabled_cfg=None):
     return mod_dir
 
 
-# ──────────────────────────── close() ─────────────────────────────
+# ──────────────────── notifier / no background thread ─────────────
 
 
-class TestClose:
-    """close() must stop the Telegram sender thread — otherwise the daemon leaks one
-    `pool_run` thread per monitor it creates on every start/stop cycle."""
+class TestNotifier:
+    """The monitor no longer owns a threaded Telegram client: it buffers alerts into an
+    injected MonitorNotifier and spawns no background sender thread of its own."""
 
-    def test_close_stops_telegram_thread(self, monitor):
-        tg = monitor.tg
-        assert tg is not None and tg.pool_send_msg.is_alive()
+    def test_monitor_has_no_telegram_thread(self, monitor):
+        assert not hasattr(monitor, 'tg')     # the queued Telegram client is gone
+        assert monitor._notifier is None      # set by the daemon, not on construction
+
+    def test_close_is_a_safe_noop(self, monitor):
         monitor.close()
-        tg.pool_send_msg.join(timeout=2)
-        assert not tg.pool_send_msg.is_alive()
-        assert monitor.tg is None
+        monitor.close()                       # idempotent, never raises
+        assert monitor._notifier is None
 
-    def test_close_is_idempotent(self, monitor):
-        monitor.close()
-        monitor.close()   # a second close must not raise
-        assert monitor.tg is None
+    def test_alert_kind_mapping(self):
+        from lib.services.monitoring.monitor import Monitor
+        assert Monitor._alert_kind(True) == 'recovery'
+        assert Monitor._alert_kind(False) == 'down'
+        assert Monitor._alert_kind(False, 'warning') == 'warn'
+
+    def test_process_result_buffers_alert(self, monitor):
+        """A changed, sendable item is buffered into the notifier with the mapped kind."""
+        added = []
+        monitor._notifier = type('N', (), {'add': lambda self, *a: added.append(a)})()
+        rmc = ReturnModuleCheck()
+        rmc.set('item1', False, 'boom', send_msg=True)
+        monitor._process_module_result('ping', rmc)
+        assert added == [('down', 'ping', 'item1', 'boom')]
+
+    def test_send_message_carries_module_and_item(self, monitor):
+        """The ad-hoc bridge path buffers the watchful's name (Module) + friendly item."""
+        added = []
+        monitor._notifier = type('N', (), {'add': lambda self, *a: added.append(a)})()
+        monitor.send_message('boom', False, module='ntp', item='NS1')
+        assert added == [('down', 'ntp', 'NS1', 'boom')]
+
+    def test_module_supplied_name_wins_over_uid_key(self, monitor):
+        """A result carrying a friendly name shows that name, not its UID key."""
+        added = []
+        monitor._notifier = type('N', (), {'add': lambda self, *a: added.append(a)})()
+        rmc = ReturnModuleCheck()
+        rmc.set('c41dc992-uid', False, 'CPU high', send_msg=True, name='PVE02')
+        monitor._process_module_result('cpu', rmc)
+        assert added == [('down', 'cpu', 'PVE02', 'CPU high')]
+
+    def test_item_label_resolves_host_uid(self, monitor):
+        """The item column shows the bound host's friendly name, not the item/host UID."""
+        monitor._host_name_map = {'uid-1': 'NS1'}
+        # A check item bound to a host via host_uid in the module config → host name.
+        monitor.config_modules = type('C', (), {
+            'get_conf': lambda self, path: (
+                {'list': {'chk-1': {'host_uid': 'uid-1'}}} if path == ['cpu'] else {})})()
+        assert monitor._item_label('cpu', 'chk-1') == 'NS1'
+        # The key itself is a host_uid (host-bound base modules) → host name.
+        assert monitor._item_label('cpu', 'uid-1') == 'NS1'
+        # Unknown → the key itself.
+        assert monitor._item_label('cpu', 'nope') == 'nope'
 
 
 # ──────────────────── _get_enabled_modules ────────────────────────
@@ -193,25 +234,30 @@ class TestCheckStatePersistence:
         r.set(key, status, msg)
         return r
 
-    def test_first_record_notifies_and_persists(self, monitor, monkeypatch):
-        sent = []
-        monkeypatch.setattr(monitor, 'send_message', lambda m, s=None: sent.append((m, s)))
+    @staticmethod
+    def _recorder(monitor):
+        """Attach a recording notifier; returns the list of (kind, module, item, msg)."""
+        added = []
+        monitor._notifier = type('N', (), {'add': lambda self, *a: added.append(a)})()
+        return added
+
+    def test_first_record_notifies_and_persists(self, monitor):
+        added = self._recorder(monitor)
         # With no prior records, the first change announces the current state.
         monitor._process_module_result('mod', self._result('k', False, 'down'))
-        assert sent == [('down', False)]
+        assert added == [('down', 'mod', 'k', 'down')]
         # ... and saving persists it to the check_state table.
         monitor.status.save()
         assert monitor._check_state_store.get_all()[('mod', 'k', '')]['status'] is False
 
-    def test_unchanged_state_is_silent(self, monitor, monkeypatch):
-        sent = []
-        monkeypatch.setattr(monitor, 'send_message', lambda m, s=None: sent.append((m, s)))
+    def test_unchanged_state_is_silent(self, monitor):
+        added = self._recorder(monitor)
         monitor._process_module_result('mod', self._result('k', True, 'ok'))   # first → notifies
         monitor._process_module_result('mod', self._result('k', True, 'ok'))   # unchanged → silent
         monitor._process_module_result('mod', self._result('k', False, 'dn'))  # transition → notifies
-        assert sent == [('ok', True), ('dn', False)]
+        assert added == [('recovery', 'mod', 'k', 'ok'), ('down', 'mod', 'k', 'dn')]
 
-    def test_state_survives_restart(self, monitor, monkeypatch):
+    def test_state_survives_restart(self, monitor):
         # Record an OK state and persist it to the DB.
         monitor._process_module_result('mod', self._result('k', True, 'ok'))
         monitor.status.save()
@@ -221,10 +267,9 @@ class TestCheckStatePersistence:
         m2 = Monitor(monitor.dir_base, monitor.dir_config, monitor.dir_modules, monitor.dir_var)
         assert m2.status.get_conf(['mod', 'k', 'status'], None) is True
         # The same OK result must NOT re-announce after the restart.
-        sent = []
-        monkeypatch.setattr(m2, 'send_message', lambda msg, s=None: sent.append(msg))
+        added = self._recorder(m2)
         m2._process_module_result('mod', self._result('k', True, 'ok'))
-        assert sent == []
+        assert added == []
 
     def test_clear_status_also_clears_state(self, monitor):
         monitor._process_module_result('mod', self._result('k', True, 'ok'))
@@ -327,38 +372,15 @@ class TestFailStreak:
             sys.modules.pop("streaky", None)
 
 
-class TestTelegramConfigFromDB:
-    """Regression: the Telegram credentials are editable config that live in the
-    DB (config migration), not config.json — the monitor must initialise/refresh
-    Telegram from the EFFECTIVE config (after _apply_db_config), not the bare
-    file.  A wrong init order left token/chat_id empty → no notifications."""
+class TestRefreshRuntimeConfig:
+    """The monitor no longer owns a Telegram client — credentials are read from the
+    effective (DB+file) config at flush time by the injected MonitorNotifier, so
+    refresh_runtime_config just re-applies the DB layer (no sender to churn)."""
 
-    def _write_db_telegram(self, monitor, token, chat_id):
-        from lib.core.config.store import ConfigStore
-        from lib.config import config_path
-        from lib.config.manager import ConfigManager
-        mgr = ConfigManager(ConfigStore(monitor._db), config_path(monitor.dir_config),
-                            fernet=monitor._fernet)
-        mgr.write({'telegram': {'token': token, 'chat_id': chat_id}})
-
-    def test_fresh_monitor_reads_telegram_from_db(self, monitor):
-        # config.json is empty; the credentials only exist in the DB layer.
-        self._write_db_telegram(monitor, 'TKN-1', 'CHT-1')
-        m2 = Monitor(monitor.dir_base, monitor.dir_config,
-                     monitor.dir_modules, monitor.dir_var)
-        assert m2.tg.token == 'TKN-1'
-        assert m2.tg.chat_id == 'CHT-1'
-
-    def test_refresh_runtime_config_updates_in_place(self, monitor):
-        # Starts empty (no telegram anywhere)…
-        assert monitor.tg.token == ''
-        tg_before = monitor.tg
-        self._write_db_telegram(monitor, 'TKN-2', 'CHT-2')
-        monitor.refresh_runtime_config()
-        # …picks up the DB values live, updating the SAME sender object.
-        assert monitor.tg is tg_before        # not recreated (no thread churn)
-        assert monitor.tg.token == 'TKN-2'
-        assert monitor.tg.chat_id == 'CHT-2'
+    def test_refresh_is_safe_without_a_notifier(self, monitor):
+        assert not hasattr(monitor, 'tg')
+        monitor.refresh_runtime_config()      # must not raise (no _init_telegram anymore)
+        assert monitor._notifier is None
 
 
 class TestDaemonModuleConfigRefresh:
@@ -449,21 +471,38 @@ class TestDaemonCycleIntegration:
 
             # The per-cycle refresh the daemon now performs.
             monitor.refresh_runtime_config()
-            monitor.tg.group_messages = False        # deterministic immediate send
+
+            # Wire a notifier reading the effective (DB-folded) config, with the routing
+            # matrix sending recoveries to Telegram — mirrors the daemon (whose manager
+            # is the dispatcher `wa`). This proves the DB creds reach the send.
+            from lib.core.notify.monitor_notifier import MonitorNotifier
+
+            class _WA:
+                _CONFIG_FILE = 'config.json'
+                def _read_config_file(self, _f):
+                    return {'telegram': {
+                                'token': monitor.config.get_conf(['telegram', 'token'], ''),
+                                'chat_id': monitor.config.get_conf(['telegram', 'chat_id'], ''),
+                                'group_messages': False},
+                            'notifications': {'telegram_on_recovery': True}}
+                def _dbg(self, *a, **k): pass
+                def _load_webhooks(self, *, decrypt=True): return []
+                def _config_section(self, _n): return {}
+            monitor._notifier = MonitorNotifier(_WA())
 
             import lib.providers.telegram as telegram_mod
             with patch.object(telegram_mod, 'requests') as req:
                 req.RequestException = Exception
                 req.post.return_value = MagicMock(status_code=200)
 
-                # Run the cycle exactly like the daemon: check → process → history.
+                # Run the cycle exactly like the daemon: check → process → history → flush.
                 ok, mname, data = monitor.check_module(name)
                 assert ok and data is not None and 'pve/state' in data.list
                 monitor._process_module_result(mname, data)
                 for key in data.list:
                     monitor._history.record(mname, key, data.get_status(key),
                                             data.get_other_data(key))
-                monitor.tg.queue_msg.join()          # drain the sender
+                monitor._notifier.flush()            # flush the cycle's grouped alerts
 
             # 1) STATUS — the live result is recorded.
             assert monitor.status.get_conf([name, 'pve/state', 'status']) is True

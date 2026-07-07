@@ -328,3 +328,17 @@ class TestEventDetailStr:
     def test_detail_str(self, detail, expected):
         from lib.services.events.manager import _EventsMixin
         assert _EventsMixin._event_detail_str(detail) == expected
+
+
+class TestAuditEventLabel:
+    """Audit-event notifications must show a human-readable, translated event name — not
+    the raw key (e.g. 'syslog_started' → 'Syslog: Started/Iniciado')."""
+
+    def test_known_event_is_translated(self, admin):
+        label = admin._embedded_services['events']._audit_event_label('syslog_started')
+        assert label != 'syslog_started' and 'Syslog' in label
+
+    def test_unknown_event_falls_back_to_raw(self, admin):
+        ev = admin._embedded_services['events']
+        assert ev._audit_event_label('totally_unknown_xyz') == 'totally_unknown_xyz'
+        assert ev._audit_event_label('') == ''

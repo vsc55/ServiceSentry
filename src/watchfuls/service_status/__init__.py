@@ -109,7 +109,8 @@ class Watchful(ModuleBase):
         os_ = self.host_os(item)
         if os_ not in _STATUS_CMDS:
             self.dict_return.set(key, False,
-                                 f'Service: {label} - *unsupported host OS: {os_}* ⚠️')
+                                 f'Service: {label} - *unsupported host OS: {os_}* ⚠️',
+                                 name=label)
             return
 
         status, error, detail = self._service_state(item, os_, service_name)
@@ -118,7 +119,7 @@ class Watchful(ModuleBase):
 
         remediation_use = None
         if self.check_status(ok, self.name_module, key):
-            self.send_message(s_message, ok)
+            self.send_message(s_message, ok, item=label)
             if not ok and remediation:
                 self._service_remediation(item, os_, service_name, expected)
                 status, error, detail = self._service_state(item, os_, service_name)
@@ -126,7 +127,7 @@ class Watchful(ModuleBase):
                 remediation_use = ok
                 s_message = '*Recovery* ' + self._fmt(label, ok, status, error, detail,
                                                       unsuccessful=True)
-                self.send_message(s_message, ok)
+                self.send_message(s_message, ok, item=label)
 
         other_data = {'error': error, 'status_detail': detail, 'remediation': remediation_use}
         self.dict_return.set(key, ok, s_message, False, other_data)
