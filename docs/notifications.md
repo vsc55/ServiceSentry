@@ -20,7 +20,7 @@ routing y las particularidades de cada canal (firma HMAC, plantillas).
 
 | Canal | Transporte | Config (sección) | Notas |
 |---|---|---|---|
-| **Telegram** | Bot API | `telegram` | Vía `lib/providers/telegram.py`; agrupa mensajes opcional |
+| **Telegram** | Bot API | `telegram` | `send_telegram` one-shot (`lib/providers/telegram.py`), **texto plano**; el monitor agrupa por ciclo (ver §[Monitor](#el-monitor-notificación-agrupada-por-ciclo-monitornotifier)) |
 | **Email** | SMTP · Microsoft 365 (Graph) · Gmail | `email` | Cuerpo HTML por plantillas i18n; destinatarios múltiples |
 | **Webhook** | HTTP POST | `webhooks` (lista) | **Varios destinos**, firma **HMAC** opcional, plantilla de cuerpo |
 
@@ -70,10 +70,42 @@ flowchart TB
 ```
 
 - **Monitor**: al detectar un **cambio de estado** de un check (no hay spam si el estado no
-  cambia) llama a `dispatch(kind=down|recovery|warn)` → matriz global.
+  cambia) enruta por la matriz global (`kind = down|recovery|warn`), pero **no una alerta a la
+  vez**: acumula el ciclo y hace un flush **agrupado** — ver §[Monitor](#el-monitor-notificación-agrupada-por-ciclo-monitornotifier).
 - **Worker de eventos**: al hacer match una regla sobre auditoría/syslog, llama a `dispatch`
-  con los **canales de la regla** (`channels=…`) → salta la matriz global.
+  con los **canales de la regla** (`channels=…`) → salta la matriz global. El nombre del
+  evento de auditoría se **traduce** al idioma configurado (`_audit_event_label`).
 - **Receptor syslog**: mensajes marcados como alerta → `dispatch(kind=syslog)`.
+
+---
+
+## El monitor: notificación agrupada por ciclo (`MonitorNotifier`)
+
+A diferencia del worker de eventos y el receptor syslog —que llaman a `dispatch()` **una vez
+por evento**—, el monitor acumula todos los cambios de estado de un ciclo en un
+**`MonitorNotifier`** (`lib/core/notify/monitor_notifier.py`) y al final del ciclo hace **un
+único flush agrupado por canal**, enrutado por la misma matriz (`{canal}_on_{kind}`):
+
+- **Telegram** — **texto plano** (sin Markdown: los mensajes de los módulos llevan `*`/`_`
+  que rompen el parser al concatenar muchos en un mensaje). Con `telegram|group_messages`
+  activo → **un mensaje** con dos secciones **⚠️ Con problemas** (down/warn) y
+  **✅ Recuperados** (recovery), ordenado por item, y un **resumen** al final con enlace a
+  `/status` (troceado si excede el límite de 4096). Sin agrupar → un mensaje por alerta.
+- **Email** — **un digest** (`render_summary`) con esas mismas dos zonas, cada una en una tabla
+  **agrupada por item** (todas las filas de un host juntas, el nombre se muestra una vez).
+- **Webhook** — **una llamada por alerta** (eventos discretos para integraciones), no agrupado.
+
+El `MonitorNotifier` reutiliza los mismos senders de canal que `dispatch()` (`send_telegram`,
+email `_dispatch`, webhook `send_all`); solo cambia la **estrategia de agrupación**, y el
+envío es **síncrono** en el flush (el antiguo cliente Telegram con cola/hilo `Telegram`/
+`pool_run` se eliminó).
+
+- **Kind**: check OK → `recovery`; fallo con severidad `warning` → `warn`; resto → `down`.
+- **Nombre del item**: cada watchful emite el nombre amigable
+  (`ReturnModuleCheck.set(…, name=)` en la ruta estructurada, `send_message(…, item=)` en la
+  ad-hoc); si el módulo no lo da, el monitor resuelve `host_uid → nombre`.
+- **Resumen de ciclo**: se emite en las dos rutas de check (manual y daemon); antes el daemon
+  no mandaba resumen.
 
 ---
 
@@ -120,6 +152,10 @@ cuerpo se construye con **plantillas HTML i18n** (`lib/core/notify/email/templat
 traducidas con el mismo sistema que el resto de la UI (ver
 [i18n.md](i18n.md)) y personalizables desde el panel
 (`/api/v1/notify/templates` · `notif_templates` / `notif_html_templates`).
+
+Plantillas: `render_alert` (una alerta) para eventos sueltos; **`render_summary`** (digest)
+para las alertas agrupadas del monitor — dos zonas **Con problemas / Recuperados** agrupadas
+por item (ver §[Monitor](#el-monitor-notificación-agrupada-por-ciclo-monitornotifier)).
 
 Destinatarios: lista en la config `email`; se parsean múltiples direcciones.
 

@@ -76,6 +76,8 @@ LANG = {
     'status_on': 'On',
     'status_off': 'Off',
     'connection_error': 'Connection error',
+    'conn_lost_title': 'No connection to the server',
+    'conn_lost_msg': 'Retrying… it will resume automatically once the connection is back.',
     'invalid_json': 'Invalid JSON',
     'save_file_error': 'Could not save file',
     'comma_separated': 'Comma separated',

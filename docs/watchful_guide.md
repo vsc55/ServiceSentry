@@ -18,7 +18,7 @@ flowchart TD
     w1 --> w2["Ejecuta la lógica de monitorización"]
     w2 --> w3["Almacena resultados en dict_return"]
     w3 --> w4["Detecta cambios de estado (check_status)"]
-    w4 --> w5["Envía notificaciones por Telegram (send_message)"]
+    w4 --> w5["Notifica el cambio (Telegram/Email/Webhook, agrupado por ciclo)"]
 ```
 
 ### Jerarquía de clases
@@ -685,16 +685,19 @@ ping_timeout = self.get_conf('timeout', 5, select_module='watchfuls.ping')
 ### Resultados
 
 ```python
-self.dict_return.set(key, status, message, send_msg=False, other_data=None)
+self.dict_return.set(key, status, message, send_msg=False, other_data=None,
+                     severity=None, name='')
 ```
 
 | Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
-| `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en la tabla `check_state` |
+| `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en la tabla `check_state`. En módulos host-céntricos suele ser el `host_uid` (un UID, no legible) |
 | `status` | bool | `True` = OK, `False` = Error |
-| `message` | str | Mensaje para Telegram. Soporta formato Markdown: `*negrita*`, `_cursiva_`, `` `código` ``, `[texto](url)` |
+| `message` | str | Texto del resultado. Se envía **en texto plano** en las notificaciones (el Markdown de Telegram se elimina, ya que se rompía al agrupar) — no incrustes `*`/`_` esperando formato |
 | `send_msg` | bool | `False` (por defecto) — no enviar el mensaje automáticamente. Usa `send_message()` después de `check_status()` para controlar cuándo se envía |
 | `other_data` | dict | Datos extra que se almacenan en `check_state` junto al resultado. Accesibles en la página pública `/status` bajo la clave `extra` de cada ítem |
+| `severity` | str | Severidad de un estado no-OK: `'warning'` (aviso, amarillo → kind `warn`) o `'error'` (por defecto). Los OK llevan `''` |
+| `name` | str | **Nombre amigable del ítem** para las notificaciones (p.ej. `PVE04`). Rellena la columna *Item* del digest; sin él, el monitor intenta resolver `host_uid → nombre`. Pásalo siempre que tengas el label del host/servicio |
 
 **`other_data` en la API de estado:** lo que pases en `other_data` aparece como `extra` en la respuesta de la página `/status`:
 
@@ -718,6 +721,7 @@ self.dict_return.set('Mi Servidor', False, 'Error', other_data={'message': 'Conn
 | `get(key) -> dict` | Devuelve el dict completo de un resultado (`{"status": ..., "message": ..., "send": ..., "other_data": ...}`) |
 | `get_status(key) -> bool` | Devuelve solo el campo `status` de un resultado |
 | `get_message(key) -> str` | Devuelve solo el campo `message` |
+| `get_name(key) -> str` | Devuelve el nombre amigable del ítem (`''` si no se pasó `name=`) |
 | `get_other_data(key) -> dict` | Devuelve solo el campo `other_data` |
 | `is_exist(key) -> bool` | Comprueba si ya existe un resultado para esa clave |
 | `remove(key) -> bool` | Elimina un resultado del dict |
@@ -766,9 +770,18 @@ Lógica interna:
 
 > Usa `check_status_custom` cuando pasas el mensaje de error en `other_data={'message': ...}` y quieres que un cambio de tipo de error genere una nueva notificación.
 
-#### `send_message(message, status)`
+#### `send_message(message, status, item='')`
 
-Envía un mensaje a Telegram. El parámetro `status` (`True`/`False`) determina si el mensaje se agrupa con otros OK o con errores al final del ciclo.
+Emite una alerta ad-hoc por las notificaciones (Telegram / Email / Webhook, según la matriz
+de routing) — no solo Telegram. El `status` (`True`/`False`) fija el *kind* (recovery / down)
+y con ello la zona del digest (**Recuperados** / **Con problemas**). Pasa **`item`** con el
+nombre amigable del host/servicio para rellenar la columna *Item* del digest (equivale a
+`name=` en `dict_return.set`); sin él, la fila sale sin nombre. El mensaje se envía en texto
+plano (el Markdown se elimina).
+
+> Nota: los watchfuls host-céntricos que devuelven el resultado con `dict_return.set(...,
+> send_msg=True)` notifican por esa vía (estructurada) — ahí el nombre va en `name=`.
+> `send_message()` es para el patrón `set(send_msg=False)` + notificación manual.
 
 ### Herramientas del sistema
 

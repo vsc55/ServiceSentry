@@ -1273,3 +1273,25 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 /* Standalone Overview page (/overview): hide the admin tab-nav — the page shows
    only the widget grid; the panel's tabs live at /admin. */
 body.overview-page #mainTabs { display: none !important; }
+
+/* Connection-lost overlay: a modal-style blocker shown when the server becomes
+   unreachable, auto-hidden on reconnect (see _polling.html / _startConnWatch). */
+.ss-conn-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, .45);
+    backdrop-filter: blur(2px);
+}
+.ss-conn-card {
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border: 1px solid var(--bs-border-color);
+    border-radius: .75rem;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .35);
+    padding: 1.75rem 2.25rem;
+    max-width: 22rem;
+}

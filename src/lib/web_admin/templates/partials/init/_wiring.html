@@ -43,10 +43,11 @@ document.getElementById('btn-tab-access')?.addEventListener('hide.bs.tab', () =>
 
 async function refreshAccessData() {
 const [u, s, ro, gr] = await Promise.all([apiGet('/api/v1/users'), apiGet('/api/v1/sessions'), apiGet('/api/v1/roles'), apiGet('/api/v1/groups')]);
-usersData = u || {};
-sessionsData = s || {};
-rolesData = ro || {};
-groupsData = gr || {};
+if (!u || !s || !ro || !gr) return;   // transient error (e.g. connection lost) → keep the current view
+usersData = u;
+sessionsData = s;
+rolesData = ro;
+groupsData = gr;
 renderSessions();
 renderUsers();
 renderRoles();

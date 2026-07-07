@@ -95,6 +95,25 @@ class TestPublicStatusPage:
         html = c.get("/status").data
         assert b"Ping" in html or b"ping" in html
 
+    def test_status_fragment_is_body_only(self, config_dir, var_dir):
+        """/status?fragment=1 returns just the dynamic body (for the AJAX refresh):
+        the module content but NOT the full HTML shell / page script."""
+        wa = WebAdmin(config_dir, "admin", "secret", var_dir,
+                      public_status=True,
+                      pw_require_upper=False, pw_require_digit=False)
+        wa._check_state_store.persist_status(
+            {"ping": {"192.168.1.1": {"status": True, "other_data": {}}}})
+        wa.app.config["TESTING"] = True
+        c = wa.app.test_client()
+        full = c.get("/status").data
+        frag = c.get("/status?fragment=1").data
+        # Full page has the shell + overlay + refresh script; the fragment does not.
+        assert b"<!DOCTYPE html>" in full and b"st-conn-overlay" in full and b"_stRefresh" in full
+        assert b"<!DOCTYPE html>" not in frag and b"st-conn-overlay" not in frag
+        # Both carry the actual status content.
+        assert b"mod-grid" in frag and (b"Ping" in frag or b"ping" in frag)
+        assert b"data-overall-ok" in frag
+
     def test_status_shows_check_name(self, config_dir, var_dir):
         """The status page renders individual checks by their display name —
         the item 'label' when set."""

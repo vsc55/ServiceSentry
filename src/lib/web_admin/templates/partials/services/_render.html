@@ -195,7 +195,8 @@ async function renderServices() {
     const c = document.getElementById('services-container');
     if (!c) return;
     const resp = await apiGet('/api/v1/services');
-    const s = (resp && resp.services) || {};
+    if (!resp) { _scheduleServicesPoll(); return; }   // transient error (e.g. connection lost) → keep the current view, retry later
+    const s = resp.services || {};
 
     // Render one card per registered service, in registry order. Identity
     // (title/icon) + state/controllability come from the backend entry; the
@@ -211,7 +212,11 @@ async function renderServices() {
         </div>
         <div class="row">${cards.join('') || `<p class="text-muted">${esc(t('svc_none'))}</p>`}</div>`;
 
-    // Light auto-refresh while the Services tab stays visible.
+    _scheduleServicesPoll();
+}
+
+// Light auto-refresh while the Services tab stays visible.
+function _scheduleServicesPoll() {
     if (_svcPollTimer) clearTimeout(_svcPollTimer);
     _svcPollTimer = setTimeout(() => {
         if (document.getElementById('tab-services')?.classList.contains('active')) renderServices();

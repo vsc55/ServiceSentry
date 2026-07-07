@@ -62,6 +62,15 @@
             </button>
         </div>
     </div>
+    <!-- Connection-lost overlay: shown when the server becomes unreachable, auto-hidden on reconnect -->
+    <div id="conn-lost-overlay" class="ss-conn-overlay d-none" role="alertdialog"
+         aria-live="assertive" aria-modal="true">
+        <div class="ss-conn-card text-center">
+            <div class="spinner-border text-warning mb-3" role="status"></div>
+            <div class="fw-semibold ss-fs-6 mb-1" id="conn-lost-title"></div>
+            <div class="text-muted small" id="conn-lost-msg"></div>
+        </div>
+    </div>
 </div>
 
 <!-- Main content -->

@@ -5,7 +5,7 @@
 import json
 import os
 
-from flask import abort, render_template, session
+from flask import abort, render_template, request, session
 
 from lib.i18n import DEFAULT_LANG, TRANSLATIONS
 
@@ -155,8 +155,7 @@ def register(app, wa):
         overall_ok = total_all == 0 or total_ok == total_all
         overall_pct = round(100 * total_ok / total_all) if total_all else 100
 
-        return render_template(
-            'status.html',
+        _ctx = dict(
             modules=modules,
             overall_ok=overall_ok,
             overall_pct=overall_pct,
@@ -167,4 +166,8 @@ def register(app, wa):
             lang=lang,
             i18n=i18n,
         )
+        # AJAX auto-refresh fetches just the dynamic body fragment (no full page reload).
+        if request.args.get('fragment'):
+            return render_template('partials/status_body.html', **_ctx)
+        return render_template('status.html', **_ctx)
 

@@ -1,0 +1,167 @@
+{# Dynamic body of the public /status page. Rendered inline by status.html and also
+   served on its own (/status?fragment=1) for the AJAX auto-refresh. #}
+{% set ns = namespace(ok_mods=0, err_mods=0) %}
+{% for mod in modules %}
+  {% if mod.all_ok %}{% set ns.ok_mods = ns.ok_mods + 1 %}
+  {% else %}{% set ns.err_mods = ns.err_mods + 1 %}{% endif %}
+{% endfor %}
+
+<!-- Live bar -->
+<div class="live-bar"></div>
+
+<!-- ── Hero ──────────────────────────────────────────────────────────── -->
+<div class="hero" data-overall-ok="{{ 'true' if overall_ok else 'false' }}">
+  <div class="hero-inner">
+    <i class="bi {% if overall_ok %}bi-shield-check{% else %}bi-shield-exclamation{% endif %} hero-icon"></i>
+    <h1 class="hero-title">ServiceSentry</h1>
+    <div class="hero-pill">
+      {% if overall_ok %}<i class="bi bi-check-circle-fill"></i> {{ i18n.status_all_ok }}
+      {% else %}<i class="bi bi-exclamation-triangle-fill"></i> {{ i18n.status_degraded }}{% endif %}
+    </div>
+    <div class="hero-meta">
+      <span class="hero-meta-item">
+        <i class="bi bi-activity"></i>
+        {{ i18n.status_checks_passing.format(ok=total_ok, total=total_all) }}
+      </span>
+      <span class="hero-meta-item">
+        <i class="bi bi-speedometer2"></i>
+        {{ i18n.status_uptime.format(pct=overall_pct) }}
+      </span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Summary ribbon ────────────────────────────────────────────────── -->
+{% if modules %}
+<div class="ribbon">
+  {% if ns.ok_mods %}
+  <span class="ribbon-chip">
+    <span class="dot" style="background:#22c55e"></span>
+    {{ ns.ok_mods }} {{ i18n.status_ok }}
+  </span>
+  {% endif %}
+  {% if ns.err_mods %}
+  <span class="ribbon-chip">
+    <span class="dot" style="background:#ef4444"></span>
+    {{ ns.err_mods }} {{ i18n.status_error }}
+  </span>
+  {% endif %}
+  <span class="ribbon-chip">
+    <i class="bi bi-activity" style="color:var(--muted);font-size:.8rem"></i>
+    {{ total_ok }}/{{ total_all }} checks
+  </span>
+  <span class="ribbon-chip">
+    <i class="bi bi-puzzle" style="color:var(--muted);font-size:.8rem"></i>
+    {{ modules|length }} modules
+  </span>
+</div>
+{% endif %}
+
+<!-- ── Content ────────────────────────────────────────────────────────── -->
+<div class="content">
+
+  {% if not modules %}
+  <div class="empty-state">
+    <i class="bi bi-inbox"></i>
+    <p>{{ i18n.status_no_data }}</p>
+  </div>
+  {% endif %}
+
+  <div class="mod-grid">
+  {% for mod in modules %}
+  <div class="mod-card" id="mod-{{ mod.name }}" style="animation-delay:{{ loop.index0 * 0.06 }}s">
+
+    <div class="mod-accent {% if mod.all_ok %}accent-ok{% else %}accent-err{% endif %}"></div>
+
+    <!-- Header -->
+    <div class="mod-header {% if mod.all_ok %}collapsed{% endif %}{% if not show_detail %} mod-header-static{% endif %}"
+         {% if show_detail %}onclick="toggleMod('{{ mod.name }}')"{% endif %}>
+
+      <div class="mod-avatar {% if mod.all_ok %}av-ok{% else %}av-err{% endif %}">
+        <i class="bi {{ mod.icon }}"></i>
+      </div>
+
+      <div class="mod-info">
+        <div class="mod-name">{{ mod.label }}</div>
+        <div class="mod-sub">
+          {{ mod.total }} checks
+          &nbsp;·&nbsp;
+          {% if mod.all_ok %}
+            <span style="color:#16a34a">{{ i18n.status_ok }}</span>
+          {% else %}
+            <span style="color:#dc2626">{{ mod.total - mod.ok }} {{ i18n.status_error }}</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <span class="mod-badge {% if mod.all_ok %}mbadge-ok{% else %}mbadge-err{% endif %}">
+        {% if mod.all_ok %}
+          <i class="bi bi-check-lg"></i> {{ i18n.status_ok }}
+        {% else %}
+          <i class="bi bi-x-lg"></i> {{ mod.total - mod.ok }} {{ i18n.status_error }}
+        {% endif %}
+      </span>
+
+      {% if show_detail %}<i class="bi bi-chevron-down mod-chevron"></i>{% endif %}
+    </div>
+
+    <!-- Progress strip -->
+    <div class="mod-progress">
+      <div class="mod-pbar {% if mod.all_ok %}pbar-ok{% else %}pbar-err{% endif %}"
+           style="width:{{ mod.pct }}%"></div>
+    </div>
+
+    <!-- Check list (per-item detail; hidden for guests when detail is off) -->
+    {% if show_detail %}
+    <div class="mod-body" id="body-{{ mod.name }}"
+         style="{% if mod.all_ok %}display:none{% endif %}">
+      {% for item in mod.checks %}
+      <div class="check-row">
+        <i class="bi {% if item.ok %}bi-check-circle-fill text-success{% else %}bi-x-circle-fill text-danger{% endif %} check-icon"></i>
+        <span class="check-name" title="{{ item.name }}">{{ item.name }}</span>
+        <span class="check-extra">
+          {% if item.extra.get('used') is not none %}
+            {% set used = item.extra.used | float %}
+            {% set alert = (item.extra.get('alert') or 80) | float %}
+            <span class="mini-bar">
+              <span class="mini-fill
+                {%- if used >= alert %}mf-crit
+                {%- elif used >= alert * 0.75 %}mf-warn
+                {%- else %}mf-safe{% endif %}"
+                style="width:{{ [used, 100] | min }}%"></span>
+            </span>
+            {{ "%.1f" | format(used) }}%
+            {% if item.extra.get('alert') %}
+              <span style="opacity:.55">/ {{ item.extra.alert }}% {{ i18n.status_alert_threshold }}</span>
+            {% endif %}
+          {% elif item.extra.get('code') %}
+            <span class="http-badge">HTTP {{ item.extra.code }}</span>
+          {% endif %}
+        </span>
+        <span class="check-badge {% if item.ok %}cbadge-ok{% else %}cbadge-err{% endif %}">
+          {% if item.ok %}{{ i18n.status_ok }}{% else %}{{ i18n.status_error }}{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+      <div class="body-pad"></div>
+    </div>
+    {% endif %}
+
+  </div>
+  {% endfor %}
+  </div>
+
+  <!-- Footer -->
+  <div class="status-footer">
+    <div class="refresh-track">
+      <div class="refresh-fill" id="refresh-fill" style="width:100%"></div>
+    </div>
+    <div>
+      <i class="bi bi-arrow-clockwise"></i>
+      {{ i18n.status_refreshing_in }} <span id="countdown">{{ refresh_secs }}</span>{{ i18n.status_seconds_abbr }}
+      <span class="footer-sep">·</span>
+      <a href="/login" class="footer-link">{{ i18n.status_admin_link }}</a>
+    </div>
+  </div>
+
+</div><!-- /content -->

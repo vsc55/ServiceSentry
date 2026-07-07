@@ -40,6 +40,19 @@ body.st-down  { --live-grad: linear-gradient(90deg, #ef4444 0%, #f97316 40%, #fb
             margin: 0; padding: 0; min-height: 100vh;
         }
 
+        /* ── Thin, theme-aware scrollbars ───────────────────────────────── */
+        * { scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb {
+            background: var(--muted);
+            border-radius: 8px;
+            /* transparent border + padding-box clip → a slim ~4px visible thumb */
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: var(--txt); background-clip: padding-box; }
+
         /* ── Animated live bar ──────────────────────────────────────────── */
         .live-bar {
             height: 3px;
@@ -295,3 +308,19 @@ body.st-down  { --live-grad: linear-gradient(90deg, #ef4444 0%, #f97316 40%, #fb
         .footer-sep { margin: 0 .6rem; opacity: .4; }
         .footer-link { color: var(--muted); text-decoration: none; }
         .footer-link:hover { text-decoration: underline; }
+
+        /* Connection-lost overlay: shown when the AJAX refresh can't reach the server,
+           auto-hidden when it answers again (display toggled inline by the page script). */
+        .ss-conn-overlay {
+            position: fixed; inset: 0; z-index: 3000;
+            align-items: center; justify-content: center;
+            background: rgba(0, 0, 0, .55); backdrop-filter: blur(2px);
+        }
+        .ss-conn-card {
+            background: var(--card-bg); color: var(--txt);
+            border: 1px solid var(--border);
+            border-radius: .75rem; padding: 1.75rem 2.25rem; max-width: 22rem;
+            text-align: center; box-shadow: var(--shadow-lg);
+        }
+        .ss-conn-title { font-weight: 600; font-size: 1.05rem; margin-bottom: .25rem; }
+        .ss-conn-msg { color: var(--muted); font-size: .85rem; }

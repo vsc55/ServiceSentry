@@ -59,8 +59,10 @@ function _startVersionPoll(intervalMs = 60000) {
             _showReloadBanner();
         }
     }, intervalMs);
-    // Session keepalive poll — detects revoked sessions for idle users.
-    setInterval(async () => {
+    // Session keepalive poll — revoked-session detection for idle users. Its /api/v1/me
+    // fetch also feeds the connection-lost overlay through the shared fetch wrapper (any
+    // response → reachable, network error → unreachable), so no explicit handling here.
+    const _keepaliveCheck = async () => {
         if (_sessionTerminated) return;
         try {
             // Capture the local-edit epoch BEFORE the request so a response that
@@ -71,10 +73,47 @@ function _startVersionPoll(intervalMs = 60000) {
             if (r.ok && typeof _syncRemoteTableConfig === 'function') {
                 _syncRemoteTableConfig(await r.json(), _ep);
             }
-        } catch (_) { /* ignore network errors */ }
-    }, (configData?.web_admin?.session_check_secs ?? 20) * 1000);
+        } catch (_) { /* the fetch wrapper already flagged the connection */ }
+    };
+    setInterval(_keepaliveCheck, (configData?.web_admin?.session_check_secs ?? 20) * 1000);
+    // The browser's own network state: a dropped link shows the overlay at once
+    // (authoritative → no debounce); a restored link re-confirms with a live check.
+    window.addEventListener('offline', () => _applyConnLost(true));
+    window.addEventListener('online', _keepaliveCheck);
     // Config field version poll — interval is read dynamically from configData each cycle.
     _scheduleConfigPoll();
+}
+
+// ── Connection-lost overlay ────────────────────────────────────────────────
+// State driven by the shared fetch wrapper (real traffic) + the browser's online/offline
+// events: shown when the server is unreachable, hidden when it answers. Showing is
+// debounced (~1.2s of continuous failure) so a single blip or a concurrent partial failure
+// doesn't flash it; hiding — on any successful response — is immediate.
+let _connLost = false;
+let _connShowTimer = null;
+
+function _applyConnLost(lost) {
+    if (lost === _connLost) return;
+    _connLost = lost;
+    const ov = document.getElementById('conn-lost-overlay');
+    if (!ov) return;
+    if (lost) {
+        const ti = document.getElementById('conn-lost-title');
+        const ms = document.getElementById('conn-lost-msg');
+        if (ti) ti.textContent = t('conn_lost_title');
+        if (ms) ms.textContent = t('conn_lost_msg');
+    }
+    ov.classList.toggle('d-none', !lost);
+}
+
+function _setConnLost(lost) {
+    if (lost) {
+        if (_connLost || _connShowTimer) return;     // already shown / show already pending
+        _connShowTimer = setTimeout(() => { _connShowTimer = null; _applyConnLost(true); }, 1200);
+    } else {
+        if (_connShowTimer) { clearTimeout(_connShowTimer); _connShowTimer = null; }
+        _applyConnLost(false);
+    }
 }
 
 function _scheduleConfigPoll() {

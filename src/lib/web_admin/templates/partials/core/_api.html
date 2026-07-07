@@ -22,7 +22,16 @@
             if (!h.has('X-CSRF-Token')) h.set('X-CSRF-Token', CSRF_TOKEN);
             init = Object.assign({}, init, { headers: h });
         }
-        return _origFetch.call(this, input, init);
+        // Drive the connection-lost overlay from real traffic: any response → reachable,
+        // a network error (not an abort) → unreachable. This shows/hides the overlay on the
+        // first failing/succeeding request instead of flooding "connection error" toasts.
+        return _origFetch.call(this, input, init).then(
+            (r) => { if (typeof _setConnLost === 'function') _setConnLost(false); return r; },
+            (e) => {
+                if (e && e.name !== 'AbortError' && typeof _setConnLost === 'function') _setConnLost(true);
+                throw e;
+            }
+        );
     };
 })();
 
@@ -51,7 +60,7 @@ async function apiGet(url) {
         const ct = r.headers.get('content-type') || '';
         if (!ct.includes('application/json')) { _onSessionTerminated(); return null; }
         return await r.json();
-    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+    } catch (e) { return null; }   /* the fetch wrapper flags the connection-lost overlay */
 }
 // Silent GET for background polling: never toasts, never redirects, never
 // triggers session-termination — returns parsed JSON or null on any failure.
@@ -76,7 +85,7 @@ async function loadConfig() {
             return payload.config;
         }
         return payload;
-    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+    } catch (e) { return null; }   /* the fetch wrapper flags the connection-lost overlay */
 }
 async function apiPut(url, data) {
     try {
@@ -87,7 +96,7 @@ async function apiPut(url, data) {
         });
         if (r.status === 401) { _onSessionTerminated(); return null; }
         return await r.json();
-    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+    } catch (e) { return null; }   /* the fetch wrapper flags the connection-lost overlay */
 }
 async function apiPost(url, data) {
     try {
@@ -98,12 +107,12 @@ async function apiPost(url, data) {
         });
         if (r.status === 401) { _onSessionTerminated(); return null; }
         return { status: r.status, data: await r.json() };
-    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+    } catch (e) { return null; }   /* the fetch wrapper flags the connection-lost overlay */
 }
 async function apiDelete(url) {
     try {
         const r = await fetch(url, { method: 'DELETE' });
         if (r.status === 401) { _onSessionTerminated(); return null; }
         return { status: r.status, data: await r.json() };
-    } catch (e) { showToast(t('connection_error'), 'danger'); return null; }
+    } catch (e) { return null; }   /* the fetch wrapper flags the connection-lost overlay */
 }

@@ -112,7 +112,7 @@ flowchart TD
 | **Pestaña de configuración** | Editar la configuración (Telegram, monitorización, idioma, …) directamente desde el navegador; paneles colapsables por sección |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
 | **Tablas de listado unificadas** | Todos los listados (Users, Roles, Groups, Credentials, Servers, Clusters, Sessions, Audit, Events, Syslog) usan un componente común dirigido por esquema: paginación arriba/abajo, ordenación por columna, columnas reordenables (arrastrar), redimensionables (doble clic = auto-ajuste) u **ajustadas al contenido** (`resizable:false`), selector de mostrar/ocultar columnas y persistencia por usuario (columnas visibles, orden y ancho en `table_config`). Ver §[Tablas de Listado](#tablas-de-listado) |
-| **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
+| **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal |
 | **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 63 flags granulares; activar/desactivar desde el modal |
@@ -130,6 +130,7 @@ flowchart TD
 | **i18n** | Inglés y español; seleccionable por usuario y configurable globalmente con `web_admin.lang` |
 | **Registro de auditoría** | Seguimiento de cambios a nivel de campo con enmascarado de datos sensibles |
 | **Gestión de sesiones** | Ver sesiones activas en tarjetas con animación hover; revocación con animación de desvanecimiento; auto-refresco del tab Access cada 30 s; poll de keepalive cada 20 s — si la sesión es revocada por otro admin, el usuario ve un toast y es redirigido al login automáticamente |
+| **Aviso de conexión perdida** | Overlay modal de "sin conexión" que aparece cuando el servidor deja de responder — dirigido por el **tráfico real** (el wrapper de `fetch` marca perdida/recuperada en cualquier petición, con debounce anti-parpadeo) + los eventos `online`/`offline` del navegador — y se cierra solo al reconectar. Los polls (Services, Access…) **conservan el contenido** en vez de vaciarlo al fallar, y la capa API ya no lanza toasts `connection_error` en cascada |
 | **Soporte proxy inverso** | `proxy_count` activa `ProxyFix` de Werkzeug para leer la IP real del cliente cuando Flask está detrás de uno o más proxies (nginx, Traefik…) |
 
 ---
@@ -291,7 +292,7 @@ El permiso requerido se indica entre paréntesis.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/status` | público* | Página de estado de los servicios. *Requiere `public_status=true` para acceso anónimo; los usuarios autenticados siempre pueden acceder. |
+| `GET` | `/status` | público* | Página de estado de los servicios. `?fragment=1` devuelve solo el cuerpo dinámico (para el auto-refresco AJAX, sin recargar la página). *Requiere `public_status=true` para acceso anónimo; los usuarios autenticados siempre pueden acceder. |
 
 ### Autenticación
 
