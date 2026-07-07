@@ -71,6 +71,16 @@ function _dwIsNavigable(wid) {
 function _dwNavigate(wid) {
     const nav = _DW_NAV[_dwBaseId(wid)];
     if (!nav) return;
+    if (window.SS_OVERVIEW_PAGE) {
+        // Standalone Overview page → open the target tab in the admin panel. Stash it (+
+        // the login marker) so the panel's wiring restores it as if it were a reload.
+        if (nav.tab) {
+            localStorage.setItem('ss_active_tab', nav.tab);
+            localStorage.setItem('ss_active_tab_login', (currentUser && currentUser.login_id) || '');
+        }
+        window.location.href = '/admin';
+        return;
+    }
     const main = _dwTabBtn(nav.tab);
     if (!main) return;
     const sub = nav.sub ? _dwTabBtn(nav.sub) : null;

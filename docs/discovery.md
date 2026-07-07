@@ -119,6 +119,15 @@ OVERVIEW_WIDGETS = [
   `'table'` (lista con `rows(wa, f)` → filas ya filtradas por `f`, + `columns`).
 - `perms`: expresión declarativa evaluada en el frontend — `any` = mostrar si el usuario tiene
   ALGUNO de esos flags; `prefix` = OR de cualquier flag que empiece por esos prefijos (per-servidor).
+- `view.filter` (solo tablas): filtrado server-side declarativo. `store` = clave del `dataset`
+  del widget donde el toolbar guarda el valor; `param` = nombre del query-param con que el
+  frontend lo envía **y bajo el que el endpoint lo lee** (default `'f'`; p.ej. syslog usa
+  `'severity_max'`). El indicador del filtro activo en la cabecera se declara así:
+  - `options: [{v, label_key, badge:{color,bg}}]` → un badge para la opción activa;
+  - una opción con `badges: [{label_key,color,bg}, …]` → **varios** badges (filtro compuesto;
+    p.ej. Servers `errmaint` → Error + Mantenimiento);
+  - `badge_fn: 'sev'` → resuelve nombre/color de la severidad desde el catálogo del frontend
+    (syslog) y lo pinta como "≥ nivel" (mínimo de severidad).
 
 **Flujo y datos:**
 

@@ -99,9 +99,10 @@ function openGroupModal(name, mode = 'edit') {
     const err = document.getElementById('gmLabelError'); if (err) err.textContent = '';
     document.getElementById('gmDescription').value = gd.description || '';
     document.getElementById('gmDescription').disabled = false;  // editable for all groups
-    // Landing page for members of this group: '' = no per-group default.
+    // Landing page for members of this group: '' = no per-group default (falls back to
+    // the global setting, shown in the "(Default)" option).
     document.getElementById('gmLandingPage').innerHTML =
-        _homePageOptions((mode === 'new') ? '' : (gd.landing_page || ''), true);
+        _homePageOptions((mode === 'new') ? '' : (gd.landing_page || ''), true, _landingInheritLabel([]));
     document.getElementById('gmUidRow').classList.toggle('d-none', isNew);
     document.getElementById('gmUid').value = isNew ? '' : (gd.uid || '');
     document.getElementById('gmEnabledGroup').style.display = '';

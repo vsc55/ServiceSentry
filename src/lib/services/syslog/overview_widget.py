@@ -49,7 +49,7 @@ OVERVIEW_WIDGETS = [
      'view': {'kind': 'table', 'icon': 'bi-card-list', 'title_key': 'overview_syslog',
               'accent': 'blue', 'data_url': '/api/v1/overview/widget/syslog',
               'empty_key': 'syslog_empty', 'row_class': 'syslog_sev',
-              'filter': {'store': 'sev', 'param': 'severity_max'},
+              'filter': {'store': 'sev', 'param': 'severity_max', 'badge_fn': 'sev'},
               'columns': [
                   {'key': 'when',     'label_key': 'syslog_time',     'cell': 'syslog_when'},
                   {'key': 'severity', 'label_key': 'syslog_severity', 'cell': 'severity'},

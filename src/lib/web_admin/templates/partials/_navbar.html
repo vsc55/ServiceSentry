@@ -5,6 +5,14 @@
             <i class="bi bi-shield-check me-1"></i> ServiceSentry
         </span>
         <div class="d-flex align-items-center">
+            {# Switch between the standalone Overview page and the admin panel. #}
+            {% if overview_page %}
+            <a class="btn btn-light btn-sm me-3" href="/admin">
+                <i class="bi bi-sliders me-1"></i>{{ i18n.admin_panel or 'Admin' }}</a>
+            {% else %}
+            <a class="btn btn-light btn-sm me-3" href="/overview">
+                <i class="bi bi-speedometer2 me-1"></i>{{ i18n.tab_overview }}</a>
+            {% endif %}
             <div class="dropdown">
                 <button class="btn btn-light btn-sm dropdown-toggle" data-bs-toggle="dropdown">
                     <i class="bi bi-person-circle me-1"></i>{{ display_name }}

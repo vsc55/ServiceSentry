@@ -354,3 +354,30 @@ class TestUIReorganisation:
         assert b'id="settingsDarkMode"' in html
         assert b'saveAccountPreferences' in html
 
+
+# ──────────────────────── Overview as its own page ─────────────────
+
+class TestOverviewPage:
+    """Overview is a standalone page (/overview), no longer a tab in the admin panel."""
+
+    def test_admin_panel_has_no_overview_tab(self, client):
+        _login(client)
+        html = client.get("/admin").get_data(as_text=True)
+        # the rendered overview tab toggle is gone (the string only lives in JS now,
+        # so check the literal nav markup, not any occurrence of the id)
+        assert 'data-bs-target="#tab-overview"' not in html
+        assert "SS_OVERVIEW_PAGE = false" in html  # rendered as the admin panel
+
+    def test_overview_route_renders_standalone(self, client):
+        _login(client)
+        resp = client.get("/overview")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert "overview-container" in html          # the widget grid
+        assert "SS_OVERVIEW_PAGE = true" in html     # standalone flag
+        assert "overview-page" in html               # body class hides #mainTabs
+
+    def test_overview_requires_login(self, client):
+        # page route → redirects to /login when unauthenticated (like /admin)
+        assert client.get("/overview").status_code == 302
+

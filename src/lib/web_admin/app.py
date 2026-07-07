@@ -650,6 +650,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Public URL for external links and notifications (stored without scheme)
         if 'public_url' in wa_cfg and isinstance(wa_cfg['public_url'], str):
             self._public_url = normalize_url(wa_cfg['public_url'])
+        # Default landing page (string attr not covered by INT/BOOL rules) — resolves the
+        # post-login destination for users/groups that don't override it. Without this the
+        # attribute stays unset at startup and _landing_url falls back to the admin panel
+        # even when the saved global is e.g. 'overview'.
+        self._landing_page = str(wa_cfg.get('landing_page') or 'admin')
         # fail2ban string fields + push into the live manager (wiring in _IpBanMixin).
         self._apply_ipban_config(wa_cfg)
 

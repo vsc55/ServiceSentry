@@ -592,3 +592,31 @@ class TestPasswordResetPrivileges:
         })
         assert resp.status_code == 200
         assert check_password_hash(wa._users["dev"]["password_hash"], "Newdevpass1")
+
+
+class TestOwnLandingPreference:
+    """A user can set their own landing page from Account Settings."""
+
+    def test_me_exposes_landing_fields(self, client):
+        _login(client)
+        me = client.get("/api/v1/me").get_json()
+        assert "pref_landing_page" in me           # the user's own choice ('' = inherit)
+        assert me.get("landing_default") in ("admin", "overview", "status")  # resolved default
+
+    def test_set_own_landing(self, admin, client):
+        _login(client)
+        r = client.put("/api/v1/users/me/preferences", json={"landing_page": "overview"})
+        assert r.status_code == 200 and r.get_json()["ok"]
+        assert admin._users["admin"]["landing_page"] == "overview"
+        assert client.get("/api/v1/me").get_json()["pref_landing_page"] == "overview"
+
+    def test_invalid_landing_rejected(self, client):
+        _login(client)
+        assert client.put("/api/v1/users/me/preferences",
+                          json={"landing_page": "bogus"}).status_code == 400
+
+    def test_empty_landing_inherits(self, admin, client):
+        _login(client)
+        client.put("/api/v1/users/me/preferences", json={"landing_page": "status"})
+        client.put("/api/v1/users/me/preferences", json={"landing_page": ""})  # back to inherit
+        assert "landing_page" not in admin._users["admin"]

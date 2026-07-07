@@ -25,8 +25,9 @@ __all__ = [
 # browser is redirected to its `url`. Served to the frontend only to build the
 # selects (id + label).
 HOME_PAGES = (
-    {'id': 'admin',  'url': '/admin',  'label_key': 'landing_admin'},
-    {'id': 'status', 'url': '/status', 'label_key': 'landing_status'},
+    {'id': 'admin',    'url': '/admin',    'label_key': 'landing_admin'},
+    {'id': 'overview', 'url': '/overview', 'label_key': 'landing_overview'},
+    {'id': 'status',   'url': '/status',   'label_key': 'landing_status'},
 )
 
 

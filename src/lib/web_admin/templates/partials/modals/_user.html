@@ -176,6 +176,13 @@
                         {% endfor %}
                     </select>
                 </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">{{ i18n.pref_landing_page }}</label>
+                    {# Options built by openAccountSettingsModal() from HOME_PAGES;
+                       first entry is "Default (…)" = inherit from group/global. #}
+                    <select class="form-select form-select-sm" id="settingsLanding"></select>
+                    <div class="form-text small">{{ i18n.pref_landing_page_hint }}</div>
+                </div>
                 <div class="mb-4">
                     <label class="form-label small fw-semibold">{{ i18n.dark_mode }}</label>
                     <select class="form-select form-select-sm" id="settingsDarkMode">

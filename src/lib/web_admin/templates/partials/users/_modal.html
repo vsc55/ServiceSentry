@@ -187,9 +187,11 @@ async function openUserModal(username, mode = 'edit') {
     const dm = u.dark_mode;
     document.getElementById('umDarkMode').value =
         (mode === 'new') ? '' : (dm === true ? 'dark' : dm === false ? 'light' : '');
-    // Landing page (admin override): '' = inherit (group/global default).
+    // Landing page (admin override): '' = inherit (group/global default). The "(Default)"
+    // option shows where it inherits from (a group's setting or the global one).
     document.getElementById('umLandingPage').innerHTML =
-        _homePageOptions((mode === 'new') ? '' : (u.landing_page || ''), true);
+        _homePageOptions((mode === 'new') ? '' : (u.landing_page || ''), true,
+                         _landingInheritLabel((mode === 'new') ? [] : (u.groups || [])));
 
     // Password: shown (and required) for new/clone, hidden on edit.
     document.getElementById('umPasswordGroup').style.display = isNew ? '' : 'none';

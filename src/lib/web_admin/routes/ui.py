@@ -56,12 +56,12 @@ def register(app, wa):
         user = wa._users.get(session.get('username', ''), {})
         return redirect(_landing_url(wa, user))
 
-    @app.route('/admin')
-    @login_required
-    def dashboard():
-        """Render the main dashboard."""
+    def _render_dashboard(overview_page: bool):
+        """Render dashboard.html either as the full admin panel (``/admin``) or as the
+        standalone Overview page (``/overview``, tabs hidden, only the widget grid)."""
         html = render_template(
             'dashboard.html',
+            overview_page=overview_page,
             username=session.get('username', ''),
             display_name=session.get('display_name', ''),
             role=session.get('role', 'viewer'),
@@ -85,6 +85,18 @@ def register(app, wa):
         resp.headers['Cache-Control'] = 'no-store, must-revalidate'
         return resp
 
+    @app.route('/admin')
+    @login_required
+    def dashboard():
+        """Render the main admin dashboard (all tabs)."""
+        return _render_dashboard(False)
+
+    @app.route('/overview')
+    @login_required
+    def overview():
+        """Render the Overview dashboard as its own page (separate from the admin panel)."""
+        return _render_dashboard(True)
+
     @app.route('/api/v1/me', methods=['GET'])
     @login_required
     def api_me():
@@ -100,6 +112,20 @@ def register(app, wa):
             for g in raw_groups
             if g in wa._groups
         ]
+        # Landing page: the user's own choice ('' = inherit) + what "inherit" resolves to
+        # (first group alphabetically with a value → global default), so the account
+        # settings modal can show a "Default (…)" option.
+        from ..constants import HOME_PAGES as _HOME_PAGES  # noqa: PLC0415
+        _hp_ids = {p['id'] for p in _HOME_PAGES}
+        _grp_land = sorted(
+            ((wa._uid_to_group_label(g) or g, wa._groups[g].get('landing_page', ''))
+             for g in raw_groups
+             if g in wa._groups and wa._groups[g].get('landing_page')),
+            key=lambda x: str(x[0]).lower())
+        _landing_default = (_grp_land[0][1] if _grp_land else '') \
+            or str(getattr(wa, '_landing_page', '') or '')
+        if _landing_default not in _hp_ids:
+            _landing_default = 'admin'
         return jsonify({
             'username': uname_me,
             'display_name': session.get('display_name', ''),
@@ -109,6 +135,8 @@ def register(app, wa):
             'permissions': list(wa._get_session_permissions()),
             'groups': group_names,
             'pref_lang': user_data.get('lang', ''),
+            'pref_landing_page': user_data.get('landing_page', ''),
+            'landing_default': _landing_default,
             'pref_dark_mode': user_data.get('dark_mode'),
             'table_config': user_data.get('table_config', {}),
             'dashboard_layout': user_data.get('dashboard_layout', []),

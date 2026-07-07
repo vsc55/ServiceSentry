@@ -1111,3 +1111,21 @@ class TestApiConfigPutProxyCount:
         resp = client.put("/api/v1/config", json={"web_admin": {"proxy_count": {"$gt": 0}}})
         assert resp.status_code == 400
         assert admin._proxy_count == 0
+
+
+class TestLandingPageApplied:
+    """Regression: the global landing_page (a string attr not covered by INT/BOOL rules)
+    must be applied by _apply_saved_config at startup — otherwise wa._landing_page stays
+    unset and login falls back to /admin even when the saved global is e.g. 'overview'."""
+
+    def test_startup_applies_global_landing(self, admin):
+        cfg = admin._read_config_file(admin._CONFIG_FILE) or {}
+        cfg.setdefault("web_admin", {})["landing_page"] = "overview"
+        admin._write_config(cfg)
+        admin._landing_page = "admin"     # simulate a stale/unset attr after a restart
+        admin._apply_saved_config()       # startup re-read must re-derive it from config
+        assert admin._landing_page == "overview"
+        from lib.web_admin.routes.auth import _landing_url
+        u = admin._users["admin"]
+        u.pop("landing_page", None)        # no per-user override → inherit the global
+        assert _landing_url(admin, u) == "/overview"

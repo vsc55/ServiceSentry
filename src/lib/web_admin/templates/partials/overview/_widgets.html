@@ -255,11 +255,25 @@ function _dwViewFilter(id, view, item) {
     const dw = document.querySelector(`.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
     return dw ? (dw.dataset[st] || '') : '';
 }
-// Filter badge in the title for the active option.
+// Filter indicator(s) in the title for the active filter value. A filter option may carry
+// a single `badge`, or a `badges` array for a compound filter (e.g. Error + Maintenance
+// → two pills). `badge_fn:'sev'` resolves the syslog severity name/colour from the
+// frontend severity catalog instead of a fixed option list.
 function _dwViewFilterBadge(id, view, item) {
     if (!view.filter) return '';
-    const opt = (view.filter.options || []).find(o => o.v === _dwViewFilter(id, view, item));
-    return (opt && opt.badge) ? _dwFilterBadge(t(opt.label_key), opt.badge.color, opt.badge.bg) : '';
+    const f = _dwViewFilter(id, view, item);
+    if (view.filter.badge_fn === 'sev') {
+        if (f === '' || f == null) return '';
+        const name = (typeof _SYSLOG_SEV !== 'undefined' && _SYSLOG_SEV[f]) || String(f);
+        const cls  = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[f]) || 'secondary';
+        // "≥ name": the filter is a minimum severity — it covers this level and all more severe.
+        return _dwFilterBadge('≥ ' + name, _DW_SEV_HEX[cls] || '#6c757d', _DW_SEV_SUBTLE[cls] || 'rgba(108,117,125,.18)');
+    }
+    const opt = (view.filter.options || []).find(o => o.v === f);
+    if (!opt) return '';
+    if (opt.badges)   // compound filter → one indicator pill per condition
+        return opt.badges.map(b => _dwFilterBadge(t(b.label_key), b.color, b.bg)).join('');
+    return opt.badge ? _dwFilterBadge(t(opt.label_key), opt.badge.color, opt.badge.bg) : '';
 }
 // Card shell (thead + placeholder tbody).  Rows are (re)filled async by _dwTableFetch.
 function _dwRenderTable(id, view, item) {

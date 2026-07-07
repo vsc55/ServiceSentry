@@ -148,6 +148,10 @@ class TestApiOverview:
         rows = client.get("/api/v1/overview/widget/syslog").get_json()["rows"]
         assert rows[0]["message"] == "boom"
         assert rows[0]["severity_name"] == "err"
+        # The severity filter must reach the backend under its declared param name
+        # (severity_max, not the default 'f'): err(3) is kept at max=3, dropped at max=2.
+        assert len(client.get("/api/v1/overview/widget/syslog?severity_max=3").get_json()["rows"]) == 1
+        assert client.get("/api/v1/overview/widget/syslog?severity_max=2").get_json()["rows"] == []
 
     def test_modules_list(self, client):
         """The modules_list table lists the two sample modules (ping, web)."""

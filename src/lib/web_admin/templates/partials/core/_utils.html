@@ -96,12 +96,33 @@ window.addEventListener('blur', () => { _modCtrlHeld = false; });
 
 // <option>s for a landing-page (home tab) select, from the HOME_PAGES registry.
 // withInherit adds a leading "(default)" empty option (per-user / per-group override).
-function _homePageOptions(selected, withInherit) {
+// inheritLabel overrides that option's text (e.g. to show where it inherits from).
+function _homePageOptions(selected, withInherit, inheritLabel) {
     const inherit = withInherit
-        ? `<option value=""${!selected ? ' selected' : ''}>${esc(t('landing_inherit'))}</option>` : '';
+        ? `<option value=""${!selected ? ' selected' : ''}>${esc(inheritLabel || t('landing_inherit'))}</option>` : '';
     return inherit + (HOME_PAGES || []).map(p =>
         `<option value="${escAttr(p.id)}"${selected === p.id ? ' selected' : ''}>${esc(t(p.label_key))}</option>`
     ).join('');
+}
+
+// Label for the "(Default)" landing option, showing WHERE it inherits from:
+// the first of the user's groups (alphabetically) that sets a landing, else the global
+// setting. *groupUids* is empty ([]) for a group's own default (always global).
+function _landingInheritLabel(groupUids) {
+    const grp = (groupUids || [])
+        .map(uid => groupsData[uid])
+        .filter(g => g && g.landing_page)
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''))[0];
+    let srcId, extra;
+    if (grp) {
+        srcId = grp.landing_page;
+        extra = `${t('landing_source_group')}: ${grp.name || ''}`;
+    } else {
+        srcId = (configData.web_admin && configData.web_admin.landing_page) || 'admin';
+        extra = t('landing_source_global');
+    }
+    const hp = (HOME_PAGES || []).find(p => p.id === srcId);
+    return `${t('landing_inherit')} · ${hp ? t(hp.label_key) : srcId} · ${extra}`;
 }
 
 function _buildColChooser(cols, visibleSet, toggleFn, resetFn, minWidth = 160) {

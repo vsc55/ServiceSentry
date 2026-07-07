@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}ServiceSentry — Admin{% endblock %}
+{% block title %}ServiceSentry — {% if overview_page %}Overview{% else %}Admin{% endif %}{% endblock %}
+{% block body_class %}{% if overview_page %}overview-page{% endif %}{% endblock %}
 
 {# All page styles live in static/css/web_admin.css (loaded by base.html). #}
 
@@ -67,10 +68,12 @@
 <div class="container-fluid py-3">
     <!-- Tabs -->
     <ul class="nav nav-tabs" id="mainTabs" role="tablist">
-        <li class="nav-item" role="presentation" id="tab-overview-li" style="display:none">
-            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-overview" type="button"
-                id="btn-tab-overview">
-                <i class="bi bi-speedometer2 me-1"></i>{{ i18n.tab_overview }}
+        {# Overview is its own page (/overview), no longer a tab in the admin panel.
+           Services is the leftmost tab and the panel's default landing. #}
+        <li class="nav-item" role="presentation" id="tab-services-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-services" type="button"
+                id="btn-tab-services">
+                <i class="bi bi-hdd-rack me-1"></i>{{ i18n.tab_services }}
             </button>
         </li>
         <li class="nav-item" role="presentation" id="tab-modules-li" style="display:none">
@@ -115,12 +118,6 @@
                 <i class="bi bi-slash-circle me-1"></i>{{ i18n.tab_ipban }}
             </button>
         </li>
-        <li class="nav-item" role="presentation" id="tab-services-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-services" type="button"
-                id="btn-tab-services">
-                <i class="bi bi-hdd-rack me-1"></i>{{ i18n.tab_services }}
-            </button>
-        </li>
         <li class="nav-item" role="presentation" id="tab-config-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-config" type="button"
                 id="btn-tab-config">
@@ -141,7 +138,7 @@
 
     <div class="tab-content pt-3">
         <!-- ==================== Overview Tab =================== -->
-        <div class="tab-pane fade show active" id="tab-overview">
+        <div class="tab-pane fade{% if overview_page %} show active{% endif %}" id="tab-overview">
             <div id="overview-container">
                 <div class="text-center py-4">
                     <div class="spinner-border spinner-border-sm"></div>
@@ -441,6 +438,8 @@
     /* ================================================================
        ServiceSentry — Dashboard JavaScript
        ================================================================ */
+    // Standalone Overview page (/overview) vs full admin panel (/admin).
+    window.SS_OVERVIEW_PAGE = {{ 'true' if overview_page else 'false' }};
 {% include "partials/_js_sections.html" %}
 </script>
 {% endblock %}

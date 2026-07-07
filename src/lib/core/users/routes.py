@@ -382,6 +382,17 @@ def register(app, wa):
                 session['dark_mode'] = dm
             if old_dm != dm:
                 changes['dark_mode'] = {'old': old_dm, 'new': dm}
+        if 'landing_page' in data:
+            lp = str(data['landing_page'] or '').strip()   # '' = inherit (group/global)
+            if lp and lp not in home_page_ids():
+                return jsonify({'error': wa._t('invalid_landing_page')}), 400
+            old_lp = user.get('landing_page', '')
+            if not lp:
+                user.pop('landing_page', None)
+            else:
+                user['landing_page'] = lp
+            if old_lp != (lp or ''):
+                changes['landing_page'] = {'old': old_lp, 'new': lp}
         if 'table_config' in data:
             tc = data['table_config']
             if isinstance(tc, dict):

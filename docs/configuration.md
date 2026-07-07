@@ -268,7 +268,7 @@ Esta matriz es configurable desde la pestaña **Configuración → Notifications
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
 | `web_admin.lang` | string | `"en_EN"` | Idioma por defecto de la interfaz web (`en_EN` o `es_ES`) |
-| `web_admin.landing_page` | string | `"admin"` | Página a la que llega el usuario tras iniciar sesión: `admin` (panel) o `status` (página pública de estado). Sobreescribible por grupo y por usuario (precedencia usuario → grupo → global); ver [web_admin.md](web_admin.md#usuarios). |
+| `web_admin.landing_page` | string | `"admin"` | Página a la que llega el usuario tras iniciar sesión: `admin` (panel), `overview` (vista general `/overview`) o `status` (página pública de estado). Sobreescribible por grupo y por usuario (precedencia usuario → grupo → global); ver [web_admin.md](web_admin.md#usuarios). |
 | `web_admin.dark_mode` | bool | `false` | Modo oscuro por defecto para sesiones nuevas |
 | `web_admin.public_status` | bool | `false` | Exponer `/status` públicamente sin autenticación. Los usuarios logueados siempre pueden acceder. |
 | `web_admin.status_refresh_secs` | int | `60` | Intervalo de refresco automático de la página `/status` (10–3600 segundos) |

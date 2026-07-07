@@ -47,8 +47,12 @@ def register(app, wa):
             except Exception:  # pylint: disable=broad-except
                 content = {}
             return jsonify({'content': content})
+        # Read the filter value under the name the widget declares (view.filter.param),
+        # defaulting to 'f' — otherwise a widget with a custom param (e.g. syslog's
+        # 'severity_max') never receives its filter and shows unfiltered rows.
+        fparam = (((desc or {}).get('view') or {}).get('filter') or {}).get('param') or 'f'
         try:
-            rows = rows_fn(wa, request.args.get('f', ''))
+            rows = rows_fn(wa, request.args.get(fparam, ''))
         except Exception:  # pylint: disable=broad-except
             rows = []
         return jsonify({'rows': rows})

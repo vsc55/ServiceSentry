@@ -61,6 +61,18 @@ function openAccountSettingsModal() {
     document.getElementById('settingsDarkMode').value =
         dm === null || dm === undefined ? 'auto' : (dm ? 'dark' : 'light');
     document.getElementById('settingsLang').value = currentUser.pref_lang || '';
+    // Landing page: "Default (…)" (inherit from group/global) + each HOME_PAGES destination.
+    const _landSel = document.getElementById('settingsLanding');
+    if (_landSel) {
+        const _defId  = currentUser.landing_default || 'admin';
+        const _defHp  = (HOME_PAGES || []).find(p => p.id === _defId);
+        const _defLbl = _defHp ? (t(_defHp.label_key) || _defId) : _defId;
+        _landSel.innerHTML =
+            `<option value="">${esc(t('pref_landing_default'))} (${esc(_defLbl)})</option>` +
+            (HOME_PAGES || []).map(p =>
+                `<option value="${escAttr(p.id)}">${esc(t(p.label_key) || p.id)}</option>`).join('');
+        _landSel.value = currentUser.pref_landing_page || '';
+    }
     document.getElementById('settingsPwCurrent').value = '';
     document.getElementById('settingsPwNew').value     = '';
     const spConf = document.getElementById('settingsPwConfirm');
@@ -72,6 +84,7 @@ function openAccountSettingsModal() {
 async function saveAccountPreferences() {
     const dmVal    = document.getElementById('settingsDarkMode').value;
     const langVal  = document.getElementById('settingsLang').value;
+    const landVal  = document.getElementById('settingsLanding')?.value ?? '';
     const darkMode = dmVal === 'auto' ? null : dmVal === 'dark';
     const prevLang = currentUser.pref_lang;
     const pwCur    = document.getElementById('settingsPwCurrent').value;
@@ -86,12 +99,13 @@ async function saveAccountPreferences() {
         if (!rp || !rp.ok) { showToast(rp?.error || t('password_change_error'), 'danger'); return; }
     }
 
-    const r = await apiPut('/api/v1/users/me/preferences', { lang: langVal, dark_mode: darkMode });
+    const r = await apiPut('/api/v1/users/me/preferences', { lang: langVal, dark_mode: darkMode, landing_page: landVal });
     if (r && r.ok) {
         const resolved = darkMode === null ? WA_DEFAULT_DARK_MODE : darkMode;
         document.documentElement.setAttribute('data-bs-theme', resolved ? 'dark' : 'light');
         currentUser.pref_dark_mode = darkMode;
         currentUser.pref_lang = langVal;
+        currentUser.pref_landing_page = landVal;
         bootstrap.Modal.getInstance(document.getElementById('accountSettingsModal'))?.hide();
         showToast(t('preferences_saved'));
         if (langVal !== prevLang) setTimeout(() => location.reload(), 800);

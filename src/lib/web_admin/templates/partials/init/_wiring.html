@@ -96,10 +96,11 @@ document.getElementById('mainTabs')?.addEventListener('shown.bs.tab', e => {
     localStorage.setItem('ss_active_tab_login', (currentUser && currentUser.login_id) || '');
 });
 
-// Which tab the admin panel opens on. The landing PAGE (admin vs the /status page)
-// is decided server-side at login; here we only pick the tab inside the panel: a
-// fresh login opens Overview (the admin home), while a reload (F5) within the same
-// login restores the last visited tab. login_id (the session id) distinguishes them.
+// Which tab the admin panel opens on. A fresh login (new login_id) opens the panel's
+// default tab — Services, the leftmost tab (Overview is now its own page); a reload (F5)
+// or navigation within the same login restores the last visited tab. login_id (the
+// session id) distinguishes the two. The Overview page's widget click-through stashes its
+// target tab under the same login marker so it lands there too.
 function _resolveLandingTab() {
     const tabVisible = target => {
         const btn = document.querySelector(`[data-bs-target="${target}"]`);
@@ -110,7 +111,8 @@ function _resolveLandingTab() {
             .find(el => el.style.display !== 'none');
         return li ? li.querySelector('[data-bs-target]')?.dataset.bsTarget : null;
     };
-    const home = tabVisible('#tab-overview') ? '#tab-overview' : firstVisible();
+    // Default tab: Services (falls back to the first visible tab without Services access).
+    const home = tabVisible('#tab-services') ? '#tab-services' : firstVisible();
     const savedTab   = localStorage.getItem('ss_active_tab');
     const savedLogin = localStorage.getItem('ss_active_tab_login');
     const isReload = savedLogin && currentUser.login_id && savedLogin === currentUser.login_id;
@@ -206,15 +208,20 @@ try {
     renderConfig();
     renderServers();
     applyRoleRestrictions();
-    // Configured landing page (per user/group/global) on a fresh login; last tab on reload.
-    const _landingTab = _resolveLandingTab();
-    if (_landingTab) {
-        const _tabBtn = document.querySelector(`[data-bs-target="${_landingTab}"]`);
-        if (_tabBtn && _tabBtn.closest('li')?.style.display !== 'none') {
-            bootstrap.Tab.getOrCreateInstance(_tabBtn).show();
+    if (window.SS_OVERVIEW_PAGE) {
+        // Standalone Overview page: no tabs to activate — just render the widget grid.
+        renderOverview();
+    } else {
+        // Admin panel: the default tab (Services) on a fresh login; the last visited tab
+        // on reload (F5) or navigation within the same login.
+        const _landingTab = _resolveLandingTab();
+        if (_landingTab) {
+            const _tabBtn = document.querySelector(`[data-bs-target="${_landingTab}"]`);
+            if (_tabBtn && _tabBtn.closest('li')?.style.display !== 'none') {
+                bootstrap.Tab.getOrCreateInstance(_tabBtn).show();
+            }
         }
     }
-    renderOverview();
     // Keep --ss-top-offset in sync with the sticky header height (navbar + visible banners)
     const _stickyTop = document.getElementById('ss-sticky-top');
     if (_stickyTop) {

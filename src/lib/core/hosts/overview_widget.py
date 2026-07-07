@@ -167,8 +167,9 @@ OVERVIEW_WIDGETS = [
                    'badge': {'color': '#dc3545', 'bg': 'rgba(220,53,69,.16)'}},
                   {'v': 'maint', 'label_key': 'host_status_maintenance',
                    'badge': {'color': '#fd7e14', 'bg': 'rgba(253,126,20,.18)'}},
-                  {'v': 'errmaint', 'label_key': 'host_status_error',
-                   'badge': {'color': '#dc3545', 'bg': 'rgba(220,53,69,.16)'}},
+                  {'v': 'errmaint', 'label_key': 'host_status_error', 'badges': [
+                      {'label_key': 'host_status_error',       'color': '#dc3545', 'bg': 'rgba(220,53,69,.16)'},
+                      {'label_key': 'host_status_maintenance', 'color': '#fd7e14', 'bg': 'rgba(253,126,20,.18)'}]},
                   {'v': 'virtual', 'label_key': 'host_virtual',
                    'badge': {'color': '#0dcaf0', 'bg': 'rgba(13,202,240,.16)'}},
                   {'v': 'physical', 'label_key': 'host_physical'},

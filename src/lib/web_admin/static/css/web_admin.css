@@ -1269,3 +1269,7 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     font-size: 3rem;
     margin-bottom: .5rem;
 }
+
+/* Standalone Overview page (/overview): hide the admin tab-nav — the page shows
+   only the widget grid; the panel's tabs live at /admin. */
+body.overview-page #mainTabs { display: none !important; }

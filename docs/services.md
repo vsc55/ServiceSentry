@@ -91,6 +91,11 @@ flowchart TB
 El registro es genérico: el panel itera los servicios y cada uno se describe a sí mismo
 (estado + acciones), sin ramas por-servicio.
 
+> El control-plane aporta además un **widget de Overview** (`lib/services/control/overview_widget.py`,
+> id `services`) que cuenta los servicios embebidos activos vs parados —sólo los reales
+> (`discover_embedded_services()`), no las vistas read-only worker/database. Es la pestaña
+> más a la izquierda y el destino por defecto del panel `/admin`.
+
 ```mermaid
 flowchart TB
     g["GET /api/v1/services"] --> agg["_services_status_dict()<br/>itera el registro: {key: obj.status()}"]
