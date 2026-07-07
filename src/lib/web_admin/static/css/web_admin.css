@@ -4,6 +4,16 @@
    and defines all application-specific components.
    ================================================================ */
 
+/* ── Thin scrollbars app-wide ───────────────────────────────────── */
+/* The default OS scrollbar is too wide for this compact UI — slim it down
+   everywhere (the page and any scroll area). Component-specific rules like
+   .dw-content stay thinner still, as they are more specific. */
+* { scrollbar-width: thin; scrollbar-color: var(--bs-border-color) transparent; }
+::-webkit-scrollbar             { width: 10px; height: 10px; }
+::-webkit-scrollbar-track       { background: transparent; }
+::-webkit-scrollbar-thumb       { background: var(--bs-border-color); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bs-secondary-color); }
+
 /* ── Light theme variables ──────────────────────────────────────── */
 [data-bs-theme="light"] body { background-color: #f5f6fa }
 [data-bs-theme="light"] {

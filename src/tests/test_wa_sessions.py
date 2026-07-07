@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """Tests for server-side session registry and management."""
 
+import uuid
+
 import pytest
 
 try:
@@ -33,9 +35,10 @@ class TestSessionRegistry:
         _login(client)
         with client.session_transaction() as s:
             assert 'session_token' in s
-            assert len(s['session_token']) == 64  # hex(32)
+            assert len(s['session_token']) == 64  # hex(32) — the secret credential
             assert 'session_id' in s
-            assert len(s['session_id']) == 16     # hex(8)
+            # Public session id is a uuid4 (matches user/host/role/… uids)
+            assert uuid.UUID(s['session_id']).version == 4
 
     def test_session_records_user_uid(self, admin, client):
         """Session entry contains the logged-in user's UID (not username)."""
@@ -166,21 +169,21 @@ class TestSessionRegistry:
     def test_close_all_sessions_button_in_ui(self, client):
         """Users tab has the close-all-sessions button."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'invalidateAllSessions()' in html
         assert b'close_all_sessions' in html
 
     def test_sessions_panel_in_ui(self, client):
         """Users tab contains the sessions panel."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'sessions-container' in html
         assert b'renderSessions' in html
 
     def test_per_user_revoke_button_in_ui(self, client):
         """Users tab has the per-user revoke button."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'revokeUserSessions' in html
 
     def test_session_ip_change_audited(self, admin, client):

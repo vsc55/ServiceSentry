@@ -135,7 +135,7 @@ class TestProcessDiscover:
     def test_discover_remote_over_ssh(self):
         from watchfuls.process import Watchful
         host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
-        with patch('lib.hosts.runner.run', return_value=(_PS_OUT, '', 0)) as run:
+        with patch('lib.core.hosts.runner.run', return_value=(_PS_OUT, '', 0)) as run:
             res = {s['name']: s['status'] for s in Watchful.discover({'__host__': host})}
         assert run.call_args.args[1] == 'ps -A -o comm='
         assert res['nginx'] == '×2' and res['sshd'] == '×1'
@@ -143,7 +143,7 @@ class TestProcessDiscover:
     def test_discover_remote_windows_tasklist(self):
         from watchfuls.process import Watchful
         host = {'kind': 'remote', 'os': 'windows', 'address': '10.0.0.9', 'ssh': {}}
-        with patch('lib.hosts.runner.run', return_value=(_TASKLIST_OUT, '', 0)) as run:
+        with patch('lib.core.hosts.runner.run', return_value=(_TASKLIST_OUT, '', 0)) as run:
             res = {s['name']: s['status'] for s in Watchful.discover({'__host__': host})}
         assert 'tasklist' in run.call_args.args[1]
         assert res['nginx.exe'] == '×2'

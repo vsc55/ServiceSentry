@@ -130,53 +130,52 @@ class TestApiOverview:
         assert resp.status_code == 200
 
     def test_response_keys(self, client):
+        """The slim aggregate carries only the shared data (module widgets + role
+        metadata); every card/table fetches its own from /overview/widget/<id>."""
         _login(client)
         data = client.get("/api/v1/modules/overview").get_json()
-        for key in ("modules", "status", "sessions", "users", "groups", "roles", "last_events"):
+        for key in ("module_widgets", "role_names", "role_keys"):
             assert key in data
 
     def test_syslog_widget_data(self, admin, client):
-        """The overview payload carries syslog data (total + recent) for the widget."""
+        """The syslog widgets expose the total (stat) + recent messages (table) over AJAX."""
         _login(client)
         admin._syslog_store.add({
             'ts': 1000.0, 'received_at': '2026-06-23T10:00:00Z', 'source': '10.0.0.1',
             'hostname': 'h1', 'app': 'sshd', 'procid': '1', 'severity': 3, 'facility': 4,
             'msgid': '', 'message': 'boom', 'raw': ''})
-        sl = client.get("/api/v1/modules/overview").get_json().get("syslog")
-        assert sl and sl["total"] == 1
-        assert sl["recent"][0]["message"] == "boom"
-        assert sl["recent"][0]["severity_name"] == "err"
+        assert client.get("/api/v1/overview/widget/syslog_stats").get_json()["content"]["value"] == 1
+        rows = client.get("/api/v1/overview/widget/syslog").get_json()["rows"]
+        assert rows[0]["message"] == "boom"
+        assert rows[0]["severity_name"] == "err"
 
     def test_modules_list(self, client):
-        """Modules list contains the two sample modules (ping, web)."""
+        """The modules_list table lists the two sample modules (ping, web)."""
         _login(client)
-        data = client.get("/api/v1/modules/overview").get_json()
-        names = {m["name"] for m in data["modules"]}
-        assert names == {"ping", "web"}
+        rows = client.get("/api/v1/overview/widget/modules_list").get_json()["rows"]
+        assert {m["name"] for m in rows} == {"ping", "web"}
 
     def test_modules_enabled_flag(self, client):
         """Both sample modules are enabled."""
         _login(client)
-        modules = client.get("/api/v1/modules/overview").get_json()["modules"]
-        assert all(m["enabled"] for m in modules)
+        rows = client.get("/api/v1/overview/widget/modules_list").get_json()["rows"]
+        assert all(m["enabled"] for m in rows)
 
     def test_modules_items_count(self, client):
         """ping has 2 items, web has 1."""
         _login(client)
-        modules = {
-            m["name"]: m for m in
-            client.get("/api/v1/modules/overview").get_json()["modules"]
-        }
-        assert modules["ping"]["items"] == 2
-        assert modules["web"]["items"] == 1
+        rows = {m["name"]: m for m in
+                client.get("/api/v1/overview/widget/modules_list").get_json()["rows"]}
+        assert rows["ping"]["items"] == 2
+        assert rows["web"]["items"] == 1
 
     def test_status_counts(self, client):
-        """check_state has 1 check (ping/192.168.1.1 OK)."""
+        """The checks stat value is the total check count (1 = ping/192.168.1.1 OK)."""
         _login(client)
-        status = client.get("/api/v1/modules/overview").get_json()["status"]
-        assert status["total"] == 1
-        assert status["ok"] == 1
-        assert status["error"] == 0
+        assert client.get("/api/v1/overview/widget/checks").get_json()["content"]["value"] == 1
+        ping = {m["name"]: m["checks"] for m in
+                client.get("/api/v1/overview/widget/modules_list").get_json()["rows"]}["ping"]
+        assert ping["ok"] == 1 and ping["error"] == 0
 
     def test_overview_module_widget_section(self, client, admin):
         """The overview payload carries generic module-widget data: each module
@@ -207,53 +206,47 @@ class TestApiOverview:
         assert any(s['value'] == '1/2' for s in e['stats'])
 
     def test_status_without_var_dir(self, config_dir):
-        """No var_dir → zero status counts."""
+        """No var_dir → the checks stat value is zero."""
         wa = WebAdmin(config_dir, "admin", "pass", var_dir=None)
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
-        status = c.get("/api/v1/modules/overview").get_json()["status"]
-        assert status == {"total": 0, "ok": 0, "error": 0, "warning": 0}
+        assert c.get("/api/v1/overview/widget/checks").get_json()["content"]["value"] == 0
 
     def test_sessions_contains_current(self, client):
-        """After login, at least 1 active session listed."""
+        """After login the sessions stat counts ≥1 and the sessions_list has the user."""
         _login(client)
-        sessions = client.get("/api/v1/modules/overview").get_json()["sessions"]
-        assert sessions["active"] >= 1
-        assert "admin" in sessions["users"]
+        assert client.get("/api/v1/overview/widget/sessions").get_json()["content"]["value"] >= 1
+        rows = client.get("/api/v1/overview/widget/sessions_list").get_json()["rows"]
+        assert any(r["user"] == "admin" for r in rows)
 
     def test_users_total(self, client):
-        """Default fixture has a single admin user."""
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        """The users stat value is the user count (1); the by-role split is in its badges."""
         _login(client)
-        users = client.get("/api/v1/modules/overview").get_json()["users"]
-        assert users["total"] == 1
-        # by_role is now keyed by UID
-        admin_uid = BUILTIN_ROLE_UIDS['admin']
-        assert users["by_role"].get(admin_uid, 0) == 1
+        content = client.get("/api/v1/overview/widget/users").get_json()["content"]
+        assert content["value"] == 1
+        assert any(b.get("fn") == "role" for b in content["badges"])
 
     def test_last_events_list(self, admin, client):
-        """last_events returns most-recent-first audit entries."""
+        """The activity table returns most-recent-first audit entries."""
         _login(client)
-        data = client.get("/api/v1/modules/overview").get_json()
-        # The login itself should have generated an audit event
-        assert isinstance(data["last_events"], list)
-        if data["last_events"]:
-            assert "event" in data["last_events"][0]
+        rows = client.get("/api/v1/overview/widget/activity").get_json()["rows"]
+        assert isinstance(rows, list)
+        if rows:
+            assert "event" in rows[0]
 
     def test_last_events_max_10(self, admin, client):
-        """Even with many audit entries, at most 10 are returned."""
+        """Even with many audit entries, the activity table returns at most 10."""
         _login(client)
-        # Generate extra audit entries
         for _ in range(15):
             admin._audit("admin", "test_event", "filler")
-        events = client.get("/api/v1/modules/overview").get_json()["last_events"]
-        assert len(events) <= 10
+        rows = client.get("/api/v1/overview/widget/activity").get_json()["rows"]
+        assert len(rows) <= 10
 
     def test_dashboard_has_overview_tab(self, client):
         """The dashboard HTML contains the overview tab."""
         _login(client)
-        resp = client.get("/")
+        resp = client.get("/admin")
         html = resp.data.decode()
         assert 'id="tab-overview"' in html
         assert 'btn-tab-overview' in html
@@ -261,83 +254,69 @@ class TestApiOverview:
     # ---- groups summary ----
 
     def test_groups_summary_keys(self, client):
-        """groups key has total and members sub-keys."""
+        """The groups stat exposes a value + badges."""
         _login(client)
-        groups = client.get("/api/v1/modules/overview").get_json()["groups"]
-        assert "total" in groups
-        assert "members" in groups
+        content = client.get("/api/v1/overview/widget/groups").get_json()["content"]
+        assert "value" in content and "badges" in content
 
     def test_groups_default_administrators(self, client):
-        """No groups.json → WebAdmin auto-creates 'administrators' group with no members."""
+        """No groups.json → WebAdmin auto-creates 'administrators' group (stat value 1)."""
         _login(client)
-        groups = client.get("/api/v1/modules/overview").get_json()["groups"]
-        assert groups["total"] == 1
-        assert groups["members"] == 0
+        assert client.get("/api/v1/overview/widget/groups").get_json()["content"]["value"] == 1
 
     # ---- roles summary ----
 
     def test_roles_summary_keys(self, client):
-        """roles key has total, builtin and custom sub-keys."""
+        """The roles stat exposes a value + badges."""
         _login(client)
-        roles = client.get("/api/v1/modules/overview").get_json()["roles"]
-        assert "total" in roles
-        assert "builtin" in roles
-        assert "custom" in roles
+        content = client.get("/api/v1/overview/widget/roles").get_json()["content"]
+        assert "value" in content and "badges" in content
 
     def test_roles_builtin_count(self, client):
-        """Builtin roles match BUILTIN_ROLE_PERMISSIONS length (admin, editor, viewer = 3)."""
-        from lib.web_admin.constants import BUILTIN_ROLE_PERMISSIONS
+        """With no custom roles the roles stat value equals the builtin count."""
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         _login(client)
-        roles = client.get("/api/v1/modules/overview").get_json()["roles"]
-        assert roles["builtin"] == len(BUILTIN_ROLE_PERMISSIONS)
-        assert roles["custom"] == 0
-        assert roles["total"] == roles["builtin"] + roles["custom"]
+        val = client.get("/api/v1/overview/widget/roles").get_json()["content"]["value"]
+        assert val == len(BUILTIN_ROLE_PERMISSIONS)
 
     def test_roles_custom_count(self, admin, client):
-        """Adding a custom role increments the custom and total counts."""
-        from lib.web_admin.constants import BUILTIN_ROLE_PERMISSIONS
+        """Adding a custom role increments the roles stat value."""
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         _login(client)
         admin._custom_roles["superuser"] = {"permissions": ["modules_view"]}
-        roles = client.get("/api/v1/modules/overview").get_json()["roles"]
-        assert roles["custom"] == 1
-        assert roles["total"] == len(BUILTIN_ROLE_PERMISSIONS) + 1
+        val = client.get("/api/v1/overview/widget/roles").get_json()["content"]["value"]
+        assert val == len(BUILTIN_ROLE_PERMISSIONS) + 1
 
     def test_credentials_summary_keys(self, client):
-        """credentials key has total, enabled and by_type sub-keys."""
+        """The credentials stat exposes a value + badges."""
         _login(client)
-        creds = client.get("/api/v1/modules/overview").get_json()["credentials"]
-        assert "total" in creds
-        assert "enabled" in creds
-        assert "by_type" in creds
-        assert isinstance(creds["by_type"], dict)
+        content = client.get("/api/v1/overview/widget/credentials").get_json()["content"]
+        assert "value" in content and "badges" in content
 
-    # ---- per-module checks ----
+    # ---- per-module checks (modules_list table rows) ----
 
     def test_modules_have_checks_key(self, client):
-        """Every module entry in overview has a checks dict."""
+        """Every modules_list row has a checks dict."""
         _login(client)
-        modules = client.get("/api/v1/modules/overview").get_json()["modules"]
-        for m in modules:
-            assert "checks" in m
-            assert isinstance(m["checks"], dict)
+        rows = client.get("/api/v1/overview/widget/modules_list").get_json()["rows"]
+        for m in rows:
+            assert isinstance(m.get("checks"), dict)
 
     def test_module_checks_structure(self, client):
         """checks dict has total, ok and error keys."""
         _login(client)
-        modules = client.get("/api/v1/modules/overview").get_json()["modules"]
-        for m in modules:
+        rows = client.get("/api/v1/overview/widget/modules_list").get_json()["rows"]
+        for m in rows:
             for key in ("total", "ok", "error"):
                 assert key in m["checks"], f"{m['name']}.checks missing '{key}'"
 
     def test_module_checks_counts(self, client):
         """ping: 1 check OK; web: no checks in status fixture."""
         _login(client)
-        modules = {
-            m["name"]: m["checks"]
-            for m in client.get("/api/v1/modules/overview").get_json()["modules"]
-        }
-        assert modules["ping"] == {"total": 1, "ok": 1, "error": 0, "warning": 0}
-        assert modules["web"] == {"total": 0, "ok": 0, "error": 0, "warning": 0}
+        rows = {m["name"]: m["checks"] for m in
+                client.get("/api/v1/overview/widget/modules_list").get_json()["rows"]}
+        assert rows["ping"] == {"total": 1, "ok": 1, "error": 0, "warning": 0}
+        assert rows["web"] == {"total": 0, "ok": 0, "error": 0, "warning": 0}
 
     def test_module_checks_with_error(self, config_dir, tmp_path):
         """A failing check increments the error counter."""
@@ -354,13 +333,9 @@ class TestApiOverview:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
-        modules = {
-            m["name"]: m["checks"]
-            for m in c.get("/api/v1/modules/overview").get_json()["modules"]
-        }
-        assert modules["ping"]["total"] == 2
-        assert modules["ping"]["ok"] == 1
-        assert modules["ping"]["error"] == 1
+        ping = {m["name"]: m["checks"] for m in
+                c.get("/api/v1/overview/widget/modules_list").get_json()["rows"]}["ping"]
+        assert ping["total"] == 2 and ping["ok"] == 1 and ping["error"] == 1
 
     def test_module_checks_with_warning(self, config_dir, tmp_path):
         """A non-OK check marked severity='warning' counts as warning, not error."""
@@ -377,11 +352,9 @@ class TestApiOverview:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
-        data = c.get("/api/v1/modules/overview").get_json()
-        ping = {m["name"]: m["checks"] for m in data["modules"]}["ping"]
+        ping = {m["name"]: m["checks"] for m in
+                c.get("/api/v1/overview/widget/modules_list").get_json()["rows"]}["ping"]
         assert ping == {"total": 2, "ok": 1, "error": 0, "warning": 1}
-        # Aggregate status reflects the warning bucket too.
-        assert data["status"]["warning"] >= 1
 
     def test_module_checks_without_var_dir(self, config_dir):
         """No var_dir → all module checks are zero."""
@@ -389,20 +362,16 @@ class TestApiOverview:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         c.post("/login", data={"username": "admin", "password": "pass"})
-        modules = c.get("/api/v1/modules/overview").get_json()["modules"]
-        for m in modules:
+        rows = c.get("/api/v1/overview/widget/modules_list").get_json()["rows"]
+        for m in rows:
             assert m["checks"] == {"total": 0, "ok": 0, "error": 0, "warning": 0}
 
     def test_status_aggregated_from_module_checks(self, client):
-        """Top-level status counts equal the sum of per-module check counts."""
+        """The checks stat total equals the sum of per-module check totals."""
         _login(client)
-        data = client.get("/api/v1/modules/overview").get_json()
-        total = sum(m["checks"]["total"] for m in data["modules"])
-        ok    = sum(m["checks"]["ok"]    for m in data["modules"])
-        error = sum(m["checks"]["error"] for m in data["modules"])
-        assert data["status"]["total"] == total
-        assert data["status"]["ok"]    == ok
-        assert data["status"]["error"] == error
+        rows = client.get("/api/v1/overview/widget/modules_list").get_json()["rows"]
+        total = sum(m["checks"]["total"] for m in rows)
+        assert client.get("/api/v1/overview/widget/checks").get_json()["content"]["value"] == total
 
 
 # ──────────────────────────── Module item schemas ──────────────────
@@ -548,14 +517,14 @@ class TestModuleItemSchemas:
     def test_dashboard_contains_item_schemas_json(self, client):
         """Dashboard HTML includes ITEM_SCHEMAS as a JS constant."""
         _login(client)
-        html = client.get("/").data.decode()
+        html = client.get("/admin").data.decode()
         assert 'ITEM_SCHEMAS' in html
         assert 'web|list' in html
 
     def test_schemas_passed_to_template(self, admin, client):  # noqa: ARG002
         """item_schemas variable is present in the rendered dashboard."""
         _login(client)
-        html = client.get("/").data.decode()
+        html = client.get("/admin").data.decode()
         # Rich schema: code has a 'default' key
         assert '"default": 200' in html or '"default":200' in html
 
@@ -591,7 +560,7 @@ class TestRekeyItemsByUid:
     flat ``list`` collections and snmp's nested ``servers``/``checks``."""
 
     def test_rekey_flat_and_nested(self):
-        from lib.web_admin.routes.modules import _rekey_items_by_uid
+        from lib.core.modules.routes import _rekey_items_by_uid
         data = {
             "ping": {"list": {
                 "host1": {"uid": "U1", "label": "A"},

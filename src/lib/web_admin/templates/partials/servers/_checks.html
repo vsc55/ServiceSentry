@@ -23,7 +23,7 @@ function _hostClusterMemberships(uid) {
 // (e.g. a numeric priority/weight, stored on profiles[pkey][field]); otherwise it
 // falls back to the cluster-node <select>. Same generic mechanism as the cluster
 // modal's member table, so both surfaces stay in sync — no module-specific code.
-function _renderClusterMembershipCards(memberships) {
+function _renderClustersMembershipCards(memberships) {
     if (!memberships || !memberships.length) return '';
     const ro = _hostModalReadonly ? 'disabled' : '';
     return memberships.map(m => {

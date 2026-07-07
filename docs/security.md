@@ -33,7 +33,7 @@ Resultado medido (estado limpio): `admin` (existe) ≈ usuario inexistente, dent
 
 ### Límite de intentos por IP (rate-limiting)
 
-Además del [bloqueo por cuenta](#bloqueo-de-cuenta-por-intentos-fallidos), hay un **límite por IP de origen** en `/login` (`lib/util/ratelimit.py` :: `RateLimiter`, ventana deslizante en memoria, thread-safe): tras `web_admin|login_ratelimit_max` intentos (por defecto **15**) dentro de `web_admin|login_ratelimit_window_secs` (por defecto **300 s**), la IP recibe `flash` genérico + redirección y se registra `login_throttled` en auditoría. Un login correcto **resetea** el contador de esa IP (usuarios legítimos tras un NAT no se penalizan). Esto frena el *password spraying* (una contraseña común probada contra muchos usuarios, que nunca dispara el bloqueo por-cuenta). El bloqueo por-cuenta usa **contadores en memoria** (el propio `request.remote_addr` no es falsificable salvo que `proxy_count` esté mal configurado — ver [Confianza de proxy](#confianza-de-proxy-e-ip-del-cliente-proxyfix)). Umbrales `0` = desactivado.
+Además del [bloqueo por cuenta](#bloqueo-de-cuenta-por-intentos-fallidos), hay un **límite por IP de origen** en `/login` (`lib/security/ratelimit.py` :: `RateLimiter`, ventana deslizante en memoria, thread-safe): tras `web_admin|login_ratelimit_max` intentos (por defecto **15**) dentro de `web_admin|login_ratelimit_window_secs` (por defecto **300 s**), la IP recibe `flash` genérico + redirección y se registra `login_throttled` en auditoría. Un login correcto **resetea** el contador de esa IP (usuarios legítimos tras un NAT no se penalizan). Esto frena el *password spraying* (una contraseña común probada contra muchos usuarios, que nunca dispara el bloqueo por-cuenta). El bloqueo por-cuenta usa **contadores en memoria** (el propio `request.remote_addr` no es falsificable salvo que `proxy_count` esté mal configurado — ver [Confianza de proxy](#confianza-de-proxy-e-ip-del-cliente-proxyfix)). Umbrales `0` = desactivado.
 
 ### Sesiones persistentes ("Remember me")
 
@@ -101,7 +101,7 @@ El **contador** de intentos fallidos (`_failed_attempts`) se mantiene **en memor
 
 ## fail2ban interno (bans de IP a nivel de servicio)
 
-Un **fail2ban embebido** (`lib/security/ipban.py` :: `IpBanManager`) banea IP de origen que acumulan ofensas — no solo login fallido, sino **cualquier acceso no autorizado** — y es **agnóstico al servicio**: además de la web, protege el [receptor syslog](#receptor-syslog-entrada-no-confiable) y cualquier futuro puerto expuesto. Es *thread-safe*, sin dependencias de framework, y su estado se persiste en la base de datos general (compartido entre procesos: web + syslog ven el mismo jail).
+Un **fail2ban embebido** (`lib/services/ipban/jail.py` :: `IpBanManager`) banea IP de origen que acumulan ofensas — no solo login fallido, sino **cualquier acceso no autorizado** — y es **agnóstico al servicio**: además de la web, protege el [receptor syslog](#receptor-syslog-entrada-no-confiable) y cualquier futuro puerto expuesto. Es *thread-safe*, sin dependencias de framework, y su estado se persiste en la base de datos general (compartido entre procesos: web + syslog ven el mismo jail).
 
 ### Dos vías de ofensa (tracks)
 
@@ -122,11 +122,11 @@ Las IP en la [lista blanca](#lista-blanca-never-ban) nunca acumulan ofensas ni s
 
 ### Acción de bloqueo por servicio (service registry)
 
-Cada servicio declara sus puertos y las **respuestas** que soporta (`lib/security/ipban_services.py`). Para una IP baneada:
+Cada servicio declara sus puertos y las **respuestas** que soporta (`lib/services/ipban/exposed.py`). Para una IP baneada:
 
 | Servicio | Puertos                     | Acciones soportadas                    | Por defecto |
 |----------|-----------------------------|----------------------------------------|-------------|
-| `web`    | tcp:80/443 (tras proxy)     | `page` · `minimal` · `reject` · `json` | `reject`    |
+| `web`    | tcp:80/443 (tras proxy)     | `page` · `minimal` · `reject` · `json` | `page`      |
 | `syslog` | udp/tcp:514, tcp:6514 (TLS) | `drop`                                 | `drop`      |
 
 - `page` = página de error con estilo · `minimal` = error mínimo · `reject` = 403 · `json` = error JSON · `drop` = ni acepta la conexión (para UDP/TCP crudo de syslog).
@@ -134,7 +134,7 @@ Cada servicio declara sus puertos y las **respuestas** que soporta (`lib/securit
 
 ### Lista blanca (never-ban)
 
-Tres fuentes se unen en el *allowlist* del manager: el *loopback*, la CSV programática `web_admin|ipban_whitelist` (env/config) y una **lista gestionada desde la UI** con descripción y autor, persistida en la tabla `ip_whitelist` (`lib/stores/ip_whitelist.py` — IP/CIDR normalizado, `description`, `created_at`, `created_by`). Añadir/quitar una entrada empuja el nuevo allowlist al jail en caliente.
+Tres fuentes se unen en el *allowlist* del manager: el *loopback*, la CSV programática `web_admin|ipban_whitelist` (env/config) y una **lista gestionada desde la UI** con descripción y autor, persistida en la tabla `ip_whitelist` (`lib/services/ipban/store/whitelist.py` — IP/CIDR normalizado, `description`, `created_at`, `created_by`). Añadir/quitar una entrada empuja el nuevo allowlist al jail en caliente.
 
 ### Historial de baneos (auditoría append-only)
 
@@ -169,6 +169,12 @@ El conteo **persistido** (no en memoria) sobrevive a reinicios y es correcto con
 | `ipban_whitelist`           | `''`                  | IP/CIDR programáticos, nunca baneados (CSV).         |
 
 La UI separa **configuración** (ajustes + «Servicios expuestos», en Config → fail2ban) de la **operativa** (sección de nivel superior con sub-pestañas IPs baneadas / Lista blanca / Historial). Ver [web_admin.md → fail2ban](web_admin.md#fail2ban-bans-de-ip).
+
+### Registrado como servicio (pestaña Services)
+
+fail2ban se registra como un **servicio embebido** más (`lib/services/ipban/`), igual que el monitor, el receptor syslog o el procesador de eventos. En la pestaña **Services** aparece con su **estado** (on/off), su **interruptor start/stop** (que conmuta `ipban_enabled` y lo persiste, reconfigurando el jail en caliente) y un **latido (heartbeat) por contenedor**: cada réplica publica su estado y sus contadores (baneadas / en vigilancia / lista blanca) en `service_instances`, así en microservicios se ve **qué pods están aplicando el jail**. A diferencia de los demás, no es un bucle de fondo sino un **gate en línea** en cada request; el start/stop no arranca un hilo, sino que activa/desactiva el interruptor maestro compartido.
+
+Todo el código del servicio vive unificado en `lib/services/ipban/`: `jail.py` (`IpBanManager`, motor sin framework), `exposed.py` (registro de servicios expuestos + acciones de bloqueo), `manager.py` (`_IpBanMixin`, la cola Flask del host: gate + captura de ofensas) y `embedded.py` (superficie Services + heartbeat). La persistencia se agrupa en `lib/services/ipban/store/`, con **una clase y un archivo por tabla** (`bans.py`, `offense_counters.py`, `offense_log.py`, `service_actions.py`, `history.py`, `whitelist.py`) y una fachada `IpBanStore` (`store.py`) que los compone y coordina las operaciones cross-tabla (`clear_offenses`, `prune`). Los routes (`lib/services/ipban/routes.py`) y las plantillas siguen su ubicación estándar, como el resto de servicios.
 
 ---
 
@@ -236,8 +242,8 @@ entren (y baje al retirar la asignación). Detalles del flujo/endpoints en
   servidor-a-servidor) y **exento de CSRF**. SCIM desactivado, token vacío/por debajo del
   mínimo (`web_admin|scim_min_token_len`, def. 16) o no coincidente → **401** (mensaje
   uniforme, no distingue "desactivado" de "token inválido").
-- **Rate-limiting** de la autenticación bearer por IP (`web_admin|scim_ratelimit_*`,
-  def. 20/300 s): tras N fallos → **429** + `Retry-After`, y cada fallo se **audita**
+- **Rate-limiting** de la autenticación bearer por IP (`web_admin|scim_ratelimit_max`
+  / `web_admin|scim_ratelimit_window_secs`, def. 20/300 s): tras N fallos → **429** + `Retry-After`, y cada fallo se **audita**
   (`scim_auth_failed`) — SCIM no tiene bloqueo por-cuenta, así que este es el freno al
   *guessing* del token (que además es de 256 bits al generarse).
 - **Solo toca lo que le pertenece** (evita escalada/lockout con solo el token):
@@ -271,9 +277,9 @@ entren (y baje al retirar la asignación). Detalles del flujo/endpoints en
 
 | Archivo | Qué cubre |
 | ------- | --------- |
-| `test_wa_ldap.py` | Autenticación LDAP correcta, credenciales incorrectas, servidor caído, fallback a local, sincronización de usuario, mapeo de grupos, `allow_email_login` |
+| `test_providers_ldap.py` | Autenticación LDAP correcta, credenciales incorrectas, servidor caído, fallback a local, sincronización de usuario, mapeo de grupos, `allow_email_login` |
 | `test_wa_scim.py` | Bearer token (desactivado/ausente/erróneo → 401), CRUD de usuarios SCIM (crear/filtrar/leer/PATCH active/borrar), grupos SCIM (crear con miembros, quitar miembro, borrar desvincula) |
-| `test_wa_oidc.py` | Callback OIDC correcto, `state` inválido, `auto_create_users=false`, sincronización de usuario, mapeo de claims |
+| `test_providers_oidc.py` | Callback OIDC correcto, `state` inválido, `auto_create_users=false`, sincronización de usuario, mapeo de claims |
 | `test_wa_saml.py` | Callback ACS SAML2 correcto, sincronización de usuario, mapeo de grupos, firma inválida → rechazado |
 
 ---
@@ -396,9 +402,9 @@ Cada endpoint está protegido por el permiso exacto que necesita:
 > - `server.<uid>.*` — por host/servidor concreto del registro (`is_server_perm`).
 > - `cluster.<uid>.*` — por cluster multi-bind concreto (`is_cluster_perm`).
 >
-> La autorización por-servidor/cluster se resuelve en `routes/modules` a partir del
+> La autorización por-servidor/cluster se resuelve en `lib/core/modules/routes.py` a partir del
 > `host_uid`/`host_uids` del ítem; las globales (`servers_*`, `clusters_*`) conceden
-> acceso a todos. Definidas en `lib/web_admin/constants.py`.
+> acceso a todos. Definidas en `lib/core/permissions.py`.
 
 ### Roles integrados
 
@@ -466,7 +472,7 @@ Los permisos son **aditivos**: el usuario obtiene sus permisos de rol propios m�
 
 ### `_role_is_admin()` — comparación robusta de rol admin
 
-Los roles pueden almacenarse en el registro del usuario (tabla `users`) como nombre de cadena (`"admin"`) o como UUID (`"00000000-..."`), dependiendo de cuándo fue creado el usuario. La función `_role_is_admin(role_val)` en `routes/users/__init__.py` normaliza ambas formas para que los guards de seguridad no sean eludidos por usuarios cuyo campo `role` no fue migrado al formato UID.
+Los roles pueden almacenarse en el registro del usuario (tabla `users`) como nombre de cadena (`"admin"`) o como UUID (`"00000000-..."`), dependiendo de cuándo fue creado el usuario. La función `_role_is_admin(role_val)` en `lib/core/users/routes.py` normaliza ambas formas para que los guards de seguridad no sean eludidos por usuarios cuyo campo `role` no fue migrado al formato UID.
 
 ```python
 def _role_is_admin(role_val: str) -> bool:
@@ -691,7 +697,7 @@ El cambio de contraseña propia requiere enviar la contraseña actual (`current_
 
 ## Protección contra Inyección SQL
 
-La persistencia respaldada por base de datos (usuarios, roles, grupos, sesiones, auditoría…) usa **siempre consultas parametrizadas** (placeholders `?` con los valores como parámetros enlazados, ver `lib/stores/*.py`); nunca se interpola entrada del usuario en el texto SQL. Los tests verifican que payloads SQL en campos de usuario y en parámetros de URL no causan errores ni comportamiento inesperado.
+La persistencia respaldada por base de datos (usuarios, roles, grupos, sesiones, auditoría…) usa **siempre consultas parametrizadas** (placeholders `?` con los valores como parámetros enlazados, ver `lib/core/*/store.py` y `lib/services/*/store/`); nunca se interpola entrada del usuario en el texto SQL. Los tests verifican que payloads SQL en campos de usuario y en parámetros de URL no causan errores ni comportamiento inesperado.
 
 | Test | Payload |
 |------|---------|
@@ -851,7 +857,9 @@ En cada respuesta (`after_request`) se emiten cabeceras de defensa en profundida
 | `Permissions-Policy` | `geolocation=(), microphone=(), camera=(), payment=()` | Uso no deseado de APIs del navegador |
 | `Strict-Transport-Security` | lo añade el proxy TLS (openresty) | *Downgrade* a HTTP |
 
-**Cookie de sesión:** `HttpOnly` (no accesible por JS) + `SameSite=Lax` (mitiga CSRF) + **`Secure`** cuando el despliegue es público/HTTPS (`secure_cookies` **o** `force_https` **o** `public_url` configurados), de modo que nunca viaja por HTTP plano. El desarrollo local por HTTP (sin ninguno de esos) sigue funcionando.
+**Cookie de sesión:** `HttpOnly` (no accesible por JS) + `SameSite=Lax` (mitiga CSRF) + **`Secure`** cuando `secure_cookies` **o** `force_https` están activos (`SESSION_COOKIE_SECURE = secure_cookies or force_https`), de modo que nunca viaja por HTTP plano. El desarrollo local por HTTP (sin ninguno de esos) sigue funcionando — un `Secure` activo haría que el navegador **descartara** la cookie sobre `http://` (síntoma: bucle de login sin error de contraseña; ver el aviso de depuración en `_csrf_protect`).
+
+> **Despliegue tras proxy TLS (nginx/NPM/openresty):** el flag `Secure` **no se activa por sí solo** aunque el usuario llegue por HTTPS — depende de `secure_cookies`/`force_https` en la config, no del esquema de la petición (que llega como HTTP desde el proxy). Si el acceso es **solo por HTTPS**, activa `web_admin.secure_cookies=true` para que la cookie lleve `Secure` (defensa en profundidad barata). **Compromiso:** con `Secure` activo se pierde el acceso por HTTP/IP en LAN. Si necesitas ambos, mantenlo desactivado y apóyate en **HSTS `preload`** (que el proxy ya emite) para forzar HTTPS en el dominio público.
 
 **Límite de tamaño de cuerpo:** `MAX_CONTENT_LENGTH = 8 MiB` — un *payload* enorme no puede agotar memoria antes de parsearse (protege APIs JSON y SCIM).
 
@@ -867,7 +875,7 @@ igual al número de proxies de confianza. Solo entonces se leen las cabeceras
 `X-Forwarded-*`, de modo que la **IP real del cliente** registrada en sesiones y
 auditoría es correcta detrás de un proxy inverso, sin permitir *spoofing* de IP
 cuando no hay proxy (con `proxy_count = 0` las cabeceras se ignoran). El middleware
-se reaplica **en caliente** al guardar el valor desde el panel (`routes/config/__init__.py`),
+se reaplica **en caliente** al guardar el valor desde el panel (`lib/core/config/routes/__init__.py`),
 sin reiniciar.
 
 ---
@@ -991,4 +999,4 @@ GET  /api/v1/notify/templates   GET /api/v1/notify/html-templates
 Hay dos rutas de ejecución remota, con políticas de host distintas:
 
 - La clase `Exec` (`lib/system/exe.py`) usa `paramiko.RejectPolicy`: los hosts que no estén en `~/.ssh/known_hosts` son rechazados (no se aceptan hosts desconocidos).
-- La ejecución **host-aware de los módulos** (`ModuleBase.host_exec` → `lib/hosts/ssh_client.py::connect_host`) es configurable **por host** mediante `ssh_verify_host`: con `True` carga `known_hosts` y aplica `RejectPolicy`; con `False` (**por defecto**) usa `AutoAddPolicy`, es decir **acepta hosts desconocidos** (añade su clave en el primer contacto). Para entornos sensibles, activa `ssh_verify_host` en el perfil del host.
+- La ejecución **host-aware de los módulos** (`ModuleBase.host_exec` → `lib/core/hosts/ssh_client.py::connect_host`) es configurable **por host** mediante `ssh_verify_host`: con `True` carga `known_hosts` y aplica `RejectPolicy`; con `False` (**por defecto**) usa `AutoAddPolicy`, es decir **acepta hosts desconocidos** (añade su clave en el primer contacto). Para entornos sensibles, activa `ssh_verify_host` en el perfil del host.

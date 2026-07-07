@@ -2129,7 +2129,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 53. Panel Web — LDAP
 
-**Archivo:** `tests/test_wa_ldap.py` — 21 tests
+**Archivo:** `tests/test_providers_ldap.py` — 21 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2157,7 +2157,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 54. Panel Web — OIDC/SSO
 
-**Archivo:** `tests/test_wa_oidc.py` — 20 tests
+**Archivo:** `tests/test_providers_oidc.py` — 20 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2184,7 +2184,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 55. Panel Web — SAML2
 
-**Archivo:** `tests/test_wa_saml2.py` — 22 tests
+**Archivo:** `tests/test_providers_saml.py` — 22 tests
 
 | Test | Qué comprueba |
 |---|---|

@@ -22,12 +22,12 @@ from lib.debug import DebugLevel
 from lib.core.object_base import ObjectBase
 from lib.security import csrf as _csrf, secret_manager
 from lib.security.headers import apply_security_headers
-from .constants import (
-    DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang,
+from lib.i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang
+from lib.core.permissions import (
     PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
-    BUILTIN_ROLE_UIDS,
-    ROLES,
+    BUILTIN_ROLE_UIDS, ROLES,
 )
+from .constants import HOME_PAGES
 from lib.config.spec import (
     CFG_BY_PATH, cfg_validate, env_field_specs, normalize_url, registry_defaults)
 from lib.config.layout import config_layout
@@ -36,9 +36,9 @@ from lib.providers.entraid.declarations import (
     OIDC_APP_NAME as _ENTRA_APP_OIDC,
     SAML2_APP_NAME as _ENTRA_APP_SAML2,
     SCIM_APP_NAME as _ENTRA_APP_SCIM)
-from .auth import ldap_auth as _ldap_auth
-from .auth import oidc_auth as _oidc_auth
-from .auth import saml_auth as _saml_auth
+from lib.providers.ldap import auth as _ldap_auth
+from lib.providers.oidc import auth as _oidc_auth
+from lib.providers.saml import auth as _saml_auth
 
 # Maps environment variable names to (config_path, expected_type), derived from
 # the central registry (lib.config.spec).  Env vars are runtime-only
@@ -56,10 +56,21 @@ def _cfg_default(path: str):
     """
     return CFG_BY_PATH[path].default
 from .mixins import (
-    _UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-    _SessionsMixin, _AuditMixin, _AuthMixin, _ChecksMixin, _ServicesMixin,
-    _IpBanMixin,
+    _PermissionsMixin, _AuthMixin, _ServicesMixin,
 )
+# fail2ban host glue lives with its service package (lib.services.ipban), like the
+# syslog/events managers — inherited here because the request gate is host-level.
+from lib.services.ipban.manager import _IpBanMixin
+# The Checks tab is the monitoring service's web glue — it lives with that service
+# (its permissions already do), inherited here like the other service mixins.
+from lib.services.monitoring.checks_mixin import _ChecksMixin
+# Core domains packaged under lib.core carry their own WebAdmin glue (mixin),
+# inherited here just like the mixins above.
+from lib.core.sessions.mixin import _SessionsMixin
+from lib.core.users.mixin import _UsersMixin
+from lib.core.roles.mixin import _RolesMixin
+from lib.core.groups.mixin import _GroupsMixin
+from lib.core.audit.mixin import _AuditMixin
 
 __all__ = ['WebAdmin']
 
@@ -187,7 +198,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Combined key sets: core secrets + the host's built-in SSH secrets +
         # module-declared secret fields.
         try:
-            from lib.hosts.profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
+            from lib.core.hosts.profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
         except Exception:  # pylint: disable=broad-except
             CORE_SSH_SECRET_FIELDS = frozenset()
         # Secret fields declared by credential-type schemas (built-in ssh +
@@ -431,10 +442,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         directly nor fight over separate connections.
         """
         from lib.db             import get_connector, reconcile_module_tables  # noqa: PLC0415
-        from lib.stores.users    import UsersStore      # noqa: PLC0415
-        from lib.stores.groups   import GroupsStore     # noqa: PLC0415
-        from lib.stores.sessions import SessionsStore   # noqa: PLC0415
-        from lib.stores.roles    import RolesStore      # noqa: PLC0415
+        from lib.core.users.store  import UsersStore   # noqa: PLC0415
+        from lib.core.groups.store import GroupsStore  # noqa: PLC0415
+        from lib.core.sessions.store import SessionsStore   # noqa: PLC0415
+        from lib.core.roles.store  import RolesStore   # noqa: PLC0415
         from lib.config.manager import bootstrap_database_cfg  # noqa: PLC0415
         db_path = os.path.join(self._var_dir or self._config_dir, 'data.db')
         db_cfg  = bootstrap_database_cfg(self._read_config_file(self._CONFIG_FILE))
@@ -449,14 +460,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # across processes). Wiring lives in _IpBanMixin.
         self._init_ipban()
         # Host registry — connection profiles defined once, reused by modules.
-        from lib.stores.hosts import HostsStore  # noqa: PLC0415
+        from lib.core.hosts.store import HostsStore  # noqa: PLC0415
         self._hosts_store = HostsStore(
             self._db_connector,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
         # Reusable named credentials (SSH identities referenced by hosts/checks).
-        from lib.stores.credentials import CredentialsStore  # noqa: PLC0415
+        from lib.core.credentials.store import CredentialsStore  # noqa: PLC0415
         self._credentials_store = CredentialsStore(
             self._db_connector,
             fernet=self._get_fernet(),
@@ -464,14 +475,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         )
         # Outgoing notification webhooks — their own table, like every other
         # editable dataset (one row per webhook; the ``secret`` is encrypted).
-        from lib.stores.webhooks import WebhooksStore  # noqa: PLC0415
+        from lib.core.notify.webhook.store import WebhooksStore  # noqa: PLC0415
         self._webhooks_store = WebhooksStore(
             self._db_connector,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
         # Event→notification subsystem stores (rules, sent-log, worker state).
-        from lib.stores.event import (  # noqa: PLC0415
+        from lib.services.events.store import (  # noqa: PLC0415
             EventRulesStore, EventStateStore, NotificationLogStore)
         self._event_rules_store = EventRulesStore(self._db_connector)
         self._notification_log_store = NotificationLogStore(self._db_connector)
@@ -481,20 +492,20 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # instance — embedded here or in another pod — upserts its liveness row;
         # the Services tab reads them. Shared connector, so a --monitor worker and
         # this process see the same rows.
-        from lib.stores.service_instances import ServiceInstancesStore  # noqa: PLC0415
+        from lib.services.control.instances import ServiceInstancesStore  # noqa: PLC0415
         self._service_instances_store = ServiceInstancesStore(self._db_connector)
         # Imperative one-shot command queue (run-now/reload/clear): the UI enqueues,
         # the hosting instance (embedded here or a remote pod) claims + runs it.
-        from lib.stores.service_commands import ServiceCommandsStore  # noqa: PLC0415
+        from lib.services.control.commands import ServiceCommandsStore  # noqa: PLC0415
         self._service_commands_store = ServiceCommandsStore(self._db_connector)
         # Leader lease for single-owner services (monitor/events): only the holder
         # does the work, extra replicas are hot standby with TTL failover.
-        from lib.stores.service_leader import ServiceLeaderStore  # noqa: PLC0415
+        from lib.services.control.leader import ServiceLeaderStore  # noqa: PLC0415
         self._service_leader_store = ServiceLeaderStore(self._db_connector)
         # Watchful module/item configuration (DB-backed, shared with the monitor
         # through the same database).
-        from lib.stores.modules import (  # noqa: PLC0415
-            ModulesStore, DbBackedModules)
+        from lib.core.modules.store import ModulesStore    # noqa: PLC0415
+        from lib.core.modules.facade import DbBackedModules  # noqa: PLC0415
         self._modules_store = ModulesStore(self._db_connector)
         self._modules_facade = DbBackedModules(
             self._modules_store,
@@ -504,7 +515,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._modules_facade.read()
         # Editable configuration: a row per ``section|field`` in the DB, owned by
         # the single ConfigManager (the one place that reads/writes config).
-        from lib.stores.config import ConfigStore     # noqa: PLC0415
+        from lib.core.config.store import ConfigStore     # noqa: PLC0415
         from lib.config.manager import ConfigManager  # noqa: PLC0415
         self._config_store = ConfigStore(self._db_connector)
         self._config_mgr = ConfigManager(
@@ -524,7 +535,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         if not self._var_dir:
             return None
         try:
-            from lib.stores.history import HistoryStore, create as _create_history  # noqa: PLC0415
+            from lib.core.history.store import HistoryStore, create as _create_history  # noqa: PLC0415
             connector = getattr(self, '_db_connector', None)
             if connector is not None:
                 return HistoryStore(connector)
@@ -541,7 +552,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         if not self._var_dir:
             return None
         try:
-            from lib.stores.check_state import CheckStateStore, create as _create_cs  # noqa: PLC0415
+            from lib.services.monitoring.check_state import CheckStateStore, create as _create_cs  # noqa: PLC0415
             connector = getattr(self, '_db_connector', None)
             if connector is not None:
                 return CheckStateStore(connector)
@@ -567,7 +578,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             return
         try:
             from lib.db import build_syslog_connector  # noqa: PLC0415
-            from lib.stores.syslog import SyslogStore, SyslogDropsStore  # noqa: PLC0415
+            from lib.services.syslog.store import SyslogStore, SyslogDropsStore  # noqa: PLC0415
             from lib.config.manager import overlay_section_env  # noqa: PLC0415
             var = self._var_dir or self._config_dir or ''
             sdb = overlay_section_env('syslog_db', self._config_section('syslog_db'))
@@ -599,7 +610,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         Flask-level settings (session lifetime, secure cookies, proxy count)
         are already correct when the app is built.
         """
-        from .routes.config import INT_RULES, BOOL_RULES  # local import avoids circular
+        from lib.core.config.routes import INT_RULES, BOOL_RULES  # local import avoids circular
         data = self._read_config_file(self._CONFIG_FILE)
         if not data:
             return
@@ -666,7 +677,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         are printed as warnings; those fields are NOT locked and the saved config
         value remains in effect.
         """
-        from .routes.config import INT_RULES, BOOL_RULES  # local import avoids circular
+        from lib.core.config.routes import INT_RULES, BOOL_RULES  # local import avoids circular
 
         locked: set[str] = set()
         overrides: dict[str, object] = {}
@@ -959,6 +970,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'current_session_token': session.get('session_id', ''),
                 'permissions_list': list(PERMISSIONS),
                 'permissions_groups': PERMISSION_GROUPS,
+                'home_pages': list(HOME_PAGES),   # landing-page registry (id/target/li/label_key)
                 'wa_builtin_roles': [BUILTIN_ROLE_UIDS[r] for r in ROLES if r in BUILTIN_ROLE_UIDS],
                 'wa_sensitive_fields': sorted(self._sensitive_fields),
                 'wa_remember_me_days': self._REMEMBER_ME_DAYS,
@@ -1197,8 +1209,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         """Register all routes — delegates to routes sub-package."""
         from .routes import register_all
         register_all(app, self)
-        _oidc_auth.register_routes(app, self)
-        _saml_auth.register_routes(app, self)
 
     # ------------------------------------------------------------------
     # Server entry-point

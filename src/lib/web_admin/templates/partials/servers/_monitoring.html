@@ -409,7 +409,7 @@ function _renderMonitoringSection() {
     // Read-only: multi-bind (cluster) checks this host is a member of. They are
     // managed in the Modules tab (one check spans all nodes), not per-host — but
     // we surface them so the node shows it belongs to a cluster check.
-    const memberHtml = _renderClusterMembershipCards(_hostClusterMemberships(_editingHostUid));
+    const memberHtml = _renderClustersMembershipCards(_hostClusterMemberships(_editingHostUid));
 
     if (!shown.length && !memberHtml) {
         return h + `<div class="text-center py-4 text-muted small">

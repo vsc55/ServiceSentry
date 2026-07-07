@@ -433,9 +433,9 @@ class TestProxmoxProvision:
     def _ssh(self, out='', err='', code=0, raise_exc=None):
         """Patch ssh_client so connect() yields a fake client and run_command()
         returns (out, err, code).  Yields (connect_mock, run_mock)."""
-        with patch('lib.hosts.ssh_client.HAS_PARAMIKO', True), \
-             patch('lib.hosts.ssh_client.connect') as conn, \
-             patch('lib.hosts.ssh_client.run_command', return_value=(out, err, code)) as run:
+        with patch('lib.core.hosts.ssh_client.HAS_PARAMIKO', True), \
+             patch('lib.core.hosts.ssh_client.connect') as conn, \
+             patch('lib.core.hosts.ssh_client.run_command', return_value=(out, err, code)) as run:
             if raise_exc is not None:
                 conn.side_effect = raise_exc
             else:
@@ -614,7 +614,7 @@ class TestProxmoxCredentialManager:
     def test_secondary_ssh_cred_overlay(self):
         """The action route overlays a referenced ssh_cred_uid (a saved ssh
         credential) onto the action config, so provisioning uses its SSH login."""
-        from lib.web_admin.routes.watchfuls import _apply_cred_to_config
+        from lib.core.modules.watchful_routes import _apply_cred_to_config
         wa = MagicMock()
         wa._credentials_store.get.return_value = {
             'enabled': True, 'data': {'ssh_user': 'svc', 'ssh_password': 'p@ss'}}

@@ -330,6 +330,7 @@ async function saveHostModal(closeAfter = true) {
                    kind: d.kind === 'remote' ? 'remote' : 'local',
                    os: d.os || 'auto',
                    maintenance: !!d.maintenance,
+                   virtual: !!d.virtual,
                    tags: d.tags || [], description: d.description || '', profiles,
                    // Persist which modules this server monitors (so a module
                    // added without checks yet survives a reopen).

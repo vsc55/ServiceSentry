@@ -391,7 +391,7 @@ class TestDnsRemote:
     def test_discover_probe_remote_parses_combined(self):
         from watchfuls.dns import Watchful
         out = "##A##\n1.2.3.4\n##AAAA##\n##MX##\n10 mail.x.\n"
-        with patch('lib.hosts.runner.run', return_value=(out, '', 0)):
+        with patch('lib.core.hosts.runner.run', return_value=(out, '', 0)):
             recs = Watchful._discover_probe_remote(_remote_host(), 'x.lan', 5)
         types = {r['record_type'] for r in recs}
         assert 'A' in types and 'MX' in types and 'AAAA' not in types
@@ -399,7 +399,7 @@ class TestDnsRemote:
 
     def test_discover_uses_host_via_ssh_when_remote(self):
         from watchfuls.dns import Watchful
-        with patch('lib.hosts.runner.run', return_value=('##A##\n9.9.9.9\n', '', 0)):
+        with patch('lib.core.hosts.runner.run', return_value=('##A##\n9.9.9.9\n', '', 0)):
             recs = Watchful.discover({'_discovery_input': {'domain': 'x.lan'},
                                       '__host__': _remote_host()})
         assert any(r['record_type'] == 'A' and r['fill_value'] == '9.9.9.9' for r in recs)

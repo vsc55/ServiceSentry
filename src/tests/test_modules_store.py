@@ -13,7 +13,7 @@ import json
 
 from lib.config import ConfigControl
 from lib.db import get_connector
-from lib.stores.modules import ModulesStore, DbBackedModules
+from lib.core.modules import ModulesStore, DbBackedModules
 
 
 def _store():

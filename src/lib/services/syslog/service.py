@@ -12,13 +12,13 @@ collaborators it needs and adds the standalone bits (a cross-process config watc
 and a blocking run loop):
 
 * a DB connector (from the ``database`` config section) and a
-  :class:`lib.stores.syslog.SyslogStore` on top of it — the same table the web
+  :class:`lib.services.syslog.store.SyslogStore` on top of it — the same table the web
   admin reads, so received messages show up in its Syslog tab;
 * a :class:`lib.config.manager.ConfigManager` so the ``syslog`` and
   ``notifications`` config is read from the very same place as everywhere else;
-* a :class:`lib.stores.webhooks.WebhooksStore` and a minimal context surface
+* a :class:`lib.core.notify.webhook.store.WebhooksStore` and a minimal context surface
   (``_read_config_file`` / ``_config_section`` / ``_load_webhooks`` / ``_dbg``)
-  so alert routing through :mod:`lib.notify.notification_dispatcher` works
+  so alert routing through :mod:`lib.core.notify.notification_dispatcher` works
   without a running web server.
 
 It deliberately does NOT start Flask, the monitor, or any HTTP endpoint: just
@@ -35,12 +35,12 @@ from lib.config import CONFIG_FILENAME, config_path
 from lib.config.manager import ConfigManager, bootstrap_database_cfg, read_config_raw
 from lib.db import get_connector
 from lib.debug import Debug, DebugLevel
-from lib.stores.config import ConfigStore
-from lib.stores.event import EventRulesStore, NotificationLogStore
-from lib.stores.service_instances import ServiceInstancesStore
-from lib.stores.service_commands import ServiceCommandsStore
-from lib.stores.syslog import SyslogStore, SyslogDropsStore
-from lib.stores.webhooks import WebhooksStore
+from lib.core.config.store import ConfigStore
+from lib.services.events.store import EventRulesStore, NotificationLogStore
+from lib.services.control.instances import ServiceInstancesStore
+from lib.services.control.commands import ServiceCommandsStore
+from lib.services.syslog.store import SyslogStore, SyslogDropsStore
+from lib.core.notify.webhook.store import WebhooksStore
 from lib.services.heartbeat import _HeartbeatMixin, db_summary
 from lib.services.control_server import start_control_server
 from lib.services.syslog.manager import _SyslogMixin

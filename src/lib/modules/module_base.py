@@ -29,7 +29,7 @@ from enum import Enum
 
 import lib
 from lib.util import os_detect
-from lib.hosts.resolve import host_profile_specs, resolve_os
+from lib.core.hosts.resolve import host_profile_specs, resolve_os
 from lib.config import ConfigTypeReturn
 from lib.debug import DebugLevel
 from lib.util.dict_files_path import DictFilesPath
@@ -622,7 +622,7 @@ class ModuleBase(ObjectBase):
             return target
         if not cred:
             return target
-        from lib.stores.credentials import apply_credential  # noqa: PLC0415
+        from lib.core.credentials.store import apply_credential  # noqa: PLC0415
         return apply_credential(target, cred)
 
     # ── Host-aware command execution ─────────────────────────────────────────
@@ -655,7 +655,7 @@ class ModuleBase(ObjectBase):
         if not isinstance(item, dict) or not cmd:
             return '', 'invalid item or command', -1
         if str(item.get('host_kind') or '').strip().lower() == 'remote':
-            from lib.hosts import ssh_client  # noqa: PLC0415
+            from lib.core.hosts import ssh_client  # noqa: PLC0415
             if not ssh_client.HAS_PARAMIKO:
                 return '', 'paramiko is not installed', -1
             address = str(item.get('ssh_host') or '').strip()

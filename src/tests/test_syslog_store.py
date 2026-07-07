@@ -5,7 +5,7 @@
 import time
 
 from lib.db import get_connector
-from lib.stores.syslog import SyslogStore
+from lib.services.syslog.store import SyslogStore
 
 
 def _store():

@@ -6,7 +6,7 @@ Everything that reads the local machine, split in two concerns:
 
 * **execution** — *how* a command runs locally: :mod:`lib.system.exe`
   (local/remote dispatch; the SSH transport itself lives in
-  :mod:`lib.hosts.ssh_client`);
+  :mod:`lib.core.hosts.ssh_client`);
 * **metric collectors** — *what* is read from the host: :mod:`lib.system.mem`
   / :mod:`lib.system.mem_info` (cross-platform RAM/SWAP via psutil) and the
   OS-specific collectors under :mod:`lib.system.linux` (RAID, thermal).

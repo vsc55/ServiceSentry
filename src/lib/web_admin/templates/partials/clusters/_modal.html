@@ -727,11 +727,11 @@ document.getElementById('clusterEditModal')?.addEventListener('hidden.bs.modal',
 });
 
 // Re-render whichever module surface is active, keeping the Modules tab and the
-// Clusters sub-tab in sync after a shared item mutation (add/delete/rename/…).
+// Cluster sub-tab in sync after a shared item mutation (add/delete/rename/…).
 function _renderModulesSurface() {
     const clEl = document.getElementById('subtab-srv-clusters');
-    const clustersActive = clEl && clEl.classList.contains('active')
+    const clusterActive = clEl && clEl.classList.contains('active')
                         && document.getElementById('clusters-container');
     renderModules();
-    if (clustersActive) renderClusters();
+    if (clusterActive) renderClusters();
 }

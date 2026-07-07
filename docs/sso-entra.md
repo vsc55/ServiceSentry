@@ -48,7 +48,7 @@ El consentimiento de admin de `Group.Read.All` se otorga automáticamente durant
 
 ServiceSentry crea el usuario **la primera vez que inicia sesión** por SSO (Just-In-Time),
 a partir de los claims de la aserción/token — controlado por el campo `auto_create_users`
-(activo por defecto en OIDC y SAML2, en `sync_user()` de `oidc_auth.py`/`saml_auth.py`):
+(activo por defecto en OIDC y SAML2, en `sync_user()` de `lib/providers/oidc/auth.py`/`lib/providers/saml/auth.py`):
 
 - En el primer login se crea la cuenta (email, nombre) y se le asigna rol según el **mapeo
   Grupos→Rol** (o `default_role` si no casa ningún grupo). En logins posteriores se
@@ -102,7 +102,7 @@ provisioning**:
   (asigna roles a esos grupos y los miembros los heredan); llevan `source: 'scim'` y un **badge
   SCIM** en la pestaña Grupos (frente a los `local`).
 - Endpoints: `Users`, `Groups`, `ServiceProviderConfig`, `ResourceTypes`, `Schemas`
-  (GET/POST/PUT/PATCH/DELETE) — ver [web_admin.md](web_admin.md) y `routes/scim.py` (transporte) + `lib/providers/scim/` (lógica).
+  (GET/POST/PUT/PATCH/DELETE) — ver [web_admin.md](web_admin.md) y `lib/providers/scim/routes.py` (transporte) + `lib/providers/scim/` (lógica).
 
 | | JIT (login) | SCIM (push) |
 |---|:---:|:---:|
@@ -115,14 +115,14 @@ respaldo al primer login.
 
 Código relevante:
 - Provider: `lib/providers/entraid/` (`auth`, `provisioning`, `directory`, `client`).
-- Rutas: `lib/web_admin/routes/auth/entraid.py`.
+- Rutas: `lib/providers/entraid/routes.py`.
 - Wizard genérico (JS): `partials/credentials/_provision_wizard.html`
   (`showEntraIdProvisionWizard`).
 - Glue por protocolo: `partials/cfg/auth/_renderers.html` (OIDC),
   `partials/cfg/auth/_wizard_saml.html` (SAML2) y `partials/cfg/auth/_wizard_scim.html` (SCIM).
 - SCIM: backend `provisioning.provision_scim_app` (crear) + `provisioning.update_scim_secrets`
-  (re-sync) + rutas `entra/scim/device-code|device-poll` en `entraid.py` (cliente
-  `GRAPH_CLI_CLIENT_ID`); endpoint SCIM `routes/scim.py` (transporte) + `lib/providers/scim/` (lógica); generador de token
+  (re-sync) + rutas `entra/scim/device-code|device-poll` en `lib/providers/entraid/routes.py` (cliente
+  `GRAPH_CLI_CLIENT_ID`); endpoint SCIM `lib/providers/scim/routes.py` (transporte) + `lib/providers/scim/` (lógica); generador de token
   `lib/util/generate_token` expuesto en `routes/util.py` (`GET /api/v1/util/token`).
 - URL pública única: `WebAdmin.public_base_url()` (override por `public_url` → auto-detección
   proxy-aware), inyectada como `SERVER_BASE_URL` y usada por `publicBaseUrl()`/`roCopyRow` en el
@@ -159,7 +159,7 @@ Google / Keycloak) que rellenan `provider_url` + claims.
 
 - `/auth/oidc/login` → redirige a Entra (authorization code + PKCE vía `authlib`).
 - `/auth/oidc/callback` → intercambia el código, valida el id_token y crea/actualiza el
-  usuario (`oidc_auth.py`).
+  usuario (`lib/providers/oidc/auth.py`).
 
 ### Rutas de provisioning
 
@@ -208,7 +208,7 @@ Nombre por defecto: **`ServiceSentry - SAML2`** (`declarations.py::SAML2_APP_NAM
 El **SP Entity ID** y la **SP ACS URL** son la identidad del propio ServiceSentry: se muestran
 en la card como filas **solo-lectura** (candado + copiar), **no editables** — derivan de la URL
 pública (o del valor `api://{appId}` que fije el asistente cuando el dominio no está verificado).
-El backend (`saml_auth._build_saml_settings`) también los deriva de `public_base_url()` si están
+El backend (`lib/providers/saml/auth.py::_build_saml_settings`) también los deriva de `public_base_url()` si están
 vacíos, así que no hay que teclearlos.
 
 ### El paso manual (Configuración básica de SAML)
@@ -235,7 +235,7 @@ portal, usa **Certificado (Base64)** (PEM `-----BEGIN CERTIFICATE-----`). *No* u
 ### SP Certificate / SP Private Key
 
 **No hacen falta** en el flujo estándar. Solo se usan si activas **firma de AuthnRequests**
-o **cifrado de token** (ninguna activa por defecto — `saml_auth.py` no define sección
+o **cifrado de token** (ninguna activa por defecto — `lib/providers/saml/auth.py` no define sección
 `security`). Déjalos en blanco.
 
 ### Rutas de provisioning

@@ -3,6 +3,324 @@
    stat/table card builders.
    ================================================================ #}
 
+// ── Data-driven render (self-describing widgets) ───────────────────
+// A widget whose descriptor carries a `view` renders generically from it + the data it
+// fetches over AJAX from /api/v1/overview/widget/<id> (stat content or table rows) — no
+// per-widget case, no monolithic aggregate.  Named accent palettes + badge styles:
+const _DW_STYLES = {
+    grey:   { accent:'linear-gradient(90deg,#94a3b8,#cbd5e1)', bg:'var(--bs-secondary-bg)',   color:'var(--bs-secondary-color)' },
+    amber:  { accent:'linear-gradient(90deg,#f59e0b,#ef4444)', bg:'rgba(245,158,11,.12)',     color:'#f59e0b' },
+    pink:   { accent:'linear-gradient(90deg,#ec4899,#f43f5e)', bg:'rgba(236,72,153,.12)',     color:'#ec4899' },
+    purple: { accent:'linear-gradient(90deg,#a855f7,#ec4899)', bg:'rgba(168,85,247,.12)',     color:'#a855f7' },
+    indigo: { accent:'linear-gradient(90deg,#6366f1,#8b5cf6)', bg:'rgba(99,102,241,.12)',     color:'#6366f1' },
+    teal:   { accent:'linear-gradient(90deg,#14b8a6,#0ea5e9)', bg:'rgba(20,184,166,.12)',     color:'#14b8a6' },
+    blue:   { accent:'linear-gradient(90deg,#0ea5e9,#6366f1)', bg:'rgba(14,165,233,.12)',     color:'#0ea5e9' },
+    green:  { accent:'linear-gradient(90deg,#22c55e,#10b981)', bg:'rgba(34,197,94,.12)',      color:'#22c55e' },
+    red:    { accent:'linear-gradient(90deg,#ef4444,#f97316)', bg:'rgba(239,68,68,.12)',      color:'#ef4444' },
+    cyan:   { accent:'linear-gradient(90deg,#06b6d4,#3b82f6)', bg:'rgba(6,182,212,.12)',      color:'#06b6d4' },
+    orange: { accent:'linear-gradient(90deg,#f59e0b,#f97316)', bg:'rgba(245,158,11,.12)',     color:'#f59e0b' },
+    emerald:{ accent:'linear-gradient(90deg,#10b981,#14b8a6)', bg:'rgba(16,185,129,.12)',     color:'#10b981' },
+    violet: { accent:'linear-gradient(90deg,#8b5cf6,#ec4899)', bg:'rgba(139,92,246,.12)',     color:'#8b5cf6' },
+    slate:  { accent:'linear-gradient(90deg,#64748b,#475569)', bg:'rgba(100,116,139,.12)',    color:'#64748b' },
+    rose:   { accent:'linear-gradient(90deg,#f43f5e,#f97316)', bg:'rgba(244,63,94,.12)',      color:'#f43f5e' },
+};
+const _DW_BADGE = {
+    ok:    { bg:'rgba(34,197,94,.15)',  color:'var(--ss-ok-text,#16a34a)' },
+    muted: { bg:'var(--bs-secondary-bg)', color:'var(--bs-secondary-color)', border:'1px solid var(--bs-border-color)' },
+    warn:  { bg:'rgba(245,158,11,.15)', color:'#d97706' },
+    teal:  { bg:'rgba(20,184,166,.15)', color:'#0d9488' },
+};
+// Resolvers for badges whose label/colour need frontend catalogs (role names, credential
+// types, syslog severities) — the server emits only the raw {role|type|value,count} and
+// these paint it, reading the last overview snapshot for the per-request maps.
+function _dwRoleName(r) {
+    const d = _lastOverviewData || {}, names = d.role_names || {};
+    return names[r] || (rolesData[r] && rolesData[r].name)
+        || ROLE_LABELS[(rolesData[r] && rolesData[r].key) || r] || r;
+}
+function _dwRoleBadge(r) {
+    const d = _lastOverviewData || {}, keys = d.role_keys || {};
+    const k = keys[r] != null ? keys[r] : (rolesData[r] && rolesData[r].key);
+    return BUILTIN_ROLE_BADGES[k || r] || 'text-bg-info';
+}
+function _dwCredBadgeCls(ct) {
+    const P = ['text-bg-info', 'text-bg-primary', 'text-bg-success',
+               'text-bg-warning', 'text-bg-danger', 'text-bg-secondary'];
+    let h = 0; for (let i = 0; i < ct.length; i++) h = (h * 31 + ct.charCodeAt(i)) >>> 0;
+    return P[h % P.length];
+}
+const _DW_BADGE_FN = {
+    role:     (b) => `<span class="badge ${_dwRoleBadge(b.role)} ss-fs-2">${b.count} ${esc(_dwRoleName(b.role))}</span>`,
+    credtype: (b) => `<span class="badge ${_dwCredBadgeCls(b.type)} ss-fs-2">${b.count} ${esc(_credTypeLabel(b.type))}</span>`,
+    sev:      (b) => `<span class="badge bg-${(typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[b.value]) || 'secondary'} ss-fs-2">${b.count} ${esc(b.name)}</span>`,
+};
+// A badge is one of: {fn:'role'|'credtype'|'sev', …} (resolver) | {plain:true,color?} (bare
+// coloured text) | {cls:'text-bg-…'} (solid bootstrap pill) | {bg,color} (custom soft pill)
+// | {style} (named soft pill).  Text = text (literal) | key+count ("N label") | key+args
+// (tf(key,…args)) | key (t(key)).
+function _dwBadge(b) {
+    if (!b) return '';
+    if (b.fn && _DW_BADGE_FN[b.fn]) return _DW_BADGE_FN[b.fn](b);
+    const icon = b.icon ? `<i class="bi ${b.icon} me-1"></i>` : '';
+    const text = b.text != null ? esc(b.text)
+        : (b.args ? tf(b.key, ...b.args)
+        : (b.count != null ? `${b.count} ${t(b.key)}` : t(b.key)));
+    if (b.plain)
+        return `<span style="font-size:.8rem;color:${b.color || 'var(--bs-secondary-color)'}">${icon}${text}</span>`;
+    if (b.cls)
+        return `<span class="badge ${b.cls} ss-fs-2">${icon}${text}</span>`;
+    const bs = (b.bg || b.color)
+        ? { bg: b.bg || 'var(--bs-secondary-bg)', color: b.color || 'var(--bs-secondary-color)' }
+        : (_DW_BADGE[b.style] || _DW_BADGE.muted);
+    const border = bs.border ? `border:${bs.border};` : '';
+    return `<span class="badge rounded-pill" style="background:${bs.bg};color:${bs.color};font-size:.72rem;${border}">${icon}${text}</span>`;
+}
+// Generic stat card from a descriptor `view` + its content {value, accent?, icon?, badges?}.
+// content == null → not fetched yet: render the shell with a spinner (filled by _dwStatFetch).
+function _dwRenderStat(view, content) {
+    const loaded = content != null;
+    content = content || {};
+    const st = _DW_STYLES[content.accent || view.accent || 'indigo'] || _DW_STYLES.indigo;
+    const value = loaded ? (content.value != null ? content.value : 0)
+        : '<span class="spinner-border spinner-border-sm text-muted"></span>';
+    const sub = loaded
+        ? ((content.badges || []).map(_dwBadge).filter(Boolean).join('')
+           || '<span class="text-muted small">—</span>')
+        : '';
+    return _dwStatCard(st.accent, st.bg, st.color, content.icon || view.icon || 'bi-grid-1x2',
+        value, view.label_key, sub);
+}
+// Dispatch a data-driven widget by its `view.kind`.
+function _dwRenderView(id, view, content, item) {
+    if (view.kind === 'stat')  return _dwRenderStat(view, content);
+    if (view.kind === 'table') return _dwRenderTable(id, view, item);
+    return '';
+}
+
+// ── Data-driven widgets: each fetches its own data over AJAX ───────────────────────
+// Stat cards cache their fetched content; tables cache their fetched rows (so a sort
+// re-renders without a re-fetch).
+const _dwStatContent = {};
+const _dwStatBusy = {};
+const _dwTableRows = {};
+const _dwTableBusy = {};
+// Cell renderers: (row, col) => <td> HTML.  Generic types + a few reusable customs
+// (module_name/on_badge/checks use the frontend module catalog, so they stay here).
+const _DW_CELLS = {
+    text: (r, c) => `<td class="small">${esc(String(r[c.key] ?? ''))}</td>`,
+    code: (r, c) => `<td><code style="font-size:.8rem">${esc(String(r[c.key] ?? '—'))}</code></td>`,
+    num:  (r, c) => `<td class="${c.align === 'muted' ? 'text-muted' : ''}">${r[c.key] ?? 0}</td>`,
+    date: (r, c) => `<td class="small text-nowrap text-muted">${_dwFmtDate(r[c.key])}</td>`,
+    module_name: (r) => {
+        const cfg = modulesData[r.name] || {};
+        const sch = ITEM_SCHEMAS[r.name + '|__module__'] || null;
+        const unsup = sch && sch['__unsupported__'] === true;
+        const avOn = !unsup && r.enabled;
+        return `<td><span class="ss-mod-av${avOn ? '' : ' off'} rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+            style="--mh:${_moduleHue(r.name)};width:26px;height:26px;font-size:.85rem;vertical-align:middle">${moduleIcon(r.name, cfg)}</span>${esc(modulePrettyName(r.name, cfg))}</td>`;
+    },
+    on_badge: (r) => {
+        const sch = ITEM_SCHEMAS[r.name + '|__module__'] || null;
+        const unsup = sch && sch['__unsupported__'] === true;
+        const html = unsup
+            ? `<span class="badge rounded-pill bg-secondary bg-opacity-50 ss-fs-2" title="${escAttr(t('platform_not_supported') || 'Not supported')}"><i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}</span>`
+            : r.enabled
+                ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem">ON</span>`
+                : `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">OFF</span>`;
+        return `<td>${html}</td>`;
+    },
+    checks: (r) => {
+        const cfg = modulesData[r.name] || {};
+        const colKeys = Object.keys(cfg).filter(k => typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
+        const activeItems = colKeys.reduce((s, k) =>
+            s + Object.values(cfg[k]).filter(v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
+        return `<td>${(r.items === 0 || activeItems === 0) ? '<span class="text-muted small">—</span>' : _dwChecksBadge(r.checks)}</td>`;
+    },
+    // Coloured avatar + label (host / user / module) — `av` picks icon + hue.
+    host_name: (r) => `<td><span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+        style="width:26px;height:26px;background:rgba(14,165,233,.14);color:#0ea5e9;font-size:.85rem;vertical-align:middle"><i class="bi bi-hdd-network"></i></span>${esc(r.name || '')}</td>`,
+    host_status:  (r) => `<td>${_dwSrvStatusBadge(r)}</td>`,
+    host_checks:  (r) => `<td>${_dwChecksBadge(r.checks)}</td>`,
+    host_modules: (r) => `<td>${_dwModulesBadge(r.modules_active, r.modules_total)}</td>`,
+    session_user: (r) => `<td><span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+        style="width:26px;height:26px;background:rgba(6,182,212,.14);color:#06b6d4;font-size:.85rem;vertical-align:middle"><i class="bi bi-person"></i></span>${esc(r.user || '')}</td>`,
+    browser: (r) => `<td class="small text-muted text-nowrap" title="${escAttr(r.agent || '')}">${esc(_dwBrowser(r.agent))}</td>`,
+    // Audit event badge, coloured by event class (login/create/delete/update…).
+    event_badge: (r) => {
+        const AE = I18N.audit_events || {};
+        const ev = r.event || '', label = AE[ev] || ev;
+        let bg = 'rgba(100,116,139,.12)', clr = '#64748b';
+        if (ev === 'login_failed' || ev.includes('error') || ev.includes('revoked') || ev.includes('deleted'))
+            { bg = 'rgba(239,68,68,.12)'; clr = 'var(--ss-err-text,#dc2626)'; }
+        else if (ev === 'login_ok' || ev.includes('created') || ev.includes('saved'))
+            { bg = 'rgba(34,197,94,.12)'; clr = 'var(--ss-ok-text,#16a34a)'; }
+        else if (ev === 'logout')
+            { bg = 'rgba(245,158,11,.12)'; clr = '#d97706'; }
+        else if (ev.includes('updated') || ev.includes('changed') || ev === 'password_reset')
+            { bg = 'rgba(6,182,212,.12)'; clr = '#0891b2'; }
+        return `<td><span class="badge rounded-pill" style="background:${bg};color:${clr};font-size:.72rem">${esc(label)}</span></td>`;
+    },
+    module_incident: (r) => {
+        const cfg = modulesData[r.module] || {};
+        return `<td><span class="ss-mod-av rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+            style="--mh:${_moduleHue(r.module)};width:26px;height:26px;font-size:.85rem;vertical-align:middle">${moduleIcon(r.module, cfg)}</span>${esc(modulePrettyName(r.module, cfg))}</td>`;
+    },
+    check_danger: (r) => `<td><span class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc(r[/*key*/'check'] || '')}</span></td>`,
+    host_code: (r) => r.host
+        ? `<td><code style="font-size:.8rem">${esc(r.host)}</code></td>`
+        : '<td><span class="text-muted small">—</span></td>',
+    login_detail: (r) => {
+        let d = r.detail;
+        if (d && typeof d === 'object') { const k = d.reason || d.error; d = k ? (t(k) || k) : JSON.stringify(d); }
+        else if (d) { d = t(d) || d; }
+        return `<td class="small text-muted text-truncate" style="max-width:16em" title="${escAttr(String(d || ''))}">${esc(String(d || '—'))}</td>`;
+    },
+    severity: (r) => {
+        const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[r.severity]) || 'secondary';
+        return `<td class="text-nowrap pe-4" style="width:1%"><span class="badge bg-${cls}">${esc(r.severity_name || '')}</span></td>`;
+    },
+    syslog_when: (r) => {
+        const when = (r.received_at || (r.ts ? new Date(r.ts * 1000).toISOString() : '')).replace('T', ' ').replace('Z', '');
+        return `<td class="small text-nowrap text-muted pe-4" style="width:1%">${esc(when)}</td>`;
+    },
+    syslog_host: (r) => {
+        const host = r.hostname || r.source || '';
+        return `<td class="small text-nowrap pe-4" style="width:1%;max-width:12em;overflow:hidden;text-overflow:ellipsis" title="${escAttr(host)}">${esc(host)}</td>`;
+    },
+    message: (r) => `<td class="small text-break">${esc(r.message || '')}</td>`,
+    ipban_reason: (r) => {
+        const fn = (typeof _ipbanReason === 'function') ? _ipbanReason : (x => x || '');
+        return `<td class="small">${esc(fn(r.reason))}</td>`;
+    },
+    num_center: (r, c) => `<td class="text-center">${r[c.key] ?? 0}</td>`,
+    ipban_expiry: (r) => {
+        const dur = (typeof _ipbanFmtDur === 'function') ? _ipbanFmtDur : (s => (s || 0) + ' s');
+        const html = r.permanent
+            ? `<span class="badge bg-danger">${esc(t('ipban_permanent'))}</span>`
+            : `<span class="small text-muted">${esc(dur(r.retry_after || 0))}</span>`;
+        return `<td class="text-nowrap">${html}</td>`;
+    },
+};
+// Sort value extractor per cell type (falls back to the raw column value).
+const _DW_CELL_SORT = {
+    module_name:  (r) => modulePrettyName(r.name, modulesData[r.name] || {}).toLowerCase(),
+    on_badge:     (r) => (r.enabled ? 1 : 0),
+    checks:       (r) => (r.checks && r.checks.error) || 0,
+    host_status:  (r) => _dwSrvStatusRank(r),
+    host_checks:  (r) => (r.checks && r.checks.error) || 0,
+    host_modules: (r) => r.modules_active || 0,
+    session_user: (r) => (r.user || '').toLowerCase(),
+    browser:      (r) => _dwBrowser(r.agent),
+    event_badge:  (r) => ((I18N.audit_events || {})[r.event] || r.event || '').toLowerCase(),
+    module_incident: (r) => modulePrettyName(r.module, modulesData[r.module] || {}).toLowerCase(),
+    check_danger: (r) => (r.check || '').toLowerCase(),
+    severity:     (r) => (r.severity ?? 7),
+    ipban_reason: (r) => (r.reason || '').toLowerCase(),
+    ipban_expiry: (r) => (r.permanent ? Infinity : (r.retry_after || 0)),
+};
+// Optional per-row <tr> class (e.g. syslog severity tint), keyed by view.row_class.
+const _DW_ROWCLASS = {
+    syslog_sev: (r) => `sl-row-${(typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[r.severity]) || 'secondary'}`,
+};
+function _dwCellSortVal(r, col) {
+    const fn = _DW_CELL_SORT[col.cell];
+    return fn ? fn(r) : r[col.key];
+}
+// <tbody> HTML for a data-driven table: sort the cached rows (by the active column) +
+// render each cell by its type.
+function _dwTableTbody(id, view, rows) {
+    const cols = view.columns || [];
+    let list = [...(rows || [])];
+    const s = _dwSort[id];
+    if (s && s.col) {
+        const col = cols.find(c => c.key === s.col);
+        if (col) list.sort((a, b) => {
+            const va = _dwCellSortVal(a, col), vb = _dwCellSortVal(b, col);
+            return va < vb ? -s.dir : va > vb ? s.dir : 0;
+        });
+    }
+    if (!list.length) {
+        if (view.empty_ok)
+            return `<tr><td colspan="${cols.length}" class="text-center text-success py-3"><i class="bi bi-check-circle me-1"></i>${esc(t(view.empty_key || 'status_empty'))}</td></tr>`;
+        return `<tr><td colspan="${cols.length}" class="text-center text-muted py-3">${esc(t(view.empty_key || 'status_empty'))}</td></tr>`;
+    }
+    const rc = view.row_class && _DW_ROWCLASS[view.row_class];
+    return list.map(r => `<tr${rc ? ` class="${rc(r)}"` : ''}>${cols.map(c => (_DW_CELLS[c.cell] || _DW_CELLS.text)(r, c)).join('')}</tr>`).join('');
+}
+// Active filter value for a widget (from the layout item on a full render, else the DOM).
+function _dwViewFilter(id, view, item) {
+    const st = view.filter && view.filter.store;
+    if (!st) return '';
+    if (item) return item[st] || '';
+    const dw = document.querySelector(`.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
+    return dw ? (dw.dataset[st] || '') : '';
+}
+// Filter badge in the title for the active option.
+function _dwViewFilterBadge(id, view, item) {
+    if (!view.filter) return '';
+    const opt = (view.filter.options || []).find(o => o.v === _dwViewFilter(id, view, item));
+    return (opt && opt.badge) ? _dwFilterBadge(t(opt.label_key), opt.badge.color, opt.badge.bg) : '';
+}
+// Card shell (thead + placeholder tbody).  Rows are (re)filled async by _dwTableFetch.
+function _dwRenderTable(id, view, item) {
+    const st = _DW_STYLES[view.accent || 'indigo'] || _DW_STYLES.indigo;
+    const cols = view.columns || [];
+    const thead = _dwTheadRow(...cols.map(c => c.sortable
+        ? _dwTh(id, c.key, t(c.label_key))
+        : `<th class="small">${esc(t(c.label_key))}</th>`));
+    const cached = _dwTableRows[id];
+    const body = cached ? _dwTableTbody(id, view, cached)
+        : `<tr><td colspan="${cols.length}" class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm"></span></td></tr>`;
+    const table = `<table class="table table-sm table-hover align-middle mb-0">${thead}<tbody>${body}</tbody></table>`;
+    return _dwTableCard(st.accent, st.bg, st.color, view.icon || 'bi-grid-1x2',
+        t(view.title_key) + _dwViewFilterBadge(id, view, item), table);
+}
+// Fetch a data-driven table's rows (filtered server-side), cache + fill its <tbody>.
+async function _dwTableFetch(id) {
+    const view = (_DW_DEFS[id] || {}).view;
+    if (!view || view.kind !== 'table' || _dwTableBusy[id]) return;
+    const dw = document.querySelector(`.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
+    if (!dw || dw.style.display === 'none') return;
+    _dwTableBusy[id] = true;
+    try {
+        const f = _dwViewFilter(id, view, null);
+        const p = (view.filter && view.filter.param) || 'f';
+        const data = await apiGet(`${view.data_url}?${p}=${encodeURIComponent(f)}`);
+        _dwTableRows[id] = (data && data.rows) || [];
+        const cur = document.querySelector(`.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
+        const tb = cur && cur.querySelector('tbody');
+        if (tb) tb.innerHTML = _dwTableTbody(id, view, _dwTableRows[id]);
+    } catch (e) { /* leave the placeholder on error */ }
+    finally { _dwTableBusy[id] = false; }
+}
+// Fetch a data-driven stat card's content, cache + re-render its card body.
+async function _dwStatFetch(id) {
+    const view = (_DW_DEFS[id] || {}).view;
+    if (!view || view.kind !== 'stat' || !view.data_url || _dwStatBusy[id]) return;
+    const sel = `.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`;
+    const dw = document.querySelector(sel);
+    if (!dw || dw.style.display === 'none') return;
+    _dwStatBusy[id] = true;
+    try {
+        const data = await apiGet(view.data_url);
+        _dwStatContent[id] = (data && data.content) || {};
+        const cont = document.querySelector(`${sel} .dw-content`);
+        if (cont) cont.innerHTML = _dwRenderStat(view, _dwStatContent[id]);
+    } catch (e) { /* leave the placeholder on error */ }
+    finally { _dwStatBusy[id] = false; }
+}
+// Fetch every visible data-driven widget (stat card or table) — one request each, so the
+// page paints instantly and each widget fills at its own pace. Called after a render.
+function _dwAsyncWidgets() {
+    document.querySelectorAll('.dw[data-wid]').forEach(dw => {
+        const id = dw.dataset.wid;
+        const v = (_DW_DEFS[id] || {}).view;
+        if (dw.style.display === 'none' || !v) return;
+        if (v.kind === 'table') _dwTableFetch(id);
+        else if (v.kind === 'stat') _dwStatFetch(id);
+    });
+}
+
 // ──────────────────────── Sort state ─────────────────────────────
 let _lastOverviewData = null;
 let _dwSort = {};   // { widgetId: { col, dir } }
@@ -27,71 +345,6 @@ function _dwChecksBadge(checks) {
     return `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>OK</span>`;
 }
 
-// Modules table widget filter (set in the layout editor): '' (all), 'on'
-// (enabled), or 'error' (a check is failing). Mirrors the Active/Checks columns.
-function _dwModuleWidgetFilter() {
-    const el = document.querySelector('.dw[data-wid="modules_list"]');
-    return el ? (el.dataset.modf || '') : '';
-}
-function _dwModuleFiltered(list, f) {
-    if (f === undefined) f = _dwModuleWidgetFilter();
-    const arr = list || [];
-    if (f === 'on')    return arr.filter(m => m.enabled);
-    if (f === 'error') return arr.filter(m => (m.checks?.error ?? 0) > 0);
-    return arr;
-}
-
-function _dwBuildModuleRows(modules) {
-    const s = _dwSort['modules_list'];
-    let rows = [...modules];
-    if (s?.col) {
-        rows.sort((a, b) => {
-            let va, vb;
-            if (s.col === 'name') {
-                va = modulePrettyName(a.name, modulesData[a.name]).toLowerCase();
-                vb = modulePrettyName(b.name, modulesData[b.name]).toLowerCase();
-            } else if (s.col === 'enabled') {
-                va = a.enabled ? 1 : 0; vb = b.enabled ? 1 : 0;
-            } else if (s.col === 'checks') {
-                va = (a.checks?.error ?? 0); vb = (b.checks?.error ?? 0);
-            } else {
-                va = a.items; vb = b.items;
-            }
-            return va < vb ? -s.dir : va > vb ? s.dir : 0;
-        });
-    }
-    if (!rows.length)
-        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('status_empty')}</td></tr>`;
-    return rows.map(m => {
-        const pname  = modulePrettyName(m.name, modulesData[m.name] || {});
-        const icon   = moduleIcon(m.name, modulesData[m.name] || {});
-        const hue    = _moduleHue(m.name);
-        const _modSch = ITEM_SCHEMAS[m.name + '|__module__'] || null;
-        const _unsupported = _modSch && _modSch['__unsupported__'] === true;
-        const _avOn  = !_unsupported && m.enabled;
-        const nameCell = `<span class="ss-mod-av${_avOn ? '' : ' off'} rounded-2 d-inline-flex align-items-center justify-content-center me-2"
-            style="--mh:${hue};width:26px;height:26px;font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
-        const active = _unsupported
-            ? `<span class="badge rounded-pill bg-secondary bg-opacity-50 ss-fs-2"
-                   title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
-                   <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}
-               </span>`
-            : m.enabled
-                ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem">ON</span>`
-                : `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">OFF</span>`;
-
-        // Compute active items from modulesData to decide if check results are meaningful
-        const cfg = modulesData[m.name] || {};
-        const colKeys = Object.keys(cfg).filter(k => typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
-        const activeItems = colKeys.reduce((s, k) =>
-            s + Object.values(cfg[k]).filter(v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
-        const checksBadge = (m.items === 0 || activeItems === 0)
-            ? `<span class="text-muted small">—</span>`
-            : _dwChecksBadge(m.checks);
-
-        return `<tr><td>${nameCell}</td><td>${active}</td><td>${checksBadge}</td><td class="text-muted">${m.items}</td></tr>`;
-    }).join('');
-}
 
 function _dwSrvStatusBadge(h) {
     if (h.maintenance)
@@ -121,144 +374,6 @@ function _dwModulesBadge(active, total) {
         <i class="bi bi-puzzle me-1" style="color:${icl}"></i>${active}/${total}</span>`;
 }
 
-// Servers table widget host filter (set in the layout editor): '' (all),
-// 'error' (a check is failing or the host status is error), 'maint' (in
-// maintenance), or 'errmaint' (either). Mirrors the table's Status/Checks columns.
-function _dwServerWidgetFilter() {
-    const el = document.querySelector('.dw[data-wid="servers_list"]');
-    return el ? (el.dataset.srvf || '') : '';
-}
-function _dwSrvHasError(h) { return (h.checks?.error ?? 0) > 0 || h.status === 'error'; }
-// f is the filter value; pass it explicitly (during a full render the widget's
-// DOM node isn't inserted yet, so reading data-srvf would be stale). Omit it to
-// resolve from the live DOM (soft refresh).
-function _dwServerFiltered(list, f) {
-    if (f === undefined) f = _dwServerWidgetFilter();
-    const arr = list || [];
-    if (f === 'error')    return arr.filter(_dwSrvHasError);
-    if (f === 'maint')    return arr.filter(h => h.maintenance);
-    if (f === 'errmaint') return arr.filter(h => _dwSrvHasError(h) || h.maintenance);
-    return arr;
-}
-
-function _dwBuildServerRows(servers) {
-    const s = _dwSort['servers_list'];
-    let rows = [...servers];
-    if (s?.col) {
-        rows.sort((a, b) => {
-            let va, vb;
-            if (s.col === 'name')         { va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); }
-            else if (s.col === 'status')  { va = _dwSrvStatusRank(a);          vb = _dwSrvStatusRank(b); }
-            else if (s.col === 'checks')  { va = (a.checks?.error ?? 0);       vb = (b.checks?.error ?? 0); }
-            else                          { va = a.modules_active || 0;        vb = b.modules_active || 0; }
-            return va < vb ? -s.dir : va > vb ? s.dir : 0;
-        });
-    }
-    if (!rows.length)
-        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('host_monitor_none')}</td></tr>`;
-    return rows.map(h => {
-        const nameCell = `<span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
-            style="width:26px;height:26px;background:rgba(14,165,233,.14);color:#0ea5e9;font-size:.85rem;vertical-align:middle"><i class="bi bi-hdd-network"></i></span>${esc(h.name || '')}`;
-        const statusCell = _dwSrvStatusBadge(h);
-        const checksCell = _dwChecksBadge(h.checks);
-        const modCell    = _dwModulesBadge(h.modules_active, h.modules_total);
-        return `<tr><td>${nameCell}</td><td>${statusCell}</td><td>${checksCell}</td><td>${modCell}</td></tr>`;
-    }).join('');
-}
-
-function _dwBuildActivityRows(events) {
-    const AE = I18N.audit_events || {};
-    const s  = _dwSort['activity'];
-    let rows = [...events];
-    if (s?.col) {
-        rows.sort((a, b) => {
-            let va, vb;
-            if (s.col === 'ts')    { va = a.ts;    vb = b.ts; }
-            else if (s.col === 'event') { va = (AE[a.event] || a.event).toLowerCase(); vb = (AE[b.event] || b.event).toLowerCase(); }
-            else                   { va = a.user.toLowerCase(); vb = b.user.toLowerCase(); }
-            return va < vb ? -s.dir : va > vb ? s.dir : 0;
-        });
-    }
-    return rows.map(e => {
-        const date  = new Date(e.ts).toLocaleString();
-        const label = AE[e.event] || e.event;
-        let bg = 'rgba(100,116,139,.12)', clr = '#64748b';
-        if (e.event === 'login_failed' || e.event.includes('error') || e.event.includes('revoked') || e.event.includes('deleted'))
-            { bg = 'rgba(239,68,68,.12)'; clr = 'var(--ss-err-text,#dc2626)'; }
-        else if (e.event === 'login_ok' || e.event.includes('created') || e.event.includes('saved'))
-            { bg = 'rgba(34,197,94,.12)'; clr = 'var(--ss-ok-text,#16a34a)'; }
-        else if (e.event === 'logout')
-            { bg = 'rgba(245,158,11,.12)'; clr = '#d97706'; }
-        else if (e.event.includes('updated') || e.event.includes('changed') || e.event === 'password_reset')
-            { bg = 'rgba(6,182,212,.12)'; clr = '#0891b2'; }
-        const badgeStyle = `background:${bg};color:${clr};font-size:.72rem`;
-        return `<tr>
-          <td class="small text-nowrap text-muted">${esc(date)}</td>
-          <td><span class="badge rounded-pill" style="${badgeStyle}">${esc(label)}</span></td>
-          <td><code style="font-size:.8rem">${esc(e.user)}</code></td></tr>`;
-    }).join('');
-}
-
-// The syslog table widget's configured minimum severity (data-sev), or null.
-function _dwSyslogMinSev() {
-    const el = document.querySelector('.dw[data-wid="syslog"]');
-    const n = el ? parseInt(el.dataset.sev, 10) : NaN;
-    return Number.isInteger(n) ? n : null;   // null = all severities
-}
-
-// Recent messages filtered by the widget's minimum severity (lower number =
-// more severe, so keep severity <= the configured max), newest first. Used for
-// the synchronous initial render; _dwSyslogAsyncRefresh then loads a full list
-// of that severity server-side.
-function _dwSyslogFiltered(recent, sev) {
-    if (sev === undefined) sev = _dwSyslogMinSev();
-    const list = recent || [];
-    return sev == null ? list : list.filter(m => (m.severity ?? 7) <= sev);
-}
-
-// When the syslog table widget has a minimum severity, fetch the latest messages
-// AT THAT LEVEL OR MORE SEVERE from the server, so it shows a full list (not just
-// whatever the overview's recent slice happened to contain). No-op without a
-// minimum set (the overview's recent list already drives the widget).
-let _dwSyslogAsyncBusy = false;
-async function _dwSyslogAsyncRefresh() {
-    const dw = document.querySelector('.dw[data-wid="syslog"]');
-    if (!dw || dw.style.display === 'none') return;
-    const tbody = dw.querySelector('tbody');
-    const sev = _dwSyslogMinSev();
-    if (!tbody || sev == null || _dwSyslogAsyncBusy) return;
-    _dwSyslogAsyncBusy = true;
-    try {
-        const data = await apiGet(`/api/v1/syslog?severity_max=${sev}&limit=20`);
-        const cur = document.querySelector('.dw[data-wid="syslog"]');     // may have changed
-        if (cur && _dwSyslogMinSev() === sev) {
-            const tb = cur.querySelector('tbody');
-            const msgs = (data && data.messages) || [];
-            if (tb) tb.innerHTML = msgs.length
-                ? _dwBuildSyslogRows(msgs)
-                : `<tr><td colspan="4" class="text-center text-muted py-3">${esc(t('syslog_empty'))}</td></tr>`;
-        }
-    } finally {
-        _dwSyslogAsyncBusy = false;
-    }
-}
-
-// Recent syslog messages (newest first); reuses the syslog severity colours/
-// row tint from _js_syslog.html.
-function _dwBuildSyslogRows(msgs) {
-    if (!msgs || !msgs.length) return '';
-    return msgs.map(m => {
-        const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
-        const when = (m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '')).replace('T', ' ').replace('Z', '');
-        const host = m.hostname || m.source || '';
-        return `<tr class="sl-row-${cls}">
-          <td class="small text-nowrap text-muted pe-4" style="width:1%">${esc(when)}</td>
-          <td class="text-nowrap pe-4" style="width:1%"><span class="badge bg-${cls}">${esc(m.severity_name || '')}</span></td>
-          <td class="small text-nowrap pe-4" style="width:1%;max-width:12em;overflow:hidden;text-overflow:ellipsis" title="${escAttr(host)}">${esc(host)}</td>
-          <td class="small text-break">${esc(m.message || '')}</td></tr>`;
-    }).join('');
-}
-
 function _dwFmtDate(v) {
     if (!v) return '—';
     const d = new Date(v);
@@ -284,124 +399,6 @@ function _dwBrowser(ua) {
     return os ? `${b} · ${os}` : b;
 }
 
-function _dwBuildSessionRows(sessions) {
-    const s = _dwSort['sessions_list'];
-    let rows = [...sessions];
-    if (s?.col) {
-        rows.sort((a, b) => {
-            let va, vb;
-            if (s.col === 'user')        { va = (a.user || '').toLowerCase(); vb = (b.user || '').toLowerCase(); }
-            else if (s.col === 'ip')     { va = (a.ip || '');                 vb = (b.ip || ''); }
-            else if (s.col === 'browser'){ va = _dwBrowser(a.agent);          vb = _dwBrowser(b.agent); }
-            else                         { va = (a.last_seen || '');          vb = (b.last_seen || ''); }
-            return va < vb ? -s.dir : va > vb ? s.dir : 0;
-        });
-    }
-    if (!rows.length)
-        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('status_empty')}</td></tr>`;
-    return rows.map(s => {
-        const userCell = `<span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
-            style="width:26px;height:26px;background:rgba(6,182,212,.14);color:#06b6d4;font-size:.85rem;vertical-align:middle"><i class="bi bi-person"></i></span>${esc(s.user || '')}`;
-        return `<tr>
-          <td>${userCell}</td>
-          <td><code style="font-size:.8rem">${esc(s.ip || '—')}</code></td>
-          <td class="small text-muted text-nowrap" title="${escAttr(s.agent || '')}">${esc(_dwBrowser(s.agent))}</td>
-          <td class="small text-nowrap text-muted">${_dwFmtDate(s.last_seen)}</td></tr>`;
-    }).join('');
-}
-
-function _dwBuildIncidentRows(items) {
-    const s = _dwSort['incidents'];
-    let rows = [...items];
-    if (s?.col) {
-        rows.sort((a, b) => {
-            let va, vb;
-            if (s.col === 'module')     { va = modulePrettyName(a.module, modulesData[a.module] || {}).toLowerCase();
-                                          vb = modulePrettyName(b.module, modulesData[b.module] || {}).toLowerCase(); }
-            else if (s.col === 'host')  { va = (a.host || '').toLowerCase(); vb = (b.host || '').toLowerCase(); }
-            else                        { va = (a.check || '').toLowerCase(); vb = (b.check || '').toLowerCase(); }
-            return va < vb ? -s.dir : va > vb ? s.dir : 0;
-        });
-    }
-    if (!rows.length)
-        return `<tr><td colspan="3" class="text-center text-success py-3"><i class="bi bi-check-circle me-1"></i>${t('overview_no_issues')}</td></tr>`;
-    return rows.map(it => {
-        const pname = modulePrettyName(it.module, modulesData[it.module] || {});
-        const icon  = moduleIcon(it.module, modulesData[it.module] || {});
-        const hue   = _moduleHue(it.module);
-        const modCell = `<span class="ss-mod-av rounded-2 d-inline-flex align-items-center justify-content-center me-2"
-            style="--mh:${hue};width:26px;height:26px;font-size:.85rem;vertical-align:middle">${icon}</span>${esc(pname)}`;
-        const chkCell = `<span class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc(it.check || '')}</span>`;
-        const hostCell = it.host ? `<code style="font-size:.8rem">${esc(it.host)}</code>` : '<span class="text-muted small">—</span>';
-        return `<tr><td>${modCell}</td><td>${chkCell}</td><td>${hostCell}</td></tr>`;
-    }).join('');
-}
-
-function _dwBuildFailedLoginRows(items) {
-    const s = _dwSort['failed_logins'];
-    let rows = [...items];
-    if (s?.col) {
-        rows.sort((a, b) => {
-            let va, vb;
-            if (s.col === 'user')      { va = (a.user || '').toLowerCase(); vb = (b.user || '').toLowerCase(); }
-            else if (s.col === 'ip')   { va = (a.ip || '');                 vb = (b.ip || ''); }
-            else if (s.col === 'detail'){ va = (a.detail || '');            vb = (b.detail || ''); }
-            else                       { va = (a.ts || '');                 vb = (b.ts || ''); }
-            return va < vb ? -s.dir : va > vb ? s.dir : 0;
-        });
-    }
-    if (!rows.length)
-        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('status_empty')}</td></tr>`;
-    return rows.map(e => {
-        // The audit detail carries an i18n key (e.g. {reason:'ldap_user_not_found'});
-        // translate it the same way the audit log UI does (t(key) || key).
-        let detail = e.detail;
-        if (detail && typeof detail === 'object') {
-            const key = detail.reason || detail.error;
-            detail = key ? (t(key) || key) : JSON.stringify(detail);
-        } else if (detail) {
-            detail = t(detail) || detail;
-        }
-        return `<tr>
-          <td class="small text-nowrap text-muted">${_dwFmtDate(e.ts)}</td>
-          <td><code style="font-size:.8rem">${esc(e.user || '—')}</code></td>
-          <td><code style="font-size:.8rem">${esc(e.ip || '—')}</code></td>
-          <td class="small text-muted text-truncate" style="max-width:16em" title="${escAttr(String(detail || ''))}">${esc(String(detail || '—'))}</td></tr>`;
-    }).join('');
-}
-
-// Banned-IP rows for the fail2ban table widget. Reuses the operational section's
-// _ipbanReason / _ipbanFmtDur helpers (same global JS bundle).
-function _dwBuildIpbanRows(items) {
-    const s = _dwSort['ipban_list'];
-    let rows = [...items];
-    if (s?.col) {
-        rows.sort((a, b) => {
-            let va, vb;
-            if (s.col === 'reason')       { va = (a.reason || '').toLowerCase(); vb = (b.reason || '').toLowerCase(); }
-            else if (s.col === 'level')   { va = a.level || 0; vb = b.level || 0; }
-            else if (s.col === 'expires') { va = a.permanent ? Infinity : (a.retry_after || 0);
-                                            vb = b.permanent ? Infinity : (b.retry_after || 0); }
-            else                          { va = (a.ip || ''); vb = (b.ip || ''); }
-            return va < vb ? -s.dir : va > vb ? s.dir : 0;
-        });
-    }
-    if (!rows.length)
-        return `<tr><td colspan="4" class="text-center text-muted py-3">${t('ipban_none')}</td></tr>`;
-    const reason = (typeof _ipbanReason === 'function') ? _ipbanReason : (r => r || '');
-    const dur = (typeof _ipbanFmtDur === 'function') ? _ipbanFmtDur : (s2 => (s2 || 0) + ' s');
-    return rows.map(b => {
-        const exp = b.permanent
-            ? `<span class="badge bg-danger">${esc(t('ipban_permanent'))}</span>`
-            : `<span class="small text-muted">${esc(dur(b.retry_after || 0))}</span>`;
-        return `<tr>
-            <td><code style="font-size:.8rem">${esc(b.ip || '')}</code></td>
-            <td class="small">${esc(reason(b.reason))}</td>
-            <td class="text-center">${b.level || 1}</td>
-            <td class="text-nowrap">${exp}</td></tr>`;
-    }).join('');
-}
-
 function _dwSortTable(wid, col) {
     const cur = _dwSort[wid];
     _dwSort[wid] = (cur?.col === col) ? { col, dir: -cur.dir } : { col, dir: 1 };
@@ -421,22 +418,14 @@ function _dwSortTable(wid, col) {
     if (tbody && html != null) tbody.innerHTML = html;
 }
 
-// Returns the <tbody> HTML for a table widget (or null if not a table).
-// Shared by sorting and the soft (content-only) refresh.
+// Returns the <tbody> HTML for a table widget (or null if not a table). All table
+// widgets are now data-driven (view.kind==='table'): re-sort the cached AJAX rows on a
+// header click, no re-fetch.
 function _dwTbodyHtml(wid) {
-    const d = _lastOverviewData;
-    if (!d) return null;
-    switch (wid) {
-        case 'modules_list':  return _dwBuildModuleRows(_dwModuleFiltered(d.modules || [], _dwModuleWidgetFilter()));
-        case 'servers_list':  return _dwBuildServerRows(_dwServerFiltered((d.servers || {}).list, _dwServerWidgetFilter()));
-        case 'sessions_list': return _dwBuildSessionRows((d.sessions || {}).list || []);
-        case 'incidents':     return _dwBuildIncidentRows(d.failing_checks || []);
-        case 'failed_logins': return _dwBuildFailedLoginRows(d.failed_logins || []);
-        case 'activity':      return _dwBuildActivityRows(d.last_events || []);
-        case 'syslog':        return _dwBuildSyslogRows(_dwSyslogFiltered((d.syslog || {}).recent, _dwSyslogMinSev()));
-        case 'ipban_list':    return _dwBuildIpbanRows((d.ipban || {}).bans || []);
-        default:              return null;
-    }
+    if (!_lastOverviewData) return null;
+    const _vw = (_DW_DEFS[wid] || {}).view;
+    if (_vw && _vw.kind === 'table') return _dwTableTbody(wid, _vw, _dwTableRows[wid] || []);
+    return null;
 }
 
 // ──────────────────────── Widget content ──────────────────────────
@@ -574,366 +563,20 @@ function _dwContent(id, data, item) {
     if (_dwIsModuleWidget(id)) return _dwModuleWidgetContent(id, data, item);
     const perms   = new Set(currentUser.permissions || []);
 
-    const modules  = data.modules  || [];
-    const status   = data.status   || {};
-    const sessions = data.sessions || {};
-    const users    = data.users    || {};
-    const groups   = data.groups   || {};
-    const roles    = data.roles    || {};
-    const events   = data.last_events || [];
-    // Role uid→name map from the overview payload — lets the by-role breakdowns
-    // resolve names WITHOUT the roles_view permission (rolesData needs it).
-    const roleNames = data.role_names || {};
-    const roleKeys  = data.role_keys  || {};
-    const _roleName = (r) => roleNames[r] || (rolesData[r] && rolesData[r].name)
-        || ROLE_LABELS[(rolesData[r] && rolesData[r].key) || r] || r;
-    // Badge colour by builtin key (admin/viewer/…); custom/unknown → default.
-    const _roleBadge = (r) => {
-        const k = roleKeys[r] != null ? roleKeys[r] : (rolesData[r] && rolesData[r].key);
-        return BUILTIN_ROLE_BADGES[k || r] || 'text-bg-info';
-    };
-
-    const enabled  = modules.filter(m => m.enabled).length;
-    const disabled = modules.length - enabled;
-
-    switch (id) {
-
-        case 'modules': {
-            const sub = [
-                enabled  ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${enabled} ${t('overview_enabled')}</span>` : '',
-                disabled ? `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">${disabled} ${t('overview_disabled')}</span>` : '',
-            ].filter(Boolean).join('');
-            return _dwStatCard('linear-gradient(90deg,#6366f1,#8b5cf6)', 'rgba(99,102,241,.12)', '#6366f1',
-                'bi-puzzle-fill', modules.length, 'overview_modules', sub);
-        }
-
-        case 'checks': {
-            const err    = status.error > 0;
-            const noData = status.total === 0;
-            const accent  = noData ? 'linear-gradient(90deg,#94a3b8,#cbd5e1)' : err ? 'linear-gradient(90deg,#ef4444,#f97316)' : 'linear-gradient(90deg,#22c55e,#10b981)';
-            const avBg    = noData ? 'var(--bs-secondary-bg)' : err ? 'rgba(239,68,68,.12)' : 'rgba(34,197,94,.12)';
-            const avColor = noData ? 'var(--bs-secondary-color)' : err ? '#ef4444' : '#22c55e';
-            const icon    = noData ? 'bi-dash-circle' : err ? 'bi-exclamation-triangle-fill' : 'bi-check-circle-fill';
-            const lbl     = noData ? t('overview_no_status') : err ? tf('overview_has_errors', status.error) : t('overview_all_ok');
-            const subClr  = noData ? 'var(--bs-secondary-color)' : err ? 'var(--ss-err-text,#ef4444)' : 'var(--ss-ok-text,#16a34a)';
-            const sub     = `<span style="font-size:.8rem;color:${subClr}">${lbl}</span>`;
-            return _dwStatCard(accent, avBg, avColor, icon, status.total, 'overview_status', sub);
-        }
-
-        case 'sessions': {
-            const byRole = sessions.by_role || {};
-            const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${_roleBadge(r)} ss-fs-2">${n} ${esc(_roleName(r))}</span>`)
-                .join('') || '<span class="text-muted small">—</span>';
-            return _dwStatCard('linear-gradient(90deg,#06b6d4,#3b82f6)', 'rgba(6,182,212,.12)', '#06b6d4',
-                'bi-plug-fill', sessions.active || 0, 'overview_sessions', sub);
-        }
-
-        case 'users': {
-            const byRole = users.by_role || {};
-            const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${_roleBadge(r)} ss-fs-2">${n} ${esc(_roleName(r))}</span>`)
-                .join('') || '<span class="text-muted small">—</span>';
-            return _dwStatCard('linear-gradient(90deg,#f59e0b,#f97316)', 'rgba(245,158,11,.12)', '#f59e0b',
-                'bi-person-fill', users.total || 0, 'overview_users', sub);
-        }
-
-        case 'groups': {
-            const byRole = groups.by_role || {};
-            const sub = Object.entries(byRole)
-                .map(([r, n]) => `<span class="badge ${_roleBadge(r)} ss-fs-2">${n} ${esc(_roleName(r))}</span>`)
-                .join('')
-                || (groups.members ? `<span class="text-muted small">${tf('overview_members', groups.members)}</span>` : '<span class="text-muted small">—</span>');
-            return _dwStatCard('linear-gradient(90deg,#10b981,#14b8a6)', 'rgba(16,185,129,.12)', '#10b981',
-                'bi-people-fill', groups.total || 0, 'overview_groups', sub);
-        }
-
-        case 'roles': {
-            const sub = roles.custom ? `<span class="text-muted small">${tf('overview_custom_roles', roles.custom)}</span>` : '';
-            return _dwStatCard('linear-gradient(90deg,#8b5cf6,#ec4899)', 'rgba(139,92,246,.12)', '#8b5cf6',
-                'bi-shield-fill-check', roles.total || 0, 'overview_roles', sub);
-        }
-
-        case 'servers': {
-            const servers = data.servers || {};
-            const ss = servers.status || {};
-            const err = (ss.error || 0) > 0;
-            const accent  = err ? 'linear-gradient(90deg,#ef4444,#f97316)' : 'linear-gradient(90deg,#0ea5e9,#6366f1)';
-            const avBg    = err ? 'rgba(239,68,68,.12)' : 'rgba(14,165,233,.12)';
-            const avColor = err ? '#ef4444' : '#0ea5e9';
-            // Status breakdown badges (only the non-zero states).
-            const badge = (n, cls, ic, lbl, sty) => n
-                ? `<span class="badge ${cls}" style="font-size:.72rem;${sty || ''}"><i class="bi ${ic} me-1"></i>${n} ${esc(t(lbl))}</span>`
-                : '';
-            const sub = [
-                badge(ss.ok,          'text-bg-success', 'bi-check-circle',    'host_status_ok'),
-                badge(ss.error,       'text-bg-danger',  'bi-x-circle',        'host_status_error'),
-                badge(ss.warning,     'text-bg-warning', 'bi-hourglass-split', 'host_status_warning'),
-                badge(ss.maintenance, '',                'bi-cone-striped',    'host_status_maintenance', 'background-color:#fd7e14;color:#fff'),
-            ].filter(Boolean).join('') || '<span class="text-muted small">—</span>';
-            return _dwStatCard(accent, avBg, avColor, 'bi-hdd-network-fill',
-                servers.total || 0, 'overview_servers', sub);
-        }
-
-        case 'credentials': {
-            const creds = data.credentials || {};
-            const byType = creds.by_type || {};
-            const disabled = (creds.total || 0) - (creds.enabled || 0);
-            // Distinct solid colour per credential type (stable by type name).
-            const _credPalette = ['text-bg-info', 'text-bg-primary', 'text-bg-success',
-                                  'text-bg-warning', 'text-bg-danger', 'text-bg-secondary'];
-            const _credBadge = (ct) => {
-                let h = 0;
-                for (let i = 0; i < ct.length; i++) h = (h * 31 + ct.charCodeAt(i)) >>> 0;
-                return _credPalette[h % _credPalette.length];
-            };
-            const sub = [
-                ...Object.entries(byType).map(([ct, n]) =>
-                    `<span class="badge ${_credBadge(ct)} ss-fs-2">${n} ${esc(_credTypeLabel(ct))}</span>`),
-                disabled > 0
-                    ? `<span class="badge text-bg-light text-muted ss-fs-2">${tf('overview_credentials_disabled', disabled)}</span>`
-                    : '',
-            ].filter(Boolean).join('') || '<span class="text-muted small">—</span>';
-            return _dwStatCard('linear-gradient(90deg,#14b8a6,#0ea5e9)', 'rgba(20,184,166,.12)', '#14b8a6',
-                'bi-key-fill', creds.total || 0, 'overview_credentials', sub);
-        }
-
-        case 'coverage': {
-            const cov = data.coverage || {};
-            const pct = cov.pct || 0;
-            const good = pct >= 90, mid = pct >= 50;
-            const accent  = good ? 'linear-gradient(90deg,#22c55e,#10b981)' : mid ? 'linear-gradient(90deg,#f59e0b,#f97316)' : 'linear-gradient(90deg,#ef4444,#f97316)';
-            const avBg    = good ? 'rgba(34,197,94,.12)' : mid ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)';
-            const avColor = good ? '#22c55e' : mid ? '#f59e0b' : '#ef4444';
-            const sub = `<span class="text-muted small">${tf('overview_of_hosts', cov.hosts_monitored || 0, cov.hosts_total || 0)}</span>`;
-            return _dwStatCard(accent, avBg, avColor, 'bi-pie-chart-fill',
-                pct + '%', 'overview_coverage', sub);
-        }
-
-        case 'webhooks': {
-            const wh = data.webhooks || {};
-            const sub = wh.total
-                ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${wh.enabled || 0} ${esc(t('overview_enabled'))}</span>`
-                : '<span class="text-muted small">—</span>';
-            return _dwStatCard('linear-gradient(90deg,#a855f7,#ec4899)', 'rgba(168,85,247,.12)', '#a855f7',
-                'bi-broadcast', wh.total || 0, 'overview_webhooks', sub);
-        }
-
-        case 'modules_list': {
-            if (!perms.has('modules_view'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const _modf = item ? (item.modf || '') : _dwModuleWidgetFilter();
-            const _mlist = _dwModuleFiltered(modules, _modf);
-            const _modBadge = (_modf === 'on') ? _dwFilterBadge(t('dw_mod_on'), '#16a34a', 'rgba(34,197,94,.16)')
-                : (_modf === 'error') ? _dwFilterBadge(t('host_status_error'), '#dc3545', 'rgba(220,53,69,.16)') : '';
-            const table = `<table class="table table-sm table-hover align-middle mb-0">
-                ${_dwTheadRow(
-                    _dwTh('modules_list','name',t('col_module')),
-                    _dwTh('modules_list','enabled',t('col_enabled')),
-                    _dwTh('modules_list','checks',t('col_checks')),
-                    _dwTh('modules_list','items',t('overview_items'))
-                )}
-                <tbody>${_dwBuildModuleRows(_mlist)}</tbody>
-            </table>`;
-            return _dwTableCard('linear-gradient(90deg,#6366f1,#8b5cf6)', 'rgba(99,102,241,.12)', '#6366f1',
-                'bi-puzzle', t('overview_modules') + _modBadge, table);
-        }
-
-        case 'servers_list': {
-            if (!perms.has('servers_view') && ![...perms].some(x => x.startsWith('server.')))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const _srvf = item ? (item.srvf || '') : _dwServerWidgetFilter();
-            const slist = _dwServerFiltered((data.servers || {}).list, _srvf);
-            // One badge per active condition, each with its own colour: error
-            // (red), maintenance (orange), or both for 'errmaint'.
-            const _bErr   = _dwFilterBadge(t('host_status_error'), '#dc3545', 'rgba(220,53,69,.16)');
-            const _bMaint = _dwFilterBadge(t('host_status_maintenance'), '#fd7e14', 'rgba(253,126,20,.18)');
-            const _srvBadge = (_srvf === 'error') ? _bErr
-                : (_srvf === 'maint') ? _bMaint
-                : (_srvf === 'errmaint') ? (_bErr + _bMaint) : '';
-            const _srvTitle = t('overview_servers') + _srvBadge;
-            const table = `<table class="table table-sm table-hover align-middle mb-0">
-                ${_dwTheadRow(
-                    _dwTh('servers_list','name',t('col_server')),
-                    _dwTh('servers_list','status',t('col_host_status')),
-                    _dwTh('servers_list','checks',t('col_checks')),
-                    _dwTh('servers_list','modules',t('col_host_modules'))
-                )}
-                <tbody>${_dwBuildServerRows(slist)}</tbody>
-            </table>`;
-            return _dwTableCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
-                'bi-hdd-network', _srvTitle, table);
-        }
-
-        case 'sessions_list': {
-            if (!perms.has('sessions_view'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const slist = (data.sessions || {}).list || [];
-            const table = `<table class="table table-sm table-hover align-middle mb-0">
-                ${_dwTheadRow(
-                    _dwTh('sessions_list','user',t('col_user')),
-                    _dwTh('sessions_list','ip',t('col_ip')),
-                    _dwTh('sessions_list','browser',t('col_browser')),
-                    _dwTh('sessions_list','last_seen',t('col_last_seen'))
-                )}
-                <tbody>${_dwBuildSessionRows(slist)}</tbody>
-            </table>`;
-            return _dwTableCard('linear-gradient(90deg,#06b6d4,#3b82f6)', 'rgba(6,182,212,.12)', '#06b6d4',
-                'bi-plug', t('overview_sessions'), table);
-        }
-
-        case 'incidents': {
-            if (!perms.has('modules_view'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const ilist = data.failing_checks || [];
-            const table = `<table class="table table-sm table-hover align-middle mb-0">
-                ${_dwTheadRow(
-                    _dwTh('incidents','module',t('col_module')),
-                    _dwTh('incidents','check',t('col_check')),
-                    _dwTh('incidents','host',t('col_host'))
-                )}
-                <tbody>${_dwBuildIncidentRows(ilist)}</tbody>
-            </table>`;
-            return _dwTableCard('linear-gradient(90deg,#ef4444,#f97316)', 'rgba(239,68,68,.12)', '#ef4444',
-                'bi-exclamation-triangle', t('overview_incidents'), table);
-        }
-
-        case 'failed_logins': {
-            if (!perms.has('audit_view'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const flist = data.failed_logins || [];
-            const table = `<table class="table table-sm table-hover align-middle mb-0">
-                ${_dwTheadRow(
-                    _dwTh('failed_logins','ts',t('col_time')),
-                    _dwTh('failed_logins','user',t('col_user')),
-                    _dwTh('failed_logins','ip',t('col_ip')),
-                    _dwTh('failed_logins','detail',t('col_detail'))
-                )}
-                <tbody>${_dwBuildFailedLoginRows(flist)}</tbody>
-            </table>`;
-            return _dwTableCard('linear-gradient(90deg,#f43f5e,#f97316)', 'rgba(244,63,94,.12)', '#f43f5e',
-                'bi-shield-lock', t('overview_failed_logins'), table);
-        }
-
-        case 'activity': {
-            if (!perms.has('audit_view'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            if (!events.length)
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('status_empty')}</div>`;
-            const table = `<table class="table table-sm table-hover align-middle mb-0">
-                ${_dwTheadRow(
-                    _dwTh('activity','ts',t('col_time')),
-                    _dwTh('activity','event',t('col_event')),
-                    _dwTh('activity','user',t('col_user'))
-                )}
-                <tbody>${_dwBuildActivityRows(events)}</tbody>
-            </table>`;
-            return _dwTableCard('linear-gradient(90deg,#64748b,#475569)', 'rgba(100,116,139,.12)', '#64748b',
-                'bi-clock-history', t('overview_recent_activity'), table);
-        }
-
-        case 'syslog_stats': {
-            if (!perms.has('syslog_view'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const sl = data.syslog || {};
-            // Severity breakdown badges (only non-zero), coloured like the syslog tab.
-            const sub = (sl.by_severity || [])
-                .filter(s => s.count)
-                .map(s => {
-                    const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[s.value]) || 'secondary';
-                    return `<span class="badge bg-${cls} ss-fs-2">${s.count} ${esc(s.name)}</span>`;
-                }).join('') || '<span class="text-muted small">—</span>';
-            return _dwStatCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
-                'bi-card-list', sl.total || 0, 'overview_syslog_stats', sub);
-        }
-
-        case 'events': {
-            if (!perms.has('events_view'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const ev    = data.events || {};
-            const total = ev.total || 0;
-            const en    = ev.enabled || 0;
-            const dis   = total - en;
-            const notif = ev.notifications || 0;
-            // Enabled/disabled breakdown (like the modules card) + a notifications-
-            // sent badge from the notification log.
-            const sub = [
-                en  ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${en} ${t('overview_enabled')}</span>` : '',
-                dis ? `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)">${dis} ${t('overview_disabled')}</span>` : '',
-                notif ? `<span class="badge rounded-pill" style="background:rgba(245,158,11,.15);color:#d97706;font-size:.72rem"><i class="bi bi-send me-1"></i>${tf('overview_events_notifications', notif)}</span>` : '',
-            ].filter(Boolean).join('') || '<span class="text-muted small">—</span>';
-            return _dwStatCard('linear-gradient(90deg,#ec4899,#f43f5e)', 'rgba(236,72,153,.12)', '#ec4899',
-                'bi-bell-fill', total, 'overview_events', sub);
-        }
-
-        case 'syslog': {
-            if (!perms.has('syslog_view'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            // sev from the layout item on a full render (DOM not inserted yet),
-            // else from the live DOM.
-            const _sevRaw = item ? item.sev : (document.querySelector('.dw[data-wid="syslog"]')?.dataset.sev);
-            const _sev = (_sevRaw == null || _sevRaw === '') ? null : (parseInt(_sevRaw, 10) || 0);
-            const slist = _dwSyslogFiltered((data.syslog || {}).recent, _sev);
-            // With a minimum severity set, always render the table shell (its
-            // body is (re)filled server-side by _dwSyslogAsyncRefresh) so an empty
-            // client-side slice never collapses it to an empty state without a
-            // <tbody> for the async fill to target.
-            if (_sev == null && !slist.length)
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('syslog_empty')}</div>`;
-            const table = `<table class="table table-sm table-hover align-middle mb-0">
-                ${_dwTheadRow(
-                    `<th class="small pe-4" style="white-space:nowrap;width:1%">${esc(t('syslog_time'))}</th>`,
-                    `<th class="small pe-4" style="white-space:nowrap;width:1%">${esc(t('syslog_severity'))}</th>`,
-                    `<th class="small pe-4" style="white-space:nowrap;width:1%">${esc(t('syslog_host'))}</th>`,
-                    `<th class="small">${esc(t('syslog_message'))}</th>`
-                )}
-                <tbody>${_dwBuildSyslogRows(slist)}</tbody>
-            </table>`;
-            const _slSev = (_sev != null && typeof _SYSLOG_SEV !== 'undefined' && _SYSLOG_SEV[_sev]) || (_sev != null ? _sev : null);
-            const _slCls = (_sev != null && typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[_sev]) || 'secondary';
-            const _slTitle = t('overview_syslog') + (_slSev != null
-                ? _dwFilterBadge('≥ ' + _slSev, _DW_SEV_HEX[_slCls] || '#6c757d', _DW_SEV_SUBTLE[_slCls] || 'rgba(108,117,125,.18)') : '');
-            return _dwTableCard('linear-gradient(90deg,#0ea5e9,#6366f1)', 'rgba(14,165,233,.12)', '#0ea5e9',
-                'bi-card-list', _slTitle, table);
-        }
-
-        case 'fail2ban': {
-            if (!perms.has('config_view') && !perms.has('config_edit'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const fb = data.ipban || {};
-            const on = !!fb.enabled;
-            const accent  = on ? 'linear-gradient(90deg,#f59e0b,#ef4444)' : 'linear-gradient(90deg,#94a3b8,#cbd5e1)';
-            const avBg    = on ? 'rgba(245,158,11,.12)' : 'var(--bs-secondary-bg)';
-            const avColor = on ? '#f59e0b' : 'var(--bs-secondary-color)';
-            const stateBadge = on
-                ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${t('overview_ipban_on')}</span>`
-                : `<span class="badge rounded-pill" style="background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-size:.72rem;border:1px solid var(--bs-border-color)"><i class="bi bi-slash-circle me-1"></i>${t('overview_ipban_off')}</span>`;
-            const sub = [
-                stateBadge,
-                !fb.banned ? `<span class="badge rounded-pill" style="background:rgba(34,197,94,.15);color:var(--ss-ok-text,#16a34a);font-size:.72rem"><i class="bi bi-check-circle me-1"></i>${t('overview_ipban_no_bans')}</span>` : '',
-                fb.watchlist ? `<span class="badge rounded-pill" style="background:rgba(245,158,11,.15);color:#d97706;font-size:.72rem"><i class="bi bi-eye me-1"></i>${tf('overview_ipban_watchlist', fb.watchlist)}</span>` : '',
-                fb.whitelist ? `<span class="badge rounded-pill" style="background:rgba(20,184,166,.15);color:#0d9488;font-size:.72rem"><i class="bi bi-shield-check me-1"></i>${tf('overview_ipban_whitelist', fb.whitelist)}</span>` : '',
-            ].filter(Boolean).join('');
-            return _dwStatCard(accent, avBg, avColor, 'bi-slash-circle', fb.banned || 0, 'overview_fail2ban', sub);
-        }
-
-        case 'ipban_list': {
-            if (!perms.has('config_view') && !perms.has('config_edit'))
-                return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-            const blist = (data.ipban || {}).bans || [];
-            const table = `<table class="table table-sm table-hover align-middle mb-0">
-                ${_dwTheadRow(
-                    _dwTh('ipban_list','ip',t('ipban_col_ip')),
-                    _dwTh('ipban_list','reason',t('ipban_col_reason')),
-                    _dwTh('ipban_list','level',t('ipban_col_level')),
-                    _dwTh('ipban_list','expires',t('ipban_col_expires'))
-                )}
-                <tbody>${_dwBuildIpbanRows(blist)}</tbody>
-            </table>`;
-            return _dwTableCard('linear-gradient(90deg,#f59e0b,#ef4444)', 'rgba(245,158,11,.12)', '#f59e0b',
-                'bi-slash-circle', t('overview_ipban_list'), table);
-        }
-
-        default: return '';
+    // Data-driven widget: its descriptor carries a `view` and fetches its own data over
+    // AJAX (stat content cached in _dwStatContent, table rows in _dwTableRows). On first
+    // render the cache is empty → a placeholder paints, then _dwAsyncWidgets fills it.
+    const _def = _DW_DEFS[id];
+    if (_def && _def.view) {
+        if (_def.canShow && !_def.canShow(perms))
+            return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
+        const content = _def.view.kind === 'stat' ? _dwStatContent[id] : null;
+        return _dwRenderView(id, _def.view, content, item);
     }
+
+    // Every built-in widget is now data-driven: stat cards and tables both declare a
+    // `view` and render generically above (see _dwRenderView).  Anything without a view
+    // is a module-contributed widget or spacer, already handled earlier — so nothing
+    // widget-specific remains here.
+    return '';
 }

@@ -142,18 +142,18 @@ if (overviewLi) overviewLi.style.display = perms.has('overview_view') ? '' : 'no
 // Modules tab
 const modulesLi = document.getElementById('tab-modules-li');
 if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
-// Infrastructure tab (Servers + Clusters + Credentials sub-tabs). Shows when the
-// user can see hosts OR manage modules (clusters are multi-bind module checks) OR
+// Infrastructure tab (Servers + Cluster + Credentials sub-tabs). Shows when the
+// user can see hosts OR manage modules (cluster are multi-bind module checks) OR
 // manage credentials (reusable SSH identities — an infrastructure concern).
 const hasAnyServer = ['servers_view','servers_edit','servers_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('server.'));
-// Clusters are their OWN resource: gated strictly by clusters_* (global) or any
-// cluster.{uid}.* (per-cluster). Module permissions do NOT grant the Clusters tab.
+// Cluster are their OWN resource: gated strictly by cluster_* (global) or any
+// cluster.{uid}.* (per-cluster). Module permissions do NOT grant the Cluster tab.
 const hasAnyCluster = ['clusters_view','clusters_add','clusters_edit','clusters_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('cluster.'));
 const serversLi = document.getElementById('tab-servers-li');
 if (serversLi) serversLi.style.display = (hasAnyServer || hasAnyModule || hasAnyCluster || hasAnyCredential) ? '' : 'none';
-// Sub-tabs: Servers gated by host perms, Clusters by cluster perms, Credentials by
+// Sub-tabs: Servers gated by host perms, Cluster by cluster perms, Credentials by
 // credential perms.
 const stSrvHosts = document.getElementById('subtab-srv-hosts-li');
 if (stSrvHosts) stSrvHosts.style.display = hasAnyServer ? '' : 'none';
@@ -188,8 +188,11 @@ if (historyLi) historyLi.style.display = perms.has('history_view') ? '' : 'none'
 const syslogLi = document.getElementById('tab-syslog-li');
 if (syslogLi) syslogLi.style.display = perms.has('syslog_view') ? '' : 'none';
 // fail2ban tab (operational: banned IPs / watchlist / history / services / whitelist)
+const hasAnyIpban = ['ipban_ban_view', 'ipban_ban_add', 'ipban_ban_edit', 'ipban_ban_delete',
+    'ipban_watchlist_clear', 'ipban_whitelist_view', 'ipban_whitelist_add', 'ipban_whitelist_delete',
+    'ipban_history_view'].some(p => perms.has(p));
 const ipbanLi = document.getElementById('tab-ipban-li');
-if (ipbanLi) ipbanLi.style.display = (hasConfigEdit || hasConfigView) ? '' : 'none';
+if (ipbanLi) ipbanLi.style.display = hasAnyIpban ? '' : 'none';
 // Services tab
 const servicesLi = document.getElementById('tab-services-li');
 if (servicesLi) servicesLi.style.display = perms.has('services_view') ? '' : 'none';

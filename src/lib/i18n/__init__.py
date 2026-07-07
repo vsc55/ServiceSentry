@@ -3,7 +3,7 @@
 """Application-wide internationalisation loader.
 
 Shared by the web admin (UI labels) and the Flask-free notification subsystem
-(:mod:`lib.notify` e-mail templates), so translations live in the general
+(:mod:`lib.core.notify` e-mail templates), so translations live in the general
 library rather than under the web layer.
 
 Translations are stored as individual Python modules inside the ``lang/``

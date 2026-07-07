@@ -188,7 +188,7 @@ class TestAuditLog:
     def test_audit_tab_in_ui(self, client):
         """Dashboard has the audit tab for admins."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'tab-audit' in html
         assert b'renderAudit' in html
 

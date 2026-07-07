@@ -66,7 +66,7 @@ function createListTable(spec) {
         render();
     }
     function resetCols() {
-        if (spec.reset) {                       // table-specific reset (e.g. clusters null sentinel)
+        if (spec.reset) {                       // table-specific reset (e.g. cluster null sentinel)
             spec.reset();
             render();
             _persistTableConfig();
@@ -120,7 +120,7 @@ function createListTable(spec) {
         c.classList.add('ss-vfill');
         try {
         // Materialise dynamic state synchronously (before any await) so getVis()/
-        // getOrd() never return null (e.g. clusters' "use defaults" sentinel).
+        // getOrd() never return null (e.g. cluster' "use defaults" sentinel).
         if (st.visible.get() == null) st.visible.set(new Set());
         if (st.order.get() == null) st.order.set([]);
         const ctx = (spec.prepare ? await spec.prepare() : {}) || {};

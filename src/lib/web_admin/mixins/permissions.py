@@ -6,7 +6,7 @@ import re
 
 from flask import session
 
-from ..constants import (
+from lib.core.permissions import (
     BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS,
     is_module_perm, is_server_perm, is_cluster_perm,
 )

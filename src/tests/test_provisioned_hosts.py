@@ -14,7 +14,7 @@ import os
 
 import pytest
 
-from lib.web_admin.routes.modules import _sync_provisioned_hosts
+from lib.core.modules.routes import _sync_provisioned_hosts
 
 # The synthetic module the tests declare a __provision_host__ for.
 _MOD = 'demo'

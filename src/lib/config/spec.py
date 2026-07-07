@@ -85,6 +85,8 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         env='SS_LANG', card='global'),           # default UI language → General card
     Cfg('web_admin|dark_mode', bool, False, attr='_default_dark_mode',
         env='SS_DARK_MODE', no_rule=True, card='global'),   # default theme → General card
+    Cfg('web_admin|landing_page', str, 'admin', attr='_landing_page',
+        no_rule=True, card='global'),   # default landing page (admin/status/…) → General card
     Cfg('web_admin|remember_me_days', int, 30, attr='_REMEMBER_ME_DAYS',
         min=1, max=365, env='SS_REMEMBER_ME_DAYS', admin_only=True,
         flask_cfg=('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v)),
@@ -162,7 +164,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('web_admin|ipban_permanent_after', int, 4, attr='_IPBAN_PERMANENT_AFTER',
         min=0, max=100, admin_only=True, card='ipban'),  # ban level past which = permanent (0=never)
     # (The per-service block action lives in the fail2ban service registry — see
-    #  lib/security/ipban_services.py — persisted in the ip_service_action table,
+    #  lib/services/ipban/exposed.py — persisted in the ip_service_action table,
     #  not as a single global config field.)
     # Env/programmatic never-ban CSV (also an escape hatch: SS_IPBAN_WHITELIST=<ip>
     # lets a locked-out admin whitelist their address and get back in). The UI-managed
@@ -353,7 +355,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
 
     # ══ Syslog receiver ═════════════════════════════════════════════════════
     # Built-in syslog server: receive RFC 3164/5424 events from external hosts
-    # over UDP/TCP(+TLS), store them (lib/stores/syslog.py) and optionally alert.
+    # over UDP/TCP(+TLS), store them (lib/services/syslog/store) and optionally alert.
     Cfg('syslog|enabled',         bool, True, admin_only=True, card='syslog_conn'),
     # autostart: launch the EMBEDDED listener at web-admin boot (a standalone
     # ``--syslog`` process ignores it).  enabled=on + autostart=off ⇒ boots stopped
@@ -412,7 +414,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ Webhooks (editor schema only) ═══════════════════════════════════════
     # These are the per-webhook FORM field defaults (type/default for the editor
     # via frontend_schema).  Webhooks are stored as records in their own table
-    # (lib/stores/webhooks.py), NOT as singleton config — so they are no_seed:
+    # (lib/core/notify/webhook/store.py), NOT as singleton config — so they are no_seed:
     # never materialised as ``webhooks|*`` rows in the config table.
     Cfg('webhooks|enabled', bool, False, no_rule=True, no_seed=True),
     Cfg('webhooks|url', str, '', no_rule=True, no_seed=True),

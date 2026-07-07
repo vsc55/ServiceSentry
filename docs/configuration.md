@@ -47,6 +47,34 @@ arranque**:
   siembra `config.json` (`seed=False`), así que ni el worker ni el web rellenan el
   fichero al arrancar.
 
+### Resolución de un campo (lectura)
+
+Para cada campo `sección|campo`, la lectura resuelve el valor efectivo por
+precedencia y marca como **bloqueado** (solo-lectura) los que vienen de entorno o de
+`config.json`. Lo hace `resolve_config()` (`lib/config/resolve.py`), que devuelve
+`(config_efectiva, paths_bloqueados)`:
+
+```mermaid
+flowchart TD
+    q["Leer campo 'sección|campo'"] --> env{"¿Fijado por<br/>variable de entorno?"}
+    env -- sí --> lockenv["valor = entorno<br/>🔒 bloqueado (read-only)"]
+    env -- no --> file{"¿Presente en<br/>config.json?"}
+    file -- sí --> lockfile["valor = config.json<br/>🔒 bloqueado (candado en UI · PUT rechazado)"]
+    file -- no --> db{"¿Hay fila en la<br/>tabla config (BD)?"}
+    db -- sí --> dbval["valor = BD<br/>✏️ editable desde el panel"]
+    db -- no --> def{"¿Tiene default<br/>en spec.py?"}
+    def -- sí --> defval["valor = default del registro<br/>(NO se escribe en disco)"]
+    def -- no --> omit["sin valor en ningún sitio<br/>→ se omite"]
+```
+
+- **Nada guardado** → cae hasta el **default del registro** (`spec.py`); no se
+  persiste en disco ni en BD.
+- **En `config.json`** (o entorno) → ese valor **gana** sobre la BD y queda
+  **bloqueado**: la UI lo muestra con candado y el `PUT /api/v1/config` lo rechaza.
+  Para volver a editarlo, quítalo del fichero.
+- La sección **`database`** es una excepción de arranque: se lee siempre de
+  `config.json`/entorno y **nunca** de la BD (el paso «BD» se salta).
+
 ### Migración automática (una vez)
 
 La primera vez que arranca con esta versión, si existe un `config.json` con la
@@ -240,11 +268,12 @@ Esta matriz es configurable desde la pestaña **Configuración → Notifications
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
 | `web_admin.lang` | string | `"en_EN"` | Idioma por defecto de la interfaz web (`en_EN` o `es_ES`) |
+| `web_admin.landing_page` | string | `"admin"` | Página a la que llega el usuario tras iniciar sesión: `admin` (panel) o `status` (página pública de estado). Sobreescribible por grupo y por usuario (precedencia usuario → grupo → global); ver [web_admin.md](web_admin.md#usuarios). |
 | `web_admin.dark_mode` | bool | `false` | Modo oscuro por defecto para sesiones nuevas |
 | `web_admin.public_status` | bool | `false` | Exponer `/status` públicamente sin autenticación. Los usuarios logueados siempre pueden acceder. |
 | `web_admin.status_refresh_secs` | int | `60` | Intervalo de refresco automático de la página `/status` (10–3600 segundos) |
 | `web_admin.status_lang` | string | `""` | Idioma de la página pública `/status`. Prioridad: sesión del usuario → este campo → `web_admin.lang`. Dejar vacío para usar el idioma por defecto del panel. |
-| `web_admin.secure_cookies` | bool | `false` | Marcar la cookie de sesión como `Secure` (solo HTTPS). Activar cuando Flask esté detrás de HTTPS. |
+| `web_admin.secure_cookies` | bool | `false` | Marcar la cookie de sesión como `Secure` (solo HTTPS). **Recomendado** cuando el acceso es solo por HTTPS (incl. tras proxy TLS como NPM/nginx): el flag no se deduce del esquema de la petición, hay que activarlo aquí (o `force_https`). Con `Secure` activo se pierde el acceso por HTTP/IP en LAN. Ver [security.md → cookies](security.md#cabeceras-de-seguridad-http-y-cookies). |
 | `web_admin.remember_me_days` | int | `30` | Duración de sesiones persistentes ("Recuérdame") en días (1–365) |
 | `web_admin.audit_max_entries` | int | `500` | Número máximo de entradas en el registro de auditoría (10–10000) |
 | `web_admin.pw_min_len` | int | `8` | Longitud mínima de contraseña (1–128) |
@@ -632,6 +661,8 @@ vaciar el log) y `events_delete`.
 
 ## Pestaña Services (estado y control de servicios)
 
+> Arquitectura de servicios (embebido vs standalone, descubrimiento, plano de control en microservicios, alta disponibilidad): ver **[services.md](services.md)**.
+
 La pestaña **Services** muestra de forma centralizada el estado de los servicios
 de fondo y permite **iniciar/detener** los que se ejecutan dentro del propio
 proceso web:
@@ -784,7 +815,7 @@ Flujo de envío:
 
 ## Exec (Ejecución de Comandos)
 
-La clase `Exec` en `lib/exe.py` abstrae la ejecución de comandos local y remota.
+La clase `Exec` en `lib/system/exe.py` abstrae la ejecución de comandos local y remota.
 
 | Modo | Implementación |
 |------|---------------|

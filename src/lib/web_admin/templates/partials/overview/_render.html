@@ -46,9 +46,14 @@ async function _softRefreshOverview() {
             content.innerHTML = _dwContent(id, data);
         }
     });
-    _dwSyslogAsyncRefresh();
+    _dwAsyncWidgets();
     _startOverviewCountdown(_overviewTimer?._interval || 0);
 }
+
+// Manual "Refresh" button → in-place data refresh (each widget re-fetches its own data
+// over AJAX), NOT a full DOM rebuild. Only a first paint / layout change goes through the
+// heavier renderOverview(); a data refresh keeps the grid, scroll and sort in place.
+function refreshOverview() { return _softRefreshOverview(); }
 
 // ──────────────────────── Kiosk / 24/7 fullscreen ─────────────────
 // Strips all chrome (navbar, tabs, controls) leaving only the widget
@@ -190,7 +195,73 @@ function setOverviewAutoRefresh(seconds) {
         }, seconds * 1000);
         _overviewTimer = { _id: id, _interval: seconds };
     }
-    renderOverview();
+    // Update only the controls bar in place (grid untouched); full render only if the
+    // dashboard hasn't been drawn yet.
+    _dwSyncControls();
+}
+
+// Builds the #overview-controls inner HTML (refresh pill + edit/fullscreen buttons).
+// Extracted so a bare interval change / kiosk toggle can re-render JUST this bar in place
+// (via _dwSyncControls) without rebuilding the widget grid.
+function _dwControlsHtml() {
+    const perms = new Set(currentUser.permissions || []);
+    const _canEditLayout = perms.has('overview_edit');
+    const editBtns = _canEditLayout ? `
+        <div class="btn-group ms-auto" role="group">
+            <button class="btn btn-sm btn-secondary" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
+                <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
+            <button type="button" class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split" id="dwEditCaret"
+                    data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">
+                <span class="visually-hidden">${t('dashboard_save_layout')}</span></button>
+            <ul class="dropdown-menu dropdown-menu-end ss-fs-3">
+                <li><button type="button" class="dropdown-item py-1" onclick="_dwSaveDb()" title="${escAttr(t('dashboard_save_layout_tt'))}">
+                    <i class="bi bi-save me-1"></i>${t('dashboard_save_layout')}</button></li>
+                <li><button type="button" class="dropdown-item py-1" onclick="_dwReset()" title="${escAttr(t('dashboard_reset_tt'))}">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>${t('dashboard_reset')}</button></li>
+                <li><button type="button" class="dropdown-item py-1" onclick="_dwClearConfig()" title="${escAttr(t('dashboard_clear_tt'))}">
+                    <i class="bi bi-eraser me-1"></i>${t('dashboard_clear')}</button></li>
+                ${perms.has('overview_set_default') ? `<li><hr class="dropdown-divider my-1"></li>
+                <li><button type="button" class="dropdown-item py-1" onclick="_dwSetDefault()" title="${escAttr(t('dashboard_set_default_tt'))}">
+                    <i class="bi bi-pin-angle me-1"></i>${t('dashboard_set_default')}</button></li>` : ''}
+                ${perms.has('overview_reset_factory') ? `<li><button type="button" class="dropdown-item py-1 text-danger" onclick="_dwResetFactory()" title="${escAttr(t('dashboard_reset_factory_tt'))}">
+                    <i class="bi bi-bootstrap-reboot me-1"></i>${t('dashboard_reset_factory')}</button></li>` : ''}
+            </ul>
+        </div>` : '';
+    const kioskBtn = `
+        <button class="btn btn-sm btn-secondary${_canEditLayout ? '' : ' ms-auto'}" onclick="_dwToggleKiosk()" title="${escAttr(t('dashboard_fullscreen_tt'))}">
+            <i class="bi bi-arrows-fullscreen me-1"></i>${t('dashboard_fullscreen')}</button>`;
+    return _renderRefreshBar('overview-container', 'refreshOverview',
+        () => _overviewTimer, 'setOverviewAutoRefresh', editBtns + kioskBtn,
+        { id: 'ov', countClass: 'ov-rc-count', fillClass: 'ov-rc-fill' });
+}
+
+// Inner HTML of the kiosk countdown bar (#ov-refresh-bar) for a given interval.
+function _dwKioskBarInner(ovInt) {
+    return `<div class="ov-refresh-track"><div class="ov-refresh-fill ov-rc-fill" style="width:100%"></div></div>
+        <div class="small text-muted mt-1"><i class="bi bi-arrow-clockwise me-1"></i>${t('status_refreshing_in')} <span class="ov-rc-count">${ovInt}</span>${t('status_seconds_abbr')}</div>`;
+}
+
+// Re-render ONLY the controls bar + kiosk countdown in place (e.g. on an auto-refresh
+// interval change or entering kiosk), keeping the widget grid, its scroll and sort intact.
+function _dwSyncControls() {
+    const grid = document.getElementById('dashboardGrid');
+    const controls = document.getElementById('overview-controls');
+    if (!grid || !controls) return renderOverview();   // nothing drawn yet → full render
+    controls.innerHTML = _dwControlsHtml();
+    const ovInt = _overviewTimer?._interval || 0;
+    let bar = document.getElementById('ov-refresh-bar');
+    if (ovInt > 0) {
+        if (!bar) { bar = document.createElement('div'); bar.id = 'ov-refresh-bar'; grid.parentNode.insertBefore(bar, grid); }
+        bar.innerHTML = _dwKioskBarInner(ovInt);
+    } else if (bar) { bar.remove(); }
+    // The controls bar was rebuilt → re-apply the edit-mode toolbar state (button + add-bar).
+    if (_dwEditing) {
+        const btn = document.getElementById('dwEditBtn');
+        if (btn) { btn.className = 'btn btn-sm btn-warning'; btn.innerHTML = `<i class="bi bi-x-lg me-1"></i>${t('dashboard_save')}`; }
+        _dwSetCaretVariant('btn-warning');
+        document.getElementById('dwAddBar')?.classList.remove('d-none');
+    }
+    _startOverviewCountdown(ovInt);
 }
 
 // ──────────────────────── Main render ─────────────────────────────
@@ -217,56 +288,19 @@ async function renderOverview() {
     const isAdmin = currentUser.role === 'admin';
     const layout  = _dwLoad();
 
-    const _canEditLayout = perms.has('overview_edit');
-    const editBtns = _canEditLayout ? `
-        <div class="btn-group ms-auto" role="group">
-            <button class="btn btn-sm btn-secondary" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
-                <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
-            <button type="button" class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split" id="dwEditCaret"
-                    data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">
-                <span class="visually-hidden">${t('dashboard_save_layout')}</span></button>
-            <ul class="dropdown-menu dropdown-menu-end ss-fs-3">
-                <li><button type="button" class="dropdown-item py-1" onclick="_dwSaveDb()" title="${escAttr(t('dashboard_save_layout_tt'))}">
-                    <i class="bi bi-save me-1"></i>${t('dashboard_save_layout')}</button></li>
-                <li><button type="button" class="dropdown-item py-1" onclick="_dwReset()" title="${escAttr(t('dashboard_reset_tt'))}">
-                    <i class="bi bi-arrow-counterclockwise me-1"></i>${t('dashboard_reset')}</button></li>
-                <li><button type="button" class="dropdown-item py-1" onclick="_dwClearConfig()" title="${escAttr(t('dashboard_clear_tt'))}">
-                    <i class="bi bi-eraser me-1"></i>${t('dashboard_clear')}</button></li>
-                ${perms.has('overview_set_default') ? `<li><hr class="dropdown-divider my-1"></li>
-                <li><button type="button" class="dropdown-item py-1" onclick="_dwSetDefault()" title="${escAttr(t('dashboard_set_default_tt'))}">
-                    <i class="bi bi-pin-angle me-1"></i>${t('dashboard_set_default')}</button></li>` : ''}
-                ${perms.has('overview_reset_factory') ? `<li><button type="button" class="dropdown-item py-1 text-danger" onclick="_dwResetFactory()" title="${escAttr(t('dashboard_reset_factory_tt'))}">
-                    <i class="bi bi-bootstrap-reboot me-1"></i>${t('dashboard_reset_factory')}</button></li>` : ''}
-            </ul>
-        </div>` : '';
-    // Fullscreen / 24/7 kiosk toggle — available to everyone who can see the overview.
-    const kioskBtn = `
-        <button class="btn btn-sm btn-secondary${_canEditLayout ? '' : ' ms-auto'}" onclick="_dwToggleKiosk()" title="${escAttr(t('dashboard_fullscreen_tt'))}">
-            <i class="bi bi-arrows-fullscreen me-1"></i>${t('dashboard_fullscreen')}</button>`;
-    // The auto-refresh countdown now lives inside the dropdown button (rendered
-    // by _renderRefreshBar). The kiosk centred bar below reuses the same
-    // .ov-rc-* classes so _startOverviewCountdown animates both at once.
-    const _ovInt = _overviewTimer?._interval || 0;
-    const ctrlBtns = editBtns + kioskBtn;
-
-    // Controls bar (hidden in kiosk mode) wraps the refresh/edit/fullscreen buttons.
-    let h = `<div id="overview-controls">`;
-    h += _renderRefreshBar('overview-container', 'renderOverview',
-        () => _overviewTimer, 'setOverviewAutoRefresh', ctrlBtns,
-        { id: 'ov', countClass: 'ov-rc-count', fillClass: 'ov-rc-fill' });
-    h += `</div>`;
+    // Controls bar (refresh pill + edit/fullscreen buttons) — its inner HTML is built by
+    // _dwControlsHtml so an interval change can re-render just this bar in place. The
+    // manual Refresh button does an in-place data refresh (refreshOverview), not a rebuild.
+    let h = `<div id="overview-controls">${_dwControlsHtml()}</div>`;
 
     // Add-widget bar (shown only in edit mode)
     h += `<div id="dwAddBar" class="d-none d-flex flex-wrap align-items-center gap-2 mb-3 px-3 py-2 rounded-3 border" style="background:var(--bs-secondary-bg)"></div>`;
 
-    // Centered countdown bar — rendered outside #overview-controls and shown
-    // ONLY in kiosk mode (CSS), where the toolbar pill is hidden.
-    if (_ovInt > 0) {
-        h += `<div id="ov-refresh-bar">
-            <div class="ov-refresh-track"><div class="ov-refresh-fill ov-rc-fill" style="width:100%"></div></div>
-            <div class="small text-muted mt-1"><i class="bi bi-arrow-clockwise me-1"></i>${t('status_refreshing_in')} <span class="ov-rc-count">${_ovInt}</span>${t('status_seconds_abbr')}</div>
-        </div>`;
-    }
+    // Centered countdown bar — rendered outside #overview-controls and shown ONLY in
+    // kiosk mode (CSS), where the toolbar pill is hidden.
+    const _ovInt = _overviewTimer?._interval || 0;
+    if (_ovInt > 0)
+        h += `<div id="ov-refresh-bar">${_dwKioskBarInner(_ovInt)}</div>`;
 
     // Dashboard grid
     const gridEdit = _dwEditing ? ' dashboard-edit' : '';
@@ -313,5 +347,5 @@ async function renderOverview() {
     }
 
     // Syslog table widget with a minimum severity → load that level server-side.
-    _dwSyslogAsyncRefresh();
+    _dwAsyncWidgets();
 }

@@ -91,7 +91,34 @@ document.getElementById('btn-subtab-credentials')?.addEventListener('shown.bs.ta
 });
 document.getElementById('mainTabs')?.addEventListener('shown.bs.tab', e => {
     localStorage.setItem('ss_active_tab', e.target.dataset.bsTarget);
+    // Stamp the login this tab was remembered under (see _resolveLandingTab): a new
+    // login resets to the configured landing; a reload (same login) restores this tab.
+    localStorage.setItem('ss_active_tab_login', (currentUser && currentUser.login_id) || '');
 });
+
+// Which tab the admin panel opens on. The landing PAGE (admin vs the /status page)
+// is decided server-side at login; here we only pick the tab inside the panel: a
+// fresh login opens Overview (the admin home), while a reload (F5) within the same
+// login restores the last visited tab. login_id (the session id) distinguishes them.
+function _resolveLandingTab() {
+    const tabVisible = target => {
+        const btn = document.querySelector(`[data-bs-target="${target}"]`);
+        return !!(btn && btn.closest('li')?.style.display !== 'none');
+    };
+    const firstVisible = () => {
+        const li = [...document.querySelectorAll('#mainTabs > li.nav-item')]
+            .find(el => el.style.display !== 'none');
+        return li ? li.querySelector('[data-bs-target]')?.dataset.bsTarget : null;
+    };
+    const home = tabVisible('#tab-overview') ? '#tab-overview' : firstVisible();
+    const savedTab   = localStorage.getItem('ss_active_tab');
+    const savedLogin = localStorage.getItem('ss_active_tab_login');
+    const isReload = savedLogin && currentUser.login_id && savedLogin === currentUser.login_id;
+    const target = (isReload && savedTab && tabVisible(savedTab)) ? savedTab : home;
+    localStorage.setItem('ss_active_tab_login', currentUser.login_id || '');
+    if (target) localStorage.setItem('ss_active_tab', target);
+    return target;
+}
 // Clear auto-update field indicators when navigating away from the config tab.
 document.getElementById('btn-tab-config')?.addEventListener('hide.bs.tab', () => {
     _autoupdatedFields.clear();
@@ -179,9 +206,10 @@ try {
     renderConfig();
     renderServers();
     applyRoleRestrictions();
-    const _savedTab = localStorage.getItem('ss_active_tab');
-    if (_savedTab) {
-        const _tabBtn = document.querySelector(`[data-bs-target="${_savedTab}"]`);
+    // Configured landing page (per user/group/global) on a fresh login; last tab on reload.
+    const _landingTab = _resolveLandingTab();
+    if (_landingTab) {
+        const _tabBtn = document.querySelector(`[data-bs-target="${_landingTab}"]`);
         if (_tabBtn && _tabBtn.closest('li')?.style.display !== 'none') {
             bootstrap.Tab.getOrCreateInstance(_tabBtn).show();
         }

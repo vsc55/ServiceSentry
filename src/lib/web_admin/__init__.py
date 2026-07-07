@@ -4,7 +4,7 @@
 
 ``WebAdmin`` is exposed lazily (PEP 562): importing a lightweight submodule such
 as :mod:`lib.i18n` — which the Flask-free notification subsystem
-(:mod:`lib.notify`) pulls for e-mail templates — must NOT drag in the whole
+(:mod:`lib.core.notify`) pulls for e-mail templates — must NOT drag in the whole
 Flask app.  ``from lib.web_admin import WebAdmin`` keeps working on demand.
 """
 

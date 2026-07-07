@@ -13,7 +13,7 @@ flowchart TD
     monitor["lib/services/monitoring/monitor.py<br/><small>Motor principal: carga módulos, ThreadPool,<br/>gestión de estado, despacho de notificaciones</small>"]
     main --> monitor
 
-    telegram["Telegram<br/><small>lib/core</small>"]
+    telegram["Telegram<br/><small>lib/providers</small>"]
     state["Estado checks<br/><small>tabla BD check_state</small>"]
     watchfuls["Watchfuls<br/><small>packages</small>"]
     monitor --> telegram
@@ -40,20 +40,24 @@ ObjectBase (lib/core/object_base.py)
 ├── Monitor (lib/services/monitoring/monitor.py)
 ├── Telegram (lib/providers/telegram.py)
 ├── ConfigManager (lib/config/manager.py)         ← ÚNICO dueño de la E/S de config (read/write/migrate)
-│   ├── ConfigStore-BD (lib/stores/config.py)      ← capa editable: tabla `config` (una fila por sección|campo)
+│   ├── ConfigStore-BD (lib/core/config/store.py)      ← capa editable: tabla `config` (una fila por sección|campo)
 │   ├── ConfigControl (lib/config/config_control.py)  ← I/O JSON de config.json (solo arranque + pins)
 │   └── lib/config/resolve.py: resolve_config() fusiona env > config.json > BD > default;
 │       migrate_config_to_db() migración única; FILE_ONLY_SECTIONS = {database}
-│       (webhooks NO: tienen su propia tabla, lib/stores/webhooks.py)
+│       (webhooks NO: tienen su propia tabla, lib/core/notify/webhook/store.py)
 │       (lib/config/spec.py: registro central de defaults; load_config() ya NO siembra a disco)
 ├── WebAdmin (lib/web_admin/app.py)
-│   ├── _UsersMixin      (lib/web_admin/mixins/users.py)
-│   ├── _RolesMixin      (lib/web_admin/mixins/roles.py)
-│   ├── _GroupsMixin     (lib/web_admin/mixins/groups.py)
-│   ├── _PermissionsMixin(lib/web_admin/mixins/permissions.py)
-│   ├── _SessionsMixin   (lib/web_admin/mixins/sessions.py)
-│   ├── _AuditMixin      (lib/web_admin/mixins/audit.py)
-│   ├── _ChecksMixin     (lib/web_admin/mixins/checks.py)   ← checks on-demand (UI); usan el ejecutor compartido
+│   # Dominios de núcleo empaquetados como módulos self-contained en lib/core/<d>/
+│   # (store + mixin + routes + permissions); WebAdmin HEREDA su mixin:
+│   ├── _UsersMixin      (lib/core/users/mixin.py)
+│   ├── _RolesMixin      (lib/core/roles/mixin.py)
+│   ├── _GroupsMixin     (lib/core/groups/mixin.py)
+│   ├── _SessionsMixin   (lib/core/sessions/mixin.py)
+│   ├── _AuditMixin      (lib/core/audit/mixin.py)   (store en el módulo; también lo importan monitoring/events)
+│   ├── _ChecksMixin     (lib/services/monitoring/checks_mixin.py) ← Checks tab = glue del motor de monitoring
+│   # Glue que sigue en lib/web_admin/mixins/ (infra sin permisos propios / host de discovery):
+│   ├── _PermissionsMixin(lib/web_admin/mixins/permissions.py)  ← calcula permisos efectivos
+│   ├── _AuthMixin       (lib/web_admin/mixins/auth.py)         ← login local/LDAP/OIDC/SAML
 │   └── _ServicesMixin   (lib/web_admin/mixins/services.py) ← descubre + controla los servicios embebidos
 │   # Los servicios NO se heredan: WebAdmin COMPONE un objeto embebido por servicio
 │   # (self._embedded_services), construido en __init__:
@@ -65,24 +69,26 @@ ObjectBase (lib/core/object_base.py)
 │   ├── SQLiteConnector       (lib/db/sqlite.py)      [por defecto]
 │   ├── MySQLConnector        (lib/db/mysql.py)
 │   └── PostgreSQLConnector   (lib/db/postgresql.py)
-├── Stores (lib/stores/, reciben un BaseConnector inyectado)
-│   ├── UsersStore      (lib/stores/users.py)        → tablas users, users_groups
-│   ├── GroupsStore     (lib/stores/groups.py)       → tablas groups, groups_roles
-│   ├── RolesStore      (lib/stores/roles.py)        → tabla roles
-│   ├── SessionsStore   (lib/stores/sessions.py)     → tabla sessions
-│   ├── AuditStore      (lib/stores/audit.py)        → tabla audit
-│   ├── CheckStateStore (lib/stores/check_state/store.py)  → tabla check_state (estado vivo de checks)
-│   ├── CredentialsStore(lib/stores/credentials.py)  → tabla credentials (identidades SSH reutilizables)
-│   ├── HistoryStore    (lib/stores/history.py)      → tabla history (series temporales)
-│   ├── HostsStore      (lib/stores/hosts.py)        → tabla hosts (servidores + perfiles de conexión)
-│   ├── ModulesStore    (lib/stores/modules/store.py)  → tablas module_config, module_config_items (config de módulos/ítems)
-│   ├── ConfigStore     (lib/stores/config.py)       → tabla config (capa editable: una fila por sección|campo)
-│   ├── WebhooksStore   (lib/stores/webhooks.py)     → tabla webhooks (destinos HTTP salientes)
-│   ├── EventRulesStore (lib/stores/event/rules.py)  → tabla event_rules (reglas de notificación)
-│   ├── NotificationLogStore (lib/stores/event/log.py) → tabla notification_log (log de envíos)
-│   ├── EventStateStore (lib/stores/event/state.py)   → tablas event_cooldowns + event_cursor (estado del worker de eventos)
-│   ├── SyslogStore     (lib/stores/syslog/messages.py)  → tabla syslog (mensajes; puede ir en BD dedicada)
-│   └── SyslogDropsStore(lib/stores/syslog/drops.py)     → tabla syslog_drops (orígenes descartados por la allowlist)
+├── Stores (reciben un BaseConnector inyectado)
+│   # Stores de dominios de núcleo movidos a su módulo (lib/core/<d>/store.py):
+│   ├── UsersStore      (lib/core/users/store.py)     → tablas users, users_groups
+│   ├── GroupsStore     (lib/core/groups/store.py)    → tablas groups, groups_roles
+│   ├── RolesStore      (lib/core/roles/store.py)     → tabla roles
+│   ├── SessionsStore   (lib/core/sessions/store.py)  → tabla sessions
+│   ├── AuditStore      (lib/core/audit/store.py)        → tabla audit (COMPARTIDO: lo usan monitoring/events)
+│   # Resto de stores, en su servicio/dominio (lib/services/*/store, lib/core/*):
+│   ├── CheckStateStore (lib/services/monitoring/check_state/store.py)  → tabla check_state (estado vivo de checks)
+│   ├── CredentialsStore(lib/core/credentials/store.py)  → tabla credentials (identidades SSH reutilizables)
+│   ├── HistoryStore    (lib/core/history/store.py)      → tabla history (series temporales)
+│   ├── HostsStore      (lib/core/hosts/store.py)        → tabla hosts (servidores + perfiles de conexión)
+│   ├── ModulesStore    (lib/core/modules/store.py)  → tablas module_config, module_config_items (config de módulos/ítems)
+│   ├── ConfigStore     (lib/core/config/store.py)       → tabla config (capa editable: una fila por sección|campo)
+│   ├── WebhooksStore   (lib/core/notify/webhook/store.py) → tabla webhooks (destinos HTTP salientes)
+│   ├── EventRulesStore (lib/services/events/store/rules.py)  → tabla event_rules (reglas de notificación)
+│   ├── NotificationLogStore (lib/services/events/store/log.py) → tabla notification_log (log de envíos)
+│   ├── EventStateStore (lib/services/events/store/state.py)   → tablas event_cooldowns + event_cursor (estado del worker de eventos)
+│   ├── SyslogStore     (lib/services/syslog/store/messages.py)  → tabla syslog (mensajes; puede ir en BD dedicada)
+│   └── SyslogDropsStore(lib/services/syslog/store/drops.py)     → tabla syslog_drops (orígenes descartados por la allowlist)
 └── ModuleBase (lib/modules/module_base.py)
     ├── watchfuls.cpu::Watchful               🌐 (multiplataforma)
     ├── watchfuls.datastore::Watchful         🌐 (multiplataforma; MySQL/PostgreSQL/MSSQL/Mongo/Redis/Influx/Elastic)
@@ -120,15 +126,11 @@ ServiceSentry/
 │   ├── pytest.ini                       # Configuración pytest (testpaths = tests watchfuls)
 │   ├── lib/
 │   │   ├── __init__.py                  # Exports: ObjectBase, DictFilesPath, Monitor, Telegram, Exec, ExecResult, Mem, MemInfo
-│   │   ├── core/                        # Primitivas compartidas del núcleo
-│   │   │   ├── object_base.py           # Clase base con el Debug compartido por TODAS las clases
-│   │   │   └── telegram.py              # Cliente de alertas (cola), usado por el monitor y por lib/notify
-│   │   ├── i18n/                        # Traducciones de toda la app (UI web + emails): __init__.py (loader) + lang/ (en_EN.py, es_ES.py)
-│   │   ├── util/                        # Helpers puros sin estado: tools.py (bytes2human) + os_detect.py (detección de SO local/remoto)
+│   │   ├── i18n/                        # Traducciones de toda la app (UI web + emails): __init__.py (loader, DEFAULT_LANG/SUPPORTED_LANGS/TRANSLATIONS/coerce_lang) + lang/ (en_EN.py, es_ES.py)
+│   │   ├── util/                        # Helpers puros sin estado: tools.py (bytes2human) + os_detect.py (SO local/remoto) + entity_audit.py (touch_entity/track_change)
 │   │   ├── security/                    # Primitivas de seguridad: secret_manager.py (cifrado Fernet, enc: prefix, ENCRYPT_KEYS) + net_guard.py (validate_external_url, guard SSRF)
-│   │   ├── system/                      # Capa de acceso al host: ejecución (exe/ssh_client) + colectores de métricas (mem, linux/)
+│   │   ├── system/                      # Capa de acceso al host: ejecución (exe) + colectores de métricas (mem, linux/)
 │   │   │   ├── exe.py                   # Ejecución de comandos local/remoto (Exec, ExecResult)
-│   │   │   ├── ssh_client.py            # Cliente SSH (paramiko) compartido
 │   │   │   ├── mem.py                   # Lectura de RAM/SWAP (multiplataforma vía psutil)
 │   │   │   ├── mem_info.py              # Dataclass MemInfo (total, free, used, percent)
 │   │   │   ├── linux/                   # Colectores específicos de Linux (RAID, térmico)
@@ -137,21 +139,20 @@ ServiceSentry/
 │   │   │   │   ├── thermal_info_collection.py   # Sensores térmicos /sys/class/thermal
 │   │   │   │   └── raid_mdstat.py       # Parser /proc/mdstat (RAID)
 │   │   │   └── windows/                 # Específico de Windows: ports.py (rangos TCP reservados vía netsh excludedportrange)
-│   │   ├── stores/                      # Repositorios DB-backed, uno por entidad (cada uno declara su TableSpec)
-│   │   │   ├── users.py                 # UsersStore      → tablas users, users_groups
-│   │   │   ├── groups.py                # GroupsStore     → tablas groups, groups_roles
-│   │   │   ├── roles.py                 # RolesStore      → tabla roles
-│   │   │   ├── sessions.py              # SessionsStore   → tabla sessions
-│   │   │   ├── audit.py                 # AuditStore      → tabla audit
-│   │   │   ├── check_state/             # paquete: store.py (CheckStateStore, tabla check_state) + facade.py (DbBackedStatus)
-│   │   │   ├── credentials.py           # CredentialsStore→ tabla credentials (identidades SSH reutilizables)
-│   │   │   ├── history.py               # HistoryStore    → tabla history (series temporales)
-│   │   │   ├── hosts.py                 # HostsStore      → tabla hosts (servidores + perfiles)
-│   │   │   ├── modules/                 # paquete: store.py (ModulesStore, tablas module_config[_items]) + facade.py (DbBackedModules)
-│   │   │   ├── config.py                # ConfigStore     → tabla config (capa editable: una fila por sección|campo)
-│   │   │   ├── webhooks.py              # WebhooksStore   → tabla webhooks (destinos HTTP salientes)
-│   │   │   ├── event/                   # paquete: rules.py (EventRulesStore) + state.py (EventStateStore: event_cooldowns/event_cursor) + log.py (NotificationLogStore)
-│   │   │   └── syslog/                  # paquete: messages.py (SyslogStore; BD dedicada opcional) + drops.py (SyslogDropsStore). Distinto de lib.services.syslog (el receptor)
+│   │   ├── core/                        # Núcleo: primitivas + infra transversal + dominios self-contained
+│   │   │   ├── object_base.py           # ObjectBase (clase base con Debug compartido)
+│   │   │   ├── constants.py             # SYSTEM_USER (centinela de autor de auditoría; fuente única)
+│   │   │   ├── permissions.py           # RBAC: ROLES/PERMISSIONS/PERMISSION_GROUPS/BUILTIN_ROLE_* + is_*_perm + discover_permissions() (escanea lib.core.* + lib.services.*)
+│   │   │   ├── users/ roles/ groups/ sessions/ audit/   # store.py + mixin.py + routes.py + permissions.py
+│   │   │   ├── credentials/ history/ config/            # store.py + routes(.py|/) + permissions.py (sin mixin; store lo importan servicios)
+│   │   │   ├── modules/                                 # store.py + facade.py + routes.py + watchful_routes.py + permissions.py
+│   │   │   ├── hosts/                                   # store.py + routes/ + profiles/runner/ssh_client/resolve/probe/migrate + permissions.py (grupo perm = 'servers')
+│   │   │   ├── clusters/ overview/                      # solo permissions.py (grupos virtuales, sin store/routes propios)
+│   │   │   └── notify/                  # Subsistema de notificación (sin Flask; lo usan web, monitor y daemons syslog/events)
+│   │   │       ├── notification_dispatcher.py  # dispatch(): enruta cada evento a Telegram/Email/Webhook
+│   │   │       ├── telegram/            # notify.py (canal, envuelve lib/providers/telegram.py) + routes.py
+│   │   │       ├── email/               # notify.py (SMTP/M365 vía providers/entraid/Gmail) + templates.py (HTML i18n) + routes.py + template_routes.py
+│   │   │       └── webhook/             # notify.py (HMAC opcional) + store.py (WebhooksStore, tabla webhooks) + routes.py + test_routes.py
 │   │   ├── services/                    # Servicios de fondo (embebidos o standalone) + el controlador central
 │   │   │   ├── __init__.py              # discover_embedded_services(): escanea los paquetes y recoge su EMBEDDED_SERVICE (auto-descubrimiento)
 │   │   │   ├── base.py                  # ServiceDescriptor: contrato de un servicio (key/label/icon/status/control)
@@ -173,13 +174,11 @@ ServiceSentry/
 │   │   │       ├── manager.py           # _EventsMixin: evalúa reglas + worker por cursor (syslog/audit); compartido web/standalone
 │   │   │       ├── embedded.py          # EmbeddedEvents: worker embebido (mode/autostart; stores delegados al host)
 │   │   │       └── service.py           # EventService: worker standalone (main.py --events)
-│   │   ├── hosts/                       # Dominio de hosts (no la tabla; eso es stores/hosts.py)
-│   │   │   ├── profiles.py              # Catálogo protocolo→campos (de __host_profile__)
-│   │   │   ├── runner.py                # Ejecución de comandos local/SSH (run, is_remote)
-│   │   │   ├── ssh_client.py            # Transporte SSH (paramiko: connect/run_command/test_connection)
-│   │   │   ├── resolve.py               # Primitivas de resolución host (host_profile_specs, resolve_os)
-│   │   │   ├── probe.py                 # Ejecuta un check de un módulo una sola vez (asistente)
-│   │   │   └── migrate.py               # Asistente: agrupar conexiones inline en hosts
+│   │   │   ├── ipban/                   # fail2ban interno: jail.py (IpBanManager) + manager.py (_IpBanMixin) + exposed.py + embedded.py + routes.py + store/ (una clase por tabla)
+│   │   │   ├── control/                 # Control-plane de servicios: instances.py + commands.py + leader.py + routes.py (/api/v1/services/*)
+│   │   │   ├── control_server.py        # Servidor de control de servicios standalone
+│   │   │   └── heartbeat.py             # Heartbeat entre instancias de servicio
+│   │   │   # (hosts: primitivas de conexión/ejecución movidas a lib/core/hosts/ — ver bloque core/)
 │   │   ├── db/                          # Capa de BD pluggable (SQLite/MySQL/PostgreSQL)
 │   │   │   ├── __init__.py              # get_connector(config, default_sqlite_path)
 │   │   │   ├── base.py                  # BaseConnector + reconcile_table() (reconciliación de esquema)
@@ -207,43 +206,35 @@ ServiceSentry/
 │   │   │       └── overview_widgets.py    # Catálogo de widgets de Overview (reutiliza helpers de credential_schemas)
 │   │   ├── providers/                   # Integraciones externas (identidad/cloud); capa baja, sin Flask
 │   │   │   ├── telegram.py              # Cliente de la Bot API de Telegram (Telegram + send_telegram)
+│   │   │   ├── ldap/                    # LDAP/AD: auth.py (lógica ldap3) + routes.py (/api/v1/auth/ldap/*)
+│   │   │   ├── oidc/                    # OIDC/OAuth2 SSO: auth.py (authlib) + routes.py (/auth/oidc/*)
+│   │   │   ├── saml/                    # SAML2 SSO: auth.py (python3-saml) + routes.py (/auth/saml2/*) [alpha]
+│   │   │   ├── scim/                    # SCIM 2.0: service.py (protocolo, sin Flask) + routes.py (/scim/v2/*)
 │   │   │   └── entraid/                 # Microsoft Entra ID / Graph (paquete)
 │   │   │       ├── client.py            # Constantes Graph/authority + graph_error()
 │   │   │       ├── auth.py              # Tenant/token app-only + device-code (start/poll)
 │   │   │       ├── directory.py         # Grupos de Entra (fetch_groups, lookup_group)
 │   │   │       ├── mail.py              # Envío de correo vía Graph (Microsoft 365)
 │   │   │       ├── provisioning.py      # Alta de apps (roles/scopes/consent/SSO)
-│   │   │       └── declarations.py      # Descubrimiento de __entraid_provision__ en watchfuls
-│   │   ├── notify/                      # Subsistema de notificación (sin Flask; lo usan web, monitor y daemons syslog/events)
-│   │   │   ├── notification_dispatcher.py  # dispatch(): enruta cada evento a Telegram/Email/Webhook
-│   │   │   ├── telegram_notify.py       # Canal Telegram (envuelve lib/providers/telegram.py)
-│   │   │   ├── email_notify.py          # Canal email (SMTP / Microsoft 365 vía providers/entraid / Gmail)
-│   │   │   ├── email_templates.py       # Plantillas HTML de email (i18n vía lib.i18n)
-│   │   │   └── webhook_notify.py        # Canal webhooks (HMAC opcional)
+│   │   │       ├── declarations.py      # Descubrimiento de __entraid_provision__ en watchfuls
+│   │   │       └── routes.py            # /api/v1/auth/entra* (registro de app + device-code de provisión SCIM)
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
-│   │       ├── app.py                   # Clase WebAdmin (hereda de los 11 mixins)
-│   │       ├── constants.py             # PERMISSIONS (52), BUILTIN_ROLE_UIDS/GROUP_UIDS, SYSTEM_USER
+│   │       ├── app.py                   # Clase WebAdmin (hereda mixins de lib/web_admin/mixins + lib/core/* + lib/services/*)
+│   │       ├── constants.py             # SOLO HOME_PAGES + home_page_ids (landing pages).
+│   │       │                            #   RBAC → lib/core/permissions.py; SYSTEM_USER → lib/core/constants.py; i18n → lib.i18n
 │   │       ├── templates/               # Plantillas Jinja2 (+ partials JS por feature)
-│   │       ├── auth/                    # Autenticación externa (opcional)
-│   │       │   ├── ldap_auth.py         # LDAP/AD (ldap3)
-│   │       │   ├── oidc_auth.py         # OIDC/OAuth2 SSO (authlib)
-│   │       │   └── saml_auth.py         # SAML2 SSO (python3-saml) [alpha]
-│   │       ├── mixins/                  # Lógica de negocio por dominio (8 mixins; los servicios NO son mixins)
-│   │       │   ├── users.py roles.py groups.py permissions.py
-│   │       │   ├── sessions.py audit.py checks.py
-│   │       │   └── services.py          # _ServicesMixin: descubre + controla los servicios embebidos (composición, lib/services/*/embedded.py)
+│   │       ├── mixins/                  # Glue de infra que NO es dominio propio:
+│   │       │   └── permissions.py auth.py services.py   # permisos efectivos / login local / host de discovery de servicios
+│   │       │   # Dominios (users/roles/groups/sessions/audit) → lib/core/<d>/mixin.py; checks → lib/services/monitoring/checks_mixin.py.
+│   │       │   # Auth externa (LDAP/OIDC/SAML) → lib/providers/{ldap,oidc,saml}/.
 │   │       └── routes/                  # Registradores de rutas Flask (ver web_admin.md)
-│   │           ├── __init__.py          # register_all(app, wa)
-│   │           ├── auth/                # /login, /logout, /api/v1/auth/ldap|entraid/*
-│   │           ├── users/               # /api/v1/users, /me, roles, groups
-│   │           ├── sessions/            # /api/v1/sessions, /api/v1/audit
-│   │           ├── modules/             # /api/v1/modules, status, overview, checks/run
-│   │           ├── notify/              # /api/v1/notify/* (telegram, email, webhook, templates)
-│   │           ├── config/ (paquete)  events/ (paquete)  hosts/ (paquete)  syslog/ (paquete)
-│   │           ├── watchfuls.py history.py daemon.py credentials.py services.py
-│   │           ├── notify/webhooks.py  (webhooks bajo notify/)
-│   │           ├── status.py ui.py errors.py
-│   │           └── …                    # (inventario completo de endpoints en web_admin.md)
+│   │           ├── __init__.py          # register_all(app, wa) — registra también los routes de core/servicios/providers
+│   │           ├── auth.py              # /login, /logout + _establish_session/_landing_url (login local; LDAP/OIDC/SAML se registran desde lib/providers/*)
+│   │           ├── status.py ui.py errors.py util.py
+│   │           └── …                    # Los demás registradores viven con su dominio/servicio:
+│   │                                    #   core:      users/roles/groups/sessions/audit/config/credentials/history/hosts/modules(+watchful_routes)/notify/*
+│   │                                    #   services:  monitoring/routes/(checks,daemon), syslog, events, ipban, control
+│   │                                    #   providers: ldap/oidc/saml/scim/entraid (auth externa + SCIM)
 │   ├── watchfuls/                       # Módulos de monitorización (packages)
 │   │   ├── filesystemusage/             # 🌐 Multiplataforma (psutil)
 │   │   │   ├── __init__.py              # Implementación del módulo
@@ -361,63 +352,17 @@ Esto evita enviar la misma alerta repetidamente en cada ciclo.
 
 ---
 
-## Servicios de fondo: registro, descubrimiento y composición
+## Servicios de fondo
 
-Los tres servicios de larga vida (monitor, syslog, eventos) viven en `lib/services/`
-y cada uno corre en **dos modos** con el **mismo código**: **embebido** en el panel
-web o **standalone** como su propio proceso (`--monitor`/`--syslog`/`--events`). La
-lógica del ciclo de vida está en el mixin compartido del paquete (`manager.py`); solo
-cambia el *host* que aporta el contexto (config, stores, debug).
+ServiceSentry corre servicios de larga vida (monitor, syslog, eventos, fail2ban) con el
+**mismo código** en dos modos — **embebido** en el panel o **standalone** (proceso/pod
+dedicado). El panel los **descubre** (`EMBEDDED_SERVICE`, patrón self-describing →
+[discovery.md](discovery.md#3-servicios-embebidos-embedded_service)), los **compone** y los
+**controla**; en modo microservicios la coordinación va por la **BD compartida** (estado
+deseado/observado, cola de comandos, lease de líder) con un *poke* HTTP opcional.
 
-### Mismo código, dos hosts (embebido vs standalone)
-
-```mermaid
-flowchart LR
-    mgr["manager.py · _MonitoringMixin<br/>(scheduler, sin Flask)"]
-    eng["monitor.py · Monitor<br/>(motor de checks)"]
-    mgr -->|usa| eng
-    mgr --> emb["embedded.py · EmbeddedMonitor<br/>contexto = WebAdmin (delegado)"]
-    mgr --> svc["service.py · MonitorService<br/>contexto = propio (conector/config)"]
-    emb --> web(["panel web · embebido"])
-    svc --> proc(["proceso/contenedor dedicado · --monitor"])
-```
-
-> syslog y events siguen el mismo patrón (`manager.py` compartido + `embedded.py` +
-> `service.py`).  El gate `SS_*_EMBEDDED` decide si el panel lo hospeda (`embedded.py`)
-> o lo posee un proceso dedicado (`service.py`).
-
-### Arranque del panel web: descubrir → componer → arrancar
-
-El WebAdmin **no hereda** los servicios: los **compone**.  Cada paquete se
-autodescribe (`EMBEDDED_SERVICE`), el registro los descubre, y el panel construye un
-objeto embebido por servicio que se arranca a sí mismo según su gating.
-
-```mermaid
-flowchart TB
-    init["WebAdmin.__init__"] --> disc["lib.services.discover_embedded_services()<br/>escanea los paquetes de lib/services/"]
-    disc --> meta["EMBEDDED_SERVICE de cada paquete<br/>{key, label, icon, order, controllable}"]
-    meta --> build["build_embedded_services(host)<br/>llama make_embedded(host) por paquete"]
-    build --> objs["self._embedded_services<br/>{monitoring, syslog, events}"]
-    objs --> boot["for svc: svc.start_at_boot()<br/>(cada uno decide enabled+embedded+autostart)"]
-    objs --> reg["_ServicesMixin._service_registry()<br/>ServiceDescriptor(status, control) por objeto"]
-    reg --> tab(["pestaña Services<br/>label · icon · estado · detalle · start/stop"])
-```
-
-### Pestaña Services: estado y control (iterando el registro)
-
-```mermaid
-flowchart TB
-    g["GET /api/v1/services"] --> agg["_services_status_dict()<br/>itera el registro: {key: obj.status()}"]
-    agg --> dyn["cada entry es auto-descriptiva:<br/>label_key · icon · detail[]"]
-    dyn --> card(["card genérico (sin ramas por-servicio)"])
-
-    p["POST /api/v1/services/&lt;key&gt;/&lt;action&gt;"] --> ctl["_service_control()<br/>registry.get(key).control(action)"]
-    ctl --> obj["Embedded&lt;X&gt;.control()<br/>guards + start/stop + auditoría"]
-
-    cfg["PUT /api/v1/config (guardar)"] --> inval["_write_config + invalidate"]
-    inval --> react["for svc in _embedded_services:<br/>svc.on_config_changed(changed)"]
-    react --> rule(["cada servicio reacciona: reload / stop"])
-```
+→ Toda la arquitectura de servicios (qué hay, cómo se crean, descubrimiento, estado y
+comunicación en microservicios, alta disponibilidad) está en **[services.md](services.md)**.
 
 ### Ejecución de checks: un único ejecutor
 
@@ -435,102 +380,11 @@ flowchart TB
     ex --> res(["(results, errors)"])
 ```
 
-> Añadir un servicio nuevo a la pestaña = soltar un paquete en `lib/services/` con su
-> `EMBEDDED_SERVICE` + `embedded.py` (que aporta `status`/`control`/`start_at_boot` y,
-> opcionalmente, `on_config_changed`).  Aparece solo en la API, el card, el log de
-> arranque y el control — **cero ediciones** en el panel ni el frontend.
-
-### Plano de control distribuido (servicios en otros procesos / pods)
-
-Cuando un servicio corre **embebido**, el panel lo controla con una llamada en
-proceso (`Embedded<X>.control()`).  Cuando corre en **otro contenedor/pod**
-(`SS_*_EMBEDDED=0`), no hay objeto local que llamar — la coordinación va por la
-**base de datos compartida**, que es la **fuente de verdad**.  Se separan tres
-conceptos en tres sitios distintos:
-
-| Concepto | Qué es | Dónde vive |
-|---|---|---|
-| **Desired state** | lo que el operador quiere (`enabled`, intervalo…) | tabla `config` (declarativo, editable en el panel) |
-| **Observed state** | qué está realmente vivo (latido, último ciclo, versión, `control_url`) | tabla `service_instances` ([`ServiceInstancesStore`]) |
-| **Comandos** | acciones one-shot (`run_now`/`reload`/`clear_status`/`prune`) | tabla `service_commands` ([`ServiceCommandsStore`], claim atómico) |
-| **Liderazgo** | quién es el dueño activo de un servicio single-owner | tabla `service_leader` ([`ServiceLeaderStore`], lease con TTL) |
-
-Cada servicio **reconcilia** hacia el desired-state y **publica su latido**; el panel
-**lee** el estado observado y, para acelerar, **hace un poke HTTP** opcional. El poke
-es solo un acelerador: si se pierde, el reconcile periódico converge igual.
-
-```mermaid
-sequenceDiagram
-    participant UI as web_admin
-    participant DB as BD compartida
-    participant SVC as servicio (pod)
-    UI->>DB: 1. escribe desired-state / encola comando
-    UI--)SVC: 2. POST /control/reconcile (best-effort, token)
-    SVC->>DB: 3. lee desired-state + reclama comandos
-    SVC->>SVC: 4. reconcile (start/stop) + ejecuta comando + ack
-    SVC--)DB: 5. heartbeat (last_seen, running, last_cycle, control_url)
-    DB-->>UI: 6. lee estado observado (no sondea pods)
-    Note over UI,SVC: si el poke (2) se pierde → el reconcile periódico converge igual
-```
-
-Piezas:
-- **`_HeartbeatMixin`** (`lib/services/heartbeat.py`): hilo de latido (~10 s) que
-  escribe `service_instances`, **drena la cola de comandos** del servicio y expone
-  `_control_reconcile()` (el objetivo del poke).  Lo mezclan tanto los `Embedded<X>`
-  como los `*Service` standalone.
-- **`_reconcile_once()`** por servicio: re-lee config y aplica el desired-state
-  (start/stop, reload de listener…).  Lo invocan el timer **y** el poke.
-- **`control_server.py`**: `ThreadingHTTPServer` (stdlib, sin Flask) que cada
-  servicio standalone levanta si hay `SS_CONTROL_TOKEN`.  Endpoints:
-  `GET /control/health` (sin auth, probes — `{ok, key, version}`, sin datos
-  sensibles), `GET /control/info` (Bearer token — snapshot vivo: status, BD,
-  líder, versión…) y `POST /control/reconcile` (Bearer token — reconcile + drain).
-- **Poke desde el panel**: `_poke_service_instances(key)` → `POST /control/reconcile`
-  a las instancias externas vivas (descubiertas por `control_url` del heartbeat).
-  Se dispara al **encolar un comando** para un servicio externo y al **guardar
-  config** que afecte a un servicio (`_poke_services_for_config`).
-
-Variables de entorno del poke (mapean a un Secret de k8s): `SS_CONTROL_TOKEN`
-(sin token → listener apagado, solo reconcile periódico), `SS_CONTROL_PORT`
-(8765), `SS_CONTROL_BIND` (0.0.0.0), `SS_CONTROL_ADVERTISE` (dirección que se
-publica como `control_url`).
-
-> **Principio**: el panel nunca *manda* a un proceso remoto; **declara desired-state**
-> y los servicios reconcilian.  Robusto ante reinicios (el estado vive en la BD, no en
-> la orden) y particiones de red (el poke es opcional).
-
-#### Alta disponibilidad: lease de líder + hot-standby
-
-Algunos servicios **no pueden** correr en más de una instancia a la vez: dos
-schedulers de monitor duplicarían cada check (y cada alerta); dos workers de
-eventos avanzarían el mismo cursor y duplicarían cada notificación.  Para permitir
-**varias réplicas** sin duplicar trabajo, esos servicios usan un **lease de líder**
-en BD ([`ServiceLeaderStore`], tabla `service_leader`):
-
-- Cada réplica intenta **adquirir/renovar** el lease en su loop de heartbeat
-  (`_renew_leadership`); el `try_acquire` es *race-safe* (UPDATE condicional
-  `WHERE holder=<viejo> OR expires_at<now`).
-- **Solo el líder hace el trabajo**: `_work_allowed()` gatea el ciclo del monitor
-  (`_monitoring_loop`) y el tick de eventos (`_event_worker_tick`).  Las demás
-  réplicas quedan en **hot-standby** (vivas pero ociosas).
-- Si el líder cae y deja de renovar, el lease **caduca** (TTL ~30 s) y otra réplica
-  lo toma → *failover* automático en segundos.  Un cierre limpio hace `release()`
-  para un relevo instantáneo.
-- `_LEADER_GATED=True` lo activa por servicio: **monitor** y **events** sí;
-  **syslog** no (es **active-active** — tras un balanceador cada mensaje llega a una
-  réplica, sin duplicar).  La pestaña Servicios marca cada instancia **Líder/En
-  espera**.
-
-> Acciones explícitas (check on-demand, comando `run_now`) **no** están gateadas por
-> líder: las ejecuta cualquier réplica (el claim de la cola garantiza "una sola vez").
-
-[`ServiceInstancesStore`]: ../src/lib/stores/service_instances.py
-[`ServiceCommandsStore`]: ../src/lib/stores/service_commands.py
-[`ServiceLeaderStore`]: ../src/lib/stores/service_leader.py
-
 ---
 
 ## Procesamiento de Eventos (notificaciones)
+
+> La **entrega** (dispatcher, canales Telegram/Email/Webhook, matriz de routing, HMAC, plantillas) — lo que ocurre a partir de `dispatch()` — está en **[notifications.md](notifications.md)**. Esta sección cubre la **generación** de eventos.
 
 Las **reglas de notificación** (audit/syslog → Telegram/Email/Webhook) las evalúa
 `_EventsMixin` (`lib/services/events/manager.py`, **sin Flask**, compartido por el WebAdmin y
@@ -661,7 +515,7 @@ solo cambia **quién** lo hospeda y **cuándo** se arranca.
 
 La capa de datos del core (`lib/db/`) abstrae el motor mediante `BaseConnector`,
 con implementaciones para **SQLite** (por defecto), **MySQL/MariaDB** y
-**PostgreSQL**. Todos los stores de `lib/stores/` (`users`, `groups`, `roles`,
+**PostgreSQL**. Todos los stores (repartidos en `lib/core/*/store.py` y `lib/services/*/store/`) (`users`, `groups`, `roles`,
 `sessions`, `audit`, `check_state`, `credentials`, `history`, `hosts`, `modules`,
 `config`, `webhooks`, `event_rules`, `notification_log`, `event_cooldowns`, `event_cursor`, `syslog`, `syslog_drops`)
 reciben un conector inyectado y no hablan nunca con un driver concreto. Se crea **un único conector
@@ -679,7 +533,7 @@ sigue en la BD principal. La topología `docker-compose.microservices.yml` levan
 dos MariaDB y enruta syslog a la dedicada vía `SS_SYSLOG_DB_*` (ver
 [configuration.md](configuration.md) y [docker.md](docker.md)).
 
-El **store de módulos** (`lib/stores/modules/store.py`) guarda la configuración de
+El **store de módulos** (`lib/core/modules/store.py`) guarda la configuración de
 watchfuls, en dos tablas: `module_config` (una
 fila por módulo: campos a nivel de módulo —`enabled`, `alert`, `interval`, meta
 `__*__`— como JSON) y `module_config_items` (una fila por ítem: `host_uid`/`label`/

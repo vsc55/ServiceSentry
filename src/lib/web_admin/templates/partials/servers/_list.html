@@ -130,7 +130,7 @@ createListTable({
     },
     cell: (host, colId) => {
         switch (colId) {
-            case 'name':    return `<td class="text-nowrap fw-semibold"${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.name)}</td>`;
+            case 'name':    return `<td class="text-nowrap fw-semibold"${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.name)}${host.virtual ? ` <span class="badge text-bg-info" title="${escAttr(t('host_virtual_hint'))}"><i class="bi bi-diagram-3 me-1"></i>${esc(t('host_virtual'))}</span>` : ''}</td>`;
             case 'address': return `<td class="text-nowrap"><code${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.address || '')}</code></td>`;
             case 'kind':    return `<td class="text-center">${host.kind === 'remote'
                 ? `<span class="badge text-bg-secondary"><i class="bi bi-hdd-network me-1"></i>${esc(t('host_kind_remote'))}</span>`

@@ -97,7 +97,7 @@ class TestAuthentication:
 
     def test_dashboard_accessible_after_login(self, client):
         _login(client)
-        resp = client.get("/")
+        resp = client.get("/admin")
         assert resp.status_code == 200
 
     def test_dashboard_seeds_config_defaults_from_registry(self, client):
@@ -106,7 +106,7 @@ class TestAuthentication:
         carrying the spec's values (e.g. syslog|udp_port=514)."""
         from lib.config.spec import registry_defaults
         _login(client)
-        html = client.get("/").get_data(as_text=True)
+        html = client.get("/admin").get_data(as_text=True)
         assert "CONFIG_REGISTRY_DEFAULTS" in html
         defs = registry_defaults()
         assert defs["syslog|udp_port"] == 514

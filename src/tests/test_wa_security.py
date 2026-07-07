@@ -52,7 +52,7 @@ class TestSecurityInjection:
     def _make_multiuser(config_dir, var_dir):
         """Admin 'secadmin' + viewer + editor for privilege-escalation tests."""
         import uuid as _uuid
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         wa = WebAdmin(config_dir, "secadmin", "secpass", var_dir=var_dir,
                       pw_require_upper=False, pw_require_digit=False)
         wa.app.config["TESTING"] = True
@@ -93,7 +93,7 @@ class TestSecurityInjection:
             "username": "xssuser", "password": "testpass", "role": "viewer",
             "display_name": payload,
         })
-        html = c.get("/").data.decode()
+        html = c.get("/admin").data.decode()
         # Jinja2 auto-escapes; the raw <script> tag must NOT appear
         assert '<script>alert("xss")</script>' not in html
 
@@ -484,7 +484,7 @@ class TestSecurityInjection:
             "username": "sstiuser", "password": "testpass", "role": "viewer",
             "display_name": "{{ config.items() }}",
         })
-        html = c.get("/").data.decode()
+        html = c.get("/admin").data.decode()
         # Must not leak Flask config; Jinja auto-escape means literal text
         assert "config.items()" not in html or "{{ config.items() }}" in html
 

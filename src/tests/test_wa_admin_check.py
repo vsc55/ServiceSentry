@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the unified admin check and the audit-stamp helper."""
+"""Tests for the unified admin check (``_is_admin_requester``)."""
 
 import pytest
 
@@ -73,17 +73,3 @@ class TestIsAdminRequester:
             assert admin._is_admin_requester() is False
         finally:
             ctx.pop()
-
-
-class TestTouchEntity:
-
-    def test_stamps_updated_fields(self, admin):
-        from lib.web_admin.routes._helpers import touch_entity
-        entity = {}
-        ctx = _session_user(admin, 'admin')
-        try:
-            touch_entity(entity)
-        finally:
-            ctx.pop()
-        assert entity['updated_by'] == 'admin'
-        assert entity['updated_at'].endswith(('Z', '+00:00')) or 'T' in entity['updated_at']

@@ -12,7 +12,7 @@ import pytest
 from conftest import create_mock_monitor
 
 from lib.db import get_connector
-from lib.stores.credentials import CredentialsStore, apply_credential
+from lib.core.credentials.store import CredentialsStore, apply_credential
 from lib.modules.discovery.credential_schemas import credential_schemas, credential_secret_fields
 
 import watchfuls.process as process
@@ -267,8 +267,8 @@ class TestApiCredentials:
         huid = admin._hosts_store.create(
             {'name': 'srv-x', 'address': '10.0.0.9', 'kind': 'remote',
              'profiles': {'ssh': {'ssh_user': 'olduser', 'ssh_password': 'storedpw'}}}, actor='admin')
-        with patch('lib.hosts.ssh_client.HAS_PARAMIKO', True), \
-             patch('lib.hosts.ssh_client.test_connection', return_value=(True, 'ok', 'linux')) as tc:
+        with patch('lib.core.hosts.ssh_client.HAS_PARAMIKO', True), \
+             patch('lib.core.hosts.ssh_client.test_connection', return_value=(True, 'ok', 'linux')) as tc:
             r = client.post('/api/v1/hosts/test_ssh', json={
                 'address': '10.0.0.9', 'uid': huid,
                 'profiles': {'ssh': {'cred_uid': cuid}}})
@@ -277,7 +277,7 @@ class TestApiCredentials:
         assert tc.call_args.kwargs['user'] == 'creduser'
 
     def test_action_config_applies_credential(self, admin):
-        from lib.web_admin.routes.watchfuls import _apply_cred_to_config
+        from lib.core.modules.watchful_routes import _apply_cred_to_config
         uid = admin._credentials_store.create(
             {'name': 'web1', 'ctype': 'web_auth',
              'data': {'auth_user': 'admin', 'auth_password': 'pw'}}, actor='a')
@@ -289,7 +289,7 @@ class TestApiCredentials:
     def test_check_test_applies_credential(self, admin):
         # The host-modal check "test" buttons must use the credential, not the
         # restored inline secret.
-        from lib.web_admin.routes.hosts import _apply_check_cred
+        from lib.core.hosts.routes import _apply_check_cred
         uid = admin._credentials_store.create(
             {'name': 'web3', 'ctype': 'web_auth',
              'data': {'auth_user': 'u', 'auth_password': 'pw'}}, actor='a')
@@ -323,7 +323,7 @@ class TestApiCredentials:
     def test_test_endpoint_uses_stored_secret(self, client, admin):
         _login(client)
         uid = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']
-        with patch('lib.hosts.ssh_client.test_connection', return_value=(True, 'ok')) as tc:
+        with patch('lib.core.hosts.ssh_client.test_connection', return_value=(True, 'ok')) as tc:
             r = client.post('/api/v1/credentials/test',
                             json={'cred_uid': uid, 'address': '10.0.0.5'})
         assert r.get_json()['ok'] is True

@@ -45,7 +45,7 @@ class TestWebAdminInit:
     def test_existing_db_users_are_preserved(self, config_dir):
         """Users already in the DB are loaded on subsequent starts (no overwrite)."""
         import uuid as _uuid
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         # First start: creates default admin
         wa1 = WebAdmin(config_dir, "myadmin", "mypass")
         wa1._users["existinguser"] = {

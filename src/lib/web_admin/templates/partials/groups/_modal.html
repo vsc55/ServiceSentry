@@ -99,6 +99,9 @@ function openGroupModal(name, mode = 'edit') {
     const err = document.getElementById('gmLabelError'); if (err) err.textContent = '';
     document.getElementById('gmDescription').value = gd.description || '';
     document.getElementById('gmDescription').disabled = false;  // editable for all groups
+    // Landing page for members of this group: '' = no per-group default.
+    document.getElementById('gmLandingPage').innerHTML =
+        _homePageOptions((mode === 'new') ? '' : (gd.landing_page || ''), true);
     document.getElementById('gmUidRow').classList.toggle('d-none', isNew);
     document.getElementById('gmUid').value = isNew ? '' : (gd.uid || '');
     document.getElementById('gmEnabledGroup').style.display = '';
@@ -151,9 +154,10 @@ async function saveGroupModal() {
         return;
     }
     const isBuiltin = !!(_editingGroup ? groupsData[_editingGroup] : {})?.builtin;
+    const landing_page = document.getElementById('gmLandingPage').value;
     if (_editingGroup) {
         const enabled = document.getElementById('gmEnabled').checked;
-        const payload = { roles, members, enabled, description };  // description editable for all groups
+        const payload = { roles, members, enabled, description, landing_page };  // description editable for all groups
         if (!isBuiltin) { payload.name = label; }
         const r = await apiPut('/api/v1/groups/' + encodeURIComponent(_editingGroup), payload);
         if (r && r.ok) {
@@ -181,13 +185,14 @@ async function saveGroupModal() {
                 updated_by: currentUser.username || '',
             };
             groupsData[_editingGroup].description = description;  // description updated for all groups
+            groupsData[_editingGroup].landing_page = landing_page;
             if (!isBuiltin) { groupsData[_editingGroup].name = label || _editingGroup; }
         } else {
             showToast(r?.error || t('update_error'), 'danger'); return;
         }
     } else {
         const enabled = document.getElementById('gmEnabled').checked;
-        const r = await apiPost('/api/v1/groups', { name: label, description, roles, members, enabled });
+        const r = await apiPost('/api/v1/groups', { name: label, description, roles, members, enabled, landing_page });
         if (r && r.status === 201) {
             const uid = r.data?.uid;
             showToast(t('group_created'));

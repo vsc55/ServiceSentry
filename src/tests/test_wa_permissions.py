@@ -22,7 +22,7 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 from tests.conftest import _HAS_FLASK, _login
-from lib.web_admin.constants import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS
+from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 

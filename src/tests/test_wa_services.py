@@ -218,6 +218,44 @@ class TestSyslogControl:
         assert admin._services_status_dict()['syslog']['running'] is False
 
 
+class TestIpbanService:
+    """fail2ban registered as an embedded service: a Services-tab row with an on/off
+    master switch (flips web_admin|ipban_enabled) and a per-container heartbeat.  It is
+    an inline gate, not a worker, so start/stop = enable/disable the shared jail."""
+
+    def test_ipban_service_registered(self, admin):
+        st = admin._services_status_dict()['ipban']
+        assert st['embedded'] is True and st['controllable'] is True
+        # counts + enabled surfaced for the widget/heartbeat
+        for k in ('banned', 'watchlist', 'whitelist', 'enabled'):
+            assert k in st
+
+    def test_ipban_start_stop_toggles_enabled(self, admin):
+        ok, reason = admin._service_control('ipban', 'stop')
+        assert ok is True and reason == ''
+        assert admin._IPBAN_ENABLED is False
+        assert admin._config_section('web_admin').get('ipban_enabled') is False
+        assert admin._services_status_dict()['ipban']['state'] == 'disabled'
+        ok, reason = admin._service_control('ipban', 'start')
+        assert ok is True and reason == ''
+        assert admin._IPBAN_ENABLED is True
+        assert admin._services_status_dict()['ipban']['state'] == 'running'
+
+    def test_ipban_control_preserves_other_config(self, admin):
+        # Regression: the toggle round-trips the FULL config; it must not wipe siblings.
+        admin._write_config({**(admin._read_config_file(admin._CONFIG_FILE) or {}),
+                             'syslog': {'enabled': True, 'udp_port': 5514}})
+        admin._invalidate_config_cache()
+        admin._service_control('ipban', 'stop')
+        admin._invalidate_config_cache()
+        assert admin._config_section('web_admin').get('ipban_enabled') is False
+        assert admin._config_section('syslog').get('udp_port') == 5514
+
+    def test_ipban_heartbeat_detail_carries_counts(self, admin):
+        det = admin._embedded_services['ipban']._hb_detail()
+        assert set(det) == {'banned', 'watchlist', 'whitelist'}
+
+
 class TestPermissions:
 
     def test_control_requires_services_control(self, admin, client, monkeypatch):

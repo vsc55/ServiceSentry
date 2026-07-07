@@ -311,7 +311,7 @@ class TestTelegramConfigFromDB:
     file.  A wrong init order left token/chat_id empty → no notifications."""
 
     def _write_db_telegram(self, monitor, token, chat_id):
-        from lib.stores.config import ConfigStore
+        from lib.core.config.store import ConfigStore
         from lib.config import config_path
         from lib.config.manager import ConfigManager
         mgr = ConfigManager(ConfigStore(monitor._db), config_path(monitor.dir_config),
@@ -346,7 +346,7 @@ class TestDaemonModuleConfigRefresh:
     they never reach status / history / Telegram."""
 
     def test_refresh_picks_up_web_added_check(self, monitor):
-        from lib.stores.modules import ModulesStore, DbBackedModules
+        from lib.core.modules import ModulesStore, DbBackedModules
         # Simulate the web admin adding a Proxmox check via its OWN store instance.
         web_cm = DbBackedModules(ModulesStore(monitor._db), fernet=monitor._fernet)
         web_cm.read()
@@ -407,10 +407,10 @@ class TestDaemonCycleIntegration:
 
         # The web admin writes BOTH the Telegram creds and the new check to the DB
         # through its own store instances — invisible to the persistent monitor.
-        from lib.stores.config import ConfigStore
+        from lib.core.config.store import ConfigStore
         from lib.config import config_path
         from lib.config.manager import ConfigManager
-        from lib.stores.modules import ModulesStore, DbBackedModules
+        from lib.core.modules import ModulesStore, DbBackedModules
         ConfigManager(ConfigStore(monitor._db), config_path(monitor.dir_config),
                       fernet=monitor._fernet).write(
             {'telegram': {'token': 'TKN-9', 'chat_id': 'CHT-9'}})

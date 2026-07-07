@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """UI routes: / (dashboard), /api/v1/me, /api/v1/health, /lang."""
 
-from flask import jsonify, make_response, redirect, render_template, request, session
+from flask import jsonify, make_response, redirect, render_template, request, session, url_for
 
 from lib.modules import ModuleBase
 from lib.util import os_detect
 from lib.debug import DebugLevel
-from lib.hosts.profiles import (
+from lib.core.hosts.profiles import (
     host_profiles_catalog,
     module_host_collections,
     module_host_fields,
@@ -17,8 +17,9 @@ from lib.hosts.profiles import (
 )
 from lib.modules.discovery.credential_schemas import credential_schemas
 from lib.modules.discovery.overview_widgets import overview_widgets_catalog
+from lib.core.overview.discovery import discover_overview_widgets_public as _discover_overview_widgets
 
-from ..constants import SUPPORTED_LANGS
+from lib.i18n import SUPPORTED_LANGS
 
 
 def register(app, wa):
@@ -45,6 +46,17 @@ def register(app, wa):
         return redirect(wa._safe_referrer('login'))
 
     @app.route('/')
+    def _root():
+        """Entry point: anonymous → /login; logged-in → the user's effective landing
+        page (per-user → group → global default), e.g. the admin panel (/admin) or the
+        public status page (/status). Same resolution used right after login."""
+        if not session.get('logged_in'):
+            return redirect(url_for('login'))
+        from .auth import _landing_url   # noqa: PLC0415  (avoid import cycle at load)
+        user = wa._users.get(session.get('username', ''), {})
+        return redirect(_landing_url(wa, user))
+
+    @app.route('/admin')
     @login_required
     def dashboard():
         """Render the main dashboard."""
@@ -61,6 +73,7 @@ def register(app, wa):
             module_host_multiple=module_host_multiple(wa._modules_dir),
             module_host_multi_bind=module_host_multi_bind(wa._modules_dir),
             module_widgets=overview_widgets_catalog(wa._modules_dir),
+            overview_widgets=_discover_overview_widgets(),
             module_status_render=module_status_render(wa._modules_dir),
             host_os_options=list(os_detect.OPTIONS),
             local_os=os_detect.local_os(),
@@ -100,6 +113,7 @@ def register(app, wa):
             'table_config': user_data.get('table_config', {}),
             'dashboard_layout': user_data.get('dashboard_layout', []),
             'modal_config': user_data.get('modal_config', {}),
+            'login_id': session.get('session_id', ''),
             'restart_pending': wa._restart_pending,
             'startup_id':      wa._startup_id,
         })

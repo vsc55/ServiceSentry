@@ -1,5 +1,5 @@
 {# ================================================================
-   Clusters sub-tab — table of multi-bind module checks + edit modal.
+   Cluster sub-tab — table of multi-bind module checks + edit modal.
 
    A "cluster" is one check bound to SEVERAL hosts at once (failover):
    any module declaring __host_multiple_bind__ (exposed as
@@ -26,9 +26,9 @@ function _clusterAddableModules() {
 }
 
 // Cluster permissions (view/add/edit/delete) — gated STRICTLY by the dedicated
-// clusters_* (global) and cluster.{uid}.{action} (per-cluster) keys. Module-level
-// access does NOT grant cluster access: the Clusters surface is its own resource
-// (a modules_view user still sees clusters in the Modules tab, not here).
+// cluster_* (global) and cluster.{uid}.{action} (per-cluster) keys. Module-level
+// access does NOT grant cluster access: the Cluster surface is its own resource
+// (a modules_view user still sees cluster in the Modules tab, not here).
 function _clPerm(...names) {
     const p = currentUser.permissions || [];
     return names.some(n => p.includes(n));
@@ -36,7 +36,7 @@ function _clPerm(...names) {
 // A global cluster permission grants the action on EVERY cluster.
 function _canAddClusters()  { return _clPerm('clusters_add'); }
 // Whether the user can perform *action* (view/edit/delete) on cluster *uid*:
-// the global clusters_{action} OR a per-cluster cluster.{uid}.{action}.
+// the global cluster_{action} OR a per-cluster cluster.{uid}.{action}.
 function _clCan(uid, action) {
     const g = { view: 'clusters_view', edit: 'clusters_edit', delete: 'clusters_delete' }[action];
     return _clPerm(g) || (!!uid && _clPerm(`cluster.${uid}.${action}`));

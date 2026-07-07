@@ -51,7 +51,7 @@ class TestMergeHostConn:
     """_merge_host_conn fills a module's connection fields from the bound host."""
 
     def test_fills_address_and_ssh(self):
-        from lib.web_admin.routes.watchfuls import _merge_host_conn
+        from lib.core.modules.watchful_routes import _merge_host_conn
 
         class _WA:
             _modules_dir = None
@@ -65,7 +65,7 @@ class TestMergeHostConn:
         assert cfg['ssh_user'] == 'root' and cfg['ssh_password'] == 'p'
 
     def test_explicit_check_value_wins(self):
-        from lib.web_admin.routes.watchfuls import _merge_host_conn
+        from lib.core.modules.watchful_routes import _merge_host_conn
 
         class _WA:
             _modules_dir = None
@@ -79,7 +79,7 @@ class TestResolveHostCtxCred:
     not only inline secrets — else disk/services/temperature discover get no data."""
 
     def test_ssh_cred_uid_is_resolved(self):
-        from lib.web_admin.routes.watchfuls import _resolve_host_ctx
+        from lib.core.modules.watchful_routes import _resolve_host_ctx
 
         class _Cstore:
             def get(self, uid, decrypt=True):
@@ -99,7 +99,7 @@ class TestResolveHostCtxCred:
         assert ctx['ssh']['ssh_port'] == 22           # other ssh fields preserved
 
     def test_no_cred_uid_left_unchanged(self):
-        from lib.web_admin.routes.watchfuls import _resolve_host_ctx
+        from lib.core.modules.watchful_routes import _resolve_host_ctx
 
         class _WA:
             _hosts_store = None
@@ -461,7 +461,7 @@ class TestHostAwareDiscovery:
     def test_process_discover_remote_draft(self, client_with_modules):
         c = client_with_modules
         _login(c)
-        with patch('lib.hosts.runner.run', return_value=('nginx\nnginx\nsshd\n', '', 0)) as run:
+        with patch('lib.core.hosts.runner.run', return_value=('nginx\nnginx\nsshd\n', '', 0)) as run:
             r = c.post('/api/v1/watchfuls/process/discover', json={
                 '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},
@@ -476,7 +476,7 @@ class TestHostAwareDiscovery:
         c = client_with_modules
         _login(c)
         out = "  nginx.service   loaded active running  Web server\n"
-        with patch('lib.hosts.runner.run', return_value=(out, '', 0)):
+        with patch('lib.core.hosts.runner.run', return_value=(out, '', 0)):
             r = c.post('/api/v1/watchfuls/service_status/discover', json={
                 '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},

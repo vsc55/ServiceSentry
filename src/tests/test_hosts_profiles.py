@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the host connection-profile catalog (lib/hosts/profiles.py)."""
+"""Tests for the host connection-profile catalog (lib/core/hosts/profiles.py)."""
 
-from lib.hosts.profiles import (
+from lib.core.hosts.profiles import (
     host_profiles_catalog,
     module_host_collections,
     module_host_fields,
@@ -61,7 +61,7 @@ class TestCatalog:
     def test_module_host_specs_preserves_datastore_ssh(self):
         # The migration relies on the module's own __host_profile__ (not the
         # catalog) so datastore's ssh tunnel fields are still recognised.
-        from lib.hosts.profiles import module_host_specs
+        from lib.core.hosts.profiles import module_host_specs
         specs = module_host_specs()
         protos = {p for p, _, _ in specs.get('datastore', [])}
         assert 'ssh' in protos   # the ssh tunnel is the host-owned profile
@@ -95,7 +95,7 @@ class TestCatalog:
 
     def test_module_host_multi_bind(self):
         # One check binding to several hosts is opt-in via __host_multiple_bind__.
-        from lib.hosts.profiles import module_host_multi_bind
+        from lib.core.hosts.profiles import module_host_multi_bind
         m = module_host_multi_bind()
         assert m.get('proxmox') is True     # cluster: one check spans member nodes
         assert m.get('ping') is False       # single-host check
@@ -103,7 +103,7 @@ class TestCatalog:
 
     def test_module_member_fields(self):
         # A multi-bind module may declare a per-node member field (__member_field__).
-        from lib.hosts.profiles import module_member_fields
+        from lib.core.hosts.profiles import module_member_fields
         m = module_member_fields()
         assert m.get('keepalived') == 'priority'   # keepalived's per-node weight
         assert 'proxmox' not in m                  # proxmox uses the node <select>
@@ -111,7 +111,7 @@ class TestCatalog:
 
     def test_module_status_render(self):
         # Status-card decorations are opt-in via __status_render__ (discovered).
-        from lib.hosts.profiles import module_status_render
+        from lib.core.hosts.profiles import module_status_render
         m = module_status_render()
         assert m.get('web') == [{'type': 'badge', 'field': 'code', 'prefix': 'HTTP '}]
         fs = m.get('filesystemusage')

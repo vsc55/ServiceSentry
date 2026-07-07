@@ -135,7 +135,7 @@ class Watchful(ModuleBase):
         route for the Servers modal) and that host is remote, the list is read
         over SSH on the host; otherwise it is read from THIS machine (psutil).
         """
-        from lib.hosts import runner as host_runner  # noqa: PLC0415
+        from lib.core.hosts import runner as host_runner  # noqa: PLC0415
         host = (config or {}).get('__host__') if isinstance(config, dict) else None
         if host_runner.is_remote(host):
             os_ = str(host.get('os') or 'linux')

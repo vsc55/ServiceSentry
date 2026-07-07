@@ -24,7 +24,7 @@ from lib.config.spec import CONFIG_FIELDS, CFG_BY_PATH, cfg_default
 # (the ``overview`` layout, the ``notif_templates`` / ``notif_html_templates``
 # overrides).  Only ``database`` is excluded: it is bootstrap (the DB connector is
 # built from it before the config layer exists), so it stays in ``config.json``.
-# (Webhooks are not here — they have their own table, ``lib/stores/webhooks.py``.)
+# (Webhooks are not here — they have their own table, ``lib/core/notify/webhook/store.py``.)
 FILE_ONLY_SECTIONS = frozenset({'database'})
 
 # First-run-only credentials: created once, kept in the file, never in the DB.

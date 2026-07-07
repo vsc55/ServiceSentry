@@ -44,6 +44,32 @@ class TestApiHosts:
         # …but stored (decrypted) for the monitor to use.
         assert admin._hosts_store.get(uid)['profiles']['ssh']['ssh_password'] == 'p@ss'
 
+    def test_overview_servers_widget_returns_hosts(self, client, admin):
+        """Regression: the servers Overview widget's row provider imported its host
+        helpers from ``lib.core.hosts`` (not re-exported) after the reorg; the swallowed
+        ImportError left the widget empty ('-') even with hosts present."""
+        _login(client)
+        assert client.post('/api/v1/hosts', json=_HOST).status_code == 200
+        from lib.core.hosts.overview_widget import server_list_rows
+        rows = server_list_rows(admin)
+        assert any(r['name'] == 'srv-1' for r in rows), rows
+
+    def test_virtual_flag_roundtrip_and_widget_split(self, client, admin):
+        """The 'virtual' flag persists (store + API round-trip) and the servers
+        Overview widget separates physical from virtual hosts."""
+        _login(client)
+        assert client.post('/api/v1/hosts', json={**_HOST, 'name': 'phys-1'}).status_code == 200
+        assert client.post('/api/v1/hosts', json={
+            'name': 'vip-1', 'address': '10.0.0.100', 'virtual': True}).status_code == 200
+        assert admin._hosts_store.get_by_name('vip-1')['virtual'] is True
+        assert admin._hosts_store.get_by_name('phys-1')['virtual'] is False
+        api = client.get('/api/v1/hosts').get_json()['hosts']
+        assert next(h for h in api if h['name'] == 'vip-1')['virtual'] is True
+        from lib.core.hosts.overview_widget import server_list_rows, servers_summary
+        summ = servers_summary(server_list_rows(admin))
+        assert summ['virtual'] == 1
+        assert summ['physical'] == summ['total'] - 1
+
     def test_clone_duplicates_with_secrets(self, client, admin):
         _login(client)
         src = client.post('/api/v1/hosts', json=_HOST).get_json()['uid']
@@ -320,7 +346,7 @@ class TestTestSsh:
 
     def test_probe_uses_submitted_fields(self, client):
         _login(client)
-        with patch('lib.hosts.ssh_client.test_connection',
+        with patch('lib.core.hosts.ssh_client.test_connection',
                    return_value=(True, 'SSH connection successful', 'linux')) as probe:
             r = client.post('/api/v1/hosts/test_ssh', json={
                 'address': '10.0.0.9',
@@ -342,7 +368,7 @@ class TestTestSsh:
             'profiles': {'ssh': {'ssh_user': 'root', 'ssh_password': 'storedpw'}},
         }).get_json()['uid']
         # Client sends the secret masked (null) — route restores it from storage.
-        with patch('lib.hosts.ssh_client.test_connection',
+        with patch('lib.core.hosts.ssh_client.test_connection',
                    return_value=(True, 'ok', '')) as probe:
             client.post('/api/v1/hosts/test_ssh', json={
                 'uid': uid, 'address': '10.0.0.9',
@@ -539,7 +565,7 @@ class TestCheckSecretRestore:
     """A test run after reload must use the stored secret, not the masked null."""
 
     def test_restores_masked_password_from_stored_item(self, admin):
-        from lib.web_admin.routes.hosts import _restore_check_secrets
+        from lib.core.hosts.routes import _restore_check_secrets
         mods = admin._load_modules()
         mods.setdefault('datastore', {}).setdefault('list', {})['d1'] = {
             'db_type': 'mysql', 'user': 'u', 'password': 'REALPASS', 'uid': 'u1'}
@@ -551,7 +577,7 @@ class TestCheckSecretRestore:
         assert fields['user'] == 'u'
 
     def test_explicit_new_password_is_kept(self, admin):
-        from lib.web_admin.routes.hosts import _restore_check_secrets
+        from lib.core.hosts.routes import _restore_check_secrets
         mods = admin._load_modules()
         mods.setdefault('datastore', {}).setdefault('list', {})['d1'] = {
             'password': 'OLDPASS', 'uid': 'u1'}
@@ -566,7 +592,7 @@ class TestServerTest:
 
     def _mock_check(self):
         # The check path uses host_exec → ssh_client.connect_host + run_command.
-        from lib.hosts import ssh_client
+        from lib.core.hosts import ssh_client
         return [
             patch.object(ssh_client, 'HAS_PARAMIKO', True),
             patch.object(ssh_client, 'connect_host', return_value=object()),
@@ -594,7 +620,7 @@ class TestServerTest:
         assert d['results'][0]['key'] == 'web'
 
     def test_full_test_ssh_and_checks(self, client, admin):
-        from lib.hosts import ssh_client
+        from lib.core.hosts import ssh_client
         _login(client)
         ctx = self._mock_check() + [
             patch.object(ssh_client, 'test_connection', return_value=(True, 'ok', 'linux')),
@@ -624,7 +650,7 @@ class TestServerTest:
 
     def test_module_test_no_ssh_skips_ssh(self, client):
         """A module-scoped test (no_ssh) runs the checks but not the SSH probe."""
-        from lib.hosts import ssh_client
+        from lib.core.hosts import ssh_client
         _login(client)
         ctx = self._mock_check() + [
             patch.object(ssh_client, 'test_connection', return_value=(True, 'ok', 'linux')),
@@ -746,7 +772,7 @@ class TestPerServerPermissions:
         _login(client, 'srvuser')
         cur = admin._hosts_store.get(uid, decrypt=True)
         body = {k: cur.get(k) for k in
-                ('name', 'address', 'kind', 'os', 'maintenance',
+                ('name', 'address', 'kind', 'os', 'maintenance', 'virtual',
                  'tags', 'description', 'profiles')}
         body['modules'] = ['ping']                         # only grow the list
         assert client.put(f'/api/v1/hosts/{uid}', json=body).status_code == 200

@@ -454,7 +454,7 @@ class TestRealModuleRuntimeContract:
         every host-capable module) and at least one host-bindable collection.
         (module_host_fields legitimately omits modules that hide no fields, e.g.
         web's visible 'url', so it is NOT the right catalog to assert here.)"""
-        from lib.hosts.profiles import module_host_collections, module_host_multi_bind
+        from lib.core.hosts.profiles import module_host_collections, module_host_multi_bind
         if not _load_schema(mod_name).get("__host_profile__"):
             pytest.skip("module is not host-capable")
         mb = module_host_multi_bind()

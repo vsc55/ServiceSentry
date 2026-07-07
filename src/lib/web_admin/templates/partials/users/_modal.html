@@ -60,7 +60,7 @@ function _umRenderClearTables() {
                     ['sessions', 'subtab_sessions'],
                     ['evrules', 'tbl_lbl_evrules'], ['evlog', 'tbl_lbl_evlog'],
                     ['syslog', 'tab_syslog'], ['sldrops', 'tbl_lbl_sldrops']];
-    // Append factory-driven tables not already listed (Credentials/Servers/Clusters).
+    // Append factory-driven tables not already listed (Credentials/Servers/Cluster).
     const _have = new Set(tables.map(e => e[0]));
     (typeof _LIST_TABLE_REGISTRY !== 'undefined' ? _LIST_TABLE_REGISTRY : []).forEach(d => {
         if (d.clearLabelKey && !_have.has(d.k)) { _have.add(d.k); tables.push([d.k, d.clearLabelKey]); }
@@ -187,6 +187,9 @@ async function openUserModal(username, mode = 'edit') {
     const dm = u.dark_mode;
     document.getElementById('umDarkMode').value =
         (mode === 'new') ? '' : (dm === true ? 'dark' : dm === false ? 'light' : '');
+    // Landing page (admin override): '' = inherit (group/global default).
+    document.getElementById('umLandingPage').innerHTML =
+        _homePageOptions((mode === 'new') ? '' : (u.landing_page || ''), true);
 
     // Password: shown (and required) for new/clone, hidden on edit.
     document.getElementById('umPasswordGroup').style.display = isNew ? '' : 'none';
@@ -273,12 +276,13 @@ async function saveUserModal() {
         const email   = document.getElementById('umEmail').value.trim();
         const _dmVal  = document.getElementById('umDarkMode').value;
         const dark_mode = _dmVal === 'dark' ? true : _dmVal === 'light' ? false : null;
+        const landing_page = document.getElementById('umLandingPage').value;
         const clear_table_keys = [...document.querySelectorAll('#umClearTablesGrid .um-clear-table:checked')]
             .map(cb => cb.value);
         const clear_dashboard_layout = document.getElementById('umClearDashboard').checked;
         const clear_modal_keys = [...document.querySelectorAll('#umClearModalsGrid .um-clear-modal:checked')]
             .map(cb => cb.value);
-        const body = { role, display_name, lang, groups, enabled, email, dark_mode,
+        const body = { role, display_name, lang, groups, enabled, email, dark_mode, landing_page,
                        clear_table_keys, clear_dashboard_layout, clear_modal_keys };
         const r = await apiPut('/api/v1/users/' + encodeURIComponent(_editingUser), body);
         if (r && r.ok) {
@@ -296,7 +300,7 @@ async function saveUserModal() {
                 }
             }
             const _nowU = _nowISO();
-            usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email, dark_mode, updated_at: _nowU, updated_by: currentUser.username || '' };
+            usersData[_editingUser] = { ...usersData[_editingUser], role, display_name: display_name || _editingUser, lang, groups, enabled, email, dark_mode, landing_page, updated_at: _nowU, updated_by: currentUser.username || '' };
             // Reflect just-cleared layouts locally so reopening the modal shows the
             // correct (disabled) checkboxes without a page reload.
             if (clear_table_keys.length && usersData[_editingUser].table_config)
@@ -324,7 +328,8 @@ async function saveUserModal() {
         if (!password) { showToast(t('password_required'), 'warning'); return; }
         const email = document.getElementById('umEmail').value.trim();
         const enabled = document.getElementById('umEnabled').checked;
-        const r = await apiPost('/api/v1/users', { username, password, role, display_name, lang, groups, email, enabled });
+        const landing_page = document.getElementById('umLandingPage').value;
+        const r = await apiPost('/api/v1/users', { username, password, role, display_name, lang, groups, email, enabled, landing_page });
         if (r && r.status === 201) {
             showToast(t('user_created'));
             const _nowC = _nowISO();

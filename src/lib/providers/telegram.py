@@ -40,7 +40,7 @@ def send_telegram(token, chat_id, text, *, parse_mode=None, timeout=10):
     """Low-level one-shot POST to the Telegram *sendMessage* API.
 
     Shared by the queued :class:`Telegram` client (used by the monitor) and the
-    one-shot :mod:`lib.notify.telegram_notify` sender (used by the dispatcher),
+    one-shot :mod:`lib.core.notify.telegram_notify` sender (used by the dispatcher),
     so the raw API call lives in a single place.  *token* / *chat_id* are
     assumed non-empty — callers validate as they see fit.
 

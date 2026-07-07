@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the host SSH helper (lib/hosts/ssh_client.py).
+"""Tests for the host SSH helper (lib/core/hosts/ssh_client.py).
 
 SSH reachability is a host-level concern reused by modules; these cover
 inline-key parsing and that test_connection never raises (reports failures).
@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lib.hosts import ssh_client
+from lib.core.hosts import ssh_client
 
 
 @pytest.mark.skipif(not ssh_client.HAS_PARAMIKO, reason='paramiko not installed')

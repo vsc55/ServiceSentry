@@ -10,60 +10,33 @@ Permite gestionar módulos, configuración y usuarios sin tocar archivos directa
 La lógica de `WebAdmin` está dividida en **mixins** (lógica de negocio) y **routes** (registro de rutas Flask):
 
 ```
-lib/web_admin/
-├── app.py                    # class WebAdmin (hereda todos los mixins)
-├── auth/
-│   ├── __init__.py
-│   ├── ldap_auth.py          # autenticación LDAP/AD (requiere ldap3)
-│   ├── oidc_auth.py          # SSO OIDC/OAuth2, rutas /auth/oidc/* (requiere authlib)
-│   └── saml_auth.py          # SSO SAML2, rutas /auth/saml2/* (requiere pysaml2) [alpha]
-│                             # (notificación: ver lib/notify/ — subsistema sin Flask reutilizable por daemons)
-├── mixins/
-│   ├── users.py              # _UsersMixin
-│   ├── roles.py              # _RolesMixin
-│   ├── groups.py             # _GroupsMixin
-│   ├── permissions.py        # _PermissionsMixin
-│   ├── sessions.py           # _SessionsMixin (sesiones + clave secreta Flask)
-│   ├── audit.py              # _AuditMixin
-│   ├── checks.py             # _ChecksMixin (checks on-demand; ejecutor compartido)
+lib/web_admin/                # Solo lo genuinamente web; los dominios/servicios/providers viven fuera (abajo)
+├── app.py                    # class WebAdmin (hereda mixins de mixins/ + lib/core/* + lib/services/*)
+├── constants.py              # SOLO HOME_PAGES + home_page_ids (landing pages). RBAC → lib/core/permissions.py; SYSTEM_USER → lib/core/constants.py; i18n → lib.i18n
+├── mixins/                   # Glue de infra que NO es un dominio propio:
+│   ├── auth.py               # _AuthMixin (login local: _authenticate)
+│   ├── permissions.py        # _PermissionsMixin (permisos efectivos)
 │   └── services.py           # _ServicesMixin (descubre + controla los servicios embebidos)
 │   # monitoring/syslog/events NO son mixins: el WebAdmin COMPONE un objeto por
 │   # servicio (lib/services/*/embedded.py), en self._embedded_services
-└── routes/
-    ├── __init__.py           # register_all(app, wa)
-    ├── auth/
-    │   ├── __init__.py       # /login, /logout (integra LDAP + OIDC + SAML2)
-    │   ├── ldap.py           # /api/v1/auth/ldap/* (test, groups, group_lookup)
-    │   └── entraid.py        # /api/v1/auth/entra/* (groups, group_lookup, saml2) + /api/v1/auth/entraid/provision/* (wizard genérico Device Code)
-    ├── modules/
-    │   ├── __init__.py       # /api/v1/modules, /api/v1/modules/status, /api/v1/modules/overview
-    │   └── checks.py         # /api/v1/modules/checks/run
-    ├── users/
-    │   ├── __init__.py       # /api/v1/users, /api/v1/me
-    │   ├── groups.py         # /api/v1/groups
-    │   └── roles.py          # /api/v1/roles
-    ├── sessions/
-    │   ├── __init__.py       # /api/v1/sessions, /api/v1/sessions/invalidate, /api/v1/sessions/revoke/*
-    │   └── audit.py          # /api/v1/audit
-    ├── notify/
-    │   ├── __init__.py       # registro de subrutas de notificación
-    │   ├── telegram.py       # /api/v1/notify/telegram/test
-    │   ├── email.py          # /api/v1/notify/email/test
-    │   ├── webhook.py        # /api/v1/notify/webhook/test
-    │   └── templates.py      # /api/v1/notify/templates, /api/v1/notify/html-templates
-    ├── config.py             # /api/v1/config, /api/v1/config/versions, /api/v1/config/schema
-    ├── webhooks.py           # /api/v1/webhooks (CRUD de webhooks)
-    ├── hosts.py              # /api/v1/hosts (registro de servidores + migración)
-    ├── credentials.py        # /api/v1/credentials (identidades SSH reutilizables)
-    ├── syslog.py             # /api/v1/syslog (mensajes, stats, status, drops)
-    ├── events.py             # /api/v1/event-rules, /api/v1/notifications/log
-    ├── services.py           # /api/v1/services (estado + start/stop)
-    ├── watchfuls.py          # /api/v1/watchfuls/<module>/<action>
-    ├── history.py            # /api/v1/history (índice, consulta, borrado, diagnóstico)
-    ├── daemon.py             # /api/v1/daemon (estado/start/stop/config del monitor; delega en _monitoring_*)
-    ├── status.py             # /status (página pública de estado)
-    ├── errors.py             # handlers 400, 403, 404, 405, 500
-    └── ui.py                 # /, /api/v1/me, /api/v1/health, /lang, /theme
+├── routes/
+│   ├── __init__.py           # register_all(app, wa) — registra también los routes de core/servicios/providers
+│   ├── auth.py               # /login, /logout + _establish_session/_landing_url (login local)
+│   ├── status.py             # /status (página pública de estado)
+│   ├── ui.py                 # /, /api/v1/me, /api/v1/health, /lang, /theme
+│   ├── errors.py             # handlers 400, 403, 404, 405, 500
+│   └── util.py               # utilidades de ruta compartidas
+├── templates/                # Jinja2 (+ partials JS por feature)
+└── static/                   # CSS/JS/imágenes
+
+# El resto de mixins/routes viven con su dominio/servicio/provider (self-contained):
+#   lib/core/<d>/          mixin.py + routes.py + store.py + permissions.py
+#     users, roles, groups, sessions, audit, config, credentials, history, hosts,
+#     modules (routes.py CRUD + watchful_routes.py acciones), notify/{telegram,email,webhook}/routes.py
+#   lib/services/<svc>/    monitoring (checks_mixin.py + routes/{checks,daemon}.py),
+#     syslog/routes/, events/routes/, ipban/routes.py, control/routes.py (/api/v1/services)
+#   lib/providers/<p>/     ldap/routes.py, oidc/routes.py, saml/routes.py (callbacks SSO),
+#     scim/routes.py (/scim/v2/*), entraid/routes.py (/api/v1/auth/entra*)
 ```
 
 ---
@@ -77,6 +50,50 @@ python3 main.py --web
 Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 
 ---
+
+## Secuencia de arranque (qué carga y cuándo)
+
+De la orden de arranque al servidor sirviendo peticiones, el WebAdmin pasa por tres fases:
+**descubrimiento en import**, **construcción** (`WebAdmin.__init__`) y **servidor** (`run()`).
+
+```mermaid
+flowchart TD
+    subgraph imp["1 · Import (antes de instanciar)"]
+        i1["import lib.core.permissions<br/>discover_permissions() escanea lib.core.* + lib.services.*<br/>→ PERMISSIONS · grupos · grants RBAC"]
+    end
+    imp --> ini
+
+    subgraph ini["2 · WebAdmin.__init__ (construcción, en orden)"]
+        direction TB
+        a["a) Descubre campos secretos de MÓDULOS<br/>ModuleBase.discover_secret_fields + perfiles de host + credential schemas<br/>→ claves de cifrado/máscara"]
+        a --> b["b) _init_entity_store(): abre la BD (conector único)<br/>reconcilia tablas core + reconcile_module_tables (tablas declaradas por módulos)<br/>→ ConfigManager + stores (users/groups/roles/sessions/hosts)"]
+        b --> c["c) history + check_state stores (reusan el conector)"]
+        c --> d["d) _load_or_create_users (crea el 1er admin si falta)<br/>+ _load_sessions / _load_roles / _load_groups (desde BD)"]
+        d --> e["e) _apply_saved_config + log level + audit store + env overrides + ipban"]
+        e --> f["f) _create_app(): Flask + secret key + headers de seguridad<br/>+ register_all() → registra rutas core / servicios / providers"]
+        f --> g["g) _init_syslog_stores + build_embedded_services()<br/>discover_embedded_services → make_embedded(self) por paquete"]
+        g --> h["h) por cada servicio embebido: start_heartbeat() + start_at_boot()<br/>(cada uno decide enabled + embedded + autostart)"]
+    end
+    ini --> run
+
+    subgraph run["3 · run() (levanta el servidor)"]
+        r1["bind de una o varias interfaces (host puede listar varias)<br/>un hilo serve_forever por bind<br/>si ninguna liga → error y salida (nunca 'arrancado' en falso)"]
+    end
+```
+
+**Cuándo se descubre cada cosa** (self-describing → [discovery.md](discovery.md)):
+
+| Qué | Cuándo | Cómo |
+|---|---|---|
+| **Permisos** (RBAC) | al **importar** `lib.core.permissions` (antes de la instancia) | `discover_permissions()` escanea `permissions.py` de cada dominio/servicio |
+| **Campos secretos, credential schemas, perfiles de host** | al **inicio de `__init__`** | escaneo de `watchfuls/` (`discover_secret_fields`, `credential_secret_fields`, `__host_profile__`) |
+| **Tablas de módulo** | en **`_init_entity_store`** | `reconcile_module_tables()` (crea/migra `mod_<m>_<n>`) |
+| **Servicios embebidos** | al **final de `__init__`** | `discover_embedded_services()` + `make_embedded()` + `start_at_boot()` |
+| **Config de módulos, widgets de Overview** | **perezoso** (bajo demanda) | al leer `/api/v1/modules` / `/api/v1/overview/widget/<id>` |
+
+> El **arranque de cada servicio** (heartbeat + `start_at_boot`, y el modo embebido vs
+> dedicado) se detalla en [services.md](services.md).
+
 
 ## Características
 
@@ -98,7 +115,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, auto-refresco configurable, siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 52 flags granulares; activar/desactivar desde el modal |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 63 flags granulares; activar/desactivar desde el modal |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
@@ -125,7 +142,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos (52 flags) |
+| `admin` | Todos los permisos (63 flags) |
 | `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` de los recursos correspondientes (`modules_view`, `servers_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`). No incluye permisos de `credentials_*` |
 | `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view` (sin `config_view` ni `credentials_view`) |
 
@@ -134,7 +151,7 @@ Abre `http://localhost:8080` (o el host/puerto configurado) en el navegador.
 ### Roles personalizados
 
 Se pueden crear roles adicionales desde la pestaña **Acceso → Roles** asignando
-cualquier combinación de los 52 permisos disponibles. Los roles personalizados se
+cualquier combinación de los 63 permisos disponibles. Los roles personalizados se
 persisten en la tabla `roles` de la BD.
 
 ```
@@ -174,7 +191,7 @@ Cada grupo tiene:
 
 ## Sistema de Permisos
 
-El sistema de control de acceso usa **52 flags granulares** por acción y recurso.
+El sistema de control de acceso usa **63 flags granulares** por acción y recurso.
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -222,11 +239,11 @@ El sistema de control de acceso usa **52 flags granulares** por acción y recurs
 | | `events_notify_view` | Ver el log de notificaciones enviadas |
 | | `events_notify_delete` | Vaciar el log de notificaciones enviadas |
 
-> Además de los 52 flags globales, cada módulo expone **permisos a nivel de módulo** dinámicos (`module.<nombre>.view`, `.add`, `.edit`, `.delete`) que permiten restringir el acceso a un módulo concreto. También existen permisos dinámicos por servidor (`server.<uid>.<acción>`) y por cluster (`cluster.<uid>.<acción>`).
+> Además de los 63 flags globales, cada módulo expone **permisos a nivel de módulo** dinámicos (`module.<nombre>.view`, `.add`, `.edit`, `.delete`) que permiten restringir el acceso a un módulo concreto. También existen permisos dinámicos por servidor (`server.<uid>.<acción>`) y por cluster (`cluster.<uid>.<acción>`).
 
 ### Implementación interna
 
-- `PERMISSIONS` — tupla con los 52 flags.
+- `PERMISSIONS` — tupla con los 63 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` para los roles integrados.
 - `_perm_required(*perms)` — factoría de decoradores: acepta si el usuario tiene **alguno** de los permisos indicados.
@@ -305,6 +322,8 @@ El permiso requerido se indica entre paréntesis.
 
 ### Servers (registro de hosts)
 
+> El **modelo host-céntrico** (perfiles por protocolo, `host_uid`, ejecución host-aware, migración): ver **[hosts.md](hosts.md)**.
+
 Define un servidor una vez (dirección + perfiles de conexión por protocolo) y
 reutilízalo desde los checks de cualquier módulo. Los secretos de los perfiles
 se enmascaran en lectura y se restauran al guardar (igual que la configuración de módulos, hoy también respaldada por la BD).
@@ -355,7 +374,7 @@ nodo, titular de la VIP, split-brain, prioridad — ver [modules.md](modules.md)
   `/api/v1/modules/status`.
 - Autorización: permisos globales `clusters_view/add/edit/delete` **+** permisos
   dinámicos por-cluster `cluster.{uid}.{view|add|edit|delete}` (resueltos en
-  `routes/modules` por el `host_uids` del ítem). Ver §[Permisos](#permisos).
+  `lib/core/modules/routes.py` por el `host_uids` del ítem). Ver §[Permisos](#permisos).
 
 ### Credenciales
 
@@ -383,7 +402,7 @@ la BD y se enmascaran en lectura.
 | `GET` | `/api/v1/config/schema` | `config_view` o `config_edit` | Obtener el schema de validación de los campos de configuración del web admin |
 | `GET` | `/api/v1/config/layout` | `config_view` o `config_edit` | Layout de la pantalla de config (tabs → cards) desde el registro central (`lib.config.layout`); el frontend renderiza la config desde esta fuente única |
 
-Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `routes/config/__init__.py`):
+Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `lib/core/config/routes/__init__.py`):
 
 | Clave (`config.json`) | Atributo | Mín | Máx |
 |----------------------|----------|-----|-----|
@@ -455,6 +474,8 @@ Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `tim
 
 ### Plantillas de Notificación
 
+> El subsistema de notificaciones completo (canales, dispatcher, matriz de routing, HMAC): ver **[notifications.md](notifications.md)**.
+
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
 | `GET` | `/api/v1/notify/templates` | `config_view` o `config_edit` | Obtener valores por defecto, sobrescrituras y cadenas por idioma |
@@ -490,6 +511,16 @@ orden, ancho y ordenación) en el campo JSON `table_config` dentro de
 `users.extra`. Se persiste server-side vía `PUT /api/v1/users/me/preferences` y
 se devuelve en `GET /api/v1/me`, de modo que la disposición de columnas se
 mantiene entre dispositivos y sesiones.
+
+**Página de inicio (landing page):** a qué pantalla llega cada usuario tras
+iniciar sesión. El valor **global** es `web_admin.landing_page` (`admin` = panel de
+administración, `status` = página pública de estado); el administrador puede
+sobreescribirlo **por usuario** (modal de usuario) y **por grupo** (modal de grupo,
+campo `landing_page` del grupo). La **precedencia** es *usuario → primer grupo con
+valor (orden alfabético) → global*; si el destino elegido no es visible por permisos,
+se cae al siguiente candidato. Los destinos válidos salen del registro `HOME_PAGES`
+(un módulo futuro puede añadir su propia página declarándola ahí). La resolución
+ocurre en el servidor al iniciar sesión (`routes/auth.py::_landing_url`).
 
 ### Grupos
 
@@ -614,6 +645,8 @@ configurados; más el log de envíos. Ver [configuration.md → Gestor de evento
 
 ### Servicios
 
+> Cómo funcionan por dentro (descubrimiento, composición, control-plane, líder/failover): ver **[services.md](services.md)**.
+
 Estado y control de los servicios de fondo (monitor, receptor syslog, procesador de
 eventos…) + las vistas de solo lectura `worker` (proceso de monitor externo) y
 `database`. **No hay ramas por-servicio**: el WebAdmin compone un objeto embebido
@@ -704,6 +737,8 @@ El nombre del módulo y de la acción deben coincidir con la regex `^[a-z][a-z0-
 ## Dashboard Personalizable
 
 La pestaña **Overview** del panel de administración incluye un dashboard totalmente personalizable por usuario. Los cambios se persisten server-side en la BD (campo `dashboard_layout` de las preferencias, vía `PUT /api/v1/users/me/preferences` y devuelto en `GET /api/v1/me`), por lo que el layout se mantiene entre dispositivos y sesiones; además se cachea en `localStorage` con la clave `ss_layout2_<username>`.
+
+> Cómo se **declaran** los widgets (descriptor `OVERVIEW_WIDGETS`, descubrimiento y carga AJAX por widget): ver [discovery.md → Widgets de Overview](discovery.md#2-widgets-de-overview-overview_widgets).
 
 ![Dashboard Overview](images/dashboard_overview.svg)
 
@@ -864,7 +899,7 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 52 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 63 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |

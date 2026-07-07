@@ -61,6 +61,17 @@ class TestGroups:
         assert groups[_ADMIN_GRP_UID]["builtin"] is True
         assert groups[_ADMIN_GRP_UID]["roles"] == [_UID_ADMIN]
 
+    def test_group_landing_page_roundtrip(self, client):
+        _login(client)
+        uid = _create_group(client, "LandingGrp", landing_page="status")
+        assert uid
+        # Persisted + returned by GET.
+        assert client.get("/api/v1/groups").get_json()[uid]["landing_page"] == "status"
+        # Editable; invalid rejected; '' clears.
+        assert client.put(f"/api/v1/groups/{uid}", json={"landing_page": "bogus"}).status_code == 400
+        assert client.put(f"/api/v1/groups/{uid}", json={"landing_page": "admin"}).status_code == 200
+        assert client.get("/api/v1/groups").get_json()[uid]["landing_page"] == "admin"
+
     def test_update_builtin_group_label_ignored(self, client):
         _login(client)
         resp = client.put(f"/api/v1/groups/{_ADMIN_GRP_UID}", json={"name": "Hacked"})

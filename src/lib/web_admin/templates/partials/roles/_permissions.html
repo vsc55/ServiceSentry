@@ -2,7 +2,7 @@
    Permissions accordion — _togglePermFilter, _buildPermsAccordion,
    _filterPermsAccordion, and the generic per-resource permission grids
    (_RM_RES_PERM_SPECS registry + _rmBuildResPermGrid/_rmBuildAllResPermGrids,
-   shared by modules/servers/clusters), _toggleModDesc.
+   shared by modules/servers/cluster), _toggleModDesc.
    Module-level state for permission filtering.
    ================================================================ #}
 
@@ -226,7 +226,7 @@ function _filterPermsAccordion(query) {
     }
 }
 
-// ── Per-resource permission grids (modules / servers / clusters) ────────────
+// ── Per-resource permission grids (modules / servers / cluster) ────────────
 // ONE generic builder driven by a descriptor registry. The only per-resource
 // code is each spec's items() (where its rows come from); the table, the
 // global-vs-explicit checked state, the {prefix}.{id}.{action} keys and the
@@ -342,7 +342,7 @@ function _rmBuildResPermGrid(spec, activePerms, disabled) {
     grid.innerHTML = h + '</tbody></table>';
 }
 
-// Build every resource grid (modules/servers/clusters) from the registry.
+// Build every resource grid (modules/servers/cluster) from the registry.
 function _rmBuildAllResPermGrids(activePerms, disabled) {
     _RM_RES_PERM_SPECS.forEach(spec => _rmBuildResPermGrid(spec, activePerms, disabled));
 }

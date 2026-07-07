@@ -658,7 +658,7 @@ La UI usa este valor para construir todas las URLs de acciones del módulo (`dis
 Declara qué campo(s) numérico(s) registra el módulo como **serie temporal** (para
 las gráficas de historial). `{"field": "temp", "unit": "°C", "label": "Temperatura"}`,
 o `{"fields": {nombre: {unit, label}}}` para varios; `{"field": null}` para módulos
-solo-estado. Lo lee `routes/history.py`.
+solo-estado. Lo lee `lib/core/history/routes.py`.
 
 ### `__icon__`
 

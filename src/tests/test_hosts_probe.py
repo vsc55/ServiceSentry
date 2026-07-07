@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for lib/hosts/probe — running a single module check once for the
+"""Tests for lib/core/hosts/probe — running a single module check once for the
 Servers "test" feature (reuses the module's real check() with a minimal
 Monitor stand-in)."""
 
 from contextlib import contextmanager
 from unittest.mock import patch
 
-from lib.hosts import ssh_client
-from lib.hosts import probe as host_probe
+from lib.core.hosts import ssh_client
+from lib.core.hosts import probe as host_probe
 
 
 @contextmanager

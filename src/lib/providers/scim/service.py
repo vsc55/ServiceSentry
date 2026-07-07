@@ -14,7 +14,8 @@ from __future__ import annotations
 import hmac
 import uuid
 
-from lib.web_admin.constants import BUILTIN_ROLE_UIDS, SYSTEM_USER, _BUILTIN_GROUPS
+from lib.core.permissions import BUILTIN_ROLE_UIDS, _BUILTIN_GROUPS
+from lib.core.constants import SYSTEM_USER
 
 USER_SCHEMA  = 'urn:ietf:params:scim:schemas:core:2.0:User'
 GROUP_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:Group'

@@ -11,7 +11,7 @@ import pytest
 
 try:
     from lib.web_admin import WebAdmin
-    from lib.notify import webhook_notify
+    from lib.core.notify.webhook import notify as webhook_notify
     _HAS_FLASK = True
 except ImportError:
     _HAS_FLASK = False

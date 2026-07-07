@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Tests for host-centric config resolution end-to-end via ``ModuleBase.resolve_host``.
 
-(The low-level resolution primitives in lib/hosts/resolve.py are tested apart in
+(The low-level resolution primitives in lib/core/hosts/resolve.py are tested apart in
 test_hosts_resolve.py; this file exercises the full merge over a mock monitor.)
 
 A check (or, for SNMP, a server) may carry a ``host_uid`` instead of inline
@@ -217,7 +217,7 @@ class TestDnsHostAware:
         assert isinstance(hp, dict) and hp.get('key') == 'ssh'
 
     def test_dns_in_module_host_fields(self):
-        from lib.hosts.profiles import module_host_fields
+        from lib.core.hosts.profiles import module_host_fields
         assert 'ssh_host' in module_host_fields().get('dns', [])
 
 

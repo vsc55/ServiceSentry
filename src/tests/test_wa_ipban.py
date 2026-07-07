@@ -4,7 +4,7 @@
 
 import time
 
-from lib.security.ipban import IpBanManager
+from lib.services.ipban.jail import IpBanManager
 from .conftest import _login
 
 
@@ -203,6 +203,29 @@ class TestIpBanStore:
 class TestIpBanIntegration:
     _ATTACKER = {"REMOTE_ADDR": "203.0.113.77"}
 
+    def test_granular_permissions(self, admin, client):
+        # A viewer role has the *_view fail2ban perms but none of add/edit/delete.
+        _login(client)
+        client.post("/api/v1/users", json={
+            "username": "ipv", "password": "testpass1", "role": "viewer"})
+        with client.session_transaction() as s:
+            s.clear()
+        client.get("/login")
+        with client.session_transaction() as s:
+            tok = s.get("_csrf")
+        data = {"username": "ipv", "password": "testpass1"}
+        if tok:
+            data["csrf_token"] = tok
+        assert client.post("/login", data=data, follow_redirects=True).status_code == 200
+        # Views allowed…
+        assert client.get("/api/v1/ipbans").status_code == 200
+        assert client.get("/api/v1/ipbans/whitelist").status_code == 200
+        assert client.get("/api/v1/ipbans/banlog").status_code == 200
+        # …mutations forbidden for a viewer.
+        assert client.post("/api/v1/ipbans", json={"ip": "203.0.113.5"}).status_code == 403
+        assert client.post("/api/v1/ipbans/whitelist", json={"value": "10.0.0.0/8"}).status_code == 403
+        assert client.delete("/api/v1/ipbans/203.0.113.5").status_code == 403
+
     def test_manual_ban_blocks_ip(self, admin, client):
         _login(client)
         r = client.post("/api/v1/ipbans", json={"ip": "203.0.113.77", "reason": "manual"})
@@ -212,6 +235,16 @@ class TestIpBanIntegration:
         assert blocked.status_code == 403
         # The admin (loopback, whitelisted) is unaffected.
         assert client.get("/api/v1/ipbans").status_code == 200
+
+    def test_manual_ban_validates_ip_and_caps_reason(self, admin, client):
+        _login(client)
+        # A non-IP value is rejected (not stored as a bogus ban).
+        bad = client.post("/api/v1/ipbans", json={"ip": "not-an-ip"})
+        assert bad.status_code == 400
+        # An over-long reason is capped (≤ 200 chars) rather than stored unbounded.
+        r = client.post("/api/v1/ipbans", json={"ip": "203.0.113.79", "reason": "x" * 500})
+        assert r.status_code == 200
+        assert len(r.get_json()["ban"]["reason"]) <= 200
 
     def test_unban_via_api(self, admin, client):
         _login(client)
@@ -408,7 +441,7 @@ class TestIpBanServiceRegistry:
         admin._ipban_services.set_action("web", "minimal")
         assert admin._ipban_store.service_actions().get("web") == "minimal"
         # A fresh registry on the same store reloads it (survives a restart).
-        from lib.security.ipban_services import IpBanServiceRegistry
+        from lib.services.ipban.exposed import IpBanServiceRegistry
         reg2 = IpBanServiceRegistry()
         reg2.load_actions(admin._ipban_store.service_actions())
         reg2.register(id="web", label_key="x", supports=("page", "minimal"), default="page")

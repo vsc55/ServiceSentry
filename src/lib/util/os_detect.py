@@ -6,7 +6,7 @@ A host declares its OS so modules that run OS-specific commands (e.g. RAID)
 know which syntax to use.  The value may be ``auto``:
 
   * a **local** host resolves ``auto`` to the platform this process runs on;
-  * a **remote** host resolves ``auto`` over SSH (see :mod:`lib.hosts.ssh_client`).
+  * a **remote** host resolves ``auto`` over SSH (see :mod:`lib.core.hosts.ssh_client`).
 
 Canonical OS tokens are kept small and stable so module code can switch on them.
 """

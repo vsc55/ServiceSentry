@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_52_flags(self):
+    def test_permissions_tuple_has_63_flags(self):
         from lib.web_admin.app import PERMISSIONS
-        assert len(PERMISSIONS) == 52
+        assert len(PERMISSIONS) == 63
 
     def test_permissions_are_unique(self):
         from lib.web_admin.app import PERMISSIONS
@@ -51,11 +51,38 @@ class TestPermissionsConstants:
             'checks_view', 'checks_run',
             'history_view', 'history_delete',
             'syslog_view', 'syslog_delete',
+            'ipban_ban_view', 'ipban_ban_add', 'ipban_ban_edit', 'ipban_ban_delete',
+            'ipban_watchlist_clear',
+            'ipban_whitelist_view', 'ipban_whitelist_add', 'ipban_whitelist_delete',
+            'ipban_history_view', 'ipban_service_edit', 'ipban_config_edit',
             'services_view', 'services_control',
             'events_view', 'events_add', 'events_edit', 'events_delete',
             'events_notify_view', 'events_notify_delete',
         }
         assert set(PERMISSIONS) == expected
+
+    def test_ipban_permissions_come_from_module_discovery(self):
+        # The 11 fail2ban flags are NOT hardcoded in constants: they are declared in
+        # lib/services/ipban/permissions.py (MODULE_PERMISSIONS) and merged via
+        # discover_permissions, the same self-describing pattern as EMBEDDED_SERVICE.
+        # This test locks in that a module owns its own permissions (flags + group +
+        # role grants) — for both services and core domains.
+        from lib.core.permissions import discover_permissions
+        from lib.web_admin.app import (PERMISSIONS, PERMISSION_GROUPS,
+                                        BUILTIN_ROLE_PERMISSIONS)
+        ipban = next(m for m in discover_permissions()
+                     if m['group'] == 'perm_group_ipban')
+        flags = [p['flag'] for p in ipban['permissions']]
+        assert len(flags) == 11 and all(f.startswith('ipban_') for f in flags)
+        # merged into the central registry (flags + group + admin-gets-all)
+        assert set(flags) <= set(PERMISSIONS)
+        assert dict(PERMISSION_GROUPS)['perm_group_ipban'] == flags
+        assert set(flags) <= BUILTIN_ROLE_PERMISSIONS['admin']
+        # editor/viewer grants derived from each flag's declared `roles`
+        exp_editor = {p['flag'] for p in ipban['permissions'] if 'editor' in p['roles']}
+        exp_viewer = {p['flag'] for p in ipban['permissions'] if 'viewer' in p['roles']}
+        assert {p for p in BUILTIN_ROLE_PERMISSIONS['editor'] if p.startswith('ipban_')} == exp_editor
+        assert {p for p in BUILTIN_ROLE_PERMISSIONS['viewer'] if p.startswith('ipban_')} == exp_viewer
 
     def test_permission_groups_structure(self):
         from lib.web_admin.app import PERMISSION_GROUPS
@@ -233,7 +260,7 @@ class TestPermissionsConstants:
     def test_dashboard_exposes_permissions_list_js(self, client):
         """Dashboard HTML contains ALL_PERMISSIONS JS constant."""
         _login(client)
-        html = client.get("/").data.decode()
+        html = client.get("/admin").data.decode()
         assert 'ALL_PERMISSIONS' in html
         assert 'modules_edit' in html
         assert 'users_view' in html
@@ -241,7 +268,7 @@ class TestPermissionsConstants:
     def test_dashboard_exposes_permission_groups(self, client):
         """Dashboard HTML includes the grouped permissions structure."""
         _login(client)
-        html = client.get("/").data.decode()
+        html = client.get("/admin").data.decode()
         assert 'perm_group_users' in html
         assert 'perm_group_audit' in html
 
@@ -273,7 +300,7 @@ class TestCustomRoles:
         assert resp.status_code == 401
 
     def test_get_roles_returns_builtin_roles(self, client):
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         _login(client)
         resp = client.get("/api/v1/roles")
         assert resp.status_code == 200
@@ -283,7 +310,7 @@ class TestCustomRoles:
             assert BUILTIN_ROLE_UIDS[key] in data
 
     def test_builtin_roles_are_marked(self, client):
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         _login(client)
         roles = client.get("/api/v1/roles").get_json()
         for key in ('admin', 'editor', 'viewer'):
@@ -291,7 +318,7 @@ class TestCustomRoles:
 
     def test_builtin_roles_have_permissions(self, client):
         from lib.web_admin.app import PERMISSIONS, BUILTIN_ROLE_PERMISSIONS
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         _login(client)
         roles = client.get("/api/v1/roles").get_json()
         assert set(roles[BUILTIN_ROLE_UIDS['admin']]['permissions']) == set(PERMISSIONS)
@@ -374,7 +401,7 @@ class TestCustomRoles:
     def test_update_builtin_role_name(self, client):
         """Built-in roles can have their display name updated, but not permissions."""
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         _login(client)
         admin_uid = BUILTIN_ROLE_UIDS['admin']
         resp = client.put(f"/api/v1/roles/{admin_uid}", json={"name": "Super Admin"})
@@ -386,7 +413,7 @@ class TestCustomRoles:
     def test_update_builtin_role_permissions_ignored(self, client):
         """Built-in role PUT ignores permission changes (only name is accepted)."""
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         _login(client)
         editor_uid = BUILTIN_ROLE_UIDS['editor']
         original_perms = set(BUILTIN_ROLE_PERMISSIONS["editor"])
@@ -408,7 +435,7 @@ class TestCustomRoles:
         assert uid not in admin._custom_roles
 
     def test_cannot_delete_builtin_role(self, client):
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         _login(client)
         resp = client.delete(f"/api/v1/roles/{BUILTIN_ROLE_UIDS['editor']}")
         assert resp.status_code == 400

@@ -34,7 +34,7 @@ class TestApiUsers:
         assert "admin" in data
         # Must NOT expose password_hash
         assert "password_hash" not in data["admin"]
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         assert data["admin"]["role"] == BUILTIN_ROLE_UIDS['admin']
 
     def test_create_user(self, client):
@@ -49,7 +49,7 @@ class TestApiUsers:
         # Verify it appears in the list
         users = client.get("/api/v1/users").get_json()
         assert "newuser" in users
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         assert users["newuser"]["role"] == BUILTIN_ROLE_UIDS['editor']
         assert users["newuser"]["display_name"] == "New User"
 
@@ -101,9 +101,46 @@ class TestApiUsers:
         })
         assert resp.status_code == 200
         users = client.get("/api/v1/users").get_json()
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         assert users["testuser"]["role"] == BUILTIN_ROLE_UIDS['editor']
         assert users["testuser"]["display_name"] == "Test Edited"
+
+    def test_landing_page_per_user(self, client):
+        _login(client)
+        client.post("/api/v1/users", json={
+            "username": "lpuser", "password": "testpass1", "role": "viewer",
+            "landing_page": "status"})
+        # GET /users echoes it back (so the edit modal repopulates the select).
+        assert client.get("/api/v1/users").get_json()["lpuser"]["landing_page"] == "status"
+        # An invalid landing page is rejected.
+        bad = client.put("/api/v1/users/lpuser", json={"landing_page": "nope"})
+        assert bad.status_code == 400
+        # A valid one is accepted + round-trips; '' clears it (inherit).
+        assert client.put("/api/v1/users/lpuser", json={"landing_page": "admin"}).status_code == 200
+        assert client.get("/api/v1/users").get_json()["lpuser"]["landing_page"] == "admin"
+        assert client.put("/api/v1/users/lpuser", json={"landing_page": ""}).status_code == 200
+
+    def test_me_exposes_login_id(self, admin, client):
+        # login_id (the session id) drives the client's fresh-login vs reload landing.
+        _login(client)
+        assert "login_id" in client.get("/api/v1/me").get_json()
+
+    def test_login_redirects_to_landing_url(self, admin, client):
+        # A user whose landing is the status page is redirected to /status, not the panel.
+        _login(client)
+        client.post("/api/v1/users", json={
+            "username": "landuser", "password": "testpass1", "role": "viewer",
+            "landing_page": "status"})
+        with client.session_transaction() as s:
+            s.clear()
+        client.get("/login")
+        with client.session_transaction() as s:
+            tok = s.get("_csrf")
+        data = {"username": "landuser", "password": "testpass1"}
+        if tok:
+            data["csrf_token"] = tok
+        r = client.post("/login", data=data)   # do NOT follow the redirect
+        assert r.status_code == 302 and r.headers["Location"].endswith("/status")
 
     def test_update_user_password(self, admin, client):
         """Changing a user's password via admin API works."""
@@ -180,7 +217,7 @@ class TestUserInputValidation:
 
     def test_create_user_valid_lang_accepted(self, admin, client):
         _login(client)
-        from lib.web_admin.constants import SUPPORTED_LANGS
+        from lib.i18n import SUPPORTED_LANGS
         lang = SUPPORTED_LANGS[0]
         resp = client.post("/api/v1/users", json={
             "username": "u2", "password": "testpass", "role": "viewer",
@@ -241,7 +278,7 @@ class TestUserInputValidation:
 
     def test_update_user_valid_lang_accepted(self, admin, client):
         _login(client)
-        from lib.web_admin.constants import SUPPORTED_LANGS
+        from lib.i18n import SUPPORTED_LANGS
         lang = SUPPORTED_LANGS[0]
         client.post("/api/v1/users", json={
             "username": "upd2", "password": "testpass", "role": "viewer",
@@ -328,7 +365,7 @@ class TestUserInputValidation:
 
     def test_preferences_valid_lang_accepted(self, client):
         _login(client)
-        from lib.web_admin.constants import SUPPORTED_LANGS
+        from lib.i18n import SUPPORTED_LANGS
         resp = client.put("/api/v1/users/me/preferences", json={"lang": SUPPORTED_LANGS[0]})
         assert resp.status_code == 200
 
@@ -352,7 +389,7 @@ class TestRolePermissions:
     def _make_multiuser_admin(config_dir, var_dir):
         """Create a WebAdmin with admin 'boss', editor 'dev', viewer 'guest'."""
         import uuid as _uuid
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         wa = WebAdmin(config_dir, "boss", "bosspass", var_dir=var_dir,
                       pw_require_upper=False, pw_require_digit=False)
         wa.app.config["TESTING"] = True
@@ -486,7 +523,7 @@ class TestPasswordResetPrivileges:
     def _make_wa(config_dir, var_dir):
         """WebAdmin with admin 'boss', editor 'dev', and viewer 'guest'."""
         import uuid as _uuid
-        from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+        from lib.core.permissions import BUILTIN_ROLE_UIDS
         wa = WebAdmin(config_dir, "boss", "bosspass", var_dir=var_dir,
                       pw_require_upper=False, pw_require_digit=False)
         wa.app.config["TESTING"] = True

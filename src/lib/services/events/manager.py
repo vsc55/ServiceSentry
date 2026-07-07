@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """Event-rules manager: match events and fire notifications.
 
-A rule (lib.stores.event.EventRulesStore) matches events from a source and,
+A rule (lib.services.events.store.EventRulesStore) matches events from a source and,
 when it fires, dispatches a ``kind='event'`` notification to the channels the rule
-chose (via lib.notify.notification_dispatcher, channels override).
+chose (via lib.core.notify.notification_dispatcher, channels override).
 
 This module is intentionally Flask-free (the dispatcher is imported lazily only
 when a rule actually fires) so it can be mixed into both the WebAdmin and the
@@ -342,7 +342,7 @@ class _EventsMixin:
                     if c in ('telegram', 'email', 'webhook')]
         if not channels:
             return
-        from lib.notify.notification_dispatcher import dispatch  # noqa: PLC0415
+        from lib.core.notify.notification_dispatcher import dispatch  # noqa: PLC0415
         name = rule.get('name') or ''
         if source == 'syslog':
             status = ctx.get('severity_name') or str(ctx.get('severity', ''))

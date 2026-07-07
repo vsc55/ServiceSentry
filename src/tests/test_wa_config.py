@@ -9,7 +9,7 @@ import pytest
 
 try:
     from lib.web_admin import WebAdmin
-    from lib.web_admin.constants import SUPPORTED_LANGS
+    from lib.i18n import SUPPORTED_LANGS
     _HAS_FLASK = True
 except ImportError:
     _HAS_FLASK = False

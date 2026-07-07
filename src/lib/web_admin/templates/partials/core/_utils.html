@@ -94,6 +94,16 @@ document.addEventListener('keydown', e => { if (e.key === 'Control' || e.key ===
 document.addEventListener('keyup',   e => { if (e.key === 'Control' || e.key === 'Meta') _modCtrlHeld = false; }, true);
 window.addEventListener('blur', () => { _modCtrlHeld = false; });
 
+// <option>s for a landing-page (home tab) select, from the HOME_PAGES registry.
+// withInherit adds a leading "(default)" empty option (per-user / per-group override).
+function _homePageOptions(selected, withInherit) {
+    const inherit = withInherit
+        ? `<option value=""${!selected ? ' selected' : ''}>${esc(t('landing_inherit'))}</option>` : '';
+    return inherit + (HOME_PAGES || []).map(p =>
+        `<option value="${escAttr(p.id)}"${selected === p.id ? ' selected' : ''}>${esc(t(p.label_key))}</option>`
+    ).join('');
+}
+
 function _buildColChooser(cols, visibleSet, toggleFn, resetFn, minWidth = 160) {
     // Each column toggle re-renders the whole table, which destroys this open menu —
     // so by default the chooser closes after picking a column (the historical
@@ -136,7 +146,7 @@ function _colChooserToggle(ev, fnName, colId) {
     // key flag in case the modifier is missing on the event.
     const keepOpen = (ev && (ev.ctrlKey || ev.metaKey)) || _modCtrlHeld;
     // Capture the current chooser button so the reopen waits for a *new* one — some
-    // tables (e.g. clusters) re-render asynchronously, so the replacement button
+    // tables (e.g. cluster) re-render asynchronously, so the replacement button
     // appears a tick later than the synchronous tables.
     const oldBtn = keepOpen ? document.querySelector(`[data-chooser="${fnName}"]`) : null;
     const fn = window[fnName];

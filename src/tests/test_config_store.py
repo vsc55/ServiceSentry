@@ -3,7 +3,7 @@
 """Tests for ConfigStore — the DB-backed editable configuration layer."""
 
 from lib.db import get_connector
-from lib.stores.config import ConfigStore
+from lib.core.config.store import ConfigStore
 
 
 def _store():

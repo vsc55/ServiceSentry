@@ -23,7 +23,7 @@ def _wants_json() -> bool:
 
 
 def _make_handler(code: int):
-    from lib.web_admin.constants import TRANSLATIONS, DEFAULT_LANG
+    from lib.i18n import TRANSLATIONS, DEFAULT_LANG
 
     def handler(e):
         if _wants_json():
@@ -36,7 +36,7 @@ def _make_handler(code: int):
         # also need them here to pass as explicit params for safety).
         try:
             from flask import session
-            from lib.web_admin.constants import DEFAULT_LANG as _DEFAULT_LANG
+            from lib.i18n import DEFAULT_LANG as _DEFAULT_LANG
             lang = session.get('lang', _DEFAULT_LANG)
             if lang not in TRANSLATIONS:
                 lang = DEFAULT_LANG

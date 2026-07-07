@@ -27,10 +27,10 @@ from lib.config.manager import (
     ConfigManager, bootstrap_database_cfg, overlay_section_env, read_config_raw)
 from lib.db import get_connector
 from lib.debug import Debug, DebugLevel
-from lib.stores.config import ConfigStore
-from lib.stores.service_instances import ServiceInstancesStore
-from lib.stores.service_commands import ServiceCommandsStore
-from lib.stores.service_leader import ServiceLeaderStore
+from lib.core.config.store import ConfigStore
+from lib.services.control.instances import ServiceInstancesStore
+from lib.services.control.commands import ServiceCommandsStore
+from lib.services.control.leader import ServiceLeaderStore
 from lib.security import secret_manager
 from lib.services.heartbeat import _HeartbeatMixin, db_summary
 from lib.services.control_server import start_control_server
@@ -107,7 +107,7 @@ class MonitorService(_HeartbeatMixin, _MonitoringMixin):
 
         # Check history on the shared connector (same table the web admin reads).
         try:
-            from lib.stores.history import HistoryStore  # noqa: PLC0415
+            from lib.core.history.store import HistoryStore  # noqa: PLC0415
             self._history = HistoryStore(self._db_connector)
         except Exception:  # pylint: disable=broad-except
             self._history = None

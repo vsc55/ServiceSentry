@@ -12,6 +12,7 @@ const LABELS = I18N.labels || {};
 const SECTION_LABELS = I18N.sections || {};
 const SENSITIVE   = new Set({{ wa_sensitive_fields | tojson }});
 const PERM_GROUPS = {{ permissions_groups | tojson }};
+const HOME_PAGES  = {{ home_pages | tojson }};   // landing-page registry (id/url/label_key) — for the selects
 const SUPPORTED_LANGS = {{ supported_langs| tojson }};
 const SYSTEM_DEFAULT_LANG      = '{{ default_lang }}';
 const CURRENT_LANG             = '{{ lang }}';
@@ -118,6 +119,10 @@ const MODULE_HOST_MULTI_BIND = {{ module_host_multi_bind | default({}) | tojson 
 // {icon, multi, perm, cols, h, label_i18n}}. The core renders them generically;
 // the data comes from the module's overview_widget() hook (module_widgets payload).
 const MODULE_WIDGETS = {{ module_widgets | default({}) | tojson }};
+// Self-describing built-in widgets (core domains + services declare them in their
+// overview_widget.py). Merged into _DW_DEFS/_DW_NAV so a domain/service contributes a
+// widget by declaring it — see lib.core.overview.discovery.
+const OVERVIEW_WIDGETS = {{ overview_widgets | default([]) | tojson }};
 // {module: [directive]} — how the Status card decorates a check's other_data
 // (usage bar / badge). Declared per-module via __status_render__; the core renders
 // each directive generically, so no other_data key names are hardcoded in core.

@@ -2,7 +2,7 @@ function openNewHostModal() {
     _editingHostUid = null;
     _hostModalReadonly = false;   // reachable only with edit rights (toolbar-gated)
     _hostDraft = { name: '', address: '', kind: 'local', os: 'auto', maintenance: false,
-                   tags: [], description: '', profiles: {} };
+                   virtual: false, tags: [], description: '', profiles: {} };
     document.getElementById('hostModalTitle').textContent = t('host_new');
     _hostChecks = _buildHostChecks(null);
     _hostCheckFilters = {};
@@ -129,6 +129,7 @@ function openEditHostModal(uid) {
     _hostDraft = JSON.parse(JSON.stringify({
         name: host.name || '', address: host.address || '',
         kind: host.kind || 'local', os: host.os || 'auto', maintenance: !!host.maintenance,
+        virtual: !!host.virtual,
         tags: host.tags || [], description: host.description || '',
         profiles: host.profiles || {},
     }));
@@ -196,6 +197,15 @@ function _renderHostModalBody() {
                 <label class="form-check-label small fw-semibold" for="hmMaint">
                     <i class="bi bi-cone-striped me-1"></i>${esc(t('host_maintenance'))}</label>
                 <div class="form-text small">${esc(t('host_maintenance_hint'))}</div>
+            </div>
+        </div>
+        <div class="col-sm-6 d-flex align-items-center">
+            <div class="form-check form-switch mt-3">
+                <input class="form-check-input" type="checkbox" id="hmVirtual" ${d.virtual ? 'checked' : ''}
+                       onchange="_hostDraft.virtual=this.checked">
+                <label class="form-check-label small fw-semibold" for="hmVirtual">
+                    <i class="bi bi-diagram-3 me-1"></i>${esc(t('host_virtual'))}</label>
+                <div class="form-text small">${esc(t('host_virtual_hint'))}</div>
             </div>
         </div>
     </div>

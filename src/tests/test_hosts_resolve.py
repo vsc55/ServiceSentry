@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for lib/hosts/resolve.py — shared host-resolution primitives."""
+"""Tests for lib/core/hosts/resolve.py — shared host-resolution primitives."""
 
-from lib.hosts.resolve import host_profile_specs, resolve_os
+from lib.core.hosts.resolve import host_profile_specs, resolve_os
 from lib.util.os_detect import local_os
 
 

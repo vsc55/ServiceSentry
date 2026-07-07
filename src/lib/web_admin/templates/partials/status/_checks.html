@@ -197,7 +197,7 @@ function _statusCheckLabel(mod, ck) {
             for (const [coll, items] of Object.entries(mc)) {
                 if (coll.startsWith('__') || !items || typeof items !== 'object') continue;
                 // Match the collection key directly, or — for multi-bind checks whose
-                // results are keyed by the item UID (e.g. clusters) — an item whose
+                // results are keyed by the item UID (e.g. cluster) — an item whose
                 // uid equals the key.
                 let it = items[key];
                 if (!(it && typeof it === 'object'))

@@ -881,7 +881,7 @@ class Watchful(ModuleBase):
         Returns {"ok": bool, "message": str, "fields": {auth_method, token_id,
         token_secret}}.
         """
-        from lib.hosts import ssh_client  # noqa: PLC0415
+        from lib.core.hosts import ssh_client  # noqa: PLC0415
         from lib.security.net_guard import validate_external_url  # noqa: PLC0415
 
         # When the check is bound to a host, the route injects the resolved host

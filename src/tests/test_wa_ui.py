@@ -25,14 +25,14 @@ class TestDarkMode:
     def test_default_theme_is_light(self, client):
         """Without any config, theme defaults to light."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'data-bs-theme="light"' in html
 
     def test_toggle_to_dark(self, client):
         """Saving dark_mode=True via preferences API switches the session theme."""
         _login(client)
         client.put("/api/v1/users/me/preferences", json={"dark_mode": True})
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'data-bs-theme="dark"' in html
 
     def test_toggle_back_to_light(self, client):
@@ -40,7 +40,7 @@ class TestDarkMode:
         _login(client)
         client.put("/api/v1/users/me/preferences", json={"dark_mode": True})
         client.put("/api/v1/users/me/preferences", json={"dark_mode": False})
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'data-bs-theme="light"' in html
 
     def test_theme_persisted_to_user(self, admin, client):
@@ -55,7 +55,7 @@ class TestDarkMode:
         """User's saved dark_mode preference is restored on login."""
         admin._users["admin"]["dark_mode"] = True
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'data-bs-theme="dark"' in html
 
     def test_api_me_includes_dark_mode(self, client):
@@ -78,7 +78,7 @@ class TestDarkMode:
         wa.app.config["TESTING"] = True
         c = wa.app.test_client()
         _login(c)
-        html = c.get("/").data
+        html = c.get("/admin").data
         assert b'data-bs-theme="dark"' in html
 
     def test_save_config_updates_default_dark_mode(self, admin, client):
@@ -116,7 +116,7 @@ class TestConfigDarkMode:
     def test_config_tab_renders_dark_mode_field(self, client):
         """The config tab JS ensures web_admin.dark_mode is rendered."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         # _js_config.html pre-populates web_admin fields via the 'wa' alias:
         # const wa = configData.web_admin; ... if (!('dark_mode' in wa)) wa.dark_mode = ...
         assert b"wa.dark_mode" in html
@@ -278,13 +278,13 @@ class TestI18n:
     def test_dashboard_exposes_default_lang(self, client):
         """Dashboard HTML includes the system default language."""
         _login(client)
-        resp = client.get("/")
+        resp = client.get("/admin")
         assert b"SYSTEM_DEFAULT_LANG" in resp.data
 
     def test_dashboard_exposes_supported_langs(self, client):
         """Dashboard JS has the list of supported languages."""
         _login(client)
-        resp = client.get("/")
+        resp = client.get("/admin")
         assert b"SUPPORTED_LANGS" in resp.data
 
 
@@ -296,14 +296,14 @@ class TestUIReorganisation:
     def test_navbar_has_user_dropdown(self, client):
         """Navbar contains a user dropdown menu with account settings."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b"openAccountSettingsModal()" in html
         assert b"bi-person-circle" in html
 
     def test_account_settings_modal_has_password_fields(self, client):
         """Account settings modal contains password change fields."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'id="accountSettingsModal"' in html
         assert b'id="settingsPwCurrent"' in html
         assert b'id="settingsPwNew"' in html
@@ -311,7 +311,7 @@ class TestUIReorganisation:
     def test_reset_password_modal_exists(self, client):
         """Dashboard contains the admin reset-password modal."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'id="resetPasswordModal"' in html
         assert b'id="btnResetPasswordOk"' in html
         assert b'id="rpNewPassword"' in html
@@ -319,13 +319,13 @@ class TestUIReorganisation:
     def test_no_inline_password_form_in_users_tab(self, client):
         """The old inline change-password card is no longer in the users tab."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'onclick="changeOwnPassword()"' not in html
 
     def test_users_table_has_reset_icon(self, client):
         """The renderUsers JS produces a reset-password button per row."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b"openResetPasswordModal(" in html
 
     def test_reset_password_via_admin_api(self, admin, client):
@@ -343,14 +343,14 @@ class TestUIReorganisation:
     def test_language_selector_in_account_settings(self, client):
         """Language selector is inside the account settings modal."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'accountSettingsModal' in html
         assert b'id="settingsLang"' in html
 
     def test_dark_mode_selector_in_account_settings(self, client):
         """Dark mode selector (3 options) is present in the account settings modal."""
         _login(client)
-        html = client.get("/").data
+        html = client.get("/admin").data
         assert b'id="settingsDarkMode"' in html
         assert b'saveAccountPreferences' in html
 

@@ -177,20 +177,20 @@ class TestCoerceLang:
 class TestTrackChange:
 
     def test_records_and_applies_change(self):
-        from lib.web_admin.routes._helpers import track_change
+        from lib.util.entity_audit import track_change
         changes, entity = [], {'name': 'old'}
         track_change(changes, entity, 'name', 'new')
         assert entity['name'] == 'new'
         assert changes == [{'field': 'name', 'old': 'old', 'new': 'new'}]
 
     def test_no_change_no_record(self):
-        from lib.web_admin.routes._helpers import track_change
+        from lib.util.entity_audit import track_change
         changes, entity = [], {'name': 'same'}
         track_change(changes, entity, 'name', 'same')
         assert changes == [] and entity['name'] == 'same'
 
     def test_old_default(self):
-        from lib.web_admin.routes._helpers import track_change
+        from lib.util.entity_audit import track_change
         changes, entity = [], {}
         track_change(changes, entity, 'name', 'new', old_default='uid-x')
         assert changes == [{'field': 'name', 'old': 'uid-x', 'new': 'new'}]

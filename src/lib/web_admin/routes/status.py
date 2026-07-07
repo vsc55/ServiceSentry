@@ -7,7 +7,7 @@ import os
 
 from flask import abort, render_template, session
 
-from lib.web_admin.constants import DEFAULT_LANG, TRANSLATIONS
+from lib.i18n import DEFAULT_LANG, TRANSLATIONS
 
 # Fallback language for watchful pretty-name lookup.
 _LANG_FALLBACK = 'en_EN'

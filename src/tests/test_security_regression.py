@@ -33,7 +33,7 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 def _make_wa(config_dir, var_dir, extra_users: dict | None = None):
     """WebAdmin with admin 'boss', editor 'dev', viewer 'guest', plus extra_users."""
     import uuid as _uuid
-    from lib.web_admin.constants import BUILTIN_ROLE_UIDS
+    from lib.core.permissions import BUILTIN_ROLE_UIDS
     wa = WebAdmin(config_dir, "boss", "Bosspass1", var_dir=var_dir)
     wa.app.config["TESTING"] = True
     for uname, role_key, pw, dn in [
@@ -369,7 +369,7 @@ class TestLdapEmptyPasswordRejected:
     """
 
     def test_empty_password_rejected(self, admin):
-        from lib.web_admin.auth import ldap_auth
+        from lib.providers.ldap import auth as ldap_auth
         attrs, reason = ldap_auth.authenticate(admin, "someuser", "")
         assert attrs is None
         assert reason == 'ldap_invalid_credentials'

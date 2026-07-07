@@ -19,77 +19,34 @@ const _DW_H_PRESET    = { sm: 150, md: 280, lg: 420, xl: 560 };
 //   row 3: sessions_list·incidents·failed_logins                     (3 × 4)
 //   row 4: modules_list·servers_list·activity                        (3 × 4)
 //   row 5: syslog                                                    (1 × 12)
-const _DW_DEFS = {
-    checks:       { icon: 'bi-activity',      lkey: 'overview_status',           dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('checks_view') || p.has('checks_run') },
-    modules:      { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('modules_view') },
-    servers:      { icon: 'bi-hdd-network',   lkey: 'overview_servers',          dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
-    users:        { icon: 'bi-person',         lkey: 'overview_users',            dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('users_view') },
-    groups:       { icon: 'bi-people',        lkey: 'overview_groups',           dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('groups_view') },
-    roles:        { icon: 'bi-shield-shaded',   lkey: 'overview_roles',            dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('roles_view') },
-    sessions:     { icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('sessions_view') },
-    webhooks:     { icon: 'bi-broadcast',     lkey: 'overview_webhooks',         dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('config_view') || p.has('config_edit') },
-    credentials:  { icon: 'bi-key',           lkey: 'overview_credentials',      dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('credentials_view') || p.has('servers_view') || p.has('modules_view') },
-    coverage:     { icon: 'bi-pie-chart',     lkey: 'overview_coverage',         dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
-    syslog_stats: { icon: 'bi-card-list',     lkey: 'overview_syslog_stats',     dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('syslog_view') },
-    events:       { icon: 'bi-bell',          lkey: 'overview_events',           dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('events_view') },
-    sessions_list:{ icon: 'bi-plug',          lkey: 'overview_sessions',         dCols: 4,  dH: 140,    hasH: true,
-                    canShow: (p)         => p.has('sessions_view') },
-    incidents:    { icon: 'bi-exclamation-triangle', lkey: 'overview_incidents',  dCols: 4,  dH: 140,    hasH: true,
-                    canShow: (p)         => p.has('modules_view') },
-    failed_logins:{ icon: 'bi-shield-lock',   lkey: 'overview_failed_logins',    dCols: 4,  dH: 140,    hasH: true,
-                    canShow: (p)         => p.has('audit_view') },
-    modules_list: { icon: 'bi-puzzle',        lkey: 'overview_modules',          dCols: 4,  dH: 340,    hasH: true,
-                    canShow: (p)         => p.has('modules_view') },
-    servers_list: { icon: 'bi-hdd-network',   lkey: 'overview_servers',          dCols: 4,  dH: 340,    hasH: true,
-                    canShow: (p)         => p.has('servers_view') || [...p].some(x => x.startsWith('server.')) },
-    activity:     { icon: 'bi-clock-history', lkey: 'overview_recent_activity',  dCols: 4,  dH: 340,    hasH: true,
-                    canShow: (p)         => p.has('audit_view') },
-    syslog:       { icon: 'bi-card-list',     lkey: 'overview_syslog',           dCols: 12, dH: 200,    hasH: true,
-                    canShow: (p)         => p.has('syslog_view') },
-    fail2ban:     { icon: 'bi-slash-circle',  lkey: 'overview_fail2ban',         dCols: 2,  dH: 'auto', hasH: false,
-                    canShow: (p)         => p.has('config_view') || p.has('config_edit') },
-    ipban_list:   { icon: 'bi-slash-circle',  lkey: 'overview_ipban_list',       dCols: 4,  dH: 340,    hasH: true,
-                    canShow: (p)         => p.has('config_view') || p.has('config_edit') },
-};
+// All built-in widgets now self-describe from their domain/service overview_widget.py
+// (lib.core.*/lib.services.*), discovered and served as OVERVIEW_WIDGETS. This object is
+// filled entirely by the merge below — nothing widget-specific is hardcoded here.
+const _DW_DEFS = {};
+
+// ── Merge the self-describing built-in widgets (discovered) into _DW_DEFS ──────────
+// Each domain/service declares its widgets in overview_widget.py (OVERVIEW_WIDGETS);
+// `perms` is a small expression: `any` = has ANY flag, `prefix` = has a flag starting
+// with any prefix (e.g. per-server `server.`).
+function _dwCanShow(perms) {
+    const any = (perms && perms.any) || [], pref = (perms && perms.prefix) || [];
+    return (p) => any.some(f => p.has(f)) || pref.some(pre => [...p].some(x => x.startsWith(pre)));
+}
+(OVERVIEW_WIDGETS || []).forEach(w => {
+    _DW_DEFS[w.id] = {
+        icon: w.icon || 'bi-grid-1x2', lkey: w.label_key,
+        dCols: w.cols || 2, dH: (w.h === undefined ? 'auto' : w.h), hasH: !!w.has_h,
+        multi: !!w.multi, canShow: _dwCanShow(w.perms),
+        view: w.view || null,   // data-driven render spec (self-describing widgets)
+    };
+});
 
 // Click-through target for each widget → the tab (and sub-tab, if any) it
 // summarises, addressed by the tab-pane selector. Navigation is gated by
 // permission: a tab/sub-tab whose <li> is hidden (no view rights) is skipped.
-const _DW_NAV = {
-    checks:        { tab: '#tab-status'  },
-    modules:       { tab: '#tab-modules' },
-    servers:       { tab: '#tab-servers' },
-    users:         { tab: '#tab-access',  sub: '#subtab-users'    },
-    groups:        { tab: '#tab-access',  sub: '#subtab-groups'   },
-    roles:         { tab: '#tab-access',  sub: '#subtab-roles'    },
-    sessions:      { tab: '#tab-access',  sub: '#subtab-sessions' },
-    webhooks:      { tab: '#tab-config'  },
-    credentials:   { tab: '#tab-access',  sub: '#subtab-credentials' },
-    coverage:      { tab: '#tab-servers' },
-    sessions_list: { tab: '#tab-access',  sub: '#subtab-sessions' },
-    incidents:     { tab: '#tab-status'  },
-    failed_logins: { tab: '#tab-audit'   },
-    modules_list:  { tab: '#tab-modules' },
-    servers_list:  { tab: '#tab-servers' },
-    activity:      { tab: '#tab-audit'   },
-    syslog:        { tab: '#tab-syslog'  },
-    syslog_stats:  { tab: '#tab-syslog'  },
-    events:        { tab: '#tab-events'  },
-    fail2ban:      { tab: '#tab-ipban'   },
-    ipban_list:    { tab: '#tab-ipban'   },
-};
+// Filled entirely from the discovered widgets' `nav` (merged below).
+const _DW_NAV = {};
+(OVERVIEW_WIDGETS || []).forEach(w => { if (w.nav) _DW_NAV[w.id] = w.nav; });
 
 // Resolve the tab/sub-tab toggle button for a pane selector, but ONLY if it is
 // available to the current user. Tab/sub-tab <li>s are set to display:none when
@@ -349,7 +306,7 @@ function _dwSetSyslogSev(sel) {
     if (sel.value === '') delete dw.dataset.sev; else dw.dataset.sev = sel.value;
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
-    _dwSyslogAsyncRefresh();   // load a full list at the chosen minimum severity
+    _dwTableFetch(dw.dataset.wid);   // data-driven table: re-fetch rows at the new severity
     _dwSave();
 }
 
@@ -360,6 +317,7 @@ function _dwSetModuleFilter(sel) {
     if (sel.value === '') delete dw.dataset.modf; else dw.dataset.modf = sel.value;
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwTableFetch(dw.dataset.wid);   // data-driven table: re-fetch rows for the new filter
     _dwSave();
 }
 
@@ -370,6 +328,7 @@ function _dwSetServerFilter(sel) {
     if (sel.value === '') delete dw.dataset.srvf; else dw.dataset.srvf = sel.value;
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwTableFetch(dw.dataset.wid);   // data-driven table: re-fetch rows for the new filter
     _dwSave();
 }
 

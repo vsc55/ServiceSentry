@@ -421,7 +421,7 @@ class Watchful(ModuleBase):
         timeout = _coerce_int(config.get('timeout'), 5) or 5
         # Host-aware: the Servers modal injects the bound host; when it is remote,
         # probe from THERE (over SSH) so a host that reaches the DNS discovers.
-        from lib.hosts import runner as host_runner  # noqa: PLC0415
+        from lib.core.hosts import runner as host_runner  # noqa: PLC0415
         host = config.get('__host__') if isinstance(config, dict) else None
         if _truthy(inp.get('axfr')):
             try:
@@ -482,7 +482,7 @@ class Watchful(ModuleBase):
     def _discover_probe_remote(cls, host: dict, domain: str, timeout: int) -> list:
         """Probe record types by running dig/nslookup ON the bound host (SSH), so
         a host that can reach the (internal) DNS does the discovery."""
-        from lib.hosts import runner as host_runner  # noqa: PLC0415
+        from lib.core.hosts import runner as host_runner  # noqa: PLC0415
         os_ = str((host or {}).get('os') or 'linux').strip().lower()
         types = cls._probe_types()
         if os_ == 'windows':

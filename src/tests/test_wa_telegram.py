@@ -111,6 +111,6 @@ class TestTelegramTest:
     def test_dashboard_has_test_button(self, client):
         """Dashboard HTML includes the Telegram test button."""
         _login(client)
-        resp = client.get("/")
+        resp = client.get("/admin")
         assert b"btnTestTelegram" in resp.data
         assert b"testTelegram()" in resp.data

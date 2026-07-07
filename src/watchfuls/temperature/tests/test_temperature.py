@@ -107,6 +107,6 @@ class TestDiscover:
     def test_discover_remote(self):
         from watchfuls.temperature import Watchful
         host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
-        with patch('lib.hosts.runner.run', return_value=(_THERMAL, '', 0)):
+        with patch('lib.core.hosts.runner.run', return_value=(_THERMAL, '', 0)):
             names = {s['name'] for s in Watchful.discover({'__host__': host})}
         assert {'x86_pkg_temp', 'acpitz', 'acpitz_1'} <= names

@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Overview widget for outgoing webhooks (config domain; see lib.core.overview.discovery)."""
+
+
+def webhooks_stat(wa) -> dict:
+    """Stat content for the ``webhooks`` card: configured total + an enabled badge."""
+    total = enabled = 0
+    try:
+        wh = wa._load_webhooks()
+        if isinstance(wh, list):
+            total = len(wh)
+            enabled = sum(1 for w in wh if isinstance(w, dict) and w.get('enabled', True))
+    except Exception:  # pylint: disable=broad-except
+        pass
+    badges = ([{'style': 'ok', 'icon': 'bi-check-circle', 'count': enabled,
+                'key': 'overview_enabled'}] if total else [])
+    return {'value': total, 'badges': badges}
+
+
+OVERVIEW_WIDGETS = [
+    {'id': 'webhooks', 'icon': 'bi-broadcast', 'label_key': 'overview_webhooks',
+     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 80,
+     'perms': {'any': ['config_view', 'config_edit']}, 'nav': {'tab': '#tab-config'},
+     'stat': webhooks_stat,
+     'view': {'kind': 'stat', 'icon': 'bi-broadcast', 'label_key': 'overview_webhooks',
+              'accent': 'purple', 'data_url': '/api/v1/overview/widget/webhooks'}},
+]

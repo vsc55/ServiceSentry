@@ -177,7 +177,7 @@ class TestDiscover:
         from watchfuls.service_status import Watchful
         host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
         out = "  nginx.service   loaded active running  Web server\n"
-        with patch('lib.hosts.runner.run', return_value=(out, '', 0)) as run:
+        with patch('lib.core.hosts.runner.run', return_value=(out, '', 0)) as run:
             res = Watchful.discover({'__host__': host})
         assert run.call_args.args[1].startswith('systemctl list-units')
         assert any(s['name'] == 'nginx' for s in res)

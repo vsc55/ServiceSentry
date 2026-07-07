@@ -173,7 +173,7 @@ class TestScimGroups:
 
     def test_cannot_modify_builtin_admin_group(self, admin, config_dir):
         """C1: SCIM must never touch the built-in Administrators group (escalation)."""
-        from lib.web_admin.constants import BUILTIN_GROUP_UIDS
+        from lib.core.permissions import BUILTIN_GROUP_UIDS
         client = self._c(admin, config_dir)
         gid = BUILTIN_GROUP_UIDS['administrators']
         uid = client.post('/scim/v2/Users', headers=_AUTH,

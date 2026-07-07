@@ -133,7 +133,7 @@ class Monitor(ObjectBase):
         if getattr(self, '_db', None) is None or not self.dir_config:
             return
         try:
-            from lib.stores.config  import ConfigStore     # noqa: PLC0415
+            from lib.core.config.store import ConfigStore     # noqa: PLC0415
             from lib.config         import config_path      # noqa: PLC0415
             from lib.config.manager import ConfigManager   # noqa: PLC0415
             # Same single ConfigManager the web admin uses — the one place that
@@ -163,7 +163,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.stores.hosts import HostsStore  # noqa: PLC0415
+            from lib.core.hosts.store import HostsStore  # noqa: PLC0415
             from lib.security import secret_manager          # noqa: PLC0415
             from lib.modules import ModuleBase       # noqa: PLC0415
             secret_keys = secret_manager.ENCRYPT_KEYS | ModuleBase.discover_secret_fields(self.dir_modules)
@@ -177,7 +177,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.stores.credentials import CredentialsStore   # noqa: PLC0415
+            from lib.core.credentials.store import CredentialsStore   # noqa: PLC0415
             from lib.security import secret_manager                        # noqa: PLC0415
             from lib.modules import ModuleBase                    # noqa: PLC0415
             from lib.modules.discovery.credential_schemas import credential_secret_fields  # noqa: PLC0415
@@ -194,7 +194,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.stores.history import HistoryStore  # noqa: PLC0415
+            from lib.core.history.store import HistoryStore  # noqa: PLC0415
             return HistoryStore(self._db)
         except Exception:  # pylint: disable=broad-except
             return None
@@ -204,7 +204,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.stores.check_state import CheckStateStore  # noqa: PLC0415
+            from lib.services.monitoring.check_state import CheckStateStore  # noqa: PLC0415
             return CheckStateStore(self._db)
         except Exception:  # pylint: disable=broad-except
             return None
@@ -275,7 +275,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.stores.audit import AuditStore  # noqa: PLC0415
+            from lib.core.audit.store import AuditStore  # noqa: PLC0415
             return AuditStore(self._db)
         except Exception:  # pylint: disable=broad-except
             return None
@@ -425,7 +425,8 @@ class Monitor(ObjectBase):
         """
         if getattr(self, '_db', None) is None:
             return ConfigControl(None, {})
-        from lib.stores.modules import ModulesStore, DbBackedModules  # noqa: PLC0415
+        from lib.core.modules.store import ModulesStore
+        from lib.core.modules.facade import DbBackedModules  # noqa: PLC0415
         store = ModulesStore(self._db)
         facade = DbBackedModules(store, fernet=getattr(self, '_fernet', None))
         facade.read()
@@ -439,7 +440,7 @@ class Monitor(ObjectBase):
         """
         store = getattr(self, '_check_state_store', None)
         if store is not None:
-            from lib.stores.check_state import DbBackedStatus  # noqa: PLC0415
+            from lib.services.monitoring.check_state import DbBackedStatus  # noqa: PLC0415
             self.status = DbBackedStatus(store, self._get_item_uid)
             self.status.read()
         else:

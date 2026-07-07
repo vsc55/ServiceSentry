@@ -30,14 +30,14 @@ from lib.debug import Debug, DebugLevel
 from .manager import _EventsMixin
 from lib.services.heartbeat import _HeartbeatMixin, db_summary
 from lib.services.control_server import start_control_server
-from lib.stores.audit import AuditStore
-from lib.stores.config import ConfigStore
-from lib.stores.event import EventRulesStore, EventStateStore, NotificationLogStore
-from lib.stores.service_instances import ServiceInstancesStore
-from lib.stores.service_commands import ServiceCommandsStore
-from lib.stores.service_leader import ServiceLeaderStore
-from lib.stores.syslog import SyslogStore
-from lib.stores.webhooks import WebhooksStore
+from lib.core.audit.store import AuditStore
+from lib.core.config.store import ConfigStore
+from lib.services.events.store import EventRulesStore, EventStateStore, NotificationLogStore
+from lib.services.control.instances import ServiceInstancesStore
+from lib.services.control.commands import ServiceCommandsStore
+from lib.services.control.leader import ServiceLeaderStore
+from lib.services.syslog.store import SyslogStore
+from lib.core.notify.webhook.store import WebhooksStore
 from lib.security import secret_manager
 
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for rule/config changes (s)

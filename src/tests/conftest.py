@@ -132,7 +132,22 @@ def admin(config_dir, var_dir):
         wa._check_state_store.persist_status(
             {"ping": {"192.168.1.1": {"status": True, "other_data": {}}}}
         )
-    return wa
+    yield wa
+    # Teardown — stop the background workers this WebAdmin started in __init__
+    # (per-service heartbeat lease loop + any scheduler/worker). Without this every
+    # test leaks live threads and the full suite piles up CPU/RAM until it runs away.
+    for _svc in getattr(wa, "_embedded_services", {}).values():
+        try:
+            _svc.stop_heartbeat()
+        except Exception:
+            pass
+        try:
+            _svc.stop()
+        except Exception:
+            try:
+                _svc.control("stop")
+            except Exception:
+                pass
 
 
 @pytest.fixture()
