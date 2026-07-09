@@ -1163,7 +1163,7 @@ Verifica que todos los endpoints JSON del web admin se comportan correctamente a
 
 **Archivo:** `tests/test_wa_watchfuls.py`
 
-Verifica el endpoint `GET|POST /api/v1/watchfuls/<module>/<action>` — autenticación, validación de entrada, despacho a classmethods y seguridad de importación.
+Verifica el endpoint `GET|POST /api/v1/modules/watchfuls/<module>/<action>` — autenticación, validación de entrada, despacho a classmethods y seguridad de importación.
 
 ### `TestApiWatchfulActionAuth`
 

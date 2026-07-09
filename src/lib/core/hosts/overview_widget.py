@@ -45,7 +45,7 @@ def server_list_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> l
         return []
     rows = []
     try:
-        from lib.core.hosts.routes._helpers import _host_statuses, _host_bound_modules  # noqa: PLC0415
+        from lib.core.hosts.service import _host_statuses, _host_bound_modules  # noqa: PLC0415
         if status_raw is None:
             status_raw = wa._read_check_status()
         if modules_raw is None:

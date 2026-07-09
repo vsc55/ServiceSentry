@@ -121,7 +121,7 @@ Código relevante:
 - Glue por protocolo: `partials/cfg/auth/_renderers.html` (OIDC),
   `partials/cfg/auth/_wizard_saml.html` (SAML2) y `partials/cfg/auth/_wizard_scim.html` (SCIM).
 - SCIM: backend `provisioning.provision_scim_app` (crear) + `provisioning.update_scim_secrets`
-  (re-sync) + rutas `entra/scim/device-code|device-poll` en `lib/providers/entraid/routes.py` (cliente
+  (re-sync) + rutas `entraid/scim/device-code|device-poll` en `lib/providers/entraid/routes.py` (cliente
   `GRAPH_CLI_CLIENT_ID`); endpoint SCIM `lib/providers/scim/routes.py` (transporte) + `lib/providers/scim/` (lógica); generador de token
   `lib/util/generate_token` expuesto en `routes/util.py` (`GET /api/v1/util/token`).
 - URL pública única: `WebAdmin.public_base_url()` (override por `public_url` → auto-detección
@@ -242,10 +242,10 @@ o **cifrado de token** (ninguna activa por defecto — `lib/providers/saml/auth.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/api/v1/auth/entra/saml2/device-code` | Inicia el registro SAML2 (Device Code). |
-| POST | `/api/v1/auth/entra/saml2/device-poll` | Sondea; al completar crea app+SP (template), cert, modo SAML, `graph_secret` y devuelve la metadata IdP. |
-| POST | `/api/v1/auth/entra/saml2/secret/device-code` | "Añadir credencial de grupos": añade un `graph_secret` a la app SAML2 existente (sin recrearla). |
-| POST | `/api/v1/auth/entra/groups`, `/group_lookup` | Listar/resolver grupos vía Graph para el mapeo (OIDC o SAML2, según `sec` — cada uno con sus credenciales). |
+| POST | `/api/v1/auth/entraid/saml2/device-code` | Inicia el registro SAML2 (Device Code). |
+| POST | `/api/v1/auth/entraid/saml2/device-poll` | Sondea; al completar crea app+SP (template), cert, modo SAML, `graph_secret` y devuelve la metadata IdP. |
+| POST | `/api/v1/auth/entraid/saml2/secret/device-code` | "Añadir credencial de grupos": añade un `graph_secret` a la app SAML2 existente (sin recrearla). |
+| POST | `/api/v1/auth/entraid/groups`, `/group_lookup` | Listar/resolver grupos vía Graph para el mapeo (OIDC o SAML2, según `sec` — cada uno con sus credenciales). |
 
 ### Campos de config (`saml2|…`)
 

@@ -11,12 +11,23 @@ to anyone who can see/edit servers, so the host form can offer a picker.
 Secret values inside ``data`` (ssh_password / ssh_key_string) are masked on
 read and restored from the stored value when the client omits them on write —
 the same scheme as the host profiles.
+
+Routes registered by this file:
+
+    GET    /api/v1/credentials                  list credentials (secrets masked)
+    POST   /api/v1/credentials                  create a credential
+    POST   /api/v1/credentials/<uid>/clone      duplicate a credential (secrets incl.)
+    GET    /api/v1/credentials/<uid>/usage      where a credential is referenced
+    PUT    /api/v1/credentials/<uid>            update a credential (masked restored)
+    DELETE /api/v1/credentials/<uid>            delete a credential
+    POST   /api/v1/credentials/test             test an SSH credential against a host
 """
 
 from flask import jsonify, session
 
 from lib.security import secret_manager
 from lib.core.hosts import ssh_client
+from lib.core.credentials import service as cred_svc
 
 from lib.core.constants import SYSTEM_USER
 
@@ -86,12 +97,10 @@ def register(app, wa):
         suffix = wa._t('cred_copy_suffix') or '(copy)'
         base = src.get('name') or 'credential'
         actor = session.get('username', SYSTEM_USER)
-        new_uid = None
-        for n in range(1, 100):
-            cand = f'{base} {suffix}' if n == 1 else f'{base} {suffix} {n}'
-            new_uid = store.create({'name': cand, 'ctype': src.get('ctype', 'ssh'),
-                                    'description': src.get('description', ''),
-                                    'data': src.get('data') or {}}, actor=actor)
+        payload = cred_svc.clone_payload(src)
+        new_uid, cand = None, ''
+        for cand in cred_svc.clone_candidate_names(base, suffix):
+            new_uid = store.create({'name': cand, **payload}, actor=actor)
             if new_uid:
                 break
         if not new_uid:
@@ -108,27 +117,9 @@ def register(app, wa):
         if not (perms & {'credentials_view', 'credentials_edit',
                          'credentials_add', 'credentials_delete'}):
             return jsonify({'error': wa._t('access_denied')}), 403
-        hosts = []
         hs = getattr(wa, '_hosts_store', None)
-        if hs is not None:
-            for h in hs.list(decrypt=False):
-                ssh = (h.get('profiles') or {}).get('ssh') or {}
-                if ssh.get('cred_uid') == uid:
-                    hosts.append({'uid': h.get('uid'), 'name': h.get('name')})
-        checks = []
-        modules = wa._load_modules()
-        for mod_key, mod_cfg in modules.items():
-            if not isinstance(mod_cfg, dict):
-                continue
-            bare = mod_key.split('.')[-1]
-            for coll, items in mod_cfg.items():
-                if coll.startswith('__') or not isinstance(items, dict):
-                    continue
-                for key, item in items.items():
-                    if isinstance(item, dict) and item.get('cred_uid') == uid:
-                        checks.append({'module': bare, 'key': key,
-                                       'label': str(item.get('label') or key)})
-        return jsonify({'hosts': hosts, 'checks': checks})
+        hosts = hs.list(decrypt=False) if hs is not None else []
+        return jsonify(cred_svc.find_credential_usage(uid, hosts, wa._load_modules()))
 
     @app.route('/api/v1/credentials/<uid>', methods=['PUT'])
     @login_required
@@ -192,13 +183,7 @@ def register(app, wa):
         uid = str(body.get('cred_uid') or '').strip()
         if uid and store is not None:
             stored = store.get(uid, decrypt=True) or {}
-            sdata = stored.get('data') or {}
-            # Fill masked/empty secrets from storage.
-            for k in ('ssh_password', 'ssh_key_string'):
-                if data.get(k) in (None, '') and sdata.get(k):
-                    data[k] = sdata[k]
-            for k in ('ssh_user', 'ssh_auth_method', 'ssh_key'):
-                data.setdefault(k, sdata.get(k))
+            cred_svc.resolve_test_identity(data, stored.get('data') or {})
         address = str(body.get('address') or '').strip()
         if not address:
             return jsonify({'ok': False, 'message': wa._t('host_address_required')})

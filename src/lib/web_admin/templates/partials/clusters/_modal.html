@@ -234,7 +234,7 @@ async function _clLoadNodes(btn) {
     if (!item) { showToast(t('connection_error'), 'danger'); return; }
     btn.disabled = true;
     btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em" role="status"></span>`;
-    const res = await apiPost('/api/v1/watchfuls/' + mod + '/list_nodes',
+    const res = await apiPost('/api/v1/modules/watchfuls/' + mod + '/list_nodes',
                               Object.assign({}, item, { _item_key: key }));
     const data = res && res.data;
     if (!data || !data.ok) { showToast((data && data.message) || t('connection_error'), 'danger'); _clMemRefresh(); return; }

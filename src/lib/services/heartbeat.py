@@ -4,7 +4,7 @@
 
 Mixed into both the embedded service objects (in the web admin process) and the
 standalone ``*Service`` daemons, so the very same code publishes a liveness row
-to :class:`lib.services.control.instances.ServiceInstancesStore` every few seconds.
+to :class:`lib.services.manager.instances.ServiceInstancesStore` every few seconds.
 The web admin then reads that table to show the real state of every instance —
 including the ones running in another container/pod — instead of guessing from
 check activity.

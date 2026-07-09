@@ -40,7 +40,7 @@ el contexto (config, stores, debug):
 | `manager.py` | El **mixin compartido** (`_<X>Mixin`, sin Flask): toda la lógica de ciclo de vida (scheduler / listener / worker) — la usan ambos hosts |
 | `embedded.py` | `Embedded<X>`: host = **WebAdmin** (delega config/stores). Aporta `status()`, `control(action)`, `start_at_boot()` y opcional `on_config_changed(changed)` |
 | `service.py` | `<X>Service`: host = **propio** (construye su conector/config). El runner del modo standalone (`--<key>`) |
-| `store/`, `routes/`, `permissions.py`, `overview_widget.py` | Opcionales: persistencia, endpoints, permisos self-describing y widget de Overview del servicio |
+| `store/`, `routes.py`, `permissions.py`, `overview_widget.py` | Opcionales: persistencia, endpoints (un único `routes.py`; events añade `rules_logic.py` con la lógica sin Flask), permisos self-describing y widget de Overview del servicio |
 
 ```mermaid
 flowchart LR
@@ -91,7 +91,7 @@ flowchart TB
 El registro es genérico: el panel itera los servicios y cada uno se describe a sí mismo
 (estado + acciones), sin ramas por-servicio.
 
-> El control-plane aporta además un **widget de Overview** (`lib/services/control/overview_widget.py`,
+> El control-plane aporta además un **widget de Overview** (`lib/services/manager/overview_widget.py`,
 > id `services`) que cuenta los servicios embebidos activos vs parados —sólo los reales
 > (`discover_embedded_services()`), no las vistas read-only worker/database. Es la pestaña
 > más a la izquierda y el destino por defecto del panel `/admin`.
@@ -111,7 +111,7 @@ flowchart TB
 ```
 
 Permisos: ver la [pestaña Services en web_admin.md](web_admin.md#servicios). El estado se
-sondea con `daemon/status` para el countdown; el control (`start`/`stop`) va por
+sondea con `/api/v1/monitoring/status` para el countdown; el control (`start`/`stop`) va por
 `/api/v1/services/<key>/<action>`.
 
 ---
@@ -216,6 +216,6 @@ doc de despliegue, que **usa** este modelo:
 - [kubernetes.md](kubernetes.md) — un Deployment por rol, probes contra `/control/health`, NetworkPolicy.
 - [deployment.md](deployment.md) — gestión de servicios (systemd/OpenRC) y comandos de servicio.
 
-[`ServiceInstancesStore`]: ../src/lib/services/control/instances.py
-[`ServiceCommandsStore`]: ../src/lib/services/control/commands.py
-[`ServiceLeaderStore`]: ../src/lib/services/control/leader.py
+[`ServiceInstancesStore`]: ../src/lib/services/manager/instances.py
+[`ServiceCommandsStore`]: ../src/lib/services/manager/commands.py
+[`ServiceLeaderStore`]: ../src/lib/services/manager/leader.py

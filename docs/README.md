@@ -19,6 +19,7 @@
 | [notifications.md](notifications.md) | Notificaciones: canales (Telegram, Email SMTP/M365/Gmail, Webhooks), el dispatcher central, flujo evento→notificación, matriz de routing por evento, firma HMAC y plantillas |
 | [hosts.md](hosts.md) | Modelo host-céntrico: un host = dirección + perfiles de conexión por protocolo (SSH/SNMP/DB…), referencia por `host_uid`, ejecución host-aware (local/SSH), resolución y migración asistida inline→host |
 | [configuration.md](configuration.md) | config.json (database, syslog, syslog_db, ldap, oidc, saml2, email, notifications, webhooks, modules…), receptor syslog, gestor de eventos, configuración de módulos en BD (tablas `module_config`/`module_config_items`), estado de checks, opciones CLI, variables de entorno (`SS_*`), sistema de debug |
+| [cli.md](cli.md) | CLI de gestión one-shot: subcomandos `user`/`group` (alta/baja/rol/contraseña/grupos), `status` y `reload` de servicios; contexto headless, capa de servicio compartida en `lib/core` (rutas web + CLI) y auto-discovery de servicios |
 | [modules.md](modules.md) | Los 19 módulos integrados: referencia de configuración, campos y flujo de cada uno |
 | [web_admin.md](web_admin.md) | Interfaz web Flask: características, roles (63 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
 | [security.md](security.md) | Autenticación (local/LDAP/OIDC/SAML2), RBAC, sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |

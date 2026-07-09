@@ -32,7 +32,7 @@
             "auth_enabled", "auth_user", "auth_password",
             "alert"
         ],
-        "__test__": "/api/v1/watchfuls/web/test_connection",
+        "__test__": "/api/v1/modules/watchfuls/web/test_connection",
 
         "enabled":          {"type": "bool", "default": true},
         "label":            {"type": "str",  "default": ""},

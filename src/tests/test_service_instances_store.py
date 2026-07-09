@@ -5,7 +5,7 @@
 import time
 
 from lib.db import get_connector
-from lib.services.control.instances import ServiceInstancesStore
+from lib.services.manager.instances import ServiceInstancesStore
 
 
 def _store():

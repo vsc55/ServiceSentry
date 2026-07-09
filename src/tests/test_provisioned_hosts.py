@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the generic provisioned-host hook (`_sync_provisioned_hosts`).
+"""Tests for the generic provisioned-host hook (`sync_provisioned_hosts`).
 
 Module-agnostic: the hook reads each module's ``__provision_host__`` schema
 declaration and, for every item with the declared address field set, ensures a
@@ -14,7 +14,7 @@ import os
 
 import pytest
 
-from lib.core.modules.routes import _sync_provisioned_hosts
+from lib.core.modules.service import sync_provisioned_hosts
 
 # The synthetic module the tests declare a __provision_host__ for.
 _MOD = 'demo'
@@ -50,12 +50,6 @@ class FakeStore:
         return True
 
 
-class FakeWa:
-    def __init__(self, store, modules_dir):
-        self._hosts_store = store
-        self._modules_dir = modules_dir
-
-
 @pytest.fixture
 def modules_dir(tmp_path):
     """A temp modules dir with one synthetic module declaring __provision_host__."""
@@ -71,7 +65,7 @@ def _data(**item):
 
 
 def _run(store, modules_dir, data):
-    _sync_provisioned_hosts(FakeWa(store, modules_dir), data, 'tester')
+    sync_provisioned_hosts(store, modules_dir, data, 'tester')
     return data[f'watchfuls.{_MOD}']['list']['k1']
 
 
@@ -116,8 +110,8 @@ def test_module_without_declaration_is_noop(tmp_path):
     (tmp_path / 'plain' / 'schema.json').write_text(
         json.dumps({'list': {'host': {'type': 'str'}}}), encoding='utf-8')
     store = FakeStore()
-    _sync_provisioned_hosts(FakeWa(store, str(tmp_path)),
-                            {'watchfuls.plain': {'list': {'p1': {'host': '1.1.1.1'}}}}, 't')
+    sync_provisioned_hosts(store, str(tmp_path),
+                           {'watchfuls.plain': {'list': {'p1': {'host': '1.1.1.1'}}}}, 't')
     assert not store.hosts
 
 
@@ -137,10 +131,10 @@ def test_returns_assignments_for_roundtrip(modules_dir):
     re-run with the link already present returns nothing (idempotent)."""
     store = FakeStore()
     data = _data(endpoint='10.0.0.9')
-    assigns = _sync_provisioned_hosts(FakeWa(store, modules_dir), data, 't')
+    assigns = sync_provisioned_hosts(store, modules_dir, data, 't')
     assert len(assigns) == 1
     a = assigns[0]
     assert a['field'] == 'endpoint_host_uid' and a['item'] == 'k1'
     assert a['uid'] == data[f'watchfuls.{_MOD}']['list']['k1']['endpoint_host_uid']
     # Link now present → a second run establishes nothing new.
-    assert _sync_provisioned_hosts(FakeWa(store, modules_dir), data, 't') == []
+    assert sync_provisioned_hosts(store, modules_dir, data, 't') == []

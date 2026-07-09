@@ -564,7 +564,7 @@ class TestRekeyItemsByUid:
     flat ``list`` collections and snmp's nested ``servers``/``checks``."""
 
     def test_rekey_flat_and_nested(self):
-        from lib.core.modules.routes import _rekey_items_by_uid
+        from lib.core.modules.service import rekey_items_by_uid as _rekey_items_by_uid
         data = {
             "ping": {"list": {
                 "host1": {"uid": "U1", "label": "A"},

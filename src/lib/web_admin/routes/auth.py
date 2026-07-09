@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Authentication routes: /login, /logout."""
+"""Authentication routes: /login, /logout.
+
+Routes registered by this file:
+
+    GET,POST /login   login form (GET) / authenticate (POST) — local + LDAP/OIDC/SAML
+    POST     /logout  end the current session
+"""
 
 from flask import flash, redirect, render_template, request, session, url_for
 

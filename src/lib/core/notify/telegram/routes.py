@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Telegram routes: /api/v1/notify/telegram/test."""
+"""Telegram routes: /api/v1/notify/telegram/test.
+
+Routes registered by this file:
+
+    POST   /api/v1/notify/telegram/test  send a test message to verify settings
+"""
 
 import re
 

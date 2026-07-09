@@ -459,6 +459,47 @@ def args_init() -> argparse.Namespace:
         dest="events_mode",
         help=_h('cli_events'),
     )
+    # ── Management subcommands (one-shot admin ops) ───────────────────────────
+    # user/group administration + service status/reload. Global options
+    # (-p/--path, -l/--lang, --log-level) must precede the subcommand.
+    sub = ap.add_subparsers(dest='cmd', metavar='COMMAND',
+                            title='management commands (one-shot)')
+    up = sub.add_parser('user', help='user administration').add_subparsers(
+        dest='sub', metavar='ACTION', required=True)
+    _p = up.add_parser('add', help='create a user')
+    _p.add_argument('username')
+    _p.add_argument('-P', '--password', help='password (prompted if omitted)')
+    _p.add_argument('--role', default='none',
+                    help='admin|editor|viewer|none or a custom role (default: none)')
+    _p.add_argument('--display', help='display name')
+    _p.add_argument('--email')
+    _p.add_argument('--group', action='append', metavar='GROUP',
+                    help='add to a group by name/uid (repeatable)')
+    _p.add_argument('--disabled', action='store_true', help='create the account disabled')
+    for _act, _hlp in (('enable', 'enable a user'), ('disable', 'disable a user')):
+        up.add_parser(_act, help=_hlp).add_argument('username')
+    _p = up.add_parser('passwd', help="change a user's password")
+    _p.add_argument('username')
+    _p.add_argument('-P', '--password', help='new password (prompted if omitted)')
+    _p = up.add_parser('role', help="set a user's role")
+    _p.add_argument('username')
+    _p.add_argument('role', help='admin|editor|viewer|none or a custom role')
+    for _act, _hlp in (('group-add', 'add a user to a group'),
+                       ('group-del', 'remove a user from a group')):
+        _p = up.add_parser(_act, help=_hlp)
+        _p.add_argument('username')
+        _p.add_argument('group', help='group name or uid')
+    gp = sub.add_parser('group', help='group administration').add_subparsers(
+        dest='sub', metavar='ACTION', required=True)
+    _p = gp.add_parser('add', help='create a group')
+    _p.add_argument('name')
+    _p.add_argument('-d', '--description')
+    _p.add_argument('--role', action='append', metavar='ROLE',
+                    help='grant a role to the group (repeatable)')
+    gp.add_parser('del', help='delete a group').add_argument('name', help='group name or uid')
+    sub.add_parser('status', help='show background service status')
+    sub.add_parser('reload',
+                   help='reload config + reconcile services on the running daemon')
     return ap.parse_args()
 
 if __name__ == "__main__":
@@ -466,6 +507,12 @@ if __name__ == "__main__":
     if getattr(_args, 'nocolor', False):
         from lib.debug import Debug as _Debug
         _Debug.set_color(False)
+    # One-shot management subcommands (user/group admin + status/reload) — run against a
+    # headless store context and exit, without starting the web panel or any daemon.
+    if getattr(_args, 'cmd', None):
+        _cfg_dir, _var_dir = _resolve_app_dirs(_args)
+        from lib.cli import commands as _cli  # noqa: WPS433
+        sys.exit(_cli.run(_args, _cfg_dir, _var_dir))
     # Standalone service modes (--monitor/--syslog/--events), discovered from the
     # service packages so there is no per-service branch here; mutually exclusive,
     # and the default (no mode flag) is the web administration panel.

@@ -565,7 +565,7 @@ class TestCheckSecretRestore:
     """A test run after reload must use the stored secret, not the masked null."""
 
     def test_restores_masked_password_from_stored_item(self, admin):
-        from lib.core.hosts.routes import _restore_check_secrets
+        from lib.core.hosts.service import _restore_check_secrets
         mods = admin._load_modules()
         mods.setdefault('datastore', {}).setdefault('list', {})['d1'] = {
             'db_type': 'mysql', 'user': 'u', 'password': 'REALPASS', 'uid': 'u1'}
@@ -577,7 +577,7 @@ class TestCheckSecretRestore:
         assert fields['user'] == 'u'
 
     def test_explicit_new_password_is_kept(self, admin):
-        from lib.core.hosts.routes import _restore_check_secrets
+        from lib.core.hosts.service import _restore_check_secrets
         mods = admin._load_modules()
         mods.setdefault('datastore', {}).setdefault('list', {})['d1'] = {
             'password': 'OLDPASS', 'uid': 'u1'}

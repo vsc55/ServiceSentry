@@ -30,7 +30,7 @@
         ],
         "__check_title_field__": "ups_name",
         "__new_item_fields__": ["ups_name"],
-        "__test__": "/api/v1/watchfuls/ups/test_connection",
+        "__test__": "/api/v1/modules/watchfuls/ups/test_connection",
         "enabled":  {"type": "bool", "default": true},
 
         "host":     {"type": "str",  "default": "", "group": "connection"},

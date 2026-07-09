@@ -233,7 +233,7 @@ async function _runHostFieldAction(mod, idx, fieldName, btn) {
     // just lists databases), mirroring the Modules tab's itemAction().
     const _orig = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>'; }
-    const res = await apiPost('/api/v1/watchfuls/' + mod + '/' + ia.id, payload);
+    const res = await apiPost('/api/v1/modules/watchfuls/' + mod + '/' + ia.id, payload);
     if (btn) { btn.disabled = false; btn.innerHTML = _orig; }
     const d = res && res.data;
     if (!d || !d.ok) { showToast((d && d.message) || t('connection_error'), 'danger'); return; }

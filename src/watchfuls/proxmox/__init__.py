@@ -611,7 +611,7 @@ class Watchful(ModuleBase):
 
     @classmethod
     def test_connection(cls, config: dict) -> dict:
-        """POST /api/v1/watchfuls/proxmox/test_connection
+        """POST /api/v1/modules/watchfuls/proxmox/test_connection
 
         Connects with the item's settings and returns a one-line summary
         (cluster name, quorum, node count, Ceph presence).
@@ -668,7 +668,7 @@ class Watchful(ModuleBase):
 
     @classmethod
     def test_permissions(cls, config: dict) -> dict:
-        """POST /api/v1/watchfuls/proxmox/test_permissions
+        """POST /api/v1/modules/watchfuls/proxmox/test_permissions
 
         Connect with the configured token and verify it holds every privilege the
         currently-enabled checks need (Sys.Audit always; Datastore.Audit for
@@ -727,7 +727,7 @@ class Watchful(ModuleBase):
 
     @classmethod
     def list_nodes(cls, config: dict) -> dict:
-        """POST /api/v1/watchfuls/proxmox/list_nodes
+        """POST /api/v1/modules/watchfuls/proxmox/list_nodes
 
         Return the cluster member node names — for the host↔node mapping picker,
         so the user assigns each member host its node without typing it by hand.
@@ -867,7 +867,7 @@ class Watchful(ModuleBase):
 
     @classmethod
     def provision_token(cls, config: dict) -> dict:
-        """POST /api/v1/watchfuls/proxmox/provision_token
+        """POST /api/v1/modules/watchfuls/proxmox/provision_token
 
         Connects to the Proxmox node over **SSH** (root or a sudo-capable user)
         and provisions an API token, then returns the generated token id + secret

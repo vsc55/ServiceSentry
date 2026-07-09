@@ -875,8 +875,8 @@ igual al número de proxies de confianza. Solo entonces se leen las cabeceras
 `X-Forwarded-*`, de modo que la **IP real del cliente** registrada en sesiones y
 auditoría es correcta detrás de un proxy inverso, sin permitir *spoofing* de IP
 cuando no hay proxy (con `proxy_count = 0` las cabeceras se ignoran). El middleware
-se reaplica **en caliente** al guardar el valor desde el panel (`lib/core/config/routes/__init__.py`),
-sin reiniciar.
+se reaplica **en caliente** al guardar el valor desde el panel (`WebAdmin._apply_config_on_save`
+en `lib/web_admin/app.py`), sin reiniciar.
 
 ---
 
@@ -988,7 +988,7 @@ GET  /api/v1/modules/overview       GET  /api/v1/users           POST /api/v1/us
 PUT  /api/v1/users/<x>      DELETE /api/v1/users/<x>     PUT  /api/v1/users/me/password
 GET  /api/v1/sessions       POST /api/v1/sessions/invalidate
 POST /api/v1/sessions/revoke/<x>   GET /api/v1/audit     GET  /api/v1/me
-GET  /api/v1/webhooks        POST /api/v1/webhooks
+GET  /api/v1/notify/webhooks        POST /api/v1/notify/webhooks
 GET  /api/v1/notify/templates   GET /api/v1/notify/html-templates
 ```
 

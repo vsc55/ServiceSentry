@@ -250,7 +250,7 @@ async function _eventModalSave() {
     // Build the stored DNF (match_groups) from the flat conditions editor.
     const payload = { ...d, match_groups: _evFlatToGroups(d.conditions) };
     delete payload.conditions;
-    const url = d.id ? '/api/v1/event-rules/' + encodeURIComponent(d.id) : '/api/v1/event-rules';
+    const url = d.id ? '/api/v1/event/rules/' + encodeURIComponent(d.id) : '/api/v1/event/rules';
     const resp = d.id ? await apiPut(url, payload) : await apiPost(url, payload);
     const ok = d.id ? (resp && resp.ok) : (resp && resp.status === 200 && resp.data && resp.data.ok);
     if (ok) {
@@ -269,19 +269,19 @@ async function _eventModalSave() {
 async function _eventToggleEnabled(rid, on) {
     const r = _eventRules.find(x => x.id === rid);
     if (!r) return;
-    const resp = await apiPut('/api/v1/event-rules/' + encodeURIComponent(rid), { ...r, enabled: on });
+    const resp = await apiPut('/api/v1/event/rules/' + encodeURIComponent(rid), { ...r, enabled: on });
     if (resp && resp.ok) { r.enabled = on; } else { showToast(t('error'), 'danger'); renderEvents(); }
 }
 function _eventDeleteRule(rid) {
     const r = _eventRules.find(x => x.id === rid);
     showConfirmModal(tf('event_delete_confirm', (r && r.name) || rid), async () => {
-        const resp = await apiDelete('/api/v1/event-rules/' + encodeURIComponent(rid));
+        const resp = await apiDelete('/api/v1/event/rules/' + encodeURIComponent(rid));
         if (resp && resp.data && resp.data.ok) { showToast(t('event_deleted'), 'success'); renderEvents(); }
         else showToast(t('error'), 'danger');
     });
 }
 async function _eventTestRule(rid) {
-    const resp = await apiPost('/api/v1/event-rules/' + encodeURIComponent(rid) + '/test', {});
+    const resp = await apiPost('/api/v1/event/rules/' + encodeURIComponent(rid) + '/test', {});
     if (resp && resp.status === 200 && resp.data && resp.data.ok) showToast(t('event_test_ok'), 'success');
     else showToast(t('event_test_fail'), 'warning');
     renderEvents();   // refresh last-notification + log
@@ -364,7 +364,7 @@ function _renderEventLog() {
 
 function _eventClearLog() {
     showConfirmModal(t('event_log_clear_confirm'), async () => {
-        const resp = await apiDelete('/api/v1/notifications/log');
+        const resp = await apiDelete('/api/v1/event/notifications');
         if (resp && resp.data && resp.data.ok) { showToast(t('event_log_cleared'), 'success'); renderEvents(); }
         else showToast(t('error'), 'danger');
     });

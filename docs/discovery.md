@@ -34,7 +34,7 @@ Difieren solo en **qué raíz escanean** y **qué declaran**:
 |---|---|---|---|---|
 | [Permisos](#1-permisos-module_permissions) | `permissions.py` · `MODULE_PERMISSIONS` | `lib.core.*` + `lib.services.*` | `discover_permissions()` | `PERMISSIONS` / `PERMISSION_GROUPS` / `BUILTIN_ROLE_PERMISSIONS` |
 | [Widgets de Overview](#2-widgets-de-overview-overview_widgets) | `overview_widget.py` · `OVERVIEW_WIDGETS` | `lib.core.*` + `lib.services.*` | `discover_overview_widgets()` (+ `_stats` / `_rows` / `_public`) | grid de Overview + AJAX por widget |
-| [Servicios embebidos](#3-servicios-embebidos-embedded_service) | `embedded.py` · `EMBEDDED_SERVICE` | `lib.services.*` | `discover_embedded_services()` | pestaña Services (estado + control) |
+| [Servicios embebidos](#3-servicios-embebidos-embedded_service) | `__init__.py` · `EMBEDDED_SERVICE` (`embedded.py` · `make_embedded`) | `lib.services.*` | `discover_embedded_services()` | pestaña Services (estado + control) |
 | [Tipos de credencial](#4-tipos-de-credencial-__credential__) | `schema.json` · `__credential__` | `watchfuls/*` | `ModuleBase.discover_schemas()` | gestor de credenciales (formularios por tipo) |
 | [Perfiles de host](#5-perfiles-de-host-__host_profile__) | `schema.json` · `__host_profile__` | `watchfuls/*` | `lib.core.hosts.profiles` | sección Servers (formularios por protocolo) |
 | [Tablas de módulo](#6-tablas-de-módulo-discover_db_tables) | `__init__.py` · `discover_db_tables()` | `watchfuls/*` | `reconcile_module_tables()` | BD general (crea/migra `mod_<m>_<n>`) |
@@ -157,9 +157,9 @@ Cada servicio de fondo (monitoring, syslog, events, ipban…) se autodescribe pa
 Services; el panel los **descubre y compone** (no los hereda). Un servicio nuevo aparece solo
 con soltar su paquete en `lib/services/`.
 
-**Descriptor** (`lib/services/<s>/embedded.py`): `EMBEDDED_SERVICE = {key, label, icon, order,
-controllable}` + una fábrica `make_embedded(host)`. (El mismo paquete expone `STANDALONE` para
-el modo dedicado que despacha `main.py`.)
+**Descriptor** (`lib/services/<s>/__init__.py`): `EMBEDDED_SERVICE = {key, label, icon, order,
+controllable}` (el mismo `__init__` expone `STANDALONE` para el modo dedicado que despacha
+`main.py`); la fábrica `make_embedded(host)` vive en `embedded.py`.
 
 **Flujo y datos:**
 
@@ -293,7 +293,7 @@ defecto es Microsoft Graph (`GRAPH_APP_ID`); los nombres de app son fuente únic
 flowchart TB
     decl["__entraid_provision__ {resource, app_roles, delegated_scopes, sso_props}"]
     decl --> norm["normalize_entraid_provision() → forma estable"]
-    norm --> wiz["asistente device-code (POST /api/v1/auth/entra*/device-code|device-poll)"]
+    norm --> wiz["asistente device-code (POST /api/v1/auth/entraid/*/device-code|device-poll)"]
     wiz --> graph["lib.providers.entraid.provisioning:<br/>registra app + SP + consentimiento en Microsoft Graph"]
     graph --> cred["devuelve client_id/secret/tenant → credencial del módulo / SSO"]
 ```

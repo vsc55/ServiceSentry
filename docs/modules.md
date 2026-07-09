@@ -858,7 +858,7 @@ sub-colección de **checks** (OIDs a comprobar):
 
 ### Gestión de MIBs
 
-El módulo expone acciones de UI (vía `/api/v1/watchfuls/snmp/<action>`) para
+El módulo expone acciones de UI (vía `/api/v1/modules/watchfuls/snmp/<action>`) para
 gestionar MIBs en `{var_dir}/snmp_mibs/`:
 
 - **Descubrimiento** (`discover`) de OIDs disponibles caminando los subárboles

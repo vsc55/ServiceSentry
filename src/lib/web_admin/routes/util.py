@@ -3,7 +3,12 @@
 """Generic utility endpoints: /api/v1/util/*.
 
 Small, feature-agnostic helpers the UI can call — e.g. generating a random
-secret/bearer token server-side (single source: :func:`lib.util.generate_token`)."""
+secret/bearer token server-side (single source: :func:`lib.util.generate_token`).
+
+Routes registered by this file:
+
+    GET /api/v1/util/token  a fresh cryptographically-strong random token (hex)
+"""
 
 from flask import jsonify, request
 

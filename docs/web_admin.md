@@ -23,20 +23,23 @@ lib/web_admin/                # Solo lo genuinamente web; los dominios/servicios
 │   ├── __init__.py           # register_all(app, wa) — registra también los routes de core/servicios/providers
 │   ├── auth.py               # /login, /logout + _establish_session/_landing_url (login local)
 │   ├── status.py             # /status (página pública de estado)
-│   ├── ui.py                 # /, /api/v1/me, /api/v1/health, /lang, /theme
+│   ├── pages.py              # vistas HTML: / (entry redirect), /admin, /overview
+│   ├── ui.py                 # /lang/<code>, /api/v1/me, /api/v1/health
 │   ├── errors.py             # handlers 400, 403, 404, 405, 500
 │   └── util.py               # utilidades de ruta compartidas
 ├── templates/                # Jinja2 (+ partials JS por feature)
 └── static/                   # CSS/JS/imágenes
 
 # El resto de mixins/routes viven con su dominio/servicio/provider (self-contained):
-#   lib/core/<d>/          mixin.py + routes.py + store.py + permissions.py
+#   lib/core/<d>/          routes.py (HTTP fino) + service.py (lógica sin Flask) + store.py
+#                          + permissions.py (+ mixin.py en users/roles/groups/sessions/audit)
 #     users, roles, groups, sessions, audit, config, credentials, history, hosts,
-#     modules (routes.py CRUD + watchful_routes.py acciones), notify/{telegram,email,webhook}/routes.py
-#   lib/services/<svc>/    monitoring (checks_mixin.py + routes/{checks,daemon}.py),
-#     syslog/routes/, events/routes/, ipban/routes.py, control/routes.py (/api/v1/services)
+#     modules (routes.py: config CRUD + /api/v1/modules/watchfuls action dispatch),
+#     notify/{telegram,email,webhook}/routes.py (/api/v1/notify/*)
+#   lib/services/<svc>/    monitoring/routes.py (/api/v1/monitoring/*), syslog/routes.py,
+#     events/routes.py (/api/v1/event/*), ipban/routes.py, manager/routes.py (/api/v1/services)
 #   lib/providers/<p>/     ldap/routes.py, oidc/routes.py, saml/routes.py (callbacks SSO),
-#     scim/routes.py (/scim/v2/*), entraid/routes.py (/api/v1/auth/entra*)
+#     scim/routes.py (/scim/v2/*), entraid/routes.py (/api/v1/auth/entraid*)
 ```
 
 ---
@@ -114,7 +117,7 @@ flowchart TD
 | **Tablas de listado unificadas** | Todos los listados (Users, Roles, Groups, Credentials, Servers, Clusters, Sessions, Audit, Events, Syslog) usan un componente común dirigido por esquema: paginación arriba/abajo, ordenación por columna, columnas reordenables (arrastrar), redimensionables (doble clic = auto-ajuste) u **ajustadas al contenido** (`resizable:false`), selector de mostrar/ocultar columnas y persistencia por usuario (columnas visibles, orden y ancho en `table_config`). Ver §[Tablas de Listado](#tablas-de-listado) |
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
-| **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal |
+| **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal. La validación + operaciones viven en una capa sin Flask (`lib/core/users/service.py`), compartida con el [CLI de gestión](cli.md) (`user add/enable/disable/passwd/role/group-add/group-del`) |
 | **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 63 flags granulares; activar/desactivar desde el modal |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
@@ -305,7 +308,7 @@ El permiso requerido se indica entre paréntesis.
 | `GET` | `/auth/saml2/login` | Inicia flujo SAML2; redirige al IdP (requiere `saml2.enabled = true` y `pysaml2`) |
 | `POST` | `/auth/saml2/acs` | Assertion Consumer Service: procesa la respuesta SAML del IdP y crea sesión |
 | `GET` | `/auth/saml2/metadata` | Devuelve el XML de metadatos de la aplicación para registrarla en el IdP |
-| `POST` | `/api/v1/auth/entra/scim/device-code` · `…/device-poll` | Registro/​re-sync de la app SCIM en Entra (Device Code Flow, cliente Graph CLI); el token se lee de config, no viaja en la petición |
+| `POST` | `/api/v1/auth/entraid/scim/device-code` · `…/device-poll` | Registro/​re-sync de la app SCIM en Entra (Device Code Flow, cliente Graph CLI); el token se lee de config, no viaja en la petición |
 | `GET` | `/api/v1/util/token` | Genera un token aleatorio fuerte (`lib/util/generate_token`, `?bytes=` 16–128) para los botones "Generar token"; requiere `config_edit` |
 
 ### Módulos
@@ -403,7 +406,7 @@ la BD y se enmascaran en lectura.
 | `GET` | `/api/v1/config/schema` | `config_view` o `config_edit` | Obtener el schema de validación de los campos de configuración del web admin |
 | `GET` | `/api/v1/config/layout` | `config_view` o `config_edit` | Layout de la pantalla de config (tabs → cards) desde el registro central (`lib.config.layout`); el frontend renderiza la config desde esta fuente única |
 
-Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `lib/core/config/routes/__init__.py`):
+Los campos numéricos del bloque `web_admin` se validan contra reglas definidas en `INT_RULES` (en `lib/core/config/service.py`):
 
 | Clave (`config.json`) | Atributo | Mín | Máx |
 |----------------------|----------|-----|-----|
@@ -464,11 +467,11 @@ Gestión de webhooks HTTP para notificaciones salientes.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/webhooks` | `config_view` o `config_edit` | Listar todos los webhooks configurados |
-| `POST` | `/api/v1/webhooks` | `config_edit` | Crear un nuevo webhook |
-| `PUT` | `/api/v1/webhooks/<id>` | `config_edit` | Editar un webhook existente |
-| `DELETE` | `/api/v1/webhooks/<id>` | `config_edit` | Eliminar un webhook |
-| `POST` | `/api/v1/webhooks/<id>/test` | `config_edit` | Enviar un payload de prueba al webhook |
+| `GET` | `/api/v1/notify/webhooks` | `config_view` o `config_edit` | Listar todos los webhooks configurados |
+| `POST` | `/api/v1/notify/webhooks` | `config_edit` | Crear un nuevo webhook |
+| `PUT` | `/api/v1/notify/webhooks/<id>` | `config_edit` | Editar un webhook existente |
+| `DELETE` | `/api/v1/notify/webhooks/<id>` | `config_edit` | Eliminar un webhook |
+| `POST` | `/api/v1/notify/webhooks/<id>/test` | `config_edit` | Enviar un payload de prueba al webhook |
 | `POST` | `/api/v1/notify/webhook/test` | `config_edit` | Probar un webhook con configuración arbitraria (desde el modal) |
 
 Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `timeout` (1–60 s), `headers` (JSON), `body_template` (cadena con `{vars}`), `secret` (cifrado en disco), `secret_header`, `enabled`.
@@ -581,15 +584,15 @@ Series temporales de resultados de checks (almacenadas por `HistoryStore`, ver [
 ### Monitor (planificador)
 
 Controla el monitor en segundo plano que ejecuta los checks periódicamente
-(`_MonitoringMixin`, en `lib/services/monitoring/manager.py`). Las rutas conservan el prefijo
-`/api/v1/daemon` por compatibilidad.
+(`_MonitoringMixin`, en `lib/services/monitoring/manager.py`). Las rutas cuelgan del prefijo
+`/api/v1/monitoring`.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/daemon/status` | `checks_run` | Estado actual del planificador |
-| `POST` | `/api/v1/daemon/start` | `checks_run` | Arrancar el planificador (opcionalmente ejecuta ya) |
-| `POST` | `/api/v1/daemon/stop` | `checks_run` | Detener el planificador |
-| `PUT` | `/api/v1/daemon/config` | `checks_run` | Actualizar el intervalo (`timer_check`) y el interruptor maestro (`enabled`). El `autostart` se edita en Configuración → Monitoring |
+| `GET` | `/api/v1/monitoring/status` | `checks_run` | Estado actual del planificador |
+| `POST` | `/api/v1/monitoring/start` | `checks_run` | Arrancar el planificador (opcionalmente ejecuta ya) |
+| `POST` | `/api/v1/monitoring/stop` | `checks_run` | Detener el planificador |
+| `PUT` | `/api/v1/monitoring/config` | `checks_run` | Actualizar el intervalo (`timer_check`) y el interruptor maestro (`enabled`). El `autostart` se edita en Configuración → Monitoring |
 
 ### Syslog
 
@@ -635,13 +638,13 @@ configurados; más el log de envíos. Ver [configuration.md → Gestor de evento
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/event-rules` | `events_view`* | Listar reglas de evento |
-| `POST` | `/api/v1/event-rules` | `events_add` | Crear una regla |
-| `PUT` | `/api/v1/event-rules/<rid>` | `events_edit` | Editar una regla |
-| `DELETE` | `/api/v1/event-rules/<rid>` | `events_delete` | Eliminar una regla |
-| `POST` | `/api/v1/event-rules/<rid>/test` | `events_edit` | Disparar la regla con un mensaje de prueba |
-| `GET` | `/api/v1/notifications/log` | `events_notify_view` | Listar el log de notificaciones enviadas |
-| `DELETE` | `/api/v1/notifications/log` | `events_notify_delete` | Vaciar el log de notificaciones |
+| `GET` | `/api/v1/event/rules` | `events_view`* | Listar reglas de evento |
+| `POST` | `/api/v1/event/rules` | `events_add` | Crear una regla |
+| `PUT` | `/api/v1/event/rules/<rid>` | `events_edit` | Editar una regla |
+| `DELETE` | `/api/v1/event/rules/<rid>` | `events_delete` | Eliminar una regla |
+| `POST` | `/api/v1/event/rules/<rid>/test` | `events_edit` | Disparar la regla con un mensaje de prueba |
+| `GET` | `/api/v1/event/notifications` | `events_notify_view` | Listar el log de notificaciones enviadas |
+| `DELETE` | `/api/v1/event/notifications` | `events_notify_delete` | Vaciar el log de notificaciones |
 
 > \* `events_view` aquí acepta **cualquiera** de `events_view`/`events_add`/`events_edit`/`events_delete`.
 
@@ -698,15 +701,17 @@ Wizard interactivo de registro de aplicación en Microsoft Entra ID (Azure AD).
 |--------|------|---------|-------------|
 | `POST` | `/api/v1/auth/entraid/provision/device-code` | `config_edit` | Inicia el wizard genérico de registro de app (Device Code); acepta un `profile` de módulo o una spec inline (roles/scopes/redirect_uris…) y devuelve `user_code` para autenticar en el navegador |
 | `POST` | `/api/v1/auth/entraid/provision/device-poll` | `config_edit` | Sondea el estado del flujo; al completarse crea la app, el service principal y el consentimiento de admin, y devuelve `client_id`, `client_secret`, `tenant_id` y `provider_url` |
-| `POST` | `/api/v1/auth/entra/groups` | `config_edit` | Lista todos los grupos del tenant (client credentials). Parámetro `sec` = `oidc` o `saml2`: usa las credenciales de esa app (SAML2 con su propio `graph_secret`) |
-| `POST` | `/api/v1/auth/entra/group_lookup` | `config_edit` | Resolver el nombre visible de un grupo por su Object ID (auto-completar el mapeo); también acepta `sec` |
-| `POST` | `/api/v1/auth/entra/saml2/device-code` | `config_edit` | Inicia el wizard de registro de la app **SAML2** en Entra ID (Device Code) |
-| `POST` | `/api/v1/auth/entra/saml2/device-poll` | `config_edit` | Sondea el registro SAML2; al completarse crea la app (template + cert + modo SAML + `graph_secret`) y devuelve sus metadatos |
-| `POST` | `/api/v1/auth/entra/saml2/secret/device-code` | `config_edit` | "Añadir credencial de grupos": añade un `graph_secret` a la app SAML2 **existente** (sin recrearla), para el mapeo Grupos→Rol |
+| `POST` | `/api/v1/auth/entraid/groups` | `config_edit` | Lista todos los grupos del tenant (client credentials). Parámetro `sec` = `oidc` o `saml2`: usa las credenciales de esa app (SAML2 con su propio `graph_secret`) |
+| `POST` | `/api/v1/auth/entraid/group_lookup` | `config_edit` | Resolver el nombre visible de un grupo por su Object ID (auto-completar el mapeo); también acepta `sec` |
+| `POST` | `/api/v1/auth/entraid/saml2/device-code` | `config_edit` | Inicia el wizard de registro de la app **SAML2** en Entra ID (Device Code) |
+| `POST` | `/api/v1/auth/entraid/saml2/device-poll` | `config_edit` | Sondea el registro SAML2; al completarse crea la app (template + cert + modo SAML + `graph_secret`) y devuelve sus metadatos |
+| `POST` | `/api/v1/auth/entraid/saml2/secret/device-code` | `config_edit` | "Añadir credencial de grupos": añade un `graph_secret` a la app SAML2 **existente** (sin recrearla), para el mapeo Grupos→Rol |
 
 ### SCIM 2.0 (aprovisionamiento proactivo)
 
 Endpoints `/scim/v2/*` que un IdP (Entra ID, Okta…) usa para **empujar** altas/cambios/bajas de usuarios y grupos (a diferencia del JIT, que espera al primer login). **No usan la sesión web**: se autentican con el **bearer token** `scim.token` (comparación en tiempo constante); si SCIM está desactivado o el token no coincide, responden **401**. Usuarios creados con `auth_source: "scim"`; los grupos SCIM ↔ grupos de ServiceSentry (los miembros heredan los roles del grupo). Config en *Autenticación → SCIM provisioning*; ver [sso-entra.md](sso-entra.md).
+
+> ⚠️ **Las rutas `/scim/v2/*` NO se pueden cambiar.** Su esquema está fijado por el estándar SCIM 2.0 (IETF RFC 7643/7644): los IdP externos se configuran solo con la URL base y esperan exactamente esas rutas (`ServiceProviderConfig`, `Users`, `Groups`…). Por eso viven **fuera** de `/api/v1/` (la API interna) — son endpoints que exponemos *para que otros los llamen*. Renombrarlas (p.ej. bajo `/api/v1/`) rompería el aprovisionamiento desde cualquier IdP.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
@@ -722,8 +727,8 @@ Endpoint genérico para exponer acciones de los módulos watchful a la UI (p.ej.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/watchfuls/<module>/<action>` | auth | Invoca `Watchful.<action>()` sin argumentos |
-| `POST` | `/api/v1/watchfuls/<module>/<action>` | auth | Invoca `Watchful.<action>(config)` pasando el cuerpo JSON como configuración |
+| `GET` | `/api/v1/modules/watchfuls/<module>/<action>` | auth | Invoca `Watchful.<action>()` sin argumentos |
+| `POST` | `/api/v1/modules/watchfuls/<module>/<action>` | auth | Invoca `Watchful.<action>(config)` pasando el cuerpo JSON como configuración |
 
 El nombre del módulo y de la acción deben coincidir con la regex `^[a-z][a-z0-9_]*$`. Solo se permiten las acciones declaradas en `WATCHFUL_ACTIONS` de cada módulo.
 
@@ -731,8 +736,7 @@ El nombre del módulo y de la acción deben coincidir con la regex `^[a-z][a-z0-
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/lang/<lang>` | auth | Establecer preferencia de idioma |
-| `GET` | `/theme/<theme>` | auth | Establecer preferencia de tema (light/dark) |
+| `GET` | `/lang/<code>` | auth | Establecer preferencia de idioma (navegación; persiste en el perfil) |
 
 ---
 

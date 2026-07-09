@@ -29,7 +29,7 @@
         "actions": [
             {
                 "id": "provision_token",
-                "url": "/api/v1/watchfuls/proxmox/provision_token",
+                "url": "/api/v1/modules/watchfuls/proxmox/provision_token",
                 "icon": "bi-key",
                 "result": "fields",
                 "inputs": [
@@ -75,7 +75,7 @@
             "check_permissions",
             "alert"
         ],
-        "__test__": "/api/v1/watchfuls/proxmox/test_connection",
+        "__test__": "/api/v1/modules/watchfuls/proxmox/test_connection",
         "__actions__": [
             {
                 "id": "provision_token",
@@ -88,7 +88,7 @@
             },
             {
                 "id": "test_permissions",
-                "url": "/api/v1/watchfuls/proxmox/test_permissions",
+                "url": "/api/v1/modules/watchfuls/proxmox/test_permissions",
                 "result": "modal",
                 "icon": "bi-shield-check",
                 "variant": "secondary",

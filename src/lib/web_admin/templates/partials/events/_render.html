@@ -1,8 +1,8 @@
 async function renderEvents() {
     // Only fetch what the user is allowed to see (avoids 403s and empty errors).
     const [rules, log] = await Promise.all([
-        _evCanRules() ? apiGet('/api/v1/event-rules') : Promise.resolve(null),
-        _evCan('events_notify_view') ? apiGet('/api/v1/notifications/log?limit=200') : Promise.resolve(null),
+        _evCanRules() ? apiGet('/api/v1/event/rules') : Promise.resolve(null),
+        _evCan('events_notify_view') ? apiGet('/api/v1/event/notifications?limit=200') : Promise.resolve(null),
     ]);
     _eventRules = (rules && rules.rules) || [];
     _eventLog = (log && log.log) || [];

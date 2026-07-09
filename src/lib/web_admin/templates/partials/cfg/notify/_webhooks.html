@@ -89,13 +89,13 @@ async function _webhookToggleEnabled(id, enabled) {
     const wh = configData.webhooks.find(w => w.id === id);
     if (!wh) return;
     const body = {...wh, secret: null};  // null = keep stored secret
-    const r = await apiPut(`/api/v1/webhooks/${id}`, body);
+    const r = await apiPut(`/api/v1/notify/webhooks/${id}`, body);
     if (!r?.ok) showToast(r?.error || t('save_error'), 'danger');
     else showToast(tf(enabled ? 'webhook_enabled_ok' : 'webhook_disabled_ok', wh.name || ''), 'success');
 }
 
 async function testWebhookById(id) {
-    const r = await apiPost(`/api/v1/webhooks/${id}/test`, {});
+    const r = await apiPost(`/api/v1/notify/webhooks/${id}/test`, {});
     showToast(r?.data?.message || (r?.data?.ok ? t('webhook_test_ok') : t('webhook_test_error')),
               r?.data?.ok ? 'success' : 'danger');
 }
@@ -103,7 +103,7 @@ async function testWebhookById(id) {
 function deleteWebhook(id) {
     const wh = (configData.webhooks || []).find(w => w.id === id);
     showConfirmModal(tf('confirm_delete_webhook', wh?.name || id), async () => {
-        const r = await apiDelete(`/api/v1/webhooks/${id}`);
+        const r = await apiDelete(`/api/v1/notify/webhooks/${id}`);
         if (r?.data?.ok) {
             configData.webhooks = (configData.webhooks || []).filter(w => w.id !== id);
             renderConfig();
@@ -293,7 +293,7 @@ function _webhookFormData() {
 async function saveWebhook() {
     if (!_webhookValidateModal()) return;
     const data = _webhookFormData();
-    const url = _webhookEditId ? `/api/v1/webhooks/${_webhookEditId}` : '/api/v1/webhooks';
+    const url = _webhookEditId ? `/api/v1/notify/webhooks/${_webhookEditId}` : '/api/v1/notify/webhooks';
     const method = _webhookEditId ? 'PUT' : 'POST';
     const r = _webhookEditId ? await apiPut(url, data) : await apiPost(url, data);
     // apiPut returns raw JSON; apiPost returns {status, data}

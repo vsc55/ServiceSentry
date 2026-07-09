@@ -92,7 +92,7 @@ if (!window._kioskFsHooked) {
 // and is disabled when stopped). Shared across Status / Overview / History.
 let _schedulerState = { running: false, interval: 0 };
 async function _loadSchedulerState() {
-    const res = await apiGetSilent('/api/v1/daemon/status');   // needs checks_run
+    const res = await apiGetSilent('/api/v1/monitoring/status');   // needs checks_run
     const st  = res ? (res.data ?? res) : null;
     _schedulerState = st
         ? { running: !!st.running, interval: parseInt(st.interval, 10) || 0 }

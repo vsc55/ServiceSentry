@@ -185,7 +185,7 @@ Botón de icono acoplado al input (Bootstrap input-group). Permite ejecutar una 
     "default": "",
     "input_action": {
         "id":           "list_databases",
-        "url":          "/api/v1/watchfuls/datastore/list_databases",
+        "url":          "/api/v1/modules/watchfuls/datastore/list_databases",
         "extra":        {},
         "icon":         "bi-database",
         "result":       "field_picker",
@@ -419,7 +419,7 @@ Lista de botones de acción para el formulario del ítem. Cada acción genera un
 "__actions__": [
     {
         "id":         "test_connection",
-        "url":        "/api/v1/watchfuls/datastore/test_connection",
+        "url":        "/api/v1/modules/watchfuls/datastore/test_connection",
         "extra":      {},
         "icon":       "bi-plug",
         "variant":    "outline-info",
@@ -428,7 +428,7 @@ Lista de botones de acción para el formulario del ítem. Cada acción genera un
     },
     {
         "id":         "test_ssh",
-        "url":        "/api/v1/watchfuls/datastore/test_connection",
+        "url":        "/api/v1/modules/watchfuls/datastore/test_connection",
         "extra":      {"_test_mode": "ssh"},
         "show_when":  {"conn_type": ["ssh"]},
         "group":      "ssh",
@@ -462,7 +462,7 @@ Propiedades de cada acción:
 URL del endpoint de test rápido. Aparece como botón en el encabezado de la colección (no en cada ítem individualmente). Hace POST con los datos del ítem seleccionado.
 
 ```json
-"__test__": "/api/v1/watchfuls/datastore/test_connection"
+"__test__": "/api/v1/modules/watchfuls/datastore/test_connection"
 ```
 
 La acción invocada debe estar en `WATCHFUL_ACTIONS` del módulo.
@@ -799,7 +799,7 @@ class Watchful(ModuleBase):
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'test_connection', 'list_databases'})
 ```
 
-El endpoint genérico `GET|POST /api/v1/watchfuls/<module>/<action>` comprueba que la acción esté en este frozenset antes de ejecutarla. Cualquier acción no listada devuelve `404`.
+El endpoint genérico `GET|POST /api/v1/modules/watchfuls/<module>/<action>` comprueba que la acción esté en este frozenset antes de ejecutarla. Cualquier acción no listada devuelve `404`.
 
 - **GET**: llama al classmethod sin argumentos → usado por `discover()`
 - **POST**: llama al classmethod con el body JSON como `dict` → usado por `test_connection()` y `list_databases()`

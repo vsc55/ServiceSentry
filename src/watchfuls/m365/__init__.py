@@ -327,7 +327,7 @@ class Watchful(ModuleBase):
 
     @classmethod
     def list_sites(cls, config: dict) -> list:
-        """POST /api/v1/watchfuls/m365/list_sites — enumerate the SharePoint
+        """POST /api/v1/modules/watchfuls/m365/list_sites — enumerate the SharePoint
         sites the app can see (app-only).  Feeds the ``site`` field's discovery
         modal: each entry is ``{name, display_name, kind, status}`` where
         ``name`` is the site URL (no scheme) that fills the field on selection.
@@ -376,7 +376,7 @@ class Watchful(ModuleBase):
 
     @classmethod
     def test_connection(cls, config: dict) -> dict:
-        """POST /api/v1/watchfuls/m365/test_connection — authenticate and read the
+        """POST /api/v1/modules/watchfuls/m365/test_connection — authenticate and read the
         target site's quota. Returns {"ok": bool, "message": str}."""
         tenant = str(config.get('tenant_id') or '').strip()
         client_id = str(config.get('client_id') or '').strip()

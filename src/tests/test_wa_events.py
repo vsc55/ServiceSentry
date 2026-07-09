@@ -54,36 +54,36 @@ class TestEventsEnabled:
 class TestEventRulesApi:
 
     def test_requires_auth(self, client):
-        assert client.get('/api/v1/event-rules').status_code == 401
+        assert client.get('/api/v1/event/rules').status_code == 401
 
     def test_crud(self, client):
         _login(client)
-        assert client.get('/api/v1/event-rules').get_json()['rules'] == []
-        r = client.post('/api/v1/event-rules', json={
+        assert client.get('/api/v1/event/rules').get_json()['rules'] == []
+        r = client.post('/api/v1/event/rules', json={
             'name': 'Failed logins', 'source': 'audit',
             'events': ['login_failed'], 'channels': ['telegram']})
         assert r.status_code == 200
         rid = r.get_json()['rule']['id']
-        rules = client.get('/api/v1/event-rules').get_json()['rules']
+        rules = client.get('/api/v1/event/rules').get_json()['rules']
         assert len(rules) == 1 and rules[0]['name'] == 'Failed logins'
         # update
-        r = client.put(f'/api/v1/event-rules/{rid}', json={
+        r = client.put(f'/api/v1/event/rules/{rid}', json={
             'name': 'Renamed', 'source': 'audit',
             'events': ['login_failed'], 'channels': ['telegram', 'email']})
         assert r.status_code == 200 and r.get_json()['rule']['name'] == 'Renamed'
         # delete
-        assert client.delete(f'/api/v1/event-rules/{rid}').status_code == 200
-        assert client.get('/api/v1/event-rules').get_json()['rules'] == []
+        assert client.delete(f'/api/v1/event/rules/{rid}').status_code == 200
+        assert client.get('/api/v1/event/rules').get_json()['rules'] == []
 
     def test_promoted_columns(self, admin, client):
         """name/enabled/description are first-class columns, not buried in data."""
         _login(client)
-        rid = client.post('/api/v1/event-rules', json={
+        rid = client.post('/api/v1/event/rules', json={
             'name': 'Promo', 'description': 'a note', 'enabled': False,
             'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']}).get_json()['rule']['id']
         # round-trips through the flat public dict
-        rule = client.get('/api/v1/event-rules').get_json()['rules'][0]
+        rule = client.get('/api/v1/event/rules').get_json()['rules'][0]
         assert rule['name'] == 'Promo' and rule['description'] == 'a note'
         assert rule['enabled'] is False
         # and they live in their own columns (the data blob does not carry them)
@@ -98,13 +98,13 @@ class TestEventRulesApi:
     def test_validation(self, client):
         _login(client)
         # no channels
-        assert client.post('/api/v1/event-rules', json={
+        assert client.post('/api/v1/event/rules', json={
             'source': 'audit', 'events': ['x'], 'channels': []}).status_code == 400
         # audit with no events
-        assert client.post('/api/v1/event-rules', json={
+        assert client.post('/api/v1/event/rules', json={
             'source': 'audit', 'events': [], 'channels': ['telegram']}).status_code == 400
         # bad regex (syslog)
-        assert client.post('/api/v1/event-rules', json={
+        assert client.post('/api/v1/event/rules', json={
             'source': 'syslog', 'match_type': 'regex', 'match_text': '(',
             'channels': ['telegram']}).status_code == 400
 
@@ -113,7 +113,7 @@ class TestEventMatching:
 
     def test_audit_event_fires_rule(self, admin, client):
         _login(client)
-        client.post('/api/v1/event-rules', json={
+        client.post('/api/v1/event/rules', json={
             'name': 'r', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']})
         with mock.patch(_DISP) as disp:
@@ -124,7 +124,7 @@ class TestEventMatching:
 
     def test_non_matching_audit_event_does_not_fire(self, admin, client):
         _login(client)
-        client.post('/api/v1/event-rules', json={
+        client.post('/api/v1/event/rules', json={
             'name': 'r', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']})
         with mock.patch(_DISP) as disp:
@@ -133,7 +133,7 @@ class TestEventMatching:
 
     def test_disabled_rule_does_not_fire(self, admin, client):
         _login(client)
-        client.post('/api/v1/event-rules', json={
+        client.post('/api/v1/event/rules', json={
             'name': 'r', 'enabled': False, 'source': 'audit',
             'events': ['login_failed'], 'channels': ['telegram']})
         with mock.patch(_DISP) as disp:
@@ -142,7 +142,7 @@ class TestEventMatching:
 
     def test_syslog_rule_matches_by_severity(self, admin, client):
         _login(client)
-        client.post('/api/v1/event-rules', json={
+        client.post('/api/v1/event/rules', json={
             'name': 's', 'source': 'syslog', 'severity_max': 3,
             'channels': ['webhook']})
         rec_err = {'severity': 2, 'severity_name': 'crit', 'hostname': 'h',
@@ -157,7 +157,7 @@ class TestEventMatching:
 
     def test_cooldown_suppresses_second(self, admin, client):
         _login(client)
-        client.post('/api/v1/event-rules', json={
+        client.post('/api/v1/event/rules', json={
             'name': 'r', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram'], 'cooldown': 60})
         with mock.patch(_DISP) as disp:
@@ -169,7 +169,7 @@ class TestEventMatching:
         _login(client)
         admin._write_config({'events': {'cooldown': 600}})
         admin._invalidate_config_cache()
-        client.post('/api/v1/event-rules', json={      # no cooldown → inherit global
+        client.post('/api/v1/event/rules', json={      # no cooldown → inherit global
             'name': 'g', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']})
         with mock.patch(_DISP) as disp:
@@ -181,7 +181,7 @@ class TestEventMatching:
         _login(client)
         admin._write_config({'events': {'cooldown': 600}})
         admin._invalidate_config_cache()
-        client.post('/api/v1/event-rules', json={      # explicit 0 → no cooldown
+        client.post('/api/v1/event/rules', json={      # explicit 0 → no cooldown
             'name': 'z', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram'], 'cooldown': 0})
         with mock.patch(_DISP) as disp:
@@ -209,7 +209,7 @@ class TestMatchTypes:
         _login(client)
         needle = {'contains': 'full', 'not_contains': 'full', 'starts': 'disk',
                   'ends': 'disk', 'regex': r'err-\d+', 'any': ''}[match_type]
-        r = client.post('/api/v1/event-rules', json={
+        r = client.post('/api/v1/event/rules', json={
             'name': 'm', 'source': 'syslog', 'match_type': match_type,
             'match_text': needle, 'channels': ['webhook']})
         assert r.status_code == 200
@@ -224,30 +224,30 @@ class TestNotificationLog:
 
     def test_log_records_test_send_and_last_fired(self, client):
         _login(client)
-        rid = client.post('/api/v1/event-rules', json={
+        rid = client.post('/api/v1/event/rules', json={
             'name': 'r', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']}).get_json()['rule']['id']
         with mock.patch(_DISP, return_value={'telegram': (True, 'sent')}):
-            assert client.post(f'/api/v1/event-rules/{rid}/test').status_code == 200
+            assert client.post(f'/api/v1/event/rules/{rid}/test').status_code == 200
         # the send is logged
-        log = client.get('/api/v1/notifications/log').get_json()
+        log = client.get('/api/v1/event/notifications').get_json()
         assert log['total'] == 1
         assert log['log'][0]['rule_name'] == 'r' and log['log'][0]['ok'] == 1
         # and the rule carries a last_fired / last_ok
-        rule = client.get('/api/v1/event-rules').get_json()['rules'][0]
+        rule = client.get('/api/v1/event/rules').get_json()['rules'][0]
         assert rule['last_fired'] and rule['last_ok'] is True
         # clearing empties it
-        assert client.delete('/api/v1/notifications/log').status_code == 200
-        assert client.get('/api/v1/notifications/log').get_json()['total'] == 0
+        assert client.delete('/api/v1/event/notifications').status_code == 200
+        assert client.get('/api/v1/event/notifications').get_json()['total'] == 0
 
     def test_log_records_failure(self, client):
         _login(client)
-        rid = client.post('/api/v1/event-rules', json={
+        rid = client.post('/api/v1/event/rules', json={
             'name': 'r', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']}).get_json()['rule']['id']
         with mock.patch(_DISP, return_value={'telegram': (False, 'boom')}):
-            client.post(f'/api/v1/event-rules/{rid}/test')
-        entry = client.get('/api/v1/notifications/log').get_json()['log'][0]
+            client.post(f'/api/v1/event/rules/{rid}/test')
+        entry = client.get('/api/v1/event/notifications').get_json()['log'][0]
         assert entry['ok'] == 0 and 'boom' in entry['message']
 
 
@@ -295,7 +295,7 @@ class TestEventWorker:
 
     def test_worker_consumes_audit_by_cursor(self, admin, client):
         _login(client)
-        client.post('/api/v1/event-rules', json={
+        client.post('/api/v1/event/rules', json={
             'name': 'w', 'source': 'audit', 'events': ['login_failed'],
             'channels': ['telegram']})
         ev = admin._embedded_services['events']

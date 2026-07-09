@@ -4,7 +4,7 @@
 
 The *third* concept of the distributed control plane, kept separate from the
 desired state (``config``) and the observed state
-(:class:`lib.services.control.instances.ServiceInstancesStore`).  Commands are
+(:class:`lib.services.manager.instances.ServiceInstancesStore`).  Commands are
 one-shot actions — "run a check cycle now", "reload rules" — that don't belong in
 declarative config: the web admin enqueues one, and whichever instance hosts that
 service (embedded here or in another pod) atomically claims and runs it, then

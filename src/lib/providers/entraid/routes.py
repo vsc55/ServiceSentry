@@ -11,6 +11,18 @@ The SSO OIDC "Register in Azure" button and every module credential reuse it (th
 OIDC app is just a provisioning profile: redirect URI + groups claim +
 require-assignment + its permissions). SAML2 keeps its own routes below, and this
 module also exposes the Graph "fetch groups" helpers used by the OIDC config.
+
+Routes registered by this file:
+
+    POST   /api/v1/auth/entraid/groups                    fetch all directory groups via Graph
+    POST   /api/v1/auth/entraid/group_lookup              look up a single group by ID via Graph
+    POST   /api/v1/auth/entraid/saml2/device-code         device-code: provision SAML2 app
+    POST   /api/v1/auth/entraid/saml2/secret/device-code  device-code: add Graph secret to app
+    POST   /api/v1/auth/entraid/saml2/device-poll         poll SAML2 app provisioning result
+    POST   /api/v1/auth/entraid/scim/device-code          device-code: provision SCIM app
+    POST   /api/v1/auth/entraid/scim/device-poll          poll SCIM app provisioning result
+    POST   /api/v1/auth/entraid/provision/device-code   device-code: generic module app
+    POST   /api/v1/auth/entraid/provision/device-poll   poll generic module app provisioning
 """
 
 import secrets
@@ -71,7 +83,7 @@ def register(app, wa):
             purl = str(data.get('provider_url')).strip()
         return (cid or '').strip(), (csec or '').strip(), (purl or '').strip()
 
-    @app.route('/api/v1/auth/entra/groups', methods=['POST'])
+    @app.route('/api/v1/auth/entraid/groups', methods=['POST'])
     @config_edit_req
     def api_entra_groups():
         """Fetch all directory groups via Graph, using the OIDC/SAML2 app credentials."""
@@ -98,7 +110,7 @@ def register(app, wa):
                   detail={'count': len(groups)})
         return jsonify({'ok': True, 'groups': groups})
 
-    @app.route('/api/v1/auth/entra/group_lookup', methods=['POST'])
+    @app.route('/api/v1/auth/entraid/group_lookup', methods=['POST'])
     @config_edit_req
     def api_entra_group_lookup():
         """Look up a single group by ID via Graph."""
@@ -122,7 +134,7 @@ def register(app, wa):
             return jsonify({'ok': True, 'found': False, 'name': None})
         return jsonify({'ok': True, 'found': True, 'name': name})
 
-    @app.route('/api/v1/auth/entra/saml2/device-code', methods=['POST'])
+    @app.route('/api/v1/auth/entraid/saml2/device-code', methods=['POST'])
     @config_edit_req
     def api_entra_saml2_device_code():
         req_body = wa._optional_json() or {}
@@ -150,7 +162,7 @@ def register(app, wa):
             'entity_id':        _saml_entity_id(wa),
         })
 
-    @app.route('/api/v1/auth/entra/saml2/secret/device-code', methods=['POST'])
+    @app.route('/api/v1/auth/entraid/saml2/secret/device-code', methods=['POST'])
     @config_edit_req
     def api_entra_saml2_secret_device_code():
         """Start a device-code flow to add a Graph client secret to the EXISTING SAML2
@@ -179,7 +191,7 @@ def register(app, wa):
             'interval':         d.get('interval', 5),
         })
 
-    @app.route('/api/v1/auth/entra/saml2/device-poll', methods=['POST'])
+    @app.route('/api/v1/auth/entraid/saml2/device-poll', methods=['POST'])
     @config_edit_req
     def api_entra_saml2_device_poll():
         data, err = wa._require_json()
@@ -254,7 +266,7 @@ def register(app, wa):
         base = _public_base(wa_)
         return f'{base.rstrip("/")}/scim/v2'
 
-    @app.route('/api/v1/auth/entra/scim/device-code', methods=['POST'])
+    @app.route('/api/v1/auth/entraid/scim/device-code', methods=['POST'])
     @config_edit_req
     def api_entra_scim_device_code():
         body = wa._optional_json() or {}
@@ -296,7 +308,7 @@ def register(app, wa):
             'scim_base':        base,
         })
 
-    @app.route('/api/v1/auth/entra/scim/device-poll', methods=['POST'])
+    @app.route('/api/v1/auth/entraid/scim/device-poll', methods=['POST'])
     @config_edit_req
     def api_entra_scim_device_poll():
         data, err = wa._require_json()

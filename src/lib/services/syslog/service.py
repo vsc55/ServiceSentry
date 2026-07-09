@@ -37,8 +37,8 @@ from lib.db import get_connector
 from lib.debug import Debug, DebugLevel
 from lib.core.config.store import ConfigStore
 from lib.services.events.store import EventRulesStore, NotificationLogStore
-from lib.services.control.instances import ServiceInstancesStore
-from lib.services.control.commands import ServiceCommandsStore
+from lib.services.manager.instances import ServiceInstancesStore
+from lib.services.manager.commands import ServiceCommandsStore
 from lib.services.syslog.store import SyslogStore, SyslogDropsStore
 from lib.core.notify.webhook.store import WebhooksStore
 from lib.services.heartbeat import _HeartbeatMixin, db_summary

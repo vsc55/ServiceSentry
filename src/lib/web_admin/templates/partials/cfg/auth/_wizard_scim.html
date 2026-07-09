@@ -125,8 +125,8 @@ async function showEntraScimWizard() {
           </div>
         </div>`;
     showEntraIdProvisionWizard({
-        url:      '/api/v1/auth/entra/scim/device-code',
-        pollUrl:  '/api/v1/auth/entra/scim/device-poll',
+        url:      '/api/v1/auth/entraid/scim/device-code',
+        pollUrl:  '/api/v1/auth/entraid/scim/device-poll',
         title:    t('scim_wizard_title'),
         intro:    t('scim_wizard_intro'),
         // No token in the request — the backend reads it from config (persisted above).
@@ -150,8 +150,8 @@ async function showEntraScimResyncWizard() {
     if (typeof _dirtyFields !== 'undefined' && _dirtyFields.has('scim|token')) await saveConfig();
     const base = _entraScimBaseUrl();
     showEntraIdProvisionWizard({
-        url:      '/api/v1/auth/entra/scim/device-code',
-        pollUrl:  '/api/v1/auth/entra/scim/device-poll',
+        url:      '/api/v1/auth/entraid/scim/device-code',
+        pollUrl:  '/api/v1/auth/entraid/scim/device-poll',
         title:    t('scim_resync_title'),
         intro:    t('scim_resync_intro'),
         simple:   true,   // just sign in + re-push (no app-name, no manual scripts)

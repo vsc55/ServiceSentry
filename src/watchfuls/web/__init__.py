@@ -220,7 +220,7 @@ class Watchful(ModuleBase):
 
     @classmethod
     def test_connection(cls, config: dict) -> dict:
-        """POST /api/v1/watchfuls/web/test_connection
+        """POST /api/v1/modules/watchfuls/web/test_connection
 
         Receives the item fields from the UI form and runs a live request.
         Returns {"ok": bool, "message": str}.

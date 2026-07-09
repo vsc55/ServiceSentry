@@ -277,7 +277,7 @@ class TestApiCredentials:
         assert tc.call_args.kwargs['user'] == 'creduser'
 
     def test_action_config_applies_credential(self, admin):
-        from lib.core.modules.watchful_routes import _apply_cred_to_config
+        from lib.core.modules.service import _apply_cred_to_config
         uid = admin._credentials_store.create(
             {'name': 'web1', 'ctype': 'web_auth',
              'data': {'auth_user': 'admin', 'auth_password': 'pw'}}, actor='a')
@@ -289,7 +289,7 @@ class TestApiCredentials:
     def test_check_test_applies_credential(self, admin):
         # The host-modal check "test" buttons must use the credential, not the
         # restored inline secret.
-        from lib.core.hosts.routes import _apply_check_cred
+        from lib.core.hosts.service import _apply_check_cred
         uid = admin._credentials_store.create(
             {'name': 'web3', 'ctype': 'web_auth',
              'data': {'auth_user': 'u', 'auth_password': 'pw'}}, actor='a')

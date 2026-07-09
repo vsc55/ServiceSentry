@@ -6,6 +6,11 @@ The interactive callback validates the token and then hands off to the web
 session layer (``web_admin.routes.auth._establish_session``) — the one place a
 provider legitimately reaches back into web_admin (a web callback establishes a
 web session).
+
+Routes registered by this file:
+
+    GET    /auth/oidc/login     start OIDC login (redirect to IdP)
+    GET    /auth/oidc/callback  validate token, establish session
 """
 
 from lib.config.spec import cfg_get

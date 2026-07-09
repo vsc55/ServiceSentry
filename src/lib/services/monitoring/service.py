@@ -28,9 +28,9 @@ from lib.config.manager import (
 from lib.db import get_connector
 from lib.debug import Debug, DebugLevel
 from lib.core.config.store import ConfigStore
-from lib.services.control.instances import ServiceInstancesStore
-from lib.services.control.commands import ServiceCommandsStore
-from lib.services.control.leader import ServiceLeaderStore
+from lib.services.manager.instances import ServiceInstancesStore
+from lib.services.manager.commands import ServiceCommandsStore
+from lib.services.manager.leader import ServiceLeaderStore
 from lib.security import secret_manager
 from lib.services.heartbeat import _HeartbeatMixin, db_summary
 from lib.services.control_server import start_control_server

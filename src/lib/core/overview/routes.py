@@ -11,9 +11,18 @@ factory reset.  Two things deliberately stay elsewhere because they are not over
 * the widget catalog (``overview_widgets_catalog``) lives in the module-discovery layer
   (:mod:`lib.modules.discovery.overview_widgets`) — it is discovered from the watchful
   modules.
+
+Routes registered by this file:
+
+    GET    /api/v1/overview/widget/<wid>    Data for one Overview widget (self-contained)
+    GET    /api/v1/overview/default-layout  Org-wide default dashboard layout
+    PUT    /api/v1/overview/default-layout  Save posted layout as org-wide default
+    POST   /api/v1/overview/reset-factory   Reset caller's dashboard to factory layout
 """
 
 from flask import jsonify, request, session
+
+from lib.core.overview import service as overview_svc
 
 
 def register(app, wa):
@@ -35,11 +44,7 @@ def register(app, wa):
             return jsonify({'error': 'not_found'}), 404
         desc = next((w for w in discover_overview_widgets() if w.get('id') == wid), None)
         perms = wa._get_session_permissions()
-        p = (desc or {}).get('perms') or {}
-        any_p, prefixes = p.get('any') or [], tuple(p.get('prefix') or [])
-        if (any_p or prefixes) and not (
-                any(x in perms for x in any_p)
-                or (prefixes and any(str(x).startswith(prefixes) for x in perms))):
+        if not overview_svc.widget_allowed(perms, desc):
             return jsonify({'error': 'forbidden'}), 403
         if stat_fn is not None:
             try:
@@ -81,15 +86,7 @@ def register(app, wa):
         widgets = data.get('layout')
         if not isinstance(widgets, list):
             return jsonify({'error': wa._t('invalid_modules_data')}), 400
-        layout = [
-            {
-                'id':     str(w.get('id', '')),
-                'cols':   int(w.get('cols') or 2),
-                'h':      w.get('h', 'auto'),
-                'hidden': bool(w.get('hidden')),
-            }
-            for w in widgets if isinstance(w, dict) and w.get('id')
-        ]
+        layout = overview_svc.normalize_layout(widgets)
         cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
         cfg.setdefault('overview', {})['default_layout'] = layout
         ok = wa._write_config(cfg)
@@ -109,17 +106,7 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
-        widgets = data.get('layout')
-        layout = [
-            {
-                'id':     str(w.get('id', '')),
-                'cols':   int(w.get('cols') or 2),
-                'h':      w.get('h', 'auto'),
-                'hidden': bool(w.get('hidden')),
-            }
-            for w in (widgets if isinstance(widgets, list) else [])
-            if isinstance(w, dict) and w.get('id')
-        ]
+        layout = overview_svc.normalize_layout(data.get('layout'))
         user = wa._users.get(session.get('username', ''))
         if user is not None:
             user['dashboard_layout'] = layout

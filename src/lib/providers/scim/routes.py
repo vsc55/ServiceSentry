@@ -7,6 +7,32 @@ every operation to :class:`lib.providers.scim.ScimService` (the Flask-independen
 provisioning logic).  An IdP (Microsoft Entra ID, Okta…) uses these routes to
 PROACTIVELY create/update/deactivate users and groups; authenticated by the
 ``scim|token`` bearer, independent of the web session.
+
+⚠️  DO NOT rename these paths.  Unlike the rest of the app (``/api/v1/*``, our own
+internal API), the ``/scim/v2/*`` URL scheme is MANDATED by the SCIM 2.0 standard
+(IETF RFC 7643/7644).  External identity providers are configured with only the base
+URL and expect exactly these standard resource paths (``ServiceProviderConfig``,
+``Users``, ``Groups``, …).  Changing them — e.g. moving under ``/api/v1/`` — would
+break provisioning from every IdP.  These are endpoints we expose FOR OTHERS to call,
+so they intentionally live outside our internal API namespace.
+
+Routes registered by this file:
+
+    GET    /scim/v2/ServiceProviderConfig  provider capability document
+    GET    /scim/v2/ResourceTypes          supported resource types
+    GET    /scim/v2/Schemas                supported schemas document
+    GET    /scim/v2/Users                  list/filter users (paginated)
+    GET    /scim/v2/Users/<uid>            get a single user
+    POST   /scim/v2/Users                  create a user
+    PUT    /scim/v2/Users/<uid>            replace a user
+    PATCH  /scim/v2/Users/<uid>            patch a user
+    DELETE /scim/v2/Users/<uid>            delete a user
+    GET    /scim/v2/Groups                 list/filter groups
+    GET    /scim/v2/Groups/<gid>           get a single group
+    POST   /scim/v2/Groups                 create a group
+    PATCH  /scim/v2/Groups/<gid>           patch a group (membership/attrs)
+    PUT    /scim/v2/Groups/<gid>           replace a group
+    DELETE /scim/v2/Groups/<gid>           delete a group
 """
 
 from flask import jsonify, request

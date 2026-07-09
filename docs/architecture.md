@@ -48,7 +48,9 @@ ObjectBase (lib/core/object_base.py)
 │       (lib/config/spec.py: registro central de defaults; load_config() ya NO siembra a disco)
 ├── WebAdmin (lib/web_admin/app.py)
 │   # Dominios de núcleo empaquetados como módulos self-contained en lib/core/<d>/
-│   # (store + mixin + routes + permissions); WebAdmin HEREDA su mixin:
+│   # (store + mixin + routes + service + permissions); las rutas son finas (solo HTTP:
+│   # parseo, sesión, persistencia, audit) y delegan la validación/mutación en service.py
+│   # (sin Flask, reutilizable por CLI); WebAdmin HEREDA su mixin:
 │   ├── _UsersMixin      (lib/core/users/mixin.py)
 │   ├── _RolesMixin      (lib/core/roles/mixin.py)
 │   ├── _GroupsMixin     (lib/core/groups/mixin.py)
@@ -143,11 +145,13 @@ ServiceSentry/
 │   │   │   ├── object_base.py           # ObjectBase (clase base con Debug compartido)
 │   │   │   ├── constants.py             # SYSTEM_USER (centinela de autor de auditoría; fuente única)
 │   │   │   ├── permissions.py           # RBAC: ROLES/PERMISSIONS/PERMISSION_GROUPS/BUILTIN_ROLE_* + is_*_perm + discover_permissions() (escanea lib.core.* + lib.services.*)
-│   │   │   ├── users/ roles/ groups/ sessions/ audit/   # store.py + mixin.py + routes.py + permissions.py
-│   │   │   ├── credentials/ history/ config/            # store.py + routes(.py|/) + permissions.py (sin mixin; store lo importan servicios)
-│   │   │   ├── modules/                                 # store.py + facade.py + routes.py + watchful_routes.py + permissions.py
-│   │   │   ├── hosts/                                   # store.py + routes/ + profiles/runner/ssh_client/resolve/probe/migrate + permissions.py (grupo perm = 'servers')
-│   │   │   ├── clusters/ overview/                      # solo permissions.py (grupos virtuales, sin store/routes propios)
+│   │   │   #   Cada dominio: routes.py fino (HTTP) + service.py (lógica sin Flask, reutilizable por CLI)
+│   │   │   ├── users/ roles/ groups/ sessions/ audit/   # store.py + mixin.py + routes.py + service.py + permissions.py
+│   │   │   ├── credentials/ history/ config/            # store.py + routes.py + service.py + permissions.py (sin mixin; store lo importan servicios; config/service.py incluye INT/BOOL_RULES + build_config_schema)
+│   │   │   ├── modules/                                 # store.py + facade.py + service.py + routes.py (config CRUD + /api/v1/modules/watchfuls action dispatch) + permissions.py
+│   │   │   ├── hosts/                                   # store.py + service.py (CRUD-transform + check fan-out/status/probe-prep) + routes.py (CRUD+test+migrate) + profiles/runner/ssh_client/resolve/probe/migrate + permissions.py (grupo perm = 'servers')
+│   │   │   ├── overview/                                # service.py (layout/widgets) + routes.py + permissions.py (grupo virtual, sin store)
+│   │   │   ├── clusters/                                # solo permissions.py (grupo virtual, sin store/routes propios)
 │   │   │   └── notify/                  # Subsistema de notificación (sin Flask; lo usan web, monitor y daemons syslog/events)
 │   │   │       ├── notification_dispatcher.py  # dispatch(): enruta cada evento a Telegram/Email/Webhook
 │   │   │       ├── telegram/            # notify.py (canal, envuelve lib/providers/telegram.py) + routes.py
@@ -175,7 +179,7 @@ ServiceSentry/
 │   │   │       ├── embedded.py          # EmbeddedEvents: worker embebido (mode/autostart; stores delegados al host)
 │   │   │       └── service.py           # EventService: worker standalone (main.py --events)
 │   │   │   ├── ipban/                   # fail2ban interno: jail.py (IpBanManager) + manager.py (_IpBanMixin) + exposed.py + embedded.py + routes.py + store/ (una clase por tabla)
-│   │   │   ├── control/                 # Control-plane de servicios: instances.py + commands.py + leader.py + routes.py (/api/v1/services/*)
+│   │   │   ├── manager/                 # Control-plane de servicios: instances.py + commands.py + leader.py + routes.py (/api/v1/services/*)
 │   │   │   ├── control_server.py        # Servidor de control de servicios standalone
 │   │   │   └── heartbeat.py             # Heartbeat entre instancias de servicio
 │   │   │   # (hosts: primitivas de conexión/ejecución movidas a lib/core/hosts/ — ver bloque core/)
@@ -217,7 +221,7 @@ ServiceSentry/
 │   │   │       ├── mail.py              # Envío de correo vía Graph (Microsoft 365)
 │   │   │       ├── provisioning.py      # Alta de apps (roles/scopes/consent/SSO)
 │   │   │       ├── declarations.py      # Descubrimiento de __entraid_provision__ en watchfuls
-│   │   │       └── routes.py            # /api/v1/auth/entra* (registro de app + device-code de provisión SCIM)
+│   │   │       └── routes.py            # /api/v1/auth/entraid/* (registro de app + device-code de provisión SCIM)
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
 │   │       ├── app.py                   # Clase WebAdmin (hereda mixins de lib/web_admin/mixins + lib/core/* + lib/services/*)
 │   │       ├── constants.py             # SOLO HOME_PAGES + home_page_ids (landing pages).
@@ -230,10 +234,12 @@ ServiceSentry/
 │   │       └── routes/                  # Registradores de rutas Flask (ver web_admin.md)
 │   │           ├── __init__.py          # register_all(app, wa) — registra también los routes de core/servicios/providers
 │   │           ├── auth.py              # /login, /logout + _establish_session/_landing_url (login local; LDAP/OIDC/SAML se registran desde lib/providers/*)
-│   │           ├── status.py ui.py errors.py util.py
+│   │           ├── pages.py             # vistas HTML: / (entry), /admin, /overview
+│   │           ├── ui.py                # sesión/API ligero: /lang/<code> (navegación), /api/v1/me, /api/v1/health
+│   │           ├── status.py errors.py util.py
 │   │           └── …                    # Los demás registradores viven con su dominio/servicio:
-│   │                                    #   core:      users/roles/groups/sessions/audit/config/credentials/history/hosts/modules(+watchful_routes)/notify/*
-│   │                                    #   services:  monitoring/routes/(checks,daemon), syslog, events, ipban, control
+│   │                                    #   core:      users/roles/groups/sessions/audit/config/credentials/history/hosts/modules/notify/*
+│   │                                    #   services:  monitoring/routes.py (/api/v1/monitoring/*), syslog/routes.py, events/routes.py, ipban, manager (/api/v1/services)
 │   │                                    #   providers: ldap/oidc/saml/scim/entraid (auth externa + SCIM)
 │   ├── watchfuls/                       # Módulos de monitorización (packages)
 │   │   ├── filesystemusage/             # 🌐 Multiplataforma (psutil)

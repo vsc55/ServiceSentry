@@ -392,7 +392,7 @@ class Watchful(ModuleBase):
 
     _MODULE_DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['__module__'])
 
-    # Discovery action exposed at /api/v1/watchfuls/dns/discover (read-only).
+    # Discovery action exposed at /api/v1/modules/watchfuls/dns/discover (read-only).
     WATCHFUL_ACTIONS: frozenset = frozenset({'discover'})
     READ_ONLY_ACTIONS: frozenset = frozenset({'discover'})
 

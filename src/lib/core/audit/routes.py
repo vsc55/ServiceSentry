@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Audit log routes: /api/v1/audit, /api/v1/audit/<int:entry_id>."""
+"""Audit log routes: /api/v1/audit, /api/v1/audit/<int:entry_id>.
+
+Routes registered by this file:
+
+    GET    /api/v1/audit                 Return all audit entries, newest first
+    DELETE /api/v1/audit                 Delete all audit log entries
+    DELETE /api/v1/audit/<int:entry_id>  Delete a single entry by DB ID
+"""
 
 from flask import jsonify
+
+from lib.core.audit import service as audit_svc
 
 
 def register(app, wa):
@@ -30,7 +39,7 @@ def register(app, wa):
         """Delete a single entry by its database ID."""
         # Retrieve entry details before deleting (for the audit trail)
         entries = wa._audit_store.get_all(newest_first=False)
-        entry   = next((e for e in entries if e.get('_id') == entry_id), None)
+        entry   = audit_svc.find_entry(entries, entry_id)
         if entry is None:
             return jsonify({'error': 'not found'}), 404
         wa._audit_store.delete_by_id(entry_id)

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Public status page route — no authentication required."""
+"""Public status page route — no authentication required.
+
+Routes registered by this file:
+
+    GET /status  public service-status page (rendered HTML; no auth)
+"""
 
 import json
 import os

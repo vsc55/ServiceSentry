@@ -743,6 +743,21 @@ python3 main.py [opciones]
 > → `--monitor`); `main.py` en sí no lee `SS_SERVICE_ROLE`. El panel web que
 > delega los puertos a este contenedor debe arrancar con `SS_SYSLOG_EMBEDDED=0`.
 
+### Subcomandos de gestión (`user` / `group` / `status` / `reload`)
+
+Además de los modos de servicio, `main.py` ofrece **subcomandos one-shot** para administrar
+usuarios y grupos y para consultar/recargar servicios sin abrir el panel web:
+
+```bash
+python3 main.py user add alice -P 'S3cret!' --role editor --group devs
+python3 main.py user disable bob
+python3 main.py group add devs --role editor
+python3 main.py status
+python3 main.py reload
+```
+
+Referencia completa (todos los subcomandos, ejemplos y arquitectura): [cli.md](cli.md).
+
 ### Variables de entorno
 
 Cada argumento del CLI puede darse también por **variable de entorno** `SS_*` (práctico para Docker, donde los flags son incómodos). El flag explícito tiene prioridad sobre el env. Los booleanos se activan con `1`/`true`/`yes`/`on`.

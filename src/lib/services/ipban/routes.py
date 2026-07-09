@@ -1,17 +1,33 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""IP ban (internal fail2ban) management routes: /api/v1/ipbans.
+"""IP ban (internal fail2ban) management routes: /api/v1/ipbans/*.
 
 Lists the jailed IPs and lets an operator ban or lift a ban manually.  The jail
 itself is enforced everywhere by :class:`lib.services.ipban.jail.IpBanManager`; these
-endpoints are only its management surface.  Gated by the config permissions
-(fail2ban is a security-admin function).
+endpoints are only its management surface.  Gated by granular per-resource fail2ban
+permissions (a security-admin function).
+
+Routes registered by this file:
+
+    GET    /api/v1/ipbans                      active bans + watchlist (offenders)
+    POST   /api/v1/ipbans                      manually ban an IP
+    DELETE /api/v1/ipbans/<ip>                 lift a ban (path-encoded IP)
+    POST   /api/v1/ipbans/action               set a per-ban block-action override
+    POST   /api/v1/ipbans/clear                drop an IP from the watchlist
+    GET    /api/v1/ipbans/banlog               ban/unban history (audit trail)
+    GET    /api/v1/ipbans/history              recent recorded attempts for an IP
+    GET    /api/v1/ipbans/services             exposed services + their block actions
+    POST   /api/v1/ipbans/services/action      set a service's block action
+    GET    /api/v1/ipbans/whitelist            never-ban entries (IP/CIDR)
+    POST   /api/v1/ipbans/whitelist            add a never-ban entry
+    DELETE /api/v1/ipbans/whitelist/<uid>      remove a never-ban entry
 """
 
-import ipaddress
 import time
 
 from flask import jsonify, request, session
+
+from lib.services.ipban import jail
 
 _MAX_REASON = 200        # cap free-text reason / description to keep rows bounded
 
@@ -58,25 +74,14 @@ def register(app, wa):
         """Manually ban an IP.  Body: ``{ip, duration_secs?, reason?}`` — a positive
         ``duration_secs`` forces that term, ``0`` = permanent, omitted = escalation
         ladder.  A whitelisted IP is refused."""
-        data = request.get_json(silent=True) or {}
-        ip = str(data.get('ip', '')).strip()
-        if not ip:
-            return jsonify({'error': wa._t('ipban_ip_required')}), 400
-        try:
-            ip = str(ipaddress.ip_address(ip))   # validate + normalize a single IP
-        except ValueError:
-            return jsonify({'error': wa._t('ipban_ip_invalid')}), 400
+        ip, dur, reason, err = jail.parse_manual_ban(
+            request.get_json(silent=True) or {}, max_reason=_MAX_REASON)
+        if err:
+            return jsonify({'error': wa._t(err)}), 400
         mgr = getattr(wa, '_ipban', None)
         if mgr is None:
             return jsonify({'error': 'unavailable'}), 503
-        if mgr.is_whitelisted(ip):
-            return jsonify({'error': wa._t('ipban_whitelisted')}), 400
-        dur = data.get('duration_secs')
-        try:
-            dur = None if dur in (None, '') else int(dur)
-        except (TypeError, ValueError):
-            dur = None
-        reason = str(data.get('reason') or 'manual').strip()[:_MAX_REASON] or 'manual'
+        # ``ban()`` re-checks the whitelist and returns None for a whitelisted IP.
         rec = mgr.ban(ip, duration_secs=dur, reason=reason,
                       by=session.get('username', 'admin'))
         if rec is None:

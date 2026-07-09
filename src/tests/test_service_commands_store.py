@@ -5,7 +5,7 @@
 import time
 
 from lib.db import get_connector
-from lib.services.control.commands import ServiceCommandsStore
+from lib.services.manager.commands import ServiceCommandsStore
 
 
 def _store():

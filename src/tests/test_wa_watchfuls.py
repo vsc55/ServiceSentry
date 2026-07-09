@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the generic watchful action endpoint: GET|POST /api/v1/watchfuls/<module>/<action>."""
+"""Tests for the generic watchful action endpoint: GET|POST /api/v1/modules/watchfuls/<module>/<action>."""
 
 import os
 import pathlib
@@ -51,7 +51,7 @@ class TestMergeHostConn:
     """_merge_host_conn fills a module's connection fields from the bound host."""
 
     def test_fills_address_and_ssh(self):
-        from lib.core.modules.watchful_routes import _merge_host_conn
+        from lib.core.modules.service import _merge_host_conn
 
         class _WA:
             _modules_dir = None
@@ -65,7 +65,7 @@ class TestMergeHostConn:
         assert cfg['ssh_user'] == 'root' and cfg['ssh_password'] == 'p'
 
     def test_explicit_check_value_wins(self):
-        from lib.core.modules.watchful_routes import _merge_host_conn
+        from lib.core.modules.service import _merge_host_conn
 
         class _WA:
             _modules_dir = None
@@ -79,7 +79,7 @@ class TestResolveHostCtxCred:
     not only inline secrets — else disk/services/temperature discover get no data."""
 
     def test_ssh_cred_uid_is_resolved(self):
-        from lib.core.modules.watchful_routes import _resolve_host_ctx
+        from lib.core.modules.service import _resolve_host_ctx
 
         class _Cstore:
             def get(self, uid, decrypt=True):
@@ -99,7 +99,7 @@ class TestResolveHostCtxCred:
         assert ctx['ssh']['ssh_port'] == 22           # other ssh fields preserved
 
     def test_no_cred_uid_left_unchanged(self):
-        from lib.core.modules.watchful_routes import _resolve_host_ctx
+        from lib.core.modules.service import _resolve_host_ctx
 
         class _WA:
             _hosts_store = None
@@ -115,11 +115,11 @@ class TestApiWatchfulActionAuth:
     """Unauthenticated requests are redirected to /login."""
 
     def test_get_requires_auth(self, client):
-        resp = client.get("/api/v1/watchfuls/filesystemusage/discover")
+        resp = client.get("/api/v1/modules/watchfuls/filesystemusage/discover")
         assert resp.status_code == 401
 
     def test_post_requires_auth(self, client):
-        resp = client.post("/api/v1/watchfuls/datastore/test_connection", json={})
+        resp = client.post("/api/v1/modules/watchfuls/datastore/test_connection", json={})
         assert resp.status_code == 401
 
 
@@ -131,29 +131,29 @@ class TestApiWatchfulActionValidation:
 
     def test_invalid_module_name_uppercase(self, client):
         _login(client)
-        resp = client.get("/api/v1/watchfuls/FILESYSTEMUSAGE/discover")
+        resp = client.get("/api/v1/modules/watchfuls/FILESYSTEMUSAGE/discover")
         assert resp.status_code == 400
         assert "error" in resp.get_json()
 
     def test_invalid_module_name_with_dash(self, client):
         _login(client)
-        resp = client.get("/api/v1/watchfuls/file-system/discover")
+        resp = client.get("/api/v1/modules/watchfuls/file-system/discover")
         assert resp.status_code == 400
 
     def test_invalid_action_name_uppercase(self, client):
         _login(client)
-        resp = client.get("/api/v1/watchfuls/filesystemusage/DISCOVER")
+        resp = client.get("/api/v1/modules/watchfuls/filesystemusage/DISCOVER")
         assert resp.status_code == 400
 
     def test_invalid_action_name_with_dash(self, client):
         _login(client)
-        resp = client.get("/api/v1/watchfuls/filesystemusage/get-list")
+        resp = client.get("/api/v1/modules/watchfuls/filesystemusage/get-list")
         assert resp.status_code == 400
 
     def test_no_modules_dir_returns_404(self, client):
         """Default admin fixture has no modules_dir → 404 before any import."""
         _login(client)
-        resp = client.get("/api/v1/watchfuls/filesystemusage/discover")
+        resp = client.get("/api/v1/modules/watchfuls/filesystemusage/discover")
         assert resp.status_code == 404
 
 
@@ -165,13 +165,13 @@ class TestApiWatchfulActionDispatch:
 
     def test_unknown_module_returns_404(self, client_with_modules):
         _login(client_with_modules)
-        resp = client_with_modules.get("/api/v1/watchfuls/nonexistent_xyz/discover")
+        resp = client_with_modules.get("/api/v1/modules/watchfuls/nonexistent_xyz/discover")
         assert resp.status_code == 404
 
     def test_action_not_in_watchful_actions_returns_404(self, client_with_modules):
         """'check' is a real method but NOT in datastore's WATCHFUL_ACTIONS."""
         _login(client_with_modules)
-        resp = client_with_modules.post("/api/v1/watchfuls/datastore/check", json={})
+        resp = client_with_modules.post("/api/v1/modules/watchfuls/datastore/check", json={})
         assert resp.status_code == 404
         assert resp.get_json()["error"] == "Action not supported"
 
@@ -180,7 +180,7 @@ class TestApiWatchfulActionDispatch:
         _login(client_with_modules)
         fake_items = [{"key": "sda1", "label": "/dev/sda1", "mount": "/"}]
         with patch("watchfuls.filesystemusage.Watchful.discover", return_value=fake_items):
-            resp = client_with_modules.get("/api/v1/watchfuls/filesystemusage/discover")
+            resp = client_with_modules.get("/api/v1/modules/watchfuls/filesystemusage/discover")
         assert resp.status_code == 200
         assert resp.get_json() == fake_items
 
@@ -190,7 +190,7 @@ class TestApiWatchfulActionDispatch:
         fake_result = {"ok": True, "message": "MySQL / MariaDB: connection successful"}
         with patch("watchfuls.datastore.Watchful.test_connection", return_value=fake_result):
             resp = client_with_modules.post(
-                "/api/v1/watchfuls/datastore/test_connection",
+                "/api/v1/modules/watchfuls/datastore/test_connection",
                 json={"db_type": "mysql", "conn_type": "tcp", "host": "localhost"},
             )
         assert resp.status_code == 200
@@ -202,7 +202,7 @@ class TestApiWatchfulActionDispatch:
         fake_result = {"ok": True, "message": "", "items": ["db1", "db2"]}
         with patch("watchfuls.datastore.Watchful.list_databases", return_value=fake_result):
             resp = client_with_modules.post(
-                "/api/v1/watchfuls/datastore/list_databases",
+                "/api/v1/modules/watchfuls/datastore/list_databases",
                 json={"db_type": "mysql", "conn_type": "tcp"},
             )
         assert resp.status_code == 200
@@ -218,7 +218,7 @@ class TestApiWatchfulActionDispatch:
             "watchfuls.filesystemusage.Watchful.discover",
             side_effect=RuntimeError("boom"),
         ):
-            resp = client_with_modules.get("/api/v1/watchfuls/filesystemusage/discover")
+            resp = client_with_modules.get("/api/v1/modules/watchfuls/filesystemusage/discover")
         assert resp.status_code == 500
         data = resp.get_json()
         assert data["ok"] is False
@@ -238,7 +238,7 @@ class TestApiWatchfulActionDispatch:
             "watchfuls.datastore.Watchful.test_connection",
             side_effect=fake_test_connection,
         ):
-            client_with_modules.post("/api/v1/watchfuls/datastore/test_connection")
+            client_with_modules.post("/api/v1/modules/watchfuls/datastore/test_connection")
 
         cfg = captured.get("config", {})
         # The route injects only server-side control keys (the shared DB
@@ -252,7 +252,7 @@ class TestApiWatchfulActionDispatch:
         _login(client_with_modules)
         fake_items = [{"key": "nginx", "label": "nginx"}]
         with patch("watchfuls.service_status.Watchful.discover", return_value=fake_items):
-            resp = client_with_modules.get("/api/v1/watchfuls/service_status/discover")
+            resp = client_with_modules.get("/api/v1/modules/watchfuls/service_status/discover")
         assert resp.status_code == 200
         assert resp.get_json() == fake_items
 
@@ -269,7 +269,7 @@ class TestApiWatchfulActionSecurity:
         exist — the endpoint returns 404, not an import of the stdlib module."""
         _login(client_with_modules)
         for name in ("os", "sys", "re", "subprocess", "pathlib", "importlib"):
-            resp = client_with_modules.get(f"/api/v1/watchfuls/{name}/discover")
+            resp = client_with_modules.get(f"/api/v1/modules/watchfuls/{name}/discover")
             assert resp.status_code == 404, f"stdlib module '{name}' should be blocked"
 
     def test_third_party_package_names_return_404(self, client_with_modules):
@@ -277,7 +277,7 @@ class TestApiWatchfulActionSecurity:
         which doesn't exist — they must not be imported."""
         _login(client_with_modules)
         for name in ("flask", "paramiko", "requests", "psutil", "pytest"):
-            resp = client_with_modules.get(f"/api/v1/watchfuls/{name}/discover")
+            resp = client_with_modules.get(f"/api/v1/modules/watchfuls/{name}/discover")
             assert resp.status_code == 404, f"package '{name}' should be blocked"
 
     def test_private_and_base_methods_blocked_by_whitelist(self, client_with_modules):
@@ -287,7 +287,7 @@ class TestApiWatchfulActionSecurity:
         for method in ("check", "get_conf", "send_message", "discover_schemas",
                        "is_enabled", "check_status"):
             resp = client_with_modules.post(
-                f"/api/v1/watchfuls/datastore/{method}", json={}
+                f"/api/v1/modules/watchfuls/datastore/{method}", json={}
             )
             assert resp.status_code == 404, f"method '{method}' should be blocked"
 
@@ -297,21 +297,21 @@ class TestApiWatchfulActionSecurity:
         _login(client_with_modules)
         for action in ("__init__", "_private", "__class__"):
             resp = client_with_modules.post(
-                f"/api/v1/watchfuls/datastore/{action}", json={}
+                f"/api/v1/modules/watchfuls/datastore/{action}", json={}
             )
             assert resp.status_code == 400
 
     def test_numeric_leading_module_name_rejected(self, client_with_modules):
         """Module names starting with a digit fail the ^[a-z] regex."""
         _login(client_with_modules)
-        resp = client_with_modules.get("/api/v1/watchfuls/1ping/discover")
+        resp = client_with_modules.get("/api/v1/modules/watchfuls/1ping/discover")
         assert resp.status_code == 400
 
     def test_long_action_name_not_in_whitelist_returns_404(self, client_with_modules):
         """A valid-regex but very long action name not in WATCHFUL_ACTIONS → 404."""
         _login(client_with_modules)
         long_action = "a" * 200
-        resp = client_with_modules.get(f"/api/v1/watchfuls/filesystemusage/{long_action}")
+        resp = client_with_modules.get(f"/api/v1/modules/watchfuls/filesystemusage/{long_action}")
         assert resp.status_code == 404
 
     def test_enc_prefix_in_post_body_does_not_crash(self, client_with_modules):
@@ -328,7 +328,7 @@ class TestApiWatchfulActionSecurity:
 
         with patch("watchfuls.datastore.Watchful.test_connection", side_effect=fake_test):
             resp = client_with_modules.post(
-                "/api/v1/watchfuls/datastore/test_connection",
+                "/api/v1/modules/watchfuls/datastore/test_connection",
                 json={"password": "enc:attacker-payload", "host": "localhost"},
             )
         assert resp.status_code == 200
@@ -337,9 +337,9 @@ class TestApiWatchfulActionSecurity:
     def test_unauthenticated_user_cannot_call_any_action(self, client_with_modules):
         """No action is reachable without a valid session — always redirects."""
         for method, url in (
-            ("GET",  "/api/v1/watchfuls/filesystemusage/discover"),
-            ("POST", "/api/v1/watchfuls/datastore/test_connection"),
-            ("GET",  "/api/v1/watchfuls/os/discover"),
+            ("GET",  "/api/v1/modules/watchfuls/filesystemusage/discover"),
+            ("POST", "/api/v1/modules/watchfuls/datastore/test_connection"),
+            ("GET",  "/api/v1/modules/watchfuls/os/discover"),
         ):
             resp = getattr(client_with_modules, method.lower())(url, json={})
             assert resp.status_code == 401, f"{method} {url} must return 401 unauthenticated"
@@ -362,21 +362,21 @@ class TestApiWatchfulActionAuthorization:
         """A modules_view-only user must NOT be able to delete a MIB (write action)."""
         self._login_viewer(client_with_modules)
         resp = client_with_modules.post(
-            "/api/v1/watchfuls/snmp/delete_mib", json={"name": "x.mib", "kind": "raw"}
+            "/api/v1/modules/watchfuls/snmp/delete_mib", json={"name": "x.mib", "kind": "raw"}
         )
         assert resp.status_code == 403
 
     def test_viewer_can_run_read_only_action(self, client_with_modules):
         """A modules_view-only user CAN run a read-only action (list_mibs)."""
         self._login_viewer(client_with_modules)
-        resp = client_with_modules.get("/api/v1/watchfuls/snmp/list_mibs")
+        resp = client_with_modules.get("/api/v1/modules/watchfuls/snmp/list_mibs")
         assert resp.status_code == 200
 
     def test_admin_can_run_write_action(self, client_with_modules):
         """Admin (has modules_edit) is not blocked by the authorization gate."""
         _login(client_with_modules)
         resp = client_with_modules.post(
-            "/api/v1/watchfuls/snmp/delete_mib", json={"name": "nonexistent.mib", "kind": "raw"}
+            "/api/v1/modules/watchfuls/snmp/delete_mib", json={"name": "nonexistent.mib", "kind": "raw"}
         )
         assert resp.status_code != 403
 
@@ -462,7 +462,7 @@ class TestHostAwareDiscovery:
         c = client_with_modules
         _login(c)
         with patch('lib.core.hosts.runner.run', return_value=('nginx\nnginx\nsshd\n', '', 0)) as run:
-            r = c.post('/api/v1/watchfuls/process/discover', json={
+            r = c.post('/api/v1/modules/watchfuls/process/discover', json={
                 '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},
             })
@@ -477,7 +477,7 @@ class TestHostAwareDiscovery:
         _login(c)
         out = "  nginx.service   loaded active running  Web server\n"
         with patch('lib.core.hosts.runner.run', return_value=(out, '', 0)):
-            r = c.post('/api/v1/watchfuls/service_status/discover', json={
+            r = c.post('/api/v1/modules/watchfuls/service_status/discover', json={
                 '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},
             })

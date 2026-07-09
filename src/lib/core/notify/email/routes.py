@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Email routes: /api/v1/notify/email/test."""
+"""Email routes: /api/v1/notify/email/test.
+
+Routes registered by this file:
+
+    POST   /api/v1/notify/email/test  send a test email (current UI config)
+"""
 
 from flask import jsonify
 

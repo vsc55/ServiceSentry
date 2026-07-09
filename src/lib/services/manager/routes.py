@@ -6,6 +6,12 @@ GET  /api/v1/services                          → aggregate status of every ser
 POST /api/v1/services/<name>/<action>          → start|stop an embedded service.
 POST /api/v1/services/<name>/command/<action>  → enqueue a one-shot command
                                                   (run_now/clear_status/reload/prune).
+
+Routes registered by this file:
+
+    GET    /api/v1/services                          aggregate status of every service
+    POST   /api/v1/services/<name>/<action>          start|stop an embedded service
+    POST   /api/v1/services/<name>/command/<action>  enqueue a one-shot command
 """
 
 from flask import jsonify, session

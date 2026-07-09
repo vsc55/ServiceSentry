@@ -1,8 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Background scheduler routes: /api/v1/daemon/*"""
+"""Monitoring service routes — the background check-scheduler control (``/api/v1/monitoring/*``).
+
+Gated by ``checks_run``.  Scheduler-config validation lives in the Flask-free
+:meth:`lib.services.monitoring.embedded.EmbeddedMonitor.apply_daemon_config`; these handlers
+are thin HTTP glue.  (The on-demand ``POST /api/v1/modules/checks/run`` — same check engine,
+triggered manually — lives in the modules domain, :mod:`lib.core.modules.routes`, next to
+``/api/v1/modules/status``.)
+
+Routes registered by this file:
+
+    GET    /api/v1/monitoring/status  current scheduler state
+    POST   /api/v1/monitoring/start   start the background scheduler
+    POST   /api/v1/monitoring/stop    stop the background scheduler
+    PUT    /api/v1/monitoring/config  update scheduler configuration
+"""
 
 from flask import jsonify, session
+
+from lib.core.users.service import AdminOpError
 
 
 def register(app, wa):
@@ -12,13 +28,15 @@ def register(app, wa):
         """The embedded monitor service object (composition)."""
         return wa._embedded_services['monitoring']
 
-    @app.route('/api/v1/daemon/status', methods=['GET'])
+    # ── background scheduler control ─────────────────────────────────────────────
+
+    @app.route('/api/v1/monitoring/status', methods=['GET'])
     @checks_run_req
     def api_daemon_status():
         """Return current scheduler state."""
         return jsonify(_mon().status_dict())
 
-    @app.route('/api/v1/daemon/start', methods=['POST'])
+    @app.route('/api/v1/monitoring/start', methods=['POST'])
     @checks_run_req
     def api_daemon_start():
         """Start the background scheduler."""
@@ -30,7 +48,7 @@ def register(app, wa):
         return jsonify({'ok': True, 'started': started,
                         'status': _mon().status_dict()})
 
-    @app.route('/api/v1/daemon/stop', methods=['POST'])
+    @app.route('/api/v1/monitoring/stop', methods=['POST'])
     @checks_run_req
     def api_daemon_stop():
         """Stop the background scheduler."""
@@ -40,7 +58,7 @@ def register(app, wa):
         return jsonify({'ok': True, 'stopped': stopped,
                         'status': _mon().status_dict()})
 
-    @app.route('/api/v1/daemon/config', methods=['PUT'])
+    @app.route('/api/v1/monitoring/config', methods=['PUT'])
     @checks_run_req
     def api_daemon_config():
         """Update scheduler configuration (interval, autostart).
@@ -51,25 +69,13 @@ def register(app, wa):
         """
         data = wa._optional_json()
         raw = wa._read_config_file(wa._CONFIG_FILE) or {}
-        mon_cfg = dict(raw.get('monitoring', {}))
-
-        changed = False
         # Fields fixed by an env var (SS_CHECK_INTERVAL) or pinned in config.json
-        # are read-only and cannot be changed from the UI — ignore them silently.
+        # are read-only and cannot be changed from the UI — ignored silently.
         _locked = set(wa._env_locked) | set(getattr(wa, '_file_locked', frozenset()))
-        if 'timer_check' in data and 'monitoring|timer_check' not in _locked:
-            try:
-                secs = max(10, min(86400, int(data['timer_check'])))
-            except (TypeError, ValueError):
-                return jsonify({'error': 'Invalid interval'}), 400
-            mon_cfg['timer_check'] = secs
-            changed = True
-
-        # The on/off ``enabled`` flag is edited from the Monitoring config tab via
-        # the generic /api/v1/config endpoint; this route only handles the interval.
-        if 'enabled' in data and 'monitoring|enabled' not in _locked:
-            mon_cfg['enabled'] = bool(data['enabled'])
-            changed = True
+        try:
+            mon_cfg, changed = _mon().apply_daemon_config(raw.get('monitoring', {}), data, _locked)
+        except AdminOpError as e:
+            return jsonify({'error': wa._t(e.key, *e.args)}), 400
 
         if changed:
             raw['monitoring'] = mon_cfg

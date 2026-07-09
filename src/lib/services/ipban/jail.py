@@ -54,6 +54,31 @@ _CATEGORY_TRACK = {
 _DEFAULT_DURATIONS = (900, 3600, 21600, 86400)   # 15m → 1h → 6h → 24h, then permanent
 
 
+def parse_manual_ban(data: dict, *, max_reason: int = 200) -> tuple:
+    """Validate + normalise a manual-ban request body ``{ip, duration_secs?, reason?}``.
+
+    Returns ``(ip, duration_secs, reason, error_key)`` — *error_key* is ``None`` on success,
+    else an i18n key (``ipban_ip_required`` / ``ipban_ip_invalid``) the caller maps to HTTP
+    400.  ``duration_secs``: a positive int forces that term, ``0`` = permanent, ``None`` =
+    escalation ladder.  Flask-free — the route owns the HTTP mapping and the manager's own
+    whitelist re-check (``ban()`` returns ``None`` for a whitelisted IP)."""
+    data = data or {}
+    ip = str(data.get('ip', '')).strip()
+    if not ip:
+        return '', None, '', 'ipban_ip_required'
+    try:
+        ip = str(ipaddress.ip_address(ip))   # validate + normalize a single IP
+    except ValueError:
+        return '', None, '', 'ipban_ip_invalid'
+    dur = data.get('duration_secs')
+    try:
+        dur = None if dur in (None, '') else int(dur)
+    except (TypeError, ValueError):
+        dur = None
+    reason = str(data.get('reason') or 'manual').strip()[:max_reason] or 'manual'
+    return ip, dur, reason, None
+
+
 def _parse_nets(values) -> list:
     """Turn a list / comma-or-space string of IPs / CIDRs into ip_network objects."""
     if isinstance(values, str):

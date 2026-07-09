@@ -33,9 +33,9 @@ from lib.services.control_server import start_control_server
 from lib.core.audit.store import AuditStore
 from lib.core.config.store import ConfigStore
 from lib.services.events.store import EventRulesStore, EventStateStore, NotificationLogStore
-from lib.services.control.instances import ServiceInstancesStore
-from lib.services.control.commands import ServiceCommandsStore
-from lib.services.control.leader import ServiceLeaderStore
+from lib.services.manager.instances import ServiceInstancesStore
+from lib.services.manager.commands import ServiceCommandsStore
+from lib.services.manager.leader import ServiceLeaderStore
 from lib.services.syslog.store import SyslogStore
 from lib.core.notify.webhook.store import WebhooksStore
 from lib.security import secret_manager

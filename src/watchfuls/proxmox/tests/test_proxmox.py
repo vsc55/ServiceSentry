@@ -614,7 +614,7 @@ class TestProxmoxCredentialManager:
     def test_secondary_ssh_cred_overlay(self):
         """The action route overlays a referenced ssh_cred_uid (a saved ssh
         credential) onto the action config, so provisioning uses its SSH login."""
-        from lib.core.modules.watchful_routes import _apply_cred_to_config
+        from lib.core.modules.service import _apply_cred_to_config
         wa = MagicMock()
         wa._credentials_store.get.return_value = {
             'enabled': True, 'data': {'ssh_user': 'svc', 'ssh_password': 'p@ss'}}

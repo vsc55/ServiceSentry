@@ -70,6 +70,13 @@ def config_dir(tmp_path):
             "chat_id": "12345",
             "group_messages": False,
         },
+        # Events autostart defaults to True, so WebAdmin.__init__ would boot the
+        # background worker (polls audit/syslog every 2s and dispatches). Tests drive
+        # evaluation synchronously via _eval_event(); a concurrent worker tick landing
+        # inside a test's `mock.patch(dispatch)` window fires a match and flips
+        # disp.called → flaky failures. Disable autostart so the worker never starts
+        # (events stays embedded; the few tests that need it start it explicitly).
+        "events": {"autostart": False},
     }
     (tmp_path / "config.json").write_text(
         json.dumps(config, indent=4), encoding="utf-8"

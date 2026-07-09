@@ -242,7 +242,7 @@ class TestWebhookArbitraryTest:
 # ──────────────────────── Webhook CRUD routes ──────────────────────────────
 
 class TestWebhookCRUD:
-    """Integration tests for /api/v1/webhooks CRUD endpoints."""
+    """Integration tests for /api/v1/notify/webhooks CRUD endpoints."""
 
     def _create(self, client, **kwargs):
         payload = {
@@ -253,14 +253,14 @@ class TestWebhookCRUD:
             'timeout': 5,
             **kwargs,
         }
-        return client.post('/api/v1/webhooks', json=payload)
+        return client.post('/api/v1/notify/webhooks', json=payload)
 
     def test_create_requires_auth(self, client):
-        resp = client.post('/api/v1/webhooks', json={})
+        resp = client.post('/api/v1/notify/webhooks', json={})
         assert resp.status_code == 401
 
     def test_list_requires_auth(self, client):
-        resp = client.get('/api/v1/webhooks')
+        resp = client.get('/api/v1/notify/webhooks')
         assert resp.status_code == 401
 
     def test_create_and_list(self, admin, client):
@@ -273,20 +273,20 @@ class TestWebhookCRUD:
         assert wh['name'] == 'Test Hook'
         assert 'id' in wh
 
-        resp2 = client.get('/api/v1/webhooks')
+        resp2 = client.get('/api/v1/notify/webhooks')
         assert resp2.status_code == 200
         ids = [w['id'] for w in resp2.get_json()['webhooks']]
         assert wh['id'] in ids
 
     def test_create_missing_url_fails(self, admin, client):
         _login(client)
-        resp = client.post('/api/v1/webhooks', json={'name': 'X', 'enabled': True})
+        resp = client.post('/api/v1/notify/webhooks', json={'name': 'X', 'enabled': True})
         assert resp.status_code == 400
 
     def test_update(self, admin, client):
         _login(client)
         wh_id = self._create(client).get_json()['webhook']['id']
-        resp = client.put(f'/api/v1/webhooks/{wh_id}', json={
+        resp = client.put(f'/api/v1/notify/webhooks/{wh_id}', json={
             'name': 'Updated', 'url': 'https://hooks.example.com/v2',
             'method': 'PUT', 'timeout': 10,
         })
@@ -296,15 +296,15 @@ class TestWebhookCRUD:
     def test_delete(self, admin, client):
         _login(client)
         wh_id = self._create(client).get_json()['webhook']['id']
-        resp = client.delete(f'/api/v1/webhooks/{wh_id}')
+        resp = client.delete(f'/api/v1/notify/webhooks/{wh_id}')
         assert resp.status_code == 200
         assert resp.get_json()['ok'] is True
-        ids = [w['id'] for w in client.get('/api/v1/webhooks').get_json()['webhooks']]
+        ids = [w['id'] for w in client.get('/api/v1/notify/webhooks').get_json()['webhooks']]
         assert wh_id not in ids
 
     def test_delete_not_found(self, admin, client):
         _login(client)
-        resp = client.delete('/api/v1/webhooks/nonexistent-id')
+        resp = client.delete('/api/v1/notify/webhooks/nonexistent-id')
         assert resp.status_code == 404
 
     def test_test_by_id(self, admin, client):
@@ -312,19 +312,19 @@ class TestWebhookCRUD:
         wh_id = self._create(client).get_json()['webhook']['id']
         with unittest.mock.patch('requests.post') as mock_post:
             mock_post.return_value = unittest.mock.Mock(status_code=200)
-            resp = client.post(f'/api/v1/webhooks/{wh_id}/test', json={})
+            resp = client.post(f'/api/v1/notify/webhooks/{wh_id}/test', json={})
         assert resp.status_code == 200
         assert resp.get_json()['ok'] is True
 
     def test_test_by_id_not_found(self, admin, client):
         _login(client)
-        resp = client.post('/api/v1/webhooks/no-such-id/test', json={})
+        resp = client.post('/api/v1/notify/webhooks/no-such-id/test', json={})
         assert resp.status_code == 404
 
     def test_secret_masked_in_list(self, admin, client):
         _login(client)
         self._create(client, secret='supersecret')
-        webhooks = client.get('/api/v1/webhooks').get_json()['webhooks']
+        webhooks = client.get('/api/v1/notify/webhooks').get_json()['webhooks']
         assert webhooks[-1]['secret'] is None  # masked
 
     def test_audit_on_create(self, admin, client):
@@ -336,6 +336,6 @@ class TestWebhookCRUD:
     def test_audit_on_delete(self, admin, client):
         _login(client)
         wh_id = self._create(client).get_json()['webhook']['id']
-        client.delete(f'/api/v1/webhooks/{wh_id}')
+        client.delete(f'/api/v1/notify/webhooks/{wh_id}')
         events = [e['event'] for e in admin._audit_log]
         assert 'webhook_deleted' in events

@@ -42,7 +42,7 @@ function _startSchedulerCountdown(rem, total) {
 }
 
 async function _daemonRefresh() {
-    const res = await apiGet('/api/v1/daemon/status');
+    const res = await apiGet('/api/v1/monitoring/status');
     if (!res) return;
     const st = res.data ?? res;
     _daemonApply(st);
@@ -155,10 +155,10 @@ async function _daemonReload(saveFirst = true) {
             if (!isNaN(secs)) await _daemonPersistInterval(secs);
         }
     }
-    const res = await apiPost('/api/v1/daemon/stop', {});
+    const res = await apiPost('/api/v1/monitoring/stop', {});
     if (res && res.data) _daemonApply(res.data.status ?? res.data);
     await new Promise(r => setTimeout(r, 300));
-    const res2 = await apiPost('/api/v1/daemon/start', {run_now: true});
+    const res2 = await apiPost('/api/v1/monitoring/start', {run_now: true});
     if (res2 && res2.data) _daemonApply(res2.data.status ?? res2.data);
 }
 
@@ -171,13 +171,13 @@ async function _daemonToggle() {
         _daemonStopping = true;
         _daemonApply({ running: true, interval: parseInt(
             document.getElementById('daemonIntervalInput')?.value, 10) || undefined });
-        const res = await apiPost('/api/v1/daemon/stop', {});
+        const res = await apiPost('/api/v1/monitoring/stop', {});
         if (res && res.data) _daemonApply(res.data.status ?? res.data);
         _daemonWaitStop();
     } else {
         _daemonStopping = false;
         // run_now: true — start triggers an immediate check instead of waiting.
-        const res = await apiPost('/api/v1/daemon/start', {run_now: true});
+        const res = await apiPost('/api/v1/monitoring/start', {run_now: true});
         if (res && res.data) _daemonApply(res.data.status ?? res.data);
     }
 }
@@ -188,7 +188,7 @@ function _daemonWaitStop() {
     if (_daemonStopWaitId) return;
     _daemonStopWaitId = setInterval(async () => {
         if (!_daemonStopping) { clearInterval(_daemonStopWaitId); _daemonStopWaitId = null; return; }
-        const res = await apiGet('/api/v1/daemon/status');
+        const res = await apiGet('/api/v1/monitoring/status');
         if (res) _daemonApply(res);
     }, 1000);
 }
@@ -196,7 +196,7 @@ function _daemonWaitStop() {
 async function _daemonPersistInterval(secs) {
     /** Save interval to server + sync all UI elements. Returns true on success. */
     if (isNaN(secs) || secs < 10) return false;
-    const res = await apiPut('/api/v1/daemon/config', {timer_check: secs});
+    const res = await apiPut('/api/v1/monitoring/config', {timer_check: secs});
     if (res?.data?.ok === false) {
         showToast(res.data.error || 'Save failed', 'danger');
         return false;

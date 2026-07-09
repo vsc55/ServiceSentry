@@ -98,6 +98,13 @@ class EventRulesStore:
         row = self._db.fetchone(f'SELECT {_SELECT} FROM {_T} WHERE uid = ?', (uid,))
         return self._row_to_rule(row) if row else None
 
+    def name_taken(self, name: str, *, exclude_id: str | None = None) -> bool:
+        """True if another rule already uses *name* (case-insensitive), skipping the rule
+        identified by *exclude_id* (so a rule keeps its own name on edit)."""
+        key = str(name).strip().lower()
+        return any(str(r.get('name', '')).strip().lower() == key and r.get('id') != exclude_id
+                   for r in (self.list() or []))
+
     def count(self) -> int:
         row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
         return row[0] if row else 0

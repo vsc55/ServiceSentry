@@ -26,7 +26,7 @@
     ],
     "__host_multiple__": true,
     "list": {
-        "__test__": "/api/v1/watchfuls/datastore/test_connection",
+        "__test__": "/api/v1/modules/watchfuls/datastore/test_connection",
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__discovery_uid_key__": true,
@@ -44,7 +44,7 @@
         "__actions__": [
             {
                 "id":         "test_ssh",
-                "url":        "/api/v1/watchfuls/datastore/test_connection",
+                "url":        "/api/v1/modules/watchfuls/datastore/test_connection",
                 "extra":      {"_test_mode": "ssh"},
                 "show_when":  {"conn_type": ["ssh"]},
                 "group":      "ssh",
@@ -104,7 +104,7 @@
                          "term_field": "db_type",
                          "input_action": {
                              "id":           "list_databases",
-                             "url":          "/api/v1/watchfuls/datastore/list_databases",
+                             "url":          "/api/v1/modules/watchfuls/datastore/list_databases",
                              "extra":        {},
                              "icon":         "bi-database",
                              "result":       "field_picker",

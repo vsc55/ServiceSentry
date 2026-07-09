@@ -230,7 +230,7 @@ async function _lookupGroupName(sec, id) {
             const r = await apiPost('/api/v1/auth/ldap/group_lookup', { dn: id });
             if (r?.data?.ok && r.data.found) return r.data.name || null;
         } else if (sec === 'oidc' || sec === 'saml2') {
-            const r = await apiPost('/api/v1/auth/entra/group_lookup', { group_id: id, sec });
+            const r = await apiPost('/api/v1/auth/entraid/group_lookup', { group_id: id, sec });
             if (r?.data?.ok && r.data.found) return r.data.name || null;
         }
     } catch (_) {}
@@ -530,7 +530,7 @@ async function _entraFetchGroups(sec) {
     const body = { sec, provider_url: provider, client_id: clientId };
     if (secret) body.client_secret = secret;
 
-    const r = await apiPost('/api/v1/auth/entra/groups', body);
+    const r = await apiPost('/api/v1/auth/entraid/groups', body);
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-microsoft me-1"></i>' + esc(t('entra_fetch_groups')); }
 
     if (!r || !r.data || !r.data.ok) {

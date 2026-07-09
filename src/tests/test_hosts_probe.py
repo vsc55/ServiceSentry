@@ -41,6 +41,9 @@ class TestProbeMonitor:
         mon = host_probe._ProbeMonitor({}, None, None)
         assert isinstance(mon, lib.Monitor)
         assert mon.send_message('x', True) is None      # no-op, no Telegram
+        # Signature must mirror Monitor.send_message: ModuleBase forwards module=/item=,
+        # so a probe of any module that emits an alert must not TypeError.
+        assert mon.send_message('x', True, module='process', item='web') is None
 
     def test_runs_process_check_remote(self):
         cfg = {'watchfuls.process': {'list': {

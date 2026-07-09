@@ -1,6 +1,13 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""LDAP API routes: /api/v1/ldap/*."""
+"""LDAP API routes: /api/v1/ldap/*.
+
+Routes registered by this file:
+
+    POST   /api/v1/auth/ldap/test          test connection and optional user creds
+    POST   /api/v1/auth/ldap/group_lookup  look up a single group by DN
+    POST   /api/v1/auth/ldap/groups        list groups from the directory
+"""
 
 from flask import jsonify, request, session
 

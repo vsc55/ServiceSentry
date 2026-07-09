@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Webhook CRUD routes: /api/v1/webhooks."""
+"""Webhook CRUD routes: /api/v1/notify/webhooks.
+
+Routes registered by this file:
+
+    GET    /api/v1/notify/webhooks               list webhooks (secrets masked)
+    POST   /api/v1/notify/webhooks               create a webhook
+    PUT    /api/v1/notify/webhooks/<wh_id>       update a webhook
+    DELETE /api/v1/notify/webhooks/<wh_id>       delete a webhook
+    POST   /api/v1/notify/webhooks/<wh_id>/test  send a test webhook by id
+"""
 
 import uuid
 from datetime import datetime, timezone
@@ -40,12 +49,12 @@ def register(app, wa):
 
     store = wa._webhooks_store
 
-    @app.route('/api/v1/webhooks', methods=['GET'])
+    @app.route('/api/v1/notify/webhooks', methods=['GET'])
     @config_view_req
     def api_list_webhooks():
         return jsonify({'webhooks': secret_manager.mask_sensitive(wa._load_webhooks())})
 
-    @app.route('/api/v1/webhooks', methods=['POST'])
+    @app.route('/api/v1/notify/webhooks', methods=['POST'])
     @config_edit_req
     def api_create_webhook():
         data, err = wa._require_json()
@@ -82,7 +91,7 @@ def register(app, wa):
             return jsonify({'ok': True, 'webhook': secret_manager.mask_sensitive(webhook)})
         return jsonify({'error': wa._t('save_file_error')}), 500
 
-    @app.route('/api/v1/webhooks/<wh_id>', methods=['PUT'])
+    @app.route('/api/v1/notify/webhooks/<wh_id>', methods=['PUT'])
     @config_edit_req
     def api_update_webhook(wh_id):
         data, err = wa._require_json()
@@ -133,7 +142,7 @@ def register(app, wa):
             return jsonify({'ok': True, 'webhook': secret_manager.mask_sensitive(updated)})
         return jsonify({'error': wa._t('save_file_error')}), 500
 
-    @app.route('/api/v1/webhooks/<wh_id>', methods=['DELETE'])
+    @app.route('/api/v1/notify/webhooks/<wh_id>', methods=['DELETE'])
     @config_edit_req
     def api_delete_webhook(wh_id):
         deleted = store.get(wh_id)
@@ -145,7 +154,7 @@ def register(app, wa):
         })
         return jsonify({'ok': True})
 
-    @app.route('/api/v1/webhooks/<wh_id>/test', methods=['POST'])
+    @app.route('/api/v1/notify/webhooks/<wh_id>/test', methods=['POST'])
     @config_edit_req
     def api_test_webhook_by_id(wh_id):
         from lib.core.notify.webhook import notify as webhook_notify

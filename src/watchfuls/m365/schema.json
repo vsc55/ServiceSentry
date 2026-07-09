@@ -52,7 +52,7 @@
             "check_tenant_usage", "tenant_max", "tenant_unit",
             "alert"
         ],
-        "__test__": "/api/v1/watchfuls/m365/test_connection",
+        "__test__": "/api/v1/modules/watchfuls/m365/test_connection",
         "__discovery_field__": "site",
         "__discovery_field_action__": "list_sites",
         "__discovery_method__": "POST",

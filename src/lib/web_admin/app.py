@@ -412,22 +412,21 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             result = self._validate_password(pw)
             if result:
                 return jsonify({'error': self._t(*result)}), 400
+
+        Delegates to :func:`lib.core.users.service.validate_password` — the one
+        implementation of the policy, shared with the CLI.
         """
-        if len(pw) < self._PW_MIN_LEN:
-            return ('password_too_short', str(self._PW_MIN_LEN))
-        if len(pw) > self._PW_MAX_LEN:
-            return ('password_too_long', str(self._PW_MAX_LEN))
-        if self._PW_REQUIRE_UPPER and not (
-            any(c.isupper() for c in pw) and any(c.islower() for c in pw)
-        ):
-            return ('password_need_upper',)
-        if self._PW_REQUIRE_DIGIT and not any(c.isdigit() for c in pw):
-            return ('password_need_digit',)
-        if self._PW_REQUIRE_SYMBOL and not any(
-            c in '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~' for c in pw
-        ):
-            return ('password_need_symbol',)
-        return None
+        from lib.core.users.service import validate_password  # noqa: PLC0415
+        return validate_password(pw, self._pw_policy())
+
+    def _pw_policy(self):
+        """The active password policy as a :class:`lib.core.users.service.PasswordPolicy`
+        (shared by the routes' create/update paths and the CLI)."""
+        from lib.core.users.service import PasswordPolicy  # noqa: PLC0415
+        return PasswordPolicy(
+            min_len=self._PW_MIN_LEN, max_len=self._PW_MAX_LEN,
+            require_upper=self._PW_REQUIRE_UPPER, require_digit=self._PW_REQUIRE_DIGIT,
+            require_symbol=self._PW_REQUIRE_SYMBOL)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -492,15 +491,15 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # instance — embedded here or in another pod — upserts its liveness row;
         # the Services tab reads them. Shared connector, so a --monitor worker and
         # this process see the same rows.
-        from lib.services.control.instances import ServiceInstancesStore  # noqa: PLC0415
+        from lib.services.manager.instances import ServiceInstancesStore  # noqa: PLC0415
         self._service_instances_store = ServiceInstancesStore(self._db_connector)
         # Imperative one-shot command queue (run-now/reload/clear): the UI enqueues,
         # the hosting instance (embedded here or a remote pod) claims + runs it.
-        from lib.services.control.commands import ServiceCommandsStore  # noqa: PLC0415
+        from lib.services.manager.commands import ServiceCommandsStore  # noqa: PLC0415
         self._service_commands_store = ServiceCommandsStore(self._db_connector)
         # Leader lease for single-owner services (monitor/events): only the holder
         # does the work, extra replicas are hot standby with TTL failover.
-        from lib.services.control.leader import ServiceLeaderStore  # noqa: PLC0415
+        from lib.services.manager.leader import ServiceLeaderStore  # noqa: PLC0415
         self._service_leader_store = ServiceLeaderStore(self._db_connector)
         # Watchful module/item configuration (DB-backed, shared with the monitor
         # through the same database).
@@ -610,19 +609,36 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         Flask-level settings (session lifetime, secure cookies, proxy count)
         are already correct when the app is built.
         """
-        from lib.core.config.routes import INT_RULES, BOOL_RULES  # local import avoids circular
         data = self._read_config_file(self._CONFIG_FILE)
         if not data:
             return
+        # Boot: the Flask app isn't built yet (``_create_app`` runs after), so live=False —
+        # only runtime attributes are set, not Flask-level config.
+        self._apply_config_attrs(data)
+
+    def _apply_config_attrs(self, data: dict, *, live: bool = False) -> None:
+        """Apply persisted config values to runtime attributes — the shared core of both boot
+        (:meth:`_apply_saved_config`) and save (:meth:`_apply_config_on_save`).
+
+        Covers the INT/BOOL registry rules, the password-length clamp, lang/status-lang/
+        dark-mode/secure-cookies, public_url, the landing page and the fail2ban settings.
+        When *live* is True the Flask app already exists, so Flask-level settings (the
+        ``flask_cfg`` mirrors + ``SESSION_COOKIE_SECURE``) are pushed onto ``self._app`` too.
+        """
+        from lib.core.config.service import INT_RULES, BOOL_RULES  # local import avoids circular
         wa_cfg = data.get('web_admin') or {}
-        # Integer rules (values in config.json are already in valid range)
+        # Integer rules (values in a saved config are already in valid range).
         for path, rule in INT_RULES.items():
             if rule['attr'] is None:
                 continue
             section, field = path.split('|')
             v = (data.get(section) or {}).get(field)
-            if isinstance(v, int) and not isinstance(v, bool):
-                setattr(self, rule['attr'], v)
+            if not (isinstance(v, int) and not isinstance(v, bool)):
+                continue
+            setattr(self, rule['attr'], v)
+            if live and 'flask_cfg' in rule:
+                cfg_key, transform = rule['flask_cfg']
+                self._app.config[cfg_key] = transform(v)
         # Boolean rules
         for path, attr in BOOL_RULES.items():
             if attr is None:
@@ -643,20 +659,61 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         new_dm = wa_cfg.get('dark_mode')
         if isinstance(new_dm, bool):
             self._default_dark_mode = new_dm
-        # Secure cookies (_create_app reads self._secure_cookies directly)
+        # Secure cookies (at boot _create_app reads self._secure_cookies directly; on a live
+        # save the app already exists, so push it onto the running app's config too).
         new_sec = wa_cfg.get('secure_cookies')
         if isinstance(new_sec, bool):
             self._secure_cookies = new_sec
+            if live:
+                self._app.config['SESSION_COOKIE_SECURE'] = new_sec
         # Public URL for external links and notifications (stored without scheme)
         if 'public_url' in wa_cfg and isinstance(wa_cfg['public_url'], str):
             self._public_url = normalize_url(wa_cfg['public_url'])
         # Default landing page (string attr not covered by INT/BOOL rules) — resolves the
-        # post-login destination for users/groups that don't override it. Without this the
-        # attribute stays unset at startup and _landing_url falls back to the admin panel
-        # even when the saved global is e.g. 'overview'.
+        # post-login destination for users/groups that don't override it.
         self._landing_page = str(wa_cfg.get('landing_page') or 'admin')
-        # fail2ban string fields + push into the live manager (wiring in _IpBanMixin).
+        # fail2ban string fields + push into the live manager (it sets _IPBAN_DURATIONS /
+        # _IPBAN_WHITELIST from wa_cfg itself, wiring in _IpBanMixin).
         self._apply_ipban_config(wa_cfg)
+
+    def _apply_config_on_save(self, old_data: dict, new_data: dict, to_apply: dict) -> None:
+        """Apply a just-saved config to the running instance: the shared runtime attributes
+        (:meth:`_apply_config_attrs` with ``live=True``) plus the save-only side-effects —
+        re-apply the log level, invalidate the config cache, let every embedded service react,
+        poke dedicated-container instances, flag a restart when port/proxy/syslog_db change,
+        and rebuild ProxyFix for the (possibly new) proxy depth."""
+        from lib.core.config.service import syslog_db_changed  # local import avoids circular
+        # Re-apply the log level immediately so a verbosity change takes effect for request
+        # tracing without waiting for a restart.
+        self._apply_log_level()
+        # Let every background service react to the config change — each owns its own rule
+        # (syslog re-applies ports/allowlist or stops; a disabled monitor stops; …). Iterating
+        # the registry keeps this generic, so a new service reacts without touching this code.
+        self._invalidate_config_cache()
+        for svc in getattr(self, '_embedded_services', {}).values():
+            svc.on_config_changed(to_apply)
+        # Accelerate convergence on services owned by a dedicated container: poke their
+        # instances so a desired-state edit applies now (the periodic reconcile would catch up).
+        poke = getattr(self, '_poke_services_for_config', None)
+        if poke is not None:
+            poke(to_apply)
+        _pre_port, _pre_proxy = self._WEB_PORT, self._proxy_count
+        self._apply_config_attrs(new_data, live=True)
+        if self._WEB_PORT != _pre_port or self._proxy_count != _pre_proxy:
+            self._restart_pending = True
+        # The syslog database connector is built at startup; any change needs a restart to
+        # take effect (like the system database section).
+        if syslog_db_changed(old_data, new_data):
+            self._restart_pending = True
+        # Rebuild ProxyFix for the (possibly new) trusted-proxy depth.
+        if isinstance(self._app.wsgi_app, ProxyFix):
+            self._app.wsgi_app = self._app.wsgi_app.app
+        if self._proxy_count > 0:
+            self._app.wsgi_app = ProxyFix(
+                self._app.wsgi_app,
+                x_for=self._proxy_count, x_proto=self._proxy_count,
+                x_host=self._proxy_count, x_prefix=self._proxy_count,
+            )
 
     @staticmethod
     def _parse_env_var(raw: str, cast: type) -> tuple:
@@ -682,7 +739,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         are printed as warnings; those fields are NOT locked and the saved config
         value remains in effect.
         """
-        from lib.core.config.routes import INT_RULES, BOOL_RULES  # local import avoids circular
+        from lib.core.config.service import INT_RULES, BOOL_RULES  # local import avoids circular
 
         locked: set[str] = set()
         overrides: dict[str, object] = {}

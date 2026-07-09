@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from lib.services.embedded import _EmbeddedBase
 from lib.services.monitoring.manager import _MonitoringMixin
+from lib.core.users.service import AdminOpError
 
 
 class EmbeddedMonitor(_EmbeddedBase, _MonitoringMixin):
@@ -75,6 +76,27 @@ class EmbeddedMonitor(_EmbeddedBase, _MonitoringMixin):
         return ok, '' if ok else 'already'
 
     # ── used by routes/daemon + routes/config ─────────────────────────────────
+    @staticmethod
+    def apply_daemon_config(mon_cfg: dict, data: dict, locked) -> tuple[dict, bool]:
+        """Apply a daemon-config PUT (interval + autostart) onto a COPY of the ``monitoring``
+        config section.  Returns ``(new_mon_cfg, changed)``.  Locked fields (pinned by env var
+        or config.json) are ignored silently.  Raises :class:`AdminOpError` (``invalid_interval``)
+        on a non-integer interval.  Flask-free — the route reads/writes config + audits."""
+        mon_cfg = dict(mon_cfg or {})
+        changed = False
+        if 'timer_check' in data and 'monitoring|timer_check' not in locked:
+            try:
+                mon_cfg['timer_check'] = max(10, min(86400, int(data['timer_check'])))
+            except (TypeError, ValueError) as exc:
+                raise AdminOpError('invalid_interval') from exc
+            changed = True
+        # The on/off ``enabled`` flag is edited from the Monitoring config tab via the
+        # generic /api/v1/config endpoint; this route only handles the interval + autostart.
+        if 'enabled' in data and 'monitoring|enabled' not in locked:
+            mon_cfg['enabled'] = bool(data['enabled'])
+            changed = True
+        return mon_cfg, changed
+
     def status_dict(self) -> dict:
         return self._monitoring_status_dict()
 

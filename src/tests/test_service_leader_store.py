@@ -5,7 +5,7 @@
 import time
 
 from lib.db import get_connector
-from lib.services.control.leader import ServiceLeaderStore
+from lib.services.manager.leader import ServiceLeaderStore
 
 
 def _store():

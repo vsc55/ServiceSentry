@@ -5,17 +5,21 @@
 After the Propuesta-A refactor groups are identified by their stable **uid**
 in both the URL and the in-memory dict.  The human-readable display name is
 stored in the ``label`` field.
-"""
 
-import uuid as _uuid_mod
-from datetime import datetime, timezone
+Routes registered by this file:
+
+    GET    /api/v1/groups        Return all groups keyed by uid
+    POST   /api/v1/groups        Create a new group
+    PUT    /api/v1/groups/<uid>  Update label, description, roles, members
+    DELETE /api/v1/groups/<uid>  Delete a group + remove from all users
+"""
 
 from flask import jsonify, session
 
+from lib.core.groups import service as groups_svc
 from lib.core.permissions import BUILTIN_ROLE_UIDS, _BUILTIN_GROUPS
 from lib.web_admin.constants import home_page_ids
 from lib.core.constants import SYSTEM_USER
-from lib.util.entity_audit import touch_entity, track_change
 
 
 def register(app, wa):
@@ -72,55 +76,30 @@ def register(app, wa):
     @app.route('/api/v1/groups', methods=['POST'])
     @groups_add_req
     def api_create_group():
-        """Create a new group.  Returns the generated uid."""
+        """Create a new group (validation + build via the shared core service)."""
         data, err = wa._require_json()
         if err:
             return err
-        label       = data.get('name', '').strip()
-        description = data.get('description', '').strip()
-        if not label:
-            return jsonify({'error': wa._t('group_name_required')}), 400
-        if len(label) > wa._MAX_GROUP_LABEL_LEN:
-            return jsonify({'error': wa._t('label_too_long', wa._MAX_GROUP_LABEL_LEN)}), 400
-        if len(description) > wa._MAX_GROUP_DESC_LEN:
-            return jsonify({'error': wa._t('description_too_long', wa._MAX_GROUP_DESC_LEN)}), 400
         roles_raw = data.get('roles', [])
         if not isinstance(roles_raw, list):
             return jsonify({'error': wa._t('invalid_roles', '')}), 400
-        # Accept builtin names/UIDs and custom role UIDs or display names
+        # Requester-context guard (stays here): only an admin may grant the admin role.
         admin_uid = wa._role_name_to_uid('admin')
-        resolved = [(_normalize_role_uid(r), r) for r in roles_raw]
-        unknown_roles = [orig for uid, orig in resolved if uid is None]
-        if unknown_roles:
-            return jsonify({'error': wa._t('invalid_roles', ', '.join(unknown_roles))}), 400
-        if admin_uid in [uid for uid, _ in resolved] and not wa._is_admin_requester():
+        if admin_uid in [_normalize_role_uid(r) for r in roles_raw] and not wa._is_admin_requester():
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
-        # Check for duplicate label (case-insensitive)
-        label_lc = label.lower()
-        if any((g.get('name') or '').lower() == label_lc for g in wa._groups.values()):
-            return jsonify({'error': wa._t('group_already_exists', label)}), 409
-        enabled   = bool(data.get('enabled', True))
-        landing_page = str(data.get('landing_page', '') or '').strip()
-        if landing_page and landing_page not in home_page_ids():
-            return jsonify({'error': wa._t('invalid_landing_page')}), 400
-        group_uid = str(_uuid_mod.uuid4())
-        now       = datetime.now(timezone.utc).isoformat()
-        username  = session.get('username', 'system')
-        role_uids = [wa._role_name_to_uid(r) or r for r in roles_raw]
-        wa._groups[group_uid] = {
-            'uid':         group_uid,
-            'name':       label,
-            'description': description,
-            'roles':       role_uids,
-            'enabled':     enabled,
-            'landing_page': landing_page,
-            'created_at':  now,
-            'updated_at':  now,
-            'updated_by':  username,
-        }
+        try:
+            group_uid = groups_svc.create_group(
+                wa._groups, name=data.get('name', ''), description=data.get('description', ''),
+                roles=roles_raw, custom_roles=wa._custom_roles,
+                enabled=bool(data.get('enabled', True)),
+                landing_page=data.get('landing_page', ''),
+                actor=session.get('username', 'system'), valid_landing=home_page_ids())
+        except groups_svc.AdminOpError as e:
+            code = 409 if e.key == 'group_already_exists' else 400
+            return jsonify({'error': wa._t(e.key, *e.args)}), code
         wa._persist_groups()
         wa._audit('group_created', detail={
-            'uid': group_uid, 'name': label, 'roles': list(roles_raw),
+            'uid': group_uid, 'name': wa._groups[group_uid]['name'], 'roles': list(roles_raw),
         })
         return jsonify({'ok': True, 'uid': group_uid}), 201
 
@@ -129,7 +108,10 @@ def register(app, wa):
     @app.route('/api/v1/groups/<uid>', methods=['PUT'])
     @groups_edit_req
     def api_update_group(uid: str):
-        """Update a group's label, description, roles and members."""
+        """Update a group's label, description, roles and members.
+
+        The requester-context guard (only an admin may edit / grant the admin role) lives
+        here; the data validation + mutation + audit run in :func:`groups_svc.update_group`."""
         if uid not in wa._groups:
             return jsonify({'error': wa._t('group_not_found')}), 404
         is_builtin   = uid in _BUILTIN_GROUPS
@@ -143,66 +125,20 @@ def register(app, wa):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         if not is_admin_req and 'admin' in data.get('roles', []):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
-
-        changes: list[dict] = []
-        # Name can only be changed for non-built-in groups
-        if not is_builtin and 'name' in data:
-            new_label = data['name'].strip()
-            if len(new_label) > wa._MAX_GROUP_LABEL_LEN:
-                return jsonify({'error': wa._t('label_too_long', wa._MAX_GROUP_LABEL_LEN)}), 400
-            track_change(changes, group, 'name', new_label, old_default=uid)
-        # Description can be changed for any group (including built-in)
-        if 'description' in data:
-            new_desc = data['description'].strip()
-            if len(new_desc) > wa._MAX_GROUP_DESC_LEN:
-                return jsonify({'error': wa._t('description_too_long', wa._MAX_GROUP_DESC_LEN)}), 400
-            track_change(changes, group, 'description', new_desc)
-        if 'landing_page' in data:
-            lp = str(data['landing_page'] or '').strip()   # '' = no per-group default
-            if lp and lp not in home_page_ids():
-                return jsonify({'error': wa._t('invalid_landing_page')}), 400
-            track_change(changes, group, 'landing_page', lp)
-        if 'roles' in data:
-            if not isinstance(data['roles'], list):
-                return jsonify({'error': wa._t('invalid_roles', '')}), 400
-            unknown_roles = [r for r in data['roles'] if _normalize_role_uid(r) is None]
-            if unknown_roles:
-                return jsonify({'error': wa._t('invalid_roles', ', '.join(unknown_roles))}), 400
-            new_role_uids = sorted(wa._role_name_to_uid(r) or r for r in data['roles'])
-            old_role_uids = sorted(wa._role_name_to_uid(r) or r for r in group.get('roles', []))
-            if old_role_uids != new_role_uids:
-                changes.append({'field': 'roles', 'old': old_role_uids, 'new': new_role_uids})
-            group['roles'] = new_role_uids
-        if 'members' in data:
-            if not isinstance(data['members'], list):
-                return jsonify({'error': wa._t('invalid_members', '')}), 400
-            all_usernames = set(wa._users.keys())
-            unknown_members = [m for m in data['members'] if m not in all_usernames]
-            if unknown_members:
-                return jsonify({'error': wa._t('invalid_members', ', '.join(unknown_members))}), 400
-            new_members = set(data['members'])
-            old_members = {u for u, d in wa._users.items() if uid in d.get('groups', [])}
-            users_changed = False
-            for uname in old_members - new_members:
-                wa._users[uname]['groups'] = [g for g in wa._users[uname].get('groups', []) if g != uid]
-                users_changed = True
-            for uname in new_members - old_members:
-                wa._users[uname].setdefault('groups', []).append(uid)
-                users_changed = True
-            if users_changed:
-                wa._persist_users()
-            if sorted(old_members) != sorted(new_members):
-                changes.append({'field': 'members',
-                                 'old': sorted(old_members), 'new': sorted(new_members)})
-        if 'enabled' in data:
-            track_change(changes, group, 'enabled', bool(data['enabled']), old_default=True)
-        # Update audit timestamps on every save (even if no visible changes)
-        touch_entity(group, session.get('username', SYSTEM_USER))
+        try:
+            result = groups_svc.update_group(
+                wa._groups, wa._users, uid, data, custom_roles=wa._custom_roles,
+                valid_landing=home_page_ids(), is_builtin=is_builtin,
+                actor=session.get('username', SYSTEM_USER))
+        except groups_svc.AdminOpError as e:
+            return jsonify({'error': wa._t(e.key, *e.args)}), 400
+        if result['users_changed']:
+            wa._persist_users()
         wa._persist_groups()
-        if changes:
+        if result['changes']:
             wa._audit('group_updated', detail={
                 'uid': uid, 'name': group.get('name', uid),
-                'changes': changes,
+                'changes': result['changes'],
                 'updated_by': group['updated_by'],
             })
         return jsonify({'ok': True})
@@ -212,21 +148,15 @@ def register(app, wa):
     @app.route('/api/v1/groups/<uid>', methods=['DELETE'])
     @groups_delete_req
     def api_delete_group(uid: str):
-        """Delete a group and remove it from all users."""
-        if uid not in wa._groups:
-            return jsonify({'error': wa._t('group_not_found')}), 404
-        if uid in _BUILTIN_GROUPS:
-            return jsonify({'error': wa._t('group_builtin')}), 403
-        label = wa._groups[uid].get('name', uid)
-        affected = []
-        for uname, udata in wa._users.items():
-            grps = udata.get('groups', [])
-            if uid in grps:
-                udata['groups'] = [g for g in grps if g != uid]
-                affected.append(uname)
+        """Delete a group and remove it from all users (via the shared core service)."""
+        label = wa._groups.get(uid, {}).get('name', uid)
+        try:
+            affected = groups_svc.delete_group(wa._groups, wa._users, uid)
+        except groups_svc.AdminOpError as e:
+            code = 404 if e.key == 'group_not_found' else 403
+            return jsonify({'error': wa._t(e.key, *e.args)}), code
         if affected:
             wa._persist_users()
-        del wa._groups[uid]
         wa._persist_groups()
         wa._audit('group_deleted', detail={'uid': uid, 'name': label, 'removed_from': affected})
         return jsonify({'ok': True})
