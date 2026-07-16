@@ -270,7 +270,8 @@ class TestDispatcherChannels:
         hooks = [{'id': 'w1', 'name': 'one', 'url': 'http://a', 'enabled': True},
                  {'id': 'w2', 'name': 'two', 'url': 'http://b', 'enabled': True}]
         sent = []
-        with mock.patch.object(admin, '_load_webhooks', return_value=hooks), \
+        # The webhook channel owns loading now — patch it there (dispatch routes through it).
+        with mock.patch('lib.core.notify.webhook.channel.load', return_value=hooks), \
              mock.patch.object(webhook_notify, '_dispatch',
                                side_effect=lambda wh, **k: (sent.append(wh['id']) or (True, 'ok'))):
             dispatch(admin, kind='event', channels=['webhook'], webhook_ids=['w2'])
@@ -282,7 +283,7 @@ class TestDispatcherChannels:
         hooks = [{'id': 'w1', 'name': 'one', 'url': 'http://a', 'enabled': True},
                  {'id': 'w2', 'name': 'two', 'url': 'http://b', 'enabled': True}]
         sent = []
-        with mock.patch.object(admin, '_load_webhooks', return_value=hooks), \
+        with mock.patch('lib.core.notify.webhook.channel.load', return_value=hooks), \
              mock.patch.object(webhook_notify, '_dispatch',
                                side_effect=lambda wh, **k: (sent.append(wh['id']) or (True, 'ok'))):
             dispatch(admin, kind='event', channels=['webhook'], webhook_ids=[])

@@ -71,7 +71,7 @@ class Watchful(ModuleBase):
         if os_ != 'linux':
             self.dict_return.set(
                 f'{key}', False,
-                f'RAID: {label} - *mdstat only available on Linux (host OS: {os_})* ⚠️',
+                self._msg('raid_unsupported_os', label, os_),
                 name=label)
             return
         path = self.get_conf('mdstat_path', self._MODULE_DEFAULTS['mdstat_path']) or '/proc/mdstat'
@@ -83,7 +83,7 @@ class Watchful(ModuleBase):
 
     def _md_analyze(self, list_md, key, label):
         if not list_md:
-            self.dict_return.set(f'{key}', True, f"[{label}] *No RAID's* in the system. ✅", name=label)
+            self.dict_return.set(f'{key}', True, self._msg('raid_none', label), name=label)
             return
         for (md, value) in list_md.items():
             other_data = {}
@@ -91,23 +91,20 @@ class Watchful(ModuleBase):
             match value.get("update", ''):
                 case RaidMdstat.UpdateStatus.ok:
                     is_warning = False
-                    message = f"RAID *{label}/{md}* in good status. ✅"
+                    message = self._msg('raid_ok', label, md)
 
                 case RaidMdstat.UpdateStatus.error:
-                    message = f"*RAID {label}/{md} is degraded.* ⚠️"
+                    message = self._msg('raid_degraded', label, md)
 
                 case RaidMdstat.UpdateStatus.recovery:
                     other_data['percent'] = value.get("recovery", {}).get('percent', -1)
                     other_data['finish']  = value.get("recovery", {}).get('finish',  -1)
                     other_data['speed']   = value.get("recovery", {}).get('speed',   -1)
-                    message = (
-                        f"*RAID {label}/{md} is degraded, recovery status "
-                        f"{other_data['percent']}%, estimate time to finish "
-                        f"{other_data['finish']}.* ⚠️"
-                    )
+                    message = self._msg('raid_recovery', label, md,
+                                        other_data['percent'], other_data['finish'])
 
                 case _:
-                    message = f"*RAID {label}/{md} Unknown Error*. ⚠️"
+                    message = self._msg('raid_unknown', label, md)
 
             self.dict_return.set(f'{key}_{md}', not is_warning, message, other_data=other_data, name=label)
 

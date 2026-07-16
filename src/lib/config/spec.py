@@ -121,6 +121,12 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         min=0, max=10, env='SS_PROXY_COUNT', admin_only=True, card='proxy'),
     Cfg('web_admin|force_https', bool, False, attr='_force_https',
         env='SS_FORCE_HTTPS', admin_only=True, card='proxy'),
+    # Framing allowlist: origins permitted to embed the panel in an iframe (CSP
+    # frame-ancestors). Empty = framing blocked (default). embed_in_teams adds the
+    # Microsoft Teams/Outlook/M365 origins so the Teams personal tab can render.
+    Cfg('web_admin|frame_ancestors', str, '', admin_only=True, no_rule=True, card='proxy'),
+    Cfg('web_admin|embed_in_teams', bool, False, attr='_embed_in_teams',
+        admin_only=True, card='proxy'),
     Cfg('web_admin|force_fqdn', bool, False, attr='_force_fqdn',
         env='SS_FORCE_FQDN', admin_only=True, card='proxy'),
     Cfg('web_admin|secure_cookies', bool, False, attr='_secure_cookies',
@@ -214,6 +220,20 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('monitoring|autostart', bool, True, env='SS_MONITORING_AUTOSTART', card='monitoring'),
     Cfg('monitoring|timer_check', int, 300, min=10, max=86400, env='SS_CHECK_INTERVAL',
         card='monitoring'),
+    # ── Platform self-monitoring (lib/core/health) — NOT the monitoring service ──
+    # Service-health notifications: alert when a background service (monitor/syslog/events
+    # worker) stops beating (crashed/unreachable) and when it recovers.  Off by default.
+    Cfg('services|notify_down', bool, False, admin_only=True, card='health'),
+    Cfg('services|down_after_secs', int, 60, min=15, max=86400, admin_only=True,
+        card='health'),
+    Cfg('services|health_poll_secs', int, 30, min=5, max=3600, admin_only=True,
+        card='health'),
+    # Certificate-expiry notifications: a periodic scan of every ssl_cert check emits
+    # ``cert_expiring`` when a cert is within warn_days of expiry (once per severity).
+    Cfg('certs|notify_expiry', bool, False, admin_only=True, card='health'),
+    Cfg('certs|warn_days', int, 21, min=1, max=3650, admin_only=True, card='health'),
+    Cfg('certs|scan_every_secs', int, 86400, min=3600, max=604800, admin_only=True,
+        card='health'),
 
     # ══ modules: global defaults inherited by every watchful module ══════════
     # Last link of the item → module → global resolution chain.  'threads' also
@@ -250,6 +270,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ LDAP ═════════════════════════════════════════════════════════════════
     Cfg('ldap|enabled', bool, False),
     Cfg('ldap|use_ssl', bool, False),
+    Cfg('ldap|ssl_verify', bool, True),   # validate the LDAPS server certificate (MITM guard)
     Cfg('ldap|fallback_to_local', bool, True),
     Cfg('ldap|allow_email_login', bool, False),
     Cfg('ldap|port', int, 389, min=1, max=65535),
@@ -329,7 +350,10 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('email|smtp_password', str, '', no_rule=True),
     Cfg('email|from_email', str, '', no_rule=True),
     Cfg('email|from_name', str, 'ServiceSentry', no_rule=True),
-    Cfg('email|lang', str, '', no_rule=True),
+    # Global language for ALL notification content (Telegram/Email/Teams/webhook), resolved by
+    # lib.core.notify.formatting.notify_lang.  (Superseded the per-email ``email|lang``; a stored
+    # ``email|lang`` from an older install is still honoured by notify_lang as a migration path.)
+    Cfg('notifications|lang', str, '', no_rule=True),
     Cfg('email|ms365_tenant_id', str, '', no_rule=True),
     Cfg('email|ms365_client_id', str, '', no_rule=True),
     Cfg('email|ms365_client_secret', str, '', no_rule=True),
@@ -337,21 +361,13 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('email|gmail_client_secret', str, '', no_rule=True),
     Cfg('email|gmail_refresh_token', str, '', no_rule=True),
 
-    # ══ Notification routing matrix (read with dynamic keys; default False) ══
-    Cfg('notifications|telegram_on_down', bool, False),
-    Cfg('notifications|telegram_on_recovery', bool, False),
-    Cfg('notifications|telegram_on_warn', bool, False),
-    Cfg('notifications|email_on_down', bool, False),
-    Cfg('notifications|email_on_recovery', bool, False),
-    Cfg('notifications|email_on_warn', bool, False),
-    Cfg('notifications|webhook_on_down', bool, False),
-    Cfg('notifications|webhook_on_recovery', bool, False),
-    Cfg('notifications|webhook_on_warn', bool, False),
-    # Syslog-receiver alert routing (kind='syslog'): a matching received message
-    # notifies the enabled channels, same matrix as the check events.
-    Cfg('notifications|telegram_on_syslog', bool, False),
-    Cfg('notifications|email_on_syslog', bool, False),
-    Cfg('notifications|webhook_on_syslog', bool, False),
+    # ══ Notification routing matrix ═════════════════════════════════════════
+    # NOT declared here — the matrix keys ``notifications|{channel}_on_{kind}`` are
+    # fully DYNAMIC: the kinds come from the notify-event registry (each domain's
+    # ``notify_events.py`` — monitoring/syslog/ipban/auth/health/… — discovered at
+    # runtime) × the registered channels.  A cell is stored in the DB ``config`` table
+    # only when the admin ticks it (default off; dispatch reads ``notif.get(k, False)``).
+    # Declaring them here would duplicate the registry — the single source of truth.
 
     # ══ Syslog receiver ═════════════════════════════════════════════════════
     # Built-in syslog server: receive RFC 3164/5424 events from external hosts
@@ -426,6 +442,33 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # body_template default lives in webhook_notify._DEFAULT_BODY_TPL (a large
     # JSON template); documented here but not duplicated.
     Cfg('webhooks|body_template', str, None, no_rule=True, no_seed=True),
+
+    # ══ Microsoft Teams (msteams) ═══════════════════════════════════════════
+    # Teams is ONE logical channel with two destination kinds:
+    #  (a) channels — Incoming Webhook URLs, stored as records in their own table
+    #      (lib/core/notify/msteams/store.py); the ``msteams_channels|*`` entries
+    #      below are editor form-field defaults only (no_seed, never materialised).
+    #  (b) users — direct-to-user delivery via the ``msteams`` singleton section
+    #      below (a real, seeded section): pick a delivery mechanism and recipients.
+    Cfg('msteams_channels|enabled', bool, True, no_rule=True, no_seed=True),
+    Cfg('msteams_channels|name', str, '', no_rule=True, no_seed=True),
+    Cfg('msteams_channels|webhook_url', str, '', no_rule=True, no_seed=True),
+    # User-mode (singleton section): send directly to users. delivery ∈
+    # {'activity_feed' (Graph TeamsActivity.Send — outbound only), 'bot'
+    # (Bot Framework proactive 1:1 chat — needs a public messaging endpoint)}.
+    Cfg('msteams|user_enabled', bool, False, no_rule=True),
+    Cfg('msteams|delivery', str, 'activity_feed', no_rule=True),   # 'activity_feed' | 'bot'
+    Cfg('msteams|notify_panel_users', bool, False, no_rule=True),  # target panel users by their email/UPN
+    Cfg('msteams|recipients', str, '', no_rule=True),              # extra UPN/email list (comma/semicolon)
+    # Graph client-credentials app (activity_feed): needs the TeamsActivity.Send
+    # application permission; the Entra wizard can register it.
+    Cfg('msteams|tenant_id', str, '', no_rule=True),
+    Cfg('msteams|client_id', str, '', no_rule=True),
+    Cfg('msteams|client_secret', str, '', no_rule=True),
+    # Bot Framework app (bot): the Azure Bot's Microsoft App (id + secret + tenant).
+    Cfg('msteams|bot_app_id', str, '', no_rule=True),
+    Cfg('msteams|bot_app_password', str, '', no_rule=True),
+    Cfg('msteams|bot_tenant_id', str, '', no_rule=True),
 )
 
 CFG_BY_PATH: dict[str, Cfg] = {f.path: f for f in CONFIG_FIELDS}

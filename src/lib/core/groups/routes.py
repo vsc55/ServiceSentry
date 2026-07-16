@@ -83,9 +83,10 @@ def register(app, wa):
         roles_raw = data.get('roles', [])
         if not isinstance(roles_raw, list):
             return jsonify({'error': wa._t('invalid_roles', '')}), 400
-        # Requester-context guard (stays here): only an admin may grant the admin role.
-        admin_uid = wa._role_name_to_uid('admin')
-        if admin_uid in [_normalize_role_uid(r) for r in roles_raw] and not wa._is_admin_requester():
+        # Requester-context guard (stays here): a non-admin may only assign roles whose
+        # permissions they hold (blocks the admin role OR any higher-privilege custom role).
+        if not wa._is_admin_requester() and not all(
+                wa._role_grantable(_normalize_role_uid(r) or r) for r in roles_raw):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         try:
             group_uid = groups_svc.create_group(
@@ -123,7 +124,9 @@ def register(app, wa):
         current_role_names = [wa._uid_to_role_name(r) or r for r in group.get('roles', [])]
         if not is_admin_req and 'admin' in current_role_names:
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
-        if not is_admin_req and 'admin' in data.get('roles', []):
+        if not is_admin_req and not all(
+                wa._role_grantable(_normalize_role_uid(r) or r)
+                for r in (data.get('roles') or [])):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         try:
             result = groups_svc.update_group(

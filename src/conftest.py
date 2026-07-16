@@ -1,4 +1,26 @@
+import os
 from unittest.mock import MagicMock
+
+
+def _load_env_test():
+    """Auto-load a local (gitignored) ``tests/.env.test`` into ``os.environ`` before collection,
+    so simply *having* the file makes its variables available to the **whole** suite — no manual
+    ``source`` needed. Values already set in the real environment win (CI / inline exports
+    override the file). Absent file → no-op. Only uses ``os``, so it adds no import cost."""
+    path = os.path.join(os.path.dirname(__file__), 'tests', '.env.test')
+    try:
+        with open(path, encoding='utf-8') as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, _, val = line.partition('=')
+                os.environ.setdefault(key.strip(), val.strip())
+    except FileNotFoundError:
+        pass
+
+
+_load_env_test()
 
 
 def create_mock_monitor(module_config=None):
@@ -23,6 +45,13 @@ def create_mock_monitor(module_config=None):
     config = ConfigControl(None)
     config.data = module_config
     mock_monitor.config_modules = config
+
+    # Config general (vacía) + dir_modules real, para que ModuleBase._msg cargue los
+    # ficheros lang/*.json reales del módulo (idioma por defecto → en_EN) en los tests.
+    full_config = ConfigControl(None)
+    full_config.data = {}
+    mock_monitor.config = full_config
+    mock_monitor.dir_modules = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'watchfuls')
 
     # Status vacio
     status = ConfigControl(None)

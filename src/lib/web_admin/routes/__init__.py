@@ -21,6 +21,7 @@ registered; every listed file's own header lists its exact per-endpoint routes.
     notify/email     /api/v1/notify/email/test  (+ template_routes: /notify/templates*, /notify/html-templates*)
     notify/telegram  /api/v1/notify/telegram/test
     notify/webhook   /api/v1/notify/webhooks*   (+ test_routes: /notify/webhook/test)
+    notify/msteams   /api/v1/notify/msteams*    (Teams channels CRUD + user test; bot inbound at /auth/msteams/messages)
 
 ── background services — lib/services/<svc>/routes.py ───────────────────────────────
     manager          /api/v1/services*          (service control plane; folder lib/services/manager)
@@ -32,6 +33,7 @@ registered; every listed file's own header lists its exact per-endpoint routes.
 ── auth providers — lib/providers/<x>/routes.py ─────────────────────────────────────
     ldap             /api/v1/auth/ldap/*        (JSON: connection test / group lookup)
     entraid          /api/v1/auth/entraid/*     (JSON: Entra app-registration + SCIM-provisioning device-code)
+    entraid (sso)    /auth/msteams/tab, /auth/msteams/sso   (Microsoft Teams personal-tab SSO sign-in)
     oidc             /auth/oidc/*               (browser OAuth redirect flow — login/callback, NOT /api/v1)
     saml             /auth/saml2/*              (browser SAML flow — login/acs/metadata, NOT /api/v1)
     scim             /scim/v2/*                 (IETF RFC 7643/7644 standard — outside /api/v1; external IdPs call it)
@@ -39,10 +41,19 @@ registered; every listed file's own header lists its exact per-endpoint routes.
 ── web — lib/web_admin/routes/*.py ──────────────────────────────────────────────────
     auth             /login, /logout            (local login; oidc/saml/ldap providers above)
     pages            /, /admin, /overview       (rendered HTML views)
+    overview2        /overview2                 (experimental Alpine.js Overview — real widgets + data)
     ui               /lang/<code> (navigation), /api/v1/me, /api/v1/health
     status           /status                    (public status page, no auth)
     util             /api/v1/util/*
     errors           (Flask error handlers — no URL routes)
+
+── path convention ──────────────────────────────────────────────────────────────────
+    Internal JSON APIs the frontend calls → ``/api/v1/<domain>/*`` (session + CSRF).
+    Endpoints hit by EXTERNAL systems or an embedding host (IdP callbacks, embedded pages,
+    provider webhooks) → ``/auth/<provider>/*`` (+ the IETF-mandated ``/scim/v2/*``): these are
+    CSRF-exempt (each module self-declares its prefixes via ``wa._register_csrf_exempt`` in its
+    register(), discovered — not hardcoded) and authenticated by their own protocol/token, not
+    the session. Teams external endpoints: ``/auth/msteams/{tab,sso,messages}``.
 """
 
 from .auth import register as _auth
@@ -55,6 +66,7 @@ from lib.core.notify.email.routes import register as _email
 from lib.core.notify.webhook.test_routes import register as _webhook
 from lib.core.notify.email.template_routes import register as _notif_templates
 from lib.core.notify.webhook.routes import register as _webhooks
+from lib.core.notify.msteams.routes import register as _msteams
 from lib.core.modules.routes import register as _modules
 from lib.services.monitoring.routes import register as _monitoring
 from lib.core.users.routes import register as _users
@@ -74,6 +86,8 @@ from lib.services.ipban.routes import register as _ipbans
 from .util import register as _util
 from .ui import register as _ui
 from .pages import register as _pages
+from .overview2 import register as _overview2   # experimental Alpine Overview (/overview2)
+from lib.providers.entraid.sso_routes import register as _msteams_sso   # Teams personal-tab SSO
 from .status import register as _status
 from .errors import register as _errors
 from lib.core.overview.routes import register as _overview
@@ -83,6 +97,8 @@ def register_all(app, wa):
     _auth(app, wa)
     _ui(app, wa)
     _pages(app, wa)
+    _overview2(app, wa)
+    _msteams_sso(app, wa)
     _status(app, wa)
     _errors(app, wa)
     _modules(app, wa)
@@ -98,6 +114,7 @@ def register_all(app, wa):
     _webhook(app, wa)
     _notif_templates(app, wa)
     _webhooks(app, wa)
+    _msteams(app, wa)
     _entraid(app, wa)
     _users(app, wa)
     _sessions(app, wa)

@@ -72,6 +72,16 @@ def _require_user(ctx, username: str):
 
 # ── user commands ──────────────────────────────────────────────────────────────
 def cmd_user_add(ctx, args) -> int:
+    """Create a local user (``user add``).
+
+    Reads ``args`` (argparse namespace): ``username``, ``password`` (prompted if
+    omitted), ``role``, ``display``, ``email``, ``group`` (names/uids) and
+    ``disabled``. Resolves each group name to its uid, creates the account via
+    :func:`lib.core.users.service.create_user` (enforcing the password policy) and
+    persists the users store on success.
+
+    Returns 0 on success, 1 on a validation/lookup error (message on stderr).
+    """
     password = args.password or getpass.getpass('Password: ')
     try:
         gids = []
@@ -93,10 +103,12 @@ def cmd_user_add(ctx, args) -> int:
 
 
 def cmd_user_enable(ctx, args) -> int:
+    """Enable the account ``args.username`` (``user enable``). Returns a shell exit code."""
     return _set_enabled(ctx, args.username, True)
 
 
 def cmd_user_disable(ctx, args) -> int:
+    """Disable the account ``args.username`` (``user disable``). Returns a shell exit code."""
     return _set_enabled(ctx, args.username, False)
 
 
@@ -113,6 +125,13 @@ def _set_enabled(ctx, username: str, enabled: bool) -> int:
 
 
 def cmd_user_passwd(ctx, args) -> int:
+    """Set a user's password (``user passwd``).
+
+    Reads ``args.username`` and ``args.password`` (prompted if omitted); the new
+    password is validated against the configured policy and hashed via
+    :func:`lib.core.users.service.set_password`, then persisted. Returns 0 on
+    success, 1 on error.
+    """
     password = args.password or getpass.getpass('New password: ')
     try:
         user = _require_user(ctx, args.username)
@@ -124,6 +143,12 @@ def cmd_user_passwd(ctx, args) -> int:
 
 
 def cmd_user_role(ctx, args) -> int:
+    """Set a user's role (``user role``).
+
+    Reads ``args.username`` and ``args.role`` (a built-in key or a custom role
+    name/uid), resolves and assigns it via :func:`lib.core.users.service.set_role`,
+    and persists. Returns 0 on success, 1 on error.
+    """
     try:
         _require_user(ctx, args.username)
         new_uid = users_svc.set_role(ctx.users, args.username, args.role, ctx.roles, actor='cli')
@@ -134,10 +159,14 @@ def cmd_user_role(ctx, args) -> int:
 
 
 def cmd_user_group_add(ctx, args) -> int:
+    """Add a user to a group (``user group-add``), reading ``args.username`` /
+    ``args.group``. Returns a shell exit code."""
     return _user_group(ctx, args, add=True)
 
 
 def cmd_user_group_del(ctx, args) -> int:
+    """Remove a user from a group (``user group-del``), reading ``args.username`` /
+    ``args.group``. Returns a shell exit code."""
     return _user_group(ctx, args, add=False)
 
 
@@ -162,6 +191,13 @@ def _user_group(ctx, args, *, add: bool) -> int:
 
 # ── group commands ─────────────────────────────────────────────────────────────
 def cmd_group_add(ctx, args) -> int:
+    """Create a group (``group add``).
+
+    Reads ``args.name``, ``args.description`` and ``args.role`` (zero or more role
+    keys/names granted to the group), creates it via
+    :func:`lib.core.groups.service.create_group` and persists. Prints the new uid.
+    Returns 0 on success, 1 on error.
+    """
     try:
         uid = groups_svc.create_group(
             ctx.groups, name=args.name, description=args.description or '',
@@ -173,6 +209,13 @@ def cmd_group_add(ctx, args) -> int:
 
 
 def cmd_group_del(ctx, args) -> int:
+    """Delete a group (``group del``).
+
+    Resolves ``args.name`` (name or uid) to a group uid and deletes it via
+    :func:`lib.core.groups.service.delete_group`, which also strips the group from
+    every member; affected users and the groups store are persisted. Returns 0 on
+    success, 1 if the group is unknown or the operation is rejected.
+    """
     gid = ctx.group_uid(args.name)
     if not gid:
         return _err(_t(ctx, 'group_not_found'))
@@ -189,6 +232,13 @@ def cmd_group_del(ctx, args) -> int:
 
 # ── service status / reload ─────────────────────────────────────────────────────
 def cmd_status(ctx, args) -> int:
+    """Print a per-service status table (``status``).
+
+    For every embedded service (auto-discovered) plus any with recorded instances,
+    prints the service key, live/stopped state (an instance is live when it is
+    running and its heartbeat is newer than ``_LIVE_SECS``), whether it is enabled
+    in config, and its instance count. ``args`` is unused. Always returns 0.
+    """
     by_key: dict[str, list] = {}
     for inst in ctx.instances_store.list_instances():
         by_key.setdefault(inst.get('service_key'), []).append(inst)
@@ -207,6 +257,12 @@ def cmd_status(ctx, args) -> int:
 
 
 def cmd_reload(ctx, args) -> int:
+    """Queue a ``reload`` command for every daemon-backed service (``reload``).
+
+    Enqueues a ``reload`` in the service-command store for each standalone
+    (daemon) service; a running daemon applies it on its next heartbeat. ``args``
+    is unused. Returns 0 if at least one command was queued, 1 otherwise.
+    """
     sent = []
     for key in _reload_targets():
         if ctx.commands_store.enqueue(key, 'reload', created_by='cli'):

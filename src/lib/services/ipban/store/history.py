@@ -82,6 +82,7 @@ class BanHistoryStore:
         try:
             hrow = self._db.fetchone(f'SELECT MAX(id) FROM {_TH}')
             if hrow and hrow[0] and hrow[0] > _MAX_HIST:
-                self._db.execute(f'DELETE FROM {_TH} WHERE id <= ?', (hrow[0] - _MAX_HIST,))
+                with self._db.transaction():   # commit so the trim persists on PG/MySQL
+                    self._db.execute(f'DELETE FROM {_TH} WHERE id <= ?', (hrow[0] - _MAX_HIST,))
         except Exception:  # pylint: disable=broad-except
             pass

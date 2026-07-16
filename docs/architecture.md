@@ -13,10 +13,10 @@ flowchart TD
     monitor["lib/services/monitoring/monitor.py<br/><small>Motor principal: carga módulos, ThreadPool,<br/>gestión de estado, despacho de notificaciones</small>"]
     main --> monitor
 
-    telegram["Telegram<br/><small>lib/providers</small>"]
+    notify["MonitorNotifier + NotificationRouter<br/><small>agrupa por ciclo · flush MULTI-CANAL<br/>Telegram/Email/Webhook/Teams vía el registro</small>"]
     state["Estado checks<br/><small>tabla BD check_state</small>"]
     watchfuls["Watchfuls<br/><small>packages</small>"]
-    monitor --> telegram
+    monitor --> notify
     monitor --> state
     monitor --> watchfuls
 
@@ -38,7 +38,10 @@ ObjectBase (lib/core/object_base.py)
 │
 ├── Main (main.py)
 ├── Monitor (lib/services/monitoring/monitor.py)
-├── Telegram (lib/providers/telegram.py)
+├── Telegram (lib/providers/telegram.py)          ← cliente de bajo nivel de la Bot API (send_telegram); lo envuelve el canal telegram/
+├── NotificationRouter (lib/core/notify/router.py) ← POSEE los stores de canal y ES el routing; dispatch(kind,…) (sin Flask, agnóstico de canal)
+│   └── NotifyContext (lib/core/notify/context.py)  ← bundle de colaboradores (db, read_config, fernet, dbg, audit, public_url, panel_user_emails); nunca Flask ni el web admin
+│       # Canales auto-registrados (registry.py) + kinds descubiertos (events.py). Detalle de entrega → notifications.md
 ├── ConfigManager (lib/config/manager.py)         ← ÚNICO dueño de la E/S de config (read/write/migrate)
 │   ├── ConfigStore-BD (lib/core/config/store.py)      ← capa editable: tabla `config` (una fila por sección|campo)
 │   ├── ConfigControl (lib/config/config_control.py)  ← I/O JSON de config.json (solo arranque + pins)
@@ -68,9 +71,14 @@ ObjectBase (lib/core/object_base.py)
 │   └─ EmbeddedEvents   (lib/services/events/embedded.py)      ← _EventsMixin + worker desacoplado
 │       (cada objeto comparte su lógica con el servicio standalone del mismo paquete)
 ├── BaseConnector (lib/db/base.py)              ← capa de BD pluggable
-│   ├── SQLiteConnector       (lib/db/sqlite.py)      [por defecto]
-│   ├── MySQLConnector        (lib/db/mysql.py)
-│   └── PostgreSQLConnector   (lib/db/postgresql.py)
+│   ├── SQLiteConnector       (lib/db/sqlite.py)      [por defecto / tests]
+│   ├── MySQLConnector        (lib/db/mysql.py)       [producción, con PostgreSQL]
+│   └── PostgreSQLConnector   (lib/db/postgresql.py)  [producción]
+│   # SQL portable a los 3 motores: quote_ident cita los identificadores reservados
+│   # (key/user/virtual/tabla groups); el atributo KIND ramifica lo específico de dialecto
+│   # (CONCAT vs ||, json_extract vs jsonb_extract_path_text, CAST INTEGER/SIGNED, last_insert_id);
+│   # rebuild de migración atómico en MySQL (RENAME) y transaccional en SQLite/PG.
+│   # Verificado contra MySQL/MariaDB + PostgreSQL reales (tests/test_db_portability*.py).
 ├── Stores (reciben un BaseConnector inyectado)
 │   # Stores de dominios de núcleo movidos a su módulo (lib/core/<d>/store.py):
 │   ├── UsersStore      (lib/core/users/store.py)     → tablas users, users_groups
@@ -127,7 +135,7 @@ ServiceSentry/
 │   ├── conftest.py                      # Helper compartido para tests
 │   ├── pytest.ini                       # Configuración pytest (testpaths = tests watchfuls)
 │   ├── lib/
-│   │   ├── __init__.py                  # Exports: ObjectBase, DictFilesPath, Monitor, Telegram, Exec, ExecResult, Mem, MemInfo
+│   │   ├── __init__.py                  # Exports (__all__): ObjectBase, DictFilesPath, Monitor, Exec, ExecResult, Mem, MemInfo (Telegram NO se exporta; es cliente de bajo nivel en lib/providers/)
 │   │   ├── i18n/                        # Traducciones de toda la app (UI web + emails): __init__.py (loader, DEFAULT_LANG/SUPPORTED_LANGS/TRANSLATIONS/coerce_lang) + lang/ (en_EN.py, es_ES.py)
 │   │   ├── util/                        # Helpers puros sin estado: tools.py (bytes2human) + os_detect.py (SO local/remoto) + entity_audit.py (touch_entity/track_change)
 │   │   ├── security/                    # Primitivas de seguridad: secret_manager.py (cifrado Fernet, enc: prefix, ENCRYPT_KEYS) + net_guard.py (validate_external_url, guard SSRF)
@@ -152,11 +160,23 @@ ServiceSentry/
 │   │   │   ├── hosts/                                   # store.py + service.py (CRUD-transform + check fan-out/status/probe-prep) + routes.py (CRUD+test+migrate) + profiles/runner/ssh_client/resolve/probe/migrate + permissions.py (grupo perm = 'servers')
 │   │   │   ├── overview/                                # service.py (layout/widgets) + routes.py + permissions.py (grupo virtual, sin store)
 │   │   │   ├── clusters/                                # solo permissions.py (grupo virtual, sin store/routes propios)
-│   │   │   └── notify/                  # Subsistema de notificación (sin Flask; lo usan web, monitor y daemons syslog/events)
-│   │   │       ├── notification_dispatcher.py  # dispatch(): enruta cada evento a Telegram/Email/Webhook
-│   │   │       ├── telegram/            # notify.py (canal, envuelve lib/providers/telegram.py) + routes.py
-│   │   │       ├── email/               # notify.py (SMTP/M365 vía providers/entraid/Gmail) + templates.py (HTML i18n) + routes.py + template_routes.py
-│   │   │       └── webhook/             # notify.py (HMAC opcional) + store.py (WebhooksStore, tabla webhooks) + routes.py + test_routes.py
+│   │   │   ├── health/                  # Auto-monitorización de la plataforma (sin Flask); emite notificaciones vía el router
+│   │   │   │   ├── health.py            # ServiceHealthMonitor: clasifica heartbeats up/down/idle → service_down/service_up (una vez por transición, leader-gated)
+│   │   │   │   ├── cert_scan.py         # CertExpiryScanner: escanea certs de los checks ssl_cert → cert_expiring (una vez por severidad expiring/expired)
+│   │   │   │   └── notify_events.py     # NOTIFY_EVENTS: service_down/service_up/cert_expiring (matrix)
+│   │   │   └── notify/                  # Subsistema de notificación / ENTREGA (sin Flask; lo usan web, monitor, health y daemons syslog/events) — ver notifications.md
+│   │   │       ├── context.py          # NotifyContext: bundle de colaboradores del router (db, read_config, fernet, dbg, audit, public_url, panel_user_emails); sin Flask
+│   │   │       ├── router.py           # NotificationRouter (posee los stores de canal + ES el routing) + run_dispatch(surface, kind, …)
+│   │   │       ├── registry.py         # Registro de canales: Channel(send/flush) auto-descubierto de <canal>/channel.py (sin lista central)
+│   │   │       ├── events.py           # Registro de kinds descubiertos (NOTIFY_EVENTS en lib/**/notify_events.py; flags matrix/ui)
+│   │   │       ├── monitor_notifier.py # MonitorNotifier: acumula las alertas de un ciclo y hace un único flush agrupado por canal
+│   │   │       ├── notification_dispatcher.py  # SHIM legacy dispatch(wa, kind, …): ya NO enruta, delega en run_dispatch
+│   │   │       ├── formatting.py       # Capa de texto: resolución custom→i18n (notify_text/text_override/event_title/notify_lang/_fill)
+│   │   │       ├── text_catalog.py     # Descubrimiento de los textos editables (paquetes core/módulos/email + esquema de tags)
+│   │   │       ├── telegram/           # channel.py (send+flush, auto-registrado) + notify.py (envuelve lib/providers/telegram.py) + routes.py
+│   │   │       ├── email/              # channel.py + notify.py (SMTP/M365 vía providers/entraid/Gmail) + templates.py (HTML i18n) + routes.py + template_routes.py
+│   │   │       ├── webhook/            # channel.py + notify.py (HMAC opcional) + store.py (WebhooksStore, tabla webhooks) + routes.py + test_routes.py
+│   │   │       └── msteams/            # channel.py + notify.py + store.py (canales Teams) + bot_store.py + bot_inbound.py + cards.py + app_package.py + routes.py
 │   │   ├── services/                    # Servicios de fondo (embebidos o standalone) + el controlador central
 │   │   │   ├── __init__.py              # discover_embedded_services(): escanea los paquetes y recoge su EMBEDDED_SERVICE (auto-descubrimiento)
 │   │   │   ├── base.py                  # ServiceDescriptor: contrato de un servicio (key/label/icon/status/control)
@@ -231,7 +251,7 @@ ServiceSentry/
 │   │       │   └── permissions.py auth.py services.py   # permisos efectivos / login local / host de discovery de servicios
 │   │       │   # Dominios (users/roles/groups/sessions/audit) → lib/core/<d>/mixin.py; checks → lib/services/monitoring/checks_mixin.py.
 │   │       │   # Auth externa (LDAP/OIDC/SAML) → lib/providers/{ldap,oidc,saml}/.
-│   │       └── routes/                  # Registradores de rutas Flask (ver web_admin.md)
+│   │       └── routes/                  # Registradores de rutas Flask (ver web-admin.md)
 │   │           ├── __init__.py          # register_all(app, wa) — registra también los routes de core/servicios/providers
 │   │           ├── auth.py              # /login, /logout + _establish_session/_landing_url (login local; LDAP/OIDC/SAML se registran desde lib/providers/*)
 │   │           ├── pages.py             # vistas HTML: / (entry), /admin, /overview
@@ -288,10 +308,25 @@ ServiceSentry/
 └── docs/
     ├── architecture.md                  # Este archivo
     ├── configuration.md
+    ├── notifications.md                  # Entrega de notificaciones (dispatcher/canales/matriz/textos) — FUENTE CANÓNICA
+    ├── services.md                       # Servicios de fondo (embebido/standalone, microservicios, HA)
+    ├── discovery.md                      # Patrones self-describing (permisos, servicios, widgets, eventos)
+    ├── hosts.md                          # Modelo host-céntrico (hosts + perfiles de conexión)
     ├── modules.md
-    ├── web_admin.md
+    ├── watchful-guide.md
+    ├── ai-module-guide.md
+    ├── web-admin.md
+    ├── schema.md
+    ├── i18n.md
+    ├── security.md
+    ├── sso-entra.md
+    ├── ssh-hardening.md
     ├── development.md
-    └── watchful_guide.md
+    ├── tests.md
+    ├── cli.md
+    ├── docker.md
+    ├── kubernetes.md
+    └── deployment.md
 ```
 
 ---
@@ -335,12 +370,12 @@ flowchart TD
     host --> each["Para CADA resultado en ReturnModuleCheck"]
     each --> save["Guarda other_data en check_state"]
     save --> changed{"¿Ha CAMBIADO el status?<br/><small>check_status</small>"}
-    changed -->|Sí| upd["Actualiza status + envía Telegram (si send=True)"]
+    changed -->|Sí| upd["Actualiza status + ACUMULA en el notifier<br/><small>self._notifier.add(kind, …) · kind = down / recovery / warn</small>"]
     changed -->|No| noop["No hace nada (evita spam)"]
 
     upd --> persist["6. Si hubo cambios → persiste en check_state"]
     noop --> persist
-    persist --> summary["7. send_message_end() → resumen Telegram"]
+    persist --> summary["7. send_message_end() → notifier.flush()<br/><small>un único flush agrupado por canal (Telegram/Email/Webhook/Teams)</small>"]
     summary --> done["8. Fin del ciclo"]
 ```
 
@@ -355,6 +390,12 @@ El sistema solo notifica cuando el estado **cambia**. Lógica en `Monitor.check_
 ```
 
 Esto evita enviar la misma alerta repetidamente en cada ciclo.
+
+El modelo **no es binario** OK/DOWN: cada cambio se clasifica en un *kind* —
+`down` (rojo), `recovery` (verde) o `warn` (ámbar, umbral **blando**: CPU/memoria altas,
+certificado próximo a caducar…) — vía `Monitor._alert_kind(status, severity)`. La entrega
+(qué canales, agrupación, textos custom→i18n) la cubre
+[notifications.md](notifications.md) — ver **[Severidad warning](notifications.md#severidad-warning)**.
 
 ---
 
@@ -390,9 +431,35 @@ flowchart TB
 
 ## Procesamiento de Eventos (notificaciones)
 
-> La **entrega** (dispatcher, canales Telegram/Email/Webhook, matriz de routing, HMAC, plantillas) — lo que ocurre a partir de `dispatch()` — está en **[notifications.md](notifications.md)**. Esta sección cubre la **generación** de eventos.
+> La **entrega** (canales Telegram/Email/Webhook/Teams, matriz de routing, HMAC, plantillas, textos custom→i18n) — lo que ocurre a partir de `dispatch()` — está en **[notifications.md](notifications.md)**. Esta sección cubre la **generación** de eventos.
 
-Las **reglas de notificación** (audit/syslog → Telegram/Email/Webhook) las evalúa
+### Arquitectura de entrega (resumen)
+
+El subsistema de entrega vive en `lib/core/notify` (**sin Flask**, **sin** dependencia de
+`web_admin`) y se articula sobre cuatro piezas — detalle en
+[notifications.md → arquitectura](notifications.md#arquitectura-contexto--router--registros):
+
+- **`NotifyContext`** (`context.py`): *bundle* explícito de colaboradores que el router
+  necesita de su host — `db`, `read_config`, `fernet`, `dbg`, `audit`, `public_url`,
+  `panel_user_emails` — como **valores/callables planos**, nunca Flask ni el web admin.
+- **`NotificationRouter`** (`router.py`): **posee** los stores de canal y **es** el routing;
+  `dispatch(kind, …)` reparte a cada canal habilitado por la matriz (o los canales explícitos
+  de una regla). `run_dispatch(surface, …)` es la misma lógica a nivel de módulo.
+- **Registro de canales** (`registry.py`): cada canal es un `Channel(send, flush)` que se
+  **auto-registra** al importarse; `load_builtin_channels()` descubre todos los
+  `lib/core/notify/<canal>/channel.py` (orden estable), sin lista central.
+- **Registro de eventos/kinds** (`events.py`): los *kinds* son **descubiertos** de los
+  `notify_events.py` (`NOTIFY_EVENTS`) por dominio, con flags `matrix`/`ui`.
+
+`notification_dispatcher.py` es ahora un **shim** de compatibilidad (`dispatch(wa, kind, …)`):
+ya **no** enruta, delega en `run_dispatch`. Los canales son **cuatro** (Telegram/Email/Webhook/
+**Teams**), descubiertos del registro. La **auto-monitorización de la plataforma**
+(`lib/core/health`) también emite por este router: `ServiceHealthMonitor` → `service_down`/
+`service_up` y `CertExpiryScanner` → `cert_expiring`. Los **textos** de toda notificación se
+resuelven **custom (por idioma) → i18n → key** (`formatting.py`: `notify_text`/`text_override`/
+`event_title`/`notify_lang`/`_fill`, con placeholders `{}` secuenciales e indexados `{0}`).
+
+Las **reglas de notificación** (audit/syslog → Telegram/Email/Webhook/Teams) las evalúa
 `_EventsMixin` (`lib/services/events/manager.py`, **sin Flask**, compartido por el WebAdmin y
 los servicios standalone). El diseño está **desacoplado de la ingesta**: los
 productores y el consumidor no se llaman en línea, sino que se comunican a través de
@@ -414,10 +481,12 @@ flowchart LR
       C -->|"en ventana"| X["descarta"]
     end
 
-    D --> ND["notification_dispatcher"]
-    ND --> TG["Telegram"]
-    ND --> EM["Email"]
-    ND --> WH["Webhook"]
+    D --> ND["router.dispatch(kind, canales de la regla)<br/><small>NotificationRouter · run_dispatch</small>"]
+    ND --> REG["registry.channels()<br/><small>canales auto-descubiertos</small>"]
+    REG --> TG["Telegram"]
+    REG --> EM["Email"]
+    REG --> WH["Webhook"]
+    REG --> MS["Teams"]
     D --> NL[("notification_log")]
     TICK -->|"avanza last_id"| CU[("event_cursor")]
     C -.->|"persiste last_fire"| CD[("event_cooldowns")]
@@ -513,7 +582,7 @@ solo cambia **quién** lo hospeda y **cuándo** se arranca.
 | ---- | --------- |
 | Monitor → módulos | `ThreadPoolExecutor` (un hilo por módulo) |
 | Dentro de cada módulo | `ThreadPoolExecutor` (un hilo por ítem: ping, datastore, hddtemp…) |
-| Envío Telegram | Hilo daemon separado con cola de mensajes |
+| Envío de notificaciones | **Síncrono** en el `flush` del `MonitorNotifier` al cierre del ciclo (sin hilo/cola de fondo; el antiguo hilo daemon de Telegram se eliminó) |
 
 ---
 

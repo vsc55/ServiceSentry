@@ -49,8 +49,10 @@ class TestContextSurface:
         assert cfg.get('enabled') is True
         assert int(cfg.get('retention_days')) == 7
 
-    def test_load_webhooks_returns_list(self, service):
-        assert isinstance(service._load_webhooks(), list)
+    def test_router_loads_webhooks(self, service):
+        # Channel loading is owned by the webhook channel, over the router the service builds.
+        from lib.core.notify.webhook import channel as webhook_channel
+        assert isinstance(webhook_channel.load(service._notify), list)
 
     def test_read_config_file_is_effective(self, admin, service):
         admin._write_config({'notifications': {'telegram_on_syslog': True}})

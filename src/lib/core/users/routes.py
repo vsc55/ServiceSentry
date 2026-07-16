@@ -109,6 +109,15 @@ def register(app, wa):
         groups_raw = data.get('groups', [])
         if not isinstance(groups_raw, list):
             return jsonify({'error': wa._t('invalid_groups', '')}), 400
+        # Requester-context guard: a non-admin may only assign a role whose permissions they
+        # themselves hold (blocks a users_add holder creating an admin — or any higher-
+        # privilege custom-role — account).
+        if not wa._role_grantable(users_svc.resolve_role_uid(role, wa._custom_roles) or role):
+            return jsonify({'error': wa._t('insufficient_permissions')}), 403
+        # …and the same for GROUP membership (a group's roles merge into the member's perms,
+        # so assigning e.g. the built-in Administrators group is an escalation too).
+        if not wa._groups_grantable(groups_raw):
+            return jsonify({'error': wa._t('insufficient_permissions')}), 403
         try:
             users_svc.create_user(
                 wa._users, username=uname, password=data.get('password', ''),
@@ -144,7 +153,6 @@ def register(app, wa):
         if err:
             return err
         user      = wa._users[username]
-        admin_uid = wa._role_name_to_uid('admin')
 
         # Role-hierarchy guard: only admins may edit other admin accounts.
         # A user with users_edit on a custom/operator role must not be able to
@@ -153,11 +161,15 @@ def register(app, wa):
         is_admin_requester = _role_is_admin(requester.get('role', ''))
         if not is_admin_requester and _role_is_admin(user.get('role', '')):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
-        # Only admins can grant the admin role (prevents privilege escalation via a
-        # non-admin with users_edit granting admin to another account).
-        if 'role' in data and not is_admin_requester:
-            if users_svc.resolve_role_uid(data['role'], wa._custom_roles) == admin_uid:
-                return jsonify({'error': wa._t('insufficient_permissions')}), 403
+        # A non-admin may only assign a role whose permissions they hold (blocks granting
+        # the admin role OR any higher-privilege custom role to another account).
+        if 'role' in data and not wa._role_grantable(
+                users_svc.resolve_role_uid(data['role'], wa._custom_roles) or data['role']):
+            return jsonify({'error': wa._t('insufficient_permissions')}), 403
+        # …and for GROUP membership: a non-admin can't add a user (or themselves) to a group
+        # whose roles they couldn't grant — e.g. the built-in Administrators group.
+        if 'groups' in data and not wa._groups_grantable(data.get('groups')):
+            return jsonify({'error': wa._t('insufficient_permissions')}), 403
         _is_sso = user.get('auth_source', 'local') != 'local'
         # Only admins can reset another user's password via the admin API (a regular
         # user changes their own via PUT /api/v1/users/me/password). SSO users have no

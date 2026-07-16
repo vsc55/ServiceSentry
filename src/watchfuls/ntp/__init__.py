@@ -116,7 +116,7 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"NTP: {item['key']} - Exception: {exc}", DebugLevel.error)
-                    message = f'NTP: {item.get("label") or item["key"]} - *Error: {exc}* 💥'
+                    message = self._msg('ntp_error', item.get('label') or item['key'], exc)
                     self.dict_return.set(item['key'], False, message)
 
         super().check()
@@ -132,10 +132,7 @@ class Watchful(ModuleBase):
         offset, delay = _ntp_query(server, timeout, item['port'])
         ok = offset < max_offset
 
-        if ok:
-            message = f'NTP: *{label}* - offset {offset:.3f}s (max {max_offset}s) ✅'
-        else:
-            message = f'NTP: *{label}* - offset {offset:.3f}s exceeds {max_offset}s ⚠️'
+        message = self._msg('ntp_ok' if ok else 'ntp_high', label, f'{offset:.3f}', max_offset)
 
         other_data = {
             'server': server,
@@ -144,7 +141,9 @@ class Watchful(ModuleBase):
             'delay_seconds': round(delay, 3),
             'max_offset': max_offset,
         }
-        self.dict_return.set(key, ok, message, False, other_data)
+        # An offset over the limit is a warning (the server answered); a query failure
+        # raises above and is reported as down.
+        self.dict_return.set(key, ok, message, False, other_data, severity='warning')
 
         if self.check_status(ok, self.name_module, key):
-            self.send_message(message, ok, item=label)
+            self.send_message(message, ok, item=label, severity='warning')

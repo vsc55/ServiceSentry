@@ -38,6 +38,17 @@ puertos syslog (los gestiona el contenedor `syslog`) y `SS_EVENTS_EMBEDDED=0` pa
 comparten los volúmenes con nombre y las bases de datos, por lo que leen y escriben
 el mismo estado.
 
+> **Dimensionado del receptor syslog.** El listener es *thread-per-connection* (una hebra
+> por conexión TCP/TLS viva). Coste medido bajo carga (ver [tests.md §49](tests.md), test de
+> 1000 conexiones simultáneas): **≈47 KB de RAM por conexión persistente** (stack de hebra +
+> buffers) más el propio proceso base. Regla práctica: 1000 conexiones ⇒ ~46 MB extra y ~1000
+> hebras; 10.000 ⇒ ~460 MB y ~10.000 hebras (escala lineal). UDP no abre conexiones (coste
+> plano). Recomendaciones: si esperas **muchísimas** conexiones TCP/TLS persistentes, usa la
+> topología de **microservicios** para aislar el contenedor `syslog` y ajústale `mem_limit` /
+> límites de hilos acorde; prefiere **UDP** o conexiones TCP cortas cuando sea viable. La
+> mayoría de instalaciones (decenas-cientos de hosts) caben de sobra en el contenedor
+> monolítico por defecto.
+
 Ambas topologías de microservicios definen dos **redes** (ver
 [Redes](#redes)): `backend` (tráfico interno servicio↔servicio y bases de datos —
 las BD viven **solo** aquí) y `frontend` (plano externo: el panel web y, en la
@@ -324,7 +335,7 @@ versión). Para que un cambio se aplique **al instante** en vez de esperar al
 reconcile periódico, define `SS_CONTROL_TOKEN` (igual en todos los contenedores):
 el panel hará un *poke* `POST /control/reconcile` al servicio. Es un acelerador
 opcional — sin token, todo sigue funcionando por el reconcile. Ver
-[architecture.md → Plano de control distribuido](architecture.md#plano-de-control-distribuido-servicios-en-otros-procesos--pods).
+[services.md → Plano de control distribuido](services.md#modo-microservicios-plano-de-control-distribuido).
 
 ### Variables sensibles
 

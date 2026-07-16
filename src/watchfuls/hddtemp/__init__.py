@@ -85,7 +85,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = f'HDD: {hddtemp.label} - *Error: {exc}* 💥'
+                    message = self._msg('hdd_error', hddtemp.label, exc)
                     self.dict_return.set(hddtemp.item_key, False, message,
                                          other_data={'name': hddtemp.label})
 
@@ -101,28 +101,28 @@ class Watchful(ModuleBase):
 
                     if isinstance(hdd_temp, int):
                         status = hdd_alert >= hdd_temp
-                        s_message = f'({hddtemp.label}): *{hdd_dev}* *({hdd_temp}º{hdd_unit})*'
-                        if status:
-                            s_message += '🔼'
-                        else:
-                            s_message += '🔽'
+                        s_message = self._msg('hdd_ok' if status else 'hdd_high',
+                                              hddtemp.label, hdd_dev, hdd_temp, hdd_unit)
                     else:
                         status = False
-                        s_message = f'({hddtemp.label}): *{hdd_dev}* *({hdd_temp})* 🔥🔥'
+                        s_message = self._msg('hdd_bad', hddtemp.label, hdd_dev, hdd_temp)
 
                     # Result key is the opaque "<item_uid>_<disk>"; carry a
                     # friendly display name for status/latest views.
                     other_data = dict(value)
                     other_data['name'] = f'{hddtemp.label} - {hdd_dev}'
-                    self.dict_return.set(hdd_name, status, s_message, False, other_data)
+                    # An over-temperature disk is a warning (the reading succeeded); a failed
+                    # hddtemp query (the else branch below) stays a down.
+                    self.dict_return.set(hdd_name, status, s_message, False, other_data,
+                                         severity='warning')
 
                     if self.check_status(status, self.name_module, hdd_name):
-                        self.send_message(s_message, status, item=f'{hddtemp.label} - {hdd_dev}')
+                        self.send_message(s_message, status, item=f'{hddtemp.label} - {hdd_dev}',
+                                          severity='warning')
 
         else:
             self._debug(f"{hddtemp.label} >> Exception: {hddtemp.error}", DebugLevel.warning)
-            s_message = f'HddTemp: {hddtemp.label} - *Error:* *{hddtemp.error}*'
-            s_message += '🔽'
+            s_message = self._msg('hdd_query_error', hddtemp.label, hddtemp.error)
 
             other_data = {'message': str(hddtemp.error), 'name': hddtemp.label}
             self.dict_return.set(hddtemp.item_key, False, s_message, False, other_data)

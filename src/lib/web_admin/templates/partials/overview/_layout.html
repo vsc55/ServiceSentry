@@ -321,24 +321,38 @@ function _dwSetSyslogSev(sel) {
 }
 
 // Set the modules table widget's filter (all / active on / error).
-function _dwSetModuleFilter(sel) {
+// Set a data-driven table widget's filter. Generic over the filter's `store` key (carried
+// on the <select> as data-fstore), so every descriptor-declared table filter (modules_list
+// srvf/modf, servers_list, …) shares one handler — no per-widget setter to add.
+function _dwSetTableFilter(sel) {
     const dw = sel.closest('.dw[data-wid]');
     if (!dw) return;
-    if (sel.value === '') delete dw.dataset.modf; else dw.dataset.modf = sel.value;
+    const store = sel.dataset.fstore;
+    if (!store) return;
+    if (sel.value === '') delete dw.dataset[store]; else dw.dataset[store] = sel.value;
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwTableFetch(dw.dataset.wid);   // data-driven table: re-fetch rows for the new filter
     _dwSave();
 }
 
-// Set the servers table widget's host filter (all / error / maintenance / both).
-function _dwSetServerFilter(sel) {
-    const dw = sel.closest('.dw[data-wid]');
-    if (!dw) return;
-    if (sel.value === '') delete dw.dataset.srvf; else dw.dataset.srvf = sel.value;
+// Compound severity filter: recompose the level + operator + maintenance controls into the
+// single stored value (via _dwSevEncode). Shows the =/≥ operator only for a severity level.
+function _dwSetSevFilter(el) {
+    const wrap = el.closest('[data-sevfilter]');
+    const dw = el.closest('.dw[data-wid]');
+    if (!wrap || !dw) return;
+    const store = wrap.dataset.fstore;
+    const level = wrap.querySelector('.dw-sev-level').value;
+    const opSel = wrap.querySelector('.dw-sev-op');
+    const maintEl = wrap.querySelector('.dw-sev-maint');
+    const isSev = level === 'warning' || level === 'error';
+    if (opSel) opSel.style.display = isSev ? '' : 'none';   // operator only for a severity level
+    const val = _dwSevEncode(level, isSev && opSel ? opSel.value : '', !!(maintEl && maintEl.checked));
+    if (val === '') delete dw.dataset[store]; else dw.dataset[store] = val;
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
-    _dwTableFetch(dw.dataset.wid);   // data-driven table: re-fetch rows for the new filter
+    _dwTableFetch(dw.dataset.wid);
     _dwSave();
 }
 
@@ -601,22 +615,42 @@ function _dwToolbar(id, cols, h, item) {
         tb += `<select class="form-select form-select-sm dw-sev py-0" style="width:auto;min-width:5.5em;font-size:.72rem"
             onchange="_dwSetSyslogSev(this)" title="${escAttr(t('syslog_min_severity'))}">${opts.join('')}</select>`;
     }
-    // Modules table widget: which modules to show (all / active on / error).
-    if (id === 'modules_list') {
-        const f = item ? (item.modf ?? '') : '';
-        const mo = [['', t('all')], ['on', t('dw_mod_on')], ['error', t('host_status_error')]]
-            .map(([v, lbl]) => `<option value="${v}"${f === v ? ' selected' : ''}>${esc(lbl)}</option>`).join('');
-        tb += `<select class="form-select form-select-sm dw-modf py-0" style="width:auto;min-width:6em;font-size:.72rem"
-            onchange="_dwSetModuleFilter(this)" title="${escAttr(t('dw_mod_filter'))}">${mo}</select>`;
+    // Data-driven table widget whose filter options come from the descriptor
+    // (view.filter.options, declared in the domain's overview_widget.py). Built generically
+    // so a new filter option needs NO change here — only the backend descriptor. (Syslog's
+    // severity filter has no `options` — it uses badge_fn:'sev' above — so it's skipped here.)
+    const _tv = (_DW_DEFS[id] || {}).view;
+    if (_tv && _tv.kind === 'table' && _tv.filter && Array.isArray(_tv.filter.options)) {
+        const store = _tv.filter.store;
+        const f = item ? (item[store] ?? '') : '';
+        const opts = _tv.filter.options.map(o =>
+            `<option value="${escAttr(o.v)}"${f === o.v ? ' selected' : ''}>${esc(t(o.label_key))}</option>`).join('');
+        tb += `<select class="form-select form-select-sm py-0" data-fstore="${escAttr(store)}"
+            style="width:auto;min-width:6em;font-size:.72rem"
+            onchange="_dwSetTableFilter(this)" title="${escAttr(t(_tv.filter.title_key || 'all'))}">${opts}</select>`;
     }
-    // Servers table widget: which hosts to show (all / error / maintenance / both).
-    if (id === 'servers_list') {
-        const f = item ? (item.srvf ?? '') : '';
-        const so = [['', t('all')], ['error', t('host_status_error')],
-                    ['maint', t('host_status_maintenance')], ['errmaint', t('dw_srv_err_maint')]]
-            .map(([v, lbl]) => `<option value="${v}"${f === v ? ' selected' : ''}>${esc(lbl)}</option>`).join('');
-        tb += `<select class="form-select form-select-sm dw-srvf py-0" style="width:auto;min-width:6em;font-size:.72rem"
-            onchange="_dwSetServerFilter(this)" title="${escAttr(t('dw_srv_filter'))}">${so}</select>`;
+    // Compound severity filter: level <select> + operator (≥/=) + optional maintenance check,
+    // all composing into the single stored value. Descriptor-declared (view.filter.levels), so
+    // a new level is a backend-only change.
+    if (_tv && _tv.kind === 'table' && _tv.filter && _tv.filter.kind === 'severity') {
+        const fl = _tv.filter, store = fl.store;
+        const cur = _dwSevDecode(item ? (item[store] ?? '') : '');
+        const isSev = cur.level === 'warning' || cur.level === 'error';
+        const lvlOpts = (fl.levels || []).map(o =>
+            `<option value="${escAttr(o.v)}"${cur.level === o.v ? ' selected' : ''}>${esc(t(o.label_key))}</option>`).join('');
+        tb += `<span class="d-inline-flex align-items-center gap-1" data-sevfilter data-fstore="${escAttr(store)}">`;
+        tb += `<select class="form-select form-select-sm py-0 dw-sev-op" title="${escAttr(t('dw_sev_op'))}"
+            style="width:auto;font-size:.72rem${isSev ? '' : ';display:none'}" onchange="_dwSetSevFilter(this)">
+            <option value="ge"${cur.op !== 'eq' ? ' selected' : ''}>≥</option>
+            <option value="eq"${cur.op === 'eq' ? ' selected' : ''}>=</option></select>`;
+        tb += `<select class="form-select form-select-sm py-0 dw-sev-level" title="${escAttr(t('dw_filter'))}"
+            style="width:auto;min-width:6em;font-size:.72rem" onchange="_dwSetSevFilter(this)">${lvlOpts}</select>`;
+        if (fl.maintenance)
+            tb += `<label class="d-inline-flex align-items-center gap-1 small text-muted mb-0" style="cursor:pointer"
+                title="${escAttr(t('host_status_maintenance'))}">
+                <input type="checkbox" class="form-check-input mt-0 dw-sev-maint"${cur.maint ? ' checked' : ''}
+                    onchange="_dwSetSevFilter(this)"><i class="bi bi-cone-striped"></i></label>`;
+        tb += `</span>`;
     }
     if (_dwIsModuleWidget(id)) {
         const f = item ? (item.mws ?? '') : '';

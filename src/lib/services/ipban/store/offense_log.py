@@ -62,6 +62,7 @@ class OffenseLogStore:
         try:
             row = self._db.fetchone(f'SELECT MAX(id) FROM {_TL}')
             if row and row[0] and row[0] > _MAX_LOG:
-                self._db.execute(f'DELETE FROM {_TL} WHERE id <= ?', (row[0] - _MAX_LOG,))
+                with self._db.transaction():   # commit so the trim persists on PG/MySQL
+                    self._db.execute(f'DELETE FROM {_TL} WHERE id <= ?', (row[0] - _MAX_LOG,))
         except Exception:  # pylint: disable=broad-except
             pass

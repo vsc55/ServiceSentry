@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover
 class PostgreSQLConnector(BaseConnector):
     """Thread-safe PostgreSQL connector via psycopg2."""
 
+    KIND              = 'postgresql'
     DDL_AUTOINCREMENT = 'SERIAL PRIMARY KEY'
     DDL_REAL          = 'DOUBLE PRECISION'
     DDL_TEXT          = 'TEXT'
@@ -83,7 +84,7 @@ class PostgreSQLConnector(BaseConnector):
         with conn.cursor() as cur:
             cur.execute(
                 'SELECT column_name FROM information_schema.columns '
-                'WHERE table_name=%s AND column_name=%s',
+                'WHERE table_name=%s AND column_name=%s AND table_schema=current_schema()',
                 (table, column),
             )
             if not cur.fetchone():
@@ -97,12 +98,15 @@ class PostgreSQLConnector(BaseConnector):
         with conn.cursor() as cur:
             cur.execute(
                 'SELECT column_name FROM information_schema.columns '
-                'WHERE table_name=%s',
+                'WHERE table_name=%s AND table_schema=current_schema()',
                 (table,),
             )
             return {row[0] for row in cur.fetchall()}
 
     def describe_table(self, table: str) -> list[ColumnInfo]:
+        """Introspect *table*'s columns from ``information_schema.columns`` (current
+        schema), ordered by ``ordinal_position``. PK membership is resolved
+        separately from ``pg_index``/``pg_attribute`` and flagged on each column."""
         conn = self._conn()
         with conn.cursor() as cur:
             cur.execute(
@@ -116,7 +120,8 @@ class PostgreSQLConnector(BaseConnector):
             cur.execute(
                 'SELECT column_name, data_type, is_nullable, column_default '
                 'FROM information_schema.columns '
-                'WHERE table_name=%s ORDER BY ordinal_position',
+                'WHERE table_name=%s AND table_schema=current_schema() '
+                'ORDER BY ordinal_position',
                 (table,),
             )
             return [
@@ -129,6 +134,9 @@ class PostgreSQLConnector(BaseConnector):
             ]
 
     def list_indexes(self, table: str) -> list[IndexInfo]:
+        """List *table*'s secondary indexes from the ``pg_index``/``pg_class``/
+        ``pg_attribute`` catalogs (current schema), preserving column order via the
+        unnested ``indkey`` ordinality. Primary-key indexes are excluded."""
         conn = self._conn()
         grouped: dict[str, list] = {}
         unique_flag: dict[str, bool] = {}
@@ -143,6 +151,7 @@ class PostgreSQLConnector(BaseConnector):
                 'JOIN pg_attribute a '
                 '  ON a.attrelid = tc.oid AND a.attnum = k.attnum '
                 'WHERE tc.relname = %s AND NOT ix.indisprimary '
+                'AND tc.relnamespace = current_schema()::regnamespace '
                 'ORDER BY ic.relname, k.ord',
                 (table,),
             )
@@ -193,6 +202,11 @@ class PostgreSQLConnector(BaseConnector):
     # ── Maintenance ───────────────────────────────────────────────────────────
 
     def vacuum(self) -> None:
+        """Run ``VACUUM ANALYZE`` to reclaim space and refresh planner statistics.
+
+        VACUUM cannot run inside a transaction block, so autocommit is toggled on for
+        the call and restored afterwards.
+        """
         conn = self._conn()
         old_autocommit = conn.autocommit
         conn.autocommit = True

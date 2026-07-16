@@ -27,6 +27,8 @@ class OidcUnavailableError(RuntimeError):
 
 
 def is_available() -> bool:
+    """Return True when the optional ``authlib`` package is installed; when False,
+    the OIDC SSO routes are not registered."""
     return _HAS_AUTHLIB
 
 
@@ -162,6 +164,15 @@ def sync_user(wa, userinfo: dict) -> dict | None:
         }
         wa._users[username] = user
     else:
+        # Never silently convert a LOCAL (or unmarked) account to SSO on a username
+        # collision — that would let an IdP user whose username claim resolves to an
+        # existing local account (e.g. a local `admin`) take it over, inheriting its
+        # groups/role. Converting a local account to SSO must be an explicit admin action
+        # (set auth_source in the user editor). SCIM/other-SSO accounts still re-link.
+        if existing.get('auth_source', 'local') in ('', 'local'):
+            wa._dbg(f"> Auth/OIDC >> username {username!r} collides with a local account; "
+                    f"refusing auto-conversion to SSO", DebugLevel.warning)
+            return None
         user = existing
         user['auth_source']    = 'oidc'
         user['auth_source_id'] = sub

@@ -19,6 +19,7 @@ from .schema import ColumnInfo, IndexInfo, TableSpec
 class SQLiteConnector(BaseConnector):
     """Thread-safe SQLite connector backed by ``threading.local``."""
 
+    KIND              = 'sqlite'
     DDL_AUTOINCREMENT = 'INTEGER PRIMARY KEY AUTOINCREMENT'
     DDL_REAL          = 'REAL'
     DDL_TEXT          = 'TEXT'
@@ -77,6 +78,7 @@ class SQLiteConnector(BaseConnector):
         }
 
     def describe_table(self, table: str) -> list[ColumnInfo]:
+        """Introspect *table*'s columns via ``PRAGMA table_info``, in physical order."""
         # PRAGMA table_info: (cid, name, type, notnull, dflt_value, pk)
         rows = self._conn().execute(f'PRAGMA table_info({table})').fetchall()
         return [
@@ -88,6 +90,9 @@ class SQLiteConnector(BaseConnector):
         ]
 
     def list_indexes(self, table: str) -> list[IndexInfo]:
+        """List *table*'s explicit ``CREATE INDEX`` indexes via ``PRAGMA index_list`` /
+        ``index_info``. Autoindexes backing PRIMARY KEY / UNIQUE constraints (origin
+        != 'c') and expression columns are skipped."""
         conn = self._conn()
         out: list[IndexInfo] = []
         # PRAGMA index_list: (seq, name, unique, origin, partial)
@@ -154,6 +159,12 @@ class SQLiteConnector(BaseConnector):
     # ── Maintenance ───────────────────────────────────────────────────────────
 
     def vacuum(self) -> None:
+        """Rebuild the database file to reclaim free space (``VACUUM``).
+
+        Commits any open transaction first (VACUUM cannot run inside one) and then
+        drops this thread's connection, since the file is rebuilt in place and some
+        ``sqlite3`` versions keep a stale cache afterwards.
+        """
         # VACUUM must run outside an open transaction.
         conn = self._conn()
         conn.commit()

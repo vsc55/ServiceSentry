@@ -96,7 +96,7 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"SSL Cert: {item['key']} - Exception: {exc}", DebugLevel.error)
-                    message = f'SSL Cert: {item.get("label") or item["key"]} - *Error: {exc}* 💥'
+                    message = self._msg('ssl_error', item.get('label') or item['key'], exc)
                     self.dict_return.set(item['key'], False, message)
 
         super().check()
@@ -129,11 +129,11 @@ class Watchful(ModuleBase):
         ok = days_left > warning_days
 
         if ok:
-            message = f'SSL Cert: *{label}* - expires in {days_left:.1f} days ✅'
+            message = self._msg('ssl_ok', label, f'{days_left:.1f}')
         elif days_left <= 0:
-            message = f'SSL Cert: *{label}* - EXPIRED ({abs(days_left):.1f} days ago) ⚠️'
+            message = self._msg('ssl_expired', label, f'{abs(days_left):.1f}')
         else:
-            message = f'SSL Cert: *{label}* - expires in {days_left:.1f} days (warning threshold: {warning_days}d) ⚠️'
+            message = self._msg('ssl_expiring', label, f'{days_left:.1f}', warning_days)
 
         other_data = {
             'host': host,
@@ -143,10 +143,13 @@ class Watchful(ModuleBase):
             'days_left': round(days_left, 2),
             'expires': expires_str,
         }
-        self.dict_return.set(key, ok, message, False, other_data)
+        # Approaching the expiry threshold is a warning; an already-EXPIRED cert is a hard
+        # problem (down).  A connection/handshake failure raises above and is reported as down.
+        severity = 'warning' if (not ok and days_left > 0) else ''
+        self.dict_return.set(key, ok, message, False, other_data, severity=severity)
 
         if self.check_status(ok, self.name_module, key):
-            self.send_message(message, ok, item=label)
+            self.send_message(message, ok, item=label, severity=severity)
 
     @staticmethod
     def _cert_expiry(der: bytes):

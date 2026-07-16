@@ -47,12 +47,13 @@ def register(app, wa):
     config_view_req = wa._perm_required('config_view', 'config_edit')
     config_edit_req = wa._perm_required('config_edit')
 
-    store = wa._webhooks_store
+    from lib.core.notify.webhook import channel as _channel
+    store = _channel.get_store(wa._notify)
 
     @app.route('/api/v1/notify/webhooks', methods=['GET'])
     @config_view_req
     def api_list_webhooks():
-        return jsonify({'webhooks': secret_manager.mask_sensitive(wa._load_webhooks())})
+        return jsonify({'webhooks': secret_manager.mask_sensitive(_channel.load(wa._notify))})
 
     @app.route('/api/v1/notify/webhooks', methods=['POST'])
     @config_edit_req

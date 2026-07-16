@@ -81,12 +81,34 @@ class _MonitoringMixin:
 
     def _monitoring_audit(self, event: str, detail: dict | None = None) -> None:
         """Emit an audit event when the host provides a sink (the WebAdmin does;
-        the standalone service has none — it logs instead)."""
-        fn = getattr(self, '_audit_system', None)
+        the standalone service has none — it logs instead).  Prefers the actor-aware
+        sink (``_audit_auto``): a manual start/stop is attributed to the request user,
+        an autostart/background one to 'system' — a single row either way."""
+        fn = getattr(self, '_audit_auto', None) or getattr(self, '_audit_system', None)
         if fn is None:
             return
         try:
             fn(event, detail or {})
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    def _monitoring_notify(self, kind: str, *args) -> None:
+        """Forward a scheduler lifecycle change to the notification router (opt-in matrix,
+        default off) — separate from the health domain's crash detection, which deliberately
+        ignores a clean operator start/stop.  Body/status are translated in the system
+        notification language (``notif_msg_{kind}`` with *args* filling its ``{}``)."""
+        try:
+            import time as _time  # noqa: PLC0415
+            from lib.core.notify.notification_dispatcher import dispatch  # noqa: PLC0415
+            from lib.core.notify.formatting import notify_lang, notify_text  # noqa: PLC0415
+            cfg = self._read_config_file(self._CONFIG_FILE) or {}
+            lang = notify_lang(cfg)
+            status_key = ('notif_status_started' if kind == 'scheduler_started'
+                          else 'notif_status_stopped')
+            dispatch(self, kind=kind, module='scheduler',
+                     status=notify_text(cfg, lang, status_key),
+                     message=notify_text(cfg, lang, f'notif_msg_{kind}', *args),
+                     timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'))
         except Exception:  # pylint: disable=broad-except
             pass
 
@@ -142,7 +164,7 @@ class _MonitoringMixin:
             if self._monitoring_running:
                 return False
             self._monitoring_stop_event.clear()
-            self._monitoring_dispose_monitor()   # drop any prior monitor (closes its Telegram thread)
+            self._monitoring_dispose_monitor()   # drop any prior monitor so a fresh one is built
             self._monitoring_thread = threading.Thread(
                 target=self._monitoring_loop,
                 args=(run_now,),
@@ -150,10 +172,12 @@ class _MonitoringMixin:
                 name='ss-scheduler',
             )
             self._monitoring_thread.start()
+        interval = self._monitoring_interval
         self._monitoring_audit('daemon_started', {
-            'interval': self._monitoring_interval,
+            'interval': interval,
             'run_now':  run_now,
         })
+        self._monitoring_notify('scheduler_started', interval)
         return True
 
     def _monitoring_stop(self) -> bool:
@@ -163,10 +187,11 @@ class _MonitoringMixin:
                 return False
             self._monitoring_stop_event.set()
             self._monitoring_next_run_ts = 0.0
-            # The scheduler thread disposes the monitor (and closes its Telegram thread)
-            # in its finally on exit — doing it here would race with an in-flight cycle
-            # re-creating the monitor via _monitoring_get_monitor().
+            # The scheduler thread disposes the monitor in its finally on exit — doing it
+            # here would race with an in-flight cycle re-creating the monitor via
+            # _monitoring_get_monitor().
         self._monitoring_audit('daemon_stopped', {})
+        self._monitoring_notify('scheduler_stopped')
         return True
 
     # ── Imperative commands (run-now / clear / reload) ─────────────────────────
@@ -234,8 +259,9 @@ class _MonitoringMixin:
         return self._monitoring_monitor
 
     def _monitoring_dispose_monitor(self) -> None:
-        """Drop the persistent Monitor, closing it first so its Telegram sender thread
-        (``pool_run``) is stopped — otherwise each start/stop cycle leaks one thread."""
+        """Drop the persistent Monitor (calling ``close()`` first), so the next start
+        rebuilds it with fresh runtime config.  Notifications are synchronous via the
+        injected ``MonitorNotifier`` — there is no background Telegram sender thread."""
         mon = self._monitoring_monitor
         self._monitoring_monitor = None
         if mon is not None:
@@ -285,7 +311,8 @@ class _MonitoringMixin:
 
     def _monitoring_loop(self, run_now: bool) -> None:
         """Scheduler thread entry point. Always disposes the persistent monitor on exit
-        (closing its Telegram sender thread) so start/stop cycles don't leak threads."""
+        so the next start rebuilds it with fresh config (no threads are leaked — sending
+        is synchronous through the MonitorNotifier)."""
         try:
             self._monitoring_loop_body(run_now)
         finally:

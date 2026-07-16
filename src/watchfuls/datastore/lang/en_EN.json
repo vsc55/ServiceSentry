@@ -150,5 +150,17 @@
     "new_item_title": "New Datastore",
     "new_item_key_label": "Connection name:",
     "rename_item_prompt": "Enter new connection name:",
-    "collections": {"list": "Datastores"}
+    "collections": {"list": "Datastores"},
+    "messages": {
+        "ds_error":      "Datastore: {} - Error: {} 💥",
+        "ds_conn_high":  "{} - {} connections > {} ⚠️",
+        "ds_ok":         "{} — {} ✅",
+        "ds_conn_error": "{} - Error: {} ⚠️"
+    },
+    "messages_vars": {
+        "ds_error": ["datastore", "error"],
+        "ds_conn_high": ["datastore", "connections", "limit"],
+        "ds_ok": ["datastore", "detail"],
+        "ds_conn_error": ["datastore", "error"]
+    }
 }

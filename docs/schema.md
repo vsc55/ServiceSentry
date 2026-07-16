@@ -698,7 +698,7 @@ en [i18n.md → Resolución de etiquetas](i18n.md#resolución-de-etiquetas-en-el
 Declara los campos de conexión que un check puede **heredar de un host vinculado**
 del registro. Dict (o lista de dicts) con `{"key": <protocolo>, "address_field":
 <campo de dirección>, "fields": [campos a heredar]}`. Lo resuelve
-`ModuleBase.resolve_host()`. Ver [web_admin.md → Servers](web_admin.md#servers-registro-de-hosts).
+`ModuleBase.resolve_host()`. Ver [web-admin.md → Servers](web-admin.md#servers-registro-de-hosts).
 
 ```json
 "__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host"]}
@@ -856,3 +856,147 @@ Usa `SUPPORTED_PLATFORMS` en la clase cuando el módulo entero es inútil en esa
 | `temperature` | `__module__`, `list` | — | — | ✓ | — | — | — | — | — |
 | `ups` | `__module__`, `list` | — | ✓ | — | — | — | — | — | — |
 | `web` | `__module__`, `list` | — | ✓ | — | — | — | — | — | — |
+
+---
+
+## Esquema de base de datos (tablas relacionales)
+
+Las secciones anteriores describen el `schema.json` de los **módulos watchful**:
+el esquema de **configuración** (qué campos tiene cada módulo y cómo se renderizan
+en la UI). Esta sección documenta algo distinto: el esquema **relacional** de la
+base de datos, es decir, las **tablas** donde ServiceSentry persiste su estado.
+
+### Motor de base de datos y convenciones
+
+- **Motor conectable (SQLite / MySQL·MariaDB / PostgreSQL)** a través de `lib/db`.
+  Todos los stores (`lib/core/*/store.py` y `lib/services/*/store/`) reciben un
+  `BaseConnector` inyectado y nunca hablan con un driver concreto. Ver
+  [architecture.md → Capa de Persistencia y Esquema de BD](architecture.md#capa-de-persistencia-y-esquema-de-bd).
+- **DDL con tokens simbólicos.** Cada columna declara un tipo simbólico
+  (`TEXT`, `INTEGER`, `REAL`, `AUTOINCREMENT`) que el conector mapea al tipo nativo
+  del motor; los identificadores reservados (`key`, `user`, `virtual`, `groups`…)
+  se citan de forma dependiente del dialecto.
+- **Esquema declarativo + reconciliación.** Cada tabla se define **una sola vez**
+  como `TableSpec` en su `store.py` (fuente de verdad: columnas, orden, tipos,
+  nullable, defaults, PK, índices, renombrados). En el arranque,
+  `connector.reconcile_table(spec)` (`lib/db/schema.py`) compara la tabla real con
+  la definición y la crea o migra automáticamente, preservando los datos.
+- **Sin claves foráneas físicas.** No hay `FOREIGN KEY` en el esquema: las
+  relaciones entre tablas son **lógicas**, por columnas `uid` (p. ej.
+  `users_groups.user_uid → users.uid`). Se resuelven en el código de los stores,
+  no en el motor.
+- **La capa editable de configuración vive en la tabla `config`** — una fila por
+  campo, con clave `section|field` (p. ej. `web_admin|lang`). No es una tabla por
+  sección: es un almacén clave-valor. Ver
+  [configuration.md → Dónde vive la configuración](configuration.md#dónde-vive-la-configuración-bd--configjson).
+- **Fechas** en `TEXT` ISO 8601 UTC (`created_at`/`updated_at`…); las series de
+  alto volumen (`history.ts`, `check_state.last_change_ts`, timestamps de servicios)
+  usan `REAL` (epoch Unix).
+- Las columnas anotadas como **`data`/`profiles`/`extra`/`detail` (JSON)** guardan
+  un blob JSON; los campos secretos dentro de ellos se cifran en reposo con Fernet
+  (ver [security.md](security.md)).
+
+En total hay **32 tablas fijas** (16 del núcleo, 14 de servicios y 2 de syslog),
+más las **tablas dinámicas por módulo** (`mod_<módulo>_<name>`, ver más abajo).
+Casi todas usan un `uid` (UUID) como PK por convención; las tablas de alto volumen
+o append-only usan un `id` autoincremental.
+
+### Tablas del núcleo (`lib/core/*`) — BD principal
+
+Estado del panel: usuarios, grupos, roles, hosts, credenciales, configuración de
+módulos, auditoría, historial y los destinos de notificación por canal.
+
+| Tabla | PK | Columnas clave | Índices | Store |
+|-------|----|----------------|---------|-------|
+| `users` | `uid` | `username` (UNIQUE), `password_hash`, `role`, `display_name`, `email`, `lang`, `dark_mode`, `enabled`, `auth_source`, `extra` (JSON), auditoría | `idx_users_role` | `core/users/store.py` |
+| `users_groups` | `uid` | `user_uid`, `group_uid` — UNIQUE(`user_uid`,`group_uid`) | `idx_users_groups_user`, `idx_users_groups_group` | `core/users/store.py` |
+| `groups` | `uid` | `name` (UNIQUE), `description`, `enabled`, `landing_page`, `source`, `external_id`, auditoría | `idx_groups_name` (UNIQUE) | `core/groups/store.py` |
+| `groups_roles` | `uid` | `group_uid`, `role_uid` — UNIQUE(`group_uid`,`role_uid`), `created_at`/`created_by` | `idx_gr_group`, `idx_gr_role` | `core/groups/store.py` |
+| `roles` | `uid` | `name` (UNIQUE), `description`, `permissions` (JSON), `enabled`, auditoría | `idx_roles_name` (UNIQUE) | `core/roles/store.py` |
+| `sessions` | `token` | `uid` (id público), `user_uid`, `created`, `last_seen`, `ip`, `user_agent` | `idx_sessions_user_uid` | `core/sessions/store.py` |
+| `credentials` | `uid` | `name` (UNIQUE), `ctype`, `enabled`, `description`, `data` (JSON, secretos cifrados), auditoría | `idx_credentials_name` | `core/credentials/store.py` |
+| `hosts` | `uid` | `name` (UNIQUE), `address`, `kind`, `os`, `maintenance`, `virtual`, `tags` (JSON), `profiles` (JSON, secretos cifrados), `modules` (JSON), auditoría | `idx_hosts_name` | `core/hosts/store.py` |
+| `module_config` | `uid` | `module` (UNIQUE), `data` (JSON: campos de módulo + meta `__*__`), auditoría | `idx_module_config_module` | `core/modules/store.py` |
+| `module_config_items` | `uid` | `module_uid` → `module_config.uid`, `collection`, `host_uid` → `hosts.uid`, `label`, `enabled`, `data` (JSON), auditoría | `idx_module_config_items_moduid`, `idx_module_config_items_host` | `core/modules/store.py` |
+| `config` | `uid` | `path` (UNIQUE, `section\|field`), `value` (JSON), auditoría | `idx_config_path` | `core/config/store.py` |
+| `audit` | `id` (auto) | `ts`, `event`, `user`, `ip`, `detail` (JSON) | `idx_audit_id` (DESC), `idx_audit_event` | `core/audit/store.py` |
+| `history` | `id` (auto) | `ts` (REAL), `module`, `item_uid`, `key`, `status`, `data` (JSON) | `idx_history_uid_ts`, `idx_history_mkts` | `core/history/store.py` |
+| `webhooks` | `uid` | `data` (JSON: url/method/headers/body/secret cifrado), auditoría | — | `core/notify/webhook/store.py` |
+| `msteams_channels` | `uid` | `data` (JSON: name/enabled/webhook_url cifrado), auditoría | — | `core/notify/msteams/store.py` |
+| `msteams_bot_refs` | `user_key` | `data` (JSON: service_url/conversation_id/user_id/upn/name), `updated_at` | — | `core/notify/msteams/bot_store.py` |
+
+> «auditoría» = las columnas `created_at`, `updated_at`, `updated_by` (ISO 8601 UTC).
+
+### Tablas de servicios (`lib/services/*`) — BD principal
+
+Plano de control distribuido (heartbeat / comandos / líder), estado de checks,
+gestor de eventos e IP ban interno (fail2ban).
+
+| Tabla | PK | Columnas clave | Índices | Store |
+|-------|----|----------------|---------|-------|
+| `service_instances` | `uid` | `instance_id` (UNIQUE), `service_key`, `mode`, `host`, `pid`, `version`, `control_url`, `running`, `started_at`, `last_seen`, `last_cycle_at`, `detail` (JSON) | `idx_svcinst_key`, `idx_svcinst_lastseen` | `services/manager/instances.py` |
+| `service_commands` | `id` (auto) | `service_key`, `action`, `args` (JSON), `created_by`/`created_at`, `claimed_at`/`claimed_by`, `done_at`, `ok`, `result` | `idx_svccmd_pending`, `idx_svccmd_created` | `services/manager/commands.py` |
+| `service_leader` | `uid` | `service_key` (UNIQUE), `holder_instance_id`, `holder_host`, `acquired_at`, `renewed_at`, `expires_at` | — | `services/manager/leader.py` |
+| `check_state` | `uid` | `module`, `key`, `item_uid`, `metric`, `status`, `message`, `other_data` (JSON), `fail_count`, `last_change_ts`, `severity` — UNIQUE(`module`,`key`,`metric`) | — | `services/monitoring/check_state/store.py` |
+| `event_rules` | `uid` | `name`, `enabled`, `description`, `data` (JSON: source/events/match/channels/cooldown/last_fired…), auditoría | `idx_event_rules_name` | `services/events/store/rules.py` |
+| `event_cooldowns` | `uid` | `rule_uid` (UNIQUE) → `event_rules.uid`, `last_fire` (REAL) | — | `services/events/store/cooldowns.py` |
+| `event_cursor` | `uid` | `source` (UNIQUE), `last_id` (último id de la tabla-fuente evaluado) | — | `services/events/store/cursor.py` |
+| `event_rules_notifications` | `id` (auto) | `ts`, `rule_id`, `rule_name`, `source`, `channels`, `ok`, `message` | `idx_notiflog_ts` | `services/events/store/log.py` |
+| `ip_bans` | `uid` | `ip` (UNIQUE), `reason`, `category`, `level`, `offenses`, `banned_at`, `banned_until` (NULL = permanente), `first_seen`, `created_by`, `detail`, `block_action` | `idx_ip_bans_until` | `services/ipban/store/bans.py` |
+| `ip_ban_history` | `id` (auto) | `ip`, `event` (banned/escalated/unbanned), `reason`, `category`, `level`, `offenses`, `banned_at`, `banned_until`, `created_by`, `ts` | `idx_ip_banhist_ip` | `services/ipban/store/history.py` |
+| `ip_offense_counters` | `uid` | `ip`, `track`, `count`, `window_start`, `updated_at` — UNIQUE(`ip`,`track`) | `idx_ip_offc_updated` | `services/ipban/store/offense_counters.py` |
+| `ip_offense_log` | `id` (auto) | `ip`, `ts`, `category` | `idx_ip_offlog_ip` | `services/ipban/store/offense_log.py` |
+| `ip_service_action` | `uid` | `service` (UNIQUE), `action` (block-action por servicio expuesto) | — | `services/ipban/store/service_actions.py` |
+| `ip_whitelist` | `uid` | `value` (UNIQUE, IP/CIDR), `description`, `created_at`, `created_by` | `idx_ip_whitelist_value` | `services/ipban/store/whitelist.py` |
+
+### Tablas de syslog — BD de syslog (o principal)
+
+Estas dos tablas son las únicas que pueden vivir en una **base de datos dedicada**:
+cuando `syslog_db|enabled` está activo, `lib/db/build_syslog_connector()` crea un
+segundo `BaseConnector` apuntando a la sección `syslog_db` (aislar un flujo de alto
+volumen); si está desactivado, comparten la **BD principal** con el resto. Ver
+[configuration.md → Base de datos de syslog](configuration.md#base-de-datos-de-syslog-ss_syslog_db_)
+y [architecture.md → Base de datos de syslog dedicada](architecture.md#base-de-datos-de-syslog-dedicada).
+
+| Tabla | PK | Columnas clave | Índices | Store |
+|-------|----|----------------|---------|-------|
+| `syslog` | `id` (auto) | `ts` (REAL), `received_at`, `source`, `hostname`, `app`, `procid`, `severity`, `facility`, `msgid`, `message`, `raw` | `idx_syslog_ts`, `idx_syslog_sev_ts`, `idx_syslog_host_ts`, `idx_syslog_app_ts`, `idx_syslog_fac_ts` | `services/syslog/store/messages.py` |
+| `syslog_drops` | `uid` | `source` (UNIQUE), `transport`, `count`, `first_seen`, `last_seen` | `idx_syslog_drops_last` | `services/syslog/store/drops.py` |
+
+### Tablas dinámicas por módulo (`mod_<módulo>_<name>`)
+
+Además de las 32 tablas fijas, un **módulo watchful** puede declarar sus propias
+tablas (cachés, índices derivados, estado por módulo) en la BD principal —el mismo
+mecanismo que usan los stores del core—. El módulo expone una función
+`discover_db_tables()` que devuelve una lista de `TableSpec` construidos con
+`lib/db/module_tables.py → module_table(módulo, name, columnas, …)`, que **prefija
+el nombre** como `mod_<módulo>_<name>` para que nunca colisionen con las tablas del
+core ni entre módulos. En el arranque, `reconcile_module_tables()` descubre e
+[reconcilia](architecture.md#reconciliación-declarativa-de-esquema) todas las tablas
+de módulo sobre el conector compartido, igual que las del core. El módulo obtiene el
+conector en runtime vía `self.db` (contexto del monitor) o la clave `__connector__`
+inyectada en la config de la acción por la ruta web de watchfuls.
+
+### Diagrama de relaciones (lógicas, por `uid`)
+
+Las flechas representan relaciones **lógicas** (por columna `uid`), no claves
+foráneas físicas.
+
+```mermaid
+erDiagram
+    users ||--o{ users_groups : "user_uid"
+    groups ||--o{ users_groups : "group_uid"
+    groups ||--o{ groups_roles : "group_uid"
+    roles ||--o{ groups_roles : "role_uid"
+    users ||--o{ sessions : "user_uid"
+    hosts ||--o{ module_config_items : "host_uid"
+    module_config ||--o{ module_config_items : "module_uid"
+    module_config_items ||--o{ history : "item_uid"
+    module_config_items ||--o{ check_state : "item_uid"
+    event_rules ||--o{ event_cooldowns : "rule_uid"
+    event_rules ||--o{ event_rules_notifications : "rule_id"
+    ip_bans ||--o{ ip_ban_history : "ip"
+    ip_bans ||--o{ ip_offense_counters : "ip"
+    service_instances ||--o{ service_commands : "service_key"
+    service_instances ||--o{ service_leader : "service_key"
+```

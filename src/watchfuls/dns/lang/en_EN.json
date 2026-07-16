@@ -49,5 +49,19 @@
         "discover_axfr":         "Use AXFR (zone transfer)",
         "discover_axfr_server":  "AXFR nameserver (optional)",
         "item_added":            "Added {}"
+    },
+    "messages": {
+        "dns_exc":        "DNS: {} - Error: {} 💥",
+        "dns_error":      "DNS: {}: {} ⚠️",
+        "dns_ok":         "DNS: {} → {} ({} ms) ✅",
+        "dns_no_results": "DNS: {}: no results ⚠️",
+        "dns_unexpected": "DNS: {}: expected \"{}\" not in [{}] ⚠️"
+    },
+    "messages_vars": {
+        "dns_exc": ["host", "error"],
+        "dns_error": ["host", "error"],
+        "dns_ok": ["host", "result", "ms"],
+        "dns_no_results": ["host"],
+        "dns_unexpected": ["host", "expected", "got"]
     }
 }

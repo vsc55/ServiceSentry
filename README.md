@@ -158,10 +158,10 @@ sudo rc-update add ServiSesentry-web default && sudo rc-service ServiSesentry-we
 | [docs/architecture.md](docs/architecture.md) | Component diagram, class hierarchy, directory structure, execution flow |
 | [docs/configuration.md](docs/configuration.md) | config.json, module configuration (now in the database), CLI options, Telegram, debug |
 | [docs/modules.md](docs/modules.md) | All 15 modules: config reference, fields and flow |
-| [docs/web_admin.md](docs/web_admin.md) | Web admin features, roles, security, API endpoints |
+| [docs/web-admin.md](docs/web-admin.md) | Web admin features, roles, security, API endpoints |
 | [docs/security.md](docs/security.md) | Authentication, RBAC, sessions, XSS, path traversal, audit log and security tests |
 | [docs/development.md](docs/development.md) | Setup, tests, VS Code debug, conventions, dependencies |
-| [docs/watchful_guide.md](docs/watchful_guide.md) | Step-by-step guide to create a new watchful module |
+| [docs/watchful-guide.md](docs/watchful-guide.md) | Step-by-step guide to create a new watchful module |
 | [docs/schema.md](docs/schema.md) | Complete `schema.json` reference: all field properties, meta-keys, language files and `discover_schemas` pipeline |
 | [docs/i18n.md](docs/i18n.md) | Internationalisation system: two-tier architecture, `discover_schemas` pipeline, adding new languages |
 | [docs/tests.md](docs/tests.md) | Full test inventory: what each test checks, pass and fail conditions, organized by group |

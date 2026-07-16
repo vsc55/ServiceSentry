@@ -16,7 +16,7 @@
         "host":                 {"type": "str",  "default": "", "placeholder": "192.168.1.1", "group": "connection"},
         "port":                 {"type": "int",  "default": 161,   "min": 1,  "max": 65535, "group": "connection"},
         "version":              {"type": "str",  "default": "2c",  "options": ["1", "2c", "3"], "group": "auth"},
-        "community":            {"type": "str",  "default": "public", "group": "auth"},
+        "community":            {"type": "str",  "default": "public", "secret": true, "show_when": {"version": ["1", "2c"]}, "group": "auth"},
         "timeout":              {"type": "int",  "default": 5,     "min": 0, "inherit_blank": true,  "max": 60, "group": "connection"},
         "retries":              {"type": "int",  "default": 1,     "min": 0,  "max": 10, "group": "connection"},
         "snmpv3_username":      {"type": "str",  "default": "",    "show_when": {"version": ["3"]}, "group": "auth"},

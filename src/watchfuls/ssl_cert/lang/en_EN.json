@@ -29,5 +29,17 @@
     },
     "new_item_key_label": "Host name or identifier:",
     "rename_item_prompt": "Enter new host name or identifier:",
-    "collections": {"list": "Certificates"}
+    "collections": {"list": "Certificates"},
+    "messages": {
+        "ssl_error":    "SSL Cert: {} - Error: {} 💥",
+        "ssl_ok":       "SSL Cert: {} - expires in {} days ✅",
+        "ssl_expired":  "SSL Cert: {} - EXPIRED ({} days ago) ⚠️",
+        "ssl_expiring": "SSL Cert: {} - expires in {} days (warning threshold: {}d) ⚠️"
+    },
+    "messages_vars": {
+        "ssl_error": ["host", "error"],
+        "ssl_ok": ["host", "days"],
+        "ssl_expired": ["host", "days"],
+        "ssl_expiring": ["host", "days", "threshold (d)"]
+    }
 }

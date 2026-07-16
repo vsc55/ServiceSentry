@@ -41,10 +41,65 @@ def resource_sp(access_token: str, resource_app_id: str) -> dict:
     return val[0]
 
 
+# Microsoft Teams first-party client app ids, preauthorized for SSO so a Teams tab
+# can silently get a token — required for a Teams app to be admin-installable.
+_TEAMS_CLIENT_IDS = ('1fec8e78-bce4-4aaf-ab1b-5451cc387264',   # Teams desktop/mobile
+                     '5e3ce6c0-2b1f-4285-8d4b-75ee78787346')   # Teams web
+
+
+def _expose_api_sso(access_token: str, obj_id: str, client_id: str) -> bool:
+    """Configure the app's SSO API surface: Application ID URI ``api://<clientId>`` +
+    an ``access_as_user`` delegated scope + the Teams clients preauthorized for it.
+
+    Without this, an admin (unified) install of the matching Teams app fails its SSO
+    validation.  Returns True on success.  Retries a few times because a just-created
+    app may not have replicated yet (PATCH would 404)."""
+    import uuid  # noqa: PLC0415
+    from lib.core.object_base import ObjectBase  # noqa: PLC0415
+    from lib.debug import DebugLevel  # noqa: PLC0415
+    hdrs = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
+    # Deterministic scope id (stable across re-runs; no RNG needed).
+    scope_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'servicesentry:{client_id}:access_as_user'))
+    scope = {
+        'id': scope_id, 'value': 'access_as_user', 'type': 'User', 'isEnabled': True,
+        'adminConsentDisplayName': 'Access ServiceSentry as the user',
+        'adminConsentDescription': 'Allows Teams to call ServiceSentry on behalf of the signed-in user.',
+        'userConsentDisplayName': 'Access ServiceSentry as you',
+        'userConsentDescription': 'Allows Teams to call ServiceSentry on your behalf.',
+    }
+    # TWO steps: Graph validates preAuthorizedApplications.delegatedPermissionIds against
+    # the *already-stored* scopes, so the scope must be created FIRST (a single combined
+    # PATCH fails: "Permission Id ... cannot be found in the AppPermissions sets").
+    step1 = {'identifierUris': [f'api://{client_id}'], 'api': {'oauth2PermissionScopes': [scope]}}
+    step2 = {'api': {'oauth2PermissionScopes': [scope],
+                     'preAuthorizedApplications': [
+                         {'appId': cid, 'delegatedPermissionIds': [scope_id]} for cid in _TEAMS_CLIENT_IDS]}}
+
+    def _patch(body):
+        last = ''
+        for _ in range(4):                         # a just-created app / new scope may lag a few seconds
+            try:
+                r = _req.patch(f'{GRAPH_BASE}/applications/{obj_id}', headers=hdrs, timeout=15, json=body)
+                ObjectBase.debug.print(f'> Entra >> expose_api PATCH {obj_id}: HTTP {getattr(r, "status_code", "?")}',
+                                       DebugLevel.debug if r.ok else DebugLevel.warning)
+                if r.ok:
+                    return
+                last = graph_error(r)
+            except Exception as exc:  # pylint: disable=broad-except
+                last = str(exc)
+                ObjectBase.debug.print(f'> Entra >> expose_api PATCH error: {exc}', DebugLevel.warning)
+            _time.sleep(1.5)
+        raise RuntimeError(last or 'PATCH /applications failed')
+
+    _patch(step1)      # create the App ID URI + access_as_user scope
+    _patch(step2)      # now preauthorize the Teams clients for that (now-existing) scope
+    return True
+
+
 def provision_entra_app(access_token: str, tenant_id: str, resources: list, *,
                         app_name: str = DEFAULT_APP_NAME,
                         redirect_uris: list | None = None, group_claims: bool = False,
-                        require_assignment: bool = False) -> dict:
+                        require_assignment: bool = False, expose_api: bool = False) -> dict:
     """Create an Entra app declaring the given per-resource permissions
     (``[{resource, roles, scopes}]`` — see declarations.normalize_entraid_provision),
     add a client secret and admin-consent them. ``roles`` are *application*
@@ -55,7 +110,11 @@ def provision_entra_app(access_token: str, tenant_id: str, resources: list, *,
     Optional SSO-style properties for a *user sign-in* app (parity with the OIDC
     wizard; all no-ops when omitted, so an app-only app stays minimal):
     ``redirect_uris`` (web reply URLs), ``group_claims`` (emit the groups claim),
-    ``require_assignment`` (only assigned users/apps may sign in)."""
+    ``require_assignment`` (only assigned users/apps may sign in).
+
+    ``expose_api`` additionally configures the app's SSO surface (Application ID URI +
+    an ``access_as_user`` scope + the Teams clients preauthorized) — needed so the
+    matching Teams app can be admin-installed (used by the Teams-notifications wizard)."""
     hdrs = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
     rra, consent = [], []          # requiredResourceAccess + (resSpId, roleIds, scopeNames)
     for block in (resources or []):
@@ -96,6 +155,16 @@ def provision_entra_app(access_token: str, tenant_id: str, resources: list, *,
         raise RuntimeError((r.json().get('error') or {}).get('message') or r.text)
     created = r.json()
     obj_id, client_id = created['id'], created['appId']
+    # 1b) optional SSO API surface (Teams app installability). Never lose the created
+    #     app/secret over this — record success so the caller can warn if it failed
+    #     (the manual portal steps remain a fallback).
+    sso_exposed = None
+    sso_error = ''
+    if expose_api:
+        try:
+            sso_exposed = _expose_api_sso(access_token, obj_id, client_id)
+        except Exception as exc:  # pylint: disable=broad-except
+            sso_exposed, sso_error = False, str(exc)
     # 2) client secret.
     r2 = _req.post(f'{GRAPH_BASE}/applications/{obj_id}/addPassword', headers=hdrs, timeout=15,
                    json={'passwordCredential': {'displayName': app_name, 'endDateTime': '2099-12-31T00:00:00Z'}})
@@ -131,7 +200,12 @@ def provision_entra_app(access_token: str, tenant_id: str, resources: list, *,
                         pass
     except Exception:  # pylint: disable=broad-except
         pass
-    return {'tenant_id': tenant_id, 'client_id': client_id, 'client_secret': client_secret}
+    out = {'tenant_id': tenant_id, 'client_id': client_id, 'client_secret': client_secret}
+    if expose_api:
+        out['sso_exposed'] = bool(sso_exposed)
+        if sso_error:
+            out['sso_error'] = sso_error
+    return out
 
 
 def provision_module_app(access_token: str, tenant_id: str, role_names: list, *,

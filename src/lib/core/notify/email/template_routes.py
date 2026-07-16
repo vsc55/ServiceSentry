@@ -133,6 +133,60 @@ def register(app, wa):
             wa._audit('notif_template_reset', detail={'lang': lang})
         return jsonify({'ok': True}), 200
 
+    # ── Unified notification-text overrides (Core + modules + email) ─────────
+    @app.route('/api/v1/notify/text-packages', methods=['GET'])
+    @config_view_req
+    def api_get_text_packages():
+        """Discover every editable notification-text package for a language (Core themes,
+        Email strings, and one package per watchful module), with defaults + current overrides."""
+        from lib.core.notify.text_catalog import discover_text_packages  # noqa: PLC0415
+        lang = (request.args.get('lang') or '').strip()
+        cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        pkgs = discover_text_packages(
+            lang,
+            overrides=cfg.get('notif_text_overrides') or {},
+            email_overrides=cfg.get('notif_templates') or {},
+            modules_dir=getattr(wa, '_modules_dir', None))
+        return jsonify({'lang': lang, 'packages': pkgs}), 200
+
+    @app.route('/api/v1/notify/text-packages/<lang>', methods=['PUT'])
+    @config_edit_req
+    def api_save_text_packages(lang):
+        """Replace all custom text overrides for one language. Body: ``{scoped_key: value}``
+        (empty value = revert to i18n).  ``email:*`` keys go to the email store
+        (``notif_templates``), ``core:*``/``mod:*`` to ``notif_text_overrides``."""
+        from lib.i18n import SUPPORTED_LANGS  # noqa: PLC0415
+        if lang not in (set(SUPPORTED_LANGS) | {'en_EN'}):
+            return jsonify({'error': f'Unknown language: {lang}'}), 400
+        body = request.get_json(force=True, silent=True)
+        if not isinstance(body, dict):
+            return jsonify({'error': 'Expected a JSON object'}), 400
+
+        email_clean, gen_clean = {}, {}
+        for k, v in body.items():
+            if not isinstance(v, str) or not v.strip():
+                continue                                   # empty → drop (revert to i18n)
+            if k.startswith('email:'):
+                email_clean[k[len('email:'):]] = v
+            elif k.startswith(('core:', 'mod:')):
+                gen_clean[k] = v
+
+        cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        for store, clean in (('notif_templates', email_clean),
+                             ('notif_text_overrides', gen_clean)):
+            cfg.setdefault(store, {})
+            if clean:
+                cfg[store][lang] = clean
+            else:
+                cfg[store].pop(lang, None)
+            if not cfg[store]:
+                cfg.pop(store, None)
+        wa._write_config(cfg)
+
+        wa._audit('notif_text_saved',
+                  detail={'lang': lang, 'keys': len(email_clean) + len(gen_clean)})
+        return jsonify({'ok': True, 'lang': lang}), 200
+
     # ── HTML body overrides ──────────────────────────────────────────────────
 
     @app.route('/api/v1/notify/html-templates', methods=['GET'])

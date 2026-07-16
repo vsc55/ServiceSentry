@@ -25,5 +25,15 @@
         "connection": "Connection",
         "alerts":     "Alerts"
     },
-    "collections": {"list": "Hosts"}
+    "collections": {"list": "Hosts"},
+    "messages": {
+        "ping_error": "Check: {} - Error: {} 💥",
+        "ping_up":    "Ping: {} 🔼",
+        "ping_down":  "Ping: {} 🔽"
+    },
+    "messages_vars": {
+        "ping_error": ["host", "error"],
+        "ping_up": ["host"],
+        "ping_down": ["host"]
+    }
 }

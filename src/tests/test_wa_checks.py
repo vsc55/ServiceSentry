@@ -48,6 +48,30 @@ class TestApiRunChecks:
         assert resp.status_code == 500
         admin._modules_dir = orig
 
+    def test_run_all_routes_notifications_through_host_router(self, admin, monkeypatch, tmp_path):
+        """On-demand "Run all" must notify like the daemon: the transient monitor gets a
+        cycle notifier routed through the host's core notification router (wa._notify)."""
+        import lib
+        import lib.services.monitoring.executor as _executor
+        captured = {}
+        monkeypatch.setattr(admin, '_modules_dir', str(tmp_path / 'watchfuls'))
+
+        class _FakeMon:
+            def __init__(self, *a, **k):
+                self._notifier = None
+
+            def _get_enabled_modules(self):
+                return []
+
+        monkeypatch.setattr(lib, 'Monitor', _FakeMon)
+        monkeypatch.setattr(_executor, 'run_checks',
+                            lambda monitor, names, **kw:
+                            (captured.setdefault('notifier', monitor._notifier), ({}, []))[1])
+        admin._run_checks('all')
+        n = captured.get('notifier')
+        assert n is not None                 # transient monitor got a cycle notifier
+        assert n._wa is admin._notify        # routed through the core router, like the daemon
+
     def test_run_checks_audit_entry(self, admin, client):
         """Running checks creates an audit log entry."""
         _login(client)

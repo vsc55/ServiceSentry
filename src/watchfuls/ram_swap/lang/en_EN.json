@@ -22,5 +22,15 @@
     "group_labels": {
         "alerts": "Alerts"
     },
-    "collections": {"list": "Memory checks"}
+    "collections": {"list": "Memory checks"},
+    "messages": {
+        "mem_unsupported_os": "Memory: {} - unsupported host OS: {} ⚠️",
+        "mem_ok":   "Normal {} ({}) used {}% ✅",
+        "mem_high": "Excessive {} ({}) used {}% ⚠️"
+    },
+    "messages_vars": {
+        "mem_unsupported_os": ["host", "OS"],
+        "mem_ok": ["type", "host", "usage %"],
+        "mem_high": ["type", "host", "usage %"]
+    }
 }

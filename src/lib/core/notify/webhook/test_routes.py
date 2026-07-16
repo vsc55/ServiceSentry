@@ -25,7 +25,8 @@ def register(app, wa):
 
         # If an id is given and secret is masked (null), restore stored secret
         if wh_id and data.get('secret') is None:
-            stored = wa._webhooks_store.get(wh_id)
+            from lib.core.notify.webhook import channel as _channel
+            stored = _channel.get_store(wa._notify).get(wh_id)
             if stored:
                 data['secret'] = stored.get('secret') or ''
 

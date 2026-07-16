@@ -1,0 +1,335 @@
+{# ================================================================
+   Config — Notifications tab: Microsoft Teams section renderer + CRUD.
+
+   Teams is one channel with two destination kinds:
+     • channels — Incoming Webhook URLs (own store; table + modal CRUD below);
+     • users    — direct delivery configured in the ``msteams`` config section,
+                  mechanism = activity_feed (Graph) | bot (Bot Framework).
+
+   _renderMsTeamsSection, _mstToggleEnabled, testMsTeamsChannel, deleteMsTeamsChannel,
+   showMsTeamsModal, _mstFormData, saveMsTeamsChannel, testMsTeamsChannelForm,
+   _msteamsDeliveryChanged, showEntraMsTeamsWizard, _entraMsTeamsApply, testMsTeamsUsers.
+   ================================================================ #}
+
+// ──────────────────────── Microsoft Teams section renderer ────────────────
+let _msteamsEditId = null;
+
+function _renderMsTeamsSection(cfgCardOpen, cfgCardClose) {
+    const data = configData.msteams || {};
+    const channels = configData.msteams_channels || [];
+    let h = cfgCardOpen('cfgcol_msteams', '<i class="bi bi-microsoft-teams me-1"></i>',
+                        SECTION_LABELS['msteams'] || 'Microsoft Teams');
+
+    // ── (a) Channels (Incoming Webhooks) ──────────────────────────────────
+    h += `<p class="small fw-semibold text-muted mb-1">${esc(t('msteams_channels_title'))}</p>`;
+    h += `<div class="cfg-field-wrap">`;
+    if (channels.length) {
+        const _l = k => (I18N.labels || {})[k] || k;
+        h += `<table class="table table-sm table-bordered mb-2 align-middle ss-fs-4">
+            <thead><tr>
+                <th style="width:30%">${esc(_l('msteams_name'))}</th>
+                <th>${esc(_l('msteams_webhook_url'))}</th>
+                <th class="text-center" style="width:5rem;white-space:nowrap">${esc(_l('enabled'))}</th>
+                <th style="width:8rem"></th>
+            </tr></thead><tbody>`;
+        channels.forEach(ch => {
+            h += `<tr>
+                <td class="align-middle">${esc(ch.name || '—')}</td>
+                <td class="align-middle text-truncate" style="max-width:200px" title="${escAttr(ch.webhook_url || '')}">${esc(ch.webhook_url || '—')}</td>
+                <td class="text-center align-middle">
+                    <input type="checkbox" class="form-check-input"${ch.enabled ? ' checked' : ''}
+                        onchange="_mstToggleEnabled(${jsStr(ch.id)},this.checked)">
+                </td>
+                <td class="text-end align-middle text-nowrap">
+                    <button class="btn btn-info btn-sm me-1" onclick="testMsTeamsChannel(${jsStr(ch.id)})"
+                        title="${escAttr(t('msteams_test'))}"><i class="bi bi-send"></i></button>
+                    <button class="btn btn-secondary btn-sm me-1" onclick="showMsTeamsModal(${jsStr(ch.id)})"
+                        title="${escAttr(t('edit_tt'))}"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteMsTeamsChannel(${jsStr(ch.id)})"
+                        title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>
+                </td>
+            </tr>`;
+        });
+        h += `</tbody></table>`;
+    } else {
+        h += `<p class="text-muted small mb-2">${esc(t('msteams_channels_empty'))}</p>`;
+    }
+    h += `<button class="btn btn-secondary btn-sm" onclick="showMsTeamsModal()">
+        <i class="bi bi-plus-lg me-1"></i>${esc(t('msteams_channel_add'))}
+    </button></div>`;
+
+    // ── (b) Direct-to-user delivery ───────────────────────────────────────
+    h += `<hr class="my-3"><p class="small fw-semibold text-muted mb-1">${esc(t('msteams_users_title'))}</p>`;
+    h += renderField('user_enabled', data.user_enabled, 'msteams|user_enabled', 'config');
+
+    // delivery mechanism selector (custom select)
+    const delivery = data.delivery || 'activity_feed';
+    const delOpts = [
+        ['activity_feed', t('msteams_delivery_activity')],
+        ['bot',           t('msteams_delivery_bot')],
+    ].map(([v, l]) => `<option value="${escAttr(v)}"${delivery === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
+    const _delHint = fieldHint('msteams|delivery');
+    const _delHintId = 'fhint_msteams_delivery';
+    const _delInfo = _delHint
+        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
+               data-bs-toggle="collapse" data-bs-target="#${_delHintId}"
+               aria-expanded="false"><i class="bi bi-info-circle"></i></button>`
+        : '';
+    const _delPanel = _delHint
+        ? `<div class="collapse" id="${_delHintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_delHint)}</div></div>`
+        : '';
+    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('msteams_delivery'))}${_delInfo}</label>
+        <div class="col-sm-8"><select class="form-select form-select-sm"
+            onchange="updateField('config','msteams|delivery',this.value);_msteamsDeliveryChanged(this.value)">
+            ${delOpts}
+        </select>${_delPanel}</div>
+    </div></div>`;
+
+    // recipients (shared by both mechanisms)
+    h += renderField('notify_panel_users', data.notify_panel_users, 'msteams|notify_panel_users', 'config');
+    h += renderField('recipients', data.recipients, 'msteams|recipients', 'config');
+
+    // activity-feed fields
+    h += `<div id="msteams-activity-fields"${delivery !== 'activity_feed' ? ' style="display:none"' : ''}>`;
+    h += `<hr class="my-2"><p class="small text-muted mb-1">${esc(t('msteams_activity_note'))}</p>`;
+    const _appLink = (typeof _entraAppLink === 'function') ? _entraAppLink(data.client_id) : '';
+    h += `<div class="mb-2">
+        <button class="btn btn-primary btn-sm" type="button" onclick="showEntraMsTeamsWizard()">
+            <i class="bi bi-microsoft me-1"></i>${esc(t('entra_wizard_btn'))}
+        </button>${_appLink}
+        <button class="btn btn-secondary btn-sm ms-2" type="button" onclick="downloadMsTeamsApp()">
+            <i class="bi bi-box-arrow-down me-1"></i>${esc(t('msteams_download_app'))}
+        </button>
+        <a class="btn btn-secondary btn-sm ms-2" target="_blank" rel="noopener"
+           href="https://admin.teams.microsoft.com/policies/manage-apps">
+            <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('msteams_open_admin'))}
+        </a>
+        <div class="small text-muted mt-1">${esc(t('msteams_download_app_hint'))}</div>
+    </div>`;
+    h += renderField('tenant_id',     data.tenant_id,     'msteams|tenant_id',     'config');
+    h += renderField('client_id',     data.client_id,     'msteams|client_id',     'config');
+    h += renderField('client_secret', data.client_secret, 'msteams|client_secret', 'config');
+    h += `</div>`;
+
+    // bot fields
+    h += `<div id="msteams-bot-fields"${delivery !== 'bot' ? ' style="display:none"' : ''}>`;
+    h += `<hr class="my-2"><p class="small text-muted mb-1">${esc(t('msteams_bot_note'))}</p>`;
+    h += renderField('bot_app_id',       data.bot_app_id,       'msteams|bot_app_id',       'config');
+    h += renderField('bot_app_password', data.bot_app_password, 'msteams|bot_app_password', 'config');
+    h += renderField('bot_tenant_id',    data.bot_tenant_id,    'msteams|bot_tenant_id',    'config');
+    h += `</div>`;
+
+    // user-delivery test button
+    h += `<div class="mt-2">
+        <button class="btn btn-info btn-sm" id="btnTestMsTeamsUsers" onclick="testMsTeamsUsers()" data-test-btn>
+            <i class="bi bi-person-check me-1"></i>${esc(t('msteams_test_users'))}
+        </button>
+    </div>`;
+
+    h += cfgCardClose;
+    return h;
+}
+
+function _msteamsDeliveryChanged(val) {
+    const map = { activity_feed: 'msteams-activity-fields', bot: 'msteams-bot-fields' };
+    Object.entries(map).forEach(([mode, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = mode === val ? '' : 'none';
+    });
+}
+
+// ── channel CRUD ────────────────────────────────────────────────────────────
+async function _mstToggleEnabled(id, enabled) {
+    configData.msteams_channels = (configData.msteams_channels || []).map(c => c.id === id ? {...c, enabled} : c);
+    const ch = configData.msteams_channels.find(c => c.id === id);
+    if (!ch) return;
+    const r = await apiPut(`/api/v1/notify/msteams/channels/${id}`, {...ch, webhook_url: null});
+    if (!r?.ok) showToast(r?.error || t('save_error'), 'danger');
+}
+
+async function testMsTeamsChannel(id) {
+    const r = await apiPost(`/api/v1/notify/msteams/channels/${id}/test`, {});
+    showToast(r?.data?.message || (r?.data?.ok ? t('msteams_test_ok') : t('msteams_test_error')),
+              r?.data?.ok ? 'success' : 'danger');
+}
+
+function deleteMsTeamsChannel(id) {
+    const ch = (configData.msteams_channels || []).find(c => c.id === id);
+    showConfirmModal(tf('confirm_delete_msteams', ch?.name || id), async () => {
+        const r = await apiDelete(`/api/v1/notify/msteams/channels/${id}`);
+        if (r?.data?.ok) {
+            configData.msteams_channels = (configData.msteams_channels || []).filter(c => c.id !== id);
+            renderConfig();
+            showToast(t('msteams_deleted_ok'), 'success');
+        } else {
+            showToast(r?.data?.error || t('delete_error'), 'danger');
+        }
+    });
+}
+
+function showMsTeamsModal(id) {
+    _msteamsEditId = id || null;
+    const ch = id ? (configData.msteams_channels || []).find(c => c.id === id) : null;
+    const _l = k => (I18N.labels || {})[k] || k;
+    document.getElementById('modalMsTeamsWrap')?.remove();
+    document.body.insertAdjacentHTML('beforeend', `
+<div id="modalMsTeamsWrap">
+<div class="modal fade" id="modalMsTeams" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-microsoft-teams me-2"></i>${esc(id ? t('msteams_edit_title') : t('msteams_new_title'))}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row mb-2 align-items-center">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_l('msteams_name'))}</label>
+          <div class="col-sm-9">
+            <input type="text" id="mstName" class="form-control form-control-sm"
+              value="${escAttr(ch?.name || '')}" placeholder="${escAttr(t('msteams_name_ph'))}">
+          </div>
+        </div>
+        <div class="row mb-2 align-items-center">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_l('enabled'))}</label>
+          <div class="col-sm-9"><input type="checkbox" id="mstEnabled" class="form-check-input"${(ch ? ch.enabled : true) ? ' checked' : ''}></div>
+        </div>
+        <div class="row mb-2 align-items-start">
+          <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_l('msteams_webhook_url'))} <span class="text-danger">*</span></label>
+          <div class="col-sm-9">
+            <input type="url" id="mstUrl" class="form-control form-control-sm"
+              value="${escAttr(ch?.webhook_url === null ? '' : (ch?.webhook_url || ''))}"
+              placeholder="${escAttr(ch?.webhook_url === null ? t('msteams_url_keep') : 'https://outlook.office.com/webhook/…')}"
+              oninput="this.classList.remove('is-invalid')">
+            <div class="invalid-feedback"></div>
+            <div class="small text-muted mt-1">${esc(t('msteams_webhook_url_hint'))}</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">${esc(t('cancel'))}</button>
+        <button class="btn btn-info" id="btnTestMsTeamsForm" onclick="testMsTeamsChannelForm()">
+          <i class="bi bi-send me-1"></i>${esc(t('msteams_test'))}
+        </button>
+        <button class="btn btn-primary" onclick="saveMsTeamsChannel()">
+          <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>`);
+    new bootstrap.Modal(document.getElementById('modalMsTeams')).show();
+}
+
+function _mstFormData() {
+    const url = document.getElementById('mstUrl')?.value.trim() || '';
+    return {
+        name: document.getElementById('mstName')?.value.trim() || 'Teams channel',
+        enabled: document.getElementById('mstEnabled')?.checked ?? true,
+        // empty on an EDIT means "keep stored" → send null; on create, send ''
+        webhook_url: (_msteamsEditId && !url) ? null : url,
+    };
+}
+
+function _mstValidate() {
+    const el = document.getElementById('mstUrl');
+    const url = (el?.value || '').trim();
+    // On edit an empty field keeps the stored URL; on create it is required.
+    if (!_msteamsEditId && !url) {
+        el?.classList.add('is-invalid');
+        const fb = el?.parentElement?.querySelector('.invalid-feedback');
+        if (fb) fb.textContent = t('msteams_url_required');
+        el?.focus();
+        return false;
+    }
+    return true;
+}
+
+async function saveMsTeamsChannel() {
+    if (!_mstValidate()) return;
+    const data = _mstFormData();
+    const url = _msteamsEditId ? `/api/v1/notify/msteams/channels/${_msteamsEditId}` : '/api/v1/notify/msteams/channels';
+    const r = _msteamsEditId ? await apiPut(url, data) : await apiPost(url, data);
+    const rData = _msteamsEditId ? r : r?.data;
+    if (rData?.ok) {
+        const ch = rData.channel;
+        if (!Array.isArray(configData.msteams_channels)) configData.msteams_channels = [];
+        if (_msteamsEditId) {
+            const idx = configData.msteams_channels.findIndex(c => c.id === _msteamsEditId);
+            if (idx >= 0) configData.msteams_channels[idx] = ch; else configData.msteams_channels.push(ch);
+        } else {
+            configData.msteams_channels.push(ch);
+        }
+        bootstrap.Modal.getInstance(document.getElementById('modalMsTeams'))?.hide();
+        renderConfig();
+        showToast(tf(_msteamsEditId ? 'msteams_updated_ok' : 'msteams_created_ok', ch?.name || ''), 'success');
+    } else {
+        showToast(rData?.error || t('save_error'), 'danger');
+    }
+}
+
+async function testMsTeamsChannelForm() {
+    // Test requires a saved channel (the per-id endpoint); prompt to save first on create.
+    if (!_msteamsEditId) { showToast(t('msteams_save_before_test'), 'warning'); return; }
+    const btn = document.getElementById('btnTestMsTeamsForm');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>'; }
+    const r = await apiPost(`/api/v1/notify/msteams/channels/${_msteamsEditId}/test`, {});
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-send me-1"></i>' + esc(t('msteams_test')); }
+    showToast(r?.data?.message || (r?.data?.ok ? t('msteams_test_ok') : t('msteams_test_error')),
+              r?.data?.ok ? 'success' : 'danger');
+}
+
+// ── user-mode: Entra "Register in Azure" (TeamsActivity.Send) + test ─────────
+function showEntraMsTeamsWizard() {
+    showEntraIdProvisionWizard({
+        url: '/api/v1/auth/entraid/provision/device-code',
+        provision: {
+            app_name: (typeof ENTRA_APP_NAME_TEAMS !== 'undefined') ? ENTRA_APP_NAME_TEAMS : 'ServiceSentry - Teams',
+            app_roles: ['TeamsActivity.Send'],
+            // Configure the app's SSO surface (Application ID URI + access_as_user scope +
+            // preauthorized Teams clients) so the Teams app package can be admin-installed.
+            expose_api: true,
+        },
+    }, (fields) => {
+        fields = fields || {};
+        _entraMsTeamsApply(fields);
+        if (typeof saveConfig === 'function') saveConfig();
+        // Report the SSO-surface outcome (needed for admin-install of the Teams app):
+        //   true  → configured;  false → PATCH failed (do it manually);
+        //   undefined → the request didn't carry expose_api (stale page → hard-reload).
+        if (fields.sso_exposed === true) {
+            showToast(t('msteams_sso_ok'), 'success');
+        } else if (fields.sso_exposed === false) {
+            // Persistent modal (the wizard auto-closes) so the error text is readable.
+            setTimeout(() => showInfoModal(
+                t('msteams_sso_warn_title'),
+                { error: fields.sso_error || '—' },
+                t('msteams_sso_warn'), 'warning'), 1800);
+        }
+    });
+}
+
+function downloadMsTeamsApp() {
+    const cid = (configData.msteams || {}).client_id || '';
+    if (!cid) { showToast(t('msteams_pkg_no_client'), 'warning'); return; }
+    // GET download (session-authenticated); pass the current client_id (may be unsaved).
+    window.open('/api/v1/notify/msteams/app-package?client_id=' + encodeURIComponent(cid), '_blank');
+}
+
+function _entraMsTeamsApply(d) {
+    if (d.tenant_id)     updateField('config', 'msteams|tenant_id',     d.tenant_id);
+    if (d.client_id)     updateField('config', 'msteams|client_id',     d.client_id);
+    if (d.client_secret) updateField('config', 'msteams|client_secret', d.client_secret);
+    renderConfig();
+}
+
+async function testMsTeamsUsers() {
+    const cfg = configData.msteams || {};
+    const btn = document.getElementById('btnTestMsTeamsUsers');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('msteams_test_users')); }
+    const r = await apiPost('/api/v1/notify/msteams/test', cfg);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-person-check me-1"></i>' + esc(t('msteams_test_users')); }
+    showToast(r?.data?.message || (r?.data?.ok ? t('msteams_test_ok') : t('msteams_test_error')),
+              r?.data?.ok ? 'success' : 'danger');
+}

@@ -35,7 +35,9 @@ from lib.providers.entraid.declarations import (
     DEFAULT_APP_NAME as _ENTRA_APP_DEFAULT,
     OIDC_APP_NAME as _ENTRA_APP_OIDC,
     SAML2_APP_NAME as _ENTRA_APP_SAML2,
-    SCIM_APP_NAME as _ENTRA_APP_SCIM)
+    SCIM_APP_NAME as _ENTRA_APP_SCIM,
+    EMAIL_APP_NAME as _ENTRA_APP_EMAIL,
+    TEAMS_APP_NAME as _ENTRA_APP_TEAMS)
 from lib.providers.ldap import auth as _ldap_auth
 from lib.providers.oidc import auth as _oidc_auth
 from lib.providers.saml import auth as _saml_auth
@@ -109,6 +111,15 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _PUBLIC_URL = ''
     _FORCE_HTTPS = False
     _FORCE_FQDN  = False
+    _frame_ancestors_list: list = []   # origins allowed to iframe the panel (CSP); set in _apply_config_attrs
+    _embed_in_teams = False
+    # CSRF-exempt path prefixes, DISCOVERED from route modules (each declares its own via
+    # _register_csrf_exempt in register()); reassigned (never mutated) so no shared-state risk.
+    _csrf_exempt_prefixes: tuple = ()
+    # Embed-origin profiles, DISCOVERED from providers via _register_embed_origins():
+    # (config_attr, origins) — origins are added to the iframe allowlist when the bool attr
+    # is on. Keeps integration-specific origins (e.g. Teams) out of the core security layer.
+    _embed_profiles: tuple = ()
     # Password-strength policy (can be overridden via config.json web_admin section)
     _PW_MIN_LEN = _cfg_default('web_admin|pw_min_len')
     _PW_MAX_LEN = _cfg_default('web_admin|pw_max_len')
@@ -305,6 +316,12 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # disabled or external) so the boot log reflects them all — not only the
         # ones that started running.
         self._log_services_startup()
+        # Service-health notifier: watch the heartbeat registry and alert on
+        # service-down / recovery transitions (opt-in via services|notify_down).
+        self._start_service_health_monitor()
+        # Certificate-expiry scanner: periodically scan ssl_cert checks and alert on
+        # certs nearing expiry (opt-in via certs|notify_expiry).
+        self._start_cert_scanner()
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -472,14 +489,24 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
-        # Outgoing notification webhooks — their own table, like every other
-        # editable dataset (one row per webhook; the ``secret`` is encrypted).
-        from lib.core.notify.webhook.store import WebhooksStore  # noqa: PLC0415
-        self._webhooks_store = WebhooksStore(
-            self._db_connector,
+        # Notification routing lives in the core-owned, web_admin-independent
+        # NotificationRouter: it *owns* the channel stores (webhooks + Teams channels +
+        # the Teams bot conversation-reference store) and does the fan-out.  The web admin
+        # builds one from an explicit NotifyContext and reaches its stores via ``_notify``
+        # (CRUD routes, config bundle) — no per-host channel wiring.
+        from lib.core.notify.context import NotifyContext  # noqa: PLC0415
+        from lib.core.notify.router import NotificationRouter  # noqa: PLC0415
+        self._notify = NotificationRouter(NotifyContext(
+            db=self._db_connector,
+            read_config=lambda: self._read_config_file(self._CONFIG_FILE),
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
-        )
+            dbg=self._dbg,
+            audit=getattr(self, '_audit', None) or (lambda *a, **k: None),
+            public_url=getattr(self, 'public_base_url', None),
+            panel_user_emails=self._panel_user_emails,
+            config_file=self._CONFIG_FILE,
+        ))
         # Event→notification subsystem stores (rules, sent-log, worker state).
         from lib.services.events.store import (  # noqa: PLC0415
             EventRulesStore, EventStateStore, NotificationLogStore)
@@ -589,6 +616,21 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         except Exception:  # pylint: disable=broad-except
             pass
 
+    def _notify_lang(self) -> str:
+        """Effective system notification language (global ``notifications|lang``, legacy
+        ``email|lang`` fallback, then the panel language) — the language every notification
+        body/title is rendered in."""
+        from lib.core.notify.formatting import notify_lang  # noqa: PLC0415
+        return notify_lang(self._read_config_file(self._CONFIG_FILE) or {})
+
+    def _notify_text(self, key: str, *args) -> str:
+        """A core notification string in the system language, with the admin text override
+        applied (custom → i18n).  For decoupled emitters (health/cert) that only need the
+        rendered text, not the language."""
+        from lib.core.notify.formatting import notify_lang, notify_text  # noqa: PLC0415
+        cfg = self._read_config_file(self._CONFIG_FILE) or {}
+        return notify_text(cfg, notify_lang(cfg), key, *args)
+
     def _read_check_status(self) -> dict:
         """Return the current check state as the nested ``{module: {key: {...}}}``
         dict that ``status.json`` used to hold — the read model for the UI."""
@@ -634,7 +676,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             section, field = path.split('|')
             v = (data.get(section) or {}).get(field)
             if not (isinstance(v, int) and not isinstance(v, bool)):
-                continue
+                continue   # absent/null = leave the runtime value unchanged (save contract)
             setattr(self, rule['attr'], v)
             if live and 'flask_cfg' in rule:
                 cfg_key, transform = rule['flask_cfg']
@@ -672,6 +714,18 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Default landing page (string attr not covered by INT/BOOL rules) — resolves the
         # post-login destination for users/groups that don't override it.
         self._landing_page = str(wa_cfg.get('landing_page') or 'admin')
+        # Framing allowlist (who may iframe the panel): admin-defined origins + any registered
+        # embed profile whose flag is on (e.g. Teams). Precomputed (boot + save) so the
+        # per-response header hook stays cheap. At boot the embed profiles aren't registered
+        # yet (they are declared during register_all), so _create_app recomputes once more
+        # after routes are registered.
+        self._recompute_frame_ancestors()
+        # fail2ban master switch: a no_rule bool, so it is NOT in BOOL_RULES — apply it
+        # explicitly (like dark_mode/secure_cookies) so a persisted disable survives a
+        # restart instead of reverting to the class default at boot.
+        new_ipban = wa_cfg.get('ipban_enabled')
+        if isinstance(new_ipban, bool):
+            self._IPBAN_ENABLED = new_ipban
         # fail2ban string fields + push into the live manager (it sets _IPBAN_DURATIONS /
         # _IPBAN_WHITELIST from wa_cfg itself, wiring in _IpBanMixin).
         self._apply_ipban_config(wa_cfg)
@@ -704,6 +758,13 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # The syslog database connector is built at startup; any change needs a restart to
         # take effect (like the system database section).
         if syslog_db_changed(old_data, new_data):
+            self._restart_pending = True
+        # The system database connector and the bind host are also read once at startup —
+        # a change to either needs a restart (mirrors syslog_db / the web port above).
+        if (old_data.get('database') or {}) != (new_data.get('database') or {}):
+            self._restart_pending = True
+        if (old_data.get('web_admin') or {}).get('host') != \
+                (new_data.get('web_admin') or {}).get('host'):
             self._restart_pending = True
         # Rebuild ProxyFix for the (possibly new) trusted-proxy depth.
         if isinstance(self._app.wsgi_app, ProxyFix):
@@ -874,6 +935,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             days=self._REMEMBER_ME_DAYS,
         )
         app.config['SESSION_COOKIE_HTTPONLY'] = True
+        # Default to the stricter Lax (better CSRF posture). If the app is made embeddable in
+        # a cross-site iframe (any allowed frame-ancestors — see _apply_embed_cookie_policy,
+        # applied after route registration once embed profiles are known), it is switched to
+        # SameSite=None so the session cookie is sent inside the iframe. Provider-agnostic.
         app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
         # Mark the session/remember-me cookie Secure only on an *explicit* HTTPS intent:
         # `secure_cookies` (opt-in) or `force_https` (all traffic redirected to HTTPS).
@@ -881,8 +946,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # for links/notifications and does not imply every request is HTTPS; forcing
         # Secure from it would silently break login over plain HTTP (a Secure cookie is
         # dropped by the browser on http://).
-        app.config['SESSION_COOKIE_SECURE'] = bool(
-            self._secure_cookies or self._force_https)
+        app.config['SESSION_COOKIE_SECURE'] = bool(self._secure_cookies or self._force_https)
         # Cap request bodies (JSON APIs + SCIM) so an oversized payload can't exhaust
         # memory before parsing.
         app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024   # 8 MiB
@@ -906,10 +970,12 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             g._req_start = time.perf_counter()
 
         # CSRF (double-submit): state-changing requests must echo the session token in
-        # the X-CSRF-Token header (JSON APIs) or csrf_token field (form posts). Exempt:
-        # token-authenticated SCIM, and inbound IdP callbacks (cross-site by design,
-        # protected instead by SAML InResponseTo / OIDC state).
-        _csrf_exempt = ('/scim/', '/auth/saml2/acs', '/auth/oidc/callback')
+        # the X-CSRF-Token header (JSON APIs) or csrf_token field (form posts). Exempt
+        # prefixes are DISCOVERED, not hardcoded: each route module declares its own via
+        # ``wa._register_csrf_exempt(...)`` in its register() (token-authenticated SCIM,
+        # inbound IdP callbacks, Teams SSO/bot — cross-site by design, protected instead by
+        # their own protocol/token). register_all() runs below, before any request, so the
+        # list is fully populated by the time _csrf_protect first reads it.
 
         @app.before_request
         def _csrf_protect():
@@ -922,7 +988,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 enabled = not app.config.get('TESTING', False)
             if not enabled:
                 return None
-            if not _csrf.needs_check(request.method, request.path, _csrf_exempt):
+            if not _csrf.needs_check(request.method, request.path, self._csrf_exempt_prefixes):
                 return None
             if not _csrf.is_valid(request, session):
                 # A CSRF failure with NO session cookie is the classic "Secure cookie
@@ -950,7 +1016,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         @app.after_request
         def _trace_request_end(response):
             # Security headers (defense-in-depth; policy in lib.security.headers).
-            apply_security_headers(response)
+            # An admin-defined frame-ancestors allowlist (+ optional Teams hosts) opens
+            # framing to those origins so the Teams personal tab can embed the panel.
+            apply_security_headers(response, frame_ancestors=self._frame_ancestors_list or None)
             # fail2ban: count a 401/403 as an offense for the client IP (logic in
             # _IpBanMixin; skips gate blocks and requests that already counted).
             self._ipban_capture(response)
@@ -1033,6 +1101,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'permissions_list': list(PERMISSIONS),
                 'permissions_groups': PERMISSION_GROUPS,
                 'home_pages': list(HOME_PAGES),   # landing-page registry (id/target/li/label_key)
+                # Notification routing matrix, registry-driven: rows = discovered event kinds
+                # (lib/core/notify/events.py), columns = registered channels (registry.py).
+                'notify_matrix_events': self._notify_matrix_events(),
+                'notify_channels': self._notify_channel_cols(),
                 'wa_builtin_roles': [BUILTIN_ROLE_UIDS[r] for r in ROLES if r in BUILTIN_ROLE_UIDS],
                 'wa_sensitive_fields': sorted(self._sensitive_fields),
                 'wa_remember_me_days': self._REMEMBER_ME_DAYS,
@@ -1087,6 +1159,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'entra_app_name_oidc':    _ENTRA_APP_OIDC,
                 'entra_app_name_saml2':   _ENTRA_APP_SAML2,
                 'entra_app_name_scim':    _ENTRA_APP_SCIM,
+                'entra_app_name_email':   _ENTRA_APP_EMAIL,
+                'entra_app_name_teams':   _ENTRA_APP_TEAMS,
                 'module_web_styles': self._module_web_styles,
                 'module_web_ui':     self._module_web_ui,
                 'module_web_modals': self._module_web_modals,
@@ -1105,6 +1179,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                     _c.close_thread_if_needed()
 
         self._register_routes(app)
+        # Route modules declared their embed profiles (e.g. Teams) during registration, so
+        # rebuild the iframe allowlist now that they're known (boot's earlier pass ran before),
+        # then apply the resulting cross-site cookie policy (self._app isn't set yet → pass app).
+        self._recompute_frame_ancestors()
+        self._apply_embed_cookie_policy(app)
         return app
 
     def _require_json(self) -> 'tuple[dict, None] | tuple[None, tuple]':
@@ -1258,14 +1337,174 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._modules_facade.save(_copy.deepcopy(data))
         return True
 
-    def _load_webhooks(self, *, decrypt: bool = True) -> list:
-        """Current notification webhooks from the DB-backed store (decrypted)."""
-        store = getattr(self, '_webhooks_store', None)
-        return store.list(decrypt=decrypt) if store else []
+    def _panel_user_emails(self) -> list:
+        """Emails/UPNs of enabled panel users — used when Teams targets panel users."""
+        store = getattr(self, '_users_store', None)
+        if not store:
+            return []
+        out = []
+        for u in (store.load() or {}).values():
+            if not isinstance(u, dict) or u.get('enabled') is False:
+                continue
+            email = (u.get('email') or '').strip()
+            if email:
+                out.append(email)
+        return out
+
+    @staticmethod
+    def _notify_matrix_events() -> list:
+        """Routing-matrix rows for the UI — discovered notification event kinds (key, i18n
+        label_key and the owning `source` so rows can be grouped by where each event comes
+        from), so a new source kind appears without editing the frontend."""
+        from lib.core.notify import events as _events  # noqa: PLC0415
+        return [{'key': e['key'], 'label_key': e['label_key'], 'source': e['source']}
+                for e in _events.ui_matrix_events()]
+
+    @staticmethod
+    def _notify_channel_cols() -> list:
+        """Routing-matrix columns for the UI — registered channels (key + conventional i18n
+        label_key ``notif_channel_<name>``), so a new channel appears without editing the frontend."""
+        from lib.core.notify import registry as _channels  # noqa: PLC0415
+        return [{'key': name, 'label_key': f'notif_channel_{name}'} for name in _channels.channels()]
+
+    def _start_service_health_monitor(self) -> None:
+        """Launch the background service-health notifier (emits service_down / service_up
+        on heartbeat transitions).  Leader-gated so replicas don't double-alert; a no-op
+        when the instances store is absent.  Enable is read live (services|notify_down)."""
+        if getattr(self, '_service_health', None) is not None:
+            return
+        store = getattr(self, '_service_instances_store', None)
+        if store is None:
+            return
+        import os as _os  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
+        from lib.core.health.health import ServiceHealthMonitor  # noqa: PLC0415
+        from lib.services.heartbeat import hostname  # noqa: PLC0415
+        from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
+        _inst_id = f'health-{hostname()}-{_os.getpid()}'
+
+        def _is_leader():
+            ls = getattr(self, '_service_leader_store', None)
+            if ls is None:
+                return True   # sole owner
+            try:
+                poll = int(self._config_section('services').get('health_poll_secs') or 30)
+            except (TypeError, ValueError):
+                poll = 30
+            try:
+                return bool(ls.try_acquire('svc_health', _inst_id, host=hostname(),
+                                           ttl=max(30, poll * 3)))
+            except Exception:  # pylint: disable=broad-except
+                return True
+
+        def _emit(kind, **fields):
+            _dispatch(self, kind=kind, timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'), **fields)
+
+        self._service_health = ServiceHealthMonitor(
+            instances_provider=lambda: store.list_instances(),
+            dispatch=_emit,
+            config_getter=lambda: self._config_section('services'),
+            is_leader=_is_leader,
+            dbg=self._dbg,
+            text_fn=self._notify_text,
+        )
+        self._service_health.start(
+            poll_getter=lambda: self._config_section('services').get('health_poll_secs', 30))
+
+    def _start_cert_scanner(self) -> None:
+        """Launch the background certificate-expiry scanner (emits cert_expiring for
+        ssl_cert checks nearing expiry).  Leader-gated; enable read live (certs|notify_expiry)."""
+        if getattr(self, '_cert_scanner', None) is not None:
+            return
+        import os as _os  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
+        from lib.core.health.cert_scan import CertExpiryScanner, enumerate_targets  # noqa: PLC0415,E501
+        from lib.services.heartbeat import hostname  # noqa: PLC0415
+        from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
+        _inst_id = f'certscan-{hostname()}-{_os.getpid()}'
+
+        def _host_address(uid):
+            store = getattr(self, '_hosts_store', None)
+            try:
+                return (store.get(uid) or {}).get('address') if store else None
+            except Exception:  # pylint: disable=broad-except
+                return None
+
+        def _targets():
+            try:
+                mods = self._modules_facade.read()
+            except Exception:  # pylint: disable=broad-except
+                return []
+            warn = self._config_section('certs').get('warn_days', 21)
+            return enumerate_targets(mods, host_address=_host_address, default_warn=warn)
+
+        def _is_leader():
+            ls = getattr(self, '_service_leader_store', None)
+            if ls is None:
+                return True
+            try:
+                return bool(ls.try_acquire('cert_scan', _inst_id, host=hostname(), ttl=3600))
+            except Exception:  # pylint: disable=broad-except
+                return True
+
+        def _emit(kind, **fields):
+            _dispatch(self, kind=kind, timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'), **fields)
+
+        self._cert_scanner = CertExpiryScanner(
+            targets_provider=_targets,
+            dispatch=_emit,
+            config_getter=lambda: self._config_section('certs'),
+            is_leader=_is_leader,
+            dbg=self._dbg,
+            text_fn=self._notify_text,
+        )
+        self._cert_scanner.start(
+            poll_getter=lambda: self._config_section('certs').get('scan_every_secs', 86400))
 
     # ------------------------------------------------------------------
     # Route registration
     # ------------------------------------------------------------------
+
+    def _register_csrf_exempt(self, *prefixes: str) -> None:
+        """Declare CSRF-exempt path prefixes — called by a route module's register() so the
+        exempt set is discovered from the modules, not hardcoded. Deduped, order preserved."""
+        clean = [p for p in prefixes if p]
+        self._csrf_exempt_prefixes = tuple(dict.fromkeys((*self._csrf_exempt_prefixes, *clean)))
+
+    def _register_embed_origins(self, config_attr: str, *origins: str) -> None:
+        """Declare iframe-embed origins gated by a bool config attr (e.g. ``_embed_in_teams``),
+        so integration-specific frame-ancestors are discovered from the provider rather than
+        hardcoded in the core security layer. Recomputes the effective allowlist."""
+        prof = (config_attr, tuple(o for o in origins if o))
+        self._embed_profiles = (*self._embed_profiles, prof)
+        self._recompute_frame_ancestors()
+
+    def _recompute_frame_ancestors(self) -> None:
+        """Rebuild the iframe allowlist: admin-configured origins + every registered embed
+        profile whose flag attr is currently on. Cheap, called on config change / at startup."""
+        try:
+            wa_cfg = (self._read_config_file(self._CONFIG_FILE) or {}).get('web_admin') or {}
+        except Exception:  # pylint: disable=broad-except
+            wa_cfg = {}
+        fa = [o for o in str(wa_cfg.get('frame_ancestors') or '').replace(',', ' ').split() if o]
+        for attr, origins in self._embed_profiles:
+            if getattr(self, attr, False):
+                fa = list(dict.fromkeys(fa + list(origins)))
+        self._frame_ancestors_list = fa
+        _app = getattr(self, '_app', None)   # None at boot (set after _create_app); set on live saves
+        if _app is not None:
+            self._apply_embed_cookie_policy(_app)
+
+    def _apply_embed_cookie_policy(self, app) -> None:
+        """SameSite=None; Secure when the app is embeddable cross-site (any allowed
+        frame-ancestors) so the session cookie survives in a cross-site iframe; else keep the
+        stricter Lax. Provider-agnostic — driven by the effective frame-ancestors allowlist."""
+        if self._frame_ancestors_list:
+            app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+            app.config['SESSION_COOKIE_SECURE'] = True
+        else:
+            app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+            app.config['SESSION_COOKIE_SECURE'] = bool(self._secure_cookies or self._force_https)
 
     def _register_routes(self, app: Flask):
         """Register all routes — delegates to routes sub-package."""

@@ -256,6 +256,9 @@ HTML_TPL_VARS: dict[str, list[str]] = {
                 '{timestamp}', '{public_url}'],
     'summary': ['{n}', '{timestamp}', '{public_url}'],
 }
+# The named placeholders each string template accepts (for the notification-text editor) live in
+# the general lang files under 'notif_email_vars' ({key: [[token, description], …]}, translated),
+# so their descriptions can be detailed per language — like a module's messages_vars.
 
 # ── Public template functions ────────────────────────────────────────────────
 

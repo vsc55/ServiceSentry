@@ -327,8 +327,13 @@ def _remote_dns_cmd(os_: str, host: str, record_type: str, nameserver: str, time
     Unix uses ``dig`` (clean, parseable); Windows uses ``nslookup``.  The
     nameserver, when given, directs the query at that server."""
     if os_ == 'windows':
-        ns = f' {nameserver}' if nameserver else ''
-        return f'nslookup -type={record_type} {host}{ns}'
+        # cmd.exe (host_exec shell=True): double-quote to neutralise & | < > ^; strip
+        # embedded quotes so a config value can't break out and inject a command. (Does not
+        # stop %VAR% expansion — no RCE, value is admin/config-controlled.)
+        def _wq(s):
+            return '"' + str(s).replace('"', '') + '"'
+        ns = f' {_wq(nameserver)}' if nameserver else ''
+        return f'nslookup -type={_wq(record_type)} {_wq(host)}{ns}'
     t = max(1, int(timeout))
     ns = (' @' + shlex.quote(nameserver)) if nameserver else ''
     return f'dig +short +time={t} +tries=1 {shlex.quote(record_type)} {shlex.quote(host)}{ns}'
@@ -622,7 +627,7 @@ class Watchful(ModuleBase):
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"DNS: {item['key']} - Exception: {exc}", DebugLevel.error)
                     lbl = item.get('label') or f'{item["record_type"]} {item["host"]}'
-                    message = f'DNS: {lbl} - *Error: {exc}* 💥'
+                    message = self._msg('dns_exc', lbl, exc)
                     self.dict_return.set(item['key'], False, message)
 
         super().check()
@@ -692,14 +697,14 @@ class Watchful(ModuleBase):
         short = ', '.join(resolved[:3]) + ('…' if len(resolved) > 3 else '')
 
         if error:
-            message = f'DNS: *{label}*: {error} ⚠️'
+            message = self._msg('dns_error', label, error)
             ok = False
         elif ok:
-            message = f'DNS: *{label}* → {short} ({response_time} ms) ✅'
+            message = self._msg('dns_ok', label, short, response_time)
         elif not resolved:
-            message = f'DNS: *{label}*: no results ⚠️'
+            message = self._msg('dns_no_results', label)
         else:
-            message = f'DNS: *{label}*: expected "{expected}" not in [{short}] ⚠️'
+            message = self._msg('dns_unexpected', label, expected, short)
 
         other_data = {
             'host': host,

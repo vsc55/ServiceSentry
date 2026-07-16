@@ -38,6 +38,10 @@ from lib.core.object_base import ObjectBase
 
 __all__ = ['ModuleBase']
 
+# Cache of a module's translated ``messages`` section, keyed by (module_dir, name, lang).
+# Watchfuls are re-instantiated every cycle, so the cache must not live on the instance.
+_MODULE_MSG_CACHE: dict = {}
+
 
 class ModuleBase(ObjectBase):
     """ Base class for modules. """
@@ -753,22 +757,75 @@ class ModuleBase(ObjectBase):
         """ Check if the module is enabled in the configuration. """
         return self.get_conf('enabled', self.module_field_default('enabled'))
 
-    def send_message(self, message, status=None, item=''):
+    def send_message(self, message, status=None, item='', severity=''):
         """
         Bridge function to the send_message function of the Monitor object, checking if the
         Monitor is defined and valid before sending the data.
 
         ``item`` is the friendly name of the thing this alert is about (host/service/…);
-        it fills the notification digest's Item column for ad-hoc sends.
+        it fills the notification digest's Item column for ad-hoc sends.  ``severity='warning'``
+        routes a non-OK alert as a ``warn`` (soft threshold breach) rather than ``down``.
         """
         if self.is_monitor_exist:
             # Pass the watchful's name so the notification digest can fill its Module column.
-            self._monitor.send_message(message, status, module=self.name_module, item=item)
+            self._monitor.send_message(message, status, module=self.name_module, item=item,
+                                       severity=severity)
         else:
             self.debug.print(
                 f">> {self.name_module} > send_message: Error, Monitor is not defined!!",
                 DebugLevel.error
             )
+
+    # ── i18n for check messages ────────────────────────────────────────────────
+    def _notify_lang(self) -> str:
+        """The system notification language (global ``notifications|lang`` …), read from the
+        monitor's full config — so a check message is built in the configured language."""
+        from lib.core.notify.formatting import notify_lang  # noqa: PLC0415
+        cfg = getattr(getattr(self._monitor, 'config', None), 'data', None)
+        return notify_lang(cfg if isinstance(cfg, dict) else {})
+
+    def _module_messages(self) -> dict:
+        """This module's ``messages`` dict for the current notification language, from its own
+        ``lang/<lang>.json`` (requested language wins, ``en_EN`` fills gaps).  Cached per
+        (module, language)."""
+        from lib.i18n import DEFAULT_LANG  # noqa: PLC0415
+        lang = self._notify_lang()
+        base = getattr(self._monitor, 'dir_modules', None) if self.is_monitor_exist else None
+        if not isinstance(base, str):
+            base = None
+        name = (self.name_module or '').split('.')[-1]
+        ck = (base, name, lang)
+        cached = _MODULE_MSG_CACHE.get(ck)
+        if cached is not None:
+            return cached
+        msgs: dict = {}
+        if base and name:
+            lang_dir = os.path.join(base, name, 'lang')
+            for lc in (lang, DEFAULT_LANG):        # requested first, then default fills gaps
+                if not lc:
+                    continue
+                try:
+                    with open(os.path.join(lang_dir, f'{lc}.json'), encoding='utf-8') as fh:
+                        data = json.load(fh)
+                except (OSError, ValueError):
+                    continue
+                for k, v in (data.get('messages') or {}).items():
+                    msgs.setdefault(k, v)
+        _MODULE_MSG_CACHE[ck] = msgs
+        return msgs
+
+    def _msg(self, key: str, *args) -> str:
+        """Translate a check message in the system notification language: an admin text override
+        (``notif_text_overrides[lang]['mod:<module>:<key>']``) wins, else this module's
+        ``lang/*.json`` ``messages`` section.  ``{}`` placeholders are filled positionally by
+        *args*; an unknown key falls back to the key itself."""
+        from lib.core.notify.formatting import text_override, _fill  # noqa: PLC0415
+        cfg = getattr(getattr(self._monitor, 'config', None), 'data', None)
+        cfg = cfg if isinstance(cfg, dict) else {}
+        name = (self.name_module or '').split('.')[-1]
+        text = (text_override(cfg, self._notify_lang(), f'mod:{name}:{key}')
+                or self._module_messages().get(key, key))
+        return _fill(text, args)   # {} sequential + {0}/{1}… indexed (reorderable in overrides)
 
     def get_conf(
             self,

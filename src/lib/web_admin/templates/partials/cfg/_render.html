@@ -250,6 +250,7 @@ function renderConfig() {
         cfgcol_email:           'linear-gradient(90deg,#dc2626,#f97316)',
         cfgcol_notifications:   'linear-gradient(90deg,#10b981,#06b6d4)',
         cfgcol_webhook:         'linear-gradient(90deg,#8b5cf6,#ec4899)',
+        cfgcol_msteams:         'linear-gradient(90deg,#4b53bc,#7b83eb)',
     };
 
     function cfgCardOpen(id, icon, title) {
@@ -306,6 +307,8 @@ function renderConfig() {
 
     // Webhooks list (array — CRUD managed separately)
     if (!Array.isArray(configData.webhooks)) configData.webhooks = [];
+    // Teams channel destinations (array — CRUD managed separately)
+    if (!Array.isArray(configData.msteams_channels)) configData.msteams_channels = [];
 
     // Pre-populate SAML2 section defaults
     if (!configData.saml2) configData.saml2 = {};
@@ -343,7 +346,7 @@ function renderConfig() {
     // then decides which sub-tab it lands in and in what order — so placement has
     // a single source of truth in lib.config.layout, not hardcoded buckets here.
     const _cardHtml = {};
-    let hNotifs = '';   // telegram + events cards accumulate here for the Notifications tab
+    const _notifCards = {};   // telegram/events cards keyed by section (order fixed on assembly below)
 
     for (const sec of sections) {
         const data = configData[sec];
@@ -353,6 +356,8 @@ function renderConfig() {
 
         if (sec === 'email') continue;           // built separately below
         if (sec === 'webhooks') continue;       // built separately via _renderWebhooksSection
+        if (sec === 'msteams') continue;        // built separately via _renderMsTeamsSection
+        if (sec === 'msteams_channels') continue;   // channel list (array) — CRUD managed separately
         if (sec === 'notifications') continue;  // built separately via _renderNotificationsMatrix
         // Feature data that lives in config.json but is NOT editable config:
         // the dashboard layout and the notification template overrides have
@@ -368,10 +373,10 @@ function renderConfig() {
             const extra = sec === 'telegram' ? `<hr class="my-2"><div class="cfg-field-wrap"><div class="row"><div class="col-sm-8 offset-sm-4 d-flex justify-content-end"><button class="btn btn-info btn-sm" onclick="testTelegram()" id="btnTestTelegram" data-test-btn title="${escAttr(t('telegram_test'))}">
                 <i class="bi bi-telegram me-1"></i>${t('telegram_test')}
             </button></div></div></div>` : '';
-            hNotifs += cfgCardOpen(cfgId, '<i class="bi bi-bell me-1"></i>', lbl);
-            hNotifs += renderScalarFields(data, sec, 'config', []);
-            hNotifs += extra;
-            hNotifs += cfgCardClose;
+            _notifCards[sec] = cfgCardOpen(cfgId, '<i class="bi bi-bell me-1"></i>', lbl)
+                + renderScalarFields(data, sec, 'config', [])
+                + extra
+                + cfgCardClose;
             continue;
         }
 
@@ -473,13 +478,18 @@ function renderConfig() {
         _cardHtml['ipban_services'] = _ipbanServicesCard(cfgCardOpen, cfgCardClose);
     }
 
-    // ── Notifications tab: three sub-tabs — Routing | Providers | Templates
+    // ── Notifications tab: sub-tabs — General | Routing | Providers | Templates
+    const hNotifGeneral   = _renderNotifGeneralSection(cfgCardOpen, cfgCardClose);
     const hNotifRouting   = _renderNotificationsMatrix(cfgCardOpen, cfgCardClose);
-    const hNotifProviders = hNotifs   // telegram section already accumulated above
-        + _renderWebhooksSection(cfgCardOpen, cfgCardClose)
-        + _renderEmailSection(cfgCardOpen, cfgCardClose);
-    const hNotifTemplates = _renderNotifTemplatesSection();
+    // Fixed order in the Providers sub-tab: Event rules → Telegram → Email → Webhooks.
+    const hNotifProviders = (_notifCards['events'] || '')
+        + (_notifCards['telegram'] || '')
+        + _renderEmailSection(cfgCardOpen, cfgCardClose)
+        + _renderMsTeamsSection(cfgCardOpen, cfgCardClose)
+        + _renderWebhooksSection(cfgCardOpen, cfgCardClose);
+    const hNotifTemplates = _renderNotifTemplatesSection(cfgCardOpen, cfgCardClose);
     const _notifSubTabs = [
+        { id: 'cfg-notif-general',   label: t('cfg_notif_subtab_general'),   icon: 'bi-gear',      html: hNotifGeneral   },
         { id: 'cfg-notif-routing',   label: t('cfg_notif_subtab_routing'),   icon: 'bi-diagram-3', html: hNotifRouting   },
         { id: 'cfg-notif-providers', label: t('cfg_notif_subtab_providers'), icon: 'bi-plug',      html: hNotifProviders },
         { id: 'cfg-notif-templates', label: t('cfg_notif_subtab_templates'), icon: 'bi-file-text', html: hNotifTemplates },

@@ -42,6 +42,15 @@ from lib.modules import ModuleBase
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
 # Per-OS command to read a service's state ({svc} substituted, shell-quoted).
+def _win_quote(s: str) -> str:
+    """Quote an argument for cmd.exe (host_exec runs with shell=True on Windows). Double
+    quotes neutralise the command separators (& | < > ^) and embedded quotes are stripped so
+    the value can't break out — the POSIX branches use shlex.quote instead. NB: this does
+    NOT stop ``%VAR%`` environment-variable expansion (no command execution, and the value
+    is admin/config-controlled), so it's not a full sandbox — just injection containment."""
+    return '"' + str(s).replace('"', '') + '"'
+
+
 _STATUS_CMDS = {
     'linux':   'systemctl is-active {svc}',
     'windows': 'sc query {svc}',
@@ -109,7 +118,7 @@ class Watchful(ModuleBase):
         os_ = self.host_os(item)
         if os_ not in _STATUS_CMDS:
             self.dict_return.set(key, False,
-                                 f'Service: {label} - *unsupported host OS: {os_}* ⚠️',
+                                 self._msg('svc_unsupported_os', label, os_),
                                  name=label)
             return
 
@@ -125,32 +134,27 @@ class Watchful(ModuleBase):
                 status, error, detail = self._service_state(item, os_, service_name)
                 ok = status if expected == 'running' else not status
                 remediation_use = ok
-                s_message = '*Recovery* ' + self._fmt(label, ok, status, error, detail,
-                                                      unsuccessful=True)
+                s_message = self._msg('svc_recovery_prefix') + self._fmt(
+                    label, ok, status, error, detail, unsuccessful=True)
                 self.send_message(s_message, ok, item=label)
 
         other_data = {'error': error, 'status_detail': detail, 'remediation': remediation_use}
         self.dict_return.set(key, ok, s_message, False, other_data)
 
-    @staticmethod
-    def _fmt(display_name, ok, status, error, detail, unsuccessful=False):
-        msg = f'Service: {display_name} '
+    def _fmt(self, display_name, ok, status, error, detail, unsuccessful=False):
         if ok:
-            msg += ' - *OK* ✅' if unsuccessful else \
-                f' - *{"Running" if status else "Stopped"}* ✅'
-        else:
-            if error and detail:
-                msg += f'- *Error: {detail}* '
-            elif status:
-                msg += '- *Running (expected: Stopped)* '
-            else:
-                msg += '- *UNSUCCESSFUL* ' if unsuccessful else '- *Stop* '
-            msg += '⚠️'
-        return msg
+            if unsuccessful:
+                return self._msg('svc_ok', display_name)
+            return self._msg('svc_running' if status else 'svc_stopped', display_name)
+        if error and detail:
+            return self._msg('svc_error', display_name, detail)
+        if status:
+            return self._msg('svc_running_unexpected', display_name)
+        return self._msg('svc_unsuccessful' if unsuccessful else 'svc_stop', display_name)
 
     def _service_state(self, item, os_, service_name):
         """Return (running, error, detail) by running the per-OS status command."""
-        svc = service_name if os_ == 'windows' else shlex.quote(service_name)
+        svc = _win_quote(service_name) if os_ == 'windows' else shlex.quote(service_name)
         cmd = _STATUS_CMDS[os_].format(svc=svc)
         out, err, code = self.host_exec(
             item, cmd, timeout=self.module_default('timeout', 15))
@@ -191,7 +195,7 @@ class Watchful(ModuleBase):
 
     def _service_remediation(self, item, os_, service_name, expected):
         action = 'stop' if expected == 'stopped' else 'start'
-        svc = service_name if os_ == 'windows' else shlex.quote(service_name)
+        svc = _win_quote(service_name) if os_ == 'windows' else shlex.quote(service_name)
         cmd = _ACTION_CMDS[os_].format(action=action, svc=svc)
         self.host_exec(item, cmd, timeout=self.module_default('timeout', 15))
 

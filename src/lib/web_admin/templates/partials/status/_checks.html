@@ -227,11 +227,15 @@ function _renderOneStatusCard(mod, checks) {
         const pname = modulePrettyName(mod, modulesData[mod] || {});
         const icon  = moduleIcon(mod, modulesData[mod] || {});
         const rows  = Object.entries(checks);
+        const _sev    = v => (v && typeof v === 'object' && v.severity) || '';
         const okCnt   = rows.filter(([, v]) => v?.status === true).length;
         const total   = rows.length;
         const allOk   = okCnt === total && total > 0;
         const noItems = total === 0;
-        const errCnt  = total - okCnt;
+        // A non-OK check is a soft warning (severity 'warning') or a hard error; count them
+        // apart so a card whose only problems are warnings reads amber, not red.
+        const warnCnt = rows.filter(([, v]) => v?.status === false && _sev(v) === 'warning').length;
+        const hardErr = (total - okCnt) - warnCnt;
         const pct     = noItems ? 0 : Math.round(100 * okCnt / total);
         // The check list starts collapsed when everything is OK and expanded as
         // soon as something failed, so problem checks are visible without a click.
@@ -240,20 +244,20 @@ function _renderOneStatusCard(mod, checks) {
         const hasRows   = total > 0;
         const collapsed = allOk;
 
-        const accentGrad = noItems
-            ? 'linear-gradient(90deg,#94a3b8,#cbd5e1)'
-            : allOk
-            ? 'linear-gradient(90deg,#22c55e,#4ade80,#0ea5e9)'
-            : 'linear-gradient(90deg,#ef4444,#f97316)';
-        const avBg    = noItems ? 'var(--bs-secondary-bg)'       : allOk ? '#dcfce7' : '#fee2e2';
-        const avColor = noItems ? 'var(--bs-secondary-color)'    : allOk ? '#15803d' : '#b91c1c';
-        const badgeBg    = noItems ? 'var(--bs-secondary-bg)'    : allOk ? '#dcfce7' : '#fee2e2';
-        const badgeColor = noItems ? 'var(--bs-secondary-color)' : allOk ? '#15803d' : '#b91c1c';
-        const pbarBg  = noItems
-            ? 'var(--bs-secondary-bg)'
-            : allOk
-            ? 'linear-gradient(90deg,#22c55e,#4ade80)'
-            : 'linear-gradient(90deg,#ef4444,#f97316)';
+        // Card colour state: green (all OK) / red (any hard error) / amber (only warnings).
+        const cardState = noItems ? 'none' : allOk ? 'ok'
+                        : hardErr === 0 && warnCnt > 0 ? 'warn' : 'error';
+        const _PAL = {
+            none:  {grad:'linear-gradient(90deg,#94a3b8,#cbd5e1)',        bg:'var(--bs-secondary-bg)', color:'var(--bs-secondary-color)', bar:'var(--bs-secondary-bg)'},
+            ok:    {grad:'linear-gradient(90deg,#22c55e,#4ade80,#0ea5e9)', bg:'#dcfce7', color:'#15803d', bar:'linear-gradient(90deg,#22c55e,#4ade80)'},
+            warn:  {grad:'linear-gradient(90deg,#f59e0b,#fbbf24)',         bg:'#fef3c7', color:'#b45309', bar:'linear-gradient(90deg,#f59e0b,#fbbf24)'},
+            error: {grad:'linear-gradient(90deg,#ef4444,#f97316)',         bg:'#fee2e2', color:'#b91c1c', bar:'linear-gradient(90deg,#ef4444,#f97316)'},
+        };
+        const _pal = _PAL[cardState];
+        const accentGrad = _pal.grad;
+        const avBg    = _pal.bg, avColor = _pal.color;
+        const badgeBg = _pal.bg, badgeColor = _pal.color;
+        const pbarBg  = _pal.bar;
 
         let h = `<div class="rounded-3 overflow-hidden border" data-status-card="${escAttr(mod)}" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 2px 8px rgba(0,0,0,.06)">`;
 
@@ -276,7 +280,14 @@ function _renderOneStatusCard(mod, checks) {
                     ? `<i class="bi bi-dash"></i> ${t('status_no_items') || '—'}`
                     : allOk
                     ? `<i class="bi bi-check-lg"></i> ${t('status_ok')}`
-                    : `<i class="bi bi-x-lg"></i> ${errCnt} ${t('status_error')}`}
+                    : (() => {
+                        // Break down non-OK checks: hard errors and/or soft warnings.
+                        const parts = [];
+                        if (hardErr > 0) parts.push(`${hardErr} ${t('status_error')}`);
+                        if (warnCnt > 0) parts.push(`${warnCnt} ${t('status_warning')}`);
+                        const ico = hardErr > 0 ? 'bi-x-lg' : 'bi-exclamation-triangle-fill';
+                        return `<i class="bi ${ico}"></i> ${parts.join(' · ')}`;
+                      })()}
             </span>
             ${hasRows ? `<i class="bi bi-chevron-down ss-card-chevron flex-shrink-0 text-muted"
                   style="font-size:.8rem;transition:transform .2s${collapsed ? ';transform:rotate(-90deg)' : ''}"></i>` : ''}
@@ -297,17 +308,20 @@ function _renderOneStatusCard(mod, checks) {
             const st = info?.status;
             const ok = st === true;
             const unknown = st !== true && st !== false;
+            const warn = st === false && _sev(info) === 'warning';   // soft threshold breach
             const extra = (typeof info === 'object' && info?.other_data) || {};
 
             const rowIcon = ok
                 ? '<i class="bi bi-check-circle-fill text-success" style="font-size:.9rem;flex-shrink:0"></i>'
-                : !unknown
-                    ? '<i class="bi bi-x-circle-fill text-danger" style="font-size:.9rem;flex-shrink:0"></i>'
-                    : '<i class="bi bi-question-circle text-secondary" style="font-size:.9rem;flex-shrink:0"></i>';
+                : unknown
+                    ? '<i class="bi bi-question-circle text-secondary" style="font-size:.9rem;flex-shrink:0"></i>'
+                    : warn
+                        ? '<i class="bi bi-exclamation-triangle-fill text-warning" style="font-size:.9rem;flex-shrink:0"></i>'
+                        : '<i class="bi bi-x-circle-fill text-danger" style="font-size:.9rem;flex-shrink:0"></i>';
 
-            const cbBg    = ok ? '#dcfce7' : !unknown ? '#fee2e2' : 'var(--bs-secondary-bg)';
-            const cbColor = ok ? '#15803d' : !unknown ? '#b91c1c' : 'var(--bs-secondary-color)';
-            const cbTxt   = ok ? t('status_ok') : !unknown ? t('status_error') : '—';
+            const cbBg    = ok ? '#dcfce7' : unknown ? 'var(--bs-secondary-bg)'    : warn ? '#fef3c7' : '#fee2e2';
+            const cbColor = ok ? '#15803d' : unknown ? 'var(--bs-secondary-color)' : warn ? '#b45309' : '#b91c1c';
+            const cbTxt   = ok ? t('status_ok') : unknown ? '—' : warn ? t('status_warning') : t('status_error');
 
             // Extra info: schema-declared decorations (__status_render__) applied
             // to other_data — first matching directive wins. Generic: a "bar"

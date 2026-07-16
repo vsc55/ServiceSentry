@@ -9,13 +9,26 @@ import pytest
 from lib.core.notify.monitor_notifier import MonitorNotifier
 
 
+class _FakeStore:
+    """Stand-in channel store: ``list()`` → rows, ``all_refs()`` → {} (bot store)."""
+    def __init__(self, rows):
+        self._rows = rows
+
+    def list(self, *, decrypt=True):
+        return self._rows
+
+    def all_refs(self):
+        return {}
+
+
 class _FakeWA:
-    """Minimal dispatcher `wa` contract."""
+    """Minimal router surface: channels load via ``store(key, factory)``."""
     _CONFIG_FILE = 'config.json'
 
     def __init__(self, cfg):
         self._cfg = cfg
         self.webhooks = [{'id': '1', 'name': 'wh', 'enabled': True, 'url': 'http://x'}]
+        self.channels = [{'id': '1', 'name': 'tc', 'enabled': True, 'webhook_url': 'https://o/x'}]
 
     def _read_config_file(self, _f):
         return self._cfg
@@ -23,8 +36,8 @@ class _FakeWA:
     def _dbg(self, *a, **k):
         pass
 
-    def _load_webhooks(self, *, decrypt=True):
-        return self.webhooks
+    def store(self, key, factory):
+        return _FakeStore({'webhook': self.webhooks, 'msteams': self.channels}.get(key, []))
 
     def _config_section(self, name):
         return self._cfg.get(name, {})
@@ -47,7 +60,7 @@ def _cfg(**matrix):
 @pytest.fixture()
 def sent(monkeypatch):
     """Capture every channel send; the real senders are stubbed out."""
-    rec = {'tg': [], 'email': [], 'webhook': []}
+    rec = {'tg': [], 'email': [], 'webhook': [], 'msteams': []}
     monkeypatch.setattr('lib.providers.telegram.send_telegram',
                         lambda token, chat, text, **k: (rec['tg'].append(text), (True, 200, 'ok'))[1])
     monkeypatch.setattr('lib.core.notify.email.notify._dispatch',
@@ -55,6 +68,8 @@ def sent(monkeypatch):
                             rec['email'].append((subject, body_html)), (True, 'sent'))[1])
     monkeypatch.setattr('lib.core.notify.webhook.notify.send_all',
                         lambda wa, **kw: (rec['webhook'].append(kw), (True, 'ok'))[1])
+    monkeypatch.setattr('lib.core.notify.msteams.notify.send_all',
+                        lambda wa, **kw: (rec['msteams'].append(kw), (True, 'ok'))[1])
     return rec
 
 
@@ -62,6 +77,26 @@ def _add_three(n):
     n.add('down', 'ping', 'host1', 'ping down')
     n.add('recovery', 'pve', 'host2', 'pve back')
     n.add('warn', 'disk', 'host3', 'disk warn')
+
+
+class TestTeamsPerEvent:
+
+    def test_msteams_one_call_per_alert(self, sent):
+        # Teams routes like webhooks: one send per alert for the enabled kinds.
+        n = MonitorNotifier(_FakeWA(_cfg(
+            msteams_on_down=True, msteams_on_recovery=True, msteams_on_warn=False)))
+        _add_three(n)
+        n.flush(public_url='https://ss.example')
+        # down + recovery enabled (warn off) → two per-event Teams sends
+        assert len(sent['msteams']) == 2
+        kinds = {kw['kind'] for kw in sent['msteams']}
+        assert kinds == {'down', 'recovery'}
+
+    def test_msteams_off_sends_nothing(self, sent):
+        n = MonitorNotifier(_FakeWA(_cfg()))   # msteams_on_* all default False
+        _add_three(n)
+        n.flush(public_url='https://ss.example')
+        assert sent['msteams'] == []
 
 
 class TestRouting:
@@ -76,6 +111,23 @@ class TestRouting:
         assert len(sent['email']) == 1
         # webhook: only down enabled, per-event → one call
         assert len(sent['webhook']) == 1
+
+    def test_route_kind_routes_whole_batch_as_one_kind(self, sent):
+        # A manual run routes the whole batch under one kind (manual_run), regardless of each
+        # alert's own kind, while the digest still carries the real down/recovery states.
+        cfg = _cfg()
+        cfg['notifications']['webhook_on_manual_run'] = True   # only the manual_run route is on
+        n = MonitorNotifier(_FakeWA(cfg), route_kind='manual_run')
+        _add_three(n)                       # down + recovery + warn (real kinds)
+        n.flush()
+        assert len(sent['webhook']) == 3    # all three forwarded via webhook_on_manual_run
+        # ...and without the manual_run route on, a routed batch sends nothing (per-kind cells
+        # — even webhook_on_down — are NOT consulted for a routed batch).
+        before = len(sent['webhook'])
+        n2 = MonitorNotifier(_FakeWA(_cfg()), route_kind='manual_run')   # base cfg has webhook_on_down
+        _add_three(n2)
+        n2.flush()
+        assert len(sent['webhook']) == before   # nothing new: no webhook_on_manual_run
 
     def test_nothing_enabled_sends_nothing(self, sent):
         n = MonitorNotifier(_FakeWA(_cfg(telegram_on_down=False, telegram_on_recovery=False,
@@ -165,8 +217,8 @@ class TestEmailGrouping:
 class TestPlainText:
 
     def test_plain_strips_telegram_markdown(self):
-        from lib.core.notify.monitor_notifier import _plain
-        assert _plain('CPU (*NS1*) 90% \\[host]') == 'CPU (NS1) 90% [host]'
+        from lib.core.notify.formatting import plain
+        assert plain('CPU (*NS1*) 90% \\[host]') == 'CPU (NS1) 90% [host]'
 
     def test_email_body_has_no_markdown(self, sent):
         n = MonitorNotifier(_FakeWA(_cfg()))

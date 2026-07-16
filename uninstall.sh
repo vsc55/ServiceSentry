@@ -6,7 +6,8 @@ CLEAR_ALL=NO
 help_usage() {
     echo "Usage: uninstall.sh [[-a | --all] | [-h | --help]]"
     echo ""
-    echo "  -a, --all   Also remove configuration files in /etc/ServiSesentry"
+    echo "  -a, --all   Also remove configuration (/etc/ServiSesentry) AND runtime data"
+    echo "              (/var/lib/ServiSesentry, including the SQLite database)"
     echo "  -h, --help  Show this help"
 }
 
@@ -80,13 +81,19 @@ case "${INIT_SYSTEM}" in
 esac
 
 # ── Remove application files ──────────────────────────────────────────────────
+# Only the program code (/opt) is removed by default.  Runtime data (/var/lib,
+# which may hold the SQLite database) and configuration (/etc) are PRESERVED unless
+# --all is given, so an uninstall can never silently destroy the database.
 echo "Removing application files..."
 rm -rf /opt/ServiSesentry
-rm -rf /var/lib/ServiSesentry
 
 if [[ "${CLEAR_ALL}" == "YES" ]]; then
-    echo "Removing configuration files..."
+    echo "Removing configuration and runtime data (--all)..."
     rm -rf /etc/ServiSesentry
+    rm -rf /var/lib/ServiSesentry
+else
+    echo "Preserving /etc/ServiSesentry (config) and /var/lib/ServiSesentry (data, incl. the"
+    echo "database). Re-run with --all to remove them too."
 fi
 
 echo ""

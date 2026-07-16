@@ -235,7 +235,7 @@ class Watchful(ModuleBase):
         timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         if not (tenant and client_id and secret):
             self._emit(key, False,
-                       f'M365: {label} — *faltan credenciales (tenant/client/secret)* ⚠️',
+                       self._msg('m3_no_creds', label),
                        {'name': f'{label} · Microsoft 365'}, severity='warning')
             return
 
@@ -246,7 +246,7 @@ class Watchful(ModuleBase):
             streak = self.fail_streak(key, True)
             effective = streak < alert
             icon = '🔼' if effective else '🔽'
-            self._emit(key, effective, f'M365: {label} {icon} [auth: {exc}]',
+            self._emit(key, effective, self._msg('m3_auth_fail', label, icon, exc),
                        {'name': f'{label} · Microsoft 365', 'error': str(exc)})
             return
         self.fail_streak(key, False)
@@ -261,7 +261,7 @@ class Watchful(ModuleBase):
             site_id, disp = self._resolve_site(token, it.get('site'), timeout)
             drive = self._graph_json(token, f'/sites/{site_id}/drive?$select=quota,name', timeout)
         except Exception as exc:  # pylint: disable=broad-except
-            self._emit(f'{key}/site', False, f'M365: {label} 🔽 [SharePoint: {exc}]')
+            self._emit(f'{key}/site', False, self._msg('m3_site_fail', label, exc))
             return
         q = (drive or {}).get('quota') or {}
         total = int(q.get('total') or 0)
@@ -290,18 +290,18 @@ class Watchful(ModuleBase):
         # nor early red). See __status_render__ (default_threshold 100).
         if usage_pct > 0:
             extra['alert'] = usage_pct
-        summary = (f'SharePoint {disp}: {used_pct}% usado '
-                   f'({_fmt_bytes(used)}/{_fmt_bytes(total)}, libre {_fmt_bytes(remaining)})')
+        summary = self._msg('m3_summary', disp, used_pct,
+                            _fmt_bytes(used), _fmt_bytes(total), _fmt_bytes(remaining))
         if not (over_pct or low_free):
-            self._emit(f'{key}/site', True, f'M365: {label} — {summary} ✅', extra)
+            self._emit(f'{key}/site', True, self._msg('m3_site_ok', label, summary), extra)
         else:
             why = []
             if over_pct:
                 why.append(f'≥ {usage_pct}%')
             if low_free:
-                why.append(f'libre < {_fmt_bytes(free_min)}')
+                why.append(self._msg('m3_why_free', _fmt_bytes(free_min)))
             self._emit(f'{key}/site', False,
-                       f'M365: {label} — *{summary} — {", ".join(why)}* ⚠️',
+                       self._msg('m3_site_alert', label, summary, ', '.join(why)),
                        extra, severity='warning')
 
     def _check_tenant(self, it: dict, key: str, label: str, token: str, timeout: int) -> None:
@@ -310,18 +310,18 @@ class Watchful(ModuleBase):
                 token, "/reports/getSharePointSiteUsageStorage(period='D7')", timeout)
             used = _csv_max(text, 'Storage Used (Byte)')
         except Exception as exc:  # pylint: disable=broad-except
-            self._emit(f'{key}/tenant', False, f'M365: {label} 🔽 [uso del tenant: {exc}]')
+            self._emit(f'{key}/tenant', False, self._msg('m3_tenant_fail', label, exc))
             return
         tmax = _to_bytes(it.get('tenant_max'), it.get('tenant_unit') or 'TB')
         extra = {'name': f'{label} · SharePoint (tenant)', 'used_bytes': used, 'limit_bytes': tmax}
-        base = f'M365: {label} — SharePoint (tenant) usado {_fmt_bytes(used)}'
+        base = self._msg('m3_tenant_base', label, _fmt_bytes(used))
         if tmax > 0 and used > tmax:
             self._emit(f'{key}/tenant', False,
-                       f'*{base} — supera el límite {_fmt_bytes(tmax)}* ⚠️',
+                       self._msg('m3_tenant_over', base, _fmt_bytes(tmax)),
                        extra, severity='warning')
         else:
-            self._emit(f'{key}/tenant', True,
-                       base + (f' (límite {_fmt_bytes(tmax)})' if tmax else '') + ' ✅', extra)
+            suffix = self._msg('m3_tenant_limit_suffix', _fmt_bytes(tmax)) if tmax else ''
+            self._emit(f'{key}/tenant', True, base + suffix + ' ✅', extra)
 
     # ── Web action: list SharePoint sites (field discovery picker) ────────
 

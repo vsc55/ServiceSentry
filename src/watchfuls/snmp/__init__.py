@@ -1304,7 +1304,8 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f'SNMP: {labels.get(key, key)} — unhandled exception: {exc}', DebugLevel.error)
-                    self.dict_return.set(key, False, f'SNMP: {labels.get(key, key)} 💥 {exc}')
+                    self.dict_return.set(key, False,
+                                         self._msg('snmp_error', labels.get(key, key), exc))
 
         super().check()
         return self.dict_return
@@ -1350,7 +1351,7 @@ class Watchful(ModuleBase):
 
         if not host:
             self._debug(f'SNMP: {label} — no server host configured, skipping.', DebugLevel.warning)
-            self.dict_return.set(key, False, f'SNMP: {label} ⚠ server not configured')
+            self.dict_return.set(key, False, self._msg('snmp_no_host', label))
             return
 
         raw_value, err = self._snmp_get(
@@ -1372,8 +1373,7 @@ class Watchful(ModuleBase):
             # within the grace window; at the threshold the check goes DOWN.
             streak = self.fail_streak(key, True)
             status = streak < max(1, t_alert)
-            icon   = '🔼' if status else '🔽'
-            msg    = f'SNMP: {label} {icon} [{err}]'
+            msg    = self._msg('snmp_up' if status else 'snmp_down', label, err)
             self._debug(f'SNMP: {label} — error: {err} (fails={streak}/{t_alert})', DebugLevel.warning)
             self.dict_return.set(key, status, msg, False, {'oid': oid, 'error': err})
             if self.check_status(status, self.name_module, key):
@@ -1382,8 +1382,7 @@ class Watchful(ModuleBase):
 
         self.fail_streak(key, False)
         status = self._evaluate(raw_value, operator, expected)
-        icon   = '🔼' if status else '🔽'
-        msg    = f'SNMP: {label} {icon} [{raw_value}]'
+        msg    = self._msg('snmp_up' if status else 'snmp_down', label, raw_value)
         self._debug(
             f'SNMP: {key} — OID={oid} value={raw_value!r} '
             f'op={operator} expected={expected!r} → {status}',

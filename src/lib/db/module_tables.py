@@ -31,9 +31,14 @@ Example (in ``watchfuls/<name>/__init__.py``)::
 
     def discover_db_tables():
         return [module_table('mymod', 'cache', (
-            Column('key',   'TEXT', nullable=False, unique=True),
+            Column('name',  'TEXT', nullable=False, unique=True),
             Column('value', 'TEXT'),
-        ), indexes=(Index('by_key', ('key',)),))]
+        ), indexes=(Index('by_name', ('name',)),))]
+
+Note: prefer non-reserved column/table names.  The generated DDL quotes identifiers, so a
+reserved word (``key``, ``user``, ``virtual``…) still *creates* fine — but if you then write
+RAW SQL against the table, quote the identifier for MySQL/PostgreSQL (use the connector's
+``quote_ident``); a bare reserved word works on SQLite but breaks on the production engines.
 """
 
 from __future__ import annotations

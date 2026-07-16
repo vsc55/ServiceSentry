@@ -15,6 +15,12 @@ from lib.config.spec import cfg_default
 
 
 def register(app, wa):
+    """Register the ``/api/v1/auth/ldap/*`` config/test endpoints on *app*.
+
+    Adds the connection/credential test, single-group lookup and directory group
+    listing routes; all require the ``config_edit`` permission. *wa* is the host
+    WebAdmin (config access, i18n, audit).
+    """
     config_edit_req = wa._perm_required('config_edit')
 
     @app.route('/api/v1/auth/ldap/test', methods=['POST'])

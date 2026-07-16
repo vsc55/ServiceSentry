@@ -111,7 +111,7 @@ class TestAuthentication:
         defs = registry_defaults()
         assert defs["syslog|udp_port"] == 514
         # the registry is the single source — spec, not the template, owns these
-        assert "syslog|udp_port" in defs and "notifications|telegram_on_down" in defs
+        assert "syslog|udp_port" in defs and "services|notify_down" in defs
 
     def test_session_stores_user_info(self, client):
         """Login populates session with username, role and display_name."""

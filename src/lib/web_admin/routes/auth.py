@@ -40,6 +40,26 @@ def _landing_url(wa, user: dict) -> str:
     return (entry.get('url') if entry else '/') or '/'
 
 
+# i18n key per ``auth_source`` for the login-notification method label (translated in the
+# system notification language, like every other notification string).
+_AUTH_METHOD_KEYS = {
+    'local': 'notif_auth_local', 'ldap': 'notif_auth_ldap',
+    'oidc': 'notif_auth_oidc', 'saml2': 'notif_auth_saml', 'saml': 'notif_auth_saml',
+    'entraid': 'notif_auth_entraid', 'msteams': 'notif_auth_msteams', 'scim': 'notif_auth_scim',
+}
+
+
+def _auth_method_label(auth_source, lang: str = '', cfg: dict = None) -> str:
+    """Friendly name for how a user authenticated ('local'/'ldap'/'oidc'/…), localised
+    (admin override honoured)."""
+    src = str(auth_source or 'local').strip() or 'local'
+    key = _AUTH_METHOD_KEYS.get(src)
+    if key:
+        from lib.core.notify.formatting import notify_text  # noqa: PLC0415
+        return notify_text(cfg, lang, key)
+    return src.upper()
+
+
 def _establish_session(wa, username: str, user: dict, remember: bool = False) -> None:
     """Populate the Flask session after a successful authentication."""
     # A successful auth clears the per-IP login throttle (legit users on a shared
@@ -55,6 +75,24 @@ def _establish_session(wa, username: str, user: dict, remember: bool = False) ->
     session['session_id']    = uid
     session['logged_in']     = True
     session['username']      = username
+    # Forward a successful login (any source: local/LDAP/OIDC/SAML/Teams) to the
+    # notification router — opt-in per channel via the routing matrix (default off).
+    # The auth method (Local / LDAP / SSO provider) is carried in both the status and
+    # the message so the alert says *how* the user signed in.
+    try:
+        import time as _t  # noqa: PLC0415
+        from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
+        from lib.core.notify.formatting import notify_lang, notify_text  # noqa: PLC0415
+        cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        lang = notify_lang(cfg)
+        method = _auth_method_label(user.get('auth_source'), lang, cfg)
+        _dispatch(wa, kind='auth_login', module='auth', item=username,
+                  status=f"{notify_text(cfg, lang, 'notif_status_login')} · {method}",
+                  message=notify_text(cfg, lang, 'notif_msg_auth_login', username, method,
+                                      request.remote_addr),
+                  timestamp=_t.strftime('%Y-%m-%d %H:%M:%S'))
+    except Exception:  # pylint: disable=broad-except
+        pass
     role_ref  = user.get('role', 'viewer')
     role_name = wa._uid_to_role_name(role_ref) if wa._is_uid(role_ref) else role_ref
     session['role']         = role_name or 'viewer'
@@ -74,6 +112,15 @@ def register(app, wa):
     if not hasattr(wa, '_login_ratelimit'):
         wa._login_ratelimit = RateLimiter()
 
+    # Auth lives in web_admin (outside the notify-events discovery roots), so it declares
+    # its notification events with the manual registry — the same escape hatch any code has.
+    from lib.core.notify.events import register_event  # noqa: PLC0415
+    for _key, _label, _order in (('auth_login', 'notif_event_auth_login', 50),
+                                 ('auth_login_failed', 'notif_event_auth_login_failed', 51),
+                                 ('auth_account_locked', 'notif_event_auth_locked', 52)):
+        register_event({'key': _key, 'source': 'auth', 'label_key': _label,
+                        'matrix': True, 'order': _order})
+
     def _login_ok(username, source, remember=False):
         """Audit a successful login (with source/role/remember) + info debug line."""
         role = session.get('role', '')
@@ -87,6 +134,22 @@ def register(app, wa):
         wa._dbg(f"> Auth >> login FAILED user={username!r} reason={reason} "
                 f"from {request.remote_addr}", DebugLevel.warning)
         wa._audit('login_failed', username, request.remote_addr, detail={'reason': reason})
+        # Forward to the notification router (opt-in matrix): a lock is its own kind.
+        try:
+            import time as _t  # noqa: PLC0415
+            from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
+            from lib.core.notify.formatting import notify_lang, notify_text  # noqa: PLC0415
+            _kind = 'auth_account_locked' if reason == 'account_locked' else 'auth_login_failed'
+            _cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+            _lang = notify_lang(_cfg)
+            _st = 'notif_status_locked' if _kind == 'auth_account_locked' else 'notif_status_failed'
+            _dispatch(wa, kind=_kind, module='auth', item=username or (request.remote_addr or '?'),
+                      status=notify_text(_cfg, _lang, _st),
+                      message=notify_text(_cfg, _lang, 'notif_msg_auth_failed', username or '?',
+                                          reason, request.remote_addr),
+                      timestamp=_t.strftime('%Y-%m-%d %H:%M:%S'))
+        except Exception:  # pylint: disable=broad-except
+            pass
         # Feed the internal fail2ban (progressive per-IP jail) — every failed login,
         # whatever the reason, is one 'auth'-track offense.
         wa._ipban_offense('login_failed')
@@ -125,6 +188,12 @@ def register(app, wa):
                     if attrs:
                         canonical = attrs.get('username') or username
                         user = ldap_auth.sync_user(wa, canonical, attrs)
+                        if user is None:
+                            # sync refused (username collides with a local account) — reject
+                            # cleanly instead of dereferencing None (generic message).
+                            flash(wa._t('invalid_credentials'), 'danger')
+                            _login_failed(canonical, 'ldap_account_conflict')
+                            return redirect(url_for('login'))
                         if not user.get('enabled', True):
                             flash(wa._t('account_disabled'), 'danger')
                             _login_failed(canonical, 'account_disabled')
@@ -145,6 +214,12 @@ def register(app, wa):
                     if attrs:
                         canonical = attrs.get('username') or username
                         user = ldap_auth.sync_user(wa, canonical, attrs)
+                        if user is None:
+                            # sync refused (username collides with a local account) — reject
+                            # cleanly instead of dereferencing None (generic message).
+                            flash(wa._t('invalid_credentials'), 'danger')
+                            _login_failed(canonical, 'ldap_account_conflict')
+                            return redirect(url_for('login'))
                         if not user.get('enabled', True):
                             flash(wa._t('account_disabled'), 'danger')
                             _login_failed(canonical, 'account_disabled')

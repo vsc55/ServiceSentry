@@ -1,7 +1,7 @@
 {
     "name": "filesystemusage",
     "version": "1.0.0",
-    "description": "Filesystem / disk usage monitoring (cross-platform via psutil).",
+    "description": "Filesystem / disk usage monitoring (host-aware, via OS commands over local/SSH).",
     "icon": "\ud83d\udcbe",
     "dependencies": ["psutil"]
 }

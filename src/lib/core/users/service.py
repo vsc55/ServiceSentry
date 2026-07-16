@@ -254,9 +254,13 @@ def update_user(users: dict, username: str, data: dict, *, policy: PasswordPolic
         if role_is_admin(user.get('role', '')) and not role_is_admin(new_role_uid):
             if sum(1 for u in users.values() if role_is_admin(u.get('role', ''))) <= 1:
                 raise AdminOpError('must_have_admin')
-        old_role_name = role_display(user['role']) if role_display else user.get('role', '')
-        if old_role_name != data['role']:
-            changes.append({'field': 'role', 'old': old_role_name, 'new': data['role']})
+        old_role_uid = user.get('role', '')
+        if old_role_uid != new_role_uid:   # compare uid-to-uid, not name-to-uid
+            changes.append({
+                'field': 'role',
+                'old': role_display(old_role_uid) if role_display else old_role_uid,
+                'new': role_display(new_role_uid) if role_display else new_role_uid,
+            })
         user['role'] = new_role_uid
 
     if 'display_name' in data and not is_sso:

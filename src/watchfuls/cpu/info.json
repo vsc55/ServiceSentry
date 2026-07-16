@@ -1,7 +1,7 @@
 {
     "name": "cpu",
     "version": "1.0.0",
-    "description": "CPU usage monitoring via psutil.",
+    "description": "CPU usage monitoring (host-aware, via OS commands over local/SSH).",
     "icon": "🖥️",
     "dependencies": []
 }

@@ -70,7 +70,7 @@ class Watchful(ModuleBase):
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f'Check: {name} — Exception: {exc}', DebugLevel.error)
                     _lbl = self.get_conf(['list', name, 'label'], '') or name
-                    self.dict_return.set(name, False, f'Web: {_lbl} — Error: {exc} 💥')
+                    self.dict_return.set(name, False, self._msg('web_error', _lbl, exc))
 
         super().check()
         return self.dict_return
@@ -128,7 +128,7 @@ class Watchful(ModuleBase):
         label = (it.get('label', '') or '').strip() or url
         scheme       = (it.get('scheme', '') or 'https').strip()
         verify_ssl   = bool(it.get('verify_ssl', True))
-        code_exp     = it.get('code', 0) or self.get_conf('code', self._MODULE_DEFAULTS['code'])
+        code_exp     = int(it.get('code', 0) or self.get_conf('code', self._MODULE_DEFAULTS['code']))
         timeout      = it.get('timeout', 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         method           = str(it.get('method', 'GET') or 'GET').upper()
         check_content    = bool(it.get('check_content', False))
@@ -152,8 +152,7 @@ class Watchful(ModuleBase):
         streak = self.fail_streak(name, not status)
         effective = status or streak < alert
 
-        icon      = '🔼' if effective else '🔽'
-        s_message = f'Web: {label} {icon}'
+        s_message = self._msg('web_up' if effective else 'web_down', label)
         if not status:
             s_message += f' [{detail}]'
 

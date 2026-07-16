@@ -50,10 +50,11 @@ class _ProbeMonitor(Monitor):
         self.config_modules = ConfigControl(None, modules_config or {})
         self.status = ConfigControl(None, {})
 
-    def send_message(self, message, status=None, module: str = '', item: str = ''):   # noqa: D401 - no-op in a probe
-        # Signature must mirror Monitor.send_message (message, status, module, item):
-        # ModuleBase.send_message forwards module=/item=, so a probe of any module that
-        # emits an alert (e.g. process via check_status) would otherwise TypeError.
+    def send_message(self, message, status=None, module: str = '', item: str = '',
+                     severity: str = ''):   # noqa: D401 - no-op in a probe
+        # Signature must mirror Monitor.send_message (message, status, module, item, severity):
+        # ModuleBase.send_message forwards module=/item=/severity=, so a probe of any module
+        # that emits an alert (e.g. process via check_status) would otherwise TypeError.
         return None
 
     def send_message_end(self):

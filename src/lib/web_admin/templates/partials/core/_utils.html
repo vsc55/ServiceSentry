@@ -272,7 +272,7 @@ async function _bulkSetEnabled(selectedSet, enabled, opts) {
             const body = opts.buildBody(item, enabled, name);
             if (!body) continue;
             const r = await apiPut(opts.path(name), body);
-            if (r?.status === 200 && r.data?.ok) opts.data[name] = { ...opts.data[name], enabled };
+            if (r?.ok) opts.data[name] = { ...opts.data[name], enabled };   // apiPut returns raw JSON
         }
         selectedSet.clear();
         opts.reRender();

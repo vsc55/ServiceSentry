@@ -168,7 +168,7 @@ El conteo **persistido** (no en memoria) sobrevive a reinicios y es correcto con
 | `ipban_permanent_after`     | `4`                   | Nivel de ban a partir del cual es permanente (`0`=nunca). |
 | `ipban_whitelist`           | `''`                  | IP/CIDR programáticos, nunca baneados (CSV).         |
 
-La UI separa **configuración** (ajustes + «Servicios expuestos», en Config → fail2ban) de la **operativa** (sección de nivel superior con sub-pestañas IPs baneadas / Lista blanca / Historial). Ver [web_admin.md → fail2ban](web_admin.md#fail2ban-bans-de-ip).
+La UI separa **configuración** (ajustes + «Servicios expuestos», en Config → fail2ban) de la **operativa** (sección de nivel superior con sub-pestañas IPs baneadas / Lista blanca / Historial). Ver [web-admin.md → fail2ban](web-admin.md#fail2ban-bans-de-ip).
 
 ### Registrado como servicio (pestaña Services)
 
@@ -233,7 +233,7 @@ Cuando `saml2.enabled = true` y el paquete `pysaml2` está instalado, el flujo e
 LDAP/OIDC/SAML2 crean el usuario **al primer login** (JIT). Con `scim.enabled` ServiceSentry
 expone además `/scim/v2/*` para que el IdP **empuje** altas/cambios/bajas **antes** de que
 entren (y baje al retirar la asignación). Detalles del flujo/endpoints en
-[sso-entra.md](sso-entra.md) y [web_admin.md](web_admin.md).
+[sso-entra.md](sso-entra.md) y [web-admin.md](web-admin.md).
 
 **Seguridad:**
 

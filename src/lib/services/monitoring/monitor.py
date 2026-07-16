@@ -520,12 +520,17 @@ class Monitor(ObjectBase):
     @staticmethod
     def _alert_kind(status, severity: str = '') -> str:
         """Map a check item's (status, severity) to a routing kind: a passing check is a
-        ``recovery``, a failing one is ``warn`` when its severity is 'warning' else ``down``."""
+        ``recovery``, a failing one is ``warn`` when its severity is 'warning' else ``down``.
+
+        The kind strings come from the monitoring domain's discovered notify-events descriptor
+        (single source of truth), so the emitter and the routing registry can't drift apart."""
+        from lib.services.monitoring.notify_events import (  # noqa: PLC0415
+            KIND_DOWN, KIND_RECOVERY, KIND_WARN)
         if status is True:
-            return 'recovery'
+            return KIND_RECOVERY
         if (severity or '') == 'warning':
-            return 'warn'
-        return 'down'
+            return KIND_WARN
+        return KIND_DOWN
 
     def _uid_name_map(self) -> dict:
         """host_uid → friendly name, built once per cycle (invalidated by
@@ -567,15 +572,17 @@ class Monitor(ObjectBase):
             pass
         return self._uid_name_map().get(key, key)
 
-    def send_message(self, message, status=None, module: str = '', item: str = '') -> None:
+    def send_message(self, message, status=None, module: str = '', item: str = '',
+                     severity: str = '') -> None:
         """Ad-hoc alert from a watchful module (the ModuleBase.send_message bridge).
 
         Buffered into the current cycle's notification batch; the emoji/host formatting
         and channel routing happen at flush time in :class:`MonitorNotifier`.  ``module``
         (the watchful's name) and ``item`` (the module-supplied friendly name) fill the
-        digest's Module/Item columns for ad-hoc sends."""
+        digest's Module/Item columns for ad-hoc sends.  ``severity='warning'`` routes a
+        non-OK alert as a ``warn`` (a soft threshold breach) instead of ``down``."""
         if message and self._notifier is not None:
-            self._notifier.add(self._alert_kind(status), module, item or '', message)
+            self._notifier.add(self._alert_kind(status, severity), module, item or '', message)
 
     def send_message_end(self) -> None:
         """Flush the cycle's buffered alerts (grouped Telegram + digest email + per-event
@@ -584,13 +591,23 @@ class Monitor(ObjectBase):
             self._notifier.flush(public_url=self._public_url)
 
     def check_status(self, status, module, module_sub_key='') -> bool:
-        """ Check if the status has changed for a given module and sub-key. """
+        """Whether the status changed for a module/sub-key — the gate watchful modules use to
+        decide whether to ``send_message`` (and the reference ``_process_module_result`` uses).
+
+        A first-seen OK item is reported as *unchanged*: with no prior state a passing check
+        never "recovered", so it must not announce a spurious ``recovery`` (this stops a first
+        cycle / manual "Run all" over 100+ passing checks from blasting 100+ recoveries).  A
+        first-seen failing check still reports changed, so real problems are announced; and a
+        genuine DOWN → UP transition (a recorded prior state) is a real recovery."""
         find_key = [module]
         if module_sub_key:
             find_key.append(module_sub_key)
         find_key.append('status')
 
         current_status = self.status.get_conf(find_key, None)
+        # get_conf returns '' (empty of the requested type), not None, for a missing key.
+        if current_status in (None, '') and self._alert_kind(status) == 'recovery':
+            return False
         return current_status != status
 
     def _process_module_result(self, module_name: str, result_data: ReturnModuleCheck) -> bool:
@@ -615,18 +632,25 @@ class Monitor(ObjectBase):
             self.status.set_conf([module_name, key, 'message'], tmp_message)
             self.status.set_conf([module_name, key, 'severity'], tmp_severity)
 
-            if self.check_status(tmp_status, module_name, key):
+            # Inline change detection (not check_status) so the working state is ALWAYS
+            # recorded on change — even for a first-seen OK item whose recovery alert is
+            # suppressed below (so the UI/check_state still shows its status).
+            prev_status = self.status.get_conf([module_name, key, 'status'], None)
+            if prev_status != tmp_status:
                 self.status.set_conf([module_name, key, 'status'], tmp_status)
                 changed = True
 
-                # The persisted check_state row is the durable baseline: a
-                # restart with an unchanged state stays quiet, while the very
-                # first record of a check still notifies its current state.
+                # The persisted check_state row is the durable baseline: a restart with an
+                # unchanged state stays quiet; a failing check announces its current state on
+                # the first record — but a first-seen OK item never "recovered", so its
+                # spurious recovery is suppressed (get_conf returns '' for a missing status).
                 if tmp_send and self._notifier is not None:
-                    # Prefer the module-supplied friendly name; else resolve the key.
-                    label = result_data.get_name(key) or self._item_label(module_name, key)
-                    self._notifier.add(self._alert_kind(tmp_status, tmp_severity),
-                                       module_name, label, tmp_message)
+                    kind = self._alert_kind(tmp_status, tmp_severity)
+                    first_record = prev_status in (None, '')
+                    if not (kind == 'recovery' and first_record):
+                        # Prefer the module-supplied friendly name; else resolve the key.
+                        label = result_data.get_name(key) or self._item_label(module_name, key)
+                        self._notifier.add(kind, module_name, label, tmp_message)
 
                 self.debug.print(
                     f"> Monitor > check_module >> Module: {module_name}/{key} - New Status: {tmp_status}"

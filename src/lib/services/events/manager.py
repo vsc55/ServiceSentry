@@ -10,14 +10,18 @@ This module is intentionally Flask-free (the dispatcher is imported lazily only
 when a rule actually fires) so it can be mixed into both the WebAdmin and the
 standalone :class:`lib.services.syslog.service.SyslogService`.
 
+Evaluation is **decoupled from ingestion**: a background worker
+(:meth:`_event_worker_tick`) drains newly-stored rows from each source **by cursor**
+(``EventStateStore``), on a poll interval — the syslog listener has no per-message hook.
+It runs in the WebAdmin (embedded) and in the standalone syslog/event services alike.
+
 Sources:
 * ``audit``  — every audit-log entry (login_failed, daemon/syslog started/stopped,
-  config_changed, host/user created/deleted, …); evaluated from `_audit_write`.
+  config_changed, host/user created/deleted, …), read from the ``audit`` table.
   This also covers "service status" for the embedded services (their start/stop
   are audit events).
-* ``syslog`` — each received syslog message (severity/host/app/match), evaluated
-  from the syslog listener's per-message hook (embedded mixin and standalone
-  service alike).
+* ``syslog`` — each received syslog message (severity/host/app/match), read from the
+  ``syslog`` table.
 
 Matching is best-effort and never raises into the caller's path.
 """
@@ -39,6 +43,7 @@ class _EventsMixin:
         self._event_rules_cache: list | None = None
         self._event_state = None                  # EventStateStore (persisted cooldown + cursor)
         self._event_worker_stop = None            # threading.Event while the worker runs
+        self._event_tick_lock = threading.Lock()  # serialize tick: worker loop vs run_now command
 
     # ── persistent state (cooldown + cursor) ──────────────────────────────────────
     def _attach_event_state(self, store) -> None:
@@ -126,6 +131,20 @@ class _EventsMixin:
         return out
 
     def _event_worker_tick(self) -> int:
+        """Guarded entry: serialize the tick so the periodic worker loop and a queued
+        ``run_now`` command (drained by the heartbeat / control poke) never drain the
+        cursor concurrently — which would re-read the same rows and double-dispatch
+        alerts.  A tick already in progress makes the second caller a no-op."""
+        lock = getattr(self, '_event_tick_lock', None)
+        if lock is not None and not lock.acquire(blocking=False):
+            return 0
+        try:
+            return self._event_worker_tick_impl()
+        finally:
+            if lock is not None:
+                lock.release()
+
+    def _event_worker_tick_impl(self) -> int:
         """Consume every new syslog/audit row since the cursor and evaluate the rules.
 
         Returns the number of records processed.  Never raises.  This is the path
@@ -352,8 +371,9 @@ class _EventsMixin:
             return event
 
     def _dispatch_event(self, source: str, rule: dict, ctx: dict) -> None:
-        channels = [c for c in (rule.get('channels') or [])
-                    if c in ('telegram', 'email', 'webhook')]
+        from lib.core.notify.registry import channels as _registered  # noqa: PLC0415
+        valid = set(_registered())
+        channels = [c for c in (rule.get('channels') or []) if c in valid]
         if not channels:
             return
         from lib.core.notify.notification_dispatcher import dispatch  # noqa: PLC0415

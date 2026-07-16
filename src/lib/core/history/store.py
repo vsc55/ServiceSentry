@@ -60,6 +60,8 @@ class HistoryStore:
 
     def __init__(self, db: BaseConnector) -> None:
         self._db = db
+        # ``key`` is a reserved word in MySQL — quote it (dialect-aware) in every raw query.
+        self._qk = db.quote_ident('key')
         self._bootstrap()
 
     # ── Schema bootstrap ──────────────────────────────────────────────────────
@@ -81,7 +83,7 @@ class HistoryStore:
         """Insert one sample."""
         try:
             self._db.execute(
-                f'INSERT INTO {_T}(ts, module, item_uid, key, status, data) '
+                f'INSERT INTO {_T}(ts, module, item_uid, {self._qk}, status, data) '
                 'VALUES(?, ?, ?, ?, ?, ?)',
                 (
                     time.time(),
@@ -113,7 +115,7 @@ class HistoryStore:
                     )
                 else:
                     deleted = self._db.execute(
-                        f'DELETE FROM {_T} WHERE module = ? AND key = ?',
+                        f'DELETE FROM {_T} WHERE module = ? AND {self._qk} = ?',
                         (module, key),
                     )
             return deleted
@@ -168,36 +170,42 @@ class HistoryStore:
         slow as the history grew).
         """
         try:
+            # Portable string concat for the fallback group key: MySQL's default sql_mode
+            # treats ``||`` as logical OR, so use CONCAT there; SQLite/PostgreSQL use ``||``.
+            k = self._qk
+            _cat = f"CONCAT(module, ':', {k})" if getattr(self._db, 'KIND', 'sqlite') == 'mysql' \
+                else f"module || ':' || {k}"
+            grp = f"COALESCE(item_uid, {_cat})"
             rows = self._db.fetchall(f'''
                 WITH ranked AS (
                     SELECT
-                        module, item_uid, key, ts, status, data,
-                        COALESCE(item_uid, module || ':' || key) AS grp,
+                        module, item_uid, {k}, ts, status, data,
+                        {grp} AS grp,
                         ROW_NUMBER() OVER (
-                            PARTITION BY COALESCE(item_uid, module || ':' || key)
+                            PARTITION BY {grp}
                             ORDER BY ts DESC, id DESC
                         ) AS rn
                     FROM {_T}
                 ),
                 agg AS (
                     SELECT
-                        COALESCE(item_uid, module || ':' || key) AS grp,
+                        {grp} AS grp,
                         COUNT(*)      AS cnt,
                         MAX(ts)       AS last_ts,
                         MIN(ts)       AS first_ts,
                         AVG(status)   AS uptime
                     FROM {_T}
-                    GROUP BY COALESCE(item_uid, module || ':' || key)
+                    GROUP BY {grp}
                 )
                 SELECT
-                    r.module, r.item_uid, r.key,
+                    r.module, r.item_uid, r.{k},
                     a.cnt, a.last_ts, a.first_ts, a.uptime,
                     r.data   AS last_data,
                     r.status AS last_status
                 FROM ranked r
                 JOIN agg a ON a.grp = r.grp
                 WHERE r.rn = 1
-                ORDER BY r.module, r.key
+                ORDER BY r.module, r.{k}
             ''')
         except Exception:  # pylint: disable=broad-except
             return []
@@ -231,7 +239,7 @@ class HistoryStore:
             where  = 'item_uid = ? AND ts >= ? AND ts <= ?'
             w_args: tuple = (item_uid, from_ts, to_ts)
         else:
-            where  = 'module = ? AND key = ? AND ts >= ? AND ts <= ?'
+            where  = f'module = ? AND {self._qk} = ? AND ts >= ? AND ts <= ?'
             w_args = (module, key, from_ts, to_ts)
         try:
             row = self._db.fetchone(
@@ -249,13 +257,15 @@ class HistoryStore:
                     w_args,
                 )
             else:
+                # MySQL's CAST target is SIGNED, not INTEGER (SQLite/PostgreSQL accept INTEGER).
+                _int = 'SIGNED' if getattr(self._db, 'KIND', 'sqlite') == 'mysql' else 'INTEGER'
                 rows = self._db.fetchall(
                     f'''SELECT
-                        CAST((ts - ?) / ? AS INTEGER) * ? + ? AS bts,
-                        CAST(ROUND(AVG(status)) AS INTEGER),
-                        data
+                        CAST((ts - ?) / ? AS {_int}) * ? + ? AS bts,
+                        CAST(ROUND(AVG(status)) AS {_int}),
+                        MAX(data)
                     FROM {_T} WHERE {where}
-                    GROUP BY CAST((ts - ?) / ? AS INTEGER)
+                    GROUP BY CAST((ts - ?) / ? AS {_int})
                     ORDER BY bts''',
                     (from_ts, bucket, bucket, from_ts) + w_args + (from_ts, bucket),
                 )
@@ -282,7 +292,7 @@ class HistoryStore:
             where  = 'item_uid = ? AND ts >= ? AND ts <= ?'
             w_args: tuple = (item_uid, from_ts, to_ts)
         else:
-            where  = 'module = ? AND key = ? AND ts >= ? AND ts <= ?'
+            where  = f'module = ? AND {self._qk} = ? AND ts >= ? AND ts <= ?'
             w_args = (module, key, from_ts, to_ts)
         try:
             row = self._db.fetchone(
@@ -300,19 +310,32 @@ class HistoryStore:
             }
             # Only chart fields matching a strict whitelist (no SQL/JSON-path injection).
             if field and _FIELD_RE.match(field):
-                path = f'$.{field}'
-                num = self._db.fetchone(
-                    "SELECT MIN(CAST(json_extract(data, ?) AS REAL)),"
-                    "       MAX(CAST(json_extract(data, ?) AS REAL)),"
-                    "       AVG(CAST(json_extract(data, ?) AS REAL)) "
-                    f"FROM {_T} WHERE {where} "
-                    "AND json_extract(data, ?) IS NOT NULL",
-                    (path, path, path) + w_args + (path,),
-                )
-                if num and num[0] is not None:
-                    result['min'] = num[0]
-                    result['max'] = num[1]
-                    result['avg'] = num[2]
+                # Portable JSON-number extraction. SQLite/MySQL: json_extract with a
+                # '$.field' path. PostgreSQL has no json_extract → jsonb_extract_path_text
+                # with the bare field name (else psycopg2 raises UndefinedFunction and the
+                # whole stats result is lost).
+                # Own try/except: on PostgreSQL a non-numeric value makes the numeric CAST
+                # raise (SQLite/MySQL degrade to NULL), so isolate it — a bad field must only
+                # drop min/max/avg, never the basic count/uptime already computed above.
+                try:
+                    kind = getattr(self._db, 'KIND', 'sqlite')
+                    if kind == 'postgresql':
+                        expr, jparam = "CAST(jsonb_extract_path_text(data::jsonb, ?) AS DOUBLE PRECISION)", field
+                    elif kind == 'mysql':
+                        expr, jparam = "CAST(json_extract(data, ?) AS DOUBLE)", f'$.{field}'
+                    else:
+                        expr, jparam = "CAST(json_extract(data, ?) AS REAL)", f'$.{field}'
+                    num = self._db.fetchone(
+                        f"SELECT MIN({expr}), MAX({expr}), AVG({expr}) "
+                        f"FROM {_T} WHERE {where} AND {expr} IS NOT NULL",
+                        (jparam, jparam, jparam) + w_args + (jparam,),
+                    )
+                    if num and num[0] is not None:
+                        result['min'] = num[0]
+                        result['max'] = num[1]
+                        result['avg'] = num[2]
+                except Exception:  # pylint: disable=broad-except
+                    pass   # keep the basic stats; field aggregates just omitted
             return result
         except Exception:  # pylint: disable=broad-except
             return {}

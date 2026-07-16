@@ -44,7 +44,7 @@ def register(app, wa):
 
     # Sections that contain external-service credentials (LDAP bind password,
     # OIDC client secret, SMTP password, etc.).  Only admins may modify them.
-    _ADMIN_ONLY_SECTIONS = frozenset({'ldap', 'oidc', 'saml2', 'email', 'telegram'})
+    _ADMIN_ONLY_SECTIONS = frozenset({'ldap', 'oidc', 'saml2', 'email', 'telegram', 'msteams'})
 
     # Individual security-relevant web_admin fields that, like the sensitive
     # sections above, must be admin-only — they govern account lockout, cookie
@@ -66,7 +66,11 @@ def register(app, wa):
             raw.setdefault(section, {})[field] = value
         # Webhooks live in their own store; bundle the list (read-only) so the
         # Notifications tab can render it.  Editing still goes through /api/v1/notify/webhooks.
-        raw['webhooks'] = wa._load_webhooks()
+        from lib.core.notify.webhook import channel as _wh_channel  # noqa: PLC0415
+        from lib.core.notify.msteams import channel as _ms_channel  # noqa: PLC0415
+        raw['webhooks'] = _wh_channel.load(wa._notify)
+        # Teams channel destinations live in their own store too — bundle read-only.
+        raw['msteams_channels'] = _ms_channel.load(wa._notify)
         resp = jsonify({
             'config': secret_manager.mask_sensitive(raw, wa._secret_keys),
             'versions': dict(wa._field_versions),

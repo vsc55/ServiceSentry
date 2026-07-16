@@ -182,7 +182,7 @@ class Watchful(ModuleBase):
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"UPS: {item['key']} - Exception: {exc}", DebugLevel.error)
                     _nm = item.get('label') or item.get('ups_name') or item['key']
-                    message = f'UPS: {_nm} - *Error: {exc}* 💥'
+                    message = self._msg('ups_error', _nm, exc)
                     self.dict_return.set(item['key'], False, message,
                                          other_data={'name': _nm})
 
@@ -226,9 +226,9 @@ class Watchful(ModuleBase):
         # Evaluate the configured thresholds; collect every reason that trips.
         reasons = []
         if low_batt:
-            reasons.append('LOW BATTERY')
+            reasons.append(self._msg('ups_reason_low_batt'))
         if on_battery and item['alert_on_battery']:
-            reasons.append('on battery')
+            reasons.append(self._msg('ups_reason_on_batt'))
         if charge is not None and item['alert_battery'] > 0 and charge < item['alert_battery']:
             reasons.append(f'battery {charge:.0f}% < {item["alert_battery"]}%')
         if runtime_min is not None and item['alert_runtime'] > 0 and runtime_min < item['alert_runtime']:
@@ -236,7 +236,7 @@ class Watchful(ModuleBase):
         if load is not None and item['alert_load'] > 0 and load > item['alert_load']:
             reasons.append(f'load {load:.0f}% > {item["alert_load"]}%')
         if not online and not on_battery:
-            reasons.append(f'status {status or "unknown"}')
+            reasons.append(self._msg('ups_reason_status', status or 'unknown'))
 
         ok = not reasons
         if ok:
@@ -246,10 +246,10 @@ class Watchful(ModuleBase):
             if runtime_min is not None:
                 extra.append(f'{runtime_min:.0f}m')
             detail = ' · '.join(extra)
-            message = f'UPS: *{name}* - Online ({status}){f" — {detail}" if detail else ""} ✅'
+            message = self._msg('ups_online', name, status, f' — {detail}' if detail else '')
         else:
             icon = '🔋' if (low_batt or on_battery) else '⚠️'
-            message = f'UPS: *{name}* - {", ".join(reasons)} ({status}) {icon}'
+            message = self._msg('ups_alert', name, ', '.join(reasons), status, icon)
 
         other_data = {
             'name': name,

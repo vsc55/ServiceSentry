@@ -33,11 +33,13 @@ arranque**:
   variable de entorno) **anula** la BD y se muestra bloqueado en la UI con un
   candado y el tooltip «valor fijado en config.json». Para volver a hacerlo
   editable, elimínalo del fichero.
-- **Qué se queda en `config.json`** (única-fuente-de-verdad `FILE_ONLY_SECTIONS`):
-  solo la sección **`database`** (arranque — el conector se construye a partir de
-  ella, antes de que exista la capa de config en BD), la lista **`webhooks`** (es
-  una lista top-level de objetos con su propia CRUD, no encaja en `sección|campo`)
-  y las **credenciales** de primer arranque (`web_admin.username` / `password`).
+- **Qué se queda en `config.json`** (única-fuente-de-verdad `FILE_ONLY_SECTIONS =
+  frozenset({'database'})`): solo la sección **`database`** (arranque — el conector
+  se construye a partir de ella, antes de que exista la capa de config en BD).
+  Aparte, las **credenciales** de primer arranque (`web_admin.username` /
+  `password`, en `CRED_PATHS`) también se conservan en el fichero. Los **webhooks**
+  ya **no** están en `config.json`: viven en su propia **tabla de BD** (`webhooks`,
+  con el secreto cifrado) y su propia CRUD.
 - **Todo lo demás va a la BD**, incluida la configuración de feature con forma
   `sección|campo`: el layout `overview`, las plantillas `notif_templates` /
   `notif_html_templates`. Tienen su propia UI y nunca aparecen como tarjetas de
@@ -242,33 +244,82 @@ Las claves equivalen a la sección `syslog_db` del `config.json` y replican las 
 | `telegram.chat_id` | string | `""` | ID del chat o grupo de Telegram (solo dígitos) |
 | `telegram.group_messages` | bool | false | Si `true`, agrupa todos los mensajes en un bloque por ciclo |
 
-### Sección `notifications`
+### Sección `notifications` (matriz de routing)
 
-Matriz de routing: qué eventos se envían por cada canal. Los webhooks individuales también tienen su propio flag `enabled`, por lo que un evento solo se entrega a los webhooks que estén activos.
+Matriz **dinámica** de routing: por cada par **(canal × kind)** un flag `bool`
+`notifications|{canal}_on_{kind}` decide si ese tipo de evento se envía por ese
+canal. **No es una tabla fija de 4 canales × 4 kinds**: las claves se **generan**
+del registro de eventos descubiertos (`lib/core/notify/events.py::matrix_events`),
+no se declaran en `spec.py` (ver el comentario en `spec.py`, sección *Notification
+routing matrix*). Añadir un kind con `matrix=True` crea sus columnas
+automáticamente. Todas por defecto `false` — una celda solo existe como fila en la
+tabla `config` de la BD cuando el admin la marca. Editable en **Configuración →
+Notificaciones → Routing** del panel web.
+
+- **Canales** (auto-descubiertos en `lib/core/notify/<canal>/channel.py`):
+  `telegram`, `email`, `webhook`, `msteams`. Los webhooks individuales tienen
+  además su propio flag `enabled`, por lo que un evento solo se entrega a los
+  webhooks que estén activos.
+- **Kinds con `matrix=True`** (cada uno genera columnas `{canal}_on_{kind}`):
+
+| kind | source | Descripción |
+|---|---|---|
+| `down` / `recovery` / `warn` | monitoring | check falla / se recupera / advertencia (umbral blando, ámbar) |
+| `scheduler_started` / `scheduler_stopped` | monitoring | el monitor (scheduler) arranca / se detiene |
+| `manual_run` | monitoring | ejecución on-demand ("Run all") desde la página Status |
+| `ipban_banned` / `ipban_unbanned` | ipban | IP baneada / desbaneada por el fail2ban interno |
+| `service_down` / `service_up` | services (health) | crash / recuperación del daemon de un servicio (auto-monitorización de la plataforma) |
+| `cert_expiring` | certs (health) | certificado próximo a caducar |
+| `syslog` | syslog | *(solo compatibilidad — ver nota)* |
+
+> **`syslog`** se mantiene con `matrix=True` **únicamente por compatibilidad de
+> configuración** (`lib/services/syslog/notify_events.py`): es `ui=False` (no
+> aparece como fila en la grid de routing) y **sin dispatcher activo**. El alertado
+> de syslog lo hacen ahora las reglas del [Gestor de eventos](#gestor-de-eventos)
+> (kind `event`), no este flag; por eso no es routing activo pese a seguir en la matriz.
+
+El kind **`event`** es `matrix=False`: **no** participa en esta matriz — cada regla
+del gestor de eventos elige sus propios canales explícitamente, por lo que no
+genera columnas `{canal}_on_event`.
+
+Detalle profundo (arquitectura contexto→router→registros, flujo
+evento→dispatch→canal, cómo se descubren los kinds) en
+[notifications.md → Eventos (kinds) y su registro](notifications.md#eventos-kinds-y-su-registro)
+y [→ Matriz de routing](notifications.md#matriz-de-routing-notifications).
+
+#### `notifications.lang` (idioma global de notificaciones)
 
 | Clave | Tipo | Por defecto | Descripción |
-|-------|------|-------------|-------------|
-| `notifications.telegram_on_down` | bool | `false` | Enviar por Telegram cuando un check falla |
-| `notifications.telegram_on_recovery` | bool | `false` | Enviar por Telegram cuando un check se recupera |
-| `notifications.telegram_on_warn` | bool | `false` | Enviar por Telegram en estado de advertencia |
-| `notifications.telegram_on_syslog` | bool | `false` | Enviar por Telegram en eventos de syslog |
-| `notifications.email_on_down` | bool | `false` | Enviar por email cuando un check falla |
-| `notifications.email_on_recovery` | bool | `false` | Enviar por email cuando un check se recupera |
-| `notifications.email_on_warn` | bool | `false` | Enviar por email en estado de advertencia |
-| `notifications.email_on_syslog` | bool | `false` | Enviar por email en eventos de syslog |
-| `notifications.webhook_on_down` | bool | `false` | Enviar a webhooks cuando un check falla |
-| `notifications.webhook_on_recovery` | bool | `false` | Enviar a webhooks cuando un check se recupera |
-| `notifications.webhook_on_warn` | bool | `false` | Enviar a webhooks en estado de advertencia |
-| `notifications.webhook_on_syslog` | bool | `false` | Enviar a webhooks en eventos de syslog |
+|---|---|---|---|
+| `notifications.lang` | string | `""` | **Idioma global de TODAS las notificaciones** (Telegram, Email, Teams y Webhook). Vacío = «— Default —» → cae al idioma del panel. Se resuelve con `formatting.notify_lang`: `notifications\|lang` → *(legacy)* `email\|lang` → `web_admin\|lang` → `''`. Config → **Notificaciones → General**. |
 
-Esta matriz es configurable desde la pestaña **Configuración → Notifications → Routing** del panel web.
+### Sección `msteams` (Microsoft Teams — envío a usuarios)
+
+Los **canales** de Teams (Incoming Webhooks) se guardan aparte, en su propia tabla
+`msteams_channels` (CRUD por `/api/v1/notify/msteams/channels*`, no en `config.json`). La sección
+`msteams` configura el **envío directo a usuarios**:
+
+| Clave | Tipo | Por defecto | Descripción |
+|---|---|---|---|
+| `msteams.user_enabled` | bool | `false` | Activa el envío directo a usuarios |
+| `msteams.delivery` | string | `activity_feed` | Mecanismo: `activity_feed` (Graph `TeamsActivity.Send`) o `bot` (Bot Framework 1:1) |
+| `msteams.notify_panel_users` | bool | `false` | Incluir a los usuarios del panel (por su email/UPN) |
+| `msteams.recipients` | string | `""` | Lista de UPN/email destino (separados por coma/;) |
+| `msteams.tenant_id` | string | `""` | Tenant de la app Graph (activity feed) |
+| `msteams.client_id` | string | `""` | Client ID de la app Graph (activity feed) |
+| `msteams.client_secret` | string | `""` | Client Secret de la app Graph (cifrado en disco) |
+| `msteams.bot_app_id` | string | `""` | App id del Azure Bot (modo `bot`) |
+| `msteams.bot_app_password` | string | `""` | Secreto del Azure Bot (cifrado en disco) |
+| `msteams.bot_tenant_id` | string | `""` | Tenant del Azure Bot (modo `bot`) |
+
+Detalle de mecanismos, requisitos y seguridad en [notifications.md](notifications.md#microsoft-teams--a-canal-o-a-usuarios).
 
 ### Sección `web_admin`
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
 | `web_admin.lang` | string | `"en_EN"` | Idioma por defecto de la interfaz web (`en_EN` o `es_ES`) |
-| `web_admin.landing_page` | string | `"admin"` | Página a la que llega el usuario tras iniciar sesión: `admin` (panel), `overview` (vista general `/overview`) o `status` (página pública de estado). Sobreescribible por grupo y por usuario (precedencia usuario → grupo → global); ver [web_admin.md](web_admin.md#usuarios). |
+| `web_admin.landing_page` | string | `"admin"` | Página a la que llega el usuario tras iniciar sesión: `admin` (panel), `overview` (vista general `/overview`) o `status` (página pública de estado). Sobreescribible por grupo y por usuario (precedencia usuario → grupo → global); ver [web-admin.md](web-admin.md#usuarios). |
 | `web_admin.dark_mode` | bool | `false` | Modo oscuro por defecto para sesiones nuevas |
 | `web_admin.public_status` | bool | `false` | Exponer `/status` públicamente sin autenticación. Los usuarios logueados siempre pueden acceder. |
 | `web_admin.status_refresh_secs` | int | `60` | Intervalo de refresco automático de la página `/status` (10–3600 segundos) |
@@ -288,6 +339,8 @@ Esta matriz es configurable desde la pestaña **Configuración → Notifications
 | `web_admin.public_url` | string | `""` | Host público (sin esquema) cuando se sirve tras un proxy; **override** de la URL base efectiva. Vacío → se **auto-detecta** de la petición (proxy-aware vía `ProxyFix`/`proxy_count`). Fuente única: `WebAdmin.public_base_url()`, inyectada al front como `SERVER_BASE_URL` y usada por `publicBaseUrl()` (redirect URIs OIDC, ACS SAML2, URL SCIM, deep links) |
 | `web_admin.force_https` | bool | `false` | Generar URLs `https://` (proxy con terminación TLS) |
 | `web_admin.force_fqdn` | bool | `false` | Redirigir a `public_url` si se accede por IP u otro host (requiere `public_url`) |
+| `web_admin.frame_ancestors` | string | `""` | Orígenes que pueden embeber el panel en un iframe (CSP `frame-ancestors`), separados por espacios/comas (admite comodines `https://*.dominio`). Vacío = iframe bloqueado (anti-clickjacking). Con lista → se elimina `X-Frame-Options` (no admite lista) y manda la CSP |
+| `web_admin.embed_in_teams` | bool | `false` | Añade los orígenes de Microsoft Teams/Outlook/M365 a la lista anterior, para que la **pestaña personal de Teams** muestre ServiceSentry |
 | `web_admin.default_page_size` | int | `25` | Tamaño de página por defecto en los listados (0 = "Todos") (0–200) |
 | `web_admin.config_poll_secs` | int | `30` | Intervalo del poll de versiones de config para detectar cambios concurrentes (10–300) |
 | `web_admin.config_update_banner_secs` | int | `8` | Segundos que se muestra el banner de "configuración actualizada" (0–60) |
@@ -335,6 +388,7 @@ Requiere el paquete opcional `ldap3` (`pip install ldap3`). Si no está instalad
 | `ldap.server` | string | `""` | Hostname o IP del servidor LDAP |
 | `ldap.port` | int | `389` | Puerto (389 sin TLS / 636 con LDAPS) (1–65535) |
 | `ldap.use_ssl` | bool | `false` | Usar LDAPS (TLS) en lugar de LDAP plano |
+| `ldap.ssl_verify` | bool | `true` | Validar el certificado del servidor LDAPS (evita *man-in-the-middle*). Desactivar solo para un servidor de laboratorio con certificado autofirmado |
 | `ldap.timeout` | int | `5` | Timeout de conexión en segundos (1–60) |
 | `ldap.bind_dn` | string | `""` | DN de la cuenta de servicio para búsquedas |
 | `ldap.bind_password` | string | `""` | Contraseña de la cuenta de servicio (cifrada en disco) |
@@ -344,7 +398,7 @@ Requiere el paquete opcional `ldap3` (`pip install ldap3`). Si no está instalad
 | `ldap.name_attr` | string | `"displayName"` | Atributo LDAP del que se lee el nombre visible |
 | `ldap.username_attr` | string | `""` | Atributo del que derivar el username (vacío = usa el introducido en login) |
 | `ldap.group_attr` | string | `"memberOf"` | Atributo LDAP del que se leen los grupos |
-| `ldap.group_role_map` | string (JSON) | `"{}"` | Objeto JSON `{"CN=Admins,...": "admin", ...}` que mapea grupos LDAP a roles de la app |
+| `ldap.group_role_map` | string (JSON) | `"{}"` | Objeto JSON `{"CN=Admins,...": "admin", ...}` que mapea grupos LDAP a roles de la app. El patrón casa de forma **exacta** contra el valor de `memberOf` (DN completo) **o** su CN (primer RDN) — no por subcadena (`Admins` no casa `Admins-ReadOnly`) |
 | `ldap.group_display_names` | dict | `{}` | Cache `{DN: nombre visible}` de grupos (autocompletado del mapeo) |
 | `ldap.default_role` | string | `""` | Rol por defecto para usuarios LDAP sin mapeo de grupo (vacío = `none`) |
 | `ldap.fallback_to_local` | bool | `true` | Si LDAP falla por error de red (no por credenciales incorrectas), intentar autenticación local |
@@ -413,7 +467,7 @@ Aprovisionamiento **proactivo** por SCIM 2.0: el IdP (Entra ID, Okta…) empuja 
 | `scim.default_role` | string | `""` | Rol de los usuarios aprovisionados (nombre o uid; vacío = `none`) |
 | `scim.auto_disable` | bool | `true` | `active:false` del IdP → deshabilita el usuario (en vez de ignorarlo) |
 
-Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos de ServiceSentry. Ver [sso-entra.md](sso-entra.md) (§Provisioning proactivo) y [web_admin.md](web_admin.md) (endpoints).
+Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos de ServiceSentry. Ver [sso-entra.md](sso-entra.md) (§Provisioning proactivo) y [web-admin.md](web-admin.md) (endpoints).
 
 ### Sección `email`
 
@@ -428,7 +482,6 @@ Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos d
 | `email.notify_on_warn` | bool | `true` | Enviar alerta en estado de advertencia *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
 | `email.from_email` | string | `""` | Dirección de envío (campo `From:`) |
 | `email.from_name` | string | `"ServiceSentry"` | Nombre del remitente que aparece en el campo `From:` |
-| `email.lang` | string | `""` | Idioma de las notificaciones de email. Vacío = usa el idioma por defecto del panel (`web_admin.lang`). |
 | `email.smtp_host` | string | `""` | Servidor SMTP (solo para `provider=smtp`) |
 | `email.smtp_port` | int | `587` | Puerto SMTP (1–65535) |
 | `email.smtp_use_tls` | bool | `true` | Usar STARTTLS (habitual en el puerto 587) |
@@ -443,6 +496,12 @@ Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos d
 | `email.gmail_refresh_token` | string | `""` | Refresh token de OAuth2 para Gmail (cifrado en disco; solo `provider=gmail`) |
 
 > **Nota:** los campos `email.notify_on_*` han sido reemplazados por la matriz de routing de la sección `notifications` y se conservan únicamente por compatibilidad con configuraciones anteriores. Los nuevos despliegues deben usar `notifications.email_on_*`.
+
+> **Nota (migración):** el antiguo campo `email.lang` **ya no existe en el
+> registro**. Ha sido sustituido por el ajuste **global** [`notifications.lang`](#notificationslang-idioma-global-de-notificaciones),
+> que fija el idioma de **todas** las notificaciones (no solo email). Un
+> `email.lang` almacenado de una instalación anterior aún se **honra** como
+> fallback (`notify_lang`), pero solo por compatibilidad.
 
 ---
 
@@ -508,30 +567,28 @@ Consulta [modules.md](modules.md) para la referencia completa de configuración 
 
 ---
 
-## Sección `webhooks` (en config.json, auto-gestionada)
+## Webhooks (tabla de BD `webhooks`, auto-gestionada)
 
-Lista de webhooks HTTP para notificaciones salientes, almacenada como el array
-`webhooks` dentro de `config.json`. Esta sección es **gestionada
-automáticamente** por el panel web — no es necesario editarla a mano. Los
-webhooks se crean, editan y eliminan desde la pestaña **Configuración →
-Notifications → Providers**.
+Lista de webhooks HTTP para notificaciones salientes. **No viven en `config.json`**:
+se almacenan como **registros en su propia tabla de BD `webhooks`**
+(`lib/core/notify/webhook/store.py`), con el `secret` cifrado en reposo. La sección
+es **gestionada automáticamente** por el panel web — no se edita a mano ni aparece
+como tarjeta de configuración. Los webhooks se crean, editan y eliminan desde la
+pestaña **Configuración → Notifications → Providers** (CRUD propia). Cada webhook
+tiene estos campos:
 
 ```json
 {
-    "webhooks": [
-        {
-            "id": "uuid4-aquí",
-            "name": "Slack Alertas",
-            "enabled": true,
-            "url": "https://hooks.slack.com/services/...",
-            "method": "POST",
-            "timeout": 10,
-            "headers": "",
-            "body_template": "{\"text\": \"[{kind}] {module}/{item} → {status}\"}",
-            "secret": "enc:gAAAAABn...",
-            "secret_header": "X-Hub-Signature-256"
-        }
-    ]
+    "id": "uuid4-aquí",
+    "name": "Slack Alertas",
+    "enabled": true,
+    "url": "https://hooks.slack.com/services/...",
+    "method": "POST",
+    "timeout": 10,
+    "headers": "",
+    "body_template": "{\"text\": \"[{kind}] {module}/{item} → {status}\"}",
+    "secret": "enc:gAAAAABn...",
+    "secret_header": "X-Hub-Signature-256"
 }
 ```
 
@@ -551,6 +608,32 @@ Notifications → Providers**.
 ### Firma HMAC
 
 Si `secret` no está vacío, el servidor añade la cabecera `<secret_header>: sha256=<firma>` a cada petición, donde la firma es `HMAC-SHA256(body, secret)` codificada en hex. El receptor puede verificar la autenticidad del payload calculando la misma firma.
+
+---
+
+## Textos y plantillas de notificación (feature-data en BD)
+
+Los textos personalizables de las notificaciones **no son config editable normal**:
+son **feature-data** que vive en la tabla `config` de la BD (forma `sección|campo`
+cuando aplica), con su propia UI en *Config → Notificaciones → **Templates*** y
+**nunca** aparecen como tarjetas de configuración. Tres almacenes, todos indexados
+por idioma:
+
+| Almacén | Forma | Qué guarda |
+|---|---|---|
+| `notif_text_overrides` | `{ <lang>: { '<scoped_key>': '<texto>' } }` | Overrides de texto de **core y módulos** por idioma. `scoped_key` = `core:<i18n_key>` (texto del core) o `mod:<módulo>:<key>` (mensaje de un módulo). Lo leen `formatting.text_override` / `notify_text` y `text_catalog.py`. |
+| `notif_templates` | `{ <lang>: { '<string_key>': '<texto>' } }` | Overrides por idioma de los **strings de texto** de los emails (store propio, por historia). |
+| `notif_html_templates` | `{ <tipo>: { <lang>: '<html>' } }` | **Cuerpos HTML** completos de email por tipo (`test`/`alert`/`summary`) e idioma. |
+
+`notif_templates` y `notif_html_templates` se **omiten como tarjetas** de
+configuración vía `FEATURE_NONCONFIG_KEYS` (frontend); `notif_text_overrides` es
+igualmente feature-data y solo se edita desde la UI de textos. La regla de
+resolución en runtime es **texto custom del admin → i18n (idioma de notificación)
+→ la key**.
+
+Detalle completo (resolución custom→i18n, cómo se generan los listados editables,
+el esquema de *tags*/placeholders y los endpoints) en
+[notifications.md → Sistema de textos de notificación](notifications.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags).
 
 ---
 
@@ -799,32 +882,39 @@ python3 main.py --web --web-host 127.0.0.1 --web-port 9090
 
 ### Funcionamiento
 
-```
-Telegram.__init__():
-├── Crea un hilo daemon (pool_run) que corre permanentemente
-└── Lista de mensajes (list_msg) actuando como cola
-
-Flujo de envío:
-1. Monitor llama tg.send_message(msg) → se añade a list_msg
-2. El hilo pool_run recoge el mensaje
-3. Modo normal: envía cada mensaje individualmente
-4. Modo group_messages: acumula mensajes, envía bloque cuando la cola queda vacía
-5. Al final del ciclo: send_message_end() → añade resumen + espera a que la cola se vacíe
-```
+El envío es **síncrono**: no hay cliente en segundo plano con cola ni hilo daemon.
+`lib/providers/telegram.py` solo exporta el helper de un disparo `send_telegram(...)`,
+que llaman por igual el canal (`telegram/channel.py`), el dispatch de evento suelto
+(`telegram/notify.py`) y la ruta de mensaje de prueba. El monitor acumula los
+cambios de un ciclo y hace un único `flush` agrupado por canal (ver
+[notifications.md → MonitorNotifier](notifications.md#el-monitor-notificación-agrupada-por-ciclo-monitornotifier)).
 
 ### Formato de mensajes
 
+Los mensajes se construyen en **HTML** (`parse_mode='HTML'`), no en Markdown (que
+se rompía con el texto de los módulos). El evento suelto lleva icono + título
+traducido en `<b>`, el target `módulo/ítem` como `<code>` (icono 🖥), el cuerpo en
+`<blockquote>` y el timestamp en `<i>`. El flush agrupado del monitor
+(`group_messages`) reparte las alertas en secciones **⚠️ Issues** (down/warn) y
+**✅ Recovered** (recovery), cada alerta como tarjeta `<blockquote>`, más un resumen:
+
 ```
-✅ 💻 [hostname]: Servicio OK                       (status=True)
-❎ 💻 [hostname]: Servicio con problemas             (status=False)
-ℹ️ Summary *hostname*, get *N* new Message. ☝☝☝   (resumen del ciclo)
+ℹ️ <b>Summary</b> · <b>{host}</b> · {n} new message(s)
+🔗 <a href="…/status">…/status</a>
 ```
+
+Detalle del formato y el troceado bajo el tope de 4096 en
+[notifications.md → Telegram](notifications.md#telegram--html).
 
 ### API de Telegram
 
 - Endpoint: `https://api.telegram.org/bot{token}/sendMessage`
-- Parámetros: `chat_id`, `text`, `parse_mode=Markdown`
-- Códigos de retorno internos: `200`=OK, `-1`=token null, `-2`=chat_id null, `-3`=ambos null
+- Parámetros: `chat_id`, `text`, `parse_mode=HTML`
+- `send_telegram(...)` devuelve `(ok, status_code, info)`: `ok=True` **solo** con
+  HTTP 200 (`info='sent'`); si no, `info` es la descripción del error de Telegram o
+  `HTTP <código>`. Con token/chat_id vacíos, el canal devuelve
+  `(False, 'Telegram not configured (token/chat_id missing)')` sin llegar a llamar
+  a la API.
 
 ---
 

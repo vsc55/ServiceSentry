@@ -16,6 +16,10 @@ Este documento cubre todas las formas soportadas de desplegar ServiceSentry en p
 - **Python 3.10+** — necesario en todos los métodos excepto Docker
 - Aplicación instalada en `/opt/ServiSesentry/` y configuración en `/etc/ServiSesentry/`
 - Token de bot de Telegram y chat ID si se quieren notificaciones de alertas
+- **RAM del receptor syslog**: si activas el servidor syslog y esperas muchas conexiones
+  TCP/TLS **persistentes**, dimensiona la memoria — es *thread-per-connection*, ≈47 KB por
+  conexión viva (~46 MB por cada 1000). Detalle y recomendaciones en [docs/docker.md](docker.md)
+  → *Dimensionado del receptor syslog*.
 
 ---
 

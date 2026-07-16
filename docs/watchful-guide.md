@@ -148,7 +148,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = f'MiModulo: {name} - *Error: {exc}* '
+                    message = self._msg('mimod_error', name, exc)  # texto en lang/*.json → messages
                     self.dict_return.set(name, False, message)
 
     def _item_check(self, name, target):
@@ -158,20 +158,16 @@ class Watchful(ModuleBase):
         # === Aquí va tu lógica de monitorización ===
         status, detail = self._do_check(target, timeout)
 
-        # Construir mensaje
-        s_message = f'MiModulo: *{name}* '
-        if status:
-            s_message += 'OK'
-        else:
-            s_message += f'FALLO {detail}'
+        # Construir el mensaje con _msg (textos en lang/*.json → sección messages)
+        s_message = self._msg('mimod_ok', name) if status else self._msg('mimod_fail', name, detail)
 
-        # Almacenar resultado
+        # Almacenar resultado (severity='warning' si es un aviso de umbral blando, '' si es caída)
         other_data = {'detail': detail}
-        self.dict_return.set(name, status, s_message, False, other_data)
+        self.dict_return.set(name, status, s_message, False, other_data, name=name)
 
         # Notificar si el estado cambió
         if self.check_status(status, self.name_module, name):
-            self.send_message(s_message, status)
+            self.send_message(s_message, status, item=name)
 
     def _do_check(self, target, timeout):
         """Realiza la verificación real. Devuelve (status: bool, detail: str)."""
@@ -387,6 +383,8 @@ Además de `pretty_name` y `labels`, los archivos de idioma pueden incluir:
 | `group_labels` | Nombre visible de cada grupo visual |
 | `action_labels` | Etiqueta del botón de cada acción (`__actions__` e `input_action`) |
 | `collections` | Nombre del grupo de colección (p. ej. `"list": "Servidores"`) |
+| `messages` | Textos de **notificación** del módulo, resueltos con `self._msg('clave', …)`. `{}` posicional (`{}` secuencial e indexado `{0}`/`{1}`); admiten override del admin por idioma |
+| `messages_vars` | Esquema de **tags** de cada texto de `messages`: `{clave: [nombre, …]}` — el hook que descubre los placeholders para el editor. Tantos nombres como `{}` tenga el texto, en ambos idiomas |
 | `rename_item_prompt` | Texto personalizado para el modal de renombrar ítem (reemplaza el texto genérico). Ejemplo: `"Introduce el nuevo nombre de host:"` |
 | `new_item_key_label` | Etiqueta personalizada para el campo de clave en el modal de nuevo ítem. Ejemplo: `"Nombre de host o identificador:"` |
 
@@ -770,18 +768,70 @@ Lógica interna:
 
 > Usa `check_status_custom` cuando pasas el mensaje de error en `other_data={'message': ...}` y quieres que un cambio de tipo de error genere una nueva notificación.
 
-#### `send_message(message, status, item='')`
+#### `send_message(message, status=None, item='', severity='')`
 
-Emite una alerta ad-hoc por las notificaciones (Telegram / Email / Webhook, según la matriz
-de routing) — no solo Telegram. El `status` (`True`/`False`) fija el *kind* (recovery / down)
-y con ello la zona del digest (**Recuperados** / **Con problemas**). Pasa **`item`** con el
-nombre amigable del host/servicio para rellenar la columna *Item* del digest (equivale a
-`name=` en `dict_return.set`); sin él, la fila sale sin nombre. El mensaje se envía en texto
-plano (el Markdown se elimina).
+Emite una alerta ad-hoc por las notificaciones (Telegram / Email / Webhook / Teams, según la
+matriz de routing) — no solo Telegram. El `status` y la `severity` fijan el *kind* (y con
+ello la zona del digest y el color):
+
+| `status` | `severity` | kind | Zona del digest / color |
+|---|---|---|---|
+| `True` | — | `recovery` | **Recuperados** (verde) |
+| `False` | `'warning'` | `warn` | **Con problemas** (ámbar — umbral blando) |
+| `False` | `''` (resto) | `down` | **Con problemas** (rojo — caída) |
+
+Pasa **`item`** con el nombre amigable del host/servicio para rellenar la columna *Item* del
+digest (equivale a `name=` en `dict_return.set`); sin él, la fila sale sin nombre. El mensaje
+se envía en **texto plano** (el Markdown se elimina al agrupar por ciclo). El mapeo
+`(status, severity) → kind` lo hace `Monitor._alert_kind`; ver
+[notifications.md → Severidad warning](notifications.md#severidad-warning).
 
 > Nota: los watchfuls host-céntricos que devuelven el resultado con `dict_return.set(...,
-> send_msg=True)` notifican por esa vía (estructurada) — ahí el nombre va en `name=`.
-> `send_message()` es para el patrón `set(send_msg=False)` + notificación manual.
+> send_msg=True)` notifican por esa vía (estructurada) — ahí el nombre va en `name=` y la
+> severidad en `severity=`. `send_message()` es para el patrón `set(send_msg=False)` +
+> notificación manual.
+
+#### `_msg(key, *args)` — textos de notificación traducibles
+
+**La forma correcta de construir el texto de una notificación** no es concatenar cadenas
+inline (`'OK'` / `f'MiModulo: *{name}*'`) — que además incrustan `*` de Markdown que hoy se
+elimina — sino declarar el texto en el fichero de idioma del módulo y resolverlo con
+`self._msg('clave', arg1, arg2, …)`.
+
+`_msg` resuelve, en este orden: **override del admin** (`notif_text_overrides[lang]['mod:<módulo>:<clave>']`,
+editable en *Config → Notificaciones → Templates*) → sección **`messages`** del
+`lang/<lang>.json` del módulo (idioma de notificación → `en_EN` rellena huecos) → la propia
+clave. Los placeholders se rellenan **posicionalmente**: `{}` secuencial **e** indexado
+`{0}`/`{1}`… (un override del admin puede así **reordenar** los valores).
+
+Declara los textos y sus **tags** en cada `lang/<lang>.json` del módulo:
+
+```json
+"messages": {
+    "cpu_ok":   "CPU ({}) uso normal {}% ✅",
+    "cpu_high": "CPU ({}) uso excesivo {}% ⚠️"
+},
+"messages_vars": {
+    "cpu_ok":   ["host", "uso %"],
+    "cpu_high": ["host", "uso %"]
+}
+```
+
+`messages_vars` mapea cada clave a la lista de nombres de sus placeholders; es el **hook de
+descubrimiento de tags** que el editor de textos usa para mostrar chips con nombre (debe
+tener tantos tags como `{}` haya, en **ambos** idiomas). Uso en el `check()`:
+
+```python
+status = used < alert
+msg = self._msg('cpu_ok' if status else 'cpu_high', host, used)
+self.dict_return.set(key, status, msg, severity='' if status else 'warning', name=host)
+if self.check_status(status, self.name_module, key):
+    self.send_message(msg, status, item=host, severity='' if status else 'warning')
+```
+
+Los 19 módulos incluidos ya usan este mecanismo. Detalle completo (capa de resolución,
+catálogo, esquema de tags, editor) en
+[notifications.md → Sistema de textos de notificación](notifications.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags).
 
 ### Herramientas del sistema
 
@@ -1397,7 +1447,7 @@ class Watchful(ModuleBase):
                 try:
                     future.result()
                 except Exception as exc:
-                    message = f'TCP: {name} - *Error: {exc}*'
+                    message = self._msg('tcp_error', name, exc)  # texto en lang/*.json → messages
                     self.dict_return.set(name, False, message)
 
         super().check()
@@ -1409,17 +1459,14 @@ class Watchful(ModuleBase):
 
         status = self._tcp_connect(host, port, timeout)
 
-        s_message = f'TCP: *{name}* ({host}:{port}) '
-        if status:
-            s_message += 'OK'
-        else:
-            s_message += 'FALLO'
+        # Textos en lang/*.json → sección messages (tags en messages_vars)
+        s_message = self._msg('tcp_ok' if status else 'tcp_fail', name, host, port)
 
         other_data = {'host': host, 'port': port}
-        self.dict_return.set(name, status, s_message, False, other_data)
+        self.dict_return.set(name, status, s_message, False, other_data, name=name)
 
         if self.check_status(status, self.name_module, name):
-            self.send_message(s_message, status)
+            self.send_message(s_message, status, item=name)
 
     @staticmethod
     def _tcp_connect(host, port, timeout):
@@ -1458,6 +1505,16 @@ class Watchful(ModuleBase):
         "host":    "Host",
         "port":    "Puerto",
         "timeout": "Timeout (s)"
+    },
+    "messages": {
+        "tcp_ok":    "TCP {} ({}:{}) OK ✅",
+        "tcp_fail":  "TCP {} ({}:{}) FALLO ⚠️",
+        "tcp_error": "TCP {} error: {}"
+    },
+    "messages_vars": {
+        "tcp_ok":    ["nombre", "host", "puerto"],
+        "tcp_fail":  ["nombre", "host", "puerto"],
+        "tcp_error": ["nombre", "error"]
     }
 }
 ```
@@ -1504,7 +1561,9 @@ class Watchful(ModuleBase):
 - [ ] Implementar `__init__` llamando a `super().__init__(monitor, __package__)`
 - [ ] Implementar `check()` devolviendo `self.dict_return`
 - [ ] Llamar a `super().check()` antes de devolver
-- [ ] Usar `dict_return.set()` para almacenar cada resultado
+- [ ] Usar `dict_return.set()` para almacenar cada resultado (con `name=` para el nombre amigable)
+- [ ] Definir los textos de notificación en `messages` de `lang/*.json` (con sus tags en `messages_vars`) y construirlos con `self._msg('clave', …)` — no cadenas inline con `*` de Markdown
+- [ ] Marcar `severity='warning'` en los avisos de umbral blando (en `dict_return.set(..., severity=…)` y/o `send_message(..., severity=…)`) para enrutarlos como kind `warn` (ámbar) en vez de `down`
 - [ ] Usar `check_status()` + `send_message()` para las notificaciones
 - [ ] Habilitar el módulo en su configuración (UI / `config_modules`) con `enabled: true`
 - [ ] Crear `tests/test_mi_modulo.py` con tests unitarios

@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """Overview widgets the hosts domain (Servers) owns (see lib.core.overview.discovery)."""
 
+from lib.core.overview.filters import (
+    parse_severity_filter, severity_matches, severity_rank)
+
 
 def _host_checks(status_raw: dict, modules_raw: dict) -> dict:
     """Enabled bound-check tally per host uid (total/ok/error/warning), from the module
@@ -71,19 +74,28 @@ def server_list_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> l
     except Exception:  # pylint: disable=broad-except
         return rows
 
-    def _err(r):
-        return (r['checks'].get('error', 0) > 0) or r['status'] == 'error'
-    if f == 'error':
-        rows = [r for r in rows if _err(r)]
-    elif f == 'maint':
-        rows = [r for r in rows if r['maintenance']]
-    elif f == 'errmaint':
-        rows = [r for r in rows if _err(r) or r['maintenance']]
-    elif f == 'virtual':
-        rows = [r for r in rows if r.get('virtual')]
-    elif f == 'physical':
-        rows = [r for r in rows if not r.get('virtual')]
-    return rows
+    level, op, maint = parse_severity_filter(f)
+    if level == '' and not maint:
+        return rows                                   # all
+    return [r for r in rows if _server_matches(r, level, op, maint)]
+
+
+def _server_matches(r: dict, level: str, op: str, maint: bool) -> bool:
+    """Whether a server row passes the compound filter. Maintenance is its own bucket (as in
+    servers_summary/servers_stat) — a maintenance host, whose skipped checks read 'warning'
+    (pending), is excluded from the severity/type match and only re-added by the maint flag."""
+    if maint and r['maintenance']:
+        return True                                   # maintenance union
+    if r['maintenance'] or level == '':
+        return False                                  # maint hosts / maint-only handled above
+    if level == 'virtual':
+        return bool(r.get('virtual'))
+    if level == 'physical':
+        return not r.get('virtual')
+    rank = severity_rank(
+        (r['checks'].get('error', 0) > 0) or r['status'] == 'error',
+        (r['checks'].get('warning', 0) > 0) or r['status'] == 'warning')
+    return severity_matches(rank, level, op)          # warning / error
 
 
 def servers_summary(rows: list) -> dict:
@@ -161,15 +173,16 @@ OVERVIEW_WIDGETS = [
      'view': {'kind': 'table', 'icon': 'bi-hdd-network', 'title_key': 'overview_servers',
               'accent': 'blue', 'data_url': '/api/v1/overview/widget/servers_list',
               'empty_key': 'host_monitor_none',
-              'filter': {'store': 'srvf', 'param': 'f', 'options': [
-                  {'v': '',      'label_key': 'all'},
-                  {'v': 'error', 'label_key': 'host_status_error',
+              # Compound severity filter: a level (warning/error) with a =/≥ operator, host
+              # type (virtual/physical), and a maintenance checkbox that unions in hosts in
+              # maintenance. Levels with ``op:True`` show the =/≥ selector.
+              'filter': {'kind': 'severity', 'store': 'srvf', 'param': 'f', 'maintenance': True,
+                         'levels': [
+                  {'v': '',        'label_key': 'all'},
+                  {'v': 'warning', 'label_key': 'status_warning', 'op': True,
+                   'badge': {'color': '#d97706', 'bg': 'rgba(245,158,11,.18)'}},
+                  {'v': 'error',   'label_key': 'host_status_error', 'op': True,
                    'badge': {'color': '#dc3545', 'bg': 'rgba(220,53,69,.16)'}},
-                  {'v': 'maint', 'label_key': 'host_status_maintenance',
-                   'badge': {'color': '#fd7e14', 'bg': 'rgba(253,126,20,.18)'}},
-                  {'v': 'errmaint', 'label_key': 'host_status_error', 'badges': [
-                      {'label_key': 'host_status_error',       'color': '#dc3545', 'bg': 'rgba(220,53,69,.16)'},
-                      {'label_key': 'host_status_maintenance', 'color': '#fd7e14', 'bg': 'rgba(253,126,20,.18)'}]},
                   {'v': 'virtual', 'label_key': 'host_virtual',
                    'badge': {'color': '#0dcaf0', 'bg': 'rgba(13,202,240,.16)'}},
                   {'v': 'physical', 'label_key': 'host_physical'},

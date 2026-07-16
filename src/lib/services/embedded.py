@@ -76,21 +76,31 @@ class _EmbeddedBase(_HeartbeatMixin):
                            {'service': self._HB_KEY, path: value})
         return True, ''
 
-    # ── config / debug / dispatch context ─────────────────────────────────────
+    # ── config / debug / notification routing context ─────────────────────────
     def _read_config_file(self, filename=None):
         return self._host._read_config_file(filename)
 
     def _config_section(self, name):
         return self._host._config_section(name)
 
-    def _load_webhooks(self, *, decrypt: bool = True):
-        return self._host._load_webhooks(decrypt=decrypt)
+    @property
+    def _notify(self):
+        """The host's core notification router — dispatch/monitor route through it, so an
+        embedded service never wires channels itself (that duplication lived here before)."""
+        return getattr(self._host, '_notify', None)
 
     def _dbg(self, msg, level: DebugLevel = DebugLevel.debug):
         return self._host._dbg(msg, level)
 
     def _audit_system(self, event, detail=None):
         fn = getattr(self._host, '_audit_system', None)
+        if fn is not None:
+            return fn(event, detail or {})
+        return None
+
+    def _audit_auto(self, event, detail=None):
+        """Audit with the request actor when in a Flask context, else as system."""
+        fn = getattr(self._host, '_audit_auto', None) or getattr(self._host, '_audit_system', None)
         if fn is not None:
             return fn(event, detail or {})
         return None

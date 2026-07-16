@@ -26,5 +26,13 @@
         "discover_title": "Procesos en Ejecución",
         "discover_error": "No se pudo cargar la lista de procesos en ejecución",
         "item_added":     "Proceso \"{}\" añadido"
+    },
+    "messages": {
+        "proc_ok":  "Proceso: {} - {} instancia(s) en ejecución ✅",
+        "proc_low": "Proceso: {} - encontradas {}/{} instancia(s) ⚠️"
+    },
+    "messages_vars": {
+        "proc_ok": ["proceso", "nº"],
+        "proc_low": ["proceso", "nº", "mínimo"]
     }
 }

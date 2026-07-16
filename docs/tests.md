@@ -1,8 +1,10 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~2931 tests** | Todos deben pasar con `pytest` para que el build sea válido. Los 6 tests de RAID local se saltan en Windows/macOS (`skipif sys.platform != 'linux'`).
+**Total: ~3100 tests** (≈3108 recolectados; ~3075 pasan y ~33 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
+
+> **Motor de BD en tests:** la suite corre sobre **SQLite** (que tolera SQL no portable). Los bugs específicos de **MySQL/MariaDB** y **PostgreSQL** (los motores de producción) se cubren con un arnés **opt-in** que corre los stores contra motores reales cuando se definen variables de entorno — ver §81. Sin esas variables, ese arnés se salta y no afecta al build.
 
 ---
 
@@ -94,6 +96,15 @@
 77. [Hosts — Hook de hosts aprovisionados](#77-hosts--hook-de-hosts-aprovisionados)
 78. [Panel Web — Política de bind del servidor web](#78-panel-web--política-de-bind-del-servidor-web)
 79. [Panel Web — SCIM 2.0 (aprovisionamiento)](#79-panel-web--scim-20-aprovisionamiento)
+80. [Panel Web — Utilidades genéricas](#80-panel-web--utilidades-genéricas-apiv1util)
+81. [Seguridad (regresiones) y Portabilidad multi-motor](#81-seguridad-regresiones-y-portabilidad-multi-motor)
+82. [Servicios — IP-ban (jail, store, integración)](#82-servicios--ip-ban-jail-store-integración)
+83. [CLI — Servicios de usuarios/grupos y comandos](#83-cli--servicios-de-usuariosgrupos-y-comandos)
+84. [Monitor — Notificador multi-canal](#84-monitor--notificador-multi-canal-routing-y-formato)
+85. [Servicios — SCIM (helpers unitarios)](#85-servicios--scim-helpers-unitarios)
+86. [Panel Web — Protección CSRF](#86-panel-web--protección-csrf)
+87. [Panel Web — Cabeceras de seguridad y módulo CSRF](#87-panel-web--cabeceras-de-seguridad-y-módulo-csrf)
+88. [Core — Estampado de entidades (audit)](#88-core--estampado-de-entidades-audit)
 
 ---
 
@@ -441,12 +452,78 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_check_module_returns_result` | `check_module("mod")` sobre módulo válido | `(True, "mod", ReturnModuleCheck)` | Si devuelve `False` o la instancia es otro tipo |
 | `test_check_module_bad_name_returns_false` | `check_module("nonexistent")` | `(False, "nonexistent", None)` | Si lanza excepción |
 
+### `TestNotifier` — Envío de alertas y buffer por ciclo
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_monitor_has_no_telegram_thread` | El monitor no arranca un hilo Telegram | Sin atributo `tg`, `_notifier` es `None` | Si existe el hilo |
+| `test_close_is_a_safe_noop` | `close()` doble es seguro | Nunca lanza, `_notifier` sigue `None` | Si lanza |
+| `test_alert_kind_mapping` | `_alert_kind` mapea el tipo de alerta | `True`→'recovery', `False`→'down', `(False,'warning')`→'warn' | Si difiere |
+| `test_process_result_buffers_alert` | Un ítem cambiado y notificable se bufferea | `('down','ping','item1','boom')` en el buffer | Si no bufferea |
+| `test_send_message_carries_module_and_item` | Envío ad-hoc conserva módulo e ítem | `('down','ntp','NS1','boom')` | Si difiere |
+| `test_module_supplied_name_wins_over_uid_key` | El nombre amigable gana al UID | `('down','cpu','PVE02','CPU high')` | Si usa el UID |
+| `test_item_label_resolves_host_uid` | `_item_label` resuelve `host_uid`→'NS1' | Clave desconocida devuelve la propia clave | Si no resuelve |
+
+### `TestMonitorAudit` — Auditoría del monitor
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_audit_system_writes_to_db` | Evento de sistema escribe en la BD | Fila `('module_check_timeout','system','internal')`; sin `audit.json` | Si no persiste |
+| `test_audit_system_falls_back_to_file` | Sin store, cae a fichero | Se crea `audit.json` | Si no lo crea |
+
+### `TestCheckStatePersistence` — Persistencia de estado de checks
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_first_record_notifies_and_persists` | El primer cambio notifica y persiste | Estado guardado con `status = False` | Si no notifica/persiste |
+| `test_unchanged_state_is_silent` | Estado sin cambios no vuelve a notificar | Solo el primero y la transición notifican | Si repite notificaciones |
+| `test_state_survives_restart` | El baseline se recarga de la BD | Mismo resultado OK no re-anuncia | Si re-anuncia |
+| `test_clear_status_also_clears_state` | `clear_status()` vacía el `check_state` store | Store vacío | Si persiste |
+| `test_maintenance_purges_live_state` | Host en mantenimiento purga su estado vivo | El estado deja de ser bool | Si conserva estado |
+| `test_derived_key_split_into_metric` | `U-1_ram/_swap` se guarda como clave + métrica | Reconstruye clave U-1 con métrica ram/swap | Si no separa |
+| `test_item_key_with_underscore_is_not_split` | `item_1` no se separa | Clave íntegra, métrica `''` | Si la parte |
+| `test_slash_composite_keys_are_distinct_metrics` | Dos claves compuestas con `/` | Dos filas con métricas distintas, reconstruye verbatim | Si colisionan |
+| `test_stale_bare_key_does_not_abort_persist` | Clave obsoleta + `/site` conviven | Ambas persisten sin colisión | Si aborta |
+
+### `TestFailStreak` — Racha de fallos
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_streak_persists_and_marks_dirty` | `fail_streak` incrementa 1→2 entre instancias | Marca dirty; recuperación lo resetea a 0 | Si no persiste o no resetea |
+
+### `TestRefreshRuntimeConfig` — Recarga de config en caliente
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_refresh_is_safe_without_a_notifier` | `refresh_runtime_config()` sin notifier | No lanza; sin `tg`; `_notifier` `None` | Si lanza |
+
+### `TestDaemonModuleConfigRefresh` — Recarga de checks del daemon
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_refresh_picks_up_web_added_check` | Recarga detecta un check añadido por web | Label vacío antes, 'Lab' después (re-lee BD) | Si no lo detecta |
+
+### `TestDaemonCycleIntegration` — Ciclo completo del daemon
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_added_check_reaches_status_history_telegram` | Tras recarga, el check corre y llega a estado, historial y Telegram | Estado `True`, 1 punto de historial, envío Telegram con token 'TKN-9'/chat 'CHT-9' | Si no propaga |
+
+### `TestGetItemUid` — Extracción de UID desde la clave
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_exact_key` | Clave exacta | `'u-123'` → `'u-123'` | Si difiere |
+| `test_slash_composite_key` | Clave compuesta con `/` | `'u-123/vip'` y `'/node/pve04'` → `'u-123'` | Si difiere |
+| `test_underscore_derived_key` | Clave derivada con `_` | `'u-9_ram'` → `'u-9'` | Si difiere |
+| `test_unknown_key_returns_none` | Clave desconocida | `'nope/vip'` → `None` | Si devuelve algo |
+
 ---
 
 ## 10. Integridad de módulos Watchful
 
 **Archivo:** `tests/test_watchfuls_integrity.py`  
-> Estos tests se ejecutan sobre los **9 módulos reales**: `filesystemusage`, `hddtemp`, `mysql`, `ping`, `raid`, `ram_swap`, `service_status`, `temperature`, `web`.
+> Estos tests se ejecutan (parametrizados) sobre **todos los módulos reales** descubiertos en `watchfuls/` — actualmente 19: `cpu`, `datastore`, `dns`, `filesystemusage`, `hddtemp`, `keepalived`, `m365`, `ntp`, `ping`, `process`, `proxmox`, `raid`, `ram_swap`, `service_status`, `snmp`, `ssl_cert`, `temperature`, `ups`, `web`. La lista (`_MODULE_NAMES`) se autodescubre, así que un módulo nuevo entra en la parametrización sin tocar los tests.
 
 ### `TestRealModuleDiscovery` — Descubrimiento en producción
 
@@ -455,7 +532,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_discovers_all_expected_modules` | `_get_enabled_modules()` encuentra los 9 módulos reales | Los 9 módulos presentes | Si falta alguno |
 | `test_no_extra_unexpected_entries` | No aparecen entradas `__pycache__` ni `.py` planos | Lista limpia | Si hay entradas no válidas |
 
-### `TestRealModuleImport` — Importación (× 9 módulos)
+### `TestRealModuleImport` — Importación (× módulos)
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -463,7 +540,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_watchful_has_item_schema[<mod>]` | `Watchful.ITEM_SCHEMA` existe y es dict no vacío | Dict con entradas | Si es `None`, no es dict, o está vacío |
 | `test_item_schema_collections_are_dicts[<mod>]` | Cada colección en el schema es dict y cada campo tiene clave `type` | Todo correcto | Si algún campo no tiene `type` o no es dict |
 
-### `TestRealModuleInfoJson` — Validez de `info.json` (× 9 módulos)
+### `TestRealModuleInfoJson` — Validez de `info.json` (× módulos)
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -473,7 +550,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_info_json_name_is_nonempty_string[<mod>]` | `name` es string no vacío | String con contenido | Si es vacío o no es string |
 | `test_info_json_icon_is_nonempty_string[<mod>]` | `icon` es string no vacío (emoji) | String con contenido | Si es vacío o no es string |
 
-### `TestRealModuleLangFiles` — Validez de `lang/*.json` (× 9 módulos)
+### `TestRealModuleLangFiles` — Validez de `lang/*.json` (× módulos)
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -484,7 +561,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_lang_pretty_name_is_nonempty_string[<mod>]` | `pretty_name` es string no vacío | Nombre legible | Si es vacío |
 | `test_lang_labels_is_dict[<mod>]` | `labels` es un dict | Dict con etiquetas | Si es otro tipo |
 
-### `TestDiscoverSchemasRealModules` — Integración completa del sistema i18n y schemas (× 9 módulos)
+### `TestDiscoverSchemasRealModules` — Integración completa del sistema i18n y schemas (× módulos)
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -495,6 +572,26 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_i18n_pretty_name_populated[<mod>]` | Cada locale tiene `pretty_name` no vacío | String con contenido | Si es vacío |
 | `test_i18n_icon_populated[<mod>]` | Cada locale tiene `icon` no vacío | Emoji o string | Si es vacío |
 | `test_schema_fields_have_label_i18n_when_lang_exists[<mod>]` | Todos los campos del schema tienen `label_i18n` mergeado de `lang/` | Clave `label_i18n` en cada campo | Si falta (indica que el merge de idiomas falló) |
+
+### `TestWatchfulActions` — Integridad de `WATCHFUL_ACTIONS`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_watchful_actions_is_frozenset[<mod>]` | Si el módulo declara `WATCHFUL_ACTIONS`, es un `frozenset` (ausente en módulos base-only) | `frozenset` o ausente | Si es otro tipo |
+| `test_expected_actions_declared[<mod>]` | Los módulos con acciones web declaran el set exacto esperado (`datastore`, `filesystemusage`, `service_status`, `temperature`) | Set exacto | Si difiere |
+| `test_action_methods_exist[<mod>]` | Cada acción declarada existe como método invocable | `callable` presente | Si falta o no es invocable |
+
+> Los dos últimos se parametrizan solo sobre los módulos con acciones web conocidas (`_EXPECTED_ACTIONS`), no sobre todos.
+
+### `TestRealModuleRuntimeContract` — Contrato de ejecución y cableado con el sistema (× módulos)
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_instantiates_and_check_runs_on_empty_config[<mod>]` | El módulo instancia y `check()` devuelve un `ReturnModuleCheck` con config vacía (los hooks pesados, p.ej. compilar MIBs SNMP, se neutralizan) | Devuelve `ReturnModuleCheck` | Si lanza o devuelve otro tipo |
+| `test_declared_credential_type_is_in_catalog[<mod>]` | Si el módulo declara un tipo de credencial (`__credential__`), ese tipo está en el catálogo central | Tipo presente en el catálogo | Si el tipo declarado no está expuesto |
+| `test_host_capable_module_is_exposed_in_catalogs[<mod>]` | Si el módulo es host-capable (`__host_profile__`), aparece en el flag multi-bind y en al menos una colección bindable a host | Presente en ambos catálogos | Si es host-capable pero falta en alguno |
+
+> **Skips intencionados** (no son fallos): estos dos últimos tests solo aplican a un subconjunto de módulos, así que se **saltan** para el resto — `skip("module declares no credential type")` en los módulos sin credencial y `skip("module is not host-capable")` en los que no declaran `__host_profile__`. Es el patrón "parametrizar sobre todos los módulos y saltar los que no tienen la característica"; la invariante sí se comprueba en los módulos a los que aplica.
 
 ---
 
@@ -665,6 +762,18 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_dashboard_contains_item_schemas_json` | HTML del dashboard contiene `ITEM_SCHEMAS` | String `ITEM_SCHEMAS` en el HTML | Si no aparece |
 | `test_schemas_passed_to_template` | Schema en el HTML tiene `"default": 200` | Presente en el HTML | Si no aparece |
 
+### `TestRekeyItemsByUid` (`test_wa_modules.py`)
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_rekey_flat_and_nested` | Reindexado de ítems por `uid` (plano y anidado) | Listas rekeyed por uid (generado si falta); escalares (`enabled`/`threads`) intactos | Si reindexa mal o toca escalares |
+
+### `TestLandingPageApplied` (`test_wa_config.py`)
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_startup_applies_global_landing` | `_apply_saved_config()` re-deriva el landing global | `_landing_page='overview'`; `_landing_url` devuelve `/overview` sin override de usuario | Si no lo aplica |
+
 ---
 
 ## 13. Panel Web — API estado y ejecución de checks
@@ -758,6 +867,50 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | Registro de sesiones | Múltiples logins registran sesiones | Todas las sesiones en `/api/sessions` | Si faltan |
 | Revocar sesión | `DELETE /api/sessions/<id>` | Sesión eliminada | Si persiste |
 
+### `TestUserInputValidation`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_create_user_invalid_lang_rejected` | Crear con idioma inválido | `400` con error | Si acepta |
+| `test_create_user_valid_lang_accepted` | Crear con idioma válido | `201`, `lang` guardado | Si rechaza |
+| `test_create_user_empty_lang_ignored` | Crear con `lang` vacío | `201`, `lang` a `None` | Si falla |
+| `test_create_user_unknown_group_rejected` | Crear con grupo desconocido | `400` con error | Si acepta |
+| `test_create_user_non_list_groups_rejected` | `groups` no es lista | `400` | Si acepta |
+| `test_create_user_known_group_accepted` | Crear con grupo conocido | `201`, uid del grupo guardado | Si rechaza |
+| `test_update_user_invalid_lang_rejected` | Editar a idioma inválido | `400`, `lang` sin cambio | Si acepta |
+| `test_update_user_valid_lang_accepted` | Editar a idioma válido | `200`, `lang` guardado | Si rechaza |
+| `test_update_user_empty_lang_accepted` | Editar a `lang` vacío | `200` | Si rechaza |
+| `test_update_user_non_bool_dark_mode_rejected` | `dark_mode` no booleano | `400` | Si acepta |
+| `test_update_user_int_dark_mode_rejected` | `dark_mode` como entero | `400` | Si acepta |
+| `test_update_user_bool_dark_mode_accepted` | `dark_mode` booleano | `200`, `dark_mode=True` | Si rechaza |
+| `test_update_user_unknown_group_rejected` | Editar con grupo desconocido | `400`, grupos siguen `[]` | Si acepta |
+| `test_update_user_non_list_groups_rejected` | `groups` no es lista al editar | `400` | Si acepta |
+| `test_update_user_known_group_accepted` | Editar con grupo conocido | `200`, uid del grupo presente | Si rechaza |
+| `test_preferences_invalid_lang_rejected` | Preferencias con idioma inválido | `400` | Si acepta |
+| `test_preferences_non_string_lang_rejected` | Preferencias con `lang` no string | `400` | Si acepta |
+| `test_preferences_valid_lang_accepted` | Preferencias con idioma válido | `200` | Si rechaza |
+| `test_preferences_non_bool_dark_mode_rejected` | Preferencias `dark_mode` no booleano | `400` | Si acepta |
+| `test_preferences_null_dark_mode_resets_to_default` | Preferencias `dark_mode` nulo | `200` (reset a default) | Si falla |
+
+### `TestPasswordResetPrivileges`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_non_admin_cannot_reset_another_users_password` | No-admin resetea a otro usuario | `403`; contraseña original intacta | Si la cambia |
+| `test_non_admin_cannot_reset_admin_password` | No-admin resetea al admin | `403`; contraseña del admin intacta | Si la cambia |
+| `test_admin_can_reset_any_password` | Admin resetea cualquier contraseña | `200`; nueva contraseña verifica | Si falla |
+| `test_non_admin_cannot_grant_admin_role` | No-admin intenta conceder rol admin | `403`; rol no admin | Si lo concede |
+| `test_non_admin_can_change_own_password_via_me_endpoint` | No-admin cambia su propia contraseña vía `/me` | `200`; nueva contraseña verifica | Si falla |
+
+### `TestOwnLandingPreference`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_me_exposes_landing_fields` | `/me` expone `pref_landing_page` y default | `landing_default` en {admin, overview, status} | Si falta |
+| `test_set_own_landing` | Fijar landing propio | `200`; `landing_page='overview'`; `/me` lo refleja | Si no aplica |
+| `test_invalid_landing_rejected` | Landing inválido | `400` | Si acepta |
+| `test_empty_landing_inherits` | Landing vacío tras fijarlo | Se elimina del usuario (hereda global) | Si persiste |
+
 ---
 
 ## 15. Panel Web — i18n, UI y seguridad
@@ -825,6 +978,14 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_reset_password_via_admin_api` | Admin reseta contraseña de otro usuario via PUT | `200`, hash actualizado | Si no cambia |
 | `test_language_selector_in_user_menu` | Selector de idioma está en el menú de usuario | Icono `bi-translate` y `/lang/` en HTML | Si no aparecen |
 | `test_dark_mode_toggle_in_user_menu` | Toggle de dark mode está en el menú de usuario | `id="darkModeSwitch"` y `toggleDarkMode()` | Si no aparecen |
+
+### `TestOverviewPage`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_admin_panel_has_no_overview_tab` | El panel admin ya no lleva pestaña Overview | Sin `data-bs-target="#tab-overview"`; `SS_OVERVIEW_PAGE = false` | Si aparece la pestaña |
+| `test_overview_route_renders_standalone` | `/overview` renderiza página independiente | `200`; HTML con `overview-container`, `SS_OVERVIEW_PAGE = true` | Si no renderiza |
+| `test_overview_requires_login` | `/overview` sin autenticar | `302` | Si devuelve `200` |
 
 ### `TestTelegramTest`
 
@@ -1208,6 +1369,53 @@ Verifica el endpoint `GET|POST /api/v1/modules/watchfuls/<module>/<action>` — 
 | `test_enc_prefix_in_post_body_does_not_crash` | Valor `enc:attacker-payload` en POST body | 200, valor pasado tal cual al classmethod | Si lanza o descifra |
 | `test_unauthenticated_user_cannot_call_any_action` | GET y POST sin sesión en múltiples rutas | 302 en todas | Si alguna responde sin login |
 
+### `TestMergeHostConn`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_fills_address_and_ssh` | La dirección del host rellena `host`+`ssh_host`; user/password SSH copiados | Campos rellenados desde el host | Si no fusiona |
+| `test_explicit_check_value_wins` | Un `host` explícito del check gana sobre la dirección del host | Valor del check conservado | Si lo pisa |
+
+### `TestResolveHostCtxCred`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_ssh_cred_uid_is_resolved` | `cred_uid` resuelve `ssh_user`/`password` | user='svc', password='secret', `ssh_port` preservado | Si no resuelve |
+| `test_no_cred_uid_left_unchanged` | Sin `cred_uid`, valores inline intactos | `ssh_user='root'` preservado | Si lo altera |
+
+### `TestApiWatchfulActionAuthorization`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_viewer_cannot_run_write_action` | Viewer ejecuta acción de escritura (`delete_mib`) | 403 | Si ejecuta |
+| `test_viewer_can_run_read_only_action` | Viewer ejecuta acción de solo lectura (`list_mibs`) | 200 | Si es 403 |
+| `test_admin_can_run_write_action` | Admin ejecuta acción de escritura | ≠ 403 | Si es 403 |
+
+### `TestWatchfulSecretFieldsProtected`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_core_does_not_hardcode_module_secrets` | Los secretos de módulo no están hardcodeados en `ENCRYPT_KEYS` | Campos snmpv3/auth ausentes de `ENCRYPT_KEYS` | Si están hardcodeados |
+| `test_secrets_discovered_from_module_schemas` | `discover_secret_fields` descubre los secretos desde los schemas | Encuentra los tres campos secretos | Si falta alguno |
+| `test_discovered_secrets_masked` | `mask_sensitive` enmascara los secretos descubiertos | Los tres campos a `None` | Si los deja en claro |
+| `test_wa_secret_keys_includes_module_secrets` | `GET /modules` enmascara los secretos de módulo | `snmpv3_auth_key` enmascarado (`None`/`''`) | Si aparece en claro |
+
+### `TestSsrfGuard`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_file_scheme_blocked` | Esquema `file://` bloqueado | Rechazado (no `None`) | Si lo permite |
+| `test_metadata_ip_blocked` | IP de metadatos `169.254.169.254` bloqueada | Rechazada (no `None`) | Si la permite |
+| `test_normal_http_allowed` | `example.com` permitido | `None` (permitido) | Si lo bloquea |
+| `test_private_host_allowed_for_monitoring` | Host privado `192.168.x` permitido para monitorización | `None` (permitido) | Si lo bloquea |
+
+### `TestHostAwareDiscovery`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_process_discover_remote_draft` | `discover` remoto de `process` | 200; nombres incluyen nginx/sshd; ejecuta `ps -A -o comm=` | Si falla |
+| `test_service_discover_remote_draft` | `discover` remoto de `service_status` | 200; un servicio "nginx" presente | Si falla |
+
 ---
 
 ## 16d. Panel Web — Matriz de permisos por endpoint
@@ -1230,22 +1438,31 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 **Archivo:** `watchfuls/filesystemusage/tests/test_filesystemusage.py`
 
-### `TestFilesystemUsageInit`
+### `TestParsers` — Parseo de salida de disco
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_init` | Instanciación del Watchful | Sin excepción, monitor asignado | Si lanza |
+| `test_df_by_mount` | `_parse_df` calcula el % de uso por montaje y por dispositivo | Uso correcto; `None` si no aparece | Si el parseo falla |
+| `test_wmic` | `_parse_wmic` calcula el % de uso desde `FreeSpace`/`Size` (Windows) | Uso correcto para `C:`/`D:` | Si difiere |
 
-### `TestFilesystemUsageCheck`
+### `TestCheck` — Ejecución del check
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_check_no_partitions` | Lista vacía en config | `ReturnModuleCheck` vacío | Si lanza |
-| `test_check_disabled_partition` | Partición con `enabled: false` | Entrada omitida del resultado | Si aparece |
-| `test_check_partition_ok` | Uso por debajo del umbral | `status = True` | Si es `False` |
-| `test_check_partition_alert` | Uso igual o superior al umbral | `status = False` | Si es `True` |
-| `test_check_other_data` | `other_data` contiene información de uso | `used_percent`, `total`, `used` presentes | Si faltan |
-| `test_check_invalid_config_uses_default` | Config malformada | Usa defaults, no lanza | Si lanza |
+| `test_ok_below_threshold` | Uso por debajo del umbral | `status = True`, `other_data.used == 75`, mount `/` | Si es `False` |
+| `test_alert_above_threshold` | Uso por encima del umbral (90 > 85) | `status = False`, mensaje con "Warning" | Si es `True` |
+| `test_windows_host_uses_wmic` | Host Windows usa `wmic` | Comando incluye `wmic`; `status = True`, `used == 75` | Si usa otro comando |
+| `test_message_uses_label_to_identify_server` | El label identifica el servidor en el mensaje | "NS1 - /" aparece en el mensaje | Si no aparece |
+| `test_same_mount_distinct_items_do_not_collide` | Mismo mount en dos ítems distintos | Claves distintas (uid-a, uid-b), sin colisión | Si colisionan |
+| `test_partition_not_found_is_error` | Partición inexistente | `status = False`, mensaje con "Error" | Si es `True` |
+| `test_disabled_and_maintenance_skipped` | Ítem deshabilitado + host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+
+### `TestDiscover` — Descubrimiento de particiones
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_discover_remote_df` | Descubrimiento remoto ejecuta `df -P -k` | Nombres incluyen `/` y `/data` | Si falla el descubrimiento |
+| `test_discover_local` | Descubrimiento local vía psutil | Devuelve el nombre `/` | Si no aparece |
 
 ---
 
@@ -1333,6 +1550,17 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_unsupported_type_returns_error` | Motor sin soporte de listado (Redis) | `ok = False`, `databases = []` | Si devuelve lista |
 | `test_memcached_not_supported` | Memcached sin listado | `ok = False` | Si devuelve datos |
 
+### `TestSshKeyString`, `TestSshVerifyHostBool`
+
+| Test | Qué comprueba | OK | Error |
+| ---- | ------------- | -- | ----- |
+| `test_pkey_from_string_invalid_raises` | `_pkey_from_string` con texto inválido | Lanza `ValueError` (skip sin paramiko) | Si no lanza |
+| `test_pkey_from_string_parses_generated_key` | Clave RSA generada round-trip | Fingerprint coincide (skip sin paramiko) | Si difiere |
+| `test_build_cfg_includes_key_string` | `_build_cfg` incluye la clave | `ssh_key_string` empieza con `-----BEGIN` | Si falta |
+| `test_absent_is_false` | `ssh_verify_host` ausente | `_build_cfg` devuelve `False` | Si difiere |
+| `test_explicit_false_stays_false` | `ssh_verify_host` explícito `False` | `False` | Si difiere |
+| `test_explicit_true_stays_true` | `ssh_verify_host` explícito `True` | `True` | Si difiere |
+
 ---
 
 ## 20. Watchful: ping
@@ -1362,32 +1590,106 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_success_message_contains_up_emoji` | Mensaje de éxito contiene emoji ✅ | Emoji presente | Si no está |
 | `test_failure_message_contains_down_emoji` | Mensaje de fallo contiene emoji de caída | Emoji presente | Si no está |
 
+### `TestPingGetConf`
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_get_conf_none_raises_value_error` | `_get_conf(None, ...)` | `ValueError` "can not be None" | Si no lanza |
+| `test_get_conf_invalid_option_raises_type_error` | Opción IntEnum desconocida | `TypeError` "is not valid option" | Si no lanza |
+
 ---
 
 ## 21. Watchful: raid
 
 **Archivo:** `watchfuls/raid/tests/test_raid.py` y `test_raid_mdstat.py`
 
-### `TestRaidInit`, `TestRaidCheckLocal`, `TestRaidCheckRemote`, etc.
+### `TestParseLines` (`test_raid.py`) — Parseo de `/proc/mdstat`
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_init` | Instanciación | Sin excepción | Si lanza |
-| `test_check_local_no_raids` | Sin arrays RAID en el sistema | Resultado vacío | Si lanza |
-| `test_check_local_raid_ok` | RAID en estado activo | `status = True` | Si es `False` |
-| `test_check_local_raid_degraded` | RAID degradado | `status = False` | Si es `True` |
-| `test_check_local_raid_recovery` | RAID en reconstrucción | `status = False` | Si es `True` |
-| `test_check_local_disabled` | Entrada con `enabled: false` | Omitida | Si aparece |
-| `test_check_remote_ok` | RAID remoto (SSH) OK | `status = True` | Si es `False` |
-| `test_check_remote_disabled` | Entrada remota deshabilitada | Omitida | Si aparece |
-| `test_label_local` | Etiqueta de array local | Nombre del dispositivo | Si devuelve otro |
-| `test_label_remote_with_label` | Etiqueta personalizada en remoto | Etiqueta configurada | Si usa el host |
-| `test_check_remote_with_key_file` | SSH con clave privada | No lanza, usa la clave | Si lanza |
-| `test_md_analyze_unknown_status` | Estado RAID desconocido | Reportado como error | Si se ignora |
-| `test_recovery_details` | Parseo de línea de recuperación de mdstat | Porcentaje y tiempo restante extraídos | Si el parseo falla |
-| `test_recovery_malformed_falls_back_empty` | Línea de recuperación malformada | Dict vacío sin excepción | Si lanza |
-| `test_read_ok` / `test_read_degraded` / `test_read_recovery` | Parseo de `/proc/mdstat` local | Estado correcto según el contenido | Si el parseo es incorrecto |
-| `test_read_remote_stderr_raises` | Error SSH | `OSError` lanzada | Si no lanza |
+| `test_ok` | Array activo | `md0` con `UpdateStatus.ok` | Si difiere |
+| `test_degraded` | Array degradado | `md0` con `UpdateStatus.error` | Si difiere |
+| `test_recovery` | Array en reconstrucción | `update = recovery`, porcentaje 12.6 | Si difiere |
+| `test_empty` | Salida vacía | Devuelve `{}` | Si lanza |
+| `test_accepts_list_of_lines` | Acepta lista de líneas (`splitlines`) | `md0` presente | Si falla |
+
+### `TestRaidDefaults` (`test_raid.py`) — Defaults y schema
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_module_defaults` | Defaults del módulo | `threads=5`, `timeout=30`, `mdstat_path=/proc/mdstat` | Si difieren |
+| `test_schema_is_host_centric` | Schema host-céntrico | `__host_profile__` con clave `ssh`; sin `local`/`host` inline | Si difiere |
+
+### `TestRaidCheck` (`test_raid.py`) — Ejecución del check
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_raid_ok` | RAID en buen estado | `1_md0` `status = True`, mensaje "good status" | Si es `False` |
+| `test_raid_degraded` | RAID degradado | `1_md0` `status = False`, mensaje "degraded" | Si es `True` |
+| `test_raid_recovery` | RAID en reconstrucción | `status = False`, mensaje "recovery", porcentaje 12.6 | Si es `True` |
+| `test_no_raids` | Sin arrays RAID | `1` `status = True`, mensaje "No RAID" | Si es `False` |
+| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_non_linux_host_reports_unsupported` | Host no-Linux | `host_exec` no invocado; `status = False`, mensaje "Linux" | Si ejecuta |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_command_failure_is_error` | Fallo del comando | `status = False`, mensaje "Error" | Si es `True` |
+| `test_module_disabled` | Módulo deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
+
+### `TestRaidLabel` (`test_raid.py`) — Etiqueta del array
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_label_from_item` | `_label('1')` con label configurado | Devuelve "MyServer" | Si difiere |
+| `test_label_falls_back_to_key` | `_label` sin label | Devuelve la clave | Si difiere |
+
+### `TestRaidMdstatInit`, `TestRaidMdstatValidateRemote`, `TestRaidMdstatIsExistLocal`, `TestRaidMdstatIsExistRemote` (`test_raid_mdstat.py`)
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_default_init` | Init por defecto | `is_remote=False`, path `/proc/mdstat` | Si difiere |
+| `test_custom_path` | Path de mdstat personalizado | Path almacenado | Si difiere |
+| `test_remote_init` | Init remoto con host/port/user/password | `is_remote=True` | Si difiere |
+| `test_not_remote_without_host` | Sin host | `is_remote=False` | Si es `True` |
+| `test_remote_with_key_file` | Remoto con `key_file` | `is_remote=True`, `_key_file` fijado | Si difiere |
+| `test_key_file_default_none` | `_key_file` por defecto | `None` | Si difiere |
+| `test_valid_remote` | `validate_remote` con config completa | `True` | Si es `False` |
+| `test_invalid_port_zero` | Puerto 0 | `validate_remote = False` | Si es `True` |
+| `test_invalid_no_user` | Usuario vacío | `validate_remote = False` | Si es `True` |
+| `test_invalid_empty_host` | Host en blanco | `validate_remote = False` | Si es `True` |
+| `test_exist_local` | `is_exist` local | `True`; `isfile` llamado con el path | Si difiere |
+| `test_not_exist_local` | Archivo local ausente | `is_exist = False` | Si es `True` |
+| `test_exist_remote` | `is_exist` remoto (salida "exists") | `True` | Si es `False` |
+| `test_not_exist_remote` | Salida remota vacía | `is_exist = False` | Si es `True` |
+| `test_remote_stderr_returns_false` | Remoto con stderr | `is_exist = False` | Si es `True` |
+| `test_remote_invalid_config_returns_false` | Config remota inválida | `is_exist = False` | Si es `True` |
+
+### `TestRaidMdstatReadStatusLocal`, `TestRaidMdstatReadStatusRemote`, `TestUpdateStatusEnum` (`test_raid_mdstat.py`)
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_read_ok` | Lectura local OK | `md0` presente, `update = ok` | Si difiere |
+| `test_read_degraded` | Lectura local degradado | `md0` `update = error` | Si difiere |
+| `test_read_recovery` | Lectura local en recuperación | `md0` recovery, porcentaje 5.2 | Si difiere |
+| `test_read_not_exist` | Archivo ausente | `read_status` devuelve `{}` | Si lanza |
+| `test_read_empty` | mdstat vacío | `read_status` devuelve `{}` | Si difiere |
+| `test_read_multiple_raids` | Varios arrays | `md0` y `md1` ambos ok | Si falta alguno |
+| `test_read_remote_ok` | Lectura remota (2 llamadas SSH) | `md0` `update = ok` | Si difiere |
+| `test_read_remote_stderr_raises` | Remoto con stderr | Lanza excepción con "ERROR" | Si no lanza |
+| `test_values` | Valores del enum `UpdateStatus` | `unknown=0, ok=1, error=2, recovery=3` | Si difieren |
+| `test_is_intenum` | `UpdateStatus` es `IntEnum` | Comparaciones de orden válidas | Si falla |
+
+### `TestRaidMdstatReadLines`, `TestRaidMdstatIsExistRemoteStdexcept`, `TestRaidMdstatRemoteStderrRaises`, `TestRaidMdstatRecoveryParsing` (`test_raid_mdstat.py`)
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_read_lines_local` | `_read_lines` local | Línea con "md0" | Si falla |
+| `test_read_lines_remote_ok` | `_read_lines` remoto OK | Línea con "md0" | Si falla |
+| `test_read_lines_remote_stderr_raises_oserror` | stderr remoto | Lanza `OSError` "REMOTE ERROR" | Si no lanza |
+| `test_read_lines_remote_stdexcept_raises_runtime` | Excepción remota | Lanza `RuntimeError` "REMOTE EXCEPTION" | Si no lanza |
+| `test_read_lines_remote_invalid_config_raises_valueerror` | Config remota inválida | Lanza `ValueError` "Remote config not valid" | Si no lanza |
+| `test_remote_stdexcept_returns_false` | `is_exist` con excepción | `False` | Si es `True` |
+| `test_read_remote_stdexcept_raises` | `read_status` con excepción en 2ª llamada | Lanza `RuntimeError` "REMOTE EXCEPTION" | Si no lanza |
+| `test_recovery_details` | Parseo de línea de recuperación | Porcentaje 5.2, finish "200.5min", speed "150000K/sec", blocks es lista | Si el parseo falla |
+| `test_recovery_malformed_falls_back_empty` | Línea de recuperación malformada | `update = recovery` pero dict `{}` | Si lanza |
 
 ---
 
@@ -1395,18 +1697,28 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 **Archivo:** `watchfuls/ram_swap/tests/test_ram_swap.py`
 
-### `TestRamSwapInit`, `TestRamSwapCheckConfig`, `TestRamSwapCheck`
+### `TestParsers` — Parseo por SO
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_init` | Instanciación | Sin excepción | Si lanza |
-| `test_default_alert_values` | Thresholds por defecto (60% RAM, 60% swap) | Valores correctos | Si difieren |
-| `test_check_normal_usage` | Uso por debajo de ambos thresholds | `ram: True`, `swap: True` | Si alguno es `False` |
-| `test_check_high_ram_usage` | RAM por encima del threshold | `ram: False` | Si es `True` |
-| `test_check_high_swap_usage` | Swap por encima del threshold | `swap: False` | Si es `True` |
-| `test_check_exact_threshold` | Uso exactamente igual al threshold | `status = False` (umbral inclusivo) | Si es `True` |
-| `test_check_other_data` | `other_data` contiene detalles de uso | `total`, `used`, `percent` presentes | Si faltan |
-| `test_check_invalid_config_uses_default` | Config malformada | Usa defaults, no lanza | Si lanza |
+| `test_linux` | `_parse_linux` | RAM 75.0, swap 25.0 | Si difiere |
+| `test_linux_no_swap` | Linux sin swap | RAM 75.0, swap 0.0 | Si difiere |
+| `test_windows` | `_parse_windows` | RAM 75.0, swap `None` | Si difiere |
+| `test_darwin` | `_parse_darwin` (macOS) | RAM entre 70-80, swap 25.0 | Si difiere |
+| `test_commands_are_allowlist_friendly` | Comandos sin encadenado de shell | Sin tokens de chaining en `_MEM_CMDS` | Si los hay |
+
+### `TestCheck` — Ejecución del check
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_normal_usage` | Uso normal | `srv_ram`/`srv_swap` `status = True`, used 75.0, nombres "srv - RAM"/"srv - SWAP" | Si difiere |
+| `test_high_ram_triggers_alert` | RAM sobre el umbral (75 ≥ 60) | `srv_ram` `status = False`, mensaje "Excessive" | Si es `True` |
+| `test_windows_reports_ram_only` | Windows | Comando con `wmic`; `srv_ram` presente, `srv_swap` ausente | Si difiere |
+| `test_unsupported_os` | SO no soportado | `host_exec` no invocado; `status = False`, mensaje "unsupported" | Si ejecuta |
+| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_command_failure_is_error` | Fallo del comando | `status = False`, mensaje "Error" | Si es `True` |
+| `test_invalid_threshold_uses_default` | Umbral inválido/fuera de rango | `_alert` cae al default, parsea "80" | Si no aplica el default |
 
 ---
 
@@ -1414,23 +1726,42 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 **Archivo:** `watchfuls/service_status/tests/test_service_status.py`
 
-### `TestServiceStatusInit`, `TestServiceStatusClearStr`, `TestServiceStatusReturn`, `TestServiceStatusCheck`
+### `TestParseState` — Parseo de estado por SO
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_init` | Instanciación | Sin excepción | Si lanza |
-| `test_clear_str_parentheses` | `clear_str()` elimina contenido entre paréntesis | Texto limpio | Si conserva paréntesis |
-| `test_clear_str_empty` / `test_clear_str_none` | `clear_str("")` y `clear_str(None)` | Sin excepción, devuelve string | Si lanza |
-| `test_service_running` | Servicio activo en systemd | `status = True` | Si es `False` |
-| `test_service_inactive` | Servicio inactivo | `status = False` | Si es `True` |
-| `test_service_failed` | Servicio en estado fallido | `status = False` | Si es `True` |
-| `test_service_active_exited` | Servicio tipo `oneshot` completado | `status = True` | Si es `False` |
-| `test_service_no_stdout` | Sin salida de systemctl | `status = False` | Si es `True` |
-| `test_check_empty_list` | Lista vacía | Resultado vacío sin excepción | Si lanza |
-| `test_check_disabled_service` | Servicio con `enabled: false` | Omitido del resultado | Si aparece |
-| `test_check_service_running` | Servicio corriendo | `status = True` | Si es `False` |
-| `test_check_service_stopped` | Servicio detenido | `status = False` | Si es `True` |
-| `test_check_multiple_services` | Múltiples servicios | Cada uno con su estado correcto | Si se mezclan |
+| `test_linux_active` | systemd activo | `(True, False, 'running')` | Si difiere |
+| `test_linux_inactive` | systemd inactivo | running `False`, error `False` | Si difiere |
+| `test_linux_failed` | systemd fallido | running `False`, error `False`, detalle "failed" | Si difiere |
+| `test_linux_missing_is_error` | Unidad inexistente (exit 127) | running `False`, error `True` | Si difiere |
+| `test_windows_running` | `SC RUNNING` | running `True` | Si es `False` |
+| `test_windows_stopped` | Servicio Windows detenido | running `False`, error `False`, detalle "stopped" | Si difiere |
+| `test_windows_missing_is_error` | Servicio Windows ausente (1060) | running `False`, error `True` | Si difiere |
+| `test_darwin_running` | `launchctl` con PID | running `True` | Si es `False` |
+| `test_freebsd_running` | FreeBSD "is running" | running `True` | Si es `False` |
+| `test_freebsd_stopped` | FreeBSD "is not running" | running `False` | Si es `True` |
+
+### `TestCheck` — Ejecución del check
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_running_ok` | Servicio corriendo | `status = True`, mensaje "Running" | Si es `False` |
+| `test_expected_stopped_ok` | Esperado detenido y detenido | `status = True`, mensaje "Stopped" | Si es `False` |
+| `test_running_but_expected_stopped` | Corriendo pero esperado detenido | `status = False`, mensaje "expected: Stopped" | Si es `True` |
+| `test_windows_host_uses_sc` | Host Windows | Comando empieza "sc query"; `status = True` | Si difiere |
+| `test_remediation_recovers` | Remediación (incluye "start") | 3 llamadas `host_exec`; `status = True`, remediación `True` | Si no recupera |
+| `test_unsupported_os` | SO no soportado | `host_exec` no invocado; `status = False`, mensaje "unsupported" | Si ejecuta |
+| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+
+### `TestDiscover` — Descubrimiento de servicios
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_parse_systemd_list` | Parseo de `systemctl list-units` | Nombres "nginx" y "cron" | Si falla |
+| `test_parse_sc_query` | Parseo de `sc query` (Windows) | `{nginx: running, spooler: stopped}` | Si difiere |
+| `test_remote_discovery_uses_ssh` | Descubrimiento remoto vía SSH | Ejecuta "systemctl list-units..."; "nginx" descubierto | Si falla |
+| `test_clear_str` | `clear_str()` limpia paréntesis; `None`→`''` | Texto limpio | Si lanza |
 
 ---
 
@@ -1438,21 +1769,28 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 **Archivo:** `watchfuls/temperature/tests/test_temperature.py`
 
-### `TestTemperatureInit`, `TestTemperatureCheck`, `TestTemperatureGetConf`
+### `TestParser` — Parseo de sensores
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_init` | Instanciación | Sin excepción | Si lanza |
-| `test_check_normal_temp` | Temperatura por debajo del threshold | `status = True` | Si es `False` |
-| `test_check_high_temp` | Temperatura por encima del threshold | `status = False` | Si es `True` |
-| `test_check_exact_threshold` | Temperatura exactamente en el threshold | `status = False` (inclusivo) | Si es `True` |
-| `test_check_no_sensors` | Sin sensores detectados | Resultado vacío sin excepción | Si lanza |
-| `test_check_multiple_sensors` | Varios sensores | Cada uno con su estado | Si se mezclan |
-| `test_check_disabled_sensor` | Sensor con `enabled: false` | Omitido | Si aparece |
-| `test_other_data_contains_temp_info` | `other_data` con temperatura actual y threshold | `temp`, `alert` presentes | Si faltan |
-| `test_get_conf_custom_label` | Label personalizado recuperado de config | Label correcto | Si usa el default |
-| `test_get_conf_none_raises` | `get_conf(None)` | `ValueError` | Si no lanza |
-| `test_get_conf_invalid_option_raises` | Opción no válida | `TypeError` | Si no lanza |
+| `test_parse_and_dedup` | Parseo y deduplicación de sensores | x86_pkg_temp 45.0, acpitz 39.5, duplicado → acpitz_1 41.0 | Si difiere |
+| `test_command_is_allowlist_friendly` | `_THERMAL_CMD` empieza "grep " sin encadenado | Sin tokens de chaining | Si los hay |
+
+### `TestCheck` — Ejecución del check
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_ok_below_threshold` | Temperatura bajo el umbral | `status = True`, temp 45.0 | Si es `False` |
+| `test_over_threshold_warns` | Temperatura sobre el umbral | `status = False`, mensaje "Warning" | Si es `True` |
+| `test_non_linux_unsupported` | Host no-Linux | `host_exec` no invocado; `status = False`, mensaje "Linux" | Si ejecuta |
+| `test_sensor_not_found_is_error` | Sensor no encontrado | `status = False`, mensaje "Error" | Si es `True` |
+| `test_disabled_and_maintenance_skipped` | Ítem deshabilitado + mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+
+### `TestDiscover` — Descubrimiento de sensores
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_discover_remote` | Descubrimiento remoto | Nombres incluyen x86_pkg_temp, acpitz, acpitz_1 | Si falta alguno |
 
 ---
 
@@ -1460,12 +1798,12 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 **Archivo:** `watchfuls/web/tests/test_web.py`
 
-### `TestWebInit`, `TestWebCheck`, `TestWebReturn`, `TestWebUrl`
+### `TestWebInit`, `TestWebCheck`, `TestWebRequest`, `TestWebScheme`, `TestWebUrl`
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
 | `test_init` | Instanciación | Sin excepción | Si lanza |
-| `test_schema_has_url` | `ITEM_SCHEMA['list']` contiene campo `url` | Campo presente | Si no está |
+| `test_schema_has_server_and_port` | `ITEM_SCHEMA['list']` declara `server`/`port` (ya no `url`) | Campos presentes, `address_field='server'` | Si falta alguno |
 | `test_check_empty_list` | Lista vacía | Resultado vacío | Si lanza |
 | `test_check_disabled_url` | URL con `enabled: false` | Omitida del resultado | Si aparece |
 | `test_check_url_ok` | HTTP 200 simulado | `status = True` | Si es `False` |
@@ -1482,7 +1820,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_url_field_used_for_request` | Campo `url` del schema se usa para la petición | Petición a la URL del campo `url` | Si usa la clave |
 | `test_backward_compat_key_as_url` | Sin campo `url` → se usa la clave como URL | Petición a la clave | Si lanza |
 | `test_empty_url_falls_back_to_key` | Campo `url` vacío → se usa la clave | Petición a la clave | Si lanza |
-| `test_key_used_in_message` | La clave (no la URL) aparece en el mensaje | Clave en el mensaje de estado | Si aparece la URL |
+| `test_label_used_in_message` | El label (no la URL) aparece en el mensaje | Label "Blog" en el mensaje de estado | Si aparece la URL |
 
 ---
 
@@ -1544,19 +1882,44 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 **Archivo:** `watchfuls/cpu/tests/test_cpu.py`
 
-### `TestCpuInit`, `TestCpuCheck`
+### `TestParsers` — Parseo por SO
 
 | Test | Qué comprueba | OK | Error |
 | --- | --- | --- | --- |
-| `test_init` | Instanciación del módulo | Sin excepción | Si lanza |
-| `test_check_disabled_returns_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
-| `test_check_ok_below_threshold` | Uso de CPU por debajo del umbral | `status = True` | Si es `False` |
-| `test_check_alert_above_threshold` | Uso de CPU por encima del umbral | `status = False` | Si es `True` |
-| `test_check_exact_threshold_is_not_ok` | Uso exactamente igual al umbral | `status = False` (no estrictamente menor) | Si es `True` |
-| `test_check_other_data_populated` | `other_data` contiene `used` y `alert` | Ambos campos presentes | Si faltan |
-| `test_check_uses_default_alert` | Sin config → usa `alert=85` por defecto | Umbral correcto | Si difiere |
-| `test_check_custom_interval` | Config con `interval` personalizado | `psutil.cpu_percent` llamado con ese intervalo | Si ignora el config |
-| `test_check_exception_handled` | Excepción en `psutil.cpu_percent` | Resultado con `status=False` sin lanzar | Si lanza al caller |
+| `test_proc_stat` | `_parse_proc_stat` (Linux) | `75.0` | Si difiere |
+| `test_cp_time` | `_parse_cp_time` (BSD) | `75.0` | Si difiere |
+| `test_windows` | `_parse_windows` | `42` | Si difiere |
+| `test_darwin_uses_last_sample` | `_parse_darwin` usa la última muestra | `75.0` | Si difiere |
+| `test_single_sample_is_none` | Muestra única | Devuelve `None` | Si difiere |
+| `test_commands_are_allowlist_friendly` | `_cpu_cmd` sin encadenado por SO | Sin tokens de chaining | Si los hay |
+
+### `TestCheck` — Ejecución del check
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_below_threshold_ok` | Uso bajo el umbral | `status = True`, used 75.0 | Si es `False` |
+| `test_above_threshold_alert` | Uso sobre el umbral (75 ≥ 60) | `status = False`, mensaje "Excessive" | Si es `True` |
+| `test_windows_host_uses_wmic` | Host Windows | Comando `wmic`; `status = True`, used 42.0 | Si difiere |
+| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_command_failure_is_error` | Fallo del comando | `status = False`, mensaje "Error" | Si es `True` |
+| `test_module_disabled` | Módulo deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
+
+### `TestThresholdInheritance` — Herencia del umbral
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_blank_item_inherits_module_threshold` | Ítem en blanco hereda umbral del módulo | alert 85 heredado; `status = True` | Si no hereda |
+| `test_null_item_inherits_module_threshold` | Ítem `null` hereda | alert 90 heredado; `status = True` | Si no hereda |
+| `test_blank_item_no_module_uses_schema_default` | Sin módulo, usa default del schema | alert 85 (schema); `status = True` | Si difiere |
+| `test_explicit_item_value_wins` | Valor explícito del ítem gana | alert 60 override; `status = False` | Si no prevalece |
+| `test_item_zero_inherits_module` | alert 0 en ítem hereda | alert 85 heredado; `status = True` | Si usa 0 |
+
+### `TestSchema` — Schema host-céntrico
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_host_centric` | Schema host-céntrico | `__host_profile__` clave `ssh`; `list` con `alert` y `label` | Si difiere |
 
 ---
 
@@ -1564,20 +1927,27 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 **Archivo:** `watchfuls/ssl_cert/tests/test_ssl_cert.py`
 
-### `TestSslCertInit`, `TestSslCertCheck`
+### `TestSslCertCheck` — Ejecución del check
 
 | Test | Qué comprueba | OK | Error |
 | --- | --- | --- | --- |
-| `test_init` | Instanciación del módulo | Sin excepción | Si lanza |
-| `test_check_disabled_returns_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
-| `test_check_empty_list_returns_empty` | Lista vacía | Resultado vacío | Si lanza |
-| `test_check_disabled_item_skipped` | Ítem con `enabled: false` | Omitido del resultado | Si aparece |
-| `test_check_cert_valid_ok` | Certificado con días restantes > umbral | `status = True` | Si es `False` |
-| `test_check_cert_within_warning_window` | Certificado dentro de la ventana de aviso | `status = False` | Si es `True` |
-| `test_check_cert_expired` | Certificado expirado | `status = False`, mensaje "EXPIRED" | Si es `True` |
-| `test_check_connection_error_handled` | Error de conexión SSL | `status = False` sin lanzar | Si lanza al caller |
-| `test_check_other_data_populated` | `other_data` contiene `days_left`, `expires`, `host`, `port` | Todos los campos presentes | Si faltan |
-| `test_check_per_item_warning_days_overrides_module` | `warning_days` por ítem anula el valor del módulo | Umbral correcto del ítem | Si usa el global |
+| `test_disabled_module_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
+| `test_disabled_item_skipped` | Ítem con `enabled: false` | Omitido del resultado | Si aparece |
+| `test_valid_ok` | Certificado con caducidad +60 días | `status = True` | Si es `False` |
+| `test_within_warning_window` | Caducidad +10 días (ventana de aviso) | `status = False`, "warning threshold" | Si es `True` |
+| `test_expired` | Certificado expirado (-5 días) | `status = False`, mensaje "EXPIRED" | Si es `True` |
+| `test_connection_error_handled` | Error de conexión SSL (rechazo) | `status = False`, "Error" sin lanzar | Si lanza al caller |
+| `test_per_item_warning_days_overrides_module` | `warning_days` por ítem anula el del módulo | +20 días con ventana 10 → `status = True` | Si usa el global |
+| `test_sni_uses_server_name_not_address` | Conecta a la dirección pero SNI = FQDN | `other_data` con `server_name`/`verify` | Si usa la dirección como SNI |
+| `test_sni_defaults_to_address` | Sin `server_name`, SNI cae a la dirección | `server_hostname` = dirección del host | Si difiere |
+| `test_verify_off_uses_insecure_context` | `verify_ssl=false` | `check_hostname=False`, `CERT_NONE`, `status = True`, verify `False` | Si verifica |
+| `test_verify_on_uses_default_context` | `verify_ssl=true` | `verify_mode != CERT_NONE` | Si no verifica |
+
+### `TestCertExpiry` — Extracción de caducidad
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_parses_generated_cert` | `_cert_expiry` sobre un cert generado | Timestamp correcto (≈`not_after`) y fecha "2031-06-01" | Si difiere |
 
 ---
 
@@ -1585,27 +1955,34 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 **Archivo:** `watchfuls/process/tests/test_process.py`
 
-### `TestProcessInit`, `TestProcessCheck`, `TestProcessDiscover`
+### `TestCountMatches` — Conteo de coincidencias
 
 | Test | Qué comprueba | OK | Error |
 | --- | --- | --- | --- |
-| `test_init` | Instanciación del módulo | Sin excepción | Si lanza |
-| `test_check_disabled_returns_empty` | Módulo deshabilitado | Resultado vacío | Si procesa |
-| `test_check_empty_list_returns_empty` | Lista vacía | Resultado vacío | Si lanza |
-| `test_check_disabled_item_skipped` | Ítem con `enabled: false` | Omitido del resultado | Si aparece |
-| `test_check_process_running_ok` | Proceso encontrado con instancias suficientes | `status = True` | Si es `False` |
-| `test_check_process_not_running` | Proceso no encontrado | `status = False` | Si es `True` |
-| `test_check_min_count_not_met` | Instancias encontradas < `min_count` | `status = False` | Si es `True` |
-| `test_check_min_count_exactly_met` | Instancias encontradas == `min_count` | `status = True` | Si es `False` |
-| `test_check_case_insensitive` | Nombre del proceso insensible a mayúsculas | Coincidencia independientemente del case | Si no coincide |
-| `test_check_empty_process_uses_key` | Campo `process` vacío → usa la clave del ítem | Búsqueda con la clave | Si usa string vacío |
-| `test_check_other_data_populated` | `other_data` contiene `process`, `count`, `min_count` | Todos los campos presentes | Si faltan |
-| `test_check_exception_handled` | Excepción en `psutil.process_iter` | `status = False` sin lanzar | Si lanza al caller |
-| `test_discover_returns_list` | `discover()` devuelve lista de dicts con `name`, `display_name`, `status` | Lista con claves requeridas | Si falta alguna clave |
-| `test_discover_counts_instances` | `discover()` cuenta múltiples instancias del mismo proceso | `status = '×2'` para 2 instancias | Si el conteo es incorrecto |
-| `test_discover_sorted_by_name` | `discover()` devuelve procesos ordenados alfabéticamente | Lista ordenada (insensible a mayúsculas) | Si el orden es incorrecto |
-| `test_discover_exception_returns_empty` | Excepción en `process_iter` durante discover | `[]` devuelto | Si lanza al caller |
-| `test_discover_skips_empty_names` | Procesos con nombre vacío excluidos del resultado | Ningún ítem con `name == ''` | Si aparecen procesos sin nombre |
+| `test_unix_counts_by_comm` | Conteo por `comm` (Unix) | nginx==2, sshd==1, ausente==0 | Si difiere |
+| `test_windows_counts_with_or_without_exe` | Conteo con o sin sufijo `.exe` | nginx/nginx.exe==2, explorer==1 | Si difiere |
+
+### `TestProcessCheck` — Ejecución del check
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_disabled_module_empty` | Módulo deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_disabled_item_skipped` | Ítem con `enabled: false` | Sin ítems, `host_exec` no invocado | Si aparece |
+| `test_running_ok` | Proceso con instancias suficientes | `status = True`, count 2 | Si es `False` |
+| `test_min_count_not_met` | Instancias < `min_count` | `status = False`, mensaje "2/3" | Si es `True` |
+| `test_windows_host_uses_tasklist` | Host Windows | Comando `tasklist`; `status = True`, count 2 | Si difiere |
+| `test_empty_process_uses_key` | Campo `process` vacío → usa la clave | Búsqueda con la clave; `status = True` | Si usa string vacío |
+| `test_command_failure_is_error` | Fallo del comando | `status = False`, mensaje "Error" | Si es `True` |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+
+### `TestProcessDiscover` — Descubrimiento de procesos
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_discover_counts_and_sorts` | Cuenta y ordena procesos | Orden alfabético; "aaa" primero, bash `status = '×2'` | Si difiere |
+| `test_discover_exception_returns_empty` | Excepción en psutil durante discover | `[]` devuelto | Si lanza al caller |
+| `test_discover_remote_over_ssh` | Descubrimiento remoto vía SSH | Ejecuta `ps -A -o comm=`; nginx '×2', sshd '×1' | Si falla |
+| `test_discover_remote_windows_tasklist` | Descubrimiento remoto Windows | Comando `tasklist`; nginx.exe '×2' | Si difiere |
 
 ---
 
@@ -1633,6 +2010,45 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_check_txt_expected_match` | Registro TXT con `expected` → subcadena encontrada | `status = True` | Si es `False` |
 | `test_check_non_a_without_dnspython_returns_false` | Tipo no-A/AAAA sin dnspython instalado | `status = False` con mensaje `dnspython` | Si lanza o da `True` |
 | `test_check_dns_no_results_is_false` | Consulta no-A que devuelve lista vacía | `status = False` | Si es `True` |
+
+### `TestDnsHardening`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_a_expected_requires_exact_match` | `expected` en A exige coincidencia exacta (no subcadena) | `'1.2.3.4'` no casa `'11.2.3.40'` → `status = False` | Si casa por subcadena |
+| `test_other_data_has_response_time` | `other_data.response_time` presente | Es `int`/`float` | Si falta |
+| `test_non_numeric_timeout_does_not_crash` | Timeout no numérico ('abc') | No aborta; `status = True` | Si lanza |
+| `test_socket_network_error_is_reported` | `OSError` de red aflora en el mensaje | Mensaje con "network down"; `status = False` | Si se silencia |
+| `test_socket_gaierror_is_no_results` | `gaierror` → sin resultados | Mensaje "no results", `status = False` | Si difiere |
+
+### `TestDnsDiscovery`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_actions_declared_and_read_only` | `discover` en `WATCHFUL_ACTIONS` y `READ_ONLY_ACTIONS` | Presente en ambos | Si falta |
+| `test_empty_domain_returns_empty` | Discover sin dominio | `[]` | Si devuelve algo |
+| `test_probe_returns_existing_types` | Una entrada por tipo que resuelve (A, MX) | `name`/`category='address'`/`value`/`fill_value='1.2.3.4'` | Si difiere |
+| `test_axfr_flag_selects_mode` | Flag `axfr` selecciona modo | `False`→probe, `True`/`'true'`→axfr | Si difiere |
+| `test_axfr_failure_returns_empty` | AXFR que lanza excepción | Discover devuelve `[]` | Si propaga |
+
+### `TestDnsRemote`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_remote_a_via_dig_targets_nameserver` | A remoto vía `dig` apuntando al nameserver | Comando con `dig` y `@192.168.110.253`; `status = True`, resuelto `['192.168.110.10']` | Si difiere |
+| `test_local_host_also_uses_dig` | Host local también usa `dig` vía `host_exec` | `status = True` | Si no usa dig |
+| `test_remote_failure_reports_error` | `host_exec` rc=9 "connection timed out" | `status = False`, mensaje con "timed out" | Si difiere |
+| `test_parse_dig_short` | `_parse_dig_short` parsea A/MX/TXT/NS | Quita puntos finales y comillas | Si el parseo falla |
+| `test_discover_probe_remote_parses_combined` | Parseo de salida `##TYPE##` combinada | A y MX presentes, AAAA ausente; A `fill_value='1.2.3.4'` | Si difiere |
+| `test_discover_uses_host_via_ssh_when_remote` | `__host__` remoto vía `lib.core.hosts.runner.run` | Registro A con `fill_value='9.9.9.9'` | Si no usa SSH |
+
+### `TestDnsWindowsResolver`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_parse_resolve_dnsname` | `_parse_resolve_dnsname` para MX/A/TXT/NS/SOA | Parseo correcto (MX '10 mx1.x.lan', SOA 'ns1.x.lan serial=7') | Si difiere |
+| `test_resolve_win_invokes_resolve_dnsname` | `_resolve_win` invoca `Resolve-DnsName` | Devuelve `['10 mx1.x.lan']`; comando con `-Server '192.168.1.1'` | Si difiere |
+| `test_check_on_windows_uses_resolve_dnsname` | En Windows usa `_resolve_win` | Llamado una vez; `status = True`, resuelto `['10 mx1.x.lan']` | Si no lo usa |
 
 ---
 
@@ -1681,6 +2097,27 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_check_connection_error_handled` | Error de conexión al demonio NUT | `status = False` sin lanzar | Si lanza al caller |
 | `test_check_other_data_populated` | `other_data` contiene `status`, `battery_charge`, `runtime`, `load` | Todos los campos presentes | Si faltan |
 | `test_check_ol_lb_combination_is_not_ok` | Estado `OL LB` (en línea pero batería baja) | `status = False` | Si es `True` |
+
+### `TestUpsThresholds`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_low_battery_charge_triggers` | Carga 15 con `alert_battery` 20 | `status = False`, mensaje "battery" | Si es `True` |
+| `test_charge_above_threshold_ok` | Carga 80 con umbral 20 | `status = True` | Si es `False` |
+| `test_low_runtime_triggers` | Runtime 300 s (5 min) con `alert_runtime` 10 | `status = False`, mensaje "runtime" | Si es `True` |
+| `test_on_battery_alerts_by_default` | `OB` sin overrides | `status = False` (alerta por defecto) | Si es `True` |
+| `test_on_battery_alert_can_be_disabled` | `OB` + `alert_on_battery=False`, carga/runtime sanos | `status = True` | Si es `False` |
+| `test_load_threshold_triggers` | Carga 95 con `alert_load` 80 | `status = False`, mensaje "load" | Si es `True` |
+| `test_load_threshold_disabled_by_default` | Carga 99 con `alert_load` 0 (por defecto) | `status = True` | Si es `False` |
+
+### `TestTestConnection`
+
+| Test | Qué comprueba | OK | Error |
+| --- | --- | --- | --- |
+| `test_ok` | `test_connection` con `OL` | `ok = True`; mensaje con "host:port" y "OL"; info con estado/carga | Si falla |
+| `test_failure_returns_message` | Conexión rechazada | `ok = False`, mensaje con "refused" | Si difiere |
+| `test_no_host` | Host vacío | `ok = False` | Si acepta |
+| `test_host_from_bound_host_ctx` | Host vacío cae al `__host__` (172.16.0.5) | `ok = True`; usa esa dirección | Si no la usa |
 
 ---
 
@@ -1924,7 +2361,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 43. Hosts — Perfiles de protocolo
 
-**Archivo:** `tests/test_hosts_profiles.py` — 9 tests
+**Archivo:** `tests/test_hosts_profiles.py` — 12 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -1940,7 +2377,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 44. Hosts — Resolución host→check
 
-**Archivo:** `tests/test_hosts_config_resolution.py` — 20 tests
+**Archivo:** `tests/test_hosts_config_resolution.py` — 26 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2050,20 +2487,41 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 49. Syslog — Listener UDP/TCP/TLS
 
-**Archivo:** `tests/test_syslog_server.py` — 10 tests
+**Archivo:** `tests/test_syslog_server.py` — 13 tests
 
 | Test | Qué comprueba |
 |---|---|
-| `test_blank_defaults_to_all_ipv4_and_ipv6` | Blank defaults to all ipv4 and ipv6 |
-| `test_detects_family_and_multiple` | Detects family and multiple |
-| `test_dedup` | Dedup |
-| `test_receive_udp` | Receive udp |
-| `test_allowlist_blocks` | Allowlist blocks |
-| `test_drop_logging_counts_and_rate_limits` | Drop logging counts and rate limits |
-| `test_newline_framing` | Newline framing |
-| `test_octet_counted_framing` | Octet counted framing |
-| `test_bind_failure_reported` | Bind failure reported |
-| `test_no_ports_no_threads` | No ports no threads |
+| `test_blank_defaults_to_all_ipv4_and_ipv6` | Bind vacío → escucha en todas las IPv4 e IPv6 |
+| `test_detects_family_and_multiple` | Detecta familia (v4/v6) y múltiples binds |
+| `test_dedup` | Deduplica binds repetidos |
+| `test_receive_udp` | Recibe y parsea un datagrama UDP |
+| `test_allowlist_blocks` | Origen fuera del allowlist se descarta (y se cuenta) |
+| `test_drop_logging_counts_and_rate_limits` | Los descartes se cuentan y el log se rate-limita por origen |
+| `test_newline_framing` | Framing TCP por salto de línea (2 mensajes en 1 conexión) |
+| `test_octet_counted_framing` | Framing TCP octet-counted (RFC 6587) |
+| `test_bind_failure_reported` | Un bind imposible se reporta en `start()` |
+| `test_no_ports_no_threads` | Sin puertos configurados no arranca hebras |
+
+### `TestLoad` — Carga / concurrencia (sin pérdida)
+
+> Un colector syslog recibe *fan-in* de muchos hosts a la vez. En **TCP** (stream fiable) no puede perderse **ninguna**: cada mensaje enmarcado llega al sink exactamente una vez. En **UDP** (best-effort) la pérdida bajo ráfaga es legítima, así que su aserción es tolerante.
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_many_concurrent_connections_no_loss_tcp` | **1000 conexiones simultáneas** (fase 1 abre y mantiene las 1000 → el servidor tiene 1000 hebras vivas a la vez; fase 2 transmite en todas), 5 mensajes cada una = **5000** | Se reciben exactamente los 5000 mensajes, sin pérdida ni duplicados | Si falta o se duplica alguno |
+| `test_high_volume_single_connection_octet_counted_no_loss` | 1 conexión con **3000** frames octet-counted seguidos (framing bajo volumen) | Los 3000 frames se reciben exactos | Si el framing pierde/parte alguno |
+| `test_udp_burst_is_best_effort` | Ráfaga de **500** datagramas UDP | El listener sobrevive y entrega el grueso (≥50%); UDP no garantiza entrega | Si se cae o pierde casi todo |
+
+**Consumo medido** (escenario de 1000 conexiones, máquina dev de 24 núcleos, Python 3.14; media de 2 corridas, cero pérdida 5000/5000):
+
+| Métrica | Valor |
+|---|---|
+| Hebras del proceso | ~4 en reposo → **~1000-1070 en pico** (una por conexión viva, es *thread-per-connection*) |
+| RSS | ~41 MB base → **~88 MB pico** → **+≈46 MB** por las 1000 conexiones (**≈47 KB/conexión**: stack de hebra + buffers) |
+| CPU | **~3 s** de CPU total (user+sys); picos instantáneos de **5-6 núcleos** durante el *connect/stream* concurrente; media ≈0,8 núcleos sobre la corrida |
+| Tiempo | ~1,7 s el test en la suite (~4 s el arnés de medición aparte, con el muestreo cada 20 ms) |
+
+> Regla aproximada: **~47 KB de RAM por conexión TCP concurrente**. 1000 conexiones simultáneas ⇒ ~46 MB extra y ~1000 hebras; escala lineal, así que un colector con muchísimas conexiones persistentes debe dimensionar RAM/hebras en consecuencia (el diseño *thread-per-connection* prioriza simplicidad y aislamiento por conexión frente a densidad extrema).
 
 ## 50. Syslog — SyslogStore
 
@@ -2090,7 +2548,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 51. Syslog — Servicio independiente
 
-**Archivo:** `tests/test_syslog_service.py` — 20 tests
+**Archivo:** `tests/test_syslog_service.py` — 19 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2100,8 +2558,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_udp_message_is_stored` | Udp message is stored |
 | `test_disabled_does_not_bind` | Disabled does not bind |
 | `test_enable_only_still_has_default_ports` | Enable only still has default ports |
-| `test_alert_dispatched` | Alert dispatched |
-| `test_no_alert_below_threshold` | No alert below threshold |
+| `test_listener_does_not_dispatch` | El listener solo almacena mensajes; nunca despacha (lo evalúa el worker de eventos) |
 | `test_cooldown_suppresses_second` | Cooldown suppresses second |
 | `test_no_rule_no_dispatch` | No rule no dispatch |
 | `test_disabled_shares_system_db` | Disabled shares system db |
@@ -2117,7 +2574,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 52. Panel Web — Comprobación de rol admin
 
-**Archivo:** `tests/test_wa_admin_check.py` — 5 tests
+**Archivo:** `tests/test_wa_admin_check.py` — 4 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2125,11 +2582,10 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_admin_via_enabled_group` | Admin via enabled group |
 | `test_not_admin_via_disabled_group` | Not admin via disabled group |
 | `test_plain_non_admin` | Plain non admin |
-| `test_stamps_updated_fields` | Stamps updated fields |
 
 ## 53. Panel Web — LDAP
 
-**Archivo:** `tests/test_providers_ldap.py` — 21 tests
+**Archivo:** `tests/test_providers_ldap.py` — 22 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2157,7 +2613,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 54. Panel Web — OIDC/SSO
 
-**Archivo:** `tests/test_providers_oidc.py` — 20 tests
+**Archivo:** `tests/test_providers_oidc.py` — 21 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2184,7 +2640,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 55. Panel Web — SAML2
 
-**Archivo:** `tests/test_providers_saml.py` — 22 tests
+**Archivo:** `tests/test_providers_saml.py` — 23 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2213,12 +2669,26 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 56. Panel Web — Servidores (hosts)
 
-**Archivo:** `tests/test_wa_hosts.py` — 38 tests
+**Archivo:** `tests/test_wa_hosts.py` — 52 tests
 
 | Test | Qué comprueba |
 |---|---|
 | `test_requires_auth` | Requires auth |
 | `test_create_list_and_mask` | Create list and mask |
+| `test_overview_servers_widget_returns_hosts` | El widget de servidores del Overview lista el host creado |
+| `test_virtual_flag_roundtrip_and_widget_split` | El flag `virtual` persiste; el widget separa físicos/virtuales |
+| `test_clone_duplicates_with_secrets` | Clonar copia perfiles y secreto, sobreescribe nombre/dirección; origen intacto |
+| `test_clone_only_selected_checks` | Clonar con lista de checks clona solo esos |
+| `test_clone_empty_checks_clones_none` | Clonar con lista de checks vacía no clona ninguno |
+| `test_clone_defaults_name_when_blank` | Nombre de clon en blanco cae a "(copia)" |
+| `test_clone_missing_source_returns_404` | Clonar un origen inexistente devuelve 404 |
+| `test_delete_host_with_checks` | `delete?with_checks` elimina single-bind y desvincula checks de clúster |
+| `test_delete_host_without_checks_keeps_them` | Delete sin `with_checks` conserva los checks |
+| `test_clone_label_uses_module_template` | El label del clon usa la plantilla de discovery con el nuevo nombre |
+| `test_clone_blanks_cluster_node` | Clonar limpia la identidad de nodo proxmox, conserva el resto |
+| `test_clone_resets_os_to_auto` | Clonar resetea el campo `os` a `auto` |
+| `test_clone_duplicates_bound_module_checks` | Clonar duplica los checks vinculados, copiando campos+label |
+| `test_clone_joins_cluster_membership` | Clonar un miembro de clúster lo une al clúster, sin duplicar |
 | `test_kind_and_maintenance_persist` | Kind and maintenance persist |
 | `test_status_derived_from_checks` | The listing carries a per-host monitoring status built from the |
 | `test_module_counts_in_listing` | The listing reports modules added vs active per host: total = the |
@@ -2385,7 +2855,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 61. Panel Web — Gestor de eventos
 
-**Archivo:** `tests/test_wa_events.py` — 17 tests
+**Archivo:** `tests/test_wa_events.py` — 27 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2409,20 +2879,70 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 62. Panel Web — Servicios
 
-**Archivo:** `tests/test_wa_services.py` — 10 tests
+**Archivo:** `tests/test_wa_services.py` — 23 tests
+
+### `TestServicesStatus`
 
 | Test | Qué comprueba |
 |---|---|
-| `test_requires_auth` | Requires auth |
-| `test_status_lists_all_services` | Status lists all services |
-| `test_database_reports_driver_and_connectivity` | Database reports driver and connectivity |
-| `test_worker_reflects_history_activity` | Worker reflects history activity |
-| `test_start_then_stop` | Start then stop |
-| `test_unknown_service_404` | Unknown service 404 |
-| `test_bad_action_400` | Bad action 400 |
-| `test_start_disabled_is_409` | Start disabled is 409 |
-| `test_start_stop_when_enabled` | Start stop when enabled |
-| `test_control_requires_services_control` | Control requires services control |
+| `test_requires_auth` | `GET /services` sin autenticar devuelve 401 |
+| `test_status_lists_all_services` | Lista los servicios core con flags state/controllable/embedded |
+| `test_database_reports_driver_and_connectivity` | La tarjeta de BD reporta driver y conectividad, no controlable |
+| `test_worker_reflects_history_activity` | El estado del worker refleja la actividad del historial |
+| `test_external_runtime_overlaid_from_leader` | La tarjeta external superpone next/last-run desde el heartbeat del líder |
+| `test_external_running_for_active_active_without_leader` | Active-active corriendo si cualquier instancia está viva |
+| `test_external_not_running_when_all_stopped` | No corriendo cuando todas las instancias están paradas |
+
+### `TestPoke`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_poke_reaches_stopped_instance` | Hace poke a la instancia parada-alcanzable, salta la caída |
+
+### `TestDebugAccessor`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_debug_property_applies_log_level` | La propiedad `debug` (`set_from_config`) conmuta `enabled` |
+
+### `TestExternalControl`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_external_monitoring_is_controllable` | El monitoring external es controlable, no embebido |
+| `test_external_start_stop_writes_enabled` | Start/stop escribe el estado deseado `enabled` de monitoring |
+| `test_external_control_preserves_other_config` | El control external preserva otras secciones de config |
+| `test_external_events_stop_sets_enabled_false` | Parar events pone `enabled=false`, el worker queda ocioso |
+
+### `TestMonitoringControl`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_start_then_stop` | Monitoring embebido: start y luego stop conmuta running |
+| `test_unknown_service_404` | Start de servicio desconocido devuelve 404 |
+| `test_bad_action_400` | Acción inválida devuelve 400 |
+
+### `TestSyslogControl`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_start_disabled_is_409` | Arrancar syslog deshabilitado devuelve 409 (razón "disabled") |
+| `test_start_stop_when_enabled` | Syslog habilitado: start/stop conmuta running |
+
+### `TestIpbanService`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_ipban_service_registered` | ipban registrado embebido+controlable, expone contadores |
+| `test_ipban_start_stop_toggles_enabled` | Start/stop conmuta `ipban_enabled` y estado |
+| `test_ipban_control_preserves_other_config` | Conmutar preserva otras secciones de config |
+| `test_ipban_heartbeat_detail_carries_counts` | El detalle del heartbeat lleva counts banned/watchlist/whitelist |
+
+### `TestPermissions`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_control_requires_services_control` | El control requiere `services_control`; ver sigue permitido |
 
 
 ---
@@ -2758,7 +3278,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 74. Panel Web — Layout de la config UI (registry-driven)
 
-**Archivo:** `tests/test_config_layout.py` — 8 tests
+**Archivo:** `tests/test_config_layout.py` — 9 tests
 
 ### `TestLayoutCoherence` — Coherencia layout ↔ registro
 
@@ -2767,6 +3287,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_tabs_and_cards_present` | `config_layout()` devuelve tabs y cards, cada tab con `id`/`label_key`/`icon` | Ambas listas no vacías y tabs completos | Si falta alguna lista o clave |
 | `test_every_card_targets_a_real_tab` | Cada card apunta a un `tab` existente en `TABS` | Todos los `card['tab']` están en los ids de tabs | Si una card referencia un tab desconocido |
 | `test_card_is_generic_xor_bespoke` | Cada card tiene exactamente uno de `fields` (genérica) o `renderer` (a medida) | XOR se cumple en todas las cards | Si una card tiene ambos o ninguno |
+| `test_generic_cards_have_fields` | Las cards genéricas declaran al menos un campo en `fields` | Toda card genérica tiene `fields` no vacío | Si una card genérica no tiene campos |
 | `test_generic_fields_exist_in_registry` | Los `fields` de cada card existen en `registry_defaults()` | Todo campo está registrado | Si un campo no está en el registro |
 | `test_no_field_placed_in_two_cards` | Ningún campo aparece en dos cards | Cada campo en una sola card | Si un campo se repite entre cards |
 | `test_card_ids_unique` | Los `id` de card no se repiten | Todos únicos | Si hay ids duplicados |
@@ -2855,7 +3376,9 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 79. Panel Web — SCIM 2.0 (aprovisionamiento)
 
-**Archivo:** `tests/test_wa_scim.py` — 14 tests
+**Archivo:** `tests/test_wa_scim.py` — 17 tests
+
+> Las pruebas unitarias del servicio SCIM (autenticación Bearer, parseo de filtros, mapeo de campos de usuario) están en `tests/test_scim_service.py`, documentadas aparte en §85.
 
 ### `TestScimAuth`
 
@@ -2888,7 +3411,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 80. Panel Web — Utilidades genéricas (`/api/v1/util/*`)
 
-**Archivo:** `tests/test_wa_util.py` — 7 tests
+**Archivo:** `tests/test_wa_util.py` — 8 tests
 
 ### `TestUtilToken` — `GET /api/v1/util/token`
 
@@ -2907,3 +3430,269 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_config_override_respects_force_https` | Override con `force_https=false` | `http://…` | Fuerza https |
 | `test_autodetect_from_request` | Sin override, con petición | Deriva de `request.host_url` (proxy-aware) | No auto-detecta |
 | `test_fallback_outside_request` | Sin override ni contexto | `http://localhost:<port>` | Otro fallback |
+
+---
+
+## 81. Seguridad (regresiones) y Portabilidad multi-motor
+
+**Archivos:** `tests/test_security_regressions.py`, `tests/test_db_portability.py`, `tests/test_db_portability_live.py`
+
+### `test_security_regressions.py` — regresiones de la auditoría de seguridad
+Cada test blinda un arreglo para que no vuelva a colarse: lectura anónima del endpoint de widgets del Overview (exige sesión), escalada de privilegios por rol/grupo (`_role_grantable`/`_groups_grantable` — un no-admin no puede asignar admin ni por rol, ni por rol *custom* superior, ni por pertenencia al grupo Administrators), cifrado de `graph_secret`, mapeo grupo→rol LDAP exacto (no por subcadena; casa DN completo o CN), toma de cuenta SSO (no convierte cuenta local), y `parse_manual_ban` con duración negativa.
+
+### `test_db_portability.py` — portabilidad SQL (offline)
+Un conector-stub que **graba el SQL** con `KIND='mysql'` verifica que el SQL crudo de los stores **cita los identificadores reservados** (`key`/`virtual`/tabla `groups`/`user`) con `quote_ident`, y que `quote_ident` es dialect-aware (backticks MySQL / comillas SQLite+PG). Caza cualquier futura reservada sin comillas sin necesidad de un motor real.
+
+### `test_db_portability_live.py` — verificación contra MySQL/PostgreSQL reales (opt-in)
+Corre los stores contra **MySQL/MariaDB** y/o **PostgreSQL** reales (los motores de producción), cubriendo lo que SQLite no detecta: reservadas, `CAST`, `json_extract`/concat por dialecto, upsert por rowcount (`FOUND_ROWS`), rebuild de migración que preserva datos, introspección de esquema y elección de líder. **Opt-in por variables de entorno** (si no están, se salta entero):
+
+Variables (una por conexión; si falta el `*_HOST`, ese motor se salta):
+
+| MySQL/MariaDB | PostgreSQL |
+|---|---|
+| `SS_TEST_MYSQL_HOST` (+ `_PORT`=3306) | `SS_TEST_PG_HOST` (+ `_PORT`=5432) |
+| `SS_TEST_MYSQL_USER` / `_PASSWORD` / `_DB` | `SS_TEST_PG_USER` / `_PASSWORD` / `_DB` |
+
+Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` — **no se versiona**, contiene credenciales) con esas variables. `src/conftest.py` lo **carga automáticamente** para toda la suite (no hace falta `source`): basta con que el fichero exista. Las variables ya presentes en el entorno real tienen prioridad (CI / export inline mandan sobre el fichero).
+
+```bash
+# desde src/ — el .env.test se auto-carga; solo hay que ejecutarlo en serie:
+.venv/Scripts/python -m pytest -n0 -q tests/test_db_portability_live.py
+```
+
+> Ejecútalo con **`-n0`** (serie): usan nombres de tabla fijos, así que en paralelo colisionarían. Por eso, bajo `-n auto` (suite completa) estos tests se **saltan** automáticamente (aunque el `.env.test` esté cargado) con el aviso *"live DB tests must run serially - use -n0"*.
+
+> Usa una **BD scratch** y ejecútalo con `-n0`: crea y borra tablas con nombres fijos, así que en paralelo colisionaría. La CI debería inyectar esas variables (secretas) apuntando a un MySQL y un PostgreSQL de test para cubrir la portabilidad de motor de forma continua.
+
+---
+
+## 82. Servicios — IP-ban (jail, store, integración)
+
+**Archivo:** `tests/test_wa_ipban.py`
+
+### `TestIpBanShared` — Estado compartido entre procesos
+
+| Test | Qué comprueba |
+|---|---|
+| `test_counters_survive_restart` | Un manager nuevo sobre el mismo store conserva las 4 ofensas; la 5ª banea |
+| `test_counter_shared_across_processes` | Dos managers sobre un store comparten el contador; la 4ª ofensa banea y el otro lo ve |
+| `test_unban_shared_across_processes` | Un baneo de un manager es visible en el otro; el desbaneo se propaga |
+
+### `TestIpBanManager` — Lógica de baneo
+
+| Test | Qué comprueba |
+|---|---|
+| `test_auth_track_bans_at_threshold` | No banea por debajo de 3 `login_failed`; banea exactamente en el 3º |
+| `test_authz_track_more_tolerant` | No banea a 4 `forbidden`; banea en el 5º (umbral authz 5) |
+| `test_escalation_to_permanent` | Cuatro baneos sucesivos → flags `[False, False, False, True]` |
+| `test_whitelist_never_bans` | IP en whitelist nunca baneada tras 10 ofensas; baneo explícito devuelve `None` |
+| `test_loopback_always_whitelisted` | `127.0.0.1` nunca baneada tras 10 ofensas |
+| `test_manual_ban_and_unban` | Baneo manual con duración 0 es permanente (`until` `None`); unban `True` y luego `False` |
+| `test_watchlist_lists_pending_offenders` | Ofensores con total/remaining correctos; el más cercano al baneo primero |
+| `test_banned_ip_leaves_watchlist` | Una IP baneada en el umbral desaparece de la lista de ofensores |
+| `test_whitelisted_never_in_watchlist` | IP en whitelist con ofensas → lista de ofensores vacía |
+| `test_disabled_never_blocks` | Deshabilitado, un baneo registrado no bloquea (`is_banned` `False`) |
+| `test_expired_ban_stops_blocking` | Tras expirar la duración, `is_banned` devuelve `False` |
+
+### `TestIpBanStore` — Persistencia
+
+| Test | Qué comprueba |
+|---|---|
+| `test_upsert_load_delete` | Upsert carga con level/until correctos; delete devuelve `True` y elimina |
+| `test_permanent_survives_load` | Baneo permanente (`until` `None`) recarga con `until` aún `None` |
+
+### `TestIpBanIntegration` — Endpoints y efecto HTTP
+
+| Test | Qué comprueba |
+|---|---|
+| `test_granular_permissions` | Rol viewer: endpoints de vista 200; mutaciones POST/DELETE 403 |
+| `test_manual_ban_blocks_ip` | Baneo manual → 403 para la IP atacante; admin en whitelist sin afectar (200) |
+| `test_manual_ban_validates_ip_and_caps_reason` | No-IP rechazado 400; razón demasiado larga recortada a ≤200 chars |
+| `test_unban_via_api` | IP baneada 403; tras DELETE de unban ya no es 403 |
+| `test_offenses_auto_ban` | Tres 401 alcanzan el umbral; la siguiente petición es 403 |
+| `test_whitelisted_ip_rejected_by_api` | Banear loopback vía API devuelve 400 |
+| `test_watchlist_via_api` | 3 ofensas bajo umbral → total 3, remaining 2, sin baneos |
+| `test_clear_watchlist_via_api` | Ofensor presente; tras clear devuelve cleared y vacía ofensores |
+| `test_history_via_api` | Dos hits → 2 filas de historial, categoría "unauthorized" con `ts` |
+| `test_whitelist_crud_and_effect` | Whitelist registra creador/hora, aplica, valida, lista y el delete lo levanta |
+| `test_block_actions` | El cuerpo del 403 difiere por acción web (page/minimal/reject) |
+| `test_per_ban_action_override` | Override "reject" por-baneo gana sobre "page" global; visible en el listado |
+| `test_set_action_unknown_ip` | Fijar acción por-baneo a IP desconocida devuelve 404 |
+| `test_static_served_when_banned` | Un asset CSS estático no es 403 para una IP baneada (assets exentos) |
+| `test_layout_exposes_ipban_config_tab` | El layout tiene pestaña ipban con cards settings+services; sin cards operacionales |
+| `test_banlist_active_only_history_keeps_all` | Baneos activos excluyen la IP expirada; el historial conserva ambos |
+| `test_banlog_records_escalation_and_unban` | Eventos del banlog, más reciente primero: `["unbanned", "escalated", "banned"]` |
+| `test_unban_reason_recorded` | DELETE con `reason` registra esa razón en el evento "unbanned" |
+
+### `TestIpBanServiceRegistry` — Registro de servicios
+
+| Test | Qué comprueba |
+|---|---|
+| `test_web_service_registered` | El servicio "web" soporta {page, minimal, reject, json}; primer endpoint proto "tcp" |
+| `test_set_service_action_drives_gate` | Fijar acción web "reject" → cuerpo 403 vacío para IP baneada |
+| `test_unsupported_action_refused` | syslog solo soporta "drop": `set_action("page")` devuelve `True` pero queda "drop" |
+| `test_service_action_persists` | La acción se guarda; un registry nuevo recarga "minimal" para web |
+| `test_unknown_service_action_404` | Fijar acción en servicio desconocido devuelve 404 |
+
+---
+
+## 83. CLI — Servicios de usuarios/grupos y comandos
+
+**Archivo:** `tests/test_cli.py`
+
+### `TestUsersService`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_create_user_defaults_and_role` | Usuario creado: rol editor, `enabled=True`, hash fijado, `updated_by="cli"` |
+| `test_create_disabled_and_groups` | `enabled=False` respetado; grupos `['g1']` |
+| `test_duplicate_raises` | Usuario duplicado lanza `AdminOpError` `user_already_exists` |
+| `test_bad_role_and_group` | Rol desconocido → `invalid_role`; grupo desconocido → `invalid_groups` |
+| `test_password_policy` | (param.) `'a'`→`password_too_short`; `'abcd'`→`None` (válida) |
+| `test_last_admin_guards` | Degradar último admin → `must_have_admin`; deshabilitarlo → `cannot_disable_last_admin` |
+| `test_set_role_and_enabled_ok` | `set_role` devuelve uid editor; `set_enabled` `True` luego `False` sin cambio |
+| `test_group_membership` | `add_group` `True` luego `False` (idempotente); `remove_group` `True`; grupo desconocido lanza |
+
+### `TestGroupsService`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_create_and_delete` | Crea grupo con nombre/roles; dup case-insensitive lanza `group_already_exists`; delete limpia membresías |
+
+### `TestCliCommands`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_user_lifecycle` | add/role/disable/enable devuelven 0; usuario final viewer, `enabled=True` |
+| `test_passwd_and_group_membership` | passwd, group add, group-add/del, group del devuelven 0; membresía verificada |
+| `test_invalid_inputs_fail` | Rol desconocido, usuario ausente, grupo desconocido devuelven código 1 |
+| `test_status_and_reload` | Los comandos `status` y `reload` devuelven 0 |
+
+---
+
+## 84. Monitor — Notificador multi-canal (routing y formato)
+
+**Archivo:** `tests/test_monitor_notifier.py`
+
+### `TestRouting`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_matrix_selects_channels_per_kind` | La matriz enruta: 1 telegram agrupado, 1 email digest, 1 webhook |
+| `test_nothing_enabled_sends_nothing` | Todos los canales deshabilitados: flush devuelve `{}`, no envía nada |
+| `test_flush_clears_the_buffer` | Tras flush no hay pendientes; el segundo flush no envía nada |
+
+### `TestTelegramGrouping`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_grouped_message_has_sections_lines_and_summary` | Un mensaje con iconos down/recovery, secciones Issues/Recovered ordenadas, resumen y URL |
+| `test_ungrouped_sends_one_message_per_line_plus_summary` | Sin agrupar: 2 mensajes de alerta + 1 resumen = 3 mensajes telegram |
+
+### `TestEmailDigest`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_single_digest_lists_every_routed_alert` | Un email; asunto menciona alertas; cuerpo lista ping/pve/disk |
+
+### `TestWebhookPerEvent`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_one_call_per_alert` | Tres llamadas webhook con kinds ordenados `['down', 'recovery', 'warn']` |
+
+### `TestEmailGrouping`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_digest_splits_issues_and_recovered` | El cuerpo del email pone Issues antes de Recovered |
+| `test_digest_groups_rows_by_item` | Dos filas de recovery del mismo ítem muestran la celda del ítem una vez |
+
+### `TestPlainText`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_plain_strips_telegram_markdown` | `_plain` quita `*` y des-escapa `\[` → texto limpio |
+| `test_email_body_has_no_markdown` | El cuerpo del email no tiene markdown `*NS1*` pero conserva `NS1` |
+
+---
+
+## 85. Servicios — SCIM (helpers unitarios)
+
+**Archivo:** `tests/test_scim_service.py`
+
+### `TestBearerTokenOk`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_valid` | Bearer token correcto (len ≥16) aceptado |
+| `test_wrong_token` | Token distinto rechazado |
+| `test_missing_prefix` | Token sin prefijo "Bearer " rechazado |
+| `test_token_below_min_len_denied` | Token coincidente pero demasiado corto (min 16) rechazado |
+| `test_empty` | Cabecera/token vacío rechazado |
+
+### `TestParseFilterEq`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_quoted` | `userName eq "bob"` → `'bob'` |
+| `test_single_quoted` | `userName eq 'bob'` → `'bob'` |
+| `test_case_insensitive_attr` | `USERNAME eq "x"` casa el atributo `userName` → `'x'` |
+| `test_no_match` | Atributo no coincidente, string vacío y `None` → `None` |
+
+### `TestScimUserFields`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_primary_email_and_name` | Elige email primario `p@x.com`, nombre "Jane", `active=True` |
+| `test_name_formatted_fallback_and_inactive` | Sin emails → `''`; nombre de `name.formatted`; `active=False` |
+| `test_active_defaults_true` | `active` ausente por defecto `True` |
+
+---
+
+## 86. Panel Web — Protección CSRF
+
+**Archivo:** `tests/test_wa_csrf.py`
+
+### `TestCsrf`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_login_requires_token` | POST login sin token: no queda logueado |
+| `test_login_with_token_succeeds` | POST login con token sembrado: logueado |
+| `test_api_mutation_without_token_rejected` | `PUT /api/v1/config` sin token → 403 |
+| `test_api_mutation_with_token_allowed` | PUT con cabecera `X-CSRF-Token` → ≠ 403 |
+| `test_get_never_blocked` | `GET /api/v1/config` → 200 |
+| `test_scim_exempt_from_csrf` | POST SCIM autenticado por Bearer sin CSRF → ≠ 403 |
+
+---
+
+## 87. Panel Web — Cabeceras de seguridad y módulo CSRF
+
+**Archivo:** `tests/test_wa_headers.py`
+
+### `TestSecurityHeaders`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_headers_present_on_response` | Respuesta con nosniff, `X-Frame-Options DENY`, Referrer-Policy, Permissions-Policy y CSP (`frame-ancestors 'none'` + `default-src 'self'`) |
+| `test_setdefault_does_not_override_proxy` | Preserva `X-Frame-Options SAMEORIGIN` del upstream; sigue añadiendo nosniff |
+
+### `TestCsrfModule`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_issue_and_validate` | `issue_token` almacena/devuelve token estable; valida por cabecera o form; rechaza token erróneo/ausente y sesión vacía |
+| `test_needs_check` | `POST /api/v1/config` requiere check; GET y rutas exentas (`/scim/`, saml acs) no |
+
+---
+
+## 88. Core — Estampado de entidades (audit)
+
+**Archivo:** `tests/test_entity_audit.py`
+
+### `TestTouchEntity`
+
+| Test | Qué comprueba |
+|---|---|
+| `test_stamps_updated_fields` | `touch_entity` fija `updated_by="admin"` y un `updated_at` con formato ISO |

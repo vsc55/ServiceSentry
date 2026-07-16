@@ -16,7 +16,7 @@ import re
 from lib.core.users.service import AdminOpError
 
 SOURCES = ('audit', 'syslog')
-CHANNELS = ('telegram', 'email', 'webhook')
+CHANNELS = ('telegram', 'email', 'webhook', 'msteams')
 MATCH_TYPES = ('any', 'equals', 'contains', 'not_contains', 'starts', 'ends', 'regex',
                'gt', 'gte', 'lt', 'lte')
 MATCH_FIELDS = ('message', 'host', 'app', 'severity')   # what a matcher targets

@@ -72,6 +72,9 @@ class GroupsStore:
 
     def __init__(self, db: BaseConnector) -> None:
         self._db = db
+        # ``groups`` is a reserved word in MySQL 8 — quote the table name (dialect-aware) in
+        # every raw query (the ``groups_roles`` / ``users_groups`` compound names are fine).
+        self._qtg = db.quote_ident(_T_GROUPS)
         self._bootstrap()
 
     # ── Schema ────────────────────────────────────────────────────────────────
@@ -82,7 +85,7 @@ class GroupsStore:
         db.reconcile_table(_GROUPS_ROLES_SCHEMA)
         # Backfill empty audit columns for existing rows.
         db.execute(
-            f"UPDATE {_T_GROUPS} SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
+            f"UPDATE {self._qtg} SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
             (_now(), _now(), 'system'),
         )
         db.commit()
@@ -96,7 +99,7 @@ class GroupsStore:
         for row in self._db.fetchall(
             'SELECT uid, name, description, enabled, landing_page, source, external_id, '
             'created_at, updated_at, updated_by '
-            f'FROM {_T_GROUPS}'
+            f'FROM {self._qtg}'
         ):
             (uid, name, desc, enabled, landing_page, source, external_id,
              created_at, updated_at, updated_by) = row
@@ -127,7 +130,7 @@ class GroupsStore:
         return groups
 
     def count(self) -> int:
-        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T_GROUPS}')
+        row = self._db.fetchone(f'SELECT COUNT(*) FROM {self._qtg}')
         return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
@@ -139,7 +142,7 @@ class GroupsStore:
             with self._db.transaction():
                 existing_created = {
                     r[0]: r[1]
-                    for r in self._db.fetchall(f'SELECT uid, created_at FROM {_T_GROUPS}')
+                    for r in self._db.fetchall(f'SELECT uid, created_at FROM {self._qtg}')
                 }
                 existing_role_ts = {
                     (r[0], r[1]): {'uid': r[2], 'created_at': r[3], 'created_by': r[4]}
@@ -148,13 +151,13 @@ class GroupsStore:
                     )
                 }
                 self._db.execute(f'DELETE FROM {_T_GROUPS_ROLES}')
-                self._db.execute(f'DELETE FROM {_T_GROUPS}')
+                self._db.execute(f'DELETE FROM {self._qtg}')
                 for uid, d in groups.items():
                     created_at = existing_created.get(uid) or d.get('created_at') or now
                     updated_at = d.get('updated_at') or now
                     updated_by = d.get('updated_by') if d.get('updated_by') is not None else ''
                     self._db.execute(
-                        f'INSERT INTO {_T_GROUPS}(uid,name,description,enabled,landing_page,source,'
+                        f'INSERT INTO {self._qtg}(uid,name,description,enabled,landing_page,source,'
                         'external_id,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?)',
                         (uid, d.get('name', uid), d.get('description', ''),
                          1 if d.get('enabled', True) else 0, d.get('landing_page') or '',
@@ -182,7 +185,7 @@ class GroupsStore:
         try:
             with self._db.transaction():
                 row = self._db.fetchone(
-                    f'SELECT created_at, source, external_id, landing_page FROM {_T_GROUPS} WHERE uid = ?', (uid,))
+                    f'SELECT created_at, source, external_id, landing_page FROM {self._qtg} WHERE uid = ?', (uid,))
                 created_at = (row[0] if row else None) or data.get('created_at') or now
                 # Keep the origin (local/scim) stable across edits unless explicitly given.
                 source = data.get('source') or (row[1] if row else None) or 'local'
@@ -197,9 +200,9 @@ class GroupsStore:
                 if landing_page is None:
                     landing_page = (row[3] if row and len(row) > 3 else None) or ''
                 # Portable upsert: delete-then-insert the group row.
-                self._db.execute(f'DELETE FROM {_T_GROUPS} WHERE uid = ?', (uid,))
+                self._db.execute(f'DELETE FROM {self._qtg} WHERE uid = ?', (uid,))
                 self._db.execute(
-                    f'INSERT INTO {_T_GROUPS}(uid,name,description,enabled,landing_page,source,'
+                    f'INSERT INTO {self._qtg}(uid,name,description,enabled,landing_page,source,'
                     'external_id,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?)',
                     (uid, data.get('name', uid), data.get('description', ''),
                      1 if data.get('enabled', True) else 0, landing_page, source, external_id,
@@ -232,7 +235,7 @@ class GroupsStore:
         try:
             with self._db.transaction():
                 self._db.execute(f'DELETE FROM {_T_GROUPS_ROLES} WHERE group_uid = ?', (uid,))
-                deleted = self._db.execute(f'DELETE FROM {_T_GROUPS} WHERE uid = ?', (uid,))
+                deleted = self._db.execute(f'DELETE FROM {self._qtg} WHERE uid = ?', (uid,))
             return deleted > 0
         except Exception:  # pylint: disable=broad-except
             return False

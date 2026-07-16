@@ -255,6 +255,15 @@ def register(app, wa):
         Body: ``{address, profiles:{ssh:{...}}, uid?}``.  When a secret field is
         masked (null/'') and ``uid`` is given, it is restored from the stored
         host so the user need not re-enter the password/key to test.
+
+        SECURITY (accepted risk, 2026-07): a ``servers_edit`` holder can point the test at
+        an arbitrary ``address`` using a referenced ``cred_uid`` whose secret they cannot
+        see — so in theory a stored SSH secret could be exfiltrated to an attacker-controlled
+        host (or used for SSRF).  Binding the address to a registered host would break the
+        legitimate "test a shared credential against a new host before saving" flow (editors
+        hold ``servers_edit`` but not ``credentials_*``), so the risk is accepted for this
+        semi-trusted role; every attempt is audited below (``host_ssh_tested`` with uid +
+        address).  See memory ``project_bug_audit_2026_07``.
         """
         if not _can_edit_body_host():
             return jsonify({'error': wa._t('access_denied')}), 403

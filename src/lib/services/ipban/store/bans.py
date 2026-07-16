@@ -113,9 +113,10 @@ class BansStore:
         """Rows whose ban is still in force (permanent or not yet expired) — seeds the
         in-memory jail on boot.  Expired rows are pruned in passing."""
         try:
-            self._db.execute(
-                f'DELETE FROM {_T} WHERE banned_until IS NOT NULL AND banned_until <= ?',
-                (now,))
+            with self._db.transaction():   # commit so the expired-row purge persists on PG/MySQL
+                self._db.execute(
+                    f'DELETE FROM {_T} WHERE banned_until IS NOT NULL AND banned_until <= ?',
+                    (now,))
         except Exception:  # pylint: disable=broad-except
             pass
         rows = self._db.fetchall(

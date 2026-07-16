@@ -135,5 +135,17 @@
     "collections": {
         "servers": "Servidores",
         "checks":  "Comprobaciones OID"
+    },
+    "messages": {
+        "snmp_error":   "SNMP: {} 💥 {}",
+        "snmp_no_host": "SNMP: {} ⚠ servidor no configurado",
+        "snmp_up":      "SNMP: {} 🔼 [{}]",
+        "snmp_down":    "SNMP: {} 🔽 [{}]"
+    },
+    "messages_vars": {
+        "snmp_error": ["check", "error"],
+        "snmp_no_host": ["check"],
+        "snmp_up": ["check", "valor"],
+        "snmp_down": ["check", "valor"]
     }
 }

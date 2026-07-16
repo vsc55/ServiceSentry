@@ -17,6 +17,7 @@ class _Resp:
     def __init__(self, payload, ok=True):
         self._payload = payload
         self.ok = ok
+        self.status_code = 200 if ok else 400
         self.content = b'x'
         self.text = 'err'
         self.reason = 'err'
@@ -150,6 +151,45 @@ def test_provision_entra_app_sso_style_options():
     # appRoleAssignmentRequired PATCHed onto the new app's service principal.
     assert any(b.get('appRoleAssignmentRequired') is True
                for u, b in fake.patches if u.endswith('/servicePrincipals/new-sp'))
+
+
+def test_provision_entra_app_expose_api_for_teams():
+    # expose_api=True (Teams wizard) configures the SSO surface so the Teams app is
+    # admin-installable: App ID URI + access_as_user scope + preauthorized Teams clients.
+    fake = _FakeReq()
+    with patch('lib.providers.entraid.provisioning._req', fake):
+        result = _provision_entra_app(
+            'tok', 'contoso',
+            [{'resource': '00000003-0000-0000-c000-000000000000',
+              'roles': ['Device.Read.All'], 'scopes': []}],
+            app_name='Teams App', expose_api=True)
+    assert result['sso_exposed'] is True
+    app_patches = [b for u, b in fake.patches if u.endswith('/applications/app-obj')]
+    # TWO PATCHes: (1) App ID URI + scope, (2) the same scope + preauthorized Teams clients.
+    # (Combined in one request Graph rejects the preauth referencing a not-yet-stored scope.)
+    step1 = next(b for b in app_patches if 'identifierUris' in b)
+    assert step1['identifierUris'] == ['api://new-client']
+    scopes = step1['api']['oauth2PermissionScopes']
+    assert len(scopes) == 1 and scopes[0]['value'] == 'access_as_user' and scopes[0]['isEnabled']
+    assert 'preAuthorizedApplications' not in step1['api']    # not in the scope-creating step
+    scope_id = scopes[0]['id']
+    step2 = next(b for b in app_patches if 'preAuthorizedApplications' in b.get('api', {}))
+    preauth = {p['appId']: p['delegatedPermissionIds'] for p in step2['api']['preAuthorizedApplications']}
+    assert set(preauth) == {'1fec8e78-bce4-4aaf-ab1b-5451cc387264',
+                            '5e3ce6c0-2b1f-4285-8d4b-75ee78787346'}
+    assert all(ids == [scope_id] for ids in preauth.values())
+
+
+def test_provision_entra_app_no_expose_api_by_default():
+    # Without expose_api, no App ID URI / SSO surface is configured (app-only apps stay minimal).
+    fake = _FakeReq()
+    with patch('lib.providers.entraid.provisioning._req', fake):
+        _provision_entra_app(
+            'tok', 'contoso',
+            [{'resource': '00000003-0000-0000-c000-000000000000',
+              'roles': ['Device.Read.All'], 'scopes': []}],
+            app_name='Plain App')
+    assert not any(u.endswith('/applications/app-obj') for u, _b in fake.patches)
 
 
 def test_app_only_stays_minimal_without_sso_options():

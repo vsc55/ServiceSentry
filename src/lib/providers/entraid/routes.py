@@ -52,10 +52,24 @@ def _saml_entity_id(wa) -> str:
 
 
 def register(app, wa):
+    """Register the ``/api/v1/auth/entra*`` app-registration + directory routes on *app*.
+
+    Wires the Graph group-read helpers (used by the OIDC/SAML2 config UI) and the
+    device-code provisioning wizards for the SAML2, SCIM and generic module apps
+    (start + poll pairs). Uses ``wa._entra_flows`` to hold in-flight device-code
+    flows keyed by a short-lived token; group/SSO routes require ``config_edit`` and
+    the generic module wizard requires the credential add/edit permissions.
+    """
     if not hasattr(wa, '_entra_flows'):
         wa._entra_flows = {}
 
     config_edit_req = wa._perm_required('config_edit')
+
+    def _wiz_err(kind: str, message: str):
+        """Audit an Entra wizard failure uniformly across every wizard (module/OIDC/
+        SAML2/SCIM/email/Teams), so a device-code error, decline or expiry is registered
+        — not just shown transiently in the wizard modal."""
+        wa._audit('entra_wizard_error', detail={'kind': kind, 'error': str(message or '')[:500]})
 
     def _entra_section_creds(data):
         """Graph client-credentials for the group→role mapping, from the named auth
@@ -137,6 +151,9 @@ def register(app, wa):
     @app.route('/api/v1/auth/entraid/saml2/device-code', methods=['POST'])
     @config_edit_req
     def api_entra_saml2_device_code():
+        """Start a device-code flow to register the SAML2 enterprise app. Stashes the
+        flow and returns the user code / verification URI plus the SP ACS URL and
+        entity id the admin will need."""
         req_body = wa._optional_json() or {}
         app_name = (req_body.get('app_name') or provisioning.SAML2_APP_NAME).strip() or provisioning.SAML2_APP_NAME
         try:
@@ -194,6 +211,10 @@ def register(app, wa):
     @app.route('/api/v1/auth/entraid/saml2/device-poll', methods=['POST'])
     @config_edit_req
     def api_entra_saml2_device_poll():
+        """Poll a pending SAML2 device-code flow. Returns ``pending``/``expired``/
+        ``error`` while sign-in is incomplete; once a token arrives, either back-fills
+        the Graph secret (``saml2_secret`` flow) or provisions the SAML2 app and
+        returns its config (audited). Cleans up the flow on any terminal state."""
         data, err = wa._require_json()
         if err:
             return err
@@ -203,6 +224,7 @@ def register(app, wa):
             return jsonify({'status': 'expired'})
         if time.time() > flow['expires_at']:
             wa._entra_flows.pop(flow_token, None)
+            _wiz_err('saml2', 'sign-in expired')
             return jsonify({'status': 'expired'})
 
         body = auth.device_code_poll(flow['device_code'])
@@ -215,6 +237,7 @@ def register(app, wa):
             return jsonify({'status': 'pending', 'interval': flow['interval']})
         if error:
             wa._entra_flows.pop(flow_token, None)
+            _wiz_err('saml2', body.get('error_description', error))
             return jsonify({'status': 'error', 'message': body.get('error_description', error)})
 
         access_token = body['access_token']
@@ -269,6 +292,10 @@ def register(app, wa):
     @app.route('/api/v1/auth/entraid/scim/device-code', methods=['POST'])
     @config_edit_req
     def api_entra_scim_device_code():
+        """Start a device-code flow to register (or re-sync) the SCIM enterprise app
+        wired to this server's ``/scim/v2`` endpoint. Requires a stored SCIM bearer
+        token; uses the Graph CLI client (needs ``Synchronization.ReadWrite.All``).
+        Returns the user code / verification URI and the SCIM base URL."""
         body = wa._optional_json() or {}
         app_name = (body.get('app_name') or provisioning.SCIM_APP_NAME).strip() or provisioning.SCIM_APP_NAME
         # The bearer token is read from config only — it never travels in the request
@@ -311,6 +338,10 @@ def register(app, wa):
     @app.route('/api/v1/auth/entraid/scim/device-poll', methods=['POST'])
     @config_edit_req
     def api_entra_scim_device_poll():
+        """Poll a pending SCIM device-code flow. Returns ``pending``/``expired``/
+        ``error`` until sign-in completes; then either re-pushes the secrets to the
+        existing app (re-sync mode) or provisions a new SCIM app + sync job. The
+        bearer token is never echoed back to the client. Audited; flow cleaned up."""
         data, err = wa._require_json()
         if err:
             return err
@@ -320,6 +351,7 @@ def register(app, wa):
             return jsonify({'status': 'expired'})
         if time.time() > flow['expires_at']:
             wa._entra_flows.pop(flow_token, None)
+            _wiz_err('scim', 'sign-in expired')
             return jsonify({'status': 'expired'})
 
         body = auth.device_code_poll(flow['device_code'],
@@ -332,6 +364,7 @@ def register(app, wa):
             return jsonify({'status': 'pending', 'interval': flow['interval']})
         if error:
             wa._entra_flows.pop(flow_token, None)
+            _wiz_err('scim', body.get('error_description', error))
             return jsonify({'status': 'error', 'message': body.get('error_description', error)})
 
         tenant_id = auth.extract_tenant_id(body)
@@ -393,6 +426,11 @@ def register(app, wa):
     @app.route('/api/v1/auth/entraid/provision/device-code', methods=['POST'])
     @cred_edit_req
     def api_entraid_provision_device_code():
+        """Start a device-code flow to provision a generic Entra app for a module
+        credential (or an inline declaration, e.g. the OIDC 'Register in Azure'
+        button). Resolves the permission profile from the module schema or the
+        request body, expands ``{public_url}`` in redirect URIs, stashes the flow and
+        returns the user code / verification URI."""
         body = wa._optional_json() or {}
         prof = _provision_profile(body.get('profile'))
         if not prof or not prof.get('resources'):
@@ -423,6 +461,9 @@ def register(app, wa):
             'redirect_uris': redirect_uris,
             'group_claims': bool(prof.get('group_claims')),
             'require_assignment': bool(prof.get('require_assignment')),
+            # Expose an SSO API surface (App ID URI + access_as_user + Teams preauth) so
+            # the app can be admin-installed as a Teams app (used by the Teams wizard).
+            'expose_api': bool(body.get('expose_api')),
             'kind': 'module',
         }
         return jsonify({'flow_token': flow_token, 'user_code': d['user_code'],
@@ -436,6 +477,10 @@ def register(app, wa):
     @app.route('/api/v1/auth/entraid/provision/device-poll', methods=['POST'])
     @cred_edit_req
     def api_entraid_provision_device_poll():
+        """Poll a pending generic-provisioning device-code flow. Returns ``pending``/
+        ``expired``/``error`` until sign-in completes; then registers the app with the
+        declared per-resource permissions (and optional SSO surface) and returns the
+        tenant/client/secret fields for the credential. Audited; flow cleaned up."""
         data, err = wa._require_json()
         if err:
             return err
@@ -445,6 +490,7 @@ def register(app, wa):
             return jsonify({'status': 'expired'})
         if time.time() > flow['expires_at']:
             wa._entra_flows.pop(ftok, None)
+            _wiz_err('provision', 'sign-in expired')
             return jsonify({'status': 'expired'})
         b = auth.device_code_poll(flow['device_code'])
         error = b.get('error', '')
@@ -455,10 +501,12 @@ def register(app, wa):
             return jsonify({'status': 'pending', 'interval': flow['interval']})
         if error:
             wa._entra_flows.pop(ftok, None)
+            _wiz_err('provision', b.get('error_description', error))
             return jsonify({'status': 'error', 'message': b.get('error_description', error)})
         tenant_id = auth.extract_tenant_id(b)
         if not tenant_id:
             wa._entra_flows.pop(ftok, None)
+            _wiz_err('provision', 'could not determine tenant')
             return jsonify({'status': 'error', 'message': 'No se pudo determinar el tenant.'})
         try:
             result = provisioning.provision_entra_app(
@@ -466,13 +514,22 @@ def register(app, wa):
                 app_name=flow.get('app_name', provisioning.DEFAULT_APP_NAME),
                 redirect_uris=flow.get('redirect_uris'),
                 group_claims=flow.get('group_claims', False),
-                require_assignment=flow.get('require_assignment', False))
+                require_assignment=flow.get('require_assignment', False),
+                expose_api=flow.get('expose_api', False))
         except Exception as exc:  # pylint: disable=broad-except
             wa._entra_flows.pop(ftok, None)
             wa._audit('entra_app_provision_failed', detail={'tenant_id': tenant_id, 'error': str(exc)})
             return jsonify({'status': 'error', 'message': str(exc)})
         wa._entra_flows.pop(ftok, None)
-        wa._audit('entra_app_provisioned', detail={
-            'app_name': flow.get('app_name', ''), 'tenant_id': tenant_id,
-            'client_id': result.get('client_id', '')})
+        _det = {'app_name': flow.get('app_name', ''), 'tenant_id': tenant_id,
+                'client_id': result.get('client_id', '')}
+        if 'sso_exposed' in result:
+            _det['sso_exposed'] = result['sso_exposed']
+        wa._audit('entra_app_provisioned', detail=_det)
+        # Record the SSO-surface configuration outcome separately so a failure is
+        # auditable (the wizard toast is transient): needed for Teams app install.
+        if result.get('sso_exposed') is False:
+            wa._audit('entra_expose_api_failed', detail={
+                'client_id': result.get('client_id', ''),
+                'error': result.get('sso_error', '')})
         return jsonify({'status': 'complete', 'fields': result})

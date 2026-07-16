@@ -82,6 +82,11 @@ class HostsStore:
         self._db = db
         self._fernet = fernet
         self._secret_keys = secret_keys or secret_manager.ENCRYPT_KEYS
+        # ``virtual`` is a reserved word in MySQL. Quote the whole column list (dialect-aware)
+        # for SELECT/INSERT, and ``virtual`` on its own for the UPDATE SET clause, so the raw
+        # runtime SQL works on MySQL/MariaDB, not just SQLite.
+        self._qsel = ', '.join(db.quote_ident(c) for c in _COLS)
+        self._qvirtual = db.quote_ident('virtual')
         self._bootstrap()
 
     # ── Schema ──────────────────────────────────────────────────────────────
@@ -148,14 +153,14 @@ class HostsStore:
     def list(self, *, decrypt: bool = True) -> list[dict]:
         """Return all hosts ordered by name."""
         return [self._row_to_host(r, decrypt)
-                for r in self._db.fetchall(f'SELECT {_SELECT} FROM {_T} ORDER BY name')]
+                for r in self._db.fetchall(f'SELECT {self._qsel} FROM {_T} ORDER BY name')]
 
     def get(self, uid: str, *, decrypt: bool = True) -> dict | None:
-        row = self._db.fetchone(f'SELECT {_SELECT} FROM {_T} WHERE uid = ?', (uid,))
+        row = self._db.fetchone(f'SELECT {self._qsel} FROM {_T} WHERE uid = ?', (uid,))
         return self._row_to_host(row, decrypt) if row else None
 
     def get_by_name(self, name: str, *, decrypt: bool = True) -> dict | None:
-        row = self._db.fetchone(f'SELECT {_SELECT} FROM {_T} WHERE name = ?', (name,))
+        row = self._db.fetchone(f'SELECT {self._qsel} FROM {_T} WHERE name = ?', (name,))
         return self._row_to_host(row, decrypt) if row else None
 
     def count(self) -> int:
@@ -175,7 +180,7 @@ class HostsStore:
         try:
             with self._db.transaction():
                 self._db.execute(
-                    f'INSERT INTO {_T} ({_SELECT}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    f'INSERT INTO {_T} ({self._qsel}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (uid, name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),
                      self._norm_os(data.get('os')),
@@ -206,7 +211,7 @@ class HostsStore:
         try:
             with self._db.transaction():
                 self._db.execute(
-                    f'UPDATE {_T} SET name=?, address=?, kind=?, os=?, maintenance=?, virtual=?, '
+                    f'UPDATE {_T} SET name=?, address=?, kind=?, os=?, maintenance=?, {self._qvirtual}=?, '
                     'tags=?, description=?, profiles=?, modules=?, updated_at=?, updated_by=? WHERE uid=?',
                     (name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),

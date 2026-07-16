@@ -5,7 +5,7 @@
 
 Admin/registry layer:
 * ``store``  — :class:`~lib.core.hosts.store.HostsStore` (host registry + encrypted profiles)
-* ``routes`` — package ``routes/`` (register + _helpers + tests + migrate): /api/v1/hosts endpoints
+* ``routes`` — module ``routes.py`` (``register``): /api/v1/hosts endpoints
 * ``permissions`` — ``MODULE_PERMISSIONS`` (group ``perm_group_servers``: servers_view / add / edit / delete)
 * ``overview_widget`` — the servers/coverage/servers_list Overview widgets
 

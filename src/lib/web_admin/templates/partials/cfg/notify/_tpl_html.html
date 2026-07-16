@@ -284,7 +284,7 @@ async function _notifHtmlMaybeInitEditor() {
     _cmUpdateWrapBtn(false);
 }
 
-function _renderNotifHtmlSection() {
+function _renderNotifHtmlSection(cfgCardOpen, cfgCardClose) {
     const typeOpts = ['test', 'alert', 'summary'].map(tp => {
         const sel = _notifHtmlState.type === tp ? ' selected' : '';
         const lbl = t(`notif_html_tpl_type_${tp}`);
@@ -295,24 +295,19 @@ function _renderNotifHtmlSection() {
         return `<option value="${escAttr(lc)}"${sel}>${esc(I18N['lang_' + lc] || lc)}</option>`;
     }).join('');
 
-    return `<div class="rounded-3 border overflow-hidden mb-3 cfg-card">
-        <div class="px-3 py-2 d-flex align-items-center gap-2 cfg-card-header">
-            <i class="bi bi-code-slash text-warning"></i>
-            <strong class="small">${esc(t('notif_html_tpl_title'))}</strong>
-        </div>
-        <div class="px-3 py-3 cfg-fields">
+    return cfgCardOpen('cfgNotifHtml', '<i class="bi bi-code-slash me-1"></i>', t('notif_html_tpl_title')) + `
             <p class="small text-muted mb-3">${esc(t('notif_html_tpl_desc'))}</p>
             <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
                 <label class="col-form-label col-form-label-sm fw-semibold text-nowrap">
-                    <i class="bi bi-envelope me-1"></i>${esc(t('notif_html_tpl_type_label'))}
-                </label>
-                <select id="notifHtmlTypeSel" class="form-select form-select-sm" style="max-width:160px"
-                    onchange="_notifHtmlTypeChanged(this.value)">${typeOpts}</select>
-                <label class="col-form-label col-form-label-sm fw-semibold text-nowrap ms-2">
                     <i class="bi bi-translate me-1"></i>${esc(t('notif_tpl_lang_label'))}
                 </label>
                 <select id="notifHtmlLangSel" class="form-select form-select-sm" style="max-width:160px"
                     onchange="_notifHtmlLangChanged(this.value)">${langOpts}</select>
+                <label class="col-form-label col-form-label-sm fw-semibold text-nowrap ms-2">
+                    <i class="bi bi-envelope me-1"></i>${esc(t('notif_html_tpl_type_label'))}
+                </label>
+                <select id="notifHtmlTypeSel" class="form-select form-select-sm" style="max-width:160px"
+                    onchange="_notifHtmlTypeChanged(this.value)">${typeOpts}</select>
                 <div class="ms-auto d-flex gap-2 flex-wrap">
                     <button class="btn btn-sm btn-secondary" onclick="_notifHtmlLoadBuiltin()"
                         title="${escAttr(t('notif_html_tpl_load_builtin_tt'))}">
@@ -332,9 +327,7 @@ function _renderNotifHtmlSection() {
                     style="font-size:.78rem;resize:vertical;white-space:pre;overflow-wrap:normal;overflow-x:auto;min-height:400px"
                     spellcheck="false"
                     placeholder="&lt;!DOCTYPE html&gt;&#10;&lt;html&gt;...&lt;/html&gt;"></textarea>
-            </div>
-        </div>
-    </div>`;
+            </div>` + cfgCardClose;
 }
 
 async function _notifHtmlLoad() {

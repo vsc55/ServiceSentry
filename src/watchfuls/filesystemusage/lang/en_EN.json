@@ -30,5 +30,17 @@
         "discover_title": "Discover Partitions",
         "discover_error": "Could not load the list of mounted partitions",
         "item_added":     "Partition \"{}\" added"
+    },
+    "messages": {
+        "fs_ok_label":   "Normal {} ({}) used {}% ✅",
+        "fs_warn_label": "Warning {} ({}) used {}% ⚠️",
+        "fs_ok_part":    "Normal partition {} used {}% ✅",
+        "fs_warn_part":  "Warning partition {} used {}% ⚠️"
+    },
+    "messages_vars": {
+        "fs_ok_label": ["host", "mount", "usage %"],
+        "fs_warn_label": ["host", "mount", "usage %"],
+        "fs_ok_part": ["mount", "usage %"],
+        "fs_warn_part": ["mount", "usage %"]
     }
 }

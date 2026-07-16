@@ -360,8 +360,13 @@ async function saveHostModal(closeAfter = true) {
     if (modsChanged) {
         const r = await apiPut('/api/v1/modules', modulesData);
         if (!(r && r.ok)) {
-            // Host saved, but the checks couldn't be persisted.
+            // Host saved, but the checks couldn't be persisted. _applyHostChecks already
+            // mutated modulesData in memory, so resync it from the server (authoritative)
+            // — otherwise the stale local change lingers and a later "Save Modules" would
+            // push it unintentionally.
             if (errEl) errEl.textContent = (r && r.error) || (t('error') || 'Error');
+            modulesData = await apiGet('/api/v1/modules') || modulesData;
+            renderModules();
             await reloadHosts();
             return;
         }

@@ -103,6 +103,7 @@ class OffenseCountersStore:
     def prune_stale(self, now: float, max_age: float) -> None:
         """Drop counter rows untouched for longer than *max_age* seconds."""
         try:
-            self._db.execute(f'DELETE FROM {_TC} WHERE updated_at < ?', (now - max_age,))
+            with self._db.transaction():   # commit so the prune persists on PG/MySQL
+                self._db.execute(f'DELETE FROM {_TC} WHERE updated_at < ?', (now - max_age,))
         except Exception:  # pylint: disable=broad-except
             pass

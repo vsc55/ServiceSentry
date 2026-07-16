@@ -341,3 +341,8 @@ class TestSaml2LoginFlow:
         assert resp.status_code == 200
         assert b'name="username"' in resp.data
         assert not wa._users['dis_saml']['enabled']
+
+
+def test_saml_csrf_exempt_declared(admin):
+    # The SAML2 provider declares its own CSRF-exempt ACS path in register().
+    assert '/auth/saml2/acs' in admin._csrf_exempt_prefixes

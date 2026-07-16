@@ -16,10 +16,10 @@ and a blocking run loop):
   admin reads, so received messages show up in its Syslog tab;
 * a :class:`lib.config.manager.ConfigManager` so the ``syslog`` and
   ``notifications`` config is read from the very same place as everywhere else;
-* a :class:`lib.core.notify.webhook.store.WebhooksStore` and a minimal context surface
-  (``_read_config_file`` / ``_config_section`` / ``_load_webhooks`` / ``_dbg``)
-  so alert routing through :mod:`lib.core.notify.notification_dispatcher` works
-  without a running web server.
+* a :class:`lib.core.notify.router.NotificationRouter` (built from an explicit
+  NotifyContext: ``_read_config_file`` / ``_config_section`` / ``_dbg`` + the shared DB)
+  so alert routing goes through the core notification router — the same code path the
+  web admin uses — without a running web server.
 
 It deliberately does NOT start Flask, the monitor, or any HTTP endpoint: just
 receive → store → alert → prune.
@@ -40,7 +40,8 @@ from lib.services.events.store import EventRulesStore, NotificationLogStore
 from lib.services.manager.instances import ServiceInstancesStore
 from lib.services.manager.commands import ServiceCommandsStore
 from lib.services.syslog.store import SyslogStore, SyslogDropsStore
-from lib.core.notify.webhook.store import WebhooksStore
+from lib.core.notify.context import NotifyContext
+from lib.core.notify.router import NotificationRouter
 from lib.services.heartbeat import _HeartbeatMixin, db_summary
 from lib.services.control_server import start_control_server
 from lib.services.syslog.manager import _SyslogMixin
@@ -118,8 +119,15 @@ class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
         self._hb_db_main = db_summary(db_cfg, os.path.basename(db_path))
         self._hb_db_syslog = (db_summary(_sdb, 'syslog.db')
                               if (_sdb or {}).get('enabled') else None)
-        self._webhooks_store = WebhooksStore(
-            self._db_connector, fernet=self._fernet, secret_keys=self._secret_keys)
+        # Dispatch goes through the core notification router (owns every channel store);
+        # this listener just builds one from an explicit NotifyContext and delegates.
+        self._notify = NotificationRouter(NotifyContext(
+            db=self._db_connector,
+            read_config=lambda: self._read_config_file(self._CONFIG_FILE),
+            fernet=self._fernet, secret_keys=self._secret_keys,
+            dbg=self._dbg,
+            config_file=self._CONFIG_FILE,
+        ))
         # Event-rules manager (shared DB): syslog→notification routing + send log.
         self._event_rules_store = EventRulesStore(self._db_connector)
         self._notification_log_store = NotificationLogStore(self._db_connector)
@@ -143,19 +151,13 @@ class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
         self._dbg(f'> Syslog >> service init: config={config_dir} var={self._var_dir} '
                   f'db={backend}', DebugLevel.info)
 
-    # ── context surface used by the notification dispatcher ───────────────────
+    # ── config surface (the router owns channel loading now) ──────────────────
     def _read_config_file(self, _filename: str | None = None) -> dict:
         """Effective configuration (DB ← config.json), via the ConfigManager."""
         return self._config_mgr.read() or {}
 
     def _config_section(self, name: str) -> dict:
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
-
-    def _load_webhooks(self, *, decrypt: bool = True) -> list:
-        try:
-            return self._webhooks_store.list(decrypt=decrypt)
-        except Exception:  # pylint: disable=broad-except
-            return []
 
     def _dbg(self, message, level: DebugLevel = DebugLevel.info) -> None:
         self._debug.print(message, level)

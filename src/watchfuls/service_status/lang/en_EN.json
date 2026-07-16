@@ -38,5 +38,26 @@
         "discover_title": "Discover System Services",
         "discover_error": "Could not load the list of system services",
         "item_added":     "Service \"{}\" added"
+    },
+    "messages": {
+        "svc_unsupported_os":     "Service: {} - unsupported host OS: {} ⚠️",
+        "svc_ok":                 "Service: {} - OK ✅",
+        "svc_running":            "Service: {} - Running ✅",
+        "svc_stopped":            "Service: {} - Stopped ✅",
+        "svc_error":              "Service: {} - Error: {} ⚠️",
+        "svc_running_unexpected": "Service: {} - Running (expected: Stopped) ⚠️",
+        "svc_unsuccessful":       "Service: {} - UNSUCCESSFUL ⚠️",
+        "svc_stop":               "Service: {} - Stop ⚠️",
+        "svc_recovery_prefix":    "Recovery "
+    },
+    "messages_vars": {
+        "svc_unsupported_os": ["service", "OS"],
+        "svc_ok": ["service"],
+        "svc_running": ["service"],
+        "svc_stopped": ["service"],
+        "svc_error": ["service", "detail"],
+        "svc_running_unexpected": ["service"],
+        "svc_unsuccessful": ["service"],
+        "svc_stop": ["service"]
     }
 }

@@ -93,8 +93,8 @@ class Watchful(ModuleBase):
         os_ = self.host_os(item)
         if os_ not in _MEM_CMDS:
             self.dict_return.set(f'{key}_ram', False,
-                                 f'Memory: {label} - *unsupported host OS: {os_}* ⚠️',
-                                 name=label)
+                                 self._msg('mem_unsupported_os', label, os_),
+                                 severity='warning', name=label)
             return
         timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         outs = []
@@ -121,14 +121,14 @@ class Watchful(ModuleBase):
     def _emit(self, result_key, caption, label, used_pct, alert):
         used = round(float(used_pct), 1)
         warning = used >= float(alert)
-        msg = f'{caption} ({label}) used {used:.1f}%'
-        msg = f'Excessive {msg} ⚠️' if warning else f'Normal {msg} ✅'
+        msg = self._msg('mem_high' if warning else 'mem_ok', caption, label, f'{used:.1f}')
         # 'name' is the display name for status views, since the result key is a
         # derived UID ("<item>_ram"/"_swap") — e.g. "NS1 - RAM".
+        # A usage-threshold breach is a warning (host reachable), not a down.
         self.dict_return.set(result_key, not warning, msg,
                              other_data={'used': used, 'alert': float(alert),
                                          'name': f'{label} - {caption}'},
-                             name=f'{label} - {caption}')
+                             severity='warning', name=f'{label} - {caption}')
 
     # ── Per-OS parsers (pure; return (ram_pct, swap_pct|None)) ────────────────
     @classmethod

@@ -8,6 +8,7 @@ raise ``LdapUnavailableError``.
 """
 
 import json
+import ssl
 import uuid
 
 from lib.config.spec import cfg_default, cfg_get
@@ -15,11 +16,11 @@ from lib.debug import DebugLevel
 
 _HAS_LDAP3 = False
 try:
-    from ldap3 import NONE, SUBTREE, Connection, Server
+    from ldap3 import NONE, SUBTREE, Connection, Server, Tls
     from ldap3.core.exceptions import LDAPException
     _HAS_LDAP3 = True
 except Exception:
-    Server = Connection = NONE = SUBTREE = None
+    Server = Connection = NONE = SUBTREE = Tls = None
     LDAPException = Exception
 
 
@@ -28,6 +29,8 @@ class LdapUnavailableError(RuntimeError):
 
 
 def is_available() -> bool:
+    """Return True when the optional ``ldap3`` package is installed; when False,
+    LDAP auth is disabled and :func:`authenticate` fails with ``ldap_unavailable``."""
     return _HAS_LDAP3
 
 
@@ -57,11 +60,18 @@ def _map_role(group_vals: list, group_role_map: dict) -> str:
     matched: dict[str, str] = {}  # role_name → first matching group
 
     for group_val in group_vals:
-        gval_lower = str(group_val).lower()
+        gv = str(group_val)
+        # Exact-match candidates: the raw value AND, when it is a DN (AD `memberOf` returns
+        # full DNs), its first RDN value (the CN). This lets a short-name pattern ("Admins")
+        # match `CN=Admins,OU=…` WITHOUT the substring escalation that would also match
+        # "Admins-ReadOnly" (whose CN is "admins-readonly", a distinct exact token).
+        candidates = {gv.lower()}
+        first_rdn = gv.split(',', 1)[0]
+        if '=' in first_rdn:
+            candidates.add(first_rdn.split('=', 1)[1].strip().lower())
         for pattern, role in group_role_map.items():
-            if pattern.lower() in gval_lower or gval_lower == pattern.lower():
-                if role not in matched:
-                    matched[role] = group_val
+            if pattern.lower() in candidates and role not in matched:
+                matched[role] = group_val
 
     for role in priority:
         if role in matched:
@@ -102,6 +112,7 @@ def authenticate(wa, username: str, password: str) -> tuple:
     server_host = cfg.get('server', '')
     port        = cfg_get(cfg, 'ldap|port')
     use_ssl     = cfg_get(cfg, 'ldap|use_ssl')
+    ssl_verify  = cfg_get(cfg, 'ldap|ssl_verify')
     timeout     = cfg_get(cfg, 'ldap|timeout')
     bind_dn     = cfg.get('bind_dn', '')
     bind_pass   = cfg.get('bind_password', '')
@@ -127,7 +138,12 @@ def authenticate(wa, username: str, password: str) -> tuple:
     wa._dbg(f"> Auth/LDAP >> bind+search server={server_host}:{port} ssl={use_ssl} base={base_dn!r}",
             DebugLevel.debug)
     try:
-        srv  = Server(server_host, port=port, use_ssl=use_ssl, get_info=NONE, connect_timeout=timeout)
+        # LDAPS: validate the server certificate by default (ssl_verify) — without an
+        # explicit Tls, ldap3 defaults to CERT_NONE, which lets a network attacker MITM the
+        # connection and capture the bind credentials. Admins can disable it (self-signed labs).
+        tls = Tls(validate=ssl.CERT_REQUIRED if ssl_verify else ssl.CERT_NONE) if use_ssl else None
+        srv  = Server(server_host, port=port, use_ssl=use_ssl, tls=tls,
+                      get_info=NONE, connect_timeout=timeout)
         conn = Connection(srv, user=bind_dn or None, password=bind_pass or None,
                           auto_bind=True, receive_timeout=timeout)
     except Exception as exc:
@@ -232,10 +248,12 @@ def _ldap_escape(s: str) -> str:
 
 # ── User sync ────────────────────────────────────────────────────────────────
 
-def sync_user(wa, username: str, attrs: dict) -> dict:
+def sync_user(wa, username: str, attrs: dict) -> "dict | None":
     """Create or update a user entry in wa._users from LDAP attributes.
 
-    Always re-syncs role from group mapping (called on every login).
+    Returns ``None`` when the username collides with an existing LOCAL account (the caller
+    must reject the login — do not convert a local account to SSO). Always re-syncs role
+    from group mapping (called on every login).
     Returns the user dict.
     """
     cfg            = _get_config(wa)
@@ -260,6 +278,13 @@ def sync_user(wa, username: str, attrs: dict) -> dict:
         }
         wa._users[username] = user
     else:
+        # Never auto-convert a LOCAL (or unmarked) account to SSO on a username collision
+        # (account-takeover guard — see the OIDC provider for the rationale). SCIM/other
+        # SSO accounts still re-link.
+        if existing.get('auth_source', 'local') in ('', 'local'):
+            wa._dbg(f"> Auth/LDAP >> username {username!r} collides with a local account; "
+                    f"refusing auto-conversion to SSO", DebugLevel.warning)
+            return None
         user = existing
         user['auth_source']    = 'ldap'
         user['auth_source_id'] = attrs.get('dn', '')

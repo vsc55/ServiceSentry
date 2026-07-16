@@ -12,7 +12,7 @@ conexión a un servidor es propiedad del *servidor*, no de un check concreto).
 > Los **campos** de cada protocolo se descubren de los módulos (`__host_profile__`) — ver
 > [discovery.md → Perfiles de host](discovery.md#5-perfiles-de-host-__host_profile__). La
 > **referencia de esa meta-clave** está en [schema.md](schema.md) / [modules.md](modules.md).
-> La **UI y los endpoints** (sección Servers) en [web_admin.md → Servidores](web_admin.md).
+> La **UI y los endpoints** (sección Servers) en [web-admin.md → Servidores](web-admin.md).
 
 ---
 
@@ -105,8 +105,8 @@ flowchart LR
   target ping + una BD en un host → un host con perfiles snmp/db).
 - **`apply_to_modules()`** → aplica: crea los hosts y reescribe los ítems para que referencien
   `host_uid`.
-- Endpoints y UI del asistente ("Detectar duplicados", preview/apply): [web_admin.md →
-  Servidores](web_admin.md).
+- Endpoints y UI del asistente ("Detectar duplicados", preview/apply): [web-admin.md →
+  Servidores](web-admin.md).
 
 ---
 
@@ -125,7 +125,7 @@ comportamiento (normalizar `__host_profile__`, resolver el SO) viva en un solo s
 ## Dónde se gestiona
 
 - **UI + endpoints** (crear/editar hosts, perfiles por protocolo, probar conexión, migración):
-  [web_admin.md → Servidores](web_admin.md).
+  [web-admin.md → Servidores](web-admin.md).
 - **Meta-clave `__host_profile__`** (referencia de campos): [schema.md](schema.md) y
   [modules.md](modules.md).
 - **Descubrimiento** del catálogo protocolo→campos: [discovery.md](discovery.md#5-perfiles-de-host-__host_profile__).

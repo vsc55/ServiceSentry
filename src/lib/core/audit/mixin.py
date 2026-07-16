@@ -9,7 +9,7 @@ the history store).
 import os
 from datetime import datetime, timezone
 
-from flask import request, session
+from flask import has_request_context, request, session
 
 
 class _AuditMixin:
@@ -116,6 +116,15 @@ class _AuditMixin:
     def _audit_system(self, event: str, detail: str | list | dict = '') -> None:
         """Append a system-generated audit entry (no Flask context needed)."""
         self._audit_write(event, 'system', 'internal', detail)
+
+    def _audit_auto(self, event: str, detail: str | list | dict = '') -> None:
+        """Append an audit entry attributed to the request actor when a Flask context
+        is active (a user-initiated action), else as a system entry (autostart /
+        background thread).  One call site, no duplicate 'admin' + 'system' rows."""
+        if has_request_context() and session.get('username'):
+            self._audit(event, detail=detail)
+        else:
+            self._audit_system(event, detail)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

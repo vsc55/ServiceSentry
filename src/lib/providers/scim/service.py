@@ -72,6 +72,8 @@ class ScimService:
         return bool(self._cfg().get('auto_disable', True))
 
     def bearer_ok(self, auth_header: str) -> bool:
+        """True when SCIM is enabled and *auth_header* carries the configured bearer
+        token (constant-time compare, weak-token floor). Used by the route auth gate."""
         cfg = self._cfg()
         if not cfg.get('enabled'):
             return False
@@ -90,6 +92,8 @@ class ScimService:
     # ── error / list envelopes ─────────────────────────────────────────────────
     @staticmethod
     def err(status, detail, scim_type=None):
+        """Build a SCIM Error ``(body, status)`` with *detail* and an optional
+        ``scimType`` (e.g. ``uniqueness``, ``mutability``, ``invalidValue``)."""
         body = {'schemas': [ERR_SCHEMA], 'status': str(status), 'detail': detail}
         if scim_type:
             body['scimType'] = scim_type
@@ -155,6 +159,8 @@ class ScimService:
 
     # ── serialization ─────────────────────────────────────────────────────────
     def user_to_scim(self, username, u):
+        """Serialize an internal user dict to a SCIM User resource (id, userName,
+        externalId, name, emails, active, meta.location)."""
         name = u.get('display_name', '') or ''
         return {
             'schemas':    [USER_SCHEMA],
@@ -169,6 +175,9 @@ class ScimService:
         }
 
     def group_to_scim(self, uid, g):
+        """Serialize an internal group dict to a SCIM Group resource, expanding its
+        members from the users that reference *uid* (id, displayName, members,
+        meta.location, and externalId when present)."""
         d = {
             'schemas':     [GROUP_SCHEMA],
             'id':          uid,
@@ -210,6 +219,9 @@ class ScimService:
 
     # ── discovery / capability documents ────────────────────────────────────────
     def service_provider_config(self):
+        """Return the SCIM ``ServiceProviderConfig`` document advertising supported
+        capabilities (patch + filter on, bulk/sort/etag/changePassword off) and the
+        OAuth bearer auth scheme."""
         return {
             'schemas': ['urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig'],
             'patch':          {'supported': True},
@@ -225,6 +237,8 @@ class ScimService:
         }, 200
 
     def resource_types(self):
+        """Return the SCIM ``ResourceTypes`` ListResponse (the User and Group types
+        with their endpoints and schema URNs)."""
         return self._list([
             {'schemas': ['urn:ietf:params:scim:schemas:core:2.0:ResourceType'],
              'id': 'User', 'name': 'User', 'endpoint': '/Users', 'schema': USER_SCHEMA,
@@ -235,11 +249,16 @@ class ScimService:
         ])
 
     def schemas_doc(self):
+        """Return the SCIM ``Schemas`` ListResponse (the supported User and Group
+        schema URNs)."""
         return self._list([{'id': USER_SCHEMA, 'name': 'User'},
                            {'id': GROUP_SCHEMA, 'name': 'Group'}])
 
     # ── Users ─────────────────────────────────────────────────────────────────
     def list_users(self, filter_str, start, count):
+        """List users as a SCIM ListResponse. A ``userName eq "…"`` filter returns
+        the single matching user; otherwise pages the full set (1-based *start*,
+        *count* capped at 200)."""
         want = parse_filter_eq(filter_str, 'userName')
         if want is not None:
             u = self.wa._users.get(want)
@@ -252,12 +271,19 @@ class ScimService:
                           total=len(items), start=start)
 
     def get_user(self, uid):
+        """Return the SCIM User with internal id *uid*, or a 404 error tuple."""
         username, u = self._user_by_id(uid)
         if not u:
             return self.err(404, f'User {uid} not found')
         return self.user_to_scim(username, u), 200
 
     def create_user(self, body):
+        """Provision a new SCIM user from *body*.
+
+        Requires ``userName`` (409 on collision); assigns the SCIM default role
+        (never admin — see :meth:`_default_role_uid`), persists the users store and
+        audits the creation. Returns the created User with 201, or an error tuple.
+        """
         username = (body.get('userName') or '').strip()
         if not username:
             return self.err(400, 'userName is required', 'invalidValue')
@@ -281,6 +307,9 @@ class ScimService:
         return self.user_to_scim(username, user), 201
 
     def replace_user(self, uid, body):
+        """Replace (PUT) a SCIM-provisioned user's attributes from *body* (display
+        name, email, active, externalId). 404 if unknown, 403 for a non-SCIM account.
+        Persists and audits only the fields that actually changed; returns the User."""
         username, u = self._user_by_id(uid)
         if not u:
             return self.err(404, f'User {uid} not found')
@@ -300,6 +329,10 @@ class ScimService:
         return self.user_to_scim(username, u), 200
 
     def patch_user(self, uid, body):
+        """Apply a SCIM PatchOp to a SCIM-provisioned user (up to 100 ops): active
+        (enable/disable), displayName/name.formatted and emails. Tolerates Entra's
+        value-object form. 404 if unknown, 403 for a non-SCIM account; persists and
+        audits only real changes; returns the User."""
         username, u = self._user_by_id(uid)
         if not u:
             return self.err(404, f'User {uid} not found')
@@ -331,6 +364,8 @@ class ScimService:
         return self.user_to_scim(username, u), 200
 
     def delete_user(self, uid):
+        """Delete a SCIM-provisioned user (hard delete). 404 if unknown, 403 for a
+        non-SCIM account. Persists, audits, and returns ``('', 204)``."""
         username, u = self._user_by_id(uid)
         if not u:
             return self.err(404, f'User {uid} not found')
@@ -345,18 +380,29 @@ class ScimService:
 
     # ── Groups ────────────────────────────────────────────────────────────────
     def list_groups(self, filter_str):
+        """List groups as a SCIM ListResponse, optionally narrowed by a
+        ``displayName eq "…"`` filter."""
         want = parse_filter_eq(filter_str, 'displayName')
         res = [self.group_to_scim(gid, g) for gid, g in self.wa._groups.items()
                if want is None or g.get('name') == want]
         return self._list(res)
 
     def get_group(self, gid):
+        """Return the SCIM Group with uid *gid*, or a 404 error tuple."""
         g = self.wa._groups.get(gid)
         if not g:
             return self.err(404, f'Group {gid} not found')
         return self.group_to_scim(gid, g), 200
 
     def create_group(self, body):
+        """Provision a SCIM group from *body* (``displayName`` required).
+
+        If a SCIM group with the same ``externalId`` already exists (typically one
+        soft-deleted on de-assignment) it is REACTIVATED and its membership replaced
+        with the new set — preserving its role mapping — instead of creating a
+        duplicate. Members are capped at ``_SCIM_MAX_MEMBERS``. Persists users +
+        groups, audits, and returns the Group with 201.
+        """
         name = (body.get('displayName') or '').strip()
         if not name:
             return self.err(400, 'displayName is required', 'invalidValue')
@@ -395,6 +441,10 @@ class ScimService:
         return self.group_to_scim(gid, self.wa._groups[gid]), 201
 
     def patch_group(self, gid, body):
+        """Apply a SCIM PatchOp to a SCIM-owned group (up to 100 ops): membership
+        add/remove/replace (capped at ``_SCIM_MAX_MEMBERS``) and displayName. 404 if
+        unknown, 403 for a built-in or non-SCIM group. Persists, audits real changes,
+        returns the Group."""
         g = self.wa._groups.get(gid)
         if not g:
             return self.err(404, f'Group {gid} not found')
@@ -431,6 +481,10 @@ class ScimService:
         return self.group_to_scim(gid, g), 200
 
     def replace_group(self, gid, body):
+        """Replace (PUT) a SCIM-owned group: set displayName and reset membership to
+        the ``members`` in *body* (capped at ``_SCIM_MAX_MEMBERS``). 404 if unknown,
+        403 for a built-in or non-SCIM group. Persists, audits real changes, returns
+        the Group."""
         g = self.wa._groups.get(gid)
         if not g:
             return self.err(404, f'Group {gid} not found')
@@ -454,6 +508,10 @@ class ScimService:
         return self.group_to_scim(gid, g), 200
 
     def delete_group(self, gid):
+        """SOFT-delete a SCIM-owned group: disable it (a disabled group grants none of
+        its roles) while preserving its role mapping and membership, so a later
+        re-assignment with the same externalId can restore it. 404 if unknown, 403 for
+        a built-in or non-SCIM group. Persists, audits, returns ``('', 204)``."""
         g = self.wa._groups.get(gid)
         if not g:
             return self.err(404, f'Group {gid} not found')

@@ -12,6 +12,7 @@ import pytest
 try:
     from lib.web_admin import WebAdmin
     from lib.core.notify.webhook import notify as webhook_notify
+    from lib.core.notify.webhook import channel as webhook_channel
     _HAS_FLASK = True
 except ImportError:
     _HAS_FLASK = False
@@ -42,6 +43,27 @@ class TestWebhookDispatch:
         ok, msg = webhook_notify._dispatch({'enabled': True, 'url': ''})
         assert not ok
         assert 'url' in msg.lower()
+
+    def test_ssrf_rejects_non_http_scheme(self):
+        ok, msg = webhook_notify._dispatch({'enabled': True, 'url': 'file:///etc/passwd'})
+        assert not ok
+        assert 'rejected' in msg.lower()
+
+    def test_ssrf_rejects_metadata_address(self):
+        ok, msg = webhook_notify._dispatch(
+            {'enabled': True, 'url': 'http://169.254.169.254/latest/meta-data/'})
+        assert not ok
+        assert 'rejected' in msg.lower()
+
+    def test_ssrf_allows_internal_target(self):
+        # A monitoring tool legitimately posts to internal/private endpoints; only
+        # link-local/metadata and non-http(s) schemes are blocked (see net_guard).
+        cfg = {**_ENABLED_CFG, 'url': 'http://127.0.0.1:9000/hook'}
+        with unittest.mock.patch('requests.post') as mock_post:
+            mock_post.return_value = unittest.mock.Mock(status_code=200)
+            ok, _ = webhook_notify._dispatch(cfg, kind='down')
+        assert ok
+        mock_post.assert_called_once()
 
     def test_no_requests_package(self, monkeypatch):
         monkeypatch.setattr(webhook_notify, '_HAS_REQUESTS', False)
@@ -190,7 +212,7 @@ class TestWebhookArbitraryTest:
 
     def test_stored_secret_kept_on_null(self, admin, client):
         """Sending id + secret=null merges the stored secret from the webhooks store."""
-        admin._webhooks_store.upsert({
+        webhook_channel.get_store(admin._notify).upsert({
             'id': 'test-wh-id',
             'enabled': True,
             'url': 'https://hooks.example.com/test',

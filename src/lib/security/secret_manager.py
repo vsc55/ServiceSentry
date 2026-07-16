@@ -27,11 +27,14 @@ ENCRYPT_KEYS: frozenset[str] = frozenset({
     'bind_password',        # LDAP service-account password
     'client_secret',        # OIDC client secret
     'sp_key',               # SAML2 SP private key
+    'graph_secret',         # SAML2 → Microsoft Graph client secret (group→role lookups)
     'idp_cert',             # SAML2 IdP signing certificate (masked from the UI once set)
     'smtp_password',        # Email SMTP password
     'ms365_client_secret',  # Email Microsoft 365 client secret
     'gmail_client_secret',  # Email Gmail client secret
     'gmail_refresh_token',  # Email Gmail refresh token
+    'webhook_url',          # Teams channel Incoming Webhook URL (embeds a secret token)
+    'bot_app_password',     # Teams Bot Framework app password/secret
 })
 
 
@@ -92,7 +95,7 @@ def mask_sensitive(data: Any, keys: frozenset = ENCRYPT_KEYS) -> Any:
     return data
 
 
-def restore_sensitive(new_data: dict, old_data: dict,
+def restore_sensitive(new_data: "dict | list", old_data: "dict | list",
                       keys: frozenset = ENCRYPT_KEYS) -> None:
     """In-place: restore sensitive fields that are ``None`` or ``''`` in
     *new_data* by copying the existing value from *old_data*.
@@ -101,6 +104,18 @@ def restore_sensitive(new_data: dict, old_data: dict,
     sensitive value (represented as ``null`` / empty string) does not erase
     the stored secret.
     """
+    # Lists: restore element-wise against the matching old element (by index), mirroring
+    # mask_sensitive which recurses into lists too — otherwise a secret nested inside a
+    # list of dicts is masked on read but never restored, silently erasing it on save.
+    # NB: pairing is POSITIONAL — a caller must not reorder/insert/delete elements of a list
+    # whose secrets are still masked, or a masked secret would be restored from the wrong
+    # element. (No current schema stores secrets in a list; this is a safety net.)
+    if isinstance(new_data, list):
+        for i, nv in enumerate(new_data):
+            if isinstance(nv, (dict, list)):
+                ov = old_data[i] if isinstance(old_data, list) and i < len(old_data) else None
+                restore_sensitive(nv, ov, keys)
+        return
     if not isinstance(old_data, dict):
         return
     for k in list(new_data.keys()):
@@ -108,6 +123,8 @@ def restore_sensitive(new_data: dict, old_data: dict,
         ov = old_data.get(k)
         if isinstance(nv, dict):
             restore_sensitive(nv, ov if isinstance(ov, dict) else {}, keys)
+        elif isinstance(nv, list):
+            restore_sensitive(nv, ov if isinstance(ov, list) else [], keys)
         elif k in keys and (nv is None or nv == '') and ov:
             new_data[k] = ov
 

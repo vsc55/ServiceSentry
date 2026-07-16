@@ -2,15 +2,20 @@
 # -*- coding: utf-8 -*-
 """Microsoft Entra ID provider.
 
-Two sides:
+Layout:
 
 * :mod:`~lib.providers.entraid.declarations` — the ``__entraid_provision__``
   declaration model (discovery + normalisation); no network.
-* :mod:`~lib.providers.entraid.graph` — the Microsoft Graph HTTP client (tokens,
-  group reads, app provisioning, mail send).
+* The Microsoft Graph HTTP surface, split by concern:
+  :mod:`~lib.providers.entraid.client` (endpoints/ids, no HTTP),
+  :mod:`~lib.providers.entraid.auth` (app-only + device-code tokens),
+  :mod:`~lib.providers.entraid.directory` (group reads),
+  :mod:`~lib.providers.entraid.mail` (``sendMail``),
+  :mod:`~lib.providers.entraid.teams` (activity feed + Bot Framework),
+  :mod:`~lib.providers.entraid.provisioning` (app-registration).
 
-The declaration helpers are re-exported here for convenience; import the Graph
-client explicitly (``from lib.providers.entraid import graph``).
+The declaration helpers are re-exported here for convenience; import the specific
+Graph submodule explicitly (e.g. ``from lib.providers.entraid import auth``).
 """
 
 from lib.providers.entraid.declarations import (  # noqa: F401

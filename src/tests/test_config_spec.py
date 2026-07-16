@@ -39,8 +39,13 @@ class TestCfgDefault:
         assert cfg_default('web_admin|remember_me_days') == 30
         assert cfg_default('global|log_level') == 'off'
 
-    def test_notifications_default_false(self):
-        assert cfg_default('notifications|telegram_on_down') is False
+    def test_notifications_matrix_is_dynamic_not_static(self):
+        # The routing matrix (notifications|{channel}_on_{kind}) is NOT declared in the
+        # registry — it's derived at runtime from the notify-event × channel registries and
+        # stored per-cell in the DB. So spec.py must hold no such static keys (no duplication).
+        from lib.config.spec import CFG_BY_PATH
+        assert not [p for p in CFG_BY_PATH
+                    if p.startswith('notifications|') and '_on_' in p]
 
 
 class TestCfgGet:

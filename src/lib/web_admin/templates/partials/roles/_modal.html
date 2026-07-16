@@ -148,32 +148,30 @@ async function saveRoleModal() {
         } else {
             showToast(r?.error || t('update_error'), 'danger'); return;
         }
-        // Update user role assignments
+        // Update user/group role assignments. Apply each and update the local cache ONLY
+        // for the ones the server accepted — otherwise a rejected reassignment (403/409/…)
+        // would still appear applied in the UI even though the "role updated" toast showed.
         const viewerUid = Object.keys(rolesData).find(uid => rolesData[uid].builtin && rolesData[uid].key === 'viewer') || 'viewer';
-        const userUpdates = [];
+        let _reassignFailures = 0;
         for (const [uname, ud] of Object.entries(usersData)) {
-            const hadRole   = ud.role === _editingRole;
-            const wantsRole = selectedUsers.has(uname);
-            if (hadRole !== wantsRole) {
-                const newRole = wantsRole ? _editingRole : viewerUid;
-                userUpdates.push(apiPut('/api/v1/users/' + encodeURIComponent(uname), { role: newRole }));
-                usersData[uname] = { ...ud, role: newRole };
-            }
+            const hadRole = ud.role === _editingRole, wantsRole = selectedUsers.has(uname);
+            if (hadRole === wantsRole) continue;
+            const newRole = wantsRole ? _editingRole : viewerUid;
+            const rr = await apiPut('/api/v1/users/' + encodeURIComponent(uname), { role: newRole });
+            if (rr && rr.ok) usersData[uname] = { ...ud, role: newRole };
+            else _reassignFailures++;
         }
-        // Update group role assignments
-        const groupUpdates = [];
         for (const [gname, gd] of Object.entries(groupsData)) {
-            const hadRole   = (gd.roles || []).includes(_editingRole);
-            const wantsRole = selectedGroups.has(gname);
-            if (hadRole !== wantsRole) {
-                const newRoles = wantsRole
-                    ? [...(gd.roles || []), _editingRole]
-                    : (gd.roles || []).filter(r => r !== _editingRole);
-                groupUpdates.push(apiPut('/api/v1/groups/' + encodeURIComponent(gname), { roles: newRoles }));
-                groupsData[gname] = { ...gd, roles: newRoles };
-            }
+            const hadRole = (gd.roles || []).includes(_editingRole), wantsRole = selectedGroups.has(gname);
+            if (hadRole === wantsRole) continue;
+            const newRoles = wantsRole
+                ? [...(gd.roles || []), _editingRole]
+                : (gd.roles || []).filter(r => r !== _editingRole);
+            const rr = await apiPut('/api/v1/groups/' + encodeURIComponent(gname), { roles: newRoles });
+            if (rr && rr.ok) groupsData[gname] = { ...gd, roles: newRoles };
+            else _reassignFailures++;
         }
-        await Promise.all([...userUpdates, ...groupUpdates]);
+        if (_reassignFailures) showToast(t('update_error'), 'danger');
     } else {
         const enabled = document.getElementById('rmEnabled').checked;
         const r = await apiPost('/api/v1/roles', { name, description, permissions, enabled });

@@ -129,6 +129,24 @@ class TestLdapMapRole:
         assert result == 'admin'
 
 
+class TestLdapSyncUser:
+    def test_refuses_to_convert_local_account(self, admin, config_dir):
+        """R5 (account-takeover): an LDAP login whose username collides with a LOCAL
+        account must be refused — sync returns None (the caller rejects, no 500), and the
+        account is NOT converted to SSO."""
+        from lib.providers.ldap import auth as ldap_auth
+        _ldap_cfg(config_dir)
+        admin._users['carol'] = {
+            'uid': 'uid-carol', 'auth_source': 'local',
+            'role': admin._role_name_to_uid('admin'), 'groups': [], 'enabled': True,
+        }
+        result = ldap_auth.sync_user(
+            admin, 'carol',
+            {'dn': 'CN=carol,DC=x', 'display_name': 'C', 'email': '', 'groups': []})
+        assert result is None
+        assert admin._users['carol']['auth_source'] == 'local'
+
+
 # ── authenticate ──────────────────────────────────────────────────────────────
 
 class TestLdapAuthenticate:

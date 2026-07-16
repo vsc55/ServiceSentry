@@ -64,6 +64,10 @@ CARDS: tuple[dict, ...] = (
     {'tab': 'general', 'id': 'proxy',     'title_key': 'proxy_section', 'icon': 'bi-diagram-3'},
     {'tab': 'general', 'id': 'database',  'section': 'database',  'icon': 'bi-database',
      'renderer': 'database'},
+    # Platform self-monitoring (core.health): is my own stack alive, are my certs valid.
+    # A core/system concern — deliberately NOT under the Monitoring service tab.
+    {'tab': 'general', 'id': 'health', 'title_key': 'cfg_card_platform_health',
+     'icon': 'bi-heart-pulse'},
 
     # ══ Monitoring ══════════════════════════════════════════════════════════
     {'tab': 'monitoring', 'id': 'monitoring', 'section': 'monitoring', 'icon': 'bi-activity'},

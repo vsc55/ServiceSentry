@@ -97,6 +97,19 @@ class MonitorService(_HeartbeatMixin, _MonitoringMixin):
             self._config_store, config_path(config_dir),
             fernet=self._fernet, secret_keys=self._secret_keys)
 
+        # Notification routing through the core router (owns every channel store), so a
+        # standalone monitor's grouped-per-cycle alerts reach webhooks/Teams too — the
+        # MonitorNotifier routes through this.
+        from lib.core.notify.context import NotifyContext  # noqa: PLC0415
+        from lib.core.notify.router import NotificationRouter  # noqa: PLC0415
+        self._notify = NotificationRouter(NotifyContext(
+            db=self._db_connector,
+            read_config=lambda: self._read_config_file(self._CONFIG_FILE),
+            fernet=self._fernet, secret_keys=self._secret_keys,
+            dbg=self._dbg,
+            config_file=self._CONFIG_FILE,
+        ))
+
         # Liveness registry (shared DB) so the web admin sees this worker even
         # though it runs in a different process/container.
         self._service_instances_store = ServiceInstancesStore(self._db_connector)

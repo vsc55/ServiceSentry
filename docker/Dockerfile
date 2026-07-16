@@ -78,6 +78,17 @@ RUN chmod +x /entrypoint.sh
 # These paths are overridden by the volume mounts defined in the compose files.
 RUN mkdir -p /etc/ServiSesentry /var/lib/ServiSesentry
 
+# Non-root user for opt-in least-privilege operation.  The dirs are owned by it so a
+# fresh named volume inherits that ownership.  USER is deliberately NOT set globally:
+# the `web`/`worker`/`events` roles run fine as this user (add `user: ssentry` in compose
+# or `securityContext.runAsUser` in Helm), but the `syslog` role binds :514 (privileged)
+# and `ping` uses raw ICMP — under Docker's default (non-ambient) capability model those
+# need root or CAP_NET_BIND_SERVICE / CAP_NET_RAW granted as *ambient* caps.  See docs.
+# Fixed uid/gid 1000 so Kubernetes `runAsUser: 1000` (Helm) matches the image user.
+RUN groupadd -g 1000 ssentry \
+    && useradd -u 1000 -g 1000 -d /app -s /usr/sbin/nologin ssentry \
+    && chown -R ssentry:ssentry /app /etc/ServiSesentry /var/lib/ServiSesentry
+
 EXPOSE 8080
 
 ENTRYPOINT ["/entrypoint.sh"]

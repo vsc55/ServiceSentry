@@ -110,7 +110,7 @@ function _eventConditionsHtml() {
 // webhook destination sub-list shows/hides without losing the active tab.
 function _eventNotifyHtml() {
     const d = _eventDraft;
-    const chIcon = { telegram: 'bi-telegram', email: 'bi-envelope', webhook: 'bi-broadcast' };
+    const chIcon = { telegram: 'bi-telegram', email: 'bi-envelope', msteams: 'bi-microsoft-teams', webhook: 'bi-broadcast' };
     const ch = (name) => `<div class="form-check">
         <input class="form-check-input" type="checkbox" id="evm-ch-${name}"${(d.channels || []).includes(name) ? ' checked' : ''}
             onchange="_eventDraftToggleChannel('${name}',this.checked)">
@@ -133,7 +133,7 @@ function _eventNotifyHtml() {
             ${dests.length ? `<div class="form-text">${esc(t('event_wh_hint'))}</div>` : ''}</div>`;
     }
     return `<label class="form-label small mb-2 d-block">${esc(t('event_channels'))}${_evHelp('event_channels_hint')}</label>
-        ${ch('telegram')}${ch('email')}${ch('webhook')}${webhookBlock}`;
+        ${ch('telegram')}${ch('email')}${ch('msteams')}${ch('webhook')}${webhookBlock}`;
 }
 
 function _eventModalForm() {

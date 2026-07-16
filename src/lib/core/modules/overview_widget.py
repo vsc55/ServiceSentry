@@ -37,10 +37,14 @@ def _modules_list_rows(wa, f: str = '') -> list:
             'items':   len(items_obj) if isinstance(items_obj, dict) else 0,
             'checks':  _mod_checks(status_raw, name),
         })
-    if f == 'on':
+    from lib.core.overview.filters import (  # noqa: PLC0415
+        parse_severity_filter, severity_rank, severity_matches)
+    level, op, _maint = parse_severity_filter(f)   # modules have no maintenance
+    if level == 'on':
         rows = [r for r in rows if r['enabled']]
-    elif f == 'error':
-        rows = [r for r in rows if r['checks']['error'] > 0]
+    elif level in ('warning', 'error'):
+        rows = [r for r in rows if severity_matches(
+            severity_rank(r['checks']['error'] > 0, r['checks']['warning'] > 0), level, op)]
     return rows
 
 
@@ -142,11 +146,16 @@ OVERVIEW_WIDGETS = [
      'rows': _modules_list_rows,
      'view': {'kind': 'table', 'icon': 'bi-puzzle', 'title_key': 'overview_modules',
               'accent': 'indigo', 'data_url': '/api/v1/overview/widget/modules_list',
-              'filter': {'store': 'modf', 'param': 'f', 'options': [
-                  {'v': '',      'label_key': 'all'},
-                  {'v': 'on',    'label_key': 'dw_mod_on',
+              # Compound severity filter: a level with a =/≥ operator (warning/error), plus
+              # the fixed 'active' option. No maintenance (a module isn't a host).
+              'filter': {'kind': 'severity', 'store': 'modf', 'param': 'f', 'maintenance': False,
+                         'levels': [
+                  {'v': '',        'label_key': 'all'},
+                  {'v': 'on',      'label_key': 'dw_mod_on',
                    'badge': {'color': '#16a34a', 'bg': 'rgba(34,197,94,.16)'}},
-                  {'v': 'error', 'label_key': 'host_status_error',
+                  {'v': 'warning', 'label_key': 'status_warning', 'op': True,
+                   'badge': {'color': '#d97706', 'bg': 'rgba(245,158,11,.18)'}},
+                  {'v': 'error',   'label_key': 'host_status_error', 'op': True,
                    'badge': {'color': '#dc3545', 'bg': 'rgba(220,53,69,.16)'}},
               ]},
               'columns': [

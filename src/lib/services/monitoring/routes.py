@@ -43,8 +43,8 @@ def register(app, wa):
         data   = wa._optional_json()
         run_now = bool(data.get('run_now', False))
         started = _mon().start(run_now=run_now)
-        if started:
-            wa._audit('daemon_started', detail={'run_now': run_now})
+        # The scheduler itself audits start/stop (actor-aware via _audit_auto) and
+        # notifies — so it's recorded once, in every path (manual, autostart, restart).
         return jsonify({'ok': True, 'started': started,
                         'status': _mon().status_dict()})
 
@@ -53,8 +53,7 @@ def register(app, wa):
     def api_daemon_stop():
         """Stop the background scheduler."""
         stopped = _mon().stop()
-        if stopped:
-            wa._audit('daemon_stopped')
+        # Audit + notify happen inside the scheduler (single, actor-aware source).
         return jsonify({'ok': True, 'stopped': stopped,
                         'status': _mon().status_dict()})
 

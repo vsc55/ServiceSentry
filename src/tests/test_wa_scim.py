@@ -236,3 +236,8 @@ class TestScimGroups:
         assert admin._groups[gid]['roles'] == [admin._role_name_to_uid('editor')]  # roles kept
         # external_id survives a persist + reload round-trip.
         assert admin._groups_store.load()[gid]['external_id'] == 'grp-ext-42'
+
+
+def test_scim_csrf_exempt_declared(admin):
+    # The SCIM provider declares its own CSRF-exempt prefix in register().
+    assert '/scim/' in admin._csrf_exempt_prefixes

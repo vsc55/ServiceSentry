@@ -27,9 +27,11 @@ from lib.core.overview import service as overview_svc
 
 def register(app, wa):
     overview_view_req = wa._perm_required('overview_view')
+    login_required = wa._login_required
 
     # --- API: data-driven widget data (AJAX, one request per widget) --------------
     @app.route('/api/v1/overview/widget/<wid>', methods=['GET'])
+    @login_required
     def api_widget_data(wid):
         """Self-contained data for one Overview widget so every card/table fetches its own
         (no monolithic aggregate).  Returns ``{content}`` for a **stat** card (its

@@ -26,5 +26,13 @@
         "discover_title": "Running Processes",
         "discover_error": "Could not load the list of running processes",
         "item_added":     "Process \"{}\" added"
+    },
+    "messages": {
+        "proc_ok":  "Process: {} - {} instance(s) running ✅",
+        "proc_low": "Process: {} - found {}/{} instance(s) ⚠️"
+    },
+    "messages_vars": {
+        "proc_ok": ["process", "count"],
+        "proc_low": ["process", "count", "minimum"]
     }
 }

@@ -336,7 +336,74 @@ flowchart TB
   (tab+card+orden) en el layout.
 - **Dónde acaban:** `renderConfig` pinta la pantalla de Config íntegra desde estas dos fuentes;
   añadir una opción = un `Cfg(...)` en spec.py + (si hace falta) una entrada en un `CARDS`.
-  Ver [configuration.md](configuration.md) y [web_admin.md](web_admin.md).
+  Ver [configuration.md](configuration.md) y [web-admin.md](web-admin.md).
+
+---
+
+## 9. Canales de notificación (`register_channel` / `Channel`)
+
+El core posee **qué canales de notificación existen**. Cada canal (Telegram, Email, Webhook,
+Microsoft Teams) es un `Channel(name, send, flush)` que **se auto-registra** al importarse; el
+router y el notificador por ciclo del monitor iteran el registro en vez de hardcodear la lista.
+
+**Descriptor** (`lib/core/notify/<canal>/channel.py`): `register_channel(Channel(name, send, flush))`
+—`send(router, cfg, **event)` entrega un evento; `flush(router, cfg, alerts, hostname, public_url)`
+entrega las alertas agrupadas de un ciclo—. `load_builtin_channels()` **descubre** cada
+`lib/core/notify/<name>/channel.py` (orden alfabético estable) y lo importa; no hay lista central.
+
+**Flujo y datos:**
+
+```mermaid
+flowchart TB
+    disc["load_builtin_channels()<br/>escanea subpaquetes de lib/core/notify/*<br/>importa <name>/channel.py"] --> reg["cada channel.py llama register_channel(Channel(name, send, flush))"]
+    reg --> registry["_REGISTRY {telegram, email, webhook, msteams}"]
+    registry --> router["NotificationRouter.dispatch(kind, …)<br/>por cada canal con {canal}_on_{kind} activo"]
+    registry --> flush["MonitorNotifier.flush()<br/>Channel.flush por canal (agrupado por ciclo)"]
+```
+
+- **Qué datos:** el nombre del canal y sus dos funciones de entrega (evento suelto / flush agrupado).
+- **Dónde acaban:** el router y el notificador del monitor los iteran genéricamente. Añadir un
+  canal = un `channel.py` que se registra; nada en el router ni en el monitor cambia. Detalle en
+  [notifications.md](notifications.md#canales).
+
+---
+
+## 10. Eventos de notificación (`NOTIFY_EVENTS`)
+
+Simétrico a los canales (los *endpoints*): el registro de las **fuentes/tipos** que se pueden
+notificar. Cada `kind` (`down`/`recovery`/`warn`/`manual_run`/`ipban_*`/`service_*`/
+`cert_expiring`/`syslog`/`event`…) es el valor de `dispatch(kind=…)` y la clave de la matriz
+`notifications|{canal}_on_{kind}`.
+
+**Descriptor** (`lib/<raíz>/<dominio>/notify_events.py` · `NOTIFY_EVENTS`) — data pura, etiquetas
+i18n por `label_key`:
+
+```python
+NOTIFY_EVENTS = [
+    {'key': 'down', 'source': 'monitoring', 'label_key': 'notif_event_down',
+     'matrix': True, 'ui': True, 'order': 10},
+]
+```
+
+`matrix=True` genera columnas `{canal}_on_{key}` (auto-routing); `matrix=False` marca una fuente
+que no auto-enruta (p.ej. `event`: las reglas eligen canal). `ui=False` oculta la fila en la UI de
+routing (p.ej. `syslog`, sin dispatcher activo).
+
+**Flujo y datos:**
+
+```mermaid
+flowchart TB
+    scan["discover_events()<br/>escanea lib.core.* / lib.services.* / lib.providers.*<br/>importa <dominio>/notify_events.py"] --> decl["NOTIFY_EVENTS de cada dominio<br/>(+ register_event() manual, p.ej. auth)"]
+    decl --> merged["events() → deduplicado + ordenado por 'order'"]
+    merged --> mtx["matrix_events() → kinds con matrix=True<br/>ui_matrix_events() → filas visibles en la grid"]
+    mtx --> grid(["UI de routing (filas=kinds · columnas=canales)<br/>+ claves de config {canal}_on_{kind}"])
+```
+
+- **Qué datos:** por evento, la key (kind), su dominio (`source`), su etiqueta i18n y los flags
+  `matrix`/`ui`/`order`.
+- **Dónde acaban:** la matriz de routing y su UI se generan de aquí (filas dinámicas); las claves de
+  config `{canal}_on_{kind}` **no** se declaran en `spec.py` — son dinámicas y por defecto off.
+  Detalle en [notifications.md](notifications.md#eventos-kinds-y-su-registro).
 
 ---
 
@@ -352,5 +419,7 @@ flowchart TB
 | Una tabla propia de un módulo | `discover_db_tables()` en el `__init__.py` del módulo |
 | Registrar una app de Entra para un módulo | `schema.json` → `__entraid_provision__` |
 | Una opción de configuración | `Cfg(...)` en `spec.py` (+ entrada en `CARDS` de `layout.py`) |
+| Un canal de notificación nuevo | un `lib/core/notify/<canal>/channel.py` → `register_channel(Channel(...))` |
+| Un evento/tipo notificable nuevo | `notify_events.py` → `NOTIFY_EVENTS` (o `register_event(...)`) en el dominio |
 
 En todos los casos: **solo el descriptor del módulo** — el núcleo lo descubre y lo integra solo.

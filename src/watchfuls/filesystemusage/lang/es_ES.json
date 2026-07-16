@@ -30,5 +30,17 @@
         "discover_title": "Descubrir Particiones",
         "discover_error": "No se pudo cargar la lista de particiones montadas",
         "item_added":     "Partición \"{}\" añadida"
+    },
+    "messages": {
+        "fs_ok_label":   "{} ({}) uso normal {}% ✅",
+        "fs_warn_label": "Aviso {} ({}) uso {}% ⚠️",
+        "fs_ok_part":    "Partición {} uso normal {}% ✅",
+        "fs_warn_part":  "Aviso partición {} uso {}% ⚠️"
+    },
+    "messages_vars": {
+        "fs_ok_label": ["host", "montaje", "uso %"],
+        "fs_warn_label": ["host", "montaje", "uso %"],
+        "fs_ok_part": ["montaje", "uso %"],
+        "fs_warn_part": ["montaje", "uso %"]
     }
 }

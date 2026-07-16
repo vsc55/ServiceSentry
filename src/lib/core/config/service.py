@@ -267,10 +267,18 @@ def build_config_schema() -> dict:
         },
         'default': cfg_default('web_admin|landing_page'),
     }
-    schema['email|lang'] = {
+    # Global notification language ('' = system default). Rendered by the unified language
+    # selector in _field_render.html (key 'notif_lang') — native names + a translated Default
+    # option — so `options` here is only for validation.
+    schema['notifications|lang'] = {
         'options': [''] + list(SUPPORTED_LANGS),
         'default': '',
     }
+    # Allowed iframe origins (CSP frame-ancestors): a removable-chips input — each origin
+    # is added on Enter — rather than one free-text string. Stored space-separated (the
+    # backend splits on comma/whitespace), same as syslog|allowed_sources.
+    schema['web_admin|frame_ancestors'] = {**cfg_meta('web_admin|frame_ancestors'),
+                                           'multi': True}
     schema['global|log_level'] = {
         'options': ['off', 'debug', 'info', 'warning', 'error'],
         'default': cfg_default('global|log_level'),

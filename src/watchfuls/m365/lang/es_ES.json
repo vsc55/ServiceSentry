@@ -54,5 +54,31 @@
     },
     "new_item_key_label": "Nombre:",
     "rename_item_prompt": "Introduce el nuevo nombre:",
-    "collections": {"list": "Conexiones de Microsoft 365"}
+    "collections": {"list": "Conexiones de Microsoft 365"},
+    "messages": {
+        "m3_no_creds":            "M365: {} — faltan credenciales (tenant/client/secret) ⚠️",
+        "m3_auth_fail":           "M365: {} {} [auth: {}]",
+        "m3_site_fail":           "M365: {} 🔽 [SharePoint: {}]",
+        "m3_summary":             "SharePoint {}: {}% usado ({}/{}, libre {})",
+        "m3_site_ok":             "M365: {} — {} ✅",
+        "m3_why_free":            "libre < {}",
+        "m3_site_alert":          "M365: {} — {} — {} ⚠️",
+        "m3_tenant_fail":         "M365: {} 🔽 [uso del tenant: {}]",
+        "m3_tenant_base":         "M365: {} — SharePoint (tenant) usado {}",
+        "m3_tenant_over":         "{} — supera el límite {} ⚠️",
+        "m3_tenant_limit_suffix": " (límite {})"
+    },
+    "messages_vars": {
+        "m3_no_creds": ["conexión"],
+        "m3_auth_fail": ["conexión", "icono", "error"],
+        "m3_site_fail": ["conexión", "error"],
+        "m3_summary": ["sitio", "uso %", "usado", "total", "libre"],
+        "m3_site_ok": ["conexión", "resumen"],
+        "m3_site_alert": ["conexión", "resumen", "motivos"],
+        "m3_tenant_fail": ["conexión", "error"],
+        "m3_tenant_base": ["conexión", "usado"],
+        "m3_tenant_over": ["mensaje", "límite"],
+        "m3_why_free": ["libre mín"],
+        "m3_tenant_limit_suffix": ["límite"]
+    }
 }

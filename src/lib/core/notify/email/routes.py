@@ -35,7 +35,8 @@ def register(app, wa):
             elif v is not None:
                 cfg[k] = v
         sender_name = cfg.get('from_name') or 'ServiceSentry'
-        lang = cfg.get('lang') or ''
+        from lib.core.notify.formatting import notify_lang  # noqa: PLC0415
+        lang = notify_lang(full_cfg)   # global notification language
         lang_key = lang or 'en_EN'
         # Apply the admin's saved customisations so the test email matches what
         # the live notifications (and the editor preview) actually produce.

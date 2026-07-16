@@ -37,7 +37,7 @@ function _renderEmailSection(cfgCardOpen, cfgCardClose) {
         <label class="col-sm-4 col-form-label col-form-label-sm">${esc(LABELS['provider'] || t('provider'))}${_pvInfoIcon}</label>
         <div class="col-sm-8"><div class="input-group input-group-sm">
             <select class="form-select"
-                onchange="configData.email=configData.email||{};configData.email.provider=this.value;markDirty('config');_emailProviderChanged(this.value)">
+                onchange="updateField('config','email|provider',this.value);_emailProviderChanged(this.value)">
                 ${pvOpts}
             </select>${_pvResetBtn}
         </div>${_pvHintPanel}</div>
@@ -48,7 +48,8 @@ function _renderEmailSection(cfgCardOpen, cfgCardClose) {
     h += renderField('from_name',          data.from_name,          'email|from_name',           'config');
     h += renderField('recipients',         data.recipients,         'email|recipients',          'config');
     h += renderField('subject_prefix',     data.subject_prefix,     'email|subject_prefix',      'config');
-    h += renderField('email_lang',         data.lang,               'email|lang',                 'config');
+    // Notification language moved to a global setting (Routing sub-tab): it applies to every
+    // channel, not just email → see _renderNotificationsMatrix (notifications|lang).
 
     // SMTP section
     h += `<div id="email-smtp-section"${provider !== 'smtp' ? ' style="display:none"' : ''}>`;
@@ -64,6 +65,15 @@ function _renderEmailSection(cfgCardOpen, cfgCardClose) {
     // Microsoft 365 section
     h += `<div id="email-ms365-section"${provider !== 'microsoft365' ? ' style="display:none"' : ''}>`;
     h += `<hr class="my-2"><p class="small fw-semibold text-muted mb-1">Microsoft 365 — Graph API</p>`;
+    // Assisted registration: reuse the shared Entra device-code wizard (like SSO) to
+    // create an app with Mail.Send and fill tenant/client/secret automatically.
+    const _emailAppLink = (typeof _entraAppLink === 'function') ? _entraAppLink(data.ms365_client_id) : '';
+    h += `<div class="mb-2">
+        <button class="btn btn-primary btn-sm" type="button" onclick="showEntraEmailWizard()">
+            <i class="bi bi-microsoft me-1"></i>${esc(t('entra_wizard_btn'))}
+        </button>${_emailAppLink}
+        <div class="small text-muted mt-1">${esc(t('email_ms365_wizard_hint'))}</div>
+    </div>`;
     h += renderField('ms365_tenant_id',     data.ms365_tenant_id,     'email|ms365_tenant_id',     'config');
     h += renderField('ms365_client_id',     data.ms365_client_id,     'email|ms365_client_id',     'config');
     h += renderField('ms365_client_secret', data.ms365_client_secret, 'email|ms365_client_secret', 'config');
@@ -108,6 +118,31 @@ function _renderEmailSection(cfgCardOpen, cfgCardClose) {
 
     h += cfgCardClose;
     return h;
+}
+
+// Microsoft 365 "Register in Azure" — parameterise the SHARED generic device-code
+// wizard (partials/credentials/_provision_wizard.html) exactly like the SSO OIDC
+// button does, requesting the Mail.Send application permission.
+function showEntraEmailWizard() {
+    showEntraIdProvisionWizard({
+        url: '/api/v1/auth/entraid/provision/device-code',
+        provision: {
+            app_name: ENTRA_APP_NAME_EMAIL,
+            app_roles: ['Mail.Send'],
+        },
+    }, (fields) => {
+        _entraEmailApply(fields || {});
+        if (typeof saveConfig === 'function') saveConfig();
+    });
+}
+
+function _entraEmailApply(d) {
+    // updateField registers each path in _dirtyFields so saveConfig() persists them
+    // (ms365_client_secret is encrypted at rest server-side).
+    if (d.tenant_id)     updateField('config', 'email|ms365_tenant_id',     d.tenant_id);
+    if (d.client_id)     updateField('config', 'email|ms365_client_id',     d.client_id);
+    if (d.client_secret) updateField('config', 'email|ms365_client_secret', d.client_secret);
+    renderConfig();
 }
 
 function _emailProviderChanged(val) {

@@ -3,40 +3,72 @@
    _renderNotificationsMatrix.
    ================================================================ #}
 
+// ──────────── Notifications → General sub-tab: global notification settings ────────────
+function _renderNotifGeneralSection(cfgCardOpen, cfgCardClose) {
+    const data = configData.notifications || {};
+    let h = cfgCardOpen('cfgcol_notif_settings', '<i class="bi bi-gear me-1"></i>', t('notif_settings'));
+    // Global language for ALL channels (applies to every notification), not per-provider.
+    h += renderField('notif_lang', data.lang, 'notifications|lang', 'config');
+    h += cfgCardClose;
+    return h;
+}
+
 // ──────────────────── Notification routing matrix renderer ────────────────
 function _renderNotificationsMatrix(cfgCardOpen, cfgCardClose) {
     const data = configData.notifications || {};
-    const events = [
-        { key: 'down',     label: t('notif_event_down') },
-        { key: 'recovery', label: t('notif_event_recovery') },
-        { key: 'warn',     label: t('notif_event_warn') },
-    ];
-    const channels = [
-        { key: 'telegram', label: t('notif_channel_telegram') },
-        { key: 'email',    label: t('notif_channel_email') },
-        { key: 'webhook',  label: t('notif_channel_webhook') },
-    ];
+    // Rows (event kinds) and columns (channels) are registry-driven — discovered on the
+    // backend (lib/core/notify/events.py + registry.py) and injected as constants, so a new
+    // source kind or channel appears here without editing this renderer.
+    const events   = (NOTIFY_MATRIX_EVENTS || []).map(e => ({ key: e.key, label: t(e.label_key), source: e.source || '' }));
+    const channels = (NOTIFY_CHANNELS || []).map(c => ({ key: c.key, label: t(c.label_key) }));
+    // Human label for an event's source (domain it comes from); falls back to the raw id.
+    const _srcLabel = s => { const k = 'notif_source_' + s; const v = t(k); return (v && v !== k) ? v : s; };
 
     let h = cfgCardOpen('cfgcol_notifications', '<i class="bi bi-grid-3x3-gap me-1"></i>', SECTION_LABELS['notifications'] || 'Notification Routing');
 
     h += `<div class="cfg-field-wrap pt-1">
         <table class="table table-sm table-bordered mb-1 ss-fs-4">
             <thead><tr>
-                <th style="width:40%;font-weight:600;color:var(--bs-secondary-color)">${esc(t('notif_event'))}</th>`;
+                <th class="align-middle" style="width:40%;font-weight:600;color:var(--bs-secondary-color)">${esc(t('notif_event'))}</th>`;
     for (const ch of channels) {
-        h += `<th class="text-center" style="font-weight:600;color:var(--bs-secondary-color)">${esc(ch.label)}</th>`;
+        // Column header + a select-all/none checkbox that toggles every event row for this channel.
+        const _on = events.filter(ev => data[`${ch.key}_on_${ev.key}`] === true).length;
+        const _allOn = events.length > 0 && _on === events.length;
+        // Label + select-all/none checkbox inline on one row (centred), not stacked.
+        h += `<th class="text-center align-middle" style="font-weight:600;color:var(--bs-secondary-color)">
+                <span class="d-inline-flex align-items-center gap-2">
+                    <span>${esc(ch.label)}</span>
+                    <input type="checkbox" class="form-check-input m-0" data-notif-colhead="${escAttr(ch.key)}"
+                        title="${escAttr(t('notif_col_toggle'))}"${_allOn ? ' checked' : ''}
+                        onchange="_notifToggleColumn(${jsStr(ch.key)}, this.checked)">
+                </span>
+            </th>`;
     }
     h += `</tr></thead><tbody>`;
 
+    const _span = channels.length + 1;
+    let _lastSource = null;
     for (const ev of events) {
+        // Group rows by their source domain (Monitoring / IP ban / Auth / …) with a subheader,
+        // so it's clear where each event comes from.
+        if (ev.source !== _lastSource) {
+            _lastSource = ev.source;
+            h += `<tr><td colspan="${_span}"
+                style="padding:.25rem .5rem;font-size:.8em;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--bs-secondary-color);background:var(--bs-tertiary-bg)">
+                ${esc(_srcLabel(ev.source))}</td></tr>`;
+        }
         h += `<tr><td class="align-middle" style="color:var(--bs-body-color)">${esc(ev.label)}</td>`;
         for (const ch of channels) {
             const fieldKey = `${ch.key}_on_${ev.key}`;
             const cfgPath  = `notifications|${fieldKey}`;
-            const val      = data[fieldKey] !== undefined ? data[fieldKey] : (ev.key !== 'warn');
+            // Every cell defaults OFF: a route is stored only when ticked, and dispatch
+            // treats an absent key as False — so the checkbox reflects the real state.
+            const val      = data[fieldKey] === true;
+            // Cells are driven by the column select-all header and count toward its state.
             h += `<td class="text-center align-middle">
-                <input type="checkbox" class="form-check-input"${val ? ' checked' : ''}
-                    onchange="updateField('config',${jsStr(cfgPath)},this.checked)">
+                <input type="checkbox" class="form-check-input notif-cell"
+                    data-notif-col="${escAttr(ch.key)}" data-cfg-path="${escAttr(cfgPath)}"${val ? ' checked' : ''}
+                    onchange="updateField('config',${jsStr(cfgPath)},this.checked);_notifSyncColumnHead(${jsStr(ch.key)})">
             </td>`;
         }
         h += `</tr>`;
@@ -44,5 +76,28 @@ function _renderNotificationsMatrix(cfgCardOpen, cfgCardClose) {
 
     h += `</tbody></table></div>`;
     h += cfgCardClose;
+    // After the card is inserted, reflect partial columns as indeterminate.
+    setTimeout(() => channels.forEach(c => _notifSyncColumnHead(c.key)), 0);
     return h;
+}
+
+// Toggle every event cell of a channel column on/off (select all / deselect all).
+function _notifToggleColumn(chKey, checked) {
+    document.querySelectorAll(`.notif-cell[data-notif-col="${chKey}"]`).forEach(cb => {
+        if (cb.checked !== checked) {
+            cb.checked = checked;
+            updateField('config', cb.getAttribute('data-cfg-path'), checked);
+        }
+    });
+    _notifSyncColumnHead(chKey);
+}
+
+// Reflect a column's header checkbox from its cells: checked = all on, indeterminate = some.
+function _notifSyncColumnHead(chKey) {
+    const head = document.querySelector(`[data-notif-colhead="${chKey}"]`);
+    if (!head) return;
+    const cells = [...document.querySelectorAll(`.notif-cell[data-notif-col="${chKey}"]`)];
+    const on = cells.filter(c => c.checked).length;
+    head.checked = cells.length > 0 && on === cells.length;
+    head.indeterminate = on > 0 && on < cells.length;
 }

@@ -26,5 +26,19 @@
     "group_labels": {
         "connection": "Conexión"
     },
-    "collections": {"list": "Hosts"}
+    "collections": {"list": "Hosts"},
+    "messages": {
+        "hdd_error":       "HDD: {} - Error: {} 💥",
+        "hdd_ok":          "({}): {} ({}º{}) 🔼",
+        "hdd_high":        "({}): {} ({}º{}) 🔽",
+        "hdd_bad":         "({}): {} ({}) 🔥🔥",
+        "hdd_query_error": "HddTemp: {} - Error: {} 🔽"
+    },
+    "messages_vars": {
+        "hdd_error": ["host", "error"],
+        "hdd_ok": ["host", "disco", "temp", "unidad"],
+        "hdd_high": ["host", "disco", "temp", "unidad"],
+        "hdd_bad": ["host", "disco", "valor"],
+        "hdd_query_error": ["host", "error"]
+    }
 }

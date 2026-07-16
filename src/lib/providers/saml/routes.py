@@ -24,6 +24,8 @@ def register(app, wa) -> None:
     """Register /auth/saml2/login, /auth/saml2/acs, /auth/saml2/metadata."""
     if not saml_auth._HAS_SAML2:
         return
+    # The IdP POSTs the assertion here cross-site (protected by SAML InResponseTo, not CSRF).
+    wa._register_csrf_exempt('/auth/saml2/acs')
 
     from flask import (flash, make_response, redirect,
                        request, session, url_for)
@@ -31,6 +33,9 @@ def register(app, wa) -> None:
 
     @app.route('/auth/saml2/login')
     def saml2_login():
+        """Start SP-initiated SAML2 login: redirect to the IdP and bind the
+        generated request id to the session so the ACS can verify ``InResponseTo``
+        (replay / unsolicited-response guard)."""
         auth = saml_auth.get_auth(wa, request)
         if auth is None:
             flash(wa._t('saml2_disabled'), 'danger')
@@ -43,6 +48,15 @@ def register(app, wa) -> None:
 
     @app.route('/auth/saml2/acs', methods=['POST'])
     def saml2_acs():
+        """Assertion Consumer Service: validate the IdP's SAML2 response and log the
+        user in.
+
+        Enforces that a matching SP-initiated request id is bound to this session
+        (rejecting unsolicited/replayed responses), checks the library's own
+        signature/condition validation, rejects a one-time-use assertion seen again
+        within its validity window, then syncs the user and establishes a session.
+        Redirects to the landing page on success, back to login on any failure.
+        """
         auth = saml_auth.get_auth(wa, request)
         if auth is None:
             flash(wa._t('saml2_disabled'), 'danger')
@@ -134,6 +148,8 @@ def register(app, wa) -> None:
 
     @app.route('/auth/saml2/metadata')
     def saml2_metadata():
+        """Serve this SP's SAML2 metadata XML (for import into the IdP). Returns 404
+        when SAML2 is disabled, 500 if the generated metadata fails validation."""
         auth = saml_auth.get_auth(wa, request)
         if auth is None:
             return wa._t('saml2_disabled'), 404

@@ -16,7 +16,7 @@ cómo se descubren, cómo se comprueba su estado y cómo se comunican entre pods
 
 | Servicio (`key`) | Qué hace | Naturaleza | Modo standalone |
 |---|---|---|---|
-| **monitoring** | Scheduler de checks: un `Monitor` persistente ejecuta los módulos por ciclo, detecta cambios de estado, despacha notificaciones y poda el historial | loop de fondo | `--monitor` |
+| **monitoring** | Scheduler de checks: un `Monitor` persistente ejecuta los módulos por ciclo, detecta cambios de estado, despacha notificaciones **agrupadas por ciclo** y poda el historial | loop de fondo | `--monitor` |
 | **syslog** | Receptor syslog centralizado: parser RFC 3164/5424 + listener UDP/TCP(+TLS), allowlist de orígenes, retención | listener de red | `--syslog` |
 | **events** | Procesador de eventos desacoplado: evalúa reglas sobre auditoría/syslog mediante un worker por cursor, con cooldowns | loop de fondo (por cursor) | `--events` |
 | **ipban** | fail2ban interno: gate de peticiones **inline** sobre un jail en BD (no es un loop) — bans progresivos por IP; registrado en la pestaña Services | gate inline | — (siempre en-proceso) |
@@ -25,6 +25,16 @@ Cada uno vive en `lib/services/<key>/`. Los tres primeros son procesos de fondo 
 externalizarse a su propio contenedor; **ipban** es un gate en la cola de peticiones del
 panel (ver [security.md → fail2ban](security.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio)),
 pero se autodescribe y aparece en la pestaña Services como los demás.
+
+> **Notificaciones del monitor — agrupadas por ciclo.** A diferencia de otros emisores (que
+> notifican evento-a-evento), el monitor acumula los cambios de estado del ciclo en un
+> **`MonitorNotifier`** y hace **un único flush multicanal al final del ciclo** (Telegram/
+> Email/Webhook/Teams), **síncrono y sin hilo de fondo**. Cada alerta se enruta por un *kind*:
+> OK → `recovery`; fallo con severidad `warning` (umbral blando) → `warn` (ámbar); resto →
+> `down`. Un **"Run all"** manual enruta todo el lote como un único evento `manual_run`
+> mientras el digest sigue mostrando los estados reales. Detalle en
+> [notifications.md → notificación agrupada por ciclo](notifications.md#el-monitor-notificación-agrupada-por-ciclo-monitornotifier)
+> y [→ Severidad warning](notifications.md#severidad-warning).
 
 ---
 
@@ -110,7 +120,7 @@ flowchart TB
     react --> rule(["cada servicio reacciona: reload / stop"])
 ```
 
-Permisos: ver la [pestaña Services en web_admin.md](web_admin.md#servicios). El estado se
+Permisos: ver la [pestaña Services en web-admin.md](web-admin.md#servicios). El estado se
 sondea con `/api/v1/monitoring/status` para el countdown; el control (`start`/`stop`) va por
 `/api/v1/services/<key>/<action>`.
 

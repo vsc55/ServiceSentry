@@ -17,5 +17,21 @@
     },
     "new_item_key_label": "Nombre de la comprobación o identificador:",
     "rename_item_prompt": "Introduce el nuevo nombre de la comprobación o identificador:",
-    "collections": {"list": "Comprobaciones RAID"}
+    "collections": {"list": "Comprobaciones RAID"},
+    "messages": {
+        "raid_unsupported_os": "RAID: {} - mdstat solo disponible en Linux (SO del host: {}) ⚠️",
+        "raid_none":     "[{}] Sin RAID en el sistema. ✅",
+        "raid_ok":       "RAID {}/{} en buen estado. ✅",
+        "raid_degraded": "RAID {}/{} degradado. ⚠️",
+        "raid_recovery": "RAID {}/{} degradado, recuperación al {}%, tiempo estimado para terminar {}. ⚠️",
+        "raid_unknown":  "RAID {}/{} Error desconocido. ⚠️"
+    },
+    "messages_vars": {
+        "raid_unsupported_os": ["host", "SO"],
+        "raid_none": ["host"],
+        "raid_ok": ["host", "array"],
+        "raid_degraded": ["host", "array"],
+        "raid_recovery": ["host", "array", "%", "ETA"],
+        "raid_unknown": ["host", "array"]
+    }
 }

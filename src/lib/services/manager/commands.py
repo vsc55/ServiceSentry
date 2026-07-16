@@ -86,11 +86,9 @@ class ServiceCommandsStore:
                 'VALUES (?,?,?,?,?)',
                 (service_key, action, json.dumps(args or {}, ensure_ascii=False),
                  created_by, time.time()))
+            new_id = self._db.last_insert_id()   # this insert's id (not a racy SELECT MAX)
             self._db.commit()
-            row = self._db.fetchone(
-                f'SELECT MAX(id) FROM {_T} WHERE service_key=? AND action=?',
-                (service_key, action))
-            return int(row[0]) if row and row[0] is not None else 0
+            return new_id
         except Exception:  # pylint: disable=broad-except
             return 0
 

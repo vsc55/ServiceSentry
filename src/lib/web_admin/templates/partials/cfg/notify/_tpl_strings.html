@@ -8,10 +8,13 @@
 
 // ── Notification template editor ────────────────────────────────────────────
 
-// State: {lang: string, data: {defaults:{}, overrides:{lang:{}}}}
-let _notifTplState = { lang: 'en_EN', data: null };
+// State: the selected language + package, the discovered packages, and the in-progress edits
+// (custom text keyed by scoped key, spanning ALL packages so one Save persists the language).
+let _notifTplState = { lang: 'en_EN', packages: [], activePkg: '', edits: {} };
 
-// Template key groups: { groupKey, entries: [{key, labelKey, multiline, vars}] }
+// Email string template keys grouped, with the {var} placeholders each one accepts. The string
+// editor is now data-driven (text-packages), but the HTML-body editor still uses this to render
+// its "available variables" toolbar + reference table (see _tpl_html.html).
 const _NOTIF_TPL_GROUPS = [
     { key: 'notif_tpl_group_general', entries: [
         { key: 'footer',      labelKey: 'notif_tpl_lbl_footer',      multiline: true },
@@ -53,29 +56,28 @@ const _NOTIF_TPL_GROUPS = [
     ]},
 ];
 
-function _renderNotifTemplatesSection() {
-    return _renderNotifStringSection() + _renderNotifHtmlSection();
+function _renderNotifTemplatesSection(cfgCardOpen, cfgCardClose) {
+    return _renderNotifStringSection(cfgCardOpen, cfgCardClose)
+         + _renderNotifHtmlSection(cfgCardOpen, cfgCardClose);
 }
 
-function _renderNotifStringSection() {
-    const langOpts = SUPPORTED_LANGS.map(lc => {
-        const sel = _notifTplState.lang === lc ? ' selected' : '';
-        return `<option value="${escAttr(lc)}"${sel}>${esc(I18N['lang_' + lc] || lc)}</option>`;
-    }).join('');
+function _renderNotifStringSection(cfgCardOpen, cfgCardClose) {
+    const langOpts = SUPPORTED_LANGS.map(lc =>
+        `<option value="${escAttr(lc)}"${_notifTplState.lang === lc ? ' selected' : ''}>${esc(I18N['lang_' + lc] || lc)}</option>`).join('');
 
-    return `<div class="rounded-3 border overflow-hidden mb-3 cfg-card">
-        <div class="px-3 py-2 d-flex align-items-center gap-2 cfg-card-header">
-            <i class="bi bi-file-text text-primary"></i>
-            <strong class="small">${esc(t('notif_tpl_title'))}</strong>
-        </div>
-        <div class="px-3 py-3 cfg-fields">
+    return cfgCardOpen('cfgNotifTexts', '<i class="bi bi-file-text me-1"></i>', t('notif_tpl_title')) + `
             <p class="small text-muted mb-3">${esc(t('notif_tpl_desc'))}</p>
             <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
                 <label class="col-form-label col-form-label-sm fw-semibold text-nowrap" for="notifTplLangSel">
                     <i class="bi bi-translate me-1"></i>${esc(t('notif_tpl_lang_label'))}
                 </label>
-                <select id="notifTplLangSel" class="form-select form-select-sm" style="max-width:180px"
+                <select id="notifTplLangSel" class="form-select form-select-sm" style="max-width:170px"
                     onchange="_notifTplLangChanged(this.value)">${langOpts}</select>
+                <label class="col-form-label col-form-label-sm fw-semibold text-nowrap ms-2" for="notifTplPkgSel">
+                    <i class="bi bi-box-seam me-1"></i>${esc(t('notif_tpl_pkg_label'))}
+                </label>
+                <select id="notifTplPkgSel" class="form-select form-select-sm" style="max-width:230px"
+                    onchange="_notifTplPkgChanged(this.value)"></select>
                 <div class="ms-auto d-flex gap-2">
                     <button class="btn btn-sm btn-secondary" onclick="_notifTplResetLang()"
                         title="${escAttr(t('notif_tpl_reset_lang'))}">
@@ -90,93 +92,198 @@ function _renderNotifStringSection() {
                 <div class="text-center text-muted py-4 rounded cfg-toolbar-bg">
                     <span class="spinner-border spinner-border-sm me-1"></span>${esc(t('loading'))}
                 </div>
-            </div>
-        </div>
-    </div>`;
+            </div>` + cfgCardClose;
 }
 
 async function _notifTplLoad() {
-    // Load string overrides and HTML overrides in parallel
+    // Load text-override packages + HTML overrides in parallel.
     await Promise.all([_notifTplLoadStrings(), _notifHtmlLoad()]);
 }
 
+// Load every editable text package for the current language; seed the edits map from the
+// stored custom values (edits spans ALL packages so one Save persists everything for the lang).
 async function _notifTplLoadStrings() {
-    const data = await apiGet('/api/v1/notify/templates');
+    const data = await apiGet('/api/v1/notify/text-packages?lang=' + encodeURIComponent(_notifTplState.lang));
     if (!data) return;
-    _notifTplState.data = data;
+    _notifTplState.packages = data.packages || [];
+    _notifTplState.edits = {};
+    for (const p of _notifTplState.packages) {
+        for (const e of (p.entries || [])) {
+            if (e.custom) _notifTplState.edits[e.key] = e.custom;
+        }
+    }
+    if (!_notifTplState.packages.some(p => p.id === _notifTplState.activePkg)) {
+        _notifTplState.activePkg = (_notifTplState.packages[0] || {}).id || '';
+    }
     _notifTplRender();
 }
 
+function _notifTplPkgLabel(p) {
+    return p.name_key ? (t(p.name_key) || p.id) : (p.name || p.id);
+}
+
 function _notifTplRender() {
-    const container = document.getElementById('notifTplBody');
-    if (!container || !_notifTplState.data) return;
-    const { defaults, overrides, lang_strings } = _notifTplState.data;
-    const langOverrides = overrides[_notifTplState.lang] || {};
-    // Use lang-specific built-in strings as placeholder/reference (fall back to English defaults)
-    const langDefaults = lang_strings[_notifTplState.lang] || defaults;
-    let html = '';
-    for (const grp of _NOTIF_TPL_GROUPS) {
-        html += `<div class="mb-3">
-            <p class="small fw-semibold mb-2 pb-1 border-bottom" style="color:var(--bs-secondary-color)">${esc(t(grp.key))}</p>`;
-        for (const entry of grp.entries) {
-            const { key, labelKey, multiline, vars } = entry;
-            const defVal  = langDefaults[key] || defaults[key] || '';
-            const custVal = langOverrides[key] || '';
-            const label   = t(labelKey) || key;
-            const varBadge = vars
-                ? `<code class="ms-2 small text-muted">${esc(vars)}</code>`
-                : '';
-            const inputEl = multiline
-                ? `<textarea class="form-control form-control-sm notif-tpl-input" rows="2"
-                        data-tpl-key="${escAttr(key)}"
-                        placeholder="${escAttr(defVal)}"
-                        style="resize:vertical;font-size:.82rem">${esc(custVal)}</textarea>`
-                : `<input type="text" class="form-control form-control-sm notif-tpl-input"
-                        data-tpl-key="${escAttr(key)}"
-                        value="${escAttr(custVal)}"
-                        placeholder="${escAttr(defVal)}">`;
-            html += `<div class="row mb-2 align-items-start">
-                <label class="col-sm-4 col-form-label col-form-label-sm pt-1 text-truncate" title="${escAttr(label)}">
-                    ${esc(label)}${varBadge}
-                </label>
-                <div class="col-sm-8">${inputEl}
-                    <div class="small text-muted mt-1" style="white-space:pre-wrap;word-break:break-word;font-size:.78rem;opacity:.7">${esc(defVal)}</div>
-                </div>
-            </div>`;
+    // Package selector (grouped Core / Modules) + the active package's entries.
+    const sel = document.getElementById('notifTplPkgSel');
+    if (sel) {
+        const groups = { core: [], modules: [] };
+        for (const p of _notifTplState.packages) (groups[p.group] || (groups[p.group] = [])).push(p);
+        let opts = '';
+        for (const [gid, gkey] of [['core', 'notif_pkg_group_core'], ['modules', 'notif_pkg_group_modules']]) {
+            if (!(groups[gid] || []).length) continue;
+            opts += `<optgroup label="${escAttr(t(gkey) || gid)}">`;
+            for (const p of groups[gid])
+                opts += `<option value="${escAttr(p.id)}"${p.id === _notifTplState.activePkg ? ' selected' : ''}>${esc(_notifTplPkgLabel(p))}</option>`;
+            opts += `</optgroup>`;
         }
-        html += `</div>`;
+        sel.innerHTML = opts;
     }
-    container.innerHTML = html;
+    const container = document.getElementById('notifTplBody');
+    if (!container) return;
+    const pkg = _notifTplState.packages.find(p => p.id === _notifTplState.activePkg);
+    if (!pkg) { container.innerHTML = ''; return; }
+    // Legend once when any text in the package takes inserted values.
+    const _hasVars = (pkg.entries || []).some(e => /\{\d*\}/.test(e.default || ''));
+    let html = _hasVars
+        ? `<div class="small text-muted mb-3"><i class="bi bi-info-circle me-1"></i>${esc(t('notif_tpl_placeholders_hint'))}</div>`
+        : '';
+    for (const e of (pkg.entries || [])) {
+        const custVal = _notifTplState.edits[e.key] || '';
+        const multiline = (e.default || '').length > 60 || (e.default || '').includes('\\n');
+        // Show the default with placeholders numbered ({} → {0}, {1}, …) everywhere (placeholder,
+        // "use default", hint) so it's consistent with the tags and lets the admin reorder them.
+        // Both forms work at runtime, so writing the numbered default in is safe.
+        const defNum = _notifTplNumberVars(e.default);
+        const inputEl = multiline
+            ? `<textarea class="form-control form-control-sm" rows="2" data-tpl-key="${escAttr(e.key)}"
+                    oninput="_notifTplEdit(this)" placeholder="${escAttr(defNum)}"
+                    style="resize:vertical;font-size:.82rem">${esc(custVal)}</textarea>`
+            : `<input type="text" class="form-control form-control-sm" data-tpl-key="${escAttr(e.key)}"
+                    oninput="_notifTplEdit(this)" value="${escAttr(custVal)}" placeholder="${escAttr(defNum)}">`;
+        // Input-group: the text field + "use default" (writes the numbered default in so it can be
+        // edited) + "copy" (copies the effective value). The default is carried on the group.
+        html += `<div class="d-flex gap-2 mb-2 align-items-start">
+            <code class="small text-muted text-truncate pt-1" style="width:190px;flex-shrink:0" title="${escAttr(e.label)}">${esc(e.label)}</code>
+            <div class="flex-grow-1" style="min-width:0">
+                <div class="input-group input-group-sm" data-tpl-default="${escAttr(defNum)}" data-tpl-saved="${escAttr(e.custom || '')}">
+                    ${inputEl}
+                    <button class="btn btn-secondary" type="button" title="${escAttr(t('notif_tpl_undo'))}"
+                        onclick="_notifTplUndo(this)"><i class="bi bi-arrow-counterclockwise"></i></button>
+                    <button class="btn btn-secondary" type="button" title="${escAttr(t('notif_tpl_use_default'))}"
+                        onclick="_notifTplUseDefault(this)"><i class="bi bi-arrow-return-left"></i></button>
+                    <button class="btn btn-secondary" type="button" title="${escAttr(t('notif_tpl_copy'))}"
+                        onclick="_notifTplCopy(this)"><i class="bi bi-clipboard"></i></button>
+                    <button class="btn btn-secondary" type="button" title="${escAttr(t('notif_tpl_clean'))}"
+                        onclick="_notifTplClean(this)"><i class="bi bi-eraser"></i></button>
+                </div>
+                ${(e.vars && e.vars.length) ? `<div class="d-flex flex-wrap gap-1 mt-1">` + e.vars.map(v => {
+                    const ph = v.ph || ('{' + v.i + '}');
+                    // Named placeholders ({item}) are self-descriptive → no separate label; only
+                    // positional ones ({0}) need a name (host, usage %, …).
+                    const showName = v.name && ph !== ('{' + v.name + '}');
+                    return `<button class="btn btn-secondary btn-sm py-0 px-1" type="button" style="font-size:.7rem"
+                        data-ph="${escAttr(ph)}" title="${escAttr(t('notif_tpl_insert_var'))}"
+                        onclick="_notifTplInsertVar(this)"><code class="text-info">${esc(ph)}</code>${showName ? ' ' + esc(v.name) : ''}</button>`;
+                }).join('') + `</div>` : ''}
+                <div class="small text-muted mt-1" style="white-space:pre-wrap;word-break:break-word;font-size:.78rem;opacity:.7">${esc(defNum)}</div>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html || `<div class="text-muted small py-3">${esc(t('notif_tpl_empty') || '—')}</div>`;
+}
+
+function _notifTplEdit(el) {
+    const key = el.dataset.tplKey, val = el.value;
+    if (val && val.trim()) _notifTplState.edits[key] = val;
+    else delete _notifTplState.edits[key];
+}
+
+// Show a template's placeholders numbered ({} → {0}, {1}, …) in the hint, so the admin sees
+// which position each inserted value is and can reorder them (write {2} before {0}).
+function _notifTplNumberVars(s) {
+    let i = 0;
+    return (s || '').replace(/\{\}/g, () => `{${i++}}`);
+}
+
+// Insert a placeholder (positional {i} or named {item}) at the cursor of this row's field.
+function _notifTplInsertVar(btn) {
+    const wrap = btn.closest('.flex-grow-1');
+    const inp = wrap && wrap.querySelector('[data-tpl-key]');
+    if (!inp) return;
+    const ph = btn.dataset.ph || '';
+    const s = (inp.selectionStart != null) ? inp.selectionStart : inp.value.length;
+    const e = (inp.selectionEnd != null) ? inp.selectionEnd : inp.value.length;
+    inp.value = inp.value.slice(0, s) + ph + inp.value.slice(e);
+    inp.focus();
+    inp.selectionStart = inp.selectionEnd = s + ph.length;
+    _notifTplEdit(inp);
+}
+
+// "Use default": write the i18n default into the field so it can be edited from it.
+function _notifTplUseDefault(btn) {
+    const grp = btn.closest('.input-group');
+    const inp = grp && grp.querySelector('[data-tpl-key]');
+    if (!grp || !inp) return;
+    inp.value = grp.dataset.tplDefault || '';
+    _notifTplEdit(inp);
+    inp.focus();
+}
+
+// "Undo": reload this field's last-saved value (discard the unsaved edit) — no full reload.
+function _notifTplUndo(btn) {
+    const grp = btn.closest('.input-group');
+    const inp = grp && grp.querySelector('[data-tpl-key]');
+    if (!grp || !inp) return;
+    inp.value = grp.dataset.tplSaved || '';
+    _notifTplEdit(inp);
+    inp.focus();
+}
+
+// "Clean": empty the field → the override is dropped and the notification falls back to i18n.
+function _notifTplClean(btn) {
+    const grp = btn.closest('.input-group');
+    const inp = grp && grp.querySelector('[data-tpl-key]');
+    if (!grp || !inp) return;
+    inp.value = '';
+    _notifTplEdit(inp);
+    inp.focus();
+}
+
+// "Copy": copy the effective value (the custom text, or the default when empty).
+function _notifTplCopy(btn) {
+    const grp = btn.closest('.input-group');
+    const inp = grp && grp.querySelector('[data-tpl-key]');
+    if (!grp || !inp) return;
+    const text = inp.value || grp.dataset.tplDefault || '';
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+        .then(() => showToast(t('copied') || 'Copied', 'success'))
+        .catch(() => { inp.select(); document.execCommand && document.execCommand('copy'); });
+}
+
+function _notifTplPkgChanged(id) {
+    _notifTplState.activePkg = id;
+    _notifTplRender();
 }
 
 function _notifTplLangChanged(lang) {
     _notifTplState.lang = lang;
-    // Keep HTML editor in sync
-    _notifHtmlState.lang = lang;
+    _notifHtmlState.lang = lang;           // keep the HTML editor in sync
     const htmlSel = document.getElementById('notifHtmlLangSel');
     if (htmlSel) htmlSel.value = lang;
     _notifHtmlRefresh();
-    if (_notifTplState.data) {
-        _notifTplRender();
-    } else {
-        _notifTplLoad();
-    }
+    _notifTplLoadStrings();                 // re-fetch (defaults + overrides are per-language)
 }
 
 async function _notifTplSave() {
-    const inputs = document.querySelectorAll('#notifTplBody .notif-tpl-input');
-    const payload = {};
-    inputs.forEach(inp => {
-        const key = inp.dataset.tplKey;
-        const val = inp.value.trim();
-        if (key && val) payload[key] = val;
-    });
-    const r = await apiPut(`/api/v1/notify/templates/${encodeURIComponent(_notifTplState.lang)}`, payload);
+    // One PUT persists ALL overrides for the language (email:* → email store, core/mod:* → generic).
+    const r = await apiPut(`/api/v1/notify/text-packages/${encodeURIComponent(_notifTplState.lang)}`,
+                           { ..._notifTplState.edits });
     if (r && r.ok) {
-        // Update local state
-        if (_notifTplState.data) {
-            _notifTplState.data.overrides[_notifTplState.lang] = r.overrides || {};
-        }
+        // The saved baseline is now the current edits — sync each entry's `custom` so per-field
+        // Undo reverts to what was just saved.
+        for (const p of _notifTplState.packages)
+            for (const e of (p.entries || [])) e.custom = _notifTplState.edits[e.key] || '';
+        _notifTplRender();
         showToast(t('notif_tpl_saved'), 'success');
     } else {
         showToast((r?.error) || t('connection_error'), 'danger');
@@ -185,15 +292,14 @@ async function _notifTplSave() {
 
 function _notifTplResetLang() {
     showConfirmModal(t('notif_tpl_reset_lang_confirm'), async () => {
-        const r = await apiDelete(`/api/v1/notify/templates/${encodeURIComponent(_notifTplState.lang)}`);
-        if (r && r.status === 200) {
-            if (_notifTplState.data) {
-                delete _notifTplState.data.overrides[_notifTplState.lang];
-            }
-            _notifTplRender();
+        // Clearing = PUT an empty set (drops both stores for this language → back to i18n).
+        const r = await apiPut(`/api/v1/notify/text-packages/${encodeURIComponent(_notifTplState.lang)}`, {});
+        if (r && r.ok) {
+            _notifTplState.edits = {};
+            _notifTplLoadStrings();
             showToast(t('notif_tpl_reset_ok'), 'success');
         } else {
-            showToast((r?.data?.error) || t('connection_error'), 'danger');
+            showToast((r?.error) || t('connection_error'), 'danger');
         }
     });
 }

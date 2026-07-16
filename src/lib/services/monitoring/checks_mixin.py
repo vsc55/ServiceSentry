@@ -39,6 +39,19 @@ class _ChecksMixin:
         dir_base = os.path.dirname(self._modules_dir)
         monitor = Monitor(dir_base, self._config_dir,
                           self._modules_dir, self._var_dir)
+        # An on-demand "Run all" notifies exactly like the daemon cycle: give the transient
+        # monitor a cycle notifier routed through this host's core notification router (same as
+        # the persistent monitor in manager._monitoring_build_monitor). It is state-change based
+        # (the shared check_state is the baseline), so an unchanged service sends nothing; the
+        # executor flushes it at the end of the batch.
+        try:
+            from lib.core.notify.monitor_notifier import MonitorNotifier  # noqa: PLC0415
+            # A manual run routes as a single ``manual_run`` event (one routing row),
+            # separate from the daemon's per-kind down/recovery/warn — the digest still
+            # shows each check's real state.
+            monitor._notifier = MonitorNotifier(self, route_kind='manual_run')
+        except Exception:  # pylint: disable=broad-except
+            pass
 
         if requested == 'all':
             module_names = monitor._get_enabled_modules()

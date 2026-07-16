@@ -41,5 +41,19 @@
     },
     "new_item_key_label": "UPS name or identifier:",
     "rename_item_prompt": "Enter new UPS name or identifier:",
-    "collections": {"list": "UPS Units"}
+    "collections": {"list": "UPS Units"},
+    "messages": {
+        "ups_error":           "UPS: {} - Error: {} 💥",
+        "ups_online":          "UPS: {} - Online ({}){} ✅",
+        "ups_alert":           "UPS: {} - {} ({}) {}",
+        "ups_reason_low_batt": "LOW BATTERY",
+        "ups_reason_on_batt":  "on battery",
+        "ups_reason_status":   "status {}"
+    },
+    "messages_vars": {
+        "ups_error": ["UPS", "error"],
+        "ups_online": ["UPS", "status", "detail"],
+        "ups_alert": ["UPS", "reasons", "status", "icon"],
+        "ups_reason_status": ["status"]
+    }
 }

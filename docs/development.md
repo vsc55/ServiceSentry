@@ -193,7 +193,7 @@ Consulta [architecture.md](architecture.md#convenciones-de-código) para la list
 
 ## Añadir un Nuevo Módulo
 
-Consulta [watchful_guide.md](watchful_guide.md) para la guía completa paso a paso.
+Consulta [watchful-guide.md](watchful-guide.md) para la guía completa paso a paso.
 
 Resumen rápido:
 

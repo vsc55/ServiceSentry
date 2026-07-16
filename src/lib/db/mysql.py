@@ -18,6 +18,7 @@ from .schema import ColumnInfo, IndexInfo
 try:
     import pymysql
     import pymysql.cursors
+    from pymysql.constants import CLIENT as _PYMYSQL_CLIENT
     _HAS_PYMYSQL = True
 except ImportError:  # pragma: no cover
     _HAS_PYMYSQL = False
@@ -26,6 +27,7 @@ except ImportError:  # pragma: no cover
 class MySQLConnector(BaseConnector):
     """Thread-safe MySQL/MariaDB connector via PyMySQL."""
 
+    KIND              = 'mysql'
     DDL_AUTOINCREMENT = 'INT AUTO_INCREMENT PRIMARY KEY'
     DDL_REAL          = 'DOUBLE'
     DDL_TEXT          = 'TEXT'
@@ -56,6 +58,10 @@ class MySQLConnector(BaseConnector):
             'password': cfg.get('password', ''),
             'charset': 'utf8mb4',
             'autocommit': False,
+            # Report MATCHED rows (not just CHANGED) from UPDATE, matching SQLite/PostgreSQL —
+            # so the "UPDATE; if rowcount == 0: INSERT" upsert pattern (event cursor/cooldowns)
+            # doesn't wrongly INSERT (→ UNIQUE violation) when re-writing an unchanged value.
+            'client_flag': _PYMYSQL_CLIENT.FOUND_ROWS,
             # InnoDB defaults to REPEATABLE READ: a long-lived read-only connection
             # (e.g. a service's config-watch thread) pins its snapshot at the first
             # SELECT and never sees another process's committed writes — so a config
@@ -63,6 +69,11 @@ class MySQLConnector(BaseConnector):
             # pods until they reconnect (it made an external syslog start flip back to
             # stopped). This control plane shares one DB across processes, so every
             # reader must see the latest committed state: use READ COMMITTED.
+            # NB: use the standard statement form (not the ``transaction_isolation`` system
+            # variable) — it works on both MySQL 5.7/8 AND MariaDB 10.x (whose variable is
+            # ``tx_isolation`` until 11.1). String concatenation portability (``||`` vs
+            # ``CONCAT``) is handled per-dialect in the queries that need it (see
+            # history.get_index), NOT by flipping sql_mode here.
             'init_command': 'SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED',
         }
 
@@ -81,6 +92,29 @@ class MySQLConnector(BaseConnector):
 
     def _adapt_sql(self, sql: str) -> str:
         return sql.replace('?', '%s')
+
+    def _apply_rebuild(self, spec, actual_cols, actual_indexes) -> None:
+        """Atomic table rebuild for MySQL/MariaDB, where DDL auto-commits (so the base's
+        drop-then-rename inside a transaction is NOT atomic and could lose data if it fails
+        mid-way).  Build the populated replacement, then swap it in with a single
+        ``RENAME TABLE old→backup, new→old`` (MySQL guarantees the multi-table rename is
+        atomic); the original stays intact as a backup until the swap succeeds, then is dropped.
+        """
+        from .schema import create_table_ddl  # noqa: PLC0415
+        q = self.quote_ident
+        tmp, extras, collist, select_list, has_common = self._rebuild_copy_plan(spec, actual_cols)
+        bak = f'__ssbak_{spec.name}'
+        self.execute_ddl(f'DROP TABLE IF EXISTS {q(tmp)}')
+        self.execute_ddl(f'DROP TABLE IF EXISTS {q(bak)}')
+        self.execute(create_table_ddl(spec, self._type_map, q, name=tmp, extra_columns=extras))
+        if has_common:
+            self.execute(f'INSERT INTO {q(tmp)} ({collist}) '
+                         f'SELECT {select_list} FROM {q(spec.name)}')
+        self.commit()
+        # Atomic swap — if anything above failed, the original table is untouched.
+        self.execute_ddl(f'RENAME TABLE {q(spec.name)} TO {q(bak)}, {q(tmp)} TO {q(spec.name)}')
+        self._recreate_indexes_after_rebuild(spec, actual_indexes)
+        self.execute_ddl(f'DROP TABLE IF EXISTS {q(bak)}')
 
     # ── Schema ────────────────────────────────────────────────────────────────
 
@@ -121,6 +155,9 @@ class MySQLConnector(BaseConnector):
             return {row[0] for row in cur.fetchall()}
 
     def describe_table(self, table: str) -> list[ColumnInfo]:
+        """Introspect *table*'s columns from ``information_schema.columns`` (current
+        database), ordered by ``ordinal_position``; PK columns are flagged from
+        ``column_key = 'PRI'``."""
         conn = self._conn()
         with conn.cursor() as cur:
             cur.execute(
@@ -140,6 +177,9 @@ class MySQLConnector(BaseConnector):
             ]
 
     def list_indexes(self, table: str) -> list[IndexInfo]:
+        """List *table*'s secondary indexes from ``information_schema.statistics``
+        (current database), grouping multi-column indexes by name in
+        ``seq_in_index`` order. The implicit ``PRIMARY`` index is excluded."""
         conn = self._conn()
         grouped: dict[str, list] = {}
         unique_flag: dict[str, bool] = {}

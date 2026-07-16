@@ -23,6 +23,8 @@ except Exception:
 
 
 def is_available() -> bool:
+    """Return True when the optional ``python3-saml`` package is installed; when
+    False, the SAML2 SSO routes are not registered."""
     return _HAS_SAML2
 
 
@@ -190,6 +192,13 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
         }
         wa._users[username] = user
     else:
+        # Never auto-convert a LOCAL (or unmarked) account to SSO on a username collision
+        # (account-takeover guard — see the OIDC provider for the rationale). SCIM/other
+        # SSO accounts still re-link.
+        if existing.get('auth_source', 'local') in ('', 'local'):
+            wa._dbg(f"> Auth/SAML2 >> username {username!r} collides with a local account; "
+                    f"refusing auto-conversion to SSO", DebugLevel.warning)
+            return None
         user = existing
         user['auth_source']    = 'saml2'
         user['auth_source_id'] = name_id

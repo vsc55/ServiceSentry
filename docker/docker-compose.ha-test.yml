@@ -74,6 +74,8 @@ services:
   web:
     <<: *app-build
     container_name: ss-ha-web
+    # Non-root: web runs no in-process checks here (*_EMBEDDED=0), so no NET_RAW/privileged port needed.
+    user: ssentry
     restart: unless-stopped
     networks: [ss]
     ports:
@@ -109,6 +111,7 @@ services:
     volumes:
       - config:/etc/ServiSesentry
       - vardata:/var/lib/ServiSesentry
+    # Runs as root: the ping module uses pythonping (raw ICMP), which needs NET_RAW as an *ambient* capability — not grantable to a non-root user via cap_add. Grant ambient NET_RAW (or drop ping) to run this non-root.
     cap_add: [NET_RAW]
     deploy:
       replicas: 2
@@ -125,6 +128,7 @@ services:
   # ── Event processor × 2 (leader-gated: 1 Leader + 1 Standby) ────────────────
   events:
     <<: *app-build
+    user: ssentry
     restart: unless-stopped
     networks: [ss]
     volumes:
@@ -147,7 +151,12 @@ services:
   # control plane, not ingestion.
   syslog:
     <<: *app-build
+    user: ssentry
     restart: unless-stopped
+    sysctls:
+      # Let the non-root process bind the privileged syslog port (514) inside the
+      # container (no host port is published here, but the listener still binds 514).
+      - net.ipv4.ip_unprivileged_port_start=0
     networks: [ss]
     volumes:
       - config:/etc/ServiSesentry
@@ -164,6 +173,7 @@ services:
       web:
         condition: service_healthy
 
+# NOTE: web/syslog/events run as the non-root 'ssentry' user (uid 1000). On a FRESH deploy the named volumes inherit that ownership from the image; for an EXISTING install whose volumes are root-owned, chown them once: docker run --rm -v <vol>:/d alpine chown -R 1000:1000 /d
 volumes:
   config:
   vardata:

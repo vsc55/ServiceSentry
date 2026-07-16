@@ -9,7 +9,7 @@
 ServiceSentry corre igual en Kubernetes que en la topología de microservicios de
 Docker (ver [docker.md](docker.md)): **un Deployment por rol** que comparten una
 **base de datos** y se coordinan por el **plano de control distribuido** (ver
-[architecture.md → Plano de control distribuido](architecture.md#plano-de-control-distribuido-servicios-en-otros-procesos--pods)).
+[services.md → Plano de control distribuido](services.md#modo-microservicios-plano-de-control-distribuido)).
 
 - **web** — panel de administración (`SS_*_EMBEDDED=0`: no programa checks, no liga
   syslog, no evalúa reglas; solo checks on-demand y la UI).
@@ -236,7 +236,7 @@ spec:
 `worker` y `events` admiten **varias réplicas con failover**: un **lease de líder**
 en BD hace que solo una haga el trabajo y las demás queden en **hot-standby**; si la
 activa cae, otra toma el relevo en ~30 s (ver
-[architecture.md → Alta disponibilidad](architecture.md#alta-disponibilidad-lease-de-líder--hot-standby)).
+[services.md → Alta disponibilidad](services.md#alta-disponibilidad-lease-de-líder--hot-standby)).
 Así que puedes poner `replicas: 2` en esos Deployments para tolerar la caída de un
 pod sin duplicar checks ni alertas. La pestaña **Servicios** marca cuál es **Líder**
 y cuáles **En espera**.

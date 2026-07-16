@@ -26,5 +26,13 @@
         "alerts": "Alerts",
         "execution": "Execution"
     },
-    "collections": {"list": "CPU checks"}
+    "collections": {"list": "CPU checks"},
+    "messages": {
+        "cpu_ok":   "Normal CPU ({}) used {}% ✅",
+        "cpu_high": "Excessive CPU ({}) used {}% ⚠️"
+    },
+    "messages_vars": {
+        "cpu_ok":   ["host", "usage %"],
+        "cpu_high": ["host", "usage %"]
+    }
 }

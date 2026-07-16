@@ -1,6 +1,6 @@
 # ServiceSentry — Documentación
 
-> Sistema de monitorización de servicios e infraestructura con notificaciones por Telegram e interfaz web de administración.
+> Sistema de monitorización de servicios e infraestructura con notificaciones multicanal (Telegram, Email, Webhooks, Microsoft Teams) e interfaz web de administración.
 
 **Autor:** Javier Pastor (VSC55) | **Licencia:** GPL v3 | **Python:** 3.10+
 
@@ -16,19 +16,19 @@
 | [architecture.md](architecture.md) | Diagrama de componentes, jerarquía de clases, estructura de directorios, flujo de ejecución, modelo de concurrencia |
 | [discovery.md](discovery.md) | Sistemas de descubrimiento (self-describing): permisos, widgets de Overview, servicios embebidos, tipos de credencial, perfiles de host, tablas de módulo, provisión Entra y registro de config — descriptores, flujos y datos |
 | [services.md](services.md) | Servicios de fondo (monitor, syslog, eventos, fail2ban): qué hacen, cómo se crean/descubren, embebido vs standalone, estado y comunicación en modo microservicios (BD compartida, comandos, lease de líder, control-plane) y alta disponibilidad |
-| [notifications.md](notifications.md) | Notificaciones: canales (Telegram, Email SMTP/M365/Gmail, Webhooks), el dispatcher central, flujo evento→notificación, matriz de routing por evento, firma HMAC y plantillas |
+| [notifications.md](notifications.md) | Notificaciones: arquitectura (contexto→router→registros de canales y eventos), canales (Telegram HTML, Email SMTP/M365/Gmail, Webhooks HMAC, Microsoft Teams), matriz de routing dinámica por evento, notificación agrupada del monitor, severidad *warning*, y el sistema de textos/plantillas (resolución custom→i18n, listados editables y esquema de tags) |
 | [hosts.md](hosts.md) | Modelo host-céntrico: un host = dirección + perfiles de conexión por protocolo (SSH/SNMP/DB…), referencia por `host_uid`, ejecución host-aware (local/SSH), resolución y migración asistida inline→host |
 | [configuration.md](configuration.md) | config.json (database, syslog, syslog_db, ldap, oidc, saml2, email, notifications, webhooks, modules…), receptor syslog, gestor de eventos, configuración de módulos en BD (tablas `module_config`/`module_config_items`), estado de checks, opciones CLI, variables de entorno (`SS_*`), sistema de debug |
 | [cli.md](cli.md) | CLI de gestión one-shot: subcomandos `user`/`group` (alta/baja/rol/contraseña/grupos), `status` y `reload` de servicios; contexto headless, capa de servicio compartida en `lib/core` (rutas web + CLI) y auto-discovery de servicios |
 | [modules.md](modules.md) | Los 19 módulos integrados: referencia de configuración, campos y flujo de cada uno |
-| [web_admin.md](web_admin.md) | Interfaz web Flask: características, roles (63 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
+| [web-admin.md](web-admin.md) | Interfaz web Flask: características, roles (63 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
 | [security.md](security.md) | Autenticación (local/LDAP/OIDC/SAML2), RBAC, sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |
 | [sso-entra.md](sso-entra.md) | SSO con Microsoft Entra ID (OIDC y SAML2): asistente de registro automático, flujo, campos de config y **limitaciones** de Graph (config básica de SAML manual, dominios no verificados, `instantiate`, `servicePrincipalNames`) + resolución de problemas |
 | [ssh-hardening.md](ssh-hardening.md) | Endurecer los hosts monitorizados: cuenta dedicada, comando forzado + envoltorio con allowlist ([ssentry-wrap](ssentry-wrap)), sudoers mínimo para remediación |
 | [development.md](development.md) | Setup local, tests, pytest, depuración en VS Code, convenciones de código, dependencias |
-| [watchful_guide.md](watchful_guide.md) | Guía paso a paso para crear un nuevo módulo de monitorización |
+| [watchful-guide.md](watchful-guide.md) | Guía paso a paso para crear un nuevo módulo de monitorización |
 | [schema.md](schema.md) | Referencia completa de `schema.json`: todas las propiedades de campo, meta-claves, archivos de idioma y pipeline de `discover_schemas` |
-| [i18n.md](i18n.md) | Sistema de internacionalización: arquitectura de dos niveles, pipeline de `discover_schemas`, añadir idiomas |
+| [i18n.md](i18n.md) | Sistema de internacionalización: capa global de UI + capa por módulo, textos de notificación (claves `notif_*`, overlay `email_tpl`, secciones `messages`/`messages_vars` y esquemas de tags), pipeline de `discover_schemas`, añadir idiomas |
 | [tests.md](tests.md) | Inventario completo de tests: qué comprueba cada test, condiciones de OK y error, organizado por grupos |
 
 ---
@@ -39,7 +39,7 @@ ServiceSentry es una herramienta de monitorización para sistemas que:
 
 - Ejecuta comprobaciones periódicas sobre servicios, discos, RAID, RAM, temperaturas, webs, bases de datos, ping, SNMP, etc.
 - Detecta **cambios de estado** — no envía notificación si el estado no ha cambiado (sin spam).
-- Envía alertas por **Telegram**, **Email** (SMTP / Microsoft 365 / Gmail) y **Webhooks** (con firma HMAC), con matriz de routing por evento.
+- Envía alertas por **Telegram**, **Email** (SMTP / Microsoft 365 / Gmail), **Webhooks** (con firma HMAC) y **Microsoft Teams**, con matriz de routing por evento y severidad *warning* (aviso ámbar) además de caído/recuperado.
 - **Receptor syslog** integrado (RFC 3164/5424, UDP/TCP/TLS) con BD dedicada opcional, y un **gestor de eventos** que notifica reglas sobre eventos de auditoría o syslog.
 - Incluye **interfaz web de administración** (Flask) con RBAC (63 permisos), grupos, modo oscuro, historial con gráficas e i18n.
 - **Autenticación externa** opcional: LDAP/AD, SSO OIDC/OAuth2 y SAML2, con sincronización de usuarios y mapeo de grupos a roles.

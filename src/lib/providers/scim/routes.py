@@ -42,6 +42,15 @@ from lib.security.ratelimit import RateLimiter
 
 
 def register(app, wa):
+    """Register the ``/scim/v2/*`` provisioning endpoints on *app*.
+
+    Wires the discovery, Users and Groups routes and installs a ``before_request``
+    gate that enforces the SCIM bearer token with per-IP rate limiting (and feeds
+    the internal fail2ban). The whole ``/scim/`` prefix is CSRF-exempt (token, not
+    session, auth). Each handler delegates to a per-request :class:`ScimService`.
+    """
+    # Token-authenticated (Bearer); exempt from the session CSRF check.
+    wa._register_csrf_exempt('/scim/')
     if not hasattr(wa, '_scim_ratelimit'):
         wa._scim_ratelimit = RateLimiter()
 

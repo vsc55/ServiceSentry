@@ -7,7 +7,8 @@ def webhooks_stat(wa) -> dict:
     """Stat content for the ``webhooks`` card: configured total + an enabled badge."""
     total = enabled = 0
     try:
-        wh = wa._load_webhooks()
+        from lib.core.notify.webhook import channel as _wh_channel  # noqa: PLC0415
+        wh = _wh_channel.load(wa._notify)
         if isinstance(wh, list):
             total = len(wh)
             enabled = sum(1 for w in wh if isinstance(w, dict) and w.get('enabled', True))

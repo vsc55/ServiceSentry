@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="{{ lang }}" data-bs-theme="{{ 'dark' if dark_mode else 'light' }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview 2 (Alpine) · ServiceSentry</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}">
+<!-- Mismo CSS que producción: reutiliza .dashboard-grid / .dw / .dw-c<n> / .dw-content / ss-* -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/web_admin.css') }}">
+<style>
+  body { padding: 1.25rem 1.75rem 4rem; }
+  [x-cloak] { display: none !important; }
+  .dw { position: relative; }
+  .dw.dragging { opacity: .5; box-shadow: 0 0 0 2px var(--bs-primary); border-radius: .6rem; }
+  /* barra de edición propia (solo en modo edición) */
+  .ov2-edit { display: flex; align-items: center; gap: .4rem; padding: .2rem .45rem; margin-bottom: .35rem;
+    background: var(--bs-secondary-bg); border: 1px dashed var(--bs-border-color); border-radius: .5rem; cursor: grab; }
+  .ov2-edit:active { cursor: grabbing; }
+  .ov2-filter { position: absolute; top: .45rem; right: .55rem; z-index: 3; }
+  .ov2-resize { height: 12px; cursor: ns-resize; display: flex; align-items: center; justify-content: center;
+    border-radius: 0 0 .6rem .6rem; background: var(--bs-tertiary-bg); }
+  .ov2-resize::after { content: ''; width: 34px; height: 3px; border-radius: 2px;
+    background: var(--bs-secondary-color); opacity: .6; }
+</style>
+</head>
+
+<body>
+<div class="container-fluid" x-data="overview2()" x-cloak>
+
+  <div class="d-flex align-items-center mb-3 gap-2 flex-wrap">
+    <h4 class="mb-0"><i class="bi bi-grid-1x2-fill me-2"></i>Overview 2
+      <span class="badge text-bg-warning align-middle">Alpine.js · datos reales</span></h4>
+    <div class="ms-auto d-flex gap-2">
+      <button class="btn btn-sm btn-secondary" @click="reloadAll()" :disabled="editing">
+        <i class="bi bi-arrow-clockwise"></i> <span x-text="t('refresh') || 'Refrescar'"></span></button>
+      <button class="btn btn-sm" :class="editing ? 'btn-warning' : 'btn-secondary'" @click="editing = !editing">
+        <i class="bi" :class="editing ? 'bi-check2' : 'bi-pencil'"></i>
+        <span x-text="editing ? (t('dashboard_save')||'Hecho') : (t('dashboard_edit')||'Editar')"></span></button>
+      <button class="btn btn-sm btn-secondary" @click="reset()" x-show="editing">
+        <i class="bi bi-arrow-counterclockwise"></i> <span x-text="t('dashboard_reset')||'Reset'"></span></button>
+      <a class="btn btn-sm btn-secondary" href="{{ url_for('overview') }}"
+         title="Comparar con el Overview de producción"><i class="bi bi-box-arrow-up-right"></i> /overview</a>
+    </div>
+  </div>
+
+  <!-- widgets ocultos (modo edición) -->
+  <div class="alert alert-secondary py-2 d-flex flex-wrap gap-2 align-items-center mb-3"
+       x-show="editing && hiddenWidgets.length">
+    <span class="small fw-semibold me-1" x-text="(t('dashboard_hidden')||'Ocultos')+':'"></span>
+    <template x-for="w in hiddenWidgets" :key="w.id">
+      <button class="btn btn-sm btn-outline-secondary py-0" @click="show(w)">
+        <i class="bi" :class="w.icon"></i> <span x-text="w.label"></span> <i class="bi bi-plus-lg"></i>
+      </button>
+    </template>
+  </div>
+
+  <div class="dashboard-grid" :class="{ 'dashboard-edit': editing }">
+    <template x-for="w in visibleWidgets" :key="w.id">
+      <div class="dw" :class="[ 'dw-c'+w.cols, dragId===w.id ? 'dragging' : '' ]" :data-wid="w.id">
+
+        <!-- barra de edición: arrastrar por aquí (pointer) + ancho −/+ + ocultar -->
+        <div class="ov2-edit" x-show="editing" @pointerdown="dragStart(w, $event)">
+          <i class="bi bi-grip-vertical text-secondary"></i>
+          <span class="small fw-semibold text-truncate" style="max-width:9em" x-text="w.label"></span>
+          <div class="ms-auto d-flex align-items-center gap-1">
+            <button class="btn btn-sm btn-secondary py-0 px-2" @click.stop="setCols(w,-1)" title="Menos ancho">−</button>
+            <span class="small fw-semibold" style="min-width:1.5em;text-align:center" x-text="w.cols"></span>
+            <button class="btn btn-sm btn-secondary py-0 px-2" @click.stop="setCols(w,1)" title="Más ancho">+</button>
+            <button class="btn btn-sm btn-secondary py-0 px-1" @click.stop="hide(w)" title="Ocultar">
+              <i class="bi bi-eye-slash"></i></button>
+          </div>
+        </div>
+
+        <!-- filtro de tabla (real: re-fetch con ?param=), visible fuera de edición -->
+        <select class="form-select form-select-sm py-0 w-auto ov2-filter" x-show="w.filter && !editing"
+                x-model="w.fval" @change="load(w)">
+          <template x-for="o in (w.filter ? w.filter.options : [])" :key="o.v">
+            <option :value="o.v" x-text="labelFor(o)"></option>
+          </template>
+        </select>
+
+        <!-- contenido: markup EXACTO de producción (misma paleta/acentos/nombres) -->
+        <div class="dw-content"
+             :style="w.hasH && w.h!=='auto' ? `flex:none;height:${w.h}px;overflow-y:auto` : ''"
+             x-html="renderCard(w)"></div>
+
+        <!-- tirador de alto: arrastrar para redimensionar (widgets con altura, p.ej. tablas) -->
+        <div class="ov2-resize" x-show="editing && w.hasH" @pointerdown.stop="resizeStart(w, $event)"
+             title="Arrastra para cambiar el alto"></div>
+      </div>
+    </template>
+  </div>
+
+  <p class="small text-secondary mt-4 mb-0">
+    <i class="bi bi-info-circle"></i> Página experimental. Mismos widgets autodescubiertos, misma API
+    (<code>/api/v1/overview/widget/&lt;id&gt;</code>) y <strong>mismo diseño</strong> que <code>/overview</code>
+    (reutiliza <code>web_admin.css</code> + la paleta de acentos y el markup de tarjeta de producción);
+    frontend con Alpine.js (local, sin build). El layout se guarda en <strong>tu cuenta</strong> vía
+    <code>PUT /api/v1/users/me/preferences</code> (el mismo <code>dashboard_layout</code> que <code>/overview</code>).
+    Las tablas reutilizan la tarjeta de producción pero con un renderer de celdas genérico (las celdas muy
+    específicas se simplifican).
+    <br><i class="bi bi-shield-exclamation text-warning"></i> <strong>Nota de seguridad:</strong>
+    esta página sirve una CSP propia con <code>'unsafe-eval'</code> (solo aquí) porque Alpine evalúa sus
+    expresiones con <code>new Function()</code>, que la CSP global prohíbe.
+  </p>
+</div>
+
+<!-- datos inyectados por el servidor -->
+<script>
+  const CATALOG = {{ overview_widgets | tojson }};
+  const LABELS  = {{ i18n | tojson }};
+  const USERNAME = {{ username | tojson }};
+  const SAVED   = {{ saved_layout | tojson }};   // el dashboard_layout de la cuenta
+  const CSRF    = {{ csrf_token | tojson }};
+  const ROLE_NAMES = {{ role_names | tojson }};  // uid -> nombre de rol (resuelve badges)
+  const ROLE_KEYS  = {{ role_keys | tojson }};   // uid -> key builtin (admin/editor/viewer)
+  const BUILTIN_ROLE_BADGES = { admin:'bg-danger', editor:'bg-primary', viewer:'bg-secondary', none:'bg-dark' };
+  function t(k){ return (k && LABELS[k]) || k || ''; }
+  function tf(k){ let s = t(k); for (let i=1;i<arguments.length;i++) s = s.replace('{}', arguments[i]); return s; }
+  function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+
+<!-- Alpine.js local (sin bundler) -->
+<script defer src="{{ url_for('static', filename='js/alpine.min.js') }}"></script>
+<script>
+const PREFS_URL = '/api/v1/users/me/preferences';
+
+// ── Paleta de acentos: COPIA EXACTA de _widgets.html (_DW_STYLES) ─────────────────
+const _DW_STYLES = {
+  grey:   { accent:'linear-gradient(90deg,#94a3b8,#cbd5e1)', bg:'var(--bs-secondary-bg)',   color:'var(--bs-secondary-color)' },
+  amber:  { accent:'linear-gradient(90deg,#f59e0b,#ef4444)', bg:'rgba(245,158,11,.12)',     color:'#f59e0b' },
+  pink:   { accent:'linear-gradient(90deg,#ec4899,#f43f5e)', bg:'rgba(236,72,153,.12)',     color:'#ec4899' },
+  purple: { accent:'linear-gradient(90deg,#a855f7,#ec4899)', bg:'rgba(168,85,247,.12)',     color:'#a855f7' },
+  indigo: { accent:'linear-gradient(90deg,#6366f1,#8b5cf6)', bg:'rgba(99,102,241,.12)',     color:'#6366f1' },
+  teal:   { accent:'linear-gradient(90deg,#14b8a6,#0ea5e9)', bg:'rgba(20,184,166,.12)',     color:'#14b8a6' },
+  blue:   { accent:'linear-gradient(90deg,#0ea5e9,#6366f1)', bg:'rgba(14,165,233,.12)',     color:'#0ea5e9' },
+  green:  { accent:'linear-gradient(90deg,#22c55e,#10b981)', bg:'rgba(34,197,94,.12)',      color:'#22c55e' },
+  red:    { accent:'linear-gradient(90deg,#ef4444,#f97316)', bg:'rgba(239,68,68,.12)',      color:'#ef4444' },
+  cyan:   { accent:'linear-gradient(90deg,#06b6d4,#3b82f6)', bg:'rgba(6,182,212,.12)',      color:'#06b6d4' },
+  orange: { accent:'linear-gradient(90deg,#f59e0b,#f97316)', bg:'rgba(245,158,11,.12)',     color:'#f59e0b' },
+  emerald:{ accent:'linear-gradient(90deg,#10b981,#14b8a6)', bg:'rgba(16,185,129,.12)',     color:'#10b981' },
+  violet: { accent:'linear-gradient(90deg,#8b5cf6,#ec4899)', bg:'rgba(139,92,246,.12)',     color:'#8b5cf6' },
+  slate:  { accent:'linear-gradient(90deg,#64748b,#475569)', bg:'rgba(100,116,139,.12)',    color:'#64748b' },
+  rose:   { accent:'linear-gradient(90deg,#f43f5e,#f97316)', bg:'rgba(244,63,94,.12)',      color:'#f43f5e' },
+};
+
+// Badge: mismo criterio que _dwBadge (cls | bg/color | key+count | text).  Los badges con
+// resolvers de catálogo (fn: role/credtype/sev) se degradan a "N etiqueta" (no cargamos los
+// catálogos aquí), pero conservan color si lo traen.
+function badge(b) {
+  if (!b) return '';
+  // Badge de rol: resolver uid -> nombre + color por key builtin (como _dwRoleName/_dwRoleBadge).
+  if (b.fn === 'role') {
+    const name = ROLE_NAMES[b.role] || b.role;
+    const cls = BUILTIN_ROLE_BADGES[ROLE_KEYS[b.role]] || 'text-bg-info';
+    return `<span class="badge ${cls} ss-fs-2">${b.count} ${esc(name)}</span>`;
+  }
+  const icon = b.icon ? `<i class="bi ${b.icon} me-1"></i>` : '';
+  const text = b.text != null ? esc(b.text)
+    : (b.args ? tf(b.key, ...b.args)
+    : (b.count != null ? `${b.count} ${esc(b.name || b.type || t(b.key))}` : t(b.key)));
+  if (b.plain)
+    return `<span style="font-size:.8rem;color:${b.color || 'var(--bs-secondary-color)'}">${icon}${text}</span>`;
+  if (b.cls)
+    return `<span class="badge ${b.cls} ss-fs-2">${icon}${text}</span>`;
+  const bg = b.bg || 'var(--bs-secondary-bg)', color = b.color || 'var(--bs-secondary-color)';
+  return `<span class="badge rounded-pill" style="background:${bg};color:${color};font-size:.72rem">${icon}${text}</span>`;
+}
+
+// Tarjeta de stat: COPIA del markup de _dwStatCard (label ya traducido).
+function statCard(accent, avBg, avColor, icon, count, label, subtitle) {
+  return `<div class="rounded-3 overflow-hidden border h-100" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
+      <div style="height:3px;background:${accent}"></div>
+      <div class="p-3">
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                style="width:46px;height:46px;background:${avBg};color:${avColor};font-size:1.3rem">
+            <i class="bi ${icon}"></i></span>
+          <div>
+            <div class="fs-2 fw-bold lh-1">${count}</div>
+            <div class="fw-semibold text-muted mt-1 ss-section-title">${esc(label)}</div>
+          </div>
+        </div>
+        ${subtitle ? `<div class="d-flex flex-wrap gap-1 mt-1">${subtitle}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+// Tarjeta de tabla: COPIA del markup de _dwTableCard.
+function tableCard(accent, avBg, avColor, icon, title, tableHtml) {
+  return `<div class="rounded-3 overflow-hidden border h-100 d-flex flex-column" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
+      <div style="height:3px;background:${accent};flex-shrink:0"></div>
+      <div class="d-flex align-items-center gap-2 px-3 py-2 flex-shrink-0" style="background:var(--bs-secondary-bg);border-bottom:1px solid var(--bs-border-color)">
+        <span class="rounded-2 d-flex align-items-center justify-content-center"
+              style="width:30px;height:30px;background:${avBg};color:${avColor};font-size:.95rem">
+          <i class="bi ${icon}"></i></span>
+        <span class="fw-semibold ss-fs-4">${esc(title)}</span>
+      </div>
+      <div style="overflow-y:auto;flex:1;font-size:.875rem">${tableHtml}</div>
+    </div>`;
+}
+
+// Renderer de celda genérico (primitivas + celdas compuestas conocidas).
+function cellText(row, c) {
+  const cell = c.cell, k = c.key, v = row[k];
+  if (cell === 'host_checks' || k === 'checks') {
+    const x = row.checks || {}; let s = `${x.ok || 0}/${x.total || 0}`;
+    if (x.error) s += ` · ${x.error} err`; if (x.warning) s += ` · ${x.warning} warn`; return s;
+  }
+  if (cell === 'host_modules' || k === 'modules') return `${row.modules_active ?? 0}/${row.modules_total ?? 0}`;
+  if (cell === 'host_name' || k === 'name')
+    return (row.name || '') + (row.maintenance ? ' 🔧' : '') + (row.virtual ? ' (v)' : '');
+  if (cell === 'host_status' || k === 'status') return String(row.status || '—');
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
+function renderStat(w) {
+  const c = w.content, loaded = c != null;
+  const st = _DW_STYLES[(c && c.accent) || w.accent || 'indigo'] || _DW_STYLES.indigo;
+  const value = w.error ? '<span class="text-danger">!</span>'
+    : (loaded ? (c.value != null ? esc(c.value) : 0)
+              : '<span class="spinner-border spinner-border-sm text-muted"></span>');
+  const sub = loaded ? ((c.badges || []).map(badge).filter(Boolean).join('')
+                        || '<span class="text-muted small">—</span>') : '';
+  return statCard(st.accent, st.bg, st.color, (c && c.icon) || w.icon || 'bi-grid-1x2', value, w.label, sub);
+}
+
+function renderTable(w) {
+  const st = _DW_STYLES[w.accent || 'indigo'] || _DW_STYLES.indigo;
+  const cols = w.columns || [];
+  const head = `<thead style="position:sticky;top:0;z-index:1;background:var(--bs-tertiary-bg)">
+      <tr class="ss-section-title" style="color:var(--bs-secondary-color)">${
+      cols.map(c => `<th class="px-3 py-2 text-nowrap">${esc(t(c.label_key))}</th>`).join('')}</tr></thead>`;
+  let body;
+  if (w.error) body = `<tr><td class="px-3 py-3 text-danger small" colspan="${cols.length}">error</td></tr>`;
+  else if (w.loading) body = `<tr><td class="px-3 py-3 text-muted small" colspan="${cols.length}"><span class="spinner-border spinner-border-sm"></span></td></tr>`;
+  else if (!w.rows.length) body = `<tr><td class="px-3 py-3 text-muted small" colspan="${cols.length}">${esc(t(w.emptyKey) || t('no_data') || '—')}</td></tr>`;
+  else body = w.rows.map(r => `<tr>${cols.map(c => `<td class="px-3 py-1">${esc(cellText(r, c))}</td>`).join('')}</tr>`).join('');
+  const table = `<table class="table table-sm table-hover mb-0 align-middle">${head}<tbody>${body}</tbody></table>`;
+  return tableCard(st.accent, st.bg, st.color, w.icon || 'bi-table', w.label, table);
+}
+
+function renderCard(w) { return w.kind === 'table' ? renderTable(w) : renderStat(w); }
+
+function overview2() {
+  return {
+    editing: false, dragId: null,
+    widgets: [], _saveTimer: null, _foreign: [],
+
+    build(saved) {
+      let base = CATALOG.map(w => {
+        const v = w.view || {};
+        return {
+          id: w.id,
+          kind: v.kind || 'stat',
+          icon: v.icon || w.icon || 'bi-grid-1x2',
+          accent: v.accent || 'indigo',
+          label: t(v.label_key || v.title_key || w.label_key),
+          cols: w.cols || 2, h: (w.h === undefined ? 'auto' : w.h), hasH: !!w.has_h,
+          dataUrl: v.data_url || null,
+          columns: v.columns || [],
+          filter: v.filter && v.filter.options ? v.filter : null,   // solo filtros con opciones
+          emptyKey: v.empty_key || '',
+          hidden: false, loading: true, error: false, content: null, rows: [], fval: '',
+        };
+      });
+      if (Array.isArray(saved) && saved.length) {
+        const byId = Object.fromEntries(base.map(w => [w.id, w]));
+        const ordered = [];
+        saved.forEach(s => {
+          const w = byId[s.id];
+          if (w) {
+            w.cols = s.cols || w.cols;
+            if (s.h !== undefined) w.h = s.h;
+            w.hidden = !!s.hidden;
+            ordered.push(w); delete byId[s.id];
+          }
+        });
+        Object.values(byId).forEach(w => ordered.push(w));
+        base = ordered;
+      }
+      return base;
+    },
+
+    init() {
+      const known = new Set(CATALOG.map(w => w.id));
+      this._foreign = (Array.isArray(SAVED) ? SAVED : []).filter(s => !known.has(s.id));
+      this.widgets = this.build(SAVED);
+      this.widgets.forEach(w => this.load(w));
+    },
+
+    save() {
+      clearTimeout(this._saveTimer);
+      this._saveTimer = setTimeout(() => {
+        const layout = this.widgets.map(w => ({ id: w.id, cols: w.cols, h: w.h, hidden: w.hidden }))
+          .concat(this._foreign);
+        fetch(PREFS_URL, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+          body: JSON.stringify({ dashboard_layout: layout }),
+        }).catch(() => {});
+      }, 400);
+    },
+
+    get visibleWidgets() { return this.widgets.filter(w => !w.hidden); },
+    get hiddenWidgets()  { return this.widgets.filter(w =>  w.hidden); },
+
+    async load(w) {
+      if (!w.dataUrl) { w.loading = false; return; }
+      w.loading = true; w.error = false;
+      try {
+        const p = w.filter && w.fval ? `?${w.filter.param || 'f'}=${encodeURIComponent(w.fval)}` : '';
+        const r = await fetch(w.dataUrl + p, { headers: { 'X-Requested-With': 'fetch' } });
+        if (!r.ok) throw new Error(r.status);
+        const d = await r.json();
+        if (w.kind === 'stat') w.content = d.content || {};
+        else w.rows = d.rows || [];
+      } catch (e) { w.error = true; }
+      w.loading = false;
+    },
+
+    reloadAll() { this.widgets.forEach(w => this.load(w)); },
+
+    setCols(w, d) { w.cols = Math.min(12, Math.max(1, w.cols + d)); this.save(); },
+    hide(w) { w.hidden = true;  this.save(); },
+    show(w) { w.hidden = false; this.save(); },
+
+    move(fromId, toId) {
+      if (!fromId || fromId === toId) return;
+      const a = this.widgets;
+      const [m] = a.splice(a.findIndex(w => w.id === fromId), 1);
+      a.splice(a.findIndex(w => w.id === toId), 0, m);
+    },
+
+    // Mover: arrastrar por la barra de edición (pointer events, como producción).
+    dragStart(w, e) {
+      if (!this.editing || e.button !== 0) return;
+      if (e.target.closest('button, select, input')) return;
+      this.dragId = w.id;
+      let last = null;
+      const onMove = (ev) => {
+        const card = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.dw[data-wid]');
+        const tid = card && card.getAttribute('data-wid');
+        if (tid && tid !== this.dragId && tid !== last) { this.move(this.dragId, tid); last = tid; }
+        if (!card) last = null;
+      };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        this.dragId = null; this.save();
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      e.preventDefault();
+    },
+
+    // Redimensionar alto: arrastrar el tirador inferior (widgets con altura).
+    resizeStart(w, e) {
+      if (!this.editing) return;
+      const card = e.target.closest('.dw');
+      const startY = e.clientY;
+      const startH = (typeof w.h === 'number') ? w.h
+        : (card ? (card.querySelector('.dw-content')?.offsetHeight || 300) : 300);
+      const onMove = (ev) => { w.h = Math.max(120, Math.round(startH + (ev.clientY - startY))); };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        this.save();
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      e.preventDefault();
+    },
+
+    labelFor(o) {
+      let s = t(o.label_key);
+      if (o.badges) s = o.badges.map(b => t(b.label_key)).join(' + ');
+      return s;
+    },
+  };
+}
+</script>
+</body>
+</html>

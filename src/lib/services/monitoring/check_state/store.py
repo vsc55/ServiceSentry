@@ -140,6 +140,9 @@ class CheckStateStore:
 
     def __init__(self, db: BaseConnector) -> None:
         self._db = db
+        # ``key`` is a reserved word in MySQL — quote it (dialect-aware) in every raw query
+        # so runtime SQL works on MySQL/MariaDB, not just SQLite.
+        self._qk = db.quote_ident('key')
         self._bootstrap()
 
     def _bootstrap(self) -> None:
@@ -153,7 +156,7 @@ class CheckStateStore:
         out: dict = {}
         try:
             rows = self._db.fetchall(
-                'SELECT uid, module, key, item_uid, metric, status, message, '
+                f'SELECT uid, module, {self._qk}, item_uid, metric, status, message, '
                 f'other_data, fail_count, last_change_ts, severity FROM {_T}'
             )
             for r in rows:
@@ -205,18 +208,18 @@ class CheckStateStore:
         severity = _norm_severity(kw.get('severity'), status)
         try:
             existing = self._db.fetchone(
-                f'SELECT uid FROM {_T} WHERE module=? AND key=? AND metric=?',
+                f'SELECT uid FROM {_T} WHERE module=? AND {self._qk}=? AND metric=?',
                 (module, key, metric),
             )
             row_uid = (existing[0] if existing and existing[0] else None) \
                 or str(uuid.uuid4())
             with self._db.transaction():
                 self._db.execute(
-                    f'DELETE FROM {_T} WHERE module=? AND key=? AND metric=?',
+                    f'DELETE FROM {_T} WHERE module=? AND {self._qk}=? AND metric=?',
                     (module, key, metric),
                 )
                 self._db.execute(
-                    f'INSERT INTO {_T}(uid, module, key, item_uid, metric, '
+                    f'INSERT INTO {_T}(uid, module, {self._qk}, item_uid, metric, '
                     'status, message, other_data, fail_count, last_change_ts, severity) '
                     'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     (
@@ -280,7 +283,7 @@ class CheckStateStore:
                 self._db.execute(f'DELETE FROM {_T}')
                 if rows:
                     self._db.executemany(
-                        f'INSERT INTO {_T}(uid, module, key, item_uid, metric, '
+                        f'INSERT INTO {_T}(uid, module, {self._qk}, item_uid, metric, '
                         'status, message, other_data, fail_count, last_change_ts, severity) '
                         'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                         list(rows.values()),
@@ -295,7 +298,7 @@ class CheckStateStore:
         """Forget the current state of a check (all its metrics)."""
         try:
             self._db.execute(
-                f'DELETE FROM {_T} WHERE module = ? AND key = ?', (module, key))
+                f'DELETE FROM {_T} WHERE module = ? AND {self._qk} = ?', (module, key))
             self._db.commit()
             return True
         except Exception:  # pylint: disable=broad-except

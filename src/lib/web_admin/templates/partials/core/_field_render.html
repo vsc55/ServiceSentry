@@ -306,46 +306,19 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             trailing: _actionBtn}), _hintHtml);
     }
     if (typeof value === 'string') {
-        // Language selector
-        if (key === 'lang') {
+        // Unified language selector — every language field renders the same way: each supported
+        // code shows its native name (I18N['lang_<code>']); fields that allow "no selection"
+        // (status_lang, notif_lang) prepend a translated Default option. One template, no dup.
+        const _LANG_DEFAULT_KEY = { status_lang: 'status_lang_default', notif_lang: 'notif_lang_default' };
+        if (key === 'lang' || key in _LANG_DEFAULT_KEY) {
+            const _defKey = _LANG_DEFAULT_KEY[key];
             let opts = '';
-            for (const code of SUPPORTED_LANGS) {
-                const sel = value === code ? ' selected' : '';
-                opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
+            if (_defKey) {
+                const defLabel = esc(I18N[_defKey] || '— ' + (I18N['use_default'] || 'Use default') + ' —');
+                opts += `<option value=""${value === '' ? ' selected' : ''}>${defLabel}</option>`;
             }
-            return `<div class="row mb-2 align-items-start">
-            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8"><div class="input-group input-group-sm">
-                <select class="form-select"
-                    onchange="updateField(${tg},${sp},this.value)">
-                    ${opts}
-                </select>${_actionBtn}
-            </div>${_hintHtml}</div></div>`;
-        }
-        // Status-page language selector (with empty = use default option)
-        if (key === 'status_lang') {
-            const defLabel = esc(I18N['status_lang_default'] || '— ' + (I18N['use_default'] || 'Use default') + ' —');
-            let opts = `<option value=""${value === '' ? ' selected' : ''}>${defLabel}</option>`;
             for (const code of SUPPORTED_LANGS) {
-                const sel = value === code ? ' selected' : '';
-                opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
-            }
-            return `<div class="row mb-2 align-items-start">
-            <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
-            <div class="col-sm-8"><div class="input-group input-group-sm">
-                <select class="form-select"
-                    onchange="updateField(${tg},${sp},this.value)">
-                    ${opts}
-                </select>${_actionBtn}
-            </div>${_hintHtml}</div></div>`;
-        }
-        // Email / Telegram notification language selector (empty = follow system language)
-        if (key === 'email_lang' || key === 'telegram_lang') {
-            const sysLabel = esc(I18N['system_default'] || '— System —');
-            let opts = `<option value=""${value === '' ? ' selected' : ''}>${sysLabel}</option>`;
-            for (const code of SUPPORTED_LANGS) {
-                const sel = value === code ? ' selected' : '';
-                opts += `<option value="${code}"${sel}>${esc(I18N['lang_' + code] || code)}</option>`;
+                opts += `<option value="${code}"${value === code ? ' selected' : ''}>${esc(I18N['lang_' + code] || code)}</option>`;
             }
             return `<div class="row mb-2 align-items-start">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>

@@ -38,5 +38,26 @@
         "discover_title": "Descubrir Servicios del Sistema",
         "discover_error": "No se pudo cargar la lista de servicios del sistema",
         "item_added":     "Servicio \"{}\" a\u00f1adido"
+    },
+    "messages": {
+        "svc_unsupported_os":     "Servicio: {} - SO del host no soportado: {} \u26a0\ufe0f",
+        "svc_ok":                 "Servicio: {} - OK \u2705",
+        "svc_running":            "Servicio: {} - En ejecuci\u00f3n \u2705",
+        "svc_stopped":            "Servicio: {} - Detenido \u2705",
+        "svc_error":              "Servicio: {} - Error: {} \u26a0\ufe0f",
+        "svc_running_unexpected": "Servicio: {} - En ejecuci\u00f3n (esperado: Detenido) \u26a0\ufe0f",
+        "svc_unsuccessful":       "Servicio: {} - SIN \u00c9XITO \u26a0\ufe0f",
+        "svc_stop":               "Servicio: {} - Parado \u26a0\ufe0f",
+        "svc_recovery_prefix":    "Recuperaci\u00f3n "
+    },
+    "messages_vars": {
+        "svc_unsupported_os": ["servicio", "SO"],
+        "svc_ok": ["servicio"],
+        "svc_running": ["servicio"],
+        "svc_stopped": ["servicio"],
+        "svc_error": ["servicio", "detalle"],
+        "svc_running_unexpected": ["servicio"],
+        "svc_unsuccessful": ["servicio"],
+        "svc_stop": ["servicio"]
     }
 }

@@ -44,5 +44,31 @@
     },
     "new_item_key_label": "Name:",
     "rename_item_prompt": "Enter the new name:",
-    "collections": {"list": "Keepalived VIPs"}
+    "collections": {"list": "Keepalived VIPs"},
+    "messages": {
+        "ka_no_members":      "Keepalived: {} — no member hosts ⚠️",
+        "ka_no_vip":          "Keepalived: {} — VIP not configured ⚠️",
+        "ka_host_unreachable": "Keepalived: {}/{} — host unreachable [{}] 🔽",
+        "ka_service":         "Keepalived: {}/{} — service {} 🔽",
+        "ka_node_ok":         "Keepalived: {}/{} — {} (service {}{}) ✅",
+        "ka_prio_suffix":     ", priority {}",
+        "ka_vip_active":      "Keepalived: {} — VIP {} active on {} ✅",
+        "ka_vip_none":        "Keepalived: {} — VIP {} held by no node 🔽",
+        "ka_vip_split":       "Keepalived: {} — VIP {} on several nodes (split-brain): {} ⚠️",
+        "ka_prio_low":        "Keepalived: {} — VIP on {} (priority {}) but an active node has higher priority ({}) ⚠️",
+        "ka_prio_ok":         "Keepalived: {} — VIP on the highest-priority node ✅"
+    },
+    "messages_vars": {
+        "ka_no_members": ["cluster"],
+        "ka_no_vip": ["cluster"],
+        "ka_host_unreachable": ["cluster", "node", "error"],
+        "ka_service": ["cluster", "node", "service state"],
+        "ka_node_ok": ["cluster", "node", "role", "service", "priority"],
+        "ka_vip_active": ["cluster", "VIP", "node"],
+        "ka_vip_none": ["cluster", "VIP"],
+        "ka_vip_split": ["cluster", "VIP", "nodes"],
+        "ka_prio_low": ["cluster", "node", "priority", "top priority"],
+        "ka_prio_ok": ["cluster"],
+        "ka_prio_suffix": ["priority"]
+    }
 }

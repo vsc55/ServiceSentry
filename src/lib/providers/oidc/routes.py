@@ -22,12 +22,16 @@ def register(app, wa):
     """Register /auth/oidc/login and /auth/oidc/callback routes."""
     if not oidc_auth._HAS_AUTHLIB:
         return
+    # The IdP redirects back here cross-site (protected by the OIDC state param, not CSRF).
+    wa._register_csrf_exempt('/auth/oidc/callback')
 
     from flask import flash, redirect, request, url_for
     from lib.web_admin.routes.auth import _establish_session, _landing_url
 
     @app.route('/auth/oidc/login')
     def oidc_login():
+        """Start OIDC login: redirect the browser to the IdP's authorization
+        endpoint (or back to the local login page if OIDC is disabled)."""
         client = oidc_auth.get_client(wa)
         if client is None:
             flash(wa._t('oidc_disabled'), 'danger')
@@ -37,6 +41,10 @@ def register(app, wa):
 
     @app.route('/auth/oidc/callback')
     def oidc_callback():
+        """OIDC redirect callback: exchange the code for a token, read the
+        userinfo, sync the user, and establish a web session (auditing the
+        outcome). Redirects to the landing page on success, back to login on any
+        failure (token error, user not allowed, account disabled)."""
         client = oidc_auth.get_client(wa)
         if client is None:
             flash(wa._t('oidc_disabled'), 'danger')

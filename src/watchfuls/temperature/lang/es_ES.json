@@ -28,5 +28,15 @@
         "discover_title": "Descubrir Sensores",
         "discover_error": "No se pudo cargar la lista de sensores de temperatura",
         "item_added":     "Sensor \"{}\" a\u00f1adido"
+    },
+    "messages": {
+        "temp_unsupported_os": "Temp: {} - solo disponible en Linux (SO del host: {}) \u26a0\ufe0f",
+        "temp_high": "Sensor {}, sobretemperatura {} \u00baC \ud83d\udd25",
+        "temp_ok":   "Sensor {}, temperatura OK {} \u00baC \u2705"
+    },
+    "messages_vars": {
+        "temp_unsupported_os": ["sensor", "SO"],
+        "temp_high": ["sensor", "°C"],
+        "temp_ok": ["sensor", "°C"]
     }
 }

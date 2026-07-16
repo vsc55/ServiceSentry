@@ -58,9 +58,9 @@ def parse_manual_ban(data: dict, *, max_reason: int = 200) -> tuple:
     """Validate + normalise a manual-ban request body ``{ip, duration_secs?, reason?}``.
 
     Returns ``(ip, duration_secs, reason, error_key)`` — *error_key* is ``None`` on success,
-    else an i18n key (``ipban_ip_required`` / ``ipban_ip_invalid``) the caller maps to HTTP
-    400.  ``duration_secs``: a positive int forces that term, ``0`` = permanent, ``None`` =
-    escalation ladder.  Flask-free — the route owns the HTTP mapping and the manager's own
+    else an i18n key (``ipban_ip_required`` / ``ipban_ip_invalid`` / ``ipban_duration_invalid``)
+    the caller maps to HTTP 400.  ``duration_secs``: a positive int forces that term, ``0`` =
+    permanent, ``None`` = escalation ladder; a negative value is rejected.  Flask-free — the route owns the HTTP mapping and the manager's own
     whitelist re-check (``ban()`` returns ``None`` for a whitelisted IP)."""
     data = data or {}
     ip = str(data.get('ip', '')).strip()
@@ -75,6 +75,10 @@ def parse_manual_ban(data: dict, *, max_reason: int = 200) -> tuple:
         dur = None if dur in (None, '') else int(dur)
     except (TypeError, ValueError):
         dur = None
+    # A negative duration must NOT be accepted: downstream ``_ban_locked`` treats any
+    # value <= 0 as permanent, so a negative would become a silent permanent ban.
+    if dur is not None and dur < 0:
+        return '', None, '', 'ipban_duration_invalid'
     reason = str(data.get('reason') or 'manual').strip()[:max_reason] or 'manual'
     return ip, dur, reason, None
 

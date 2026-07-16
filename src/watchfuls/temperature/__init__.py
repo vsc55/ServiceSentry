@@ -73,7 +73,8 @@ class Watchful(ModuleBase):
         os_ = self.host_os(item)
         if os_ != 'linux':
             self.dict_return.set(key, False,
-                                 f'Temp: {key} - *only available on Linux (host OS: {os_})* ⚠️')
+                                 self._msg('temp_unsupported_os', key, os_),
+                                 severity='warning')
             return
         sensor = (item.get('sensor', '') or '').strip() or key
         label = (item.get('label', '') or '').strip() or sensor
@@ -93,12 +94,11 @@ class Watchful(ModuleBase):
                       or self.get_conf('alert', None)
                       or self._MODULE_DEFAULTS['alert'])
         warning = temp > alert
-        msg = f'Sensor *{label}*, '
-        msg += (f'*over temperature Warning {temp:.1f} ºC* 🔥' if warning
-                else f'temperature Ok *{temp:.1f} ºC* ✅')
+        msg = self._msg('temp_high' if warning else 'temp_ok', label, f'{temp:.1f}')
+        # An over-temperature is a warning (host reachable); a sensor read failure raises above.
         self.dict_return.set(key, not warning, msg,
                              other_data={'type': sensor, 'temp': temp, 'alert': alert},
-                             name=label)
+                             severity='warning', name=label)
 
     @staticmethod
     def _parse_thermal(out):

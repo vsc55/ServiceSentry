@@ -154,7 +154,7 @@ class Watchful(ModuleBase):
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f'Check: {name} — Exception: {exc}', DebugLevel.error)
                     _lbl = self.get_conf(['list', name, 'label'], '') or name
-                    self.dict_return.set(name, False, f'Proxmox: {_lbl} — Error: {exc} 💥', False)
+                    self.dict_return.set(name, False, self._msg('px_error', _lbl, exc), False)
 
         super().check()
         return self.dict_return
@@ -185,12 +185,13 @@ class Watchful(ModuleBase):
         'insufficient permission' message instead of a hard error."""
         if getattr(exc, 'code', 0) == 403:
             m = _PERM_RE.search(getattr(exc, 'msg', '') or str(exc))
-            detail = f'{m.group(2).strip()} en {m.group(1).strip()}' if m else str(exc)
+            detail = (self._msg('px_perm_detail', m.group(2).strip(), m.group(1).strip())
+                      if m else str(exc))
             self._emit(key, False,
-                       f'Proxmox: {label} ⚠ [{what}: permiso insuficiente — requiere {detail}]',
+                       self._msg('px_perm_insufficient', label, what, detail),
                        extra, severity='warning')
         else:
-            self._emit(key, False, f'Proxmox: {label} 🔽 [{what}: {exc}]', extra)
+            self._emit(key, False, self._msg('px_check_fail', label, what, exc), extra)
 
     @staticmethod
     def _required_privs(it: dict) -> list:
@@ -221,7 +222,7 @@ class Watchful(ModuleBase):
         try:
             perms = self._pve_get(conn, '/access/permissions') or {}
         except Exception as exc:  # pylint: disable=broad-except
-            self._emit_exc(key, label, 'permisos', exc)
+            self._emit_exc(key, label, self._msg('px_what_perms'), exc)
             return
         if not isinstance(perms, dict):
             perms = {}
@@ -229,10 +230,10 @@ class Watchful(ModuleBase):
                    if not self._perm_has(perms, path, p)]
         if missing:
             self._emit(key, False,
-                       f'Proxmox: {label} ⚠ permisos insuficientes: {", ".join(missing)}',
+                       self._msg('px_perms_missing', label, ', '.join(missing)),
                        {'missing': ', '.join(missing)}, severity='warning')
         else:
-            self._emit(key, True, f'Proxmox: {label} 🔼 permisos correctos')
+            self._emit(key, True, self._msg('px_perms_ok', label))
 
     # ── Per-item check ────────────────────────────────────────────────────
 
@@ -281,7 +282,7 @@ class Watchful(ModuleBase):
             effective = streak < alert
             icon = '🔽' if not effective else '🔼'
             self._emit(name, effective,
-                       f'Proxmox: {label} {icon} [conexión ({len(candidates)} nodo/s): {exc}]',
+                       self._msg('px_conn_fail', label, icon, len(candidates), exc),
                        {'error': str(exc), 'candidates': candidates})
             return
         self.fail_streak(name, False)   # connected → reset the streak
@@ -299,7 +300,7 @@ class Watchful(ModuleBase):
             try:
                 nodes = self._pve_get(conn, '/nodes') or []
             except Exception as exc:  # pylint: disable=broad-except
-                self._emit_exc(f'{name}/nodes', label, 'nodos', exc)
+                self._emit_exc(f'{name}/nodes', label, self._msg('px_what_nodes'), exc)
 
         if it.get('check_cluster', True):
             self._chk_cluster(conn, name, label)
@@ -342,7 +343,7 @@ class Watchful(ModuleBase):
         try:
             data = self._pve_get(conn, '/cluster/status') or []
         except Exception as exc:  # pylint: disable=broad-except
-            self._emit_exc(key, label, 'clúster', exc)
+            self._emit_exc(key, label, self._msg('px_what_cluster'), exc)
             return
         cluster = next((e for e in data if e.get('type') == 'cluster'), None)
         nodes = [e for e in data if e.get('type') == 'node']
@@ -351,16 +352,15 @@ class Watchful(ModuleBase):
         # nodes even if only one address was configured.
         node_ips = [str(e['ip']) for e in nodes if e.get('ip')]
         if cluster is None:
-            self._emit(key, True, f'Proxmox: {label} 🔼 nodo standalone (sin clúster)',
+            self._emit(key, True, self._msg('px_standalone', label),
                        {'standalone': True, 'node_ips': node_ips})
             return
         quorate = bool(cluster.get('quorate'))
         cname = cluster.get('name', '')
         icon = '🔼' if quorate else '🔽'
-        qtxt = 'OK' if quorate else 'PERDIDO'
+        qtxt = self._msg('px_quorum_ok' if quorate else 'px_quorum_lost')
         self._emit(key, quorate,
-                   f'Proxmox: {label} {icon} clúster {cname} · quórum {qtxt} · '
-                   f'{online}/{len(nodes)} nodos online',
+                   self._msg('px_cluster', label, icon, cname, qtxt, online, len(nodes)),
                    {'quorate': quorate, 'nodes_online': online, 'nodes_total': len(nodes),
                     'node_ips': node_ips})
 
@@ -385,15 +385,15 @@ class Watchful(ModuleBase):
             online = str(n.get('status', '')) == 'online'
             if node in maint:
                 # User-declared maintenance: never alert (e.g. powered off on purpose).
-                self._emit(key, True, f'Proxmox: {label} 🛠 nodo {node}{tag} en mantenimiento (manual)',
+                self._emit(key, True, self._msg('px_node_maint_manual', label, node, tag),
                            {'maintenance': True, **extra})
             elif not online:
-                self._emit(key, False, f'Proxmox: {label} 🔽 nodo {node}{tag} offline', extra)
+                self._emit(key, False, self._msg('px_node_offline', label, node, tag), extra)
             elif ha.get(node) == 'maintenance':
-                self._emit(key, True, f'Proxmox: {label} 🛠 nodo {node}{tag} en mantenimiento',
+                self._emit(key, True, self._msg('px_node_maint', label, node, tag),
                            {'maintenance': True, **extra})
             else:
-                self._emit(key, True, f'Proxmox: {label} 🔼 nodo {node}{tag} online', extra)
+                self._emit(key, True, self._msg('px_node_online', label, node, tag), extra)
 
     def _chk_ceph(self, conn: dict, name: str, label: str) -> None:
         key = f'{name}/ceph'
@@ -402,7 +402,7 @@ class Watchful(ModuleBase):
         except PveError as exc:
             low = str(exc.msg).lower()
             if exc.code in (404, 501) or any(t in low for t in _CEPH_ABSENT):
-                self._emit(key, True, f'Proxmox: {label} — Ceph no configurado')
+                self._emit(key, True, self._msg('px_ceph_absent', label))
                 return
             self._emit_exc(key, label, 'Ceph', exc)
             return
@@ -412,7 +412,7 @@ class Watchful(ModuleBase):
         health = str((data.get('health') or {}).get('status') or '').upper()
         ok = (health == 'HEALTH_OK')
         icon = '🔼' if ok else '🔽'
-        self._emit(key, ok, f'Proxmox: {label} {icon} Ceph {health or "desconocido"}',
+        self._emit(key, ok, self._msg('px_ceph', label, icon, health or self._msg('px_unknown')),
                    {'health': health})
 
     def _chk_network(self, conn: dict, name: str, label: str, nodes: list,
@@ -427,7 +427,7 @@ class Watchful(ModuleBase):
             try:
                 ifaces = self._pve_get(conn, f'/nodes/{node}/network') or []
             except Exception as exc:  # pylint: disable=broad-except
-                self._emit_exc(key, label, f'red {node}{tag}', exc, extra)
+                self._emit_exc(key, label, f'{self._msg("px_what_net")} {node}{tag}', exc, extra)
                 continue
             # Flag autostart interfaces that are not currently active (down).
             down = [i.get('iface') for i in ifaces
@@ -435,10 +435,10 @@ class Watchful(ModuleBase):
             down = [d for d in down if d]
             if down:
                 self._emit(key, False,
-                           f'Proxmox: {label} 🔽 red {node}{tag}: interfaces caídas {", ".join(down)}',
+                           self._msg('px_net_down', label, node, tag, ', '.join(down)),
                            {'down': down, **extra})
             else:
-                self._emit(key, True, f'Proxmox: {label} 🔼 red {node}{tag}', extra)
+                self._emit(key, True, self._msg('px_net_ok', label, node, tag), extra)
 
     def _chk_updates(self, conn: dict, name: str, label: str, nodes: list,
                      threshold: int, maint: set = frozenset(), node_host: dict = None) -> None:
@@ -452,22 +452,21 @@ class Watchful(ModuleBase):
             try:
                 ups = self._pve_get(conn, f'/nodes/{node}/apt/update') or []
             except Exception as exc:  # pylint: disable=broad-except
-                self._emit_exc(key, label, f'updates {node}{tag}', exc, extra)
+                self._emit_exc(key, label, f'{self._msg("px_what_updates")} {node}{tag}', exc, extra)
                 continue
             total = len(ups)
             security = sum(1 for u in ups if _is_security(u))
             if security > 0:
                 self._emit(key, False,
-                           f'Proxmox: {label} 🔽 {node}{tag}: {security} actualización(es) de '
-                           f'seguridad ({total} en total)',
+                           self._msg('px_upd_security', label, node, tag, security, total),
                            {'total': total, 'security': security, **extra},
                            severity='warning')
             elif threshold > 0 and total >= threshold:
                 self._emit(key, True,
-                           f'Proxmox: {label} ⬆ {node}{tag}: {total} actualización(es) disponibles',
+                           self._msg('px_upd_available', label, node, tag, total),
                            {'total': total, 'security': 0, **extra})
             else:
-                self._emit(key, True, f'Proxmox: {label} 🔼 {node}{tag}: al día',
+                self._emit(key, True, self._msg('px_upd_ok', label, node, tag),
                            {'total': total, 'security': 0, **extra})
 
     def _chk_storage(self, conn: dict, name: str, label: str, nodes: list,
@@ -482,7 +481,7 @@ class Watchful(ModuleBase):
             try:
                 stores = self._pve_get(conn, f'/nodes/{node}/storage') or []
             except Exception as exc:  # pylint: disable=broad-except
-                self._emit_exc(key, label, f'storage {node}{tag}', exc, extra)
+                self._emit_exc(key, label, f'{self._msg("px_what_storage")} {node}{tag}', exc, extra)
                 continue
             down, full = [], []   # enabled-but-inactive, and over-usage-threshold
             for s in stores:
@@ -502,14 +501,14 @@ class Watchful(ModuleBase):
             if down or full:
                 parts = []
                 if down:
-                    parts.append(f'inactivos: {", ".join(down)}')
+                    parts.append(self._msg('px_storage_inactive', ', '.join(down)))
                 if full:
-                    parts.append(f'uso alto: {", ".join(full)}')
+                    parts.append(self._msg('px_storage_full', ', '.join(full)))
                 self._emit(key, False,
-                           f'Proxmox: {label} 🔽 storage {node}{tag}: {" · ".join(parts)}',
+                           self._msg('px_storage_bad', label, node, tag, ' · '.join(parts)),
                            {'down': down, 'full': full, **extra})
             else:
-                self._emit(key, True, f'Proxmox: {label} 🔼 storage {node}{tag}', extra)
+                self._emit(key, True, self._msg('px_storage_ok', label, node, tag), extra)
 
     # ── API client (stateless; usable from the test_connection classmethod) ─
 

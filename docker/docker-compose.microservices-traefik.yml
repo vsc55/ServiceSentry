@@ -140,6 +140,8 @@ services:
       dockerfile: docker/Dockerfile
     image: servicesentry:latest
     container_name: servicesentry-web
+    # Non-root: web runs no in-process checks here (*_EMBEDDED=0), so no NET_RAW/privileged port needed.
+    user: ssentry
     restart: unless-stopped
     networks:
       # backend: reach the databases; frontend: Traefik routes to it here.
@@ -207,6 +209,7 @@ services:
     volumes:
       - config:/etc/ServiSesentry
       - vardata:/var/lib/ServiSesentry
+    # Runs as root: the ping module uses pythonping (raw ICMP), which needs NET_RAW as an *ambient* capability — not grantable to a non-root user via cap_add. Grant ambient NET_RAW (or drop ping) to run this non-root.
     cap_add:
       # Required by the ping watchful module (raw ICMP sockets).
       # Remove if not using ping monitoring.
@@ -274,7 +277,11 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: servicesentry-syslog
+    user: ssentry
     restart: unless-stopped
+    sysctls:
+      # Let the non-root process bind the privileged syslog port (514).
+      - net.ipv4.ip_unprivileged_port_start=0
     networks:
       # backend only: the DBs. Raw syslog ingress is the host port mapping below
       # (UDP/TCP) — Traefik does NOT front syslog by default, so the receiver keeps
@@ -314,6 +321,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: servicesentry-events
+    user: ssentry
     restart: unless-stopped
     networks:
       - backend
@@ -335,6 +343,7 @@ services:
         condition: service_healthy
 
 # ── Named volumes ─────────────────────────────────────────────────────────────
+# NOTE: web/syslog/events run as the non-root 'ssentry' user (uid 1000). On a FRESH deploy the named volumes inherit that ownership from the image; for an EXISTING install whose volumes are root-owned, chown them once: docker run --rm -v <vol>:/d alpine chown -R 1000:1000 /d
 volumes:
   config:
   vardata:

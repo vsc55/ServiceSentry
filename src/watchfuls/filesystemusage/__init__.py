@@ -98,11 +98,15 @@ class Watchful(ModuleBase):
         alert = float(item.get('alert', 0)
                       or self.module_default('alert', self._MODULE_DEFAULTS['alert']))
         ok = used <= alert
-        msg = f'{label} ({part}) used {used}%' if label != part else f'partition {part} used {used}%'
-        msg = f'Normal {msg} ✅' if ok else f'Warning {msg} ⚠️'
+        if label != part:
+            msg = self._msg('fs_ok_label' if ok else 'fs_warn_label', label, part, used)
+        else:
+            msg = self._msg('fs_ok_part' if ok else 'fs_warn_part', part, used)
         # Key the result by the item key (unique per check) — not by the mount
         # point, or two checks on the same partition would collide into one.
-        self.dict_return.set(key, ok, msg, other_data={'used': used, 'mount': part, 'alert': alert}, name=label)
+        # A usage-threshold breach is a warning, not a down (a hard df failure raises above).
+        self.dict_return.set(key, ok, msg, other_data={'used': used, 'mount': part, 'alert': alert},
+                             severity='warning', name=label)
 
     # ── Parsers (pure) ────────────────────────────────────────────────────────
     @classmethod

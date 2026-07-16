@@ -24,5 +24,15 @@
         "connection": "Connection",
         "alerts":     "Alerts"
     },
-    "collections": {"list": "NTP Servers"}
+    "collections": {"list": "NTP Servers"},
+    "messages": {
+        "ntp_error": "NTP: {} - Error: {} 💥",
+        "ntp_ok":    "NTP: {} - offset {}s (max {}s) ✅",
+        "ntp_high":  "NTP: {} - offset {}s exceeds {}s ⚠️"
+    },
+    "messages_vars": {
+        "ntp_error": ["server", "error"],
+        "ntp_ok": ["server", "offset (s)", "max (s)"],
+        "ntp_high": ["server", "offset (s)", "max (s)"]
+    }
 }

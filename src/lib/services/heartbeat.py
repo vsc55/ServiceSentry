@@ -243,6 +243,7 @@ class _HeartbeatMixin:
         if self._hb_store() is None or not self._hb_key():
             return
         self._hb_stop = threading.Event()
+        stop_ev = self._hb_stop   # captured, so a later restart's fresh Event can't confuse this loop
         interval = every or self._HB_EVERY
         # Drop this process's own restart 'zombies' (same host+mode+service, old PID)
         # so a restart leaves exactly one live row, not an accumulating pile.
@@ -259,7 +260,7 @@ class _HeartbeatMixin:
 
         def _loop():
             beat = 0
-            while not self._hb_stop.wait(interval):
+            while not stop_ev.wait(interval):
                 self._renew_leadership()
                 self._heartbeat_write()
                 self._drain_commands()
@@ -294,3 +295,6 @@ class _HeartbeatMixin:
         store = self._hb_store()
         if store is not None and self._hb_key():
             store.mark_down(self._hb_instance_id())
+        # Clear the thread handle so a later start_heartbeat() can spin a fresh worker
+        # (the guard `if self._hb_thread is not None: return` would otherwise block restart).
+        self._hb_thread = None

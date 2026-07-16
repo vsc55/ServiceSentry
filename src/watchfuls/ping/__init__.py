@@ -125,16 +125,18 @@ class Watchful(ModuleBase):
                 except Exception as exc: # pylint: disable=broad-except
                     self._debug(f"Check: {name} - Exception: {exc}", DebugLevel.error)
                     _lbl = self.get_conf_in_list("label", name, "") or host or name
-                    message = f'Check: {_lbl} - *Error: {exc}* 💥'
+                    message = self._msg('ping_error', _lbl, exc)
                     self.dict_return.set(name, False, message)
 
         super().check()
         return self.dict_return
 
     def _ping_check(self, name, host):
-        t_alert   = self.get_conf_in_list("alert",   name, 0) or self.get_conf('alert',   self._MODULE_DEFAULTS['alert'])
-        t_timeout = self.get_conf_in_list("timeout", name, 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
-        t_attempt = self.get_conf_in_list("attempt", name, 0) or self.get_conf('attempt', self._MODULE_DEFAULTS['attempt'])
+        # Coerce to int: stored config values may be strings (hand-edited config.json), and
+        # a raw str would break range()/settimeout()/comparisons below.
+        t_alert   = int(self.get_conf_in_list("alert",   name, 0) or self.get_conf('alert',   self._MODULE_DEFAULTS['alert']))
+        t_timeout = int(self.get_conf_in_list("timeout", name, 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
+        t_attempt = int(self.get_conf_in_list("attempt", name, 0) or self.get_conf('attempt', self._MODULE_DEFAULTS['attempt']))
 
         ping_ok, rtt_ms = self._ping_return(host, t_timeout, t_attempt)
         other_data = {'latency_ms': round(rtt_ms, 2)} if rtt_ms is not None else {}
@@ -146,8 +148,7 @@ class Watchful(ModuleBase):
         status = ping_ok or streak < t_alert
 
         label = self.get_conf_in_list("label", name, "") or host or name
-        icon = '🔼' if status else '🔽'
-        s_message = f'Ping: *{label}* {icon}'
+        s_message = self._msg('ping_up' if status else 'ping_down', label)
 
         self.dict_return.set(name, status, s_message, False, other_data=other_data)
 

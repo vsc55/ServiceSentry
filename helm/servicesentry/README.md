@@ -67,6 +67,11 @@ Lista completa en [`values.yaml`](values.yaml).
   ni las probes `/control/health`); el control sigue por el reconcile periódico.
 - El Service de ingreso de syslog usa puertos **mixtos UDP/TCP**: requiere un cluster
   que lo soporte; si no, divídelo en dos Services.
+- **Ejecución no-root**: los Deployments `web` y `events` corren como el usuario no
+  privilegiado 1000 (`podSecurityContext`/`securityContext` en `values.yaml`);
+  `worker` (ping) y `syslog` (`:514`) siguen como root porque necesitan
+  `CAP_NET_RAW` / `CAP_NET_BIND_SERVICE` ambientales, no concedibles a un contenedor
+  no-root por defecto.
 
 ## Desinstalar
 

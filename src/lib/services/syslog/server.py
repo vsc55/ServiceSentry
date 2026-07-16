@@ -161,6 +161,9 @@ class SyslogServer:
         self.running = False
 
     def _spawn(self, target, *, name, args=()):
+        # Prune finished per-connection threads first, so a long-lived listener with many
+        # short TCP/TLS connections doesn't accumulate dead Thread objects without bound.
+        self._threads = [x for x in self._threads if x.is_alive()]
         t = threading.Thread(target=target, name=name, args=args, daemon=True)
         t.start()
         self._threads.append(t)

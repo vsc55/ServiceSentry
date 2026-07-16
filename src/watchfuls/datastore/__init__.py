@@ -104,7 +104,7 @@ def _pkey_from_string(key_string: str, password: str = ''):
 
 
 class _SSHTunnel:
-    """One-shot SSH TCP port-forward tunnel."""
+    """SSH TCP port-forward tunnel — serves multiple connections until ``close()``."""
 
     def __init__(self, ssh_host, ssh_port, ssh_user, ssh_password, ssh_key,
                  remote_host, remote_port, timeout=10, verify_host=False,
@@ -142,24 +142,33 @@ class _SSHTunnel:
         self._transport = transport
         self._remote_host = str(remote_host)
         self._remote_port = int(remote_port)
-        self._accept_timeout = timeout + 5
+        self._closed = False
 
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind(('127.0.0.1', 0))
-        srv.listen(1)
+        # Backlog > 1: serve MULTIPLE connections through the forward, not just one — a
+        # backend may open several (InfluxDB 2.x→1.x fallback probe, MongoDB SDAM monitor
+        # sockets). Closing after the first accept broke those over SSH.
+        srv.listen(8)
         self.local_port = srv.getsockname()[1]
         self._server = srv
-        self._thread = threading.Thread(target=self._accept_and_relay, daemon=True)
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
         self._thread.start()
 
-    def _accept_and_relay(self):
-        try:
-            self._server.settimeout(self._accept_timeout)
-            conn, addr = self._server.accept()
-            self._server.close()
-        except Exception:
-            return
+    def _accept_loop(self):
+        """Accept connections until the tunnel is closed, relaying each on its own thread."""
+        self._server.settimeout(1.0)
+        while not self._closed:
+            try:
+                conn, addr = self._server.accept()
+            except socket.timeout:
+                continue
+            except Exception:
+                break
+            threading.Thread(target=self._handle_conn, args=(conn, addr), daemon=True).start()
+
+    def _handle_conn(self, conn, addr):
         chan = None
         try:
             chan = self._transport.open_channel(
@@ -195,6 +204,7 @@ class _SSHTunnel:
         t1.join(); t2.join()
 
     def close(self):
+        self._closed = True   # stop the accept loop
         try: self._server.close()
         except Exception: pass
         try: self._client.close()
@@ -277,7 +287,7 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:
                     _lbl = self.get_conf(['list', key, 'label'], '') or key
-                    self.dict_return.set(key, False, f'Datastore: {_lbl} - *Error: {exc}* 💥')
+                    self.dict_return.set(key, False, self._msg('ds_error', _lbl, exc))
         super().check()
         return self.dict_return
 
@@ -303,19 +313,24 @@ class Watchful(ModuleBase):
         # (Configuration > Modules).  0 everywhere = disabled.
         limit = int(self.get_conf(['list', key, 'alert_connections'], 0)
                     or self.module_default('alert_connections', 0) or 0)
+        # A connection-count threshold breach is a warning (the datastore is reachable);
+        # a real connect/query error (the else branch, ok already False) stays a down.
+        threshold_breach = False
         if ok and limit > 0 and isinstance(conns, (int, float)) and conns > limit:
             ok  = False
-            msg = f'{int(conns)} connections > {limit}'
-            s_msg = f'*{disp}* - *{msg}* ⚠️'
+            threshold_breach = True
+            msg = f'{int(conns)} connections > {limit}'   # internal reason (change detection)
+            s_msg = self._msg('ds_conn_high', disp, int(conns), limit)
         elif ok:
             # Shared formatter → identical detail to the web "Test connection".
-            s_msg = f'*{disp}* — {self._summary_text(True, msg, metrics)} ✅'
+            s_msg = self._msg('ds_ok', disp, self._summary_text(True, msg, metrics))
         else:
-            s_msg = f'*{disp}* - *Error: {msg}* ⚠️'
+            s_msg = self._msg('ds_conn_error', disp, msg)
 
-        self.dict_return.set(key, ok, s_msg, False, other)
+        severity = 'warning' if threshold_breach else ''
+        self.dict_return.set(key, ok, s_msg, False, other, severity=severity)
         if self.check_status_custom(ok, key, msg):
-            self.send_message(s_msg, ok, item=disp)
+            self.send_message(s_msg, ok, item=disp, severity=severity)
 
     def _build_cfg(self, key, db_type):
         """Collect all config fields for one item into a plain dict."""

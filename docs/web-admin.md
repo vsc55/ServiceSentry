@@ -123,10 +123,10 @@ flowchart TD
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
 | **SSO SAML2** | Login federado mediante SAML2 (cualquier IdP compatible: ADFS, Keycloak, Okta…). Rutas `/auth/saml2/login`, `/auth/saml2/acs`, `/auth/saml2/metadata`. Sincronización automática de usuarios y mapeo de grupos a roles. Requiere `python3-saml`. [alpha] |
-| **Notificaciones por Email** | Envío de alertas por correo vía SMTP, Microsoft 365 (Graph API) o Gmail (OAuth2). Plantilla HTML personalizable por idioma y tipo (alert/summary/test). Configurable desde la pestaña Configuración → Notifications. |
+| **Notificaciones por Email** | Envío de alertas por correo vía SMTP, Microsoft 365 (Graph API) o Gmail (OAuth2). Plantilla HTML personalizable por idioma y tipo (`alert`/`summary`/`test`; el tipo `summary` es editable y previsualizable, pero **aún no se envía** — no hay emails resumen agrupados). Configurable desde la pestaña Configuración → Notifications. |
 | **Webhooks** | Lista de webhooks HTTP personalizables para notificaciones salientes. Cada webhook tiene URL, método (POST/PUT/GET), cabeceras personalizadas, plantilla de cuerpo JSON, timeout, secreto HMAC opcional y flag habilitado/deshabilitado. Se gestionan con un modal dedicado en la pestaña de configuración → Notifications. |
 | **Despachador de notificaciones** | `notification_dispatcher.dispatch()` enruta cada evento a los canales habilitados (Telegram, Email, Webhook) según la matriz de routing configurable en `config.json → notifications`. |
-| **Plantillas de notificación** | Editor de cadenas de texto (sujetos, badges, frases) con soporte multi-idioma y sobrescritura por idioma. Editor de HTML (con CodeMirror 5, resaltado de sintaxis, autocompletado, formateo, previsualización en vivo) para la plantilla del cuerpo de email. |
+| **Textos de notificación** | Editor unificado **"Notification Texts"** que cubre, por idioma y con sobrescritura del admin, los **eventos/estados/mensajes del core**, los **mensajes de CADA módulo** watchful y las **cadenas de email**. Se complementa con el editor del **cuerpo HTML** del email (CodeMirror 5: resaltado, autocompletado, formateo, preview en vivo). Detalle del sistema (resolución custom→i18n, listados y tags): ver [notifications.md](notifications.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags). |
 | **Prueba de Telegram** | Enviar un mensaje de prueba para verificar la conectividad del bot |
 | **Modo oscuro** | Preferencia por usuario, persistida entre sesiones |
 | **Pestaña activa del panel** | El panel `/admin` abre por defecto en **Services** (la pestaña más a la izquierda). Al recargar (F5) o navegar dentro de la misma sesión se restaura la última pestaña vista (`localStorage`, discriminado por `login_id` de sesión); un login nuevo vuelve al default. Si la pestaña guardada deja de existir o el usuario pierde acceso, se cae a la primera pestaña visible |
@@ -378,7 +378,7 @@ nodo, titular de la VIP, split-brain, prioridad — ver [modules.md](modules.md)
   `/api/v1/modules/status`.
 - Autorización: permisos globales `clusters_view/add/edit/delete` **+** permisos
   dinámicos por-cluster `cluster.{uid}.{view|add|edit|delete}` (resueltos en
-  `lib/core/modules/routes.py` por el `host_uids` del ítem). Ver §[Permisos](#permisos).
+  `lib/core/modules/routes.py` por el `host_uids` del ítem). Ver §[Permisos](#sistema-de-permisos).
 
 ### Credenciales
 
@@ -455,6 +455,24 @@ El endpoint `/api/v1/config/schema` también expone metadatos para:
 
 El campo `web_admin.page_sizes` es un array de enteros no negativos que define las opciones de tamaño de página disponibles en todos los listados del panel. Se sanitiza al guardar: se descartan valores no enteros, booleanos y negativos; si el resultado queda vacío, se restaura el valor por defecto `[25, 50, 100, 200, 0]` (donde `0` significa "Todos"). No forma parte de `INT_RULES` ya que su validación es especial (array, no escalar).
 
+### Notificaciones (estructura de la pestaña de configuración)
+
+La pestaña **Notificaciones** de *Configuración* se compone de **4 sub-tabs**
+(`partials/cfg/_render.html`):
+
+| Sub-tab | i18n | Contenido |
+|---|---|---|
+| **General** | `cfg_notif_subtab_general` | Idioma global de notificaciones (ver abajo) |
+| **Routing** | `cfg_notif_subtab_routing` | Matriz `{canal}_on_{kind}` — ver [notifications.md → Matriz de routing](notifications.md#matriz-de-routing-notifications) |
+| **Providers** | `cfg_notif_subtab_providers` | Config y prueba de cada canal, en orden fijo: Event rules → Telegram → Email → **MS Teams** (`_renderMsTeamsSection`) → Webhooks |
+| **Templates** | `cfg_notif_subtab_templates` | Editor de textos ("Notification Texts") + editor del cuerpo HTML de email — ver [§Textos y plantillas de notificación](#textos-y-plantillas-de-notificación) |
+
+**Sub-tab General — idioma de notificación.** Su único ajuste es `notif_lang`
+(path `notifications|lang`; i18n `notif_lang` = "Notification language"),
+aplicable a **todos** los canales — una notificación no tiene contexto de usuario
+pero sí de sistema. Selector con opción "— Default —" y la lista de idiomas
+mostrada traducida. Ver [notifications.md → Idioma de notificación](notifications.md#idioma-de-notificación).
+
 ### Telegram
 
 | Método | Ruta | Permiso | Descripción |
@@ -476,26 +494,69 @@ Gestión de webhooks HTTP para notificaciones salientes.
 
 Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `timeout` (1–60 s), `headers` (JSON), `body_template` (cadena con `{vars}`), `secret` (cifrado en disco), `secret_header`, `enabled`.
 
-### Plantillas de Notificación
+### Textos y plantillas de notificación
 
-> El subsistema de notificaciones completo (canales, dispatcher, matriz de routing, HMAC): ver **[notifications.md](notifications.md)**.
+> El detalle **canónico** del sistema de textos (resolución custom→i18n, cómo se
+> **generan los listados** editables y el **esquema de tags** de cada texto) está en
+> **[notifications.md → Sistema de textos de notificación](notifications.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags)**.
+> Aquí solo la UI y sus endpoints (el resto del subsistema —canales, dispatcher,
+> matriz, HMAC— también en [notifications.md](notifications.md)).
+
+El sub-tab **Templates** contiene dos tarjetas colapsables
+([detalle de la UI](notifications.md#4-el-editor-ui-y-sus-endpoints)):
+
+- **"Notification Texts"** (`partials/cfg/notify/_tpl_strings.html`; i18n
+  `notif_tpl_title`) — editor unificado **data-driven** que cubre, por idioma, los
+  **eventos/estados/mensajes del core**, los **mensajes de CADA módulo** y las
+  **cadenas de email**. Un selector de **idioma** + un selector de **paquete**
+  agrupado en optgroups **Core** / **Modules**; por fila, la key + **chips** de tags
+  insertables y 4 botones: **undo**, **use-default**, **copy** y **clean**.
+- **"Custom HTML Body"** (`_tpl_html.html`) — editor del cuerpo HTML completo del
+  email por Idioma → Tipo (`test`/`alert`/`summary`), con CodeMirror 5 (resaltado,
+  autocompletado, formateo) y preview en vivo.
+
+Endpoints (`lib/core/notify/email/template_routes.py`):
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/notify/templates` | `config_view` o `config_edit` | Obtener valores por defecto, sobrescrituras y cadenas por idioma |
-| `PUT` | `/api/v1/notify/templates/<lang>` | `config_edit` | Guardar sobrescrituras de cadenas para un idioma |
-| `DELETE` | `/api/v1/notify/templates/<lang>` | `config_edit` | Restablecer sobrescrituras de un idioma a los valores por defecto |
-| `GET` | `/api/v1/notify/html-templates` | `config_view` o `config_edit` | Obtener plantillas HTML almacenadas y variables disponibles por tipo |
+| `GET` | `/api/v1/notify/text-packages?lang=` | `config_view` o `config_edit` | Descubre **todos** los paquetes de texto editables de un idioma: **Core** (`core.events`/`core.messages`/`core.statuses`), **Email** (`core.email`) y **uno por módulo** (`mod.<módulo>`); cada entrada `{key, label, default, custom, vars}`. Es la fuente **data-driven** real del editor unificado |
+| `PUT` | `/api/v1/notify/text-packages/<lang>` | `config_edit` | Guarda **todos** los overrides del idioma (abarca todos los paquetes). Body `{scoped_key: valor}` (valor vacío = revertir a i18n); reparte por prefijo: `email:*` → store `notif_templates`, `core:*`/`mod:*` → `notif_text_overrides`. Es el **Save** del editor; el "reset language" es este mismo PUT con `{}` |
+| `GET` | `/api/v1/notify/templates` | `config_view` o `config_edit` | (legacy) Defaults + sobrescrituras + cadenas por idioma de **email** |
+| `PUT` | `/api/v1/notify/templates/<lang>` | `config_edit` | (legacy) Guardar sobrescrituras de las cadenas de email. **La UI ya no lo invoca**: escribe vía `text-packages` con claves `email:*` |
+| `DELETE` | `/api/v1/notify/templates/<lang>` | `config_edit` | (legacy) Restablecer las sobrescrituras de email de un idioma |
+| `GET` | `/api/v1/notify/html-templates` | `config_view` o `config_edit` | Obtener plantillas HTML almacenadas y variables disponibles por tipo (`HTML_TPL_VARS`) |
 | `PUT` | `/api/v1/notify/html-templates/<type>/<lang>` | `config_edit` | Guardar plantilla HTML personalizada (tipo: `test`, `alert`, `summary`) |
 | `DELETE` | `/api/v1/notify/html-templates/<type>/<lang>` | `config_edit` | Eliminar plantilla HTML personalizada (restaura la integrada) |
-| `GET` | `/api/v1/notify/html-templates/<type>/built-in` | `config_edit` | Previsualizar la plantilla HTML integrada renderizada con datos de muestra |
-| `POST` | `/api/v1/notify/html-templates/<type>/preview` | `config_edit` | Renderizar una plantilla HTML arbitraria (del editor) con datos de muestra |
+| `GET` | `/api/v1/notify/html-templates/<type>/built-in` | `config_view` o `config_edit` | Previsualizar la plantilla HTML integrada renderizada con datos de muestra |
+| `POST` | `/api/v1/notify/html-templates/<type>/preview` | `config_view` o `config_edit` | Renderizar una plantilla HTML arbitraria (del editor) con datos de muestra |
+
+> El tipo HTML **`summary`** es editable y previsualizable, pero ServiceSentry
+> **no envía (aún) emails resumen agrupados**; la UI muestra un aviso
+> (`notif_html_tpl_summary_note`) para no inducir a error.
 
 ### Email (prueba)
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
 | `POST` | `/api/v1/notify/email/test` | `config_edit` | Enviar un email de prueba con la configuración actual (guardada o no) |
+
+### Microsoft Teams
+
+Gestión de **canales** de Teams (Incoming Webhooks, en su propia tabla) + pruebas
+de entrega a canal y a usuario, y descarga del paquete de app de Teams. La UI los
+renderiza en el sub-tab Providers (`_renderMsTeamsSection`). Cómo funciona el canal
+(a canal vs a usuario; mecanismos `activity_feed`/`bot`): ver
+[notifications.md → Microsoft Teams](notifications.md#microsoft-teams--a-canal-o-a-usuarios).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/notify/msteams/channels` | `config_view` o `config_edit` | Listar canales (URL de webhook enmascarada) |
+| `POST` | `/api/v1/notify/msteams/channels` | `config_edit` | Crear un canal (Incoming Webhook) |
+| `PUT` | `/api/v1/notify/msteams/channels/<cid>` | `config_edit` | Editar un canal (URL omitida = se conserva la almacenada) |
+| `DELETE` | `/api/v1/notify/msteams/channels/<cid>` | `config_edit` | Eliminar un canal |
+| `POST` | `/api/v1/notify/msteams/channels/<cid>/test` | `config_edit` | Enviar una card de prueba a un canal |
+| `POST` | `/api/v1/notify/msteams/test` | `config_edit` | Probar la entrega a usuario (config actual, guardada o no) |
+| `GET` | `/api/v1/notify/msteams/app-package` | `config_view` o `config_edit` | Descargar el paquete de app de Teams (`manifest.json` + iconos) para el modo `activity_feed` |
 
 ### Usuarios
 
@@ -1032,8 +1093,9 @@ Todos los eventos auditados:
 | `webhook_enabled` / `webhook_disabled` | Activación o desactivación de un webhook |
 | `webhook_deleted` | Eliminación de un webhook |
 | `webhook_test_ok` / `webhook_test_fail` | Envío de payload de prueba a un webhook |
-| `notif_template_saved` | Guardado de sobrescrituras de cadenas de notificación |
-| `notif_template_reset` | Restablecimiento de sobrescrituras de un idioma a los valores por defecto |
+| `notif_text_saved` | Guardado del editor unificado "Notification Texts" (overrides de textos core/módulos/email de un idioma); es el que dispara el **Save** del editor (y el "reset language", que hace `PUT text-packages` con `{}`) |
+| `notif_template_saved` | Guardado de sobrescrituras de cadenas de notificación (email, ruta legacy `templates/<lang>`) |
+| `notif_template_reset` | Restablecimiento de sobrescrituras de un idioma a los valores por defecto (email, ruta legacy) |
 | `notif_html_template_saved` | Guardado de plantilla HTML de email personalizada |
 | `notif_html_template_reset` | Restablecimiento de plantilla HTML a la integrada |
 | `audit_cleared` | Borrado completo del registro de auditoría |

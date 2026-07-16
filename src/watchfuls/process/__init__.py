@@ -93,10 +93,8 @@ class Watchful(ModuleBase):
 
         count = self._count_matches(out, os_, name)
         ok = count >= min_count
-        if ok:
-            message = f'Process: *{key}* - {count} instance(s) running ✅'
-        else:
-            message = f'Process: *{key}* - found {count}/{min_count} instance(s) ⚠️'
+        message = (self._msg('proc_ok', key, count) if ok
+                   else self._msg('proc_low', key, count, min_count))
 
         other_data = {'process': name, 'count': count, 'min_count': min_count}
         self.dict_return.set(key, ok, message, False, other_data)

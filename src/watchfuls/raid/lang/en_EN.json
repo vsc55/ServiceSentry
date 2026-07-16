@@ -17,5 +17,21 @@
     },
     "new_item_key_label": "Check name or identifier:",
     "rename_item_prompt": "Enter new check name or identifier:",
-    "collections": {"list": "RAID checks"}
+    "collections": {"list": "RAID checks"},
+    "messages": {
+        "raid_unsupported_os": "RAID: {} - mdstat only available on Linux (host OS: {}) ⚠️",
+        "raid_none":     "[{}] No RAID's in the system. ✅",
+        "raid_ok":       "RAID {}/{} in good status. ✅",
+        "raid_degraded": "RAID {}/{} is degraded. ⚠️",
+        "raid_recovery": "RAID {}/{} is degraded, recovery status {}%, estimate time to finish {}. ⚠️",
+        "raid_unknown":  "RAID {}/{} Unknown Error. ⚠️"
+    },
+    "messages_vars": {
+        "raid_unsupported_os": ["host", "OS"],
+        "raid_none": ["host"],
+        "raid_ok": ["host", "array"],
+        "raid_degraded": ["host", "array"],
+        "raid_recovery": ["host", "array", "%", "ETA"],
+        "raid_unknown": ["host", "array"]
+    }
 }

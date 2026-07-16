@@ -102,7 +102,7 @@ provisioning**:
   (asigna roles a esos grupos y los miembros los heredan); llevan `source: 'scim'` y un **badge
   SCIM** en la pestaña Grupos (frente a los `local`).
 - Endpoints: `Users`, `Groups`, `ServiceProviderConfig`, `ResourceTypes`, `Schemas`
-  (GET/POST/PUT/PATCH/DELETE) — ver [web_admin.md](web_admin.md) y `lib/providers/scim/routes.py` (transporte) + `lib/providers/scim/` (lógica).
+  (GET/POST/PUT/PATCH/DELETE) — ver [web-admin.md](web-admin.md) y `lib/providers/scim/routes.py` (transporte) + `lib/providers/scim/` (lógica).
 
 | | JIT (login) | SCIM (push) |
 |---|:---:|:---:|
@@ -120,6 +120,16 @@ Código relevante:
   (`showEntraIdProvisionWizard`).
 - Glue por protocolo: `partials/cfg/auth/_renderers.html` (OIDC),
   `partials/cfg/auth/_wizard_saml.html` (SAML2) y `partials/cfg/auth/_wizard_scim.html` (SCIM).
+- Otro consumidor del mismo wizard: **notificaciones Email → Microsoft 365**
+  (`partials/cfg/notify/_email.html` :: `showEntraEmailWizard`), que registra una app con el
+  permiso de aplicación `Mail.Send` reutilizando la spec inline del endpoint genérico.
+- Y **notificaciones Microsoft Teams → activity feed** (`partials/cfg/notify/_msteams.html` ::
+  `showEntraMsTeamsWizard`), que registra una app con el permiso `TeamsActivity.Send` por la misma
+  vía y con `expose_api=true` → el provisioning además configura el **SSO surface** (Application ID
+  URI `api://<clientId>` + scope `access_as_user` + preautorización de los client ids de Teams) para
+  que la app de Teams generada sea **admin-instalable** (la instalación unificada valida el SSO).
+  (El modo *bot* de Teams NO usa este wizard: requiere un recurso Azure Bot, que es ARM/Bot Service
+  y no Graph.)
 - SCIM: backend `provisioning.provision_scim_app` (crear) + `provisioning.update_scim_secrets`
   (re-sync) + rutas `entraid/scim/device-code|device-poll` en `lib/providers/entraid/routes.py` (cliente
   `GRAPH_CLI_CLIENT_ID`); endpoint SCIM `lib/providers/scim/routes.py` (transporte) + `lib/providers/scim/` (lógica); generador de token

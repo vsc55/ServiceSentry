@@ -54,5 +54,31 @@
     },
     "new_item_key_label": "Name:",
     "rename_item_prompt": "Enter the new name:",
-    "collections": {"list": "Microsoft 365 connections"}
+    "collections": {"list": "Microsoft 365 connections"},
+    "messages": {
+        "m3_no_creds":            "M365: {} — missing credentials (tenant/client/secret) ⚠️",
+        "m3_auth_fail":           "M365: {} {} [auth: {}]",
+        "m3_site_fail":           "M365: {} 🔽 [SharePoint: {}]",
+        "m3_summary":             "SharePoint {}: {}% used ({}/{}, free {})",
+        "m3_site_ok":             "M365: {} — {} ✅",
+        "m3_why_free":            "free < {}",
+        "m3_site_alert":          "M365: {} — {} — {} ⚠️",
+        "m3_tenant_fail":         "M365: {} 🔽 [tenant usage: {}]",
+        "m3_tenant_base":         "M365: {} — SharePoint (tenant) used {}",
+        "m3_tenant_over":         "{} — over the limit {} ⚠️",
+        "m3_tenant_limit_suffix": " (limit {})"
+    },
+    "messages_vars": {
+        "m3_no_creds": ["connection"],
+        "m3_auth_fail": ["connection", "icon", "error"],
+        "m3_site_fail": ["connection", "error"],
+        "m3_summary": ["site", "used %", "used", "total", "free"],
+        "m3_site_ok": ["connection", "summary"],
+        "m3_site_alert": ["connection", "summary", "reasons"],
+        "m3_tenant_fail": ["connection", "error"],
+        "m3_tenant_base": ["connection", "used"],
+        "m3_tenant_over": ["message", "limit"],
+        "m3_why_free": ["min free"],
+        "m3_tenant_limit_suffix": ["limit"]
+    }
 }

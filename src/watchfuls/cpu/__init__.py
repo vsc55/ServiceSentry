@@ -109,9 +109,11 @@ class Watchful(ModuleBase):
                       or self.module_default('alert', self._MODULE_DEFAULTS['alert']))
         used = round(float(usage), 1)
         ok = used < alert
-        msg = f'CPU ({label}) used {used:.1f}%'
-        msg = f'Normal {msg} ✅' if ok else f'Excessive {msg} ⚠️'
-        self.dict_return.set(key, ok, msg, other_data={'used': used, 'alert': alert}, name=label)
+        msg = self._msg('cpu_ok' if ok else 'cpu_high', label, f'{used:.1f}')
+        # A threshold breach is a warning (the host is reachable), not a down — a hard
+        # failure (unreachable/parse error) raises above and is reported as down.
+        self.dict_return.set(key, ok, msg, other_data={'used': used, 'alert': alert},
+                             severity='warning', name=label)
 
     # ── Per-OS parsers (pure; return usage % or None) ─────────────────────────
     @classmethod

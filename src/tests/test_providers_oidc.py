@@ -137,6 +137,20 @@ class TestOidcSyncUser:
         assert admin._uid_to_role_name(user['role']) == 'admin'
         assert user['display_name'] == 'Bob New'
 
+    def test_refuses_to_convert_a_local_account(self, admin, config_dir):
+        """Regression (account-takeover): an IdP user whose username collides with an
+        existing LOCAL account must NOT hijack it — sync returns None, account untouched."""
+        from lib.providers.oidc import auth as oidc_auth
+        _oidc_cfg(config_dir)
+        admin._users['carol'] = {
+            'uid': 'uid-carol', 'auth_source': 'local',
+            'role': admin._role_name_to_uid('admin'), 'groups': [], 'enabled': True,
+        }
+        result = oidc_auth.sync_user(
+            admin, _make_userinfo('carol', 'carol@evil.example', 'Carol', groups=['Admins']))
+        assert result is None
+        assert admin._users['carol']['auth_source'] == 'local'   # not converted to SSO
+
     def test_auto_create_false_blocks_new_user(self, admin, config_dir):
         from lib.providers.oidc import auth as oidc_auth
         _oidc_cfg(config_dir, extra={'auto_create_users': False})
@@ -283,3 +297,8 @@ class TestOidcLoginFlow:
         assert resp.status_code == 200
         assert b'name="username"' in resp.data
         assert not wa._users['dis_user']['enabled']
+
+
+def test_oidc_csrf_exempt_declared(admin):
+    # The OIDC provider declares its own CSRF-exempt path in register() (discovered, not hardcoded).
+    assert '/auth/oidc/callback' in admin._csrf_exempt_prefixes

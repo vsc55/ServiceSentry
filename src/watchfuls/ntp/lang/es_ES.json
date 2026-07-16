@@ -24,5 +24,15 @@
         "connection": "Conexión",
         "alerts":     "Alertas"
     },
-    "collections": {"list": "Servidores NTP"}
+    "collections": {"list": "Servidores NTP"},
+    "messages": {
+        "ntp_error": "NTP: {} - Error: {} 💥",
+        "ntp_ok":    "NTP: {} - desfase {}s (máx {}s) ✅",
+        "ntp_high":  "NTP: {} - desfase {}s supera {}s ⚠️"
+    },
+    "messages_vars": {
+        "ntp_error": ["servidor", "error"],
+        "ntp_ok": ["servidor", "desfase (s)", "máx (s)"],
+        "ntp_high": ["servidor", "desfase (s)", "máx (s)"]
+    }
 }

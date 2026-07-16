@@ -252,10 +252,28 @@ class TestCheckStatePersistence:
 
     def test_unchanged_state_is_silent(self, monitor):
         added = self._recorder(monitor)
-        monitor._process_module_result('mod', self._result('k', True, 'ok'))   # first → notifies
+        monitor._process_module_result('mod', self._result('k', True, 'ok'))   # first OK → no recovery
         monitor._process_module_result('mod', self._result('k', True, 'ok'))   # unchanged → silent
         monitor._process_module_result('mod', self._result('k', False, 'dn'))  # transition → notifies
-        assert added == [('recovery', 'mod', 'k', 'ok'), ('down', 'mod', 'k', 'dn')]
+        assert added == [('down', 'mod', 'k', 'dn')]
+
+    def test_first_seen_ok_is_not_a_recovery(self, monitor):
+        """A passing check seen for the first time never 'recovered' — no spurious recovery
+        (so a first cycle / manual "Run all" over many OK checks doesn't blast recoveries).
+        Its state is still recorded, so a later real transition is detected."""
+        added = self._recorder(monitor)
+        monitor._process_module_result('mod', self._result('k', True, 'ok'))
+        assert added == []                                        # suppressed
+        # A real DOWN → UP transition IS a recovery.
+        monitor._process_module_result('mod', self._result('k', False, 'dn'))  # → down
+        monitor._process_module_result('mod', self._result('k', True, 'ok'))   # down → up = recovery
+        assert added == [('down', 'mod', 'k', 'dn'), ('recovery', 'mod', 'k', 'ok')]
+
+    def test_first_seen_down_still_notifies(self, monitor):
+        """A first-seen FAILING check still announces its current state (real problem now)."""
+        added = self._recorder(monitor)
+        monitor._process_module_result('mod', self._result('k', False, 'down'))
+        assert added == [('down', 'mod', 'k', 'down')]
 
     def test_state_survives_restart(self, monitor):
         # Record an OK state and persist it to the DB.
@@ -498,6 +516,9 @@ class TestDaemonCycleIntegration:
                 # Run the cycle exactly like the daemon: check → process → history → flush.
                 ok, mname, data = monitor.check_module(name)
                 assert ok and data is not None and 'pve/state' in data.list
+                # Seed a prior DOWN so the OK result is a genuine recovery (down → up) that
+                # sends — a first-seen OK check is (correctly) not a recovery and stays quiet.
+                monitor.status.set_conf([name, 'pve/state', 'status'], False)
                 monitor._process_module_result(mname, data)
                 for key in data.list:
                     monitor._history.record(mname, key, data.get_status(key),

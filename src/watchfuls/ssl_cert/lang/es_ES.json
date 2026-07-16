@@ -29,5 +29,17 @@
     },
     "new_item_key_label": "Nombre de host o identificador:",
     "rename_item_prompt": "Introduce el nuevo nombre de host o identificador:",
-    "collections": {"list": "Certificados"}
+    "collections": {"list": "Certificados"},
+    "messages": {
+        "ssl_error":    "SSL Cert: {} - Error: {} 💥",
+        "ssl_ok":       "SSL Cert: {} - caduca en {} días ✅",
+        "ssl_expired":  "SSL Cert: {} - CADUCADO (hace {} días) ⚠️",
+        "ssl_expiring": "SSL Cert: {} - caduca en {} días (umbral de aviso: {}d) ⚠️"
+    },
+    "messages_vars": {
+        "ssl_error": ["host", "error"],
+        "ssl_ok": ["host", "días"],
+        "ssl_expired": ["host", "días"],
+        "ssl_expiring": ["host", "días", "umbral (d)"]
+    }
 }

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """ Lib package. """
 
-__version__ = '1.0.0'
+__version__ = '0.0.1'
 
 from lib.util.dict_files_path import DictFilesPath
 from lib.system.exe import Exec, ExecResult

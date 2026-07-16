@@ -46,6 +46,10 @@ class AuditStore:
 
     def __init__(self, db: BaseConnector) -> None:
         self._db = db
+        # ``user`` is a reserved word in PostgreSQL (it means CURRENT_USER) — quote it
+        # (dialect-aware) in every raw query, else the INSERT errors and the SELECT would
+        # return the DB login instead of the column.
+        self._qu = db.quote_ident('user')
         self._bootstrap()
 
     # ── Schema ────────────────────────────────────────────────────────────────
@@ -76,7 +80,7 @@ class AuditStore:
             if not isinstance(detail, str) else detail
         )
         self._db.execute(
-            f'INSERT INTO {_T}(ts, event, user, ip, detail) VALUES(?,?,?,?,?)',
+            f'INSERT INTO {_T}(ts, event, {self._qu}, ip, detail) VALUES(?,?,?,?,?)',
             (ts, event, user, ip, raw_detail),
         )
         self._db.commit()
@@ -101,7 +105,7 @@ class AuditStore:
         """Return all entries as a list of dicts."""
         order = 'DESC' if newest_first else 'ASC'
         rows = self._db.fetchall(
-            f'SELECT id, ts, event, user, ip, detail FROM {_T} ORDER BY id {order}'
+            f'SELECT id, ts, event, {self._qu}, ip, detail FROM {_T} ORDER BY id {order}'
         )
         return [_row_to_dict(r) for r in rows]
 
@@ -110,7 +114,7 @@ class AuditStore:
 
         Each dict carries ``_id`` (the row id) so the worker can advance the cursor."""
         rows = self._db.fetchall(
-            f'SELECT id, ts, event, user, ip, detail FROM {_T} '
+            f'SELECT id, ts, event, {self._qu}, ip, detail FROM {_T} '
             'WHERE id > ? ORDER BY id ASC LIMIT ?',
             (int(last_id), max(1, min(5000, int(limit)))))
         return [_row_to_dict(r) for r in rows]
@@ -145,7 +149,7 @@ class AuditStore:
             ))
         with self._db.transaction():
             self._db.executemany(
-                f'INSERT INTO {_T}(ts, event, user, ip, detail) VALUES(?,?,?,?,?)',
+                f'INSERT INTO {_T}(ts, event, {self._qu}, ip, detail) VALUES(?,?,?,?,?)',
                 rows,
             )
         return len(rows)

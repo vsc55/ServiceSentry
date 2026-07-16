@@ -60,5 +60,15 @@
     },
     "new_item_key_label": "URL or hostname:",
     "rename_item_prompt": "Enter new URL or hostname:",
-    "collections": {"list": "URLs"}
+    "collections": {"list": "URLs"},
+    "messages": {
+        "web_error": "Web: {} — Error: {} 💥",
+        "web_up":    "Web: {} 🔼",
+        "web_down":  "Web: {} 🔽"
+    },
+    "messages_vars": {
+        "web_error": ["URL", "error"],
+        "web_up": ["URL"],
+        "web_down": ["URL"]
+    }
 }

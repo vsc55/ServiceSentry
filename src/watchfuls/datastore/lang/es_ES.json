@@ -150,5 +150,17 @@
     "new_item_title": "Nuevo almacén de datos",
     "new_item_key_label": "Nombre de conexión:",
     "rename_item_prompt": "Introduce el nuevo nombre de conexión:",
-    "collections": {"list": "Almacenes de datos"}
+    "collections": {"list": "Almacenes de datos"},
+    "messages": {
+        "ds_error":      "Datastore: {} - Error: {} 💥",
+        "ds_conn_high":  "{} - {} conexiones > {} ⚠️",
+        "ds_ok":         "{} — {} ✅",
+        "ds_conn_error": "{} - Error: {} ⚠️"
+    },
+    "messages_vars": {
+        "ds_error": ["datastore", "error"],
+        "ds_conn_high": ["datastore", "conexiones", "límite"],
+        "ds_ok": ["datastore", "detalle"],
+        "ds_conn_error": ["datastore", "error"]
+    }
 }

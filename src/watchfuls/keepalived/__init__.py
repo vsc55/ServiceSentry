@@ -114,11 +114,11 @@ class Watchful(ModuleBase):
         members = it.get('__cluster_members__') or []
         if not members:
             self._emit(key, False,
-                       f'Keepalived: {label} — *sin hosts miembros* ⚠️', severity='warning')
+                       self._msg('ka_no_members', label), severity='warning')
             return
         if not vip_ip:
             self._emit(f'{key}/vip', False,
-                       f'Keepalived: {label} — *VIP no configurada* ⚠️',
+                       self._msg('ka_no_vip', label),
                        {'vip': ''}, severity='warning')
 
         # One probe per member host: service state + its current addresses.
@@ -143,8 +143,8 @@ class Watchful(ModuleBase):
             out, err, code = self.host_exec(mi, probe, timeout=timeout)
             if code != 0 and not (out or '').strip():
                 self._emit(f'{key}/node/{name}', False,
-                           f'Keepalived: {label}/{name} — *host inaccesible* '
-                           f'[{(err or "").strip() or code}] 🔽', extra)
+                           self._msg('ka_host_unreachable', label, name,
+                                     (err or '').strip() or code), extra)
                 continue
 
             svc = _svc_state(out)
@@ -155,12 +155,12 @@ class Watchful(ModuleBase):
 
             if check_service and svc != 'active':
                 self._emit(f'{key}/node/{name}', False,
-                           f'Keepalived: {label}/{name} — *servicio {svc}* 🔽', node_extra)
+                           self._msg('ka_service', label, name, svc), node_extra)
             else:
                 role = 'MASTER' if holds else 'BACKUP'
-                prio_txt = f', prioridad {priority}' if priority is not None else ''
+                prio_txt = self._msg('ka_prio_suffix', priority) if priority is not None else ''
                 self._emit(f'{key}/node/{name}', True,
-                           f'Keepalived: {label}/{name} — {role} (servicio {svc}{prio_txt}) ✅',
+                           self._msg('ka_node_ok', label, name, role, svc, prio_txt),
                            node_extra)
                 if svc == 'active':
                     alive_prio.append((name, priority))
@@ -171,17 +171,16 @@ class Watchful(ModuleBase):
         if check_vip and vip_ip:
             if len(holders) == 1:
                 self._emit(f'{key}/vip', True,
-                           f'Keepalived: {label} — VIP {vip_ip} activa en {holders[0][0]} ✅',
+                           self._msg('ka_vip_active', label, vip_ip, holders[0][0]),
                            {**vip_extra, 'holder': holders[0][0], 'holders': 1})
             elif not holders:
                 self._emit(f'{key}/vip', False,
-                           f'Keepalived: {label} — *VIP {vip_ip} no la tiene ningún nodo* 🔽',
+                           self._msg('ka_vip_none', label, vip_ip),
                            {**vip_extra, 'holders': 0})
             else:
                 names = ', '.join(h[0] for h in holders)
                 self._emit(f'{key}/vip', False,
-                           f'Keepalived: {label} — *VIP {vip_ip} en varios nodos '
-                           f'(split-brain): {names}* ⚠️',
+                           self._msg('ka_vip_split', label, vip_ip, names),
                            {**vip_extra, 'holders': len(holders)}, severity='warning')
 
         # ── Priority: the VIP should sit on the highest-priority alive node ─
@@ -192,11 +191,10 @@ class Watchful(ModuleBase):
                 top = max(p for _, p in rated)
                 if hp < top:
                     self._emit(f'{key}/priority', False,
-                               f'Keepalived: {label} — *VIP en {hn} (prioridad {hp}) pero hay '
-                               f'un nodo activo con prioridad mayor ({top})* ⚠️',
+                               self._msg('ka_prio_low', label, hn, hp, top),
                                {'holder': hn, 'holder_priority': hp, 'top_priority': top},
                                severity='warning')
                 else:
                     self._emit(f'{key}/priority', True,
-                               f'Keepalived: {label} — VIP en el nodo de mayor prioridad ✅',
+                               self._msg('ka_prio_ok', label),
                                {'holder': hn, 'holder_priority': hp})

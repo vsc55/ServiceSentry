@@ -129,6 +129,46 @@ class _PermissionsMixin:
             )
         return frozenset()
 
+    def _role_grantable(self, role_ref: str) -> bool:
+        """Requester-context guard: may the current requester assign role *role_ref*?
+
+        - An admin may grant anything.
+        - The built-in ``admin`` role is never grantable by a non-admin.
+        - The other built-in roles (``editor``/``viewer``) ARE grantable — delegated user
+          management legitimately assigns the standard roles even though the actor may not
+          personally hold every ``*_view`` permission they carry.
+        - A **custom** role is grantable only if its permissions are a subset of the
+          requester's own effective permissions (blocks assigning a custom role that carries
+          a permission the requester lacks — i.e. self-/other-escalation).
+
+        *role_ref* is a role UID (as stored) or a built-in key."""
+        if self._is_admin_requester():
+            return True
+        if role_ref == BUILTIN_ROLE_UIDS.get('admin') or role_ref == 'admin':
+            return False
+        if role_ref in set(BUILTIN_ROLE_UIDS.values()) or role_ref in BUILTIN_ROLE_PERMISSIONS:
+            return True   # built-in editor/viewer — delegatable
+        return self._get_role_permissions(role_ref) <= self._get_session_permissions()
+
+    def _groups_grantable(self, group_uids) -> bool:
+        """Requester-context guard for assigning group MEMBERSHIP: a non-admin may only add a
+        user to a group whose roles they could themselves grant (via :meth:`_role_grantable`).
+
+        Membership matters because a group's roles are merged into the member's effective
+        permissions — so adding a user to the built-in *Administrators* group (or any group
+        carrying a higher-privilege role) is an escalation just like assigning the role
+        directly. Admins may assign anything."""
+        if self._is_admin_requester():
+            return True
+        for g_uid in group_uids or []:
+            g = self._groups.get(g_uid)
+            if not isinstance(g, dict):
+                continue
+            for r in g.get('roles', []) or []:
+                if not self._role_grantable(r):
+                    return False
+        return True
+
     def _get_effective_permissions(self, username: str, role_ref: str) -> frozenset:
         """Return merged permissions: role perms ∪ perms from all roles in user's groups."""
         perms = self._get_role_permissions(role_ref)

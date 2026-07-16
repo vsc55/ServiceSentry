@@ -58,6 +58,11 @@ class CliContext:
         self.roles = self.roles_store.load_roles()   # {uid: {name, ...}} — customs + overrides
 
     def password_policy(self) -> PasswordPolicy:
+        """Build the :class:`PasswordPolicy` from the ``web_admin`` config section.
+
+        Reads the ``pw_*`` settings (length bounds + upper/digit/symbol requirements),
+        applying the same defaults the web UI uses.
+        """
         wa = self.cfg.get('web_admin') or {}
         return PasswordPolicy(
             min_len=int(wa.get('pw_min_len') or 8),
@@ -78,7 +83,9 @@ class CliContext:
         return None
 
     def persist_users(self) -> None:
+        """Write the in-memory users working copy back to the DB store."""
         self.users_store.save_all(self.users)
 
     def persist_groups(self) -> None:
+        """Write the in-memory groups working copy back to the DB store."""
         self.groups_store.save_all(self.groups)

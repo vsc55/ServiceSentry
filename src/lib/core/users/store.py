@@ -15,7 +15,7 @@ data, lockout counters, …) go into a JSON ``extra`` column.
 
 Schema::
 
-    users(uid UNIQUE, username PK, password_hash, role, display_name,
+    users(uid PK, username UNIQUE, password_hash, role, display_name,
           email, lang, dark_mode, enabled, auth_source, extra,
           created_at, updated_at, updated_by)
     users_groups(user_uid, group_uid, PRIMARY KEY(user_uid, group_uid))

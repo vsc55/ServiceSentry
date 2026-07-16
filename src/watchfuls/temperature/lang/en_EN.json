@@ -28,5 +28,15 @@
         "discover_title": "Discover Sensors",
         "discover_error": "Could not load the list of temperature sensors",
         "item_added":     "Sensor \"{}\" added"
+    },
+    "messages": {
+        "temp_unsupported_os": "Temp: {} - only available on Linux (host OS: {}) ⚠️",
+        "temp_high": "Sensor {}, over temperature Warning {} ºC 🔥",
+        "temp_ok":   "Sensor {}, temperature Ok {} ºC ✅"
+    },
+    "messages_vars": {
+        "temp_unsupported_os": ["sensor", "OS"],
+        "temp_high": ["sensor", "°C"],
+        "temp_ok": ["sensor", "°C"]
     }
 }

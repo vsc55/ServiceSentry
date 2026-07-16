@@ -37,12 +37,14 @@ def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
              webhook_ids=None) -> tuple[bool, str]:
     """Send to all enabled webhooks. Returns (all_ok, summary).
 
-    Webhooks live in their own DB-backed store (``wa._load_webhooks``); *cfg* is
-    accepted only for backwards compatibility and ignored for the webhook list.
-    When *webhook_ids* is a non-empty iterable, only those destinations (matched
-    by id) are notified; otherwise every enabled webhook is.
+    Webhooks live in the webhook channel's own store (loaded via
+    :func:`lib.core.notify.webhook.channel.load`); *cfg* is accepted only for backwards
+    compatibility and ignored for the webhook list.  When *webhook_ids* is a non-empty
+    iterable, only those destinations (matched by id) are notified; otherwise every
+    enabled webhook is.
     """
-    webhooks = [w for w in (wa._load_webhooks() or [])
+    from lib.core.notify.webhook import channel as _channel  # noqa: PLC0415
+    webhooks = [w for w in (_channel.load(wa) or [])
                 if w.get('enabled') and (w.get('url') or '').strip()]
     if webhook_ids:
         wanted = {str(i) for i in webhook_ids}
@@ -72,6 +74,14 @@ def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
     url = (cfg.get('url') or '').strip()
     if not url:
         return False, 'Webhook URL is not configured'
+
+    # SSRF guard: reject non-HTTP(S) schemes and the link-local / cloud-metadata range
+    # (169.254.x). Private/internal targets are allowed — an internal webhook endpoint is a
+    # legitimate destination for a monitoring tool (see lib.security.net_guard).
+    from lib.security.net_guard import validate_external_url  # noqa: PLC0415
+    reason = validate_external_url(url)
+    if reason:
+        return False, f'Webhook URL rejected: {reason}'
 
     method         = cfg_get(cfg, 'webhooks|method', falsy=True).upper()
     timeout        = cfg_get(cfg, 'webhooks|timeout', falsy=True)

@@ -13,6 +13,9 @@ const SECTION_LABELS = I18N.sections || {};
 const SENSITIVE   = new Set({{ wa_sensitive_fields | tojson }});
 const PERM_GROUPS = {{ permissions_groups | tojson }};
 const HOME_PAGES  = {{ home_pages | tojson }};   // landing-page registry (id/url/label_key) — for the selects
+// Notification routing matrix, registry-driven (see lib/core/notify/events.py + registry.py):
+const NOTIFY_MATRIX_EVENTS = {{ notify_matrix_events | tojson }};   // rows: {key, label_key}
+const NOTIFY_CHANNELS      = {{ notify_channels | tojson }};        // cols: {key, label_key}
 const SUPPORTED_LANGS = {{ supported_langs| tojson }};
 const SYSTEM_DEFAULT_LANG      = '{{ default_lang }}';
 const CURRENT_LANG             = '{{ lang }}';
@@ -143,6 +146,8 @@ const ENTRA_APP_NAME_DEFAULT = {{ entra_app_name_default | tojson }};
 const ENTRA_APP_NAME_OIDC    = {{ entra_app_name_oidc    | tojson }};
 const ENTRA_APP_NAME_SAML2   = {{ entra_app_name_saml2   | tojson }};
 const ENTRA_APP_NAME_SCIM    = {{ entra_app_name_scim    | tojson }};
+const ENTRA_APP_NAME_EMAIL   = {{ entra_app_name_email   | tojson }};
+const ENTRA_APP_NAME_TEAMS   = {{ entra_app_name_teams   | tojson }};
 // Effective public base URL (config override → else proxy-aware auto-detect),
 // resolved server-side by WebAdmin.public_base_url(). Used by publicBaseUrl().
 const SERVER_BASE_URL = {{ wa_base_url | tojson }};

@@ -107,13 +107,32 @@ class _IpBanMixin:
         )
 
     def _ipban_notify(self, action: str, ip: str, info: dict) -> None:
-        """Audit an automatic/manual ban lifecycle event (banned / escalated / lifted)."""
+        """Audit a ban lifecycle event (banned / escalated / lifted) and forward it to the
+        notification router as an ``ipban_banned`` / ``ipban_unbanned`` event (opt-in matrix)."""
         try:
             detail = {'ip': ip, 'reason': info.get('reason', ''),
                       'level': info.get('level'), 'by': info.get('by', 'system')}
             detail['permanent'] = info.get('until') is None
             self._audit_system(f'ip_{action}',
                                detail={k: v for k, v in detail.items() if v is not None})
+        except Exception:  # pylint: disable=broad-except
+            pass
+        # Route through the core notification matrix (default off, so opt-in per channel).
+        try:
+            import time as _time  # noqa: PLC0415
+            from lib.core.notify.notification_dispatcher import dispatch  # noqa: PLC0415
+            from lib.core.notify.formatting import notify_lang, notify_text  # noqa: PLC0415
+            unbanned = action == 'unbanned'
+            kind = 'ipban_unbanned' if unbanned else 'ipban_banned'
+            reason = info.get('reason', '')
+            cfg = self._read_config_file(self._CONFIG_FILE) or {}
+            lang = notify_lang(cfg)
+            msg = notify_text(cfg, lang, 'notif_msg_ip_unbanned' if unbanned else 'notif_msg_ip_banned', ip)
+            if reason:
+                msg += f' ({reason})'
+            status = notify_text(cfg, lang, 'notif_status_unbanned' if unbanned else 'notif_status_banned')
+            dispatch(self, kind=kind, module='ipban', item=ip, status=status,
+                     message=msg, timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'))
         except Exception:  # pylint: disable=broad-except
             pass
 

@@ -37,7 +37,8 @@ from lib.services.manager.instances import ServiceInstancesStore
 from lib.services.manager.commands import ServiceCommandsStore
 from lib.services.manager.leader import ServiceLeaderStore
 from lib.services.syslog.store import SyslogStore
-from lib.core.notify.webhook.store import WebhooksStore
+from lib.core.notify.context import NotifyContext
+from lib.core.notify.router import NotificationRouter
 from lib.security import secret_manager
 
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for rule/config changes (s)
@@ -98,9 +99,16 @@ class EventService(_HeartbeatMixin, _EventsMixin):
         # Sources the worker consumes (audit on the main DB, syslog on its own).
         self._audit_store = AuditStore(self._db_connector)
         self._syslog_store = SyslogStore(self._syslog_db_connector)
-        # Dispatch + bookkeeping (shared DB).
-        self._webhooks_store = WebhooksStore(
-            self._db_connector, fernet=self._fernet, secret_keys=self._secret_keys)
+        # Dispatch goes through the core notification router (owns every channel store);
+        # this worker just builds one from an explicit NotifyContext and delegates.
+        self._notify = NotificationRouter(NotifyContext(
+            db=self._db_connector,
+            read_config=lambda: self._read_config_file(self._CONFIG_FILE),
+            fernet=self._fernet, secret_keys=self._secret_keys,
+            dbg=self._dbg,
+            config_file=self._CONFIG_FILE,
+        ))
+        # Bookkeeping (shared DB).
         self._event_rules_store = EventRulesStore(self._db_connector)
         self._notification_log_store = NotificationLogStore(self._db_connector)
         self._event_state_store = EventStateStore(self._db_connector)
@@ -125,19 +133,13 @@ class EventService(_HeartbeatMixin, _EventsMixin):
         self._dbg(f'> Events >> service init: config={config_dir} var={self._var_dir} '
                   f'db={backend}', DebugLevel.info)
 
-    # ── context surface used by the notification dispatcher ───────────────────
+    # ── config surface (the router owns channel loading now) ──────────────────
     def _read_config_file(self, _filename: str | None = None) -> dict:
         """Effective configuration (DB ← config.json), via the ConfigManager."""
         return self._config_mgr.read() or {}
 
     def _config_section(self, name: str) -> dict:
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
-
-    def _load_webhooks(self, *, decrypt: bool = True) -> list:
-        try:
-            return self._webhooks_store.list(decrypt=decrypt)
-        except Exception:  # pylint: disable=broad-except
-            return []
 
     def _dbg(self, message, level: DebugLevel = DebugLevel.info) -> None:
         self._debug.print(message, level)
