@@ -44,7 +44,7 @@ _SEP = '---SS---'
 
 # Per-OS command(s) that yield the memory figures parsed below.  macOS/FreeBSD
 # need several readings: each is a separate single-binary command (no shell
-# chaining) so the set fits a strict SSH allowlist (see docs/ssh-hardening.md);
+# chaining) so the set fits a strict SSH allowlist (see docs/caso-ssh-hardening.md);
 # their outputs are joined here with _SEP.
 _MEM_CMDS = {
     'linux':   ['cat /proc/meminfo'],

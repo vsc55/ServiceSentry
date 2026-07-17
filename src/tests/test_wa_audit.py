@@ -139,7 +139,7 @@ class TestAuditLog:
         client.post("/api/v1/sessions/invalidate",
                     content_type="application/json", data="{}")
         events = [e['event'] for e in admin._audit_log]
-        assert 'all_sessions_revoked' in events
+        assert 'session_all_revoked' in events
 
     def test_audit_api_returns_entries(self, admin, client):
         """GET /api/audit returns the audit log."""

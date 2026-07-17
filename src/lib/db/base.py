@@ -288,15 +288,24 @@ class BaseConnector(ABC):
         return '; '.join(bits) or 'no-op'
 
     def _column_type_clause(self, col) -> str:
-        """Native type plus inline constraints for a single ADD COLUMN."""
+        """Native type + inline constraints for a single ADD COLUMN on an EXISTING table.
+
+        Retro-adding a column to a *populated* table is constrained across engines:
+        * ``NOT NULL`` is inlined only when a ``DEFAULT`` exists (existing rows adopt it).
+          A NOT-NULL column WITHOUT a default is added **nullable** instead — otherwise
+          PostgreSQL hard-fails ("column contains null values") and MySQL silently injects an
+          implicit type default (a data-correctness landmine).  Callers can backfill and
+          tighten separately.
+        * ``UNIQUE`` is **never** inlined here — :meth:`_apply_incremental` adds a separate
+          unique index after the column, so a table with duplicates fails on the index (a
+          clear, recoverable error) rather than mid-ALTER.
+        """
         native = self._type_map.get(col.type.upper(), col.type)
         parts = [native]
-        if not col.nullable:
+        if not col.nullable and col.default is not None:
             parts.append('NOT NULL')
         if col.default is not None:
             parts.append(f'DEFAULT {col.default}')
-        if col.unique:
-            parts.append('UNIQUE')
         return ' '.join(parts)
 
     def _drop_index(self, name: str, table: str) -> None:
@@ -306,8 +315,16 @@ class BaseConnector(ABC):
     def _apply_incremental(self, spec: TableSpec, diff: SchemaDiff) -> None:
         """Add trailing columns and reconcile indexes without a rebuild."""
         for col in diff.missing_columns:
+            if not col.nullable and col.default is None:
+                _log.warning(
+                    'reconcile %s: adding column %r as NULLABLE — a NOT NULL column with no '
+                    'default cannot be added to a populated table on all engines; backfill '
+                    'and tighten separately if required', spec.name, col.name)
             self.add_column_if_missing(
                 spec.name, col.name, self._column_type_clause(col))
+            if col.unique:   # separate unique index (not inlined on ADD COLUMN)
+                self.execute_ddl(create_index_ddl(
+                    f'ux_{spec.name}_{col.name}', spec.name, [col.name], True, self.quote_ident))
         for idx in diff.changed_indexes:
             self._drop_index(idx.name, spec.name)
         for idx in list(diff.missing_indexes) + list(diff.changed_indexes):

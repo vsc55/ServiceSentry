@@ -14,8 +14,8 @@ particularidades de cada canal, la **severidad warning**, y — en detalle — e
 los listados** editables, y el **esquema de tags** de cada texto.
 
 > La **generación** de eventos (worker que drena syslog/audit, reglas, cooldown) está en
-> [architecture.md → Procesamiento de Eventos](architecture.md#procesamiento-de-eventos-notificaciones)
-> y el servicio en [services.md](services.md). Aquí se documenta lo que pasa **a partir**
+> [explica-arquitectura.md → Procesamiento de Eventos](explica-arquitectura.md#procesamiento-de-eventos-notificaciones)
+> y el servicio en [explica-servicios.md](explica-servicios.md). Aquí se documenta lo que pasa **a partir**
 > de `dispatch()`.
 
 ---
@@ -178,6 +178,25 @@ Detalles:
 - **Sin hilo de fondo**: el flush es **síncrono**; el antiguo cliente Telegram con
   cola/hilo (`lib.providers.telegram.Telegram` / `pool_run`) ya no lo usa el monitor.
 
+```mermaid
+flowchart TD
+    cycle["ciclo de monitorización<br/>(executor.run_checks)"] --> chg{"¿cambió el estado<br/>del check?"}
+    chg -- no --> cycle
+    chg -- "sí" --> kind["kind por alerta:<br/>OK→recovery · warning→warn · resto→down"]
+    kind --> acc["MonitorNotifier.add(alerta, kind)<br/><small>acumula TODO el ciclo</small>"]
+    acc --> cycle
+    cycle == "fin de ciclo" ==> flush["notifier.flush() (síncrono)"]
+    flush --> reg["itera el registro de canales"]
+    reg --> m{"matriz: {canal}_on_{kind}?"}
+    m -- "false" --> skip["omitir ese canal/kind"]
+    m -- "true" --> tg["Telegram: 1 digest HTML agrupado<br/>(⚠️ Issues / ✅ Recovered, troceado &lt;4096)"]
+    m -- "true" --> em["Email: 1 digest (render_summary)<br/>2 zonas, agrupado por host"]
+    m -- "true" --> wh["Webhook / Teams:<br/>1 llamada POR alerta (no agrupado)"]
+```
+
+> `route_kind` (p.ej. **"Run all"** on-demand → `manual_run`) hace que el flush completo
+> enrute como **un** único kind; el digest sigue mostrando los estados reales.
+
 ---
 
 ## Matriz de routing (`notifications`)
@@ -195,9 +214,18 @@ Routing*.
 | **Webhook** | `webhook_on_down` | `webhook_on_recovery` | `webhook_on_warn` | `webhook_on_<kind>` |
 | **Teams** | `msteams_on_down` | `msteams_on_recovery` | `msteams_on_warn` | `msteams_on_<kind>` |
 
-Las **reglas de eventos** NO usan esta matriz: cada regla lleva su propia lista de canales.
+```mermaid
+flowchart LR
+    a["alerta (kind: down/recovery/warn/…)"] --> ch["por cada canal<br/>(Telegram/Email/Webhook/Teams)"]
+    ch --> flag{"flag {canal}_on_{kind}<br/>en 'notifications'"}
+    flag -- "true" --> send["enviar por ese canal"]
+    flag -- "false (default)" --> skip["no enviar"]
+```
+
+Las **reglas de eventos** NO usan esta matriz: cada regla lleva su propia lista de canales
+(ver el gestor de eventos en [explica-servicios.md](explica-servicios.md)).
 Detalle de las claves en
-[configuration.md → notifications](configuration.md#sección-notifications-matriz-de-routing).
+[ref-configuracion.md → notifications](ref-configuracion.md#sección-notifications-matriz-de-routing).
 
 ---
 
@@ -245,9 +273,73 @@ con clientes de correo); strings traducibles y personalizables (ver
 > wizard Device Code Flow que el SSO (`showEntraIdProvisionWizard`) para registrar una app
 > en Entra ID con el permiso de aplicación **`Mail.Send`** y rellenar
 > `ms365_tenant_id`/`ms365_client_id`/`ms365_client_secret` (el secreto cifrado). Solo hay
-> que indicar el remitente (`from_email`). Detalle en [sso-entra.md](sso-entra.md).
+> que indicar el remitente (`from_email`). Detalle en [caso-entra-id.md](caso-entra-id.md).
 
-Destinatarios: lista en la config `email` (se parsean múltiples direcciones).
+#### Resolución de destinatarios (usuarios y grupos → emails)
+
+El campo de destinatarios (`email|recipients`, y también `msteams|recipients`) **no** guarda solo
+direcciones: guarda **tokens**, y la lista real de emails se resuelve **en el momento de enviar**
+contra el directorio vivo. Esto permite dirigir avisos a "el grupo Operaciones" sin mantener
+manualmente una lista de correos.
+
+**Formas de token** (string CSV; también acepta `;`):
+
+| Token | Se resuelve a |
+|---|---|
+| `alguien@dominio.com` | esa dirección, tal cual |
+| `user:<uid>` | el email **actual** de ese usuario del panel |
+| `group:<uid>` | los emails de los **miembros habilitados** de ese grupo |
+
+**Flujo end-to-end:**
+
+1. **UI (edición)** — el campo es de **chips** con autocompletado (`suggest:'recipients'` en
+   `build_config_schema()`) que sugiere **usuarios** y **grupos** activos vía
+   `GET /api/v1/notify/recipients/suggest` (gate `config_edit`). Al elegir uno se inserta el token
+   `user:<uid>`/`group:<uid>`; también puedes escribir un email suelto. Se persiste como string CSV.
+2. **Envío** — el canal email pide el resolver al router (`router.store('recipients', lambda ctx:
+   RecipientResolver(ctx.db))`, en `lib/core/notify/recipients.py`). Al vivir sobre el conector de
+   BD compartido, **funciona igual en el panel web y en el proceso monitor**.
+3. **`RecipientResolver.expand(raw)`** — tokeniza, y **solo si hay algún `user:`/`group:`** carga un
+   snapshot **fresco** del directorio (`UsersStore`/`GroupsStore`) para que desactivar/editar surta
+   efecto **inmediato**. Resuelve token a token, **deduplica** (case-insensitive, conservando el
+   orden) y devuelve `{'emails': [...], 'skipped': [...]}`.
+4. **Validación / omisiones** — un token que no aporta a nadie se acumula en `skipped` con una
+   **etiqueta legible** (nombre del usuario/grupo; si fue eliminado, su uid). El canal **envía a
+   `emails`** y el resultado del **test** de email (y el log) **muestra los `skipped`** para avisar.
+
+```mermaid
+flowchart TD
+    raw["email|recipients (CSV de tokens)"] --> tok["parse_tokens()<br/>separa por , o ; y recorta"]
+    tok --> any{"¿algún user:/group:?"}
+    any -- no --> loop
+    any -- "sí" --> load["_load(): snapshot FRESCO del directorio<br/>usuarios habilitados+email · grupos habilitados"]
+    load --> loop["por cada token"]
+    loop --> kind{"tipo de token"}
+    kind -- "email normal" --> add["añadir (dedup case-insensitive)"]
+    kind -- "user:&lt;uid&gt;" --> u{"¿usuario habilitado y con email?"}
+    u -- "sí" --> add
+    u -- "no (desactivado/sin email/eliminado)" --> skip["skipped += etiqueta"]
+    kind -- "group:&lt;uid&gt;" --> g{"¿grupo habilitado y con miembros con email?"}
+    g -- "sí" --> addm["añadir emails de miembros habilitados (dedup)"]
+    g -- "no (desactivado/vacío/eliminado)" --> skip
+    add --> done
+    addm --> done
+    skip --> done["{emails, skipped}"]
+    done --> send["el canal envía a emails · el test/log muestra skipped"]
+```
+
+**Estado del directorio (desactivar / eliminar)** — como la resolución es por token contra el
+directorio vivo, el efecto es inmediato sin editar la config:
+
+* **Usuario desactivado / sin email / eliminado** → `user:<uid>` no aporta email (se **omite**).
+* **Grupo desactivado / vacío / eliminado** → `group:<uid>` no expande (se **omite**); un grupo
+  activo solo aporta los emails de sus miembros **habilitados con email**.
+* En la UI, el chip de un usuario/grupo que ya no está activo se muestra como *"usuario/grupo
+  desconocido"* (el endpoint de sugerencias solo lista los activos), señal de que hay que quitarlo.
+
+> El catálogo de grupos/usuarios y qué significa "habilitado" están en
+> [ref-permisos.md](ref-permisos.md) y [ref-esquema-bd.md](ref-esquema-bd.md); el endpoint de
+> sugerencias, en [ref-api.md](ref-api.md#notificaciones--canales).
 
 ### Webhook — HMAC + plantilla + múltiples destinos
 
@@ -283,7 +375,7 @@ panel** (`notify_panel_users`, resueltos por email). El endpoint inbound del bot
 
 > **Nota.** El modo `bot` es **opcional** y su endpoint público solo es viable si el
 > despliegue expone ServiceSentry a Internet. Para despliegues internos, usa `activity_feed`
-> (solo salida) o el envío a canal. Detalle del wizard Entra en [sso-entra.md](sso-entra.md).
+> (solo salida) o el envío a canal. Detalle del wizard Entra en [caso-entra-id.md](caso-entra-id.md).
 
 ---
 
@@ -306,7 +398,7 @@ estar en varios idiomas. El idioma efectivo lo resuelve
 `formatting.notify_lang(cfg)`:
 
 ```
-notifications|lang  →  (legacy) email|lang  →  web_admin|lang  →  ''
+notifications|lang  →  web_admin|lang  →  ''
 ```
 
 `notifications|lang` es un ajuste **global** (Config → Notificaciones → **General**), con una
@@ -321,7 +413,7 @@ opción "— Default —" y la lista de idiomas mostrada **traducida**.
 | `event_title(kind, lang, cfg)` | **Título** localizado de un kind: mapea `kind → notif_event_*` (`EVENT_LABEL_KEY`) y resuelve por `notify_text` (override→i18n→key prettificada). Los mismos `notif_event_*` que muestra la UI de la matriz, así el título de un mensaje y su fila de la grid nunca divergen. |
 | `event_icon(kind)` | Emoji por kind (`EVENT_ICON`, campana si desconocido). |
 | `notify_lang(cfg)` | Idioma efectivo (arriba). |
-| `_fill(text, args)` | Rellena placeholders. **Soporta dos formas**: `{}` **secuencial** (cada uno consume el siguiente arg) **e** indexado `{0}`/`{1}`… **por posición** — así un texto custom puede **reordenar** los valores insertados (escribir `{2}` antes de `{0}`), cosa que `{}` no puede. |
+| `_fill(text, args)` | Rellena placeholders; soporta `{}` secuencial e indexado `{0}`/`{1}` (reordenables). Detalle en [ref-i18n.md → Placeholders](ref-i18n.md#placeholders-secuencial-vs-indexado-_fill). |
 | `plain(text)` | Quita la decoración Markdown de un mensaje de módulo (`*`, `\[`) para email/webhook/tarjetas. |
 
 **Módulos** — `lib/modules/module_base.py::ModuleBase._msg(key, *args)`: resuelve el override
@@ -332,10 +424,10 @@ pedido → idioma por defecto) → si no, la key; usa el mismo `_fill`. El idiom
 **Almacenamiento** (en la config, como *feature-data*, no como config editable normal):
 
 ```jsonc
-"notif_text_overrides": {                 // core + módulos
+"notif_text_overrides": {                 // core + módulos (claves con ámbito core:/mod:)
   "es_ES": {
-    "core:notif_msg_auth_login": "…",     // scoped key core:<i18n_key>
-    "mod:ups:ups_reason_status": "…"      // scoped key mod:<módulo>:<msg_key>
+    "core:notif_msg_auth_login": "…",
+    "mod:ups:ups_reason_status": "…"
   }
 },
 "notif_templates":      { "es_ES": { "alert_down": "…" } },  // strings de EMAIL (store propio)
@@ -344,6 +436,9 @@ pedido → idioma por defecto) → si no, la key; usa el mismo `_fill`. El idiom
 
 Email conserva su **store propio** (`notif_templates`) por historia; core/módulos usan
 `notif_text_overrides`. El endpoint unificado reparte cada clave a su store según el prefijo.
+El significado de cada *scoped key* (`core:<i18n_key>`, `mod:<módulo>:<msg_key>`) y cómo se
+resuelve se explica en
+[explica-i18n.md → Overrides de administrador](explica-i18n.md#overrides-de-administrador).
 
 ### 2) El catálogo: cómo se generan los listados (`lib/core/notify/text_catalog.py`)
 
@@ -378,15 +473,10 @@ Forma de cada entrada:
 ### 3) El esquema de tags (info por placeholder)
 
 Cada texto que recibe valores dinámicos declara **qué representa cada placeholder**, en el
-propio idioma (traducible), para que el editor muestre chips con nombre y el admin sepa qué
-inserta cada `{0}`/`{1}`. Los esquemas son **datos**, no código, y viven junto a las
-traducciones:
-
-| Fuente del esquema | Fichero | Forma | Para |
-|---|---|---|---|
-| **`notif_msg_vars`** | `lib/i18n/lang/<lang>.py` | `{ msg_key: [nombre, …] }` | mensajes core (`notif_msg_*`) |
-| **`notif_email_vars`** | `lib/i18n/lang/<lang>.py` | `{ string_key: [[token, descripción], …] }` | strings de email (token fijo `{item}`/`{n}`/`{ts}`/`{sender}`, descripción traducida) |
-| **`messages_vars`** | `watchfuls/<módulo>/lang/<lang>.json` | `{ msg_key: [nombre, …] }` | mensajes de cada módulo — **el hook de descubrimiento de tags de un módulo** |
+propio idioma (traducible), para que el editor muestre chips con nombre. Los esquemas son
+**datos**, no código, y viven junto a las traducciones: `notif_msg_vars` y `notif_email_vars`
+(core) y `messages_vars` (por módulo). La tabla comparativa con sus formas y ubicaciones está
+en [ref-i18n.md → Los tres esquemas de tags](ref-i18n.md#los-tres-esquemas-de-tags).
 
 Para `notif_msg_vars` y `messages_vars`, el catálogo convierte la lista de nombres en
 `{'i': i, 'name': n, 'ph': '{i}'}` (placeholder posicional numerado). Para `notif_email_vars`,
@@ -437,18 +527,18 @@ Endpoints (`lib/core/notify/email/template_routes.py`):
 | `GET /api/v1/notify/templates`, `PUT`/`DELETE /…/<lang>` | Strings de email legacy (defaults + overrides). |
 | `GET /api/v1/notify/html-templates`, `…/<type>/built-in`, `POST …/<type>/preview`, `PUT`/`DELETE …/<type>/<lang>` | Cuerpos HTML de email (guardar/preview/built-in/borrar). Tipos válidos: `test`, `alert`, `summary`. |
 
-Idioma y paridad de las claves i18n: ver [i18n.md](i18n.md).
+Idioma y paridad de las claves i18n: ver [explica-i18n.md](explica-i18n.md).
 
 ---
 
 ## Dónde se configura y se prueba
 
 - **Config** de cada canal + la matriz + el idioma de notificación:
-  [configuration.md](configuration.md) (secciones `telegram`, `email`, `webhooks`, `msteams`,
+  [ref-configuracion.md](ref-configuracion.md) (secciones `telegram`, `email`, `webhooks`, `msteams`,
   `notifications`).
 - **UI y endpoints** (probar canal, gestionar webhooks/canales Teams, editar textos y cuerpos
-  HTML): [web-admin.md](web-admin.md).
+  HTML): [explica-web-admin.md](explica-web-admin.md).
 - **Reglas de evento** (qué eventos de audit/syslog notifican y por qué canales):
-  [architecture.md → Procesamiento de Eventos](architecture.md#procesamiento-de-eventos-notificaciones)
-  + el servicio `events` en [services.md](services.md).
-- **Traducción y esquemas de tags**: [i18n.md](i18n.md).
+  [explica-arquitectura.md → Procesamiento de Eventos](explica-arquitectura.md#procesamiento-de-eventos-notificaciones)
+  + el servicio `events` en [explica-servicios.md](explica-servicios.md).
+- **Traducción y esquemas de tags**: [explica-i18n.md](explica-i18n.md).

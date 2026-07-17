@@ -311,14 +311,18 @@ async function renderOverview() {
         const spClass = def.spacer ? ' dw-spacer' : '';
         // Clickable when it maps to a tab/sub-tab the user is allowed to view.
         const navClass = (!def.spacer && _dwIsNavigable(item.id)) ? ' dw-clickable' : '';
+        // Module widgets are wide listing cards — opt them out of the hover "pop"
+        // zoom (it scales a wide card off the viewport edge).
+        const modClass = _dwIsModuleWidget(item.id) ? ' dw-module' : '';
         const display = item.hidden ? ' style="display:none"' : '';
-        const hpx     = def.hasH ? _dwHpx(item.h) : null;
+        const hasH    = _dwInstHasH(item.id, item.mws || '');   // table→auto at 'sum' scope
+        const hpx     = hasH ? _dwHpx(item.h) : null;
         const cStyle  = hpx ? ` style="flex:none;height:${hpx}px;overflow-y:auto"` : '';
-        h += `<div class="dw dw-c${item.cols}${spClass}${navClass}" data-wid="${escAttr(item.id)}"
-               data-cols="${item.cols}" data-h="${escAttr(String(item.h || 'auto'))}"${item.sev ? ` data-sev="${escAttr(String(item.sev))}"` : ''}${item.srvf ? ` data-srvf="${escAttr(String(item.srvf))}"` : ''}${item.modf ? ` data-modf="${escAttr(String(item.modf))}"` : ''}${item.mws ? ` data-mws="${escAttr(String(item.mws))}"` : ''}${display}>`;
+        h += `<div class="dw dw-c${item.cols}${spClass}${navClass}${modClass}" data-wid="${escAttr(item.id)}"
+               data-cols="${item.cols}" data-h="${escAttr(String(item.h || 'auto'))}"${item.sev ? ` data-sev="${escAttr(String(item.sev))}"` : ''}${item.srvf ? ` data-srvf="${escAttr(String(item.srvf))}"` : ''}${item.modf ? ` data-modf="${escAttr(String(item.modf))}"` : ''}${item.mws ? ` data-mws="${escAttr(String(item.mws))}"` : ''}${item.mwlvl ? ` data-mwlvl="${escAttr(String(item.mwlvl))}"` : ''}${display}>`;
         h += _dwToolbar(item.id, item.cols, item.h || 'auto', item);
         h += `<div class="dw-content"${cStyle}>${_dwContent(item.id, data, item)}</div>`;
-        if (def.hasH) h += `<div class="dw-resize" title="${escAttr(t('widget_resize_h') || 'Drag to resize height')}"></div>`;
+        if (hasH) h += `<div class="dw-resize" title="${escAttr(t('widget_resize_h') || 'Drag to resize height')}"></div>`;
         h += `</div>`;
     }
     h += `</div>`;
@@ -327,6 +331,8 @@ async function renderOverview() {
 
     // Click a widget → jump to its tab (gated by permission in _dwNavigate).
     document.getElementById('dashboardGrid')?.addEventListener('click', _dwOnGridClick);
+    // Keep a wide module widget's hover zoom on screen (origin toward the side with room).
+    document.getElementById('dashboardGrid')?.addEventListener('mouseover', _dwOnGridHover);
 
     // (Re)start the countdown ticker for the freshly-rendered bar.
     _startOverviewCountdown(_ovInt);

@@ -16,6 +16,7 @@ import json as _json
 from lib.config.spec import cfg_get
 from lib.debug import DebugLevel
 from lib.core.object_base import ObjectBase
+from lib.i18n import translate
 
 try:
     import requests as _req
@@ -34,7 +35,7 @@ _PLACEHOLDERS = ('kind', 'module', 'item', 'status', 'message', 'timestamp')
 def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
              status: str = '', message: str = '',
              timestamp: str = '', cfg: dict | None = None,
-             webhook_ids=None) -> tuple[bool, str]:
+             webhook_ids=None, lang: str = '') -> tuple[bool, str]:
     """Send to all enabled webhooks. Returns (all_ok, summary).
 
     Webhooks live in the webhook channel's own store (loaded via
@@ -50,13 +51,13 @@ def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
         wanted = {str(i) for i in webhook_ids}
         webhooks = [w for w in webhooks if str(w.get('id') or w.get('uid') or '') in wanted]
         if not webhooks:
-            return False, 'No matching enabled webhooks selected'
+            return False, translate(lang, 'webhook_none_selected')
     if not webhooks:
-        return False, 'No enabled webhooks configured'
+        return False, translate(lang, 'webhook_none_enabled')
     results = []
     for wh in webhooks:
         ok, msg = _dispatch(wh, kind=kind, module=module, item=item,
-                            status=status, message=message, timestamp=timestamp)
+                            status=status, message=message, timestamp=timestamp, lang=lang)
         results.append((ok, msg, wh.get('name') or wh.get('id', '?')))
     all_ok = all(r[0] for r in results)
     summary = '; '.join(f"{r[2]}: {r[1]}" for r in results)
@@ -65,15 +66,15 @@ def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
 
 def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
               item: str = '', status: str = '', message: str = '',
-              timestamp: str = '') -> tuple[bool, str]:
+              timestamp: str = '', lang: str = '') -> tuple[bool, str]:
     """Send webhook with the given payload. Returns (ok, message)."""
     if not cfg.get('enabled'):
-        return False, 'Webhook notifications are not enabled'
+        return False, translate(lang, 'webhook_not_enabled')
     if not _HAS_REQUESTS:
-        return False, 'Webhook requires the requests package'
+        return False, translate(lang, 'webhook_no_requests')
     url = (cfg.get('url') or '').strip()
     if not url:
-        return False, 'Webhook URL is not configured'
+        return False, translate(lang, 'webhook_no_url')
 
     # SSRF guard: reject non-HTTP(S) schemes and the link-local / cloud-metadata range
     # (169.254.x). Private/internal targets are allowed — an internal webhook endpoint is a
@@ -81,7 +82,7 @@ def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
     from lib.security.net_guard import validate_external_url  # noqa: PLC0415
     reason = validate_external_url(url)
     if reason:
-        return False, f'Webhook URL rejected: {reason}'
+        return False, translate(lang, 'webhook_url_rejected', reason)
 
     method         = cfg_get(cfg, 'webhooks|method', falsy=True).upper()
     timeout        = cfg_get(cfg, 'webhooks|timeout', falsy=True)
@@ -105,7 +106,7 @@ def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
             if isinstance(parsed, dict):
                 extra_headers = {str(k): str(v) for k, v in parsed.items()}
         except _json.JSONDecodeError:
-            return False, 'Webhook headers field is not valid JSON'
+            return False, translate(lang, 'webhook_bad_headers')
 
     try:
         if method == 'GET':
@@ -133,7 +134,7 @@ def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
             resp = req_fn(url, data=body_bytes, headers=headers, timeout=timeout)
 
         if 200 <= resp.status_code < 300:
-            return True, f'Webhook delivered (HTTP {resp.status_code})'
-        return False, f'Webhook failed: HTTP {resp.status_code}'
+            return True, translate(lang, 'webhook_ok', resp.status_code)
+        return False, translate(lang, 'webhook_fail', resp.status_code)
     except Exception as exc:
         return False, str(exc)

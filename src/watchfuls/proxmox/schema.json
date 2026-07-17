@@ -94,6 +94,15 @@
                 "variant": "secondary",
                 "full_width": true,
                 "group": "checks"
+            },
+            {
+                "id": "fix_permissions",
+                "url": "/api/v1/modules/watchfuls/proxmox/fix_permissions",
+                "result": "modal",
+                "icon": "bi-shield-plus",
+                "variant": "warning",
+                "full_width": true,
+                "group": "checks"
             }
         ],
 

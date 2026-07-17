@@ -7,7 +7,7 @@
     <title>{% block title %}ServiceSentry{% endblock %}</title>
     <link href="/static/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/bootstrap-icons.min.css" rel="stylesheet">
-    <link href="/static/css/web_admin.css" rel="stylesheet">
+    <link href="/static/css/web_admin.css?v={{ asset_v }}" rel="stylesheet">
     {% if module_web_styles is defined %}{% for _inc in module_web_styles %}{% include _inc %}{% endfor %}{% endif %}
     {% block extra_head %}{% endblock %}
 </head>

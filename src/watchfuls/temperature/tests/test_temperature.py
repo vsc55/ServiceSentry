@@ -51,7 +51,7 @@ class TestParser:
 
     def test_command_is_allowlist_friendly(self):
         """The remote command is a single fixed ``grep`` with no shell loop or
-        chaining, so it fits a strict SSH command allowlist (docs/ssh-hardening.md)."""
+        chaining, so it fits a strict SSH command allowlist (docs/caso-ssh-hardening.md)."""
         from watchfuls.temperature import _THERMAL_CMD
         assert _THERMAL_CMD.startswith('grep ')
         for token in (' for ', ';', '&&', '|', '$('):

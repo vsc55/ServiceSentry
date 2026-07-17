@@ -17,6 +17,7 @@ let _msteamsEditId = null;
 function _renderMsTeamsSection(cfgCardOpen, cfgCardClose) {
     const data = configData.msteams || {};
     const channels = configData.msteams_channels || [];
+    if (typeof _recipSuggestLoad === 'function') _recipSuggestLoad();   // recipients typeahead data
     let h = cfgCardOpen('cfgcol_msteams', '<i class="bi bi-microsoft-teams me-1"></i>',
                         SECTION_LABELS['msteams'] || 'Microsoft Teams');
 

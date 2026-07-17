@@ -3,6 +3,9 @@
    ================================================================ #}
 
 // ──────────────────────────── Session management ─────────────────
+// Client-side gate for the destructive controls (the server enforces too, but the UI
+// should hide them from a viewer with `sessions_view` but not `sessions_revoke`).
+function _canRevokeSessions() { return new Set(currentUser.permissions || []).has('sessions_revoke'); }
 let _sessionsPage = 1;
 let _sessionsPageSize = null;
 let _selectedSessions = new Set();
@@ -72,14 +75,14 @@ function _sessionsCardsBody(sids) {
                 <div class="flex-grow-1 min-w-0">
                     <div class="d-flex align-items-center gap-1 flex-wrap">
                         <code class="fw-semibold ss-fs-4">${esc(s.username)}</code>
-                        ${isCurrent ? `<span class="badge text-bg-success rounded-pill ss-fs-1">${t('current_session')}</span>` : ''}
+                        ${isCurrent ? `<span class="badge text-bg-success rounded-pill ss-fs-1">${t('session_current')}</span>` : ''}
                     </div>
                     <div class="text-muted ss-fs-2"><i class="bi bi-geo-alt me-1"></i>${esc(s.ip)}</div>
                 </div>
-                <button class="btn btn-sm btn-danger py-0 px-2 flex-shrink-0"
-                    onclick="revokeSession(${jsStr(sid)})" title="${escAttr(t('revoke_session_tt'))}">
+                ${_canRevokeSessions() ? `<button class="btn btn-sm btn-danger py-0 px-2 flex-shrink-0"
+                    onclick="revokeSession(${jsStr(sid)})" title="${escAttr(t('session_revoke_tt'))}">
                     <i class="bi bi-x-lg"></i>
-                </button>
+                </button>` : ''}
             </div>
             ${s.user_agent ? `<div class="px-3 pb-1" style="font-size:.7rem;color:var(--bs-secondary-color);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(s.user_agent)}"><i class="bi bi-window me-1" style="opacity:.6"></i>${esc(s.user_agent.length > 72 ? s.user_agent.slice(0, 72) + '…' : s.user_agent)}</div>` : ''}
             <div class="d-flex gap-3 px-3 pb-2 pt-0" style="font-size:.72rem;color:var(--bs-secondary-color)">
@@ -95,7 +98,7 @@ function _sessionsCardsBody(sids) {
 createListTable({
     key: 'sessions', containerId: 'sessions-container', tableId: 'sessions-table',
     accent: 'slate', icon: 'bi-plug',
-    title: () => `${esc(t('active_sessions'))} (${Object.keys(sessionsData).length})`,
+    title: () => `${esc(t('session_active'))} (${Object.keys(sessionsData).length})`,
     columns: _SES_COLS, defaultVisible: _SESSIONS_DEFAULT_COLS,
     persist: true, clearLabelKey: 'subtab_sessions',
     persistExtra: () => ({ view: _sessionsViewMode }),
@@ -119,7 +122,7 @@ createListTable({
         const s = sessionsData[sid];
         const isCurrent = !!s.is_current;
         switch (colId) {
-            case 'username':   return `<td class="text-nowrap"><code>${esc(s.username)}</code>${isCurrent?`<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${t('current_session')}</span>`:''}</td>`;
+            case 'username':   return `<td class="text-nowrap"><code>${esc(s.username)}</code>${isCurrent?`<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${t('session_current')}</span>`:''}</td>`;
             case 'ip':         return `<td class="text-nowrap"><code class="text-muted ss-fs-3">${esc(s.ip)}</code></td>`;
             case 'user_agent': return `<td class="small text-muted" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(s.user_agent||'')}">${esc(s.user_agent||'—')}</td>`;
             case 'created':    return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.created))}</td>`;
@@ -127,11 +130,11 @@ createListTable({
             default:           return '<td></td>';
         }
     },
-    actions: sid => `<button class="btn btn-sm btn-danger py-0 px-1" onclick="revokeSession(${jsStr(sid)})" title="${escAttr(t('revoke_session_tt'))}"><i class="bi bi-x-lg"></i></button>`,
-    bulkBar: (ctx, sel) => sel.size > 0 ? `
+    actions: sid => _canRevokeSessions() ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="revokeSession(${jsStr(sid)})" title="${escAttr(t('session_revoke_tt'))}"><i class="bi bi-x-lg"></i></button>` : '',
+    bulkBar: (ctx, sel) => (sel.size > 0 && _canRevokeSessions()) ? `
         <div class="d-flex align-items-center gap-1 border-start ps-2 me-1">
             <span class="badge bg-secondary rounded-pill">${sel.size}</span>
-            <button class="btn btn-sm btn-danger" onclick="_bulkRevokeSessions()" title="${escAttr(t('revoke_session_tt'))}"><i class="bi bi-x-lg me-1"></i>${esc(t('revoke_session'))}</button>
+            <button class="btn btn-sm btn-danger" onclick="_bulkRevokeSessions()" title="${escAttr(t('session_revoke_tt'))}"><i class="bi bi-x-lg me-1"></i>${esc(t('session_revoke'))}</button>
             <button class="btn btn-sm btn-secondary" onclick="_selectedSessions.clear();renderSessions()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
         </div>` : '',
     headerLead: (ctx, mode) => {
@@ -142,10 +145,10 @@ createListTable({
         </div>`;
     },
     refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>`,
-    headerButtons: () => `<button class="btn btn-sm btn-danger ms-1" onclick="invalidateAllSessions()" title="${escAttr(t('close_all_sessions_tt'))}"><i class="bi bi-x-circle me-1"></i>${esc(t('close_all_sessions'))}</button>`,
+    headerButtons: () => _canRevokeSessions() ? `<button class="btn btn-sm btn-danger ms-1" onclick="invalidateAllSessions()" title="${escAttr(t('session_close_all_tt'))}"><i class="bi bi-x-circle me-1"></i>${esc(t('session_close_all'))}</button>` : '',
     emptyBody: () => `<div class="text-center py-5 text-muted">
             <i class="bi bi-person-slash ss-empty-icon"></i>
-            <span>${t('no_active_sessions')}</span>
+            <span>${t('session_none')}</span>
         </div>`,
     state: {
         visible: { get: () => _sessionsVisibleCols, set: s => { _sessionsVisibleCols = s; } },

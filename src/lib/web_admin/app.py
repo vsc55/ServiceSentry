@@ -343,7 +343,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             def wrapper(*args, **kwargs):
                 if not self._check_session():
                     if request.path.startswith('/api/'):
-                        return jsonify({'error': 'Unauthorized'}), 401
+                        return jsonify({'error': self._t('unauthorized')}), 401
                     return redirect(url_for('login'))
                 if not any(p in self._get_session_permissions() for p in perms):
                     return jsonify({'error': self._t('access_denied')}), 403
@@ -357,7 +357,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         def wrapper(*args, **kwargs):
             if not self._check_session():
                 if request.path.startswith('/api/'):
-                    return jsonify({'error': 'Unauthorized'}), 401
+                    return jsonify({'error': self._t('unauthorized')}), 401
                 return redirect(url_for('login'))
             return f(*args, **kwargs)
         return wrapper
@@ -368,7 +368,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         def wrapper(*args, **kwargs):
             if not self._check_session():
                 if request.path.startswith('/api/'):
-                    return jsonify({'error': 'Unauthorized'}), 401
+                    return jsonify({'error': self._t('unauthorized')}), 401
                 return redirect(url_for('login'))
             if 'users_view' not in self._get_session_permissions():
                 return jsonify({'error': self._t('access_denied')}), 403
@@ -381,7 +381,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         def wrapper(*args, **kwargs):
             if not self._check_session():
                 if request.path.startswith('/api/'):
-                    return jsonify({'error': 'Unauthorized'}), 401
+                    return jsonify({'error': self._t('unauthorized')}), 401
                 return redirect(url_for('login'))
             perms = self._get_session_permissions()
             if not ('modules_edit' in perms or 'config_edit' in perms):
@@ -617,9 +617,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             pass
 
     def _notify_lang(self) -> str:
-        """Effective system notification language (global ``notifications|lang``, legacy
-        ``email|lang`` fallback, then the panel language) — the language every notification
-        body/title is rendered in."""
+        """Effective system notification language (global ``notifications|lang``, then the
+        panel language) — the language every notification body/title is rendered in."""
         from lib.core.notify.formatting import notify_lang  # noqa: PLC0415
         return notify_lang(self._read_config_file(self._CONFIG_FILE) or {})
 
@@ -1091,7 +1090,15 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             _ldap_cfg  = _cfg.get('ldap')  or {}
             _oidc_cfg  = _cfg.get('oidc')  or {}
             _saml2_cfg = _cfg.get('saml2') or {}
+            # Cache-buster for the stylesheet: its mtime, so an edited web_admin.css
+            # always reaches the browser (the dev watcher doesn't restart on .css,
+            # and the <link> is otherwise a plain, cacheable URL).
+            try:
+                asset_v = int(os.path.getmtime(os.path.join(app.static_folder, 'css', 'web_admin.css')))
+            except OSError:
+                asset_v = 0
             return {
+                'asset_v': asset_v,
                 'lang': lang,
                 'default_lang': self._default_lang,
                 'dark_mode': dark_mode,

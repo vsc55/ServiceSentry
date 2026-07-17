@@ -5,6 +5,7 @@
 // ──────────────────────────── Field value picker ───────────────────
 let _fpFieldPathStr = null;
 let _fpItems        = null;
+let _fpGen          = 0;      // bumped each open — a late async fill for an old open is ignored
 let _fpOnPick       = null;   // optional callback(value) — used by the server modal
 let _fpCurrent      = '';     // currently-selected value (to highlight it)
 let _fpMulti        = false;  // multi-select mode → toggle, comma-separated value
@@ -34,6 +35,49 @@ function openFieldPickerModal(fieldPathStr, items, title, onPick, currentVal, mu
     if (da) da.innerHTML = `<i class="bi bi-x-square me-1"></i>${esc(t('checks_select_none'))}`;
     _renderFieldPickerList();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('fieldPickerModal')).show();
+}
+
+// Open the picker IMMEDIATELY in a loading state (items still being fetched), then
+// call setFieldPickerItems()/fieldPickerError() when the request resolves — so a slow
+// discover shows the modal + spinner at once instead of a frozen button.
+function openFieldPickerLoading(fieldPathStr, title, currentVal, multi) {
+    const gen = ++_fpGen;   // caller passes this back to setFieldPickerItems/fieldPickerError
+    _fpFieldPathStr = fieldPathStr;
+    _fpItems = null;
+    _fpOnPick = null;
+    _fpMulti = !!multi;
+    _fpCurrent = (currentVal != null && currentVal !== '')
+        ? String(currentVal)
+        : (fieldPathStr ? (getPath(modulesData, fieldPathStr.split('|')) || '') : '');
+    _fpValue = String(_fpCurrent || '');
+    const titleEl = document.getElementById('fieldPickerModalTitle');
+    if (titleEl) titleEl.textContent = title || '';
+    const filterEl = document.getElementById('fieldPickerFilter');
+    if (filterEl) filterEl.value = '';
+    const bar = document.getElementById('fieldPickerMultiBar');
+    if (bar) bar.style.display = _fpMulti ? '' : 'none';
+    const sa = document.getElementById('fpSelectAllBtn');
+    if (sa) sa.innerHTML = `<i class="bi bi-check-all me-1"></i>${esc(t('checks_select_all'))}`;
+    const da = document.getElementById('fpDeselectAllBtn');
+    if (da) da.innerHTML = `<i class="bi bi-x-square me-1"></i>${esc(t('checks_select_none'))}`;
+    const body = document.getElementById('fieldPickerModalBody');
+    if (body) body.innerHTML = `<div class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>${esc(t('loading') || 'Loading…')}</div>`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fieldPickerModal')).show();
+    return gen;
+}
+
+// A late response for a supersed(ed) open (different field, or reopened) is dropped when
+// the caller passes the token it got from openFieldPickerLoading and it no longer matches.
+function setFieldPickerItems(items, token) {
+    if (token != null && token !== _fpGen) return;
+    _fpItems = Array.isArray(items) ? items : [];
+    _renderFieldPickerList();
+}
+
+function fieldPickerError(msg, token) {
+    if (token != null && token !== _fpGen) return;
+    const body = document.getElementById('fieldPickerModalBody');
+    if (body) body.innerHTML = `<div class="alert alert-danger mb-0 small">${esc(msg || t('error') || 'Error')}</div>`;
 }
 
 function _renderFieldPickerList() {

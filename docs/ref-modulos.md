@@ -3,14 +3,14 @@
 Referencia de configuración y comportamiento de todos los módulos de monitorización incluidos.
 
 Cada módulo es un **package** (carpeta con `__init__.py`) en `watchfuls/`.
-Consulta [watchful-guide.md](watchful-guide.md) para crear el tuyo propio.
+Consulta [caso-guia-watchful.md](caso-guia-watchful.md) para crear el tuyo propio.
 
 > **Módulos de sistema host-aware.** Los módulos que miden recursos del sistema
 > (`cpu`, `ram_swap`, `temperature`, `filesystemusage`, `process`, `service_status`
 > y `raid`) **no** usan `psutil` en el `check()`: ejecutan comandos de SO mediante
 > `ModuleBase.host_exec`, **en local** o **por SSH** según el host vinculado al ítem
 > (perfil `__host_profile__` de tipo `ssh`). Cada uno elige el comando propio de
-> cada SO (Linux/Windows/macOS/FreeBSD) y parsea la salida en Python. `psutil` solo
+> cada SO (Linux/Windows/FreeBSD) y parsea la salida en Python. `psutil` solo
 > se usa, cuando aplica, en el `discover()` **local** (autocompletado de la UI).
 
 ---
@@ -56,8 +56,8 @@ Estructura devuelta por el método `check()` de cada módulo:
 > enruta como kind **`warn`** (ámbar, umbral blando), no `down` (rojo). La notificación
 > es **multicanal** (Telegram/Email/Webhook/Teams): el `message` viaja en **texto plano**
 > y el Markdown (`*negrita*`) se **elimina** al agrupar por ciclo. Ver
-> [notifications.md → Severidad warning](notifications.md#severidad-warning) y
-> [→ notificación agrupada por ciclo](notifications.md#el-monitor-notificación-agrupada-por-ciclo-monitornotifier).
+> [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning) y
+> [→ notificación agrupada por ciclo](explica-notificaciones.md#el-monitor-notificación-agrupada-por-ciclo-monitornotifier).
 
 ---
 
@@ -67,7 +67,7 @@ Monitoriza el porcentaje de uso de CPU. Es **host-aware**: cada ítem se vincula
 host del registro y la CPU se mide vía `ModuleBase.host_exec` **en local o por SSH**
 con el comando propio de cada SO (nunca `psutil` en el check).
 
-**Plataforma:** Linux, Windows, macOS, FreeBSD 🌐
+**Plataforma:** Linux, Windows, FreeBSD 🌐
 
 **Config:**
 ```json
@@ -95,12 +95,12 @@ con el comando propio de cada SO (nunca `psutil` en el check).
 
 **Flujo:** `ModuleBase.host_exec(item, cmd)` (local o SSH) ejecuta el comando de CPU
 propio del SO (`_cpu_cmd`): `cat /proc/stat` en Linux, `sysctl -n kern.cp_time` en
-FreeBSD, `top -l 2 -n 0` en macOS, `wmic cpu get loadpercentage /value` en Windows. En
+FreeBSD, `wmic cpu get loadpercentage /value` en Windows. En
 Linux/FreeBSD se toman **dos muestras** con la espera de `interval` en Python (el delta
 de ocupación); se parsea el uso en Python → compara con el umbral → alerta si supera
 `alert`. Un fallo duro (host inalcanzable, salida no parseable) se reporta como `down`.
 
-> **Severidad:** superar el umbral emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** superar el umbral emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
@@ -108,7 +108,7 @@ de ocupación); se parsea el uso en Python → compara con el umbral → alerta 
 
 Comprueba los días hasta la expiración de certificados SSL/TLS de servidores remotos. Funciona con cualquier servidor HTTPS/TLS.
 
-**Plataforma:** Linux, Windows, macOS 🌐
+**Plataforma:** Linux, Windows 🌐
 
 **Dependencia:** `cryptography` (parsea el certificado DER; permite leer la caducidad incluso en modo inseguro/sin verificación, donde `getpeercert()` no devuelve el dict).
 
@@ -148,7 +148,7 @@ Es **host-aware**: el ítem puede vincularse a un host del registro y heredar la
 
 **Flujo:** `ssl.create_default_context()` + `socket.create_connection()` → `ssock.getpeercert(binary_form=True)` (DER) → `cryptography.x509.load_der_x509_certificate(der)` → lee `not_valid_after` → calcula días restantes → alerta si `days_left <= warning_days`.
 
-> **Severidad:** `days_left > warning_days` → OK; *cerca de caducar* (`0 < days_left <= warning_days`) emite `severity='warning'` (ámbar, kind `warn`); **certificado ya caducado (`days_left <= 0`) o handshake fallido** es `down` (rojo). Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** `days_left > warning_days` → OK; *cerca de caducar* (`0 < days_left <= warning_days`) emite `severity='warning'` (ámbar, kind `warn`); **certificado ya caducado (`days_left <= 0`) o handshake fallido** es `down` (rojo). Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
@@ -156,7 +156,7 @@ Es **host-aware**: el ítem puede vincularse a un host del registro y heredar la
 
 Verifica que los procesos del sistema están en ejecución comprobando el número mínimo de instancias activas. Es **host-aware**: cada ítem se vincula a un host del registro y la lista de procesos se lee vía `ModuleBase.host_exec` en local o por SSH.
 
-**Plataforma:** Linux, Windows, macOS, FreeBSD 🌐
+**Plataforma:** Linux, Windows, FreeBSD 🌐
 
 **Config:**
 ```json
@@ -195,7 +195,7 @@ Verifica que los procesos del sistema están en ejecución comprobando el númer
 
 Comprueba que los hostnames resuelven correctamente para todos los tipos de registro DNS (A, AAAA, CNAME, MX, TXT, NS, PTR, SOA), con soporte opcional para validar que el valor resuelto contiene un texto esperado.
 
-**Plataforma:** Linux, Windows, macOS 🌐
+**Plataforma:** Linux, Windows 🌐
 
 **Dependencia opcional:** `dnspython>=2.3` para tipos distintos de A/AAAA. Si no está instalado, las consultas A/AAAA siguen funcionando; otros tipos devolverán `status=False` con mensaje de error.
 
@@ -251,7 +251,7 @@ Comprueba que los hostnames resuelven correctamente para todos los tipos de regi
 
 Comprueba el offset de tiempo consultando servidores NTP vía UDP. Implementación con stdlib de Python sin dependencias externas.
 
-**Plataforma:** Linux, Windows, macOS 🌐
+**Plataforma:** Linux, Windows 🌐
 
 **Config:**
 ```json
@@ -284,7 +284,7 @@ Comprueba el offset de tiempo consultando servidores NTP vía UDP. Implementaci�
 
 **Flujo:** Paquete UDP NTP `b'\x1b' + 47*b'\x00'` (LI=0, VN=3, Mode=3) → lee T2 (bytes 32-39) y T3 (bytes 40-47) → offset = `|((T2-T1)+(T3-T4))/2|` → alerta si `offset >= max_offset`.
 
-> **Severidad:** superar el offset máximo emite `warning` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** superar el offset máximo emite `warning` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
@@ -292,7 +292,7 @@ Comprueba el offset de tiempo consultando servidores NTP vía UDP. Implementaci�
 
 Consulta el estado de SAIs/UPS a través del protocolo NUT (Network UPS Tools) por TCP. Soporta autenticación opcional.
 
-**Plataforma:** Linux, Windows, macOS 🌐
+**Plataforma:** Linux, Windows 🌐
 
 **Config:**
 ```json
@@ -343,7 +343,7 @@ Es **host-aware** (el ítem puede vincularse a un host del registro).
 
 Monitoriza el porcentaje de uso de particiones. Es **host-aware**: cada ítem se vincula a un host del registro y el uso se mide vía `ModuleBase.host_exec` en local o por SSH.
 
-**Plataforma:** Linux, Windows, macOS, FreeBSD 🌐
+**Plataforma:** Linux, Windows, FreeBSD 🌐
 
 **Config:**
 ```json
@@ -384,13 +384,13 @@ Monitoriza el porcentaje de uso de particiones. Es **host-aware**: cada ítem se
 
 **Flujo:** `ModuleBase.host_exec(item, cmd)` ejecuta `df -P -k` en Unix o `wmic logicaldisk get DeviceID,FreeSpace,Size /format:value` en Windows → parsea el % de uso de la partición → compara con el umbral. `psutil` **no** se usa en el check, solo en `discover()` local. Un fallo duro (`df` inalcanzable, punto de montaje inexistente) se reporta como `down`.
 
-> **Severidad:** superar el umbral emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** superar el umbral emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
 ## 🌡️ hddtemp — Temperatura de Discos
 
-Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco. Al conectarse a un host remoto, es compatible con cualquier plataforma cliente (Linux, macOS, Windows).
+Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco. Al conectarse a un host remoto, es compatible con cualquier plataforma cliente (Linux, Windows).
 
 > El demonio `hddtemp` debe estar ejecutándose en el servidor remoto y escuchando en el puerto configurado.
 
@@ -426,11 +426,11 @@ Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco. A
 
 > La **dirección del host** no es un campo de `list`: el ítem se **vincula a un host**
 > del registro y hereda la dirección vía `__host_profile__` (la `key` del item se usa
-> como fallback). Ver [web-admin.md → Servers](web-admin.md#servers-registro-de-hosts).
+> como fallback). Ver [explica-web-admin.md → Servers](explica-web-admin.md#servers-registro-de-hosts).
 
 **Flujo:** `socket.create_connection(host, port)` → lee datos → parsea formato `|dev|model|temp|unit|` → compara con el umbral.
 
-> **Severidad:** superar el umbral de temperatura emite `warning` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** superar el umbral de temperatura emite `warning` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
@@ -438,7 +438,7 @@ Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco. A
 
 Verifica que los servidores de bases de datos son accesibles y responden correctamente. Soporta múltiples motores, modos de conexión TCP, socket Unix y túnel SSH.
 
-**Plataforma:** Linux / Windows / macOS 🌐
+**Plataforma:** Linux / Windows 🌐
 
 **Dependencias opcionales** (instalar solo las necesarias):
 
@@ -635,7 +635,7 @@ Verifica que los servidores de bases de datos son accesibles y responden correct
 
 **Túnel SSH:** se levanta un túnel local con `paramiko` antes de cualquier intento de conexión. El puerto local se asigna dinámicamente. El túnel se cierra automáticamente al terminar, tanto en éxito como en error.
 
-> **Severidad:** los avisos de umbral blando (p. ej. salud degradada) emiten `warning` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** los avisos de umbral blando (p. ej. salud degradada) emiten `warning` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
@@ -643,7 +643,7 @@ Verifica que los servidores de bases de datos son accesibles y responden correct
 
 Comprueba si los hosts son accesibles mediante ping ICMP.
 
-**Plataforma:** Linux / macOS / Windows 🌐 (con `pythonping`; el fallback raw socket requiere root o `CAP_NET_RAW`)
+**Plataforma:** Linux / Windows 🌐 (con `pythonping`; el fallback raw socket requiere root o `CAP_NET_RAW`)
 
 **Config:**
 ```json
@@ -694,7 +694,7 @@ Monitoriza arrays RAID software de Linux leyendo `/proc/mdstat`, localmente y v�
 
 **Plataforma:** Linux *(monitorización local)*. El módulo puede ejecutarse en cualquier plataforma como cliente SSH hacia servidores remotos Linux.
 
-> **Windows / macOS:** el campo `local` aparece como "No compatible" en la UI y no puede activarse. La monitorización remota vía SSH funciona en todas las plataformas.
+> **Windows:** el campo `local` aparece como "No compatible" en la UI y no puede activarse. La monitorización remota vía SSH funciona en todas las plataformas.
 
 **Config:**
 ```json
@@ -729,7 +729,7 @@ Monitoriza arrays RAID software de Linux leyendo `/proc/mdstat`, localmente y v�
 > **no** son campos del ítem, sino que se heredan al **vincular el ítem a un host**
 > del registro (`__host_profile__` + credenciales reutilizables). El ejemplo de
 > arriba con `host`/`user`/`key_file` inline es el **formato legacy** (clave `remote`),
-> que sigue leyéndose por compatibilidad. Ver [web-admin.md → Servers](web-admin.md#servers-registro-de-hosts).
+> que sigue leyéndose por compatibilidad. Ver [explica-web-admin.md → Servers](explica-web-admin.md#servers-registro-de-hosts).
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
@@ -751,7 +751,7 @@ Monitoriza arrays RAID software de Linux leyendo `/proc/mdstat`, localmente y v�
 
 Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se vincula a un host del registro y la memoria se mide vía `ModuleBase.host_exec` en local o por SSH (nunca `psutil` en el check).
 
-**Plataforma:** Linux, Windows, macOS, FreeBSD 🌐
+**Plataforma:** Linux, Windows, FreeBSD 🌐
 
 **Config:**
 ```json
@@ -776,9 +776,9 @@ Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se 
 
 > Cada ítem de `list` se mide en el **host vinculado** (`__host_profile__` de tipo `ssh`; sin vínculo = local). El check emite **dos resultados** por ítem: `<clave>_ram` y `<clave>_swap` (el SWAP solo si el SO lo reporta).
 
-**Flujo:** `ModuleBase.host_exec(item, cmd)` ejecuta el/los comando(s) de memoria propios del SO (`_MEM_CMDS`): `cat /proc/meminfo` en Linux, `wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value` en Windows, `sysctl`/`vm_stat` en macOS, `sysctl`/`swapinfo -k` en FreeBSD → parsea el % de uso en Python → compara con los umbrales. Un SO no soportado o un fallo duro se reporta como problema (`down`/parse).
+**Flujo:** `ModuleBase.host_exec(item, cmd)` ejecuta el/los comando(s) de memoria propios del SO (`_MEM_CMDS`): `cat /proc/meminfo` en Linux, `wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value` en Windows, `sysctl`/`swapinfo -k` en FreeBSD → parsea el % de uso en Python → compara con los umbrales. Un SO no soportado o un fallo duro se reporta como problema (`down`/parse).
 
-> **Severidad:** superar el umbral de RAM/SWAP emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** superar el umbral de RAM/SWAP emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
@@ -786,7 +786,7 @@ Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se 
 
 Comprueba si los servicios del sistema están en ejecución. Es **host-aware** (el estado se lee en local o por SSH según el host vinculado vía `ModuleBase.host_exec`), soporta **auto-remediación** (inicio/detención automática) y permite definir el **estado esperado** por servicio (`running` o `stopped`).
 
-**Plataforma:** Linux, Windows, macOS, FreeBSD 🌐
+**Plataforma:** Linux, Windows, FreeBSD 🌐
 
 > **El check usa siempre `systemctl is-active` en Linux.** La detección del init
 > system (`_detect_linux_init`: systemd si existe `/run/systemd/system`, OpenRC si
@@ -837,7 +837,6 @@ Comprueba si los servicios del sistema están en ejecución. Es **host-aware** (
 | -- | ----------------- |
 | Linux | `systemctl is-active <servicio>` |
 | Windows | `sc query <servicio>` |
-| macOS | `launchctl list <servicio>` |
 | FreeBSD | `service <servicio> status` |
 
 **Flujo:**
@@ -859,7 +858,6 @@ Por cada servicio habilitado (en el host vinculado, local o SSH):
 | -- | ----- | ---- |
 | Linux | `systemctl start <svc>` | `systemctl stop <svc>` |
 | Windows | `sc start <svc>` | `sc stop <svc>` |
-| macOS | `launchctl start <svc>` | `launchctl stop <svc>` |
 | FreeBSD | `service <svc> start` | `service <svc> stop` |
 
 ---
@@ -900,7 +898,7 @@ sub-colección de **checks** (OIDs a comprobar):
 
 > Los campos `snmpv3_auth_key` y `snmpv3_priv_key` se declaran como secretos en
 > el `schema.json` del módulo y el core los cifra automáticamente (descubrimiento
-> schema-driven, ver [security.md](security.md)). El módulo es 100 % independiente
+> schema-driven, ver [explica-seguridad.md](explica-seguridad.md)). El módulo es 100 % independiente
 > del core.
 
 ### Gestión de MIBs
@@ -919,7 +917,7 @@ gestionar MIBs en `{var_dir}/snmp_mibs/`:
 **Seguridad:** los nombres de fichero MIB se validan con una allowlist
 (`[A-Za-z0-9_.-]`) + confinamiento de path (`pathlib.resolve()`); las
 importaciones por URL pasan por el guard SSRF `validate_external_url()`. Ver
-[security.md](security.md) → *Path Traversal* y *SSRF*.
+[explica-seguridad.md](explica-seguridad.md) → *Path Traversal* y *SSRF*.
 
 ---
 
@@ -964,7 +962,7 @@ Monitoriza sensores de temperatura del sistema leyendo `/sys/class/thermal/*` en
 
 **Flujo:** `ModuleBase.host_exec(item, cmd)` ejecuta un único `grep -H . /sys/class/thermal/thermal_zone*/{type,temp}` → correlaciona `type`↔`temp` por zona en Python → compara la temperatura del sensor con el umbral → alerta si lo supera. Un fallo de lectura del sensor se reporta como `down`.
 
-> **Severidad:** superar el umbral de temperatura emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** superar el umbral de temperatura emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
@@ -972,7 +970,7 @@ Monitoriza sensores de temperatura del sistema leyendo `/sys/class/thermal/*` en
 
 Comprueba que las URLs responden con el código HTTP esperado.
 
-**Plataforma:** Linux, Windows, macOS 🌐
+**Plataforma:** Linux, Windows 🌐
 
 **Config:**
 ```json
@@ -1056,7 +1054,7 @@ Admite provisioning asistido de la credencial vía SSH (`provision_token`).
 
 **Flujo:** login (token o ticket) → consultas a `/cluster`, `/nodes`, `/ceph`… → evalúa cada check activado → alerta si alguno falla o supera su umbral.
 
-> **Severidad:** los avisos de umbral blando (updates pendientes, uso de almacenamiento, nodo en mantenimiento) emiten `warning` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** los avisos de umbral blando (updates pendientes, uso de almacenamiento, nodo en mantenimiento) emiten `warning` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
@@ -1084,33 +1082,52 @@ registro) y su peso VRRP.
 estado del cluster → alerta ante servicio caído, 0 o >1 titulares de la VIP (split-brain)
 o prioridad inesperada.
 
-> **Severidad:** los avisos de umbral blando (p. ej. prioridad inesperada) emiten `warning` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+> **Severidad:** los avisos de umbral blando (p. ej. prioridad inesperada) emiten `warning` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 ---
 
 ## ☁️ m365 — Microsoft 365 (Microsoft Graph)
 
-Monitoriza **Microsoft 365** vía la **Microsoft Graph API** (app-only): almacenamiento de
-**SharePoint** por sitio (cuota del drive: % usado / espacio libre) y **tendencia de uso**
-del tenant. Se autentica con una credencial **`m365_app`** (tenant/client/secret), que el
-**asistente de Entra ID** puede aprovisionar (ver [sso-entra.md](sso-entra.md) para el motor
-de provisioning compartido).
+Monitoriza **Microsoft 365** vía la **Microsoft Graph API** (app-only). Se autentica con una
+credencial **`m365_app`** (tenant/client/secret), que el **asistente de Entra ID** puede
+aprovisionar (ver [caso-entra-id.md](caso-entra-id.md) para el motor de provisioning compartido).
+Cada comprobación es un **interruptor opcional** en el ítem (`check_*`); cada una emite su
+resultado bajo una clave propia `<ítem>/<servicio>`, así son independientes.
 
 **Plataforma:** Multiplataforma 🌐 (HTTP a Graph)
 
-| Clave | Tipo | Por defecto | Descripción |
+**Comprobaciones disponibles** (cada `check_*` con su umbral):
+
+| Check (`list.*.check_*`) | Qué mide | Umbral | Permiso Graph |
 | --- | --- | --- | --- |
-| `tenant_id` / `client_id` / `client_secret` | string | `""` | Credenciales de la app (o una credencial `m365_app` reutilizable) |
-| `list.*.check_site` | bool | true | Medir el almacenamiento de un sitio de SharePoint |
-| `list.*.site` | string | `""` | Sitio a medir (vacío = raíz/tenant); botón **discover** (`list_sites`) para elegirlo |
-| `usage_pct` | int | 90 | % de cuota usada para alertar (nivel Defaults del módulo; heredado por ítems) |
-| `free_min` + `free_unit` | int / string | 0 / `GB` | Alertar si el espacio libre baja de X |
-| `list.*.check_tenant_usage` | bool | false | Comprobar la tendencia de uso del tenant |
-| `tenant_max` + `tenant_unit` | int / string | 0 / `TB` | Umbral de uso del tenant |
-| `list.*.timeout` / `alert` | int | 0 | Timeout / reintentos por ítem (`0` hereda el global) |
+| `check_site` (def. true) | Cuota del drive de un sitio de SharePoint (% usado / libre) | `usage_pct` (%), `free_min`+`free_unit`; `site` (vacío = raíz; botón **discover** `list_sites`) | `Sites.Read.All` |
+| `check_tenant_usage` | Almacenamiento total USADO de SharePoint en el tenant | `tenant_max`+`tenant_unit` (0 = informativo) | `Reports.Read.All` |
+| `check_health` | Estado de servicios M365 (degradación = warning, interrupción = down) | `health_services` (filtro opcional por nombre) | `ServiceHealth.Read.All` |
+| `check_licenses` | Capacidad de licencias (SKU): unidades libres = habilitadas − consumidas | `license_min` (0 = avisa al agotarse) | `Organization.Read.All` |
+| `check_secrets` | Caducidad del secreto/certificado **de esta misma app** | `secret_days` (avisa N días antes; caducado avisa siempre) | `Application.Read.All` |
+| `check_mailbox` | Buzones de Exchange sobre cuota (envío/recepción prohibidos) | `mailbox_over_max` (0 = avisa si hay alguno) | `Reports.Read.All` |
+| `check_onedrive` | Almacenamiento total USADO de OneDrive en el tenant | `onedrive_max`+`onedrive_unit` (0 = informativo) | `Reports.Read.All` |
+| `check_secure_score` | Microsoft Secure Score (actual/máx en %) | `secure_min` (% mínimo; 0 = informativo) | `SecurityEvents.Read.All` |
+| `check_risky_users` | Usuarios en riesgo (Identity Protection, `atRisk`) | `risky_max` (0 = avisa si hay alguno) | `IdentityRiskyUser.Read.All` |
 
-**Flujo:** token *client-credentials* (`.default` de Graph) → consultas a
-`/sites/{id}/drive` y a los informes de uso → compara con `usage_pct` / `free_min` /
-`tenant_max` → alerta al superarlos.
+`tenant_id` / `client_id` / `client_secret` son las credenciales de la app (o una credencial
+`m365_app` reutilizable). `list.*.timeout` / `alert` por ítem (`0` hereda el global).
 
-> **Severidad:** superar los umbrales de cuota/uso emite `warning` (ámbar, kind `warn`), no `down`. Ver [notifications.md → Severidad warning](notifications.md#severidad-warning).
+**Flujo:** token *client-credentials* (`.default` de Graph) → una consulta por check activo →
+compara con su umbral → emite OK / warning / down bajo `<ítem>/<servicio>`.
+
+**Permisos:** el asistente de registro en Entra pide de una vez todos los permisos de
+aplicación de arriba (con consentimiento de admin). Los checks que no uses no requieren su
+permiso — pero el asistente los concede todos para no tener que volver.
+
+**Comprobar / arreglar permisos** (genérico de Entra ID, en el editor de la credencial
+`m365_app`): **«Comprobar permisos»** llama a `POST /api/v1/auth/entraid/check-permissions`,
+que resuelve los permisos requeridos desde `__entraid_provision__`, pide un token app-only y
+compara su claim `roles`, mostrando cada uno ✅/❌ (solo lectura, sin admin). Si faltan,
+**«Arreglar permisos»** lanza el asistente device-code en modo *ensure*: concede a la app
+**existente** (por `client_id`) los permisos que falten y los re-consiente (sin crear app
+nueva ni rotar el secreto), con informe de concedidos / ya presentes / aún faltan.
+El módulo m365 no implementa nada de esto: solo **declara** sus permisos en
+`__entraid_provision__`; el proveedor Entra ID (`lib/providers/entraid`) hace el trabajo.
+
+> **Severidad:** superar un umbral de cuota/uso/postura emite `warning` (ámbar, kind `warn`); una **interrupción de servicio** sí es `down`. Un fallo de auth/Graph de un check concreto es `down` solo de ese check. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).

@@ -16,6 +16,7 @@ function _modUiStr(modName, key, fallback) {
 }
 
 let _discoverServices    = null;
+let _discoverGen         = 0;      // bumped each open — a late fetch for a superseded open is dropped
 let _discoverPathStr     = null;
 let _discoverFieldPathStr = null;
 let _discoverUrl         = null;   // current discover endpoint
@@ -27,6 +28,7 @@ function _discoverSetFilterVisible(show) {
 }
 
 async function openDiscoverModal(pathStr, url) {
+    _discoverGen++;            // invalidate any in-flight fetch from a previous open
     _discoverHostMod = null;   // Modules section, not the Servers (host) modal
     _discoverFieldPathStr = null;
     _discoverPathStr = pathStr;
@@ -67,6 +69,7 @@ async function openDiscoverModal(pathStr, url) {
 
 /** Fetch discovery results (GET, or POST with module config + optional input). */
 async function _discoverFetchAndRender(pathStr, url, _colSch, extraInput) {
+    const gen = _discoverGen;   // snapshot: drop this fetch if the modal is reopened meanwhile
     const modName = pathStr.split('|')[0];
     const body = document.getElementById('discoverModalBody');
     const _usePost = _colSch && _colSch['__discovery_method__'] === 'POST';
@@ -95,6 +98,7 @@ async function _discoverFetchAndRender(pathStr, url, _colSch, extraInput) {
     } else {
         data = await apiGet(url);
     }
+    if (gen !== _discoverGen) return;   // superseded by a later open — ignore this stale result
     if (!Array.isArray(data)) {
         if (body) body.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${esc(_modUiStr(modName, 'discover_error', t('error') || '?'))}</div>`;
         return;
@@ -176,6 +180,7 @@ async function _runDiscovery() {
 }
 
 async function openDiscoverModalForField(fieldPathStr, url) {
+    const gen = ++_discoverGen;   // invalidate prior in-flight fetch; snapshot for this open
     _discoverHostMod = null;   // Modules section, not the Servers (host) modal
     _discoverFieldPathStr = fieldPathStr;
     // Collection path = all parts except field key and item key (last two segments).
@@ -209,6 +214,7 @@ async function openDiscoverModalForField(fieldPathStr, url) {
     } else {
         data = await apiGet(url);
     }
+    if (gen !== _discoverGen) return;   // superseded by a later open — ignore this stale result
     if (!Array.isArray(data)) {
         if (body) body.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${esc(_modUiStr(modName, 'discover_error', t('error') || '?'))}</div>`;
         return;

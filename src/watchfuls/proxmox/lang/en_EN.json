@@ -104,6 +104,7 @@
     "action_labels": {
         "test_connection": "Test connection",
         "test_permissions": "Check permissions",
+        "fix_permissions": "Fix permissions (SSH)",
         "provision_token": "Provision API token (SSH)",
         "list_nodes": "List cluster nodes"
     },

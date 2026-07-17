@@ -9,7 +9,7 @@ Referencia completa de todos los archivos de configuración y opciones CLI de Se
 | Modo | Directorio config | Directorio var |
 |------|------------------|----------------|
 | **Desarrollo** (detecta `src` en la ruta) | `../data/` (relativo) | igual que directorio config (`../data/`) |
-| **Producción Linux / macOS** | `/etc/ServiSesentry/` | `/var/lib/ServiSesentry/` |
+| **Producción Linux** | `/etc/ServiSesentry/` | `/var/lib/ServiSesentry/` |
 | **Producción Windows** | `/etc/ServiSesentry/` | `%PROGRAMDATA%\ServiSesentry` |
 | **Personalizado** (`-p path`) | ruta especificada | según modo dev/prod |
 
@@ -160,7 +160,7 @@ independiente ignora `autostart`). Si el panel hospeda el monitor lo decide el e
 Selecciona el motor de base de datos donde se persisten usuarios, roles, grupos,
 sesiones, auditoría e historial. Si se omite, se usa **SQLite** sobre el fichero
 `data.db` del directorio var. El esquema de cada tabla se valida y reconcilia
-automáticamente en cada arranque (ver [architecture.md](architecture.md) →
+automáticamente en cada arranque (ver [explica-arquitectura.md](explica-arquitectura.md) →
 *Capa de Persistencia y Esquema de BD*).
 
 | Clave | Tipo | Por defecto | Descripción |
@@ -187,7 +187,7 @@ automáticamente en cada arranque (ver [architecture.md](architecture.md) →
 >
 > **Convención de fechas:** las columnas de fecha/hora se almacenan como `TEXT`
 > ISO 8601 UTC en los tres motores (SQLite no tiene tipo de fecha nativo). Ver
-> la nota *TODO* en [architecture.md](architecture.md).
+> la nota *TODO* en [explica-arquitectura.md](explica-arquitectura.md).
 
 #### Configuración por variables de entorno (`SS_DB_*`)
 
@@ -284,8 +284,8 @@ genera columnas `{canal}_on_event`.
 
 Detalle profundo (arquitectura contexto→router→registros, flujo
 evento→dispatch→canal, cómo se descubren los kinds) en
-[notifications.md → Eventos (kinds) y su registro](notifications.md#eventos-kinds-y-su-registro)
-y [→ Matriz de routing](notifications.md#matriz-de-routing-notifications).
+[explica-notificaciones.md → Eventos (kinds) y su registro](explica-notificaciones.md#eventos-kinds-y-su-registro)
+y [→ Matriz de routing](explica-notificaciones.md#matriz-de-routing-notifications).
 
 #### `notifications.lang` (idioma global de notificaciones)
 
@@ -312,19 +312,19 @@ Los **canales** de Teams (Incoming Webhooks) se guardan aparte, en su propia tab
 | `msteams.bot_app_password` | string | `""` | Secreto del Azure Bot (cifrado en disco) |
 | `msteams.bot_tenant_id` | string | `""` | Tenant del Azure Bot (modo `bot`) |
 
-Detalle de mecanismos, requisitos y seguridad en [notifications.md](notifications.md#microsoft-teams--a-canal-o-a-usuarios).
+Detalle de mecanismos, requisitos y seguridad en [explica-notificaciones.md](explica-notificaciones.md#microsoft-teams--a-canal-o-a-usuarios).
 
 ### Sección `web_admin`
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
 | `web_admin.lang` | string | `"en_EN"` | Idioma por defecto de la interfaz web (`en_EN` o `es_ES`) |
-| `web_admin.landing_page` | string | `"admin"` | Página a la que llega el usuario tras iniciar sesión: `admin` (panel), `overview` (vista general `/overview`) o `status` (página pública de estado). Sobreescribible por grupo y por usuario (precedencia usuario → grupo → global); ver [web-admin.md](web-admin.md#usuarios). |
+| `web_admin.landing_page` | string | `"admin"` | Página a la que llega el usuario tras iniciar sesión: `admin` (panel), `overview` (vista general `/overview`) o `status` (página pública de estado). Sobreescribible por grupo y por usuario (precedencia usuario → grupo → global); ver [explica-web-admin.md](explica-web-admin.md#usuarios). |
 | `web_admin.dark_mode` | bool | `false` | Modo oscuro por defecto para sesiones nuevas |
 | `web_admin.public_status` | bool | `false` | Exponer `/status` públicamente sin autenticación. Los usuarios logueados siempre pueden acceder. |
 | `web_admin.status_refresh_secs` | int | `60` | Intervalo de refresco automático de la página `/status` (10–3600 segundos) |
 | `web_admin.status_lang` | string | `""` | Idioma de la página pública `/status`. Prioridad: sesión del usuario → este campo → `web_admin.lang`. Dejar vacío para usar el idioma por defecto del panel. |
-| `web_admin.secure_cookies` | bool | `false` | Marcar la cookie de sesión como `Secure` (solo HTTPS). **Recomendado** cuando el acceso es solo por HTTPS (incl. tras proxy TLS como NPM/nginx): el flag no se deduce del esquema de la petición, hay que activarlo aquí (o `force_https`). Con `Secure` activo se pierde el acceso por HTTP/IP en LAN. Ver [security.md → cookies](security.md#cabeceras-de-seguridad-http-y-cookies). |
+| `web_admin.secure_cookies` | bool | `false` | Marcar la cookie de sesión como `Secure` (solo HTTPS). **Recomendado** cuando el acceso es solo por HTTPS (incl. tras proxy TLS como NPM/nginx): el flag no se deduce del esquema de la petición, hay que activarlo aquí (o `force_https`). Con `Secure` activo se pierde el acceso por HTTP/IP en LAN. Ver [explica-seguridad.md → cookies](explica-seguridad.md#cabeceras-de-seguridad-http-y-cookies). |
 | `web_admin.remember_me_days` | int | `30` | Duración de sesiones persistentes ("Recuérdame") en días (1–365) |
 | `web_admin.audit_max_entries` | int | `500` | Número máximo de entradas en el registro de auditoría (10–10000) |
 | `web_admin.pw_min_len` | int | `8` | Longitud mínima de contraseña (1–128) |
@@ -346,7 +346,7 @@ Detalle de mecanismos, requisitos y seguridad en [notifications.md](notification
 | `web_admin.config_update_banner_secs` | int | `8` | Segundos que se muestra el banner de "configuración actualizada" (0–60) |
 | `web_admin.lockout_max_attempts` | int | `5` | Intentos fallidos antes de bloquear la cuenta (0 = desactivado) (0–100) |
 | `web_admin.lockout_duration_secs` | int | `900` | Duración del bloqueo de cuenta en segundos (60–86400) |
-| `web_admin.ipban_enabled` | bool | `true` | [fail2ban interno](security.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio): interruptor maestro (`false` ⇒ nunca banea) |
+| `web_admin.ipban_enabled` | bool | `true` | [fail2ban interno](explica-seguridad.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio): interruptor maestro (`false` ⇒ nunca banea) |
 | `web_admin.ipban_auth_threshold` | int | `10` | Ofensas de la vía `auth` (login fallido, CSRF…) antes del ban (0 = off) (0–1000) |
 | `web_admin.ipban_auth_window_secs` | int | `600` | Ventana deslizante de la vía `auth` (10–86400) |
 | `web_admin.ipban_authz_threshold` | int | `30` | Ofensas de la vía `authz` (acceso sin permiso) antes del ban (0 = off) (0–1000) |
@@ -452,9 +452,9 @@ Requiere el paquete opcional `python3-saml` (`pip install python3-saml`). **[alp
 | `saml2.auto_create_users` | bool | `true` | Crear el usuario en el primer login |
 | `saml2.sp_app_id` | string | `""` | AppId (client id) de la app registrada en Entra ID — para el enlace "Abrir en Entra ID" |
 | `saml2.sp_object_id` | string | `""` | ObjectId del servicePrincipal en Entra — para el deep-link a la sección SSO del portal |
-| `saml2.graph_secret` | string | `""` | Client secret **propio** de la app SAML2 (cifrado) para leer grupos vía Graph en el mapeo Grupos→Rol. Lo crea el asistente; ver [sso-entra.md](sso-entra.md) |
+| `saml2.graph_secret` | string | `""` | Client secret **propio** de la app SAML2 (cifrado) para leer grupos vía Graph en el mapeo Grupos→Rol. Lo crea el asistente; ver [caso-entra-id.md](caso-entra-id.md) |
 
-Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/metadata` (metadatos SP para registrar en el IdP). Los usuarios se sincronizan con `auth_source: "saml2"`. El registro asistido de la app en Entra ID y sus limitaciones están en [sso-entra.md](sso-entra.md).
+Rutas: `/auth/saml2/login` (inicio), `/auth/saml2/acs` (callback), `/auth/saml2/metadata` (metadatos SP para registrar en el IdP). Los usuarios se sincronizan con `auth_source: "saml2"`. El registro asistido de la app en Entra ID y sus limitaciones están en [caso-entra-id.md](caso-entra-id.md).
 
 ### Sección `scim`
 
@@ -467,7 +467,7 @@ Aprovisionamiento **proactivo** por SCIM 2.0: el IdP (Entra ID, Okta…) empuja 
 | `scim.default_role` | string | `""` | Rol de los usuarios aprovisionados (nombre o uid; vacío = `none`) |
 | `scim.auto_disable` | bool | `true` | `active:false` del IdP → deshabilita el usuario (en vez de ignorarlo) |
 
-Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos de ServiceSentry. Ver [sso-entra.md](sso-entra.md) (§Provisioning proactivo) y [web-admin.md](web-admin.md) (endpoints).
+Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos de ServiceSentry. Ver [caso-entra-id.md](caso-entra-id.md) (§Provisioning proactivo) y [explica-web-admin.md](explica-web-admin.md) (endpoints).
 
 ### Sección `email`
 
@@ -497,11 +497,9 @@ Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos d
 
 > **Nota:** los campos `email.notify_on_*` han sido reemplazados por la matriz de routing de la sección `notifications` y se conservan únicamente por compatibilidad con configuraciones anteriores. Los nuevos despliegues deben usar `notifications.email_on_*`.
 
-> **Nota (migración):** el antiguo campo `email.lang` **ya no existe en el
-> registro**. Ha sido sustituido por el ajuste **global** [`notifications.lang`](#notificationslang-idioma-global-de-notificaciones),
-> que fija el idioma de **todas** las notificaciones (no solo email). Un
-> `email.lang` almacenado de una instalación anterior aún se **honra** como
-> fallback (`notify_lang`), pero solo por compatibilidad.
+> **Nota:** el idioma de notificación se fija con el ajuste **global**
+> [`notifications.lang`](#notificationslang-idioma-global-de-notificaciones), que aplica a
+> **todas** las notificaciones (no solo email). No existe un campo `email.lang`.
 
 ---
 
@@ -529,7 +527,7 @@ de la configuración editable, se persiste en la tabla `config` de la BD (un
 ## Configuración de módulos (en base de datos)
 
 Configuración por módulo. **Se persiste en la base de datos**, en dos tablas
-(ver [architecture.md](architecture.md)):
+(ver [explica-arquitectura.md](explica-arquitectura.md)):
 
 Tabla `module_config`: una fila por módulo — los campos a nivel de módulo
 (`enabled`, `alert`, meta `__*__`) como JSON en la columna `data`.
@@ -563,7 +561,7 @@ clave de primer nivel coincide con el nombre de la carpeta del módulo en
 }
 ```
 
-Consulta [modules.md](modules.md) para la referencia completa de configuración de cada módulo.
+Consulta [ref-modulos.md](ref-modulos.md) para la referencia completa de configuración de cada módulo.
 
 ---
 
@@ -633,7 +631,7 @@ resolución en runtime es **texto custom del admin → i18n (idioma de notificac
 
 Detalle completo (resolución custom→i18n, cómo se generan los listados editables,
 el esquema de *tags*/placeholders y los endpoints) en
-[notifications.md → Sistema de textos de notificación](notifications.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags).
+[explica-notificaciones.md → Sistema de textos de notificación](explica-notificaciones.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags).
 
 ---
 
@@ -744,34 +742,20 @@ vaciar el log) y `events_delete`.
 
 ## Pestaña Services (estado y control de servicios)
 
-> Arquitectura de servicios (embebido vs standalone, descubrimiento, plano de control en microservicios, alta disponibilidad): ver **[services.md](services.md)**.
-
-La pestaña **Services** muestra de forma centralizada el estado de los servicios
-de fondo y permite **iniciar/detener** los que se ejecutan dentro del propio
-proceso web:
-
-| Servicio | Estado | Control |
-|----------|--------|---------|
-| **Scheduler** (monitor embebido) | running / stopped | start / stop |
-| **Receptor syslog** | running / stopped / disabled / external | start / stop (si embebido y activo) |
-| **Procesador de eventos** | running / stopped / external / disabled | start / stop (si embebido) |
-| **Worker** (monitor externo) | active / stale / unknown | solo lectura (vive en otro proceso) |
-| **Base de datos** | running / error (sonda `SELECT 1`) | solo lectura |
-
-El worker externo se detecta por la **actividad reciente de checks** en la BD
-compartida (`HistoryStore.latest_ts()`). Los servicios que viven en otro
-contenedor se muestran en solo-lectura. API: `GET /api/v1/services` y
-`POST /api/v1/services/<name>/<start|stop>`. Permisos: `services_view` (ver) y
-`services_control` (operar).
+La pestaña **Services** muestra de forma centralizada el estado de los servicios de
+fondo (scheduler, receptor syslog, procesador de eventos, worker externo, base de
+datos) y permite **iniciar/detener** los que se ejecutan dentro del propio proceso
+web. Su arquitectura (embebido vs standalone, descubrimiento, estados, plano de
+control en microservicios, API y permisos) se documenta en
+[explica-servicios.md](explica-servicios.md).
 
 ---
 
 ## Estado de los checks (tabla `check_state`)
 
 El **último estado conocido** de cada comprobación se persiste en la tabla
-`check_state` de la base de datos (en `data.db` con SQLite), no en un fichero.
-Sobrevive a los reinicios, de modo que un cambio de estado no se vuelve a
-notificar al arrancar. Ver [check_state_store](architecture.md) para el detalle.
+`check_state` de la base de datos; su esquema y semántica se documentan en
+[ref-esquema-bd.md](ref-esquema-bd.md#check_state--estado-vivo-por-check-reemplaza-statusjson).
 
 Ejecuta con `-c` / `--clear` (`SS_CLEAR`) para vaciar el estado antes de empezar
 y forzar la re-notificación en el siguiente ciclo.
@@ -796,8 +780,8 @@ python3 main.py [opciones]
 | `--events` | `SS_EVENTS` | Ejecuta **solo** el procesador de eventos independiente (sin web ni monitor) |
 | `-t N`, `--timer N` | `SS_TIMER` | Segundos entre comprobaciones del monitor (`0` = una pasada y salir). Por defecto = `monitoring.timer_check` |
 | `-c`, `--clear` | `SS_CLEAR` | Limpia el estado de los checks antes de ejecutar |
-| `-v`, `--verbose` | `SS_VERBOSE` | Modo verbose (debug ON, nivel `null` → muestra todo). Tiene prioridad sobre `global.log_level`. |
-| `--log-level LEVEL` | `SS_LOG_LEVEL` | Nivel de log: `off`/`debug`/`info`/`warning`/`error`. Sobreescribe `global.log_level` (`-v` sigue forzando debug). |
+| `-v`, `--verbose` | `SS_VERBOSE` | Activa el **debugger interactivo de Flask** (`app.debug=True` + `DebuggedApplication`). **No** cambia el nivel del log de la app — para eso usa `--log-level`. |
+| `--log-level LEVEL` | `SS_LOG_LEVEL` | Nivel de log: `off`/`debug`/`info`/`warning`/`error`. Sobreescribe `global.log_level`. |
 | `-l`, `--lang LANG` | `SS_LANG` | Idioma de la interfaz/banners (`en_EN` / `es_ES`) |
 | `-V`, `--version` | — | Imprime la versión y sale |
 | `--nocolor`, `--no-color` | `SS_NOCOLOR` / `NO_COLOR` | Desactiva los colores ANSI del debug (útil al redirigir a fichero). Los colores también se desactivan solos si la salida no es un terminal. |
@@ -828,18 +812,10 @@ python3 main.py [opciones]
 
 ### Subcomandos de gestión (`user` / `group` / `status` / `reload`)
 
-Además de los modos de servicio, `main.py` ofrece **subcomandos one-shot** para administrar
-usuarios y grupos y para consultar/recargar servicios sin abrir el panel web:
-
-```bash
-python3 main.py user add alice -P 'S3cret!' --role editor --group devs
-python3 main.py user disable bob
-python3 main.py group add devs --role editor
-python3 main.py status
-python3 main.py reload
-```
-
-Referencia completa (todos los subcomandos, ejemplos y arquitectura): [cli.md](cli.md).
+Además de los modos de servicio, `main.py` ofrece **subcomandos one-shot** para
+administrar usuarios y grupos y para consultar/recargar servicios sin abrir el
+panel web. Referencia completa (todos los subcomandos, ejemplos y arquitectura):
+[ref-cli.md](ref-cli.md).
 
 ### Variables de entorno
 
@@ -850,9 +826,9 @@ Cada argumento del CLI puede darse también por **variable de entorno** `SS_*` (
 SS_WEB=true SS_WEB_PORT=9090 SS_VERBOSE=1 python3 main.py
 ```
 
-Esto es independiente de las variables de entorno que sobreescriben **campos de `config.json`** (todas con prefijo `SS_*`, p. ej. `SS_CHECK_INTERVAL`, `SS_TELEGRAM_TOKEN`, `SS_MONITORING_ENABLED`) — ver [docker.md](docker.md). Aquellas fijan valores de configuración en runtime; las `SS_*` de arranque controlan cómo se lanza el proceso.
+Esto es independiente de las variables de entorno que sobreescriben **campos de `config.json`** (todas con prefijo `SS_*`, p. ej. `SS_CHECK_INTERVAL`, `SS_TELEGRAM_TOKEN`, `SS_MONITORING_ENABLED`) — ver [caso-docker.md](caso-docker.md). Aquellas fijan valores de configuración en runtime; las `SS_*` de arranque controlan cómo se lanza el proceso.
 
-**Plano de control distribuido (despliegues multi-proceso/HA):** el listener de control HTTP se activa con `SS_CONTROL_TOKEN` (`SS_CONTROL_PORT`/`SS_CONTROL_BIND`/`SS_CONTROL_ADVERTISE` ajustan puerto/bind/URL anunciada). Permite el *poke* `/control/reconcile` entre roles (web ↔ workers) para aplicar cambios de config sin esperar al poll. Detalles en [architecture.md](architecture.md), [docker.md](docker.md) y [kubernetes.md](kubernetes.md).
+**Plano de control distribuido (despliegues multi-proceso/HA):** el listener de control HTTP se activa con `SS_CONTROL_TOKEN` (`SS_CONTROL_PORT`/`SS_CONTROL_BIND`/`SS_CONTROL_ADVERTISE` ajustan puerto/bind/URL anunciada). Permite el *poke* `/control/reconcile` entre roles (web ↔ workers) para aplicar cambios de config sin esperar al poll. Detalles en [explica-arquitectura.md](explica-arquitectura.md), [caso-docker.md](caso-docker.md) y [caso-kubernetes.md](caso-kubernetes.md).
 
 ### Ejemplos
 
@@ -880,41 +856,11 @@ python3 main.py --web --web-host 127.0.0.1 --web-port 9090
 
 ## Notificaciones Telegram
 
-### Funcionamiento
-
-El envío es **síncrono**: no hay cliente en segundo plano con cola ni hilo daemon.
-`lib/providers/telegram.py` solo exporta el helper de un disparo `send_telegram(...)`,
-que llaman por igual el canal (`telegram/channel.py`), el dispatch de evento suelto
-(`telegram/notify.py`) y la ruta de mensaje de prueba. El monitor acumula los
-cambios de un ciclo y hace un único `flush` agrupado por canal (ver
-[notifications.md → MonitorNotifier](notifications.md#el-monitor-notificación-agrupada-por-ciclo-monitornotifier)).
-
-### Formato de mensajes
-
-Los mensajes se construyen en **HTML** (`parse_mode='HTML'`), no en Markdown (que
-se rompía con el texto de los módulos). El evento suelto lleva icono + título
-traducido en `<b>`, el target `módulo/ítem` como `<code>` (icono 🖥), el cuerpo en
-`<blockquote>` y el timestamp en `<i>`. El flush agrupado del monitor
-(`group_messages`) reparte las alertas en secciones **⚠️ Issues** (down/warn) y
-**✅ Recovered** (recovery), cada alerta como tarjeta `<blockquote>`, más un resumen:
-
-```
-ℹ️ <b>Summary</b> · <b>{host}</b> · {n} new message(s)
-🔗 <a href="…/status">…/status</a>
-```
-
-Detalle del formato y el troceado bajo el tope de 4096 en
-[notifications.md → Telegram](notifications.md#telegram--html).
-
-### API de Telegram
-
-- Endpoint: `https://api.telegram.org/bot{token}/sendMessage`
-- Parámetros: `chat_id`, `text`, `parse_mode=HTML`
-- `send_telegram(...)` devuelve `(ok, status_code, info)`: `ok=True` **solo** con
-  HTTP 200 (`info='sent'`); si no, `info` es la descripción del error de Telegram o
-  `HTTP <código>`. Con token/chat_id vacíos, el canal devuelve
-  `(False, 'Telegram not configured (token/chat_id missing)')` sin llegar a llamar
-  a la API.
+Las claves de configuración de Telegram están en [Sección `telegram`](#sección-telegram)
+y el routing por evento en [Sección `notifications`](#sección-notifications-matriz-de-routing).
+El funcionamiento (envío síncrono, formato HTML, agrupación por ciclo, troceado bajo
+el tope de 4096 y API) se documenta en
+[explica-notificaciones.md → Telegram](explica-notificaciones.md#telegram--html).
 
 ---
 
@@ -961,53 +907,12 @@ result = Exec.execute(
 
 ---
 
-## Sistema de Debug
+## Sistema de logging
 
-### Niveles (DebugLevel)
+La verbosidad se controla con la clave de configuración **`global.log_level`**
+(`off` / `debug` / `info` / `warning` / `error`), documentada arriba en
+[Sección `global`](#sección-global) y seleccionable en **Configuración → Interfaz**.
+El cambio se aplica al guardar (sin reinicio) y el scheduler lo re-aplica en cada ciclo.
 
-| Nivel | Valor | Uso |
-|-------|-------|-----|
-| `null` | 0 | Muestra todo |
-| `debug` | 1 | Información detallada de debugging |
-| `info` | 2 | Información general de flujo |
-| `warning` | 3 | Advertencias |
-| `error` | 4 | Errores |
-| `emergency` | 5 | Emergencias críticas |
-
-### Lógica de filtrado
-
-Un mensaje se muestra si:
-- `debug.enabled == True` **Y**
-- `debug.level.value <= msg_level.value`
-
-El nivel configurado actúa como **filtro mínimo**. Con `level=info`, se muestran mensajes `info`, `warning`, `error` y `emergency`, pero NO `debug`.
-
-### Instancia compartida
-
-`ObjectBase.debug` es un atributo de **clase** (no de instancia). Todos los objetos que heredan de `ObjectBase` comparten la misma instancia de `Debug`. Al cambiar el nivel en uno, cambia para todos.
-
-### Configuración del nivel
-
-El nivel mínimo a mostrar se controla con **`global.log_level`** (`off` / `debug` / `info` / `warning` / `error`), seleccionable en **Configuración → Interfaz**:
-
-- `off` → debug desactivado.
-- cualquier otro nombre → debug activado, usando ese nivel como filtro mínimo.
-
-El flag `--verbose` (`SS_VERBOSE`) fuerza debug ON con nivel `null` (todo) y tiene prioridad sobre `global.log_level`. El cambio en la UI se aplica **al guardar** (sin reinicio), y el scheduler lo re-aplica en cada ciclo.
-
-### Prefijo y colores
-
-Cada línea lleva el prefijo del nivel, alineado: `[DEBUG  ]`, `[INFO   ]`, `[WARNING]`, `[ERROR  ]`.
-
-Si la salida es un terminal (TTY), cada nivel se colorea (gris/cian/amarillo/rojo). Los colores se desactivan automáticamente al redirigir a fichero/pipe, o explícitamente con `--nocolor` (`SS_NOCOLOR` o el estándar `NO_COLOR`). En Windows se habilita el procesamiento ANSI de la consola automáticamente.
-
-### Qué se traza (con `log_level=debug`)
-
-Capas transversales que cubren todas las áreas:
-
-- **HTTP** — una línea por petición de **cualquier** endpoint: método, ruta, función handler, claves de entrada (query + body, **nunca valores** → sin secretos), estado, motivo del rechazo (4xx/5xx), tiempo y tamaño.
-- **SQL** — cada consulta a BD (statement, **nunca los params**).
-- **Config** — lecturas de `config.json` (cache miss) y guardado paso a paso.
-- **Dominio** — login/auth (LDAP/local/SSO), notificaciones (canales/SMTP/webhook), scheduler (ciclo/módulo/ítem), inicialización de DB y Telegram.
-
-Nada de esto registra contraseñas, tokens ni secretos.
+El sistema de logging (niveles, filtrado, color, `--verbose`, qué se traza) se
+documenta en [explica-logging.md](explica-logging.md).

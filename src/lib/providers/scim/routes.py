@@ -82,7 +82,7 @@ def register(app, wa):
         wa._ipban_offense('scim_auth_failed')
         if not allowed:
             resp = jsonify({'schemas': [ERR_SCHEMA], 'status': '429',
-                            'detail': 'Too many failed SCIM authentication attempts'})
+                            'detail': wa._t('scim_too_many_auth_fails')})
             resp.headers['Retry-After'] = str(retry)
             return resp, 429
         return _finish(ScimService.err(401, 'Unauthorized (SCIM disabled or invalid bearer token)'))

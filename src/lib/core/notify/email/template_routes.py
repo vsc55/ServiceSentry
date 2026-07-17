@@ -87,11 +87,11 @@ def register(app, wa):
 
         valid_langs = set(SUPPORTED_LANGS) | {'en_EN'}
         if lang not in valid_langs:
-            return jsonify({'error': f'Unknown language: {lang}'}), 400
+            return jsonify({'error': wa._t('tpl_unknown_language', lang)}), 400
 
         body = request.get_json(force=True, silent=True)
         if not isinstance(body, dict):
-            return jsonify({'error': 'Expected a JSON object'}), 400
+            return jsonify({'error': wa._t('tpl_expected_json_object')}), 400
 
         valid_keys = set(email_templates._DEFAULT_STRINGS.keys())
         clean: dict[str, str] = {
@@ -157,10 +157,10 @@ def register(app, wa):
         (``notif_templates``), ``core:*``/``mod:*`` to ``notif_text_overrides``."""
         from lib.i18n import SUPPORTED_LANGS  # noqa: PLC0415
         if lang not in (set(SUPPORTED_LANGS) | {'en_EN'}):
-            return jsonify({'error': f'Unknown language: {lang}'}), 400
+            return jsonify({'error': wa._t('tpl_unknown_language', lang)}), 400
         body = request.get_json(force=True, silent=True)
         if not isinstance(body, dict):
-            return jsonify({'error': 'Expected a JSON object'}), 400
+            return jsonify({'error': wa._t('tpl_expected_json_object')}), 400
 
         email_clean, gen_clean = {}, {}
         for k, v in body.items():
@@ -212,7 +212,7 @@ def register(app, wa):
         preview reflects the customised text strings.
         """
         if tpl_type not in _VALID_HTML_TYPES:
-            return jsonify({'error': f'Unknown type: {tpl_type}'}), 400
+            return jsonify({'error': wa._t('tpl_unknown_type', tpl_type)}), 400
         from lib.core.notify.email import templates as email_templates
         from flask import request as _req
 
@@ -260,7 +260,7 @@ def register(app, wa):
         If ``html`` is empty, renders using the built-in template.
         """
         if tpl_type not in _VALID_HTML_TYPES:
-            return jsonify({'error': f'Unknown type: {tpl_type}'}), 400
+            return jsonify({'error': wa._t('tpl_unknown_type', tpl_type)}), 400
         from lib.core.notify.email import templates as email_templates
 
         body = request.get_json(force=True, silent=True) or {}
@@ -269,7 +269,7 @@ def register(app, wa):
         lang_key = lang or 'en_EN'
 
         if not isinstance(html_tpl, str):
-            return jsonify({'error': 'Field "html" must be a string'}), 400
+            return jsonify({'error': wa._t('tpl_html_must_be_string')}), 400
 
         # Load current string overrides so preview reflects customised text
         cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
@@ -299,15 +299,15 @@ def register(app, wa):
         """Save a custom HTML body for *tpl_type* + *lang*."""
         from lib.i18n import SUPPORTED_LANGS
         if tpl_type not in _VALID_HTML_TYPES:
-            return jsonify({'error': f'Unknown type: {tpl_type}'}), 400
+            return jsonify({'error': wa._t('tpl_unknown_type', tpl_type)}), 400
         valid_langs = set(SUPPORTED_LANGS) | {'en_EN'}
         if lang not in valid_langs:
-            return jsonify({'error': f'Unknown language: {lang}'}), 400
+            return jsonify({'error': wa._t('tpl_unknown_language', lang)}), 400
 
         body = request.get_json(force=True, silent=True) or {}
         html_body = body.get('html', '')
         if not isinstance(html_body, str):
-            return jsonify({'error': 'Field "html" must be a string'}), 400
+            return jsonify({'error': wa._t('tpl_html_must_be_string')}), 400
 
         cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
         tpls = cfg.setdefault('notif_html_templates', {})

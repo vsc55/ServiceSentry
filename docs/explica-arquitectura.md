@@ -30,6 +30,72 @@ flowchart TD
 
 ---
 
+## Dependencias entre módulos
+
+Vista de **capas** (alto nivel): las flechas indican "depende de / usa". Las dependencias
+apuntan hacia abajo; `lib/db`, `lib/security`, `lib/config` e `lib/i18n` son hojas
+transversales, y `lib/core/object_base` (con el `Debug` compartido) es la base de todo.
+
+```mermaid
+flowchart TD
+    main["main.py<br/><small>CLI · dispatch de modos</small>"]
+
+    subgraph entrypoints["Puntos de entrada"]
+        web["lib/web_admin<br/><small>app · routes (thin) · mixins</small>"]
+        svc["lib/services/*<br/><small>monitoring · syslog · events · ipban · manager</small>"]
+        cli["lib/cli<br/><small>subcomandos user/group/status/reload</small>"]
+    end
+    main --> web
+    main --> svc
+    main --> cli
+
+    subgraph domain["Dominio (lib/core/*)"]
+        core["users · groups · roles · sessions · config<br/>hosts · credentials · audit · history · modules · overview"]
+        notify["lib/core/notify<br/><small>router + canales (telegram/email/webhook/msteams)</small>"]
+    end
+
+    prov["lib/providers/*<br/><small>ldap · oidc · saml · scim · entraid · telegram</small>"]
+
+    subgraph checks["Ejecución de checks"]
+        watch["watchfuls/*"]
+        modbase["lib/modules (ModuleBase)"]
+        system["lib/system<br/><small>exe (local/SSH) · mem · linux</small>"]
+    end
+
+    subgraph leaves["Transversales / hojas"]
+        db["lib/db<br/><small>BaseConnector + sqlite/mysql/postgresql</small>"]
+        sec["lib/security<br/><small>csrf · headers · secret_manager</small>"]
+        cfg["lib/config<br/><small>spec · ConfigManager</small>"]
+        i18n["lib/i18n"]
+    end
+
+    base["lib/core/object_base<br/><small>Debug compartido</small>"]
+
+    web --> core
+    web --> notify
+    web --> prov
+    web --> svc
+    web --> i18n
+    cli --> core
+    svc --> core
+    svc --> notify
+    core --> db
+    core --> sec
+    core --> cfg
+    notify --> prov
+    svc --> watch
+    watch --> modbase
+    modbase --> system
+    modbase --> db
+    core --> base
+    svc --> base
+    watch --> base
+```
+
+> Es una vista de capas, no el grafo de importaciones completo. El **catálogo físico** de
+> stores por dominio está en [ref-esquema-bd.md](ref-esquema-bd.md); la organización de
+> ficheros exacta, en la [estructura de directorios](#estructura-de-directorios).
+
 ## Jerarquía de Clases
 
 ```text
@@ -41,7 +107,7 @@ ObjectBase (lib/core/object_base.py)
 ├── Telegram (lib/providers/telegram.py)          ← cliente de bajo nivel de la Bot API (send_telegram); lo envuelve el canal telegram/
 ├── NotificationRouter (lib/core/notify/router.py) ← POSEE los stores de canal y ES el routing; dispatch(kind,…) (sin Flask, agnóstico de canal)
 │   └── NotifyContext (lib/core/notify/context.py)  ← bundle de colaboradores (db, read_config, fernet, dbg, audit, public_url, panel_user_emails); nunca Flask ni el web admin
-│       # Canales auto-registrados (registry.py) + kinds descubiertos (events.py). Detalle de entrega → notifications.md
+│       # Canales auto-registrados (registry.py) + kinds descubiertos (events.py). Detalle de entrega → explica-notificaciones.md
 ├── ConfigManager (lib/config/manager.py)         ← ÚNICO dueño de la E/S de config (read/write/migrate)
 │   ├── ConfigStore-BD (lib/core/config/store.py)      ← capa editable: tabla `config` (una fila por sección|campo)
 │   ├── ConfigControl (lib/config/config_control.py)  ← I/O JSON de config.json (solo arranque + pins)
@@ -164,7 +230,7 @@ ServiceSentry/
 │   │   │   │   ├── health.py            # ServiceHealthMonitor: clasifica heartbeats up/down/idle → service_down/service_up (una vez por transición, leader-gated)
 │   │   │   │   ├── cert_scan.py         # CertExpiryScanner: escanea certs de los checks ssl_cert → cert_expiring (una vez por severidad expiring/expired)
 │   │   │   │   └── notify_events.py     # NOTIFY_EVENTS: service_down/service_up/cert_expiring (matrix)
-│   │   │   └── notify/                  # Subsistema de notificación / ENTREGA (sin Flask; lo usan web, monitor, health y daemons syslog/events) — ver notifications.md
+│   │   │   └── notify/                  # Subsistema de notificación / ENTREGA (sin Flask; lo usan web, monitor, health y daemons syslog/events) — ver explica-notificaciones.md
 │   │   │       ├── context.py          # NotifyContext: bundle de colaboradores del router (db, read_config, fernet, dbg, audit, public_url, panel_user_emails); sin Flask
 │   │   │       ├── router.py           # NotificationRouter (posee los stores de canal + ES el routing) + run_dispatch(surface, kind, …)
 │   │   │       ├── registry.py         # Registro de canales: Channel(send/flush) auto-descubierto de <canal>/channel.py (sin lista central)
@@ -251,7 +317,7 @@ ServiceSentry/
 │   │       │   └── permissions.py auth.py services.py   # permisos efectivos / login local / host de discovery de servicios
 │   │       │   # Dominios (users/roles/groups/sessions/audit) → lib/core/<d>/mixin.py; checks → lib/services/monitoring/checks_mixin.py.
 │   │       │   # Auth externa (LDAP/OIDC/SAML) → lib/providers/{ldap,oidc,saml}/.
-│   │       └── routes/                  # Registradores de rutas Flask (ver web-admin.md)
+│   │       └── routes/                  # Registradores de rutas Flask (ver explica-web-admin.md)
 │   │           ├── __init__.py          # register_all(app, wa) — registra también los routes de core/servicios/providers
 │   │           ├── auth.py              # /login, /logout + _establish_session/_landing_url (login local; LDAP/OIDC/SAML se registran desde lib/providers/*)
 │   │           ├── pages.py             # vistas HTML: / (entry), /admin, /overview
@@ -306,27 +372,27 @@ ServiceSentry/
 │   ├── config.json                     # Capa de solo-lectura + arranque: sección `database`, credenciales de primer arranque, overrides bloqueados y datos de feature (webhooks/overview/plantillas)
 │   └── data.db                         # BD SQLite por defecto (usuarios, roles, sesiones, auditoría, hosts, credenciales, historial, estado de checks, config de módulos/ítems Y la configuración editable: tabla `config`)
 └── docs/
-    ├── architecture.md                  # Este archivo
-    ├── configuration.md
-    ├── notifications.md                  # Entrega de notificaciones (dispatcher/canales/matriz/textos) — FUENTE CANÓNICA
-    ├── services.md                       # Servicios de fondo (embebido/standalone, microservicios, HA)
-    ├── discovery.md                      # Patrones self-describing (permisos, servicios, widgets, eventos)
-    ├── hosts.md                          # Modelo host-céntrico (hosts + perfiles de conexión)
-    ├── modules.md
-    ├── watchful-guide.md
+    ├── explica-arquitectura.md                  # Este archivo
+    ├── ref-configuracion.md
+    ├── explica-notificaciones.md                  # Entrega de notificaciones (dispatcher/canales/matriz/textos) — FUENTE CANÓNICA
+    ├── explica-servicios.md                       # Servicios de fondo (embebido/standalone, microservicios, HA)
+    ├── explica-descubrimiento.md                      # Patrones self-describing (permisos, servicios, widgets, eventos)
+    ├── explica-hosts.md                          # Modelo host-céntrico (hosts + perfiles de conexión)
+    ├── ref-modulos.md
+    ├── caso-guia-watchful.md
     ├── ai-module-guide.md
-    ├── web-admin.md
-    ├── schema.md
-    ├── i18n.md
-    ├── security.md
-    ├── sso-entra.md
-    ├── ssh-hardening.md
-    ├── development.md
-    ├── tests.md
-    ├── cli.md
-    ├── docker.md
-    ├── kubernetes.md
-    └── deployment.md
+    ├── explica-web-admin.md
+    ├── ref-schema-json.md
+    ├── explica-i18n.md
+    ├── explica-seguridad.md
+    ├── caso-entra-id.md
+    ├── caso-ssh-hardening.md
+    ├── caso-desarrollo.md
+    ├── ref-tests.md
+    ├── ref-cli.md
+    ├── caso-docker.md
+    ├── caso-kubernetes.md
+    └── caso-despliegue.md
 ```
 
 ---
@@ -395,7 +461,7 @@ El modelo **no es binario** OK/DOWN: cada cambio se clasifica en un *kind* —
 `down` (rojo), `recovery` (verde) o `warn` (ámbar, umbral **blando**: CPU/memoria altas,
 certificado próximo a caducar…) — vía `Monitor._alert_kind(status, severity)`. La entrega
 (qué canales, agrupación, textos custom→i18n) la cubre
-[notifications.md](notifications.md) — ver **[Severidad warning](notifications.md#severidad-warning)**.
+[explica-notificaciones.md](explica-notificaciones.md) — ver **[Severidad warning](explica-notificaciones.md#severidad-warning)**.
 
 ---
 
@@ -404,12 +470,12 @@ certificado próximo a caducar…) — vía `Monitor._alert_kind(status, severit
 ServiceSentry corre servicios de larga vida (monitor, syslog, eventos, fail2ban) con el
 **mismo código** en dos modos — **embebido** en el panel o **standalone** (proceso/pod
 dedicado). El panel los **descubre** (`EMBEDDED_SERVICE`, patrón self-describing →
-[discovery.md](discovery.md#3-servicios-embebidos-embedded_service)), los **compone** y los
+[explica-descubrimiento.md](explica-descubrimiento.md#3-servicios-embebidos-embedded_service)), los **compone** y los
 **controla**; en modo microservicios la coordinación va por la **BD compartida** (estado
 deseado/observado, cola de comandos, lease de líder) con un *poke* HTTP opcional.
 
 → Toda la arquitectura de servicios (qué hay, cómo se crean, descubrimiento, estado y
-comunicación en microservicios, alta disponibilidad) está en **[services.md](services.md)**.
+comunicación en microservicios, alta disponibilidad) está en **[explica-servicios.md](explica-servicios.md)**.
 
 ### Ejecución de checks: un único ejecutor
 
@@ -431,13 +497,13 @@ flowchart TB
 
 ## Procesamiento de Eventos (notificaciones)
 
-> La **entrega** (canales Telegram/Email/Webhook/Teams, matriz de routing, HMAC, plantillas, textos custom→i18n) — lo que ocurre a partir de `dispatch()` — está en **[notifications.md](notifications.md)**. Esta sección cubre la **generación** de eventos.
+> La **entrega** (canales Telegram/Email/Webhook/Teams, matriz de routing, HMAC, plantillas, textos custom→i18n) — lo que ocurre a partir de `dispatch()` — está en **[explica-notificaciones.md](explica-notificaciones.md)**. Esta sección cubre la **generación** de eventos.
 
 ### Arquitectura de entrega (resumen)
 
 El subsistema de entrega vive en `lib/core/notify` (**sin Flask**, **sin** dependencia de
 `web_admin`) y se articula sobre cuatro piezas — detalle en
-[notifications.md → arquitectura](notifications.md#arquitectura-contexto--router--registros):
+[explica-notificaciones.md → arquitectura](explica-notificaciones.md#arquitectura-contexto--router--registros):
 
 - **`NotifyContext`** (`context.py`): *bundle* explícito de colaboradores que el router
   necesita de su host — `db`, `read_config`, `fernet`, `dbg`, `audit`, `public_url`,
@@ -521,54 +587,15 @@ el **worker** las drena por cursor. La "cola" es la propia tabla de origen.
   externo: en externo el start/stop edita el estado deseado (`events.enabled`) que el
   contenedor reconcilia.
 
-### ¿Qué proceso corre el worker en cada topología?
+### Topología del worker (embebido vs. externo)
 
-| | Monolítico / **embebido** | Microservicios / **externo** |
-|---|---|---|
-| Worker de eventos | hilo dentro del contenedor **web** | contenedor **`events`** dedicado |
-| Hosting | `SS_EVENTS_EMBEDDED=1` (por defecto) | web: `SS_EVENTS_EMBEDDED=0` · events: `SS_SERVICE_ROLE=events` |
-| `events.enabled` | `true` (on/off) | `true` (on/off) |
-| Entrypoint | interno (`_start_event_worker`) | `main.py --events` → `EventService` |
-| Control en Services | start / stop | start / stop (edita `events.enabled`) |
-| Base de datos | compartida (principal + syslog) | la misma BD compartida |
+El worker corre como hilo dentro del contenedor **web** (monolítico/embebido) o como
+contenedor **`events`** dedicado (microservicios), con el **mismo núcleo**
+(`_event_worker_tick` / `_event_worker_loop`); solo cambia **quién** lo hospeda y
+**cuándo** se arranca.
 
-```mermaid
-flowchart TB
-    subgraph MONO["Monolítico — un proceso"]
-      WEBm["web<br/>Flask + scheduler + listener syslog + event worker"]
-    end
-    subgraph MICRO["Microservicios — un proceso por rol"]
-      WEBx["web<br/>Flask"]
-      WRK["worker<br/>scheduler"]
-      SYS["syslog<br/>listener"]
-      EVT["events<br/>event worker"]
-    end
-    WEBm --- DBm[("BD compartida")]
-
-    WEBx --- DB[("BD principal")]
-    WEBx --- SDB[("BD syslog")]
-    WRK --- DB
-    SYS --- DB
-    SYS --- SDB
-    EVT --- DB
-    EVT --- SDB
-```
-
-**Accesos a BD por rol** (en microservicios, cuando `syslog_db.enabled`):
-
-| Rol | BD principal (config, audit, reglas, log, historial…) | BD syslog (mensajes + descartes) |
-|---|---|---|
-| **web** | ✔ (todo el panel) | ✔ (lee y muestra los mensajes) |
-| **worker** (scheduler) | ✔ | — |
-| **syslog** (listener) | ✔ (lee su config de la sección `syslog`) | ✔ (escribe los mensajes) |
-| **events** (worker) | ✔ (reglas, audit, cooldown, cursor) | ✔ (lee los mensajes por cursor) |
-
-> Todos comparten la **misma** BD principal (y la misma BD de syslog cuando está
-> separada); cada rol abre solo los conectores que necesita. La config (incl. la del
-> syslog) vive siempre en la BD principal, por eso todos los roles la abren.
-
-En ambos casos el núcleo es el mismo (`_event_worker_tick` / `_event_worker_loop`);
-solo cambia **quién** lo hospeda y **cuándo** se arranca.
+→ Las tablas de topología por rol, los accesos a BD por rol y el diagrama MONO/MICRO
+están en **[explica-servicios.md](explica-servicios.md)**.
 
 > Esto **sustituye** la evaluación en línea anterior (el hook por mensaje del
 > listener y el `_eval_event` dentro de `_audit_write`), que acoplaba el envío de
@@ -578,11 +605,9 @@ solo cambia **quién** lo hospeda y **cuándo** se arranca.
 
 ## Modelo de Concurrencia
 
-| Capa | Mecanismo |
-| ---- | --------- |
-| Monitor → módulos | `ThreadPoolExecutor` (un hilo por módulo) |
-| Dentro de cada módulo | `ThreadPoolExecutor` (un hilo por ítem: ping, datastore, hddtemp…) |
-| Envío de notificaciones | **Síncrono** en el `flush` del `MonitorNotifier` al cierre del ciclo (sin hilo/cola de fondo; el antiguo hilo daemon de Telegram se eliminó) |
+El monitor paraleliza los módulos con un `ThreadPoolExecutor` de `min(len(módulos), 16)` hilos (**cap 16**, `executor.py`), cada módulo paraleliza a su vez sus ítems con otro pool, y el envío de notificaciones es **síncrono** en el `flush` del `MonitorNotifier` al cierre del ciclo (sin hilo/cola de fondo).
+
+→ Tratamiento completo (cuellos de botella, cachés, límites de recursos) en [explica-rendimiento.md](explica-rendimiento.md#modelo-de-concurrencia).
 
 ---
 
@@ -606,28 +631,22 @@ falso, o crea un **segundo `BaseConnector`** apuntando a la sección `syslog_db`
 cuando está activo. `SyslogStore`/`SyslogDropsStore` usan ese conector; el resto
 sigue en la BD principal. La topología `docker-compose.microservices.yml` levanta
 dos MariaDB y enruta syslog a la dedicada vía `SS_SYSLOG_DB_*` (ver
-[configuration.md](configuration.md) y [docker.md](docker.md)).
+[ref-configuracion.md](ref-configuracion.md) y [caso-docker.md](caso-docker.md)).
 
-El **store de módulos** (`lib/core/modules/store.py`) guarda la configuración de
-watchfuls, en dos tablas: `module_config` (una
-fila por módulo: campos a nivel de módulo —`enabled`, `alert`, `interval`, meta
-`__*__`— como JSON) y `module_config_items` (una fila por ítem: `host_uid`/`label`/
-`enabled` promovidos a columnas para joins/búsquedas, el resto del ítem como
-JSON). El facade `DbBackedModules` subclasa `ConfigControl`, por lo que
-`Monitor.config_modules` y el acceso desde el panel web son idénticos para quien
-los usa, y la misma BD se comparte entre web y worker. Los secretos siguen
-cifrados con Fernet a nivel de valor, ahora dentro
-del JSON de las tablas.
+El **store de módulos** (`lib/core/modules/store.py`) persiste la configuración de
+watchfuls en dos tablas (`module_config` + `module_config_items`) vía el facade
+`DbBackedModules` (subclase de `ConfigControl`), de modo que `Monitor.config_modules`
+y el panel web comparten la misma BD. El detalle de columnas y el cifrado Fernet a
+nivel de valor están en [ref-esquema-bd.md](ref-esquema-bd.md#portabilidad-multi-motor).
 
 ### Reconciliación declarativa de esquema
 
-Cada tabla se define una sola vez como `TableSpec` (`lib/db/schema.py`:
-columnas, orden, tipos, nullable, defaults, PK, índices, renombrados). En el
-arranque, `connector.reconcile_table(spec)` compara la tabla real con la
-definición y la **actualiza automáticamente** (añade columnas, corrige orden,
-tipos, nullable, defaults e índices; reconstruye la tabla preservando los datos
-cuando un `ALTER` no basta). Las columnas presentes en la BD pero ausentes del
-spec **se conservan y se reportan en log, nunca se borran**.
+Cada tabla se define una sola vez como `TableSpec` (`lib/db/schema.py`) y, en el
+arranque, `connector.reconcile_table(spec)` alinea la tabla real con la definición
+(reconstruyendo y preservando datos cuando un `ALTER` no basta; nunca borra columnas
+ausentes del spec).
+
+→ Esquema completo, tablas y portabilidad multi-motor en [ref-esquema-bd.md](ref-esquema-bd.md#portabilidad-multi-motor).
 
 ### Convención de tipos de fecha/hora
 
@@ -666,13 +685,13 @@ aritmética/agregación baratas.
 
 | Módulo | Plataforma | Implementación |
 | ------ | ---------- | -------------- |
-| `datastore` | Linux / Windows / macOS | Conectores nativos de BD; túnel SSH vía `paramiko` |
-| `filesystemusage` | Linux / Windows / macOS | `psutil.disk_partitions()` + `psutil.disk_usage()` |
-| `ram_swap` / `mem` | Linux / Windows / macOS | `psutil.virtual_memory()` + `psutil.swap_memory()` |
-| `web` | Linux / Windows / macOS | `urllib.request` (stdlib) |
-| `ping` | Linux / macOS / Windows\* | `pythonping` (principal); fallback raw socket ICMP |
+| `datastore` | Linux / Windows | Conectores nativos de BD; túnel SSH vía `paramiko` |
+| `filesystemusage` | Linux / Windows | `psutil.disk_partitions()` + `psutil.disk_usage()` |
+| `ram_swap` / `mem` | Linux / Windows | `psutil.virtual_memory()` + `psutil.swap_memory()` |
+| `web` | Linux / Windows | `urllib.request` (stdlib) |
+| `ping` | Linux / Windows\* | `pythonping` (principal); fallback raw socket ICMP |
 | `service_status` | Linux (systemd / OpenRC / SysV) + Windows | `systemctl` / `rc-service` / `service` / `psutil` |
-| `temperature` | Linux / macOS | `psutil.sensors_temperatures()` |
+| `temperature` | Linux | `psutil.sensors_temperatures()` |
 | `raid` | Linux (local) / cualquier plataforma (SSH remoto) | `/proc/mdstat` local + SSH/paramiko remoto. El campo `local` está guardado por `supported_platforms: ["linux"]` — en otras plataformas la UI lo muestra como "No compatible" |
 | `hddtemp` | Linux | Socket TCP al demonio hddtemp |
 

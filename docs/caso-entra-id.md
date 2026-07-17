@@ -1,15 +1,21 @@
-# SSO con Microsoft Entra ID (OIDC y SAML2)
+# Microsoft Entra ID (SSO OIDC/SAML2 · registro de apps)
 
-ServiceSentry ofrece inicio de sesión único (SSO) contra **Microsoft Entra ID** por
-dos protocolos, cada uno con un **asistente "Registrar en Azure"** que crea la
-aplicación en el tenant automáticamente (Device Code Flow) y rellena la config:
+Todo lo específico de **Microsoft Entra ID** en ServiceSentry: el inicio de sesión único
+(SSO) por OIDC y SAML2, y los **asistentes "Registrar en Azure"** (Device Code Flow) que
+crean apps en el tenant automáticamente — para SSO, para el aprovisionamiento **SCIM**, y
+para las notificaciones de **Microsoft 365 (email)** y **Teams**.
 
 - **OIDC / OAuth2** — recomendado. Registro **totalmente automático**, sin pasos manuales.
 - **SAML2** — registro **casi** automático; un último paso (la *Configuración básica de
   SAML*) **debe hacerse a mano en el portal** por una limitación de la API de Graph.
 
-Ambos asistentes viven en la pestaña **Config → Autenticación** y usan el mismo motor de
-provisioning (`lib/providers/entraid/`).
+Todos los asistentes viven en la pestaña **Config** y usan el mismo motor de provisioning
+(`lib/providers/entraid/`).
+
+> **SCIM** (aprovisionamiento proactivo) es un **estándar agnóstico del IdP** (RFC 7643/7644):
+> su funcionamiento general, activación y semántica están en **[caso-scim.md](caso-scim.md)**.
+> Aquí se documenta solo el **atajo específico de Entra** para registrar la app SCIM
+> automáticamente ([§ Registro SCIM en Entra](#registro-scim-en-entra)).
 
 ---
 
@@ -26,6 +32,32 @@ provisioning (`lib/providers/entraid/`).
    permisos declarados.
 4. Los valores resultantes (client_id, secret, cert IdP, URLs…) se **escriben en la
    config** del proveedor correspondiente.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin
+    participant SS as ServiceSentry
+    participant MS as Microsoft (login)
+    participant Graph as Microsoft Graph
+    Admin->>SS: "Registrar en Azure" (OIDC/SAML2/SCIM)
+    SS->>Graph: solicitar device code
+    Graph-->>SS: user_code + verification_uri_complete
+    SS-->>Admin: abre la página de Microsoft con el código embebido
+    Admin->>MS: inicia sesión (sesión existente, 1 clic)
+    loop device-poll hasta completar
+        SS->>Graph: ¿autorizado? (token de admin)
+    end
+    Graph-->>SS: access token (admin)
+    SS->>Graph: crear app + service principal + secreto/cert
+    SS->>Graph: conceder consentimiento de admin (permisos declarados)
+    Graph-->>SS: client_id · secret · (cert IdP) · URLs
+    SS->>SS: escribir en la config del proveedor
+    SS-->>Admin: registro completado
+```
+
+> El flujo de **login** (una vez registrada la app) se documenta con sus diagramas en
+> [explica-seguridad.md § Flujo de autenticación](explica-seguridad.md#flujo-de-autenticación).
 
 El asistente también tiene una pestaña **Manual** con los scripts equivalentes de
 **PowerShell (Microsoft.Graph)** y **Azure CLI**, por si se prefiere crear la app a mano.
@@ -53,65 +85,34 @@ a partir de los claims de la aserción/token — controlado por el campo `auto_c
 - En el primer login se crea la cuenta (email, nombre) y se le asigna rol según el **mapeo
   Grupos→Rol** (o `default_role` si no casa ningún grupo). En logins posteriores se
   actualizan datos/rol.
-### Provisioning proactivo (SCIM 2.0)
 
-Además del JIT, ServiceSentry expone un **endpoint SCIM 2.0** (`/scim/v2/*`) para que el
-IdP dé de alta/actualice/baja usuarios y grupos **antes** de que entren (la pestaña
-**"Aprovisionamiento"** de Azure). Se activa en **Config → Autenticación → SCIM
-provisioning**:
+### Registro SCIM en Entra
 
-- **Enabled** + un **token** (bearer secreto, cifrado). La card muestra la **URL base SCIM**
-  (`https://<tu public_url>/scim/v2`) como fila **solo-lectura** (candado + copiar; derivada de
-  la URL pública, ver [configuration.md](configuration.md) `public_url`) y un input-group de
-  token con botón **Generar** (pide un token aleatorio fuerte al servidor — `lib/util/generate_token`
-  vía `GET /api/v1/util/token` — y lo pone en el campo; no se guarda hasta pulsar Guardar) y botón
-  **Copiar**. En la pestaña de aprovisionamiento del IdP: *Tenant/SCIM URL* = esa URL,
-  *Secret Token* = el token. Como todo secreto, el token **nunca se re-emite al navegador** tras
-  guardarse (se muestra enmascarado con un placeholder "token configurado").
+**SCIM 2.0** (aprovisionamiento proactivo de usuarios/grupos) es agnóstico del IdP; su
+funcionamiento, activación (endpoint `/scim/v2`, token, URL base), tabla JIT-vs-SCIM,
+semántica de baja y badges están en **[caso-scim.md](caso-scim.md)**. Aquí solo el **atajo
+específico de Entra**.
+
 - **Registrar SCIM en Azure** (botón, análogo a OIDC/SAML2): por Device Code Flow crea una
   **app empresarial** con un **trabajo de sincronización SCIM** (plantilla *customappsso*) ya
   apuntado a la URL base + token de ServiceSentry (`BaseAddress`/`SecretToken`). El último
   paso es manual en el portal: **asignar** los usuarios/grupos y pulsar **Iniciar
   aprovisionamiento** (SCIM solo empuja principales asignados). Junto al botón, **Abrir en
   Entra ID** enlaza a la hoja *Aprovisionamiento* de la app. Guarda `sp_app_id`/`sp_object_id`
-  para el deep link. También hay pestaña **Manual** con los scripts PowerShell/Azure CLI
-  equivalentes.
-  - **Sin token previo**: si al pulsar el botón no hay ningún token (ni en el campo ni
-    guardado), se **genera uno automáticamente** (server-side) y se **guarda** antes de
-    lanzar el registro, para que el flujo funcione de un tirón sin generarlo a mano.
+  para el deep link. También hay pestaña **Manual** con los scripts PowerShell/Azure CLI.
+  - **Sin token previo**: si al pulsar el botón no hay token (ni en el campo ni guardado), se
+    **genera uno automáticamente** (server-side) y se **guarda** antes de registrar, para que
+    el flujo funcione de un tirón.
   - **Cliente Graph CLI**: el flujo SCIM usa *Microsoft Graph Command Line Tools*
     (`14d82eec-…`) en vez de Azure PowerShell, porque el scope `Synchronization.ReadWrite.All`
     (necesario para el sync job/secrets) no está preautorizado en Azure PowerShell → daría
     `AADSTS65002`. OIDC/SAML2 siguen con el cliente por defecto.
   - **El token no viaja en la petición**: el backend lo lee de config (`_config_section('scim')`)
-    y no lo acepta ni lo devuelve; el frontend solo sabe *si está seteado* y, si hay un token sin
-    guardar, lo **persiste primero** antes de registrar.
+    y no lo acepta ni lo devuelve; el frontend solo sabe *si está seteado*.
 - **Re-sincronización del token** (evita el desajuste ServiceSentry↔Entra que causa 401 en el
   *Test Connection*): al **Generar** un token con una app ya registrada, se re-empuja
   automáticamente a la app **existente** (`provisioning.update_scim_secrets`, reusa
   `sp_object_id`, sin crear otra) — un device-code ligero (login + PUT de secrets).
-- **default_role** para los usuarios aprovisionados; **auto_disable** = `active:false`
-  (asignación retirada) deshabilita el usuario.
-- **Desasignar en Entra:** un **usuario** se **desactiva** (`active:false`); un **grupo** se
-  desactiva mediante **soft-delete** (Entra manda `DELETE`, pero conservamos el grupo y su
-  mapeo grupo→rol — un grupo desactivado no concede roles). Al **reasignar** el grupo, Entra
-  hace `POST` con el mismo `externalId` y el grupo se **reactiva** con sus roles intactos (sin
-  duplicar). Ver [security.md](security.md#scim-20-aprovisionamiento-proactivo).
-- Usuarios creados con `auth_source: 'scim'` — muestran un **badge SCIM** en la lista de
-  Usuarios (junto a OIDC/SAML2/LDAP). Los **grupos SCIM** se mapean a grupos de ServiceSentry
-  (asigna roles a esos grupos y los miembros los heredan); llevan `source: 'scim'` y un **badge
-  SCIM** en la pestaña Grupos (frente a los `local`).
-- Endpoints: `Users`, `Groups`, `ServiceProviderConfig`, `ResourceTypes`, `Schemas`
-  (GET/POST/PUT/PATCH/DELETE) — ver [web-admin.md](web-admin.md) y `lib/providers/scim/routes.py` (transporte) + `lib/providers/scim/` (lógica).
-
-| | JIT (login) | SCIM (push) |
-|---|:---:|:---:|
-| Cuándo se crea el usuario | Al primer login SSO | Cuando el IdP sincroniza (aunque no haya entrado) |
-| Baja automática | No | Sí (`active:false` → deshabilita si `auto_disable`) |
-| Requiere | `auto_create_users` | Endpoint SCIM activo + token |
-
-Los dos modos coexisten: puedes usar SCIM para altas/bajas centralizadas y el JIT como
-respaldo al primer login.
 
 Código relevante:
 - Provider: `lib/providers/entraid/` (`auth`, `provisioning`, `directory`, `client`).

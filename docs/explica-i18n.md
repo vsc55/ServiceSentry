@@ -31,7 +31,7 @@ idioma desde la UI) y un **esquema de tags** que documenta los placeholders de
 cada texto. Todo eso se detalla en
 [Traducción de textos de notificación](#traducción-de-textos-de-notificación).
 El detalle del **editor** y sus endpoints vive en
-[notifications.md → «Sistema de textos de notificación»](notifications.md); aquí
+[explica-notificaciones.md → «Sistema de textos de notificación»](explica-notificaciones.md); aquí
 se documenta solo la parte de **traducción**.
 
 ---
@@ -92,62 +92,15 @@ todas las plantillas. El JavaScript la recibe en la constante `I18N`.
 
 ## Nivel 2 — Traducciones por módulo
 
-### Estructura de archivos
+Cada módulo aporta un fichero `src/watchfuls/<modulo>/lang/<idioma>.json` con su
+nombre visible (`pretty_name`), las **etiquetas de campos** (`labels`, `hints`,
+`group_labels`, `option_labels`, …) y sus **textos i18n de checks** (`messages`
++ esquema `messages_vars`). La estructura de carpetas, el formato completo y la
+tabla de todas sus secciones están en
+[ref-i18n.md → Fichero de idioma por módulo](ref-i18n.md#fichero-de-idioma-por-módulo-langjson).
 
-```text
-src/watchfuls/mi_modulo/
-  +-- lang/
-        +-- en_EN.json   ← etiquetas en inglés
-        +-- es_ES.json   ← etiquetas en español
-        +-- fr_FR.json   ← (añadir para soporte de francés)
-```
-
-### Formato del archivo
-
-```json
-{
-    "pretty_name": "Mi Módulo",
-    "module_description": "Qué monitoriza este módulo",
-    "labels":      { "enabled": "Habilitado", "host": "Host", "timeout": "Tiempo máximo (s)" },
-    "hints":       { "timeout": "Segundos antes de abortar la comprobación" },
-    "group_labels":{ "connection": "Conexión" },
-    "option_labels": { "scheme": { "http": "HTTP", "https": "HTTPS" } },
-    "action_labels": { "test_connection": "Probar conexión" },
-    "collections": { "list": "Servidores" },
-    "field_terms": { "db": { "mysql": { "label": "Base de datos" }, "redis": { "label": "Índice" } } },
-    "new_item_key_label": "Nombre del servidor",
-    "rename_item_prompt": "Nuevo nombre",
-    "messages": {
-        "ups_online": "UPS: {} - Online ({}){} ✅",
-        "ups_alert":  "UPS: {} - {} ({}) {}"
-    },
-    "messages_vars": {
-        "ups_online": ["UPS", "status", "detail"],
-        "ups_alert":  ["UPS", "reasons", "status", "icon"]
-    }
-}
-```
-
-| Clave | Propósito |
-|-------|-----------|
-| `pretty_name` | Nombre legible del módulo mostrado en la cabecera de la UI |
-| `module_description` | Descripción/ayuda del módulo |
-| `labels.<campo>` | Etiqueta del campo en el formulario de configuración del módulo |
-| `hints.<campo>` | Texto de ayuda (tooltip) bajo el campo |
-| `group_labels.<grupo>` | Nombre visible de cada grupo de campos (`group`) |
-| `option_labels.<campo>.<valor>` | Etiquetas de las opciones de un campo con `options` |
-| `action_labels.<id>` | Etiqueta de cada botón de acción (`__actions__`/`input_action`) |
-| `collections.<col>` | Nombre visible de cada colección (p. ej. `list`) |
-| `field_terms.<campo>.<valor>` | Label/hint/acción según otro campo (ver `term_field` en [schema.md](schema.md)) |
-| `new_item_key_label` | Etiqueta del campo de clave en el modal de nuevo ítem |
-| `rename_item_prompt` | Texto del modal de renombrar ítem |
-| `messages.<msg_key>` | **Textos i18n de los checks** que el módulo emite a las notificaciones (con placeholders `{}`); los resuelve `ModuleBase._msg()` |
-| `messages_vars.<msg_key>` | **Esquema de tags** de cada mensaje: nombre de cada placeholder, para el editor de textos |
-
-Solo `pretty_name` y `labels` son habituales; el resto son opcionales. Las
-claves de presentación (`labels`, `hints`, `group_labels`, …) se fusionan en
-`label_i18n`/`__i18n__` por `discover_schemas()` (ver
-[schema.md → Archivos de idioma](schema.md)). En cambio `messages` y
+Las claves de presentación (`labels`, `hints`, `group_labels`, …) se fusionan en
+`label_i18n`/`__i18n__` por `discover_schemas()`; en cambio `messages` y
 `messages_vars` **no** entran en el schema del navegador: son la parte de
 **notificación** del fichero de módulo — ver
 [Traducción de textos de notificación](#traducción-de-textos-de-notificación).
@@ -228,7 +181,7 @@ Para el **icono del módulo** (`moduleIcon`):
 
 | Prioridad | Fuente |
 |-----------|--------|
-| 1 | `ITEM_SCHEMAS["mod\|__icon__"]` — declaración `bi-*` del `schema.json`, **canónica** (ver [schema.md → `__icon__`](schema.md#__icon__)) |
+| 1 | `ITEM_SCHEMAS["mod\|__icon__"]` — declaración `bi-*` del `schema.json`, **canónica** (ver [ref-schema-json.md → `__icon__`](ref-schema-json.md#__icon__)) |
 | 2 | `config.icon` (override para módulos que no declaran `__icon__`) |
 | 3 | `ITEM_SCHEMAS["mod\|__i18n__"][CURRENT_LANG].icon` |
 | 4 | `ITEM_SCHEMAS["mod\|__i18n__"][SYSTEM_DEFAULT_LANG].icon` |
@@ -333,15 +286,13 @@ flowchart TD
     subgraph notif["Notificaciones (todos los canales) — notify_lang()"]
         n1{"¿notifications.lang?"}
         n1 -- sí --> n2["notifications.lang"]
-        n1 -- no --> n3{"¿email.lang<br/>(legado)?"}
-        n3 -- sí --> n4["email.lang"]
-        n3 -- no --> n5["web_admin.lang"]
+        n1 -- no --> n5["web_admin.lang"]
     end
 ```
 
 El idioma de **cualquier** canal de notificación (Telegram, email, webhook,
 Teams…) lo resuelve `notify_lang(cfg)` (`lib/core/notify/formatting.py`):
-`notifications|lang` → `email|lang` (legado) → `web_admin|lang`.
+`notifications|lang` → `web_admin|lang`.
 
 ### Flujo 2 — ¿Cómo se obtiene el texto de una clave?
 
@@ -376,8 +327,8 @@ Teams…) se traduce reutilizando las dos capas anteriores. Esta sección cubre 
 parte de **traducción**: qué claves existen, cómo se sobreescriben por idioma y
 cómo se descubren los tags. El **editor** de la UI (Config → Notificaciones →
 Templates) y sus endpoints se documentan en
-[notifications.md → «Sistema de textos de notificación: plantillas, listados y
-tags»](notifications.md).
+[explica-notificaciones.md → «Sistema de textos de notificación: plantillas, listados y
+tags»](explica-notificaciones.md).
 
 ### Familias de claves de notificación del core
 
@@ -418,32 +369,10 @@ idioma; las claves ausentes caen al inglés.
 ### Los tres esquemas de tags
 
 Cada texto de notificación admite **placeholders**, y cada uno tiene un esquema
-que los nombra para el editor. Hay **tres** esquemas, todos traducibles y por
-idioma:
-
-| Esquema | Ubicación | Forma | Placeholders |
-|---------|-----------|-------|--------------|
-| `notif_msg_vars` | `lib/i18n/lang/<idioma>.py` | `{msg_key: [nombre, …]}` | Posicionales `{}` / `{0}` `{1}` de los mensajes `notif_msg_*` del core |
-| `notif_email_vars` | `lib/i18n/lang/<idioma>.py` | `{string_key: [[token, descripción], …]}` | Token **fijo** con nombre (`{item}`, `{n}`, `{ts}`, `{sender}`) + descripción traducida |
-| `messages_vars` | `watchfuls/<mod>/lang/<idioma>.json` | `{msg_key: [nombre, …]}` | Posicionales de los `messages` del módulo; es el **hook de descubrimiento** de tags de un módulo |
-
-Ejemplos:
-
-```python
-# lib/i18n/lang/en_EN.py
-'notif_msg_vars':   { 'notif_msg_auth_login': ['user', 'auth method', 'IP address'] },
-'notif_email_vars': { 'alert_down': [['{item}', 'affected service/host']] },
-```
-
-```json
-// watchfuls/ups/lang/en_EN.json
-"messages_vars": { "ups_online": ["UPS", "status", "detail"] }
-```
-
-> **Dos convenciones de placeholder:** los mensajes `notif_msg_*` y los
-> `messages` de módulo usan `{}` **posicional** (el orden importa); las cadenas
-> de email usan placeholders **con nombre** (`{item}`, `{n}`, `{ts}`,
-> `{sender}`), que se sustituyen por clave.
+que los nombra para el editor: `notif_msg_vars` y `notif_email_vars` (core, en
+`lib/i18n/lang/<idioma>.py`) y `messages_vars` (por módulo, en su `lang/*.json`).
+La tabla comparativa, sus formas y las dos convenciones de placeholder están en
+[ref-i18n.md → Los tres esquemas de tags](ref-i18n.md#los-tres-esquemas-de-tags).
 
 ### Cómo un módulo emite texto traducido: `ModuleBase._msg()`
 
@@ -474,21 +403,15 @@ vacío = usar el default de i18n. Los overrides se guardan en
   módulo.
 
 El detalle del editor y sus endpoints está en
-[notifications.md](notifications.md).
+[explica-notificaciones.md](explica-notificaciones.md).
 
 ### Placeholders: secuencial vs. indexado
 
-`_fill(text, args)` (`lib/core/notify/formatting.py`) soporta **dos** formas de
-placeholder, combinables en una misma cadena:
-
-- **Secuencial `{}`** — cada `{}` consume el siguiente argumento en orden.
-- **Indexado `{0}` / `{1}` …** — inserta `args[N]` por posición, lo que permite
-  **reordenar** los valores. Es imprescindible en overrides y traducciones,
-  donde el orden natural de la frase difiere entre idiomas (un `{}` plano no
-  puede expresarlo). Los índices fuera de rango se dejan intactos.
-
-Esta ayuda se muestra al usuario en el editor vía
-`notif_tpl_placeholders_hint`.
+El resultado de `_msg()` pasa por `_fill(text, args)`
+(`lib/core/notify/formatting.py`), que soporta placeholders **secuenciales `{}`**
+e **indexados `{0}`/`{1}`** (estos permiten reordenar los valores en overrides y
+traducciones). El detalle está en
+[ref-i18n.md → Placeholders: secuencial vs. indexado](ref-i18n.md#placeholders-secuencial-vs-indexado-_fill).
 
 ---
 

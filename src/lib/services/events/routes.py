@@ -68,7 +68,7 @@ def register(app, wa):
         if err:
             return err
         if store.get(rid) is None:
-            return jsonify({'error': 'Not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         try:
             rule = rules_logic.prepare_rule(store, data, exclude_id=rid)
         except AdminOpError as e:
@@ -84,7 +84,7 @@ def register(app, wa):
     def api_delete_event_rule(rid):
         stored = store.get(rid)
         if stored is None or not store.delete(rid):
-            return jsonify({'error': 'Not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         wa._embedded_services['events']._events_reload()
         wa._audit('event_rule_deleted', detail={'id': rid, 'name': stored.get('name', '')})
         return jsonify({'ok': True})
@@ -94,7 +94,7 @@ def register(app, wa):
     def api_test_event_rule(rid):
         rule = store.get(rid)
         if rule is None:
-            return jsonify({'error': 'Not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         from lib.core.notify.notification_dispatcher import dispatch  # noqa: PLC0415
         ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         results = dispatch(wa, kind='event', module=rule.get('source', 'audit'),

@@ -656,7 +656,44 @@ class Monitor(ObjectBase):
                     f"> Monitor > check_module >> Module: {module_name}/{key} - New Status: {tmp_status}"
                 )
 
+        # Prune orphan state: drop stored keys a module stops reporting. Without
+        # this the monitor only ever *sets* keys, so a removed item / disabled
+        # sub-check would leave its last status lingering forever (e.g. a stale
+        # error next to a live result — the m365 phantom). Reached only when the
+        # module ran and returned a result set (see check()'s caller), so an
+        # errored/timed-out module never wipes its last-known state.
+        if self._prune_orphan_status(module_name, result_data):
+            changed = True
+
         return changed
+
+    def _prune_orphan_status(self, module_name: str, result_data: ReturnModuleCheck) -> bool:
+        """Delete stored keys this cycle's *result_data* no longer covers.
+
+        A stale RESULT key (one carrying a ``status`` — a deleted item or a disabled
+        sub-check) is always dropped. A bookkeeping-only key (no ``status`` — e.g. a
+        bare item key holding just ``fail_count`` while the real results live under
+        ``<item>/…`` sub-keys) is kept while ANY sub-key of the same item is still
+        reported, and dropped only once the whole item is gone — so an in-flight
+        failure streak survives. Returns True if anything was removed (so the caller
+        persists the pruned status)."""
+        mod_status = self.status.data.get(module_name) if isinstance(self.status.data, dict) else None
+        if not isinstance(mod_status, dict):
+            return False
+        current = set(result_data.keys())
+        live_prefixes = {str(k).split('/', 1)[0] for k in current}
+        orphans = []
+        for k in list(mod_status):
+            if k in current:
+                continue                                    # still reported → keep
+            entry = mod_status.get(k)
+            if isinstance(entry, dict) and 'status' in entry:
+                orphans.append(k)                           # stale result → drop
+            elif str(k).split('/', 1)[0] not in live_prefixes:
+                orphans.append(k)                           # bookkeeping for a gone item
+        for k in orphans:
+            del mod_status[k]
+        return bool(orphans)
 
     def _import_watchful(self, module_name: str):
         """Import a watchful module by name (returns the imported module).

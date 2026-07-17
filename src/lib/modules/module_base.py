@@ -784,21 +784,22 @@ class ModuleBase(ObjectBase):
         cfg = getattr(getattr(self._monitor, 'config', None), 'data', None)
         return notify_lang(cfg if isinstance(cfg, dict) else {})
 
-    def _module_messages(self) -> dict:
-        """This module's ``messages`` dict for the current notification language, from its own
-        ``lang/<lang>.json`` (requested language wins, ``en_EN`` fills gaps).  Cached per
-        (module, language)."""
+    def _module_lang_section(self, section: str) -> dict:
+        """This module's *section* dict for the current notification language, from its
+        own ``lang/<lang>.json`` (requested language wins, ``en_EN`` fills gaps). Used
+        for ``messages`` and any module-specific map (e.g. m365 ``health_states``).
+        Cached per (module, language, section)."""
         from lib.i18n import DEFAULT_LANG  # noqa: PLC0415
         lang = self._notify_lang()
         base = getattr(self._monitor, 'dir_modules', None) if self.is_monitor_exist else None
         if not isinstance(base, str):
             base = None
         name = (self.name_module or '').split('.')[-1]
-        ck = (base, name, lang)
+        ck = (base, name, lang, section)
         cached = _MODULE_MSG_CACHE.get(ck)
         if cached is not None:
             return cached
-        msgs: dict = {}
+        out: dict = {}
         if base and name:
             lang_dir = os.path.join(base, name, 'lang')
             for lc in (lang, DEFAULT_LANG):        # requested first, then default fills gaps
@@ -809,10 +810,14 @@ class ModuleBase(ObjectBase):
                         data = json.load(fh)
                 except (OSError, ValueError):
                     continue
-                for k, v in (data.get('messages') or {}).items():
-                    msgs.setdefault(k, v)
-        _MODULE_MSG_CACHE[ck] = msgs
-        return msgs
+                for k, v in (data.get(section) or {}).items():
+                    out.setdefault(k, v)
+        _MODULE_MSG_CACHE[ck] = out
+        return out
+
+    def _module_messages(self) -> dict:
+        """This module's ``messages`` dict for the current notification language."""
+        return self._module_lang_section('messages')
 
     def _msg(self, key: str, *args) -> str:
         """Translate a check message in the system notification language: an admin text override

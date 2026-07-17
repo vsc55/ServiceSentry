@@ -30,7 +30,7 @@ Se ofrecen tres topologías a partir de la misma imagen; elige una:
   TLS-ALPN-01 pueda validar el certificado.
 
 La conexión a la BD principal se inyecta por env `SS_DB_*` y la de syslog por
-`SS_SYSLOG_DB_*` (ver [configuration.md](configuration.md) → *Sección `database`*);
+`SS_SYSLOG_DB_*` (ver [ref-configuracion.md](ref-configuracion.md) → *Sección `database`*);
 el `web` arranca con `SS_MONITORING_EMBEDDED=0` para **no** ejecutar el monitor
 (lo hace el contenedor `worker`), `SS_SYSLOG_EMBEDDED=0` para **no** ligar los
 puertos syslog (los gestiona el contenedor `syslog`) y `SS_EVENTS_EMBEDDED=0` para
@@ -39,7 +39,7 @@ comparten los volúmenes con nombre y las bases de datos, por lo que leen y escr
 el mismo estado.
 
 > **Dimensionado del receptor syslog.** El listener es *thread-per-connection* (una hebra
-> por conexión TCP/TLS viva). Coste medido bajo carga (ver [tests.md §49](tests.md), test de
+> por conexión TCP/TLS viva). Coste medido bajo carga (ver [ref-tests.md §49](ref-tests.md), test de
 > 1000 conexiones simultáneas): **≈47 KB de RAM por conexión persistente** (stack de hebra +
 > buffers) más el propio proceso base. Regla práctica: 1000 conexiones ⇒ ~46 MB extra y ~1000
 > hebras; 10.000 ⇒ ~460 MB y ~10.000 hebras (escala lineal). UDP no abre conexiones (coste
@@ -270,23 +270,12 @@ el panel web sobreviven a los reinicios del contenedor.
 | **Credenciales** | | |
 | `SS_USERNAME` | *(obligatorio)* | Usuario del panel de administración |
 | `SS_PASSWORD` | *(obligatorio)* | Contraseña del panel de administración |
-| **Apariencia** | | |
-| `SS_LANG` | `en_EN` | Idioma de la interfaz (`en_EN` / `es_ES`) |
-| `SS_DARK_MODE` | `false` | Activar el modo oscuro por defecto |
-| **Seguridad** | | |
-| `SS_SECURE_COOKIES` | `false` | Poner a `true` al servir sobre HTTPS |
-| `SS_REMEMBER_ME_DAYS` | `30` | Duración de la sesión en días |
-| `SS_PROXY_COUNT` | `0` | Número de proxies inversos delante de la aplicación |
-| `SS_PUBLIC_URL` | *(vacío)* | Nombre de host público, sin esquema — p. ej. `monitor.example.com` o `monitor.example.com:8080`. Necesario para los enlaces de Telegram y el acceso directo a la página de estado cuando se accede por un dominio distinto a la IP del servidor |
-| `SS_FORCE_HTTPS` | `false` | `true` cuando el proxy inverso termina HTTPS — la app generará URLs `https://` aunque internamente use HTTP |
-| `SS_FORCE_FQDN` | `false` | `true` para redirigir al hostname de `SS_PUBLIC_URL` si se accede por IP u otro nombre, conservando la ruta y los parámetros. Requiere `SS_PUBLIC_URL` |
+| **App (variables genéricas)** | | Apariencia, seguridad/proxy, log de auditoría, Telegram y nivel de log (`SS_LANG`, `SS_DARK_MODE`, `SS_SECURE_COOKIES`, `SS_REMEMBER_ME_DAYS`, `SS_PROXY_COUNT`, `SS_PUBLIC_URL`, `SS_FORCE_HTTPS`, `SS_FORCE_FQDN`, `SS_AUDIT_MAX_ENTRIES`, `SS_TELEGRAM_*`, `SS_LOG_LEVEL`…) → ver [ref-configuracion.md](ref-configuracion.md#variables-de-entorno) |
 | **Página de estado pública** | | |
 | `SS_PUBLIC_STATUS` | `false` | Habilitar el endpoint `/status` sin autenticación |
 | `SS_PUBLIC_STATUS_DETAIL` | `false` | Mostrar el detalle por ítem en la página de estado pública |
 | `SS_STATUS_REFRESH_SECS` | `60` | Intervalo de refresco automático en la página de estado |
 | `SS_STATUS_LANG` | *(vacío)* | Idioma específico para la página de estado; por defecto usa `SS_LANG` |
-| **Log de auditoría** | | |
-| `SS_AUDIT_MAX_ENTRIES` | `500` | Número máximo de entradas a conservar en el log de auditoría |
 | **Monitor / Worker** | | |
 | `SS_CHECK_INTERVAL` | `300` | Segundos entre comprobaciones (periodo del worker y del scheduler embebido) |
 | **Plano de control distribuido** (microservicios) | | |
@@ -294,20 +283,15 @@ el panel web sobreviven a los reinicios del contenedor.
 | `SS_CONTROL_PORT` | `8765` | Puerto del listener de control (`/control/health`, `/control/reconcile`) en los roles `worker`/`syslog`/`events` |
 | `SS_CONTROL_BIND` | `0.0.0.0` | Dirección de enlace del listener de control |
 | `SS_CONTROL_ADVERTISE` | *(nombre del host/pod)* | Dirección que el servicio publica como `control_url` para que el `web` sepa dónde hacer el poke (p. ej. el nombre del servicio en compose: `worker`) |
-| **Telegram** | | |
-| `SS_TELEGRAM_TOKEN` | *(no definido)* | Token del bot de Telegram |
-| `SS_TELEGRAM_CHAT_ID` | *(no definido)* | ID del chat o grupo de Telegram |
-| `SS_TELEGRAM_GROUP_MESSAGES` | `false` | Agrupar varias alertas en un único mensaje |
-| **Varios** | | |
-| `SS_VERBOSE` | `false` | Activar salida detallada / debug (fuerza el nivel máximo, equivale a `--verbose`). Para un nivel concreto usa `SS_LOG_LEVEL` o `global.log_level` desde el panel (**Configuración → Interfaz**) |
-| `SS_LOG_LEVEL` | *(vacío)* | Nivel de log para cualquier rol (`off`/`debug`/`info`/`warning`/`error`); sobreescribe el valor guardado. `SS_VERBOSE`/`-v` siguen forzando debug. Vacío = usa el valor guardado |
+| **Salida / logs del contenedor** | | |
+| `SS_VERBOSE` | `false` | Activar salida detallada / debug (fuerza el nivel máximo, equivale a `--verbose`). Lo traduce el `entrypoint.sh`. Para un nivel concreto usa `SS_LOG_LEVEL` (ver [ref-configuracion.md](ref-configuracion.md#variables-de-entorno)) |
 | `NO_COLOR` | *(no definido)* | Si se define (cualquier valor), desactiva los colores ANSI del debug. Los logs de Docker no son un TTY, así que el color ya se desactiva solo |
 
 > **Nota:** las variables `SS_WEB_HOST`, `SS_WEB_PORT` y `SS_VERBOSE` las traduce el
 > `entrypoint.sh` a los flags `--web-host`/`--web-port`/`--verbose`.
 > Alternativamente, el CLI lee directamente variables `SS_*` (`SS_WEB`,
 > `SS_WEB_PORT`, `SS_WEB_HOST`, `SS_VERBOSE`, `SS_NOCOLOR`, `SS_CONFIG_DIR`…)
-> sin pasar por el entrypoint — ver [configuration.md](configuration.md#variables-de-entorno).
+> sin pasar por el entrypoint — ver [ref-configuracion.md](ref-configuracion.md#variables-de-entorno).
 > Los campos de `config.json` (variables `SS_*` como `SS_LANG`, `SS_CHECK_INTERVAL`,
 > `SS_TELEGRAM_TOKEN`) se aplican en runtime por el proceso Python y nunca se escriben a disco.
 
@@ -335,7 +319,7 @@ versión). Para que un cambio se aplique **al instante** en vez de esperar al
 reconcile periódico, define `SS_CONTROL_TOKEN` (igual en todos los contenedores):
 el panel hará un *poke* `POST /control/reconcile` al servicio. Es un acelerador
 opcional — sin token, todo sigue funcionando por el reconcile. Ver
-[services.md → Plano de control distribuido](services.md#modo-microservicios-plano-de-control-distribuido).
+[explica-servicios.md → Plano de control distribuido](explica-servicios.md#modo-microservicios-plano-de-control-distribuido).
 
 ### Variables sensibles
 
@@ -405,7 +389,7 @@ actualizaciones.
 
 ## Proxy inverso
 
-Consulta la [guía de proxy inverso](deployment.md#proxy-inverso) para las instrucciones completas de NPM y Traefik.
+Consulta la [guía de proxy inverso](caso-despliegue.md#proxy-inverso) para las instrucciones completas de NPM y Traefik.
 
 Al ejecutar detrás de cualquier proxy inverso con terminación HTTPS, configura estas variables en tu fichero compose:
 
@@ -429,34 +413,8 @@ docker compose -f docker/docker-compose.microservices-traefik.yml up -d
 ```
 
 Si en cambio ya tienes una instancia de Traefik propia y solo quieres exponer el
-`web`, añade las labels al servicio `servicesentry-web` y conéctalo a la red de
-tu Traefik:
-
-```yaml
-services:
-  servicesentry-web:
-    networks:
-      - traefik_public
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.sentry.rule=Host(`monitor.example.com`)"
-      - "traefik.http.routers.sentry.entrypoints=websecure"
-      - "traefik.http.routers.sentry.tls.certresolver=letsencrypt"
-      - "traefik.http.services.sentry.loadbalancer.server.port=8080"
-    environment:
-      SS_PROXY_COUNT: "1"
-      SS_PUBLIC_URL: "monitor.example.com"
-      SS_FORCE_HTTPS: "true"
-      SS_SECURE_COOKIES: "true"
-
-networks:
-  traefik_public:
-    external: true
-```
-
-> `websecure` y `letsencrypt` son los nombres de entrypoint y certresolver
-> habituales en una instalación estándar de Traefik. Ajústalos si los tuyos tienen
-> nombres distintos.
+`web` (labels del router, red externa, entrypoints/certresolver), la receta
+completa está en [caso-despliegue.md](caso-despliegue.md#proxy-inverso).
 
 #### Syslog y Traefik (por qué va directo)
 
@@ -485,16 +443,8 @@ pierde la IP de origen** y el allowlist por IP deja de ser fiable.
 
 ### Nginx Proxy Manager (NPM)
 
-NPM no requiere configuración de cabeceras manual — las añade automáticamente.
-
-1. Crea un **Proxy Host** apuntando a `http://<ip-del-servidor>:8080`
-2. En la pestaña **SSL** activa el certificado Let's Encrypt y marca *Force SSL*
-3. Configura las variables de entorno en tu fichero compose:
-
-```yaml
-environment:
-  SS_PROXY_COUNT: "1"
-  SS_PUBLIC_URL: "monitor.example.com"
-  SS_FORCE_HTTPS: "true"
-  SS_SECURE_COOKIES: "true"
-```
+Los pasos de NPM (Proxy Host, SSL/Force SSL y las variables de entorno) son los
+mismos para cualquier despliegue; están en
+[caso-despliegue.md](caso-despliegue.md#proxy-inverso). Aplica las variables de
+entorno resultantes en el `environment:` de tu fichero compose (ver el bloque al
+inicio de esta sección).

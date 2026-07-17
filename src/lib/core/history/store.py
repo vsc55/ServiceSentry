@@ -259,13 +259,16 @@ class HistoryStore:
             else:
                 # MySQL's CAST target is SIGNED, not INTEGER (SQLite/PostgreSQL accept INTEGER).
                 _int = 'SIGNED' if getattr(self._db, 'KIND', 'sqlite') == 'mysql' else 'INTEGER'
+                # FLOOR before the cast so the bucket index truncates identically on all
+                # engines (PostgreSQL's CAST(double AS int) rounds; SQLite/MySQL truncate) —
+                # operand is always ≥ 0 (ts ≥ from_ts), so FLOOR == truncate.
                 rows = self._db.fetchall(
                     f'''SELECT
-                        CAST((ts - ?) / ? AS {_int}) * ? + ? AS bts,
+                        CAST(FLOOR((ts - ?) / ?) AS {_int}) * ? + ? AS bts,
                         CAST(ROUND(AVG(status)) AS {_int}),
                         MAX(data)
                     FROM {_T} WHERE {where}
-                    GROUP BY CAST((ts - ?) / ? AS {_int})
+                    GROUP BY CAST(FLOOR((ts - ?) / ?) AS {_int})
                     ORDER BY bts''',
                     (from_ts, bucket, bucket, from_ts) + w_args + (from_ts, bucket),
                 )

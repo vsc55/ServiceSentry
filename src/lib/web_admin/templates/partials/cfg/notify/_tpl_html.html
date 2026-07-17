@@ -133,10 +133,10 @@ async function _cmFormatHtml() {
     if (typeof html_beautify === 'undefined') {
         if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
         await _ensureCodeMirror();
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Format'; }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>' + t('tpl_format'); }
     }
     if (typeof html_beautify === 'undefined') {
-        showToast('Formatter not available', 'warning');
+        showToast(t('tpl_formatter_unavailable'), 'warning');
         return;
     }
 
@@ -161,13 +161,13 @@ async function _cmFormatHtml() {
         content_unformatted:  ['pre', 'textarea', 'script', 'style'],
     });
 
-    if (pretty === raw) { showToast('Already formatted', 'info'); return; }
+    if (pretty === raw) { showToast(t('tpl_already_formatted'), 'info'); return; }
 
     const cursor = _cmEditor.getCursor();
     _cmEditor.setValue(pretty);
     _cmEditor.setCursor(cursor);
     _cmEditor.focus();
-    showToast('Formatted ✓', 'success');
+    showToast(t('tpl_formatted_ok'), 'success');
 }
 
 /** Toggle line wrapping in the editor and update the button appearance. */
@@ -397,18 +397,18 @@ function _notifHtmlRefresh() {
             <div class="ms-auto d-flex gap-2 flex-nowrap">
                 <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
                         onclick="_cmFormatHtml()"
-                        title="Format / Beautify HTML">
-                    <i class="bi bi-magic me-1"></i>Format
+                        title="${escAttr(t('tpl_format_tt'))}">
+                    <i class="bi bi-magic me-1"></i>${t('tpl_format')}
                 </button>
                 <button type="button" id="notifHtmlWrapBtn"
                         class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
                         onclick="_cmToggleWrap()"
-                        title="Toggle line wrap">
+                        title="${escAttr(t('tpl_wrap_tt'))}">
                     <i class="bi bi-text-wrap"></i>
                 </button>
                 <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
                         onclick="if(_cmEditor)_cmEditor.execCommand('findPersistent')"
-                        title="Find (Ctrl+F) / Replace (Ctrl+H)">
+                        title="${escAttr(t('tpl_find_tt'))}">
                     <i class="bi bi-search"></i>
                 </button>
                 <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
@@ -429,7 +429,7 @@ function _notifHtmlRefresh() {
                 </button>
                 <button type="button" class="btn btn-sm btn-secondary lh-1 py-1 px-2 notif-tpl-btn"
                         data-bs-toggle="collapse" data-bs-target="#notifHtmlShortcuts"
-                        title="Keyboard shortcuts">
+                        title="${escAttr(t('tpl_shortcuts'))}">
                     <i class="bi bi-keyboard"></i>
                 </button>
             </div>
@@ -462,18 +462,18 @@ function _notifHtmlRefresh() {
         </div>
         <div class="collapse" id="notifHtmlShortcuts">
             <div class="px-2 py-2 small rounded border mt-1 cfg-toolbar-bg ss-fs-3">
-                <div class="fw-semibold mb-2 small">Keyboard shortcuts</div>
+                <div class="fw-semibold mb-2 small">${t('tpl_shortcuts')}</div>
                 <table class="w-100 small" style="border-collapse:collapse">
-                    <tr><td class="py-1 pe-3"><kbd>Ctrl+Space</kbd></td><td class="text-muted">Autocomplete</td></tr>
-                    <tr><td class="py-1 pe-3"><kbd>Ctrl+F</kbd></td><td class="text-muted">Find</td></tr>
-                    <tr><td class="py-1 pe-3"><kbd>Ctrl+H</kbd></td><td class="text-muted">Find &amp; Replace</td></tr>
-                    <tr><td class="py-1 pe-3"><kbd>Ctrl+G</kbd></td><td class="text-muted">Go to line</td></tr>
-                    <tr><td class="py-1 pe-3"><kbd>Ctrl+/</kbd></td><td class="text-muted">Toggle comment</td></tr>
-                    <tr><td class="py-1 pe-3"><kbd>Alt+F</kbd></td><td class="text-muted">Fold block</td></tr>
-                    <tr><td class="py-1 pe-3"><kbd>Alt+U</kbd></td><td class="text-muted">Unfold block</td></tr>
-                    <tr><td class="py-1 pe-3"><kbd>Tab / Shift+Tab</kbd></td><td class="text-muted">Indent / Dedent</td></tr>
-                    <tr><td class="py-1 pe-3"><kbd>F11</kbd></td><td class="text-muted">Toggle fullscreen</td></tr>
-                    <tr><td class="py-1 pe-3"><kbd>Esc</kbd></td><td class="text-muted">Exit fullscreen</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+Space</kbd></td><td class="text-muted">${t('tpl_sc_autocomplete')}</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+F</kbd></td><td class="text-muted">${t('tpl_sc_find')}</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+H</kbd></td><td class="text-muted">${t('tpl_sc_replace')}</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+G</kbd></td><td class="text-muted">${t('tpl_sc_goto')}</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Ctrl+/</kbd></td><td class="text-muted">${t('tpl_sc_comment')}</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Alt+F</kbd></td><td class="text-muted">${t('tpl_sc_fold')}</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Alt+U</kbd></td><td class="text-muted">${t('tpl_sc_unfold')}</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Tab / Shift+Tab</kbd></td><td class="text-muted">${t('tpl_sc_indent')}</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>F11</kbd></td><td class="text-muted">${t('tpl_sc_fullscreen')}</td></tr>
+                    <tr><td class="py-1 pe-3"><kbd>Esc</kbd></td><td class="text-muted">${t('tpl_sc_exit_fullscreen')}</td></tr>
                 </table>
             </div>
         </div>`;

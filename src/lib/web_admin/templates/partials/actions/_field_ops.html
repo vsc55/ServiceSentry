@@ -71,6 +71,7 @@ function _doDeleteItem() {
     const parent = getPath(target === 'config' ? configData : modulesData, parts);
     if (parent && key in parent) {
         delete parent[key];
+        _modItemSel.delete(parentPathStr + '|' + key);   // drop from selection so the "N selected" count stays accurate
         markDirty(target);
         target === 'modules' ? _renderModulesSurface() : renderConfig();
     }
@@ -194,6 +195,9 @@ function _doRenameItem() {
         const [k, v] = entries[i];
         parent[i === idx ? nk : k] = v;
     }
+    // Keep the selection consistent: move any selection from the old key to the new one.
+    const _selOld = parentPathStr + '|' + oldKey;
+    if (_modItemSel.delete(_selOld)) _modItemSel.add(parentPathStr + '|' + nk);
     bootstrap.Modal.getInstance(document.getElementById('renameItemModal')).hide();
     _renameItemCtx = null;
     // Re-expand the item after re-render if it was open before the rename

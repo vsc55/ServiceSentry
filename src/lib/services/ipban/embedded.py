@@ -96,6 +96,7 @@ class EmbeddedIpban(_EmbeddedBase):
             poke(self._HB_KEY)
         self._audit_system('service_started' if enable else 'service_stopped',
                            {'service': 'ipban', 'web_admin|ipban_enabled': enable})
+        self._notify_service_control(action)
         return True, ''
 
     def on_config_changed(self, changed) -> None:

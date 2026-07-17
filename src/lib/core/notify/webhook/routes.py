@@ -103,7 +103,7 @@ def register(app, wa):
             return jsonify({'error': err_msg}), 400
         stored = store.get(wh_id)
         if stored is None:
-            return jsonify({'error': 'Not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         # null secret = masked field, keep stored value
         secret = data.get('secret')
         if secret is None:
@@ -148,7 +148,7 @@ def register(app, wa):
     def api_delete_webhook(wh_id):
         deleted = store.get(wh_id)
         if deleted is None or not store.delete(wh_id):
-            return jsonify({'error': 'Not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         wa._field_versions['webhooks|_version'] = str(uuid.uuid4())
         wa._audit('webhook_deleted', detail={
             'id': wh_id, 'name': (deleted or {}).get('name', ''),
@@ -161,7 +161,7 @@ def register(app, wa):
         from lib.core.notify.webhook import notify as webhook_notify
         stored = store.get(wh_id)
         if stored is None:
-            return jsonify({'error': 'Not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         ok, msg = webhook_notify._dispatch(
             stored,

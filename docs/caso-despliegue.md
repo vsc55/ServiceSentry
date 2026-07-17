@@ -4,7 +4,7 @@ Este documento cubre todas las formas soportadas de desplegar ServiceSentry en p
 
 | Método | Indicado para |
 | ------ | ------------- |
-| [Docker](docker.md) | Cualquier servidor — instalación más sencilla, entorno aislado |
+| [Docker](caso-docker.md) | Cualquier servidor — instalación más sencilla, entorno aislado |
 | [install.sh](#instalación-automática-installsh) | Instalación automática rápida en Debian / Ubuntu / Gentoo |
 | [systemd](#systemd-debian-ubuntu-rhel-arch) | Instalación manual en distribuciones con systemd |
 | [OpenRC](#openrc-gentoo-alpine) | Instalación manual en distribuciones con OpenRC |
@@ -18,14 +18,14 @@ Este documento cubre todas las formas soportadas de desplegar ServiceSentry en p
 - Token de bot de Telegram y chat ID si se quieren notificaciones de alertas
 - **RAM del receptor syslog**: si activas el servidor syslog y esperas muchas conexiones
   TCP/TLS **persistentes**, dimensiona la memoria — es *thread-per-connection*, ≈47 KB por
-  conexión viva (~46 MB por cada 1000). Detalle y recomendaciones en [docs/docker.md](docker.md)
+  conexión viva (~46 MB por cada 1000). Detalle y recomendaciones en [docs/caso-docker.md](caso-docker.md)
   → *Dimensionado del receptor syslog*.
 
 ---
 
 ## Docker
 
-Consulta [docs/docker.md](docker.md) para la referencia completa de Docker: variables de entorno, volúmenes y configuración de proxy inverso.
+Consulta [docs/caso-docker.md](caso-docker.md) para la referencia completa de Docker: variables de entorno, volúmenes y configuración de proxy inverso.
 
 ```bash
 # Monolítica (un contenedor), microservicios (web + worker + syslog, 2 BD)
@@ -73,7 +73,7 @@ arranca por primera vez, se crean automáticamente con valores predeterminados:
 > directorio var (`/var/lib/ServiSesentry/` en Linux). El esquema se crea y
 > reconcilia automáticamente. Opcionalmente puede usarse PostgreSQL o MySQL
 > configurando la sección `database` de `config.json` (ver
-> [configuration.md](configuration.md)).
+> [ref-configuracion.md](ref-configuracion.md)).
 
 Tras el primer arranque puedes abrir el panel web para configurar las alertas de
 Telegram, añadir objetivos de monitorización y cambiar la contraseña de administrador.
@@ -242,7 +242,7 @@ SS_WEB_PORT="9090"
 > Estas variables `SS_*` las lee el CLI de forma nativa como valor por defecto de
 > los argumentos equivalentes (`--web-host`, `--web-port`, etc.), así que exportarlas
 > en el entorno funciona igual que pasarlas como flags. Lista completa en
-> [configuration.md](configuration.md#variables-de-entorno).
+> [ref-configuracion.md](ref-configuracion.md#variables-de-entorno).
 
 Reinicia el servicio tras editar:
 
@@ -352,7 +352,7 @@ configuración avanzada.
 
 > **Atajo:** el compose `docker/docker-compose.microservices-traefik.yml` ya trae
 > un Traefik integrado con TLS Let's Encrypt automático; solo necesitas definir
-> `SS_DOMAIN` y `SS_ACME_EMAIL`. Ver [docker.md → Traefik](docker.md#traefik). Lo
+> `SS_DOMAIN` y `SS_ACME_EMAIL`. Ver [caso-docker.md → Traefik](caso-docker.md#traefik). Lo
 > de abajo es para integrar con un Traefik **ya existente**.
 
 Traefik añade automáticamente `X-Forwarded-Proto: https` cuando la petición

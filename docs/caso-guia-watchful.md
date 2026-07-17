@@ -79,8 +79,10 @@ class Watchful(ModuleBase):
     # La UI web lo usa para generar formularios y aplicar valores por defecto automáticamente.
     ITEM_SCHEMA = _SCHEMA
 
-    # Atajo para acceder rápidamente a los valores por defecto
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()}
+    # Atajo para acceder rápidamente a los valores por defecto.
+    # Usa el helper de ModuleBase: salta las meta-claves __*__ y admite
+    # los formatos rich ({default: …}) y simple ({campo: valor}).
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
 
     # Constantes del módulo (opcional)
     _MI_VALOR_DEFAULT = 42
@@ -225,7 +227,7 @@ Python inline. El archivo tiene una clave de primer nivel por **colección**:
                 "url":       "/api/v1/modules/watchfuls/mi_modulo/test_connection",
                 "extra":     {},
                 "icon":      "bi-plug",
-                "variant":   "outline-info",
+                "variant":   "info",
                 "full_width": true,
                 "result":    "toast"
             }
@@ -261,22 +263,25 @@ class Watchful(ModuleBase):
                  if not k.startswith('__')}
 ```
 
-### Claves de meta-colección (`__*__`)
+### Campos y meta-claves más comunes
 
-Estas claves controlan el comportamiento de la UI y no corresponden a campos de datos:
+Cada campo es un objeto con, como mínimo, `type` y `default`. Las propiedades más habituales:
 
-| Clave | Descripción |
-|-------|-------------|
-| `__field_order__` | Lista de claves que fija el orden de renderizado en el formulario. Si se omite, se usan los campos en orden de declaración. |
-| `__group_when__` | Dict `{nombre_grupo: show_when}`. Controla cuándo el **encabezado** de un grupo es visible, independientemente de los campos que contiene. Si un grupo no aparece aquí, su encabezado siempre se muestra. |
-| `__actions__` | Lista de botones de acción que aparecen al pie del formulario (o dentro de un grupo, ver `group` abajo). |
-| `__test__` | URL a la que se envía el formulario al pulsar el botón de test rápido del encabezado de colección. |
-| `__discovery__` | **Nombre de la acción** de descubrimiento (p. ej. `"discover"`, no una URL); debe estar en `WATCHFUL_ACTIONS`. La UI construye la URL `/api/v1/modules/watchfuls/<modulo>/<accion>` con el `api_ver` del `__module__`. Activa el botón de descubrimiento en el encabezado de la colección. Por defecto GET; `"__discovery_method__": "POST"` hace POST con la config como body. |
-| `__discovery_field__` | Nombre del campo al que se añade un botón de búsqueda inline (input-group). Al pulsarlo abre el modal de descubrimiento en modo selección de campo: los ítems ya añadidos aparecen desactivados y seleccionar uno escribe su valor en el campo. Requiere `__discovery__`. |
-| `__key_mirrors_field__` | Nombre de un campo. Cuando está definido, la clave del ítem se renombra automáticamente para coincidir con el valor de ese campo cada vez que se selecciona un valor desde el modal de descubrimiento. El botón de renombrar se oculta para los ítems de esta colección. |
+| Propiedad | Descripción |
+|-----------|-------------|
+| `type` | `"bool"`, `"int"`, `"float"`, `"str"` o `"list"` (**obligatorio**) |
+| `default` | Valor por defecto cuando el campo falta en la config (**obligatorio**) |
+| `min` / `max` | Rango permitido para campos numéricos |
+| `sensitive` | `true` → campo de contraseña (oculto en la UI); con nombre reservado, cifrado en reposo |
+| `options` | Lista de valores permitidos para `str` → desplegable |
+| `show_when` | `{campo: [valores]}` — visibilidad condicional según otro campo |
 
-> **Referencia completa en [schema.md](schema.md).** Esta guía cubre lo esencial.
-> Para funciones avanzadas consulta schema.md: **sub-colecciones** (`type:
+Además, las claves `__*__` de una colección (p. ej. `__field_order__`, `__group_when__`,
+`__actions__`, `__discovery__`, `__discovery_field__`, `__key_mirrors_field__`) controlan el
+comportamiento de la UI y **no** son campos de datos.
+
+> **Referencia completa en [ref-schema-json.md](ref-schema-json.md).** Esta guía cubre lo esencial.
+> Para funciones avanzadas consulta ref-schema-json.md: **sub-colecciones** (`type:
 > "sub_collection"`), **placeholders** (`placeholder`/`placeholder_module`/
 > `placeholder_map`/`zero_as_blank`), **descubrimiento enriquecido**
 > (`__discovery_method__`, `__discovery_subtitle__`, `__discovery_type_field__`,
@@ -285,21 +290,6 @@ Estas claves controlan el comportamiento de la UI y no corresponden a campos de 
 > opciones (`options_int`, `options_deps`), campos (`hidden`, `readonly`,
 > `numericString`, `multi`, `nullable`, `inherit_blank`), historial (`__history__`)
 > y **gating por dependencias** (`MISSING_DEPS`/`PARTIAL_DEPS` en la clase).
-
-### Propiedades de campo
-
-| Propiedad             | Tipo   | Obligatorio | Descripción |
-|-----------------------|--------|-------------|-------------|
-| `type`                | str    | Sí | `"bool"`, `"int"`, `"float"`, `"str"`, `"list"` |
-| `default`             | any    | Sí | Valor por defecto cuando el campo falta en la configuración del módulo |
-| `min`                 | number | No | Valor mínimo (`int` / `float`) |
-| `max`                 | number | No | Valor máximo (`int` / `float`) |
-| `sensitive`           | bool   | No | Si `true`, se renderiza como campo de contraseña (oculto) en la UI |
-| `options`             | list   | No | Lista de valores permitidos para campos `str` → desplegable en la UI |
-| `group`               | str    | No | Nombre del grupo visual al que pertenece el campo. Los campos del mismo grupo se agrupan bajo un encabezado |
-| `show_when`           | dict   | No | Condición `{campo: [valores]}` que controla si el campo es visible en la UI. Ejemplo: `{"mode": ["ssh"]}` |
-| `input_action`        | dict   | No | Define un botón de icono acoplado al input (ver más abajo) |
-| `supported_platforms` | list   | No | Lista de plataformas en las que el campo está disponible (`"linux"`, `"win32"`, `"darwin"`). En plataformas no incluidas el campo se renderiza como un badge "No compatible" desactivado en lugar de un control interactivo. Ejemplo: `["linux"]` |
 
 ### Acciones de formulario (`__actions__`)
 
@@ -311,11 +301,11 @@ Cada acción en `__actions__` genera un botón en el formulario del ítem:
 | `url`          | str    | Endpoint al que se hace POST con el contenido actual del ítem |
 | `extra`        | dict   | Campos extra añadidos al payload (p. ej. `{"_test_mode": "ssh"}`) |
 | `icon`         | str    | Clase Bootstrap Icons (p. ej. `"bi-plug"`) |
-| `variant`      | str    | Variante Bootstrap del botón (p. ej. `"outline-info"`, `"outline-secondary"`) |
+| `variant`      | str    | Variante Bootstrap **sólida** del botón (p. ej. `"info"`, `"secondary"`, `"warning"`) |
 | `full_width`   | bool   | Si `true`, el botón ocupa el 100 % del ancho disponible |
 | `show_when`    | dict   | Igual que en campos: oculta el botón según el valor de otro campo |
 | `group`        | str    | Si se especifica, el botón se inyecta dentro del bloque visual del grupo indicado (debajo del último campo de ese grupo) en lugar de al pie del formulario |
-| `result`       | str    | Cómo mostrar la respuesta: `"toast"` (notificación emergente) o `"field_picker"` (modal de selección) |
+| `result`       | str    | Cómo mostrar la respuesta: `"toast"` (notificación emergente, por defecto/fallback), `"list"` (badges), `"field_picker"` (modal de selección), `"modal"` (modal genérico) o `"fields"` (rellena varios campos) |
 | `result_field` | str    | Solo para `result: "field_picker"`: nombre del campo del ítem que se rellenará con el valor elegido |
 
 ### Acción inline en campo (`input_action`)
@@ -532,23 +522,24 @@ def discover(cls, config=None) -> list[dict]:
 Cada ítem usa **`name`** (identificador que se guarda como clave/valor del ítem) y
 **`display_name`** (texto visible). `status` (bool) es opcional. Campos extra
 (`type`, categoría…) los consumen las meta-claves `__discovery_*__` para enriquecer
-el modal (badges de tipo/categoría, subtítulos) — ver [schema.md](schema.md).
+el modal (badges de tipo/categoría, subtítulos) — ver [ref-schema-json.md](ref-schema-json.md).
 
 ---
 
 ## 4c. Tablas propias en la base de datos general
 
 Un módulo puede declarar tablas propias (cachés, índices derivados, estado) en
-la **base de datos general** de la aplicación (SQLite por defecto; MySQL/PG vía
-la sección `database` de `config.json`) en lugar de inventar su propio
-almacenamiento. El gestor de BD (`lib.db.module_tables`) las crea/migra en el
-arranque mediante el mismo motor declarativo (`reconcile_table` + `TableSpec`)
-que las tablas core.
+la **base de datos general** de la aplicación en lugar de inventar su propio
+almacenamiento; el gestor de BD las crea/migra en el arranque con el mismo motor
+declarativo que las tablas core.
 
-**1. Declarar las tablas** con una función a nivel de módulo `discover_db_tables()`
-(espejo de `discover_schemas`). Construye cada `TableSpec` con `module_table(...)`,
-que las nombra como `mod_<modulo>_<nombre>` (anti-colisión con tablas core y
-entre módulos):
+> El mecanismo completo (namespacing `mod_<modulo>_<nombre>`, reconciliación,
+> arranque de web y monitor) está en
+> [explica-descubrimiento.md](explica-descubrimiento.md). Aquí basta con lo que
+> escribe el autor del módulo.
+
+**1. Declarar las tablas** con una función a nivel de módulo `discover_db_tables()`,
+que construye cada `TableSpec` con `module_table(...)`:
 
 ```python
 # watchfuls/mi_modulo/__init__.py
@@ -561,10 +552,6 @@ def discover_db_tables():
         Column('valor', 'TEXT'),
     ), indexes=(Index('por_clave', ('clave',)),))]
 ```
-
-El gestor valida que cada `TableSpec` esté namespaced para el módulo (si no, la
-omite con un warning) y reconcilia las válidas en el arranque de **web** y de
-**monitor**. Un fallo en una tabla se registra y nunca aborta el arranque.
 
 **2. Usar el conector en runtime** — hay dos contextos:
 
@@ -637,15 +624,10 @@ def check(self):
 Para módulos que leen campo-a-campo (`get_conf_in_list`), cachea el ítem resuelto
 por cycle y lee de él (patrón `_resolved_item` en `datastore`/`web`).
 
-**Qué cubre el host y qué el check.** El host posee *cómo conectar* (dirección +
-credenciales); el ítem conserva *qué comprobar* (SNMP→OIDs, web→`path`/método,
-ping→intentos). Cuando un check se vincula a un host, la UI **oculta** los campos
-de conexión (los de `__host_profile__`) porque vienen del host.
-
-**Almacenamiento.** Los hosts viven en la BD general (`HostsStore`, tabla
-`hosts`); los secretos de los perfiles se cifran con `secret_manager` igual que
-en la configuración del módulo. El monitor expone el registro como `self._monitor._hosts_store`
-y `resolve_host` lo usa de forma transparente.
+> **Qué cubre el host, dónde se almacena y cómo se cifra** (el host posee *cómo
+> conectar*, el ítem *qué comprobar*; la UI oculta los campos de conexión al
+> vincular; los hosts viven en `HostsStore` con los secretos cifrados) está en
+> [explica-hosts.md](explica-hosts.md).
 
 **Cuándo NO declararlo.** Si el "target" del módulo no es un servidor con
 conexión/credenciales sino un sujeto de la comprobación (p. ej. **dns**, cuyo
@@ -784,7 +766,7 @@ Pasa **`item`** con el nombre amigable del host/servicio para rellenar la column
 digest (equivale a `name=` en `dict_return.set`); sin él, la fila sale sin nombre. El mensaje
 se envía en **texto plano** (el Markdown se elimina al agrupar por ciclo). El mapeo
 `(status, severity) → kind` lo hace `Monitor._alert_kind`; ver
-[notifications.md → Severidad warning](notifications.md#severidad-warning).
+[explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
 > Nota: los watchfuls host-céntricos que devuelven el resultado con `dict_return.set(...,
 > send_msg=True)` notifican por esa vía (estructurada) — ahí el nombre va en `name=` y la
@@ -798,11 +780,9 @@ inline (`'OK'` / `f'MiModulo: *{name}*'`) — que además incrustan `*` de Markd
 elimina — sino declarar el texto en el fichero de idioma del módulo y resolverlo con
 `self._msg('clave', arg1, arg2, …)`.
 
-`_msg` resuelve, en este orden: **override del admin** (`notif_text_overrides[lang]['mod:<módulo>:<clave>']`,
-editable en *Config → Notificaciones → Templates*) → sección **`messages`** del
-`lang/<lang>.json` del módulo (idioma de notificación → `en_EN` rellena huecos) → la propia
-clave. Los placeholders se rellenan **posicionalmente**: `{}` secuencial **e** indexado
-`{0}`/`{1}`… (un override del admin puede así **reordenar** los valores).
+`_msg` resuelve el texto (override del admin → sección `messages` del `lang/<lang>.json`
+→ la propia clave) y rellena los placeholders **posicionalmente** (`{}` secuencial e
+indexado `{0}`/`{1}`…).
 
 Declara los textos y sus **tags** en cada `lang/<lang>.json` del módulo:
 
@@ -817,9 +797,9 @@ Declara los textos y sus **tags** en cada `lang/<lang>.json` del módulo:
 }
 ```
 
-`messages_vars` mapea cada clave a la lista de nombres de sus placeholders; es el **hook de
-descubrimiento de tags** que el editor de textos usa para mostrar chips con nombre (debe
-tener tantos tags como `{}` haya, en **ambos** idiomas). Uso en el `check()`:
+`messages_vars` mapea cada clave a los nombres de sus placeholders (tantos tags como `{}`
+haya, en **ambos** idiomas). El esquema de tags, la capa de resolución y el editor de textos
+están en [ref-i18n.md](ref-i18n.md). Uso en el `check()`:
 
 ```python
 status = used < alert
@@ -831,7 +811,7 @@ if self.check_status(status, self.name_module, key):
 
 Los 19 módulos incluidos ya usan este mecanismo. Detalle completo (capa de resolución,
 catálogo, esquema de tags, editor) en
-[notifications.md → Sistema de textos de notificación](notifications.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags).
+[explica-notificaciones.md → Sistema de textos de notificación](explica-notificaciones.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags).
 
 ### Herramientas del sistema
 
@@ -880,12 +860,12 @@ Si tu módulo solo funciona en determinadas plataformas, declara esta variable d
 
 ```python
 class Watchful(ModuleBase):
-    SUPPORTED_PLATFORMS = ('linux', 'darwin')   # no disponible en Windows
+    SUPPORTED_PLATFORMS = ('linux',)   # solo Linux
 ```
 
 Cuando la plataforma actual no está en la lista, **la colección entera del módulo** se muestra en la UI con un badge "No compatible" en lugar de formularios interactivos. Los módulos `temperature` y `raid` (campo `local`) usan este mecanismo.
 
-Para restringir **solo un campo** (no el módulo entero), usa `supported_platforms` en `schema.json` — ver [`schema.md`](schema.md#supported_platforms).
+Para restringir **solo un campo** (no el módulo entero), usa `supported_platforms` en `schema.json` — ver [`ref-schema-json.md`](ref-schema-json.md#supported_platforms).
 
 ### Debug
 
@@ -1240,7 +1220,8 @@ Se definen en `info.json` en la raíz del package del módulo:
     "name": "mi_modulo",
     "version": "1.0.0",
     "description": "Descripción breve de lo que hace el módulo.",
-    "icon": "🔍"
+    "icon": "🔍",
+    "dependencies": []
 }
 ```
 
@@ -1264,7 +1245,7 @@ El sistema multilanguage es automático: `ModuleBase.discover_schemas()` fusiona
 estos archivos con `schema.json` e `info.json` al arrancar, y la UI los usa
 sin ninguna configuración adicional.
 
-> **Documentación completa del sistema i18n** → [i18n.md](i18n.md)
+> **Documentación completa del sistema i18n** → [explica-i18n.md](explica-i18n.md)
 > (arquitectura de dos niveles, pipeline de `discover_schemas`, resolución de
 > etiquetas en el navegador, constantes JS, cómo añadir un idioma nuevo)
 
@@ -1413,7 +1394,7 @@ _SCHEMA = json.load(
 class Watchful(ModuleBase):
 
     ITEM_SCHEMA = _SCHEMA
-    _DEFAULTS = {k: v['default'] for k, v in _SCHEMA['list'].items()}
+    _DEFAULTS = ModuleBase._schema_defaults(_SCHEMA['list'])
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
@@ -1553,7 +1534,7 @@ class Watchful(ModuleBase):
 - [ ] Crear `__init__.py` con una clase `Watchful(ModuleBase)`
 - [ ] Crear `watchful.py` con `from . import Watchful`
 - [ ] Crear `schema.json` con las definiciones de campos `__module__` y `list`
-- [ ] Crear `info.json` con `name`, `description` e `icon`
+- [ ] Crear `info.json` con `name`, `version`, `description`, `icon` y `dependencies` (las cinco claves son obligatorias; `dependencies` puede ser `[]`)
 - [ ] Crear `lang/en_EN.json` con `pretty_name` y `labels`
 - [ ] Crear `lang/es_ES.json` con `pretty_name` y `labels` traducidos
 - [ ] Cargar `_SCHEMA` desde `schema.json` y asignar `ITEM_SCHEMA = _SCHEMA`
@@ -1586,7 +1567,7 @@ class Watchful(ModuleBase):
 - [ ] Añadir `__discovery__` + `__discovery_field__` si se quiere botón de búsqueda inline en un campo `str`
 - [ ] Añadir `__key_mirrors_field__` si la clave del ítem debe sincronizarse con el campo descubierto
 - [ ] Añadir `supported_platforms` en campos que solo tienen sentido en determinadas plataformas
-- [ ] Declarar `SUPPORTED_PLATFORMS = ('linux', 'darwin')` en la clase si el módulo entero no soporta todas las plataformas
+- [ ] Declarar `SUPPORTED_PLATFORMS = ('linux',)` en la clase si el módulo entero no soporta todas las plataformas
 - [ ] Declarar `WATCHFUL_ACTIONS: frozenset[str]` con los classmethods que se expondrán como endpoints web
 - [ ] Implementar los classmethods listados en `WATCHFUL_ACTIONS` como `@classmethod` con firma `(cls, config: dict)` para POST o `(cls)` para GET
 - [ ] Añadir `rename_item_prompt` en los archivos de idioma para personalizar el texto del modal de renombrar

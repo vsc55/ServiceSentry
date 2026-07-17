@@ -37,7 +37,11 @@ class _FakeWA:
         pass
 
     def store(self, key, factory):
-        return _FakeStore({'webhook': self.webhooks, 'msteams': self.channels}.get(key, []))
+        # webhook/msteams use the built-in fake store; everything else (e.g. the email
+        # recipient resolver) is built from the factory like the real router does.
+        if key in ('webhook', 'msteams'):
+            return _FakeStore({'webhook': self.webhooks, 'msteams': self.channels}[key])
+        return factory(type('_Ctx', (), {'db': None})())
 
     def _config_section(self, name):
         return self._cfg.get(name, {})
@@ -64,7 +68,7 @@ def sent(monkeypatch):
     monkeypatch.setattr('lib.providers.telegram.send_telegram',
                         lambda token, chat, text, **k: (rec['tg'].append(text), (True, 200, 'ok'))[1])
     monkeypatch.setattr('lib.core.notify.email.notify._dispatch',
-                        lambda cfg, *, subject, body_html, recipients: (
+                        lambda cfg, *, subject, body_html, recipients, lang='': (
                             rec['email'].append((subject, body_html)), (True, 'sent'))[1])
     monkeypatch.setattr('lib.core.notify.webhook.notify.send_all',
                         lambda wa, **kw: (rec['webhook'].append(kw), (True, 'ok'))[1])

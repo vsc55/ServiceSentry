@@ -3,8 +3,8 @@
 """Notification titles are localised to the *system* notification language.
 
 A notification has no user context but a system one — the global ``notifications|lang``
-(falling back to the legacy ``email|lang``, then the panel language). The Telegram
-single-event title is translated with that language, not English-only.
+(falling back to the panel language). The Telegram single-event title is translated with
+that language, not English-only.
 """
 
 from lib.core.notify.formatting import event_title, notify_lang
@@ -30,13 +30,9 @@ class TestEventTitle:
 
 class TestNotifyLang:
 
-    def test_precedence_notifications_over_email_over_panel(self):
+    def test_precedence_notifications_over_panel(self):
         assert notify_lang({'notifications': {'lang': 'es_ES'},
-                            'email': {'lang': 'en_EN'},
                             'web_admin': {'lang': 'en_EN'}}) == 'es_ES'
-
-    def test_falls_back_to_legacy_email_lang(self):
-        assert notify_lang({'email': {'lang': 'en_EN'}}) == 'en_EN'
 
     def test_falls_back_to_panel_language(self):
         assert notify_lang({'web_admin': {'lang': 'es_ES'}}) == 'es_ES'

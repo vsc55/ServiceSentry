@@ -3,9 +3,9 @@
 """OIDC SSO routes: /auth/oidc/login, /auth/oidc/callback.
 
 The interactive callback validates the token and then hands off to the web
-session layer (``web_admin.routes.auth._establish_session``) — the one place a
-provider legitimately reaches back into web_admin (a web callback establishes a
-web session).
+session layer (``wa._establish_session`` / ``wa._landing_url`` on the WebAdmin) —
+the one place a provider legitimately reaches back into web_admin (a web callback
+establishes a web session).
 
 Routes registered by this file:
 
@@ -26,7 +26,6 @@ def register(app, wa):
     wa._register_csrf_exempt('/auth/oidc/callback')
 
     from flask import flash, redirect, request, url_for
-    from lib.web_admin.routes.auth import _establish_session, _landing_url
 
     @app.route('/auth/oidc/login')
     def oidc_login():
@@ -80,11 +79,11 @@ def register(app, wa):
                       detail={'reason': 'account_disabled'})
             return redirect(url_for('login'))
 
-        _establish_session(wa, username, user)
+        wa._establish_session(username, user)
         role_uid = user.get('role', '')
         assigned_role = wa._uid_to_role_name(role_uid) if wa._is_uid(role_uid) else role_uid
         wa._audit('login_ok', username, request.remote_addr,
                   detail={'auth_source': 'oidc',
                           'groups_received': received_groups,
                           'role_assigned': assigned_role})
-        return redirect(_landing_url(wa, user))
+        return redirect(wa._landing_url(user))

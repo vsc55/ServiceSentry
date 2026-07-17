@@ -281,6 +281,11 @@ createListTable({
         const _uid = item.uid || key;
         const canEdit = _clCan(_uid, 'edit');
         const canDelete = _clCan(_uid, 'delete');
+        // Run this cluster check once and show the per-member breakdown (mirrors
+        // the Servers list "test" button). Gated on edit (the test endpoint is).
+        const _testBtn = canEdit ? `
+            <button class="btn btn-sm btn-info py-0 px-1 me-1" title="${escAttr(t('host_test'))}"
+                onclick="_clTestRow('${esc(mod)}','${esc(coll)}',${jsStr(key)})"><i class="bi bi-play-circle"></i></button>` : '';
         const _openBtn = `
             <button class="btn btn-sm ${canEdit ? 'btn-primary' : 'btn-secondary'} py-0 px-1 me-1"
                 title="${escAttr(canEdit ? t('edit') : (t('cl_view') || t('host_view')))}"
@@ -288,7 +293,7 @@ createListTable({
         const _delBtn = canDelete ? `
             <button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
                 onclick="removeItem('modules','${esc(mod)}|${esc(coll)}',${jsStr(key)})"><i class="bi bi-trash3"></i></button>` : '';
-        return _openBtn + _delBtn;
+        return _testBtn + _openBtn + _delBtn;
     },
     refreshButton: () => `<button class="btn btn-sm btn-secondary ms-1" onclick="renderClusters()" title="${escAttr(t('refresh_tt'))}">
                 <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>`,
@@ -323,6 +328,23 @@ createListTable({
         saveOrder: '_clSaveColOrder', initFeatures: '_initClTableFeatures',
     },
 });
+
+// Run a single cluster (multi-bind) check once and show its per-member results
+// in the shared test-results modal — the cluster counterpart of the Servers
+// list's testHostRow(). The check resolves its member hosts from host_uids, so
+// no host_uid is needed (no_ssh: the SSH connection check is host-scoped, N/A).
+async function _clTestRow(mod, coll, key) {
+    const item = ((modulesData[mod] || {})[coll] || {})[key];
+    if (!item) return;
+    const label = item.label || key;
+    _openHostTestModal(`${_modPrettyName(mod)} — ${label}`);
+    const res = await apiPost('/api/v1/hosts/test', {
+        no_ssh: true,
+        checks: [{ module: mod, collection: coll, key,
+                   fields: { ...item }, cred_uid: item.cred_uid || '' }],
+    });
+    _renderHostTestResults(res && res.data);
+}
 
 // Quick enable/disable from the table (no full re-render — just dim the row).
 function _clToggle(mod, coll, key, on, el) {

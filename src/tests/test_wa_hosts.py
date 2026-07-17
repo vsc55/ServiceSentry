@@ -414,7 +414,10 @@ class TestApiMigrate:
         # Items are now keyed by their uid, so look them up by value.
         r1 = next(iter(newmods['snmp']['servers'].values()))
         assert r1.get('host_uid') and 'host' not in r1
-        assert r1['community'] == 'public'         # per-check setting preserved
+        # community is a secret (secret: true) → masked in the API response, so verify
+        # it survived the migration by reading the DECRYPTED stored config instead.
+        r1_stored = next(iter(admin._load_modules()['snmp']['servers'].values()))
+        assert r1_stored['community'] == 'public'  # per-check setting preserved
         p1 = next(iter(newmods['ping']['list'].values()))
         assert p1.get('host_uid') == r1['host_uid'] and 'host' not in p1
 

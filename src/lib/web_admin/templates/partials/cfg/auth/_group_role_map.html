@@ -132,9 +132,16 @@ function _renderGroupRoleMap(sec, rawValue) {
 }
 
 function _grmRoleOpts(sel) {
-    const allRoles = ['admin', 'editor', 'viewer',
-        ...Object.keys(rolesData).filter(r => !['admin','editor','viewer','none'].includes(r)),
-        'none'];
+    // The stored value is what the SSO resolver's _role_name_to_uid() expects: a built-in
+    // internal key ('admin'/'editor'/'viewer'/'none') or a custom role's DISPLAY NAME.
+    // rolesData is keyed by UID, so custom options must use rd.name — never the UID key
+    // (which wouldn't resolve, would show the raw UID as label, and would never pre-select).
+    const customs = Object.values(rolesData)
+        .filter(rd => !rd.builtin)
+        .map(rd => rd.name)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+    const allRoles = ['admin', 'editor', 'viewer', ...customs, 'none'];
     return allRoles.map(r => {
         const lbl = (I18N.role_labels && I18N.role_labels[r]) || r;
         return `<option value="${escAttr(r)}"${sel === r ? ' selected' : ''}>${esc(lbl)}</option>`;

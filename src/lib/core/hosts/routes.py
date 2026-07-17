@@ -269,7 +269,7 @@ def register(app, wa):
             return jsonify({'error': wa._t('access_denied')}), 403
         if not ssh_client.HAS_PARAMIKO:
             return jsonify({'ok': False,
-                            'message': 'paramiko is not installed (pip install paramiko)'})
+                            'message': wa._t('paramiko_missing')})
         data, err = wa._require_json()
         if err:
             return err
@@ -324,12 +324,23 @@ def register(app, wa):
         """Run each grouped check once on the host; return a flat result list."""
         store = host_probe.ProbeHostsStore(record, _store())
         db = getattr(wa, '_db_connector', None)
+        # Global config → the probe resolves check messages in the configured
+        # notification language (with admin text overrides) instead of raw i18n keys.
+        notify_cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        # Saved module-level settings (e.g. ssl_cert warning_days, timeout) so the
+        # module's get_conf() resolves them in the probe — an item that inherits a
+        # module-level value (blank/0) would otherwise fall back to the hardcoded
+        # default instead of the configured value.
+        saved_mods = wa._load_modules() or {}
         out = []
         for (bare, coll), items in grouped.items():
-            cfg = {f'watchfuls.{bare}': {coll: items}}
+            _mod_scalars = {k: v for k, v in (saved_mods.get(bare) or {}).items()
+                            if not k.startswith('__') and not isinstance(v, dict)}
+            cfg = {f'watchfuls.{bare}': {**_mod_scalars, coll: items}}
             try:
                 results = host_probe.run_module_check(
-                    bare, cfg, hosts_store=store, db=db, modules_dir=wa._modules_dir)
+                    bare, cfg, hosts_store=store, db=db, modules_dir=wa._modules_dir,
+                    notify_cfg=notify_cfg)
             except Exception as exc:  # pylint: disable=broad-except
                 out.append({'module': bare, 'key': '', 'name': '', 'ok': False,
                             'message': str(exc)})
@@ -343,7 +354,7 @@ def register(app, wa):
     def _ssh_test(record):
         ssh = (record.get('profiles') or {}).get('ssh') or {}
         if not ssh_client.HAS_PARAMIKO:
-            return {'ok': False, 'message': 'paramiko is not installed'}
+            return {'ok': False, 'message': wa._t('paramiko_missing')}
         ok, msg, _os = ssh_client.test_connection(
             address=record.get('address', ''), port=ssh.get('ssh_port') or 22,
             user=ssh.get('ssh_user', ''), password=ssh.get('ssh_password', ''),
@@ -362,7 +373,7 @@ def register(app, wa):
             return err
         module = _bare(str(body.get('module') or ''))
         if not _MOD_RE.match(module):
-            return jsonify({'ok': False, 'message': 'invalid module'}), 400
+            return jsonify({'ok': False, 'message': wa._t('invalid_module_name')}), 400
         coll = str(body.get('collection') or 'list')
         key = str(body.get('key') or 'check')
         record = _probe_host_record(wa, body)

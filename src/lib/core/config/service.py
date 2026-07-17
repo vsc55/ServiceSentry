@@ -322,6 +322,15 @@ def build_config_schema() -> dict:
     # Web panel bind address: a single IPv4/IPv6 the HTTP server listens on (0.0.0.0 = all
     # IPv4); validated as an IP, no CIDR.
     schema['web_admin|host'] = {**cfg_meta('web_admin|host'), 'ipkind': 'ip'}
+    # Recipient lists render as removable chips (type an address, Enter adds it; paste a
+    # comma list to add several) with a typeahead (`suggest: 'recipients'`) over panel
+    # users' emails and groups. A group is stored as the token `group:<uid>` and expanded
+    # to its members' emails on send (RecipientResolver). Stored as a comma-joined string —
+    # the channels split it on comma/semicolon (email _parse_recipients, msteams).
+    schema['email|recipients'] = {
+        **cfg_meta('email|recipients'), 'multi': True, 'suggest': 'recipients'}
+    schema['msteams|recipients'] = {
+        **cfg_meta('msteams|recipients'), 'multi': True, 'suggest': 'recipients'}
     schema['telegram|chat_id'] = {'numericString': True}
     schema['web_admin|role_modal_scrollable'] = {'type': 'bool', 'default': True}
     # SAML2 certificate / private-key fields render as multiline textareas so a PEM block

@@ -15,6 +15,7 @@ from __future__ import annotations
 import html
 
 from lib.core.notify.formatting import event_icon, event_title
+from lib.i18n import translate
 from lib.providers.telegram import send_telegram
 
 
@@ -49,7 +50,7 @@ def _dispatch(cfg: dict, *, kind: str = '', module: str = '', item: str = '',
     token = str(cfg.get('token') or '').strip()
     chat_id = str(cfg.get('chat_id') or '').strip()
     if not token or not chat_id:
-        return False, 'Telegram not configured (token/chat_id missing)'
+        return False, translate(lang, 'telegram_not_configured')
     # HTML parse mode — every dynamic field is escaped in _format, so arbitrary
     # message content renders safely (and *_/underscores no longer break parsing).
     try:

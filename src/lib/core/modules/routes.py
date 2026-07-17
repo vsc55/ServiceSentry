@@ -202,9 +202,9 @@ def register(app, wa):
         Read-only actions need only ``modules_view`` (the decorator); state-changing ones need
         per-module edit.  The Flask-free config resolution lives in modules.service."""
         if not re.match(r'^[a-z][a-z0-9_]*$', module_name):
-            return jsonify({'error': 'Invalid module name'}), 400
+            return jsonify({'error': wa._t('invalid_module_name')}), 400
         if not re.match(r'^[a-z][a-z0-9_]*$', action):
-            return jsonify({'error': 'Invalid action name'}), 400
+            return jsonify({'error': wa._t('invalid_action_name')}), 400
 
         if not wa._modules_dir:
             return jsonify({'error': wa._t('checks_no_modules_dir')}), 404
@@ -216,18 +216,18 @@ def register(app, wa):
         try:
             mod = importlib.import_module(f'watchfuls.{module_name}')
         except ImportError:
-            return jsonify({'error': 'Module not found'}), 404
+            return jsonify({'error': wa._t('module_not_found')}), 404
 
         cls = getattr(mod, 'Watchful', None)
         if cls is None:
-            return jsonify({'error': 'Module not found'}), 404
+            return jsonify({'error': wa._t('module_not_found')}), 404
 
         if action not in cls.WATCHFUL_ACTIONS:
-            return jsonify({'error': 'Action not supported'}), 404
+            return jsonify({'error': wa._t('action_not_supported')}), 404
 
         method = getattr(cls, action, None)
         if method is None:
-            return jsonify({'error': 'Action not found'}), 404
+            return jsonify({'error': wa._t('action_not_found')}), 404
 
         # Access control: read-only actions need only modules_view (already enforced by the
         # decorator); any state-changing action (upload/delete MIB, import-from-URL, compile,

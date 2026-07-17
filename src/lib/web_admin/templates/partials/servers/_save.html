@@ -566,7 +566,7 @@ async function openMigrateModal() {
     _migrateCandidates.forEach((c, i) => {
         // Default-check the real duplicates (the dedup wins).
         const chk = c.is_duplicate ? 'checked' : '';
-        const mem = c.members.map(m =>
+        const mem = (c.members || []).map(m =>
             `<span class="badge bg-light text-dark border me-1">${esc(m.module.split('.').pop())}/${esc(m.key)}</span>`).join('');
         const protos = (c.protocols || []).map(p =>
             `<span class="badge bg-info text-dark me-1">${esc(p)}</span>`).join('') || '<span class="text-muted">—</span>';
@@ -574,7 +574,7 @@ async function openMigrateModal() {
             <td><input type="checkbox" class="form-check-input" data-mig-idx="${i}" ${chk}></td>
             <td><input type="text" class="form-control form-control-sm" data-mig-name="${i}"
                        value="${escAttr(c.suggested_name || c.address)}"></td>
-            <td><code>${esc(c.address)}</code>${c.is_duplicate ? ` <span class="badge bg-warning text-dark">×${c.members.length}</span>` : ''}</td>
+            <td><code>${esc(c.address)}</code>${c.is_duplicate ? ` <span class="badge bg-warning text-dark">×${(c.members || []).length}</span>` : ''}</td>
             <td>${protos}</td>
             <td>${mem}</td>
         </tr>`;

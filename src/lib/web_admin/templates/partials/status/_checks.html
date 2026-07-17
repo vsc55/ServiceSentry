@@ -226,7 +226,10 @@ function _statusCheckLabel(mod, ck) {
 function _renderOneStatusCard(mod, checks) {
         const pname = modulePrettyName(mod, modulesData[mod] || {});
         const icon  = moduleIcon(mod, modulesData[mod] || {});
-        const rows  = Object.entries(checks);
+        // Only entries with a recorded status are checks; a bookkeeping-only entry
+        // (e.g. a bare item key holding just fail_count, when the real results live
+        // under sub-keys like <item>/site) must not show as a phantom row.
+        const rows  = Object.entries(checks).filter(([, v]) => v && typeof v === 'object' && 'status' in v);
         const _sev    = v => (v && typeof v === 'object' && v.severity) || '';
         const okCnt   = rows.filter(([, v]) => v?.status === true).length;
         const total   = rows.length;
@@ -350,11 +353,19 @@ function _renderOneStatusCard(mod, checks) {
                 }
             }
 
-            h += `<div class="d-flex align-items-center gap-2 px-3 py-2" style="border-top:1px solid var(--bs-border-color);font-size:.865rem">
-                ${rowIcon}
-                <span class="flex-grow-1 text-truncate" style="min-width:0" title="${escAttr(extra.name || _statusCheckLabel(mod, ck))}">${esc(extra.name || _statusCheckLabel(mod, ck))}</span>
+            // Reason line: the check's message, shown under the name for any non-OK
+            // result so the operator sees WHY it failed/warned (e.g. a Graph error or
+            // the threshold breached) without leaving the card.
+            const _rowName = extra.name || _statusCheckLabel(mod, ck);
+            const _rowMsg  = (!ok && info && typeof info === 'object' && info.message) ? String(info.message) : '';
+            h += `<div class="d-flex align-items-start gap-2 px-3 py-2" style="border-top:1px solid var(--bs-border-color);font-size:.865rem">
+                <span class="mt-1">${rowIcon}</span>
+                <div class="flex-grow-1" style="min-width:0">
+                    <div class="text-truncate" title="${escAttr(_rowName)}">${esc(_rowName)}</div>
+                    ${_rowMsg ? `<div class="text-muted mt-1" style="font-size:.76rem;word-break:break-word">${esc(_rowMsg)}</div>` : ''}
+                </div>
                 ${extraHtml}
-                <span class="rounded-pill px-2 py-0 fw-bold flex-shrink-0"
+                <span class="rounded-pill px-2 py-0 fw-bold flex-shrink-0 mt-1"
                       style="font-size:.68rem;background:${cbBg};color:${cbColor}">${cbTxt}</span>
             </div>`;
         }

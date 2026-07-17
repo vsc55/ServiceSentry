@@ -31,6 +31,11 @@ class _EmbeddedBase(_HeartbeatMixin):
     # ``None`` → not externally controllable (only when hosted here).
     _EXTERNAL_KNOB: tuple | None = None
 
+    # Whether an operator start/stop of this service emits the generic
+    # ``service_started`` / ``service_stopped`` notification.  Off for monitoring, which
+    # already emits its own ``scheduler_started`` / ``scheduler_stopped`` (no double-fire).
+    _LIFECYCLE_NOTIFY: bool = True
+
     def __init__(self, host):
         self._host = host
         self._CONFIG_FILE = host._CONFIG_FILE
@@ -74,7 +79,33 @@ class _EmbeddedBase(_HeartbeatMixin):
             poke(self._HB_KEY)
         self._audit_system('service_started' if action == 'start' else 'service_stopped',
                            {'service': self._HB_KEY, path: value})
+        # Notify from the operator's instance immediately (so a Services-tab toggle alerts
+        # now, not only when the remote worker later reconciles). Gated so monitoring, which
+        # emits its own scheduler_started/stopped, doesn't double-fire.
+        if self._LIFECYCLE_NOTIFY:
+            self._notify_service_control(action)
         return True, ''
+
+    # ── operator start/stop notification (opt-in matrix, default off) ─────────
+    def _notify_service_control(self, action: str) -> None:
+        """Dispatch a ``service_started`` / ``service_stopped`` notification synchronously
+        for an operator start/stop of this service.  The service key fills the message body.
+        Best-effort — a routing/send error never breaks the control action."""
+        try:
+            import time as _time  # noqa: PLC0415
+            from lib.core.notify.notification_dispatcher import dispatch  # noqa: PLC0415
+            from lib.core.notify.formatting import notify_lang, notify_text  # noqa: PLC0415
+            cfg = self._host._read_config_file(self._CONFIG_FILE) or {}
+            lang = notify_lang(cfg)
+            kind = 'service_started' if action == 'start' else 'service_stopped'
+            status_key = 'notif_status_started' if action == 'start' else 'notif_status_stopped'
+            label = self._HB_KEY or 'service'
+            dispatch(self._host, kind=kind, module='service', item=label,
+                     status=notify_text(cfg, lang, status_key),
+                     message=notify_text(cfg, lang, 'notif_msg_' + kind, label),
+                     timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'))
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     # ── config / debug / notification routing context ─────────────────────────
     def _read_config_file(self, filename=None):

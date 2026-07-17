@@ -168,7 +168,7 @@ def register(app, wa):
         bind_password = stored_cfg.get('bind_password') or ''
 
         if not dn:
-            return jsonify({'ok': False, 'message': 'dn required'}), 200
+            return jsonify({'ok': False, 'message': wa._t('ldap_dn_required')}), 200
         if not server:
             return jsonify({'ok': False, 'message': wa._t('ldap_test_missing')}), 200
 

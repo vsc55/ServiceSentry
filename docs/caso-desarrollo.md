@@ -20,7 +20,7 @@ cd ServiceSentry/src
 
 # Crear y activar entorno virtual
 python3 -m venv .venv
-source .venv/bin/activate          # Linux / macOS
+source .venv/bin/activate          # Linux
 .venv\Scripts\Activate.ps1         # Windows PowerShell
 
 # Instalar dependencias de producción
@@ -34,23 +34,14 @@ pip install -r requirements-dev.txt
 
 ## Ejecución de la Aplicación
 
+Ejemplos rápidos para desarrollo (el catálogo completo de flags, env `SS_*` y ejemplos está en
+[ref-configuracion.md](ref-configuracion.md#opciones-de-línea-de-comandos)):
+
 ```bash
 cd src
-
-# Una sola pasada de monitorización
-python3 main.py --monitor -t 0
-
-# Monitor continuo, comprobación cada 5 minutos
-python3 main.py --monitor -t 300
-
-# Panel web (modo por defecto si no se pasa ningún flag)
-python3 main.py --web
-
-# Salida detallada
-python3 main.py -v
-
-# Usar directorio de configuración personalizado
-python3 main.py -p /ruta/a/config/
+python3 main.py --web              # Panel web (modo por defecto)
+python3 main.py --monitor -t 0     # Una sola pasada de monitorización
+python3 main.py --monitor -t 300   # Monitor continuo, cada 5 minutos
 ```
 
 En modo desarrollo (cuando `src` está en la ruta), los archivos de configuración se leen desde `../data/` relativo a `src/`.
@@ -106,7 +97,7 @@ src/
 │   ├── #   ldap, oidc, saml2, history, hosts, webhook, notif_templates,
 │   ├── #   password_policy, errors, ui, telegram, watchfuls,
 │   ├── #   syslog, events, services
-│   └── # (ver docs/tests.md para el inventario completo por test)
+│   └── # (ver docs/ref-tests.md para el inventario completo por test)
 └── watchfuls/
     ├── ping/tests/test_ping.py
     ├── datastore/tests/test_datastore.py
@@ -180,7 +171,7 @@ Usa `pytest.exe` directamente en lugar de `-m pytest` para evitar problemas de a
 
 ## Convenciones del Proyecto
 
-Consulta [architecture.md](architecture.md#convenciones-de-código) para la lista completa. Resumen:
+Consulta [explica-arquitectura.md](explica-arquitectura.md#convenciones-de-código) para la lista completa. Resumen:
 
 - Prefijo `_` para métodos y atributos privados.
 - Type hints en todas las firmas.
@@ -193,7 +184,7 @@ Consulta [architecture.md](architecture.md#convenciones-de-código) para la list
 
 ## Añadir un Nuevo Módulo
 
-Consulta [watchful-guide.md](watchful-guide.md) para la guía completa paso a paso.
+Consulta [caso-guia-watchful.md](caso-guia-watchful.md) para la guía completa paso a paso.
 
 Resumen rápido:
 
@@ -217,10 +208,16 @@ Siempre necesarias, independientemente de qué módulos estén activos:
 | Paquete | Versión | Propósito |
 | ------- | ------- | --------- |
 | `Flask` | >=3.0 | Interfaz web de administración |
-| `werkzeug` | >=3.0 | Hashing de contraseñas, utilidades de request |
+| `werkzeug` | >=3.0 | Hashing de contraseñas (scrypt), utilidades de request, `DebuggedApplication` |
+| `jinja2` | >=3.0 | Plantillas (uso directo de `ChoiceLoader`/`FileSystemLoader` en `app.py`) |
 | `cryptography` | >=41.0 | Cifrado Fernet de valores sensibles en disco (`lib/security/secret_manager.py`) |
 | `requests` | >=2.28 | Llamadas HTTP a la API de Telegram (`lib/providers/telegram.py`) y a Microsoft Graph (`lib/providers/entraid/`) |
 | `psutil` | >=5.9 | Información del sistema: RAM, disco, temperatura, servicios Windows |
+
+> **Nota:** Microsoft 365 / Entra ID **no** usa `msal`; habla con Graph directamente vía
+> `requests` + `PyJWT`. Casi todas las dependencias no-core se importan de forma **lazy /
+> condicional** (drivers de BD, SSO, SNMP, DNS, ping), de modo que su ausencia solo desactiva
+> la funcionalidad correspondiente.
 
 ### Dependencias por módulo
 
@@ -229,7 +226,10 @@ Solo se necesitan si el módulo correspondiente está activo en su configuració
 | Paquete | Versión | Módulo | Propósito |
 | ------- | ------- | ------ | --------- |
 | `paramiko` | >=3.0 | `raid`, `datastore` (SSH) | Ejecución remota de comandos y túneles SSH |
-| `pythonping` | >=1.1.4 | `ping` | Ping ICMP multiplataforma sin root en Windows |
+| `pythonping` | >=1.1.4 | `ping` | Ping ICMP multiplataforma sin root en Windows (fallback a socket raw si falta) |
+| `dnspython` | >=2.3 | `dns` | Resolución DNS avanzada (fallback a A/AAAA vía socket de stdlib si falta) |
+| `pysnmp` | >=6.0 | `snmp` | Consultas SNMP v1/v2c/v3 |
+| `pysmi` | >=1.1 | `snmp` | Compilación de MIBs |
 | `PyMySQL` | >=1.0 | `datastore` | Conectividad MySQL / MariaDB |
 | `psycopg2-binary` | >=2.9 | `datastore` | Conectividad PostgreSQL |
 | `pymssql` | >=2.2 | `datastore` | Conectividad Microsoft SQL Server |
@@ -248,6 +248,7 @@ Solo se necesitan si activas la funcionalidad correspondiente:
 | `ldap3` | `config.json → ldap` | Autenticación LDAP / Active Directory |
 | `authlib` | `config.json → oidc` | SSO OIDC / OAuth2 (Entra ID, Google, Keycloak…) |
 | `python3-saml` | `config.json → saml2` | SSO SAML2 (ADFS, Okta…) **[alpha]** |
+| `PyJWT[crypto]` | Teams SSO / bot | Validación de tokens JWT de Teams SSO y del Bot Framework |
 | `psycopg2-binary` | `config.json → database` (driver `postgresql`) | Persistencia del core en PostgreSQL |
 | `PyMySQL` | `config.json → database` (driver `mysql`/`mariadb`) | Persistencia del core en MySQL/MariaDB |
 
@@ -255,7 +256,7 @@ Solo se necesitan si activas la funcionalidad correspondiente:
 > auditoría, historial) usa SQLite por defecto sin dependencias extra. Para
 > usar PostgreSQL o MySQL basta con instalar su driver (los mismos paquetes que
 > el módulo `datastore`) y configurar la sección `database`. Ver
-> [architecture.md](architecture.md) → *Capa de Persistencia y Esquema de BD*.
+> [explica-arquitectura.md](explica-arquitectura.md) → *Capa de Persistencia y Esquema de BD*.
 
 ```bash
 pip install -r requirements.txt

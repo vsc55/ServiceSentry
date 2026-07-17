@@ -35,8 +35,8 @@ salvo la remediación de servicios:
 > root, y se acota con una regla `sudoers` mínima. Si no usas remediación, la
 > cuenta puede ser 100 % de solo lectura y **sin sudo**.
 >
-> **macOS / BSD:** los comandos cambian (`top -l 2 -n 0`, `sysctl -n …`,
-> `vm_stat`, `swapinfo -k`…); añádelos a la allowlist si monitorizas esos SO.
+> **BSD:** los comandos cambian (`sysctl -n …`, `swapinfo -k`…); añádelos a la
+> allowlist si monitorizas esos SO.
 > **Windows:** los hosts Windows usan otros comandos (`wmic`, `tasklist`,
 > `sc query`, `Get-*`) y **no** los cubre este envoltorio POSIX (`ssentry-wrap`);
 > para hosts Windows por SSH adapta la allowlist a esos comandos o usa una cuenta
@@ -44,7 +44,7 @@ salvo la remediación de servicios:
 
 Todos los comandos son un **binario suelto** sin encadenamiento de shell. Los
 módulos que necesitan varias lecturas (cpu muestrea `/proc/stat` dos veces;
-ram_swap/temperature en macOS/FreeBSD) hacen cada lectura en una llamada
+ram_swap/temperature en FreeBSD) hacen cada lectura en una llamada
 separada y combinan/esperan en Python, no con `sleep`/`;`/`|` remotos. Eso
 permite una allowlist estricta de un comando por entrada.
 
@@ -161,7 +161,7 @@ host remoto:
   Python (antes: bucle `for … done`).
 - **cpu** muestrea `/proc/stat` (o `kern.cp_time` en FreeBSD) en **dos llamadas**
   con la espera del intervalo en Python (antes: `cat … | grep …; sleep N; …`).
-- **ram_swap** en macOS/FreeBSD ejecuta cada `sysctl`/`vm_stat`/`swapinfo` por
+- **ram_swap** en FreeBSD ejecuta cada `sysctl`/`swapinfo` por
   separado y une las salidas con un marcador en Python (antes: `…; echo SEP; …`).
 
 Cada módulo incluye un test `test_command(s)_are_allowlist_friendly` que fija

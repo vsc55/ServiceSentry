@@ -21,7 +21,7 @@ lib/web_admin/                # Solo lo genuinamente web; los dominios/servicios
 │   # servicio (lib/services/*/embedded.py), en self._embedded_services
 ├── routes/
 │   ├── __init__.py           # register_all(app, wa) — registra también los routes de core/servicios/providers
-│   ├── auth.py               # /login, /logout + _establish_session/_landing_url (login local)
+│   ├── auth.py               # /login, /logout (login local; llama a wa._establish_session, def. en mixins/auth.py)
 │   ├── status.py             # /status (página pública de estado)
 │   ├── pages.py              # vistas HTML: / (entry redirect), /admin, /overview
 │   ├── ui.py                 # /lang/<code>, /api/v1/me, /api/v1/health
@@ -84,7 +84,7 @@ flowchart TD
     end
 ```
 
-**Cuándo se descubre cada cosa** (self-describing → [discovery.md](discovery.md)):
+**Cuándo se descubre cada cosa** (self-describing → [explica-descubrimiento.md](explica-descubrimiento.md)):
 
 | Qué | Cuándo | Cómo |
 |---|---|---|
@@ -95,7 +95,7 @@ flowchart TD
 | **Config de módulos, widgets de Overview** | **perezoso** (bajo demanda) | al leer `/api/v1/modules` / `/api/v1/overview/widget/<id>` |
 
 > El **arranque de cada servicio** (heartbeat + `start_at_boot`, y el modo embebido vs
-> dedicado) se detalla en [services.md](services.md).
+> dedicado) se detalla en [explica-servicios.md](explica-servicios.md).
 
 
 ## Características
@@ -109,7 +109,7 @@ flowchart TD
 | **Receptor Syslog** | Servidor syslog integrado (RFC 3164/5424, UDP/TCP/TLS): pestaña Syslog con mensajes filtrables (severidad/host/app/búsqueda), allowlist de orígenes y **registro de descartes**; retención por antigüedad/filas; BD dedicada opcional; puede correr embebido o como contenedor aparte. Permisos `syslog_view`/`syslog_delete`. Ver §[Syslog](#syslog) |
 | **Gestor de eventos** | Reglas que observan eventos de auditoría o syslog y notifican por los canales configurados (Telegram/Email/webhooks concretos); cooldown global con herencia por regla; **log de notificaciones** enviadas. La evaluación está **desacoplada de la ingesta**: un *procesador de eventos* lee por cursor los mensajes/eventos ya guardados (cooldown persistido), embebido o como contenedor propio. Permisos `events_*`. Ver §[Eventos (reglas de notificación)](#eventos-reglas-de-notificación) |
 | **Servicios** | Pestaña Services: estado y **control (start/stop)** de los servicios de fondo (monitor embebido, receptor syslog, **procesador de eventos**, worker, base de datos). Permisos `services_view`/`services_control`. Ver §[Servicios](#servicios) |
-| **fail2ban interno** | Baneo de IP a nivel de servicio (web + syslog) por ofensas acumuladas (login fallido, CSRF, acceso no autorizado…), con duraciones escaladas, lista blanca gestionada, watchlist, historial y acción de bloqueo por servicio. Sección operativa propia (IPs baneadas / Lista blanca / Historial) + ajustes en Config → fail2ban. Persistido en BD (cross-proceso). Permisos `config_view`/`config_edit`. Ver §[fail2ban](#fail2ban-bans-de-ip) y [security.md](security.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio) |
+| **fail2ban interno** | Baneo de IP a nivel de servicio (web + syslog) por ofensas acumuladas (login fallido, CSRF, acceso no autorizado…), con duraciones escaladas, lista blanca gestionada, watchlist, historial y acción de bloqueo por servicio. Sección operativa propia (IPs baneadas / Lista blanca / Historial) + ajustes en Config → fail2ban. Persistido en BD (cross-proceso). Permisos `config_view`/`config_edit`. Ver §[fail2ban](#fail2ban-bans-de-ip) y [explica-seguridad.md](explica-seguridad.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | **Página propia** (`/overview`, separada del panel de administración) con tarjetas de resumen (Modules, Checks, Servers, **Services**, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events, **fail2ban**) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente, **IP baneadas**); cada widget enlaza (click-through) a su pestaña del panel; los widgets de tabla con filtro muestran un **indicador del filtro activo** en la cabecera — uno o varios badges (p.ej. Servers "Error + Mantenimiento" pinta ambos; Syslog pinta "≥ nivel"); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin. El widget **Services** cuenta los servicios embebidos activos vs parados |
 | **Pestaña de configuración** | Editar la configuración (Telegram, monitorización, idioma, …) directamente desde el navegador; paneles colapsables por sección |
@@ -117,7 +117,7 @@ flowchart TD
 | **Tablas de listado unificadas** | Todos los listados (Users, Roles, Groups, Credentials, Servers, Clusters, Sessions, Audit, Events, Syslog) usan un componente común dirigido por esquema: paginación arriba/abajo, ordenación por columna, columnas reordenables (arrastrar), redimensionables (doble clic = auto-ajuste) u **ajustadas al contenido** (`resizable:false`), selector de mostrar/ocultar columnas y persistencia por usuario (columnas visibles, orden y ancho en `table_config`). Ver §[Tablas de Listado](#tablas-de-listado) |
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
-| **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal. La validación + operaciones viven en una capa sin Flask (`lib/core/users/service.py`), compartida con el [CLI de gestión](cli.md) (`user add/enable/disable/passwd/role/group-add/group-del`) |
+| **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal. La validación + operaciones viven en una capa sin Flask (`lib/core/users/service.py`), compartida con el [CLI de gestión](ref-cli.md) (`user add/enable/disable/passwd/role/group-add/group-del`) |
 | **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 63 flags granulares; activar/desactivar desde el modal |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
@@ -126,7 +126,7 @@ flowchart TD
 | **Notificaciones por Email** | Envío de alertas por correo vía SMTP, Microsoft 365 (Graph API) o Gmail (OAuth2). Plantilla HTML personalizable por idioma y tipo (`alert`/`summary`/`test`; el tipo `summary` es editable y previsualizable, pero **aún no se envía** — no hay emails resumen agrupados). Configurable desde la pestaña Configuración → Notifications. |
 | **Webhooks** | Lista de webhooks HTTP personalizables para notificaciones salientes. Cada webhook tiene URL, método (POST/PUT/GET), cabeceras personalizadas, plantilla de cuerpo JSON, timeout, secreto HMAC opcional y flag habilitado/deshabilitado. Se gestionan con un modal dedicado en la pestaña de configuración → Notifications. |
 | **Despachador de notificaciones** | `notification_dispatcher.dispatch()` enruta cada evento a los canales habilitados (Telegram, Email, Webhook) según la matriz de routing configurable en `config.json → notifications`. |
-| **Textos de notificación** | Editor unificado **"Notification Texts"** que cubre, por idioma y con sobrescritura del admin, los **eventos/estados/mensajes del core**, los **mensajes de CADA módulo** watchful y las **cadenas de email**. Se complementa con el editor del **cuerpo HTML** del email (CodeMirror 5: resaltado, autocompletado, formateo, preview en vivo). Detalle del sistema (resolución custom→i18n, listados y tags): ver [notifications.md](notifications.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags). |
+| **Textos de notificación** | Editor unificado **"Notification Texts"** que cubre, por idioma y con sobrescritura del admin, los **eventos/estados/mensajes del core**, los **mensajes de CADA módulo** watchful y las **cadenas de email**. Se complementa con el editor del **cuerpo HTML** del email (CodeMirror 5: resaltado, autocompletado, formateo, preview en vivo). Detalle del sistema (resolución custom→i18n, listados y tags): ver [explica-notificaciones.md](explica-notificaciones.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags). |
 | **Prueba de Telegram** | Enviar un mensaje de prueba para verificar la conectividad del bot |
 | **Modo oscuro** | Preferencia por usuario, persistida entre sesiones |
 | **Pestaña activa del panel** | El panel `/admin` abre por defecto en **Services** (la pestaña más a la izquierda). Al recargar (F5) o navegar dentro de la misma sesión se restaura la última pestaña vista (`localStorage`, discriminado por `login_id` de sesión); un login nuevo vuelve al default. Si la pestaña guardada deja de existir o el usuario pierde acceso, se cae a la primera pestaña visible |
@@ -138,121 +138,18 @@ flowchart TD
 
 ---
 
-## Roles de Usuario
+## Roles, grupos y permisos
 
 ![Gestión de acceso](images/access_tab.svg)
 
-### Roles integrados
+El **catálogo completo** de roles integrados, roles personalizados, grupos y los **63 flags
+de permiso** (más los permisos dinámicos por módulo/servidor/cluster y las estructuras
+internas `PERMISSIONS`/`PERMISSION_GROUPS`/`_perm_required`/`_get_effective_permissions`) es
+la fuente única en **[ref-permisos.md](ref-permisos.md)**. La **semántica de seguridad**
+(escalada, IDOR) está en [explica-seguridad.md](explica-seguridad.md); los **endpoints** de
+roles/grupos/usuarios, en [ref-api.md](ref-api.md).
 
-| Rol | Permisos |
-|-----|----------|
-| `admin` | Todos los permisos (63 flags) |
-| `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` de los recursos correspondientes (`modules_view`, `servers_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`). No incluye permisos de `credentials_*` |
-| `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view` (sin `config_view` ni `credentials_view`) |
-
-> Los roles integrados **no pueden eliminarse** ni cambiar sus permisos via API. Sí permiten actualizar la **etiqueta** (`label`) y gestionar qué usuarios y grupos tienen ese rol asignado. La etiqueta personalizada (override de nombre/descripción) se persiste como una fila más en la tabla `roles` de la BD.
-
-### Roles personalizados
-
-Se pueden crear roles adicionales desde la pestaña **Acceso → Roles** asignando
-cualquier combinación de los 63 permisos disponibles. Los roles personalizados se
-persisten en la tabla `roles` de la BD.
-
-```
-/api/v1/roles             POST   → crear rol
-/api/v1/roles/<name>      PUT    → editar rol
-/api/v1/roles/<name>      DELETE → eliminar rol (falla si hay usuarios asignados)
-```
-
----
-
-## Grupos de Usuarios
-
-Los grupos permiten asignar uno o varios **roles** a un conjunto de usuarios.
-Los permisos son **aditivos**: el usuario obtiene sus permisos de rol propios más
-la unión de los permisos de todos los roles de todos sus grupos.
-
-### Grupo integrado
-
-| Grupo | Roles | Notas |
-|-------|-------|-------|
-| `administrators` | `admin` | No puede borrarse; permite editar roles asignados y miembros; `label`/`description` son inmutables |
-
-### API de grupos
-
-```
-/api/v1/groups             GET    → listar grupos con miembros y roles
-/api/v1/groups             POST   → crear grupo
-/api/v1/groups/<name>      PUT    → editar roles y miembros (label/description ignorados en builtin)
-/api/v1/groups/<name>      DELETE → eliminar grupo (403 si es builtin)
-```
-
-Cada grupo tiene:
-- `roles: []` — lista de nombres de rol cuyos permisos se añaden a los miembros
-- `members` — calculado dinámicamente a partir del store de usuarios en la BD (campo `groups` de cada usuario)
-
----
-
-## Sistema de Permisos
-
-El sistema de control de acceso usa **63 flags granulares** por acción y recurso.
-
-| Grupo | Permiso | Descripción |
-|-------|---------|-------------|
-| **Usuarios** | `users_view` | Ver la lista de usuarios |
-| | `users_add` | Crear usuarios |
-| | `users_edit` | Editar propiedades / rol de usuarios |
-| | `users_delete` | Eliminar usuarios |
-| **Roles** | `roles_view` | Ver la lista de roles |
-| | `roles_add` | Crear roles personalizados |
-| | `roles_edit` | Editar roles personalizados |
-| | `roles_delete` | Eliminar roles personalizados |
-| **Grupos** | `groups_view` | Ver la lista de grupos |
-| | `groups_add` | Crear grupos |
-| | `groups_edit` | Editar grupos |
-| | `groups_delete` | Eliminar grupos |
-| **Auditoría** | `audit_view` | Leer el registro de auditoría |
-| | `audit_delete` | Borrar entradas del registro |
-| **Módulos** | `modules_view` | Ver la lista de módulos |
-| | `modules_add` | Crear nuevas entradas de módulo |
-| | `modules_edit` | Guardar cambios en módulos |
-| | `modules_delete` | Eliminar entradas de módulo |
-| **Servers** | `servers_view` `servers_add` `servers_edit` `servers_delete` | CRUD del registro de hosts |
-| **Clusters** | `clusters_view` `clusters_add` `clusters_edit` `clusters_delete` | CRUD de clusters (checks multi-bind: una comprobación vinculada a varios hosts) |
-| **Credenciales** | `credentials_view` `credentials_add` `credentials_edit` `credentials_delete` | CRUD de identidades SSH reutilizables |
-| **Config** | `config_view` | Leer `config.json` sin poder editarlo |
-| | `config_edit` | Guardar cambios en configuración |
-| **Overview** | `overview_view` | Ver el dashboard de resumen |
-| | `overview_edit` | Editar el layout propio del dashboard |
-| | `overview_set_default` | Fijar el layout como default global para todos |
-| | `overview_reset_factory` | Restaurar el layout de fábrica |
-| **Sesiones** | `sessions_view` | Ver sesiones activas |
-| | `sessions_revoke` | Revocar sesiones |
-| **Checks** | `checks_view` | Ver resultados de checks y la pestaña Status |
-| | `checks_run` | Lanzar comprobaciones bajo demanda |
-| **Historial** | `history_view` | Ver gráficas y series temporales del historial |
-| | `history_delete` | Borrar datos del historial |
-| **Syslog** | `syslog_view` | Ver mensajes syslog y el registro de descartes |
-| | `syslog_delete` | Vaciar mensajes / descartes |
-| **Servicios** | `services_view` | Ver el estado de los servicios |
-| | `services_control` | Iniciar/detener servicios |
-| **Eventos** | `events_view` | Ver reglas de notificación |
-| | `events_add` | Crear reglas de evento |
-| | `events_edit` | Editar reglas |
-| | `events_delete` | Eliminar reglas de evento |
-| | `events_notify_view` | Ver el log de notificaciones enviadas |
-| | `events_notify_delete` | Vaciar el log de notificaciones enviadas |
-
-> Además de los 63 flags globales, cada módulo expone **permisos a nivel de módulo** dinámicos (`module.<nombre>.view`, `.add`, `.edit`, `.delete`) que permiten restringir el acceso a un módulo concreto. También existen permisos dinámicos por servidor (`server.<uid>.<acción>`) y por cluster (`cluster.<uid>.<acción>`).
-
-### Implementación interna
-
-- `PERMISSIONS` — tupla con los 63 flags.
-- `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de roles agrupado.
-- `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` para los roles integrados.
-- `_perm_required(*perms)` — factoría de decoradores: acepta si el usuario tiene **alguno** de los permisos indicados.
-- `_get_effective_permissions(username, role)` — devuelve la unión del frozenset del rol del usuario más los permisos de todos los roles de todos sus grupos.
-- `GET /api/v1/me` — incluye el campo `permissions: list[str]` con los permisos efectivos de la sesión activa.
+Esta sección documenta solo cómo el panel **aplica** esos permisos en la interfaz.
 
 ### Restricción de roles en la UI
 
@@ -272,15 +169,15 @@ botones y pestañas según los permisos del usuario actual obtenidos de `/api/v1
 
 ## Seguridad
 
-- Contraseñas hasheadas con `werkzeug.security` (scrypt por defecto en Werkzeug 3.x; los tests usan `pbkdf2:sha256` para acelerar la ejecución paralela).
-- Contraseña nueva mínimo 8 caracteres; validada en el servidor.
-- Límites de longitud aplicados en el servidor: username ≤ 64 chars, display_name ≤ 128, group name ≤ 64, label ≤ 128, description ≤ 512.
-- Redireccionamientos validados contra el mismo origen (evita open redirect).
-- Nombres de usuario escapados en mensajes de la UI (evita XSS en títulos de modales).
-- Sesiones revocables desde el panel de administración.
-- Las acciones destructivas (eliminar usuario/rol/grupo, revocar sesión) se confirman con un modal Bootstrap centrado antes de ejecutarse — nunca con `confirm()` nativo del navegador.
-- Política de host SSH por defecto cambiada a `RejectPolicy` (hosts desconocidos rechazados).
-- Campos sensibles (contraseñas, tokens) enmascarados en el diff del registro de auditoría.
+Las defensas del panel (hashing de contraseñas scrypt, mínimo 8 caracteres, límites de
+longitud server-side, validación anti open-redirect, escape XSS, revocación de sesiones,
+confirmación de acciones destructivas con modal —nunca `confirm()` nativo—, enmascarado de
+secretos en la auditoría) son la fuente única en **[explica-seguridad.md](explica-seguridad.md)**.
+
+> **Política de host SSH (matiz importante):** no hay un `RejectPolicy` global. Solo la clase
+> `Exec` usa `RejectPolicy`; la ruta host-aware por defecto usa `ssh_verify_host=False` →
+> `AutoAddPolicy` (acepta hosts desconocidos). Detalle en
+> [explica-seguridad.md](explica-seguridad.md) y [explica-hosts.md](explica-hosts.md).
 
 ---
 
@@ -290,6 +187,11 @@ botones y pestañas según los permisos del usuario actual obtenidos de `/api/v1
 
 Todos los endpoints requieren autenticación (cookie de sesión) salvo los indicados como *público*.
 El permiso requerido se indica entre paréntesis.
+
+> 📖 **El inventario completo y autoritativo de la API está en
+> [ref-api.md](ref-api.md)** (todos los dominios, con arquitectura de rutas,
+> CSRF, versionado y ejemplos). Las tablas de abajo cubren los dominios que gestiona esta
+> pestaña; ante cualquier duda, `ref-api.md` es la fuente mantenida.
 
 ### Estado público
 
@@ -302,7 +204,7 @@ El permiso requerido se indica entre paréntesis.
 | Método | Ruta | Descripción |
 | ------ | ---- | ----------- |
 | `POST` | `/login` | Iniciar sesión con usuario y contraseña (también maneja LDAP si está habilitado) |
-| `GET` | `/logout` | Cerrar sesión e invalidar la sesión actual |
+| `POST` | `/logout` | Cerrar sesión e invalidar el token de sesión (requiere CSRF) |
 | `GET` | `/auth/oidc/login` | Inicia el flujo OIDC; redirige al IdP (requiere `oidc.enabled = true` y `authlib`) |
 | `GET` | `/auth/oidc/callback` | Callback OIDC; crea sesión tras verificar el token del IdP |
 | `GET` | `/auth/saml2/login` | Inicia flujo SAML2; redirige al IdP (requiere `saml2.enabled = true` y `pysaml2`) |
@@ -326,7 +228,7 @@ El permiso requerido se indica entre paréntesis.
 
 ### Servers (registro de hosts)
 
-> El **modelo host-céntrico** (perfiles por protocolo, `host_uid`, ejecución host-aware, migración): ver **[hosts.md](hosts.md)**.
+> El **modelo host-céntrico** (perfiles por protocolo, `host_uid`, ejecución host-aware, migración): ver **[explica-hosts.md](explica-hosts.md)**.
 
 Define un servidor una vez (dirección + perfiles de conexión por protocolo) y
 reutilízalo desde los checks de cualquier módulo. Los secretos de los perfiles
@@ -334,11 +236,11 @@ se enmascaran en lectura y se restauran al guardar (igual que la configuración 
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/hosts` | `modules_view` | Listar hosts (secretos enmascarados) |
-| `POST` | `/api/v1/hosts` | `modules_edit` | Crear un host `{name, address, tags, description, profiles}` |
-| `PUT` | `/api/v1/hosts/<uid>` | `modules_edit` | Actualizar un host (secretos omitidos se conservan) |
-| `DELETE` | `/api/v1/hosts/<uid>` | `modules_edit` | Eliminar un host |
-| `POST` | `/api/v1/hosts/<uid>/clone` | `servers_add` | Clonar un host (dirección + perfiles) con nuevo uid/nombre |
+| `GET` | `/api/v1/hosts` | `servers_view` (o view por host) | Listar hosts (secretos enmascarados) |
+| `POST` | `/api/v1/hosts` | `servers_edit` | Crear un host `{name, address, tags, description, profiles}` |
+| `PUT` | `/api/v1/hosts/<uid>` | `edit` por host | Actualizar un host (secretos omitidos se conservan) |
+| `DELETE` | `/api/v1/hosts/<uid>` | `delete` por host | Eliminar un host |
+| `POST` | `/api/v1/hosts/<uid>/clone` | `servers_edit` | Clonar un host (dirección + perfiles) con nuevo uid/nombre |
 | `GET` | `/api/v1/hosts/<uid>/status` | `servers_view` | Últimos resultados de cada check vinculado al host |
 | `POST` | `/api/v1/hosts/test_ssh` | `servers_edit` | Probar conectividad SSH a un host |
 | `POST` | `/api/v1/hosts/test_check` | `servers_edit` | Probar un check concreto contra un host |
@@ -369,7 +271,7 @@ los checks inline existentes).
 Un **cluster** es un único check vinculado a **varios hosts** a la vez — el ítem lleva
 un array `host_uids` (en vez de un solo `host_uid`) y el módulo evalúa el conjunto y
 agrega el estado. El ejemplo canónico es **`keepalived`** (VRRP multi-nodo: servicio por
-nodo, titular de la VIP, split-brain, prioridad — ver [modules.md](modules.md), sección keepalived).
+nodo, titular de la VIP, split-brain, prioridad — ver [ref-modulos.md](ref-modulos.md), sección keepalived).
 
 - Pestaña **Clusters** propia (`templates/partials/clusters/`): tabla + modal de
   creación/edición con selección de los hosts miembros y sus columnas dinámicas.
@@ -463,7 +365,7 @@ La pestaña **Notificaciones** de *Configuración* se compone de **4 sub-tabs**
 | Sub-tab | i18n | Contenido |
 |---|---|---|
 | **General** | `cfg_notif_subtab_general` | Idioma global de notificaciones (ver abajo) |
-| **Routing** | `cfg_notif_subtab_routing` | Matriz `{canal}_on_{kind}` — ver [notifications.md → Matriz de routing](notifications.md#matriz-de-routing-notifications) |
+| **Routing** | `cfg_notif_subtab_routing` | Matriz `{canal}_on_{kind}` — ver [explica-notificaciones.md → Matriz de routing](explica-notificaciones.md#matriz-de-routing-notifications) |
 | **Providers** | `cfg_notif_subtab_providers` | Config y prueba de cada canal, en orden fijo: Event rules → Telegram → Email → **MS Teams** (`_renderMsTeamsSection`) → Webhooks |
 | **Templates** | `cfg_notif_subtab_templates` | Editor de textos ("Notification Texts") + editor del cuerpo HTML de email — ver [§Textos y plantillas de notificación](#textos-y-plantillas-de-notificación) |
 
@@ -471,7 +373,7 @@ La pestaña **Notificaciones** de *Configuración* se compone de **4 sub-tabs**
 (path `notifications|lang`; i18n `notif_lang` = "Notification language"),
 aplicable a **todos** los canales — una notificación no tiene contexto de usuario
 pero sí de sistema. Selector con opción "— Default —" y la lista de idiomas
-mostrada traducida. Ver [notifications.md → Idioma de notificación](notifications.md#idioma-de-notificación).
+mostrada traducida. Ver [explica-notificaciones.md → Idioma de notificación](explica-notificaciones.md#idioma-de-notificación).
 
 ### Telegram
 
@@ -498,12 +400,12 @@ Cada webhook almacena: `id` (UUID), `name`, `url`, `method` (POST/PUT/GET), `tim
 
 > El detalle **canónico** del sistema de textos (resolución custom→i18n, cómo se
 > **generan los listados** editables y el **esquema de tags** de cada texto) está en
-> **[notifications.md → Sistema de textos de notificación](notifications.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags)**.
+> **[explica-notificaciones.md → Sistema de textos de notificación](explica-notificaciones.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags)**.
 > Aquí solo la UI y sus endpoints (el resto del subsistema —canales, dispatcher,
-> matriz, HMAC— también en [notifications.md](notifications.md)).
+> matriz, HMAC— también en [explica-notificaciones.md](explica-notificaciones.md)).
 
 El sub-tab **Templates** contiene dos tarjetas colapsables
-([detalle de la UI](notifications.md#4-el-editor-ui-y-sus-endpoints)):
+([detalle de la UI](explica-notificaciones.md#4-el-editor-ui-y-sus-endpoints)):
 
 - **"Notification Texts"** (`partials/cfg/notify/_tpl_strings.html`; i18n
   `notif_tpl_title`) — editor unificado **data-driven** que cubre, por idioma, los
@@ -546,7 +448,7 @@ Gestión de **canales** de Teams (Incoming Webhooks, en su propia tabla) + prueb
 de entrega a canal y a usuario, y descarga del paquete de app de Teams. La UI los
 renderiza en el sub-tab Providers (`_renderMsTeamsSection`). Cómo funciona el canal
 (a canal vs a usuario; mecanismos `activity_feed`/`bot`): ver
-[notifications.md → Microsoft Teams](notifications.md#microsoft-teams--a-canal-o-a-usuarios).
+[explica-notificaciones.md → Microsoft Teams](explica-notificaciones.md#microsoft-teams--a-canal-o-a-usuarios).
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
@@ -594,8 +496,8 @@ ocurre en el servidor al iniciar sesión (`routes/auth.py::_landing_url`).
 |--------|------|---------|-------------|
 | `GET` | `/api/v1/groups` | `groups_view` | Listar todos los grupos con miembros y roles |
 | `POST` | `/api/v1/groups` | `groups_add` | Crear un grupo |
-| `PUT` | `/api/v1/groups/<name>` | `groups_edit` | Editar roles y miembros de un grupo (label/description ignorados en builtin) |
-| `DELETE` | `/api/v1/groups/<name>` | `groups_delete` | Eliminar un grupo (403 si es builtin) |
+| `PUT` | `/api/v1/groups/<uid>` | `groups_edit` | Editar roles y miembros de un grupo (label/description ignorados en builtin) |
+| `DELETE` | `/api/v1/groups/<uid>` | `groups_delete` | Eliminar un grupo (403 si es builtin) |
 
 ### Roles
 
@@ -603,8 +505,8 @@ ocurre en el servidor al iniciar sesión (`routes/auth.py::_landing_url`).
 |--------|------|---------|-------------|
 | `GET` | `/api/v1/roles` | `roles_view` | Listar todos los roles (integrados + personalizados) |
 | `POST` | `/api/v1/roles` | `roles_add` | Crear un rol personalizado |
-| `PUT` | `/api/v1/roles/<name>` | `roles_edit` | Editar rol; en integrados solo se acepta `label`; en personalizados acepta `label` y `permissions` |
-| `DELETE` | `/api/v1/roles/<name>` | `roles_delete` | Eliminar un rol personalizado |
+| `PUT` | `/api/v1/roles/<uid>` | `roles_edit` | Editar rol; en integrados solo se acepta `label`; en personalizados acepta `label` y `permissions` |
+| `DELETE` | `/api/v1/roles/<uid>` | `roles_delete` | Eliminar un rol personalizado |
 
 ### Sesiones
 
@@ -631,7 +533,7 @@ ocurre en el servidor al iniciar sesión (`routes/auth.py::_landing_url`).
 
 ### Historial
 
-Series temporales de resultados de checks (almacenadas por `HistoryStore`, ver [architecture.md](architecture.md)).
+Series temporales de resultados de checks (almacenadas por `HistoryStore`, ver [explica-arquitectura.md](explica-arquitectura.md)).
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
@@ -639,8 +541,8 @@ Series temporales de resultados de checks (almacenadas por `HistoryStore`, ver [
 | `GET` | `/api/v1/history` | `history_view` | Consultar datos de serie (`module`, `key`, `hours`, `points`, `field`) |
 | `DELETE` | `/api/v1/history` | `history_delete` | Borrar el historial de un par `(module, key)` |
 | `DELETE` | `/api/v1/history/all` | `history_delete` | Vaciar todo el historial |
-| `POST` | `/api/v1/history/test-write` | `history_delete` | Escribir datos de prueba para verificar el almacenamiento |
-| `GET` | `/api/v1/history/diag` | `history_delete` | Diagnóstico del almacenamiento de historial |
+| `POST` | `/api/v1/history/test-write` | `history_view` | Escribir datos de prueba para verificar el almacenamiento |
+| `GET` | `/api/v1/history/diag` | `history_view` | Diagnóstico del almacenamiento de historial |
 
 ### Monitor (planificador)
 
@@ -673,29 +575,31 @@ Receptor syslog: consulta de mensajes, estadísticas y el registro de descartes
 
 ### fail2ban (bans de IP)
 
-[fail2ban interno](security.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio): jail de IP baneadas, watchlist (IP en camino de un ban), lista blanca, historial y acción de bloqueo por servicio. Los ajustes (umbrales/duraciones) están en Config → fail2ban; estos endpoints son la **operativa**.
+[fail2ban interno](explica-seguridad.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio): jail de IP baneadas, watchlist (IP en camino de un ban), lista blanca, historial y acción de bloqueo por servicio. Los ajustes (umbrales/duraciones) están en Config → fail2ban; estos endpoints son la **operativa**.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/ipbans` | `config_view`* | IP baneadas activas + watchlist + estado (`enabled`) |
-| `POST` | `/api/v1/ipbans` | `config_edit` | Banear una IP manualmente (`{ip, reason?, duration_secs?}`) |
-| `DELETE` | `/api/v1/ipbans/<ip>` | `config_edit` | Retirar un ban (requiere `?reason=` — se registra en el historial) |
-| `POST` | `/api/v1/ipbans/action` | `config_edit` | Override de acción de bloqueo por-ban (`{ip, action}`) |
-| `POST` | `/api/v1/ipbans/clear` | `config_edit` | Limpiar una IP del watchlist (borra sus contadores) |
-| `GET` | `/api/v1/ipbans/history` | `config_view`* | Historial de intentos de una IP (`?ip=`) |
-| `GET` | `/api/v1/ipbans/banlog` | `config_view`* | Historial de baneos (ban/escalado/desban), `?ip=` opcional |
-| `GET` | `/api/v1/ipbans/services` | `config_view`* | Servicios expuestos + acción de bloqueo por servicio |
-| `POST` | `/api/v1/ipbans/services/action` | `config_edit` | Fijar la acción por defecto de un servicio (`{service, action}`) |
-| `GET` | `/api/v1/ipbans/whitelist` | `config_view`* | Lista blanca gestionada (IP/CIDR + descripción + autor) |
-| `POST` | `/api/v1/ipbans/whitelist` | `config_edit` | Añadir a la lista blanca (`{value, description?}`) |
-| `DELETE` | `/api/v1/ipbans/whitelist/<uid>` | `config_edit` | Quitar una entrada de la lista blanca |
+| `GET` | `/api/v1/ipbans` | `ipban_ban_view` | IP baneadas activas + watchlist + estado (`enabled`) |
+| `POST` | `/api/v1/ipbans` | `ipban_ban_add` | Banear una IP manualmente (`{ip, reason?, duration_secs?}`) |
+| `DELETE` | `/api/v1/ipbans/<ip>` | `ipban_ban_delete` | Retirar un ban (requiere `?reason=` — se registra en el historial) |
+| `POST` | `/api/v1/ipbans/action` | `ipban_ban_edit` | Override de acción de bloqueo por-ban (`{ip, action}`) |
+| `POST` | `/api/v1/ipbans/clear` | `ipban_watchlist_clear` | Limpiar una IP del watchlist (borra sus contadores) |
+| `GET` | `/api/v1/ipbans/history` | `ipban_ban_view` / `history_view` / `whitelist_view` | Historial de intentos de una IP (`?ip=`) |
+| `GET` | `/api/v1/ipbans/banlog` | `ipban_history_view` | Historial de baneos (ban/escalado/desban), `?ip=` opcional |
+| `GET` | `/api/v1/ipbans/services` | `ipban_service_edit`\|`config_view`\|`config_edit` | Servicios expuestos + acción de bloqueo por servicio |
+| `POST` | `/api/v1/ipbans/services/action` | `ipban_service_edit`\|`config_edit` | Fijar la acción por defecto de un servicio (`{service, action}`) |
+| `GET` | `/api/v1/ipbans/whitelist` | `ipban_whitelist_view` | Lista blanca gestionada (IP/CIDR + descripción + autor) |
+| `POST` | `/api/v1/ipbans/whitelist` | `ipban_whitelist_add` | Añadir a la lista blanca (`{value, description?}`) |
+| `DELETE` | `/api/v1/ipbans/whitelist/<uid>` | `ipban_whitelist_delete` | Quitar una entrada de la lista blanca |
 
-> \* `config_view` acepta **cualquiera** de `config_view`/`config_edit`.
+> La familia `ipban_*` sustituye al antiguo gating `config_*` (permisos granulares por
+> acción). El endpoint `/api/v1/ipbans/history` acepta **cualquiera** de `ipban_ban_view`,
+> `ipban_history_view` o `ipban_whitelist_view`.
 
 ### Eventos (reglas de notificación)
 
 Reglas que observan eventos (`audit` o `syslog`) y notifican por los canales
-configurados; más el log de envíos. Ver [configuration.md → Gestor de eventos](configuration.md#gestor-de-eventos).
+configurados; más el log de envíos. Ver [ref-configuracion.md → Gestor de eventos](ref-configuracion.md#gestor-de-eventos).
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
@@ -711,7 +615,7 @@ configurados; más el log de envíos. Ver [configuration.md → Gestor de evento
 
 ### Servicios
 
-> Cómo funcionan por dentro (descubrimiento, composición, control-plane, líder/failover): ver **[services.md](services.md)**.
+> Cómo funcionan por dentro (descubrimiento, composición, control-plane, líder/failover): ver **[explica-servicios.md](explica-servicios.md)**.
 
 Estado y control de los servicios de fondo (monitor, receptor syslog, procesador de
 eventos…) + las vistas de solo lectura `worker` (proceso de monitor externo) y
@@ -760,8 +664,8 @@ Wizard interactivo de registro de aplicación en Microsoft Entra ID (Azure AD).
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `POST` | `/api/v1/auth/entraid/provision/device-code` | `config_edit` | Inicia el wizard genérico de registro de app (Device Code); acepta un `profile` de módulo o una spec inline (roles/scopes/redirect_uris…) y devuelve `user_code` para autenticar en el navegador |
-| `POST` | `/api/v1/auth/entraid/provision/device-poll` | `config_edit` | Sondea el estado del flujo; al completarse crea la app, el service principal y el consentimiento de admin, y devuelve `client_id`, `client_secret`, `tenant_id` y `provider_url` |
+| `POST` | `/api/v1/auth/entraid/provision/device-code` | `credentials_add`\|`credentials_edit` | Inicia el wizard genérico de registro de app (Device Code); acepta un `profile` de módulo o una spec inline (roles/scopes/redirect_uris…) y devuelve `user_code` para autenticar en el navegador |
+| `POST` | `/api/v1/auth/entraid/provision/device-poll` | `credentials_add`\|`credentials_edit` | Sondea el estado del flujo; al completarse crea la app, el service principal y el consentimiento de admin, y devuelve `client_id`, `client_secret`, `tenant_id` y `provider_url` |
 | `POST` | `/api/v1/auth/entraid/groups` | `config_edit` | Lista todos los grupos del tenant (client credentials). Parámetro `sec` = `oidc` o `saml2`: usa las credenciales de esa app (SAML2 con su propio `graph_secret`) |
 | `POST` | `/api/v1/auth/entraid/group_lookup` | `config_edit` | Resolver el nombre visible de un grupo por su Object ID (auto-completar el mapeo); también acepta `sec` |
 | `POST` | `/api/v1/auth/entraid/saml2/device-code` | `config_edit` | Inicia el wizard de registro de la app **SAML2** en Entra ID (Device Code) |
@@ -770,7 +674,7 @@ Wizard interactivo de registro de aplicación en Microsoft Entra ID (Azure AD).
 
 ### SCIM 2.0 (aprovisionamiento proactivo)
 
-Endpoints `/scim/v2/*` que un IdP (Entra ID, Okta…) usa para **empujar** altas/cambios/bajas de usuarios y grupos (a diferencia del JIT, que espera al primer login). **No usan la sesión web**: se autentican con el **bearer token** `scim.token` (comparación en tiempo constante); si SCIM está desactivado o el token no coincide, responden **401**. Usuarios creados con `auth_source: "scim"`; los grupos SCIM ↔ grupos de ServiceSentry (los miembros heredan los roles del grupo). Config en *Autenticación → SCIM provisioning*; ver [sso-entra.md](sso-entra.md).
+Endpoints `/scim/v2/*` que un IdP (Entra ID, Okta…) usa para **empujar** altas/cambios/bajas de usuarios y grupos (a diferencia del JIT, que espera al primer login). **No usan la sesión web**: se autentican con el **bearer token** `scim.token` (comparación en tiempo constante); si SCIM está desactivado o el token no coincide, responden **401**. Usuarios creados con `auth_source: "scim"`; los grupos SCIM ↔ grupos de ServiceSentry (los miembros heredan los roles del grupo). Config en *Autenticación → SCIM provisioning*; ver [caso-entra-id.md](caso-entra-id.md).
 
 > ⚠️ **Las rutas `/scim/v2/*` NO se pueden cambiar.** Su esquema está fijado por el estándar SCIM 2.0 (IETF RFC 7643/7644): los IdP externos se configuran solo con la URL base y esperan exactamente esas rutas (`ServiceProviderConfig`, `Users`, `Groups`…). Por eso viven **fuera** de `/api/v1/` (la API interna) — son endpoints que exponemos *para que otros los llamen*. Renombrarlas (p.ej. bajo `/api/v1/`) rompería el aprovisionamiento desde cualquier IdP.
 
@@ -805,7 +709,7 @@ El nombre del módulo y de la acción deben coincidir con la regex `^[a-z][a-z0-
 
 La pestaña **Overview** del panel de administración incluye un dashboard totalmente personalizable por usuario. Los cambios se persisten server-side en la BD (campo `dashboard_layout` de las preferencias, vía `PUT /api/v1/users/me/preferences` y devuelto en `GET /api/v1/me`), por lo que el layout se mantiene entre dispositivos y sesiones; además se cachea en `localStorage` con la clave `ss_layout2_<username>`.
 
-> Cómo se **declaran** los widgets (descriptor `OVERVIEW_WIDGETS`, descubrimiento y carga AJAX por widget): ver [discovery.md → Widgets de Overview](discovery.md#2-widgets-de-overview-overview_widgets).
+> Cómo se **declaran** los widgets (descriptor `OVERVIEW_WIDGETS`, descubrimiento y carga AJAX por widget): ver [explica-descubrimiento.md → Widgets de Overview](explica-descubrimiento.md#2-widgets-de-overview-overview_widgets).
 
 ![Dashboard Overview](images/dashboard_overview.svg)
 
@@ -1001,7 +905,7 @@ Esto implica:
 - Los **iconos** de los módulos los declara cada `schema.json` con `__icon__`
   (clase `bi-*`); los **nombres de visualización** salen de `lang/*.json` (`__i18n__`).
   El mismo icono lo usan el panel (`moduleIcon`) y la página `/status` — ver
-  [schema.md → `__icon__`](schema.md#__icon__) e [i18n.md](i18n.md#resolución-de-etiquetas-en-el-navegador).
+  [ref-schema-json.md → `__icon__`](ref-schema-json.md#__icon__) e [explica-i18n.md](explica-i18n.md#resolución-de-etiquetas-en-el-navegador).
   El avatar que lo envuelve (`.ss-mod-av`) ajusta su luminosidad al tema activo
   (claro/oscuro) para conservar contraste.
 - Añadir un nuevo campo a `schema.json` es suficiente para que aparezca en la UI.

@@ -7,6 +7,7 @@
 function _renderEmailSection(cfgCardOpen, cfgCardClose) {
     const data = configData.email || {};
     const provider = data.provider || 'smtp';
+    if (typeof _recipSuggestLoad === 'function') _recipSuggestLoad();   // recipients typeahead data
 
     let h = cfgCardOpen('cfgcol_email', '<i class="bi bi-envelope me-1"></i>', t('email_section'));
 

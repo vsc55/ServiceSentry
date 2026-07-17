@@ -5,6 +5,29 @@
    ================================================================ #}
 
 // ──────────────────────────── Field render ─────────────────────────
+// Value a blank per-item field inherits via `placeholder_module` (shown as its placeholder):
+// the module-level setting if configured, else the live Configuration > Modules value, else the
+// module's own settings default from its ``__module__`` schema.  Returns null when none applies.
+// 0 is a REAL inherited value (e.g. alert_connections 0 = "no limit"), so it is kept — not blank.
+// (CONFIG_FIELD_DEFAULTS only carries a few web_admin keys, so it is NOT a source of module defaults.)
+function _placeholderModuleValue(pathStr, field) {
+    const modName = pathStr.split('|')[0];
+    let v = (modulesData[modName] || {})[field];
+    if (v == null || v === '') {
+        const g = (typeof configData !== 'undefined' && configData.modules)
+            ? configData.modules[field] : undefined;
+        if (g != null && g !== '') {
+            v = g;
+        } else {
+            const msch = (typeof ITEM_SCHEMAS !== 'undefined'
+                && ITEM_SCHEMAS[modName + '|__module__']) || {};
+            const mdef = msch[field];
+            v = (mdef && mdef.default != null) ? mdef.default : null;
+        }
+    }
+    return (v == null || v === '') ? null : v;
+}
+
 // Resolve a field's value-dependent term (label/hint/action/pick) from the
 // module i18n `field_terms`, driven by a sibling field (meta.term_field) — e.g.
 // datastore's 'db' → Database/Index/Bucket by db_type.  Returns null if none.
@@ -221,15 +244,8 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         // shows that value as the placeholder even when stored blank/null — same
         // cascade as the value-present branch below (module → global → spec default).
         if (!_ph && meta.placeholder_module != null) {
-            const _modName = pathStr.split('|')[0];
-            let _modPh = (modulesData[_modName] || {})[meta.placeholder_module];
-            if (_modPh == null || _modPh === 0 || _modPh === '') {
-                const _g = (typeof configData !== 'undefined' && configData.modules)
-                    ? configData.modules[meta.placeholder_module] : undefined;
-                _modPh = (_g != null && _g !== '') ? _g
-                    : CONFIG_FIELD_DEFAULTS['modules|' + meta.placeholder_module];
-            }
-            if (_modPh != null && _modPh !== 0) _ph = ` placeholder="${escAttr(String(_modPh))}"`;
+            const _modPh = _placeholderModuleValue(pathStr, meta.placeholder_module);
+            if (_modPh != null && _modPh !== '') _ph = ` placeholder="${escAttr(String(_modPh))}"`;
             _pmAttr = ` data-placeholder-module="${escAttr(String(meta.placeholder_module))}" data-zero-as-blank="1"`;
         }
         return _fieldRow(lblHtml, fieldCtl({kind: 'number',
@@ -284,17 +300,11 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             extraAttrs += ` data-zero-as-blank="1"`;
             if (value === 0) displayValue = '';
         } else if (meta && meta.placeholder_module != null) {
-            const _modName = pathStr.split('|')[0];
-            let _modPh = (modulesData[_modName] || {})[meta.placeholder_module];
-            // Cascade: when the module-level default is blank it inherits the
-            // global Configuration > Modules value (live config, else spec default).
-            if (_modPh == null || _modPh === 0 || _modPh === '') {
-                const _g = (typeof configData !== 'undefined' && configData.modules)
-                    ? configData.modules[meta.placeholder_module] : undefined;
-                _modPh = (_g != null && _g !== '') ? _g
-                    : CONFIG_FIELD_DEFAULTS['modules|' + meta.placeholder_module];
-            }
-            if (_modPh != null && _modPh !== 0) extraAttrs += ` placeholder="${escAttr(String(_modPh))}"`;
+            // Cascade: module-level setting → live Configuration > Modules value → the module's
+            // own ``__module__`` settings default (see _placeholderModuleValue). 0 is a real
+            // inherited value, so it is shown as the placeholder (not suppressed).
+            const _modPh = _placeholderModuleValue(pathStr, meta.placeholder_module);
+            if (_modPh != null && _modPh !== '') extraAttrs += ` placeholder="${escAttr(String(_modPh))}"`;
             extraAttrs += ` data-placeholder-module="${escAttr(String(meta.placeholder_module))}"`;
             extraAttrs += ` data-zero-as-blank="1"`;
             if (value === 0) displayValue = '';
@@ -429,7 +439,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 : (typeof CONFIG_FIELD_DEFAULTS !== 'undefined' ? CONFIG_FIELD_DEFAULTS[pathStr] : null);
             return _fieldRow(lblHtml, fieldCtl({kind: 'multi', key: pathStr, value: _norm(value),
                 placeholder: (_mph != null && _mph !== '') ? String(_mph) : '',
-                validate: (meta.ipkind || ''), trailing: _actionBtn}), _hintHtml);
+                validate: (meta.ipkind || ''), suggest: (meta.suggest || ''), trailing: _actionBtn}), _hintHtml);
         }
         // Single IP / bind-address field (e.g. web_admin|host) — validate on
         // change, revert + toast on invalid. Placeholder shows the registry default.
@@ -1058,12 +1068,108 @@ function _ipWarn(bad) {
     }
 }
 function chipsHtml(key, value) {
-    return _multiList(value).map(v =>
-        `<span class="badge text-bg-secondary d-inline-flex align-items-center gap-1 multi-chip" style="font-weight:400">
-            ${esc(v)}<button type="button" class="btn-close btn-close-white ss-fs-1"
+    return _multiList(value).map(v => {
+        // Recipient tokens render as the group/user name + an icon (they expand to
+        // email(s) on send). `group:<uid>` → members' emails, `user:<uid>` → that user's
+        // email. Anything else is a literal address.
+        let inner, cls = 'text-bg-secondary';
+        if (v.startsWith('group:')) {
+            inner = `<i class="bi bi-people-fill"></i>${esc(_recipGroupLabel(v.slice(6)))}`;
+            cls = 'text-bg-primary';
+        } else if (v.startsWith('user:')) {
+            inner = `<i class="bi bi-person-fill"></i>${esc(_recipUserLabel(v.slice(5)))}`;
+            cls = 'text-bg-info';
+        } else {
+            inner = esc(v);
+        }
+        return `<span class="badge ${cls} d-inline-flex align-items-center gap-1 multi-chip" style="font-weight:400">
+            ${inner}<button type="button" class="btn-close btn-close-white ss-fs-1"
                 aria-label="${escAttr(t('remove'))}" title="${escAttr(t('remove'))}"
-                onclick="chipRemove(${jsStr(key)},${jsStr(v)})"></button></span>`
-    ).join('');
+                onclick="chipRemove(${jsStr(key)},${jsStr(v)})"></button></span>`;
+    }).join('');
+}
+// ── Recipient typeahead (panel users + groups) for `multi` fields with suggest ──
+let _recipSuggest = null;            // {users:[{uid,email,name}], groups:[{uid,name}]}
+const _recipGroupMap = {};           // uid -> name (chip labels)
+const _recipUserMap = {};            // uid -> name (chip labels)
+function _recipGroupLabel(uid) { return _recipGroupMap[uid] || (t('notif_recipient_group_unknown') || uid); }
+function _recipUserLabel(uid) { return _recipUserMap[uid] || (t('notif_recipient_user_unknown') || uid); }
+async function _recipSuggestLoad() {
+    if (_recipSuggest) return _recipSuggest;
+    const r = await apiGet('/api/v1/notify/recipients/suggest');
+    _recipSuggest = (r && r.users) ? r : { users: [], groups: [] };
+    (_recipSuggest.groups || []).forEach(g => { _recipGroupMap[g.uid] = g.name; });
+    (_recipSuggest.users || []).forEach(u => { _recipUserMap[u.uid] = u.name; });
+    // Group/user chips rendered before this resolved showed the raw uid — refresh now.
+    document.querySelectorAll('[data-multi-suggest]').forEach(box => {
+        const k = box.getAttribute('data-multi-chips');
+        if (k) renderChips(k);
+    });
+    return _recipSuggest;
+}
+function _multiSuggestClose() {
+    document.querySelectorAll('.multi-suggest-menu').forEach(m => m.remove());
+}
+function _multiSuggestPick(key, val) {
+    chipsSet(key, _multiList(_faGet(key)).concat([val]));
+    _multiSuggestClose();
+    const box = document.querySelector(`[data-multi-chips="${CSS.escape(key)}"]`);
+    const inp = box && box.querySelector('input');
+    if (inp) { inp.value = ''; inp.focus(); }
+}
+function _multiSuggestRender(box, inp, users, groups) {
+    _multiSuggestClose();
+    if (!users.length && !groups.length) return;
+    const key = box.dataset.multiChips;
+    const item = (icon, label, sub, val) =>
+        `<button type="button" class="dropdown-item d-flex align-items-center gap-2 py-1"
+            onmousedown="event.preventDefault()" onclick="_multiSuggestPick(${jsStr(key)},${jsStr(val)})">
+            <i class="bi ${icon} text-muted"></i><span class="text-truncate">${esc(label)}</span>
+            ${sub ? `<span class="text-muted small ms-auto text-truncate">${esc(sub)}</span>` : ''}</button>`;
+    const rows = groups.map(g => item('bi-people-fill', g.name, t('notif_recipient_group') || 'group', 'group:' + g.uid))
+        .concat(users.map(u => item('bi-person', u.name, u.email || t('notif_recipient_no_email'), 'user:' + u.uid)));
+    const menu = document.createElement('div');
+    menu.className = 'multi-suggest-menu dropdown-menu show';
+    menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:1080;min-width:16rem;max-width:100%;max-height:14rem;overflow:auto';
+    menu.innerHTML = rows.join('');
+    const grp = box.closest('.input-group') || box.parentElement;
+    grp.style.position = grp.style.position || 'relative';
+    grp.appendChild(menu);
+}
+function _multiSuggestInput(inp) {
+    const box = inp.closest('[data-multi-chips]');
+    if (!box || !box.dataset.multiSuggest) return;
+    const q = inp.value.trim().toLowerCase();
+    if (!q) { _multiSuggestClose(); return; }
+    _recipSuggestLoad().then(s => {
+        if (inp.value.trim().toLowerCase() !== q) return;   // stale
+        const cur = new Set(_multiList(_faGet(box.dataset.multiChips)).map(x => x.toLowerCase()));
+        const users = (s.users || []).filter(u =>
+            !cur.has(('user:' + u.uid).toLowerCase()) && !cur.has(String(u.email || '').toLowerCase()) &&
+            (String(u.email || '').toLowerCase().includes(q) || String(u.name || '').toLowerCase().includes(q))).slice(0, 6);
+        const groups = (s.groups || []).filter(g =>
+            !cur.has(('group:' + g.uid).toLowerCase()) &&
+            String(g.name || '').toLowerCase().includes(q)).slice(0, 4);
+        _multiSuggestRender(box, inp, users, groups);
+    });
+}
+// Enter in a multi input: for a suggest field, an exact group/user match is picked
+// (so typing a group name + Enter adds the group); otherwise the typed text is added
+// as a free entry. Non-suggest fields just add the text (existing behaviour).
+function _multiEnter(inp) {
+    const box = inp.closest('[data-multi-chips]');
+    if (!box) return;
+    const key = box.dataset.multiChips;
+    if (box.dataset.multiSuggest && _recipSuggest) {
+        const q = inp.value.trim().toLowerCase();
+        const g = (_recipSuggest.groups || []).find(x => String(x.name || '').toLowerCase() === q);
+        if (g) { _multiSuggestPick(key, 'group:' + g.uid); return; }
+        const u = (_recipSuggest.users || []).find(x =>
+            String(x.email || '').toLowerCase() === q || String(x.name || '').toLowerCase() === q);
+        if (u) { _multiSuggestPick(key, 'user:' + u.uid); return; }
+    }
+    chipAdd(key, inp);
+    _multiSuggestClose();
 }
 // Re-render only the chips, keeping the inline "add" input that lives in the box.
 function renderChips(key) {
@@ -1153,17 +1259,19 @@ function fieldCtl(spec) {
         case 'multi': {
             // When empty, hint the default value + the add cue; once it has chips,
             // just the add cue (renderChips() keeps this in sync on add/remove).
-            const _addPh = t('multi_add');
+            const _addPh = spec.suggest ? (t('notif_recipient_add') || t('multi_add')) : t('multi_add');
             const _emptyPh = spec.placeholder ? `${spec.placeholder} — ${_addPh}` : _addPh;
             const _ph = _multiList(spec.value).length ? _addPh : _emptyPh;
+            const _sug = spec.suggest ? ` data-multi-suggest="${escAttr(spec.suggest)}"` : '';
+            const _oninput = spec.suggest ? ` oninput="_multiSuggestInput(this)" onblur="setTimeout(_multiSuggestClose,150)" autocomplete="off"` : '';
             return `<div class="input-group input-group-sm">
                 <div class="form-control d-flex flex-wrap align-items-center gap-1"
                      style="height:auto;min-height:calc(1.5em + .5rem + 2px);cursor:text"
-                     data-multi-chips="${escAttr(spec.key)}" data-multi-add-ph="${escAttr(_addPh)}" data-multi-empty-ph="${escAttr(_emptyPh)}" data-multi-validate="${escAttr(spec.validate || '')}"
+                     data-multi-chips="${escAttr(spec.key)}"${_sug} data-multi-add-ph="${escAttr(_addPh)}" data-multi-empty-ph="${escAttr(_emptyPh)}" data-multi-validate="${escAttr(spec.validate || '')}"
                      onclick="this.querySelector('input')?.focus()">${chipsHtml(spec.key, spec.value)}<input
                     type="text" class="border-0 p-0 flex-grow-1 bg-transparent" style="outline:none;box-shadow:none;min-width:6rem"
-                    placeholder="${escAttr(_ph)}"
-                    onkeydown="if(event.key==='Enter'){event.preventDefault();chipAdd(${jsStr(spec.key)},this);}"></div>
+                    placeholder="${escAttr(_ph)}"${_oninput}
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();_multiEnter(this);}"></div>
                 ${tr}</div>`;
         }
         default:
@@ -1218,12 +1326,16 @@ function _refreshConditionalFields(itemPathStr) {
             } catch {}
         });
         // Update placeholder for inputs that inherit a module-level field value.
+        // Use the SAME cascade as the render (_placeholderModuleValue): module-level
+        // setting → live Configuration > Modules global → the module's __module__
+        // schema default. 0 is a real inherited value (kept, not blanked) — otherwise
+        // this live refresh would clobber the correct placeholder set at render time.
         container.querySelectorAll('input[data-placeholder-module]').forEach(el => {
             try {
                 const modField = el.dataset.placeholderModule;
-                const modName  = (container.dataset.swItemPath || '').split('|')[0];
-                const ph = modName ? (modulesData[modName] || {})[modField] : null;
-                el.placeholder = (ph != null && ph !== 0) ? String(ph) : '';
+                const cfgPath  = el.dataset.cfgPath || '';
+                const ph = cfgPath ? _placeholderModuleValue(cfgPath, modField) : null;
+                el.placeholder = (ph != null && ph !== '') ? String(ph) : '';
             } catch {}
         });
     });

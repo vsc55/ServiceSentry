@@ -6,7 +6,7 @@ A Teams tab can't sign in with a normal OAuth redirect (Microsoft's login page c
 be framed), so it uses the Teams JS SDK: ``getAuthToken()`` yields a signed token that
 :mod:`lib.providers.entraid.tab_sso` validates and this module turns into a session —
 the same provider pattern as OIDC/SAML (which also live under ``lib/providers`` and
-reuse ``web_admin.routes.auth._establish_session``).
+reuse ``wa._establish_session`` on the WebAdmin).
 
 External-facing (a host renders the page / a token authenticates it), so both live under
 the ``/auth/<provider>/*`` convention — CSRF-exempt, NOT session-gated.
@@ -63,10 +63,9 @@ def register(app, wa):
     frame-ancestor origins for the embed CSP. On success the SSO endpoint reuses the
     shared web session layer, exactly like the OIDC/SAML providers.
     """
-    # Reuse the shared session layer (the one place a provider turns an external identity
-    # into a ServiceSentry session) — exactly like the OIDC/SAML providers do.
-    from lib.web_admin.routes.auth import _establish_session, _landing_url
-
+    # Reuse the shared session layer on the WebAdmin (``wa._establish_session`` /
+    # ``wa._landing_url``) — the one place a provider turns an external identity into a
+    # ServiceSentry session, exactly like the OIDC/SAML providers do.
     # External/token-authenticated (SDK token), so exempt from the session CSRF check.
     wa._register_csrf_exempt('/auth/msteams/tab', '/auth/msteams/sso')
     # Declare the Teams/Outlook origins that may iframe the panel when embed_in_teams is on
@@ -118,7 +117,7 @@ def register(app, wa):
         if user.get('enabled') is False:
             return jsonify({'ok': False, 'error': wa._t('msteams_sso_no_user')}), 403
 
-        _establish_session(wa, username, user)
+        wa._establish_session(username, user)
         wa._audit('msteams_sso_login', detail={'user': username})
         wa._dbg(f"> Auth/Teams >> SSO session established user={username!r}", DebugLevel.info)
-        return jsonify({'ok': True, 'redirect': _landing_url(wa, user)})
+        return jsonify({'ok': True, 'redirect': wa._landing_url(user)})

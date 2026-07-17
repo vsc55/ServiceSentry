@@ -537,3 +537,89 @@ def add_graph_secret(access_token: str, app_id: str) -> str:
     if not rs.ok:
         raise RuntimeError(graph_error(rs))
     return rs.json().get('secretText', '') or ''
+
+
+def ensure_app_permissions(access_token: str, tenant_id: str, client_id: str,
+                           resources: list) -> dict:
+    """Grant any MISSING application permissions to an EXISTING app (by appId),
+    without recreating it or rotating its secret.
+
+    *resources* is the same ``[{resource, roles, scopes}]`` shape as
+    :func:`provision_entra_app`.  For each resource it resolves the role ids, adds
+    the missing ones to the app's ``requiredResourceAccess`` (so the portal shows
+    them) and — the actual admin consent for an application permission — creates an
+    ``appRoleAssignment`` on the app's own service principal for each granted role.
+    Idempotent: roles already assigned are reported, not re-granted.
+
+    Returns ``{tenant_id, client_id, granted:[names], already:[names], missing:[names]}``
+    (``missing`` = roles the resource doesn't offer or that failed to assign)."""
+    hdrs = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
+    ra = _req.get(
+        f"{GRAPH_BASE}/applications?$filter=appId eq '{client_id}'"
+        "&$select=id,displayName,requiredResourceAccess", headers=hdrs, timeout=15)
+    if not ra.ok:
+        raise RuntimeError(graph_error(ra))
+    apps = ra.json().get('value') or []
+    if not apps:
+        raise RuntimeError(f'Application not found in the tenant: {client_id}')
+    obj_id = apps[0]['id']
+    rra = list(apps[0].get('requiredResourceAccess') or [])
+
+    # The app's own service principal holds the grants — create it if the app has none.
+    spr = _req.get(f"{GRAPH_BASE}/servicePrincipals?$filter=appId eq '{client_id}'&$select=id",
+                   headers=hdrs, timeout=15)
+    sp_val = (spr.json().get('value') or []) if spr.ok else []
+    if sp_val:
+        client_sp_id = sp_val[0]['id']
+    else:
+        cr = _req.post(f"{GRAPH_BASE}/servicePrincipals", headers=hdrs, timeout=15,
+                       json={'appId': client_id,
+                             'tags': ['WindowsAzureActiveDirectoryIntegratedApp']})
+        if not cr.ok:
+            raise RuntimeError(graph_error(cr))
+        client_sp_id = cr.json().get('id')
+
+    # Roles already assigned to our SP (so we don't re-grant).
+    ex = _req.get(f"{GRAPH_BASE}/servicePrincipals/{client_sp_id}/appRoleAssignments"
+                  "?$select=appRoleId", headers=hdrs, timeout=15)
+    have = {a.get('appRoleId') for a in (ex.json().get('value') or [])} if ex.ok else set()
+
+    granted, already, missing = [], [], []
+    for block in (resources or []):
+        res_app = str((block or {}).get('resource') or GRAPH_APP_ID)
+        role_names = list(dict.fromkeys((block or {}).get('roles') or []))
+        if not role_names:
+            continue
+        res = resource_sp(access_token, res_app)            # {id, appRoles, …}
+        res_sp_id = res.get('id')
+        role_ids = {ar.get('value'): ar.get('id') for ar in (res.get('appRoles') or [])
+                    if ar.get('value') in role_names and ar.get('id')}
+        missing += [n for n in role_names if n not in role_ids]   # not offered by the resource
+        want_ids = set()
+        for name, rid in role_ids.items():
+            want_ids.add(rid)
+            if rid in have:
+                already.append(name); continue
+            asg = _req.post(
+                f"{GRAPH_BASE}/servicePrincipals/{client_sp_id}/appRoleAssignments",
+                headers=hdrs, timeout=15,
+                json={'principalId': client_sp_id, 'resourceId': res_sp_id, 'appRoleId': rid})
+            if asg.ok or getattr(asg, 'status_code', 0) == 409:   # 409 = already assigned
+                granted.append(name)
+            else:
+                missing.append(name)
+        # Mirror the grants into requiredResourceAccess so the portal reflects them.
+        blk = next((b for b in rra if str(b.get('resourceAppId')) == res_app), None)
+        if blk is None:
+            blk = {'resourceAppId': res_app, 'resourceAccess': []}
+            rra.append(blk)
+        have_ids = {a.get('id') for a in (blk.get('resourceAccess') or [])}
+        for rid in want_ids - have_ids:
+            blk.setdefault('resourceAccess', []).append({'id': rid, 'type': 'Role'})
+    try:                                                    # best-effort (consent is the assignment)
+        _req.patch(f"{GRAPH_BASE}/applications/{obj_id}", headers=hdrs, timeout=15,
+                   json={'requiredResourceAccess': rra})
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return {'tenant_id': tenant_id, 'client_id': client_id, 'granted': granted,
+            'already': sorted(set(already)), 'missing': sorted(set(missing))}

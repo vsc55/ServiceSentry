@@ -3,9 +3,9 @@
 """SAML2 SSO routes: /auth/saml2/login, /auth/saml2/acs, /auth/saml2/metadata.
 
 The ACS callback validates the assertion (with replay + InResponseTo hardening)
-and then hands off to the web session layer
-(``web_admin.routes.auth._establish_session``) — the one place a provider
-legitimately reaches back into web_admin (a web callback establishes a web session).
+and then hands off to the web session layer (``wa._establish_session`` /
+``wa._landing_url`` on the WebAdmin) — the one place a provider legitimately reaches
+back into web_admin (a web callback establishes a web session).
 
 Routes registered by this file:
 
@@ -29,7 +29,6 @@ def register(app, wa) -> None:
 
     from flask import (flash, make_response, redirect,
                        request, session, url_for)
-    from lib.web_admin.routes.auth import _establish_session, _landing_url
 
     @app.route('/auth/saml2/login')
     def saml2_login():
@@ -141,10 +140,10 @@ def register(app, wa) -> None:
                       detail={'reason': 'account_disabled'})
             return redirect(url_for('login'))
 
-        _establish_session(wa, username, user)
+        wa._establish_session(username, user)
         wa._audit('login_ok', username, request.remote_addr,
                   detail={'auth_source': 'saml2'})
-        return redirect(_landing_url(wa, user))
+        return redirect(wa._landing_url(user))
 
     @app.route('/auth/saml2/metadata')
     def saml2_metadata():

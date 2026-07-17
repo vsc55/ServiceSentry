@@ -104,6 +104,7 @@
     "action_labels": {
         "test_connection": "Probar conexión",
         "test_permissions": "Comprobar permisos",
+        "fix_permissions": "Arreglar permisos (SSH)",
         "provision_token": "Aprovisionar token API (SSH)",
         "list_nodes": "Listar nodos del clúster"
     },

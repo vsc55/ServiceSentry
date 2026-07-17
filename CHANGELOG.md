@@ -5,6 +5,83 @@ All notable changes to **ServiceSentry** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Notification recipients: typeahead over users & groups, resolved on send.** The recipient chips
+  (Config → Notifications → Email / Microsoft Teams) autocomplete as you type against panel **users**
+  and **groups** (new `GET /api/v1/notify/recipients/suggest`, gated by `config_edit`). Picking one
+  stores a token — `user:<uid>` (chip: person icon + name) or `group:<uid>` (people icon + name) —
+  that a `RecipientResolver` **expands to email(s) at send time**: a user → their current email, a
+  group → its enabled members' emails. Built from the shared DB via `router.store('recipients', …)`,
+  so it works in both the web-admin test-send and the monitor process. Resolution is against the live
+  directory, so a **disabled or deleted** user/group (and a user with no email) is skipped
+  automatically — logged and surfaced in the email test result (its chip shows "unknown"). Emails are
+  de-duplicated; plain typed addresses still work. Enabled by flagging the field `suggest: 'recipients'`
+  in `build_config_schema()` on top of the `multi` chips widget; still stored as a comma-joined string.
+- **m365 Overview widgets** (schema `__overview_widget__` + `Watchful.overview_widget`). A module
+  can now contribute **several** widgets — `__overview_widget__` accepts a **list** — each with a
+  `view`: **`stat`** (a Servers-like stat card: a big count + a coloured badge per state,
+  N OK / N Warning / N Error, from a per-state `counts` backend breakdown; auto height, not
+  resizable) or **`table`** (a dense listing with a scope selector: all / aggregate / a specific
+  check kind). m365 ships both: a stat card fixed to **Service health** (via `scope: "health"`) that
+  **clicks through to Microsoft's service-health page** (via `link`; generic
+  `_dwIsNavigable`/`_dwNavigate` support for external module-widget links), plus a **table** widget
+  with the selector. In the table, rows are always sorted **worst-first** (error → warning → ok), and
+  a second **minimum-level** filter (all / ≥ warning / only errors) narrows them down — both applied
+  generically to every module table widget. At the **Aggregate** scope a table widget collapses to a
+  stat card, so there it behaves like one: **auto (locked) height, not resizable, and the level
+  filter is hidden**. The backend `Watchful.overview_widget` returns one entry
+  per check KIND (Service health, Licenses, App credentials, Mailboxes, OneDrive, Secure Score, Risky
+  users, SharePoint) aggregated across every m365 item — the same data feeds both widgets. Each widget
+  is keyed `mw_<module>` (primary) / `mw_<module>_<id>`.
+- **Generic Entra ID "check & fix app permissions"** (the Entra provider owns it; modules only
+  declare *what* they need). Two credential-editor actions on any credential that declares
+  `__entraid_provision__` (m365 is the first):
+  - **Check permissions** → `POST /api/v1/auth/entraid/check-permissions`: resolves the required
+    application permissions from the module profile, acquires an app-only token and inspects its
+    `roles` claim (read-only, no admin), and returns a ✅/❌ report. Backed by the dependency-light
+    `lib/providers/entraid/permissions.py` (`token_roles` + `permission_report`). The modal opens
+    **immediately** with the required-permission list (known up-front from the action's provision),
+    then ticks each ✅/❌ in sequence as the result arrives — no blank wait. When something is
+    missing, a **Fix permissions** button appears in the modal footer that launches the fix flow
+    (the fix action itself is `toolbar:false` — invokable from the check modal, not shown as its own
+    toolbar button). The credential-editor Actions row groups the app-lifecycle buttons together
+    (Create app · Open app in Entra ID · Check permissions).
+  - **Fix permissions** → the device-code sign-in wizard in a new **ensure** mode: instead of
+    creating a new app it grants the MISSING permissions to the **existing** app (by `client_id`) and
+    admin-consents them (`provisioning.ensure_app_permissions` → merge `requiredResourceAccess` +
+    `appRoleAssignments`), without a new app or a rotated secret, then shows a
+    granted/already-present/still-missing report. Idempotent; audited
+    (`entra_app_permissions_ensured`/`_failed`).
+
+  The m365 Watchful no longer implements any of this — it only declares its required permissions in
+  `__entraid_provision__` and adds the two credential actions. The shared action/link labels live in
+  the **core** i18n (`prov_entraid_action_*`), referenced by each action's `label` key, so modules
+  don't duplicate them (both the credential editor and item action resolvers honor `action.label`).
+- **m365 module — many more Microsoft 365 checks** (beyond SharePoint storage), each an opt-in
+  per-item toggle via the same Graph app-only auth: **service health** (`serviceAnnouncement/healthOverviews`
+  — degradation warns, interruption is a hard down; optional service filter), **license capacity**
+  (`subscribedSkus` — free units below a threshold / exhausted), **app secret/certificate expiry**
+  (`applications` — warns N days before this app's own credential expires, avoiding a dead monitor),
+  **mailboxes over quota** (reports `getMailboxUsageQuotaStatusMailboxCounts`), **OneDrive tenant
+  usage** (reports `getOneDriveUsageStorage`), **Secure Score** (`security/secureScores` — % below a
+  minimum) and **risky users** (`identityProtection/riskyUsers`). Each emits under `<item>/<service>`
+  so results stay independent. The Entra "Register in Azure" wizard now requests the extra
+  application permissions (`ServiceHealth.Read.All`, `Organization.Read.All`, `Application.Read.All`,
+  `SecurityEvents.Read.All`, `IdentityRiskyUser.Read.All`) alongside the existing `Sites.Read.All` /
+  `Reports.Read.All`. Full en/es i18n and tests for every new check.
+- **Clusters list "check" button**: the Infrastructure → Clusters table now has a per-row test
+  button (▶, like the Servers list) that runs that multi-bind check once and shows the per-member
+  breakdown in the shared results modal (`_clTestRow` → `/api/v1/hosts/test` with an explicit
+  single-check payload + `no_ssh`; members resolve from `host_uids`). Gated on edit, mirroring the
+  Servers test.
+- **Proxmox "Fix permissions" action**: the *Check permissions* modal often showed a missing
+  privilege (e.g. `Datastore.Audit (/)`) with no way to fix it. A new `fix_permissions` action
+  (button next to *Check permissions*) grants exactly the privileges the item's enabled checks need
+  to the identity the credential uses — the token's own user (parsed from `token_id`) plus the token
+  itself for a privilege-separated token, or the password user — over SSH (root/sudo), then
+  re-verifies over the API and shows the fresh verdict. It reuses a custom role
+  (`ServiceSentryMonitor`) and does NOT rotate the token (unlike *Provision token*). The SSH path is
+  now a shared `Watchful._provision_ssh` helper (extracted from `provision_token`, keeping the SSRF
+  guard in one place). Write action → requires module edit and is audited.
 - **Web admin panel** (Flask + Jinja2 + Bootstrap 5) with card views, an advanced configuration
   panel, navigation reorg and a generic table CSS.
 - **Host-centric model**: a host registry with per-protocol profiles (SSH/SNMP/DB/HTTP…),
@@ -227,8 +304,202 @@ All notable changes to **ServiceSentry** are documented in this file.
   router. Adding a channel is a new `channel.py` with no change to the router or the monitor.
   Removed the web admin's channel-store aliases and `_load_webhooks`/`_load_msteams`/`_msteams_bot_refs`
   shims; routes and the config bundle reach a channel's store through its `channel.get_store(wa._notify)`.
+- **Row-hover highlight on the notification-routing matrix** (Config → Notifications → Routing): the
+  event row under the cursor is tinted so the active line stands out. Implemented with Bootstrap
+  `table-hover` + a reusable `.ss-hover-rows` utility class (section sub-headers keep their own
+  background).
+
+### Changed
+- **Dropped the legacy `email|lang` fallback (pre-release cleanup).** Since no version has shipped
+  there is nothing to migrate, so `notify_lang()` now resolves `notifications|lang` → `web_admin|lang`
+  → `''` (the `email|lang` branch is gone). Removed all references — the fallback code + docstrings
+  (`formatting.py`, `app.py`, `spec.py` comment), the `test_falls_back_to_legacy_email_lang` test
+  (and the precedence test's `email` layer), and the docs (`explica-i18n.md` flow + diagram,
+  `explica-notificaciones.md` precedence, `ref-configuracion.md` migration note).
+- **i18n sweep: hardcoded user-facing strings routed through i18n** (excluding the standalone
+  `overview2.html` dev page). Backend: the four notification channels (`email`/`msteams`/`webhook`/
+  `telegram` `notify.py`) now translate their send/test result messages via `translate(lang, key)`
+  (lang threaded from `notify_lang(cfg)`, so both the monitor and the "Send test" toast are
+  localized); route error bodies use `wa._t(key)` in `modules`, `entraid` (incl. the lone leftover
+  **Spanish** literal), `msteams`, email `template_routes`, `hosts` (SSH test), `scim`, `history`,
+  `ldap`, plus generic `not_found`/`unauthorized`. Frontend: `msteams_tab.html` (Teams SSO landing),
+  the HTML-template editor toolbar/toasts/shortcuts (`_tpl_html.html`), `_utils.html` copy toast,
+  `audit/_detail.html` labels, and the group/role name placeholders (`modals/_access.html`) now use
+  `t(...)` / `{{ i18n[...] }}`. New keys follow the codebase's per-domain families — channel result
+  messages under `email_*` / `webhook_*` / `telegram_*` / `msteams_*` (matching the existing 56
+  `msteams_*` / 33 `webhook_*` / … keys), reusing `msteams_url_required` where it already existed;
+  the cross-channel recipient chips stay `notif_recipient_*`. en/es parity throughout.
+- **i18n: session keys homogenized under `session_*`.** The scattered session labels/messages/actions
+  (`active_sessions`, `no_active_sessions`, `sessions_closed`, `current_session`, `revoke_session[_tt]`,
+  `revoke_user_sessions`, `confirm_revoke_user_sessions`, `close_all_sessions[_tt]`,
+  `confirm_close_all_sessions`) now use the `session_*` prefix (e.g. `session_active`, `session_none`,
+  `session_close_all`, `session_revoke_user_confirm`), matching the already-`session_*` audit events.
+  The two odd audit events were renamed too (`user_sessions_revoked`→`session_user_revoked`,
+  `all_sessions_revoked`→`session_all_revoked`); audit rows written before this show the raw event slug.
+  Cross-cutting families left untouched (`col_sessions`, `subtab_sessions`, `overview_sessions`) and the
+  `sessions_view`/`sessions_revoke` **permission flags** are unchanged.
+- **Notification recipient fields render as removable chips** (Config → Notifications → Email and
+  Microsoft Teams). Type an address and press Enter to add it (or paste a comma-separated batch);
+  each entry is a chip with an × to remove. Reuses the existing `multi` field widget — just flags
+  `email|recipients` / `msteams|recipients` with `multi: true` in `build_config_schema()`; still
+  stored as a comma-joined string, so the channels' recipient parsing is unchanged.
+- **Auth flow refactor (thin `/login` route + Flask-free resolver, no behaviour change).** The
+  `login` route no longer holds the LDAP orchestration: the local-vs-LDAP decision (and the two
+  previously-duplicated LDAP branches — known-SSO user vs unknown user) is now one Flask-free
+  `_AuthMixin.resolve_login(username, password) -> LoginResult`; the route only maps the result to
+  session/audit/flash. The shared post-auth helpers `_establish_session`, `_landing_url` and
+  `_auth_method_label` moved from `web_admin/routes/auth.py` onto `_AuthMixin` — so the OIDC/SAML/Teams
+  provider routes call `wa._establish_session(...)` / `wa._landing_url(...)` instead of importing them
+  from `web_admin.routes.auth` (removes the provider→route layering coupling flagged in the audit). The
+  LDAP protocol stays in `providers/ldap`. Verified behaviour-identical: anti-timing/anti-enumeration,
+  lockout, LDAP fallback and all SSO paths — 151 auth/LDAP/OIDC/SAML/Teams-SSO/security-regression tests pass.
 
 ### Fixed
+- **DB portability — cross-engine schema evolution.** `add_column_if_missing`/`_apply_incremental`
+  no longer emit a bare `ADD COLUMN … NOT NULL` with no default (fatal on a non-empty table in every
+  engine): a `NOT NULL` constraint is only rendered when the column carries a default, otherwise the
+  column is added nullable (and a warning is logged). A `unique=True` column is now enforced with a
+  follow-up `CREATE UNIQUE INDEX` (`ux_<table>_<col>`) instead of an inline `UNIQUE` clause, which
+  MySQL/SQLite reject on `ALTER TABLE ADD COLUMN`.
+- **History bucket downsampling was SQLite-only.** The time-bucket aggregation used integer division
+  that silently returned floats (or errored) on MySQL/PostgreSQL; it now truncates with
+  `CAST(FLOOR((ts - ?) / ?) AS <int>)` in both the SELECT and GROUP BY, so downsampled history graphs
+  render identically across engines.
+- **`/history/diag` used a SQLite-only path** (`PRAGMA table_info` + a private `_conn()`); it now goes
+  through the portable connector API (`list_columns`, `fetchone`, `KIND`), so the diagnostics endpoint
+  works on any backend.
+- **Field-value picker / discovery modal could show stale results.** Opening a picker or a discovery
+  modal for one field while a slow request for a previous one was still in flight let the late response
+  overwrite the current modal. Each open now takes a generation token; a response whose token no longer
+  matches the active open is dropped (`_fpGen` in the field picker, `_discoverGen` in discovery).
+- **Sessions tab exposed revoke controls to view-only users.** The card/table revoke buttons, the bulk
+  bar and the "close all" header button are now gated on `sessions_revoke` client-side (`_canRevokeSessions()`),
+  matching the server-side check, so a user with only `sessions_view` no longer sees dead buttons.
+- **Group→role mapping listed custom roles by UID.** The role dropdown built custom-role options from
+  the role UID instead of its name, so a mapping to a custom role couldn't resolve; it now uses `rd.name`
+  (built-ins by key, customs by name), matching `_role_name_to_uid`.
+- **Field rename/delete left orphaned entries in the multi-select set.** Renaming or deleting a
+  collection item didn't update `_modItemSel`, so a stale `parent|key` selection lingered (and a rename
+  lost the selection); both now fix up the set.
+- **Config tab could open on a hidden tab / servers "migrate" crashed on a memberless cluster.** The
+  active-config-tab fallback now snaps to the first available tab when the remembered one is gone, and
+  the migrate modal guards `cluster.members` (`|| []`) at both the `.map` and `.length` sites.
+- **`_fmtDateTime` returned "Invalid Date" for unparseable values** instead of echoing the original
+  string; it now falls back to the raw input.
+- **Built-in Editor role now includes `credentials_view` + `credentials_edit`.** The editor could
+  configure modules that use reusable credentials but couldn't see or edit the credentials themselves;
+  granted via `roles: ('editor',)` on those two flags in `credentials/permissions.py` (add/delete stay
+  admin-only).
+- **Overview card hover effects broke at the corners.** Both the `.dw-clickable:hover` outline and the
+  "pop" glow box-shadow traced a square-ish box (the outline used the default `--bs-border-radius`; the
+  glow used `.dw`'s unset radius), while every card rounds with `.rounded-3` (`--bs-border-radius-lg`),
+  so the page background showed through at the rounded corners on hover. `.dw` now carries that radius,
+  so both effects hug the card corners. Separately, the stat cards' top **accent bar** now rounds its
+  own top corners (`border-radius: …-lg …-lg 0 0`, in both `_dwStatCard` and `_dwMwStatCard`) instead
+  of relying on the card's `overflow:hidden` clip: Chromium drops that clip at the corner while an
+  ancestor is `transform`-scaled (the hover "pop"), so the square accent corner poked past the card's
+  rounded corner. (Verified with a headless-Edge screenshot of the exact markup + CSS.)
+- **Overview module stat cards pop by a fixed small amount** (a `dw-module` class). A wide card popped
+  with the core's proportional `scale(1.04)` ballooned — overflowing the viewport and overlapping its
+  neighbours. `_dwOnGridHover` now sets `--dw-pop = 1 + 8px/width` (capped at 1.04), so a wide card
+  grows the same ~8px a narrow one does, and points `transform-origin` at the side with room; the
+  neighbours also recede (they did already for core cards), so the popped card has space instead of
+  overlapping. Verified with a headless-Edge measurement (cols-8 at the left edge: scale 1.0148,
+  8px growth, no overlap, on-screen). Plus glow + a crisp outline; only the stat-card view pops
+  (tables don't). Compact core stat cards are unchanged.
+- **Stylesheet cache-busting.** `web_admin.css` is now linked with a `?v=<mtime>` query, so an edited
+  stylesheet always reaches the browser. The dev watcher doesn't restart on `.css`, and the plain URL
+  was cacheable, so earlier CSS-only fixes could silently not take effect until a hard refresh.
+- **Overview edit-mode toolbar showed a module widget's raw id** (e.g. `mw_m365:0`) instead of its
+  title: the label fell back to the widget id because module widgets have no `lkey`; it now uses
+  `_dwLabel(def)` (the module's translated `pretty_name`, e.g. "Microsoft 365").
+- **Multicheck modules — live per-check checklist + status reasons.** A module whose item runs
+  several sub-checks (m365: SharePoint/tenant/health/licenses/secrets/mailbox/OneDrive/Secure
+  Score/risky users) can declare them in the schema (`list.__multicheck__` = `[{toggle, suffix}]`).
+  The item's **Check** button then opens a checklist modal **immediately**, lists every enabled
+  sub-check with a spinner, and runs each on its own request (`test_connection` honours a `_service`
+  suffix → runs just that one), ticking each row ✅/⚠️ with its reason as the result arrives — no
+  more waiting for the whole batch before anything shows. The **Status** card now also prints each
+  non-OK check's message (the reason) under its name, and the m365 checks' failure paths carry a
+  friendly name so a failed sub-check shows e.g. "… · OneDrive (tenant)" instead of the raw
+  `<item>/onedrive` key. m365's **service health is now one check per service** (`<item>/health/<svc>`):
+  with no filter it auto-surfaces just the **affected** services from Microsoft's API (a single
+  aggregate OK row when all are healthy); with a `health_services` filter it shows each chosen
+  service (OK or not), and that filter is **discoverable** (`list_services` feeds a multi-select
+  picker, so you pick services without knowing their names). Each service's raw Microsoft status
+  code (`serviceDegradation`, `serviceInterruption`, `investigating`, …) is now shown as a
+  **human-readable label with a ✅/⚠️/🔴 icon** (new `health_states` i18n map, read via a generalised
+  `ModuleBase._module_lang_section`) — so a degradation reads warning and an interruption reads
+  error, in the Status card *and* in Telegram/email notifications. The live checklist expands a
+  sub-check that returns several results (like per-service health) into a row each, and the discover
+  picker now **opens immediately with a loading state** instead of freezing the button until data
+  arrives. The risky-users check no longer 400s (`$top` capped at the API's 500).
+- **Test fix**: `test_wa_hosts::TestApiMigrate::test_preview_and_apply` asserted the migrated SNMP
+  `community` by reading `/api/v1/modules`, which now masks it (`community` is `secret: true`) — so
+  it read `None`. It now verifies the value survived the migration against the decrypted stored
+  config (`_load_modules()`).
+- **Monitor now prunes orphan check status**: the monitor only ever *set* status keys, never
+  removed them, so a deleted item / disabled sub-check left its last status lingering forever (the
+  root cause behind the m365 phantom, and stale rows for removed items generally). Each cycle a
+  module's result now prunes the keys it no longer covers: a stale **result** key (carrying a
+  `status`) is dropped immediately, while a **bookkeeping-only** key (no `status` — e.g. a bare item
+  key holding just `fail_count` while results live under `<item>/site`) is kept as long as any
+  sub-key of that item is still reported, so an in-flight failure streak survives. Pruning runs only
+  when the module ran and returned a result set, so an errored/timed-out module never wipes its
+  last-known state. The Status card also stops counting bookkeeping-only entries as checks.
+- **m365 showed a phantom extra check per item**: a single item reported two results (e.g.
+  `item_1 · Microsoft 365` Error **and** `item_1 · SharePoint` OK). The check emitted a success under
+  a per-service key (`<item>/site`, `<item>/tenant`) but a pre-service failure (no creds / auth)
+  under the **bare item key** — and the monitor never prunes keys a module stops emitting, so once
+  auth started working the old base-key error lingered forever beside the real result. Failures now
+  report under the SAME per-service keys, so a later success overwrites them; and the monitor now
+  prunes orphan status (below), so any pre-existing base-key result clears on the next cycle.
+- **m365 auth error was unreadable**: a failed token request showed only `Auth: HTTP 400: Bad
+  Request`, hiding the cause. `_graph_error` only parsed Graph's `{"error": {"message": …}}` shape,
+  but the OAuth token endpoint returns `{"error": "invalid_client", "error_description":
+  "AADSTS…"}` (with `error` as a string) — so `('invalid_client').get('message')` threw and the real
+  reason was dropped. It now handles both shapes, surfacing the AADSTS code (e.g. *AADSTS7000215:
+  Invalid client secret provided* → expired/wrong secret; *AADSTS90002* → wrong tenant) so the test
+  says exactly what to fix.
+- **Servers "test" results**: two probe fixes. (1) Check messages were shown as their raw i18n key
+  (`cpu_ok`, `dns_ok`, `ssl_expiring`…) instead of the translated text, because the probe monitor
+  (`lib/core/hosts/probe.py`) left `dir_modules=''`, so `ModuleBase._msg` couldn't load each module's
+  `lang/<lang>.json` and fell back to the key. The probe now receives `modules_dir` (to resolve the
+  message catalogs) and the global config (`notify_cfg`, so messages use the configured notification
+  language + admin text overrides), matching how notifications/Status render them. (2) A per-item
+  field that inherits a **module-level** setting (e.g. `ssl_cert` *warning_days*, blank → inherit)
+  used the hardcoded default (30) in the test instead of the configured module value, because the
+  probe passed only the tested collection's items — not the module-level scalar settings. `_run_checks`
+  now merges the saved module-level fields so `get_conf()` resolves them.
+- **module config UI**: per-item numeric fields that inherit a module-level setting via
+  `placeholder_module` now show the inherited value as the placeholder (they were blank). The
+  fallback wrongly used `CONFIG_FIELD_DEFAULTS['modules|<field>']`, but that JS constant only holds a
+  few `web_admin|*` keys — never module defaults — so it always resolved to `undefined`. Resolution
+  now cascades module-level value → live *Configuration → Modules* value → the module's own
+  `__module__` schema default (via a shared `_placeholderModuleValue` helper), and a genuine `0` is
+  shown (e.g. datastore *Max connections* → `0` = "no limit"; DNS item *Timeout* → the module default).
+  The live placeholder refresh (`_refreshConditionalFields`, on item expand) kept the old broken
+  logic — it read only `modulesData[mod][field]` and suppressed `0`, so **expanding an item wiped the
+  correct placeholder the render had just set**; it now reuses the same `_placeholderModuleValue`
+  cascade so the inherited value survives expand.
+- **notifications UI**: the routing matrix no longer repeats a section header. Rows are now grouped
+  by source so each subheader (Monitoring / IP ban / Authentication / Service control / …) appears
+  once with its events contiguous, even when different sources interleave by `order` (previously the
+  header re-emitted on every source change, so *Authentication* and *Service control* showed twice).
+- **notifications**: starting/stopping **syslog**, the **event processor** or the internal
+  **fail2ban** from the Services tab sent no notification (only an audit entry) — only the monitoring
+  scheduler did (`scheduler_started`/`scheduler_stopped`). Added generic operator lifecycle events
+  `service_started` / `service_stopped` (source *Service control*), dispatched **synchronously at the
+  control point** — in each service's embedded `control()` and in `_control_external` (so a split/
+  microservices toggle notifies from the operator's instance immediately, instead of waiting for the
+  remote worker's reconcile). Monitoring keeps its own scheduler events (`_LIFECYCLE_NOTIFY = False`
+  on `EmbeddedMonitor`, no double-fire). New routing-matrix rows (opt-in, default off) + i18n
+  (en_EN/es_ES). The `service_down`/`service_up` (platform health) events are unchanged: those are
+  crash detection and still ignore a clean operator start/stop.
+- **audit**: two audit events showed their raw key instead of a label in the Audit tab —
+  `entra_saml2_graph_secret` (SAML2 provisioning creates the Graph client secret) and
+  `notif_text_saved` (unified notification-text editor). Both added to the `audit_events` i18n dict
+  (en_EN/es_ES, parity kept). Verified no other emitted audit event is missing a translation.
 - **uninstall**: `uninstall.sh` no longer destroys runtime data by default. It now removes only the
   program code (`/opt/ServiSesentry`) and **preserves** both the config (`/etc/ServiSesentry`) and the
   runtime data (`/var/lib/ServiSesentry`, which may hold the SQLite database) — `--all` is required to
@@ -396,6 +667,78 @@ All notable changes to **ServiceSentry** are documented in this file.
   injection from configuration values).
 
 ### Docs
+- **Generalised the Entra doc and split out IdP-agnostic SCIM.** `caso-sso-entra.md` →
+  `caso-entra-id.md`, broadened from "SSO" to all Entra-specific material (OIDC, SAML2 and the
+  Device-Code app-registration wizards for SSO/SCIM/M365-email/Teams). New `caso-scim.md` is the
+  single source for **generic SCIM 2.0 provisioning** (IdP-agnostic per RFC 7643/7644): enable +
+  token + base URL, JIT-vs-SCIM, configuring Entra/Okta/other IdPs, user/group de-provisioning and
+  group soft-delete, badges — pointing to `ref-api.md` (endpoints), `explica-seguridad.md`
+  (security) and `caso-entra-id.md` (the Entra auto-registration shortcut). The Entra doc keeps
+  only the Entra-specific SCIM registration. All inbound links (docs index/topic map + the 8
+  referring docs) rewritten; 0 broken links/anchors verified.
+- **Added Mermaid flow/diagram coverage for the requested areas** (all from ground-truth code
+  reads): a module **dependency (layer) graph** in `explica-arquitectura.md` (the component,
+  start, check-cycle and delivery diagrams already existed); an **authentication flow** section in
+  `explica-seguridad.md` (sequence diagrams for local login and SSO OIDC/SAML2/Teams — all
+  converging on `_establish_session()` — plus a per-request `_check_session()` flowchart); and an
+  **API call flow** section in `ref-api.md` (request-lifecycle sequence with the CSRF/401/403
+  branches + a layered call-flow flowchart route→service→store→connector).
+- **Added worked examples** alongside the new diagrams: an illustrative `oidc` config block + a
+  local-login `curl` in the auth section, and a `PUT /api/v1/config` request/response (200 +
+  403-CSRF shapes) in the API section.
+- **Removed macOS from the documentation** (not currently supported or tested): platform tables and
+  "multiplataforma" claims now read Linux/Windows, macOS-only command rows (`launchctl`,
+  `sysctl`/`vm_stat`) and the `darwin` schema examples were dropped across README, `ref-modulos`,
+  `explica-arquitectura`, `ref-configuracion`, `ref-schema-json`, `caso-desarrollo`,
+  `caso-guia-watchful` and `caso-ssh-hardening` (FreeBSD/BSD kept). The `test_darwin*` rows in
+  `ref-tests.md` and the macOS mentions in `ai-module-guide.md` were left untouched — the former
+  are real test names (removing them would misrepresent the suite), the latter is exempt from the
+  reorg; note the module code still contains `darwin` paths even though macOS is unsupported.
+- **Documentation reorganised with a type-prefixed naming convention and a single-source-of-truth
+  policy.** Every doc is now prefixed by its type — `ref-` (reference/look-up), `explica-`
+  (explanation/how-it-works), `caso-` (case/how-to) — with Spanish stems (e.g. `architecture.md` →
+  `explica-arquitectura.md`, `api-reference.md` → `ref-api.md`, `deployment.md` →
+  `caso-despliegue.md`; 25 files renamed). `README.md` and `ai-module-guide.md` are exempt. All
+  inbound links were rewritten — cross-doc links, the docs index/topic map, and the code-comment
+  pointers in `watchfuls/*/watchful.py` and tests — with 0 broken links/anchors verified.
+- **Mixed docs split into ref + explica, one SSOT per topic.** New `ref-permisos.md` (the RBAC
+  catalog: 63 permission flags, roles, groups, dynamic perms — extracted from web-admin, now the
+  single source) and `ref-i18n.md` (tag schemas + `lang/*.json` structure + `_fill` — extracted
+  from i18n). The Debug/logging explanation moved out of the config reference into
+  `explica-logging.md`. Duplicated topics across docs (concurrency, DB schema/reconcile, service
+  topology, REST control-plane, config/env vars, notification grouping, schema.json reference,
+  discovery, host model, reverse-proxy) were trimmed to a summary + pointer to their SSOT.
+- **Doc/code contradictions reconciled against ground truth.** Permission count corrected 52 → **63**
+  (`ref-permisos.md` canonical; the stale table removed from security). Per-module thread pool cap
+  documented as `min(len(módulos), 16)` (architecture previously implied unbounded). Action/button
+  `variant` examples changed from `outline-*` to solid variants (the actual convention). `info.json`
+  `dependencies` documented as **required** (enforced by `test_info_json_has_required_keys`).
+  `input_action.result` corrected to `toast|list|field_picker|modal|fields`. The `_DEFAULTS`
+  snippet fixed to exclude `__*__` meta-keys (`ModuleBase._schema_defaults`). The misleading global
+  "SSH RejectPolicy default" note corrected (only `Exec` uses it; host-aware path defaults to
+  `AutoAddPolicy`). Deprecated `@write_required`/`@admin_required` decorators flagged as unused.
+- **New reference docs for previously-undocumented areas, all generated from ground-truth code
+  reads.** Added `docs/api-reference.md` (complete, authoritative REST inventory: route
+  architecture — no blueprints, thin routes + Flask-free service layer —, CSRF/versioning, and
+  every endpoint by domain with method/path/permission/purpose + examples), `docs/db-schema.md`
+  (the 32 runtime tables with columns/types/indexes, an ER Mermaid diagram, and the
+  reconcile/multi-engine portability mechanism), `docs/performance.md` (concurrency model,
+  bottlenecks, caches, table row caps, scaling), and `docs/logging.md` (the custom `Debug`
+  system + the residual unconfigured stdlib `logging` path). Extended `docs/README.md` with an
+  index entry per new doc plus a topic map (documentation-outline → doc).
+- **Corrected stale facts across existing docs** found while cross-checking against the code:
+  `web-admin.md` REST tables — hosts use the `servers_*` family (not `modules_*`), history
+  `test-write`/`diag` require `history_view` (not `history_delete`), Entra ID provisioning
+  requires `credentials_add`/`credentials_edit` (not `config_edit`), the IP-ban endpoints use the
+  granular `ipban_*` family (not `config_*`), roles/groups paths are `<uid>` (not `<name>`), and
+  `/logout` is POST; a pointer to `api-reference.md` as the maintained source was added.
+  `configuration.md` — `--verbose`/`SS_VERBOSE` only enables Flask's interactive debugger and does
+  NOT change the log level (use `--log-level`). `security.md` — the encrypted-fields table now
+  includes `graph_secret`/`idp_cert`/`webhook_url`/`bot_app_password`, and the runtime-transparency
+  note reflects that editable config is written encrypted to the DB via `ConfigManager`
+  (`_save_config_file` no longer exists on `WebAdmin`). `development.md` — added the missing
+  dependencies `jinja2`, `dnspython`, `pysnmp`, `pysmi`, `PyJWT`, and a note that M365/Entra uses
+  `requests`+`PyJWT` (not `msal`) and that non-core deps are lazily imported.
 - **Doc filenames standardised to kebab-case** (lowercase, hyphen-separated — the URL/slug-friendly
   convention; `README.md` stays the conventional exception). Renamed `ai_module_guide.md` →
   `ai-module-guide.md`, `watchful_guide.md` → `watchful-guide.md`, `web_admin.md` → `web-admin.md`,
@@ -519,6 +862,12 @@ All notable changes to **ServiceSentry** are documented in this file.
   `scheme`/`server`/`port`/`path` schema (`url` is compat). Added a cross-cutting note on host-aware
   system modules, and per-module `severity='warning'` (amber) on soft-threshold breaches. Fixed the
   "via psutil" description in `cpu`/`filesystemusage`/`process` `info.json`.
+- **`troubleshooting.md` — nuevo registro de bugs resueltos y trampas conocidas**: documenta
+  fallos no evidentes con su causa raíz, solución y lección generalizable (formato de fichas:
+  Síntoma / Diagnóstico / Causa raíz / Solución / Lección), separado del changelog. Primera
+  entrada: el placeholder heredado (`placeholder_module`) que el render fijaba bien pero
+  `_refreshConditionalFields` borraba al expandir el item por usar lógica divergente. Añadido al
+  índice de `docs/README.md`.
 
 ### Notes
 - **`/overview2`**: an internal proof-of-concept to evaluate **Alpine.js** against the current

@@ -27,7 +27,7 @@ on that host via :meth:`ModuleBase.host_exec` using an OS-appropriate command
 ``wmic`` on Windows) and compared with a per-check threshold.
 
 Each command is a single binary with no shell chaining, so it fits a strict SSH
-command allowlist (see ``docs/ssh-hardening.md``).  Linux/FreeBSD need a delta
+command allowlist (see ``docs/caso-ssh-hardening.md``).  Linux/FreeBSD need a delta
 over an interval, so the second sample is taken by a second call and the wait
 happens here in Python — not via a remote ``sleep``.
 """

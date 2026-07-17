@@ -14,6 +14,7 @@ EVENT_ICON = {
     'scheduler_started': '🟢', 'scheduler_stopped': '🛑',
     'auth_login': '🔓', 'auth_login_failed': '🚫', 'auth_account_locked': '🔒',
     'ipban_banned': '⛔', 'ipban_unbanned': '🔓',
+    'service_started': '▶️', 'service_stopped': '⏹️',
     'service_down': '💥', 'service_up': '💚',
     'cert_expiring': '📜',
     'syslog': '📄', 'event': '🔔',
@@ -29,6 +30,7 @@ EVENT_LABEL_KEY = {
     'auth_login': 'notif_event_auth_login', 'auth_login_failed': 'notif_event_auth_login_failed',
     'auth_account_locked': 'notif_event_auth_locked',
     'ipban_banned': 'notif_event_ipban_banned', 'ipban_unbanned': 'notif_event_ipban_unbanned',
+    'service_started': 'notif_event_service_started', 'service_stopped': 'notif_event_service_stopped',
     'service_down': 'notif_event_service_down', 'service_up': 'notif_event_service_up',
     'cert_expiring': 'notif_event_cert_expiring',
     'syslog': 'notif_event_syslog', 'event': 'notif_event',
@@ -54,10 +56,9 @@ def event_title(kind: str, lang: str = '', cfg: dict = None) -> str:
 
 def notify_lang(cfg: dict) -> str:
     """Effective notification language for the system: the global ``notifications|lang``,
-    falling back to the legacy ``email|lang``, then the panel language, then ''."""
+    falling back to the panel language, then ''."""
     cfg = cfg or {}
     return ((cfg.get('notifications') or {}).get('lang')
-            or (cfg.get('email') or {}).get('lang')
             or (cfg.get('web_admin') or {}).get('lang') or '')
 
 

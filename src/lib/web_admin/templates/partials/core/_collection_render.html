@@ -16,6 +16,15 @@ async function testItemConnection(pathStr, url, btn, extra) {
         extra || {});
     // Inject item key so classmethods can use it as fallback for __key__ placeholder fields.
     if (_itemKey) itemData['_item_key'] = _itemKey;
+    // "Multicheck" module (schema __multicheck__): open a LIVE checklist at once and
+    // run each ENABLED sub-check on its own request, ticking each row as it returns.
+    const _colSchema = ITEM_SCHEMAS[_schemaKeyOf(parts.slice(0, -1).join('|'))]
+        || ITEM_SCHEMAS[parts[0] + '|list'] || null;
+    const _mc = _colSchema && _colSchema.__multicheck__;
+    if (Array.isArray(_mc) && _mc.length) {
+        _runItemMultiCheck(parts[0], _colSchema, _itemKey, url, itemData, _mc);
+        return;
+    }
     const origHtml = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`;
@@ -23,15 +32,97 @@ async function testItemConnection(pathStr, url, btn, extra) {
     btn.disabled = false;
     btn.innerHTML = origHtml;
     if (!result) return;
-    const ok = result.data && result.data.ok;
-    const msg = (result.data && result.data.message) || (ok ? t('connection_ok') : t('connection_error'));
+    const d = result.data || {};
+    const ok = d.ok;
+    const msg = d.message || (ok ? t('connection_ok') : t('connection_error'));
     // When the endpoint returns extra data on success (e.g. all the UPS/NUT
     // variables), show it in a modal; otherwise a toast is enough.
-    if (ok && result.data.info && Object.keys(result.data.info).length) {
-        showInfoModal(t('test_connection') || 'Test', result.data.info, msg);
+    if (ok && d.info && Object.keys(d.info).length) {
+        showInfoModal(t('test_connection') || 'Test', d.info, msg, d.variant);
     } else {
         showToast(msg, ok ? 'success' : 'danger');
     }
+}
+
+// Shared modal for a module's live sub-check checklist (multicheck items).
+function _itemMultiCheckModal() {
+    let el = document.getElementById('itemMultiCheckModal');
+    if (el) return el;
+    el = document.createElement('div');
+    el.className = 'modal fade'; el.id = 'itemMultiCheckModal'; el.tabIndex = -1;
+    el.innerHTML = `<div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+        <div class="modal-header py-2">
+            <h6 class="modal-title mb-0"><i class="bi bi-list-check me-2"></i><span id="imcTitle"></span></h6>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body"><div id="imcLead" class="small mb-2"></div><div id="imcBody"></div></div>
+    </div></div>`;
+    document.body.appendChild(el);
+    return el;
+}
+
+// Run each ENABLED sub-check of a multicheck item as its own request, so the modal
+// opens immediately (list + spinners) and each row resolves as its data arrives.
+function _runItemMultiCheck(mod, colSchema, itemKey, url, itemData, mc) {
+    const enabled = mc.filter(s => itemData[s.toggle] === true);
+    if (!enabled.length) { showToast(t('host_test_none') || '—', 'secondary'); return; }
+    const _lbl = tog => {
+        const f = colSchema[tog], li = f && f.label_i18n;
+        return (li && (li[CURRENT_LANG] || li[SYSTEM_DEFAULT_LANG])) || tog;
+    };
+    const el = _itemMultiCheckModal();
+    document.getElementById('imcTitle').textContent =
+        (typeof _modPrettyName === 'function' ? _modPrettyName(mod) : mod) + (itemKey ? ' — ' + itemKey : '');
+    document.getElementById('imcLead').innerHTML =
+        `<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>${esc(t('cred_prov_waiting') || 'Checking…')}</span>`;
+    // One container per enabled sub-check; a sub-check may expand into several rows
+    // (e.g. m365 service-health returns one result per affected/watched service).
+    document.getElementById('imcBody').innerHTML = enabled.map((s, i) =>
+        `<div id="imc-row-${i}"><div class="d-flex align-items-start gap-2 py-1">
+            <span class="mt-1"><span class="spinner-border spinner-border-sm text-secondary"></span></span>
+            <div class="flex-grow-1 text-truncate" title="${escAttr(_lbl(s.toggle))}">${esc(_lbl(s.toggle))}</div>
+        </div></div>`).join('');
+    bootstrap.Modal.getOrCreateInstance(el).show();
+    const _ic = ok => ok
+        ? '<i class="bi bi-check-circle-fill text-success"></i>'
+        : '<i class="bi bi-exclamation-triangle-fill text-warning"></i>';
+    const _rowHtml = (icon, title, msg) =>
+        `<div class="d-flex align-items-start gap-2 py-1">
+            <span class="mt-1">${icon}</span>
+            <div class="flex-grow-1" style="min-width:0">
+                <div class="text-truncate" title="${escAttr(title)}">${esc(title)}</div>
+                ${msg ? `<div class="text-muted mt-1" style="font-size:.76rem;word-break:break-word">${esc(msg)}</div>` : ''}
+            </div>
+        </div>`;
+    let doneReqs = 0, okc = 0, total = 0;
+    enabled.forEach((s, i) => {
+        apiPost(url, Object.assign({ _service: s.suffix }, itemData)).then(r => {
+            const d = r && r.data;
+            const results = (d && Array.isArray(d.results)) ? d.results : [];
+            const cont = document.getElementById('imc-row-' + i);
+            if (cont) {
+                if (results.length <= 1) {
+                    const res = results[0] || null;
+                    const ok  = res ? !!res.ok : !!(d && d.ok);
+                    const msg = (res && res.message) || (d && d.message) || '';
+                    total += 1; if (ok) okc += 1;
+                    cont.innerHTML = _rowHtml(_ic(ok), _lbl(s.toggle), msg);
+                } else {
+                    // Several results for one sub-check → group them under its label.
+                    cont.innerHTML = `<div class="small fw-semibold mt-2 mb-1">${esc(_lbl(s.toggle))}</div>`
+                        + results.map(res => {
+                            total += 1; if (res.ok) okc += 1;
+                            return _rowHtml(_ic(!!res.ok), res.name || res.key || '', res.message || '');
+                        }).join('');
+                }
+            }
+            if (++doneReqs === enabled.length) {
+                const l = document.getElementById('imcLead');
+                if (l) l.innerHTML = `<span class="text-${okc === total ? 'success' : 'warning'}">`
+                    + `<i class="bi ${okc === total ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'} me-1"></i>${okc}/${total} OK</span>`;
+            }
+        });
+    });
 }
 
 /**
@@ -72,6 +163,30 @@ async function itemAction(btn) {
         }
     }
 
+    // Field picker (discover): open the picker IMMEDIATELY in a loading state, then
+    // populate it when the items arrive — the modal + spinner show at once instead of
+    // a frozen button while the discover request runs.
+    if (result === 'field_picker' && typeof openFieldPickerLoading === 'function') {
+        let _pkTitle = btn.textContent.trim();
+        if (!_pkTitle && typeof _fieldTermFor === 'function') {
+            const _m = (typeof fieldMeta === 'function')
+                ? fieldMeta(ITEM_SCHEMAS[_schemaKeyOf(pathStr)] || null, resultFld) : null;
+            const _tm = _fieldTermFor(resultFld, _m, pathStr + '|' + resultFld, 'modules');
+            _pkTitle = (_tm && _tm.pick) || btn.title || resultFld;
+        }
+        const _fpTok = openFieldPickerLoading(pathStr + '|' + resultFld, _pkTitle, undefined, resultMulti);
+        const _oh = btn.innerHTML; btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`;
+        const r2 = await apiPost(url, itemData);
+        btn.disabled = false; btn.innerHTML = _oh;
+        const d2 = r2 && r2.data;
+        // Pass the open-token so a late response can't fill a picker the user has since
+        // closed or reopened for another field (stale-response race).
+        if (!d2 || !d2.ok) { fieldPickerError((d2 && d2.message) || t('error'), _fpTok); return; }
+        setFieldPickerItems((d2.items || []).map(x => String(x)), _fpTok);
+        return;
+    }
+
     const origHtml = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`;
@@ -103,12 +218,10 @@ async function itemAction(btn) {
                 ${items.map(d => `<span class="badge bg-secondary bg-opacity-50 text-body ss-fs-2">${esc(d)}</span>`).join('')}
             </div></div>`;
     } else if (result === 'field_picker') {
+        // Fallback (openFieldPickerLoading unavailable): post then open the picker.
         if (!ok) { showToast(msg, 'danger'); return; }
         const items = (res.data.items || []).map(d => String(d));
         if (!items.length) { showToast(t('no_items') || 'No items', 'secondary'); return; }
-        // The action button is icon-only, so textContent is empty — title the
-        // picker from the field's value-dependent term (pick), the button's
-        // tooltip (the action label), or the field name as a last resort.
         let _pkTitle = btn.textContent.trim();
         if (!_pkTitle && typeof _fieldTermFor === 'function') {
             const _m = (typeof fieldMeta === 'function')
@@ -160,7 +273,7 @@ function _renderInlineActions(pathStr, actions, itemData) {
     let btns = '';
 
     for (const action of actions) {
-        const label   = esc(_al[action.id] || t(action.id) || action.id);
+        const label   = esc(_al[action.id] || t(action.label || action.id) || action.id);
         const icon    = action.icon ? `<i class="bi ${escAttr(action.icon)} me-1"></i>` : '';
         const variant = escAttr(action.variant || 'secondary');
         const isToast       = !action.result || action.result === 'toast';
@@ -213,7 +326,7 @@ function _renderGroupActionBtns(pathStr, actions, itemData) {
     const _al      = (_modLd && _modLd.action_labels) || {};
     let btns = '';
     for (const action of actions) {
-        const label   = esc(_al[action.id] || t(action.id) || action.id);
+        const label   = esc(_al[action.id] || t(action.label || action.id) || action.id);
         const icon    = action.icon ? `<i class="bi ${escAttr(action.icon)} me-1"></i>` : '';
         const variant = escAttr(action.variant || 'secondary');
         const isFieldPicker = action.result === 'field_picker';

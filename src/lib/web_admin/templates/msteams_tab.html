@@ -18,16 +18,21 @@
 <body>
   <div class="wrap">
     <div class="spinner" id="spin"></div>
-    <div id="msg">Signing you in to ServiceSentry…</div>
-    <a class="btn" id="browser" href="/" target="_blank" rel="noopener">Open ServiceSentry in your browser</a>
+    <div id="msg">{{ i18n['msteams_sso_signing'] }}</div>
+    <a class="btn" id="browser" href="/" target="_blank" rel="noopener">{{ i18n['msteams_sso_open_browser'] }}</a>
   </div>
   <script>
   (function () {
+    var I = {
+      sdk_fail: {{ i18n['msteams_sso_sdk_fail']|tojson }},
+      failed: {{ i18n['msteams_sso_failed']|tojson }},
+      failed_prefix: {{ i18n['msteams_sso_failed_prefix']|tojson }}
+    };
     var msg = document.getElementById('msg'),
         spin = document.getElementById('spin'),
         browser = document.getElementById('browser');
     function fail(text) { if (spin) spin.style.display = 'none'; msg.textContent = text; browser.style.display = 'inline-block'; }
-    if (!window.microsoftTeams) { fail('The Microsoft Teams SDK could not be loaded.'); return; }
+    if (!window.microsoftTeams) { fail(I.sdk_fail); return; }
     microsoftTeams.app.initialize()
       .then(function () { return microsoftTeams.authentication.getAuthToken(); })
       .then(function (token) {
@@ -41,9 +46,9 @@
       .then(function (r) { return r.json().then(function (d) { return { status: r.status, d: d }; }); })
       .then(function (res) {
         if (res.d && res.d.ok) { window.location = res.d.redirect || '/'; }
-        else { fail((res.d && res.d.error) || 'Sign-in failed.'); }
+        else { fail((res.d && res.d.error) || I.failed); }
       })
-      .catch(function (e) { fail('Teams sign-in failed: ' + (e && e.message ? e.message : String(e))); });
+      .catch(function (e) { fail(I.failed_prefix + (e && e.message ? e.message : String(e))); });
   })();
   </script>
 </body>

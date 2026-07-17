@@ -101,6 +101,7 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
         if action == 'stop':
             self._stop_event_worker()
             self._audit_system('events_worker_stopped', {})
+            self._notify_service_control('stop')
             return True, ''
         if not self._events_enabled():              # start needs enabled in config
             return False, 'disabled'
@@ -108,6 +109,7 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
         ok = bool(self._event_worker_running())
         if ok:
             self._audit_system('events_worker_started', {})
+            self._notify_service_control('start')
         return ok, '' if ok else 'already'
 
     # ── used by routes/config ─────────────────────────────────────────────────

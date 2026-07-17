@@ -118,10 +118,11 @@ class Watchful(ModuleBase):
         if isinstance(v, dict) and 'default' in v
     }
 
-    # 'provision_token' is a WRITE action (creates a Proxmox user/token over SSH),
-    # so it is intentionally NOT in READ_ONLY_ACTIONS → it gets audited.
+    # 'provision_token' and 'fix_permissions' are WRITE actions (they change the
+    # Proxmox cluster over SSH), so they are intentionally NOT in READ_ONLY_ACTIONS
+    # → they require module edit rights and get audited.
     WATCHFUL_ACTIONS: frozenset[str] = frozenset(
-        {'test_connection', 'test_permissions', 'provision_token', 'list_nodes'})
+        {'test_connection', 'test_permissions', 'provision_token', 'fix_permissions', 'list_nodes'})
     READ_ONLY_ACTIONS: frozenset[str] = frozenset(
         {'test_connection', 'test_permissions', 'list_nodes'})
 
@@ -865,21 +866,15 @@ class Watchful(ModuleBase):
         }
 
     @classmethod
-    def provision_token(cls, config: dict) -> dict:
-        """POST /api/v1/modules/watchfuls/proxmox/provision_token
+    def _provision_ssh(cls, config: dict, cmd: str, *, timeout: int = 30) -> dict:
+        """Run *cmd* on a Proxmox node over SSH (root/sudo), reusing the host's SSH
+        profile/credential — the shared connection path behind ``provision_token``
+        and ``fix_permissions``.
 
-        Connects to the Proxmox node over **SSH** (root or a sudo-capable user)
-        and provisions an API token, then returns the generated token id + secret
-        so the UI fills the form (result mode ``fields``).
-
-        Two modes (``mode`` input):
-          * ``create`` (default) — idempotently create a read-only monitoring user
-            and grant the ``PVEAuditor`` role at ``/``, then (re)create the token.
-          * ``renew`` — only rotate the token secret (remove + add); assumes the
-            user and role already exist (lighter, for secret rotation).
-
-        Returns {"ok": bool, "message": str, "fields": {auth_method, token_id,
-        token_secret}}.
+        Resolves the SSH target from the modal fields, falling back to the bound
+        host's ``__host__`` SSH context; tries each candidate address in turn behind
+        the SSRF guard.  Returns ``{'ok': True, 'out', 'err', 'code'}`` on a
+        successful run, else ``{'ok': False, 'message': <reason>}``.
         """
         from lib.core.hosts import ssh_client  # noqa: PLC0415
         from lib.security.net_guard import validate_external_url  # noqa: PLC0415
@@ -922,6 +917,67 @@ class Watchful(ModuleBase):
             return {'ok': False,
                     'message': 'Indica una contraseña o clave SSH (o una credencial SSH) para el aprovisionamiento'}
 
+        if not ssh_client.HAS_PARAMIKO:
+            return {'ok': False, 'message': 'paramiko no está instalado (pip install paramiko)'}
+
+        # Connect over SSH via the shared ssh_client (same path as the host-aware
+        # checks): it accepts an inline key text directly and honours the host-key
+        # policy.  Try each candidate node until one connects.
+        out = err = ''
+        code = None
+        connected = False
+        last_err = None
+        for cand in candidates:
+            reason = validate_external_url(f'https://{cand}:{ssh_port}')
+            if reason:
+                last_err = f'{cand}: bloqueado ({reason})'
+                continue
+            client = None
+            try:
+                client = ssh_client.connect(
+                    address=cand, port=ssh_port, user=ssh_user,
+                    password=ssh_password or '', key_path=ssh_key or '',
+                    key_string=ssh_key_string or '', verify_host=ssh_verify, timeout=timeout)
+                out, err, code = ssh_client.run_command(client, cmd, timeout=timeout)
+                connected = True
+                break
+            except Exception as exc:  # pylint: disable=broad-except
+                last_err = f'{cand}:{ssh_port} → {exc}'
+            finally:
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+        if not connected:
+            hint = ''
+            if last_err and 'known_hosts' in last_err:
+                hint = (' La clave del host no está en known_hosts y el perfil SSH del host '
+                        'tiene la verificación activada: desactívala o añade la clave.')
+            return {'ok': False,
+                    'message': (f'SSH: {last_err or "ningún host alcanzable"}.{hint} '
+                                f'La acción conecta por SSH (puerto {ssh_port}) '
+                                f'al nodo Proxmox, no a la API (8006): revisa que el puerto SSH, '
+                                f'la dirección de gestión y el firewall sean correctos.')}
+        return {'ok': True, 'out': (out or '').strip(), 'err': (err or '').strip(), 'code': code}
+
+    @classmethod
+    def provision_token(cls, config: dict) -> dict:
+        """POST /api/v1/modules/watchfuls/proxmox/provision_token
+
+        Connects to the Proxmox node over **SSH** (root or a sudo-capable user)
+        and provisions an API token, then returns the generated token id + secret
+        so the UI fills the form (result mode ``fields``).
+
+        Two modes (``mode`` input):
+          * ``create`` (default) — idempotently create a read-only monitoring user
+            and grant the ``PVEAuditor`` role at ``/``, then (re)create the token.
+          * ``renew`` — only rotate the token secret (remove + add); assumes the
+            user and role already exist (lighter, for secret rotation).
+
+        Returns {"ok": bool, "message": str, "fields": {auth_method, token_id,
+        token_secret}}.
+        """
         user = (config.get('prov_user') or 'servicesentry@pve').strip()
         token = (config.get('prov_token') or 'monitoring').strip()
         role = (config.get('prov_role') or 'ServiceSentryMonitor').strip()
@@ -953,51 +1009,10 @@ class Watchful(ModuleBase):
                 + token_cmd
             )
 
-        if not ssh_client.HAS_PARAMIKO:
-            return {'ok': False, 'message': 'paramiko no está instalado (pip install paramiko)'}
-
-        # Connect over SSH via the shared ssh_client (same path as the host-aware
-        # checks): it accepts an inline key text directly and honours the host-key
-        # policy.  Try each candidate node until one connects.
-        out = err = ''
-        code = None
-        connected = False
-        last_err = None
-        for cand in candidates:
-            reason = validate_external_url(f'https://{cand}:{ssh_port}')
-            if reason:
-                last_err = f'{cand}: bloqueado ({reason})'
-                continue
-            client = None
-            try:
-                client = ssh_client.connect(
-                    address=cand, port=ssh_port, user=ssh_user,
-                    password=ssh_password or '', key_path=ssh_key or '',
-                    key_string=ssh_key_string or '', verify_host=ssh_verify, timeout=30)
-                out, err, code = ssh_client.run_command(client, cmd, timeout=30)
-                connected = True
-                break
-            except Exception as exc:  # pylint: disable=broad-except
-                last_err = f'{cand}:{ssh_port} → {exc}'
-            finally:
-                if client is not None:
-                    try:
-                        client.close()
-                    except Exception:  # pylint: disable=broad-except
-                        pass
-        if not connected:
-            hint = ''
-            if last_err and 'known_hosts' in last_err:
-                hint = (' La clave del host no está en known_hosts y el perfil SSH del host '
-                        'tiene la verificación activada: desactívala o añade la clave.')
-            return {'ok': False,
-                    'message': (f'SSH: {last_err or "ningún host alcanzable"}.{hint} '
-                                f'El aprovisionamiento conecta por SSH (puerto {ssh_port}) '
-                                f'al nodo Proxmox, no a la API (8006): revisa que el puerto SSH, '
-                                f'la dirección de gestión y el firewall sean correctos.')}
-
-        out = (out or '').strip()
-        err = (err or '').strip()
+        res = cls._provision_ssh(config, cmd)
+        if not res.get('ok'):
+            return {'ok': False, 'message': res.get('message', 'SSH: error')}
+        out, err, code = res.get('out', ''), res.get('err', ''), res.get('code')
         data = _extract_json(out)
         secret = (data or {}).get('value')
         full_id = (data or {}).get('full-tokenid') or f'{user}!{token}'
@@ -1020,3 +1035,69 @@ class Watchful(ModuleBase):
                 'token_secret': secret,
             },
         }
+
+    @classmethod
+    def fix_permissions(cls, config: dict) -> dict:
+        """POST /api/v1/modules/watchfuls/proxmox/fix_permissions
+
+        Grant the privileges the item's *enabled* checks need to the identity the
+        configured credential already uses, over **SSH** (root/sudo) — the same path
+        as ``provision_token`` but WITHOUT rotating the token, so an existing token
+        keeps working with more privileges.
+
+        Ensures a custom role (``prov_role``, default ``ServiceSentryMonitor``) holds
+        exactly the required privileges (``Sys.Audit``; ``Datastore.Audit`` for the
+        storage check; ``Sys.Modify`` for the updates check) and grants it at ``/``
+        to the token's own user — and to the token itself, covering a
+        privilege-separated token.  Then re-verifies over the API and returns the
+        fresh per-privilege verdict (same shape as ``test_permissions``).
+
+        Returns {"ok": bool, "all_ok": bool, "message": str, "variant": str,
+                 "info": [[label, ✅/❌], …]}.
+        """
+        auth_method = str(config.get('auth_method') or 'token').strip().lower()
+        role = (config.get('prov_role') or 'ServiceSentryMonitor').strip()
+        # Exactly the privileges the enabled checks need (deduped, order preserved).
+        privs = list(dict.fromkeys(p for p, _path, _f in cls._required_privs(config)))
+        if not privs:
+            return {'ok': False, 'message': 'No hay privilegios que conceder'}
+
+        # Grant to the identity the credential uses: the token's own user (parsed
+        # from token_id 'user@realm!tokenname'), else the password user.  A privsep
+        # token has its own ACLs, so also grant on the token itself for token auth.
+        token_id = str(config.get('token_id') or '').strip()
+        token_grant = ''
+        if auth_method == 'token':
+            if not token_id:
+                return {'ok': False, 'message': 'Falta token_id para conceder permisos'}
+            user = token_id.split('!', 1)[0]
+            token_grant = f"pveum acl modify / --tokens {_shq(token_id)} --roles {_shq(role)}; "
+        else:
+            user = str(config.get('username') or '').strip()
+            if not user:
+                return {'ok': False, 'message': 'Falta el usuario para conceder permisos'}
+
+        qu, qr, qp = _shq(user), _shq(role), _shq(', '.join(privs))
+        # Idempotent: create the role if absent, sync its privileges, grant it at /
+        # (propagates) to the user and — for a privsep token — to the token too.
+        cmd = (
+            f"pveum role add {qr} -privs {qp} 2>/dev/null; "
+            f"pveum role modify {qr} -privs {qp}; "
+            f"pveum acl modify / --users {qu} --roles {qr}; "
+            + token_grant
+        ).rstrip('; ')
+
+        res = cls._provision_ssh(config, cmd)
+        if not res.get('ok'):
+            return {'ok': False, 'message': res.get('message', 'SSH: error')}
+
+        # Re-verify over the API so the result modal shows the updated verdict.
+        note = f'Permisos concedidos a «{user}» (rol «{role}»: {", ".join(privs)}). '
+        verify = cls.test_permissions(config)
+        if isinstance(verify, dict) and verify.get('ok'):
+            verify = dict(verify)
+            verify['message'] = note + str(verify.get('message', ''))
+            return verify
+        return {'ok': True, 'all_ok': False, 'variant': 'warning',
+                'message': note + 'No se pudo re-verificar por API: '
+                                  + str((verify or {}).get('message', ''))}

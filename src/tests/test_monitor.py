@@ -316,9 +316,14 @@ class TestCheckStatePersistence:
     def test_derived_key_split_into_metric(self, monitor):
         # ram_swap-style: one item (keyed by its uid), two derived result keys.
         # Each is stored as key=<uid> + metric=ram/swap, not "<uid>_ram".
+        # Emitted together in ONE result set (as the real check does), so orphan
+        # pruning keeps both.
+        from lib.modules import ReturnModuleCheck
         monitor.config_modules.data = {'ram_swap': {'list': {'U-1': {'uid': 'U-1'}}}}
-        monitor._process_module_result('ram_swap', self._result('U-1_ram', True, 'ok'))
-        monitor._process_module_result('ram_swap', self._result('U-1_swap', False, 'hi'))
+        r = ReturnModuleCheck()
+        r.set('U-1_ram', True, 'ok')
+        r.set('U-1_swap', False, 'hi')
+        monitor._process_module_result('ram_swap', r)
         monitor.status.save()
         states = monitor._check_state_store.get_all()
         assert states[('ram_swap', 'U-1', 'ram')]['item_uid'] == 'U-1'
@@ -340,8 +345,10 @@ class TestCheckStatePersistence:
         # uid + a distinct '/'-metric — NOT collapse to (uid, '') and trip the
         # UNIQUE PK, which aborted the whole persist and left the module empty.
         monitor.config_modules.data = {'m365': {'list': {'item_1': {'uid': 'U-1'}}}}
-        monitor._process_module_result('m365', self._result('item_1/site', True, 'ok'))
-        monitor._process_module_result('m365', self._result('item_1/tenant', False, 'hi'))
+        r = ReturnModuleCheck()               # both sub-checks in ONE result set (as the real check emits)
+        r.set('item_1/site', True, 'ok')
+        r.set('item_1/tenant', False, 'hi')
+        monitor._process_module_result('m365', r)
         monitor.status.save()
         states = monitor._check_state_store.get_all()
         assert states[('m365', 'U-1', '/site')]['item_uid'] == 'U-1'
@@ -363,6 +370,58 @@ class TestCheckStatePersistence:
         assert monitor.status.save() is True
         out = monitor._check_state_store.as_status_dict()['m365']
         assert 'U-1' in out and 'U-1/site' in out
+
+
+class TestOrphanStatusPruning:
+    """The monitor prunes stored status for items a module stops reporting (item
+    deleted / all its sub-checks disabled), so a removed item's last state doesn't
+    linger forever. Pruning is per ITEM prefix (before '/'), so bookkeeping under a
+    bare item key survives while any of its sub-keyed results are still live."""
+
+    @staticmethod
+    def _multi(*keys):
+        from lib.modules import ReturnModuleCheck
+        r = ReturnModuleCheck()
+        for k in keys:
+            r.set(k, True, 'ok')
+        return r
+
+    def test_removed_item_is_pruned(self, monitor):
+        monitor._process_module_result('mod', self._multi('a', 'b'))
+        assert set(monitor.status.data['mod']) == {'a', 'b'}
+        # 'b' disappears from the module's output → its stored status is pruned.
+        changed = monitor._process_module_result('mod', self._multi('a'))
+        assert set(monitor.status.data['mod']) == {'a'}
+        assert changed is True                       # pruning alone still triggers a save
+
+    def test_empty_result_clears_module(self, monitor):
+        monitor._process_module_result('mod', self._multi('a'))
+        monitor._process_module_result('mod', self._multi())     # no items → cleared
+        assert monitor.status.data.get('mod', {}) == {}
+
+    def test_bookkeeping_under_item_prefix_survives(self, monitor):
+        # A bare item key (bookkeeping, e.g. fail_count) is kept while any sub-keyed
+        # result for the SAME item is still reported (prefix match).
+        monitor._process_module_result('m365', self._multi('item_1/site'))
+        monitor.status.set_conf(['m365', 'item_1', 'fail_count'], 2)
+        monitor._process_module_result('m365', self._multi('item_1/site'))
+        assert monitor.status.data['m365']['item_1'] == {'fail_count': 2}
+        assert 'item_1/site' in monitor.status.data['m365']
+
+    def test_sibling_subcheck_disabled_is_pruned(self, monitor):
+        # Both sub-checks live, then one is disabled → only its key is pruned.
+        monitor._process_module_result('m365', self._multi('item_1/site', 'item_1/tenant'))
+        assert set(monitor.status.data['m365']) == {'item_1/site', 'item_1/tenant'}
+        monitor._process_module_result('m365', self._multi('item_1/site'))
+        assert set(monitor.status.data['m365']) == {'item_1/site'}
+
+    def test_errored_module_never_prunes(self, monitor):
+        # The caller only calls _process_module_result on success, so a module that
+        # errors keeps its last-known state. Simulate: state exists, module "errors"
+        # (caller skips the call) → state must be untouched.
+        monitor._process_module_result('mod', self._multi('a', 'b'))
+        # No call this cycle (errored) → state intact.
+        assert set(monitor.status.data['mod']) == {'a', 'b'}
 
 
 class TestFailStreak:

@@ -77,7 +77,7 @@ contraseñas, tokens y claves privadas.
 > módulos mediante `ModuleBase.discover_secret_fields()` y los protege de forma
 > uniforme (cifrado, enmascarado, restauración al guardar) sin codificar sus
 > nombres. Así los módulos permanecen independientes del core. Ver
-> [security.md](security.md) → *Descubrimiento de secretos de módulos*.
+> [explica-seguridad.md](explica-seguridad.md) → *Descubrimiento de secretos de módulos*.
 
 ---
 
@@ -202,13 +202,15 @@ Propiedades de `input_action`:
 | `url` | str | Endpoint al que se hace POST con los datos del ítem como body |
 | `extra` | dict | Campos extra añadidos al payload antes del envío |
 | `icon` | str | Clase Bootstrap Icons (p. ej. `"bi-database"`) |
-| `result` | str | Modo de resultado: `"toast"`, `"list"` o `"field_picker"` |
+| `result` | str | Modo de resultado: `"toast"`, `"list"`, `"field_picker"`, `"modal"` o `"fields"` (por defecto/fallback `"toast"`) |
 | `result_field` | str | Solo para `"field_picker"`: campo del ítem que se rellena con el valor elegido |
 
 Modos de resultado (`result`):
-- `"toast"` — muestra la respuesta como notificación emergente
+- `"toast"` — muestra la respuesta como notificación emergente (valor por defecto y fallback)
 - `"list"` — muestra `res.data.items` como badges bajo el campo
 - `"field_picker"` — abre un modal con la lista `res.data.items`; al seleccionar, escribe en `result_field`
+- `"modal"` — abre un modal genérico con el contenido de la respuesta
+- `"fields"` — escribe varios campos del ítem a partir de la respuesta
 
 ---
 
@@ -377,7 +379,7 @@ Lista de plataformas en las que el campo está disponible. En plataformas no inc
 }
 ```
 
-Valores válidos: `"linux"`, `"win32"`, `"darwin"`.
+Valores válidos: `"linux"`, `"win32"`. Python puede reportar otros valores de `sys.platform`, pero solo Linux y Windows están soportados y probados.
 
 Cuando `discover_schemas()` detecta que la plataforma actual no está en la lista, añade `__unsupported__: true` al campo en los schemas devueltos. La UI renderiza entonces el badge "No compatible" en lugar del control.
 
@@ -422,7 +424,7 @@ Lista de botones de acción para el formulario del ítem. Cada acción genera un
         "url":        "/api/v1/modules/watchfuls/datastore/test_connection",
         "extra":      {},
         "icon":       "bi-plug",
-        "variant":    "outline-info",
+        "variant":    "info",
         "full_width": true,
         "result":     "toast"
     },
@@ -433,7 +435,7 @@ Lista de botones de acción para el formulario del ítem. Cada acción genera un
         "show_when":  {"conn_type": ["ssh"]},
         "group":      "ssh",
         "icon":       "bi-hdd-network",
-        "variant":    "outline-secondary",
+        "variant":    "secondary",
         "full_width": true,
         "result":     "toast"
     }
@@ -448,9 +450,9 @@ Propiedades de cada acción:
 | `url` | str | Endpoint al que se hace POST con los datos del ítem |
 | `extra` | dict | Campos extra fusionados con el payload antes del envío |
 | `icon` | str | Clase Bootstrap Icons |
-| `variant` | str | Variante Bootstrap del botón (`"outline-info"`, `"outline-secondary"`, etc.) |
+| `variant` | str | Variante Bootstrap **sólida** del botón (`"info"`, `"secondary"`, `"warning"`, etc.) |
 | `full_width` | bool | Si `true`, el botón ocupa el 100 % del ancho disponible |
-| `result` | str | Modo de resultado: `"toast"` (notificación), `"list"` (badges), `"field_picker"` (modal de selección) |
+| `result` | str | Modo de resultado: `"toast"` (notificación, por defecto/fallback), `"list"` (badges), `"field_picker"` (modal de selección), `"modal"` (modal genérico), `"fields"` (rellena varios campos) |
 | `result_field` | str | Solo para `"field_picker"`: campo que recibe el valor seleccionado |
 | `show_when` | dict | Igual que en campos: oculta el botón según el valor de otro campo |
 | `group` | str | Si se especifica, el botón se inyecta dentro del bloque visual del grupo en lugar de al pie del formulario |
@@ -691,14 +693,14 @@ flowchart TD
 ```
 
 Prioridad completa de `moduleIcon` (con `config.icon` y fallback `__i18n__`/emoji)
-en [i18n.md → Resolución de etiquetas](i18n.md#resolución-de-etiquetas-en-el-navegador).
+en [explica-i18n.md → Resolución de etiquetas](explica-i18n.md#resolución-de-etiquetas-en-el-navegador).
 
 ### `__host_profile__`
 
 Declara los campos de conexión que un check puede **heredar de un host vinculado**
 del registro. Dict (o lista de dicts) con `{"key": <protocolo>, "address_field":
 <campo de dirección>, "fields": [campos a heredar]}`. Lo resuelve
-`ModuleBase.resolve_host()`. Ver [web-admin.md → Servers](web-admin.md#servers-registro-de-hosts).
+`ModuleBase.resolve_host()`. Ver [explica-web-admin.md → Servers](explica-web-admin.md#servers-registro-de-hosts).
 
 ```json
 "__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host"]}
@@ -814,7 +816,7 @@ Esta variable de **clase Python** (no una propiedad de `schema.json`) protege el
 
 ```python
 class Watchful(ModuleBase):
-    SUPPORTED_PLATFORMS = ('linux', 'darwin')   # no disponible en Windows
+    SUPPORTED_PLATFORMS = ('linux',)   # solo Linux
 ```
 
 Cuando la plataforma actual no está en la tupla, `discover_schemas()` añade `__unsupported__: true` a **todas las colecciones** del módulo. La UI renderiza entonces un badge "No compatible" en lugar de los formularios interactivos.
@@ -822,7 +824,6 @@ Cuando la plataforma actual no está en la tupla, `discover_schemas()` añade `_
 | Valor      | Plataforma |
 |------------|------------|
 | `"linux"`  | Linux      |
-| `"darwin"` | macOS      |
 | `"win32"`  | Windows    |
 
 **Distinción con `supported_platforms` de campo:**
@@ -871,7 +872,7 @@ base de datos, es decir, las **tablas** donde ServiceSentry persiste su estado.
 - **Motor conectable (SQLite / MySQL·MariaDB / PostgreSQL)** a través de `lib/db`.
   Todos los stores (`lib/core/*/store.py` y `lib/services/*/store/`) reciben un
   `BaseConnector` inyectado y nunca hablan con un driver concreto. Ver
-  [architecture.md → Capa de Persistencia y Esquema de BD](architecture.md#capa-de-persistencia-y-esquema-de-bd).
+  [explica-arquitectura.md → Capa de Persistencia y Esquema de BD](explica-arquitectura.md#capa-de-persistencia-y-esquema-de-bd).
 - **DDL con tokens simbólicos.** Cada columna declara un tipo simbólico
   (`TEXT`, `INTEGER`, `REAL`, `AUTOINCREMENT`) que el conector mapea al tipo nativo
   del motor; los identificadores reservados (`key`, `user`, `virtual`, `groups`…)
@@ -888,13 +889,13 @@ base de datos, es decir, las **tablas** donde ServiceSentry persiste su estado.
 - **La capa editable de configuración vive en la tabla `config`** — una fila por
   campo, con clave `section|field` (p. ej. `web_admin|lang`). No es una tabla por
   sección: es un almacén clave-valor. Ver
-  [configuration.md → Dónde vive la configuración](configuration.md#dónde-vive-la-configuración-bd--configjson).
+  [ref-configuracion.md → Dónde vive la configuración](ref-configuracion.md#dónde-vive-la-configuración-bd--configjson).
 - **Fechas** en `TEXT` ISO 8601 UTC (`created_at`/`updated_at`…); las series de
   alto volumen (`history.ts`, `check_state.last_change_ts`, timestamps de servicios)
   usan `REAL` (epoch Unix).
 - Las columnas anotadas como **`data`/`profiles`/`extra`/`detail` (JSON)** guardan
   un blob JSON; los campos secretos dentro de ellos se cifran en reposo con Fernet
-  (ver [security.md](security.md)).
+  (ver [explica-seguridad.md](explica-seguridad.md)).
 
 En total hay **32 tablas fijas** (16 del núcleo, 14 de servicios y 2 de syslog),
 más las **tablas dinámicas por módulo** (`mod_<módulo>_<name>`, ver más abajo).
@@ -955,8 +956,8 @@ Estas dos tablas son las únicas que pueden vivir en una **base de datos dedicad
 cuando `syslog_db|enabled` está activo, `lib/db/build_syslog_connector()` crea un
 segundo `BaseConnector` apuntando a la sección `syslog_db` (aislar un flujo de alto
 volumen); si está desactivado, comparten la **BD principal** con el resto. Ver
-[configuration.md → Base de datos de syslog](configuration.md#base-de-datos-de-syslog-ss_syslog_db_)
-y [architecture.md → Base de datos de syslog dedicada](architecture.md#base-de-datos-de-syslog-dedicada).
+[ref-configuracion.md → Base de datos de syslog](ref-configuracion.md#base-de-datos-de-syslog-ss_syslog_db_)
+y [explica-arquitectura.md → Base de datos de syslog dedicada](explica-arquitectura.md#base-de-datos-de-syslog-dedicada).
 
 | Tabla | PK | Columnas clave | Índices | Store |
 |-------|----|----------------|---------|-------|
@@ -972,7 +973,7 @@ mecanismo que usan los stores del core—. El módulo expone una función
 `lib/db/module_tables.py → module_table(módulo, name, columnas, …)`, que **prefija
 el nombre** como `mod_<módulo>_<name>` para que nunca colisionen con las tablas del
 core ni entre módulos. En el arranque, `reconcile_module_tables()` descubre e
-[reconcilia](architecture.md#reconciliación-declarativa-de-esquema) todas las tablas
+[reconcilia](explica-arquitectura.md#reconciliación-declarativa-de-esquema) todas las tablas
 de módulo sobre el conector compartido, igual que las del core. El módulo obtiene el
 conector en runtime vía `self.db` (contexto del monitor) o la clave `__connector__`
 inyectada en la config de la acción por la ruta web de watchfuls.

@@ -133,7 +133,7 @@ def register(app, wa):
         client_id, client_secret, provider_url = _entra_section_creds(data)
 
         if not group_id:
-            return jsonify({'ok': False, 'message': 'group_id required'}), 200
+            return jsonify({'ok': False, 'message': wa._t('entra_group_id_required')}), 200
         tenant = auth.tenant_from_provider_url(provider_url)
         if not tenant:
             return jsonify({'ok': False, 'message': wa._t('entra_groups_not_entra')}), 200
@@ -257,7 +257,7 @@ def register(app, wa):
         if not tenant_id:
             wa._entra_flows.pop(flow_token, None)
             return jsonify({'status': 'error',
-                            'message': 'Could not determine tenant ID from token.'})
+                            'message': wa._t('entra_no_tenant')})
 
         try:
             result = provisioning.provision_saml2_app(
@@ -371,7 +371,7 @@ def register(app, wa):
         if not tenant_id:
             wa._entra_flows.pop(flow_token, None)
             return jsonify({'status': 'error',
-                            'message': 'Could not determine tenant ID from token.'})
+                            'message': wa._t('entra_no_tenant')})
 
         # Re-sync mode: an app already exists → just re-push the token to it.
         if flow.get('sp_object_id'):
@@ -423,6 +423,59 @@ def register(app, wa):
         except Exception:  # pylint: disable=broad-except
             return None
 
+    def _required_roles(body):
+        """The application permissions a check/fix needs: the module profile's roles
+        (by ``profile``), else an inline ``__entraid_provision__`` spec in the body."""
+        prof = _provision_profile(body.get('profile'))
+        if not prof or not prof.get('resources'):
+            from lib.providers.entraid import normalize_entraid_provision  # noqa: PLC0415
+            _inline = normalize_entraid_provision(body)
+            if _inline['resources']:
+                prof = _inline
+        roles = [r for res in ((prof or {}).get('resources') or []) for r in (res.get('roles') or [])]
+        return list(dict.fromkeys(roles))
+
+    @app.route('/api/v1/auth/entraid/check-permissions', methods=['POST'])
+    @cred_edit_req
+    def api_entraid_check_permissions():
+        """Verify an Entra app-only credential holds the application permissions a
+        module needs (resolved from its ``__entraid_provision__`` by ``profile``).
+
+        Read-only and generic — the core knows no module's permissions, it discovers
+        them by profile.  Acquires an app-only token and inspects its ``roles`` claim
+        (no admin, no writes).  Identity: inline ``tenant_id``/``client_id``/
+        ``client_secret`` from the body, with a stored credential (``cred_uid``)
+        filling the rest — notably the secret the editor sends masked.  Returns a
+        modal-ready report ``{ok, all_ok, message, variant, info, missing, results}``."""
+        from lib.providers.entraid import permissions  # noqa: PLC0415
+        body = wa._optional_json() or {}
+        required = _required_roles(body)
+        if not required:
+            return jsonify({'ok': False, 'message': wa._t('cred_prov_error')}), 400
+        vals = {}
+        cred_uid = str(body.get('cred_uid') or '').strip()
+        cstore = getattr(wa, '_credentials_store', None)
+        if cred_uid and cstore is not None:
+            stored = (cstore.get(cred_uid, decrypt=True) or {}).get('data') or {}
+            vals.update({k: stored.get(k) for k in ('tenant_id', 'client_id', 'client_secret')})
+        for k in ('tenant_id', 'client_id', 'client_secret'):
+            if body.get(k) not in (None, ''):
+                vals[k] = body[k]
+        tenant = str(vals.get('tenant_id') or '').strip()
+        client_id = str(vals.get('client_id') or '').strip()
+        secret = str(vals.get('client_secret') or '').strip()
+        if not (tenant and client_id and secret):
+            return jsonify({'ok': False, 'message': wa._t('prov_entraid_perms_need_creds')}), 400
+        try:
+            token = auth.app_token(tenant, client_id, secret)
+        except Exception as exc:  # pylint: disable=broad-except
+            return jsonify({'ok': False, 'message': f'Auth: {exc}'})
+        rep = permissions.permission_report(permissions.token_roles(token), required)
+        msg = (wa._t('prov_entraid_perms_all_ok') if rep['all_ok']
+               else wa._t('prov_entraid_perms_missing') + ': ' + ', '.join(rep['missing']))
+        return jsonify({'ok': True, 'message': msg,
+                        'variant': 'success' if rep['all_ok'] else 'warning', **rep})
+
     @app.route('/api/v1/auth/entraid/provision/device-code', methods=['POST'])
     @cred_edit_req
     def api_entraid_provision_device_code():
@@ -453,6 +506,10 @@ def register(app, wa):
         _base = _public_base(wa)
         redirect_uris = [str(u).replace('{public_url}', _base)
                          for u in (prof.get('redirect_uris') or [])]
+        # "Ensure" mode: instead of creating a new app, GRANT the declared
+        # permissions to an EXISTING app (by client_id) and admin-consent them —
+        # the "Fix permissions" flow. The poll branches on this.
+        ensure_client_id = str(body.get('client_id') or '').strip()
         wa._entra_flows[flow_token] = {
             'device_code': d['device_code'],
             'expires_at': time.time() + int(d.get('expires_in', 900)),
@@ -464,6 +521,7 @@ def register(app, wa):
             # Expose an SSO API surface (App ID URI + access_as_user + Teams preauth) so
             # the app can be admin-installed as a Teams app (used by the Teams wizard).
             'expose_api': bool(body.get('expose_api')),
+            'ensure_client_id': ensure_client_id,
             'kind': 'module',
         }
         return jsonify({'flow_token': flow_token, 'user_code': d['user_code'],
@@ -507,7 +565,24 @@ def register(app, wa):
         if not tenant_id:
             wa._entra_flows.pop(ftok, None)
             _wiz_err('provision', 'could not determine tenant')
-            return jsonify({'status': 'error', 'message': 'No se pudo determinar el tenant.'})
+            return jsonify({'status': 'error', 'message': wa._t('entra_no_tenant')})
+        # "Fix permissions": grant the declared permissions to the EXISTING app
+        # (by client_id) and admin-consent them, without creating a new app.
+        ensure_cid = flow.get('ensure_client_id')
+        if ensure_cid:
+            try:
+                report = provisioning.ensure_app_permissions(
+                    b['access_token'], tenant_id, ensure_cid, flow['resources'])
+            except Exception as exc:  # pylint: disable=broad-except
+                wa._entra_flows.pop(ftok, None)
+                wa._audit('entra_app_permissions_failed',
+                          detail={'tenant_id': tenant_id, 'client_id': ensure_cid, 'error': str(exc)})
+                return jsonify({'status': 'error', 'message': str(exc)})
+            wa._entra_flows.pop(ftok, None)
+            wa._audit('entra_app_permissions_ensured', detail={
+                'tenant_id': tenant_id, 'client_id': ensure_cid,
+                'granted': report.get('granted'), 'missing': report.get('missing')})
+            return jsonify({'status': 'complete', 'ensure': True, 'report': report})
         try:
             result = provisioning.provision_entra_app(
                 b['access_token'], tenant_id, flow['resources'],

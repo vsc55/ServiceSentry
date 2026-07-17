@@ -31,7 +31,7 @@
                         <div class="mb-2 flex-shrink-0">
                             <label class="form-label small fw-semibold">{{ i18n.group_name }}</label>
                             <input type="text" class="form-control form-control-sm" id="gmLabel" autocomplete="off"
-                                placeholder="e.g. Operations Team"
+                                placeholder="{{ i18n.group_name_ph }}"
                                 oninput="this.classList.remove('is-invalid')">
                             <div class="invalid-feedback" id="gmLabelError"></div>
                         </div>
@@ -111,7 +111,7 @@
                         <div class="mb-2 flex-shrink-0">
                             <label class="form-label small fw-semibold">{{ i18n.role_name }}</label>
                             <input type="text" class="form-control form-control-sm" id="rmLabel" autocomplete="off"
-                                placeholder="e.g. Operations Viewer"
+                                placeholder="{{ i18n.role_name_ph }}"
                                 oninput="this.classList.remove('is-invalid')">
                             <div class="invalid-feedback" id="rmLabelError"></div>
                         </div>

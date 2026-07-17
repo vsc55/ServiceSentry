@@ -4,7 +4,7 @@
 **herramienta de administración one-shot** (gestión de usuarios y grupos, estado y recarga de
 servicios). Este documento cubre los **subcomandos de gestión**; los *modos de servicio*
 (`--web` / `--monitor` / `--syslog` / `--events`) están en
-[configuration.md → Opciones de Línea de Comandos](configuration.md#opciones-de-línea-de-comandos).
+[ref-configuracion.md → Opciones de Línea de Comandos](ref-configuracion.md#opciones-de-línea-de-comandos).
 
 ```bash
 python3 main.py <opciones-globales> <subcomando> ...
@@ -111,7 +111,7 @@ flowchart LR
 - **Auto-discovery** (sin nombres hardcodeados): `status` lista los servicios vía
   `discover_embedded_services()` (descriptor `EMBEDDED_SERVICE`); `reload` apunta a los que
   corren un daemon que drena comandos vía `discover_standalone_services()` (descriptor
-  `STANDALONE`) — un servicio nuevo se detecta solo. Ver [discovery.md](discovery.md).
+  `STANDALONE`) — un servicio nuevo se detecta solo. Ver [explica-descubrimiento.md](explica-descubrimiento.md).
 
 > El único punto que **no** se comparte es `api_update_user` (role/enable/passwd por la vía
 > web), que mantiene su lógica inline por su tracking granular de auditoría (`changes`); usa las

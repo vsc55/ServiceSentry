@@ -480,7 +480,7 @@ function _dwTbodyHtml(wid) {
 // ──────────────────────── Widget content ──────────────────────────
 function _dwStatCard(accent, avBg, avColor, icon, count, labelKey, subtitle) {
     return `<div class="rounded-3 overflow-hidden border h-100" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
-        <div style="height:3px;background:${accent}"></div>
+        <div style="height:3px;background:${accent};border-radius:var(--bs-border-radius-lg) var(--bs-border-radius-lg) 0 0"></div>
         <div class="p-3">
             <div class="d-flex align-items-center gap-3 mb-2">
                 <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
@@ -529,40 +529,9 @@ const _DW_SEV_SUBTLE = { danger: 'rgba(220,53,69,.16)', warning: 'rgba(255,193,7
 
 // ─────────────── Generic module-contributed widget renderer ───────────────
 // Driven entirely by the module's overview_widget() data (entries/aggregate with
-// module-authored labels) + the catalog (icon/title). No module specifics here.
-function _dwMwStateColors(state) {
-    if (state === 'error') return ['#dc3545', 'rgba(220,53,69,.16)'];
-    if (state === 'warn')  return ['#fd7e14', 'rgba(253,126,20,.18)'];
-    if (state === 'ok')    return ['#16a34a', 'rgba(34,197,94,.16)'];
-    return ['var(--bs-secondary-color)', 'var(--bs-secondary-bg)'];
-}
-function _dwMwBadge(state) {
-    if (state === 'ok')    return `<span class="badge text-bg-success">OK</span>`;
-    if (state === 'warn')  return `<span class="badge text-bg-warning">🛠</span>`;
-    if (state === 'error') return `<span class="badge text-bg-danger">${esc(t('host_status_error'))}</span>`;
-    return `<span class="badge text-bg-secondary">—</span>`;
-}
-function _dwMwStats(stats) {       // module key/value chips, coloured by state
-    return (stats || []).map(s => {
-        const [fg, bg] = _dwMwStateColors(s.state);
-        return `<span class="badge rounded-pill me-1" style="color:${fg};background:${bg};font-size:.72rem">${esc(s.label)}: ${esc(String(s.value))}</span>`;
-    }).join('');
-}
-function _dwMwEntryRows(entries) {       // one row per entry (all-entries view)
-    if (!entries || !entries.length)
-        return `<tr><td colspan="2" class="text-center text-muted py-3">${t('overview_no_status')}</td></tr>`;
-    return entries.map(e => `<tr>
-        <td class="text-nowrap fw-semibold align-middle">${_dwMwBadge(e.ok ? 'ok' : 'error')} ${esc(e.name)}</td>
-        <td>${_dwMwStats(e.stats)}</td></tr>`).join('');
-}
-function _dwMwDetailRows(rows) {         // one row per sub-item (single-entry view)
-    if (!rows || !rows.length)
-        return `<tr><td colspan="2" class="text-center text-muted py-3">${t('overview_no_status')}</td></tr>`;
-    return rows.map(r => {
-        const nm = esc(r.name) + (r.detail ? ` <span class="text-muted small">${esc(r.detail)}</span>` : '');
-        return `<tr><td class="text-nowrap">${nm}</td><td class="text-end">${_dwMwBadge(r.state)}</td></tr>`;
-    }).join('');
-}
+// module-authored labels) + the catalog (icon/title/view). No module specifics here.
+// view 'stat' → a Servers-like stat card (a big count + a badge per state) for the
+// declared scope; view 'table' → a dense listing with an optional scope selector.
 function _dwModuleWidgetContent(id, data, item) {
     const perms = new Set(currentUser.permissions || []);
     const def = _dwModuleDef(id) || {};
@@ -573,38 +542,110 @@ function _dwModuleWidgetContent(id, data, item) {
     const title = _dwLabel(def);
     const icon = def.icon || 'bi-grid-1x2';
     const acc = 'linear-gradient(90deg,#6366f1,#8b5cf6)', bg = 'rgba(99,102,241,.12)', fg = '#6366f1';
-    const _sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
-    const scope = item ? (item.mws || '')
-        : (document.querySelector(`.dw[data-wid="${_sel}"]`)?.dataset.mws || '');
 
-    if (!entries.length)
-        return _dwTableCard(acc, bg, fg, icon, title,
-            `<div class="text-center py-3 text-muted small">${t('overview_no_status')}</div>`);
+    if (def.view === 'table') {
+        const _sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+        const dw = item ? null : document.querySelector(`.dw[data-wid="${_sel}"]`);
+        const scope = item ? (item.mws || '')   : (dw?.dataset.mws || '');
+        const level = item ? (item.mwlvl || '') : (dw?.dataset.mwlvl || '');   // '' | warn | error
+        if (scope === 'sum') {                          // aggregate → one summary stat card
+            const c = (wd.aggregate || {}).counts;
+            return _dwMwStatCard(c ? c.total : entries.length,
+                (wd.aggregate || {}).count_label || title, c, acc, bg, fg, icon);
+        }
+        if (scope) {                                    // a specific kind → its per-service rows
+            const e = entries.find(x => x.id === scope);
+            const rows = _dwMwSortFilter(e ? e.rows : [], level);   // error→warn→ok, level-filtered
+            const body = `<table class="table table-sm table-hover align-middle mb-0"><tbody>${_dwMwDetailRows(rows)}</tbody></table>`;
+            return _dwTableCard(acc, bg, fg, icon, e ? e.name : title, body);
+        }
+        const rows = _dwMwSortFilter(entries, level);   // one row per kind, error→warn→ok
+        const body = `<table class="table table-sm table-hover align-middle mb-0"><tbody>${_dwMwEntryRows(rows)}</tbody></table>`;
+        return _dwTableCard(acc, bg, fg, icon, title, body);
+    }
 
-    if (scope === 'sum') {                              // aggregate of all entries
-        const a = wd.aggregate || {};
-        const card = `<div class="rounded-3 overflow-hidden border h-100" style="background:var(--ss-surface-bg,var(--bs-body-bg))">
-            <div style="height:3px;background:${acc}"></div>
-            <div class="p-3">
-              <div class="d-flex align-items-center gap-3 mb-2">
-                <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
-                      style="width:46px;height:46px;background:${bg};color:${fg};font-size:1.3rem"><i class="bi ${icon}"></i></span>
-                <div><div class="fs-2 fw-bold lh-1">${a.count ?? entries.length}</div>
-                     <div class="fw-semibold text-muted mt-1 ss-section-title">${esc(a.count_label || title)}</div></div>
-              </div>
-              <div class="d-flex flex-wrap gap-1 mt-1">${_dwMwStats(a.stats)}</div>
-            </div></div>`;
-        return card;
+    // stat view: the module declares which check kind the card shows (`scope`, by entry
+    // id, e.g. m365 → "health" = Service health); no scope defaults to the aggregate.
+    if (def.scope) {
+        const e = entries.find(x => x.id === def.scope);
+        return _dwMwStatCard((e && e.counts ? e.counts.total : 0),
+            e ? e.name : title, e && e.counts, acc, bg, fg, icon);
     }
-    if (scope) {                                        // a specific entry → its rows
-        const e = entries.find(x => x.id === scope);
-        const table = `<table class="table table-sm table-hover align-middle mb-0">
-            <tbody>${_dwMwDetailRows(e ? e.rows : [])}</tbody></table>`;
-        return _dwTableCard(acc, bg, fg, icon, e ? e.name : title, table);
-    }
-    const table = `<table class="table table-sm table-hover align-middle mb-0">
-        <tbody>${_dwMwEntryRows(entries)}</tbody></table>`;
-    return _dwTableCard(acc, bg, fg, icon, title, table);
+    const c = (wd.aggregate || {}).counts;
+    return _dwMwStatCard(c ? c.total : entries.length, title, c, acc, bg, fg, icon);
+}
+
+// ── Table-view helpers (dense listing) ──
+// Severity rank so rows sort worst-first (error → warning → ok) and the level
+// filter ('' = all, 'warn' = ≥ warning, 'error' = only errors) can drop lesser ones.
+const _DW_MW_RANK = { error: 3, warn: 2, ok: 1 };
+function _dwMwRank(state) { return _DW_MW_RANK[state] || 0; }
+function _dwMwSortFilter(list, level) {
+    const min = _dwMwRank(level);                       // '' → 0 → keep everything
+    return (list || []).filter(x => _dwMwRank(x.state) >= min)
+        .slice().sort((a, b) => _dwMwRank(b.state) - _dwMwRank(a.state));
+}
+function _dwMwStateColors(state) {
+    if (state === 'error') return ['#dc3545', 'rgba(220,53,69,.16)'];
+    if (state === 'warn')  return ['#fd7e14', 'rgba(253,126,20,.18)'];
+    if (state === 'ok')    return ['#16a34a', 'rgba(34,197,94,.16)'];
+    return ['var(--bs-secondary-color)', 'var(--bs-secondary-bg)'];
+}
+function _dwMwBadge(state) {
+    if (state === 'ok')    return `<span class="badge text-bg-success"><i class="bi bi-check-circle"></i></span>`;
+    if (state === 'warn')  return `<span class="badge text-bg-warning"><i class="bi bi-exclamation-triangle"></i></span>`;
+    if (state === 'error') return `<span class="badge text-bg-danger"><i class="bi bi-x-circle"></i></span>`;
+    return `<span class="badge text-bg-secondary">—</span>`;
+}
+function _dwMwStats(stats) {       // module key/value chips, coloured by state
+    return (stats || []).map(s => {
+        const [cfg, cbg] = _dwMwStateColors(s.state);
+        return `<span class="badge rounded-pill me-1" style="color:${cfg};background:${cbg};font-size:.72rem">${esc(s.label)}: ${esc(String(s.value))}</span>`;
+    }).join('');
+}
+function _dwMwEntryRows(entries) {       // one row per check kind (all-entries view)
+    if (!entries || !entries.length)
+        return `<tr><td colspan="2" class="text-center text-muted py-3">${t('overview_no_status')}</td></tr>`;
+    return entries.map(e => `<tr>
+        <td class="text-nowrap fw-semibold align-middle">${_dwMwBadge(e.state || (e.ok ? 'ok' : 'error'))} ${esc(e.name)}</td>
+        <td>${_dwMwStats(e.stats)}</td></tr>`).join('');
+}
+function _dwMwDetailRows(rows) {         // one row per sub-item (single-kind view)
+    if (!rows || !rows.length)
+        return `<tr><td colspan="2" class="text-center text-muted py-3">${t('overview_no_status')}</td></tr>`;
+    return rows.map(r => {
+        const nm = esc(r.name) + (r.detail ? ` <span class="text-muted small">${esc(r.detail)}</span>` : '');
+        return `<tr><td class="text-nowrap">${nm}</td><td class="text-end">${_dwMwBadge(r.state)}</td></tr>`;
+    }).join('');
+}
+
+// Stat card for module widgets — like the Servers widget: a big count plus a coloured
+// badge per state (N OK / N Warning / N Error). counts: {ok, warn, error, total}
+function _dwMwStateBadges(counts) {
+    counts = counts || {};
+    const specs = [
+        ['ok',    'text-bg-success', 'bi-check-circle',           'status_ok'],
+        ['warn',  'text-bg-warning', 'bi-exclamation-triangle',   'status_warning'],
+        ['error', 'text-bg-danger',  'bi-x-circle',               'status_error'],
+    ];
+    const b = specs.filter(([k]) => (counts[k] || 0) > 0)
+        .map(([k, cls, ic, key]) =>
+            `<span class="badge ${cls} ss-fs-2"><i class="bi ${ic} me-1"></i>${counts[k]} ${t(key)}</span>`)
+        .join('');
+    return b || `<span class="text-muted small">—</span>`;
+}
+function _dwMwStatCard(count, label, counts, acc, bg, fg, icon) {
+    return `<div class="rounded-3 overflow-hidden border h-100" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
+        <div style="height:3px;background:${acc};border-radius:var(--bs-border-radius-lg) var(--bs-border-radius-lg) 0 0"></div>
+        <div class="p-3">
+          <div class="d-flex align-items-center gap-3 mb-2">
+            <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                  style="width:46px;height:46px;background:${bg};color:${fg};font-size:1.3rem"><i class="bi ${icon}"></i></span>
+            <div><div class="fs-2 fw-bold lh-1">${count}</div>
+                 <div class="fw-semibold text-muted mt-1 ss-section-title">${esc(label)}</div></div>
+          </div>
+          <div class="d-flex flex-wrap gap-1 mt-1">${_dwMwStateBadges(counts)}</div>
+        </div></div>`;
 }
 
 function _dwContent(id, data, item) {

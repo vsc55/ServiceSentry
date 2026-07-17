@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 
-from lib.core.notify.formatting import plain
+from lib.core.notify.formatting import notify_lang, plain
 from lib.core.notify.registry import Channel, register_channel
 
 # ── store ownership (the Teams channel owns its stores; the router only caches them) ──
@@ -53,7 +53,7 @@ def send(router, cfg, *, kind='', module='', item='', status='', message='',
     from lib.core.notify.msteams import notify as msteams_notify  # noqa: PLC0415
     return msteams_notify.send_all(router, cfg=cfg.get('msteams') or {}, kind=kind,
                                    module=module, item=item, status=status,
-                                   message=message, timestamp=timestamp)
+                                   message=message, timestamp=timestamp, lang=notify_lang(cfg))
 
 
 def flush(router, cfg, alerts, hostname, public_url) -> tuple:
@@ -64,7 +64,8 @@ def flush(router, cfg, alerts, hostname, public_url) -> tuple:
     for a in alerts:
         ok, msg = msteams_notify.send_all(
             router, kind=a['kind'], module=a['module'], item=a['item'] or hostname,
-            status=a['kind'], message=plain(a['message']), timestamp=ts, cfg=msteams_cfg)
+            status=a['kind'], message=plain(a['message']), timestamp=ts, cfg=msteams_cfg,
+            lang=notify_lang(cfg))
         ok_all = ok_all and ok
         infos.append(msg)
     return (ok_all, '; '.join(infos))

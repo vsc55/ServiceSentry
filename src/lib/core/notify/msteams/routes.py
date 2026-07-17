@@ -31,9 +31,9 @@ def _validate_channel(data: dict, *, require_url: bool = True) -> str | None:
         return None                      # keep-stored sentinel on update
     url = (raw or '').strip()
     if not url:
-        return 'webhook_url is required'
+        return 'msteams_url_required'
     if not (url.startswith('https://') or url.startswith('http://')):
-        return 'webhook_url must be an http(s) URL'
+        return 'msteams_webhook_url_not_http'
     return None
 
 
@@ -58,7 +58,7 @@ def register(app, wa):
             return err
         err_msg = _validate_channel(data)
         if err_msg:
-            return jsonify({'error': err_msg}), 400
+            return jsonify({'error': wa._t(err_msg)}), 400
         channel = {
             'id': str(uuid.uuid4()),
             'name': (data.get('name') or '').strip() or 'Teams channel',
@@ -81,10 +81,10 @@ def register(app, wa):
         # webhook_url == None → keep the stored URL (it's a masked secret), so don't require it.
         err_msg = _validate_channel(data, require_url=data.get('webhook_url') is not None)
         if err_msg:
-            return jsonify({'error': err_msg}), 400
+            return jsonify({'error': wa._t(err_msg)}), 400
         stored = store.get(cid)
         if stored is None:
-            return jsonify({'error': 'Not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         # null webhook_url = masked field, keep stored value
         url = data.get('webhook_url')
         if url is None:
@@ -116,7 +116,7 @@ def register(app, wa):
     def api_delete_msteams(cid):
         deleted = store.get(cid)
         if deleted is None or not store.delete(cid):
-            return jsonify({'error': 'Not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         wa._field_versions['msteams_channels|_version'] = str(uuid.uuid4())
         wa._audit('msteams_channel_deleted', detail={'id': cid, 'name': (deleted or {}).get('name', '')})
         return jsonify({'ok': True})
@@ -127,8 +127,10 @@ def register(app, wa):
         from lib.core.notify.msteams import notify as ms_notify
         stored = store.get(cid)
         if stored is None:
-            return jsonify({'error': 'Not found'}), 404
-        ok, msg = ms_notify.send_channel_test(stored)
+            return jsonify({'error': wa._t('not_found')}), 404
+        from lib.core.notify.formatting import notify_lang  # noqa: PLC0415
+        lang = notify_lang(wa._read_config_file(wa._CONFIG_FILE) or {})
+        ok, msg = ms_notify.send_channel_test(stored, lang=lang)
         wa._audit('msteams_test_ok' if ok else 'msteams_test_fail',
                   detail={'id': cid, **({} if ok else {'error': msg})})
         return jsonify({'ok': ok, 'message': msg})
@@ -143,7 +145,9 @@ def register(app, wa):
         cfg = dict(wa._config_section('msteams'))
         cfg.update({k: v for k, v in body.items() if v is not None})
         # Route through the notification router (owns the Teams stores / channel access).
-        ok, msg = ms_notify.send_user_test(wa._notify, cfg)
+        from lib.core.notify.formatting import notify_lang  # noqa: PLC0415
+        lang = notify_lang(wa._read_config_file(wa._CONFIG_FILE) or {})
+        ok, msg = ms_notify.send_user_test(wa._notify, cfg, lang=lang)
         wa._audit('msteams_test_ok' if ok else 'msteams_test_fail',
                   detail={'mode': 'users', **({} if ok else {'error': msg})})
         return jsonify({'ok': ok, 'message': msg})
@@ -179,14 +183,14 @@ def register(app, wa):
         app_id = (cfg.get('bot_app_id') or '').strip()
         delivery = cfg_get(cfg, 'msteams|delivery', falsy=True)
         if not (cfg.get('user_enabled') and delivery == 'bot' and app_id):
-            return jsonify({'error': 'Teams bot delivery is not enabled'}), 404
+            return jsonify({'error': wa._t('msteams_bot_disabled')}), 404
         store_ = _channel.get_bot_store(wa._notify)
         if store_ is None:
-            return jsonify({'error': 'Teams bot store unavailable'}), 503
+            return jsonify({'error': wa._t('msteams_bot_store_unavailable')}), 503
         try:
             bot_inbound.validate_bearer(request.headers.get('Authorization', ''), app_id)
         except bot_inbound.BotValidationUnavailable:
-            return jsonify({'error': 'Teams bot endpoint requires the PyJWT package'}), 501
+            return jsonify({'error': wa._t('msteams_bot_no_pyjwt')}), 501
         except Exception as exc:  # pylint: disable=broad-except
             return jsonify({'error': f'unauthorized: {exc}'}), 401
         activity = request.get_json(silent=True) or {}

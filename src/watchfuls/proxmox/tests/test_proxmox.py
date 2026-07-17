@@ -564,6 +564,58 @@ class TestProxmoxProvision:
         assert out['ok'] is False
         assert 'permission denied' in out['message']
 
+    def test_fix_permissions_grants_to_token_user(self):
+        """Fix grants the required privileges to the token's own user AND the token
+        (privsep), over SSH, WITHOUT rotating the token, then re-verifies via API."""
+        from watchfuls.proxmox import Watchful
+        verify = {'ok': True, 'all_ok': True, 'variant': 'success',
+                  'message': 'Todos los permisos necesarios están concedidos', 'info': []}
+        with self._ssh(out='') as (_conn, run), \
+             patch.object(Watchful, 'test_permissions', return_value=verify):
+            out = Watchful.fix_permissions({
+                'host': '10.0.0.1', 'ssh_user': 'root', 'ssh_password': 'pw',
+                'auth_method': 'token', 'token_id': 'monitor@pve!ssentry',
+                'check_storage': True, 'check_updates': False,
+            })
+        assert out['ok'] is True and out.get('all_ok') is True
+        cmd = run.call_args.args[1]
+        assert 'pveum role add' in cmd and 'pveum role modify' in cmd
+        assert 'Sys.Audit' in cmd and 'Datastore.Audit' in cmd     # base + storage
+        assert 'ServiceSentryMonitor' in cmd
+        assert 'pveum acl modify / --users' in cmd                 # grant to the user
+        assert 'monitor@pve' in cmd                                # the token's user
+        assert '--tokens' in cmd                                   # privsep token grant
+        assert 'pveum user token add' not in cmd                   # token NOT rotated
+        assert out['message'].startswith('Permisos concedidos')
+
+    def test_fix_permissions_password_auth_no_token_grant(self):
+        """Password auth: grant to the username only (no token ACL); privileges
+        follow the enabled checks (storage off → no Datastore.Audit)."""
+        from watchfuls.proxmox import Watchful
+        verify = {'ok': True, 'all_ok': True, 'variant': 'success', 'message': 'ok', 'info': []}
+        with self._ssh(out='') as (_conn, run), \
+             patch.object(Watchful, 'test_permissions', return_value=verify):
+            out = Watchful.fix_permissions({
+                'host': '10.0.0.1', 'ssh_password': 'pw',
+                'auth_method': 'password', 'username': 'monitor@pve',
+                'check_storage': False, 'check_updates': False,
+            })
+        assert out['ok'] is True
+        cmd = run.call_args.args[1]
+        assert '--tokens' not in cmd                               # no token grant
+        assert 'pveum acl modify / --users' in cmd
+        assert 'Sys.Audit' in cmd
+        assert 'Datastore.Audit' not in cmd                        # storage check off
+
+    def test_fix_permissions_requires_token_id(self):
+        from watchfuls.proxmox import Watchful
+        out = Watchful.fix_permissions({
+            'host': '10.0.0.1', 'ssh_password': 'pw',
+            'auth_method': 'token', 'token_id': '',
+        })
+        assert out['ok'] is False
+        assert 'token_id' in out['message']
+
 
 class TestProxmoxCredentialManager:
     """The reusable credential (type proxmox_auth) is overlaid onto the item at

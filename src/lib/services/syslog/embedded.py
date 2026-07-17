@@ -134,6 +134,7 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
         if action == 'stop':
             self.listener_stop()
             self._audit_system('syslog_stopped', {})
+            self._notify_service_control('stop')
             return True, ''
         if not bool(self._syslog_cfg().get('enabled')):
             return False, 'disabled'
@@ -141,6 +142,7 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
         ok = bool(self._syslog_server and self._syslog_server.running)
         if ok:
             self._audit_system('syslog_started', {})
+            self._notify_service_control('start')
         return ok, '' if ok else 'already'
 
     # ── used by routes/config + app shutdown ──────────────────────────────────

@@ -351,8 +351,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('email|from_email', str, '', no_rule=True),
     Cfg('email|from_name', str, 'ServiceSentry', no_rule=True),
     # Global language for ALL notification content (Telegram/Email/Teams/webhook), resolved by
-    # lib.core.notify.formatting.notify_lang.  (Superseded the per-email ``email|lang``; a stored
-    # ``email|lang`` from an older install is still honoured by notify_lang as a migration path.)
+    # lib.core.notify.formatting.notify_lang.
     Cfg('notifications|lang', str, '', no_rule=True),
     Cfg('email|ms365_tenant_id', str, '', no_rule=True),
     Cfg('email|ms365_client_id', str, '', no_rule=True),

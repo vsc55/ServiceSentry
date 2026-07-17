@@ -75,7 +75,7 @@ class TestParsers:
 
     def test_commands_are_allowlist_friendly(self):
         """Each per-OS command is a single binary with no shell chaining, so it
-        fits a strict SSH command allowlist (docs/ssh-hardening.md)."""
+        fits a strict SSH command allowlist (docs/caso-ssh-hardening.md)."""
         from watchfuls.cpu import _cpu_cmd
         for os_ in ('linux', 'freebsd', 'darwin', 'windows'):
             cmd = _cpu_cmd(os_)

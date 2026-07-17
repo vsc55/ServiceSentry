@@ -21,6 +21,7 @@ from lib.config.spec import cfg_get
 from lib.debug import DebugLevel
 from lib.core.object_base import ObjectBase
 from lib.core.notify.msteams import cards
+from lib.i18n import translate
 
 try:
     import requests as _req
@@ -31,7 +32,7 @@ except ImportError:
 
 def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
              status: str = '', message: str = '', timestamp: str = '',
-             cfg: dict | None = None, channel_ids=None) -> tuple[bool, str]:
+             cfg: dict | None = None, channel_ids=None, lang: str = '') -> tuple[bool, str]:
     """Send to every enabled Teams channel + (if enabled) directly to users.
 
     Returns ``(all_ok, summary)``.  ``channel_ids`` optionally restricts the channel
@@ -39,7 +40,7 @@ def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
     (user-mode settings); loaded from *wa* when not provided.
     """
     if not _HAS_REQUESTS:
-        return False, 'Microsoft Teams requires the requests package'
+        return False, translate(lang, 'msteams_no_requests')
     if cfg is None:
         cfg = wa._config_section('msteams')
 
@@ -64,34 +65,34 @@ def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
         results.extend(_send_users(wa, cfg, text))
 
     if not results:
-        return False, 'No Teams channels or user delivery configured'
+        return False, translate(lang, 'msteams_no_destinations')
     all_ok = all(r[0] for r in results)
     summary = '; '.join(f'{r[2]}: {r[1]}' for r in results)
     return all_ok, summary
 
 
-def send_channel_test(channel: dict) -> tuple[bool, str]:
+def send_channel_test(channel: dict, lang: str = '') -> tuple[bool, str]:
     """POST a test card to a single channel record (used by the per-channel test route)."""
     if not _HAS_REQUESTS:
-        return False, 'Microsoft Teams requires the requests package'
+        return False, translate(lang, 'msteams_no_requests')
     url = (channel.get('webhook_url') or '').strip()
     if not url:
-        return False, 'Channel webhook URL is not configured'
+        return False, translate(lang, 'msteams_url_required')
     card = cards.message_card(kind='test', module='ServiceSentry', item='msteams_test',
                               status='TEST', message='ServiceSentry Teams test', timestamp='')
     return _post_card(url, card)
 
 
-def send_user_test(wa, cfg: dict | None = None) -> tuple[bool, str]:
+def send_user_test(wa, cfg: dict | None = None, lang: str = '') -> tuple[bool, str]:
     """Send a test message via the configured user-delivery mechanism."""
     if not _HAS_REQUESTS:
-        return False, 'Microsoft Teams requires the requests package'
+        return False, translate(lang, 'msteams_no_requests')
     if cfg is None:
         cfg = wa._config_section('msteams')
     text = cards.plain_text(kind='test', item='msteams_test', message='ServiceSentry Teams test')
     results = _send_users(wa, cfg, text)
     if not results:
-        return False, 'No recipients configured'
+        return False, translate(lang, 'msteams_no_recipients')
     return all(r[0] for r in results), '; '.join(f'{r[2]}: {r[1]}' for r in results)
 
 

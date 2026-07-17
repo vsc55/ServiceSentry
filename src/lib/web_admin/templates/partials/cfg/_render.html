@@ -685,7 +685,8 @@ function renderConfig() {
         id: 'cfg-tab-' + tab.id, label: t(tab.label_key), icon: tab.icon, html: _byTab[tab.id] || '',
     }));
     // A stale saved active tab (e.g. the removed "Server") → fall back to the first.
-    if (!_cfgTabs.some(tab => tab.id === _activeCfgTab)) _activeCfgTab = _cfgTabs[0].id;
+    // Guard the empty-layout case so an absent/failed layout doesn't crash renderConfig().
+    if (_cfgTabs.length && !_cfgTabs.some(tab => tab.id === _activeCfgTab)) _activeCfgTab = _cfgTabs[0].id;
     let tabNav = `<ul class="nav nav-tabs mb-3" id="cfg-tab-nav" role="tablist">`;
     let tabContent = `<div class="tab-content">`;
     _cfgTabs.forEach(tab => {

@@ -177,6 +177,6 @@ def register(app, wa):
         """Remove a single dropped source from the tally."""
         store = getattr(wa, '_syslog_drops_store', None)
         if store is None or not store.delete(uid):
-            return jsonify({'error': 'Not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         wa._audit('syslog_drops_cleared', detail={'uid': uid})
         return jsonify({'ok': True})

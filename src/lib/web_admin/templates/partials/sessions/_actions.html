@@ -1,7 +1,7 @@
 async function _bulkRevokeSessions() {
     const sids = [..._selectedSessions];
     if (!sids.length) return;
-    showConfirmModal(`${t('revoke_session')} ${sids.length} ${t('selected').toLowerCase()}?`, async () => {
+    showConfirmModal(`${t('session_revoke')} ${sids.length} ${t('selected').toLowerCase()}?`, async () => {
         for (const sid of sids) {
             const r = await apiPost('/api/v1/sessions/revoke/' + encodeURIComponent(sid), {});
             if (r?.status === 200 && r.data?.ok) delete sessionsData[sid];
@@ -12,7 +12,7 @@ async function _bulkRevokeSessions() {
 }
 
 async function revokeSession(sid) {
-    showConfirmModal(t('revoke_session') + '?', async () => {
+    showConfirmModal(t('session_revoke') + '?', async () => {
         const isCurrent = !!sessionsData[sid]?.is_current;
         const r = await apiPost('/api/v1/sessions/revoke/' + encodeURIComponent(sid), {});
         if (r && r.status === 200 && r.data?.ok) {
@@ -37,10 +37,10 @@ async function revokeSession(sid) {
 }
 
 async function revokeUserSessions(username) {
-    showConfirmModal(tf('confirm_revoke_user_sessions', username), async () => {
+    showConfirmModal(tf('session_revoke_user_confirm', username), async () => {
         const r = await apiPost('/api/v1/sessions/revoke-user/' + encodeURIComponent(username), {});
         if (r && r.status === 200 && r.data?.ok) {
-            showToast(t('user_sessions_revoked'));
+            showToast(t('session_user_revoked'));
             if (username === currentUser.username) {
                 setTimeout(() => { location.href = '/login'; }, Math.max((configData?.web_admin?.session_revoke_redirect_secs ?? 3) * 1000, 300));
                 return;
@@ -57,10 +57,10 @@ async function revokeUserSessions(username) {
 }
 
 async function invalidateAllSessions() {
-    showConfirmModal(t('confirm_close_all_sessions'), async () => {
+    showConfirmModal(t('session_close_all_confirm'), async () => {
         const r = await apiPost('/api/v1/sessions/invalidate', {});
         if (r && r.status === 200 && r.data?.ok) {
-            showToast(t('sessions_closed'));
+            showToast(t('session_closed'));
             setTimeout(() => { location.href = '/login'; }, Math.max((configData?.web_admin?.session_revoke_redirect_secs ?? 3) * 1000, 300));
         } else {
             showToast(r?.data?.error || t('connection_error'), 'danger');

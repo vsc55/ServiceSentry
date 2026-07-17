@@ -11,7 +11,20 @@ from __future__ import annotations
 import time
 
 from lib.core.notify.formatting import notify_lang, plain
+from lib.core.notify.recipients import RecipientResolver
 from lib.core.notify.registry import Channel, register_channel
+
+
+def _resolve_recipients(router, email_cfg) -> list:
+    """Expand the configured recipient tokens (plain email | ``group:<uid>``) to a flat
+    email list, via the router-owned resolver (works in web + monitor). Empty/unknown
+    groups are logged, not fatal."""
+    resolver = router.store('recipients', lambda ctx: RecipientResolver(ctx.db))
+    res = resolver.expand(email_cfg.get('recipients', ''))
+    if res.get('skipped'):
+        router._dbg(f"email: recipient(s) with no deliverable address skipped: "
+                    f"{', '.join(res['skipped'])}")
+    return res['emails']
 
 
 def send(router, cfg, *, kind='', module='', item='', status='', message='',
@@ -35,7 +48,8 @@ def send(router, cfg, *, kind='', module='', item='', status='', message='',
     )
     return email_notify._dispatch(
         email_cfg, subject=subject, body_html=body_html,
-        recipients=None,   # None → fall back to the configured recipients
+        recipients=_resolve_recipients(router, email_cfg),   # expand group tokens → emails
+        lang=lang,
     )
 
 
@@ -54,8 +68,8 @@ def flush(router, cfg, alerts, hostname, public_url) -> tuple:
         public_url=public_url, lang=lang, strings=strings, html_override=html_override)
     prefix = email_cfg.get('subject_prefix') or '[ServiceSentry]'
     subject = f'{prefix} {hostname}: {len(alerts)} alert(s)'
-    return email_notify._dispatch(email_cfg, subject=subject,
-                                  body_html=body_html, recipients=None)
+    return email_notify._dispatch(email_cfg, subject=subject, body_html=body_html,
+                                  recipients=_resolve_recipients(router, email_cfg), lang=lang)
 
 
 register_channel(Channel('email', send, flush))

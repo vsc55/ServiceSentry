@@ -34,11 +34,11 @@ function formatAuditDetailFull(detail) {
         if (detail.reason)   html += `<p class="mb-1">${esc(t(detail.reason) || detail.reason)}</p>`;
         if (detail.name)     html += `<p class="mb-1"><strong>${t('col_group_name') || 'Group'}:</strong> <code>${esc(detail.name)}</code></p>`;
         if (detail.username) html += `<p class="mb-1"><strong>${t('col_user')}:</strong> ${esc(detail.username)}</p>`;
-        if (detail.role)     html += `<p class="mb-1"><strong>Role:</strong> ${esc(detail.role)}</p>`;
+        if (detail.role)     html += `<p class="mb-1"><strong>${t('col_role') || 'Role'}:</strong> ${esc(detail.role)}</p>`;
         if (detail.auth_source) html += `<p class="mb-1"><strong>${t('col_auth_source') || 'Source'}:</strong> ${esc(detail.auth_source)}</p>`;
         if (detail.remember !== undefined) html += `<p class="mb-1"><strong>${t('remember_me') || 'Remember me'}:</strong> ${detail.remember ? (t('yes') || 'yes') : (t('no') || 'no')}</p>`;
         if (detail.uid)      html += `<p class="mb-1"><strong>${t('session') || 'Session'}:</strong> <code>${esc(detail.uid)}</code></p>`;
-        if (detail.retry_after !== undefined) html += `<p class="mb-1"><strong>Retry-After:</strong> ${esc(String(detail.retry_after))}s</p>`;
+        if (detail.retry_after !== undefined) html += `<p class="mb-1"><strong>${t('audit_retry_after') || 'Retry-After'}:</strong> ${esc(String(detail.retry_after))}s</p>`;
         if (detail.display_name && !detail.changes) html += `<p class="mb-1">${esc(detail.display_name)}</p>`;
         if (Array.isArray(detail.changes) && detail.changes.length) {
             html += formatAuditDetailFull(detail.changes);

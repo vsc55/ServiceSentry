@@ -27,7 +27,7 @@ function _renderNotificationsMatrix(cfgCardOpen, cfgCardClose) {
     let h = cfgCardOpen('cfgcol_notifications', '<i class="bi bi-grid-3x3-gap me-1"></i>', SECTION_LABELS['notifications'] || 'Notification Routing');
 
     h += `<div class="cfg-field-wrap pt-1">
-        <table class="table table-sm table-bordered mb-1 ss-fs-4">
+        <table class="table table-sm table-bordered table-hover ss-hover-rows mb-1 ss-fs-4">
             <thead><tr>
                 <th class="align-middle" style="width:40%;font-weight:600;color:var(--bs-secondary-color)">${esc(t('notif_event'))}</th>`;
     for (const ch of channels) {
@@ -47,31 +47,39 @@ function _renderNotificationsMatrix(cfgCardOpen, cfgCardClose) {
     h += `</tr></thead><tbody>`;
 
     const _span = channels.length + 1;
-    let _lastSource = null;
+    // Group rows by their source domain (Monitoring / IP ban / Auth / Service control / …) so
+    // each subheader appears EXACTLY ONCE and its events are contiguous — even when different
+    // sources interleave by 'order' (e.g. auth and service-control orders overlapping). Group
+    // order = first appearance (lowest 'order'); rows keep their registry order within the group.
+    const _groups = [];
+    const _gIndex = {};
     for (const ev of events) {
-        // Group rows by their source domain (Monitoring / IP ban / Auth / …) with a subheader,
-        // so it's clear where each event comes from.
-        if (ev.source !== _lastSource) {
-            _lastSource = ev.source;
-            h += `<tr><td colspan="${_span}"
-                style="padding:.25rem .5rem;font-size:.8em;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--bs-secondary-color);background:var(--bs-tertiary-bg)">
-                ${esc(_srcLabel(ev.source))}</td></tr>`;
-        }
-        h += `<tr><td class="align-middle" style="color:var(--bs-body-color)">${esc(ev.label)}</td>`;
-        for (const ch of channels) {
-            const fieldKey = `${ch.key}_on_${ev.key}`;
-            const cfgPath  = `notifications|${fieldKey}`;
-            // Every cell defaults OFF: a route is stored only when ticked, and dispatch
-            // treats an absent key as False — so the checkbox reflects the real state.
-            const val      = data[fieldKey] === true;
-            // Cells are driven by the column select-all header and count toward its state.
-            h += `<td class="text-center align-middle">
+        let gi = _gIndex[ev.source];
+        if (gi === undefined) { gi = _gIndex[ev.source] = _groups.length; _groups.push({ source: ev.source, rows: [] }); }
+        _groups[gi].rows.push(ev);
+    }
+    const _cell = (ev, ch) => {
+        const fieldKey = `${ch.key}_on_${ev.key}`;
+        const cfgPath  = `notifications|${fieldKey}`;
+        // Every cell defaults OFF: a route is stored only when ticked, and dispatch treats an
+        // absent key as False — so the checkbox reflects the real state. Cells are driven by the
+        // column select-all header and count toward its state.
+        const val      = data[fieldKey] === true;
+        return `<td class="text-center align-middle">
                 <input type="checkbox" class="form-check-input notif-cell"
                     data-notif-col="${escAttr(ch.key)}" data-cfg-path="${escAttr(cfgPath)}"${val ? ' checked' : ''}
                     onchange="updateField('config',${jsStr(cfgPath)},this.checked);_notifSyncColumnHead(${jsStr(ch.key)})">
             </td>`;
+    };
+    for (const grp of _groups) {
+        h += `<tr><td colspan="${_span}"
+                style="padding:.25rem .5rem;font-size:.8em;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--bs-secondary-color);background:var(--bs-tertiary-bg)">
+                ${esc(_srcLabel(grp.source))}</td></tr>`;
+        for (const ev of grp.rows) {
+            h += `<tr><td class="align-middle" style="color:var(--bs-body-color)">${esc(ev.label)}</td>`;
+            for (const ch of channels) h += _cell(ev, ch);
+            h += `</tr>`;
         }
-        h += `</tr>`;
     }
 
     h += `</tbody></table></div>`;

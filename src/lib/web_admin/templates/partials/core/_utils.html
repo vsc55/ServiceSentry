@@ -36,6 +36,7 @@ function _fmtDateTime(iso) {
     if (!iso) return '—';
     try {
         const d = new Date(iso), p = n => String(n).padStart(2, '0');
+        if (isNaN(d.getTime())) return iso;   // Invalid Date doesn't throw → avoid "NaN-NaN-NaN"
         return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
     } catch (_) { return iso; }
 }
@@ -587,8 +588,8 @@ function _copyToClipboard(text) {
     if (navigator.clipboard) {
         navigator.clipboard.writeText(text)
             .then(() => showToast(t('copied'), 'success'))
-            .catch(() => showToast('Copy failed', 'danger'));
+            .catch(() => showToast(t('copy_failed'), 'danger'));
     } else {
-        showToast('Copy failed', 'danger');
+        showToast(t('copy_failed'), 'danger');
     }
 }

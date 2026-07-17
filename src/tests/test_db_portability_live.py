@@ -15,7 +15,7 @@ The target database must be a SCRATCH database: these tests CREATE and DROP the 
 SERIALLY (``-n0``) — they use fixed table names, so parallel workers would collide.
 
 The connection variables are conveniently kept in a gitignored ``tests/.env.test`` (auto-loaded
-by ``conftest.py`` for the whole suite); see docs/tests.md §81. Then just:
+by ``conftest.py`` for the whole suite); see docs/ref-tests.md §81. Then just:
 
     .venv/Scripts/python -m pytest -n0 -q tests/test_db_portability_live.py
 """
@@ -68,7 +68,7 @@ def live_db(request):
     # These tests use fixed table names and drop/recreate them, so they must not run in
     # parallel (xdist workers would clobber each other). Under `-n auto` they'd now be
     # collected — since `.env.test` is auto-loaded for the whole suite — so skip unless
-    # serial. Run them with `-n0` (see docs/tests.md §81).
+    # serial. Run them with `-n0` (see docs/ref-tests.md §81).
     if int(os.environ.get('PYTEST_XDIST_WORKER_COUNT', '1')) > 1:
         pytest.skip('live DB tests must run serially - use -n0')
     cfg = _mysql_cfg() if request.param == 'mysql' else _pg_cfg()

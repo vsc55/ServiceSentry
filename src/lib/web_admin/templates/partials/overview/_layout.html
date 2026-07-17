@@ -59,16 +59,21 @@ function _dwTabBtn(sel) {
     return btn;
 }
 
-// A widget is navigable when its target tab — and its sub-tab, if it has one —
-// are both permitted for the current user.
+// A widget is navigable when it declares an external link (module widgets), or when
+// its target tab — and its sub-tab, if it has one — are both permitted for the user.
 function _dwIsNavigable(wid) {
+    const md = _dwModuleDef(wid);
+    if (md && md.link) return true;
     const nav = _DW_NAV[_dwBaseId(wid)];
     if (!nav || !_dwTabBtn(nav.tab)) return false;
     return !nav.sub || !!_dwTabBtn(nav.sub);
 }
 
-// Switch to the widget's tab (and sub-tab). No-op without permission.
+// Open the widget's external link in a new tab (module widgets), else switch to its
+// tab (and sub-tab). No-op without permission.
 function _dwNavigate(wid) {
+    const md = _dwModuleDef(wid);
+    if (md && md.link) { window.open(md.link, '_blank', 'noopener'); return; }
     const nav = _DW_NAV[_dwBaseId(wid)];
     if (!nav) return;
     if (window.SS_OVERVIEW_PAGE) {
@@ -99,32 +104,78 @@ function _dwOnGridClick(e) {
     _dwNavigate(dw.dataset.wid);
 }
 
+// Module stat cards are wide, so a proportional pop would balloon over the neighbours.
+// Give them a FIXED small growth (~8px, like a narrow card) via --dw-pop, and point the
+// transform-origin at whichever side has room so the little growth stays on screen.
+const _DW_POP_PX = 8;                       // absolute width a popped card gains
+function _dwOnGridHover(e) {
+    if (_dwEditing) return;
+    const dw = e.target.closest('.dw-module');
+    if (!dw) return;
+    const r = dw.getBoundingClientRect();
+    if (!r.width) return;
+    const vw = document.documentElement.clientWidth;
+    const scale = Math.min(1.04, 1 + _DW_POP_PX / r.width);   // ≤ the core cards' 1.04
+    const grow = r.width * (scale - 1);                        // total px added
+    dw.style.setProperty('--dw-pop', scale.toFixed(4));
+    let ox = '50%';
+    if (r.left - grow / 2 < 0 && r.right + grow <= vw) ox = '0%';        // hug left, grow right
+    else if (r.right + grow / 2 > vw && r.left - grow >= 0) ox = '100%'; // hug right, grow left
+    dw.style.transformOrigin = ox + ' center';
+}
+
 // Spacers are dynamic (multiple instances, ids "spacer:N"); they have no
 // catalog entry, so resolve their definition synthetically.
-// Module-contributed widgets (schema __overview_widget__) → addable widget types
-// keyed `mw_<module>`.  Instances carry a `:N` suffix; the core knows NOTHING
-// about any specific module — icon/title/multi/perm come from MODULE_WIDGETS and
-// the data from the module's overview_widget() hook.
+// Module-contributed widgets (schema __overview_widget__) → addable widget types.
+// A module contributes one or more widgets (its `widgets` list); each is keyed
+// `mw_<module>` (primary, id='') or `mw_<module>_<id>`.  Instances carry a `:N`
+// suffix.  The core knows NOTHING about any specific module — icon/title/view/perm
+// come from MODULE_WIDGETS and the data from the module's overview_widget() hook.
+// view 'stat' = a stat card (auto height, not resizable); 'table' = a dense listing
+// (fixed/resizable height) with an optional scope selector.
 const _DW_MODULE = {};
 for (const [mod, def] of Object.entries((typeof MODULE_WIDGETS !== 'undefined' ? MODULE_WIDGETS : {}) || {})) {
-    _DW_MODULE['mw_' + mod] = {
-        module: mod, icon: def.icon || 'bi-grid-1x2', dCols: def.cols || 4, dH: def.h || 340,
-        hasH: true, multi: !!def.multi, perm: def.perm || 'modules_view',
-        label_i18n: def.label_i18n || {},
-        canShow: (p) => !def.perm || p.has(def.perm),
-    };
+    const widgets = (def.widgets && def.widgets.length) ? def.widgets : [def];
+    for (const w of widgets) {
+        const isTable = w.view === 'table';
+        const perm = w.perm || def.perm || 'modules_view';
+        _DW_MODULE['mw_' + mod + (w.id ? '_' + w.id : '')] = {
+            module: mod, view: isTable ? 'table' : 'stat',
+            icon: w.icon || def.icon || 'bi-grid-1x2', dCols: w.cols || def.cols || 4,
+            dH: isTable ? (w.h || 340) : 'auto', hasH: isTable,
+            multi: !!w.multi, perm, scope: w.scope || '', link: w.link || '',
+            selector: !!w.selector, label_i18n: def.label_i18n || {},
+            canShow: (p) => !perm || p.has(perm),
+        };
+    }
 }
 function _dwBaseId(id) { return String(id).split(':')[0]; }
 function _dwModuleDef(id) { return _DW_MODULE[_dwBaseId(id)] || null; }
 function _dwIsModuleWidget(id) { return !!_dwModuleDef(id); }
 function _dwIsMulti(id) { const d = _dwModuleDef(id); return !!(d && d.multi); }
+// A module widget renders as a stat card when its view is 'stat', or when a table
+// widget is at the 'sum' (aggregate) scope — in which case it behaves like a stat
+// card: auto height, not resizable, no level filter.
+function _dwWidgetIsStat(id, scope) {
+    const d = _dwModuleDef(id);
+    if (!d) return false;
+    return d.view !== 'table' || scope === 'sum';
+}
+// Effective height config for an instance (a table widget collapses to auto height
+// when it's showing the aggregate stat card).
+function _dwInstHasH(id, scope) {
+    const d = _dwDef(id);
+    return !!(d && d.hasH) && !_dwWidgetIsStat(id, scope);
+}
 // Resolved display title for any widget def (core widgets use lkey; module widgets
-// carry a label_i18n map from their pretty_name).
+// carry a label_i18n map from their pretty_name).  A module's table widget gets a
+// " · <table>" suffix so it's distinguishable from its stat card in the add bar.
 function _dwLabel(def) {
     if (!def) return '';
     if (def.lkey) return t(def.lkey);
     const li = def.label_i18n || {};
-    return li[CURRENT_LANG] || li[SYSTEM_DEFAULT_LANG] || def.module || '';
+    const base = li[CURRENT_LANG] || li[SYSTEM_DEFAULT_LANG] || def.module || '';
+    return def.view === 'table' ? `${base} · ${t('dw_mw_table')}` : base;
 }
 function _dwIsSpacer(id) { return String(id).startsWith('spacer:'); }
 function _dwDef(id) {
@@ -205,6 +256,7 @@ function _dwSave() {
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
         ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
         ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
+        ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
 }
@@ -320,6 +372,56 @@ function _dwSetSyslogSev(sel) {
     _dwSave();
 }
 
+// A table widget collapses to a stat card at the 'sum' scope: sync its height
+// (auto vs fixed), its resize handle, and hide the level filter accordingly.
+function _dwApplyModuleShape(dw) {
+    const id = dw.dataset.wid, def = _dwDef(id);
+    const scope = dw.dataset.mws || '';
+    const hasH = _dwInstHasH(id, scope);
+    const content = dw.querySelector('.dw-content');
+    if (content) {
+        const hpx = hasH ? _dwHpx(dw.dataset.h) : null;
+        content.style.flex = hpx ? 'none' : '';
+        content.style.height = hpx ? (hpx + 'px') : '';
+        content.style.overflowY = hpx ? 'auto' : '';
+    }
+    let rh = [...dw.children].find(c => c.classList && c.classList.contains('dw-resize'));
+    if (hasH && !rh) {
+        rh = document.createElement('div');
+        rh.className = 'dw-resize';
+        rh.title = t('widget_resize_h') || 'Drag to resize height';
+        dw.appendChild(rh);
+        _dwInitDnd(document.getElementById('dashboardGrid'));
+    } else if (!hasH && rh) {
+        rh.remove();
+    }
+    const lvl = dw.querySelector('.dw-mwlvl');
+    if (lvl) lvl.style.display = (def && def.view === 'table' && scope !== 'sum') ? '' : 'none';
+}
+
+// Set a module table widget's scope ('' = all entries, 'sum' = aggregate, or a
+// specific entry id) — generic across any module-contributed table widget.
+function _dwSetModuleScope(sel) {
+    const dw = sel.closest('.dw[data-wid]');
+    if (!dw) return;
+    if (sel.value === '') delete dw.dataset.mws; else dw.dataset.mws = sel.value;
+    const content = dw.querySelector('.dw-content');
+    if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwApplyModuleShape(dw);              // stat-collapse at 'sum': height/resize + level filter
+    _dwSave();
+}
+
+// Set a module table widget's minimum level ('' = all, 'warn' = ≥ warning, 'error'
+// = only errors). Rows are always sorted worst-first regardless.
+function _dwSetModuleLevel(sel) {
+    const dw = sel.closest('.dw[data-wid]');
+    if (!dw) return;
+    if (sel.value === '') delete dw.dataset.mwlvl; else dw.dataset.mwlvl = sel.value;
+    const content = dw.querySelector('.dw-content');
+    if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwSave();
+}
+
 // Set the modules table widget's filter (all / active on / error).
 // Set a data-driven table widget's filter. Generic over the filter's `store` key (carried
 // on the <select> as data-fstore), so every descriptor-declared table filter (modules_list
@@ -353,17 +455,6 @@ function _dwSetSevFilter(el) {
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwTableFetch(dw.dataset.wid);
-    _dwSave();
-}
-
-// Set a module widget's scope ('' = all entries, 'sum' = aggregate, or a specific
-// entry id) — generic across any module-contributed widget.
-function _dwSetModuleScope(sel) {
-    const dw = sel.closest('.dw[data-wid]');
-    if (!dw) return;
-    if (sel.value === '') delete dw.dataset.mws; else dw.dataset.mws = sel.value;
-    const content = dw.querySelector('.dw-content');
-    if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwSave();
 }
 
@@ -441,7 +532,7 @@ function _dwAddInstance(base) {
     const def = _dwDef(id);
     const hpx = (def.dH && def.dH !== 'auto') ? def.dH : null;
     const el  = document.createElement('div');
-    el.className = `dw dw-c${def.dCols}`;
+    el.className = `dw dw-c${def.dCols}${_dwIsModuleWidget(id) ? ' dw-module' : ''}`;
     el.dataset.wid = id;
     el.dataset.cols = def.dCols;
     el.dataset.h = def.dH || 'auto';
@@ -563,6 +654,7 @@ async function _dwSaveDb() {
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
         ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
         ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
+        ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
     const r = await apiPut('/api/v1/users/me/preferences', { dashboard_layout: layout });
@@ -588,6 +680,7 @@ async function _dwSetDefault() {
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
         ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
         ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
+        ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
     }));
     const r = await apiPut('/api/v1/overview/default-layout', { layout });
     if (r && r.ok) {
@@ -604,7 +697,7 @@ function _dwToolbar(id, cols, h, item) {
     const hasH = def?.hasH;
     let tb = `<div class="dw-toolbar" title="${escAttr(t('dashboard_drag'))}">`;
     tb += `<span class="dw-drag-handle"><i class="bi bi-grip-horizontal"></i></span>`;
-    tb += `<span class="small text-muted text-truncate" style="max-width:8em">${esc(t(def?.lkey || id))}</span>`;
+    tb += `<span class="small text-muted text-truncate" style="max-width:8em">${esc(_dwLabel(def) || t(def?.lkey || id))}</span>`;
     tb += `<span class="d-flex align-items-center gap-1 ms-auto">`;
     // Syslog table widget: minimum severity to show.
     if (id === 'syslog') {
@@ -652,10 +745,10 @@ function _dwToolbar(id, cols, h, item) {
                     onchange="_dwSetSevFilter(this)"><i class="bi bi-cone-striped"></i></label>`;
         tb += `</span>`;
     }
-    if (_dwIsModuleWidget(id)) {
+    // Module table widget: scope selector (all / aggregate / a specific check kind).
+    if (def?.view === 'table' && def.selector) {
         const f = item ? (item.mws ?? '') : '';
-        const mod = _dwModuleDef(id).module;
-        const entries = (((_lastOverviewData || {}).module_widgets || {})[mod] || {}).entries || [];
+        const entries = (((_lastOverviewData || {}).module_widgets || {})[def.module] || {}).entries || [];
         const opts = [['', t('dw_mw_all')], ['sum', t('dw_mw_sum')]]
             .map(([v, lbl]) => `<option value="${v}"${f === v ? ' selected' : ''}>${esc(lbl)}</option>`)
             .concat(entries.map(e =>
@@ -663,6 +756,15 @@ function _dwToolbar(id, cols, h, item) {
             .join('');
         tb += `<select class="form-select form-select-sm dw-mws py-0" style="width:auto;min-width:7em;font-size:.72rem"
             onchange="_dwSetModuleScope(this)">${opts}</select>`;
+        // Level filter: all / ≥ warning / only errors (rows are always sorted worst-first).
+        // Hidden at the 'sum' scope, where the widget is a stat card (no rows to filter).
+        const lv = item ? (item.mwlvl ?? '') : '';
+        const lvOpts = [['', t('dw_mw_all')],
+                        ['warn', '≥ ' + t('status_warning')],
+                        ['error', t('status_error')]]
+            .map(([v, lbl]) => `<option value="${v}"${lv === v ? ' selected' : ''}>${esc(lbl)}</option>`).join('');
+        tb += `<select class="form-select form-select-sm dw-mwlvl py-0" title="${escAttr(t('dw_mw_level'))}"
+            style="width:auto;min-width:6em;font-size:.72rem${f === 'sum' ? ';display:none' : ''}" onchange="_dwSetModuleLevel(this)">${lvOpts}</select>`;
     }
     // Width
     tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;

@@ -10,9 +10,9 @@ Todo el subsistema vive en `lib/core/hosts/` (parte de la capa fundacional, porq
 conexión a un servidor es propiedad del *servidor*, no de un check concreto).
 
 > Los **campos** de cada protocolo se descubren de los módulos (`__host_profile__`) — ver
-> [discovery.md → Perfiles de host](discovery.md#5-perfiles-de-host-__host_profile__). La
-> **referencia de esa meta-clave** está en [schema.md](schema.md) / [modules.md](modules.md).
-> La **UI y los endpoints** (sección Servers) en [web-admin.md → Servidores](web-admin.md).
+> [explica-descubrimiento.md → Perfiles de host](explica-descubrimiento.md#5-perfiles-de-host-__host_profile__). La
+> **referencia de esa meta-clave** está en [ref-schema-json.md](ref-schema-json.md) / [ref-modulos.md](ref-modulos.md).
+> La **UI y los endpoints** (sección Servers) en [explica-web-admin.md → Servidores](explica-web-admin.md).
 
 ---
 
@@ -76,7 +76,7 @@ remoto por SSH, de forma transparente. El *contexto de host* que se pasa es:
   classmethods, sin instancia): reciben el contexto de host y listan ítems en el host ligado.
   Nunca lanza excepción — los fallos vuelven como `('', <error>, -1)`.
 - **`ssh_verify_host`** por host controla la política de host key (ver
-  [security.md](security.md)): `True` = `known_hosts` + `RejectPolicy`; `False` (por defecto) =
+  [explica-seguridad.md](explica-seguridad.md)): `True` = `known_hosts` + `RejectPolicy`; `False` (por defecto) =
   `AutoAddPolicy` (acepta hosts desconocidos en el primer contacto).
 
 `paramiko` es dependencia **opcional**: sin él, `HAS_PARAMIKO=False` y `test_connection()`
@@ -105,8 +105,8 @@ flowchart LR
   target ping + una BD en un host → un host con perfiles snmp/db).
 - **`apply_to_modules()`** → aplica: crea los hosts y reescribe los ítems para que referencien
   `host_uid`.
-- Endpoints y UI del asistente ("Detectar duplicados", preview/apply): [web-admin.md →
-  Servidores](web-admin.md).
+- Endpoints y UI del asistente ("Detectar duplicados", preview/apply): [explica-web-admin.md →
+  Servidores](explica-web-admin.md).
 
 ---
 
@@ -125,9 +125,9 @@ comportamiento (normalizar `__host_profile__`, resolver el SO) viva en un solo s
 ## Dónde se gestiona
 
 - **UI + endpoints** (crear/editar hosts, perfiles por protocolo, probar conexión, migración):
-  [web-admin.md → Servidores](web-admin.md).
-- **Meta-clave `__host_profile__`** (referencia de campos): [schema.md](schema.md) y
-  [modules.md](modules.md).
-- **Descubrimiento** del catálogo protocolo→campos: [discovery.md](discovery.md#5-perfiles-de-host-__host_profile__).
+  [explica-web-admin.md → Servidores](explica-web-admin.md).
+- **Meta-clave `__host_profile__`** (referencia de campos): [ref-schema-json.md](ref-schema-json.md) y
+  [ref-modulos.md](ref-modulos.md).
+- **Descubrimiento** del catálogo protocolo→campos: [explica-descubrimiento.md](explica-descubrimiento.md#5-perfiles-de-host-__host_profile__).
 - **Seguridad** de la ejecución remota (`ssh_verify_host`, hardening del host):
-  [security.md](security.md) y [ssh-hardening.md](ssh-hardening.md).
+  [explica-seguridad.md](explica-seguridad.md) y [caso-ssh-hardening.md](caso-ssh-hardening.md).

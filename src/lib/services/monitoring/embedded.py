@@ -18,6 +18,7 @@ from lib.core.users.service import AdminOpError
 class EmbeddedMonitor(_EmbeddedBase, _MonitoringMixin):
 
     _LEADER_GATED = True       # single-owner: only the lease holder runs cycles
+    _LIFECYCLE_NOTIFY = False   # emits its own scheduler_started/stopped (no generic double)
     # Desired-state knob a dedicated --monitor container reconciles (start/stop).
     _EXTERNAL_KNOB = ('monitoring|enabled', True, False)
 

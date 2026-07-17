@@ -20,6 +20,7 @@ from email.mime.text import MIMEText
 from lib.config.spec import cfg_get
 from lib.debug import DebugLevel
 from lib.core.object_base import ObjectBase
+from lib.i18n import translate
 
 try:
     import requests as _req
@@ -32,29 +33,33 @@ def send(wa, subject: str, body_html: str,
          recipients: list[str] | None = None) -> tuple[bool, str]:
     """Send email using the stored (decrypted) config. Returns (ok, message)."""
     cfg = wa._config_section('email')
-    return _dispatch(cfg, subject, body_html, recipients)
+    from lib.core.notify.formatting import notify_lang  # noqa: PLC0415
+    lang = notify_lang(wa._read_config_file(wa._CONFIG_FILE) or {})
+    return _dispatch(cfg, subject, body_html, recipients, lang=lang)
 
 
 def _dispatch(cfg: dict, subject: str, body_html: str,
-              recipients: list[str] | None) -> tuple[bool, str]:
+              recipients: list[str] | None, lang: str = '') -> tuple[bool, str]:
     if not cfg.get('enabled'):
-        return False, 'Email notifications are not enabled'
+        return False, translate(lang, 'email_disabled')
     provider = cfg_get(cfg, 'email|provider')
     if isinstance(recipients, str):
         rcpts = _parse_recipients(recipients)
+    elif recipients is None:                    # only None falls back to the raw config
+        rcpts = _parse_recipients(cfg.get('recipients', ''))
     else:
-        rcpts = recipients or _parse_recipients(cfg.get('recipients', ''))
+        rcpts = list(recipients)                # explicit (possibly empty) list wins as-is
     if not rcpts:
-        return False, 'No recipients configured'
+        return False, translate(lang, 'email_no_recipients')
     prefix = (cfg.get('subject_prefix') or '').strip()
     full_subject = f'{prefix} {subject}'.strip() if prefix else subject
     if provider == 'smtp':
-        return _send_smtp(cfg, full_subject, body_html, rcpts)
+        return _send_smtp(cfg, full_subject, body_html, rcpts, lang)
     if provider == 'microsoft365':
-        return _send_ms365(cfg, full_subject, body_html, rcpts)
+        return _send_ms365(cfg, full_subject, body_html, rcpts, lang)
     if provider == 'gmail':
-        return _send_gmail(cfg, full_subject, body_html, rcpts)
-    return False, f'Unknown email provider: {provider}'
+        return _send_gmail(cfg, full_subject, body_html, rcpts, lang)
+    return False, translate(lang, 'email_unknown_provider', provider)
 
 
 def _parse_recipients(raw: str) -> list[str]:
@@ -62,10 +67,10 @@ def _parse_recipients(raw: str) -> list[str]:
 
 
 def _send_smtp(cfg: dict, subject: str, body_html: str,
-               recipients: list[str]) -> tuple[bool, str]:
+               recipients: list[str], lang: str = '') -> tuple[bool, str]:
     host = (cfg.get('smtp_host') or '').strip()
     if not host:
-        return False, 'SMTP host is not configured'
+        return False, translate(lang, 'email_smtp_no_host')
     port = cfg_get(cfg, 'email|smtp_port', falsy=True)
     use_ssl = cfg_get(cfg, 'email|smtp_use_ssl')
     use_tls = cfg_get(cfg, 'email|smtp_use_tls') and not use_ssl
@@ -97,21 +102,21 @@ def _send_smtp(cfg: dict, subject: str, body_html: str,
                 if username:
                     srv.login(username, password)
                 srv.sendmail(from_email, recipients, msg.as_string())
-        return True, 'Email sent successfully'
+        return True, translate(lang, 'email_ok_smtp')
     except Exception as exc:
         return False, str(exc)
 
 
 def _send_ms365(cfg: dict, subject: str, body_html: str,
-                recipients: list[str]) -> tuple[bool, str]:
+                recipients: list[str], lang: str = '') -> tuple[bool, str]:
     if not _HAS_REQUESTS:
-        return False, 'Microsoft 365 requires the requests package'
+        return False, translate(lang, 'email_ms365_no_requests')
     tenant_id     = (cfg.get('ms365_tenant_id') or '').strip()
     client_id     = (cfg.get('ms365_client_id') or '').strip()
     client_secret = (cfg.get('ms365_client_secret') or '').strip()
     from_email    = (cfg.get('from_email') or '').strip()
     if not all([tenant_id, client_id, client_secret, from_email]):
-        return False, 'Microsoft 365 requires tenant_id, client_id, client_secret and from_email'
+        return False, translate(lang, 'email_ms365_missing')
     # The Graph client (token + sendMail) lives in the Entra ID provider — no direct
     # Microsoft calls from here. Imported after the requests guard above.
     from lib.providers.entraid import auth, mail  # noqa: PLC0415
@@ -122,15 +127,15 @@ def _send_ms365(cfg: dict, subject: str, body_html: str,
             'body': {'contentType': 'HTML', 'content': body_html},
             'toRecipients': [{'emailAddress': {'address': r}} for r in recipients],
         })
-        return True, 'Email sent via Microsoft 365'
+        return True, translate(lang, 'email_ok_ms365')
     except Exception as exc:
         return False, str(exc)
 
 
 def _send_gmail(cfg: dict, subject: str, body_html: str,
-                recipients: list[str]) -> tuple[bool, str]:
+                recipients: list[str], lang: str = '') -> tuple[bool, str]:
     if not _HAS_REQUESTS:
-        return False, 'Gmail OAuth2 requires the requests package'
+        return False, translate(lang, 'email_gmail_no_requests')
     import base64
     client_id     = (cfg.get('gmail_client_id') or '').strip()
     client_secret = (cfg.get('gmail_client_secret') or '').strip()
@@ -138,7 +143,7 @@ def _send_gmail(cfg: dict, subject: str, body_html: str,
     from_email    = (cfg.get('from_email') or '').strip()
     from_name     = cfg_get(cfg, 'email|from_name', falsy=True).strip()
     if not all([client_id, client_secret, refresh_token, from_email]):
-        return False, 'Gmail requires client_id, client_secret, refresh_token and from_email'
+        return False, translate(lang, 'email_gmail_missing')
     try:
         token_r = _req.post(
             'https://oauth2.googleapis.com/token',
@@ -167,6 +172,6 @@ def _send_gmail(cfg: dict, subject: str, body_html: str,
             timeout=15,
         )
         send_r.raise_for_status()
-        return True, 'Email sent via Gmail'
+        return True, translate(lang, 'email_ok_gmail')
     except Exception as exc:
         return False, str(exc)

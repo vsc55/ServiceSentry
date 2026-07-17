@@ -1,5 +1,11 @@
 {
     "__icon__": "bi-microsoft",
+    "__overview_widget__": [
+        {"id": "health", "view": "stat", "icon": "bi-microsoft", "perm": "modules_view",
+         "scope": "health", "link": "https://admin.microsoft.com/#/servicehealth"},
+        {"id": "table", "view": "table", "icon": "bi-microsoft", "perm": "modules_view",
+         "selector": true, "cols": 4, "h": 340}
+    ],
     "__module__": {
         "api_ver": "v1",
         "enabled": {"type": "bool", "default": true},
@@ -13,7 +19,9 @@
     "__history__": {"field": "used", "unit": "%", "label": "Microsoft 365"},
     "__status_render__": [{"type": "bar", "value": "used", "threshold": "alert", "default_threshold": 100, "unit": "%"}],
     "__entraid_provision__": {
-        "app_roles": ["Sites.Read.All", "Reports.Read.All"],
+        "app_roles": ["Sites.Read.All", "Reports.Read.All", "ServiceHealth.Read.All",
+                      "Organization.Read.All", "Application.Read.All",
+                      "SecurityEvents.Read.All", "IdentityRiskyUser.Read.All"],
         "app_name": "ServiceSentry M365 Monitor"
     },
     "__credential__": {
@@ -26,15 +34,34 @@
         "actions": [
             {
                 "id": "provision_app",
+                "label": "prov_entraid_action_provision_app",
                 "url": "/api/v1/auth/entraid/provision/device-code",
                 "icon": "bi-microsoft",
                 "result": "device_code",
                 "provision": {"profile": "m365"}
+            },
+            {
+                "id": "test_permissions",
+                "label": "prov_entraid_action_test_permissions",
+                "url": "/api/v1/auth/entraid/check-permissions",
+                "icon": "bi-shield-check",
+                "result": "modal",
+                "provision": {"profile": "m365"}
+            },
+            {
+                "id": "fix_permissions",
+                "label": "prov_entraid_action_fix_permissions",
+                "url": "/api/v1/auth/entraid/provision/device-code",
+                "icon": "bi-shield-plus",
+                "result": "device_code",
+                "toolbar": false,
+                "provision": {"profile": "m365", "ensure": true}
             }
         ],
         "links": [
             {
                 "id": "open_app",
+                "label": "prov_entraid_action_open_app",
                 "icon": "bi-box-arrow-up-right",
                 "url": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/{client_id}",
                 "require": ["client_id"]
@@ -50,9 +77,27 @@
             "tenant_id", "client_id", "client_secret", "timeout",
             "check_site", "site", "usage_pct", "free_min", "free_unit",
             "check_tenant_usage", "tenant_max", "tenant_unit",
+            "check_health", "health_services",
+            "check_licenses", "license_min",
+            "check_secrets", "secret_days",
+            "check_mailbox", "mailbox_over_max",
+            "check_onedrive", "onedrive_max", "onedrive_unit",
+            "check_secure_score", "secure_min",
+            "check_risky_users", "risky_max",
             "alert"
         ],
         "__test__": "/api/v1/modules/watchfuls/m365/test_connection",
+        "__multicheck__": [
+            {"toggle": "check_site",         "suffix": "site"},
+            {"toggle": "check_tenant_usage", "suffix": "tenant"},
+            {"toggle": "check_health",       "suffix": "health"},
+            {"toggle": "check_licenses",     "suffix": "licenses"},
+            {"toggle": "check_secrets",      "suffix": "secrets"},
+            {"toggle": "check_mailbox",      "suffix": "mailbox"},
+            {"toggle": "check_onedrive",     "suffix": "onedrive"},
+            {"toggle": "check_secure_score", "suffix": "securescore"},
+            {"toggle": "check_risky_users",  "suffix": "risky"}
+        ],
         "__discovery_field__": "site",
         "__discovery_field_action__": "list_sites",
         "__discovery_method__": "POST",
@@ -61,6 +106,7 @@
         "__actions__": [
             {
                 "id": "provision_app",
+                "label": "prov_entraid_action_provision_app",
                 "open_credential_action": true,
                 "icon": "bi-microsoft",
                 "variant": "secondary",
@@ -94,6 +140,44 @@
                           "show_when": {"check_tenant_usage": [true]}, "group": "checks"},
         "tenant_unit":   {"type": "str",  "default": "TB", "options": ["GB", "TB"],
                           "show_when": {"check_tenant_usage": [true]}, "group": "checks"},
+
+        "check_health":  {"type": "bool", "default": false, "group": "checks"},
+        "health_services": {"type": "str", "default": "", "placeholder": "Exchange Online, Microsoft Teams",
+                          "show_when": {"check_health": [true]}, "group": "checks",
+                          "input_action": {
+                              "id":           "list_services",
+                              "url":          "/api/v1/modules/watchfuls/m365/list_services",
+                              "icon":         "bi-search",
+                              "result":       "field_picker",
+                              "result_field": "health_services",
+                              "result_multi": true
+                          }},
+
+        "check_licenses": {"type": "bool", "default": false, "group": "checks"},
+        "license_min":   {"type": "int",  "default": 0, "min": 0, "max": 9999999,
+                          "show_when": {"check_licenses": [true]}, "group": "checks"},
+
+        "check_secrets": {"type": "bool", "default": false, "group": "checks"},
+        "secret_days":   {"type": "int",  "default": 30, "min": 1, "max": 3650,
+                          "show_when": {"check_secrets": [true]}, "group": "checks"},
+
+        "check_mailbox": {"type": "bool", "default": false, "group": "checks"},
+        "mailbox_over_max": {"type": "int", "default": 0, "min": 0, "max": 9999999,
+                          "show_when": {"check_mailbox": [true]}, "group": "checks"},
+
+        "check_onedrive": {"type": "bool", "default": false, "group": "checks"},
+        "onedrive_max":  {"type": "int",  "default": 0, "min": 0, "max": 9999999,
+                          "show_when": {"check_onedrive": [true]}, "group": "checks"},
+        "onedrive_unit": {"type": "str",  "default": "TB", "options": ["GB", "TB"],
+                          "show_when": {"check_onedrive": [true]}, "group": "checks"},
+
+        "check_secure_score": {"type": "bool", "default": false, "group": "checks"},
+        "secure_min":    {"type": "int",  "default": 0, "min": 0, "max": 100,
+                          "show_when": {"check_secure_score": [true]}, "group": "checks"},
+
+        "check_risky_users": {"type": "bool", "default": false, "group": "checks"},
+        "risky_max":     {"type": "int",  "default": 0, "min": 0, "max": 9999999,
+                          "show_when": {"check_risky_users": [true]}, "group": "checks"},
 
         "alert":         {"type": "int",  "default": 0, "min": 0, "max": 20,
                           "zero_as_blank": true, "placeholder_module": "alert", "group": "alerts"}

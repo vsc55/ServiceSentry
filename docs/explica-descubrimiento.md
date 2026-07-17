@@ -151,6 +151,102 @@ flowchart TB
 
 ---
 
+## 2b. Widgets contribuidos por un módulo watchful (`__overview_widget__`)
+
+Aparte de los widgets del core (§2), **un watchful puede aportar sus propios widgets** al Overview
+desde su `schema.json`. El core no sabe nada del módulo: solo lee claves genéricas y llama a un hook.
+El catálogo (`lib/modules/discovery/overview_widgets.py`) es **código 100 % genérico** — nada
+específico de un módulo vive ahí (ni URLs, ni scopes, ni iconos): todo lo aporta el módulo.
+
+**Declaración** (`schema.json`, un dict o una **lista** para aportar varios widgets):
+
+```json
+"__overview_widget__": [
+    {"id": "health", "view": "stat",  "icon": "bi-...", "scope": "health",
+     "link": "https://ejemplo/estado"},
+    {"id": "table",  "view": "table", "icon": "bi-...", "selector": true, "cols": 4, "h": 340}
+]
+```
+
+Claves por widget (todas opcionales salvo lo indicado):
+
+- `view` — **`stat`** (tarjeta tipo Servers: número grande + un badge de color por estado
+  N OK / N Warning / N Error; por defecto) o **`table`** (listado denso).
+- `id` — distingue los widgets del módulo: `''` = el primario (clave `mw_<módulo>`); los demás son
+  `mw_<módulo>_<id>`. Cada uno es un tipo de widget añadible independiente en la barra "Añadir widget".
+- `icon`, `cols`, `h`, `perm` — icono BI, span/alto por defecto y permiso (default `modules_view`).
+- `scope` (stat) — **qué entrada muestra la tarjeta**, por su `id` en los `entries` del hook
+  (`''` = agregado de todas). El título de la tarjeta es el `pretty_name` traducido del módulo.
+- `selector` (table) — muestra el selector de scope (Todos / Agregado / cada entrada) en el toolbar
+  (modo edición, como el resto de filtros de widget); se persiste en el layout (`mws`). La tabla
+  ordena **peor primero** (error → warning → ok) y ofrece un **filtro de nivel** (Todos / ≥ warning /
+  solo error, dataset `mwlvl`). En scope Agregado la tabla se colapsa a una stat card (altura auto,
+  no redimensionable, sin filtro de nivel).
+- `link` — hace el widget **clicable**: abre esa URL externa en pestaña nueva (soporte genérico en
+  `_dwIsNavigable` / `_dwNavigate`).
+
+**Datos** — el hook del módulo `Watchful.overview_widget(items, status, lang) -> dict`:
+
+```python
+{
+  'entries': [                       # una entrada por "tipo de check" (kind)
+    {'id': 'health', 'name': 'Service health', 'ok': False, 'state': 'warn',
+     'counts': {'ok': 23, 'warn': 4, 'error': 0, 'total': 27},   # alimenta los badges del stat card
+     'rows': [{'name': 'Exchange Online', 'state': 'warn', 'detail': ''}, …],  # filas de la tabla
+     'stats': [{'label': 'OK', 'value': '23/27', 'state': 'warn'}]},
+  ],
+  'aggregate': {'count': 8, 'count_label': 'Checks',
+                'counts': {'ok': 30, 'warn': 4, 'error': 0, 'total': 34}},
+}
+```
+
+El catálogo devuelve `{módulo: {module, label_i18n, widgets:[descriptor, …]}}`; el frontend expande
+cada descriptor en una definición `_DW_MODULE` (clave `mw_<módulo>[_<id>]`). Los mismos datos del hook
+alimentan **todos** los widgets del módulo (la vista los presenta distinto).
+
+**Flujo (declaración → catálogo → datos → render):**
+
+```mermaid
+flowchart TB
+    sch["schema.json de cada watchful<br/>__overview_widget__ [{id, view, scope, selector, link, …}]"]
+    sch --> cat["overview_widgets_catalog()<br/><small>lib/modules/discovery/overview_widgets.py (genérico)</small>"]
+    cat --> mw["MODULE_WIDGETS → front<br/>{módulo: {module, label_i18n, widgets:[…]}}"]
+    mw --> dw["expande a _DW_MODULE<br/>clave mw_&lt;módulo&gt;[_&lt;id&gt;] (tipos añadibles)"]
+    dw --> grid["Overview: pinta la rejilla (metadatos)"]
+    grid -- "carga de datos" --> ajax["GET /api/v1/modules/overview"]
+    ajax --> hook["servidor ejecuta<br/>Watchful.overview_widget(items, status, lang)"]
+    hook --> data["{entries[], aggregate}<br/><small>counts ok/warn/error · rows · stats</small>"]
+    data --> render["render por scope y vista:<br/>stat (badges) · table (peor primero + filtro nivel)"]
+```
+
+> Los widgets de **módulo** obtienen su dato del snapshot `GET /api/v1/modules/overview` (que
+> ejecuta el hook), a diferencia de los widgets del **core** (§2), que piden
+> `GET /api/v1/overview/widget/<id>` por widget. La **detección de estado** (ok/warn/error de cada
+> entrada) la hace el propio módulo dentro de `overview_widget()` a partir de sus `items`/`status`
+> — el core solo pinta los `counts`/`state` que el módulo reporta.
+
+### Comportamiento de hover del dashboard (genérico para futuros widgets)
+
+Reglas en `web_admin.css` + `_dwOnGridHover` (`partials/overview/_layout.html`) — **no hay que
+reinventarlo por widget**:
+
+- Los stat cards del **core** hacen "pop" (`scale(1.04)` + glow) y los vecinos se encogen/atenúan.
+- Los **widgets de módulo** llevan la clase `dw-module` (la añade `_render.html`). Como suelen ser
+  **anchos**, un scale proporcional los desbordaría o solaparía; en su lugar `_dwOnGridHover` fija
+  `--dw-pop = 1 + 8px/ancho` (tope 1.04) → **crecimiento fijo ~8px** como los estrechos, y apunta el
+  `transform-origin` al lado con hueco para no salirse de la ventana. Los vecinos también se apartan,
+  así el pop tiene sitio en vez de solaparse. Solo la vista stat card hace pop (las tablas no).
+- La barra de acento superior de los stat cards redondea sus esquinas (`border-radius: …-lg …-lg 0 0`)
+  porque Chromium deja de recortar `overflow:hidden`+`border-radius` cuando un ancestro tiene
+  `transform` (el pop) → sin ese redondeo, la esquina del acento se ve cuadrada. `.dw` lleva el mismo
+  radio para que outline y glow huguen las esquinas.
+
+> **Cache-busting del CSS**: `web_admin.css` se enlaza con `?v={{ asset_v }}` (mtime del archivo,
+> inyectado por el context processor). El `dev_watch` **no** reinicia con cambios `.css`; sin este
+> parámetro, los cambios de estilo no llegaban al navegador hasta un refresco forzado.
+
+---
+
 ## 3. Servicios embebidos (`EMBEDDED_SERVICE`)
 
 Cada servicio de fondo (monitoring, syslog, events, ipban…) se autodescribe para la pestaña
@@ -177,7 +273,7 @@ flowchart TB
 - **Qué datos:** identidad y capacidades del servicio (clave, etiqueta, icono, si es controlable);
   en runtime, `status()` (estado + detalle) y `control(action)`.
 - **Dónde acaban:** la pestaña Services los itera genéricamente (sin ramas por-servicio) para
-  pintar tarjeta, estado y botones. Detalle en [services.md](services.md).
+  pintar tarjeta, estado y botones. Detalle en [explica-servicios.md](explica-servicios.md).
 
 ---
 
@@ -243,7 +339,7 @@ flowchart TB
 - **Qué datos:** por protocolo, el módulo dueño, el campo de dirección y la lista de campos con
   sus metadatos (tipo, opciones, secret, i18n).
 - **Dónde acaban:** los formularios de la sección Servers y la resolución host-céntrica de checks.
-  Ver [modules.md](modules.md) y [schema.md](schema.md).
+  Ver [ref-modulos.md](ref-modulos.md) y [ref-schema-json.md](ref-schema-json.md).
 
 ---
 
@@ -301,7 +397,7 @@ flowchart TB
 - **Qué datos:** recurso de API, roles de aplicación, scopes delegados y (SSO) redirect URIs +
   claim de grupos; normalizados a una forma estable.
 - **Dónde acaban:** el asistente los usa para registrar la app en Entra vía Graph y devolver las
-  credenciales. Detalle en [sso-entra.md](sso-entra.md).
+  credenciales. Detalle en [caso-entra-id.md](caso-entra-id.md).
 
 ---
 
@@ -336,7 +432,7 @@ flowchart TB
   (tab+card+orden) en el layout.
 - **Dónde acaban:** `renderConfig` pinta la pantalla de Config íntegra desde estas dos fuentes;
   añadir una opción = un `Cfg(...)` en spec.py + (si hace falta) una entrada en un `CARDS`.
-  Ver [configuration.md](configuration.md) y [web-admin.md](web-admin.md).
+  Ver [ref-configuracion.md](ref-configuracion.md) y [explica-web-admin.md](explica-web-admin.md).
 
 ---
 
@@ -364,7 +460,7 @@ flowchart TB
 - **Qué datos:** el nombre del canal y sus dos funciones de entrega (evento suelto / flush agrupado).
 - **Dónde acaban:** el router y el notificador del monitor los iteran genéricamente. Añadir un
   canal = un `channel.py` que se registra; nada en el router ni en el monitor cambia. Detalle en
-  [notifications.md](notifications.md#canales).
+  [explica-notificaciones.md](explica-notificaciones.md#canales).
 
 ---
 
@@ -403,7 +499,7 @@ flowchart TB
   `matrix`/`ui`/`order`.
 - **Dónde acaban:** la matriz de routing y su UI se generan de aquí (filas dinámicas); las claves de
   config `{canal}_on_{kind}` **no** se declaran en `spec.py` — son dinámicas y por defecto off.
-  Detalle en [notifications.md](notifications.md#eventos-kinds-y-su-registro).
+  Detalle en [explica-notificaciones.md](explica-notificaciones.md#eventos-kinds-y-su-registro).
 
 ---
 
@@ -412,7 +508,8 @@ flowchart TB
 | Quiero… | Toco… |
 |---|---|
 | Un permiso nuevo en un dominio/servicio | su `permissions.py` → `MODULE_PERMISSIONS.permissions` (+ i18n del flag/grupo) |
-| Una tarjeta en el Overview | su `overview_widget.py` → `OVERVIEW_WIDGETS` (+ `stat`/`rows`) |
+| Una tarjeta en el Overview (dominio/servicio del core) | su `overview_widget.py` → `OVERVIEW_WIDGETS` (+ `stat`/`rows`) |
+| Uno o varios widgets de Overview desde un **módulo watchful** | `schema.json` → `__overview_widget__` (lista) + hook `Watchful.overview_widget()` — ver §2b |
 | Un servicio de fondo nuevo | un paquete en `lib/services/<s>/` con `EMBEDDED_SERVICE` + `make_embedded(host)` |
 | Un tipo de credencial para un módulo | `schema.json` → `__credential__` (+ campos en schema/lang) |
 | Un protocolo de conexión de host | `schema.json` → `__host_profile__` |

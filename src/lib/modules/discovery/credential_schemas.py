@@ -96,6 +96,18 @@ def _i18n_for(lang_data: dict, section: str, key: str) -> dict:
     return out
 
 
+def _general_i18n(key: str) -> dict:
+    """Build ``{lang: text}`` for *key* from the GENERAL i18n catalog — the fallback
+    for GENERIC credential action/link labels (e.g. the shared Entra ID provisioning
+    actions ``provision_app``/``test_permissions``/``fix_permissions``/``open_app``),
+    so their text lives once in the core i18n instead of being duplicated in every
+    module's ``action_labels``.  Mirrors the frontend's ``t(action.id)`` fallback."""
+    from lib.i18n import TRANSLATIONS  # noqa: PLC0415
+    out = {lang: cat[key] for lang, cat in TRANSLATIONS.items()
+           if isinstance(cat, dict) and isinstance(cat.get(key), str) and cat[key]}
+    return out
+
+
 # Structural attributes copied verbatim from a field declaration to its catalog
 # entry (everything except the derived ``kind`` and the translations).
 _FIELD_PASS_THROUGH = ('options', 'show_when', 'default', 'placeholder', 'rows',
@@ -230,6 +242,9 @@ def credential_schemas(watchfuls_dir: str | None = None) -> dict:
                 if not isinstance(a, dict) or not a.get('id') or not a.get('url'):
                     continue
                 aid = str(a['id'])
+                # An action may reference an explicit i18n label key (e.g. the shared
+                # Entra ID actions use `prov_entraid_action_*`); else its id is the key.
+                albl = str(a.get('label') or aid)
                 inputs = []
                 for f in (a.get('inputs') or []):
                     if not isinstance(f, dict) or not f.get('name'):
@@ -247,8 +262,12 @@ def credential_schemas(watchfuls_dir: str | None = None) -> dict:
                     'url':        str(a['url']),
                     'icon':       str(a.get('icon') or 'bi-lightning'),
                     'result':     str(a.get('result') or 'toast'),
-                    'label_i18n': _i18n_for(lang_data, 'action_labels', aid) or {'en_EN': aid},
+                    'label_i18n': (_i18n_for(lang_data, 'action_labels', albl)
+                                   or _general_i18n(albl) or {'en_EN': aid}),
                     'inputs':     inputs,
+                    # False → the action is invokable (e.g. from another modal) but not
+                    # shown as a button in the credential-editor actions toolbar.
+                    'toolbar':    bool(a.get('toolbar', True)),
                 }
                 # A device-code provisioning action carries a `provision` object
                 # (opaque pass-through). Whatever extras the module's provisioning
@@ -270,12 +289,14 @@ def credential_schemas(watchfuls_dir: str | None = None) -> dict:
                 if not isinstance(lnk, dict) or not lnk.get('id') or not lnk.get('url'):
                     continue
                 lid = str(lnk['id'])
+                llbl = str(lnk.get('label') or lid)
                 link_entries.append({
                     'id':         lid,
                     'url':        str(lnk['url']),
                     'icon':       str(lnk.get('icon') or 'bi-box-arrow-up-right'),
                     'require':    [str(x) for x in (lnk.get('require') or []) if isinstance(x, str)],
-                    'label_i18n': _i18n_for(lang_data, 'action_labels', lid) or {'en_EN': lid},
+                    'label_i18n': (_i18n_for(lang_data, 'action_labels', llbl)
+                                   or _general_i18n(llbl) or {'en_EN': lid}),
                 })
             catalog[ctype] = {
                 'module':     entry,

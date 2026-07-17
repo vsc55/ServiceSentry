@@ -171,7 +171,7 @@ class TestSessionRegistry:
         _login(client)
         html = client.get("/admin").data
         assert b'invalidateAllSessions()' in html
-        assert b'close_all_sessions' in html
+        assert b'session_close_all' in html
 
     def test_sessions_panel_in_ui(self, client):
         """Users tab contains the sessions panel."""

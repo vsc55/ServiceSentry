@@ -37,7 +37,7 @@ def register(app, wa):
         if not wa._is_admin_requester():
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         count = wa._revoke_all_sessions()
-        wa._audit('all_sessions_revoked', detail=str(count))
+        wa._audit('session_all_revoked', detail=str(count))
         session.clear()
         return jsonify({'ok': True, 'count': count})
 
@@ -76,7 +76,7 @@ def register(app, wa):
         if not wa._is_admin_requester() and username != session.get('username'):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         count = wa._revoke_user_sessions(username)
-        wa._audit('user_sessions_revoked',
+        wa._audit('session_user_revoked',
                   detail={'username': username, 'count': count})
         if username == session.get('username'):
             session.clear()

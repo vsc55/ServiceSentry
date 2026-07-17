@@ -7,9 +7,9 @@
 > (`helm install ss ./helm/servicesentry …`, ver su [README](../helm/servicesentry/README.md)).
 
 ServiceSentry corre igual en Kubernetes que en la topología de microservicios de
-Docker (ver [docker.md](docker.md)): **un Deployment por rol** que comparten una
+Docker (ver [caso-docker.md](caso-docker.md)): **un Deployment por rol** que comparten una
 **base de datos** y se coordinan por el **plano de control distribuido** (ver
-[services.md → Plano de control distribuido](services.md#modo-microservicios-plano-de-control-distribuido)).
+[explica-servicios.md → Plano de control distribuido](explica-servicios.md#modo-microservicios-plano-de-control-distribuido)).
 
 - **web** — panel de administración (`SS_*_EMBEDDED=0`: no programa checks, no liga
   syslog, no evalúa reglas; solo checks on-demand y la UI).
@@ -236,7 +236,7 @@ spec:
 `worker` y `events` admiten **varias réplicas con failover**: un **lease de líder**
 en BD hace que solo una haga el trabajo y las demás queden en **hot-standby**; si la
 activa cae, otra toma el relevo en ~30 s (ver
-[services.md → Alta disponibilidad](services.md#alta-disponibilidad-lease-de-líder--hot-standby)).
+[explica-servicios.md → Alta disponibilidad](explica-servicios.md#alta-disponibilidad-lease-de-líder--hot-standby)).
 Así que puedes poner `replicas: 2` en esos Deployments para tolerar la caída de un
 pod sin duplicar checks ni alertas. La pestaña **Servicios** marca cuál es **Líder**
 y cuáles **En espera**.
@@ -252,4 +252,4 @@ ingesta — sube `replicas` sin más.
   periódico (≤15 s) igualmente.
 - **Base de datos**: usa un MySQL/PostgreSQL gestionado o un StatefulSet; apunta
   `SS_DB_*` ahí. Para syslog de alto volumen, una segunda BD con `SS_SYSLOG_DB_*`
-  (ver [docker.md](docker.md)).
+  (ver [caso-docker.md](caso-docker.md)).

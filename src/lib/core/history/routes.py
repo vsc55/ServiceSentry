@@ -58,7 +58,7 @@ def register(app, wa):
         key      = request.args.get('key', '').strip()
         item_uid = request.args.get('uid', '').strip() or None
         if not module or not key:
-            return jsonify({'error': 'module and key are required'}), 400
+            return jsonify({'error': wa._t('history_module_key_required')}), 400
 
         try:
             # Fractional hours allowed (sub-hour ranges like "10m" → 1/6 h);
@@ -66,7 +66,7 @@ def register(app, wa):
             hours  = min(87600.0, max(1 / 60, float(request.args.get('hours', 24))))
             points = min(2000, max(10, int(request.args.get('points', 500))))
         except (TypeError, ValueError):
-            return jsonify({'error': 'invalid hours or points'}), 400
+            return jsonify({'error': wa._t('history_invalid_range')}), 400
 
         to_ts   = time.time()
         from_ts = to_ts - hours * 3600
@@ -110,7 +110,7 @@ def register(app, wa):
         key      = request.args.get('key', '').strip()
         item_uid = request.args.get('uid', '').strip() or None
         if not module or not key:
-            return jsonify({'error': 'module and key are required'}), 400
+            return jsonify({'error': wa._t('history_module_key_required')}), 400
 
         deleted = wa._history.delete_series(module, key, item_uid=item_uid)
         wa._audit('history_deleted', detail={
@@ -136,7 +136,7 @@ def register(app, wa):
         import sys  # noqa: PLC0415
         h = wa._history
         if h is None:
-            return jsonify({'ok': False, 'error': 'wa._history is None'})
+            return jsonify({'ok': False, 'error': wa._t('history_unavailable')})
         try:
             before = h.get_index()
             h.record('__test__', '__test__', True, {'value': 42.0})
@@ -168,15 +168,19 @@ def register(app, wa):
                 'var_dir': wa._var_dir,
                 'error': '_history is None — _init_history() failed or var_dir not set',
             })
+        # Go through the connector's dialect-agnostic API (works on SQLite/MySQL/PG) —
+        # the store is a HistoryStore whose connector is ``h._db`` (no _conn()/_path on it),
+        # and PRAGMA table_info is SQLite-only.
+        conn = getattr(h, '_db', None)
         try:
-            count_row = h._conn().execute('SELECT COUNT(*) FROM history').fetchone()
+            count_row = conn.fetchone('SELECT COUNT(*) FROM history')
             count     = count_row[0] if count_row else -1
-            cols      = [r[1] for r in h._conn().execute('PRAGMA table_info(history)').fetchall()]
+            cols      = sorted(conn.list_columns('history'))
         except Exception as exc:  # pylint: disable=broad-except
             return jsonify({'store': 'error', 'error': str(exc)})
         return jsonify({
-            'store':      'SQLiteConnector',
-            'db_path':    getattr(h, '_path', '?'),
+            'store':      getattr(conn, 'KIND', '?'),
+            'db_path':    getattr(conn, '_path', None),   # only SQLite has a file path
             'var_dir':    wa._var_dir,
             'rows':       count,
             'columns':    cols,

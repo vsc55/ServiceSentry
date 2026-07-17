@@ -784,6 +784,11 @@
     transition: transform .2s;
 }
 
+/* Generic row-hover highlight for Bootstrap tables (pair with .table-hover): a clear,
+   theme-agnostic tint so the row under the cursor stands out. Reusable on any table. */
+.ss-hover-rows { --bs-table-hover-bg: rgba(128,128,128,.18); }
+.ss-hover-rows > tbody > tr > * { transition: background-color .12s; }
+
 /* ── Notifications sub-tab nav-pills ───────────────────────────────── */
 /* Wrap the pill bar with the same visual language as cfg-card headers  */
 #cfg-notif-subtabs {
@@ -883,6 +888,11 @@
     .dashboard-grid .dw { grid-column: span 12 !important; }
 }
 .dw { display: flex; flex-direction: column; }
+/* Match the cards' rounding (.rounded-3) so the hover outline and the "pop" glow
+   box-shadow follow the card's rounded corners instead of a square box — otherwise
+   the page background showed through at the corners on hover. .dw has no background
+   of its own, so this only shapes those hover effects. */
+.dw { border-radius: var(--bs-border-radius-lg); }
 .dw-content { flex: 1; min-height: 0; overflow: hidden; }
 
 /* Click-through widgets jump to their tab — only outside edit mode. The card
@@ -890,8 +900,7 @@
    controls (sort headers, links) keep their own cursor via [onclick] etc. */
 .dashboard-grid:not(.dashboard-edit) .dw-clickable .dw-content { cursor: pointer; }
 .dashboard-grid:not(.dashboard-edit) .dw-clickable:hover {
-    outline: 1px solid var(--bs-border-color);
-    border-radius: var(--bs-border-radius);
+    outline: 1px solid var(--bs-border-color);   /* radius from .dw (matches the card) */
 }
 
 /* Hover "focus" effect: the non-table widget under the cursor scales up toward
@@ -902,7 +911,8 @@
 .dashboard-grid:not(.dashboard-edit) .dw:not(.dw-spacer) {
     transition: transform .2s ease, box-shadow .2s ease, opacity .2s ease;
 }
-/* Siblings of the hovered widget recede (everything except the hovered one). */
+/* Siblings of the hovered widget recede (everything except the hovered one) — for a
+   core OR module stat card, so a popped module card has room and doesn't just overlap. */
 .dashboard-grid:not(.dashboard-edit):has(.dw:not(.dw-spacer):not(:has(table)):hover)
         .dw:not(.dw-spacer):not(:hover) {
     transform: scale(.95);
@@ -912,8 +922,21 @@
 /* Luminous focus glow, tinted per theme so it stands out on either background. */
 [data-bs-theme="dark"]  .dashboard-grid { --ss-focus-glow: 245, 158, 11; }  /* amber */
 [data-bs-theme="light"] .dashboard-grid { --ss-focus-glow: 37, 99, 235; }   /* blue */
-.dashboard-grid:not(.dashboard-edit) .dw:not(.dw-spacer):not(:has(table)):hover {
+.dashboard-grid:not(.dashboard-edit) .dw:not(.dw-spacer):not(.dw-module):not(:has(table)):hover {
     transform: scale(1.04);
+    box-shadow: 0 0 18px 1px rgba(var(--ss-focus-glow, 56, 189, 248), .6),
+                0 8px 24px rgba(0, 0, 0, .35);
+    position: relative;
+    z-index: 3;
+}
+/* Module stat cards are wide, so a proportional scale would balloon (overlap/overflow).
+   They pop by a FIXED small amount instead: JS sets --dw-pop = 1 + 8px/width (see
+   _dwOnGridHover) so a wide card grows the same ~8px as a narrow one, and points
+   transform-origin at the side with room. Plus glow + a crisp outline; radius from .dw
+   so all three hug the card corners. Only the stat-card view pops (tables don't). */
+.dashboard-grid:not(.dashboard-edit) .dw-module:not(:has(table)):hover {
+    transform: scale(var(--dw-pop, 1.02));
+    outline: 1px solid var(--bs-border-color);
     box-shadow: 0 0 18px 1px rgba(var(--ss-focus-glow, 56, 189, 248), .6),
                 0 8px 24px rgba(0, 0, 0, .35);
     position: relative;

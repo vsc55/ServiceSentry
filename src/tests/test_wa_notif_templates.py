@@ -410,7 +410,7 @@ class TestTestEmailUsesOverrides:
         captured = {}
         from lib.core.notify.email import notify as email_notify
 
-        def _fake_dispatch(cfg, subject, body_html, recipients=None):
+        def _fake_dispatch(cfg, subject, body_html, recipients=None, lang=''):
             captured['subject'] = subject
             captured['body'] = body_html
             return True, 'ok'

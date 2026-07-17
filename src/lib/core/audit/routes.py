@@ -41,7 +41,7 @@ def register(app, wa):
         entries = wa._audit_store.get_all(newest_first=False)
         entry   = audit_svc.find_entry(entries, entry_id)
         if entry is None:
-            return jsonify({'error': 'not found'}), 404
+            return jsonify({'error': wa._t('not_found')}), 404
         wa._audit_store.delete_by_id(entry_id)
         wa._audit('audit_entry_deleted', detail={
             'deleted_event': entry.get('event', ''),

@@ -225,7 +225,7 @@ function _umRenderSessions(username) {
     countEl.textContent = entries.length || '';
     if (!entries.length) {
         group.style.display = '';
-        table.innerHTML = `<p class="text-muted small m-2">${t('no_active_sessions')}</p>`;
+        table.innerHTML = `<p class="text-muted small m-2">${t('session_none')}</p>`;
         return;
     }
     entries.sort((a, b) => {
@@ -246,7 +246,7 @@ function _umRenderSessions(username) {
         const created  = new Date(sess.created).toLocaleString();
         const lastSeen = new Date(sess.last_seen).toLocaleString();
         const cur = sess.is_current
-            ? `<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${t('current_session')}</span>` : '';
+            ? `<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${t('session_current')}</span>` : '';
         h += `<tr>
             <td class="text-nowrap"><code>${esc(sess.ip)}</code>${cur}</td>
             <td class="text-nowrap text-muted">${esc(created)}</td>
