@@ -74,7 +74,6 @@ jobs:
 
           if [ "${{ matrix.init }}" = "systemd" ]; then
             test -f /lib/systemd/system/ServiSesentry.service     || fail "ServiSesentry.service not installed"
-            test -f /lib/systemd/system/ServiSesentry.timer       || fail "ServiSesentry.timer not installed"
             test -f /lib/systemd/system/ServiSesentry-web.service || fail "ServiSesentry-web.service not installed"
           else
             test -f /etc/init.d/ServiSesentry     || fail "init.d/ServiSesentry not installed"
@@ -113,7 +112,9 @@ jobs:
       - name: Test monitoring daemon (single check, no modules)
         run: |
           fail() { echo "FAIL: $1"; exit 1; }
-          python3 /opt/ServiSesentry/main.py \
+          # `--monitor -t 0` runs one scheduler pass and exits. Bare `main.py` now starts
+          # the web panel (the default mode) and would hang here forever.
+          python3 /opt/ServiSesentry/main.py --monitor -t 0 \
             || fail "monitoring daemon exited with non-zero status"
           echo "OK: monitoring daemon single check passed"
 
@@ -132,13 +133,19 @@ jobs:
           python3 /opt/ServiSesentry/main.py --web --web-host 127.0.0.1 --web-port 18080 &
           WEB_PID=$!
 
-          # Wait up to 15 s for Flask to start accepting connections.
-          timeout 15 sh -c \
-            'until curl -sf http://127.0.0.1:18080/login >/dev/null 2>&1; do sleep 1; done' \
-            || { kill "$WEB_PID" 2>/dev/null; fail "web service did not start within 15 s"; }
+          # Health-check with Python, which is present on all three images — curl is only
+          # installed on the systemd ones, so a curl probe would fail the Gentoo job.
+          # urlopen raises (non-zero exit) on connection refusal or any HTTP error.
+          probe() {
+            python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/login', timeout=2).read()" 2>/dev/null
+          }
 
-          curl -sf http://127.0.0.1:18080/login >/dev/null \
-            || { kill "$WEB_PID" 2>/dev/null; fail "login page returned an HTTP error"; }
+          ok=""
+          for _ in $(seq 15); do
+            if probe; then ok=1; break; fi
+            sleep 1
+          done
+          [ -n "$ok" ] || { kill "$WEB_PID" 2>/dev/null; fail "web service did not start within 15 s"; }
 
           kill "$WEB_PID" 2>/dev/null || true
           wait "$WEB_PID" 2>/dev/null || true

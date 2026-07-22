@@ -430,6 +430,24 @@ All notable changes to **ServiceSentry** are documented in this file.
   lockout, LDAP fallback and all SSO paths — 151 auth/LDAP/OIDC/SAML/Teams-SSO/security-regression tests pass.
 
 ### Fixed
+- **CI: install tests aborted on Debian/Ubuntu with `sudo: command not found`.**
+  `check_dependencies.sh` called `sudo apt install` unconditionally, but the install-test
+  containers run as root with no `sudo` present. It now uses `sudo` only when not already root,
+  falls back to running `apt` directly as root, and skips with a clear message when it is neither
+  root nor has `sudo` (instead of crashing under `set -e`).
+- **CI: three further install-test breakages, surfaced once the `sudo` abort was fixed.**
+  (1) The systemd check asserted a `ServiSesentry.timer` that no longer exists — the timer was
+  dropped when the monitor became a long-running service; the stale assertion is removed.
+  (2) The "monitoring daemon" step ran bare `main.py`, which now starts the **web panel** (the
+  default mode) and would hang forever — it runs `main.py --monitor -t 0` (one pass, then exit).
+  (3) The web-startup health check used `curl`, installed only on the systemd images, so it would
+  fail the Gentoo job — it now probes with `python3` (present on all three images).
+- **CI: the test workflow installed `pytest-xdist` but ran serially.** Added `-n auto`, so the
+  full suite runs in parallel (~13 min) instead of leaving the dependency unused.
+- **CI: the Docker workflow logged `test is not a valid semver` twice.** The `type=semver` tag
+  patterns tried to parse the `test` build tag as a version. They are now gated with
+  `enable=${{ startsWith(github.ref, 'refs/tags/v') }}`, so they apply only to real `v*` release
+  tags and stay quiet for the `test` tag.
 - **The Overview syslog card was slow and then reported a plausible `0`.** It called
   `SyslogStore.stats()`, which computes four separate `GROUP BY` aggregations over the whole
   message table (host, app, severity, facility) — the card displays only the total and the

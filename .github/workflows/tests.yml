@@ -24,4 +24,6 @@ jobs:
 
       - name: Run tests
         working-directory: src
-        run: pytest -m "not integration"
+        # -n auto uses the pytest-xdist installed above (otherwise it is dead weight);
+        # the suite is ~13 min parallel vs. much longer serial.
+        run: pytest -m "not integration" -n auto
