@@ -664,12 +664,24 @@ function renderConfig() {
             const section = path.slice(0, i), field = path.slice(i + 1);
             h += renderField(field, (configData[section] || {})[field], path, 'config');
         }
-        return h + cfgCardClose;
+        // Buttons packages contributed to this card (same generic treatment the bespoke
+        // auth renderers give them), so any card can carry actions — not just auth ones.
+        const _sec = card.section || card.id;
+        return h + _cfgSectionActions(_sec, configData[_sec] || {}) + cfgCardClose;
     };
     for (const _c of ((CONFIG_LAYOUT && CONFIG_LAYOUT.cards) || [])) {
-        if (Array.isArray(_c.fields) && _c.fields.length && !(_c.id in _cardHtml)) {
-            _cardHtml[_c.id] = _renderGenericCard(_c);
+        // A card earns its place with fields OR with actions: the Maintenance card is
+        // built purely from what the domains contribute and has no fields of its own.
+        const _hasFields  = Array.isArray(_c.fields)  && _c.fields.length;
+        const _hasActions = Array.isArray(_c.actions) && _c.actions.length;
+        if (!(_hasFields || _hasActions) || (_c.id in _cardHtml)) continue;
+        // An actions-only card whose every button is gated away (permission or show_when)
+        // must not survive as an empty titled shell.
+        if (!_hasFields) {
+            const _sec = _c.section || _c.id;
+            if (!_cfgSectionActions(_sec, configData[_sec] || {})) continue;
         }
+        _cardHtml[_c.id] = _renderGenericCard(_c);
     }
 
     // ── Assemble the sub-tabs from the central layout (CONFIG_LAYOUT, injected
@@ -752,6 +764,9 @@ async function testTelegram() {
 // own web/*_ui.html. This renders them generically: the panel never hardcodes a
 // package-specific button. `show_when` is a tiny gate: {field, not_empty}.
 function _cfgActionVisible(act, data) {
+    // A declared permission gates the button entirely (the API enforces it too — this
+    // only keeps an action the user cannot perform off the screen).
+    if (act.perm && !new Set(currentUser.permissions || []).has(act.perm)) return false;
     const w = act.show_when;
     if (!w || !w.field) return true;
     const v = (data || {})[w.field];

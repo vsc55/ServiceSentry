@@ -181,12 +181,13 @@ if (configLi) configLi.style.display = (hasConfigEdit || hasConfigView) ? '' : '
 const statusLi = document.getElementById('tab-status-li');
 const hasChecks = perms.has('checks_view') || perms.has('checks_run');
 if (statusLi) statusLi.style.display = hasChecks ? '' : 'none';
-// History tab
-const historyLi = document.getElementById('tab-history-li');
-if (historyLi) historyLi.style.display = perms.has('history_view') ? '' : 'none';
-// Syslog tab
-const syslogLi = document.getElementById('tab-syslog-li');
-if (syslogLi) syslogLi.style.display = perms.has('syslog_view') ? '' : 'none';
+// Standalone section pages (History / Syslog / Overview) are navbar buttons, not tabs:
+// each declares its permission in the HOME_PAGES registry and renders hidden, so this
+// reveals only the ones the user may open. Adding a page needs no change here.
+document.querySelectorAll('[data-nav-perm]').forEach(a => {
+    const need = a.getAttribute('data-nav-perm');
+    a.style.display = (!need || perms.has(need)) ? '' : 'none';
+});
 // fail2ban tab (operational: banned IPs / watchlist / history / services / whitelist)
 const hasAnyIpban = ['ipban_ban_view', 'ipban_ban_add', 'ipban_ban_edit', 'ipban_ban_delete',
     'ipban_watchlist_clear', 'ipban_whitelist_view', 'ipban_whitelist_add', 'ipban_whitelist_delete',

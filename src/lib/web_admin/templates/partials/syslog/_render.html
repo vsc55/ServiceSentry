@@ -40,7 +40,7 @@ async function renderSyslog() {
           ${_buildColChooser(_SL_COLS, _slVisibleCols, '_slToggleCol', '_resetSlCols')}
           <button class="btn btn-secondary btn-sm" onclick="_syslogReload()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
           <span id="sl-auto-refresh"></span>
-          ${_syslogCanDelete() ? `<button class="btn btn-danger btn-sm" onclick="_syslogClear()"><i class="bi bi-trash me-1"></i>${esc(t('syslog_clear'))}</button>` : ''}
+          {# Clearing the store is offered in Config → General → Maintenance, not here. #}
         </div>
         <div id="sl-drops" class="px-3"></div>
         <div class="ss-card-band ss-card-band-top" id="sl-pager-top"></div>

@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}ServiceSentry — {% if overview_page %}Overview{% else %}Admin{% endif %}{% endblock %}
-{% block body_class %}{% if overview_page %}overview-page{% endif %}{% endblock %}
+{% block title %}ServiceSentry — {% if standalone %}{{ standalone|capitalize }}{% else %}Admin{% endif %}{% endblock %}
+{% block body_class %}{% if standalone %}standalone-page {{ standalone }}-page{% endif %}{% endblock %}
 
 {# All page styles live in static/css/web_admin.css (loaded by base.html). #}
 
 {% block body %}
+{# Loading overlay: it is the interaction BLOCKER while the page boots (dims the page so
+   the menus cannot be used half-built), not merely a spinner — every page keeps it. #}
 <!-- Loading overlay -->
 <div id="loading">
     <div class="spinner-border text-primary" role="status">
@@ -75,7 +77,10 @@
 
 <!-- Main content -->
 <div class="container-fluid py-3">
-    <!-- Tabs -->
+    <!-- Tabs — only the admin panel has them. A standalone section page (/overview,
+         /history, /syslog) is a different page: its tab bar is NOT rendered at all
+         (not merely hidden), so nothing of the panel's navigation reaches the DOM. -->
+    {% if not standalone %}
     <ul class="nav nav-tabs" id="mainTabs" role="tablist">
         {# Overview is its own page (/overview), no longer a tab in the admin panel.
            Services is the leftmost tab and the panel's default landing. #}
@@ -103,24 +108,14 @@
                 <i class="bi bi-activity me-1"></i>{{ i18n.tab_status }}
             </button>
         </li>
-        <li class="nav-item" role="presentation" id="tab-history-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-history" type="button"
-                id="btn-tab-history">
-                <i class="bi bi-graph-up me-1"></i>{{ i18n.tab_history }}
-            </button>
-        </li>
+        {# History is its own page (/history) — reachable from the navbar button. #}
         <li class="nav-item" role="presentation" id="tab-events-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-events" type="button"
                 id="btn-tab-events">
                 <i class="bi bi-bell me-1"></i>{{ i18n.tab_events }}
             </button>
         </li>
-        <li class="nav-item" role="presentation" id="tab-syslog-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-syslog" type="button"
-                id="btn-tab-syslog">
-                <i class="bi bi-card-list me-1"></i>{{ i18n.tab_syslog }}
-            </button>
-        </li>
+        {# Syslog is its own page (/syslog) — reachable from the navbar button. #}
         <li class="nav-item" role="presentation" id="tab-ipban-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ipban" type="button"
                 id="btn-tab-ipban">
@@ -144,18 +139,28 @@
             </button>
         </li>
     </ul>
+    {% endif %}
 
     <div class="tab-content pt-3">
         <!-- ==================== Overview Tab =================== -->
-        <div class="tab-pane fade{% if overview_page %} show active{% endif %}" id="tab-overview">
+        {% if not standalone or standalone == 'overview' %}
+        <div class="tab-pane fade{% if standalone == 'overview' %} show active{% endif %}" id="tab-overview">
             <div id="overview-container">
+                {# Placeholder for the PANEL's pane, which is inactive at load. On a
+                   standalone page the pane is active from the first paint, so this would
+                   sit under the loading overlay as a second spinner — there the overlay is
+                   the indicator, and the render fills this in. #}
+                {% if not standalone %}
                 <div class="text-center py-4">
                     <div class="spinner-border spinner-border-sm"></div>
                 </div>
+                {% endif %}
             </div>
         </div>
 
         <!-- ==================== Modules Tab ==================== -->
+        {% endif %}
+        {% if not standalone %}
         <div class="tab-pane fade" id="tab-modules">
             <div class="d-flex align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border"
                  style="background:var(--bs-secondary-bg);position:sticky;top:calc(var(--ss-top-offset,0px) + 8px);z-index:10">
@@ -179,6 +184,8 @@
         </div>
 
         <!-- =============== Infrastructure Tab (Servers + Cluster) =============== -->
+        {% endif %}
+        {% if not standalone %}
         <div class="tab-pane fade" id="tab-servers">
             <!-- Sub-tab nav -->
             <ul class="nav nav-tabs mb-3" id="infraSubTabs" role="tablist">
@@ -214,6 +221,8 @@
         </div>
 
         <!-- ==================== Status Tab ===================== -->
+        {% endif %}
+        {% if not standalone %}
         <div class="tab-pane fade" id="tab-status">
             <div id="status-container">
                 <p class="text-muted">{{ i18n.status_placeholder }}</p>
@@ -221,15 +230,21 @@
         </div>
 
         <!-- ==================== History Tab ==================== -->
-        <div class="tab-pane fade" id="tab-history">
+        {% endif %}
+        {% if not standalone or standalone == 'history' %}
+        <div class="tab-pane fade{% if standalone == 'history' %} show active{% endif %}" id="tab-history">
             <div id="history-container">
+                {% if not standalone %}   {# see #overview-container #}
                 <div class="text-center py-4">
                     <div class="spinner-border spinner-border-sm"></div>
                 </div>
+                {% endif %}
             </div>
         </div>
 
         <!-- ==================== Events Tab ===================== -->
+        {% endif %}
+        {% if not standalone %}
         <div class="tab-pane fade" id="tab-events">
             <div id="events-container" class="ss-vfill">
                 <div class="text-center py-4">
@@ -239,15 +254,21 @@
         </div>
 
         <!-- ==================== Syslog Tab ===================== -->
-        <div class="tab-pane fade" id="tab-syslog">
+        {% endif %}
+        {% if not standalone or standalone == 'syslog' %}
+        <div class="tab-pane fade{% if standalone == 'syslog' %} show active{% endif %}" id="tab-syslog">
             <div id="syslog-container" class="ss-vfill">
+                {% if not standalone %}   {# see #overview-container #}
                 <div class="text-center py-4">
                     <div class="spinner-border spinner-border-sm"></div>
                 </div>
+                {% endif %}
             </div>
         </div>
 
         <!-- ==================== fail2ban Tab ===================== -->
+        {% endif %}
+        {% if not standalone %}
         <div class="tab-pane fade" id="tab-ipban">
             <div id="ipban-container" class="ss-vfill ss-subtabs-fill">
                 <div class="text-center py-4">
@@ -257,6 +278,8 @@
         </div>
 
         <!-- ==================== Services Tab ===================== -->
+        {% endif %}
+        {% if not standalone %}
         <div class="tab-pane fade" id="tab-services">
             <div id="services-container">
                 <div class="text-center py-4">
@@ -266,6 +289,8 @@
         </div>
 
         <!-- ==================== Config Tab ===================== -->
+        {% endif %}
+        {% if not standalone %}
         <div class="tab-pane fade" id="tab-config">
             <div style="position:sticky;top:calc(var(--ss-top-offset,0px) + 8px);z-index:10">
                 <div class="d-flex align-items-center gap-2 px-3 py-2 rounded-top-3 border"
@@ -301,6 +326,8 @@
         </div>
 
         <!-- ==================== Access Tab ===================== -->
+        {% endif %}
+        {% if not standalone %}
         <div class="tab-pane fade" id="tab-access">
             <!-- Sub-tab nav -->
             <ul class="nav nav-tabs mb-3" id="accessSubTabs" role="tablist">
@@ -346,6 +373,8 @@
         </div>
 
         <!-- ==================== Audit Tab ====================== -->
+        {% endif %}
+        {% if not standalone %}
         <div class="tab-pane fade" id="tab-audit">
             <!-- Controls bar — sort/group + actions (refresh/export/clear) on the
                  right, filters below. Fixed natural height; only #audit-container
@@ -434,6 +463,7 @@
 
             <div id="audit-container" class="ss-vfill"></div>
         </div>
+        {% endif %}
     </div>
 </div>
 
@@ -448,7 +478,10 @@
        ServiceSentry — Dashboard JavaScript
        ================================================================ */
     // Standalone Overview page (/overview) vs full admin panel (/admin).
-    window.SS_OVERVIEW_PAGE = {{ 'true' if overview_page else 'false' }};
+    // Standalone section page ('' = the full admin panel). The wiring calls the
+    // render entry point the HOME_PAGES registry declares for it.
+    window.SS_STANDALONE_PAGE = {{ (standalone or '')|tojson }};
+    window.SS_STANDALONE_PAGES = {{ standalone_specs|tojson }};
 {% include "partials/_js_sections.html" %}
 </script>
 {% endblock %}

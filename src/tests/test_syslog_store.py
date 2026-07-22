@@ -114,6 +114,28 @@ class TestSyslogStats:
         assert any(d['count'] == 2 for d in st['by_app'])      # nginx x2
         assert all('name' in d for d in st['by_facility'])
 
+    def test_only_computes_the_requested_breakdowns(self):
+        """Each breakdown is its own GROUP BY over the whole table.
+
+        The Overview card reads the total and the severity split, so computing host, app
+        and facility as well made it four times as expensive for data nobody displays —
+        slow enough on a large store to look like a hung widget."""
+        s = _store()
+        s.add_many([_rec(hostname='web01', app='nginx', severity=3, facility=4),
+                    _rec(hostname='db01', app='mysqld', severity=6, facility=3)])
+        st = s.stats(only=('severity',))
+        assert st['total'] == 2                                # total is always computed
+        assert [d['count'] for d in st['by_severity']] == [1, 1]
+        # Omitted ones are empty, not missing — callers index them unconditionally.
+        for key in ('by_host', 'by_app', 'by_facility'):
+            assert st[key] == [], f'{key} was computed but not requested'
+
+    def test_no_only_still_computes_everything(self):
+        s = _store()
+        s.add_many([_rec(hostname='web01', app='nginx', severity=3, facility=4)])
+        st = s.stats()
+        assert st['by_host'] and st['by_app'] and st['by_severity'] and st['by_facility']
+
     def test_stats_honour_filters(self):
         s = _store()
         s.add_many([_rec(hostname='a', severity=2), _rec(hostname='b', severity=6)])

@@ -165,12 +165,14 @@ function _syslogCopyFallback(text, ok) {
 
 function _syslogReload() { _loadSyslogFacets(); _loadSyslog(); }
 
+// Offered in Config → General → Maintenance (see lib/services/syslog/manifest.py), so it
+// usually runs with the Syslog table off screen — only reload it when it is there.
 function _syslogClear() {
     showConfirmModal(t('syslog_clear_confirm'), async () => {
         const r = await apiDelete('/api/v1/syslog');
         if (r && r.data && r.data.ok) {
             showToast(t('syslog_cleared'), 'success');
-            _loadSyslog();
+            if (document.getElementById('sl-table-wrap')) _loadSyslog();
         }
     });
 }

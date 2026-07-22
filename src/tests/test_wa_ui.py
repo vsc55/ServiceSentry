@@ -388,16 +388,18 @@ class TestOverviewPage:
         # the rendered overview tab toggle is gone (the string only lives in JS now,
         # so check the literal nav markup, not any occurrence of the id)
         assert 'data-bs-target="#tab-overview"' not in html
-        assert "SS_OVERVIEW_PAGE = false" in html  # rendered as the admin panel
+        assert 'window.SS_STANDALONE_PAGE = ""' in html   # rendered as the admin panel
 
     def test_overview_route_renders_standalone(self, client):
+        """The overview-only flag became the generic one shared by every standalone
+        section page; the rest of that contract lives in test_wa_standalone_pages.py."""
         _login(client)
         resp = client.get("/overview")
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)
-        assert "overview-container" in html          # the widget grid
-        assert "SS_OVERVIEW_PAGE = true" in html     # standalone flag
-        assert "overview-page" in html               # body class hides #mainTabs
+        assert "overview-container" in html                    # the widget grid
+        assert 'window.SS_STANDALONE_PAGE = "overview"' in html
+        assert "overview-page" in html                         # body marker
 
     def test_overview_requires_login(self, client):
         # page route → redirects to /login when unauthenticated (like /admin)

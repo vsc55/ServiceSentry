@@ -237,13 +237,16 @@ async function _hostLogsFetch() {
 
 // Jump from a "Latest data" row to that series' chart in the History tab.
 function _goToHistory(mod, key) {
+    // History is its own page now: navigate to it with the series in the URL so the link
+    // is shareable/bookmarkable. localStorage is still written as the fallback renderHistory
+    // uses when no params are given (e.g. opening /history from the navbar).
     try {
         localStorage.setItem('ss_history_mod', mod);
         localStorage.setItem('ss_history_key', key);
     } catch (e) { /* ignore */ }
     bootstrap.Modal.getInstance(document.getElementById('hostModal'))?.hide();
-    const btn = document.getElementById('btn-tab-history');
-    if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();  // → shown.bs.tab → renderHistory restores the series
+    window.location.href = '/history?module=' + encodeURIComponent(mod)
+                         + '&key=' + encodeURIComponent(key);
 }
 
 async function testHostRow(uid) {

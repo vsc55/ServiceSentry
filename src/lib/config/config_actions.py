@@ -27,6 +27,10 @@ package while the panel only knows "render a button that calls this name".
 current values: ``{'field': <name>, 'not_empty': True}`` renders the button only when
 that field has a value (e.g. no "rotate secret" until an app is registered).
 
+``perm`` (optional) names a permission flag the user must hold for the button to be
+rendered at all — destructive actions declare the same flag their API endpoint enforces
+(e.g. ``history_delete``). It is a UI gate on top of, never instead of, the server check.
+
 ``group_label_key`` (optional) names the caption of the actions row. When every visible
 action of a section shares the same one, the panel uses it (e.g. "Entra ID" instead of a
 generic "Actions"), so the row says WHOSE actions these are; when actions from different
@@ -42,7 +46,7 @@ from __future__ import annotations
 _PKG_ROOTS = ('lib.providers', 'lib.services', 'lib.core')
 
 _ALLOWED = ('section', 'id', 'label_key', 'tooltip_key', 'icon', 'variant',
-            'order', 'fn', 'show_when', 'group_label_key')
+            'order', 'fn', 'show_when', 'group_label_key', 'perm')
 
 
 def _normalize(raw) -> dict | None:

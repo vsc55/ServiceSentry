@@ -1,14 +1,3 @@
-function _historyApplyPermissions() {
-    const canDelete = (currentUser?.permissions || []).includes('history_delete');
-    // Clear All button
-    const clearAllWrap = document.getElementById('history-clear-all-wrap');
-    if (clearAllWrap) clearAllWrap.style.display = canDelete ? '' : 'none';
-    // Clear series button (also controlled in _historyShowToolbar). Hidden in
-    // compare mode (it acts on a single series, which is ambiguous there).
-    const clearBtn = document.getElementById('history-clear-btn');
-    if (clearBtn) clearBtn.style.display = (_historyMod && canDelete && !_historyCompare) ? '' : 'none';
-}
-
 function _historyShowPlaceholder() {
     // No series selected → nothing to auto-refresh.
     _historyStopTimer();
@@ -183,7 +172,6 @@ function _historyShowToolbar() {
     _historyRenderLegend();
     _historyRenderRange();
     _historyRenderAutoRefresh();
-    _historyApplyPermissions();
 }
 
 // Compare toggle (in the header) reflects the current mode; keep the ms-2 spacing.

@@ -77,10 +77,22 @@ async function renderHistory() {
     const cont = document.getElementById('history-container');
     if (!cont) return;
 
-    // Restore persisted state before building the layout
+    // Restore persisted state before building the layout. On the standalone /history page
+    // the series may come in the URL (?module=&key=) — a shareable deep link, e.g. the
+    // "see this check's history" jump from Infrastructure. URL wins over the last visited
+    // series; opening /history bare falls back to what was stored.
     _historyHours = parseFloat(localStorage.getItem(_HLS_HOURS) || '24') || 24;
-    const savedMod = localStorage.getItem(_HLS_MOD);
-    const savedKey = localStorage.getItem(_HLS_KEY);
+    const _qs = new URLSearchParams(window.location.search);
+    const _qMod = _qs.get('module');
+    const _qKey = _qs.get('key');
+    if (_qMod && _qKey) {
+        try {
+            localStorage.setItem(_HLS_MOD, _qMod);
+            localStorage.setItem(_HLS_KEY, _qKey);
+        } catch (e) { /* ignore */ }
+    }
+    const savedMod = _qMod || localStorage.getItem(_HLS_MOD);
+    const savedKey = _qKey || localStorage.getItem(_HLS_KEY);
 
     // Re-entering the tab rebuilds the DOM → drop any running timer; it is
     // re-armed below from the saved interval only when a series is shown.
@@ -247,11 +259,8 @@ function _historyRenderLayout() {
       <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}
     </button>
     <span id="history-auto-refresh" class="d-flex align-items-center gap-2"></span>
-    <span id="history-clear-all-wrap">
-      <button class="btn btn-sm btn-danger" onclick="_historyClearAll()">
-        <i class="bi bi-trash3 me-1"></i>${esc(t('history_clear_all'))}
-      </button>
-    </span>
+    {# Data wipes are not offered here: they live in Config → General → Maintenance,
+       away from a page that stays open all day. #}
   </div>
 </div>
 
@@ -304,10 +313,6 @@ function _historyRenderLayout() {
         </ul>
       </div>
 
-      <button class="btn btn-sm btn-danger" id="history-clear-btn" style="display:none"
-              onclick="_historyClearSeries()">
-        <i class="bi bi-trash3 me-1"></i>${esc(t('history_clear_series'))}
-      </button>
     </div>
 
     <!-- Padded drawing zone + stats -->
@@ -325,6 +330,5 @@ function _historyRenderLayout() {
 
     _historyRenderSeriesList();
     _historyUpdateCompareBtn();
-    _historyApplyPermissions();
 }
 

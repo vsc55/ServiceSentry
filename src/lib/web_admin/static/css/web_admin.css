@@ -1293,9 +1293,10 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     margin-bottom: .5rem;
 }
 
-/* Standalone Overview page (/overview): hide the admin tab-nav — the page shows
-   only the widget grid; the panel's tabs live at /admin. */
-body.overview-page #mainTabs { display: none !important; }
+/* Standalone section pages (/overview, /history, /syslog) need no rule to hide the admin
+   tab-nav: they are different pages and dashboard.html does not RENDER it (nor the other
+   sections' panes) for them. The body still carries `standalone-page` + `<id>-page` for
+   any per-page styling. */
 
 /* Connection-lost overlay: a modal-style blocker shown when the server becomes
    unreachable, auto-hidden on reconnect (see _polling.html / _startConnWatch). */

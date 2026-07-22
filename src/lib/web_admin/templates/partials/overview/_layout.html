@@ -76,9 +76,12 @@ function _dwNavigate(wid) {
     if (md && md.link) { window.open(md.link, '_blank', 'noopener'); return; }
     const nav = _DW_NAV[_dwBaseId(wid)];
     if (!nav) return;
-    if (window.SS_OVERVIEW_PAGE) {
-        // Standalone Overview page → open the target tab in the admin panel. Stash it (+
-        // the login marker) so the panel's wiring restores it as if it were a reload.
+    // A section that lives on its own page declares `url` instead of `tab`: go straight
+    // there, from anywhere (no tab to activate in the panel).
+    if (nav.url) { window.location.href = nav.url; return; }
+    if (window.SS_STANDALONE_PAGE) {
+        // On a standalone page → open the target tab in the admin panel. Stash it (+ the
+        // login marker) so the panel's wiring restores it as if it were a reload.
         if (nav.tab) {
             localStorage.setItem('ss_active_tab', nav.tab);
             localStorage.setItem('ss_active_tab_login', (currentUser && currentUser.login_id) || '');

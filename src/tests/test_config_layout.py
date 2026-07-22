@@ -32,12 +32,15 @@ class TestLayoutCoherence:
             assert ('fields' in c) ^ ('renderer' in c), \
                 f"card {c['id']} must have exactly one of fields/renderer"
 
-    def test_generic_cards_have_fields(self):
-        # A generic card (no renderer) must resolve to at least one field, else it is
-        # an empty card (a field lost its card= assignment).
+    def test_generic_cards_are_not_empty(self):
+        # A generic card (no renderer) must resolve to at least one field OR carry
+        # contributed actions, else it is an empty card (typically a field that lost its
+        # card= assignment). Actions alone are legitimate: the Maintenance card has no
+        # fields of its own and is built entirely from what the domains contribute.
         for c in config_layout()['cards']:
             if 'renderer' not in c:
-                assert c.get('fields'), f"generic card {c['id']} has no fields"
+                assert c.get('fields') or c.get('actions'), \
+                    f"generic card {c['id']} has neither fields nor actions"
 
     def test_generic_fields_exist_in_registry(self):
         from lib.config.spec import CONFIG_FIELDS

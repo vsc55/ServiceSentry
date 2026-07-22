@@ -307,49 +307,94 @@ function _historyOnHoverMulti(e, canvas) {
 }
 
 // ── Clear history ─────────────────────────────────────────────────────────────
-function _historyClearSeries() {
-    if (!_historyMod || !_historyKey) return;
-    const entry = _historyIndex.find(s => s.module === _historyMod && s.key === _historyKey);
-    const prettyMod = entry?.pretty_name || _historyMod;
-    const msg = `${t('history_clear_confirm')} "${prettyMod} / ${(entry?.label) || _historyKey}"?`;
-    showConfirmModal(msg, async () => {
-        // Pass params as query string — DELETE body is unreliable across proxies.
-        const url = `/api/v1/history?module=${encodeURIComponent(_historyMod)}&key=${encodeURIComponent(_historyKey)}` +
-            (_historyUid ? `&uid=${encodeURIComponent(_historyUid)}` : '');
-        const res = await apiDelete(url);
-        if (res?.data?.ok) {
-            showToast(t('history_cleared'), 'success');
-            await _historyLoadIndex();
-            if (!_historyIndex.some(s => s.module === _historyMod && s.key === _historyKey)) {
-                _historyMod = null; _historyKey = null; _historyUid = null;
-                localStorage.removeItem(_HLS_MOD); localStorage.removeItem(_HLS_KEY);
-                _historyRenderLayout();
-                _historyApplyPermissions();
-                _historyShowPlaceholder();
-            } else {
-                _historyRenderSeriesList();
-                await _historyLoadChart();
-            }
-        } else {
-            showToast(t('save_failed'), 'danger');
-        }
-    });
+// Both actions are offered in Config → General → Maintenance (declared in
+// lib/core/history/manifest.py), NOT in the History toolbar. They therefore run on a page
+// where the History surface is usually absent, so every refresh below is conditional.
+
+let _historyClearIndex = [];   // series index owned by the picker, independent of the tab
+
+/** Is the History surface actually on screen and worth refreshing? */
+function _historyIsLive() { return !!document.getElementById('history-series-list'); }
+
+/** Drop a selection that no longer exists, so a later visit does not try to restore it. */
+function _historyForgetSelection() {
+    _historyMod = null; _historyKey = null; _historyUid = null;
+    localStorage.removeItem(_HLS_MOD); localStorage.removeItem(_HLS_KEY);
 }
 
+// ── Clear ONE series: pick it first (there is no "current series" in the config panel)
+async function showHistoryClearSeriesModal() {
+    _historyClearIndex = await apiGet('/api/v1/history/index') || [];
+    if (!_historyClearFillModules()) { showToast(t('history_empty'), 'info'); return; }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('historyClearModal')).show();
+}
+
+/** Fill the module select; returns false when there is nothing to delete at all. */
+function _historyClearFillModules() {
+    const sel = document.getElementById('hcsModule');
+    if (!sel) return false;
+    const prev = sel.value;
+    // module → pretty name, deduplicated, sorted by what the user actually reads
+    const mods = [...new Map(_historyClearIndex.map(s => [s.module, s.pretty_name || s.module]))]
+        .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+    sel.innerHTML = mods.map(([m, pretty]) =>
+        `<option value="${escAttr(m)}">${esc(pretty)}</option>`).join('');
+    if (prev && mods.some(([m]) => m === prev)) sel.value = prev;   // keep the choice
+    _historyClearFillSeries();
+    return mods.length > 0;
+}
+
+function _historyClearFillSeries() {
+    const mod = document.getElementById('hcsModule')?.value || '';
+    const sel = document.getElementById('hcsSeries');
+    if (!sel) return;
+    sel.innerHTML = _historyClearIndex.filter(s => s.module === mod).map(s =>
+        `<option value="${escAttr(s.key)}">${esc(s.label || s.key)}</option>`).join('');
+    _historyClearSyncBtn();
+}
+
+function _historyClearSyncBtn() {
+    const btn = document.getElementById('hcsDelete');
+    const sel = document.getElementById('hcsSeries');
+    if (btn) btn.disabled = !(sel && sel.value);
+}
+
+async function _historyClearSeriesConfirmed() {
+    const mod = document.getElementById('hcsModule')?.value || '';
+    const key = document.getElementById('hcsSeries')?.value || '';
+    if (!mod || !key) return;
+    const entry = _historyClearIndex.find(s => s.module === mod && s.key === key);
+    // Pass params as query string — DELETE body is unreliable across proxies.
+    const url = `/api/v1/history?module=${encodeURIComponent(mod)}&key=${encodeURIComponent(key)}` +
+        (entry?.item_uid ? `&uid=${encodeURIComponent(entry.item_uid)}` : '');
+    const res = await apiDelete(url);
+    if (!res?.data?.ok) { showToast(t('save_failed'), 'danger'); return; }
+
+    showToast(t('history_cleared'), 'success');
+    if (_historyMod === mod && _historyKey === key) _historyForgetSelection();
+    // Keep the picker honest for a second deletion in the same visit; close it once the
+    // last series is gone.
+    _historyClearIndex = await apiGet('/api/v1/history/index') || [];
+    if (!_historyClearFillModules()) {
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('historyClearModal')).hide();
+    }
+    if (_historyIsLive()) {
+        await _historyLoadIndex();
+        _historyRenderSeriesList();
+        if (_historyMod) await _historyLoadChart(); else _historyShowPlaceholder();
+    }
+}
+
+// ── Clear EVERYTHING
 function _historyClearAll() {
     showConfirmModal(t('history_clear_all_confirm'), async () => {
         const res = await apiDelete('/api/v1/history/all');
-        if (res?.data?.ok) {
-            showToast(t('history_cleared'), 'success');
-            _historyIndex = [];
-            _historyMod = null; _historyKey = null;
-            localStorage.removeItem(_HLS_MOD); localStorage.removeItem(_HLS_KEY);
-            _historyRenderLayout();
-            _historyApplyPermissions();
-            _historyShowPlaceholder();
-        } else {
-            showToast(t('save_failed'), 'danger');
-        }
+        if (!res?.data?.ok) { showToast(t('save_failed'), 'danger'); return; }
+        showToast(t('history_cleared'), 'success');
+        _historyIndex = [];
+        _historyClearIndex = [];
+        _historyForgetSelection();
+        if (_historyIsLive()) { _historyRenderLayout(); _historyShowPlaceholder(); }
     });
 }
 

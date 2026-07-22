@@ -34,18 +34,27 @@ function clearDirty(target) {
 }
 function _isDirty(target) {
     const id = target === 'modules' ? 'badgeModulesDirty' : 'badgeConfigDirty';
-    return !document.getElementById(id)?.classList.contains('d-none');
+    const badge = document.getElementById(id);
+    // No badge at all = that section is not part of this page (standalone pages render a
+    // single pane), so there is nothing unsaved to lose. Note `!el?.x` would yield `true`
+    // here — reading "dirty" — and pop the browser's leave-confirmation on every nav.
+    return !!badge && !badge.classList.contains('d-none');
 }
 
 /** Show the 3-button unsaved-changes modal (Cancel / Discard / Save).
- *  After Discard or Save the tab switch to *nextTabBtn* is performed. */
-function showUnsavedChangesModal(dirtyTarget, nextTabBtn) {
+ *  After Discard or Save, *next* is performed: either a tab button to switch to, or a
+ *  callback (used to leave the panel for a standalone section page, where "next" is a
+ *  navigation rather than a tab switch). */
+function showUnsavedChangesModal(dirtyTarget, next) {
     document.getElementById('unsavedChangesMsg').textContent = t('unsaved_changes_leave');
     const modal = bootstrap.Modal.getOrCreateInstance(
         document.getElementById('unsavedChangesModal'));
 
     function _dismiss() { modal.hide(); }
-    function _go()      { bootstrap.Tab.getOrCreateInstance(nextTabBtn).show(); }
+    function _go() {
+        if (typeof next === 'function') next();
+        else bootstrap.Tab.getOrCreateInstance(next).show();
+    }
 
     const btnCancel  = document.getElementById('btnUnsavedCancel');
     const btnDiscard = document.getElementById('btnUnsavedDiscard');

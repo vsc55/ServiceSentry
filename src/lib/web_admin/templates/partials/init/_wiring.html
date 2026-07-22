@@ -26,11 +26,14 @@ document.getElementById('btnRenameItemOk').addEventListener('click', _doRenameIt
 document.getElementById('renameItemInput').addEventListener('keydown', e => {
 if (e.key === 'Enter') { e.preventDefault(); _doRenameItem(); }
 });
-document.getElementById('btn-tab-status').addEventListener('shown.bs.tab', async () => {
+// Optional chaining like every other tab hook below: the panel's tab buttons do NOT
+// exist on a standalone section page (/overview, /history, /syslog), and an unguarded
+// access here throws at top level — aborting the whole script before the init runs.
+document.getElementById('btn-tab-status')?.addEventListener('shown.bs.tab', async () => {
     await renderStatus();   // wait for DOM so daemon widget exists before first poll
     _daemonStartPoll();
 });
-document.getElementById('btn-tab-status').addEventListener('hide.bs.tab', _daemonStopPoll);
+document.getElementById('btn-tab-status')?.addEventListener('hide.bs.tab', _daemonStopPoll);
 let _accessPollTimer = null;
 document.getElementById('btn-tab-access')?.addEventListener('shown.bs.tab', () => {
     refreshAccessData();
@@ -140,6 +143,23 @@ document.getElementById('mainTabs')?.addEventListener('hide.bs.tab', e => {
     e.preventDefault();
     showUnsavedChangesModal(dirtyTarget, e.relatedTarget);
 });
+// Moving between sections is a real navigation (each is its own page), so the browser
+// would show its own bare "leave site?" dialog — which cannot offer Save. Intercept our
+// own section links and reuse the same modal the tab switch uses. Recursive because both
+// Modules and Config can be dirty at once: each is resolved before the page is left.
+const _leaveFor = href => {
+    const dirtyTarget = _isDirty('modules') ? 'modules'
+                      : _isDirty('config')  ? 'config' : null;
+    if (!dirtyTarget) { window.location.href = href; return; }
+    showUnsavedChangesModal(dirtyTarget, () => _leaveFor(href));
+};
+document.querySelectorAll('a[data-nav-section]').forEach(link => {
+    link.addEventListener('click', e => {
+        if (!_isDirty('modules') && !_isDirty('config')) return;   // nothing to lose
+        e.preventDefault();
+        _leaveFor(link.getAttribute('href'));
+    });
+});
 // Warn on page close / refresh if there are unsaved changes — unless the user (or
 // the restart/reload banner) asked for an explicit reload via forcePageReload().
 window.addEventListener('beforeunload', e => {
@@ -205,13 +225,39 @@ try {
     clearDirty('config'); // ensure config starts clean regardless of loadConfig side-effects
     if (currentUser.restart_pending) _showRestartBanner();
     _startVersionPoll();
-    renderModules();
-    renderConfig();
-    renderServers();
+    // Panel-only work: a standalone section page renders ONLY its own section, so it
+    // never draws (nor pays for) the panel's other tabs.
+    if (!window.SS_STANDALONE_PAGE) {
+        renderModules();
+        renderConfig();
+        renderServers();
+    }
     applyRoleRestrictions();
-    if (window.SS_OVERVIEW_PAGE) {
-        // Standalone Overview page: no tabs to activate — just render the widget grid.
-        renderOverview();
+    if (window.SS_STANDALONE_PAGE) {
+        // Standalone section page: no tabs to activate — call the render entry point the
+        // HOME_PAGES registry declares for it. Resolved from THIS scope (all the section
+        // partials are concatenated into the same <script>), not via window[...]: a
+        // top-level `function` is only a global in a classic script, and relying on that
+        // silently leaves the section's spinner spinning if it ever stops being one.
+        const _RENDERERS = {
+            renderOverview: typeof renderOverview === 'function' ? renderOverview : null,
+            renderHistory:  typeof renderHistory  === 'function' ? renderHistory  : null,
+            renderSyslog:   typeof renderSyslog   === 'function' ? renderSyslog   : null,
+        };
+        const _spec = (window.SS_STANDALONE_PAGES || [])
+            .find(p => p.id === window.SS_STANDALONE_PAGE);
+        const _fn = _spec && (_RENDERERS[_spec.render] || window[_spec.render]);
+        if (typeof _fn === 'function') {
+            // Hand over from the boot overlay to the section's own skeleton: the render
+            // paints it synchronously before yielding, so dropping the overlay here means
+            // one indicator at a time, with neither a gap nor two spinners at once. Same
+            // meaning the overlay has on the panel — it covers booting, not fetching.
+            document.getElementById('loading')?.remove();
+            await _fn();   // awaited so a rejection lands in the catch below
+        } else {
+            console.error('Standalone page has no render entry point:',
+                          window.SS_STANDALONE_PAGE, _spec);
+        }
     } else {
         // Admin panel: the default tab (Services) on a fresh login; the last visited tab
         // on reload (F5) or navigation within the same login.

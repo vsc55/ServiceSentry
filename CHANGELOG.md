@@ -5,6 +5,26 @@ All notable changes to **ServiceSentry** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **History and Syslog became standalone section pages, like Overview.** They are no longer tabs
+  inside the admin panel: `/history` and `/syslog` are whole pages of their own, declared once in
+  the `HOME_PAGES` registry with a `standalone` spec (pane, render entry point, required
+  permission, navbar icon/label). One generic route factory serves them all, the navbar builds its
+  buttons from the same data, and each is selectable as a landing page. A standalone page renders
+  **only its own pane** — the admin tab bar and the other sections' markup are not emitted at all,
+  rather than shipped and hidden with CSS. `/history` accepts a shareable deep link
+  (`?module=&key=`), which is what the "see this check's history" jump from Infrastructure now
+  uses. The navbar always shows the same four buttons in the same order (Overview, History, Syslog,
+  Admin); the section being viewed stays in place, highlighted, instead of disappearing.
+- **Destructive data wipes gathered in Config → General → Maintenance.** *Clear All History*,
+  *Clear a Series* and *Clear Syslog Messages* left the toolbars of the very sections they erase —
+  pages that stay open all day, one stray click from deleting everything. The Maintenance card has
+  no fields of its own and knows nothing about history or syslog: each domain contributes its
+  button as a `CONFIG_ACTION` on section `maintenance` (`lib/core/history/manifest.py`,
+  `lib/services/syslog/manifest.py`). Two limitations had to go for that to work — generic cards
+  now render contributed actions (previously only the bespoke auth renderers did), and a card may
+  now exist on actions alone. `CONFIG_ACTIONS` also gained a `perm` key, so a button whose
+  permission the user lacks is never drawn (the API still enforces it). Clearing one series is a
+  picker modal now, since there is no "current series" outside the History page.
 - **Packages can now contribute config-section buttons and their own web UI — no package-specific
   glue left in `web_admin`.** Two self-describing mechanisms (documented as §7b in
   `explica-descubrimiento.md`): (1) `CONFIG_ACTIONS` — a provider/service/module declares its
@@ -410,6 +430,39 @@ All notable changes to **ServiceSentry** are documented in this file.
   lockout, LDAP fallback and all SSO paths — 151 auth/LDAP/OIDC/SAML/Teams-SSO/security-regression tests pass.
 
 ### Fixed
+- **The Overview syslog card was slow and then reported a plausible `0`.** It called
+  `SyslogStore.stats()`, which computes four separate `GROUP BY` aggregations over the whole
+  message table (host, app, severity, facility) — the card displays only the total and the
+  severity split, so three quarters of that work fed nothing, slow enough on a large store to
+  look like a hung widget. `stats()` now takes `only=(…)` to compute just the requested
+  breakdowns (omitted ones come back as empty lists, never missing keys) and the card asks for
+  `severity` alone. Its `except` also swallowed every failure into `0` messages — indistinguishable
+  from a genuinely empty store; it still keeps the card alive but now logs a warning.
+- **Standalone pages loaded nothing but an endless spinner.** Two top-level
+  `document.getElementById('btn-tab-status').addEventListener(...)` calls in
+  `partials/init/_wiring.html` lacked the optional chaining every other tab hook uses. Once the
+  admin tab bar stopped being rendered on `/overview`, `/history` and `/syslog`, that element no
+  longer existed, so the access threw **outside** the init `try/catch` and aborted the entire
+  script before any renderer ran — the page arrived intact and simply never initialised. A static
+  test now fails on any unguarded access to a panel-only element (`btn-tab-*`, `subtab-*`).
+- **Two spinners at once while a standalone page loaded, and a navbar that assembled in two
+  steps.** Every tab pane ships a spinner placeholder in the markup, and on a standalone page that
+  pane is `show active` from the first paint — so it sat under the `#loading` overlay as a second
+  spinner, both visible from the very first frame, before any script ran. The pane placeholder is
+  now emitted only for the panel (where panes are inactive at load and it is what a tab switch
+  shows first), and the overlay is handed over to the section's own skeleton right as the render
+  starts. The overlay itself stays on every page: it dims the page to block interaction while
+  booting, not merely to spin. Separately, the *Admin* button rendered visible while the section
+  buttons waited for `applyRoleRestrictions()` — it now carries an empty `data-nav-perm` and goes
+  through the same single reveal.
+- **The browser's "leave site?" dialog fired on every navigation away from a standalone page.**
+  `_isDirty()` read `!document.getElementById(id)?.classList.contains('d-none')`, which evaluates
+  to `true` when the element is missing — and the dirty badges live in the Modules/Config panes,
+  which a standalone page does not render. Every section was therefore permanently "unsaved". It
+  now treats an absent badge as clean. Latent since the badges had always existed; moving the
+  sections out of the panel exposed it. Leaving the panel with genuinely unsaved changes is now
+  intercepted too, reusing the in-app Cancel/Discard/**Save** modal — the browser's own dialog
+  cannot offer Save, and both Modules and Config are resolved before the page is left.
 - **DB portability — cross-engine schema evolution.** `add_column_if_missing`/`_apply_incremental`
   no longer emit a bare `ADD COLUMN … NOT NULL` with no default (fatal on a non-empty table in every
   engine): a `NOT NULL` constraint is only rendered when the column carries a default, otherwise the
@@ -925,6 +978,11 @@ All notable changes to **ServiceSentry** are documented in this file.
   índice de `docs/README.md`.
 
 ### Notes
+- **Deferred by decision**: `fail2ban` (IP bans) and `events` stay as tabs inside the admin panel
+  for now. Both are operational surfaces that would fit the standalone-page treatment Overview,
+  History and Syslog now get — the `HOME_PAGES` registry takes them without new machinery (a
+  `standalone` spec plus their existing render entry point), so this is a decision, not a
+  limitation.
 - **`/overview2`**: an internal proof-of-concept to evaluate **Alpine.js** against the current
   Overview (same widgets/API/design; edit mode persisted to the account; a route-scoped CSP with
   `'unsafe-eval'`). Not a product feature — parked.

@@ -447,7 +447,7 @@ flowchart TB
 Un **provider/servicio/módulo** puede añadir **botones** a una sección de config y aportar su
 propio **JavaScript**, sin que una sola línea específica del paquete viva en `web_admin`.
 
-**Descriptor** (`lib/providers/<p>/config_actions.py`, o el mismo fichero en un servicio/módulo):
+**Descriptor** (`lib/providers/<p>/manifest.py`, o el `manifest.py` de un servicio/módulo):
 
 ```python
 CONFIG_ACTIONS = [
@@ -458,14 +458,35 @@ CONFIG_ACTIONS = [
      'fn': 'showEntraOidcRotateSecret',              # función JS que aporta el paquete
      'group_label_key': 'entra_id',                  # rótulo de la fila (opcional)
      'show_when': {'field': 'client_id', 'not_empty': True}},
+    # 'perm': 'history_delete',                      # opcional: permiso requerido
 ]
 ```
 
 - `fn` nombra una función JS que **el mismo paquete** publica en su `web/*_ui.html` → el
   comportamiento viaja con el paquete; el panel solo sabe "pinta un botón que llama a este nombre".
+  (Un dominio de `lib/core` no tiene `web/`: su JS ya vive en los parciales del panel; basta con
+  que la función sea global.)
 - `show_when` es una condición declarativa mínima evaluada en el frontend contra los valores de
   la sección (`{field, not_empty}`) — p. ej. no ofrecer "rotar secreto" hasta que haya app.
+- `perm` oculta el botón a quien no tenga ese permiso. Es una barrera **de UI**, nunca sustituye
+  la comprobación del endpoint: mantiene fuera de la vista lo que el usuario no puede hacer.
 - `variant` usa nombres **sólidos** de Bootstrap (nunca `outline-*`).
+
+Las acciones las pinta cualquier card, no solo las de auth: el renderer genérico las añade y una
+card puede existir **solo** con acciones (sin campos propios). De ahí sale la card
+**Mantenimiento** (Config → General): no conoce ni history ni syslog, se compone de lo que cada
+dominio aporta sobre la sección `maintenance`.
+
+| Acción | La declara | Permiso |
+|---|---|---|
+| *Borrar Una Serie* | `lib/core/history/manifest.py` | `history_delete` |
+| *Borrar Todo El Historial* | `lib/core/history/manifest.py` | `history_delete` |
+| *Vaciar Mensajes De Syslog* | `lib/services/syslog/manifest.py` | `syslog_delete` |
+
+> Estos borrados **estaban** en la barra de herramientas de la propia sección que vacían. Se
+> agruparon aquí porque History y Syslog son páginas que se dejan abiertas todo el día, y "borrar
+> todo" no debe quedar a un clic de distancia. Elegir *qué* serie borrar sigue siendo asunto de
+> History: el botón abre un modal selector que aporta ese dominio.
 
 **UI del paquete** — mismo mecanismo que ya usaban los watchfuls, ahora también para providers:
 
@@ -484,11 +505,11 @@ mismo nombre). Puede haber **varios** `*_ui.html` por paquete (p. ej. `_oidc_ui.
 
 ```mermaid
 flowchart TB
-    decl["config_actions.py :: CONFIG_ACTIONS<br/>[{section, id, label_key, icon, variant, fn, show_when}]"]
+    decl["manifest.py :: CONFIG_ACTIONS<br/>[{section, id, label_key, icon, variant, fn, perm, show_when}]"]
     decl --> disc["discover_config_actions()<br/><small>escanea lib.providers / lib.services / lib.core</small>"]
     disc --> lay["config_layout(): adjunta 'actions' a la card de esa sección"]
     lay --> api["GET /api/v1/config/layout"]
-    api --> ren["_cfgSectionActions(sec, data)<br/><small>evalúa show_when y pinta los botones</small>"]
+    api --> ren["_cfgSectionActions(sec, data)<br/><small>evalúa perm + show_when y pinta los botones</small>"]
     ren --> click["onclick → fn()"]
     js["<pkg>/web/*_ui.html (JS del paquete)"] --> inj["module_web_ui → bloque script"]
     inj -.-> click

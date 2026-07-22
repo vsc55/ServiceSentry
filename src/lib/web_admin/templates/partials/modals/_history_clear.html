@@ -1,0 +1,42 @@
+{# Clear a single history series — the picker the Maintenance action opens.
+
+   Choosing WHICH series to erase is a History concern, so the config panel only knows
+   "call showHistoryClearSeriesModal()" (declared in lib/core/history/manifest.py). The
+   modal confirms on its own: an explicit two-step selection plus a destructive button is
+   the friction here, so it does not stack a second confirm dialog on top. #}
+<div class="modal fade" id="historyClearModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title">
+                    <i class="bi bi-trash3 me-1"></i>{{ i18n.history_clear_series }}
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body pb-2">
+                <div class="mb-2">
+                    <label class="form-label small mb-1" for="hcsModule">{{ i18n.col_module }}</label>
+                    <select class="form-select form-select-sm" id="hcsModule"
+                            onchange="_historyClearFillSeries()"></select>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1" for="hcsSeries">{{ i18n.history_series }}</label>
+                    <select class="form-select form-select-sm" id="hcsSeries"
+                            onchange="_historyClearSyncBtn()"></select>
+                </div>
+                <div class="alert alert-warning py-2 px-2 small mb-0 d-flex align-items-center gap-2">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <span>{{ i18n.history_clear_irreversible }}</span>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-danger" id="hcsDelete" disabled
+                        onclick="_historyClearSeriesConfirmed()">
+                    <i class="bi bi-trash3 me-1"></i>{{ i18n.delete }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

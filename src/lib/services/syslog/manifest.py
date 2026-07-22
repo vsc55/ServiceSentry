@@ -32,19 +32,30 @@ MODULE_PERMISSIONS = {
 }
 
 
+# ── Maintenance action this package contributes ──────────────────
+# Wiping the message store is grouped with the other data wipes in Config → General →
+# Maintenance rather than sitting in the Syslog toolbar. `fn` ships with the syslog UI.
+CONFIG_ACTIONS = [
+    {'section': 'maintenance', 'id': 'syslog_clear',
+     'label_key': 'syslog_clear_all', 'tooltip_key': 'syslog_clear_all_tt',
+     'icon': 'bi-trash3', 'variant': 'danger', 'order': 30,
+     'perm': 'syslog_delete', 'fn': '_syslogClear'},
+]
+
+
 # ── Overview widgets this package contributes ────────────────────
 from .overview_widget import syslog_rows, syslog_stats_stat  # noqa: F401
 
 OVERVIEW_WIDGETS = [
     {'id': 'syslog_stats', 'icon': 'bi-card-list', 'label_key': 'overview_syslog_stats',
      'cols': 2, 'h': 'auto', 'has_h': False, 'order': 110,
-     'perms': {'any': ['syslog_view']}, 'nav': {'tab': '#tab-syslog'},
+     'perms': {'any': ['syslog_view']}, 'nav': {'url': '/syslog'},
      'stat': syslog_stats_stat,
      'view': {'kind': 'stat', 'icon': 'bi-card-list', 'label_key': 'overview_syslog_stats',
               'accent': 'blue', 'data_url': '/api/v1/overview/widget/syslog_stats'}},
     {'id': 'syslog', 'icon': 'bi-card-list', 'label_key': 'overview_syslog',
      'cols': 12, 'h': 200, 'has_h': True, 'order': 190,
-     'perms': {'any': ['syslog_view']}, 'nav': {'tab': '#tab-syslog'},
+     'perms': {'any': ['syslog_view']}, 'nav': {'url': '/syslog'},
      'rows': syslog_rows,
      'view': {'kind': 'table', 'icon': 'bi-card-list', 'title_key': 'overview_syslog',
               'accent': 'blue', 'data_url': '/api/v1/overview/widget/syslog',

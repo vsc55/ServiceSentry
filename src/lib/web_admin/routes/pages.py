@@ -28,6 +28,7 @@ from lib.core.hosts.profiles import (
 from lib.modules.discovery.credential_schemas import credential_schemas
 from lib.modules.discovery.overview_widgets import overview_widgets_catalog
 from lib.core.overview.discovery import discover_overview_widgets_public as _discover_overview_widgets
+from ..constants import standalone_pages
 
 
 def register(app, wa):
@@ -43,12 +44,17 @@ def register(app, wa):
         user = wa._users.get(session.get('username', ''), {})
         return redirect(wa._landing_url(user))
 
-    def _render_dashboard(overview_page: bool):
-        """Render dashboard.html either as the full admin panel (``/admin``) or as the
-        standalone Overview page (``/overview``, tabs hidden, only the widget grid)."""
+    def _render_dashboard(standalone: str = ''):
+        """Render dashboard.html as the full admin panel (``/admin``, *standalone* empty)
+        or as one standalone section page (``/overview``, ``/history``, ``/syslog``): the
+        tab bar is hidden and only that section's pane is shown and rendered."""
         html = render_template(
             'dashboard.html',
-            overview_page=overview_page,
+            standalone=standalone,
+            # Registry-driven: the navbar builds its buttons from this and the wiring
+            # calls the declared render entry point for the active standalone page.
+            standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone']}
+                              for p in standalone_pages()],
             username=session.get('username', ''),
             display_name=session.get('display_name', ''),
             role=session.get('role', 'viewer'),
@@ -76,10 +82,25 @@ def register(app, wa):
     @login_required
     def dashboard():
         """Render the main admin dashboard (all tabs)."""
-        return _render_dashboard(False)
+        return _render_dashboard()
 
-    @app.route('/overview')
-    @login_required
-    def overview():
-        """Render the Overview dashboard as its own page (separate from the admin panel)."""
-        return _render_dashboard(True)
+    # Standalone section pages (Overview / History / Syslog): one generic route per
+    # entry in the HOME_PAGES registry, gated by the permission it declares. Adding a
+    # page to the registry is enough — no per-page view function here.
+    def _make_standalone_view(page: dict):
+        spec = page['standalone']
+
+        def _view():
+            perms = set(wa._get_effective_permissions(
+                session.get('username', ''), session.get('role', '')) or [])
+            if spec.get('perm') and spec['perm'] not in perms:
+                return redirect(url_for('dashboard'))
+            return _render_dashboard(page['id'])
+
+        _view.__name__ = f"page_{page['id']}"
+        _view.__doc__ = f"Render the {page['id']} section as its own page."
+        return _view
+
+    for _page in standalone_pages():
+        app.add_url_rule(_page['url'], endpoint=f"page_{_page['id']}",
+                         view_func=login_required(_make_standalone_view(_page)))

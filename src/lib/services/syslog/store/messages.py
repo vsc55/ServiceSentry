@@ -209,25 +209,35 @@ class SyslogStore:
             (*params, int(top)))
         return [{'value': r[0], 'count': r[1]} for r in rows]
 
-    def stats(self, filters: dict | None = None, *, top: int = 10) -> dict:
+    def stats(self, filters: dict | None = None, *, top: int = 10,
+              only: tuple[str, ...] | None = None) -> dict:
         """Aggregate counts for the dashboard charts: total + breakdowns by host,
         severity, facility (family) and app.
 
         Faceted: each breakdown applies every *other* filter but NOT its own, so
         all of a dimension's options stay visible even after one is selected —
-        that's what lets the UI multi-select several values of the same type."""
+        that's what lets the UI multi-select several values of the same type.
+
+        *only* restricts which breakdowns are computed (``None`` = all of them). Each one
+        is a separate ``GROUP BY`` over the message table, so asking for the four when the
+        caller reads one makes the query four times as expensive on a large store — the
+        Overview card wants just the total and the severity split. Omitted breakdowns come
+        back as empty lists, never missing keys."""
         base = filters or {}
+        want = set(only) if only else {'host', 'app', 'severity', 'facility'}
         total = self.count(base)
 
-        def grp(column: str, own_key: str, limit: int) -> list:
+        def grp(column: str, own_key: str, limit: int, name: str) -> list:
+            if name not in want:
+                return []
             sub = {k: v for k, v in base.items() if k != own_key}
             where, params = self._where(sub)
             return self._group_counts(column, where, params, limit)
 
-        by_host = grp(_HOST_EXPR, 'hostname', top)
-        by_app = grp('app', 'app', top)
-        by_sev = grp('severity', 'severity', len(SEVERITIES))
-        by_fac = grp('facility', 'facility', len(FACILITIES))
+        by_host = grp(_HOST_EXPR, 'hostname', top, 'host')
+        by_app = grp('app', 'app', top, 'app')
+        by_sev = grp('severity', 'severity', len(SEVERITIES), 'severity')
+        by_fac = grp('facility', 'facility', len(FACILITIES), 'facility')
         return {
             'total': total,
             'by_host': by_host,

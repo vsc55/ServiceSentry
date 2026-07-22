@@ -5,14 +5,30 @@
             <i class="bi bi-shield-check me-1"></i> ServiceSentry
         </span>
         <div class="d-flex align-items-center">
-            {# Switch between the standalone Overview page and the admin panel. #}
-            {% if overview_page %}
-            <a class="btn btn-light btn-sm me-3" href="/admin">
+            {# Standalone section pages (Overview / History / Syslog) are declared in the
+               HOME_PAGES registry, not hardcoded here. EVERY section is offered on every
+               page — including the one being viewed, which stays put and is highlighted
+               instead of disappearing: a nav whose buttons come and go gives the sections
+               a different position on each page. Each button is hidden until
+               applyRoleRestrictions() checks its permission (id: nav-page-<id>), so
+               nothing flashes for a user who may not see that section. #}
+            {% for p in standalone_specs %}
+            <a class="btn btn-sm me-2 {{ 'btn-primary' if p.id == standalone else 'btn-light' }}"
+               href="{{ p.url }}" data-nav-section
+               {% if p.id == standalone %}aria-current="page"{% endif %}
+               id="nav-page-{{ p.id }}" data-nav-perm="{{ p.perm }}" style="display:none">
+                <i class="bi {{ p.icon }} me-1"></i>{{ i18n[p.nav_label_key] }}</a>
+            {% endfor %}
+            {# Admin always sits last, after the sections, so the buttons keep one fixed
+               order (Overview, History, Syslog, Admin) on every page. #}
+            {# Empty data-nav-perm = no permission needed, but it still goes through the
+               same reveal as the rest: otherwise this one button pops in immediately while
+               the others wait for applyRoleRestrictions(), and the nav visibly assembles
+               itself in two steps. #}
+            <a class="btn btn-sm me-2 {{ 'btn-light' if standalone else 'btn-primary' }}"
+               href="/admin" data-nav-section data-nav-perm="" style="display:none"
+               {% if not standalone %}aria-current="page"{% endif %}>
                 <i class="bi bi-sliders me-1"></i>{{ i18n.admin_panel or 'Admin' }}</a>
-            {% else %}
-            <a class="btn btn-light btn-sm me-3" href="/overview">
-                <i class="bi bi-speedometer2 me-1"></i>{{ i18n.tab_overview }}</a>
-            {% endif %}
             <div class="dropdown">
                 <button class="btn btn-light btn-sm dropdown-toggle" data-bs-toggle="dropdown">
                     <i class="bi bi-person-circle me-1"></i>{{ display_name }}

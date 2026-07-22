@@ -68,6 +68,13 @@ CARDS: tuple[dict, ...] = (
     # A core/system concern — deliberately NOT under the Monitoring service tab.
     {'tab': 'general', 'id': 'health', 'title_key': 'cfg_card_platform_health',
      'icon': 'bi-heart-pulse'},
+    # Destructive data wipes, gathered in ONE place instead of sitting in the toolbar of
+    # the section they erase — a monitoring page is left open all day, and "clear all" is
+    # not something to keep one stray click away. The card has no fields of its own: each
+    # domain contributes its button as a CONFIG_ACTION on section 'maintenance', so
+    # nothing here knows about history or syslog specifically.
+    {'tab': 'general', 'id': 'maintenance', 'title_key': 'cfg_card_maintenance',
+     'icon': 'bi-trash3'},
 
     # ══ Monitoring ══════════════════════════════════════════════════════════
     {'tab': 'monitoring', 'id': 'monitoring', 'section': 'monitoring', 'icon': 'bi-activity'},
