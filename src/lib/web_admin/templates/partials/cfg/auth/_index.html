@@ -3,6 +3,6 @@
    ================================================================ #}
 {% include "partials/cfg/auth/_renderers.html" %}
 {% include "partials/cfg/auth/_group_role_map.html" %}
-{% include "partials/cfg/auth/_wizard_oidc.html" %}
-{% include "partials/cfg/auth/_wizard_saml.html" %}
-{% include "partials/cfg/auth/_wizard_scim.html" %}
+{# The Entra ID wizards (OIDC / SAML2 / SCIM) are NOT included here: they are provider
+   glue and live with their provider (lib/providers/entraid/web/*_ui.html), injected
+   generically through the package web-assets discovery (module_web_ui). #}

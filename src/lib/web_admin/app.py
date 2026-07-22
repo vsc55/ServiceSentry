@@ -322,6 +322,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Certificate-expiry scanner: periodically scan ssl_cert checks and alert on
         # certs nearing expiry (opt-in via certs|notify_expiry).
         self._start_cert_scanner()
+        self._start_secret_scanner()
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -894,37 +895,52 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # (e.g. "Alerts" before "Connection") instead of their schema order.
         app.json.sort_keys = False
 
-        # Discover watchful modules that ship their own web UI partials.
-        # Convention (all files are optional per module):
-        #   watchfuls/<mod>/web/_styles.html — CSS injected inside <head>
-        #   watchfuls/<mod>/web/_ui.html     — JS injected inside <script> block
-        #   watchfuls/<mod>/web/_modals.html — HTML modals injected before </body>
-        # The watchfuls root is added to the Jinja2 loader so includes resolve as
-        # e.g. "snmp/web/_ui.html" and Jinja2 variables ({{ i18n.* }}) still work.
-        _watchfuls_root = os.path.normpath(
-            os.path.join(base_dir, '..', '..', 'watchfuls')
-        )
+        # Discover PACKAGES that ship their own web UI partials — watchful modules AND
+        # providers alike, so no package-specific glue ever has to live in web_admin.
+        # Convention (all files optional, per package):
+        #   <pkg>/web/_styles.html — CSS injected inside <head>
+        #   <pkg>/web/_ui.html     — JS injected inside the <script> block
+        #   <pkg>/web/_modals.html — HTML modals injected before </body>
+        # Each root is added to the Jinja2 loader so includes resolve (e.g.
+        # "snmp/web/_ui.html", "providers/entraid/web/_ui.html") and Jinja2 variables
+        # ({{ i18n.* }}) still work. Providers are addressed through their PARENT dir so
+        # their prefix ("providers/…") can never collide with a watchful of the same name.
+        _watchfuls_root = os.path.normpath(os.path.join(base_dir, '..', '..', 'watchfuls'))
+        _lib_root = os.path.normpath(os.path.join(base_dir, '..'))          # …/lib
+        _providers_root = os.path.join(_lib_root, 'providers')
         _module_web_styles: list[str] = []
         _module_web_ui: list[str] = []
         _module_web_modals: list[str] = []
-        if os.path.isdir(_watchfuls_root):
-            for _mod in sorted(os.listdir(_watchfuls_root)):
-                _web_dir = os.path.join(_watchfuls_root, _mod, 'web')
+        _loader_roots: list[str] = []
+
+        def _collect_web(scan_dir: str, prefix: str, loader_root: str) -> None:
+            """Append every ``<pkg>/web/*.html`` under *scan_dir* to the injection lists."""
+            if not os.path.isdir(scan_dir):
+                return
+            found = False
+            for _pkg in sorted(os.listdir(scan_dir)):
+                _web_dir = os.path.join(scan_dir, _pkg, 'web')
                 if not os.path.isdir(_web_dir):
                     continue
                 for _f in sorted(f for f in os.listdir(_web_dir) if f.endswith('.html')):
-                    _tpl = f'{_mod}/web/{_f}'
+                    _tpl = f'{prefix}{_pkg}/web/{_f}'
                     if _f.endswith('_modals.html'):
                         _module_web_modals.append(_tpl)
                     elif _f.endswith('_ui.html'):
                         _module_web_ui.append(_tpl)
                     elif _f.endswith('_styles.html'):
                         _module_web_styles.append(_tpl)
-            if _module_web_styles or _module_web_ui or _module_web_modals:
-                app.jinja_loader = ChoiceLoader([
-                    app.jinja_loader,
-                    FileSystemLoader(_watchfuls_root),
-                ])
+                    else:
+                        continue
+                    found = True
+            if found and loader_root not in _loader_roots:
+                _loader_roots.append(loader_root)
+
+        _collect_web(_watchfuls_root, '', _watchfuls_root)
+        _collect_web(_providers_root, 'providers/', _lib_root)
+        if _loader_roots:
+            app.jinja_loader = ChoiceLoader(
+                [app.jinja_loader] + [FileSystemLoader(r) for r in _loader_roots])
         self._module_web_styles = _module_web_styles
         self._module_web_ui = _module_web_ui
         self._module_web_modals = _module_web_modals
@@ -1466,6 +1482,78 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             text_fn=self._notify_text,
         )
         self._cert_scanner.start(
+            poll_getter=lambda: self._config_section('certs').get('scan_every_secs', 86400))
+
+    def _save_oidc_secret(self, secret: str, expires_at: str = '') -> bool:
+        """Persist a freshly minted OIDC client secret (and the expiry Entra granted).
+
+        Used by both the assisted rotation (device-code route) and the unattended one
+        (:class:`SecretExpiryScanner`).  ``expires_at`` is stored verbatim so the scanner
+        can compute the remaining life; an empty value simply means "unknown"."""
+        if not secret:
+            return False
+        cfg = self._read_config_file(self._CONFIG_FILE) or {}
+        cfg.setdefault('oidc', {})
+        cfg['oidc']['client_secret'] = secret
+        cfg['oidc']['secret_expires_at'] = expires_at or ''
+        return bool(self._write_config(cfg))
+
+    def _start_secret_scanner(self) -> None:
+        """Launch the background Entra client-secret scanner: warns before the OIDC secret
+        expires (``secret_expiring``) and, when ``oidc|secret_auto_rotate`` is on, mints a
+        replacement once inside ``oidc|secret_rotate_days`` (``secret_rotated``).
+
+        Unattended rotation authenticates the app **as itself** (client-credentials) and
+        therefore only works if the app may modify its own registration in Entra; when it
+        can't, rotation fails and the scanner degrades to warning only."""
+        if getattr(self, '_secret_scanner', None) is not None:
+            return
+        import os as _os  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
+        from lib.core.health.secret_scan import SecretExpiryScanner  # noqa: PLC0415
+        from lib.providers.entraid import auth as _ent_auth, provisioning as _ent_prov  # noqa: PLC0415,E501
+        from lib.services.heartbeat import hostname  # noqa: PLC0415
+        from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
+        _inst_id = f'secretscan-{hostname()}-{_os.getpid()}'
+
+        def _is_leader():
+            ls = getattr(self, '_service_leader_store', None)
+            if ls is None:
+                return True
+            try:
+                return bool(ls.try_acquire('secret_scan', _inst_id, host=hostname(), ttl=3600))
+            except Exception:  # pylint: disable=broad-except
+                return True
+
+        def _emit(kind, **fields):
+            _dispatch(self, kind=kind, timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'), **fields)
+
+        def _rotate():
+            """App-only token with the app's CURRENT secret → mint the next one."""
+            oidc = self._config_section('oidc')
+            tenant = _ent_auth.tenant_from_provider_url(oidc.get('provider_url', '') or '')
+            if not tenant:
+                raise RuntimeError('cannot derive tenant from oidc|provider_url')
+            token = _ent_auth.app_token(tenant, oidc.get('client_id', ''),
+                                        oidc.get('client_secret', ''))
+            return _ent_prov.add_app_secret(token, oidc.get('client_id', ''),
+                                            display_name='ServiceSentry OIDC (auto)')
+
+        def _save(secret, expires_at):
+            self._save_oidc_secret(secret, expires_at)
+            self._audit('entra_oidc_secret_rotated',
+                        detail={'auto': True, 'expires_at': expires_at})
+
+        self._secret_scanner = SecretExpiryScanner(
+            config_getter=lambda: self._config_section('oidc'),
+            dispatch=_emit,
+            rotate_fn=_rotate,
+            save_fn=_save,
+            is_leader=_is_leader,
+            dbg=self._dbg,
+            text_fn=self._notify_text,
+        )
+        self._secret_scanner.start(
             poll_getter=lambda: self._config_section('certs').get('scan_every_secs', 86400))
 
     # ------------------------------------------------------------------

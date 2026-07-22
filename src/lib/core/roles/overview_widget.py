@@ -33,13 +33,3 @@ def roles_stat(wa) -> dict:
     return {'value': total,
             'badges': ([{'plain': True, 'key': 'overview_custom_roles', 'args': [custom]}]
                        if custom else [])}
-
-
-OVERVIEW_WIDGETS = [
-    {'id': 'roles', 'icon': 'bi-shield-shaded', 'label_key': 'overview_roles',
-     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 60,
-     'perms': {'any': ['roles_view']}, 'nav': {'tab': '#tab-access', 'sub': '#subtab-roles'},
-     'stat': roles_stat,
-     'view': {'kind': 'stat', 'icon': 'bi-shield-fill-check', 'label_key': 'overview_roles',
-              'accent': 'violet', 'data_url': '/api/v1/overview/widget/roles'}},
-]

@@ -19,13 +19,3 @@ def groups_stat(wa) -> dict:
     if not badges and members:
         badges = [{'plain': True, 'key': 'overview_members', 'args': [members]}]
     return {'value': len(wa._groups), 'badges': badges}
-
-
-OVERVIEW_WIDGETS = [
-    {'id': 'groups', 'icon': 'bi-people', 'label_key': 'overview_groups',
-     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 50,
-     'perms': {'any': ['groups_view']}, 'nav': {'tab': '#tab-access', 'sub': '#subtab-groups'},
-     'stat': groups_stat,
-     'view': {'kind': 'stat', 'icon': 'bi-people-fill', 'label_key': 'overview_groups',
-              'accent': 'emerald', 'data_url': '/api/v1/overview/widget/groups'}},
-]

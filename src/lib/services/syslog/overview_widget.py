@@ -33,27 +33,3 @@ def syslog_rows(wa, f: str = '') -> list:
         return store.query(filters, limit=20)
     except Exception:  # pylint: disable=broad-except
         return []
-
-
-OVERVIEW_WIDGETS = [
-    {'id': 'syslog_stats', 'icon': 'bi-card-list', 'label_key': 'overview_syslog_stats',
-     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 110,
-     'perms': {'any': ['syslog_view']}, 'nav': {'tab': '#tab-syslog'},
-     'stat': syslog_stats_stat,
-     'view': {'kind': 'stat', 'icon': 'bi-card-list', 'label_key': 'overview_syslog_stats',
-              'accent': 'blue', 'data_url': '/api/v1/overview/widget/syslog_stats'}},
-    {'id': 'syslog', 'icon': 'bi-card-list', 'label_key': 'overview_syslog',
-     'cols': 12, 'h': 200, 'has_h': True, 'order': 190,
-     'perms': {'any': ['syslog_view']}, 'nav': {'tab': '#tab-syslog'},
-     'rows': syslog_rows,
-     'view': {'kind': 'table', 'icon': 'bi-card-list', 'title_key': 'overview_syslog',
-              'accent': 'blue', 'data_url': '/api/v1/overview/widget/syslog',
-              'empty_key': 'syslog_empty', 'row_class': 'syslog_sev',
-              'filter': {'store': 'sev', 'param': 'severity_max', 'badge_fn': 'sev'},
-              'columns': [
-                  {'key': 'when',     'label_key': 'syslog_time',     'cell': 'syslog_when'},
-                  {'key': 'severity', 'label_key': 'syslog_severity', 'cell': 'severity'},
-                  {'key': 'host',     'label_key': 'syslog_host',     'cell': 'syslog_host'},
-                  {'key': 'message',  'label_key': 'syslog_message',  'cell': 'message'},
-              ]}},
-]

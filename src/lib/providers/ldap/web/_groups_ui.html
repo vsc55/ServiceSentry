@@ -1,0 +1,66 @@
+{# ================================================================
+   LDAP — group source for the group→role mapping widget.
+
+   Declared in this package's manifest.py (GROUP_SOURCES); web_admin renders the
+   button/picker generically and calls these by name. Shared widget helpers
+   (_grmAddRow, _grmAutoResolveNames, _grmBindFilter, _grmMark*) stay in the panel.
+   ================================================================ #}
+
+async function _ldapFetchGroups(sec) {
+    sec = sec || 'ldap';
+    const cfg = configData.ldap || {};
+    if (!cfg.server) {
+        showToast(t('ldap_test_missing'), 'warning');
+        return;
+    }
+    const btn    = document.getElementById('btnFetchGroups_' + sec);
+    const picker = document.getElementById('ldapGroupPicker');
+    const list   = document.getElementById('ldapGroupList');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('grm_fetch_groups')); }
+    if (picker) picker.style.display = 'none';
+    _grmMarkSearching('ldap');
+
+    const r = await apiPost('/api/v1/auth/ldap/groups', cfg);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download me-1"></i>' + esc(t('grm_fetch_groups')); }
+
+    if (!r || !r.data || !r.data.ok) {
+        _grmMarkNotFound('ldap');
+        await _saveDisplayNames('ldap');
+        showToast((r && r.data && r.data.message) || t('ldap_test_error'), 'danger');
+        return;
+    }
+    const groups = r.data.groups || [];
+    if (!groups.length) {
+        _grmMarkNotFound('ldap');
+        await _saveDisplayNames('ldap');
+        showToast(t('grm_no_groups'), 'info');
+        return;
+    }
+    if (list) {
+        list.innerHTML = groups.map(g =>
+            `<div class="d-flex align-items-center justify-content-between py-1 px-2 border-bottom grm-group-pick"
+                  data-grm-name="${escAttr((g.name || '').toLowerCase())}"
+                  style="cursor:pointer;transition:background .1s" title="${escAttr(g.dn)}"
+                  onmouseover="this.style.background='var(--bs-tertiary-bg,#f0f0f0)'" onmouseout="this.style.background=''"
+                  onclick="_ldapPickGroup(${jsStr(g.dn)},${jsStr(g.name)})">
+                <span class="me-3 fw-medium small text-truncate">${esc(g.name)}</span>
+                <span class="text-muted text-truncate" style="font-size:.7rem;flex-shrink:0;max-width:55%">${esc(g.dn)}</span>
+            </div>`
+        ).join('');
+        _grmBindFilter('ldap');
+        const _ldapNameMap = {};
+        groups.forEach(g => { if (g.dn) { _ldapNameMap[g.dn] = g.name; _grmNameCache.ldap[g.dn.toLowerCase()] = g.name; } });
+        _grmAutoResolveNames('ldap', _ldapNameMap);
+        _grmMarkNotFound('ldap');
+        await _saveDisplayNames('ldap');
+    }
+    if (picker) picker.style.display = '';
+}
+
+function _ldapPickGroup(dn, name) {
+    _grmAddRow('ldap', dn, name);
+}
+
+// Fetch the tenant's groups via Graph for the OIDC or SAML2 section.  The SAML2 app
+// (registered by the wizard) has its own client secret in graph_secret; both use the
+// same /entra/groups endpoint (the backend resolves creds by `sec`).

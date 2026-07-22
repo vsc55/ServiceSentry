@@ -40,9 +40,8 @@ def register(app, wa):
         public status page (/status). Same resolution used right after login."""
         if not session.get('logged_in'):
             return redirect(url_for('login'))
-        from .auth import _landing_url   # noqa: PLC0415  (avoid import cycle at load)
         user = wa._users.get(session.get('username', ''), {})
-        return redirect(_landing_url(wa, user))
+        return redirect(wa._landing_url(user))
 
     def _render_dashboard(overview_page: bool):
         """Render dashboard.html either as the full admin panel (``/admin``) or as the

@@ -208,6 +208,75 @@ def register(app, wa):
             'interval':         d.get('interval', 5),
         })
 
+    @app.route('/api/v1/auth/entraid/oidc/secret/device-code', methods=['POST'])
+    @config_edit_req
+    def api_entra_oidc_secret_device_code():
+        """Start a device-code flow to mint a FRESH client secret on the EXISTING OIDC app
+        (rotation), without recreating the app registration."""
+        app_id = wa._config_section('oidc').get('client_id', '').strip()
+        if not app_id:
+            return jsonify({'error': wa._t('entra_oidc_no_app')}), 400
+        try:
+            d = auth.device_code_start()
+        except Exception as exc:  # pylint: disable=broad-except
+            return jsonify({'error': str(exc) or wa._t('entra_device_code_error')}), 502
+        flow_token = secrets.token_urlsafe(16)
+        wa._entra_flows[flow_token] = {
+            'device_code': d['device_code'],
+            'expires_at':  time.time() + int(d.get('expires_in', 900)),
+            'interval':    int(d.get('interval', 5)),
+            'kind':        'oidc_secret',
+            'app_id':      app_id,
+        }
+        return jsonify({
+            'flow_token':       flow_token,
+            'user_code':        d['user_code'],
+            'verification_uri': d['verification_uri'],
+            'verification_uri_complete': d.get('verification_uri_complete'),
+            'expires_in':       d.get('expires_in', 900),
+            'interval':         d.get('interval', 5),
+        })
+
+    @app.route('/api/v1/auth/entraid/oidc/secret/device-poll', methods=['POST'])
+    @config_edit_req
+    def api_entra_oidc_secret_device_poll():
+        """Poll the OIDC secret-rotation flow. On success mints a new secret on the existing
+        app and persists it (with the expiry Entra granted) into ``oidc|client_secret`` /
+        ``oidc|secret_expires_at``. The previous secret stays valid until it expires, so the
+        rotation is non-disruptive."""
+        data, err = wa._require_json()
+        if err:
+            return err
+        flow_token = data.get('flow_token')
+        flow = wa._entra_flows.get(flow_token)
+        if not flow or flow.get('kind') != 'oidc_secret':
+            return jsonify({'status': 'expired'})
+        if time.time() > flow['expires_at']:
+            wa._entra_flows.pop(flow_token, None)
+            return jsonify({'status': 'expired'})
+
+        body = auth.device_code_poll(flow['device_code'])
+        error = body.get('error', '')
+        if error == 'authorization_pending':
+            return jsonify({'status': 'pending'})
+        if error == 'slow_down':
+            flow['interval'] = min(flow['interval'] + 5, 30)
+            return jsonify({'status': 'pending', 'interval': flow['interval']})
+        if error:
+            wa._entra_flows.pop(flow_token, None)
+            return jsonify({'status': 'error', 'message': body.get('error_description', error)})
+
+        wa._entra_flows.pop(flow_token, None)
+        try:
+            res = provisioning.add_app_secret(body['access_token'], flow['app_id'],
+                                              display_name='ServiceSentry OIDC')
+        except Exception as exc:  # pylint: disable=broad-except
+            return jsonify({'status': 'error', 'message': str(exc)})
+        wa._save_oidc_secret(res.get('secret', ''), res.get('expires_at', ''))
+        wa._audit('entra_oidc_secret_rotated',
+                  detail={'app_id': flow['app_id'], 'expires_at': res.get('expires_at', '')})
+        return jsonify({'status': 'complete', 'expires_at': res.get('expires_at', '')})
+
     @app.route('/api/v1/auth/entraid/saml2/device-poll', methods=['POST'])
     @config_edit_req
     def api_entra_saml2_device_poll():

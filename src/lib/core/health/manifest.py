@@ -13,4 +13,8 @@ NOTIFY_EVENTS = [
      'matrix': True, 'order': 61},
     {'key': 'cert_expiring', 'source': 'certs', 'label_key': 'notif_event_cert_expiring',
      'matrix': True, 'order': 70},
+    {'key': 'secret_expiring', 'source': 'certs', 'label_key': 'notif_event_secret_expiring',
+     'matrix': True, 'order': 71},
+    {'key': 'secret_rotated', 'source': 'certs', 'label_key': 'notif_event_secret_rotated',
+     'matrix': True, 'order': 72},
 ]

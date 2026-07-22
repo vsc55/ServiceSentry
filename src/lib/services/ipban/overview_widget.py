@@ -57,39 +57,3 @@ def ipban_list_rows(wa, f: str = '') -> list:
             for b in mgr.list_bans(active_only=True)[:15]]
     except Exception:  # pylint: disable=broad-except
         return []
-
-
-OVERVIEW_WIDGETS = [
-    {
-        'id':        'fail2ban',
-        'icon':      'bi-slash-circle',
-        'label_key': 'overview_fail2ban',
-        'cols':      2, 'h': 'auto', 'has_h': False,
-        'order':     200,
-        'perms':     {'any': ['ipban_ban_view', 'ipban_whitelist_view', 'ipban_history_view']},
-        'nav':       {'tab': '#tab-ipban'},
-        # Data-driven render: generic stat card from its AJAX-fetched content.
-        'stat':      fail2ban_stat,
-        'view':      {'kind': 'stat', 'icon': 'bi-slash-circle',
-                      'label_key': 'overview_fail2ban', 'accent': 'grey',
-                      'data_url': '/api/v1/overview/widget/fail2ban'},
-    },
-    {
-        'id':        'ipban_list',
-        'icon':      'bi-slash-circle',
-        'label_key': 'overview_ipban_list',
-        'cols':      4, 'h': 340, 'has_h': True,
-        'order':     210,
-        'perms':     {'any': ['ipban_ban_view']},
-        'nav':       {'tab': '#tab-ipban'},
-        'rows':      ipban_list_rows,
-        'view':      {'kind': 'table', 'icon': 'bi-slash-circle', 'title_key': 'overview_ipban_list',
-                      'accent': 'amber', 'data_url': '/api/v1/overview/widget/ipban_list',
-                      'empty_key': 'ipban_none', 'columns': [
-                          {'key': 'ip',      'label_key': 'ipban_col_ip',      'sortable': True, 'cell': 'code'},
-                          {'key': 'reason',  'label_key': 'ipban_col_reason',  'sortable': True, 'cell': 'ipban_reason'},
-                          {'key': 'level',   'label_key': 'ipban_col_level',   'sortable': True, 'cell': 'num_center'},
-                          {'key': 'expires', 'label_key': 'ipban_col_expires', 'sortable': True, 'cell': 'ipban_expiry'},
-                      ]},
-    },
-]

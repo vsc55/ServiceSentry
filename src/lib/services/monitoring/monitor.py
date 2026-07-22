@@ -524,7 +524,7 @@ class Monitor(ObjectBase):
 
         The kind strings come from the monitoring domain's discovered notify-events descriptor
         (single source of truth), so the emitter and the routing registry can't drift apart."""
-        from lib.services.monitoring.notify_events import (  # noqa: PLC0415
+        from lib.services.monitoring.manifest import (  # noqa: PLC0415
             KIND_DOWN, KIND_RECOVERY, KIND_WARN)
         if status is True:
             return KIND_RECOVERY

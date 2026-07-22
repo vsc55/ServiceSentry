@@ -1,19 +1,13 @@
 {# ================================================================
    Config — Auth tab: _renderAuthSection, _renderDefaultRoleField,
-   _drPickRole, _applyLdapPreset, _applyOidcPreset, _applySaml2Preset,
-   testLdap, and the shared "Open in Entra ID" deep-link helper _entraAppLink.
-   The per-protocol "Register in Azure" wizards live in _wizard_{oidc,saml,scim}.html.
-   ================================================================ #}
+   _drPickRole, _applyLdapPreset, _applyOidcPreset, _applySaml2Preset, testLdap.
 
-// "Open in Entra ID" deep-link button for an already-registered app (by its
-// appId/client id). Empty until an app exists (OIDC client_id / SAML2 sp_app_id).
-function _entraAppLink(appId) {
-    appId = (appId || '').trim();
-    if (!appId) return '';
-    const url = 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/' + encodeURIComponent(appId);
-    return `<a class="btn btn-secondary btn-sm ms-2" href="${escAttr(url)}" target="_blank" rel="noopener">
-                    <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('entra_open_app'))}</a>`;
-}
+   NOTHING provider-specific lives here. Provider buttons (Entra ID: register,
+   open app, rotate secret…) are DECLARED by the provider
+   (lib/providers/<p>/config_actions.py :: CONFIG_ACTIONS) and rendered generically
+   by _cfgSectionActions(); the JS they call ships in the provider's own
+   web/*_ui.html.
+   ================================================================ #}
 
 // ──────────────────────── External auth section renderer ──────────────────
 function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
@@ -45,19 +39,21 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
                 </button>
                 <small class="text-muted cfg-preset-hint">${esc(t('oidc_preset_hint'))}</small>
             </div>
-        </div></div>
-        <div class="cfg-field-wrap mb-2"><div class="row align-items-center">
-            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">Entra ID</small></div>
-            <div class="col-sm-8">
-                <button class="btn btn-primary btn-sm" onclick="showEntraWizard()" type="button">
-                    <i class="bi bi-microsoft me-1"></i>${esc(t('entra_wizard_btn'))}
-                </button>${_entraAppLink(data.client_id)}
-            </div>
         </div></div>`;
+        // Buttons contributed by a package (Entra: register / open app / rotate secret)
+        // — declared as data in the provider and rendered generically. No provider-
+        // specific glue lives in web_admin.
+        h += _cfgSectionActions(sec, data);
         // Read-only redirect URI (callback) derived from the public URL — the value the
         // admin registers in the IdP (Entra/Google/Keycloak) as an allowed redirect URI.
         h += roCopyRow(t('oidc_callback_label'), publicBaseUrl() + '/auth/oidc/callback',
                        t('oidc_callback_hint'));
+        // Current client-secret expiry: written by the app (the value Entra granted when
+        // the secret was minted), never hand-edited → read-only. Only meaningful once
+        // known; empty means the scanner can neither warn nor rotate.
+        if ((data.secret_expires_at || '').trim()) {
+            h += roCopyRow(fieldLabel('secret_expires_at'), data.secret_expires_at);
+        }
     }
 
     // LDAP quick-setup preset buttons
@@ -99,14 +95,9 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
                 <small class="text-muted cfg-preset-hint">${esc(t('saml2_preset_hint'))}</small>
             </div>
         </div></div>`;
-        h += `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
-            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">Entra ID</small></div>
-            <div class="col-sm-8">
-                <button class="btn btn-primary btn-sm" onclick="showEntraSaml2Wizard()" type="button">
-                    <i class="bi bi-microsoft me-1"></i>${esc(t('entra_saml2_wizard_btn'))}
-                </button>${_entraSaml2SsoLink(data)}${(data.sp_app_id || '').trim() ? `<button class="btn btn-secondary btn-sm ms-2" onclick="_entraSaml2AddSecret()" type="button"><i class="bi bi-key me-1"></i>${esc(t('entra_saml2_add_secret_btn'))}</button>` : ''}
-            </div>
-        </div></div>`;
+        // Package-contributed buttons (Entra SAML2: register / add group credential),
+        // declared by the provider and rendered generically.
+        h += _cfgSectionActions(sec, data);
         // SP identity — ServiceSentry's own Entity ID + ACS URL. These are FIXED
         // (derived from the public URL / set by the wizard as api://{appId}), never
         // hand-edited: shown read-only with a copy button so the admin pastes them
@@ -132,6 +123,10 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
             'provider_url', 'client_id', 'client_secret', 'scopes',
             'username_claim', 'email_claim', 'name_claim', 'groups_claim',
             'auto_create_users',
+            // Client-secret lifecycle (secret_expires_at is shown read-only above —
+            // the app writes it, it is not hand-edited).
+            'secret_notify_expiry', 'secret_warn_days',
+            'secret_auto_rotate', 'secret_rotate_days',
         ],
         saml2: [
             'enabled', 'button_label',

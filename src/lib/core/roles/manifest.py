@@ -12,3 +12,16 @@ MODULE_PERMISSIONS = {
         {'flag': 'roles_delete', 'roles': ()},                    # delete custom roles
     ),
 }
+
+
+# ── Overview widgets this package contributes ────────────────────
+from .overview_widget import roles_stat  # noqa: F401
+
+OVERVIEW_WIDGETS = [
+    {'id': 'roles', 'icon': 'bi-shield-shaded', 'label_key': 'overview_roles',
+     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 60,
+     'perms': {'any': ['roles_view']}, 'nav': {'tab': '#tab-access', 'sub': '#subtab-roles'},
+     'stat': roles_stat,
+     'view': {'kind': 'stat', 'icon': 'bi-shield-fill-check', 'label_key': 'overview_roles',
+              'accent': 'violet', 'data_url': '/api/v1/overview/widget/roles'}},
+]

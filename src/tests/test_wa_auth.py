@@ -90,6 +90,17 @@ class TestAuthentication:
         assert resp2.status_code == 302
         assert "/login" in resp2.headers["Location"]
 
+    def test_root_logged_in_redirects_to_landing(self, client):
+        """Regression: ``GET /`` WITH a session must resolve the landing page.
+
+        The anonymous case short-circuits to /login, so the logged-in branch of ``_root``
+        was never exercised — an ImportError there (``_landing_url`` moved from
+        routes/auth.py to the _AuthMixin) only blew up at runtime."""
+        _login(client)
+        resp = client.get("/")
+        assert resp.status_code == 302
+        assert "/login" not in resp.headers["Location"]
+
     def test_already_logged_in_skips_login_page(self, client):
         _login(client)
         resp = client.get("/login")

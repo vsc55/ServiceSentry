@@ -19,6 +19,47 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## `GET /` con sesión rompe con `ImportError: cannot import name '_landing_url'`
+
+**Fecha:** 2026-07-22 · **Área:** web-admin / rutas (`routes/pages.py`)
+
+**Síntoma** — con la sesión iniciada, entrar en la raíz `/` devolvía un 500 con
+`ImportError: cannot import name '_landing_url' from 'lib.web_admin.routes.auth'`.
+Anónimo funcionaba bien (redirigía a `/login`), y `/admin` también: solo fallaba `/`
+estando autenticado.
+
+**Diagnóstico** — el traceback señalaba directamente `pages.py::_root`. Un `grep` de
+`_landing_url` mostró que **todos** los demás llamantes (`routes/auth.py`,
+`providers/oidc`, `providers/saml`, `entraid/sso_routes`) lo invocan como
+**método** (`wa._landing_url(user)`), y que está definido en
+`lib/web_admin/mixins/auth.py:177`. Solo `pages.py` conservaba la forma antigua
+(función de módulo importada de `routes/auth.py` y llamada con `wa` como primer
+argumento).
+
+**Causa raíz** — regresión del refactor de auth (ruta `/login` fina + resolver sin
+Flask): `_landing_url` se movió de `routes/auth.py` al `_AuthMixin`, pero el
+`import` diferido dentro de `_root` no se actualizó. Al ser un import **dentro de
+la función** (puesto ahí para evitar un ciclo al cargar), no falla al arrancar ni lo
+detecta un import-check: solo estalla al ejecutar esa rama.
+
+**Por qué los tests no lo cogieron** — los únicos tests que hacían `GET /` lo hacían
+**sin sesión**, y esa rama hace `return redirect(url_for('login'))` *antes* de llegar
+al import. La rama autenticada no estaba cubierta.
+
+**Solución** — usar el método del mixin, igual que el resto de llamantes:
+`return redirect(wa._landing_url(user))`, eliminando el import diferido. Se corrigió
+también el único test que importaba el símbolo antiguo (`test_wa_config.py`) y se
+añadió la regresión que faltaba: `test_root_logged_in_redirects_to_landing`
+(`tests/test_wa_auth.py`), verificada fallando con el bug y pasando con el fix.
+
+**Lección** — un **import diferido dentro de una función** esquiva tanto el arranque
+como cualquier chequeo estático de imports; su única red de seguridad es un test que
+ejecute *esa* rama. Al mover un símbolo, `grep` de TODOS los llamantes (no solo los
+que el IDE resuelve) y comprobar que cada rama de una ruta —anónima **y**
+autenticada— tiene cobertura.
+
+---
+
 ## El placeholder heredado (`placeholder_module`) desaparece al expandir un item
 
 **Fecha:** 2026-07-16 · **Área:** web-admin / render de campos (`_field_render.html`)

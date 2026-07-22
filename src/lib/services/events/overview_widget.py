@@ -29,13 +29,3 @@ def events_stat(wa) -> dict:
         badges.append({'style': 'warn', 'icon': 'bi-send',
                        'key': 'overview_events_notifications', 'args': [notif]})
     return {'value': total, 'badges': badges}
-
-
-OVERVIEW_WIDGETS = [
-    {'id': 'events', 'icon': 'bi-bell', 'label_key': 'overview_events',
-     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 120,
-     'perms': {'any': ['events_view']}, 'nav': {'tab': '#tab-events'},
-     'stat': events_stat,
-     'view': {'kind': 'stat', 'icon': 'bi-bell-fill', 'label_key': 'overview_events',
-              'accent': 'pink', 'data_url': '/api/v1/overview/widget/events'}},
-]

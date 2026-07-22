@@ -17,6 +17,28 @@ from tests.conftest import _login
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 
+# ──────────────────── Package-contributed web assets ────────────────────
+
+class TestPackageWebAssets:
+    """A package (watchful OR provider) may ship web/_ui.html; web_admin injects it
+    generically, so no package-specific glue lives in the panel's own templates."""
+
+    def test_provider_ui_is_injected(self, client):
+        """The Entra provider's wizards live in lib/providers/entraid/web/*_ui.html and
+        must reach the dashboard through the module_web_ui discovery — regression for the
+        move that took this glue out of partials/cfg/auth/."""
+        _login(client)
+        html = client.get("/admin").data
+        for fn in (b'showEntraWizard', b'showEntraOidcRotateSecret',
+                   b'showEntraSaml2Wizard', b'showEntraScimWizard'):
+            assert fn in html, f'{fn!r} missing → provider web asset not injected'
+
+    def test_watchful_ui_still_injected(self, client):
+        """The original watchfuls path must keep working (snmp ships web/_ui.html)."""
+        _login(client)
+        assert b'snmp' in client.get("/admin").data
+
+
 # ──────────────────────────── Dark mode ────────────────────────────
 
 class TestDarkMode:

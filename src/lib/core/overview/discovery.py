@@ -36,37 +36,14 @@ from __future__ import annotations
 _MODULE_ROOTS = ('lib.core', 'lib.services')
 
 
-def _scan(pkg_name: str) -> list[dict]:
-    import importlib  # noqa: PLC0415
-    import pkgutil    # noqa: PLC0415
-
-    try:
-        pkg = importlib.import_module(pkg_name)
-    except Exception:  # pylint: disable=broad-except
-        return []
-    found: list[dict] = []
-    for mod in pkgutil.iter_modules(pkg.__path__):
-        if not mod.ispkg:
-            continue
-        try:
-            sub = importlib.import_module(f'{pkg_name}.{mod.name}.overview_widget')
-        except Exception:  # pylint: disable=broad-except
-            continue
-        widgets = getattr(sub, 'OVERVIEW_WIDGETS', None)
-        if isinstance(widgets, (list, tuple)):
-            for w in widgets:
-                if isinstance(w, dict) and w.get('id'):
-                    found.append(w)
-    return found
-
-
 def discover_overview_widgets() -> list[dict]:
     """Every built-in widget descriptor (core domains + services), ordered by ``order``.
-    A package without an ``overview_widget`` module is skipped; an import error in one
-    never breaks the rest."""
-    found: list[dict] = []
-    for root in _MODULE_ROOTS:
-        found.extend(_scan(root))
+
+    Descriptors live in each package's ``manifest.py`` (``OVERVIEW_WIDGETS``, importing its
+    own data providers); the shared scanner (:mod:`lib.discovery`) collects them."""
+    from lib.discovery import scan_flat  # noqa: PLC0415
+    found = [w for w in scan_flat('OVERVIEW_WIDGETS', roots=_MODULE_ROOTS)
+             if isinstance(w, dict) and w.get('id')]
     found.sort(key=lambda w: w.get('order', 999))
     return found
 

@@ -17,6 +17,7 @@ EVENT_ICON = {
     'service_started': '▶️', 'service_stopped': '⏹️',
     'service_down': '💥', 'service_up': '💚',
     'cert_expiring': '📜',
+    'secret_expiring': '🔑', 'secret_rotated': '🔄',
     'syslog': '📄', 'event': '🔔',
 }
 
@@ -33,6 +34,8 @@ EVENT_LABEL_KEY = {
     'service_started': 'notif_event_service_started', 'service_stopped': 'notif_event_service_stopped',
     'service_down': 'notif_event_service_down', 'service_up': 'notif_event_service_up',
     'cert_expiring': 'notif_event_cert_expiring',
+    'secret_expiring': 'notif_event_secret_expiring',
+    'secret_rotated': 'notif_event_secret_rotated',
     'syslog': 'notif_event_syslog', 'event': 'notif_event',
 }
 

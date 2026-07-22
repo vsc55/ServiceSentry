@@ -21,36 +21,15 @@ import re
 _MODULE_ROOTS = ('lib.core', 'lib.services')
 
 
-def _scan(pkg_name: str) -> list[dict]:
-    """Collect ``MODULE_PERMISSIONS`` from every sub-package's ``permissions`` module."""
-    import importlib  # noqa: PLC0415
-    import pkgutil    # noqa: PLC0415
-
-    try:
-        pkg = importlib.import_module(pkg_name)
-    except Exception:  # pylint: disable=broad-except
-        return []
-    found: list[dict] = []
-    for mod in pkgutil.iter_modules(pkg.__path__):
-        if not mod.ispkg:                       # base.py / registry.py … are modules
-            continue
-        try:
-            sub = importlib.import_module(f'{pkg_name}.{mod.name}.permissions')
-        except Exception:  # pylint: disable=broad-except
-            continue                            # no permissions module (or it failed)
-        meta = getattr(sub, 'MODULE_PERMISSIONS', None)
-        if isinstance(meta, dict) and meta.get('group') and meta.get('permissions'):
-            found.append(meta)
-    return found
-
-
 def discover_permissions() -> list[dict]:
-    """Every module's ``MODULE_PERMISSIONS`` (core domains + services), ordered by the
-    optional ``order`` key.  A package without a ``permissions`` module is skipped; an
-    import error in one never breaks the rest."""
-    found: list[dict] = []
-    for root in _MODULE_ROOTS:
-        found.extend(_scan(root))
+    """Every package's ``MODULE_PERMISSIONS`` (core domains + services), ordered by the
+    optional ``order`` key.
+
+    Declarations live in each package's ``manifest.py``; the shared scanner
+    (:mod:`lib.discovery`) collects them, so this only filters + orders."""
+    from lib.discovery import scan_values  # noqa: PLC0415
+    found = [m for m in scan_values('MODULE_PERMISSIONS', roots=_MODULE_ROOTS)
+             if isinstance(m, dict) and m.get('group') and m.get('permissions')]
     found.sort(key=lambda m: m.get('order', 999))
     return found
 

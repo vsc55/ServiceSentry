@@ -20,8 +20,14 @@ Principio de **fuente única**: cada tema se documenta en profundidad en **un so
 SSOT); el resto lo referencian con un enlace en vez de duplicarlo. Si editas un tema, edítalo en
 su SSOT (ver el [mapa temático](#mapa-temático-dónde-está-cada-cosa)).
 
-> `README.md` (este índice) y `ai-module-guide.md` (guía orientada a IA, con su propio
-> versionado interno) quedan fuera de la convención de prefijos.
+> `README.md` (este índice) es el único fichero sin prefijo.
+>
+> **Excepción consciente al principio de fuente única:** `caso-guia-modulo-ia.md` está
+> pensada para que un agente construya un módulo **leyéndola sola**, así que es
+> deliberadamente **autocontenida** y duplica material de `ref-schema-json.md`,
+> `explica-descubrimiento.md` y `caso-guia-watchful.md`. Lleva su propio `version` /
+> `last_validated` en el frontmatter: al cambiar algo de esos temas, hay que **revalidarla**
+> además de editar su SSOT.
 
 ## Índice
 
@@ -50,7 +56,7 @@ su SSOT (ver el [mapa temático](#mapa-temático-dónde-está-cada-cosa)).
 | [caso-ssh-hardening.md](caso-ssh-hardening.md) | Endurecer los hosts monitorizados: cuenta dedicada, comando forzado + envoltorio con allowlist ([ssentry-wrap](ssentry-wrap)), sudoers mínimo para remediación |
 | [caso-desarrollo.md](caso-desarrollo.md) | Setup local, tests, pytest, depuración en VS Code, convenciones de código, dependencias |
 | [caso-guia-watchful.md](caso-guia-watchful.md) | Guía paso a paso para crear un nuevo módulo de monitorización |
-| [ai-module-guide.md](ai-module-guide.md) | Guía de creación de módulos orientada a IA: referencia de build validada + catálogo de fallos comunes (F-01…F-14) |
+| [caso-guia-modulo-ia.md](caso-guia-modulo-ia.md) | Guía de creación de módulos orientada a IA: referencia de build validada + catálogo de fallos comunes (F-01…F-14) |
 | [ref-schema-json.md](ref-schema-json.md) | Referencia completa de `schema.json`: todas las propiedades de campo, meta-claves, archivos de idioma y pipeline de `discover_schemas` |
 | [explica-i18n.md](explica-i18n.md) | Mecánica de i18n: capa global de UI + capa por módulo, resolución de etiquetas en navegador, pipeline de `discover_schemas`, cómo añadir idiomas |
 | [ref-i18n.md](ref-i18n.md) | Referencia de i18n: estructura de `lang/*.json`, los tres esquemas de tags (`notif_msg_vars`/`notif_email_vars`/`messages_vars`) y placeholders `_fill` (secuencial vs indexado) |
@@ -67,7 +73,7 @@ Guía rápida por temas de documentación técnica → documento(s) donde se cub
 | ---- | ------------ |
 | **Arquitectura** (componentes, flujo de datos, concurrencia, diagramas) | [explica-arquitectura.md](explica-arquitectura.md) · [explica-rendimiento.md](explica-rendimiento.md) |
 | **Estructura del repositorio** | [explica-arquitectura.md](explica-arquitectura.md) (§ estructura de directorios) · [explica-web-admin.md](explica-web-admin.md) (§ organización del código) |
-| **Backend Python** (paquetes, clases, rutas, servicios) | [explica-web-admin.md](explica-web-admin.md) · [explica-servicios.md](explica-servicios.md) · [ref-modulos.md](ref-modulos.md) · [caso-guia-watchful.md](caso-guia-watchful.md) · [ai-module-guide.md](ai-module-guide.md) |
+| **Backend Python** (paquetes, clases, rutas, servicios) | [explica-web-admin.md](explica-web-admin.md) · [explica-servicios.md](explica-servicios.md) · [ref-modulos.md](ref-modulos.md) · [caso-guia-watchful.md](caso-guia-watchful.md) · [caso-guia-modulo-ia.md](caso-guia-modulo-ia.md) |
 | **Frontend** (HTML/CSS/JS, componentes, fetch, DOM, i18n) | [explica-web-admin.md](explica-web-admin.md) · [explica-i18n.md](explica-i18n.md) · [ref-i18n.md](ref-i18n.md) |
 | **API REST** (endpoints, métodos, permisos, ejemplos) | [ref-api.md](ref-api.md) |
 | **Flujo de ejecución** (arranque → respuesta) | [explica-arquitectura.md](explica-arquitectura.md) (§ flujo de ejecución) |

@@ -37,30 +37,3 @@ def activity_rows(wa, f: str = '') -> list:
         for e in list(reversed(wa._audit_log))[:10]
         if isinstance(e, dict)
     ]
-
-
-OVERVIEW_WIDGETS = [
-    {'id': 'failed_logins', 'icon': 'bi-shield-lock', 'label_key': 'overview_failed_logins',
-     'cols': 4, 'h': 140, 'has_h': True, 'order': 150,
-     'perms': {'any': ['audit_view']}, 'nav': {'tab': '#tab-audit'},
-     'rows': failed_login_rows,
-     'view': {'kind': 'table', 'icon': 'bi-shield-lock', 'title_key': 'overview_failed_logins',
-              'accent': 'rose', 'data_url': '/api/v1/overview/widget/failed_logins',
-              'empty_key': 'status_empty', 'columns': [
-                  {'key': 'ts',     'label_key': 'col_time',   'sortable': True, 'cell': 'date'},
-                  {'key': 'user',   'label_key': 'col_user',   'sortable': True, 'cell': 'code'},
-                  {'key': 'ip',     'label_key': 'col_ip',     'sortable': True, 'cell': 'code'},
-                  {'key': 'detail', 'label_key': 'col_detail', 'sortable': True, 'cell': 'login_detail'},
-              ]}},
-    {'id': 'activity', 'icon': 'bi-clock-history', 'label_key': 'overview_recent_activity',
-     'cols': 4, 'h': 340, 'has_h': True, 'order': 180,
-     'perms': {'any': ['audit_view']}, 'nav': {'tab': '#tab-audit'},
-     'rows': activity_rows,
-     'view': {'kind': 'table', 'icon': 'bi-clock-history', 'title_key': 'overview_recent_activity',
-              'accent': 'slate', 'data_url': '/api/v1/overview/widget/activity',
-              'empty_key': 'status_empty', 'columns': [
-                  {'key': 'ts',    'label_key': 'col_time',  'sortable': True, 'cell': 'date'},
-                  {'key': 'event', 'label_key': 'col_event', 'sortable': True, 'cell': 'event_badge'},
-                  {'key': 'user',  'label_key': 'col_user',  'sortable': True, 'cell': 'code'},
-              ]}},
-]

@@ -17,13 +17,3 @@ def webhooks_stat(wa) -> dict:
     badges = ([{'style': 'ok', 'icon': 'bi-check-circle', 'count': enabled,
                 'key': 'overview_enabled'}] if total else [])
     return {'value': total, 'badges': badges}
-
-
-OVERVIEW_WIDGETS = [
-    {'id': 'webhooks', 'icon': 'bi-broadcast', 'label_key': 'overview_webhooks',
-     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 80,
-     'perms': {'any': ['config_view', 'config_edit']}, 'nav': {'tab': '#tab-config'},
-     'stat': webhooks_stat,
-     'view': {'kind': 'stat', 'icon': 'bi-broadcast', 'label_key': 'overview_webhooks',
-              'accent': 'purple', 'data_url': '/api/v1/overview/widget/webhooks'}},
-]

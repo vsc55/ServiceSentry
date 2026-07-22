@@ -7,9 +7,12 @@ checks widget as a warning, not folded into the error count (nor hidden)."""
 
 import pytest
 
-from lib.core.modules.overview_widget import (
-    OVERVIEW_WIDGETS as MOD_WIDGETS, _mod_checks, _modules_list_rows)
-from lib.core.hosts.overview_widget import OVERVIEW_WIDGETS as HOST_WIDGETS, _server_matches
+# Descriptors live in each package's manifest.py; the data providers they bind stay in
+# the package's own overview_widget.py (see lib/discovery.py).
+from lib.core.modules.manifest import OVERVIEW_WIDGETS as MOD_WIDGETS
+from lib.core.modules.overview_widget import _mod_checks, _modules_list_rows
+from lib.core.hosts.manifest import OVERVIEW_WIDGETS as HOST_WIDGETS
+from lib.core.hosts.overview_widget import _server_matches
 from lib.core.overview.filters import parse_severity_filter, severity_matches
 from lib.services.monitoring.overview_widget import checks_stat
 

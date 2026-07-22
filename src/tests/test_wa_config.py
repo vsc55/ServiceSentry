@@ -1125,7 +1125,6 @@ class TestLandingPageApplied:
         admin._landing_page = "admin"     # simulate a stale/unset attr after a restart
         admin._apply_saved_config()       # startup re-read must re-derive it from config
         assert admin._landing_page == "overview"
-        from lib.web_admin.routes.auth import _landing_url
         u = admin._users["admin"]
         u.pop("landing_page", None)        # no per-user override → inherit the global
-        assert _landing_url(admin, u) == "/overview"
+        assert admin._landing_url(u) == "/overview"

@@ -1,0 +1,73 @@
+{# ================================================================
+   Microsoft Entra ID — group source for the group→role mapping widget.
+
+   Declared in this package's manifest.py (GROUP_SOURCES); web_admin renders the
+   button/picker generically and calls these by name. Shared widget helpers
+   (_grmAddRow, _grmAutoResolveNames, _grmBindFilter, _grmMark*) stay in the panel.
+   ================================================================ #}
+
+async function _entraFetchGroups(sec) {
+    const cfg = configData[sec] || {};
+    const clientId = sec === 'saml2' ? cfg.sp_app_id    : cfg.client_id;
+    const secret   = sec === 'saml2' ? cfg.graph_secret : cfg.client_secret;
+    const provider = sec === 'saml2' ? cfg.idp_sso_url  : cfg.provider_url;
+    // Each section uses its OWN app credentials. For SAML2 that means the app must
+    // have been registered by the wizard (which stores sp_app_id + graph_secret).
+    if (!provider || !clientId) {
+        showToast(t(sec === 'saml2' ? 'entra_saml2_groups_no_app' : 'entra_groups_missing_creds'), 'warning');
+        return;
+    }
+    const btn    = document.getElementById('btnFetchGroups_' + sec);
+    const picker = document.getElementById(sec + 'GroupPicker');
+    const list   = document.getElementById(sec + 'GroupList');
+    if (btn)    { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + esc(t('entra_fetch_groups')); }
+    if (picker) picker.style.display = 'none';
+    _grmMarkSearching(sec);
+
+    // Secret is masked (null) after page load; the backend reads it from config in that
+    // case. Send it only when plaintext (right after the wizard, before a refresh).
+    const body = { sec, provider_url: provider, client_id: clientId };
+    if (secret) body.client_secret = secret;
+
+    const r = await apiPost('/api/v1/auth/entraid/groups', body);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-microsoft me-1"></i>' + esc(t('entra_fetch_groups')); }
+
+    if (!r || !r.data || !r.data.ok) {
+        _grmMarkNotFound(sec);
+        await _saveDisplayNames(sec);
+        showToast((r && r.data && r.data.message) || t('ldap_test_error'), 'danger');
+        return;
+    }
+    const groups = r.data.groups || [];
+    if (!groups.length) {
+        _grmMarkNotFound(sec);
+        await _saveDisplayNames(sec);
+        showToast(t('grm_no_groups'), 'info');
+        return;
+    }
+    if (list) {
+        list.innerHTML = groups.map(g =>
+            `<div class="py-1 px-2 border-bottom grm-group-pick"
+                data-grm-name="${escAttr((g.name || '').toLowerCase())}"
+                style="cursor:pointer"
+                onmouseover="this.style.background='var(--bs-tertiary-bg,#f0f0f0)'" onmouseout="this.style.background=''"
+                onclick="_entraPickGroup('${escAttr(sec)}',${jsStr(g.id)},${jsStr(g.name)})">
+                <div class="fw-medium small">${esc(g.name)}</div>
+                <div class="font-monospace text-muted" style="font-size:.7rem;user-select:all">${esc(g.id)}</div>
+            </div>`
+        ).join('');
+        _grmBindFilter(sec);
+        const _nameMap = {};
+        groups.forEach(g => { if (g.id) { _nameMap[g.id] = g.name; _grmNameCache[sec][g.id.toLowerCase()] = g.name; } });
+        _grmAutoResolveNames(sec, _nameMap);
+        _grmMarkNotFound(sec);
+        await _saveDisplayNames(sec);
+    }
+    if (picker) picker.style.display = '';
+}
+
+function _entraPickGroup(sec, id, name) {
+    // Store the Object ID as the map key (Entra ID sends Object IDs in the groups claim).
+    // Pass the display name as the label so the input shows something readable.
+    _grmAddRow(sec, id, name);
+}

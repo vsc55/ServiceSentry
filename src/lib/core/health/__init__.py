@@ -13,5 +13,5 @@ that turn observed state into notification events routed by :mod:`lib.core.notif
   configured ``ssl_cert`` checks.
 
 Kept import-light (no Flask, no eager service imports); the events it publishes are
-declared in :mod:`lib.core.health.notify_events` and discovered by the notify registry.
+declared in :mod:`lib.core.health.manifest` and discovered by the notify registry.
 """

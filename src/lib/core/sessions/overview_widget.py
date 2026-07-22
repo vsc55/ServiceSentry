@@ -37,25 +37,3 @@ def session_rows(wa, f: str = '') -> list:
                      'created': s.get('created', ''), 'last_seen': s.get('last_seen', '')})
     rows.sort(key=lambda x: str(x.get('last_seen') or ''), reverse=True)
     return rows
-
-
-OVERVIEW_WIDGETS = [
-    {'id': 'sessions', 'icon': 'bi-plug', 'label_key': 'overview_sessions',
-     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 70,
-     'perms': {'any': ['sessions_view']}, 'nav': {'tab': '#tab-access', 'sub': '#subtab-sessions'},
-     'stat': session_stat,
-     'view': {'kind': 'stat', 'icon': 'bi-plug-fill', 'label_key': 'overview_sessions',
-              'accent': 'cyan', 'data_url': '/api/v1/overview/widget/sessions'}},
-    {'id': 'sessions_list', 'icon': 'bi-plug', 'label_key': 'overview_sessions',
-     'cols': 4, 'h': 140, 'has_h': True, 'order': 130,
-     'perms': {'any': ['sessions_view']}, 'nav': {'tab': '#tab-access', 'sub': '#subtab-sessions'},
-     'rows': session_rows,
-     'view': {'kind': 'table', 'icon': 'bi-plug', 'title_key': 'overview_sessions',
-              'accent': 'cyan', 'data_url': '/api/v1/overview/widget/sessions_list',
-              'empty_key': 'status_empty', 'columns': [
-                  {'key': 'user',      'label_key': 'col_user',      'sortable': True, 'cell': 'session_user'},
-                  {'key': 'ip',        'label_key': 'col_ip',        'sortable': True, 'cell': 'code'},
-                  {'key': 'browser',   'label_key': 'col_browser',   'sortable': True, 'cell': 'browser'},
-                  {'key': 'last_seen', 'label_key': 'col_last_seen', 'sortable': True, 'cell': 'date'},
-              ]}},
-]

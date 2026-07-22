@@ -1,0 +1,105 @@
+{# ================================================================
+   Config — Auth tab: OIDC "Register in Azure" wizard glue.
+
+   OIDC registration is FULLY automatic (no manual portal step), so it just
+   parameterises the SHARED generic wizard
+   (partials/credentials/_provision_wizard.html :: showEntraIdProvisionWizard):
+   the OIDC app is a provisioning profile (web sign-in app + groups claim +
+   require-assignment + openid/email/profile/User.Read + Group.Read.All). On
+   completion the created app's tenant/client/secret + the OIDC claim mapping are
+   written to the oidc config.  (The "Open in Entra ID" helper _entraAppLink and
+   the section renderer live in _renderers.html.)
+
+   _entraRedirectUri, showEntraWizard, _entraApply.
+   ================================================================ #}
+
+function _entraRedirectUri() {
+    return publicBaseUrl() + '/auth/oidc/callback';   // shared helper (core/_utils.html)
+}
+
+function showEntraWizard() {
+    showEntraIdProvisionWizard({
+        url: '/api/v1/auth/entraid/provision/device-code',
+        provision: {
+            app_name: ENTRA_APP_NAME_OIDC,
+            app_roles: ['Group.Read.All'],
+            scopes: ['openid', 'email', 'profile', 'User.Read'],
+            redirect_uris: [_entraRedirectUri()],
+            group_claims: true,
+            require_assignment: true,
+        },
+    }, (fields) => {
+        _entraApply(fields || {});
+        if (typeof saveConfig === 'function') saveConfig();
+    });
+}
+
+// Rotate the client secret of the EXISTING OIDC app (no re-registration): a plain
+// device-code sign-in; the backend mints the new secret via Graph addPassword and
+// persists it together with the expiry Entra granted, so there is nothing to write
+// here — just refresh the config view. The previous secret stays valid until it
+// expires, so the rotation does not interrupt sign-ins.
+function showEntraOidcRotateSecret() {
+    showEntraIdProvisionWizard({
+        url:     '/api/v1/auth/entraid/oidc/secret/device-code',
+        pollUrl: '/api/v1/auth/entraid/oidc/secret/device-poll',
+        title:   t('entra_oidc_secret_rotate'),
+        intro:   t('entra_oidc_secret_rotate_tt'),
+        simple:  true,
+        onResult: (d) => {
+            if (typeof loadConfig === 'function') loadConfig().then(() => renderConfig());
+            return { html: `<div class="alert alert-success mb-0 py-2 small"><i class="bi bi-check-circle-fill me-1"></i>${esc(tf('entra_oidc_secret_rotated_ok', d.expires_at || '—'))}</div>`,
+                     autoClose: true };
+        },
+    });
+}
+
+function _entraApply(d) {
+    const patch = {
+        username_claim: 'preferred_username',
+        email_claim: 'email', name_claim: 'name', groups_claim: 'groups',
+        scopes: 'openid email profile',
+        button_label: 'Microsoft Entra ID',
+    };
+    if (d.provider_url)  patch.provider_url  = d.provider_url;
+    else if (d.tenant_id) patch.provider_url = `https://login.microsoftonline.com/${d.tenant_id}/v2.0`;
+    if (d.client_id)     patch.client_id     = d.client_id;
+    if (d.client_secret) patch.client_secret = d.client_secret;
+    // updateField registers each path in _dirtyFields so saveConfig() picks them up
+    for (const [field, value] of Object.entries(patch)) {
+        updateField('config', `oidc|${field}`, value);
+    }
+    renderConfig();
+}
+
+// ── Shared Entra deep link (moved here from web_admin: it is provider glue) ──
+// "Open in Entra ID" link/button for an already-registered app, by its appId.
+// Kept as a function returning HTML because the notify cards (M365 email, Teams)
+// still embed it inline; the config-section BUTTON goes through CONFIG_ACTIONS.
+function _entraAppUrl(appId) {
+    appId = (appId || '').trim();
+    return appId
+        ? 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/'
+          + encodeURIComponent(appId)
+        : '';
+}
+
+function _entraAppLink(appId) {
+    const url = _entraAppUrl(appId);
+    if (!url) return '';
+    return `<a class="btn btn-secondary btn-sm ms-2" href="${escAttr(url)}" target="_blank" rel="noopener">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('entra_open_app'))}</a>`;
+}
+
+// CONFIG_ACTIONS targets: open the registered app in the Entra portal.
+function openEntraAppFromConfig() {
+    const url = _entraAppUrl(((configData || {}).oidc || {}).client_id);
+    if (url) window.open(url, '_blank', 'noopener');
+}
+
+function openEntraSaml2AppFromConfig() {
+    const d = ((configData || {}).saml2 || {});
+    const url = (typeof _entraSaml2SsoUrl === 'function'
+                 ? _entraSaml2SsoUrl(d.sp_object_id, d.sp_app_id) : '') || _entraAppUrl(d.sp_app_id);
+    if (url) window.open(url, '_blank', 'noopener');
+}

@@ -8,12 +8,13 @@ the notifications monitoring sensors forward.  Each ``kind`` (``down``/``recover
 ``warn``/``syslog``/``event``/…) is the value carried in ``dispatch(kind=…)`` and the key
 of the routing matrix ``notifications|{channel}_on_{kind}``.
 
-Two ways an event enters the registry, mirroring the self-describing pattern already used
-by ``permissions.py`` (``MODULE_PERMISSIONS``) and ``overview_widget.py`` (``OVERVIEW_WIDGETS``):
+Two ways an event enters the registry, following the shared self-describing convention
+(``manifest.py`` + :mod:`lib.discovery`) also used by ``MODULE_PERMISSIONS``,
+``OVERVIEW_WIDGETS`` and ``CONFIG_ACTIONS``:
 
-* **Discovered** — a domain that publishes notifications declares a ``notify_events``
-  submodule with a ``NOTIFY_EVENTS`` list; :func:`discover_events` scans ``lib.core.*`` /
-  ``lib.services.*`` / ``lib.providers.*`` and collects them.
+* **Discovered** — a domain that publishes notifications declares a ``NOTIFY_EVENTS`` list
+  in its ``manifest.py``; :func:`discover_events` collects them from ``lib.core.*`` /
+  ``lib.services.*`` / ``lib.providers.*`` through the shared scanner.
 * **Manual** — :func:`register_event` adds one programmatically (a source not tied to a
   discoverable package, or a future admin-defined event).
 
@@ -65,37 +66,14 @@ def register_event(descriptor: dict) -> None:
         _MANUAL[ev['key']] = ev
 
 
-def _scan(pkg_name: str) -> list[dict]:
-    import importlib  # noqa: PLC0415
-    import pkgutil    # noqa: PLC0415
-
-    try:
-        pkg = importlib.import_module(pkg_name)
-    except Exception:  # pylint: disable=broad-except
-        return []
-    found: list[dict] = []
-    for mod in pkgutil.iter_modules(pkg.__path__):
-        if not mod.ispkg:
-            continue
-        try:
-            sub = importlib.import_module(f'{pkg_name}.{mod.name}.notify_events')
-        except Exception:  # pylint: disable=broad-except
-            continue   # that domain publishes no notification events
-        declared = getattr(sub, 'NOTIFY_EVENTS', None)
-        if isinstance(declared, (list, tuple)):
-            for raw in declared:
-                ev = _normalize(raw)
-                if ev:
-                    found.append(ev)
-    return found
-
-
 def discover_events() -> list[dict]:
-    """Every event a domain declares (core + services + providers), unordered/undeduped."""
-    found: list[dict] = []
-    for root in _MODULE_ROOTS:
-        found.extend(_scan(root))
-    return found
+    """Every event a domain declares (core + services + providers), unordered/undeduped.
+
+    Declarations live in each package's ``manifest.py`` (``NOTIFY_EVENTS``) and are picked
+    up by the shared scanner — this only applies the feature's own normalisation."""
+    from lib.discovery import scan_flat  # noqa: PLC0415
+    return [ev for ev in (_normalize(raw)
+                          for raw in scan_flat('NOTIFY_EVENTS', roots=_MODULE_ROOTS)) if ev]
 
 
 def events() -> list[dict]:

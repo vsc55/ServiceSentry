@@ -342,9 +342,6 @@ Los campos booleanos se validan vía `BOOL_RULES`:
 | `email\|enabled` | — |
 | `email\|smtp_use_tls` | — |
 | `email\|smtp_use_ssl` | — |
-| `email\|notify_on_down` | — |
-| `email\|notify_on_recovery` | — |
-| `email\|notify_on_warn` | — |
 
 El endpoint `/api/v1/config/schema` también expone metadatos para:
 

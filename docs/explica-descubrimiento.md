@@ -47,6 +47,47 @@ Difieren solo en **qué raíz escanean** y **qué declaran**:
 
 ---
 
+## 0. La convención común: `manifest.py` + un único escáner
+
+Todos los mecanismos de este documento comparten la **misma forma**: un paquete *declara* lo
+que aporta y el core genérico lo recoge. Para que esa forma sea una y no N:
+
+- Cada paquete declara **todo** lo que aporta en su **`manifest.py`**
+  (`lib/core/<d>/manifest.py`, `lib/services/<s>/manifest.py`, `lib/providers/<p>/manifest.py`).
+- Un **único** escáner, `lib/discovery.py`, lo recoge: `scan(CONST)` devuelve el valor de esa
+  constante en cada paquete que la declare (`scan_values` / `scan_flat` para las variantes).
+
+```python
+# lib/core/credentials/manifest.py
+from .overview_widget import credentials_stat      # el proveedor pesado se queda en su módulo
+
+MODULE_PERMISSIONS = {...}
+OVERVIEW_WIDGETS = [{'id': 'credentials', ..., 'stat': credentials_stat}]
+```
+
+El manifiesto contiene los **descriptores**; las implementaciones pesadas (p. ej. el proveedor
+de datos de un widget, de 150-200 líneas) siguen en su propio módulo y se **importan** en el
+manifiesto, para que este sea una lista legible de "qué ofrece este paquete" y no un cajón.
+
+**Por qué Python y no JSON:** un descriptor puede ligar objetos vivos (una función `stat`, una
+factoría). Los **watchfuls** son el caso opuesto —plugins drop-in que no traen código del
+core— y por eso declaran en `schema.json` (datos puros), recogidos por el pipeline de schemas.
+
+| Constante | Qué aporta | Mecanismo |
+|---|---|---|
+| `MODULE_PERMISSIONS` | permisos del dominio | §1 |
+| `OVERVIEW_WIDGETS` | widgets del Overview | §2 |
+| `EMBEDDED_SERVICE` / `STANDALONE` | servicio de fondo | §3 |
+| `CONFIG_ACTIONS` | botones en una sección de config | §7b |
+| `GROUP_SOURCES` | origen de grupos de directorio de una sección | §7c |
+| `NOTIFY_EVENTS` | eventos notificables | §10 |
+
+> **Regla:** para añadir un mecanismo nuevo **no** copies un escáner ni inventes un nombre de
+> fichero: declara la constante en el `manifest.py` del paquete y léela con
+> `lib.discovery.scan*`.
+
+---
+
 ## 1. Permisos (`MODULE_PERMISSIONS`)
 
 Cada dominio de núcleo y cada servicio declara los permisos que posee; el editor de roles y
@@ -398,6 +439,120 @@ flowchart TB
   claim de grupos; normalizados a una forma estable.
 - **Dónde acaban:** el asistente los usa para registrar la app en Entra vía Graph y devolver las
   credenciales. Detalle en [caso-entra-id.md](caso-entra-id.md).
+
+---
+
+## 7b. Acciones de config y UI aportadas por un paquete (`CONFIG_ACTIONS` + `web/`)
+
+Un **provider/servicio/módulo** puede añadir **botones** a una sección de config y aportar su
+propio **JavaScript**, sin que una sola línea específica del paquete viva en `web_admin`.
+
+**Descriptor** (`lib/providers/<p>/config_actions.py`, o el mismo fichero en un servicio/módulo):
+
+```python
+CONFIG_ACTIONS = [
+    {'section': 'oidc', 'id': 'rotate_secret', 'order': 30,
+     'label_key': 'entra_oidc_secret_rotate',        # i18n del texto
+     'tooltip_key': 'entra_oidc_secret_rotate_tt',   # opcional
+     'icon': 'bi-arrow-repeat', 'variant': 'warning',
+     'fn': 'showEntraOidcRotateSecret',              # función JS que aporta el paquete
+     'group_label_key': 'entra_id',                  # rótulo de la fila (opcional)
+     'show_when': {'field': 'client_id', 'not_empty': True}},
+]
+```
+
+- `fn` nombra una función JS que **el mismo paquete** publica en su `web/*_ui.html` → el
+  comportamiento viaja con el paquete; el panel solo sabe "pinta un botón que llama a este nombre".
+- `show_when` es una condición declarativa mínima evaluada en el frontend contra los valores de
+  la sección (`{field, not_empty}`) — p. ej. no ofrecer "rotar secreto" hasta que haya app.
+- `variant` usa nombres **sólidos** de Bootstrap (nunca `outline-*`).
+
+**UI del paquete** — mismo mecanismo que ya usaban los watchfuls, ahora también para providers:
+
+| Fichero | Dónde se inyecta |
+|---|---|
+| `<pkg>/web/_styles.html` | dentro de `<head>` |
+| `<pkg>/web/_ui.html` | dentro del bloque `<script>` |
+| `<pkg>/web/_modals.html` | antes de `</body>` |
+
+Se descubren en `WebAdmin.__init__` escaneando `watchfuls/` **y** `lib/providers/` (los providers
+se referencian con prefijo `providers/…` para que su ruta no pueda colisionar con un watchful del
+mismo nombre). Puede haber **varios** `*_ui.html` por paquete (p. ej. `_oidc_ui.html`,
+`_saml_ui.html`, `_scim_ui.html`).
+
+**Flujo y datos:**
+
+```mermaid
+flowchart TB
+    decl["config_actions.py :: CONFIG_ACTIONS<br/>[{section, id, label_key, icon, variant, fn, show_when}]"]
+    decl --> disc["discover_config_actions()<br/><small>escanea lib.providers / lib.services / lib.core</small>"]
+    disc --> lay["config_layout(): adjunta 'actions' a la card de esa sección"]
+    lay --> api["GET /api/v1/config/layout"]
+    api --> ren["_cfgSectionActions(sec, data)<br/><small>evalúa show_when y pinta los botones</small>"]
+    ren --> click["onclick → fn()"]
+    js["<pkg>/web/*_ui.html (JS del paquete)"] --> inj["module_web_ui → bloque script"]
+    inj -.-> click
+```
+
+- **Qué datos:** metadatos del botón (sección, id, i18n, icono, variante, orden, condición) y el
+  **nombre** de la función; nunca la implementación.
+- **Dónde acaban:** la card de esa sección en Config. Ejemplo real: el provider Entra ID declara
+  *Registrar en Azure*, *Abrir en Entra ID* y *Rotar secreto* para `oidc`, y *Registrar SAML2* /
+  *Añadir credencial de grupos* para `saml2` — ver [caso-entra-id.md](caso-entra-id.md).
+
+> **Regla:** si necesitas un botón o JS específico de un paquete, **no** lo escribas en
+> `web_admin`; decláralo aquí y publica el JS en el `web/` del paquete.
+
+---
+
+## 7c. Origen de grupos de directorio (`GROUP_SOURCES`)
+
+El widget de mapeo **grupo→rol** permite traer los grupos directamente del directorio que
+respalda esa sección, en vez de teclear DNs u object ids. Qué directorio es depende del
+proveedor — conocimiento que **antes vivía en `web_admin`** como ramas
+`sec === 'ldap'` / `'oidc'|'saml2'`, incluyendo el endpoint de cada uno y hasta el nombre del
+campo del body (`dn` vs `group_id`).
+
+**Descriptor** (`lib/providers/<p>/manifest.py`):
+
+```python
+GROUP_SOURCES = [
+    {'section': 'ldap',                          # sección de config que respalda
+     'label_key': 'grm_fetch_groups', 'icon': 'bi-cloud-download',
+     'fetch_fn': '_ldapFetchGroups',             # JS que publica el propio provider
+     'pick_fn':  '_ldapPickGroup',
+     'lookup_url': '/api/v1/auth/ldap/group_lookup',
+     'lookup_key': 'dn',                         # campo del body con el id del grupo
+     'picker_id': 'ldapGroupPicker', 'hint_key': 'grm_pick_hint'},
+]
+```
+
+El provider de Entra declara **dos** (`oidc` y `saml2`) apuntando al mismo endpoint de Graph
+con distinto `picker_id`, para que ambas secciones puedan estar abiertas a la vez.
+
+**Flujo y datos:**
+
+```mermaid
+flowchart TB
+    decl["manifest.py :: GROUP_SOURCES<br/>[{section, fetch_fn, lookup_url, lookup_key, picker_id…}]"]
+    decl --> disc["discover_group_sources() (una por sección)"]
+    disc --> lay["config_layout(): adjunta 'group_source' a la card"]
+    lay --> api["GET /api/v1/config/layout"]
+    api --> ren["_grmGroupSource(sec) en el widget"]
+    ren --> btn["pinta el botón + el picker"]
+    ren --> look["_lookupGroupName: apiPost(lookup_url, {[lookup_key]: id, sec})"]
+    js["<provider>/web/_groups_ui.html"] --> inj["module_web_ui"]
+    inj -.-> btn
+```
+
+- **La capacidad manda, no el nombre**: `hasNames` (mostrar columna de nombres) pasó de ser una
+  lista fija de secciones a `!!_grmGroupSource(sec)`. Una sección sin origen no muestra botón de
+  traer grupos ni columna de nombres, sin tocar el panel.
+- **Añadir un IdP nuevo** (Okta, etc.) = soltar un provider con su `manifest.py` + su
+  `web/_groups_ui.html`. **Cero cambios en `web_admin`**.
+
+> Cubierto por `tests/test_wa_group_sources.py`, que además vigila que no reaparezcan las ramas
+> `sec === '…'` ni los ids de botón antiguos.
 
 ---
 

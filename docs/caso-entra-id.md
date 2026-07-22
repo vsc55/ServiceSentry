@@ -86,6 +86,53 @@ a partir de los claims de la aserción/token — controlado por el campo `auto_c
   Grupos→Rol** (o `default_role` si no casa ningún grupo). En logins posteriores se
   actualizan datos/rol.
 
+### Rotación del secreto de cliente (OIDC)
+
+El secreto de la app OIDC **caduca** (la política del tenant decide cuánto dura, así que el
+único valor fiable es el `endDateTime` que Graph devuelve al emitirlo — se guarda en
+`oidc|secret_expires_at`). Hay tres piezas, todas opcionales e independientes:
+
+| Pieza | Clave de config | Qué hace |
+|---|---|---|
+| **Rotación asistida** (un clic) | — (botón) | Botón **Rotar secreto** en Config → Autenticación → OIDC |
+| **Aviso de caducidad** | `oidc\|secret_notify_expiry` + `oidc\|secret_warn_days` (30) | Notifica `secret_expiring` cuando quedan ≤ N días |
+| **Rotación desatendida** | `oidc\|secret_auto_rotate` + `oidc\|secret_rotate_days` (15) | Emite el reemplazo cuando quedan ≤ N días (**margen**) |
+
+> **Clave**: añadir un secreto en Entra **no revoca el anterior** — ambos son válidos hasta
+> que el viejo caduque. Por eso la rotación (asistida o automática) **no corta los inicios de
+> sesión**.
+
+```mermaid
+flowchart TD
+    subgraph asistida["A · Rotación asistida (un clic)"]
+        b["botón 'Rotar secreto'"] --> dc["device-code: admin firma en Microsoft"]
+        dc --> ap["Graph addPassword sobre la app EXISTENTE"]
+        ap --> save["guarda oidc|client_secret + secret_expires_at"]
+    end
+    subgraph fondo["B · Escáner en segundo plano (leader-gated)"]
+        tick["cada scan_every_secs"] --> d{"días restantes"}
+        d -- "> warn_days" --> rearm["re-arma el aviso"]
+        d -- "≤ rotate_days y auto_rotate" --> rot["token app-only (la app se autentica a sí misma)<br/>→ addPassword → guarda"]
+        rot -- ok --> ev1["notifica secret_rotated"]
+        rot -- falla --> warn
+        d -- "≤ warn_days" --> warn["notifica secret_expiring<br/><small>una vez por severidad: expiring → expired</small>"]
+    end
+```
+
+**Requisito de la rotación desatendida (B):** la app se autentica **como ella misma**
+(client-credentials) y necesita permiso para **modificar su propio registro** en Entra. Si no
+lo tiene, la rotación falla y el sistema **degrada a solo aviso** (nunca se queda en silencio).
+Si la rotación automática no es viable en tu tenant, deja solo el aviso + el botón de rotación
+asistida.
+
+> ⚠️ **No deducible del código:** cuánta vida concede realmente Entra a un secreto depende de
+> la **política del tenant** (el código pide `2099-12-31`, pero Entra puede recortarlo). Por eso
+> se guarda y usa el `endDateTime` devuelto, no el solicitado. Si `secret_expires_at` está
+> vacío (caducidad desconocida), el escáner **no** puede avisar ni rotar.
+
+Endpoints: `POST /api/v1/auth/entraid/oidc/secret/device-code` y `…/device-poll` — ver
+[ref-api.md](ref-api.md#provider--entra-id-json--libprovidersentraidroutespy).
+
 ### Registro SCIM en Entra
 
 **SCIM 2.0** (aprovisionamiento proactivo de usuarios/grupos) es agnóstico del IdP; su

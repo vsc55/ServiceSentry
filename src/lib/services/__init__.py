@@ -28,52 +28,25 @@ from __future__ import annotations
 
 
 def discover_embedded_services() -> list[dict]:
-    """Discover every service package's ``EMBEDDED_SERVICE`` self-description.
+    """Every service package's ``EMBEDDED_SERVICE`` self-description, ordered by ``order``.
 
-    Scans the sub-packages of :mod:`lib.services` (each long-running service is a
-    package) and collects the ``EMBEDDED_SERVICE`` dict any of them exposes,
-    returning them ordered by the optional ``order`` key.  A package without one is
-    simply skipped, and an import error in one package never breaks the rest.
-    """
-    import importlib  # noqa: PLC0415
-    import pkgutil    # noqa: PLC0415
-
-    found: list[dict] = []
-    for mod in pkgutil.iter_modules(__path__):
-        if not mod.ispkg:                       # base.py / registry.py are modules
-            continue
-        try:
-            sub = importlib.import_module(f'{__name__}.{mod.name}')
-        except Exception:  # pylint: disable=broad-except
-            continue
-        meta = getattr(sub, 'EMBEDDED_SERVICE', None)
-        if isinstance(meta, dict) and meta.get('key'):
-            found.append(meta)
+    Declared in each package's ``manifest.py`` and collected by the shared scanner
+    (:mod:`lib.discovery`); a package without one is simply skipped."""
+    from lib.discovery import scan_values  # noqa: PLC0415
+    found = [m for m in scan_values('EMBEDDED_SERVICE', roots=(__name__,))
+             if isinstance(m, dict) and m.get('key')]
     found.sort(key=lambda m: m.get('order', 999))
     return found
 
 
 def discover_standalone_services() -> list[dict]:
-    """Discover each service package's ``STANDALONE`` descriptor (CLI mode → runner).
+    """Every service package's ``STANDALONE`` descriptor (CLI mode -> runner).
 
-    Same package scan as :func:`discover_embedded_services`; used by ``main.py`` to
-    dispatch ``--monitor`` / ``--syslog`` / ``--events`` to
-    ``lib.services.<key>.service.run_standalone`` without a per-service branch.
-    Ordered by the optional ``order`` key (a tie-break if two modes were set)."""
-    import importlib  # noqa: PLC0415
-    import pkgutil    # noqa: PLC0415
-
-    found: list[dict] = []
-    for mod in pkgutil.iter_modules(__path__):
-        if not mod.ispkg:
-            continue
-        try:
-            sub = importlib.import_module(f'{__name__}.{mod.name}')
-        except Exception:  # pylint: disable=broad-except
-            continue
-        meta = getattr(sub, 'STANDALONE', None)
-        if isinstance(meta, dict) and meta.get('dest'):
-            found.append(meta)
+    Used by ``main.py`` to dispatch ``--monitor`` / ``--syslog`` / ``--events`` to
+    ``lib.services.<key>.service.run_standalone`` without a per-service branch."""
+    from lib.discovery import scan_values  # noqa: PLC0415
+    found = [m for m in scan_values('STANDALONE', roots=(__name__,))
+             if isinstance(m, dict) and m.get('dest')]
     found.sort(key=lambda m: m.get('order', 999))
     return found
 

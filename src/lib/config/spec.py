@@ -303,6 +303,15 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('oidc|name_claim', str, 'name', no_rule=True),
     Cfg('oidc|groups_claim', str, 'groups', no_rule=True),
     Cfg('oidc|default_role', str, '', no_rule=True),
+    # Client-secret lifecycle. ``secret_expires_at`` is written by the app (the expiry Entra
+    # actually granted when the secret was minted), not typed by the admin. The scanner in
+    # lib.core.health.secret_scan warns at ``secret_warn_days`` and — only if
+    # ``secret_auto_rotate`` is on — mints a replacement at ``secret_rotate_days``.
+    Cfg('oidc|secret_expires_at', str, '', no_rule=True),
+    Cfg('oidc|secret_notify_expiry', bool, False, admin_only=True),
+    Cfg('oidc|secret_warn_days', int, 30, min=1, max=3650, admin_only=True),
+    Cfg('oidc|secret_auto_rotate', bool, False, admin_only=True),
+    Cfg('oidc|secret_rotate_days', int, 15, min=1, max=3650, admin_only=True),
 
     # ══ SAML2 ════════════════════════════════════════════════════════════════
     Cfg('saml2|enabled', bool, False),
@@ -337,9 +346,6 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('email|enabled', bool, False),
     Cfg('email|smtp_use_tls', bool, True),
     Cfg('email|smtp_use_ssl', bool, False),
-    Cfg('email|notify_on_down', bool, True),
-    Cfg('email|notify_on_recovery', bool, True),
-    Cfg('email|notify_on_warn', bool, True),
     Cfg('email|smtp_port', int, 587, min=1, max=65535),
     # Email string fields (defaults read at point of use)
     Cfg('email|provider', str, 'smtp', no_rule=True),

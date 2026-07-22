@@ -20,3 +20,24 @@ NOTIFY_EVENTS = [
     {'key': 'service_stopped', 'source': _SRC, 'label_key': 'notif_event_service_stopped',
      'matrix': True, 'order': 51},
 ]
+
+
+# ── Overview widgets this package contributes ────────────────────
+from .overview_widget import services_stat  # noqa: F401
+
+OVERVIEW_WIDGETS = [
+    {
+        'id':        'services',
+        'icon':      'bi-hdd-rack',
+        'label_key': 'overview_services',
+        'cols':      2, 'h': 'auto', 'has_h': False,
+        'order':     25,
+        'perms':     {'any': ['services_view']},
+        'nav':       {'tab': '#tab-services'},
+        # Data-driven render: generic stat card from its AJAX-fetched content.
+        'stat':      services_stat,
+        'view':      {'kind': 'stat', 'icon': 'bi-hdd-rack',
+                      'label_key': 'overview_services', 'accent': 'green',
+                      'data_url': '/api/v1/overview/widget/services'},
+    },
+]

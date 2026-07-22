@@ -12,3 +12,16 @@ MODULE_PERMISSIONS = {
         {'flag': 'groups_delete', 'roles': ()},                    # delete groups
     ),
 }
+
+
+# ── Overview widgets this package contributes ────────────────────
+from .overview_widget import groups_stat  # noqa: F401
+
+OVERVIEW_WIDGETS = [
+    {'id': 'groups', 'icon': 'bi-people', 'label_key': 'overview_groups',
+     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 50,
+     'perms': {'any': ['groups_view']}, 'nav': {'tab': '#tab-access', 'sub': '#subtab-groups'},
+     'stat': groups_stat,
+     'view': {'kind': 'stat', 'icon': 'bi-people-fill', 'label_key': 'overview_groups',
+              'accent': 'emerald', 'data_url': '/api/v1/overview/widget/groups'}},
+]

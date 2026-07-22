@@ -34,13 +34,3 @@ def checks_stat(wa) -> dict:
                        'color': '#f59e0b'})
     return {'value': total, 'accent': accent, 'icon': 'bi-exclamation-triangle-fill',
             'badges': badges}
-
-
-OVERVIEW_WIDGETS = [
-    {'id': 'checks', 'icon': 'bi-activity', 'label_key': 'overview_status',
-     'cols': 2, 'h': 'auto', 'has_h': False, 'order': 10,
-     'perms': {'any': ['checks_view', 'checks_run']}, 'nav': {'tab': '#tab-status'},
-     'stat': checks_stat,
-     'view': {'kind': 'stat', 'icon': 'bi-activity', 'label_key': 'overview_status',
-              'accent': 'green', 'data_url': '/api/v1/overview/widget/checks'}},
-]

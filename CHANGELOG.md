@@ -5,6 +5,37 @@ All notable changes to **ServiceSentry** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Packages can now contribute config-section buttons and their own web UI — no package-specific
+  glue left in `web_admin`.** Two self-describing mechanisms (documented as §7b in
+  `explica-descubrimiento.md`): (1) `CONFIG_ACTIONS` — a provider/service/module declares its
+  buttons as DATA in `<pkg>/config_actions.py` (`section`, `label_key`, `icon`, solid `variant`,
+  `order`, the JS `fn` name and a declarative `show_when: {field, not_empty}` gate);
+  `discover_config_actions()` scans `lib.providers`/`lib.services`/`lib.core`, `config_layout()`
+  attaches them to the matching card, and the generic `_cfgSectionActions()` renders them.
+  (2) the existing package **web-assets** discovery (`web/_ui.html` / `_modals.html` /
+  `_styles.html`), until now scanned only under `watchfuls/`, now also covers `lib/providers/`
+  (referenced as `providers/<name>/…` so a provider can never collide with a watchful of the same
+  name, and a package may ship several `*_ui.html`).
+  **Migration:** all Entra ID glue moved out of the panel — the OIDC/SAML2/SCIM wizards became
+  `lib/providers/entraid/web/{_oidc,_saml,_scim}_ui.html`, the `_entraAppLink` deep-link helper
+  moved with them, and the hardcoded Entra buttons in `partials/cfg/auth/_renderers.html` were
+  replaced by the generic renderer driven by the provider's `CONFIG_ACTIONS`.
+- **Entra ID OIDC client-secret lifecycle: assisted rotation, expiry warning and unattended
+  rotation with a margin.** An Entra app secret expires, so three independent, opt-in pieces were
+  added. (1) **Assisted rotation** — a *Rotate secret* button on Config → Authentication → OIDC
+  runs a device-code sign-in and mints a fresh secret on the EXISTING app registration via Graph
+  `addPassword` (new `POST /api/v1/auth/entraid/oidc/secret/device-code` + `…/device-poll`), with
+  no re-registration. (2) **Expiry warning** — a new leader-gated background scanner
+  (`lib/core/health/secret_scan.py`) emits the routable `secret_expiring` event once per severity
+  (expiring → expired), re-arming when the secret is renewed (`oidc|secret_notify_expiry`,
+  `oidc|secret_warn_days`, default 30). (3) **Unattended rotation** — with
+  `oidc|secret_auto_rotate` on, the scanner mints the replacement once inside the
+  `oidc|secret_rotate_days` margin (default 15) by authenticating the app **as itself**
+  (client-credentials) and emits `secret_rotated`; if the app may not modify its own registration
+  the rotation fails and it degrades to warning only (never silent). Adding a secret does not
+  revoke the previous one, so rotation is non-disruptive. New `provisioning.add_app_secret()`
+  returns the **expiry Entra actually granted** (the tenant policy may cap the requested lifetime),
+  stored in `oidc|secret_expires_at` — an empty value means unknown and disables both checks.
 - **Notification recipients: typeahead over users & groups, resolved on send.** The recipient chips
   (Config → Notifications → Email / Microsoft Teams) autocomplete as you type against panel **users**
   and **groups** (new `GET /api/v1/notify/recipients/suggest`, gated by `config_edit`). Picking one
@@ -310,6 +341,30 @@ All notable changes to **ServiceSentry** are documented in this file.
   background).
 
 ### Changed
+- **Removed the dead `email|notify_on_*` keys (pre-release cleanup).** Superseded by the
+  `notifications` routing matrix (`notifications|email_on_*`) and **read by nothing** — they only
+  still rendered three no-op switches on the Email card. Dropped the 3 `Cfg` declarations, their
+  6 i18n label/hint entries per language, and the doc rows/compat note.
+- **`ai-module-guide.md` → `caso-guia-modulo-ia.md`**, bringing the last doc into the naming
+  convention (17 inbound references rewritten, including the `watchfuls/*/watchful.py` pointers).
+  It stays **deliberately self-contained** rather than deduplicated: its whole purpose is for an
+  agent to build a module from that file alone (its frontmatter records the validation), so the
+  README now documents it as a conscious exception to the single-source rule — with the caveat
+  that changing schema/discovery/guide material means **revalidating it** as well as editing the
+  SSOT.
+- **One discovery convention for every self-describing feature: `manifest.py` + a single
+  scanner.** Each feature used to grow its own near-identical `pkgutil.iter_modules` loop
+  importing a differently-named submodule (`permissions.py`, `overview_widget.py`,
+  `notify_events.py`, `config_actions.py`, `__init__.py`), so adding a mechanism meant copying a
+  scanner and inventing a file name. Now a package declares everything it contributes in its own
+  **`manifest.py`**, and the shared `lib/discovery.py` (`scan`/`scan_values`/`scan_flat`) collects
+  it. Migrated all five families — `MODULE_PERMISSIONS` (16 packages), `OVERVIEW_WIDGETS` (14),
+  `NOTIFY_EVENTS` (6), `CONFIG_ACTIONS` (1) and `EMBEDDED_SERVICE`/`STANDALONE` (4) — and deleted
+  the four bespoke scanners. Heavy implementations (a widget's 150-200-line data provider) stay in
+  their own module and are imported into the manifest, so it reads as a list of what the package
+  offers. Descriptors stay **Python** (not JSON) because they bind live objects — callables like a
+  widget's `stat` provider; watchful modules are the opposite case (drop-in plugins with no core
+  code) and keep declaring in `schema.json`. Documented as §0 of `explica-descubrimiento.md`.
 - **Dropped the legacy `email|lang` fallback (pre-release cleanup).** Since no version has shipped
   there is nothing to migrate, so `notify_lang()` now resolves `notifications|lang` → `web_admin|lang`
   → `''` (the `email|lang` branch is gone). Removed all references — the fallback code + docstrings

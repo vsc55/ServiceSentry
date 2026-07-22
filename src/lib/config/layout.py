@@ -131,10 +131,26 @@ def config_layout() -> dict:
     (``cfg_meta``).  A generic card gets its ``fields`` DERIVED from the schema
     (options with a matching ``Cfg.card``); a ``renderer`` card is drawn by a
     named frontend function.  Single source of truth: the UI can never drift."""
+    from lib.config.config_actions import discover_config_actions  # noqa: PLC0415
+    from lib.config.group_sources import discover_group_sources  # noqa: PLC0415
+    by_section: dict[str, list] = {}
+    for a in discover_config_actions():
+        by_section.setdefault(a['section'], []).append(a)
+    sources = {s['section']: s for s in discover_group_sources()}
     cards = []
     for c in CARDS:
         d = dict(c)
         if 'renderer' not in d:
             d['fields'] = _fields_for_card(d['id'])
+        # Buttons a package contributes to this card's section (self-describing; the
+        # panel renders them generically and the package ships the JS they name).
+        acts = by_section.get(d.get('section') or d['id'])
+        if acts:
+            d['actions'] = acts
+        # Directory group source backing this section, if a provider declares one — the
+        # group→role widget renders its fetch button / picker / name lookup from it.
+        src = sources.get(d.get('section') or d['id'])
+        if src:
+            d['group_source'] = src
         cards.append(d)
     return {'tabs': [dict(t) for t in TABS], 'cards': cards}

@@ -745,3 +745,38 @@ async function testTelegram() {
         showToast(r?.data?.error || t('telegram_test_error'), 'danger');
     }
 }
+
+// ─────────────── Package-contributed config actions (generic) ───────────────
+// A provider/service/module declares buttons for a config section as DATA
+// (lib/config/config_actions.py :: CONFIG_ACTIONS) and ships the JS they name in its
+// own web/*_ui.html. This renders them generically: the panel never hardcodes a
+// package-specific button. `show_when` is a tiny gate: {field, not_empty}.
+function _cfgActionVisible(act, data) {
+    const w = act.show_when;
+    if (!w || !w.field) return true;
+    const v = (data || {})[w.field];
+    if (w.not_empty) return String(v == null ? '' : v).trim() !== '';
+    return true;
+}
+
+function _cfgSectionActions(sec, data) {
+    const cards = (CONFIG_LAYOUT && CONFIG_LAYOUT.cards) || [];
+    const card = cards.find(c => (c.section || c.id) === sec);
+    const acts = ((card && card.actions) || []).filter(a => _cfgActionVisible(a, data));
+    if (!acts.length) return '';
+    const btns = acts.map(a => {
+        const tip = a.tooltip_key ? ` title="${escAttr(t(a.tooltip_key))}"` : '';
+        const ico = a.icon ? `<i class="bi ${escAttr(a.icon)} me-1"></i>` : '';
+        return `<button class="btn btn-${escAttr(a.variant || 'secondary')} btn-sm" type="button"
+                        onclick="${escAttr(a.fn)}()"${tip}>${ico}${esc(t(a.label_key))}</button>`;
+    }).join('');
+    // Row caption: when every visible action comes from the same package group, use its
+    // label (e.g. "Entra ID") so the row says WHOSE actions these are; if a section mixes
+    // packages, fall back to the generic "Actions".
+    const groups = new Set(acts.map(a => a.group_label_key || ''));
+    const capKey = (groups.size === 1 && !groups.has('')) ? [...groups][0] : 'cfg_actions_label';
+    return `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+        <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">${esc(t(capKey))}</small></div>
+        <div class="col-sm-8 d-flex gap-2 align-items-center flex-wrap">${btns}</div>
+    </div></div>`;
+}

@@ -11,14 +11,3 @@ optional rules raise notifications on matching severity/regex.
 from lib.services.syslog.parser import parse_message, SEVERITIES, FACILITIES
 
 __all__ = ['parse_message', 'SEVERITIES', 'FACILITIES']
-
-# Self-description for the web admin's Services tab (see
-# lib.services.discover_embedded_services); the host wires the embedded
-# status/control by convention (``_service_syslog_status`` / ``_control_syslog``).
-EMBEDDED_SERVICE = {
-    'key': 'syslog', 'label_key': 'svc_syslog', 'icon': 'bi-hdd-stack',
-    'order': 20, 'controllable': True,
-}
-
-# Standalone launch (main.py --syslog) — see discover_standalone_services().
-STANDALONE = {'key': 'syslog', 'dest': 'syslog_mode', 'banner': 'banner_syslog', 'order': 20}

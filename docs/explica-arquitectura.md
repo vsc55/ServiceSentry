@@ -380,7 +380,7 @@ ServiceSentry/
     ├── explica-hosts.md                          # Modelo host-céntrico (hosts + perfiles de conexión)
     ├── ref-modulos.md
     ├── caso-guia-watchful.md
-    ├── ai-module-guide.md
+    ├── caso-guia-modulo-ia.md
     ├── explica-web-admin.md
     ├── ref-schema-json.md
     ├── explica-i18n.md

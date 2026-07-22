@@ -425,6 +425,15 @@ Requiere el paquete opcional `authlib` (`pip install authlib`).
 | `oidc.group_display_names` | dict | `{}` | Cache `{id de grupo: nombre visible}` (autocompletado del mapeo) |
 | `oidc.default_role` | string | `""` | Rol por defecto para usuarios OIDC sin mapeo de grupo (vacío = `none`) |
 | `oidc.auto_create_users` | bool | `true` | Crear automáticamente el usuario en la tabla `users` de la base de datos en el primer login |
+| `oidc.secret_expires_at` | string | `""` | Caducidad del secreto actual (ISO-8601). **La escribe la app** al crear/rotar el secreto: es el valor que Entra concedió (su política puede recortarlo), no el solicitado. Vacío = desconocido → no se puede avisar ni rotar |
+| `oidc.secret_notify_expiry` | bool | `false` | Notificar (`secret_expiring`) cuando el secreto esté próximo a caducar. Se enruta por canal en la matriz de Routing |
+| `oidc.secret_warn_days` | int | `30` | Avisar cuando al secreto le queden estos días |
+| `oidc.secret_auto_rotate` | bool | `false` | Emitir automáticamente un secreto de reemplazo antes de caducar. Requiere que la app pueda modificar su propio registro en Entra; si no, degrada a solo aviso |
+| `oidc.secret_rotate_days` | int | `15` | **Margen**: rotar cuando queden estos días (debe ser menor que `secret_warn_days` para rotar antes de avisar) |
+
+> El ciclo de vida del secreto (rotación asistida, aviso y rotación desatendida) se explica en
+> [caso-entra-id.md](caso-entra-id.md#rotación-del-secreto-de-cliente-oidc). El escáner reutiliza
+> `certs.scan_every_secs` como periodicidad.
 
 Cuando está habilitado, aparece el botón **Login with SSO** en la pantalla de login. El wizard integrado en la pestaña de configuración puede registrar la aplicación en Microsoft Entra ID automáticamente mediante Device Code Flow.
 
@@ -477,9 +486,6 @@ Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos d
 | `email.provider` | string | `"smtp"` | Proveedor de envío: `smtp`, `microsoft365` o `gmail` |
 | `email.recipients` | string | `""` | Direcciones de destino separadas por comas |
 | `email.subject_prefix` | string | `""` | Prefijo opcional para el asunto del mensaje |
-| `email.notify_on_down` | bool | `true` | Enviar alerta cuando un check falla *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
-| `email.notify_on_recovery` | bool | `true` | Enviar alerta cuando se recupera un check *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
-| `email.notify_on_warn` | bool | `true` | Enviar alerta en estado de advertencia *(obsoleto: sustituido por la matriz `notifications`; se mantiene por compatibilidad)* |
 | `email.from_email` | string | `""` | Dirección de envío (campo `From:`) |
 | `email.from_name` | string | `"ServiceSentry"` | Nombre del remitente que aparece en el campo `From:` |
 | `email.smtp_host` | string | `""` | Servidor SMTP (solo para `provider=smtp`) |
@@ -494,8 +500,6 @@ Usuarios creados con `auth_source: "scim"`; los grupos SCIM se mapean a grupos d
 | `email.gmail_client_id` | string | `""` | Client ID de la app Gmail OAuth2 (solo `provider=gmail`) |
 | `email.gmail_client_secret` | string | `""` | Client Secret de Gmail (cifrado en disco; solo `provider=gmail`) |
 | `email.gmail_refresh_token` | string | `""` | Refresh token de OAuth2 para Gmail (cifrado en disco; solo `provider=gmail`) |
-
-> **Nota:** los campos `email.notify_on_*` han sido reemplazados por la matriz de routing de la sección `notifications` y se conservan únicamente por compatibilidad con configuraciones anteriores. Los nuevos despliegues deben usar `notifications.email_on_*`.
 
 > **Nota:** el idioma de notificación se fija con el ajuste **global**
 > [`notifications.lang`](#notificationslang-idioma-global-de-notificaciones), que aplica a
