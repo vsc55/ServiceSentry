@@ -56,13 +56,19 @@ Run $py @("-m","pip","install","-U","pip-tools")
 Write-Host "✔ pip and pip-tools updated."
 Write-Host ""
 
-# 5) Install dependencies
-if (Test-Path "requirements.txt") {
-    Write-Host "📦 Installing dependencies from requirements.txt..."
+# 5) Install production dependencies from the LOCK (exact, hash-verified versions), so the
+#    dev venv matches what Docker/CI deploy. requirements.txt (ranges) is only the source
+#    the lock is compiled from — fall back to it if the lock is somehow missing.
+if (Test-Path "requirements.lock") {
+    Write-Host "📦 Installing pinned dependencies from requirements.lock..."
+    Run $py @("-m","pip","install","-r","requirements.lock")
+    Write-Host "✔ Dependencies installed (locked)."
+} elseif (Test-Path "requirements.txt") {
+    Write-Host "⚠ requirements.lock not found; installing ranges from requirements.txt."
     Run $py @("-m","pip","install","-r","requirements.txt")
-    Write-Host "✔ Dependencies installed."
+    Write-Host "✔ Dependencies installed (unpinned)."
 } else {
-    Write-Host "⚠ No requirements.txt found; nothing to install."
+    Write-Host "⚠ No requirements.lock/txt found; nothing to install."
 }
 Write-Host ""
 

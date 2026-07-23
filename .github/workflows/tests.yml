@@ -15,12 +15,17 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-          cache-dependency-path: src/requirements.txt
+          cache-dependency-path: src/requirements.lock
 
       - name: Install dependencies
         run: |
-          pip install -r src/requirements.txt
-          pip install pytest pytest-xdist
+          # Production: exact, hash-verified versions from the lock (its hashes put pip in
+          # --require-hashes mode). Dev tooling goes on top WITHOUT the lock as a -c
+          # constraint: a hashed constraints file would force --require-hashes onto the
+          # (unhashed) dev requirements and fail. The lock is already installed, so the >=
+          # ranges dev pulls in are satisfied and pip does not float production off it.
+          pip install -r src/requirements.lock
+          pip install -r src/requirements-dev.txt
 
       - name: Run tests
         working-directory: src

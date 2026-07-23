@@ -361,6 +361,21 @@ All notable changes to **ServiceSentry** are documented in this file.
   background).
 
 ### Changed
+- **Pinned dependency versions for reproducible builds (`requirements.lock`).** Every dependency
+  in `requirements.txt` used an open `>=` range and nothing was locked, so each `docker build` /
+  `pip install` pulled whatever satisfied the minimum — two builds on different days could ship
+  different trees, and a new major (Flask 4, a breaking Werkzeug…) would enter on its own and could
+  break the runtime with no repo change (the same class of surprise as the paramiko `.deb` break).
+  `requirements.txt` now stays as the intent (ranges) and a new `requirements.lock` carries the
+  exact, **tested** versions from the dev venv (the one the 3402-test suite passes on) — 41 pinned
+  packages across the full tree, each with **`--hash` digests** so pip verifies integrity in
+  `--require-hashes` mode (supply-chain protection). Everything installs from the lock: Docker, the
+  `tests` / `db-backends` workflows, and `setup_env.ps1` (so the dev venv matches what deploys, not
+  a floating `requirements.txt`); the workflows' pip cache key tracks the lock. Dev tooling is
+  layered on top without the lock as a `-c` constraint (a hashed constraints file would force
+  `--require-hashes` onto the unhashed dev requirements) — the lock is already installed, so its
+  pins hold. Header in both files documents how to regenerate. (`PyJWT` is optional and absent from
+  the dev venv, so its lock entry keeps the resolver's version.)
 - **Removed the dead `email|notify_on_*` keys (pre-release cleanup).** Superseded by the
   `notifications` routing matrix (`notifications|email_on_*`) and **read by nothing** — they only
   still rendered three no-op switches on the Email card. Dropped the 3 `Cfg` declarations, their
@@ -430,6 +445,12 @@ All notable changes to **ServiceSentry** are documented in this file.
   lockout, LDAP fallback and all SSO paths — 151 auth/LDAP/OIDC/SAML/Teams-SSO/security-regression tests pass.
 
 ### Fixed
+- **Install aborted on Debian/Ubuntu fetching a dead paramiko `.deb` (affects real installs,
+  not just CI).** `dependencies.txt` pinned `python3-paramiko` to a hardcoded pool URL for
+  paramiko 2.4.2 (2018); that file is gone from current mirrors, so `wget` returned 404 (exit 8)
+  and aborted the install. The pinned version also contradicted `requirements.txt`
+  (`paramiko>=3.0`). Now it installs `python3-paramiko` from the distro repo like every other
+  dependency (Debian 13 ships paramiko 3.x).
 - **CI: install tests aborted on Debian/Ubuntu with `sudo: command not found`.**
   `check_dependencies.sh` called `sudo apt install` unconditionally, but the install-test
   containers run as root with no `sudo` present. It now uses `sudo` only when not already root,

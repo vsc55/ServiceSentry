@@ -63,9 +63,12 @@ ENV SS_VERBOSE=false
 
 WORKDIR /app
 
-# Install Python dependencies in a separate layer for better cache reuse
-COPY src/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies in a separate layer for better cache reuse.
+# Install from the lock (exact, tested versions) so an image built today and one built
+# next month contain the same dependency tree — requirements.txt (ranges) is only the
+# source the lock is compiled from.
+COPY src/requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 # Copy application source
 COPY src/ .

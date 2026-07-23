@@ -1,4 +1,14 @@
 # ServiSesentry - Dependencias de producción
+#
+# Este fichero declara la INTENCIÓN (compatibilidad mínima con rangos >=). Lo que se
+# INSTALA en Docker, CI y setup_env.ps1 es requirements.lock: versiones exactas, ya
+# probadas y con hashes (integridad), para builds reproducibles. Regenerar tras cambiar
+# una dependencia, con el venv de desarrollo activo:
+#   1) pip-compile --strip-extras -o requirements.lock requirements.txt   (resuelve el árbol)
+#   2) reconcilia las versiones a las probadas en el venv y corre la suite completa
+#   3) pip-compile --generate-hashes --strip-extras -o requirements.lock <esas versiones>
+#      (añade los hashes a las versiones ya reconciliadas)
+# No edites requirements.lock a mano salvo para esa reconciliación.
 requests>=2.28
 paramiko>=3.0
 PyMySQL>=1.0
