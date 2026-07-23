@@ -445,6 +445,14 @@ All notable changes to **ServiceSentry** are documented in this file.
   lockout, LDAP fallback and all SSO paths — 151 auth/LDAP/OIDC/SAML/Teams-SSO/security-regression tests pass.
 
 ### Fixed
+- **`ConfigControl.is_changed` could miss a real edit (timestamp race).** It compared two
+  `datetime.now()` marks (`_update > _load`), so a read-then-modify inside a single clock tick —
+  fast code paths, coarse clocks — reported *unchanged* for data that had in fact changed. It
+  surfaced as a flaky CI failure (`test_changed_after_read_then_modify`, which passed on Windows
+  where file I/O between the two marks let the clock advance, but failed on the faster Linux
+  runner). Replaced the timestamp compare with an explicit `_dirty` flag set by the data setter and
+  cleared by `read()`/`save()` — exact and platform-independent. (Verified 10/10 deterministic;
+  the flag has no production consumers yet, but the API is now correct for them.)
 - **Flaky syslog tests: the embedded listener bound real sockets on port 514 during the whole
   test suite.** `test_syslog_service::test_udp_message_is_stored` failed in CI with `TCP 514:
   Permission denied`, but that was the visible tip: the `admin`/`client` fixtures build a full

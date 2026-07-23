@@ -37,7 +37,7 @@ class ConfigControl(ConfigStore):
     def __init__(self, file, init_data: dict = None):
         """ Init object. """
         self._load = None
-        self._update = None
+        self._dirty = False    # set True by the data setter, cleared by read()/save()
         super().__init__(file)
         self.data = init_data
 
@@ -54,7 +54,7 @@ class ConfigControl(ConfigStore):
     @data.setter
     def data(self, val: dict | None = None):
         """ Set the configuration data. """
-        self._update = datetime.datetime.now()
+        self._dirty = True
         self._data = val
 
     @property
@@ -67,15 +67,13 @@ class ConfigControl(ConfigStore):
         """
         Return True if the configuration data has been changed since the last load,
         False otherwise.
+
+        Tracked with an explicit dirty flag rather than comparing ``datetime.now()``
+        timestamps: read-then-modify can happen inside a single clock tick (fast paths,
+        coarse clocks), which made the old ``_update > _load`` compare miss the change —
+        a real edit reported as unchanged. The flag is exact and platform-independent.
         """
-        if not self._update:
-            return False
-
-        if not self._load:
-            # Data inserted manually, no file has been read.
-            return True
-
-        return self._update > self._load
+        return self._dirty
 
     @property
     def is_load(self) -> bool:
@@ -87,12 +85,10 @@ class ConfigControl(ConfigStore):
 
     def read(self, return_data=True, def_return=None) -> dict | None: # pylint: disable=arguments-renamed
         """ Read the configuration from the file. """
-        self.data = super().read(def_return)
+        self.data = super().read(def_return)   # sets _dirty via the setter
 
-        time_read = datetime.datetime.now() if self.is_data else None
-
-        self._load = time_read
-        self._update = time_read
+        self._load = datetime.datetime.now() if self.is_data else None
+        self._dirty = False                    # freshly loaded → in sync with the file
 
         if return_data:
             return self.data
@@ -103,9 +99,8 @@ class ConfigControl(ConfigStore):
             data = self.data
 
         if super().save(data):
-            time_save = datetime.datetime.now()
-            self._load = time_save
-            self._update = time_save
+            self._load = datetime.datetime.now()
+            self._dirty = False                # persisted → in sync with the file
             return True
         return False
 
