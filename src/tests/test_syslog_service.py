@@ -65,11 +65,16 @@ class TestReceive:
 
     def test_udp_message_is_stored(self, admin, service):
         port = _free_port()
+        # UDP only: pin TCP/TLS off so the listener never binds the privileged default
+        # port 514 (a bind that fails as non-root — e.g. on CI). Configuring just
+        # ``udp_port`` would leave ``tcp_port`` at its registry default (514), which the
+        # service then tries — and fails — to bind. This test exercises UDP alone.
         admin._write_config({'syslog': {'enabled': True, 'bind_host': '127.0.0.1',
-                                        'udp_port': port}})
+                                        'udp_port': port, 'tcp_port': 0, 'tls_port': 0}})
         admin._invalidate_config_cache()
         problems = service._syslog_apply_config()
         assert problems == [] and service._syslog_server is not None
+        assert service._syslog_server._tcp_port == 0   # TCP off → no privileged bind attempted
         c = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         c.sendto(b'<34>Oct 11 22:14:15 myhost su: failed login', ('127.0.0.1', port))
         c.close()
@@ -199,7 +204,7 @@ class TestRun:
             t.join(timeout=0.5)
             assert service._syslog_server is None
             admin._write_config({'syslog': {'enabled': True, 'bind_host': '127.0.0.1',
-                                            'udp_port': port}})
+                                            'udp_port': port, 'tcp_port': 0, 'tls_port': 0}})
             admin._invalidate_config_cache()
             # force an immediate reload rather than waiting for the poll interval
             service._config_mgr.invalidate()
@@ -235,7 +240,7 @@ class TestTraceability:
         self._trace_on(service)
         port = _free_port()
         admin._write_config({'syslog': {'enabled': True, 'bind_host': '127.0.0.1',
-                                        'udp_port': port}})
+                                        'udp_port': port, 'tcp_port': 0, 'tls_port': 0}})
         admin._invalidate_config_cache()
         service._syslog_apply_config()
         service.stop()

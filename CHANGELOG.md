@@ -445,6 +445,20 @@ All notable changes to **ServiceSentry** are documented in this file.
   lockout, LDAP fallback and all SSO paths — 151 auth/LDAP/OIDC/SAML/Teams-SSO/security-regression tests pass.
 
 ### Fixed
+- **Flaky syslog tests: the embedded listener bound real sockets on port 514 during the whole
+  test suite.** `test_syslog_service::test_udp_message_is_stored` failed in CI with `TCP 514:
+  Permission denied`, but that was the visible tip: the `admin`/`client` fixtures build a full
+  `WebAdmin`, whose syslog service **autostarts a real UDP+TCP listener on the privileged default
+  port 514** on every instance. Root cause: the harness tried to suppress it with the env var
+  `SS_SYSLOG_AUTOSTART=0`, which the embedded boot path does not read — so every test's listener
+  competed on 514 with live sockets, making message counts non-deterministic (e.g. `test_stats`
+  seeing 5 rows where it seeded 3; the same test failed 2 of 4 identical runs). Fixed by setting
+  `syslog: {autostart: False}` as **config** in the `config_dir` fixture (which the boot path does
+  honour); syslog stays enabled, the listener simply does not bind. Separately, the three
+  service-level tests that exercise UDP now pin `tcp_port: 0`/`tls_port: 0` so their explicit
+  listener never touches 514 either. (`test_stats` now passes 5/5, `test_wa_syslog` 18/18 across
+  repeated runs — both were non-deterministic before.) Note: that the `SS_SYSLOG_AUTOSTART` env
+  override is ignored by the embedded boot path is a latent product bug, filed for follow-up.
 - **Install aborted on Debian/Ubuntu fetching a dead paramiko `.deb` (affects real installs,
   not just CI).** `dependencies.txt` pinned `python3-paramiko` to a hardcoded pool URL for
   paramiko 2.4.2 (2018); that file is gone from current mirrors, so `wget` returned 404 (exit 8)
@@ -474,6 +488,10 @@ All notable changes to **ServiceSentry** are documented in this file.
   script's documented safety guarantee.
 - **CI: the test workflow installed `pytest-xdist` but ran serially.** Added `-n auto`, so the
   full suite runs in parallel (~13 min) instead of leaving the dependency unused.
+- **CI: the Docker workflow warned that its actions target the deprecated Node.js 20.** Bumped the
+  four `docker/*` actions to their Node 24 majors — `setup-buildx-action@v4`, `login-action@v4`,
+  `metadata-action@v6`, `build-push-action@v7` (all require Actions Runner ≥ v2.327.1, which the
+  GitHub-hosted runners satisfy). The workflow's inputs are unchanged.
 - **CI: the Docker workflow logged `test is not a valid semver` twice.** The `type=semver` tag
   patterns tried to parse the `test` build tag as a version. They are now gated with
   `enable=${{ startsWith(github.ref, 'refs/tags/v') }}`, so they apply only to real `v*` release

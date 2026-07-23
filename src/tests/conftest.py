@@ -13,9 +13,11 @@ import pytest
 # interferes with mocked-dispatch assertions.
 os.environ.setdefault('SS_EVENTS_EMBEDDED', '0')
 os.environ.setdefault('SS_MONITORING_EMBEDDED', '0')
-# syslog is enabled by default now, so keep its listener from binding privileged
-# port 514 at fixture boot (xdist runs many workers → 514 conflicts). Tests that
-# exercise the listener start it explicitly on a free port.
+# syslog is enabled by default now; its listener must NOT bind at fixture boot (it would
+# grab the privileged port 514 — fails as non-root, and many workers conflict). This env
+# var does NOT reach the embedded boot path, so it is not enough on its own — the real
+# switch is `syslog: {autostart: False}` in the config_dir fixture below. Kept as a
+# belt-and-braces default in case a standalone code path reads it.
 os.environ.setdefault('SS_SYSLOG_AUTOSTART', '0')
 
 try:
@@ -77,6 +79,15 @@ def config_dir(tmp_path):
         # disp.called → flaky failures. Disable autostart so the worker never starts
         # (events stays embedded; the few tests that need it start it explicitly).
         "events": {"autostart": False},
+        # Syslog autostart defaults to True, so WebAdmin.__init__ binds a real UDP+TCP
+        # listener on the privileged default port 514. That fails as non-root (CI) and,
+        # worse, every test's listener competes on 514 with live sockets → non-deterministic
+        # message counts (a test's own listener receives stray traffic, so e.g. stats sees
+        # 5 rows where it seeded 3). The env var SS_SYSLOG_AUTOSTART is NOT honoured by the
+        # embedded boot path, so it must be set here as config. Syslog stays enabled (the
+        # status endpoint reports enabled=True, running=False); tests that exercise the
+        # listener start it explicitly on a free port.
+        "syslog": {"autostart": False},
     }
     (tmp_path / "config.json").write_text(
         json.dumps(config, indent=4), encoding="utf-8"
