@@ -187,12 +187,16 @@ jobs:
         run: |
           fail() { echo "FAIL: $1"; exit 1; }
 
+          # Without -a, uninstall.sh removes only the program code (/opt). It PRESERVES
+          # both config (/etc) and runtime data (/var/lib, incl. the SQLite database) by
+          # design, so an uninstall can never silently destroy the database — this step
+          # asserts exactly that safety property.
           test ! -d /opt/ServiSesentry \
             || fail "/opt/ServiSesentry was not removed"
-          test ! -d /var/lib/ServiSesentry \
-            || fail "/var/lib/ServiSesentry was not removed"
+          test -d /var/lib/ServiSesentry \
+            || fail "/var/lib/ServiSesentry was removed (data must be kept without -a)"
           test -d /etc/ServiSesentry \
-            || fail "/etc/ServiSesentry was removed (should be kept without -a)"
+            || fail "/etc/ServiSesentry was removed (config must be kept without -a)"
 
           echo "OK: partial uninstall verified"
 

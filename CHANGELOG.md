@@ -468,6 +468,10 @@ All notable changes to **ServiceSentry** are documented in this file.
   bootstrap file, and after the config→DB migration the database is what first run creates; the
   assertion (a leftover from when startup seeded `config.json`, and unmeetable in CI since
   `data/config.json` is gitignored) now checks `data.db` alone.
+  (5) The partial-uninstall check asserted `/var/lib` (runtime data + the SQLite DB) was removed,
+  but `uninstall.sh` without `-a` deliberately **preserves** it (and `/etc`) so an uninstall can
+  never silently destroy the database — the check now asserts that data is kept, matching the
+  script's documented safety guarantee.
 - **CI: the test workflow installed `pytest-xdist` but ran serially.** Added `-n auto`, so the
   full suite runs in parallel (~13 min) instead of leaving the dependency unused.
 - **CI: the Docker workflow logged `test is not a valid semver` twice.** The `type=semver` tag
