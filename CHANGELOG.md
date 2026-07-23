@@ -463,6 +463,11 @@ All notable changes to **ServiceSentry** are documented in this file.
   default mode) and would hang forever — it runs `main.py --monitor -t 0` (one pass, then exit).
   (3) The web-startup health check used `curl`, installed only on the systemd images, so it would
   fail the Gentoo job — it now probes with `python3` (present on all three images).
+  (4) The first-run step asserted `config.json` was created — but no run mode writes it (verified:
+  both `--monitor -t 0` and `--web` create only `data.db`). `config.json` is an optional read-only
+  bootstrap file, and after the config→DB migration the database is what first run creates; the
+  assertion (a leftover from when startup seeded `config.json`, and unmeetable in CI since
+  `data/config.json` is gitignored) now checks `data.db` alone.
 - **CI: the test workflow installed `pytest-xdist` but ran serially.** Added `-n auto`, so the
   full suite runs in parallel (~13 min) instead of leaving the dependency unused.
 - **CI: the Docker workflow logged `test is not a valid semver` twice.** The `type=semver` tag

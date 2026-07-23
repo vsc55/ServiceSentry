@@ -118,13 +118,16 @@ jobs:
             || fail "monitoring daemon exited with non-zero status"
           echo "OK: monitoring daemon single check passed"
 
-      - name: Verify first-run config + database were created
+      - name: Verify first-run database was created
         run: |
           fail() { echo "FAIL: $1"; exit 1; }
-          test -f /etc/ServiSesentry/config.json || fail "config.json not created on first run"
-          # Module/item config (and users/roles/…/history) now live in the DB.
+          # The database is what first run creates: all editable config plus
+          # users/roles/modules/history now live in it. config.json is an OPTIONAL,
+          # read-only bootstrap file the operator may supply — no run mode writes it, so it
+          # is not an invariant to assert here (and data/config.json is gitignored, so a
+          # clean checkout has none to install).
           test -f /var/lib/ServiSesentry/data.db || fail "data.db not created on first run"
-          echo "OK: first-run config + database verified"
+          echo "OK: first-run database verified"
 
       - name: Test web service startup
         run: |
