@@ -173,6 +173,30 @@ class TestDedicatedDb:
             svc.stop()
 
 
+class TestAutostartEnv:
+    """SS_SYSLOG_AUTOSTART must overlay onto the effective syslog config.
+
+    Regression: the embedded boot path read the raw config section, which applies neither
+    the registry default nor the env override — so SS_SYSLOG_AUTOSTART was silently ignored
+    and the listener always bound port 514 (see the config→DB / env-overlay design). The
+    fix routes autostart through _syslog_cfg(), which now overlays the section's env vars."""
+
+    def test_env_overrides_effective_config(self, service):
+        # _syslog_cfg() is the single source; the env must win over saved/defaults.
+        with mock.patch.dict('os.environ', {'SS_SYSLOG_AUTOSTART': 'true'}):
+            assert service._syslog_cfg().get('autostart') is True
+        with mock.patch.dict('os.environ', {'SS_SYSLOG_AUTOSTART': '0'}):
+            assert service._syslog_cfg().get('autostart') is False
+
+    def test_embedded_autostart_honours_env(self, admin):
+        # The embedded listener's boot gate reflects the env, not just the True default.
+        emb = admin._embedded_services['syslog']
+        with mock.patch.dict('os.environ', {'SS_SYSLOG_AUTOSTART': 'true'}):
+            assert emb._syslog_autostart() is True
+        with mock.patch.dict('os.environ', {'SS_SYSLOG_AUTOSTART': '0'}):
+            assert emb._syslog_autostart() is False
+
+
 class TestRun:
 
     def test_run_stays_alive_when_disabled_then_stops(self, admin, service):
@@ -269,3 +293,62 @@ class TestTraceability:
             service._eval_event('syslog',{'severity': 1, 'severity_name': 'alert', 'source': '7.7.7.7',
                                  'message': 'boom', 'hostname': 'h', 'received_at': ''})
         assert 'matched' in capsys.readouterr().out
+
+
+class TestRouterEnvOverlay:
+    """The notification router applies SS_* env on the consumption side (central overlay).
+
+    Regression: telegram credentials set purely via env (Docker) were ignored at send time
+    because the router read the raw stored config. `_read_config_file` now overlays env, so
+    the cfg every channel sees carries SS_TELEGRAM_*."""
+
+    def test_telegram_env_reaches_the_router_config(self, service):
+        with mock.patch.dict('os.environ', {'SS_TELEGRAM_TOKEN': 'ENVT',
+                                            'SS_TELEGRAM_CHAT_ID': 'ENVC'}):
+            cfg = service._notify._read_config_file()
+        assert (cfg.get('telegram') or {}).get('token') == 'ENVT'
+        assert (cfg.get('telegram') or {}).get('chat_id') == 'ENVC'
+
+
+class TestEventsAutostartEnv:
+    """`SS_EVENTS_AUTOSTART` must gate the embedded events worker (parity with syslog)."""
+
+    def test_embedded_events_autostart_honours_env(self, admin):
+        emb = admin._embedded_services['events']
+        with mock.patch.dict('os.environ', {'SS_EVENTS_AUTOSTART': '0'}):
+            assert emb._autostart() is False
+        with mock.patch.dict('os.environ', {'SS_EVENTS_AUTOSTART': '1'}):
+            assert emb._autostart() is True
+
+
+class TestIpbanStandalone:
+    """A standalone syslog receiver (Docker, no WebAdmin) must enforce the shared,
+    DB-backed fail2ban jail: drop jailed IPs and converge with every replica."""
+
+    def test_builds_a_jail_and_blocks_a_banned_ip(self, service):
+        assert service._ipban is not None
+        service._ipban.ban('9.9.9.9', duration_secs=3600, reason='test')
+        assert service._ipban.is_banned_flag('9.9.9.9') is True
+        assert service._ipban.is_banned_flag('1.2.3.4') is False
+
+    def test_listener_is_wired_to_the_jail(self, admin, service):
+        # apply_config builds the server with non-null is_banned/on_offense from _ipban
+        port = _free_port()
+        admin._write_config({'syslog': {'enabled': True, 'bind_host': '127.0.0.1',
+                                        'udp_port': port, 'tcp_port': 0, 'tls_port': 0}})
+        admin._invalidate_config_cache()
+        service._syslog_apply_config()
+        srv = service._syslog_server
+        assert srv is not None
+        assert srv._is_banned is not None and srv._on_offense is not None
+
+    def test_ban_is_shared_across_receivers(self, admin):
+        # a second receiver on the SAME main DB sees the ban (shared desired-state)
+        s1 = SyslogService(admin._config_dir, admin._var_dir)
+        s2 = SyslogService(admin._config_dir, admin._var_dir)
+        try:
+            s1._ipban.ban('8.8.8.8', duration_secs=3600, reason='x')
+            assert s2._ipban.is_banned_flag('8.8.8.8') is True
+        finally:
+            s1.stop()
+            s2.stop()

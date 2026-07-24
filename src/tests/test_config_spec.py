@@ -200,3 +200,52 @@ class TestTrackChange:
         track_change(changes, entity, 'name', 'new', old_default='uid-x')
         assert changes == [{'field': 'name', 'old': 'uid-x', 'new': 'new'}]
         assert entity['name'] == 'new'
+
+
+class TestOverlayAllEnv:
+    """`overlay_all_env` applies SS_* env to a FULL config on the consumption side.
+
+    The stored config never carries env (the UI needs saved-vs-locked separate), so
+    notification dispatch and the standalone workers apply it here. Regression: telegram
+    was ignored everywhere and events|autostart in the embedded boot."""
+
+    def _overlay(self, monkeypatch, cfg, env):
+        # Start from an environment with NO SS_* set (conftest fixes SS_SYSLOG_AUTOSTART
+        # etc. process-wide) and apply only this case's vars, so the result is deterministic.
+        from lib.config.manager import overlay_all_env
+        for k in env_field_specs():
+            monkeypatch.delenv(k, raising=False)
+        for k, v in env.items():
+            monkeypatch.setenv(k, v)
+        return overlay_all_env(cfg)
+
+    def test_creates_absent_section_from_env(self, monkeypatch):
+        # blank saved telegram + SS_TELEGRAM_* → the section is materialised
+        out = self._overlay(monkeypatch, {'global': {'log_level': 'off'}},
+                            {'SS_TELEGRAM_TOKEN': 'T', 'SS_TELEGRAM_CHAT_ID': 'C'})
+        assert out['telegram'] == {'token': 'T', 'chat_id': 'C'}
+
+    def test_env_wins_over_saved(self, monkeypatch):
+        out = self._overlay(monkeypatch, {'telegram': {'token': 'saved'}},
+                            {'SS_TELEGRAM_TOKEN': 'env'})
+        assert out['telegram']['token'] == 'env'
+
+    def test_bool_and_int_casting(self, monkeypatch):
+        out = self._overlay(monkeypatch, {},
+                            {'SS_EVENTS_AUTOSTART': '0', 'SS_CHECK_INTERVAL': '45'})
+        assert out['events']['autostart'] is False
+        assert out['monitoring']['timer_check'] == 45 and isinstance(
+            out['monitoring']['timer_check'], int)
+
+    def test_database_section_is_left_to_bootstrap(self, monkeypatch):
+        # SS_DB_* is owned by bootstrap_database_cfg; overlay_all_env must not touch it.
+        out = self._overlay(monkeypatch, {'database': {'driver': 'sqlite'}},
+                            {'SS_DB_PASSWORD': 'x'})
+        assert out['database'] == {'driver': 'sqlite'}
+
+    def test_sections_without_env_untouched_and_no_mutation(self, monkeypatch):
+        src = {'global': {'log_level': 'off'}}
+        out = self._overlay(monkeypatch, src, {})
+        assert out == {'global': {'log_level': 'off'}}
+        out['global']['log_level'] = 'debug'      # out is a copy
+        assert src['global']['log_level'] == 'off'

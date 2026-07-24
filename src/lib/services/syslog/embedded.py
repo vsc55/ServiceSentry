@@ -74,8 +74,9 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
         return _embedded_listener_enabled()
 
     def _syslog_autostart(self) -> bool:
-        from lib.config.spec import cfg_get  # noqa: PLC0415
-        return bool(cfg_get(self._config_section('syslog'), 'syslog|autostart'))
+        # Read through _syslog_cfg() so registry defaults AND the SS_SYSLOG_AUTOSTART env
+        # override apply (a raw _config_section read sees neither → always the True default).
+        return bool(self._syslog_cfg().get('autostart'))
 
     def _retention_loop(self) -> None:
         while not self._syslog_retention_stop.wait(self.RETENTION_EVERY):

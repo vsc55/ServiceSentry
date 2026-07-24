@@ -42,13 +42,20 @@ class _SyslogMixin:
     def _syslog_cfg(self) -> dict:
         """Effective ``syslog`` config with registry defaults merged underneath the
         saved values (defaults are lazy, so a config with only ``enabled`` saved
-        would otherwise lack the ports).  CLI overrides win when present."""
+        would otherwise lack the ports).  ``SS_SYSLOG_*`` env vars overlay next, then
+        CLI overrides win when present.
+
+        The ConfigManager read does not apply env overrides, so this is where the
+        section's ``env=`` vars (e.g. ``SS_SYSLOG_AUTOSTART``) take effect — for both
+        the embedded listener and the standalone receiver (Docker deployments)."""
         from lib.config.spec import section_defaults  # noqa: PLC0415
+        from lib.config.manager import overlay_section_env  # noqa: PLC0415
         saved = self._config_section('syslog') or {}
         # A null (blank) value means "use the registry default" → skip nulls so the
         # merged default underneath wins.
         cfg = {**section_defaults('syslog'),
                **{k: v for k, v in saved.items() if v is not None}}
+        cfg = overlay_section_env('syslog', cfg)   # SS_SYSLOG_* env wins over saved/defaults
         host_override = getattr(self, '_host_override', None)
         port_override = getattr(self, '_port_override', None)
         if host_override:

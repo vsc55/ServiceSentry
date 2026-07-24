@@ -5,6 +5,18 @@ All notable changes to **ServiceSentry** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **The standalone Syslog receiver now enforces the internal fail2ban.** A syslog container running
+  on its own (Docker, no WebAdmin) previously never dropped jailed IPs or reported offenses — the
+  `is_banned`/`on_offense` callbacks were only wired when syslog ran embedded in the web admin.
+  `SyslogService` now builds the shared, DB-backed `IpBanManager` on the **main** connector (the
+  same `ip_bans` table every replica converges on), so a ban placed by the web container takes
+  effect in the standalone receiver, and offenses it detects feed the shared jail. Bans are audited
+  and routed through the notification matrix like the web admin. The framework-free construction was
+  extracted to `lib/services/ipban/factory.py` (`make_ipban`/`configure_ipban`/`ipban_notify`),
+  reused by both the WebAdmin and the receiver (the old `_IpBanMixin` is Flask-coupled). Config
+  (`web_admin|ipban_*`, incl. `SS_IPBAN_ENABLED`/`SS_IPBAN_WHITELIST`) is applied on boot and
+  reconciled every 15 s so a web-side toggle converges without a restart. (Events stays out: it has
+  no network listener and no ban action.)
 - **History and Syslog became standalone section pages, like Overview.** They are no longer tabs
   inside the admin panel: `/history` and `/syslog` are whole pages of their own, declared once in
   the `HOME_PAGES` registry with a `standalone` spec (pane, render entry point, required
@@ -465,8 +477,28 @@ All notable changes to **ServiceSentry** are documented in this file.
   honour); syslog stays enabled, the listener simply does not bind. Separately, the three
   service-level tests that exercise UDP now pin `tcp_port: 0`/`tls_port: 0` so their explicit
   listener never touches 514 either. (`test_stats` now passes 5/5, `test_wa_syslog` 18/18 across
-  repeated runs — both were non-deterministic before.) Note: that the `SS_SYSLOG_AUTOSTART` env
-  override is ignored by the embedded boot path is a latent product bug, filed for follow-up.
+  repeated runs — both were non-deterministic before.)
+- **`SS_SYSLOG_AUTOSTART` env override was ignored by the embedded syslog boot (product bug).**
+  Surfaced by the flakiness above: `EmbeddedSyslog._syslog_autostart()` read the raw config
+  section, which applies neither the registry default nor the section's `env=` override, so the
+  var never took effect and the listener always bound port 514 — a Docker/env deployment could not
+  turn autostart off. `_syslog_cfg()` now overlays the section's `SS_SYSLOG_*` env vars (via
+  `overlay_section_env`, the same path `syslog_db`/`monitoring` already use, so it also works in
+  the **standalone** receiver, not just the web-embedded one), and autostart reads through it.
+  Verified: `SS_SYSLOG_AUTOSTART=0` now binds no listener; two regression tests pin the contract.
+- **`SS_*` env overrides were ignored whenever config was CONSUMED outside the web layer (same
+  class of bug, generalised).** `ConfigManager.read()` deliberately returns the saved config
+  without env (the config UI needs saved-vs-`env-locked` kept separate), and only ad-hoc per-section
+  patches applied env. So **`SS_TELEGRAM_TOKEN`/`CHAT_ID` were never applied when actually sending a
+  Telegram alert** (web *and* standalone), and `SS_EVENTS_AUTOSTART` was ignored on the embedded
+  events boot. Fixed centrally without touching the UI edit path: a new
+  `overlay_all_env(cfg)` (`lib/config/manager.py`) applies every section's `env=` vars (except
+  `database|*`, owned by bootstrap), applied on the two **consumption** surfaces —
+  `NotificationRouter._read_config_file` (dispatch for every host) and the three standalone service
+  `_read_config_file` (their whole-config read). The embedded events autostart now overlays its
+  section too. `ConfigManager.read`/`WebAdmin._read_config_file`/`_config_section` are left raw so
+  the config editor still distinguishes saved from env-locked. Regression tests cover the overlay,
+  telegram-via-router, and events autostart.
 - **Install aborted on Debian/Ubuntu fetching a dead paramiko `.deb` (affects real installs,
   not just CI).** `dependencies.txt` pinned `python3-paramiko` to a hardcoded pool URL for
   paramiko 2.4.2 (2018); that file is gone from current mirrors, so `wget` returned 404 (exit 8)

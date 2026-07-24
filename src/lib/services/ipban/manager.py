@@ -20,8 +20,6 @@ The host WebAdmin provides ``_db_connector``, ``_t``, ``_audit_system`` and the
 
 from __future__ import annotations
 
-import time
-
 from flask import g, jsonify, make_response, render_template, request
 
 from lib.config.spec import cfg_default as _cfg_default
@@ -48,13 +46,12 @@ class _IpBanMixin:
         """Create the shared jail manager + its stores on the general connector, so
         counting/ban state is persistent and shared across every process. Called from
         the entity-store init (after ``_db_connector`` exists)."""
-        from lib.services.ipban.store import IpBanStore, IpWhitelistStore  # noqa: PLC0415
-        from .jail import IpBanManager                        # noqa: PLC0415
+        from lib.services.ipban.store import IpWhitelistStore  # noqa: PLC0415
         from .exposed import IpBanServiceRegistry             # noqa: PLC0415
-        self._ipban_store = IpBanStore(self._db_connector)
+        from .factory import make_ipban                       # noqa: PLC0415
+        # Shared construction (also used by the standalone syslog receiver).
+        self._ipban_store, self._ipban = make_ipban(self._db_connector, notify=self._ipban_notify)
         self._ip_whitelist_store = IpWhitelistStore(self._db_connector)
-        self._ipban_store.prune(time.time())
-        self._ipban = IpBanManager(store=self._ipban_store, notify=self._ipban_notify)
         # Service capability registry: each exposed service declares its ports +
         # supported block actions, so nothing about them is hardcoded. Web registers
         # itself here; syslog registers from its own manager when it (re)starts.
@@ -107,34 +104,12 @@ class _IpBanMixin:
         )
 
     def _ipban_notify(self, action: str, ip: str, info: dict) -> None:
-        """Audit a ban lifecycle event (banned / escalated / lifted) and forward it to the
-        notification router as an ``ipban_banned`` / ``ipban_unbanned`` event (opt-in matrix)."""
-        try:
-            detail = {'ip': ip, 'reason': info.get('reason', ''),
-                      'level': info.get('level'), 'by': info.get('by', 'system')}
-            detail['permanent'] = info.get('until') is None
-            self._audit_system(f'ip_{action}',
-                               detail={k: v for k, v in detail.items() if v is not None})
-        except Exception:  # pylint: disable=broad-except
-            pass
-        # Route through the core notification matrix (default off, so opt-in per channel).
-        try:
-            import time as _time  # noqa: PLC0415
-            from lib.core.notify.notification_dispatcher import dispatch  # noqa: PLC0415
-            from lib.core.notify.formatting import notify_lang, notify_text  # noqa: PLC0415
-            unbanned = action == 'unbanned'
-            kind = 'ipban_unbanned' if unbanned else 'ipban_banned'
-            reason = info.get('reason', '')
-            cfg = self._read_config_file(self._CONFIG_FILE) or {}
-            lang = notify_lang(cfg)
-            msg = notify_text(cfg, lang, 'notif_msg_ip_unbanned' if unbanned else 'notif_msg_ip_banned', ip)
-            if reason:
-                msg += f' ({reason})'
-            status = notify_text(cfg, lang, 'notif_status_unbanned' if unbanned else 'notif_status_banned')
-            dispatch(self, kind=kind, module='ipban', item=ip, status=status,
-                     message=msg, timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'))
-        except Exception:  # pylint: disable=broad-except
-            pass
+        """Audit a ban lifecycle event and route it through the notification matrix.
+
+        Delegates to the shared, framework-free :func:`lib.services.ipban.factory.ipban_notify`
+        so the WebAdmin and the standalone Syslog receiver notify bans the same way."""
+        from .factory import ipban_notify  # noqa: PLC0415
+        ipban_notify(self, action, ip, info)
 
     # ── request-time helpers ────────────────────────────────────────────────────
     @staticmethod

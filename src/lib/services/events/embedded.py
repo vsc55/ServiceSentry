@@ -51,8 +51,13 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
         return v not in ('0', 'false', 'no', 'off')
 
     def _autostart(self) -> bool:
+        # Overlay SS_EVENTS_AUTOSTART so an env deployment can turn autostart off (a raw
+        # section read applies neither the registry default nor the env — mirrors the
+        # syslog embedded boot fix).
         from lib.config.spec import cfg_get  # noqa: PLC0415
-        return bool(cfg_get(self._config_section('events'), 'events|autostart'))
+        from lib.config.manager import overlay_section_env  # noqa: PLC0415
+        cfg = overlay_section_env('events', self._config_section('events'))
+        return bool(cfg_get(cfg, 'events|autostart'))
 
     def _poll(self) -> int:
         p = (self._config_section('events') or {}).get('poll_secs')

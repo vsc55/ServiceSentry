@@ -135,8 +135,13 @@ class EventService(_HeartbeatMixin, _EventsMixin):
 
     # ── config surface (the router owns channel loading now) ──────────────────
     def _read_config_file(self, _filename: str | None = None) -> dict:
-        """Effective configuration (DB ← config.json), via the ConfigManager."""
-        return self._config_mgr.read() or {}
+        """Effective configuration (DB ← config.json) with SS_* env overlaid.
+
+        A standalone worker has no web layer to apply env overrides and no config UI to
+        break, so env is layered on the whole config here — this is the process's single
+        consumption surface (autostart gates, notify channels, etc.)."""
+        from lib.config.manager import overlay_all_env  # noqa: PLC0415
+        return overlay_all_env(self._config_mgr.read() or {})
 
     def _config_section(self, name: str) -> dict:
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}

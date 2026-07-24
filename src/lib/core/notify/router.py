@@ -104,8 +104,13 @@ class NotificationRouter:
 
     # ── generic context surface (called back by run_dispatch + the channels) ────
     def _read_config_file(self, _filename=None) -> dict:
+        # Overlay SS_* env here (the consumption surface for notifications on EVERY host —
+        # web-embedded and the 3 standalone workers all dispatch through this router). The
+        # stored config never carries env (the UI needs it that way), so e.g.
+        # SS_TELEGRAM_TOKEN/CHAT_ID would otherwise be ignored when actually sending.
+        from lib.config.manager import overlay_all_env  # noqa: PLC0415 (avoid import cycle)
         try:
-            return self._ctx.read_config() or {}
+            return overlay_all_env(self._ctx.read_config() or {})
         except Exception:  # pylint: disable=broad-except
             return {}
 

@@ -111,6 +111,45 @@ def overlay_section_env(section_name: str, section_cfg: dict | None) -> dict:
     return out
 
 
+def overlay_all_env(cfg: dict | None) -> dict:
+    """Overlay every registry ``env=`` var onto a FULL config dict, section by section.
+
+    The section-scoped :func:`overlay_section_env` is fine when a consumer already knows
+    which section it wants, but the notification router and the standalone service workers
+    consume the whole config (any section) — and ``ConfigManager.read`` deliberately does
+    not apply env (the web UI needs the saved-vs-env-locked distinction). This applies the
+    env on the CONSUMPTION side so ``SS_TELEGRAM_*``, ``SS_EVENTS_AUTOSTART``, etc. take
+    effect in web-embedded dispatch and in the Docker standalone workers alike.
+
+    ``database|*`` is skipped on purpose — the connector is built from
+    :func:`bootstrap_database_cfg` before this layer exists, and re-casting it here would
+    be redundant. A section absent from *cfg* is created when an env var targets it (e.g.
+    a blank saved telegram config + ``SS_TELEGRAM_TOKEN``)."""
+    from lib.config.spec import env_field_specs  # noqa: PLC0415 (avoid import cycle)
+    out = {sec: dict(vals) if isinstance(vals, dict) else vals
+           for sec, vals in (cfg or {}).items()}
+    for env_key, (path, cast) in env_field_specs().items():
+        sec, _, field = path.partition('|')
+        if sec == 'database':                    # owned by bootstrap_database_cfg
+            continue
+        raw = os.environ.get(env_key)
+        if raw in (None, ''):
+            continue
+        if cast is bool:
+            value = raw.strip().lower() in ('1', 'true', 'yes', 'on')
+        elif cast is int:
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                continue
+        else:
+            value = raw
+        if not isinstance(out.get(sec), dict):
+            out[sec] = {}
+        out[sec][field] = value
+    return out
+
+
 def _decrypt_db_values(db_vals: dict, fernet) -> dict:
     """DB values store ciphertext for secrets; decrypt them by field name (reusing
     the nested key-matching of :mod:`lib.security.secret_manager`)."""

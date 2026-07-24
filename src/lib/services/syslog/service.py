@@ -135,6 +135,17 @@ class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
         self._service_instances_store = ServiceInstancesStore(self._db_connector)
         # Imperative command queue (reload/prune) the heartbeat loop drains.
         self._service_commands_store = ServiceCommandsStore(self._db_connector)
+        # Internal fail2ban (shared, DB-backed on the MAIN connector): a standalone syslog
+        # container must drop jailed IPs and report offenses like the embedded listener.
+        # Built here so `self._ipban` exists before `_syslog_apply_config` wires
+        # is_banned/on_offense (syslog/manager.py). State converges with every replica via
+        # the shared `ip_bans` table. The notify hook fires only on a ban, by when
+        # `self._notify` (built above) is ready.
+        from lib.services.ipban.factory import make_ipban  # noqa: PLC0415
+        from lib.services.ipban.store import IpWhitelistStore  # noqa: PLC0415
+        self._ipban_store, self._ipban = make_ipban(self._db_connector, notify=self._ipban_notify)
+        self._ip_whitelist_store = IpWhitelistStore(self._db_connector)
+        self._configure_ipban()
         self._init_events()
 
         self._debug = Debug()
@@ -153,11 +164,30 @@ class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
 
     # ── config surface (the router owns channel loading now) ──────────────────
     def _read_config_file(self, _filename: str | None = None) -> dict:
-        """Effective configuration (DB ← config.json), via the ConfigManager."""
-        return self._config_mgr.read() or {}
+        """Effective configuration (DB ← config.json) with SS_* env overlaid.
+
+        A standalone worker has no web layer to apply env overrides and no config UI to
+        break, so env is layered on the whole config here — this is the process's single
+        consumption surface (autostart gates, notify channels, etc.)."""
+        from lib.config.manager import overlay_all_env  # noqa: PLC0415
+        return overlay_all_env(self._config_mgr.read() or {})
 
     def _config_section(self, name: str) -> dict:
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
+
+    # ── internal fail2ban (standalone) ───────────────────────────────────────────
+    def _ipban_notify(self, action: str, ip: str, info: dict) -> None:
+        """Ban-lifecycle audit + notification, shared with the WebAdmin."""
+        from lib.services.ipban.factory import ipban_notify  # noqa: PLC0415
+        ipban_notify(self, action, ip, info)
+
+    def _configure_ipban(self) -> None:
+        """Push the ``web_admin|ipban_*`` settings (env already overlaid by
+        ``_read_config_file``) into the jail, merging the shared UI whitelist."""
+        from lib.services.ipban.factory import configure_ipban  # noqa: PLC0415
+        wl = getattr(self, '_ip_whitelist_store', None)
+        extra = wl.values() if wl is not None else ()
+        configure_ipban(self._ipban, self._config_section('web_admin'), extra_whitelist=extra)
 
     def _dbg(self, message, level: DebugLevel = DebugLevel.info) -> None:
         self._debug.print(message, level)
@@ -177,6 +207,7 @@ class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
         Called by the periodic watch loop and on demand by the control-server poke."""
         self._config_mgr.invalidate()                # drop the cache, read fresh DB
         self._events_reload()                        # pick up event-rule edits too
+        self._configure_ipban()                      # converge on ipban desired-state (no restart)
         new = self._config_signature()
         if new != getattr(self, '_syslog_sig', None):
             self._syslog_sig = new
